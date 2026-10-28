@@ -47,13 +47,13 @@ pub(crate) fn folders(snapshot: &switchboard_core::Snapshot) -> Vec<(String, Str
         })
 }
 
-/// `<CODEX_HOME or ~/.codex>/config.toml`.
+/// `<CODEX_HOME or ~/.codex>/config.toml`, the person's own: never a Switchboard home's
+/// (SB-183).
 pub(crate) fn config_path() -> Option<PathBuf> {
-    std::env::var_os("CODEX_HOME")
-        .filter(|v| !v.is_empty())
-        .map(PathBuf::from)
-        .or_else(|| dirs::home_dir().map(|h| h.join(".codex")))
-        .map(|d| d.join("config.toml"))
+    config_path_from(&crate::person::Sources::process())
+}
+pub(crate) fn config_path_from(sources: &crate::person::Sources) -> Option<PathBuf> {
+    crate::person::codex_dir_from(sources).map(|d| d.join("config.toml"))
 }
 
 pub(crate) fn wanted(root: &Path) -> bool {
@@ -95,6 +95,17 @@ fn toml_quote(value: &str) -> String {
 /// The config with Switchboard's provider: the selection at the top (a top-level key must come
 /// before any table), the provider table at the end, the person's text between, untouched.
 pub(crate) fn with_route(text: &str, address: &str, capability: &str) -> Result<String, String> {
+    with_provider(text, address, capability, true)
+}
+/// [`with_route`] with `requires_openai_auth` chosen: an organization's Codex shell home (SB-183)
+/// holds no sign-in, so it sends none (measured: Codex 0.163.0 sends the capability header and no
+/// `Authorization` either way, `docs/evidence/shell-home-measurement-2026-10.md`).
+pub(crate) fn with_provider(
+    text: &str,
+    address: &str,
+    capability: &str,
+    requires_auth: bool,
+) -> Result<String, String> {
     let own = stripped(text);
     let parsed: toml::Table = own.parse().map_err(|_| CODEX_ROUTE_UNREADABLE)?;
     if let Some(chosen) = parsed.get("model_provider") {
@@ -107,7 +118,7 @@ pub(crate) fn with_route(text: &str, address: &str, capability: &str) -> Result<
         toml_quote(PROVIDER)
     );
     let tail = format!(
-        "{TAIL_OPEN}\n[model_providers.{PROVIDER}]\nname = \"Fabric Switchboard\"\nbase_url = {}\nwire_api = \"responses\"\nrequires_openai_auth = true\nsupports_websockets = false\nhttp_headers = {{ \"X-Switchboard-Capability\" = {} }}\n{CLOSE}\n",
+        "{TAIL_OPEN}\n[model_providers.{PROVIDER}]\nname = \"Fabric Switchboard\"\nbase_url = {}\nwire_api = \"responses\"\nrequires_openai_auth = {requires_auth}\nsupports_websockets = false\nhttp_headers = {{ \"X-Switchboard-Capability\" = {} }}\n{CLOSE}\n",
         toml_quote(&format!("http://{address}/codex/{}/v1", switchboard_proxy::AUTO_POOL)),
         toml_quote(capability),
     );
@@ -188,6 +199,39 @@ mod tests {
 
     const PERSON: &str =
         "# my settings\nmodel = \"gpt-5\"\n\n[projects.\"/w/app\"]\ntrust_level = \"trusted\"\n";
+
+    #[test]
+    fn the_route_is_never_written_into_a_shell_home() {
+        // SB-183: `serve` or an offline CLI started in a hooked terminal sees the group's Codex
+        // shell home as CODEX_HOME. SB-143's provider goes into the person's own config.toml.
+        let person = tempfile::tempdir().unwrap();
+        let data = tempfile::tempdir().unwrap();
+        let shell_home = data.path().join("shell").join("codex-acme");
+        std::fs::create_dir_all(&shell_home).unwrap();
+        let env = |name: &str| (name == "CODEX_HOME").then(|| shell_home.clone().into_os_string());
+        let sources = crate::person::Sources {
+            env: &env,
+            home: Some(person.path().to_owned()),
+            data: Some(data.path().to_owned()),
+        };
+        let path = config_path_from(&sources).unwrap();
+        assert_eq!(path, person.path().join(".codex").join("config.toml"));
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        assert!(apply(&path, "127.0.0.1:1", "synthetic-capability").unwrap());
+        assert!(!shell_home.join("config.toml").exists());
+        // The person's own CODEX_HOME elsewhere is still theirs.
+        let elsewhere = person.path().join("codex-own");
+        let env = |name: &str| (name == "CODEX_HOME").then(|| elsewhere.clone().into_os_string());
+        let sources = crate::person::Sources {
+            env: &env,
+            home: Some(person.path().to_owned()),
+            data: Some(data.path().to_owned()),
+        };
+        assert_eq!(
+            config_path_from(&sources),
+            Some(elsewhere.join("config.toml"))
+        );
+    }
 
     #[test]
     fn the_provider_goes_in_around_the_persons_text_and_comes_out_leaving_it_as_it_was() {

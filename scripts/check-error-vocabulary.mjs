@@ -45,10 +45,28 @@ const EXCLUDED_FILES = {
 // Messages that are error literals in the sources above but can never reach the UI.
 // Every entry names why. Keep this list short: a doubtful message gets a mapping instead.
 const ALLOWLIST = {
+  // runtime launches.rs (SB-212): who launched a session is named only by `switchboard launch
+  // --by/--parent` and read only by `switchboard sessions --history/show` and MCP
+  // switchboard_sessions; the window sends neither `Launched` nor `Launches`.
+  'Name the launcher with up to 64 letters, digits, dots, hyphens or underscores.': 'SB-212 launch --by: CLI only',
+  'Give a launch id from switchboard sessions --history as the parent.': 'SB-212 launch --parent: CLI only',
+  'No launch has that id. List them with switchboard sessions --history.': 'SB-212 sessions show: CLI and MCP only',
+  'Only a launch can name who launched it.': 'SB-212 Launched wraps only launches; the window never sends it',
   // runtime settings_bundle.rs parse(): SB-176 settings import runs from the CLI only; the window
   // has no import, so this prints to the terminal.
   'This is not a Switchboard settings file (switchboard-settings/1).': 'SB-176 settings import is CLI-only',
+  // runtime spend.rs set_ceiling(): the window always sends `by: window`, so raising or clearing
+  // is refused only to the CLI and MCP, whose errors print to the terminal or the agent.
+  'Raising or clearing a ceiling is done in the Switchboard window. From here, set a first ceiling or a lower one.': 'C-Q1: CLI and MCP only; the window sets as the window',
+  // runtime spend.rs remove_group(): the window deletes a group with `by: window` (src-tauri
+  // remove_project), so a group holding a ceiling is refused only to the CLI (C-Q7).
+  'This group has a spending ceiling. Delete the group in the Switchboard window, where its ceiling goes with it.': 'C-Q7: CLI only; the window deletes as the window',
+  'This group has a spending ceiling. Remove or replace its own key in the Switchboard window.': 'C-Q9: CLI and MCP only; the window removes and replaces as the window',
+  'A spending ceiling counts this key\'s spend. Remove or replace the key in the Switchboard window.': 'C-Q9: CLI and MCP only; the window removes and replaces as the window',
   'Project folders could not be read.': 'SB-135 project_roots: the window ignores a failed read and keeps the flat folder list.',
+  // runtime shell/map.rs write(): the terminal hook's folder map is written only by the owner's
+  // background bindings pass (SB-183, node A-4), which logs a refusal; no renderer request writes it.
+  'Two rows of the terminal folder map name the same folder.': 'SB-183 shell map write: background bindings pass only, logged',
   // runtime lib.rs AgentKey offline: only the CLI runs without an owner; the desktop app always
   // has one, so this never reaches the UI.
   "Start the desktop app or 'switchboard serve' once first.": 'offline CLI only',

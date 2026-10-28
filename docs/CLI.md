@@ -96,6 +96,7 @@ switchboard login finish LOGIN_UUID
 switchboard accounts select ACCOUNT_UUID --provider codex --pool work
 switchboard launch ACCOUNT_UUID --mode managed --working-directory /absolute/project/path
 switchboard launch --provider claude --working-directory /absolute/project/path --in-place -- --resume SESSION_ID
+switchboard launch ACCOUNT_UUID --working-directory /absolute/project/path --by voc-learn --parent LAUNCH_ID
 switchboard continue wf_0123456789abcdef --account ACCOUNT_UUID --dir /absolute/checkout
 ```
 
@@ -105,7 +106,7 @@ On Windows use an absolute drive or UNC project path, quoted if it contains spac
 
 `login begin` opens the installed official provider CLI in a private home; `--label` is optional and defaults to the email of the account that signs in; signing in to an account already saved updates it where it is (label and pool kept, every copy in every pool) instead of adding another (SB-62). `login status` answers `pending`, `complete` (ready to finish) or `ended` (the Terminal session exited without a successful sign-in) and reads no credential; the desktop app polls it and finishes on its own. Complete its login, then `finish` imports only that new credential into the OS vault and cleans staging. If the account is saved but its staging home cannot be removed, `finish` reports `Account saved; isolated login cleanup needs attention.`, releases the sign-in slot and retries the cleanup before the next `login begin` (`failed_login_cleanup_releases_the_slot_after_the_account_is_saved`). To cancel, close/finish that Terminal process, then `switchboard login cancel LOGIN_UUID`. It never kills an unrelated process or invokes global logout. A sign-in survives an app or `serve` restart: the next owner takes back the sign-ins whose journal it can read and that completed in Terminal or are still open there, newest first and at most four (`MAX_LOGINS`; `adopt_logins` in `crates/switchboard-runtime/src/launch.rs`, test `a_sign_in_open_across_a_restart_is_taken_back_and_kept_from_the_sweep`), so its login id still answers `status`, `finish` and `cancel`; the rest are swept. Recovery limits are in [operations](OPERATIONS.md).
 
-`launch` opens the session in a new Terminal window. **`--in-place`** (0.6.9, SB-75) prepares exactly the same session (the private home, its tools and `switchboard mcp`, the scrubbed environment, the one-session-per-home marker) and runs it in the terminal the command was started in, for a host with its own console (Fabric Dashboards' panel); the agent's exit status is the command's, and the host never sees a token. It needs a terminal on stdin and stdout and, like every launch, a running owner; macOS and Linux for now. **`--provider claude|codex`** instead of an account id uses the account Switchboard would use for that folder: its group's selected account, else the account of the folder's rule in force, else the default group's selected account. Arguments after `--` go to the agent after Switchboard's own, each quoted (at most 16, up to 1024 characters, no control characters), for example `-- --resume <id>` for Claude Code, `-- resume <id>` for Codex; they need `--in-place`.
+`launch` opens the session in a new Terminal window. **`--in-place`** (0.6.9, SB-75) prepares exactly the same session (the private home, its tools and `switchboard mcp`, the scrubbed environment, the one-session-per-home marker) and runs it in the terminal the command was started in, for a host with its own console (Fabric Dashboards' panel); the agent's exit status is the command's, and the host never sees a token. It needs a terminal on stdin and stdout and, like every launch, a running owner; macOS and Linux for now. **`--provider claude|codex`** instead of an account id uses the account Switchboard would use for that folder: its group's selected account, else the account of the folder's rule in force, else the default group's selected account. Arguments after `--` go to the agent after Switchboard's own, each quoted (at most 16, up to 1024 characters, no control characters), for example `-- --resume <id>` for Claude Code, `-- resume <id>` for Codex; they need `--in-place`. For the launch record (SB-212): **`--by NAME`** names the runner that launches (up to 64 letters, digits, dots, hyphens or underscores; otherwise refused with “Name the launcher with up to 64 letters, digits, dots, hyphens or underscores.”), **`--parent LAUNCH_ID`** names the launch this one continues, whose record then says its work went here (a malformed id is refused with “Give a launch id from switchboard sessions --history as the parent.”), and **`--surface dashboards|recovery`** says the launch comes from Fabric Dashboards' console or from a host resuming a stopped session (default `cli`). The answer carries `launch_id`.
 
 `continue` hands an [Observatory](CONTRACTS.md#workflow-continuation-sb-52-2026-10-05) workflow whose executor ran out of its limit to another account: of the same provider, or since 0.6.7 of the other one, Claude Code ↔ Codex, with the same checkpoint and constraints (SB-70) (`--mode isolated` by default, or `managed`). Since 0.6.31 `--account` also takes `opencode`: OpenCode on the saved OpenRouter key and its default model, with its own configuration for that session only (`OPENCODE_CONFIG_CONTENT`), the handoff as its first message (`opencode --prompt`) and never a change to your own OpenCode (SB-119); without `--account` the default agent continues (`switchboard agents default`, SB-120). Since 0.6.20 `--account` also takes a saved Kimi Code account's id (SB-99) or `hermes`: Hermes Agent on the saved OpenRouter key, on the model your Hermes is set to when it runs on OpenRouter (`switchboard agents hermes status`), else the key's default model (`switchboard agents openrouter model`); in a home Switchboard owns, its first turn the handoff (`hermes chat --query-file`, SB-107). The answer's `modelFrom` says which (`hermes` or `key`). With `--in-place` (0.6.25, SB-108) the continuing session runs in the calling terminal instead of a new Terminal window (the same session, home and first prompt), for an embedded console such as Fabric Dashboards'; it needs a terminal on stdin and stdout and refuses before anything is offered without one. It reads the workflow, refuses before anything changes when it cannot be continued here (closed, no checkpoint, a handoff already waiting, a declared key not in the vault, a workflow that names no executor, the same account, a folder outside the workflow's checkouts), offers it with reason `limit` and opens the account's session in Terminal. That session accepts the handoff itself, through the Observatory tools Switchboard declares in its config. The engine refuses an offer while the executor wrote a checkpoint less than two minutes ago; Switchboard reports that sentence and launches nothing. Set `SWITCHBOARD_OBSERVATORY_BIN` when `project-observatory` is not in `~/.local/bin`, Homebrew or `PATH`. macOS only for now.
 
@@ -149,7 +150,7 @@ switchboard rotation status
 switchboard rotation set --provider claude --pool default --target claude-cli --enabled false
 ```
 
-Capture reuses existing local authorization without another login. Import reads Claude Swap and reports imported/failed/skipped counts without credentials. Activate changes the ordinary Claude Code account with identity checks and compatible locks; only captured/imported Claude OAuth profiles qualify. Account selection for the proxy stays separate.
+Capture reuses existing local authorization without another login. When the saved account belongs to an organization that has exactly one group and it landed outside that group, the `login finish` and `accounts capture` receipts carry `organization_group: {pool, name, in_cli?}` (SB-160, SCN-077): the group to move it to with `accounts move`, which nothing does on its own. `in_cli: true` marks the account the ordinary `claude` or `codex` is signed in to, which joins a group only after the CLI switches (always so for `accounts capture`; for `login finish` when the current accounts list its id). A repeated `login finish` reads the account where it is now, so after a move it carries no offer; nor does an account whose identity the group already holds (`a_new_seat_the_cli_is_signed_in_to_says_so_in_its_receipt`, `a_repeated_finish_reads_where_the_account_is_now` in `crates/switchboard-runtime/src/lib.rs`). Import reads Claude Swap and reports imported/failed/skipped counts without credentials. Activate changes the ordinary Claude Code account with identity checks and compatible locks; only captured/imported Claude OAuth profiles qualify. Account selection for the proxy stays separate.
 
 Rotation targets are `managed` and `claude-cli` (serialized `claude_cli`). `rotation set` changes only the flags it is given and keeps the saved values of the others, so `--enabled false` stops rotation without resetting custom settings. A new policy starts off, with `--threshold` 90, `--hysteresis` 10, `--cooldown` 1800 seconds and `--max-age` 300 seconds (`rotation_set_changes_only_the_given_flags`). The saved policy is read and the merged one written in two steps; a concurrent change between them is overwritten. Hysteresis is headroom below the threshold. Only one native Claude policy may be enabled across all pools because the ordinary native account is one shared target. Existing streams are never replayed. Configuration persists offline; status explicitly reports whether the owner/monitor runs. Full behavior and limitations: [account and rotation contract](ACCOUNTS-AND-ROTATION.md).
 
@@ -159,11 +160,11 @@ Version 0.4 serves Switchboard to coding agents over the Model Context Protocol 
 
 ```sh
 switchboard mcp               # stdio server: status, accounts, usage, switch, project rules
-switchboard mcp --read-only   # only the 23 read tools; usage refresh shows the stored observation
+switchboard mcp --read-only   # only the 24 read tools; usage refresh shows the stored observation
 switchboard --data-dir /path/to/app-data mcp
 ```
 
-`switchboard mcp` speaks newline-delimited JSON-RPC 2.0 on stdin/stdout (MCP `2025-06-18`, also `2025-03-26` and `2024-11-05`; clients asking for `2025-11-25` (MCP Inspector 2.9.0, the TypeScript SDK 1.32.0 and client 2.3.0, the Python SDK 2.3.0) accept `2025-06-18` and work: [matrix](runs/2026-10-04-sb-43-mcp-matrix/README.md), `scripts/mcp_compat.py`); stdout carries protocol messages only. It uses the running owner's control channel when the desktop app or `serve` runs, else an offline store operation under the exclusive lock. No tool accepts or returns a credential, and launch is not exposed; `switchboard_login` and `switchboard_kimi_login` begin a sign-in that the person finishes. `switchboard_switch` with `target: "claude_cli"` changes the ordinary Claude Code login for every `claude` session and is refused unless the call carries `global: true`. The server lists 45 tools; `--read-only` lists the 23 that only read and none of the 22 that write (the tool reference has one section per tool, and `every_mcp_tool_is_in_the_skill_reference` fails when one is missing). A managed session that Switchboard launches gets the server automatically when the CLI is found (Claude through `--mcp-config`, Codex through `[mcp_servers]` in its private config); an isolated session gets the read-only set. Both also get the Fabric project board (`fabric`) when the operator registered it in that provider's user scope (SB-20).
+`switchboard mcp` speaks newline-delimited JSON-RPC 2.0 on stdin/stdout (MCP `2025-06-18`, also `2025-03-26` and `2024-11-05`; clients asking for `2025-11-25` (MCP Inspector 2.9.0, the TypeScript SDK 1.32.0 and client 2.3.0, the Python SDK 2.3.0) accept `2025-06-18` and work: [matrix](runs/2026-10-04-sb-43-mcp-matrix/README.md), `scripts/mcp_compat.py`); stdout carries protocol messages only. It uses the running owner's control channel when the desktop app or `serve` runs, else an offline store operation under the exclusive lock. No tool accepts or returns a credential, and launch is not exposed; `switchboard_login` and `switchboard_kimi_login` begin a sign-in that the person finishes. `switchboard_switch` with `target: "claude_cli"` changes the ordinary Claude Code login for every `claude` session and is refused unless the call carries `global: true`. The server lists 48 tools; `--read-only` lists the 24 that only read and none of the 24 that write (the tool reference has one section per tool, and `every_mcp_tool_is_in_the_skill_reference` fails when one is missing). A managed session that Switchboard launches gets the server automatically when the CLI is found (Claude through `--mcp-config`, Codex through `[mcp_servers]` in its private config); an isolated session gets the read-only set. Both also get the Fabric project board (`fabric`) when the operator registered it in that provider's user scope (SB-20).
 
 A project reserves its accounts to its folders and their subfolders. A project has no folder limit; all projects together hold at most 1024 folders, and no folder may sit inside another project's (`a_project_has_no_folder_limit_and_all_projects_hold_1024`).
 
@@ -181,6 +182,89 @@ switchboard project bindings    # the folders bound, with their pool and route
 ```
 
 Leaving a project removes only what Switchboard wrote, and `switchboard uninstall` removes every binding. Never print that file in a chat: its token opens the pool on this computer. See the [SB-118 packet](packets/sb-118-claude-bindings.md).
+
+### Terminals in an organization's folders (SB-183, 0.7.0)
+
+In a group bound to an organization, a terminal with Switchboard's shell hook runs plain `claude`
+and `codex` in that group's shell homes, with `SWITCHBOARD_CONTEXT=org:<id>`, and gives the
+person's own values back when it leaves the folder ([SCN-074](ux/scenarios.md), design
+[dossier A](runs/2026-10-26-iteration-0.7.0/dossier-a-context-binding.md) part A). The owner
+(the app or `serve`) writes each organization group's shell homes, `<data>/shell/claude-<pool>`
+and, for a group with a Codex account, `<data>/shell/codex-<pool>`, and the folder map
+`<data>/shell/map.json`; a computer with no group bound to an organization gets none of them, and
+every folder there answers `none`.
+
+```sh
+switchboard shell status            # the hook's state, this terminal, the folder's group and homes
+switchboard shell status --dir /w/acme --json
+switchboard shell env --shell zsh --dir "$PWD"   # what the hook asks on every change of folder
+switchboard shell init zsh          # the hook script itself (also bash, fish, pwsh)
+switchboard shell off               # take the hook out of every start file and keep it out
+switchboard shell on                # put it back, with or without an organization's group
+```
+
+- `shell env` prints one line: `none`, or the group's pool, its context, the Claude shell home and
+  the Codex shell home (`-` for none), separated by tabs. It reads only `<data>/shell/map.json` and
+  `<data>/shell-hook`: no store lock, no owner, so a busy or stopped owner never holds a terminal.
+  It always exits 0 and never writes to the error stream; anything it cannot read (no map, a map
+  of another version or over 1 MiB, the hook turned off, a relative or unknown folder, a bad
+  argument) answers `none`. The Claude home is answered only in the group's folder itself: Claude
+  Code reads Switchboard's route only from the folder it starts in, so in a subfolder the Claude
+  field is `-` (a group with no Codex account answers `none` there). Budget 25 ms
+  (`shell_env_answers_without_the_owner_or_the_store_lock_within_25_ms`).
+- `shell init <zsh|bash|fish|pwsh>` prints the hook script, naming this executable and the data
+  folder, for people who keep their own start files: `eval "$(switchboard shell init zsh)"` in
+  `.zshrc` (bash likewise), `switchboard shell init fish | source` in fish's,
+  `switchboard shell init pwsh | Out-String | Invoke-Expression` in a PowerShell profile (the
+  PowerShell script carries the two paths as base64, so Windows PowerShell 5.1's console code
+  page cannot garble a user name that is not ASCII). On every change of folder it
+  asks `shell env` and exports the group's `CLAUDE_CONFIG_DIR`, `CODEX_HOME` and
+  `SWITCHBOARD_CONTEXT`, keeping your own values in shell variables it never exports and giving
+  them back exactly when you leave; a variable you change while inside stays yours. It prints
+  nothing, never fails the prompt, and does nothing in a terminal Switchboard launched. A CLI that
+  is gone, too old for `shell env` or failing reads as `none`, so the values it set are given back;
+  zsh waits at most ten seconds for an answer. fish runs the hook in interactive shells only;
+  PowerShell asks as it loads only in a shell you type in (not under `-Command`, `-File`,
+  `-EncodedCommand` or `-NonInteractive` without `-NoExit`), and does nothing in Constrained
+  Language Mode.
+- On a computer with a group bound to an organization, the installed app (in `/Applications` or
+  `~/Applications` on macOS) puts one marked block
+  (`# >>> Fabric Switchboard: shell hook (SB-183) >>>` … `# <<< Fabric Switchboard <<<`) at the end
+  of the start file of each shell present: `.zshrc` (in `ZDOTDIR` when set; never created when
+  there is none and `~/.zshenv` exists, or `~/.zprofile` names `ZDOTDIR`, since the app cannot
+  see where zsh reads it: `shell status` then gives `eval "$(switchboard shell init zsh)"` to add
+  yourself), bash's login file on
+  macOS (`.bash_profile`, `.bash_login` or `.profile`) and `.bashrc` on Linux, and fish's own file
+  `~/.config/fish/conf.d/fabric-switchboard.fish`; on Windows, `Microsoft.PowerShell_profile.ps1`
+  of each PowerShell edition installed (`WindowsPowerShell\` and `PowerShell\` under Documents,
+  wherever Documents was redirected), except where the execution policy is `Restricted` or
+  `AllSigned`: that profile is not changed and `shell status` says so (`policy_blocked`);
+  Switchboard never changes the policy. Where PowerShell is held to Constrained Language Mode
+  (Application Control holds both editions; `__PSLockdownPolicy` holds Windows PowerShell 5.1
+  only), that edition's profile is not changed and `shell status` says so
+  (`constrained_language`). A profile saved in UTF-16 (with its byte order mark) is written in
+  UTF-16 and given back byte for byte. It reads the hook script only when it is there.
+  A start file that is a link (a dotfile manager's), another user's or not text is left alone, and
+  `shell status` says so; add `shell init`'s line yourself there. A block you delete by hand is not
+  written back. `shell off` gives every file back byte for byte (a start file Switchboard created
+  and that holds nothing else is deleted), and `switchboard uninstall` does the same.
+- `shell on` and `shell off` act for Switchboard's own data folder only: with another
+  `--data-dir` they answer “Only Switchboard's own data folder can change your terminals' start
+  files. Run this command without --data-dir.” and change nothing, and `uninstall` of another
+  data folder leaves the start files alone. The hook names the installed `switchboard` (a
+  development build never names itself; with none installed, `shell on` says so).
+- `shell status` reads the same files and the installer's record and never fails: `hook` is `on`,
+  `off`, `default_on` (no choice made and a group belongs to an organization) or `default_off`;
+  `terminal.hook_loaded` says whether this terminal exported `SWITCHBOARD_SHELL_HOOK=1`; `here` is
+  what `shell env` answers in the folder; `files` lists each start file with its state. A group
+  with no Codex account reads “codex: your own sign-in (this group has no Codex account)”.
+
+Programs started in such a terminal see a shell home as `CLAUDE_CONFIG_DIR` or `CODEX_HOME`.
+Switchboard never takes a folder inside its own data folder for the person's: what a launch links
+from, the limit scan's transcripts, where *Codex in group folders* writes its provider and the user
+scope a launch copies its MCP servers from all fall back to `~/.claude` and `~/.codex` then. An
+offline switch of the ordinary Claude Code from such a terminal is refused: “This session runs in a
+Switchboard home or a terminal in an organization's folder. Run this from another terminal.”
 
 ### A project's folders follow its work and the disk (SB-117, SB-121, SB-131)
 
@@ -247,6 +331,7 @@ switchboard project map [--under ~/DATA]   # SB-135: Git repositories on disk, e
 switchboard project move-root --folder /work/bot --pool client-beta   # SB-135: a repository with its worktrees and clones into another group, in one step
 switchboard project move-root --folder /work/bot --pool tools --also   # SB-146: into one more group; it stays in its others (--from <group> picks the one it leaves)
 switchboard project delete --pool client-alpha  # its accounts stay in the pool, no longer reserved
+# a group holding a spending ceiling is deleted only in the window (its ceiling goes with it)
 switchboard project show --path /path/to/project
 switchboard project set --path /path/to/project --account ACCOUNT_UUID --expires-in-hours 8
 switchboard project set --path /path/to/project --account ACCOUNT_UUID --target claude-cli --paused
@@ -271,12 +356,16 @@ Restart the agent after installing; it loads servers and skills at session start
 ### Sessions (SB-95)
 
 ```sh
-switchboard sessions          # Claude Code, Codex and Kimi Code sessions Switchboard launched that are starting or running
+switchboard sessions          # sessions Switchboard launched (Claude Code, Codex, Kimi Code, Hermes, OpenCode, catalog agents) that are starting or running
 switchboard sessions --all    # also the ended ones (each home keeps its last launch's record)
 switchboard --json sessions   # {sessions: [...]}
+switchboard sessions --history          # every launch of the last 90 days, newest first (SB-212)
+switchboard sessions show LAUNCH_ID     # one launch, who launched it and where its work went
 ```
 
-Each launch writes `.session.json` beside its `launch.command` (0600): `account_id`, `provider`, `pool`, `context` (`personal` or `org:<id>`, SB-110: the context the session runs in, fixed at its start, also exported to it as `SWITCHBOARD_CONTEXT`; Claude Code and Codex launches only, a Kimi Code, Hermes or OpenCode session has none yet), `mode` (`managed`/`isolated`), `working_directory`, `in_place`, `launched_at` and `continues` (the workflow id a continuation picks up, or null); no credential. The list adds `label`, `context_name` (the organization’s name for an `org:` context; the text output shows it after the account), `home` (`homes` or `runtimes`), `started_at` (when the script recorded its process) and `state`: `starting` (Terminal has not run the script yet), `running` (the recorded process is still that session: the pid alive and at least as old as its marker; on Windows, the pid with its creation time), `ended`, or `unknown` (the marker cannot be read). Only Switchboard's own homes are read (`homes`, `runtimes` and `kimi/sessions`) and no link is followed; a session started outside Switchboard is not listed. The MCP tool `switchboard_sessions` (`all?`) answers the same. A managed session follows its pool's selected account from the next request, so `account_id` is the account selected at launch.
+Each launch writes `.session.json` beside its `launch.command` (0600): `account_id`, `provider`, `pool`, `context` (`personal` or `org:<id>`, SB-110: the context the session runs in, fixed at its start, also exported to it as `SWITCHBOARD_CONTEXT`; since 0.7.0 also Kimi Code sessions, Hermes and OpenCode continuations, agents launched on the OpenRouter key (`provider` and `agent` the agent id, `label` its model) and agents launched through the proxy (`provider` `claude`, the route's provider, and `agent` the catalog id), SB-201), `mode` (`managed`/`isolated`), `working_directory`, `in_place`, `launched_at` and `continues` (the workflow id a continuation picks up, or null); no credential. The list adds `agent` when the record names none (from the provider: `claude-code`, `codex`, `kimi-code`, `hermes`, `opencode`; null otherwise; the text output's second column shows it, the provider only when it is null), `label`, `context_name` (the organization’s name for an `org:` context; the text output shows it after the account), `home` (`homes` or `runtimes`), `started_at` (when the script recorded its process) and `state`: `starting` (Terminal has not run the script yet), `running` (the recorded process is still that session: the pid alive and at least as old as its marker; on Windows, the pid with its creation time), `ended`, or `unknown` (the marker cannot be read). Only Switchboard's own homes are read (`homes`, `runtimes` and `kimi/sessions`) and no link is followed; a session started outside Switchboard is not listed. The MCP tool `switchboard_sessions` (`all?`) answers the same. A managed session follows its pool's selected account from the next request, so `account_id` is the account selected at launch.
+
+Since 0.7.0 (SB-212) every launch also keeps a record of its own, `launches/<launch_id>.json`, because a home is reused and its `.session.json` names only its latest launch. `--history` lists them (`{launches: [...], total}`, at most 500): the same fields plus `launch_id`, `launched_by` (`surface`: `window`, `cli`, `mcp`, `fallback`, `recovery` or `dashboards`; `caller_launch_id`, `caller_project`, `caller_program`, `by`, `parent`), what the session's hooks reported (`provider_session_id`, `transcript`, `turns`, `last_turn_at`, `ended: limit`; `nested_sessions`, the sessions a launched session started inside itself, SB-218) and `continued_as` (where its work went: a later launch or a hand-over), with `continued_from` on the launch that took the work over (SB-219). Each line shows the id, state, agent, who launched it (`cli:voc-learn` with `--by`), folder, time, a limit stop and where the work went. `show LAUNCH_ID` adds the account, group, provider session, transcript path and turns, then *Launched by* (up the chain to the first launch) and *Then* (what it launched or what took its work over). Every launched session carries `SWITCHBOARD_LAUNCH_ID`, so a `switchboard launch` run inside it names it as the caller with no flag. Records are kept 90 days. The fields: [CONTRACTS](CONTRACTS.md#launch-records-and-their-chain-sb-212-2026-10-26).
 
 ### Setting up with a coding agent (SB-93)
 
@@ -288,7 +377,7 @@ switchboard onboard --status                # one line per step, with the comman
 switchboard --json onboard --status --host codex --folder /work/app
 ```
 
-The answer is `{complete, host, folder, steps[]}`; each step is `{id, state, summary, next}` in this order: `owner` (the app or `serve` answers), `accounts` (claude, codex and kimi accounts that are switched on), `project` (the folder's project; always optional), `mcp` (a `switchboard` server in the agent's config: Claude Code's `~/.claude.json` user or per-folder scope, the folder's `.mcp.json`, or the enabled Switchboard plugin; Codex's `config.toml` under `CODEX_HOME` or `~/.codex`) and `proving_call` (`mcp-proof.json` in the data folder, written by `switchboard mcp` after its first answered tool call: the client's name and the time). `state` is `done`, `todo` (`next.command` for the agent, `next.tool` for the proving call), `needs_person` (`next.person`, sometimes with a `next.command` the agent may run to start it) or `optional`. `--host` defaults to the agent the command runs inside (`CLAUDECODE=1`, or Codex's `CODEX_SANDBOX`/`CODEX_THREAD_ID`); unknown, any registration counts. The MCP tool `switchboard_onboarding` (`path?`, `host?`) answers the same.
+The answer is `{complete, degraded, host, folder, steps[]}`; each step is `{id, state, summary, next}` in this order: `owner` (the app or `serve` answers), `accounts` (claude, codex and kimi accounts that are switched on), `project` (the folder's project; always optional), `mcp` (a `switchboard` server in the agent's config: Claude Code's `~/.claude.json` user or per-folder scope, the folder's `.mcp.json`, or the enabled Switchboard plugin; Codex's `config.toml` under `CODEX_HOME` or `~/.codex`) and `proving_call` (`mcp-proof.json` in the data folder, written by `switchboard mcp` after its first answered tool call: the client's name and the time). `state` is `done`, `todo` (`next.command` for the agent, `next.tool` for the proving call), `needs_person` (`next.person`, sometimes with a `next.command` the agent may run to start it) or `optional`. `--host` defaults to the agent the command runs inside (`CLAUDECODE=1`, or Codex's `CODEX_SANDBOX`/`CODEX_THREAD_ID`); unknown, any registration counts. Those are the five steps of a computer with no organization. With PassionCode.ai connected and listing no organization, one optional `organization` step follows. With organizations (SB-202), `organization` follows, then per organization, newest first, `org_group` (exactly one group bound to it; `needs_person` otherwise, with `next.command` and `next.alternatives` the agent runs once the person agreed), `seat`, `hook` and `launch`, each carrying `organization: {id, name}`. `next.turn_on` and `next.turn_off` on `hook` are the person's switches (`shell on`, `shell off`), never in `next.command`. `degraded` names reads that failed or were partial (`snapshot`: an owner of another version answered and part of its snapshot could not be read; `sign_ins`; `sessions`); the step each touches says so, and the checklist still answers. Every command the steps name parses as a command of this CLI (`onboard_commands::every_command_the_checklist_names_exists` in `crates/switchboard-cli/src/main.rs`). The MCP tool `switchboard_onboarding` (`path?`, `host?`) answers the same.
 
 ### Fallback chains
 
@@ -316,8 +405,47 @@ the automatic fallback walks the chain that applies (0.6.8, SB-73: Claude Code a
 Kimi Code on saved Kimi accounts since SB-99: its first turn runs as `kimi -p`, without approvals,
 then `kimi -c` resumes it only when that first turn succeeded; Hermes on the saved OpenRouter key since
 SB-107; OpenCode on the same key and its default model since SB-119; an agent disabled on the Agents
-page is skipped as `agent_disabled` (SB-120); other agents are skipped until SB-72); `switchboard continue` still hands a workflow over by hand.
+page is skipped as `agent_disabled` (SB-120); other agents and keyed pins are skipped until the
+project grant they need can be checked, SB-96); `switchboard continue` still hands a workflow over by hand.
 `--mode managed` applies to Claude Code and Codex only; with Hermes, OpenCode or Kimi Code it is refused.
+
+### Spending ceilings
+
+Before every paid step of an automatic hand-over (Hermes or OpenCode on an OpenRouter key, Claude
+Code or Codex on an API-key account) Switchboard reads the key's spend from OpenRouter and skips
+the step when the key has less than $0.50 left of its own limit, when a spending ceiling is
+reached (a question opens: double it or keep it), or when a ceiling covers it and its spend cannot
+be read (0.7.0, SB-72; [contract](CONTRACTS.md#spending-ceilings-sb-72-070)). A ceiling is a daily dollar amount for this
+computer (every saved OpenRouter key added up per UTC day) or for a group on its own key, or one
+for a task counted on its key since the task's first paid hand-over.
+
+```sh
+switchboard ceiling list                                     # ceilings, open questions, the last hand-over
+switchboard ceiling set 5                                    # this computer: $5 a UTC day
+switchboard ceiling set --scope project:alpha-web 2          # a group on its own key
+switchboard ceiling set --scope workflow:wf_0123456789abcdef 1
+switchboard ceiling keep q_0123456789abcdef                  # keep a reached ceiling as it is
+switchboard continue wf_0123456789abcdef --account hermes --dir /absolute/checkout --ceiling 1
+```
+
+From the CLI (and MCP) a first ceiling for a scope or a lower one is accepted; raising, doubling
+or clearing one is done in the Switchboard window (*Raising or clearing a ceiling is done in the
+Switchboard window. From here, set a first ceiling or a lower one.*; *Doubling a ceiling is
+answered in the Switchboard window.*), so an agent never loosens a ceiling. `continue --ceiling`
+sets the task's ceiling before anything is offered (an amount out of range, or higher than the
+one set, refuses the continue); the continue is then gated by it like a hand-over (C-Q8): every
+paid start through Switchboard (`continue`, also `--to-console` and on the default agent, onto
+Hermes, OpenCode or an API-key account; `agents launch --openrouter`; `agents launch` through the
+proxy on an API-key account; `launch <API-key account>`) is refused before anything is offered or
+started when a ceiling is reached (*A spending ceiling is reached, so no paid agent starts. Its
+question waits in the Switchboard window.*), when a covering ceiling's spend cannot be read (*A
+spending ceiling covers this start and its spend could not be read, so no paid agent starts.*) or
+when the key has less than $0.50 left of its own limit. Removing or replacing a capped group's
+own key (`agents openrouter remove|set --pool <group>`) is the window's (*This group has a
+spending ceiling. Remove or replace its own key in the Switchboard window.*, C-Q9). Tests
+`ceilings_are_set_lowered_listed_and_kept_from_the_cli_and_never_raised`,
+`a_paid_continue_by_hand_past_a_reached_machine_ceiling_is_refused_and_offers_nothing`,
+`a_capped_groups_own_key_is_removed_or_replaced_only_in_the_window`.
 
 ### Other coding agents
 
@@ -400,9 +528,16 @@ switchboard agents openrouter model anthropic/claude-sonnet-4.5
 switchboard agents openrouter remove
 switchboard agents openrouter set --key-stdin --pool client-alpha   # SB-144: the key agents in that project's folders run on
 switchboard agents openrouter list         # every saved key with its project, and the projects without one
-switchboard agents key --service openrouter --dir /work/app   # the key of that folder's project, else the machine's (launch scripts call this)
+switchboard agents key --service openrouter --pool client-alpha   # exactly that group's own key (launch scripts call this, SB-213)
+switchboard agents key --service openrouter --machine   # exactly the machine's key (launch scripts call this, SB-213)
+switchboard agents key --service openrouter --dir /work/app   # the key of that folder's group, else the machine's (scripts written before 0.7.0)
 switchboard agents key --service openrouter   # the value, for a session script's export only
 ```
+
+A session script names the key slot its start's spending check read (`--pool` or `--machine`),
+never its folder: a folder that joins another group between the launch and the script's first
+line still runs on the key that was checked. A slot whose key was removed meanwhile answers that
+no key is saved, and the script stops before the agent starts.
 
 `set` refuses interactive input: pipe the key (`< key.txt`, `pbpaste |`). `status` asks
 OpenRouter itself (`GET /api/v1/key`) and shows `limit_remaining` and `usage_daily`; a refused

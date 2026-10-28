@@ -1,7 +1,8 @@
 // Pure interface rules, kept free of DOM access so scripts/test-ui-logic.mjs can
 // exercise them directly. main.ts owns rendering; these functions own decisions.
-import type { Account, AccountLimit, Organization, AgentRow, AgentSetup, OpenrouterCredit, RecommendedModel, SessionInfo, ProjectRule, RotationPolicy, UpdateStatus, Usage, UsageWindow } from './types';
-import { t } from './i18n';
+import type { ShellHookNotice, ShellHookStatus, Onboarding, OnboardStep, ChainExecutor, ChainScope, ChainStepView } from './types';
+import type { Account, AccountLimit, Organization, OrganizationGroupOffer, AgentRow, AgentSetup, OpenrouterCredit, RecommendedModel, SessionInfo, ProjectRule, RotationPolicy, UpdateStatus, Usage, UsageWindow } from './types';
+import { t, plural } from './i18n';
 
 export type Appearance = 'system' | 'dark' | 'light';
 export type Theme = 'dark' | 'light';
@@ -68,6 +69,15 @@ export class MutationClock {
   stamp(): number { return this.active > 0 ? -1 : this.generation; }
   /** True when no mutation began after the stamp and none is still running. */
   accepts(stamp: number): boolean { return stamp === this.generation && this.active === 0; }
+}
+/** SB-229: a background read under the clock: `applied` with its value, or `failed`, only when no
+ * user action began after it was issued; `stale` otherwise (its value, when it answered, may predate
+ * the action: it may fill an empty view, never replace one; its failure is not shown). */
+export type ClockedRead<T> = { state: 'applied'; value: T } | { state: 'failed'; error: unknown } | { state: 'stale'; value?: T };
+export async function clockedRead<T>(clock: MutationClock, read: () => Promise<T>): Promise<ClockedRead<T>> {
+  const stamp = clock.stamp();
+  try { const value = await read(); return clock.accepts(stamp) ? { state: 'applied', value } : { state: 'stale', value }; }
+  catch (error) { return clock.accepts(stamp) ? { state: 'failed', error } : { state: 'stale' }; }
 }
 
 export type RuleState = 'active' | 'paused' | 'expired';
@@ -310,6 +320,45 @@ export function groupSeatsElsewhere(snapshot: OrgSnapshot, organization: string 
   if (!organization || !accounts.length) return false;
   return !accounts.some((a) => groupAdmits(snapshot, organization, a));
 }
+/** SB-160 (B-6, SCN-078): the card line of a seat the provider no longer accepts (the monitor's
+ * `sign_in_required`), naming its organization; null for a personal account or a signed-in one,
+ * which keep today's text. */
+export function seatEndedText(snapshot: OrgSnapshot, account: Pick<Account, 'id' | 'label' | 'provider' | 'external_identity'>, signInRequired: string[] | undefined): string | null {
+  if (!signInRequired?.includes(account.id)) return null;
+  const id = attribution(snapshot, account).organization;
+  const organization = id ? (snapshot.organizations ?? []).find((o) => o.id === id) : undefined;
+  if (!organization) return null;
+  return t("{label}'s sign-in has ended. If {organization} removed your seat, ask its administrator; to keep using it, sign in again.", { label: account.label, organization: organization.name });
+}
+/** SB-160 (B-6, SCN-078): a group bound to an organization whose seats (its accounts of that
+ * organization) have all ended says so; a group whose accounts all belong elsewhere keeps
+ * SB-170's line instead, and an empty group its own note. */
+export function groupSeatsEndedText(snapshot: OrgSnapshot, group: { name: string; organization?: string | null }, accounts: Pick<Account, 'id' | 'label' | 'provider' | 'external_identity'>[], signInRequired: string[] | undefined): string | null {
+  const organization = group.organization ?? null;
+  if (!organization || !signInRequired) return null;
+  const seats = accounts.filter((a) => groupAdmits(snapshot, organization, a));
+  if (!seats.length || !seats.every((a) => signInRequired.includes(a.id))) return null;
+  return t("None of {group}'s accounts is signed in. Sessions in its folders are refused until one is.", { group: group.name });
+}
+/** What the window's minute-by-minute background pass reads again besides the account list, by
+ * the page on screen: the organization checklist where its card is drawn (B-8; it lists sessions),
+ * the session list on Activity (SB-104), the ceilings on Agents and API keys (C-7, local
+ * `spend.json`), and the PassionCode.ai status on Organizations (SB-227: a local file read, so a
+ * mark a background read made shows without reopening the page). */
+export type BackgroundRead = 'onboarding' | 'sessions' | 'ceilings' | 'passioncode';
+export function backgroundReads(page: string): BackgroundRead[] {
+  if (page === 'orgs') return ['onboarding', 'passioncode'];
+  if (page === 'accounts') return ['onboarding'];
+  if (page === 'activity') return ['sessions'];
+  if (page === 'agents' || page === 'tokens') return ['ceilings'];
+  return [];
+}
+/** SB-160 (B-7, SCN-079): when the person stopped being in this organization on PassionCode.ai,
+ * while it is not linked again; null otherwise (a disconnect is not leaving). */
+export function organizationReleasedAt(status: { connected: boolean; released?: { organization: string; at: number }[] } | null, organization: Pick<Organization, 'id' | 'vesta_id'>): number | null {
+  if (!status?.connected || organization.vesta_id) return null;
+  return status.released?.find((r) => r.organization === organization.id)?.at ?? null;
+}
 /** SB-159: the PassionCode.ai panel's line as a translation key and its values. */
 export function passioncodeLine(status: { connected: boolean; state?: string; read_at?: number | null; organizations?: number } | null): { key: string; values?: Record<string, string | number> } {
   if (!status || !status.connected) return { key: 'Not connected. Connect to bring your PassionCode.ai organizations here with their names and domains, kept current.' };
@@ -413,13 +462,17 @@ export function intervalWhile(tick: () => void, ms: number, timers: Timers = bro
   };
 }
 
-/** What About says about automatic updates (SB-55), and whether "Restart to update" is offered. */
-export function updateLine(status: Pick<UpdateStatus, 'available' | 'reason' | 'enabled' | 'state' | 'current' | 'version' | 'error' | 'needs_permission'>): { text: string; restart: boolean } {
+/** What About says about automatic updates (SB-55), and whether "Restart to update" is offered.
+ * `when` formats a time (Unix seconds) for the line that says when a paused update starts (SB-208). */
+export function updateLine(status: Pick<UpdateStatus, 'available' | 'reason' | 'enabled' | 'state' | 'current' | 'version' | 'error' | 'needs_permission' | 'restart_after'>, when: (seconds: number) => string = (seconds) => new Date(seconds * 1000).toISOString().slice(0, 16).replace('T', ' ')): { text: string; restart: boolean } {
   if (!status.available) return { text: t(status.reason ?? 'Automatic updates work in the installed app only.'), restart: false };
   if (status.state === 'ready' && status.version) {
     return status.needs_permission
       ? { text: t('Version {version} is ready. Restarting asks for an administrator password to replace the app.', { version: status.version }), restart: true }
-      : { text: t('Version {version} is ready. It starts on its own when Switchboard is idle in the background or opens again, or restart now.', { version: status.version }), restart: true };
+      // SB-208: during SB-191's pause it does not start at the next idle moment; say from when.
+      : status.restart_after
+        ? { text: t('Version {version} is ready. It starts on its own when Switchboard is idle in the background after {time} or opens again, or restart now.', { version: status.version, time: when(status.restart_after) }), restart: true }
+        : { text: t('Version {version} is ready. It starts on its own when Switchboard is idle in the background or opens again, or restart now.', { version: status.version }), restart: true };
   }
   // SB-104: a check that failed says so, even with automatic updates off (a manual check).
   if (status.state === 'failed' && status.error) return { text: t(status.error), restart: false };
@@ -433,15 +486,30 @@ export function updateLine(status: Pick<UpdateStatus, 'available' | 'reason' | '
  * The notice after an official sign-in is saved (SB-62). An identity already saved was signed in
  * again in place — same account, label and pool — so it is never announced as added.
  */
-export function signInNotice(account: { label: string; pool: string; signed_in_again?: boolean; login_cleanup?: 'done' | 'pending' }, providerLabel: string, projects: { pool: string; name: string }[] = []): string {
+export function signInNotice(account: { label: string; pool: string; signed_in_again?: boolean; login_cleanup?: 'done' | 'pending'; organization_group?: OrganizationGroupOffer }, providerLabel: string, projects: { pool: string; name: string }[] = []): string {
   // D-1: the group by its name or the default group, never a pool id alone.
   const where = inGroup(account.pool, projects);
   const head = account.signed_in_again
     ? t('{label} is signed in again in {provider} {where}.', { label: account.label, provider: providerLabel, where })
     : t('{label} added to {provider} {where}.', { label: account.label, provider: providerLabel, where });
-  return account.login_cleanup === 'pending'
+  const text = account.login_cleanup === 'pending'
     ? `${head} ${t('Switchboard could not remove its temporary sign-in folder yet and retries before the next sign-in.')}`
     : head;
+  const note = organizationMoveNote(account.label, providerLabel, account.organization_group);
+  return note ? `${text} ${note}` : text;
+}
+/**
+ * SB-160 (B-4, SCN-077): the ordinary CLI's own account cannot join a group, so its offer is a
+ * sentence instead of an action; empty otherwise. Draft copy until wave 4.
+ */
+export function organizationMoveNote(label: string, providerLabel: string, offer: OrganizationGroupOffer | undefined): string {
+  return offer?.in_cli ? t('Switch {provider} to another account first to move {label} to group “{group}”.', { provider: providerLabel, label, group: offer.name }) : '';
+}
+/** SB-160 (B-4, SCN-077): the notice's one action for a seat that landed outside its organization's group; nothing moves until the person presses it. */
+export function signInMove(account: { id: string; label: string; organization_group?: OrganizationGroupOffer }): { id: string; pool: string; label: string; done: string } | null {
+  const offer = account.organization_group;
+  if (!offer || offer.in_cli) return null;
+  return { id: account.id, pool: offer.pool, label: t('Move it to “{group}”', { group: offer.name }), done: t('{label} moved to group “{name}”.', { label: account.label, name: offer.name }) };
 }
 /** The balance line of the saved OpenRouter key (SB-79): numbers only, in US dollars. */
 export function openrouterCreditLine(credit: Pick<OpenrouterCredit, 'limit' | 'limit_remaining' | 'limit_reset' | 'usage_daily'>): string {
@@ -677,8 +745,9 @@ export function ordinaryKimiNote(status: { signed_in: boolean; error: string | n
   return status.error ? t(status.error) : null;
 }
 
-/** SB-120: the order agents take over work in — the subscriptions-first preset (Claude Code,
- * Codex, Kimi Code, Hermes), then OpenCode. Tools-only agents follow, in the catalog's order. */
+/** SB-120: the order agents take over work in: the subscriptions-first preset (Claude Code,
+ * Codex, Kimi Code, Hermes), then OpenCode. Tools-only agents follow, in the catalog's order.
+ * The same list as `agent_catalog::SWITCHABLE`, tied by a check (SB-229). */
 export const TAKEOVER_ORDER = ['claude-code', 'codex', 'kimi-code', 'hermes', 'opencode'];
 const takeoverRank = (id: string) => { const i = TAKEOVER_ORDER.indexOf(id); return i < 0 ? TAKEOVER_ORDER.length : i; };
 export function sortAgents<T extends Pick<AgentRow, 'id'>>(agents: T[]): T[] {
@@ -695,6 +764,85 @@ export function defaultAgentChoices(agents: Pick<AgentRow, 'id' | 'name' | 'enab
   }
   return choices;
 }
+/** C-3 (SB-71): the key a chain is filed under, `chain_view::scope_key`'s (tied by a check, SB-229). */
+export function chainScopeKey(scope: ChainScope): string {
+  return scope.kind === 'machine' ? 'machine' : scope.kind === 'project' ? `project:${scope.pool}` : `workflow:${scope.id}`;
+}
+/** C-3 (SB-71): a step moved one place up (`delta` -1) or down (+1); a move past either end
+ * changes nothing. A new list: the one given stays as it was. */
+export function moveStep<T>(steps: readonly T[], index: number, delta: number): T[] {
+  const next = [...steps]; const to = index + delta;
+  if (index < 0 || index >= next.length || to < 0 || to >= next.length) return next;
+  [next[index], next[to]] = [next[to], next[index]];
+  return next;
+}
+/** The saved accounts a chain step may be pinned to, mirroring the core's rules
+ * (`chains.rs validate_executor`) and what the fallback runs (`fallback.rs resolve_with`): Claude
+ * Code on Claude accounts, Codex on Codex accounts, Kimi Code on saved Kimi Code accounts. Hermes
+ * and OpenCode run on the OpenRouter key, and a pinned account would only make them wait, so they
+ * get none; another agent never runs on a subscription sign-in. Disabled accounts are never used. */
+export function accountsForStep<A extends Pick<Account, 'id' | 'label' | 'provider' | 'enabled'>>(agent: string, accounts: readonly A[], kimiAccounts: readonly { id: string; label: string }[] = []): { id: string; label: string }[] {
+  if (agent === 'kimi-code') return kimiAccounts.map((k) => ({ id: k.id, label: k.label }));
+  const provider = agent === 'claude-code' ? 'claude' : agent === 'codex' ? 'codex' : null;
+  if (!provider) return [];
+  return accounts.filter((a) => a.provider === provider && a.enabled).map((a) => ({ id: a.id, label: a.label }));
+}
+/** A chain in one line, its steps in order: “Claude Code → Codex”, a pinned account or key in
+ * brackets; no chain reads “Not set”. */
+export function chainSummary(executors: readonly ChainExecutor[] | null | undefined, nameOf: (agent: string) => string, accountLabel: (id: string) => string | undefined = () => undefined): string {
+  if (!executors?.length) return t('Not set');
+  return executors.map((e) => {
+    const name = nameOf(e.agent);
+    if (e.key) return t('{agent} (key {key})', { agent: name, key: e.key });
+    const label = e.account_id ? accountLabel(e.account_id) ?? e.account_id : null;
+    return label ? `${name} (${label})` : name;
+  }).join(' → ');
+}
+/** Why a step would be passed over, as a phrase: the chains view's readiness reasons and the
+ * hand-over gate's (fallback.rs, spend gate C-5). An unknown code is shown as itself. */
+export function skipReasonText(reason: string | null | undefined): string | null {
+  switch (reason) {
+    case 'no_usable_account': return t('no account with room');
+    case 'agent_disabled': return t('disabled under Installed');
+    case 'sign_in_required': return t('needs a sign-in');
+    case 'agent_settings_unreadable': return t('agent settings could not be read');
+    case 'agent_not_automatic_yet': case 'key_pinned': return t('not automatic yet');
+    case 'ceiling_reached': return t('today\'s ceiling reached');
+    case 'key_exhausted': return t('less than $0.50 left on the key');
+    case 'spend_unknown': return t('spend could not be read');
+    case 'ceilings_unreadable': return t('spending ceilings could not be read');
+    default: return null;
+  }
+}
+/** One readiness line for a step (SCN-082): ready on which account or key, or why not. A paid
+ * step's spend is read only at a hand-over, so the window says it has not been read. */
+export function stepReasonText(step: Pick<ChainStepView, 'state' | 'reason' | 'paid' | 'account_label' | 'key_scope' | 'key'>, groupName?: string): string {
+  if (step.state === 'ready') {
+    const where = step.key_scope === 'group' ? (groupName ? t('the key of {group}', { group: groupName }) : t('the group\'s key')) : step.key_scope === 'machine' ? t('this computer\'s key') : step.account_label ?? '';
+    const line = where ? t('Ready: {where}', { where }) : t('Ready');
+    return step.paid ? `${line}. ${t('Spend not read yet.')}` : line;
+  }
+  if (step.state === 'not_installed') return t('Not installed');
+  if (step.state === 'not_automatic') return step.reason === 'key_pinned' && step.key ? t('Pinned to key {name}: not automatic yet (waits for project grants)', { name: step.key }) : t('Not automatic yet');
+  const phrase = skipReasonText(step.reason);
+  return phrase ? t('Skipped: {reason}', { reason: phrase }) : t('Skipped ({code})', { code: step.reason ?? '?' });
+}
+/** What the last hand-over did, as a phrase after “Last hand-over: {time},”. */
+export function handoverOutcomeText(outcome: string): string {
+  switch (outcome) {
+    case 'offered': return t('handed over');
+    case 'launch_failed': return t('the launch failed after the offer');
+    case 'every_step_refused': return t('every step was refused');
+    case 'no_usable_executor': return t('no agent could take it');
+    default: return skipReasonText(outcome) ?? outcome;
+  }
+}
+/** The steps the last hand-over passed over, one “Agent: reason” each. */
+export function handoverSkipped(skipped: readonly { agent: string; reason: string }[], nameOf: (agent: string) => string): string[] {
+  return skipped.map((s) => `${nameOf(s.agent)}: ${skipReasonText(s.reason) ?? s.reason}`);
+}
+/** A workflow id short enough for a row: wf_ and its first eight hex digits. */
+export const shortWorkflow = (id: string) => id.slice(0, 11);
 /** A token count as OpenRouter shows context: 1.05M, 200K, 10M. */
 export function tokenCount(n: number): string {
   if (n >= 1_000_000) return `${Number((n / 1_000_000).toFixed(2))}M`;
@@ -742,10 +890,21 @@ export function statTroubleText(c: StatCounts): string {
   if (share === null) return '–';
   return share === 0 && c.limited + c.failed > 0 ? '<1%' : `${share}%`;
 }
+/** Coding agents' display names by the id the proxy or a session record gives them. */
+const AGENT_NAMES: Record<string, string> = { 'claude-code': 'Claude Code', codex: 'Codex CLI', opencode: 'OpenCode', hermes: 'Hermes Agent', kilo: 'Kilo Code', goose: 'Goose', aider: 'Aider', crush: 'Crush', 'qwen-code': 'Qwen Code', kimi: 'Kimi Code', 'kimi-code': 'Kimi Code', pi: 'Pi' };
 /** A coding agent's name as the proxy recorded it (from its user-agent). */
 export function statAgentName(agent: string): string {
-  const names: Record<string, string> = { 'claude-code': 'Claude Code', codex: 'Codex CLI', opencode: 'OpenCode', hermes: 'Hermes Agent', kilo: 'Kilo Code', goose: 'Goose', aider: 'Aider', crush: 'Crush', 'qwen-code': 'Qwen Code', kimi: 'Kimi Code', pi: 'Pi', 'anthropic-sdk': t('Anthropic SDK'), 'openai-sdk': t('OpenAI SDK') };
+  const names: Record<string, string> = { ...AGENT_NAMES, 'anthropic-sdk': t('Anthropic SDK'), 'openai-sdk': t('OpenAI SDK') };
   return names[agent] ?? t('Other client');
+}
+/**
+ * SB-201: the agent a launched session runs, by its display name: the record's catalog `agent`
+ * (an agent through the proxy records the route's provider, `claude`), else its provider's own
+ * CLI for an older record; an agent without a known name shows its id.
+ */
+export function sessionAgentName(session: { agent?: string | null; provider: string }): string {
+  const id = session.agent ?? (session.provider === 'claude' ? 'claude-code' : session.provider);
+  return AGENT_NAMES[id] ?? id;
 }
 
 /** SB-147: the share of input tokens read from the cache, as a whole percent; null with no input. */
@@ -904,4 +1063,317 @@ export function firstRunHint(current: { claude?: { status: string } | null; code
  */
 export function usableWhileBusy(key: string): boolean {
   return /^(nav-|refresh$|dismiss-notice$|countdown-toggle$|org-filter-|quota-|chart-|stats-|stat-[a-z]+-sort-|folders-|disk-map-toggle$|review-rules$|open-api-keys$|tour-|[a-z-]+-retry$)/.test(key);
+}
+
+/** SB-183 (node A-7): one start file's line in *Terminals in organization folders*; `command` is
+ * the line a person adds by hand (with *Copy*) when Switchboard could not write the file. */
+export interface ShellHookFileView { text: string; command: string | null; problem: boolean }
+export interface ShellHookView {
+  state: 'reading' | 'failed' | 'on' | 'default_on' | 'off' | 'default_off' | 'inactive';
+  line: string;
+  files: ShellHookFileView[];
+  /** The switch: Turn off while the hook is wanted, Turn on otherwise; disabled outside the installed app. */
+  action: { label: string; on: boolean; disabled: boolean } | null;
+  /** A block the person took out while the hook is on: *Add the block again* writes it back. */
+  readd: boolean;
+  note: string | null;
+  error: string | null;
+  retry: boolean;
+}
+/** The line a person adds to a start file Switchboard left alone. */
+export function shellInitLine(shell: string): string | null {
+  if (shell === 'zsh' || shell === 'bash') return `eval "$(switchboard shell init ${shell})"`;
+  if (shell === 'fish') return 'switchboard shell init fish | source';
+  if (shell === 'pwsh') return 'switchboard shell init pwsh | Out-String | Invoke-Expression';
+  return null;
+}
+/** A start file's path as the person knows it: `~/...` under their home. */
+export function homePath(path: string, home: string | null): string {
+  if (home && (path === home || path.startsWith(home.endsWith('/') ? home : `${home}/`))) return `~${path.slice(home.replace(/\/$/, '').length)}`;
+  return path;
+}
+function shellHookFile(file: { shell: string; path: string; state: string }, home: string | null): ShellHookFileView {
+  const path = homePath(file.path, home);
+  const shell = file.shell;
+  switch (file.state) {
+    case 'written': return { text: shell === 'fish' ? t('fish: its own file, added') : t('{shell}: {path}, added', { shell, path }), command: null, problem: false };
+    case 'skipped_symlink': return { text: t('{path} is a link, so Switchboard did not change it. Add this line yourself:', { path }), command: shellInitLine(shell), problem: true };
+    case 'skipped_zdotdir_unknown': return { text: t('zsh may read its start file from another folder (ZDOTDIR), so Switchboard created none. Add this line to the start file zsh reads:'), command: shellInitLine('zsh'), problem: true };
+    case 'skipped_owner': return { text: t('{path} belongs to another user, so Switchboard did not change it.', { path }), command: null, problem: true };
+    case 'unreadable': return { text: t('{path} could not be read, so Switchboard did not change it.', { path }), command: null, problem: true };
+    case 'removed_by_person': return { text: t('You took the block out of {path}, so Switchboard does not add it back.', { path }), command: null, problem: true };
+    case 'policy_blocked': return { text: t('PowerShell\'s execution policy stops profiles from loading, so the hook is inactive there. Switchboard does not change it. Whoever manages this computer can allow signed or local scripts for your user.'), command: null, problem: true };
+    case 'constrained_language': return { text: t('PowerShell runs in Constrained Language Mode on this computer, so the hook is inactive there. Switchboard does not change this mode. Whoever manages this computer sets it.'), command: null, problem: true };
+    default: return { text: t('{shell}: {path}, {state}', { shell, path, state: file.state }), command: null, problem: true };
+  }
+}
+/** SB-222: off by default. An organization's group with no row in the folder map is named with
+ * why (its folders belong to another group, are not on this computer, or it has none yet); the
+ * first one, in the runtime's order, when there are several. */
+function defaultOffLine(unmapped: NonNullable<ShellHookStatus['unmapped']>): string {
+  const first = unmapped[0];
+  if (!first) return t('Off: no group belongs to an organization on this computer.');
+  if (first.reason === 'held' && first.held_by) return t('Off: {organization}\'s folders belong to the group “{group}”, so terminals there keep your own settings.', { organization: first.organization, group: first.held_by });
+  if (first.reason === 'no_folder') return t('Off: {organization}\'s group “{group}” has no folder yet.', { organization: first.organization, group: first.group });
+  return t('Off: {organization}\'s folders are not on this computer.', { organization: first.organization });
+}
+/** What the Groups page's *Terminals in organization folders* section shows for a read (null while
+ * reading) and the last read's or save's error (SCN-075). */
+export function shellHookView(status: ShellHookStatus | null, error: string | null = null): ShellHookView {
+  const none = { files: [], action: null, readd: false, note: null };
+  if (!status) {
+    if (error) return { ...none, state: 'failed', line: t('The terminal hook\'s state could not be read.'), error, retry: true };
+    return { ...none, state: 'reading', line: t('Reading the terminal hook…'), error: null, retry: false };
+  }
+  const wanted = status.hook === 'on' || status.hook === 'default_on';
+  const files = status.files.map((f) => shellHookFile(f, status.home));
+  const active = status.files.some((f) => f.state === 'written');
+  const orgs = status.organizations;
+  let state: ShellHookView['state'] = status.hook;
+  let line: string;
+  if (wanted && !active) { state = 'inactive'; line = t('On, but no start file holds the hook yet, so terminals do not follow organization folders.'); }
+  else if (status.hook === 'default_on') line = orgs.length === 1 ? t('On: new terminals in {organization}\'s folders work in its context.', { organization: orgs[0] }) : t('On: new terminals in organization folders work in their context.');
+  else if (status.hook === 'on') line = t('On: new terminals in organization folders work in their context.');
+  else if (status.hook === 'off') line = t('Off: new terminals keep your own settings.');
+  else line = defaultOffLine(status.unmapped ?? []);
+  const action = { label: wanted ? t('Turn off') : t('Turn on'), on: !wanted, disabled: !status.can_change };
+  const readd = wanted && status.can_change && status.files.some((f) => f.state === 'removed_by_person');
+  const note = status.can_change ? null : t('Only the installed app changes terminal settings.');
+  const map = status.map === 'ok' || status.map === 'missing' ? null : status.map === 'unknown_version' ? t('The folder map was written by another version of Switchboard, so no folder applies until it writes it again.') : t('The folder map could not be read, so no folder applies.');
+  return { state, line, files, action, readd, note, error: error ?? map, retry: false };
+}
+/** The notice after *Turn off* / *Turn on* (SCN-075 steps 2 and 3). */
+export function shellHookToggleNotice(on: boolean): string {
+  return on ? t('The terminal hook is on. New terminals in organization folders work in their context.') : t('The terminal hook is off. New terminals keep your own settings; terminals already open switch back at their next change of folder.');
+}
+/** The first-time notice (SCN-074 step 1): the same words the system notification carries. */
+export function shellHookNoticeText(notice: ShellHookNotice): { title: string; body: string } {
+  return {
+    title: t('Terminals now work in {organization}\'s context in its folders', { organization: notice.organization }),
+    body: t('New terminals opened in {group}\'s folders run claude and codex on {organization}\'s accounts and history. Turn this off under Groups.', { group: notice.group, organization: notice.organization }),
+  };
+}
+/** SCN-066: under *Codex in group folders*, while the terminal hook is on in an organization's folders.
+ * Only organizations whose folder map rows carry a Codex account (`codex_organizations`): elsewhere `codex` keeps the person's sign-in. */
+export function codexHookLine(status: ShellHookStatus | null): string | null {
+  const orgs = status?.codex_organizations ?? [];
+  if (!status || !(status.hook === 'on' || status.hook === 'default_on') || !status.files.some((f) => f.state === 'written') || !orgs.length) return null;
+  return orgs.length === 1 ? t('In {organization}\'s folders, new terminals use its Codex accounts whether this is on or off.', { organization: orgs[0] }) : t('In organization folders, new terminals use their Codex accounts whether this is on or off.');
+}
+
+// ── SB-202 (B-8, SCN-076): the first run of an organization machine ──
+/** The steps of one organization's card, in the checklist's order. */
+export type OrgSetupStepId = 'organization' | 'org_group' | 'seat' | 'hook' | 'launch';
+export interface OrgSetupLine { id: OrgSetupStepId; state: OnboardStep['state']; title: string; line: string; /** org_group: the groups bound to the organization when more than one. */ groups?: string[]; /** SB-228: a command the line names, shown as code after it. */ command?: string }
+export interface OrgSetup { organization: { id: string; name: string }; group: { pool: string; name: string } | null; lines: OrgSetupLine[]; complete: boolean }
+export type OrgSetupAction = { kind: 'group'; organization: string; label: string } | { kind: 'sign_in'; pool: string; label: string };
+export const ORG_SETUP_HIDDEN_KEY = 'switchboard.orgSetupHidden';
+export function orgSetupStateLabel(state: OnboardStep['state']): string {
+  return ({ done: t('Done'), todo: t('To do'), needs_person: t('Needs you'), optional: t('Optional') })[state];
+}
+export function orgSetupTitle(setup: Pick<OrgSetup, 'organization'>): string {
+  return t('Set up {organization} on this computer', { organization: setup.organization.name });
+}
+const seatLeadLine = (organization: string, group: string) => t('Sign in with your {organization} address. It goes to the group “{group}”.', { organization, group });
+const seatLabel = (organization: string) => t('Sign in with your {organization} address', { organization });
+/** Words one step in the window's language from the checklist's fields, never from its English summary. */
+function orgSetupLine(step: OnboardStep, organization: string, group: { pool: string; name: string } | null): string {
+  switch (step.id) {
+    case 'org_group':
+      if (step.state === 'done' && step.group) return t('Its group is “{group}”.', { group: step.group.name });
+      return (step.groups ?? []).length > 1 ? t('Keep one group for {organization} on this computer: {groups}.', { organization, groups: (step.groups ?? []).join(', ') }) : t('{organization} has no group on this computer yet.', { organization });
+    case 'seat':
+      if (step.state === 'done') return group ? t('Your {organization} account in “{group}” is signed in.', { organization, group: group.name }) : t('Your {organization} account is signed in.', { organization });
+      if (!group) return t('Sign in once the group exists.');
+      return (step.ended ?? 0) > 0 ? t('Your {organization} accounts in “{group}” must sign in again. If {organization} removed your seat, ask its administrator.', { organization, group: group.name }) : seatLeadLine(organization, group.name);
+    case 'hook':
+      return ({
+        active: t("Terminals in {organization}'s folders work in its context. To turn this off:", { organization }),
+        pending: t('The terminal hook is on, but no start file holds it yet.'),
+        off: t("The terminal hook is off: terminals in {organization}'s folders keep your own settings.", { organization }),
+        waiting: t("Terminals follow {organization}'s folders once its group has a folder.", { organization }),
+        unread: t("The terminal hook's state could not be read."),
+      })[step.terminals ?? 'unread'];
+    case 'launch':
+      return step.state === 'done' ? t("A session ran in {organization}'s context.", { organization }) : t('Launch a session in a folder of the group to check it.');
+    default:
+      return t('{organization} is on this computer.', { organization });
+  }
+}
+const ORG_STEP_TITLES = (): Record<OrgSetupStepId, string> => ({ organization: t('Organization'), org_group: t('Group'), seat: t('Your seat'), hook: t('Terminals'), launch: t('First launch') });
+/** F1 (wave 4 design pass, SCN-079): the organizations the person left on PassionCode.ai (`released`,
+ * not linked again), by id. None while the connection is not read or is disconnected. */
+export function releasedOrganizations(status: Parameters<typeof organizationReleasedAt>[0], organizations: readonly Pick<Organization, 'id' | 'vesta_id'>[]): string[] {
+  return organizations.filter((o) => organizationReleasedAt(status, o) !== null).map((o) => o.id);
+}
+/** F1 (SCN-079): the line at the top of Organizations, while another organization's setup card
+ * would push each card's own released line below the fold: which organizations the person left. */
+export function releasedSummary(status: Parameters<typeof organizationReleasedAt>[0], organizations: readonly Pick<Organization, 'id' | 'name' | 'vesta_id'>[]): string | null {
+  const names = organizations.filter((o) => organizationReleasedAt(status, o) !== null).map((o) => o.name);
+  if (!names.length) return null;
+  return plural(names.length, { one: '{names} is no longer in your PassionCode.ai organizations. It stays here with its groups until you remove it.', other: '{names} are no longer in your PassionCode.ai organizations. They stay here with their groups until you remove them.' }, { names: names.join(', ') });
+}
+/** Every organization whose checklist is not complete yet, in the checklist's order (newest first).
+ * An organization the person left on PassionCode.ai (`released`) gets no card: its line on
+ * Organizations says so, and setting it up again is not offered (SCN-079, F1). */
+export function orgSetups(onboarding: Onboarding | null | undefined, released: readonly string[] = []): OrgSetup[] {
+  const known = new Set<string>(['org_group', 'seat', 'hook', 'launch']);
+  const byOrg = new Map<string, { organization: { id: string; name: string }; steps: OnboardStep[] }>();
+  for (const step of onboarding?.steps ?? []) {
+    if (!step.organization || !known.has(step.id) || released.includes(step.organization.id)) continue;
+    const entry = byOrg.get(step.organization.id) ?? { organization: step.organization, steps: [] };
+    entry.steps.push(step); byOrg.set(step.organization.id, entry);
+  }
+  const titles = ORG_STEP_TITLES();
+  const setups: OrgSetup[] = [];
+  for (const { organization, steps } of byOrg.values()) {
+    const group = steps.find((s) => s.id === 'org_group' && s.state === 'done')?.group ?? null;
+    const lines: OrgSetupLine[] = [{ id: 'organization', state: 'done', title: titles.organization, line: orgSetupLine({ id: 'organization', state: 'done', summary: '' }, organization.name, group) }];
+    for (const step of steps) lines.push({ id: step.id as OrgSetupStepId, state: step.state, title: titles[step.id as OrgSetupStepId], line: orgSetupLine(step, organization.name, group), ...((step.groups ?? []).length > 1 ? { groups: step.groups } : {}), ...(step.id === 'hook' && step.terminals === 'active' ? { command: 'switchboard shell off' } : {}) });
+    const complete = lines.every((l) => l.state === 'done' || l.state === 'optional');
+    if (!complete) setups.push({ organization, group, lines, complete });
+  }
+  return setups;
+}
+/** The card's one action: the first step not done, when the window can do it. */
+export function orgSetupAction(setup: OrgSetup): OrgSetupAction | null {
+  const first = setup.lines.find((l) => l.state === 'todo' || l.state === 'needs_person');
+  if (!first) return null;
+  if (first.id === 'org_group') return !first.groups ? { kind: 'group', organization: setup.organization.id, label: t('+ Group for {organization}', { organization: setup.organization.name }) } : null;
+  if (first.id === 'seat' && setup.group) return { kind: 'sign_in', pool: setup.group.pool, label: seatLabel(setup.organization.name) };
+  return null;
+}
+/** One first-run card at a time: the usage question, then the tour, then this card; on Accounts and on top of Organizations, and after Hide on Organizations only. */
+export function orgSetupShown(input: { page: string; organization: string; hidden: string[]; usage: UsageStatus | null | undefined; usageFailed: boolean; tourStep: number | null }): boolean {
+  if (tourWaits(input.usage, input.usageFailed) || input.tourStep !== null) return false;
+  if (input.page === 'orgs') return true;
+  return input.page === 'accounts' && !input.hidden.includes(input.organization);
+}
+/** SB-228: the card's one caveat when a read behind the checklist failed (`degraded`): the widest
+ * first (saved settings, then sign-ins, then sessions), any other code in general words. */
+export function orgSetupCaveat(onboarding: Onboarding | null | undefined): string | null {
+  const degraded = onboarding?.degraded ?? [];
+  if (!degraded.length) return null;
+  if (degraded.includes('snapshot')) return t("Part of Switchboard's saved settings could not be read, so a step may be wrong or missing.");
+  if (degraded.includes('sign_ins')) return t('Whether a sign-in ended could not be read, so Your seat may read signed in when it is not.');
+  if (degraded.includes('sessions')) return t('The recorded sessions could not be read, so First launch may read not done.');
+  return t('Part of the setup could not be read, so a step may be wrong.');
+}
+type OrgSetupScreen = { page: string; hidden: string[]; usage: UsageStatus | null | undefined; usageFailed: boolean; tourStep: number | null; /** F1: organizations left on PassionCode.ai (`releasedOrganizations`). */ released?: readonly string[] };
+/** SB-228 (VIS-21): a card with an action of its own is on screen, so its action is the screen's
+ * one primary and the page's buttons (+ New organization, Restore from backup, + Add account) go quiet. */
+export function orgSetupLeads(input: OrgSetupScreen & { onboarding: Onboarding | null | undefined }): boolean {
+  return orgSetupPrimary(input) !== null;
+}
+/** F3 (wave 4 design pass, VIS-21): with several cards on screen, only the first one shown with an
+ * action of its own has the filled button; the others' actions are bordered. Its organization's id. */
+export function orgSetupPrimary(input: OrgSetupScreen & { onboarding: Onboarding | null | undefined }): string | null {
+  return orgSetups(input.onboarding, input.released).find((setup) => !!orgSetupAction(setup) && orgSetupShown({ ...input, organization: setup.organization.id }))?.organization.id ?? null;
+}
+/** F2 (wave 4 design pass, SCN-076 step 7, VIS-21): on Accounts an organization's own action (its
+ * card's, or the empty page's seat sign-in after *Hide*) is the screen's one primary, so *Add to
+ * Switchboard* and *Turn on for Claude Code* go quiet beside it. */
+export function accountsOrgActionLeads(input: { cardLeads: boolean; emptyLead: AccountsEmptyKey | null }): boolean {
+  return input.cardLeads || input.emptyLead?.lead === 'org_seat';
+}
+/** VIS-21: one filled button per screen: of the actions a page offers to lead, in its reading
+ * order, the first one offered is filled; the others are bordered. */
+export function firstPrimary<T extends string>(offered: readonly (readonly [T, boolean])[]): T | null {
+  return offered.find(([, on]) => on)?.[0] ?? null;
+}
+/** SB-228 (SCN-076): the first checklist read failed, so there are no steps to show: the card of
+ * the newest organization it would be shown for, with the read-failed note only. Null once any
+ * read answered (that card keeps its steps and shows the note itself). */
+export function orgSetupUnread(input: OrgSetupScreen & { onboarding: Onboarding | null | undefined; failed: boolean; organizations: readonly Pick<Organization, 'id' | 'name' | 'created_at'>[] }): { id: string; name: string } | null {
+  if (input.onboarding || !input.failed) return null;
+  const newest = input.organizations.filter((o) => !(input.released ?? []).includes(o.id)).sort((a, b) => b.created_at - a.created_at);
+  const org = newest.find((o) => orgSetupShown({ ...input, organization: o.id }));
+  return org ? { id: org.id, name: org.name } : null;
+}
+export function hiddenOrgSetups(store: Pick<Storage, 'getItem'> | null): string[] {
+  try { const value: unknown = JSON.parse(store?.getItem(ORG_SETUP_HIDDEN_KEY) ?? '[]'); return Array.isArray(value) ? value.filter((v): v is string => typeof v === 'string') : []; } catch { return []; }
+}
+export type AccountsEmptyKey = { lead: 'backup' } | { lead: 'org_seat'; organization: string; group: string; pool: string; line: string; label: string } | { lead: 'reading' | 'add_current' | 'sign_in' };
+/** What the empty Accounts page leads with: a backup to restore, then an organization's seat (its group exists, no seat yet), then today's first-account line. */
+export function accountsEmptyKey(input: { backup: boolean; onboarding: Onboarding | null | undefined; current: Parameters<typeof firstRunHint>[0]; released?: readonly string[] }): AccountsEmptyKey {
+  if (input.backup) return { lead: 'backup' };
+  for (const setup of orgSetups(input.onboarding, input.released)) {
+    const action = orgSetupAction(setup);
+    if (action?.kind === 'sign_in' && setup.group) return { lead: 'org_seat', organization: setup.organization.name, group: setup.group.name, pool: setup.group.pool, line: seatLeadLine(setup.organization.name, setup.group.name), label: action.label };
+  }
+  return { lead: firstRunHint(input.current) };
+}
+/** C-7 (SB-72): an amount of US dollars as the window writes money everywhere ($5.00), thousands
+ * grouped ($1,000.00, SB-230), the same in every language (a window-wide decision, `docs/brand/strings.md`). */
+export function dollars(value: number): string {
+  const [whole, cents] = value.toFixed(2).split('.');
+  return `$${whole.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}.${cents}`;
+}
+/** SB-230: the line the remove-key confirmation adds for a group whose daily ceiling counts that key. */
+export function ceilingRemovalNote(ceiling: { usd: number; active: boolean } | null): string | null {
+  return ceiling?.active ? t('Its daily ceiling of {usd} stops counting until the group has a key of its own again.', { usd: dollars(ceiling.usd) }) : null;
+}
+/** SB-230: what a background read leaves on screen. An answer replaces the view and clears the
+ * error; a failure names itself, except right after a saved change (`afterSave`): the change stands,
+ * what is shown stays, and the next read reports; a stale read only fills an empty view. */
+export function afterRead<V>(current: { view: V | null; error: string }, read: ClockedRead<V>, afterSave: boolean, errorText: (error: unknown) => string): { view: V | null; error: string } {
+  if (read.state === 'applied') return { view: read.value, error: '' };
+  if (read.state === 'failed' && !afterSave) return { view: current.view, error: errorText(read.error) };
+  // A stale answer fills an empty view only (a later read corrects it), and clears nothing.
+  if (read.state === 'stale' && read.value !== undefined && current.view === null) return { view: read.value, error: current.error };
+  return current;
+}
+/** One answer to a reached ceiling. There is no `recommended` field and no primary class: the
+ * rule is a question without a recommended option (C-Q1, SCN-084). */
+export interface CeilingAction { answer: 'double' | 'keep'; label: string; className: string; disabled: boolean }
+/** The question a reached ceiling asks: its sentence and its two answers of equal weight, in a
+ * fixed order (double, then keep). `double` is the core's doubled value, `null` when doubling
+ * would pass $1,000 (that button stays, unavailable, and `note` says why). */
+export function ceilingQuestion(q: { value: number; double?: number | null; kind?: 'machine' | 'project' | 'workflow'; scope?: string }): { text: string; actions: CeilingAction[]; note: string | null } {
+  const usd = dollars(q.value);
+  const doubled = q.double === undefined ? q.value * 2 : q.double;
+  const text = q.kind === 'project' ? t('{group}\'s daily ceiling of {usd} is reached.', { group: q.scope ?? '', usd })
+    : q.kind === 'workflow' ? t('The ceiling of task {id}, {usd}, is reached.', { id: q.scope ?? '', usd })
+      : t('This computer\'s daily ceiling of {usd} is reached.', { usd });
+  // One class for both: the same size, weight and contrast.
+  const className = 'button ceiling-answer';
+  return {
+    text,
+    actions: [
+      { answer: 'double', label: t('Double to {usd}', { usd: dollars(doubled ?? q.value * 2) }), className, disabled: doubled === null },
+      { answer: 'keep', label: t('Keep {usd}', { usd }), className, disabled: false },
+    ],
+    note: doubled === null ? t('Doubling would pass $1,000, the most a ceiling may be. Set a ceiling of up to $1,000 instead.') : null,
+  };
+}
+/** The warning beside a ceiling when a running agent can spend past it on the key's own limit
+ * (SCN-083): no limit, a limit that is not daily, or a daily limit above the ceiling. `null` when
+ * there is no ceiling, the key was not read, or its daily limit is no higher than the ceiling. */
+export function ceilingWarning(ceiling: number | null, credit: Pick<OpenrouterCredit, 'limit' | 'limit_reset'> | null): string | null {
+  if (ceiling === null || !credit) return null;
+  const tail = t('A running agent can spend up to the key\'s own limit; Switchboard\'s ceiling only decides whether it is started.');
+  if (credit.limit === null || !Number.isFinite(credit.limit)) return `${t('This key has no spending limit of its own.')} ${t('A running agent can spend without a limit; Switchboard\'s ceiling only decides whether it is started.')}`;
+  if (credit.limit_reset !== 'daily') {
+    const reason = credit.limit_reset === 'monthly' ? t('The key\'s own limit resets monthly, not daily.')
+      : credit.limit_reset === 'weekly' ? t('The key\'s own limit resets weekly, not daily.')
+        : t('The key\'s own limit never resets.');
+    return `${reason} ${tail}`;
+  }
+  if (credit.limit > ceiling) return `${t('The key\'s own limit, {limit} a day, is higher than this ceiling.', { limit: dollars(credit.limit) })} ${tail}`;
+  return null;
+}
+/** The ceiling line of the machine key panel and a group key row. */
+export function ceilingLine(ceiling: { usd: number; doubled_from: number | null; active: boolean } | null): string {
+  if (!ceiling) return t('Daily ceiling: not set');
+  const value = ceiling.doubled_from !== null ? t('Daily ceiling: {usd}, doubled from {from}', { usd: dollars(ceiling.usd), from: dollars(ceiling.doubled_from) }) : t('Daily ceiling: {usd}', { usd: dollars(ceiling.usd) });
+  return ceiling.active ? value : `${t('Inactive: this group has no key of its own now.')} ${value}`;
+}
+/** The key's own limit at OpenRouter, shown beside Switchboard's ceiling on a group key row. */
+export function keyLimitLine(credit: Pick<OpenrouterCredit, 'limit' | 'limit_reset'>): string {
+  if (credit.limit === null || !Number.isFinite(credit.limit)) return t('Key\'s own limit: none');
+  const limit = dollars(credit.limit);
+  if (credit.limit_reset === 'daily') return t('Key\'s own limit: {limit}, resets daily', { limit });
+  if (credit.limit_reset === 'weekly') return t('Key\'s own limit: {limit}, resets weekly', { limit });
+  if (credit.limit_reset === 'monthly') return t('Key\'s own limit: {limit}, resets monthly', { limit });
+  return t('Key\'s own limit: {limit}, never resets', { limit });
 }

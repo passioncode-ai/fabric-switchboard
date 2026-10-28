@@ -1,5 +1,6 @@
 //! Headless account operations; credentials are accepted only from bounded stdin.
 mod mcp;
+mod shell;
 use clap::{Parser, Subcommand, ValueEnum};
 use serde_json::{json, Value};
 use std::{
@@ -9,7 +10,7 @@ use std::{
 };
 use switchboard_core::{AuthKind, Provider, RotationPolicy};
 use switchboard_runtime::{
-    arm_hard_exit, control, default_root, onboarding, oplog,
+    arm_hard_exit, control, default_root, launches, onboarding, oplog,
     projects::{detect_session, Session},
     rfc3339, AgentVia, Operation, Owner, StopSignals, DRAIN_DEADLINE, HARD_EXIT_AFTER,
 };
@@ -70,12 +71,19 @@ enum Command {
     },
     /// Report online/offline mode and the proxy address, without its capability.
     Status,
-    /// Sessions Switchboard launched (Claude Code, Codex) that are starting or running: account,
-    /// provider, group, mode, folder and times. Reads only.
+    /// Sessions Switchboard launched that are starting or running: Claude Code, Codex, Kimi Code,
+    /// Hermes, OpenCode and catalog agents. Account, agent, provider, group, mode, context, folder
+    /// and times. Reads only.
     Sessions {
         /// Also list sessions that ended (their homes keep the last launch's record).
-        #[arg(long)]
+        #[arg(long, conflicts_with = "history")]
         all: bool,
+        /// Every launch of the last 90 days, newest first, each with who launched it and what
+        /// it did: one record per launch, also when a later launch reused its home.
+        #[arg(long)]
+        history: bool,
+        #[command(subcommand)]
+        command: Option<SessionsCommand>,
     },
     /// Inspect the actual signed-in accounts in the ordinary provider CLIs.
     Current,
@@ -111,6 +119,18 @@ enum Command {
         /// stdin and stdout). The same session, home and tools as a Terminal launch.
         #[arg(long)]
         in_place: bool,
+        /// Who is launching, for the launch record: a runner's own name (up to 64 letters,
+        /// digits, dots, hyphens or underscores), such as `voc-learn`.
+        #[arg(long, value_name = "NAME")]
+        by: Option<String>,
+        /// The launch this one continues (a launch id from `switchboard sessions --history`):
+        /// that launch's record then names this one as where its work went.
+        #[arg(long, value_name = "LAUNCH_ID")]
+        parent: Option<String>,
+        /// Where the launch is asked from: `dashboards` for Fabric Dashboards' console,
+        /// `recovery` for a host resuming a stopped session; default `cli`.
+        #[arg(long, value_enum, default_value = "cli")]
+        surface: LaunchSurface,
         /// Arguments for the agent, after `--` (for example `-- --resume <id>`); with --in-place.
         #[arg(last = true)]
         args: Vec<String>,
@@ -144,6 +164,11 @@ enum Command {
         /// within two minutes opens it in Terminal.
         #[arg(long, conflicts_with = "mode")]
         to_console: bool,
+        /// Also give this task a spending ceiling, in dollars, before it is offered: counted on
+        /// the OpenRouter key since the task's first paid hand-over and checked at each automatic
+        /// hand-over. A first ceiling or a lower one; raising one is done in the Switchboard window.
+        #[arg(long, value_name = "USD")]
+        ceiling: Option<f64>,
     },
     /// Own the vault, inference proxy and private CLI control listener until Ctrl-C or
     /// SIGTERM, then stop within ten seconds.
@@ -178,6 +203,14 @@ enum Command {
         #[command(subcommand)]
         command: ChainCommand,
     },
+    /// Spending ceilings for paid fallback agents: a daily ceiling in dollars for this computer
+    /// or for a group on its own key, and one for a task counted since its first paid hand-over.
+    /// From here, set a first ceiling or a lower one, and keep one that was reached; raising,
+    /// doubling or clearing one is done in the Switchboard window.
+    Ceiling {
+        #[command(subcommand)]
+        command: CeilingCommand,
+    },
     /// Groups (repositories with accounts of their own) and optional folder rules. The command
     /// is named `project`; a group's id is its `pool`.
     Project {
@@ -204,6 +237,13 @@ enum Command {
         /// The coding agent being set up; default: the one this command runs inside, when known.
         #[arg(long, value_enum)]
         host: Option<HostArg>,
+    },
+    /// The terminal hook: in a group bound to an organization, plain `claude` and `codex`
+    /// started from a terminal run in that group's homes and context. `shell status` says what
+    /// applies; `shell env` is what the hook asks on every change of folder.
+    Shell {
+        #[command(subcommand)]
+        command: shell::ShellCmd,
     },
     /// Serve the Switchboard tools to a coding agent over MCP on stdin/stdout.
     Mcp {
@@ -695,9 +735,14 @@ enum ChainCommand {
         /// A workflow id (`wf_` and 16 hex digits): show the chain that applies to it.
         #[arg(long)]
         workflow: Option<String>,
-        /// A group id: show the chain that applies to it.
+        /// A group id: show the chain that applies to it. With --dir, the executor account's
+        /// group.
         #[arg(long)]
         pool: Option<String>,
+        /// A workflow's checkout folder (absolute): its group is found as the automatic fallback
+        /// finds it, before --pool.
+        #[arg(long)]
+        dir: Option<PathBuf>,
     },
     /// Set a chain in order. Each agent is a catalog id (`switchboard agents list`), optionally
     /// pinned: `codex@ACCOUNT_ID` runs on that account, `kimi-code#project/env/NAME` on a paid
@@ -718,6 +763,26 @@ enum ChainCommand {
         /// `machine`, `project:<group id>` or `workflow:<wf_id>`.
         #[arg(long, default_value = "machine")]
         scope: String,
+    },
+}
+#[derive(Subcommand)]
+enum CeilingCommand {
+    /// Every spending ceiling, the questions a reached one asked, and the last hand-over.
+    List,
+    /// Set a first ceiling for a scope, or lower one, in dollars from 0.01 to 1000.
+    Set {
+        /// `machine`, `project:<group id>` or `workflow:<wf_id>`.
+        #[arg(long, default_value = "machine")]
+        scope: String,
+        /// Dollars: per UTC day for this computer and a group, since the task's first paid
+        /// hand-over for a task.
+        usd: f64,
+    },
+    /// Keep a reached ceiling as it is: answers its question. Doubling it is answered in the
+    /// Switchboard window.
+    Keep {
+        /// The question's id, `q_` and 16 hex digits (`switchboard ceiling list`).
+        id: String,
     },
 }
 /// `machine`, `project:<pool>` or `workflow:<wf_id>`.
@@ -791,6 +856,13 @@ enum AgentsCommand {
         /// key of its group wins over the machine's.
         #[arg(long)]
         dir: Option<PathBuf>,
+        /// With --service: exactly this group's own key, never the folder's or the machine's.
+        /// Session scripts name the key their spending check read this way.
+        #[arg(long, requires = "service", conflicts_with_all = ["dir", "machine"])]
+        pool: Option<String>,
+        /// With --service: exactly the machine's key, never a group's.
+        #[arg(long, requires = "service", conflicts_with = "dir")]
+        machine: bool,
     },
     /// The OpenRouter key agents run on: save it (piped on stdin), see what it may still spend,
     /// change the default model, or remove it.
@@ -970,6 +1042,22 @@ enum Login {
         login_id: String,
     },
 }
+#[derive(Subcommand)]
+enum SessionsCommand {
+    /// One launch with its chain: who launched it, up to the first launch, and the launches it
+    /// started or that took its work over.
+    Show {
+        /// The launch id (`switchboard sessions --history`).
+        launch_id: String,
+    },
+}
+/// Where `switchboard launch` is run from, for the launch record.
+#[derive(Clone, Copy, ValueEnum)]
+enum LaunchSurface {
+    Cli,
+    Dashboards,
+    Recovery,
+}
 #[derive(Clone, Copy, ValueEnum)]
 enum ProviderArg {
     Claude,
@@ -1019,6 +1107,31 @@ fn read_secret() -> Result<String, String> {
     Ok(input.trim().to_owned())
 }
 async fn run(cli: &Cli) -> Result<Value, String> {
+    // Before the data folder is resolved: these read files only and never fail (SB-183). Every
+    // `shell` command is answered here, so this match names each one: a new one fails to compile
+    // until it is answered (the later `Command::Shell` arm is unreachable).
+    if let Command::Shell { command } = &cli.command {
+        return match command {
+            shell::ShellCmd::Status { dir } => {
+                Ok(shell::status(cli.data_dir.as_deref(), dir.as_deref()))
+            }
+            shell::ShellCmd::Env { dir, .. } => {
+                shell::print_line(&shell::env_answer(cli.data_dir.as_deref(), dir.as_deref()));
+                Ok(Value::Null)
+            }
+            shell::ShellCmd::On => shell::set(cli.data_dir.as_deref(), true),
+            shell::ShellCmd::Off => shell::set(cli.data_dir.as_deref(), false),
+            shell::ShellCmd::Init { shell: kind } => {
+                let script = shell::init(cli.data_dir.as_deref(), *kind)?;
+                if cli.json {
+                    Ok(json!({"shell": kind.kind().name(), "script": script}))
+                } else {
+                    print!("{script}");
+                    Ok(Value::Null)
+                }
+            }
+        };
+    }
     let root = cli.data_dir.clone().map(Ok).unwrap_or_else(default_root)?;
     if !root.is_absolute() {
         return Err("--data-dir must be an absolute private directory.".into());
@@ -1039,7 +1152,7 @@ async fn run(cli: &Cli) -> Result<Value, String> {
             keep_data,
             purge,
             yes,
-            &switchboard_runtime::uninstall::places(),
+            &switchboard_runtime::uninstall::places(&root),
         );
     }
     if let Command::Onboard {
@@ -1076,6 +1189,26 @@ async fn run(cli: &Cli) -> Result<Value, String> {
         oplog::event("stop_requested", &[("signal", oplog::Field::Code(signal))]);
         let stopped = owner.shutdown(DRAIN_DEADLINE).await;
         return Ok(json!({"state":"stopped", "drained": stopped.drained}));
+    }
+    // `continue --ceiling`: the task's ceiling first, so a refusal (out of range, higher than
+    // the one set) stops the continue before anything is offered.
+    if let Command::Continue {
+        workflow_id,
+        ceiling: Some(usd),
+        ..
+    } = &cli.command
+    {
+        call(
+            &root,
+            Operation::SetCeiling {
+                scope: switchboard_core::ChainScope::Workflow {
+                    id: workflow_id.clone(),
+                },
+                usd: Some(*usd),
+                by: switchboard_runtime::spend::Surface::Cli,
+            },
+        )
+        .await?;
     }
     let operation = match &cli.command {
         Command::Accounts { command } => match command {
@@ -1179,7 +1312,14 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                 choice: (organization != "auto").then(|| organization.clone()),
             },
         },
-        Command::Sessions { all } => Operation::Sessions { all: *all },
+        Command::Sessions {
+            command: Some(SessionsCommand::Show { launch_id }),
+            ..
+        } => Operation::Launches {
+            launch_id: Some(launch_id.clone()),
+        },
+        Command::Sessions { history: true, .. } => Operation::Launches { launch_id: None },
+        Command::Sessions { all, .. } => Operation::Sessions { all: *all },
         Command::Current => Operation::CurrentAccounts,
         Command::Backup { command } => match command {
             Backup::List => Operation::Backups,
@@ -1264,8 +1404,25 @@ async fn run(cli: &Cli) -> Result<Value, String> {
             mode,
             working_directory,
             in_place,
+            by,
+            parent,
+            surface,
             args,
         } => {
+            // SB-212: checked before anything is asked (the owner checks them again); a clap
+            // parser's refusal would print only "Invalid arguments".
+            if by.as_deref().is_some_and(|b| !launches::valid_name(b)) {
+                return Err(launches::BY_INVALID.into());
+            }
+            if parent.as_deref().is_some_and(|p| !launches::valid_id(p)) {
+                return Err(launches::PARENT_INVALID.into());
+            }
+            let surface = match surface {
+                LaunchSurface::Cli => launches::Surface::Cli,
+                LaunchSurface::Dashboards => launches::Surface::Dashboards,
+                LaunchSurface::Recovery => launches::Surface::Recovery,
+            };
+            let by = launches::LaunchedBy::from_caller(surface, by.clone(), parent.clone());
             return launch(
                 &root,
                 id,
@@ -1274,8 +1431,9 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                 working_directory,
                 *in_place,
                 args,
+                by,
             )
-            .await
+            .await;
         }
         Command::Continue {
             workflow_id,
@@ -1327,9 +1485,18 @@ async fn run(cli: &Cli) -> Result<Value, String> {
             Some(HandoversCommand::Run { id }) => return run_handover(&root, id).await,
         },
         Command::Chain { command } => match command {
-            ChainCommand::List { workflow, pool } => Operation::Chains {
+            ChainCommand::List {
+                workflow,
+                pool,
+                dir,
+            } => Operation::Chains {
                 workflow: workflow.clone(),
                 pool: pool.clone(),
+                folder: match dir {
+                    Some(dir) if dir.is_absolute() => Some(dir.clone()),
+                    Some(_) => return Err("--dir must be an absolute folder.".into()),
+                    None => None,
+                },
             },
             ChainCommand::Set {
                 scope,
@@ -1349,6 +1516,19 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                 scope: chain_scope(scope)?,
                 executors: vec![],
                 preset: None,
+            },
+        },
+        Command::Ceiling { command } => match command {
+            CeilingCommand::List => Operation::Ceilings,
+            CeilingCommand::Set { scope, usd } => Operation::SetCeiling {
+                scope: chain_scope(scope)?,
+                usd: Some(*usd),
+                by: switchboard_runtime::spend::Surface::Cli,
+            },
+            CeilingCommand::Keep { id } => Operation::AnswerCeiling {
+                id: id.clone(),
+                answer: switchboard_runtime::spend::Answer::Keep,
+                by: switchboard_runtime::spend::Surface::Cli,
             },
         },
         Command::Agents { command } => match command {
@@ -1374,20 +1554,34 @@ async fn run(cli: &Cli) -> Result<Value, String> {
             AgentsCommand::Key {
                 service: Some(KeyService::Openrouter),
                 dir,
-            } => Operation::AgentKeyValue {
-                service: "openrouter".into(),
-                folder: match dir {
-                    Some(d) if d.is_absolute() => Some(d.clone()),
-                    Some(_) => return Err("--dir must be an absolute folder.".into()),
-                    None => std::env::current_dir().ok(),
-                },
-            },
+                pool,
+                machine,
+            } => {
+                use switchboard_runtime::spend::KeySlot;
+                // SB-213: a slot named is the key fetched, whatever group the folder is in now.
+                let slot = match (pool, machine) {
+                    (Some(pool), _) => Some(KeySlot::Group(pool.clone())),
+                    (None, true) => Some(KeySlot::Machine),
+                    (None, false) => None,
+                };
+                Operation::AgentKeyValue {
+                    service: "openrouter".into(),
+                    folder: match (dir, &slot) {
+                        (_, Some(_)) => None,
+                        (Some(d), None) if d.is_absolute() => Some(d.clone()),
+                        (Some(_), None) => return Err("--dir must be an absolute folder.".into()),
+                        (None, None) => std::env::current_dir().ok(),
+                    },
+                    slot,
+                }
+            }
             AgentsCommand::Openrouter { command } => match command {
                 OpenrouterCommand::Set { model, pool, .. } => Operation::AgentKeySet {
                     service: "openrouter".into(),
                     key: read_secret()?,
                     model: model.clone(),
                     pool: pool.clone(),
+                    by: switchboard_runtime::spend::Surface::Cli,
                 },
                 OpenrouterCommand::Status { pool } => Operation::AgentKeyStatus {
                     service: "openrouter".into(),
@@ -1402,6 +1596,7 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                 OpenrouterCommand::Remove { pool } => Operation::AgentKeyRemove {
                     service: "openrouter".into(),
                     pool: pool.clone(),
+                    by: switchboard_runtime::spend::Surface::Cli,
                 },
                 OpenrouterCommand::List => Operation::AgentKeys {
                     service: "openrouter".into(),
@@ -1535,7 +1730,10 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                     .map(|u| folder(&Some(u.clone())))
                     .collect::<Result<Vec<_>, _>>()?,
             },
-            Project::Delete { pool } => Operation::RemoveProject { pool: pool.clone() },
+            Project::Delete { pool } => Operation::RemoveProject {
+                pool: pool.clone(),
+                by: switchboard_runtime::spend::Surface::Cli,
+            },
             Project::Suggest {
                 from_hook: true, ..
             } => project_suggest_hook_and_exit(&root).await,
@@ -1577,9 +1775,16 @@ async fn run(cli: &Cli) -> Result<Value, String> {
         },
         Command::Serve
         | Command::Mcp { .. }
+        | Command::Shell { .. }
         | Command::Uninstall { .. }
         | Command::Onboard { .. } => unreachable!(),
     };
+    // SB-212: a launch names who asked for it (`agents launch`, `kimi launch`, `continue
+    // --to-console`).
+    let operation = switchboard_runtime::launched(
+        operation,
+        launches::LaunchedBy::from_caller(launches::Surface::Cli, None, None),
+    );
     let value = call(&root, operation).await?;
     match &cli.command {
         Command::Accounts { command: Accounts::List } => Ok(json!({"accounts": value["accounts"], "routes": value["routes"]})),
@@ -1599,6 +1804,7 @@ async fn run(cli: &Cli) -> Result<Value, String> {
 /// `switchboard launch` (SB-75 adds the account for a folder and the in-place run): resolves the
 /// account when only a provider is given, asks the owner to prepare the session, and either
 /// leaves it to the Terminal the owner opened or runs the prepared script in this terminal.
+#[allow(clippy::too_many_arguments)]
 async fn launch(
     root: &std::path::Path,
     id: &Option<String>,
@@ -1607,6 +1813,7 @@ async fn launch(
     working_directory: &std::path::Path,
     in_place: bool,
     args: &[String],
+    by: launches::LaunchedBy,
 ) -> Result<Value, String> {
     use std::io::IsTerminal;
     if !in_place && !args.is_empty() {
@@ -1632,17 +1839,20 @@ async fn launch(
     };
     let value = call(
         root,
-        Operation::Launch {
-            id,
-            mode: match mode {
-                Mode::Isolated => "isolated",
-                Mode::Managed => "managed",
-            }
-            .into(),
-            working_directory: working_directory.to_owned(),
-            in_place,
-            args: args.to_vec(),
-        },
+        switchboard_runtime::launched(
+            Operation::Launch {
+                id,
+                mode: match mode {
+                    Mode::Isolated => "isolated",
+                    Mode::Managed => "managed",
+                }
+                .into(),
+                working_directory: working_directory.to_owned(),
+                in_place,
+                args: args.to_vec(),
+            },
+            by,
+        ),
     )
     .await?;
     if !in_place {
@@ -1683,17 +1893,20 @@ async fn continue_workflow(
     }
     let value = call(
         root,
-        Operation::Continue {
-            workflow_id: workflow_id.to_owned(),
-            id: account.to_owned(),
-            mode: match mode {
-                Mode::Isolated => "isolated",
-                Mode::Managed => "managed",
-            }
-            .into(),
-            working_directory: dir.to_owned(),
-            in_place,
-        },
+        switchboard_runtime::launched(
+            Operation::Continue {
+                workflow_id: workflow_id.to_owned(),
+                id: account.to_owned(),
+                mode: match mode {
+                    Mode::Isolated => "isolated",
+                    Mode::Managed => "managed",
+                }
+                .into(),
+                working_directory: dir.to_owned(),
+                in_place,
+            },
+            launches::LaunchedBy::from_caller(launches::Surface::Cli, None, None),
+        ),
     )
     .await?;
     if !in_place {
@@ -1768,12 +1981,59 @@ pub(crate) async fn onboard_status(
         )
         .await?;
         probe.project = Some(resolved["project"].clone()).filter(|p| !p.is_null());
+        // SB-202: the organization checklist's reads, only where an organization exists. The
+        // `hook` step reads `shell status` (SB-183's record), never the start files.
+        let passioncode = switchboard_runtime::vesta::status(root).ok();
+        probe.passioncode = passioncode.as_ref().is_some_and(|v| v["connected"] == true);
+        // F1 of the wave 4 design pass (SCN-079): what the person left there is not set up again.
+        if probe.passioncode {
+            probe.released = passioncode
+                .as_ref()
+                .and_then(|v| v["released"].as_array())
+                .into_iter()
+                .flatten()
+                .filter_map(|r| r["organization"].as_str().map(str::to_owned))
+                .collect();
+        }
+        // Read leniently: the owner answering may be another version (its snapshot may carry
+        // keys this CLI does not know). What could not be read is named, never dropped.
+        let (saved, partial) = onboarding::read_snapshot(&snapshot);
+        if partial {
+            probe.degraded.push("snapshot".into());
+        }
+        if saved.as_ref().is_some_and(|s| !s.organizations.is_empty()) {
+            // A failed read leaves its list empty and is named in the step it touches.
+            match call(root, Operation::MonitorStatus).await {
+                Ok(monitor) => {
+                    probe.sign_in_required = monitor["sign_in_required"]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .filter_map(|id| id.as_str().map(str::to_owned))
+                        .collect()
+                }
+                Err(_) => probe.degraded.push("sign_ins".into()),
+            }
+            match call(root, Operation::Sessions { all: true }).await {
+                Ok(sessions) => {
+                    probe.contexts = sessions["sessions"]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .filter_map(|s| s["context"].as_str().map(str::to_owned))
+                        .collect()
+                }
+                Err(_) => probe.degraded.push("sessions".into()),
+            }
+            probe.shell = Some(shell::status(Some(root), Some(&folder)));
+        }
+        probe.snapshot = saved;
     }
     // SB-103: Windows names the home USERPROFILE (as `agents::setup` reads it).
     let home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })
         .map(PathBuf::from)
         .unwrap_or_default();
-    let codex_home = std::env::var_os("CODEX_HOME").map(PathBuf::from);
+    let codex_home = switchboard_runtime::person::codex_home();
     let hosts = match probe.host {
         Some(host) => vec![host],
         None => vec![onboarding::Host::Claude, onboarding::Host::Codex],
@@ -1835,8 +2095,62 @@ async fn project_suggest_hook(root: &std::path::Path) -> Value {
         .ok()
         .and_then(Result::ok)
         .and_then(|input| serde_json::from_slice(&input).ok());
+    // SB-212: a session Switchboard launched records its provider session and transcript, beside
+    // the folder's suggestion and within the same deadline.
+    let (_, value) = tokio::join!(
+        launch_event(root, parsed.as_ref(), launches::Event::Start),
+        suggest_from_hook(root, parsed.as_ref()),
+    );
+    value
+}
+/// SB-212: what a session's hook reports about its own launch, when Switchboard launched it
+/// (`SWITCHBOARD_LAUNCH_ID` in its environment). Without that variable, or with an input that
+/// is not a hook's, nothing is asked. Never an error: the answer is not read.
+async fn launch_event(root: &std::path::Path, hook: Option<&Value>, event: launches::Event) {
+    let Some(launch_id) = std::env::var(launches::ENV)
+        .ok()
+        .filter(|id| launches::valid_id(id))
+    else {
+        return;
+    };
+    let Some(hook) = hook.filter(|h| h.is_object()) else {
+        return;
+    };
+    // A start names its session or its transcript; another object asks nothing (N-5).
+    if event == launches::Event::Start
+        && !hook["session_id"].is_string()
+        && !hook["transcript_path"].is_string()
+    {
+        return;
+    }
+    // SB-218: a start of the launch's own process under a new session (`/clear`, a compaction, a
+    // resume) says so; a nested session's start does not, and never replaces its parent's.
+    let source = (event == launches::Event::Start)
+        .then(|| hook["source"].as_str())
+        .flatten()
+        .filter(|s| matches!(*s, "clear" | "compact" | "resume"))
+        .map(str::to_owned);
+    let operation = |source: Option<String>| Operation::LaunchEvent {
+        launch_id: launch_id.clone(),
+        event,
+        provider_session_id: hook["session_id"].as_str().map(str::to_owned),
+        transcript: hook["transcript_path"].as_str().map(PathBuf::from),
+        source,
+    };
+    let _ = tokio::time::timeout(SESSION_HOOK_DEADLINE, async {
+        let sent = source.is_some();
+        match call(root, operation(source)).await {
+            // An owner from before `source` (the update window) records it as a start.
+            Err(e) if sent && e == switchboard_runtime::control::CONTROL_OWNER_OLDER => {
+                call(root, operation(None)).await
+            }
+            answer => answer,
+        }
+    })
+    .await;
+}
+async fn suggest_from_hook(root: &std::path::Path, parsed: Option<&Value>) -> Value {
     let Some(cwd) = parsed
-        .as_ref()
         .and_then(|h| h["cwd"].as_str())
         .map(std::path::PathBuf::from)
     else {
@@ -1892,9 +2206,16 @@ const HOOK_INPUT_LIMIT: u64 = 8 * 1024 * 1024;
 async fn recovery_hook(root: &std::path::Path) -> Value {
     use std::io::Read;
     let mut input = Vec::new();
+    // One byte past the limit tells an input that was cut from one of exactly the limit.
     let read = std::io::stdin()
-        .take(HOOK_INPUT_LIMIT)
+        .take(HOOK_INPUT_LIMIT + 1)
         .read_to_end(&mut input);
+    // SB-210: an input past the limit cannot be parsed, and a `Stop` hook's stdout is read as
+    // its decision: such an input answers `{}`, no decision, as a `Stop` does. Claude Code's
+    // `StopFailure` payload is a few hundred bytes, so none is that long.
+    if input.len() as u64 > HOOK_INPUT_LIMIT {
+        return json!({});
+    }
     let parsed: Option<Value> = read.ok().and_then(|_| serde_json::from_slice(&input).ok());
     let Some(hook) = parsed else {
         return json!({"registered": false, "reason": "malformed_input"});
@@ -1903,11 +2224,16 @@ async fn recovery_hook(root: &std::path::Path) -> Value {
     // session's stop, asks the owner only when the session has one, and prints `{}`: a Stop
     // hook's stdout is read by Claude Code as its decision.
     if hook["hook_event_name"].as_str() == Some("Stop") {
-        if let Some(session) = hook["session_id"].as_str() {
+        // SB-220: the launch record's turn and the recovery stop are asked side by side, each
+        // bounded like the start hook (SB-149), so the hook takes at most one deadline, not two.
+        let settle = async {
+            let Some(session) = hook["session_id"].as_str() else {
+                return;
+            };
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map_or(0, |d| d.as_secs() as i64);
-            // Bounded like the start hook (SB-149): a busy or absent owner never holds a turn.
+            // A busy or absent owner never holds a turn.
             if switchboard_runtime::recovery::session_has_live_stop(root, session, now) {
                 let _ = tokio::time::timeout(
                     SESSION_HOOK_DEADLINE,
@@ -1920,7 +2246,12 @@ async fn recovery_hook(root: &std::path::Path) -> Value {
                 )
                 .await;
             }
-        }
+        };
+        // SB-212: the launch record counts the turn.
+        tokio::join!(
+            launch_event(root, Some(&hook), launches::Event::Turn),
+            settle
+        );
         return json!({});
     }
     let billing = match hook["error"].as_str() {
@@ -1928,17 +2259,107 @@ async fn recovery_hook(root: &std::path::Path) -> Value {
         Some("billing_error") => true,
         _ => return json!({"registered": false, "reason": "not_a_limit"}),
     };
-    let (Some(session), Some(cwd)) = (hook["session_id"].as_str(), hook["cwd"].as_str()) else {
-        return json!({"registered": false, "reason": "malformed_input"});
+    // SB-220: the stop's registration does not wait behind the record's update; both run side
+    // by side. SB-212: the launch record says where the session stopped.
+    let register = async {
+        let (Some(session), Some(cwd)) = (hook["session_id"].as_str(), hook["cwd"].as_str()) else {
+            return json!({"registered": false, "reason": "malformed_input"});
+        };
+        let operation = Operation::RecoveryHook {
+            session: session.to_owned(),
+            directory: std::path::PathBuf::from(cwd),
+            billing,
+        };
+        match call(root, operation).await {
+            Ok(value) => value,
+            Err(error) => json!({"registered": false, "reason": "refused", "message": error}),
+        }
     };
-    let operation = Operation::RecoveryHook {
-        session: session.to_owned(),
-        directory: std::path::PathBuf::from(cwd),
-        billing,
-    };
-    match call(root, operation).await {
-        Ok(value) => value,
-        Err(error) => json!({"registered": false, "reason": "refused", "message": error}),
+    let ((), answer) = tokio::join!(
+        launch_event(root, Some(&hook), launches::Event::Limit),
+        register
+    );
+    answer
+}
+/// One launch on one line (SB-212): its id, state and agent, who launched it, where and when.
+fn launch_line(l: &Value) -> String {
+    let text = |v: &Value| v.as_str().unwrap_or(PLACEHOLDER).to_string();
+    let by = &l["launched_by"];
+    let mut who = text(&by["surface"]);
+    if let Some(name) = by["by"].as_str() {
+        who.push(':');
+        who.push_str(name);
+    }
+    let mut line = format!(
+        "{} {:<9} {:<16} {:<14} {} · {}",
+        text(&l["launch_id"]),
+        text(&l["state"]),
+        text(&l["agent"]),
+        who,
+        text(&l["working_directory"]),
+        utc(&l["launched_at"]),
+    );
+    if let Some(ended) = l["ended"].as_str() {
+        line.push_str(&format!(" · stopped: {ended}"));
+    }
+    if let Some(kind) = l["continued_as"]["kind"].as_str() {
+        line.push_str(&format!(
+            " · went to {kind} {}",
+            text(&l["continued_as"]["id"])
+        ));
+    }
+    line
+}
+/// `switchboard sessions show`: the launch, then its chain up and down.
+fn print_launch(value: &Value) {
+    let launch = &value["launch"];
+    println!("{}", launch_line(launch));
+    let text = |v: &Value| v.as_str().unwrap_or(PLACEHOLDER).to_string();
+    for (key, name) in [
+        ("label", "account"),
+        ("pool", "group"),
+        ("provider_session_id", "provider session"),
+        ("transcript", "transcript"),
+        ("turns", "turns"),
+        ("handover", "hand-over"),
+    ] {
+        let field = &launch[key];
+        if !field.is_null() {
+            let shown = field
+                .as_str()
+                .map_or_else(|| field.to_string(), str::to_owned);
+            println!("  {name}: {shown}");
+        }
+    }
+    let by = &launch["launched_by"];
+    for (key, name) in [
+        ("caller_project", "caller's group"),
+        ("caller_program", "caller's program"),
+    ] {
+        if let Some(v) = by[key].as_str() {
+            println!("  {name}: {v}");
+        }
+    }
+    if launch["last_turn_at"].is_i64() {
+        println!("  last turn: {}", utc(&launch["last_turn_at"]));
+    }
+    for (key, heading) in [("up", "Launched by"), ("down", "Then")] {
+        let rows = value[key].as_array().cloned().unwrap_or_default();
+        if rows.is_empty() {
+            continue;
+        }
+        println!("{heading}:");
+        for r in &rows {
+            if r["missing"] == true {
+                println!(
+                    "  {} (record no longer kept) via {}",
+                    text(&r["launch_id"]),
+                    text(&r["via"])
+                );
+            } else {
+                println!("  {} via {}", launch_line(r), text(&r["via"]));
+            }
+        }
     }
 }
 async fn call(root: &std::path::Path, operation: Operation) -> Result<Value, String> {
@@ -2002,6 +2423,23 @@ fn print_result(value: &Value, cli: &Cli) {
                 );
             }
         }
+        Command::Sessions {
+            command: Some(SessionsCommand::Show { .. }),
+            ..
+        } => print_launch(value),
+        Command::Sessions { history: true, .. } => {
+            let launches = value["launches"].as_array().cloned().unwrap_or_default();
+            if launches.is_empty() {
+                println!("No launch is recorded yet.");
+            }
+            for l in &launches {
+                println!("{}", launch_line(l));
+            }
+            let total = value["total"].as_u64().unwrap_or(0);
+            if total as usize > launches.len() {
+                println!("{} of {total} launches, newest first.", launches.len());
+            }
+        }
         Command::Sessions { .. } => {
             let sessions = value["sessions"].as_array().cloned().unwrap_or_default();
             if sessions.is_empty() {
@@ -2017,10 +2455,18 @@ fn print_result(value: &Value, cli: &Cli) {
                     Some(name) => format!("{label} ({name})"),
                     None => label.to_owned(),
                 };
+                // SB-201: the agent the session runs (an agent through the proxy records the
+                // route's provider, `claude`); the provider when an older record names none. 16
+                // fits the longest catalog id.
+                let agent = if s["agent"].is_string() {
+                    &s["agent"]
+                } else {
+                    &s["provider"]
+                };
                 println!(
-                    "{:<9} {:<7} {:<9} {} · {} · {}",
+                    "{:<9} {:<16} {:<9} {} · {} · {}",
                     text(&s["state"]),
-                    text(&s["provider"]),
+                    text(agent),
                     text(&s["mode"]),
                     label,
                     text(&s["working_directory"]),
@@ -2031,6 +2477,7 @@ fn print_result(value: &Value, cli: &Cli) {
                 );
             }
         }
+        Command::Shell { .. } => print!("{}", shell::status_text(value)),
         Command::Onboard { status: false, .. } => print!("{}", text(&value["guide"])),
         Command::Onboard { status: true, .. } => {
             for step in value["steps"].as_array().into_iter().flatten() {
@@ -2408,6 +2855,23 @@ fn print_result(value: &Value, cli: &Cli) {
                 println!("preset {}: {}", text(&preset["id"]), agents.join(" → "));
             }
         }
+        Command::Ceiling {
+            command: CeilingCommand::List,
+        } => print_ceilings(value),
+        Command::Ceiling {
+            command: CeilingCommand::Set { .. },
+        } => println!(
+            "Ceiling for {}: ${:.2}.",
+            scope_label(&value["ceiling"]["scope"]),
+            dollars(&value["ceiling"])
+        ),
+        Command::Ceiling {
+            command: CeilingCommand::Keep { .. },
+        } => println!(
+            "Kept: the ceiling for {} stays ${:.2}.",
+            scope_label(&value["ceiling"]["scope"]),
+            dollars(&value["ceiling"])
+        ),
         Command::Chain {
             command: ChainCommand::Set { .. },
         } => println!("Chain set."),
@@ -2481,6 +2945,80 @@ fn print_result(value: &Value, cli: &Cli) {
         _ => print_value(value, false),
     }
 }
+/// A ceiling's dollars: `usd` in a view, `cents` in a stored ceiling.
+fn dollars(ceiling: &Value) -> f64 {
+    ceiling["usd"]
+        .as_f64()
+        .or_else(|| ceiling["cents"].as_f64().map(|c| c / 100.0))
+        .unwrap_or_default()
+}
+/// `machine`, `project:<pool>` or `workflow:<wf_id>`, as `--scope` takes it.
+fn scope_label(scope: &Value) -> String {
+    match scope["kind"].as_str() {
+        Some("project") => format!("project:{}", scope["pool"].as_str().unwrap_or_default()),
+        Some("workflow") => format!("workflow:{}", scope["id"].as_str().unwrap_or_default()),
+        _ => "machine".to_owned(),
+    }
+}
+fn print_ceilings(value: &Value) {
+    let ceilings = value["ceilings"].as_array().cloned().unwrap_or_default();
+    if ceilings.is_empty() {
+        println!(
+            "No spending ceiling is set. Paid agents are bound only by their key's own limit."
+        );
+    }
+    for c in &ceilings {
+        let usd = c["usd"].as_f64().unwrap_or_default();
+        let measure = if c["scope"]["kind"] == "workflow" {
+            "since the task's first paid hand-over"
+        } else {
+            "a UTC day"
+        };
+        let inactive = if c["active"] == false {
+            " (inactive: this group has no key of its own now)"
+        } else {
+            ""
+        };
+        println!(
+            "{:28} ${usd:.2} {measure}{inactive}",
+            scope_label(&c["scope"])
+        );
+    }
+    for q in value["questions"].as_array().into_iter().flatten() {
+        let id = q["id"].as_str().unwrap_or_default();
+        println!(
+            "Reached: {} ${:.2} (${:.2} counted). Keep it: switchboard ceiling keep {id}. Double it in the Switchboard window.",
+            scope_label(&q["scope"]),
+            q["usd"].as_f64().unwrap_or_default(),
+            q["spent"].as_f64().unwrap_or_default(),
+        );
+    }
+    let last = &value["last_handover"];
+    if last.is_object() {
+        let skipped: Vec<String> = last["skipped"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .map(|s| {
+                format!(
+                    "{} {}",
+                    s["agent"].as_str().unwrap_or_default(),
+                    s["reason"].as_str().unwrap_or_default()
+                )
+            })
+            .collect();
+        let skipped = if skipped.is_empty() {
+            String::new()
+        } else {
+            format!("; skipped: {}", skipped.join(", "))
+        };
+        println!(
+            "Last hand-over: {}, {}{skipped}",
+            utc(&last["at"]),
+            last["outcome"].as_str().unwrap_or_default()
+        );
+    }
+}
 fn print_value(value: &Value, json_output: bool) {
     if json_output {
         println!("{}", json!({"ok":true,"data":value}));
@@ -2499,6 +3037,12 @@ fn print_value(value: &Value, json_output: bool) {
 /// on every platform instead of the platform's default.
 const STACK_BYTES: usize = 16 * 1024 * 1024;
 fn main() -> ExitCode {
+    // `shell env` runs on every change of folder in a hooked terminal: answered here, before the
+    // runtime starts, within its 25 ms budget (SB-183).
+    let args: Vec<std::ffi::OsString> = std::env::args_os().skip(1).collect();
+    if let Some(code) = shell::env_fast_path(&args) {
+        return code;
+    }
     let runtime = std::thread::Builder::new()
         .name("switchboard-main".into())
         .stack_size(STACK_BYTES)
@@ -2605,7 +3149,28 @@ async fn start() -> ExitCode {
         }
     };
     match run(&cli).await {
-        Ok(_) if matches!(cli.command, Command::Mcp { .. }) => ExitCode::SUCCESS,
+        Ok(_)
+            if matches!(
+                cli.command,
+                Command::Mcp { .. }
+                    | Command::Shell {
+                        command: shell::ShellCmd::Env { .. }
+                    }
+            ) =>
+        {
+            ExitCode::SUCCESS
+        }
+        // `shell init` printed its script itself (in --json it answers the script as data).
+        Ok(Value::Null)
+            if matches!(
+                cli.command,
+                Command::Shell {
+                    command: shell::ShellCmd::Init { .. }
+                }
+            ) =>
+        {
+            ExitCode::SUCCESS
+        }
         Ok(value) => {
             print_result(&value, &cli);
             ExitCode::SUCCESS
@@ -2808,7 +3373,8 @@ mod mcp_parity {
             Not("SB-176: reads a file the person brought from another machine and adds groups and policies; the person runs it once per move"),
         ),
         ("status", Tool("switchboard_status")),
-        ("sessions", Tool("switchboard_sessions")),
+        // `sessions` itself (and its `--all`, `--history`) answers through the same tool.
+        ("sessions show", Tool("switchboard_sessions")),
         ("current", Tool("switchboard_status")),
         ("rotation status", Tool("switchboard_rotation")),
         ("rotation set", Tool("switchboard_rotation_set")),
@@ -2863,6 +3429,9 @@ mod mcp_parity {
         ("chain list", Tool("switchboard_chain_get")),
         ("chain set", Tool("switchboard_chain_set")),
         ("chain clear", Tool("switchboard_chain_set")),
+        ("ceiling list", Tool("switchboard_ceilings")),
+        ("ceiling set", Tool("switchboard_ceiling_set")),
+        ("ceiling keep", Tool("switchboard_ceiling_answer")),
         ("project list", Tool("switchboard_projects")),
         ("project show", Tool("switchboard_project_context")),
         ("project set", Tool("switchboard_project_set")),
@@ -2888,6 +3457,17 @@ mod mcp_parity {
         ("backup now", Tool("switchboard_backup_now")),
         ("backup restore", Not(PERSON)),
         ("onboard", Tool("switchboard_onboarding")),
+        ("shell status", Tool("switchboard_shell_hook")),
+        (
+            "shell env",
+            Not("SB-183: the terminal hook's own question on every change of folder, one line for a shell script; not an agent action"),
+        ),
+        ("shell on", Tool("switchboard_shell_hook_set")),
+        ("shell off", Tool("switchboard_shell_hook_set")),
+        (
+            "shell init",
+            Not("SB-183: prints the hook script for a person's own start file; not an agent action"),
+        ),
         ("uninstall", Not(PERSON)),
     ];
 
@@ -2984,5 +3564,166 @@ mod mcp_parity {
             })
             .collect();
         assert!(found.is_empty(), "{found:#?}");
+    }
+}
+
+/// SB-202: every command `switchboard onboard --status` names (`next.command`, the person's
+/// `turn_on` and `turn_off`, and `alternatives`) parses as a command of this CLI, so the checklist
+/// never tells an agent or a person to run one that does not exist.
+#[cfg(test)]
+mod onboard_commands {
+    use super::{onboarding, Cli};
+    use clap::Parser;
+    use serde_json::{json, Value};
+    use std::path::PathBuf;
+
+    fn acme() -> onboarding::Probe {
+        let mut snapshot = switchboard_core::Snapshot::default();
+        snapshot
+            .organizations
+            .push(switchboard_core::organizations::Organization {
+                id: "o-acme".into(),
+                name: "Acme Inc".into(),
+                domains: vec!["acme.com".into()],
+                provider_organizations: vec![],
+                created_at: 1,
+                vesta_id: None,
+            });
+        snapshot.projects.push(switchboard_core::Project {
+            pool: "acme-work".into(),
+            name: "Acme work".into(),
+            folders: vec!["/work/acme".into()],
+            created_at: 1,
+            sources: vec![],
+            organization: Some("o-acme".into()),
+        });
+        snapshot.accounts.push(switchboard_core::Account {
+            id: "a-1".into(),
+            label: "me@acme.com".into(),
+            provider: switchboard_core::Provider::Claude,
+            kind: switchboard_core::AuthKind::OAuth,
+            pool: "acme-work".into(),
+            enabled: true,
+            created_at: 1,
+            identity: None,
+            usage: None,
+            external_identity: None,
+            usage_health: None,
+        });
+        onboarding::Probe {
+            folder: Some(PathBuf::from("/work/acme app")),
+            host: Some(onboarding::Host::Claude),
+            snapshot: Some(snapshot),
+            shell: Some(json!({"hook": "default_on"})),
+            ..Default::default()
+        }
+    }
+    /// Every state a step can be in, as far as it changes what the step names.
+    fn probes() -> Vec<onboarding::Probe> {
+        let mut out = vec![
+            onboarding::Probe::default(),
+            onboarding::Probe {
+                folder: Some(PathBuf::from("/work/my app")),
+                host: Some(onboarding::Host::Codex),
+                ..Default::default()
+            },
+        ];
+        let mut none = acme();
+        none.snapshot.as_mut().unwrap().organizations.clear();
+        none.passioncode = true;
+        out.push(none);
+        for hook in ["on", "default_on", "off", "default_off", "unknown"] {
+            let mut probe = acme();
+            probe.shell = Some(json!({"hook": hook}));
+            out.push(probe);
+        }
+        let mut unbound = acme();
+        unbound.snapshot.as_mut().unwrap().projects[0].organization = None;
+        out.push(unbound);
+        let mut two = acme();
+        let snapshot = two.snapshot.as_mut().unwrap();
+        let mut second = snapshot.projects[0].clone();
+        second.pool = "acme-two".into();
+        second.name = "Acme two".into();
+        snapshot.projects.push(second);
+        out.push(two);
+        let mut seatless = acme();
+        seatless.snapshot.as_mut().unwrap().accounts[0].pool = "default".into();
+        out.push(seatless);
+        out
+    }
+    /// Shell words: single quotes as `onboarding` writes them; a `<placeholder>` is one word.
+    fn words(command: &str) -> Vec<String> {
+        let mut out = Vec::new();
+        let mut word = String::new();
+        let (mut quoted, mut placeholder, mut any) = (false, false, false);
+        for c in command.chars() {
+            match c {
+                '\'' if !placeholder => {
+                    quoted = !quoted;
+                    any = true;
+                }
+                '<' if !quoted => {
+                    placeholder = true;
+                    any = true;
+                    word.push('x');
+                }
+                '>' if placeholder => placeholder = false,
+                _ if placeholder => {}
+                ' ' if !quoted => {
+                    if any {
+                        out.push(std::mem::take(&mut word));
+                    }
+                    any = false;
+                }
+                _ => {
+                    word.push(c);
+                    any = true;
+                }
+            }
+        }
+        if any {
+            out.push(word);
+        }
+        out
+    }
+
+    #[test]
+    fn every_command_the_checklist_names_exists() {
+        let mut seen = std::collections::BTreeSet::new();
+        let mut checked = 0;
+        for probe in probes() {
+            let answer = onboarding::steps(&probe);
+            for step in answer["steps"].as_array().unwrap() {
+                let next = &step["next"];
+                let mut commands: Vec<(&str, &Value)> = ["command", "turn_on", "turn_off"]
+                    .into_iter()
+                    .map(|key| (key, &next[key]))
+                    .collect();
+                for alternative in next["alternatives"].as_array().into_iter().flatten() {
+                    commands.push(("alternatives", alternative));
+                }
+                for (key, command) in commands {
+                    let Some(command) = command.as_str() else {
+                        continue;
+                    };
+                    let args = words(command);
+                    // `claude mcp add` and `codex mcp add` belong to the agents, not this CLI.
+                    if args[0] != "switchboard" {
+                        continue;
+                    }
+                    seen.insert(key);
+                    checked += 1;
+                    if let Err(error) = Cli::try_parse_from(&args) {
+                        panic!("{} ({key}) does not parse: {error}", step["id"]);
+                    }
+                }
+            }
+        }
+        assert!(checked >= 15, "{checked}");
+        assert_eq!(
+            seen.into_iter().collect::<Vec<_>>(),
+            ["alternatives", "command", "turn_off", "turn_on"]
+        );
     }
 }

@@ -17,7 +17,7 @@ use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 use switchboard_core::{Account, Provider};
 
-/// A fake engine for tests, or an engine outside the usual folders.
+/// An engine outside the usual folders (unit tests use `TEST_OBSERVATORY` instead).
 pub const OBSERVATORY_BIN_ENV: &str = "SWITCHBOARD_OBSERVATORY_BIN";
 /// The engine answers a local SQLite read or one offer; a minute is a hang, not a slow disk.
 const ENGINE_TIMEOUT: Duration = Duration::from_secs(60);
@@ -97,11 +97,28 @@ pub struct Offer {
     pub credentials_missing: bool,
 }
 
+#[cfg(test)]
+tokio::task_local! {
+    /// A test's stand-in for the engine. A unit test never reaches the engine installed on this
+    /// computer: without a stand-in it reads as not installed, as on a CI runner.
+    pub(crate) static TEST_OBSERVATORY: PathBuf;
+}
+
 /// The engine executable: the override, then the usual folders.
 pub fn observatory() -> Result<PathBuf, String> {
     if !cfg!(unix) {
         return Err(UNIX_ONLY.into());
     }
+    #[cfg(test)]
+    return TEST_OBSERVATORY
+        .try_with(PathBuf::clone)
+        .map_err(|_| NOT_INSTALLED.into());
+    #[cfg(not(test))]
+    installed_observatory()
+}
+
+/// The engine this computer has: the override, then the usual folders.
+fn installed_observatory() -> Result<PathBuf, String> {
     if let Some(path) = std::env::var_os(OBSERVATORY_BIN_ENV) {
         let path = PathBuf::from(path);
         return if path.is_absolute() && path.is_file() {
@@ -1126,7 +1143,7 @@ mod tests {
             std::env::var_os("OBSERVATORY_HOME").is_some(),
             "a scratch workspace only"
         );
-        let bin = observatory().unwrap();
+        let bin = installed_observatory().unwrap();
         let shown = show(&bin, wf).unwrap();
         let chosen = account("new-account", Provider::Claude);
         let dir = Path::new(checkout).canonicalize().unwrap();

@@ -184,21 +184,33 @@ impl Snapshot {
     pub fn organization(&self, id: &str) -> Option<&Organization> {
         self.organizations.iter().find(|o| o.id == id)
     }
-    /// Whether `account` may serve the group that reserves `pool` (SB-109): its attribution
-    /// equals the group's organization, personal included. Always while no organization exists,
-    /// and for a pool no group reserves (`default`).
     /// SB-110: the context a session of `account` in `folder` runs in, in the contract's form
-    /// (`personal`, `org:<id>`; fabric-agent-contract `contexts.md`). The group of the account's
-    /// pool decides, else the group holding the folder, else the account's own organization (a
-    /// folder in no group is a session without a project, CX-26); when a group and the account
-    /// disagree, the more private wins. `personal` while no organization exists.
+    /// (`personal`, `org:<id>`; fabric-agent-contract `contexts.md`): `context_for` with the
+    /// account's own organization and its pool.
     pub fn session_context(&self, account: &Account, folder: Option<&std::path::Path>) -> String {
+        self.context_for(
+            self.attribution(account).organization.as_deref(),
+            Some(&account.pool),
+            folder,
+        )
+    }
+    /// SB-110, SB-201: the one context rule for any session. `own` is the organization of
+    /// whatever pays for it (an account, a key; none is personal), `pool` the pool it serves,
+    /// `folder` where it works. The group of the pool decides, else the group holding the folder,
+    /// else `own` (a folder in no group is a session without a project, CX-26); when a group and
+    /// `own` disagree, the more private wins. `personal` while no organization exists.
+    pub fn context_for(
+        &self,
+        own: Option<&str>,
+        pool: Option<&str>,
+        folder: Option<&std::path::Path>,
+    ) -> String {
         if self.organizations.is_empty() {
-            return "personal".into();
+            return PERSONAL.into();
         }
-        let own = self.attribution(account).organization;
-        let group = self
-            .project_of_pool(&account.pool)
+        let own = own.map(str::to_owned);
+        let group = pool
+            .and_then(|p| self.project_of_pool(p))
             .or_else(|| folder.and_then(|f| self.project_for(f)))
             .map(|p| p.organization.clone());
         let context = match group {
@@ -206,14 +218,51 @@ impl Snapshot {
             Some(_) => None,
             None => own,
         };
-        context.map_or_else(|| "personal".into(), |id| format!("org:{id}"))
+        context.map_or_else(|| PERSONAL.into(), |id| format!("org:{id}"))
     }
+    /// SB-201: the context of a session that runs on no account, on a saved key of `key_pool`
+    /// (a group's own key; none: the machine's key, or no key at all as Kimi Code): the key's
+    /// group's organization is its own. The machine's key belongs to no organization, so in an
+    /// organization's folder it reads personal.
+    pub fn key_context(&self, key_pool: Option<&str>, folder: Option<&std::path::Path>) -> String {
+        let own = key_pool
+            .and_then(|p| self.project_of_pool(p))
+            .and_then(|p| p.organization.as_deref());
+        self.context_for(own, key_pool, folder)
+    }
+    /// Whether `account` may serve the group that reserves `pool` (SB-109): its attribution
+    /// equals the group's organization, personal included. Always while no organization exists,
+    /// and for a pool no group reserves (`default`).
     pub fn context_admits(&self, pool: &str, account: &Account) -> bool {
         if self.organizations.is_empty() {
             return true;
         }
         self.project_of_pool(pool)
             .is_none_or(|p| p.organization == self.attribution(account).organization)
+    }
+    /// SB-202: the one group bound to `organization`; none when it has no group or several
+    /// (the person keeps one).
+    pub fn organization_group(&self, organization: &str) -> Option<&crate::Project> {
+        let mut bound = self
+            .projects
+            .iter()
+            .filter(|p| p.organization.as_deref() == Some(organization));
+        let first = bound.next()?;
+        bound.next().is_none().then_some(first)
+    }
+    /// SB-202: the accounts of `organization` in its one group (`organization_group`), whatever
+    /// their state; empty while it has no single group.
+    pub fn organization_seats(&self, organization: &str) -> Vec<&Account> {
+        let Some(group) = self.organization_group(organization) else {
+            return Vec::new();
+        };
+        self.accounts
+            .iter()
+            .filter(|a| {
+                a.pool == group.pool
+                    && self.attribution(a).organization.as_deref() == Some(organization)
+            })
+            .collect()
     }
 }
 
@@ -384,8 +433,9 @@ impl Store {
     /// SB-159: brings the person's PassionCode.ai organizations in. A linked one takes Vesta's
     /// name and domains (a name or domain another organization here holds is left as it was);
     /// an unlinked one of the same name or with a shared domain is linked rather than duplicated,
-    /// keeping its accounts; the rest are added. One linked here that Vesta no longer lists is
-    /// kept as a local organization.
+    /// keeping its accounts; the rest are added. One linked here that a well-formed answer no
+    /// longer lists is kept as a local organization (SB-227: an empty list, or a row whose id
+    /// cannot be read, releases nothing).
     pub fn apply_vesta(&self, read: &[VestaOrganization]) -> Result<VestaApplied, String> {
         // Names compare as `validate` compares them: trimmed, lowercased.
         let same = |a: &str, b: &str| a.trim().to_lowercase() == b.trim().to_lowercase();
@@ -478,10 +528,20 @@ impl Store {
                 }
             }
         }
-        for o in &mut candidate.organizations {
-            if o.vesta_id.as_ref().is_some_and(|v| !seen.contains(v)) {
-                o.vesta_id = None;
-                applied.released += 1;
+        // SB-227: only a well-formed list proves the person left: one that names something and
+        // whose every row has an id that can be read. An organization is released only when no
+        // row of it names its link, whether or not that row was taken above (a name too long,
+        // a row past the 32nd).
+        let well_formed = !read.is_empty() && read.iter().all(|v| vesta_id_valid(&v.id));
+        if well_formed {
+            for o in &mut candidate.organizations {
+                if o.vesta_id
+                    .as_ref()
+                    .is_some_and(|v| !read.iter().any(|r| &r.id == v))
+                {
+                    o.vesta_id = None;
+                    applied.released += 1;
+                }
             }
         }
         if applied != VestaApplied::default() {
@@ -690,6 +750,104 @@ mod tests {
             s.session_context(&me, Some("/work/acme".as_ref())),
             "personal"
         );
+    }
+
+    /// SB-201: a session that runs on no account (Kimi Code, an agent on a saved OpenRouter key)
+    /// follows the same rule with its key's group as its own: the group's key gives the group's
+    /// context, the machine's key or no key gives the folder's group only when that agrees, so
+    /// an organization's folder on a personal key reads personal.
+    #[test]
+    fn a_session_without_an_account_takes_its_keys_group_else_personal() {
+        use crate::Project;
+        let group = |pool: &str, folder: &str, organization: Option<&str>| Project {
+            pool: pool.into(),
+            name: pool.into(),
+            folders: vec![folder.into()],
+            created_at: 1,
+            sources: Vec::new(),
+            organization: organization.map(str::to_owned),
+        };
+        let mut s = Snapshot::default();
+        let acme = Some("/work/acme".as_ref());
+        assert_eq!(s.context_for(None, None, acme), "personal");
+        assert_eq!(s.key_context(Some("acme-pool"), acme), "personal");
+        s.organizations = vec![org(O1, "Acme", &["acme.example"]), org(O2, "Beta", &[])];
+        s.projects = vec![
+            group("acme-pool", "/work/acme", Some(O1)),
+            group("own-pool", "/work/own", None),
+        ];
+        let org1 = format!("org:{O1}");
+        // The group's own key: that group's context, wherever the folder is.
+        assert_eq!(s.key_context(Some("acme-pool"), acme), org1);
+        assert_eq!(s.key_context(Some("acme-pool"), None), org1);
+        assert_eq!(s.key_context(Some("own-pool"), acme), "personal");
+        // The machine's key, or no key at all (Kimi Code): personal, also in the
+        // organization's folder (the more private wins, A-Q6).
+        assert_eq!(s.key_context(None, acme), "personal");
+        assert_eq!(s.key_context(None, Some("/work/own".as_ref())), "personal");
+        assert_eq!(s.key_context(None, None), "personal");
+        assert_eq!(s.context_for(None, None, acme), "personal");
+        // A pool no group reserves decides nothing: the folder's group does.
+        assert_eq!(s.context_for(Some(O1), Some("default"), acme), org1);
+        assert_eq!(s.context_for(Some(O1), None, None), org1);
+        assert_eq!(s.context_for(Some(O2), None, acme), "personal");
+    }
+
+    /// SB-202: the one group bound to an organization, and its seats there.
+    #[test]
+    fn the_only_group_of_an_organization_is_found_and_two_are_not() {
+        use crate::Project;
+        let group = |pool: &str, folder: &str, organization: Option<&str>| Project {
+            pool: pool.into(),
+            name: pool.into(),
+            folders: vec![folder.into()],
+            created_at: 1,
+            sources: Vec::new(),
+            organization: organization.map(str::to_owned),
+        };
+        let mut s = Snapshot {
+            organizations: vec![org(O1, "Acme", &["acme.example"]), org(O2, "Beta", &[])],
+            ..Default::default()
+        };
+        assert!(s.organization_group(O1).is_none());
+        assert!(s.organization_seats(O1).is_empty());
+        s.projects = vec![
+            group("acme-pool", "/work/acme", Some(O1)),
+            group("own-pool", "/work/own", None),
+        ];
+        let mut seat = account(A, Provider::Claude, "dev@acme.example", None);
+        seat.pool = "acme-pool".into();
+        let mut elsewhere = account(B, Provider::Codex, "ops@acme.example", None);
+        elsewhere.pool = "own-pool".into();
+        let mut personal = account(
+            "00000000-0000-4000-8000-00000000000c",
+            Provider::Claude,
+            "me@example.com",
+            None,
+        );
+        personal.pool = "acme-pool".into();
+        s.accounts = vec![seat, elsewhere, personal];
+        assert_eq!(
+            s.organization_group(O1).map(|p| p.pool.as_str()),
+            Some("acme-pool")
+        );
+        // Its seats in that group only: not one of its accounts in another group, not a
+        // personal account the group still holds.
+        let seats: Vec<&str> = s
+            .organization_seats(O1)
+            .iter()
+            .map(|a| a.id.as_str())
+            .collect();
+        assert_eq!(seats, vec![A]);
+        // No group, an unknown organization: none.
+        assert!(s.organization_group(O2).is_none());
+        assert!(s.organization_seats(O2).is_empty());
+        assert!(s.organization_group("unknown").is_none());
+        // Two groups bound to one organization: neither is its group, so no seats either.
+        s.projects
+            .push(group("acme-two", "/work/acme-two", Some(O1)));
+        assert!(s.organization_group(O1).is_none());
+        assert!(s.organization_seats(O1).is_empty());
     }
 
     #[test]

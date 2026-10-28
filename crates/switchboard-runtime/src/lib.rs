@@ -8,6 +8,7 @@ pub mod attribution;
 mod bindings;
 mod blocking;
 mod carry;
+mod chain_view;
 mod codex_route;
 pub mod continuation;
 pub mod control;
@@ -19,15 +20,19 @@ pub mod handovers;
 pub mod hermes;
 pub mod kimi;
 pub mod launch;
+pub mod launches;
 mod limits;
 mod monitor;
 pub mod onboarding;
 pub mod oplog;
+pub mod person;
 pub mod projects;
 pub mod recovery;
 mod refresh;
 pub mod roots;
 pub mod settings_bundle;
+pub mod shell;
+pub mod spend;
 mod statistics;
 pub mod suggest;
 pub mod uninstall;
@@ -189,6 +194,32 @@ pub enum Operation {
         #[serde(default)]
         all: bool,
     },
+    /// SB-212: a launch operation (`Launch`, `Continue`, `ContinueToConsole`, `LaunchAgent`,
+    /// `KimiLaunch`) with who asked for it. The owner checks `by` and `parent`, turns the
+    /// caller's folder into its group and records the rest on the launch.
+    Launched {
+        by: launches::LaunchedBy,
+        inner: Box<Operation>,
+    },
+    /// SB-212: what a launched session's own hook reports (`SessionStart`, `Stop`, a limit).
+    LaunchEvent {
+        launch_id: String,
+        event: launches::Event,
+        #[serde(default)]
+        provider_session_id: Option<String>,
+        #[serde(default)]
+        transcript: Option<PathBuf>,
+        /// SB-218: `SessionStart`'s `source` when the launch's own process moved to a new
+        /// session (`clear`, `compact`, `resume`); absent for a new session. Sent only then, so
+        /// an owner from before it decodes every other event.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        source: Option<String>,
+    },
+    /// SB-212: every launch record, newest first; with `launch_id`, that launch and its chain.
+    Launches {
+        #[serde(default)]
+        launch_id: Option<String>,
+    },
     /// Creates (`pool: None`) or updates a project: its name, folders and whole account set.
     SaveProject {
         pool: Option<String>,
@@ -206,8 +237,13 @@ pub enum Operation {
         #[serde(default)]
         organization: Option<String>,
     },
+    /// Deletes a group. `by` names the surface (C-Q7): a group holding a spending ceiling is
+    /// deleted only by the window, since its ceiling goes with it; the CLI and MCP are refused.
+    /// Left out, a request counts as the CLI's.
     RemoveProject {
         pool: String,
+        #[serde(default = "spend::agent_surface")]
+        by: spend::Surface,
     },
     /// Makes a pool's folder capability worthless and writes a new one into its folders (an
     /// exposure, 2026-10-18). Other pools and managed sessions keep theirs.
@@ -335,6 +371,10 @@ pub enum Operation {
         /// SB-144: a project's pool for its own key; none: the machine's key.
         #[serde(default)]
         pool: Option<String>,
+        /// C-Q9: replacing the own key of a group that holds a spending ceiling is the window's.
+        /// Left out, a request counts as the CLI's.
+        #[serde(default = "spend::agent_surface")]
+        by: spend::Surface,
     },
     /// The saved key's metadata and, with `credit`, what it may still spend (asked of the
     /// service). Never the key.
@@ -352,11 +392,14 @@ pub enum Operation {
         #[serde(default)]
         pool: Option<String>,
     },
-    /// Removes the saved key and its vault item.
+    /// Removes the saved key and its vault item. C-Q9: for a group that holds a spending ceiling,
+    /// only the window removes it. Left out, `by` counts as the CLI's.
     AgentKeyRemove {
         service: String,
         #[serde(default)]
         pool: Option<String>,
+        #[serde(default = "spend::agent_surface")]
+        by: spend::Surface,
     },
     /// SB-144: every saved key of a service with the project it is for (none: the machine's),
     /// and every project with or without one. Never a key.
@@ -368,8 +411,14 @@ pub enum Operation {
     AgentKeyValue {
         service: String,
         /// SB-144: the folder the agent starts in; its project's key wins over the machine's.
+        /// A script written before SB-213 names it.
         #[serde(default)]
         folder: Option<PathBuf>,
+        /// SB-213: the exact key slot a session script names (`--machine`, `--pool <group>`),
+        /// the one its start's spend gate read; `folder` is then not read. A slot whose key is
+        /// gone answers that no key is saved, never another key.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        slot: Option<spend::KeySlot>,
     },
     /// Durable stopped-session registrations and capacity notices (SB-114), CLI/host only.
     Recovery,
@@ -447,11 +496,15 @@ pub enum Operation {
         on: Option<bool>,
     },
     /// Fallback chains (SB-71): every chain, presets, and effective workflow/project chain.
+    /// With `folder` (a workflow's checkout) the group is found as the fallback finds it
+    /// (`fallback::chain_pool`), `pool` standing for the executor account's group.
     Chains {
         #[serde(default)]
         workflow: Option<String>,
         #[serde(default)]
         pool: Option<String>,
+        #[serde(default)]
+        folder: Option<PathBuf>,
     },
     /// Sets the chain of a scope in order; an empty list clears it. A preset id may stand for
     /// the list.
@@ -461,6 +514,27 @@ pub enum Operation {
         executors: Vec<switchboard_core::Executor>,
         #[serde(default)]
         preset: Option<String>,
+    },
+    /// Spending ceilings for paid fallback agents (SB-72): every ceiling, the open questions and
+    /// the last hand-over (`spend::view`). An unreadable `spend.json` is an error, never "none".
+    Ceilings,
+    /// Sets the ceiling of a scope in dollars (machine and group: per UTC day; a task: since its
+    /// first paid hand-over); `usd: null` clears it, and a body without `usd` is refused. `by`
+    /// names the surface: the CLI and MCP may set a first ceiling or a lower one, raising and
+    /// clearing are the window's (C-Q1), and `by: window` from outside the app's own process is
+    /// refused like a ceiling answer.
+    SetCeiling {
+        scope: switchboard_core::ChainScope,
+        #[serde(deserialize_with = "spend::present")]
+        usd: Option<f64>,
+        by: spend::Surface,
+    },
+    /// Answers a reached ceiling's question: `keep` from any surface, `double` only from the
+    /// window (`by: window`, C-Q1). The CLI and MCP send their own surface.
+    AnswerCeiling {
+        id: String,
+        answer: spend::Answer,
+        by: spend::Surface,
     },
     /// Starts an agent in a folder: through the proxy on the pool's API-key account, or on the
     /// saved OpenRouter key (`via: openrouter`, SB-79) with `model` (default: the key's model).
@@ -571,6 +645,9 @@ pub(crate) struct NativeSources {
     pub(crate) transcripts: fn(i64) -> Vec<PathBuf>,
     /// SB-143: Codex's own `config.toml`; None for a synthetic owner, which never writes it.
     pub(crate) codex_config: fn() -> Option<PathBuf>,
+    /// SB-183: what an organization's shell home carries of the person's (their folders and
+    /// board server); nothing for a synthetic owner.
+    pub(crate) shell: shell::homes::Sources,
 }
 pub(crate) type Activate = fn(
     &Credential,
@@ -591,6 +668,7 @@ pub(crate) const UNAVAILABLE: NativeSources = NativeSources {
     swap_signature: || None,
     transcripts: |_| Vec::new(),
     codex_config: || None,
+    shell: shell::homes::NO_SOURCES,
 };
 /// Claude Swap as a synthetic owner sees it: absent.
 pub(crate) fn no_swap() -> Result<external::ImportBatch, String> {
@@ -610,12 +688,27 @@ pub(crate) const NATIVE: NativeSources = NativeSources {
     swap_signature: external::claude_swap_signature,
     transcripts: limits::transcript_files,
     codex_config: codex_route::config_path,
+    shell: shell::homes::NATIVE,
 };
 impl NativeSources {
     /// The read for an operation a person asked for.
     pub(crate) fn fresh(&self, provider: Provider) -> Result<external::CapturedProfile, String> {
         (self.fresh.unwrap_or(self.current))(provider)
     }
+}
+/// The `shell_hook` log event of one installer run: counts and flags only (LC-12).
+fn log_shell_hook(report: &shell::install::Report) {
+    oplog::event(
+        "shell_hook",
+        &[
+            ("wanted", oplog::Field::Flag(report.wanted)),
+            ("written", oplog::Field::Number(report.written as i64)),
+            ("removed", oplog::Field::Number(report.removed as i64)),
+            ("skipped", oplog::Field::Number(report.skipped as i64)),
+            ("changed", oplog::Field::Number(report.changed as i64)),
+            ("no_hook", oplog::Field::Flag(report.no_hook)),
+        ],
+    );
 }
 
 pub struct Runtime {
@@ -643,6 +736,12 @@ pub struct Runtime {
     kimi_watch: kimi::KimiWatch,
     /// Provider not-before per account, and one quota request per account at a time (SB-39).
     usage_gate: usage_gate::UsageGate,
+    /// SB-183: the person's home for the terminal hook's start files; set only by the installed
+    /// app (`enable_shell_hook`), so a test, `serve` or a development build never writes one.
+    shell_hook: Mutex<Option<shell::install::Host>>,
+    /// Whether a group bound to an organization existed at the last look, for the hook's
+    /// default (written when the first appears, taken out when the last leaves).
+    shell_present: Mutex<Option<bool>>,
     /// Set only for a real owner; synthetic owners never write a backup anywhere.
     backup_key: Mutex<Option<Arc<dyn switchboard_core::backup::BackupKey>>>,
     backup_folder: Mutex<Option<PathBuf>>,
@@ -748,6 +847,8 @@ impl Runtime {
         native: NativeSources,
     ) -> Result<Arc<Self>, String> {
         let store = Arc::new(Store::open(root.clone(), vault)?);
+        // H-2: `control_slow` names the time a request waited for the store's lock.
+        store.observe_lock_waits(control::lock_waited);
         let proxy = start_proxy(&root, store.clone()).await?;
         let refresh = refresh::RefreshState::default();
         refresh.remember_in(root.join("renewal-state.json"));
@@ -787,6 +888,8 @@ impl Runtime {
             openrouter_models: Mutex::new(agent_settings::ModelCache::default()),
             bindings_repos: Mutex::new(bindings::RepoCache::default()),
             usage_gate,
+            shell_hook: Mutex::new(None),
+            shell_present: Mutex::new(None),
             backup_key: Mutex::new(None),
             backup_folder: Mutex::new(None),
             backup_state: Mutex::new(BackupState::default()),
@@ -824,6 +927,17 @@ impl Runtime {
         );
     }
     pub async fn execute(&self, operation: Operation) -> Result<Value, String> {
+        // SB-212: a launch runs with who asked for it, and its answer names its launch id.
+        if let Operation::Launched { by, inner } = operation {
+            if !is_launch(&inner) {
+                return Err(launches::NOT_A_LAUNCH.into());
+            }
+            let by = launches::resolve(&self.store.snapshot()?, by)?;
+            return launches::scoped(Some(by), Box::pin(self.execute(*inner))).await;
+        }
+        if is_launch(&operation) && !launches::capturing() {
+            return launches::scoped(None, Box::pin(self.execute(operation))).await;
+        }
         if let Operation::ContinueToConsole {
             workflow_id,
             id,
@@ -851,6 +965,8 @@ impl Runtime {
                 | Operation::HermesModel
                 | Operation::KimiLoginStatus { .. }
                 | Operation::Chains { .. }
+                // A file read; spend.json is changed only by the operations below.
+                | Operation::Ceilings
                 | Operation::LaunchAccount { .. }
                 | Operation::Status
                 | Operation::MonitorStatus
@@ -889,6 +1005,10 @@ impl Runtime {
                 | Operation::RecoveryHook { .. }
                 // SB-204: the same file and lock, after a turn of a stopped session.
                 | Operation::RecoveryContinued { .. }
+                // SB-212: a launch record is one small file written under its own lock; a
+                // session's hook gives up after 1.5 s and must not wait out the transaction.
+                | Operation::LaunchEvent { .. }
+                | Operation::Launches { .. }
         ) {
             return execute(self.store.clone(), &self.root, Some(self), operation).await;
         }
@@ -909,7 +1029,7 @@ impl Runtime {
         // provider never holds every other operation (SB-39).
         if let Operation::Usage { id } = &operation {
             return Ok(json!(
-                monitor::check(
+                monitor::check_by_person(
                     &self.store,
                     self.native,
                     &self.refresh,
@@ -920,11 +1040,91 @@ impl Runtime {
                 .await?
             ));
         }
+        // C-Q8: a paid start by hand takes the hand-over turn and passes its spend gate before
+        // the owner transaction, the order the automatic fallback takes them in: its gate and
+        // launch run together and never beside a hand-over's, and a slow spend read holds up no
+        // other operation. Only a start that is paid takes the turn; its account is resolved
+        // first (`paid_start`). A fallback step already holds it and passed its own gate
+        // (`fallback::gated`).
+        let mut operation = operation;
+        let paid = if fallback::gated() {
+            None
+        } else {
+            self.paid_start(&mut operation)?
+        };
+        //
         // The Store mutex protects metadata, but launch and removal also mutate
         // private homes. Keep the complete operation in one owner transaction.
-        let _mutation = self.mutations.lock().await;
+        //
+        // SB-213: the gate decided on the key its folder resolved to then; a folder that joined
+        // another group before the transaction (`SaveProject`, the monitor's `add_found`, both
+        // under it) would start on a key, and under a ceiling, no gate read. Inside the
+        // transaction no project changes, so the key is compared there, a read with no network.
+        // Moved, the transaction is let go and the start gated once more on the key it spends
+        // now, inside the same budget; moved again, it is refused. The order stays: the
+        // hand-over turn, then the gate (no transaction), then the transaction.
+        let (_turn, _mutation, pin) = match &paid {
+            Some((workflow, dir, kind)) => {
+                let turn = fallback::HAND_OVER.lock().await;
+                // Fix cycle 1, F3: only the time inside the gates is charged, so the wait for the
+                // owner transaction between two gates never leaves the second with nothing.
+                let budget = fallback::by_hand_budget();
+                let gate = || async {
+                    let started = tokio::time::Instant::now();
+                    let pin = fallback::gate_pinned(
+                        &self.store,
+                        &self.root,
+                        workflow.as_deref(),
+                        dir,
+                        *kind,
+                        budget.limit(fallback::SPEND_READ_TIMEOUT),
+                    )
+                    .await;
+                    budget.charge(started.elapsed());
+                    pin
+                };
+                let mut pin = gate().await?;
+                let mut again = true;
+                loop {
+                    let mutation = self.mutations.lock().await;
+                    if pin.holds(&self.store.snapshot()?) {
+                        break (Some(turn), mutation, Some(pin));
+                    }
+                    // The second gate runs without the transaction, as the first did.
+                    drop(mutation);
+                    // Its start never runs on this key: the baseline its gate wrote goes (F2).
+                    pin.release(&self.root);
+                    fallback::log_moved(again);
+                    if !again {
+                        return Err(spend::STOP_FOLDER_MOVED.into());
+                    }
+                    again = false;
+                    pin = gate().await?;
+                }
+            }
+            None => {
+                let mutation = self.mutations.lock().await;
+                // The automatic fallback's paid step: its gate ran on the pass's snapshot, and
+                // the hand-over turn it holds cannot be let go mid-step, so a moved key refuses
+                // the step before anything is offered; the pass goes on down the chain.
+                if let Some(pin) = fallback::pinned() {
+                    if !pin.holds(&self.store.snapshot()?) {
+                        pin.release(&self.root);
+                        fallback::log_moved(false);
+                        return Err(spend::STOP_FOLDER_MOVED.into());
+                    }
+                }
+                (None, mutation, None)
+            }
+        };
         let reported = Reported::of(&operation, &self.store);
-        let result = execute(self.store.clone(), &self.root, Some(self), operation).await;
+        let run = execute(self.store.clone(), &self.root, Some(self), operation);
+        // The gate passed above: the operation's own gate is not run again.
+        let result = if paid.is_some() {
+            fallback::as_gated(pin, run).await
+        } else {
+            run.await
+        };
         if let (Ok(_), Some(reported)) = (&result, reported) {
             self.report(&reported);
         }
@@ -965,6 +1165,9 @@ impl Runtime {
                     read_pool_salts(&self.root).into_iter().collect();
                 salts.sort();
                 salts.hash(&mut h);
+                // SB-183: the organizations' shell homes and the folder map follow the groups'
+                // organizations and Codex accounts too.
+                shell::homes::key(&snapshot, &self.native.shell).hash(&mut h);
                 key = h.finish();
             }
             key
@@ -990,6 +1193,49 @@ impl Runtime {
                     Ok(mut last) => binding_changed(&report, &mut last),
                     Err(_) => true,
                 };
+                // SB-183: the organizations' shell homes and the terminal hook's folder map.
+                // A refusal is a code in the log, never an answer to anyone's request.
+                let shell = blocking::run(|| {
+                    shell::homes::sync(
+                        &self.root,
+                        &snapshot,
+                        &report.bound_folders,
+                        &address,
+                        &self.proxy.auto_capability(),
+                        &self.native.shell,
+                    )
+                });
+                if shell.homes_written > 0
+                    || shell.map_written
+                    || shell.failed > 0
+                    || shell.map_refused
+                {
+                    oplog::event(
+                        "shell_homes",
+                        &[
+                            ("rows", oplog::Field::Number(shell.rows as i64)),
+                            (
+                                "homes_written",
+                                oplog::Field::Number(shell.homes_written as i64),
+                            ),
+                            ("failed", oplog::Field::Number(shell.failed as i64)),
+                            (
+                                "map",
+                                oplog::Field::Code(if shell.map_refused {
+                                    "refused"
+                                } else if shell.map_written {
+                                    "written"
+                                } else {
+                                    "unchanged"
+                                }),
+                            ),
+                        ],
+                    );
+                }
+                // The hook's default follows the map just written (one rule with `shell status`).
+                self.shell_hook_follow(blocking::run(|| {
+                    shell::map::organizations_present(&self.root)
+                }));
                 if changed {
                     oplog::event(
                         "claude_binding",
@@ -1021,6 +1267,90 @@ impl Runtime {
                     &[("result", oplog::Field::Code("unreadable"))],
                 )
             }
+        }
+    }
+    /// C-Q8: whether `operation` is a paid start by hand, and what its spend gate needs: the
+    /// workflow (a continue), the folder whose key it spends and what it spends. The account is
+    /// resolved first: `Continue` on the default agent is given the account chosen here, so the
+    /// operation runs on the account that was gated; `LaunchAgent` through the proxy on the
+    /// pool's selected account, which is paid only when it is an API-key account (a subscription
+    /// account is refused by the launch itself, never as an unknown spend). A start the operation
+    /// refuses before its gate (arguments without `--in-place`, an in-place continue on Windows)
+    /// is not gated here; the refusals the gate preceded run here in the same order.
+    fn paid_start(
+        &self,
+        operation: &mut Operation,
+    ) -> Result<Option<(Option<String>, PathBuf, fallback::Paid)>, String> {
+        let root = &self.root;
+        match operation {
+            Operation::LaunchAgent {
+                working_directory,
+                via: AgentVia::Openrouter,
+                ..
+            } => Ok(Some((
+                None,
+                projects::project_dir(root, working_directory)?,
+                fallback::Paid::OpenRouter,
+            ))),
+            Operation::LaunchAgent {
+                pool,
+                working_directory,
+                via: AgentVia::Proxy,
+                ..
+            } => {
+                let api_key = self
+                    .store
+                    .selected_account(Provider::Claude, pool)
+                    .is_some_and(|a| a.kind == AuthKind::ApiKey);
+                if !api_key {
+                    return Ok(None);
+                }
+                Ok(Some((
+                    None,
+                    projects::project_dir(root, working_directory)?,
+                    fallback::Paid::ApiKeyAccount,
+                )))
+            }
+            Operation::Launch {
+                id,
+                working_directory,
+                in_place,
+                args,
+                ..
+            } => {
+                if !*in_place && !args.is_empty() {
+                    return Ok(None);
+                }
+                let Some(kind) = fallback::paid_kind(&self.store.snapshot()?, id) else {
+                    return Ok(None);
+                };
+                Ok(Some((
+                    None,
+                    projects::project_dir(root, working_directory)?,
+                    kind,
+                )))
+            }
+            Operation::Continue {
+                workflow_id,
+                id,
+                working_directory,
+                in_place,
+                ..
+            } => {
+                if *in_place && cfg!(windows) {
+                    return Ok(None);
+                }
+                if id.is_empty() {
+                    *id = continue_default(root, self, workflow_id, working_directory)?;
+                }
+                let Some(kind) = fallback::paid_kind(&self.store.snapshot()?, id) else {
+                    return Ok(None);
+                };
+                let directory =
+                    continue_checks(&self.store, root, workflow_id, id, working_directory)?;
+                Ok(Some((Some(workflow_id.clone()), directory, kind)))
+            }
+            _ => Ok(None),
         }
     }
     /// `Operation::ContinueToConsole`: the hand-over the automatic fallback makes with "Open
@@ -1415,10 +1745,32 @@ impl Runtime {
     /// home could not be removed yet (it is retried before the next sign-in and on every repeated
     /// Finish). A repeated Finish returns the same account and never captures again (SB-42).
     fn finish_login(&self, id: &str) -> Result<Value, String> {
+        // SB-160 (B-4): the receipt reads the account as stored now (a repeated Finish after a
+        // move reads where it went), and says `in_cli` when the ordinary CLI is signed in to it,
+        // as `accounts capture` does: such an account cannot join a group until the CLI switches.
         let receipt = |account: &Account, cleaned: bool, again: bool| {
-            let mut value = json!(account);
+            let snapshot = self.store.snapshot().ok();
+            let stored = snapshot
+                .as_ref()
+                .and_then(|s| s.accounts.iter().find(|a| a.id == account.id))
+                .unwrap_or(account);
+            let mut value = json!(stored);
             value["login_cleanup"] = json!(if cleaned { "done" } else { "pending" });
             value["signed_in_again"] = json!(again);
+            if let Some(mut offer) = snapshot
+                .as_ref()
+                .and_then(|s| organization_offer(s, stored))
+            {
+                let current = self.current_accounts().unwrap_or(Value::Null);
+                if ["claude", "codex"].iter().any(|p| {
+                    current[*p]["account_ids"]
+                        .as_array()
+                        .is_some_and(|ids| ids.iter().any(|v| v == stored.id.as_str()))
+                }) {
+                    offer["in_cli"] = json!(true);
+                }
+                value["organization_group"] = offer;
+            }
             value
         };
         let mut logins = self
@@ -1571,6 +1923,187 @@ impl Runtime {
     /// Starts analytics for the desktop app (docs/ANALYTICS.md): a release build (it carries
     /// the App Key) owning the real data folder. `launch` is `ordinary` or `background`. Until
     /// the person has answered the switch in this app, the start is held and nothing is sent.
+    /// SB-183 (node A-3): the installed app's owner writes the terminal hook's start-file
+    /// blocks. Only for the app's own data folder; the app calls it only from an installed
+    /// build (never a development build or the smoke check), and `serve` never does.
+    /// The app must also run from `/Applications` or `~/Applications` on macOS: a bundle opened
+    /// from a download or build folder (or translocated) is not installed.
+    pub fn enable_shell_hook(self: &Arc<Self>) {
+        self.enable_shell_hook_when(
+            || {
+                std::env::current_exe()
+                    .and_then(|exe| exe.canonicalize())
+                    .is_ok_and(|exe| {
+                        shell::install::installed_app(&exe, dirs::home_dir().as_deref())
+                    })
+            },
+            || shell::install::Host::process(shell::install::hook_cli()),
+        );
+    }
+    /// `enable_shell_hook` with the installed check and the person's home given: the data
+    /// folder is checked first, then `installed`, and only then is `host` asked for.
+    pub(crate) fn enable_shell_hook_when(
+        &self,
+        installed: impl FnOnce() -> bool,
+        host: impl FnOnce() -> Option<shell::install::Host>,
+    ) {
+        if !shell::install::is_default_root(&self.root) {
+            return;
+        }
+        if !installed() {
+            return;
+        }
+        if let Some(host) = host() {
+            self.enable_shell_hook_with(host);
+        }
+    }
+    pub(crate) fn enable_shell_hook_with(&self, host: shell::install::Host) {
+        if let Ok(mut slot) = self.shell_hook.lock() {
+            *slot = Some(host);
+        }
+        let present = blocking::run(|| shell::map::organizations_present(&self.root));
+        self.shell_hook_apply(present);
+    }
+    /// The first-time notice: `{organization, group}` of the organization's group whose
+    /// presence wrote the first block, kept in `shell-hook.json` until the window acknowledges
+    /// it (a restart in between keeps it). The window shows it (node A-7).
+    /// Only the installed app's owner (the one holding the person's home) answers it, so a
+    /// development build or `serve` over the same data folder neither posts nor acknowledges it.
+    pub fn shell_hook_notice(&self) -> Option<Value> {
+        if !self.shell_hook.lock().is_ok_and(|h| h.is_some()) {
+            return None;
+        }
+        shell::install::pending_notice(&self.root)
+            .map(|n| json!({"organization": n.organization, "group": n.group}))
+    }
+    /// SB-183 (node A-7): the window's *Terminals in organization folders* section, the same
+    /// state `switchboard shell status` reads (the hook, the choice, the folder map, each start
+    /// file) without the terminal's own fields, plus `can_change` (this owner is the installed
+    /// app, so the window's switch works), the organizations whose groups the hook follows by
+    /// name, the organization groups it does not follow and why (`unmapped`, SB-222), and the
+    /// person's home for showing start files as `~/...`.
+    pub fn shell_hook_status(&self) -> Value {
+        let root = self.root.clone();
+        let mut value = blocking::run(move || shell::map::status(Some(&root), None, &|_| None));
+        if let Some(object) = value.as_object_mut() {
+            for field in ["terminal", "here", "folder"] {
+                object.remove(field);
+            }
+        }
+        value["can_change"] = json!(self.shell_hook.lock().is_ok_and(|h| h.is_some()));
+        value["organizations"] = json!(self.shell_hook_organizations(false));
+        value["codex_organizations"] = json!(self.shell_hook_organizations(true));
+        // SB-222: organization groups the map holds no row for, and why, for the window's line.
+        value["unmapped"] = json!(self
+            .store
+            .snapshot()
+            .map(|snapshot| blocking::run(move || shell::homes::unmapped(&snapshot)))
+            .unwrap_or_default());
+        value["home"] = json!(dirs::home_dir().and_then(|h| h.to_str().map(str::to_owned)));
+        value
+    }
+    /// The pools of the folder map's valid rows (with `codex`, only rows whose pool has a Codex
+    /// account), each once, in the map's order: the groups the hook follows now.
+    fn shell_hook_pools(&self, codex: bool) -> Vec<String> {
+        let shell::map::Loaded::Read(map) = blocking::run(|| shell::map::read(&self.root)) else {
+            return Vec::new();
+        };
+        let mut pools: Vec<String> = Vec::new();
+        for row in map.valid_rows().filter(|r| !codex || r.codex) {
+            if !pools.contains(&row.pool) {
+                pools.push(row.pool.clone());
+            }
+        }
+        pools
+    }
+    /// The names of the organizations whose groups the folder map holds (with `codex`, only
+    /// rows that carry a Codex account), sorted, each once: the same rule as the hook's default.
+    fn shell_hook_organizations(&self, codex: bool) -> Vec<String> {
+        let pools = self.shell_hook_pools(codex);
+        let Ok(snapshot) = self.store.snapshot() else {
+            return Vec::new();
+        };
+        let names: std::collections::BTreeSet<String> = pools
+            .iter()
+            .filter_map(|pool| snapshot.project_of_pool(pool))
+            .filter_map(|p| snapshot.organization(p.organization.as_deref()?))
+            .map(|o| o.name.clone())
+            .collect();
+        names.into_iter().collect()
+    }
+    /// The window's *Turn off* / *Turn on*: saves the choice and brings every start file in line
+    /// with it now, as `switchboard shell off|on` does, then answers [`Self::shell_hook_status`].
+    /// Only the installed app's owner holds the person's home; any other owner (a development
+    /// build, `serve`, another data folder) refuses and changes nothing.
+    pub fn set_shell_hook(&self, on: bool) -> Result<Value, String> {
+        let Some(host) = self.shell_hook.lock().ok().and_then(|h| h.clone()) else {
+            return Err(shell::install::NOT_INSTALLED.into());
+        };
+        let root = self.root.clone();
+        let present = blocking::run(|| shell::map::organizations_present(&self.root));
+        let report = blocking::run(move || -> Result<shell::install::Report, String> {
+            shell::install::set_choice(&root, on)?;
+            Ok(shell::install::apply(&root, &host, present, on))
+        })?;
+        if let Ok(mut last) = self.shell_present.lock() {
+            *last = Some(present);
+        }
+        log_shell_hook(&report);
+        if on && report.no_hook {
+            return Err(shell::install::NO_PATH.into());
+        }
+        Ok(self.shell_hook_status())
+    }
+    /// The window showed the first-time notice: it is never shown again.
+    pub fn acknowledge_shell_hook_notice(&self) {
+        if !self.shell_hook.lock().is_ok_and(|h| h.is_some()) {
+            return;
+        }
+        let root = self.root.clone();
+        blocking::run(move || shell::install::acknowledge_notice(&root));
+    }
+    /// Runs the start-file installer when the presence of an organization's group is new or
+    /// flipped; never on an idle pass, never without the installed app's home.
+    fn shell_hook_follow(&self, present: bool) {
+        let changed = match self.shell_present.lock() {
+            Ok(last) => *last != Some(present),
+            Err(_) => false,
+        };
+        if changed {
+            self.shell_hook_apply(present);
+        }
+    }
+    fn shell_hook_apply(&self, present: bool) {
+        if let Ok(mut last) = self.shell_present.lock() {
+            *last = Some(present);
+        }
+        let Some(host) = self.shell_hook.lock().ok().and_then(|h| h.clone()) else {
+            return;
+        };
+        let report = blocking::run(|| shell::install::apply(&self.root, &host, present, false));
+        log_shell_hook(&report);
+        if report.first_written && shell::map::choice(&self.root) == shell::map::Choice::Default {
+            // The group named is one whose folder the map holds: its presence wrote the block.
+            let pools = self.shell_hook_pools(false);
+            let notice = self.store.snapshot().ok().and_then(|s| {
+                let group = pools.iter().find_map(|pool| {
+                    s.project_of_pool(pool).filter(|p| {
+                        p.organization
+                            .as_deref()
+                            .is_some_and(|o| s.organization(o).is_some())
+                    })
+                })?;
+                let organization = s.organization(group.organization.as_deref()?)?;
+                Some(shell::install::Notice {
+                    organization: organization.name.clone(),
+                    group: group.name.clone(),
+                })
+            });
+            if let Some(notice) = notice {
+                blocking::run(|| shell::install::set_notice(&self.root, notice));
+            }
+        }
+    }
     pub fn enable_analytics(self: &Arc<Self>, launch: &str) {
         let (Some(key), Some(shared)) = (analytics::APP_KEY, analytics::shared_folder()) else {
             return;
@@ -2575,6 +3108,27 @@ const RETRY_PENDING: i64 = 600;
 /// project when it is still missing this long after it was first seen missing.
 const VANISH_LOOK: i64 = 300;
 const VANISH_CONFIRM: i64 = 300;
+/// SB-160 (B-4, SCN-077): the one group of the account's organization when the account landed
+/// outside it, `{pool, name}`, for the person to move it there (nothing moves here). None for a
+/// personal account, an organization with no group or several, an account already in it, or one
+/// whose identity the group already holds under another account.
+fn organization_offer(snapshot: &switchboard_core::Snapshot, account: &Account) -> Option<Value> {
+    let organization = snapshot.attribution(account).organization?;
+    let group = snapshot.organization_group(&organization)?;
+    let held = account.external_identity.as_ref().is_some_and(|identity| {
+        snapshot.accounts.iter().any(|a| {
+            a.pool == group.pool
+                && a.provider == account.provider
+                && a.external_identity.as_ref().is_some_and(|i| {
+                    // The core store's own identity test (`ExternalIdentity::matches`).
+                    i.account_id.is_some()
+                        && i.account_id == identity.account_id
+                        && i.organization_id == identity.organization_id
+                })
+        })
+    });
+    (group.pool != account.pool && !held).then(|| json!({"pool": group.pool, "name": group.name}))
+}
 /// Refusal: an account the ordinary CLI is signed in to cannot join a project.
 pub const PROJECT_ACCOUNT_IN_CLI: &str = "This account is signed in to the ordinary Claude Code or Codex, which every folder uses. Switch the CLI to another account first, then add this one to the project.";
 /// What an operation reports to analytics once it succeeds (docs/ANALYTICS.md).
@@ -2654,14 +3208,142 @@ pub fn organizations_view(snapshot: &switchboard_core::Snapshot) -> Value {
         .collect();
     json!({"schema": 1, "organizations": organizations, "accounts": accounts})
 }
+/// C-Q1: the window answers in the app's own process (`Runtime::execute`). An operation that
+/// names the window but arrives through the control listener or an offline command (anything
+/// holding the control token, an agent running the CLI included) is refused before it runs.
+/// A session's record as the list shows it (SB-95, SB-110, SB-201): the account's label, the
+/// organization's name and the agent it runs.
+fn label_session(snapshot: &switchboard_core::Snapshot, mut session: Value) -> Value {
+    let id = session["account_id"].as_str().map(str::to_owned);
+    let label = snapshot
+        .accounts
+        .iter()
+        .find(|a| Some(&a.id) == id.as_ref())
+        .map(|a| a.label.clone())
+        .or_else(|| {
+            snapshot
+                .kimi_accounts
+                .iter()
+                .find(|k| Some(&k.id) == id.as_ref())
+                .map(|k| k.label.clone())
+        })
+        // A Hermes hand-over names its model itself (SB-107).
+        .or_else(|| session["label"].as_str().map(str::to_owned));
+    session["label"] = label.into();
+    // SB-110: an organization's context also by its name, for the CLI and agents.
+    let context_name = session["context"]
+        .as_str()
+        .and_then(|c| c.strip_prefix("org:"))
+        .and_then(|id| snapshot.organization(id))
+        .map(|o| o.name.clone());
+    session["context_name"] = context_name.into();
+    // SB-201: one field names the agent. A catalog agent's record carries it; a
+    // launch of a provider's own CLI is named from its provider.
+    if !session["agent"].is_string() {
+        let agent = match session["provider"].as_str() {
+            Some("claude") => Some("claude-code"),
+            Some("kimi") => Some("kimi-code"),
+            Some(other @ ("codex" | "hermes" | "opencode")) => Some(other),
+            _ => None,
+        };
+        session["agent"] = agent.into();
+    }
+    session
+}
+/// SB-212: the operations that launch a session and get a launch record.
+fn is_launch(operation: &Operation) -> bool {
+    matches!(
+        operation,
+        Operation::Launch { .. }
+            | Operation::Continue { .. }
+            | Operation::ContinueToConsole { .. }
+            | Operation::LaunchAgent { .. }
+            | Operation::KimiLaunch { .. }
+    )
+}
+/// SB-212: `operation` with who asked for it, when it launches a session; any other operation
+/// as it is.
+pub fn launched(operation: Operation, by: launches::LaunchedBy) -> Operation {
+    if is_launch(&operation) {
+        Operation::Launched {
+            by,
+            inner: Box::new(operation),
+        }
+    } else {
+        operation
+    }
+}
+/// SB-212: a launch that reached the owner from outside its process (the control listener, an
+/// offline command) never says the window asked for it: a bare one is the command line's, and
+/// `window` becomes `cli`.
+pub(crate) fn from_outside(operation: Operation) -> Operation {
+    match operation {
+        Operation::Launched { mut by, inner } => {
+            if by.surface == launches::Surface::Window {
+                by.surface = launches::Surface::Cli;
+            }
+            Operation::Launched { by, inner }
+        }
+        operation if is_launch(&operation) => Operation::Launched {
+            by: launches::LaunchedBy::surface(launches::Surface::Cli),
+            inner: Box::new(operation),
+        },
+        operation => operation,
+    }
+}
+pub(crate) fn window_only_refusal(operation: &Operation) -> Option<&'static str> {
+    matches!(
+        operation,
+        Operation::AnswerCeiling {
+            by: spend::Surface::Window,
+            ..
+        } | Operation::SetCeiling {
+            by: spend::Surface::Window,
+            ..
+        } | Operation::RemoveProject {
+            by: spend::Surface::Window,
+            ..
+        } | Operation::AgentKeySet {
+            by: spend::Surface::Window,
+            ..
+        } | Operation::AgentKeyRemove {
+            by: spend::Surface::Window,
+            ..
+        }
+    )
+    .then_some(spend::WINDOW_ONLY)
+}
 pub async fn execute_offline(root: PathBuf, operation: Operation) -> Result<Value, String> {
+    if let Some(refusal) = window_only_refusal(&operation) {
+        return Err(refusal.into());
+    }
     let store = Arc::new(Store::open(root.clone(), Arc::new(NativeVault::new()))?);
-    execute(store, &root, None, operation).await
+    execute(store, &root, None, from_outside(operation)).await
 }
 /// How long a command waits for the store when another process holds it (SB-181): an update
 /// restart keeps the lock through the old owner's drain and frees it once the new owner runs,
 /// and Fabric Dashboards gives each read 10 s.
 pub const STORE_WAIT: std::time::Duration = std::time::Duration::from_secs(8);
+/// How long a console's take of a paid hand-over waits for the hand-over turn (SB-215, FD-71):
+/// the automatic fallback holds it across a whole hand-over, gate and launch. Past it the take
+/// answers `handovers::BUSY` and the hand-over keeps waiting.
+pub const TAKE_TURN_WAIT: std::time::Duration = std::time::Duration::from_secs(10);
+#[cfg(test)]
+tokio::task_local! {
+    /// A test's own `TAKE_TURN_WAIT`: `HAND_OVER` is one lock per process, so a test that holds
+    /// it must hold it briefly.
+    pub(crate) static TEST_TAKE_TURN_WAIT: std::time::Duration;
+}
+fn take_turn_wait() -> std::time::Duration {
+    // In tests a neighbour holds the lock across 10 s reads (SB-221), so a take that does not
+    // test the wait itself waits as long as the fallback's own tests do.
+    #[cfg(test)]
+    return TEST_TAKE_TURN_WAIT
+        .try_with(|w| *w)
+        .unwrap_or(std::time::Duration::from_secs(60));
+    #[cfg(not(test))]
+    TAKE_TURN_WAIT
+}
 /// One command from the CLI or `switchboard mcp`: to the running owner, else offline. While the
 /// store's lock is held and no owner answers (an owner draining or starting, another offline
 /// command), it asks again every 200 ms, the owner first, until `STORE_WAIT` has passed.
@@ -2695,6 +3377,73 @@ where
             result => return result,
         }
     }
+}
+/// SB-120: the account a `Continue` that names none runs on, the machine's default agent:
+/// OpenCode and Hermes run on the OpenRouter key; Claude Code, Codex and Kimi Code on the account a
+/// one-step chain of that agent would choose now. Resolved once, before the spend gate (C-Q8).
+fn continue_default(
+    root: &Path,
+    runtime: &Runtime,
+    workflow_id: &str,
+    working_directory: &Path,
+) -> Result<String, String> {
+    match agent_settings::read(root)?.default.as_deref() {
+        Some(hermes::HERMES_TARGET) => Ok(hermes::HERMES_TARGET.to_owned()),
+        Some(launch::OPENCODE_TARGET) => Ok(launch::OPENCODE_TARGET.to_owned()),
+        Some(agent) => {
+            agent_settings::usable(root, agent)?;
+            if !continuation::valid_workflow_id(workflow_id) {
+                return Err(continuation::BAD_WORKFLOW_ID.into());
+            }
+            let folder = working_directory
+                .canonicalize()
+                .map_err(|_| "Choose an existing project directory.")?;
+            // The executor is read first, so its own exhausted account is never the one chosen.
+            let shown = continuation::show(&continuation::observatory()?, workflow_id)?;
+            fallback::account_for_default(
+                runtime,
+                agent,
+                &continuation::executor_of(&shown),
+                &folder,
+                monitor::now(),
+            )
+        }
+        None => Err(agent_settings::NAME_AN_ACCOUNT.into()),
+    }
+}
+/// The refusals a `Continue` on `id` meets before its spend gate and offer: an agent the person
+/// disabled for taking over work (SB-120), a malformed workflow id, a folder that does not exist.
+/// Answers the canonical folder.
+fn continue_checks(
+    store: &Store,
+    root: &Path,
+    workflow_id: &str,
+    id: &str,
+    working_directory: &Path,
+) -> Result<PathBuf, String> {
+    let agent = if id == hermes::HERMES_TARGET || id == launch::OPENCODE_TARGET {
+        Some(id.to_owned())
+    } else if store.kimi_account(id).is_ok() {
+        Some("kimi-code".to_owned())
+    } else {
+        store
+            .snapshot()?
+            .accounts
+            .iter()
+            .find(|a| a.id == id)
+            .map(|a| switchboard_core::provider_agent(a.provider).to_owned())
+    };
+    if let Some(a) = agent {
+        if agent_settings::disabled(root, &a)? {
+            return Err(agent_settings::DISABLED.into());
+        }
+    }
+    if !continuation::valid_workflow_id(workflow_id) {
+        return Err(continuation::BAD_WORKFLOW_ID.into());
+    }
+    working_directory
+        .canonicalize()
+        .map_err(|_| "Choose an existing project directory.".to_string())
 }
 async fn execute(
     store: Arc<Store>,
@@ -2769,7 +3518,13 @@ async fn execute(
             if let Some(runtime) = runtime {
                 runtime.invalidate_current();
             }
-            Ok(json!(account))
+            let mut receipt = json!(account);
+            // SB-160: the ordinary CLI's account cannot join a group until the CLI switches.
+            if let Some(mut offer) = organization_offer(&store.snapshot()?, &account) {
+                offer["in_cli"] = json!(true);
+                receipt["organization_group"] = offer;
+            }
+            Ok(receipt)
         }
         Operation::ImportClaudeSwap { pool } => {
             // Validate before reading external material, even for an empty import.
@@ -2888,7 +3643,7 @@ async fn execute(
                 }
             };
             Ok(json!(
-                monitor::check(&store, native, refresh_state, &id, None, gate).await?
+                monitor::check_by_person(&store, native, refresh_state, &id, None, gate).await?
             ))
         }
         Operation::AgentCatalog => Ok(agent_catalog::catalog()),
@@ -3021,6 +3776,38 @@ async fn execute(
             "handovers": handovers::pending(root),
         })),
         Operation::HandoverTake { id } => {
+            // C-Q8: a paid hand-over passed the spend gate when it was queued; it passes it again,
+            // with the hand-over turn, when a console takes it, on the key slot its script names
+            // (SB-213). Refused, it stays waiting: the window may double the ceiling meanwhile. SB-215: a record without `paid` is
+            // classified as its start spends now, and the turn is waited for at most
+            // `TAKE_TURN_WAIT`: a hand-over in progress elsewhere answers busy, the record kept.
+            let paid = handovers::waiting(root, &id).and_then(|h| {
+                fallback::handover_paid(store.snapshot().ok().as_ref(), &h).map(|kind| (h, kind))
+            });
+            let _turn = match &paid {
+                Some((waiting, kind)) => {
+                    let turn = if fallback::gated() {
+                        None
+                    } else {
+                        Some(
+                            tokio::time::timeout(take_turn_wait(), fallback::HAND_OVER.lock())
+                                .await
+                                .map_err(|_| handovers::BUSY.to_string())?,
+                        )
+                    };
+                    // SB-213: on the key slot its script fetches; a moved folder refuses it.
+                    fallback::gate_take(
+                        &store,
+                        root,
+                        waiting,
+                        *kind,
+                        tokio::time::Instant::now() + fallback::GATE_BUDGET,
+                    )
+                    .await?;
+                    turn
+                }
+                None => None,
+            };
             let taken = handovers::take(root, &id)?;
             Ok(json!({"handover": taken, "script": taken.script}))
         }
@@ -3030,12 +3817,95 @@ async fn execute(
             }
             Ok(json!({"enabled": handovers::enabled(root)}))
         }
-        Operation::Chains { workflow, pool } => {
+        Operation::Chains {
+            workflow,
+            pool,
+            folder,
+        } => {
+            let snapshot = store.snapshot()?;
+            // C-8: a checkout folder finds its group as the fallback does; `pool` is then the
+            // executor account's group.
+            let pool = match folder {
+                Some(folder) => {
+                    let folder = folder.canonicalize().unwrap_or(folder);
+                    fallback::chain_pool_of(&snapshot, pool, &folder).0
+                }
+                None => pool,
+            };
             let effective = store.chain_for(workflow.as_deref(), pool.as_deref())?;
+            // C-2: what each step would do now, read like the fallback's own pass but never
+            // starting the engine, a hand-over or a network call (a paid step's spend is null).
+            let readiness = if snapshot.chains.is_empty() {
+                serde_json::Map::new()
+            } else {
+                let now = monitor::now();
+                let mut limited = runtime.map_or_else(HashSet::new, |r| r.limits.limited_ids(now));
+                if let Some(r) = runtime {
+                    limited.extend(r.kimi_watch.limited(now));
+                }
+                let sign_in: HashSet<String> =
+                    refresh_state.sign_in_required(&store).into_iter().collect();
+                let settings = agent_settings::read(root);
+                let settings_readable = settings.is_ok();
+                let disabled: HashSet<String> = settings
+                    .map(|s| s.disabled.into_iter().collect())
+                    .unwrap_or_default();
+                let wants = |agent: &str| {
+                    snapshot
+                        .chains
+                        .iter()
+                        .any(|c| c.executors.iter().any(|e| e.agent == agent))
+                };
+                let kimi_usable = |id: &str| kimi::continuation_preflight(root, &store, id).is_ok();
+                let kimi_used = |id: &str| runtime.map_or(0.0, |r| r.kimi_watch.used(id));
+                let kimi = fallback::KimiChoice {
+                    ids: snapshot
+                        .kimi_accounts
+                        .iter()
+                        .map(|k| k.id.clone())
+                        .collect(),
+                    usable: &kimi_usable,
+                    used: &kimi_used,
+                    hermes_ready: wants(hermes::HERMES_TARGET)
+                        && launch::hermes_continuation_ready(&store),
+                    opencode_ready: wants(launch::OPENCODE_TARGET)
+                        && launch::opencode_continuation_ready(&store),
+                    disabled,
+                };
+                let catalog = agent_catalog::catalog();
+                let installed = |agent: &str| {
+                    catalog["agents"]
+                        .as_array()
+                        .and_then(|all| all.iter().find(|a| a["id"] == agent))
+                        .is_some_and(|a| agent_settings::installed(a).is_some())
+                };
+                chain_view::readiness(
+                    &snapshot,
+                    &chain_view::Inputs {
+                        limited: &limited,
+                        sign_in: &sign_in,
+                        kimi: &kimi,
+                        installed: &installed,
+                        settings_readable,
+                    },
+                )
+            };
+            // The last hand-over is spend.json's record (C-5 writes it); an unreadable file keeps
+            // the chains readable and says so.
+            let (last_handover, ceilings_unreadable) = match spend::read(root) {
+                Ok(file) => (json!(file.last_handover), false),
+                Err(_) => (Value::Null, true),
+            };
             Ok(json!({
-                "chains": store.snapshot()?.chains,
+                "chains": snapshot.chains,
                 "effective": effective,
                 "presets": agent_catalog::presets(),
+                "readiness": readiness,
+                "last_handover": last_handover,
+                "ceilings_unreadable": ceilings_unreadable,
+                // Offline there is no owner: no limit evidence, so `readiness` cannot name a
+                // limited account.
+                "limits_known": runtime.is_some(),
             }))
         }
         Operation::SetChain {
@@ -3073,6 +3943,20 @@ async fn execute(
             }
             Ok(json!({"chain": store.set_chain(scope, executors)?}))
         }
+        Operation::Ceilings => spend::view(root, &store.snapshot()?, monitor::now()),
+        Operation::SetCeiling { scope, usd, by } => {
+            let ceiling =
+                spend::set_ceiling(root, &store.snapshot()?, scope, usd, by, monitor::now())?;
+            // spend.json is a setting backups carry: the next change-driven backup takes it.
+            store.setting_changed();
+            Ok(json!({"ceiling": ceiling}))
+        }
+        Operation::AnswerCeiling { id, answer, by } => {
+            let answered =
+                spend::answer(root, &store.snapshot()?, &id, answer, by, monitor::now())?;
+            store.setting_changed();
+            Ok(answered)
+        }
         Operation::AgentConnect { agent, pool } => {
             let address = runtime
                 .map(|r| r.proxy.address().to_string())
@@ -3087,8 +3971,18 @@ async fn execute(
             key,
             model,
             pool,
+            by,
         } => {
-            let saved = store.set_agent_key_for(&service, pool.as_deref(), &key, model)?;
+            // C-Q9: replacing a key whose spend a ceiling counts (a capped group's own, any key
+            // under a machine ceiling, a task ceiling's baseline key) starts that count again.
+            // SB-223: whether the slot holds a key is read inside the spend write lock.
+            let replaces = || {
+                service == "openrouter"
+                    && spend::saved_or_unknown(store.agent_key_for(&service, pool.as_deref()))
+            };
+            let saved = spend::guard_group_key(root, pool.as_deref(), replaces, by, || {
+                store.set_agent_key_for(&service, pool.as_deref(), &key, model)
+            })?;
             Ok(
                 json!({"service": saved.service, "pool": saved.pool, "saved_at": saved.saved_at, "model": saved.model}),
             )
@@ -3106,12 +4000,39 @@ async fn execute(
             let saved = store.set_agent_key_model_for(&service, pool.as_deref(), &model)?;
             Ok(json!({"service": saved.service, "pool": saved.pool, "model": saved.model}))
         }
-        Operation::AgentKeyRemove { service, pool } => {
-            Ok(json!({"removed": store.remove_agent_key_for(&service, pool.as_deref())?}))
+        Operation::AgentKeyRemove { service, pool, by } => {
+            // C-Q9: removing a key whose spend a ceiling counts moves its paid steps to a key the
+            // ceiling does not count, or out of a machine ceiling's sum. A key that is not saved
+            // removes nothing and loosens nothing.
+            let exists = || {
+                service == "openrouter"
+                    && spend::saved_or_unknown(store.agent_key_for(&service, pool.as_deref()))
+            };
+            let removed = spend::guard_group_key(root, pool.as_deref(), exists, by, || {
+                store.remove_agent_key_for(&service, pool.as_deref())
+            })?;
+            Ok(json!({ "removed": removed }))
         }
         Operation::AgentKeys { service } => agent_keys::list(&store, &service),
-        Operation::AgentKeyValue { service, folder } => {
-            Ok(json!({"key": store.agent_key_value_in(&service, folder.as_deref())?}))
+        Operation::AgentKeyValue {
+            service,
+            folder,
+            slot,
+        } => {
+            let key = match slot {
+                Some(slot) => {
+                    let pool = match &slot {
+                        spend::KeySlot::Machine => None,
+                        spend::KeySlot::Group(pool) => Some(pool.as_str()),
+                    };
+                    let entry = store
+                        .agent_key_for(&service, pool)?
+                        .ok_or(switchboard_core::agent_keys::NO_AGENT_KEY)?;
+                    store.agent_key_secret(&entry)?
+                }
+                None => store.agent_key_value_in(&service, folder.as_deref())?,
+            };
+            Ok(json!({ "key": key }))
         }
         Operation::HermesModel => tokio::task::spawn_blocking(hermes::status)
             .await
@@ -3164,13 +4085,18 @@ async fn execute(
             via: AgentVia::Openrouter,
             model,
             ..
-        } => launch::launch_agent_openrouter(
-            root,
-            &store,
-            &agent,
-            model.as_deref(),
-            &working_directory,
-        ),
+        } => {
+            // C-Q8: on the OpenRouter key a launch in this folder uses, gated like a hand-over.
+            let dir = projects::project_dir(root, &working_directory)?;
+            fallback::gate_by_hand(&store, root, None, &dir, fallback::Paid::OpenRouter).await?;
+            launch::launch_agent_openrouter(
+                root,
+                &store,
+                &agent,
+                model.as_deref(),
+                &working_directory,
+            )
+        }
         Operation::LaunchAgent {
             agent,
             pool,
@@ -3179,6 +4105,17 @@ async fn execute(
             ..
         } => {
             let runtime = needs_owner()?;
+            // C-Q8: through the proxy on the pool's API-key account, gated like a hand-over. The
+            // selected account is read first: a subscription account (or none) is refused by the
+            // launch for what it is, never as an unknown spend.
+            if store
+                .selected_account(Provider::Claude, &pool)
+                .is_some_and(|a| a.kind == AuthKind::ApiKey)
+            {
+                let dir = projects::project_dir(root, &working_directory)?;
+                fallback::gate_by_hand(&store, root, None, &dir, fallback::Paid::ApiKeyAccount)
+                    .await?;
+            }
             launch::launch_agent(
                 root,
                 &store,
@@ -3206,6 +4143,11 @@ async fn execute(
             let runtime = needs_owner()?;
             if !in_place && !args.is_empty() {
                 return Err(launch::EXTRA_ARGS_INVALID.into());
+            }
+            // C-Q8: a session on an API-key account is a paid start, gated like a hand-over.
+            if let Some(kind) = fallback::paid_kind(&store.snapshot()?, &id) {
+                let dir = projects::project_dir(root, &working_directory)?;
+                fallback::gate_by_hand(&store, root, None, &dir, kind).await?;
             }
             if mode == "isolated" {
                 // An isolated session holds an access token only and is never renewed while it
@@ -3260,65 +4202,21 @@ async fn execute(
                 launch::start_terminal
             };
             let runtime = needs_owner()?;
-            // SB-120: no account named → the machine's default agent: OpenCode and Hermes run on
-            // the OpenRouter key; Claude Code, Codex and Kimi Code on the account a one-step chain
-            // of that agent would choose now.
+            // SB-120: no account named → the machine's default agent (`continue_default`).
             let id = if id.is_empty() {
-                match agent_settings::read(root)?.default.as_deref() {
-                    Some(hermes::HERMES_TARGET) => hermes::HERMES_TARGET.to_owned(),
-                    Some(launch::OPENCODE_TARGET) => launch::OPENCODE_TARGET.to_owned(),
-                    Some(agent) => {
-                        agent_settings::usable(root, agent)?;
-                        if !continuation::valid_workflow_id(&workflow_id) {
-                            return Err(continuation::BAD_WORKFLOW_ID.into());
-                        }
-                        let folder = working_directory
-                            .canonicalize()
-                            .map_err(|_| "Choose an existing project directory.")?;
-                        // The executor is read first, so its own exhausted account is never the
-                        // one chosen.
-                        let shown =
-                            continuation::show(&continuation::observatory()?, &workflow_id)?;
-                        fallback::account_for_default(
-                            runtime,
-                            agent,
-                            &continuation::executor_of(&shown),
-                            &folder,
-                            monitor::now(),
-                        )?
-                    }
-                    None => return Err(agent_settings::NAME_AN_ACCOUNT.into()),
-                }
+                continue_default(root, runtime, &workflow_id, &working_directory)?
             } else {
                 id
             };
-            // SB-120: an agent the person disabled for taking over work takes no workflow.
-            let agent = if id == hermes::HERMES_TARGET || id == launch::OPENCODE_TARGET {
-                Some(id.clone())
-            } else if store.kimi_account(&id).is_ok() {
-                Some("kimi-code".to_owned())
-            } else {
-                store
-                    .snapshot()?
-                    .accounts
-                    .iter()
-                    .find(|a| a.id == id)
-                    .map(|a| switchboard_core::provider_agent(a.provider).to_owned())
-            };
-            if let Some(a) = agent {
-                if agent_settings::disabled(root, &a)? {
-                    return Err(agent_settings::DISABLED.into());
-                }
-            }
             // Everything that can refuse runs before the offer, so a refusal leaves the workflow
             // exactly as it was; after the offer, a failed launch leaves it to lapse.
-            if !continuation::valid_workflow_id(&workflow_id) {
-                return Err(continuation::BAD_WORKFLOW_ID.into());
+            let directory = continue_checks(&store, root, &workflow_id, &id, &working_directory)?;
+            // C-Q8: a paid continue by hand (Hermes, OpenCode, an API-key account) passes the
+            // spend gate as a hand-over does, once: the automatic fallback's step passed its own.
+            if let Some(kind) = fallback::paid_kind(&store.snapshot()?, &id) {
+                fallback::gate_by_hand(&store, root, Some(&workflow_id), &directory, kind).await?;
             }
             let bin = continuation::observatory()?;
-            let directory = working_directory
-                .canonicalize()
-                .map_err(|_| "Choose an existing project directory.")?;
             // SB-107: Hermes Agent on the saved OpenRouter key, with the same order — every
             // refusal before the offer, a failed launch after it left to lapse.
             let other_agent = id == hermes::HERMES_TARGET
@@ -3360,6 +4258,8 @@ async fn execute(
                 "account": id,
                     "model": launched["model"],
                     "modelFrom": launched["model_from"],
+                    // SB-213: the key slot its script fetches, for a queued hand-over's record.
+                    "keySlot": launched["key_slot"],
                 }));
             }
             if id == hermes::HERMES_TARGET {
@@ -3407,6 +4307,8 @@ async fn execute(
                 "account": id,
                     "model": launched["model"],
                     "modelFrom": launched["model_from"],
+                    // SB-213: the key slot its script fetches, for a queued hand-over's record.
+                    "keySlot": launched["key_slot"],
                 }));
             }
             // SB-99: a saved Kimi Code account continues through `kimi`, with the same order —
@@ -4189,8 +5091,19 @@ async fn execute(
             let map = blocking::run(|| roots::disk_map(&under, &snapshot));
             serde_json::to_value(map).map_err(|_| "Repositories could not be listed.".into())
         }
-        Operation::RemoveProject { pool } => {
-            let project = store.remove_project(&pool)?;
+        Operation::RemoveProject { pool, by } => {
+            // C-Q7: a group's ceiling goes with it, so spend.json is pruned under its lock. C-Q9:
+            // its own OpenRouter key goes too, so a ceiling counting that key keeps the group.
+            let (project, pruned) = spend::remove_group(
+                root,
+                &pool,
+                by,
+                || Ok(store.agent_key_for("openrouter", Some(&pool))?.is_some()),
+                || store.remove_project(&pool),
+            )?;
+            if pruned {
+                store.setting_changed();
+            }
             // SB-121: its folders are not adopted by another project by themselves afterwards.
             if suggest::remember_removed(root, &project.pool, &project.folders, monitor::now())
                 .is_err()
@@ -4259,38 +5172,60 @@ async fn execute(
             }
             Ok(json!(restored))
         }
+        // Reached offline (`Runtime::execute` unwraps it before): the same scope around the
+        // launch, which then asks for an owner.
+        Operation::Launched { by, inner } => {
+            if !is_launch(&inner) {
+                return Err(launches::NOT_A_LAUNCH.into());
+            }
+            let by = launches::resolve(&store.snapshot()?, by)?;
+            launches::scoped(
+                Some(by),
+                Box::pin(execute(store.clone(), root, runtime, *inner)),
+            )
+            .await
+        }
+        Operation::LaunchEvent {
+            launch_id,
+            event,
+            provider_session_id,
+            transcript,
+            source,
+        } => Ok(launches::event_from(
+            root,
+            &launch_id,
+            event,
+            provider_session_id.as_deref(),
+            transcript.as_deref(),
+            source.as_deref(),
+            monitor::now(),
+        )),
+        Operation::Launches { launch_id } => {
+            let snapshot = store.snapshot()?;
+            // The states may ask `kill -0`/`ps`: never on an async worker (SB-103).
+            match launch_id {
+                Some(id) => {
+                    let mut shown = crate::blocking::run(|| launches::show(root, &id))?;
+                    shown["launch"] = label_session(&snapshot, shown["launch"].take());
+                    Ok(shown)
+                }
+                None => {
+                    let (listed, total) = crate::blocking::run(|| launches::history(root));
+                    let listed: Vec<Value> = listed
+                        .into_iter()
+                        .map(|r| label_session(&snapshot, r))
+                        .collect();
+                    Ok(json!({"launches": listed, "total": total}))
+                }
+            }
+        }
         Operation::Sessions { all } => {
             let snapshot = store.snapshot()?;
             // SB-103: the liveness checks may start `kill -0`/`ps`: never on an async worker.
             let listed = crate::blocking::run(|| launch::sessions(root, all));
             let sessions: Vec<Value> = listed
                 .into_iter()
-                .map(|mut session| {
-                    let id = session["account_id"].as_str().map(str::to_owned);
-                    let label = snapshot
-                        .accounts
-                        .iter()
-                        .find(|a| Some(&a.id) == id.as_ref())
-                        .map(|a| a.label.clone())
-                        .or_else(|| {
-                            snapshot
-                                .kimi_accounts
-                                .iter()
-                                .find(|k| Some(&k.id) == id.as_ref())
-                                .map(|k| k.label.clone())
-                        })
-                        // A Hermes hand-over names its model itself (SB-107).
-                        .or_else(|| session["label"].as_str().map(str::to_owned));
-                    session["label"] = label.into();
-                    // SB-110: an organization's context also by its name, for the CLI and agents.
-                    let context_name = session["context"]
-                        .as_str()
-                        .and_then(|c| c.strip_prefix("org:"))
-                        .and_then(|id| snapshot.organization(id))
-                        .map(|o| o.name.clone());
-                    session["context_name"] = context_name.into();
-                    session
-                })
+                .map(|session| label_session(&snapshot, session))
                 .collect();
             Ok(json!({ "sessions": sessions }))
         }
@@ -4865,6 +5800,18 @@ mod owner_tests {
             )
             .unwrap();
         }
+        // SB-201: an agent launched on the OpenRouter key: no account, its model as its label.
+        let agent = root.path().join("runtimes").join("agent-goose-openrouter");
+        std::fs::create_dir_all(&agent).unwrap();
+        std::fs::write(
+            agent.join(launch::SESSION_RECORD),
+            json!({"account_id": "goose", "provider": "goose", "agent": "goose",
+                "pool": "openrouter", "context": format!("org:{}", acme.id), "mode": "isolated",
+                "working_directory": "/w", "in_place": false, "launched_at": 2,
+                "continues": null, "label": "moonshotai/kimi-k2"})
+            .to_string(),
+        )
+        .unwrap();
         let listed = runtime
             .execute(Operation::Sessions { all: true })
             .await
@@ -4881,6 +5828,12 @@ mod owner_tests {
         assert_eq!(by("one")["context_name"], "Acme");
         assert_eq!(by("two")["context"], "personal");
         assert!(by("two")["context_name"].is_null());
+        assert_eq!(by("goose")["provider"], "goose");
+        assert_eq!(by("goose")["agent"], "goose");
+        assert_eq!(by("goose")["label"], "moonshotai/kimi-k2");
+        assert_eq!(by("goose")["context_name"], "Acme");
+        // A Claude Code launch's record names no agent: the list names it from the provider.
+        assert_eq!(by("one")["agent"], "claude-code");
     }
     /// SB-180: `suggest_found` held the owner transaction while every found folder was saved on
     /// its own, each save publishing `accounts.json` and syncing the bindings. One pass's folders
@@ -5029,6 +5982,172 @@ mod owner_tests {
                 .unwrap_err(),
             "Sign-in not found. Start again."
         );
+    }
+    #[tokio::test]
+    async fn a_new_seat_of_an_organization_outside_its_only_group_is_offered_it() {
+        // SB-160 (B-4, SCN-077): a seat of an organization that has one group, signed in
+        // elsewhere, comes back with that group in its receipt; nothing moves.
+        let root = tempfile::tempdir().unwrap();
+        let runtime = fixtures::runtime(root.path(), signed_in, activates).await;
+        let finish = |account: Account| {
+            let home = root.path().join(format!("staging-{}", account.id));
+            std::fs::create_dir_all(&home).unwrap();
+            let login = launch::fixture_login(home, account);
+            let id = login.id.clone();
+            runtime.logins.lock().unwrap().insert(id.clone(), login);
+            runtime.finish_login(&id).unwrap()
+        };
+        let a = save(&runtime.store, "synthetic-c", "default");
+        // No organization: no field.
+        assert!(finish(a.clone()).get("organization_group").is_none());
+        let acme = runtime
+            .store
+            .add_organization("Acme", &["example.invalid".into()])
+            .unwrap();
+        let folder = tempfile::tempdir().unwrap();
+        let group = runtime
+            .store
+            .save_project_in(
+                None,
+                "Acme work",
+                &[folder.path().to_path_buf()],
+                &[],
+                Some(Some(&acme.id)),
+            )
+            .unwrap();
+        let receipt = finish(a.clone());
+        assert_eq!(
+            receipt["organization_group"],
+            json!({"pool": group.pool, "name": "Acme work"})
+        );
+        assert_eq!(
+            runtime.store.snapshot().unwrap().accounts[0].pool,
+            "default",
+            "never moved without the person"
+        );
+        // The account the ordinary CLI is signed in to cannot join a group: said so.
+        let captured = runtime
+            .execute(Operation::CaptureCurrent {
+                provider: Provider::Claude,
+                label: None,
+                pool: "default".into(),
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            captured["organization_group"],
+            json!({"pool": group.pool, "name": "Acme work", "in_cli": true})
+        );
+        // Guards: a personal seat, and a seat already in the group, get no field.
+        runtime
+            .store
+            .assign_organization(&a.id, Some(switchboard_core::organizations::PERSONAL))
+            .unwrap();
+        assert!(finish(a.clone()).get("organization_group").is_none());
+        let b = save(&runtime.store, "synthetic-b", &group.pool);
+        assert!(finish(b).get("organization_group").is_none());
+        // Two groups for Acme: no offer.
+        runtime.store.assign_organization(&a.id, None).unwrap();
+        let other = tempfile::tempdir().unwrap();
+        runtime
+            .store
+            .save_project_in(
+                None,
+                "Acme two",
+                &[other.path().to_path_buf()],
+                &[],
+                Some(Some(&acme.id)),
+            )
+            .unwrap();
+        assert!(finish(a).get("organization_group").is_none());
+    }
+    #[tokio::test]
+    async fn a_new_seat_the_cli_is_signed_in_to_says_so_in_its_receipt() {
+        // SB-160 (B-4): the ordinary CLI is signed in as `synthetic-a`; a sign-in that saved that
+        // same identity outside its organization's group is offered the group with `in_cli`, as
+        // `accounts capture` is, so the window offers no move the group would refuse.
+        let root = tempfile::tempdir().unwrap();
+        let runtime = fixtures::runtime(root.path(), signed_in, activates).await;
+        let acme = runtime
+            .store
+            .add_organization("Acme", &["example.invalid".into()])
+            .unwrap();
+        let folder = tempfile::tempdir().unwrap();
+        let group = runtime
+            .store
+            .save_project_in(
+                None,
+                "Acme work",
+                &[folder.path().to_path_buf()],
+                &[],
+                Some(Some(&acme.id)),
+            )
+            .unwrap();
+        let a = save(&runtime.store, "synthetic-a", "default");
+        let home = root.path().join("staging-cli");
+        std::fs::create_dir_all(&home).unwrap();
+        let login = launch::fixture_login(home, a);
+        let id = login.id.clone();
+        runtime.logins.lock().unwrap().insert(id.clone(), login);
+        assert_eq!(
+            runtime.finish_login(&id).unwrap()["organization_group"],
+            json!({"pool": group.pool, "name": "Acme work", "in_cli": true})
+        );
+    }
+    #[tokio::test]
+    async fn a_repeated_finish_reads_where_the_account_is_now() {
+        // SB-160 (B-4): finish, move the account into its group, finish again: the second
+        // receipt reads the stored account, not the copy kept from the first, and offers nothing.
+        let root = tempfile::tempdir().unwrap();
+        let runtime = fixtures::runtime(root.path(), signed_out, activates).await;
+        let acme = runtime
+            .store
+            .add_organization("Acme", &["example.invalid".into()])
+            .unwrap();
+        let folder = tempfile::tempdir().unwrap();
+        let group = runtime
+            .store
+            .save_project_in(
+                None,
+                "Acme work",
+                &[folder.path().to_path_buf()],
+                &[],
+                Some(Some(&acme.id)),
+            )
+            .unwrap();
+        let a = save(&runtime.store, "synthetic-c", "default");
+        let home = root.path().join("staging-again");
+        std::fs::create_dir_all(&home).unwrap();
+        let login = launch::fixture_login(home, a.clone());
+        let id = login.id.clone();
+        runtime.logins.lock().unwrap().insert(id.clone(), login);
+        assert_eq!(
+            runtime.finish_login(&id).unwrap()["organization_group"],
+            json!({"pool": group.pool, "name": "Acme work"})
+        );
+        runtime
+            .execute(Operation::MoveAccount {
+                id: a.id.clone(),
+                pool: group.pool.clone(),
+            })
+            .await
+            .unwrap();
+        let again = runtime.finish_login(&id).unwrap();
+        assert_eq!(again["pool"], group.pool.as_str(), "{again}");
+        assert!(again.get("organization_group").is_none(), "{again}");
+        // The group already holds this identity under another account: nothing to offer.
+        let d = save(&runtime.store, "synthetic-d", "default");
+        save(&runtime.store, "synthetic-d", &group.pool);
+        let home = root.path().join("staging-held");
+        std::fs::create_dir_all(&home).unwrap();
+        let login = launch::fixture_login(home, d);
+        let id = login.id.clone();
+        runtime.logins.lock().unwrap().insert(id.clone(), login);
+        assert!(runtime
+            .finish_login(&id)
+            .unwrap()
+            .get("organization_group")
+            .is_none());
     }
     #[test]
     fn completed_sign_ins_are_bounded() {
@@ -5654,6 +6773,367 @@ mod owner_tests {
         drop(held);
     }
 
+    /// SB-183 (node A-3): only an owner the installed app enabled with a home writes start
+    /// files. A test or development owner (any owner over a data folder that is not the app's
+    /// own) never gets one, whatever groups it holds.
+    #[tokio::test]
+    async fn no_test_or_dev_build_touches_the_real_home() {
+        let root = tempfile::tempdir().unwrap();
+        let runtime = fixtures::runtime(root.path(), signed_out, activates).await;
+        let (work, acme) = organization_group(&runtime).await;
+        runtime.bindings_pass().await;
+        assert!(shell::map::answer(root.path(), &acme).is_some());
+        // The installed app's call, on a data folder that is not the app's own: refused.
+        runtime.enable_shell_hook();
+        runtime.bindings_pass().await;
+        assert!(!shell::install::record_path(root.path()).exists());
+        assert!(runtime.shell_hook_notice().is_none());
+        drop(work);
+    }
+
+    /// SB-183 (node A-3): the data-folder guard holds on its own. Even when the app counts as
+    /// installed and a home is at hand, an owner over a data folder that is not the app's own
+    /// writes no start file and no record.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn an_installed_app_over_another_data_folder_writes_no_start_file() {
+        let root = tempfile::tempdir().unwrap();
+        let runtime = fixtures::runtime(root.path(), signed_out, activates).await;
+        let (work, acme) = organization_group(&runtime).await;
+        runtime.bindings_pass().await;
+        assert!(shell::map::answer(root.path(), &acme).is_some());
+        let home = tempfile::tempdir().unwrap();
+        let home = home.path().canonicalize().unwrap();
+        let zshrc = home.join(".zshrc");
+        std::fs::write(&zshrc, "own\n").unwrap();
+        let cli = home.join("switchboard");
+        std::fs::write(&cli, "#!/bin/sh\n").unwrap();
+        let host = shell::install::Host {
+            home: home.clone(),
+            zdotdir: None,
+            login_shell: Some("zsh".into()),
+            macos: true,
+            // SAFETY: getuid has no preconditions and cannot fail.
+            uid: Some(unsafe { libc::getuid() }),
+            cli: Some(cli),
+            windows: None,
+        };
+        let asked = std::sync::atomic::AtomicBool::new(false);
+        runtime.enable_shell_hook_when(
+            || {
+                asked.store(true, std::sync::atomic::Ordering::SeqCst);
+                true
+            },
+            || Some(host),
+        );
+        runtime.bindings_pass().await;
+        assert_eq!(std::fs::read_to_string(&zshrc).unwrap(), "own\n");
+        assert!(!shell::install::record_path(root.path()).exists());
+        assert!(runtime.shell_hook_notice().is_none());
+        // The installed check is not even consulted: the data folder decides first.
+        assert!(!asked.load(std::sync::atomic::Ordering::SeqCst));
+        drop(work);
+    }
+
+    /// SB-183 (node A-3): the installed owner writes the block at start when an organization's
+    /// group exists, says so once, takes the default block out when the last one leaves, and
+    /// writes it again when one comes back, all in an injected home.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn the_installed_owner_follows_the_presence_of_an_organization_group() {
+        let root = tempfile::tempdir().unwrap();
+        let runtime = fixtures::runtime(root.path(), signed_out, activates).await;
+        let home = tempfile::tempdir().unwrap();
+        let home = home.path().canonicalize().unwrap();
+        let zshrc = home.join(".zshrc");
+        std::fs::write(&zshrc, "own\n").unwrap();
+        let cli = home.join("switchboard");
+        std::fs::write(&cli, "#!/bin/sh\n").unwrap();
+        let host = shell::install::Host {
+            home: home.clone(),
+            zdotdir: None,
+            login_shell: Some("zsh".into()),
+            macos: true,
+            // SAFETY: getuid has no preconditions and cannot fail.
+            uid: Some(unsafe { libc::getuid() }),
+            cli: Some(cli),
+            windows: None,
+        };
+        // No organization yet: enabled, nothing written.
+        runtime.enable_shell_hook_with(host);
+        assert_eq!(std::fs::read_to_string(&zshrc).unwrap(), "own\n");
+        assert!(runtime.shell_hook_notice().is_none());
+        // The first organization's group appears: the next pass writes the block, once.
+        let (work, _acme) = organization_group(&runtime).await;
+        runtime.bindings_pass().await;
+        let text = std::fs::read_to_string(&zshrc).unwrap();
+        assert!(text.contains(shell::install::OPEN), "{text}");
+        let notice = runtime.shell_hook_notice().expect("the first-time notice");
+        assert_eq!(notice["organization"], "Acme");
+        assert_eq!(notice["group"], "Acme");
+        runtime.acknowledge_shell_hook_notice();
+        assert!(runtime.shell_hook_notice().is_none(), "only once");
+        // Idle passes do not touch the file.
+        std::fs::write(&zshrc, &text).unwrap();
+        runtime.bindings_pass().await;
+        assert_eq!(std::fs::read_to_string(&zshrc).unwrap(), text);
+        // The group turns personal: the default block goes.
+        let pool = runtime.store.snapshot().unwrap().projects[0].pool.clone();
+        let account = runtime.store.snapshot().unwrap().accounts[0].id.clone();
+        runtime
+            .store
+            .assign_organization(&account, Some("personal"))
+            .unwrap();
+        runtime.store.set_project_organization(&pool, None).unwrap();
+        runtime.bindings_pass().await;
+        assert_eq!(std::fs::read_to_string(&zshrc).unwrap(), "own\n");
+        // The person turns it off; an organization coming back writes nothing.
+        shell::install::set_choice(root.path(), false).unwrap();
+        let org = runtime.store.snapshot().unwrap().organizations[0]
+            .id
+            .clone();
+        runtime
+            .store
+            .assign_organization(&account, Some(&org))
+            .unwrap();
+        runtime
+            .store
+            .set_project_organization(&pool, Some(&org))
+            .unwrap();
+        runtime.bindings_pass().await;
+        assert_eq!(std::fs::read_to_string(&zshrc).unwrap(), "own\n");
+        drop(work);
+    }
+
+    /// Fix cycle 1 of node A-7 (B1): the hook the window, MCP and `shell status` report is the
+    /// hook the installer wrote. An organization's group whose only folder a personal group
+    /// takes (`project_for`: the more private wins) has no row in the folder map, so no block
+    /// is written by default and none is reported; when the personal group lets the folder go,
+    /// both turn on together. Onboarding's `hook` step reads the same state.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn the_hook_reported_is_the_hook_written() {
+        let root = tempfile::tempdir().unwrap();
+        let runtime = fixtures::runtime(root.path(), signed_out, activates).await;
+        let home = tempfile::tempdir().unwrap();
+        let home = home.path().canonicalize().unwrap();
+        let zshrc = home.join(".zshrc");
+        std::fs::write(&zshrc, "own\n").unwrap();
+        let cli = home.join("switchboard");
+        std::fs::write(&cli, "#!/bin/sh\n").unwrap();
+        runtime.enable_shell_hook_with(shell::install::Host {
+            home: home.clone(),
+            zdotdir: None,
+            login_shell: Some("zsh".into()),
+            macos: true,
+            // SAFETY: getuid has no preconditions and cannot fail.
+            uid: Some(unsafe { libc::getuid() }),
+            cli: Some(cli),
+            windows: None,
+        });
+        let (work, acme) = organization_group(&runtime).await;
+        // A personal group holds the organization group's only folder.
+        let two = fixtures::save(&runtime.store, "synthetic-two", "default").id;
+        runtime
+            .store
+            .assign_organization(&two, Some("personal"))
+            .unwrap();
+        let mine = runtime
+            .execute(Operation::SaveProject {
+                pool: None,
+                name: "Mine".into(),
+                folders: vec![acme.clone()],
+                account_ids: vec![two.clone()],
+                base_folders: None,
+                organization: Some("personal".into()),
+            })
+            .await
+            .unwrap();
+        runtime.bindings_pass().await;
+        assert!(shell::map::answer(root.path(), &acme).is_none());
+        let agree = |runtime: &Runtime| -> bool {
+            let status = runtime.shell_hook_status();
+            let written = status["files"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|f| f["state"] == "written");
+            assert_eq!(status["hook"] == "default_on", written, "{status}");
+            let probe = onboarding::Probe {
+                snapshot: runtime.store.snapshot().ok(),
+                shell: Some(status),
+                ..Default::default()
+            };
+            let answer = onboarding::steps(&probe);
+            let hook = answer["steps"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|s| s["id"] == "hook")
+                .expect("the hook step")
+                .clone();
+            let follows = hook["summary"].as_str().unwrap().contains("work in");
+            assert_eq!(follows, written, "{hook}");
+            written
+        };
+        assert!(!agree(&runtime), "no row: no block, and none reported");
+        assert_eq!(std::fs::read_to_string(&zshrc).unwrap(), "own\n");
+        // The personal group lets the folder go: the row comes, and the block with it.
+        let pool = mine["pool"].as_str().unwrap().to_owned();
+        let elsewhere = work.path().canonicalize().unwrap().join("mine");
+        std::fs::create_dir_all(&elsewhere).unwrap();
+        runtime
+            .execute(Operation::SaveProject {
+                pool: Some(pool),
+                name: "Mine".into(),
+                folders: vec![elsewhere],
+                account_ids: vec![two],
+                base_folders: None,
+                organization: Some("personal".into()),
+            })
+            .await
+            .unwrap();
+        runtime.bindings_pass().await;
+        assert!(shell::map::answer(root.path(), &acme).is_some());
+        assert!(agree(&runtime), "a row: the block, and default_on");
+        drop(work);
+    }
+
+    /// Fix cycle 1 of node A-7 (N2): the first-time notice is the installed app's. An owner
+    /// without the installed home (a development build or `serve` over the same data folder)
+    /// returns none to the watcher and cannot acknowledge it away.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn only_the_installed_owner_reads_or_acknowledges_the_notice() {
+        let root = tempfile::tempdir().unwrap();
+        let runtime = fixtures::runtime(root.path(), signed_out, activates).await;
+        let home = tempfile::tempdir().unwrap();
+        let home = home.path().canonicalize().unwrap();
+        std::fs::write(home.join(".zshrc"), "own\n").unwrap();
+        let cli = home.join("switchboard");
+        std::fs::write(&cli, "#!/bin/sh\n").unwrap();
+        runtime.enable_shell_hook_with(shell::install::Host {
+            home: home.clone(),
+            zdotdir: None,
+            login_shell: Some("zsh".into()),
+            macos: true,
+            // SAFETY: getuid has no preconditions and cannot fail.
+            uid: Some(unsafe { libc::getuid() }),
+            cli: Some(cli),
+            windows: None,
+        });
+        let (work, _acme) = organization_group(&runtime).await;
+        runtime.bindings_pass().await;
+        assert!(shell::install::pending_notice(root.path()).is_some());
+        // The same data folder, an owner without the installed home.
+        let host = runtime.shell_hook.lock().unwrap().take();
+        assert!(runtime.shell_hook_notice().is_none(), "not posted");
+        runtime.acknowledge_shell_hook_notice();
+        assert!(
+            shell::install::pending_notice(root.path()).is_some(),
+            "not acknowledged"
+        );
+        *runtime.shell_hook.lock().unwrap() = host;
+        assert!(runtime.shell_hook_notice().is_some());
+        drop(work);
+    }
+
+    /// A group bound to the organization "Acme" with one Claude account and one folder.
+    pub(crate) async fn organization_group(runtime: &Runtime) -> (tempfile::TempDir, PathBuf) {
+        let work = tempfile::tempdir().unwrap();
+        let acme = work.path().canonicalize().unwrap().join("acme");
+        std::fs::create_dir_all(&acme).unwrap();
+        let org = runtime.store.add_organization("Acme", &[]).unwrap();
+        let one = fixtures::save(&runtime.store, "synthetic-one", "default").id;
+        runtime
+            .store
+            .assign_organization(&one, Some(&org.id))
+            .unwrap();
+        runtime
+            .execute(Operation::SaveProject {
+                pool: None,
+                name: "Acme".into(),
+                folders: vec![acme.clone()],
+                account_ids: vec![one],
+                base_folders: None,
+                organization: Some(org.id.clone()),
+            })
+            .await
+            .unwrap();
+        (work, acme)
+    }
+
+    /// SB-183 (node A-4): the bindings pass writes an organization's shell homes and the folder
+    /// map, and a pass whose fingerprint did not move writes nothing: a file taken away is not
+    /// written back until something changes. A synthetic owner carries nothing of the real home.
+    #[tokio::test]
+    async fn an_idle_pass_writes_nothing() {
+        let root = tempfile::tempdir().unwrap();
+        let runtime = fixtures::runtime(root.path(), signed_out, activates).await;
+        let work = tempfile::tempdir().unwrap();
+        let work = work.path().canonicalize().unwrap();
+        let acme = work.join("acme");
+        std::fs::create_dir_all(&acme).unwrap();
+        let org = runtime.store.add_organization("Acme", &[]).unwrap();
+        let one = fixtures::save(&runtime.store, "synthetic-one", "default").id;
+        runtime
+            .store
+            .assign_organization(&one, Some(&org.id))
+            .unwrap();
+        runtime
+            .execute(Operation::SaveProject {
+                pool: None,
+                name: "Acme".into(),
+                folders: vec![acme.clone()],
+                account_ids: vec![one],
+                base_folders: None,
+                organization: Some(org.id.clone()),
+            })
+            .await
+            .unwrap();
+        runtime.bindings_pass().await;
+        let map_file = shell::map::path(root.path());
+        let found = shell::map::answer(root.path(), &acme).expect("a row for the folder");
+        assert_eq!(found.context, format!("org:{}", org.id));
+        let home = found.claude_home.clone().unwrap();
+        let settings = home.join("settings.json");
+        assert!(settings.is_file());
+        // Nothing of the real person's folder in a synthetic owner's home.
+        assert!(!home.join("CLAUDE.md").exists());
+        // Idle: the files taken away stay away.
+        let written = std::fs::read(&map_file).unwrap();
+        std::fs::remove_file(&map_file).unwrap();
+        std::fs::remove_file(&settings).unwrap();
+        for _ in 0..5 {
+            runtime.bindings_pass().await;
+        }
+        assert!(!map_file.exists(), "an idle pass wrote the map");
+        assert!(!settings.exists(), "an idle pass wrote a shell home");
+        // A change (the group turns personal) is written: the map loses its row, the home stays.
+        std::fs::write(&map_file, &written).unwrap();
+        let pool = found.pool.clone();
+        runtime
+            .store
+            .set_project_organization(&pool, None)
+            .unwrap_err();
+        runtime
+            .store
+            .assign_organization(
+                &runtime.store.snapshot().unwrap().accounts[0].id,
+                Some("personal"),
+            )
+            .unwrap();
+        runtime.store.set_project_organization(&pool, None).unwrap();
+        runtime.bindings_pass().await;
+        assert_ne!(
+            std::fs::read(&map_file).unwrap(),
+            written,
+            "the map was rewritten"
+        );
+        assert!(shell::map::answer(root.path(), &acme).is_none());
+        assert!(home.is_dir(), "the organization's history stays");
+    }
+
     #[tokio::test]
     async fn a_folder_moved_out_of_its_project_cannot_spend_the_projects_accounts() {
         // SB-133: a renamed project folder kept the project's route and capability in its
@@ -6142,7 +7622,10 @@ mod owner_tests {
         // An account left in a deleted project's pool goes back to default by itself.
         runtime.execute(move_to("app")).await.unwrap();
         runtime
-            .execute(Operation::RemoveProject { pool: "app".into() })
+            .execute(Operation::RemoveProject {
+                pool: "app".into(),
+                by: spend::Surface::Window,
+            })
             .await
             .unwrap();
         assert_eq!(pool_of(&runtime), "app");
@@ -6380,7 +7863,10 @@ mod owner_tests {
         assert_eq!(folders(&runtime).len(), 2);
         // Removing the whole project remembers its folders too.
         runtime
-            .execute(Operation::RemoveProject { pool: "app".into() })
+            .execute(Operation::RemoveProject {
+                pool: "app".into(),
+                by: spend::Surface::Window,
+            })
             .await
             .unwrap();
         runtime
@@ -6977,6 +8463,7 @@ mod owner_tests {
             .execute(Operation::Chains {
                 workflow: Some("wf_0123456789abcdef".into()),
                 pool: None,
+                folder: None,
             })
             .await
             .unwrap();
@@ -6987,6 +8474,7 @@ mod owner_tests {
             .execute(Operation::Chains {
                 workflow: None,
                 pool: None,
+                folder: None,
             })
             .await
             .unwrap();
@@ -6999,6 +8487,268 @@ mod owner_tests {
             })
             .await
             .is_err());
+    }
+    #[tokio::test]
+    async fn the_chain_that_applies_is_found_through_the_checkout_folder_like_the_fallback() {
+        // C-8/C-2 fix cycle 1: `Chains {workflow, folder}` resolves the group the way the
+        // fallback does (`fallback::chain_pool`): the group holding the folder, not only a pool
+        // the caller names.
+        let root = tempfile::tempdir().unwrap();
+        let runtime = fixtures::runtime(root.path(), signed_out, activates).await;
+        let repo = tempfile::tempdir().unwrap();
+        let repo_path = repo.path().canonicalize().unwrap();
+        let group = runtime
+            .store
+            .save_project(None, "Alpha", std::slice::from_ref(&repo_path), &[])
+            .unwrap();
+        let step = |agent: &str| switchboard_core::Executor {
+            agent: agent.into(),
+            account_id: None,
+            key: None,
+        };
+        runtime
+            .store
+            .set_chain(switchboard_core::ChainScope::Machine, vec![step("codex")])
+            .unwrap();
+        runtime
+            .store
+            .set_chain(
+                switchboard_core::ChainScope::Project {
+                    pool: group.pool.clone(),
+                },
+                vec![step("claude-code")],
+            )
+            .unwrap();
+        let view = runtime
+            .execute(Operation::Chains {
+                workflow: Some("wf_0123456789abcdef".into()),
+                pool: None,
+                folder: Some(repo_path.join("src")),
+            })
+            .await
+            .unwrap();
+        assert_eq!(view["effective"]["scope"]["kind"], "project");
+        assert_eq!(view["effective"]["scope"]["pool"], group.pool.as_str());
+        assert_eq!(view["limits_known"], true, "the owner knows its limits");
+        // Outside every group the machine's chain applies.
+        let elsewhere = tempfile::tempdir().unwrap();
+        let view = runtime
+            .execute(Operation::Chains {
+                workflow: Some("wf_0123456789abcdef".into()),
+                pool: None,
+                folder: Some(elsewhere.path().to_owned()),
+            })
+            .await
+            .unwrap();
+        assert_eq!(view["effective"]["scope"]["kind"], "machine");
+        // An offline answer has no owner's limits: it says so.
+        let offline = tempfile::tempdir().unwrap();
+        let store = Arc::new(
+            Store::open(offline.path().to_owned(), Arc::new(MemoryVault::default())).unwrap(),
+        );
+        let view = execute(
+            store,
+            offline.path(),
+            None,
+            Operation::Chains {
+                workflow: None,
+                pool: None,
+                folder: None,
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(view["limits_known"], false);
+    }
+    #[tokio::test]
+    async fn spending_ceilings_are_set_read_and_answered_through_the_runtime() {
+        // SB-72 (C-4): the operations as the surfaces send them, over spend.json, never Snapshot.
+        let root = tempfile::tempdir().unwrap();
+        let runtime = fixtures::runtime(root.path(), signed_out, activates).await;
+        let op = |v: Value| serde_json::from_value::<Operation>(v).unwrap();
+        let empty = runtime.execute(Operation::Ceilings).await.unwrap();
+        assert_eq!(empty["ceilings"], json!([]));
+        assert_eq!(empty["limits"]["max_usd"], 1000.0);
+        // C-4 fix cycle 1: a body that leaves out `usd` or `by` is refused, never read as
+        // "clear" or as some surface.
+        assert!(serde_json::from_value::<Operation>(
+            json!({"operation": "set_ceiling", "scope": {"kind": "machine"}, "by": "window"})
+        )
+        .is_err());
+        assert!(serde_json::from_value::<Operation>(
+            json!({"operation": "set_ceiling", "scope": {"kind": "machine"}, "usd": 5})
+        )
+        .is_err());
+        let changes = runtime.store.changes();
+        let set = runtime
+            .execute(op(
+                json!({"operation": "set_ceiling", "scope": {"kind": "machine"}, "usd": 5, "by": "window"}),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(set["ceiling"]["cents"], 500);
+        // spend.json is carried by backups: a ceiling set counts for the next one.
+        assert!(
+            runtime.store.changes() > changes,
+            "the next backup carries it"
+        );
+        let out = runtime
+            .execute(op(
+                json!({"operation": "set_ceiling", "scope": {"kind": "machine"}, "usd": 0, "by": "window"}),
+            ))
+            .await
+            .unwrap_err();
+        assert_eq!(out, spend::OUT_OF_RANGE);
+        // A question opened by the gate (C-5), answered as each surface would.
+        let snapshot = runtime.store.snapshot().unwrap();
+        let id = spend::open_question(
+            root.path(),
+            &snapshot,
+            &switchboard_core::ChainScope::Machine,
+            500,
+            5.1,
+            monitor::now(),
+        )
+        .unwrap()
+        .unwrap();
+        let listed = runtime.execute(Operation::Ceilings).await.unwrap();
+        assert_eq!(listed["questions"][0]["id"], id.as_str());
+        assert_eq!(listed["questions"][0]["double_usd"], 10.0);
+        let refused = runtime
+            .execute(op(
+                json!({"operation": "answer_ceiling", "id": id, "answer": "double", "by": "mcp"}),
+            ))
+            .await
+            .unwrap_err();
+        assert_eq!(refused, spend::DOUBLE_IN_WINDOW);
+        let doubled = runtime
+            .execute(op(json!({"operation": "answer_ceiling", "id": id, "answer": "double", "by": "window"})))
+            .await
+            .unwrap();
+        assert_eq!(doubled["ceiling"]["usd"], 10.0);
+        assert_eq!(doubled["ceiling"]["doubled_from"], 5.0);
+        // A surface must say who it is; an unknown one is refused before anything runs.
+        assert!(serde_json::from_value::<Operation>(
+            json!({"operation": "answer_ceiling", "id": id, "answer": "keep"})
+        )
+        .is_err());
+        assert!(serde_json::from_value::<Operation>(
+            json!({"operation": "answer_ceiling", "id": id, "answer": "keep", "by": "operator"})
+        )
+        .is_err());
+        // Nothing of it reached accounts.json: a 0.6.x build still reads the store.
+        let stored = serde_json::to_string(&runtime.store.snapshot().unwrap()).unwrap();
+        assert!(!stored.contains("ceiling") && !stored.contains("cents"));
+        assert!(root.path().join(spend::FILE).is_file());
+        let cleared = runtime
+            .execute(op(
+                json!({"operation": "set_ceiling", "scope": {"kind": "machine"}, "usd": null, "by": "window"}),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(cleared["ceiling"], Value::Null);
+    }
+    #[tokio::test]
+    async fn the_chain_view_names_why_each_step_would_be_skipped() {
+        // C-2 (dossier C part A): `Chains` adds, per chain set, what each step would do now and
+        // the last hand-over from spend.json, without the engine, a hand-over or a network call.
+        let root = tempfile::tempdir().unwrap();
+        let runtime = fixtures::runtime(root.path(), signed_out, activates).await;
+        runtime
+            .execute(Operation::AgentEnable {
+                agent: "codex".into(),
+                enabled: false,
+            })
+            .await
+            .unwrap();
+        runtime
+            .execute(Operation::SetChain {
+                scope: switchboard_core::ChainScope::Machine,
+                executors: vec![
+                    switchboard_core::Executor {
+                        agent: "codex".into(),
+                        account_id: None,
+                        key: None,
+                    },
+                    switchboard_core::Executor {
+                        agent: "hermes".into(),
+                        account_id: None,
+                        key: Some("demo/prod/OPENROUTER_API_KEY".into()),
+                    },
+                ],
+                preset: None,
+            })
+            .await
+            .unwrap();
+        let view = runtime
+            .execute(Operation::Chains {
+                workflow: None,
+                pool: None,
+                folder: None,
+            })
+            .await
+            .unwrap();
+        let steps = view["readiness"]["machine"].as_array().unwrap();
+        assert_eq!(steps.len(), 2);
+        assert_eq!(steps[0]["state"], "skipped");
+        assert_eq!(steps[0]["reason"], "agent_disabled");
+        assert_eq!(steps[1]["state"], "not_automatic");
+        assert_eq!(steps[1]["reason"], "key_pinned");
+        assert_eq!(view["last_handover"], Value::Null);
+        assert_eq!(view["ceilings_unreadable"], false);
+        // The last hand-over is read from spend.json, never from Snapshot events.
+        std::fs::write(
+            root.path().join(spend::FILE),
+            r#"{"version":1,"last_handover":{"at":5,"workflow":"wf_0123456789abcdef","outcome":"no_step","skipped":[{"agent":"codex","reason":"agent_disabled"}]}}"#,
+        )
+        .unwrap();
+        let view = runtime
+            .execute(Operation::Chains {
+                workflow: None,
+                pool: None,
+                folder: None,
+            })
+            .await
+            .unwrap();
+        assert_eq!(view["last_handover"]["outcome"], "no_step");
+        assert_eq!(
+            view["last_handover"]["skipped"][0]["reason"],
+            "agent_disabled"
+        );
+        // An unreadable spend.json keeps the chains readable and says so.
+        std::fs::write(root.path().join(spend::FILE), b"{broken").unwrap();
+        let view = runtime
+            .execute(Operation::Chains {
+                workflow: None,
+                pool: None,
+                folder: None,
+            })
+            .await
+            .unwrap();
+        assert_eq!(view["ceilings_unreadable"], true);
+        assert_eq!(view["last_handover"], Value::Null);
+        assert_eq!(view["chains"].as_array().unwrap().len(), 1);
+    }
+    #[tokio::test]
+    async fn an_offline_command_cannot_answer_a_ceiling_as_the_window() {
+        // C-Q1 (C-4): with no owner running, the CLI's offline path refuses `by: window` before
+        // it opens the store; only the app's own process answers as the window.
+        let root = tempfile::tempdir().unwrap();
+        let refused = execute_offline(
+            root.path().to_owned(),
+            Operation::AnswerCeiling {
+                id: "q_0123456789abcdef".into(),
+                answer: spend::Answer::Double,
+                by: spend::Surface::Window,
+            },
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(refused, spend::WINDOW_ONLY);
+        assert!(
+            !root.path().join("accounts.json").exists(),
+            "the store was never opened"
+        );
     }
     #[tokio::test]
     async fn a_stored_copy_alone_never_moves_the_live_token_to_another_account() {
@@ -7404,6 +9154,125 @@ mod lifecycle_tests {
             .status()
     }
 
+    /// SB-183 (node A-3): the first-time notice waits for the window, across a restart of the
+    /// owner, and is gone once the window acknowledged it.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn the_first_time_notice_waits_for_the_window_across_a_restart() {
+        let root = tempfile::tempdir().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let home = home.path().canonicalize().unwrap();
+        std::fs::write(home.join(".zshrc"), "own\n").unwrap();
+        let cli = home.join("switchboard");
+        std::fs::write(&cli, "#!/bin/sh\n").unwrap();
+        let host = shell::install::Host {
+            home: home.clone(),
+            zdotdir: None,
+            login_shell: Some("zsh".into()),
+            macos: true,
+            // SAFETY: getuid has no preconditions and cannot fail.
+            uid: Some(unsafe { libc::getuid() }),
+            cli: Some(cli),
+            windows: None,
+        };
+        let first = owner(root.path()).await;
+        first.runtime.enable_shell_hook_with(host.clone());
+        let (work, _acme) = super::owner_tests::organization_group(&first.runtime).await;
+        first.runtime.bindings_pass().await;
+        assert!(first.runtime.shell_hook_notice().is_some());
+        first.shutdown(Duration::from_secs(5)).await;
+        // The app restarted before the window showed it: the installed app enables its home at
+        // start, and only then answers the notice (A-7 fix cycle 1, N2).
+        let second = owner(root.path()).await;
+        let runtime = &second.runtime;
+        assert!(runtime.shell_hook_notice().is_none(), "not before its home");
+        runtime.enable_shell_hook_with(host.clone());
+        let notice = runtime
+            .shell_hook_notice()
+            .expect("the notice is still waiting after a restart");
+        assert_eq!(notice["organization"], "Acme");
+        assert_eq!(notice["group"], "Acme");
+        assert!(runtime.shell_hook_notice().is_some(), "until acknowledged");
+        runtime.acknowledge_shell_hook_notice();
+        assert!(runtime.shell_hook_notice().is_none());
+        second.shutdown(Duration::from_secs(5)).await;
+        let third = owner(root.path()).await;
+        third.runtime.enable_shell_hook_with(host);
+        third.runtime.bindings_pass().await;
+        assert!(third.runtime.shell_hook_notice().is_none(), "said once");
+        third.shutdown(Duration::from_secs(5)).await;
+        drop(work);
+    }
+
+    /// SB-183 (node A-7): the window's *Turn off* / *Turn on* go through the installed owner's
+    /// home: off gives the start file back byte for byte and keeps it out, on writes it again;
+    /// the section reads the organization by name. An owner that is not the installed app
+    /// refuses and changes nothing.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn the_windows_switch_turns_the_hook_off_and_on_through_the_owner() {
+        let root = tempfile::tempdir().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let home = home.path().canonicalize().unwrap();
+        let rc = home.join(".zshrc");
+        std::fs::write(&rc, "own\n").unwrap();
+        let cli = home.join("switchboard");
+        std::fs::write(&cli, "#!/bin/sh\n").unwrap();
+        let host = shell::install::Host {
+            home: home.clone(),
+            zdotdir: None,
+            login_shell: Some("zsh".into()),
+            macos: true,
+            // SAFETY: getuid has no preconditions and cannot fail.
+            uid: Some(unsafe { libc::getuid() }),
+            cli: Some(cli),
+            windows: None,
+        };
+        let owner = owner(root.path()).await;
+        let runtime = &owner.runtime;
+        // Not the installed app yet: the switch is refused and nothing is written.
+        assert_eq!(runtime.shell_hook_status()["can_change"], false);
+        assert_eq!(
+            runtime.set_shell_hook(true).unwrap_err(),
+            shell::install::NOT_INSTALLED
+        );
+        assert_eq!(std::fs::read_to_string(&rc).unwrap(), "own\n");
+        assert_eq!(shell::map::choice(root.path()), shell::map::Choice::Default);
+
+        runtime.enable_shell_hook_with(host);
+        let (work, _acme) = super::owner_tests::organization_group(runtime).await;
+        runtime.bindings_pass().await;
+        let status = runtime.shell_hook_status();
+        assert_eq!(status["can_change"], true);
+        assert_eq!(status["hook"], "default_on");
+        assert_eq!(status["organizations"], json!(["Acme"]));
+        assert_eq!(status["unmapped"], json!([]), "SB-222: its group has a row");
+        assert_eq!(status["files"][0]["state"], "written");
+        assert!(
+            status.get("terminal").is_none(),
+            "the window has no terminal of its own"
+        );
+        assert!(std::fs::read_to_string(&rc)
+            .unwrap()
+            .contains(shell::install::OPEN));
+
+        let off = runtime.set_shell_hook(false).unwrap();
+        assert_eq!(off["hook"], "off");
+        assert_eq!(std::fs::read_to_string(&rc).unwrap(), "own\n");
+        // A background pass after off writes nothing back.
+        runtime.bindings_pass().await;
+        assert_eq!(std::fs::read_to_string(&rc).unwrap(), "own\n");
+
+        let on = runtime.set_shell_hook(true).unwrap();
+        assert_eq!(on["hook"], "on");
+        assert_eq!(on["files"][0]["state"], "written");
+        assert!(std::fs::read_to_string(&rc)
+            .unwrap()
+            .contains(shell::install::OPEN));
+        owner.shutdown(Duration::from_secs(5)).await;
+        drop(work);
+    }
+
     #[tokio::test]
     async fn a_restarted_owner_keeps_the_address_and_token_a_session_holds() {
         let tmp = tempfile::tempdir().unwrap();
@@ -7778,6 +9647,48 @@ mod usage_gate_tests {
         runtime.execute(Operation::Usage { id: id.into() }).await
     }
 
+    /// B-5 fix cycle 2: a person's *Check* reaches past a usage verdict through both doors that
+    /// carry it: the owner's `Runtime::execute` and the `execute` arm the offline CLI runs. The
+    /// provider answering 200 takes the verdict back; the background check would not have asked.
+    #[tokio::test]
+    async fn a_persons_usage_operation_lifts_a_verdict_through_the_owner_and_the_offline_arm() {
+        let root = tempfile::tempdir().unwrap();
+        let runtime = fixtures::runtime(root.path(), signed_in, activates).await;
+        let b = save(&runtime.store, "synthetic-b", "default");
+        let up = upstream(&runtime).await;
+        let verdict = || {
+            let credential = runtime.store.stored_credential(&b.id).unwrap();
+            runtime.refresh.reject(&b.id, &credential);
+            assert_eq!(
+                runtime.refresh.sign_in_required(&runtime.store),
+                vec![b.id.clone()]
+            );
+        };
+
+        verdict();
+        assert!(usage(&runtime, &b.id).await.is_ok());
+        assert_eq!(up.calls.load(Ordering::SeqCst), 1);
+        assert!(
+            runtime.refresh.sign_in_required(&runtime.store).is_empty(),
+            "the owner's Usage operation is a person's check"
+        );
+
+        verdict();
+        let answer = execute(
+            runtime.store.clone(),
+            &runtime.root,
+            Some(runtime.as_ref()),
+            Operation::Usage { id: b.id.clone() },
+        )
+        .await;
+        assert!(answer.is_ok(), "{answer:?}");
+        assert_eq!(up.calls.load(Ordering::SeqCst), 2);
+        assert!(
+            runtime.refresh.sign_in_required(&runtime.store).is_empty(),
+            "the offline Usage arm is a person's check"
+        );
+    }
+
     #[tokio::test]
     async fn no_caller_checks_before_the_providers_not_before() {
         let root = tempfile::tempdir().unwrap();
@@ -8015,5 +9926,132 @@ mod usage_gate_tests {
         )
         .await;
         assert_eq!(answer.unwrap_err(), switchboard_proxy::USAGE_RATE_LIMITED);
+    }
+}
+
+#[cfg(test)]
+mod launch_record_tests {
+    use super::*;
+    use fixtures::*;
+
+    #[test]
+    fn a_launch_from_outside_the_app_never_reads_as_the_window() {
+        let launch = || Operation::KimiLaunch {
+            id: "k".into(),
+            working_directory: PathBuf::from("/x"),
+        };
+        let bare = from_outside(launch());
+        let Operation::Launched { by, inner } = bare else {
+            panic!("a bare launch is wrapped");
+        };
+        assert_eq!(by.surface, launches::Surface::Cli);
+        assert!(matches!(*inner, Operation::KimiLaunch { .. }));
+        let claimed = from_outside(Operation::Launched {
+            by: launches::LaunchedBy::surface(launches::Surface::Window),
+            inner: Box::new(launch()),
+        });
+        let Operation::Launched { by, .. } = claimed else {
+            panic!();
+        };
+        assert_eq!(by.surface, launches::Surface::Cli);
+        let dashboards = from_outside(Operation::Launched {
+            by: launches::LaunchedBy::surface(launches::Surface::Dashboards),
+            inner: Box::new(launch()),
+        });
+        let Operation::Launched { by, .. } = dashboards else {
+            panic!();
+        };
+        assert_eq!(by.surface, launches::Surface::Dashboards);
+        assert!(matches!(
+            from_outside(Operation::Snapshot),
+            Operation::Snapshot
+        ));
+        // The wire form a CLI sends, read back by the owner.
+        let wire = serde_json::to_string(&Operation::Launched {
+            by: launches::LaunchedBy {
+                by: Some("voc-learn".into()),
+                ..launches::LaunchedBy::surface(launches::Surface::Cli)
+            },
+            inner: Box::new(launch()),
+        })
+        .unwrap();
+        assert!(matches!(
+            serde_json::from_str::<Operation>(&wire).unwrap(),
+            Operation::Launched { .. }
+        ));
+    }
+    #[tokio::test]
+    async fn a_malformed_launcher_name_or_a_wrapped_non_launch_is_refused_before_anything_runs() {
+        let root = tempfile::tempdir().unwrap();
+        let runtime = runtime(root.path(), signed_out, activates).await;
+        let refused = runtime
+            .execute(Operation::Launched {
+                by: launches::LaunchedBy {
+                    by: Some("two words".into()),
+                    ..launches::LaunchedBy::surface(launches::Surface::Cli)
+                },
+                inner: Box::new(Operation::KimiLaunch {
+                    id: "k".into(),
+                    working_directory: root.path().to_owned(),
+                }),
+            })
+            .await
+            .unwrap_err();
+        assert_eq!(refused, launches::BY_INVALID);
+        let refused = runtime
+            .execute(Operation::Launched {
+                by: launches::LaunchedBy::surface(launches::Surface::Cli),
+                inner: Box::new(Operation::Snapshot),
+            })
+            .await
+            .unwrap_err();
+        assert_eq!(refused, launches::NOT_A_LAUNCH);
+        assert!(!root.path().join(launches::DIR).exists());
+    }
+    #[tokio::test]
+    async fn the_history_and_one_launch_read_through_the_owner_and_a_hook_writes_its_turns() {
+        let root = tempfile::tempdir().unwrap();
+        let runtime = runtime(root.path(), signed_out, activates).await;
+        let home = root.path().join("runtimes").join("claude-default");
+        private_fs_dir(&home);
+        let id = launches::new_id();
+        launches::record(
+            root.path(),
+            &home,
+            json!({"account_id": "a", "provider": "claude", "launched_at": 5}),
+            &id,
+        )
+        .unwrap();
+        let listed = runtime
+            .execute(Operation::Launches { launch_id: None })
+            .await
+            .unwrap();
+        assert_eq!(listed["total"], 1);
+        assert_eq!(listed["launches"][0]["launch_id"], id.as_str());
+        assert_eq!(listed["launches"][0]["agent"], "claude-code");
+        assert_eq!(listed["launches"][0]["state"], "ended");
+        let answer = runtime
+            .execute(Operation::LaunchEvent {
+                launch_id: id.clone(),
+                event: launches::Event::Turn,
+                provider_session_id: None,
+                transcript: None,
+                source: None,
+            })
+            .await
+            .unwrap();
+        assert_eq!(answer, json!({"recorded": true}));
+        let shown = runtime
+            .execute(Operation::Launches {
+                launch_id: Some(id.clone()),
+            })
+            .await
+            .unwrap();
+        assert_eq!(shown["launch"]["turns"], 1);
+        assert_eq!(shown["up"], json!([]));
+        assert_eq!(shown["down"], json!([]));
+    }
+    fn private_fs_dir(path: &Path) {
+        switchboard_core::private_fs::private_dir(path).unwrap();
     }
 }

@@ -263,7 +263,26 @@ impl Pass {
         crate::kimi::watch(&runtime.root, &runtime.store, &runtime.kimi_watch, time).await;
         crate::fallback::pass(runtime, time).await;
         // SB-108: a hand-over no console took in two minutes opens in Terminal.
-        crate::handovers::sweep(&runtime.root, time, crate::launch::start_terminal);
+        // C-Q8: a paid one passes the spend gate again first.
+        // SB-215: one record without `paid` is classified on the snapshot as it is now, and the
+        // pass's gates share one budget.
+        let snapshot = runtime.store.snapshot().ok();
+        crate::handovers::sweep(
+            &runtime.root,
+            time,
+            crate::launch::start_terminal,
+            |h: &crate::handovers::Handover| crate::fallback::handover_paid(snapshot.as_ref(), h),
+            // SB-213: gated on the key slot its script names; a moved folder refuses it.
+            |h: crate::handovers::Handover, kind, end| async move {
+                crate::fallback::gate_take(&runtime.store, &runtime.root, &h, kind, end).await
+            },
+            crate::fallback::GATE_BUDGET,
+            crate::fallback::SPEND_READ_TIMEOUT,
+            &crate::fallback::HAND_OVER,
+        )
+        .await;
+        // SB-212: launch records not written for 90 days go, looked for at most once an hour.
+        crate::launches::prune_due(&runtime.root, time);
         // Analytics: the daily active event and accounts added by any path; sends what waits.
         if let Some(client) = runtime.analytics() {
             if let Ok(snapshot) = runtime.store.snapshot() {
@@ -433,7 +452,15 @@ async fn probe_provider(
     switchboard_proxy::probe_usage_detailed(store, id.to_owned(), credential).await
 }
 
-pub(crate) async fn probe(store: Arc<Store>, id: &str, gate: &UsageGate) -> Result<Usage, String> {
+/// One quota check of `id`. `rejected` is set to the account's provider and the credential sent
+/// when the provider itself answered 401 (B-5). A token that expired here is refused before the network,
+/// and that refusal says nothing about the seat.
+pub(crate) async fn probe(
+    store: Arc<Store>,
+    id: &str,
+    gate: &UsageGate,
+    rejected: &mut Option<(Provider, switchboard_core::Credential)>,
+) -> Result<Usage, String> {
     let account = store
         .snapshot()?
         .accounts
@@ -499,6 +526,18 @@ pub(crate) async fn probe(store: Arc<Store>, id: &str, gate: &UsageGate) -> Resu
                     &[("outcome", crate::oplog::Field::Code(failure_code(&failure)))],
                 ),
             }
+            // B-5 fix cycle 1: a Codex 401 within `CODEX_EXPIRY_SKEW` of the token's local
+            // expiry may be a clock running ahead here: no verdict.
+            let skew = if account.provider == Provider::Codex {
+                CODEX_EXPIRY_SKEW
+            } else {
+                0
+            };
+            if failure.message == switchboard_proxy::REJECTED
+                && generation.expires_at.is_none_or(|t| t > checked + skew)
+            {
+                *rejected = Some((account.provider, generation.clone()));
+            }
             store.usage_health_credential(id, &generation, "failed", checked, checked + delay)?;
             Err(
                 if failure.message == switchboard_proxy::REJECTED
@@ -527,6 +566,32 @@ pub(crate) async fn check(
     lock: Option<&tokio::sync::Mutex<()>>,
     gate: &UsageGate,
 ) -> Result<Usage, String> {
+    check_as(store, native, refresh, id, lock, gate, false).await
+}
+/// B-5 fix cycle 1: a quota check a person asked for (the owner's Usage operation, the offline
+/// CLI's). Past a usage verdict it asks the provider once more: any answer other than a 401
+/// takes the verdict back, so a provider's mistake never needs a new sign-in or a restart. The
+/// background pass never comes here.
+pub(crate) async fn check_by_person(
+    store: &Arc<Store>,
+    native: crate::NativeSources,
+    refresh: &crate::refresh::RefreshState,
+    id: &str,
+    lock: Option<&tokio::sync::Mutex<()>>,
+    gate: &UsageGate,
+) -> Result<Usage, String> {
+    check_as(store, native, refresh, id, lock, gate, true).await
+}
+#[allow(clippy::too_many_arguments)]
+async fn check_as(
+    store: &Arc<Store>,
+    native: crate::NativeSources,
+    refresh: &crate::refresh::RefreshState,
+    id: &str,
+    lock: Option<&tokio::sync::Mutex<()>>,
+    gate: &UsageGate,
+    person: bool,
+) -> Result<Usage, String> {
     // SB-179: the owner transaction is held for the checks and the store, not for the grant.
     let refreshed = |force: bool| async move {
         crate::refresh::ensure_fresh_with(store, native, refresh, id, force, lock, "usage_renewal")
@@ -547,16 +612,67 @@ pub(crate) async fn check(
                 }
             }
         }
+        // B-5 fix cycle 1: a person's check asks once past a usage verdict (never past a
+        // lineage the token endpoint refused). Nothing is renewed: a 401 keeps the verdict.
+        if person && refresh.usage_verdict_only(store, id) {
+            let mut seen = None;
+            return match probe(store.clone(), id, gate, &mut seen).await {
+                Err(error) if error == switchboard_proxy::REJECTED => dead(),
+                other => {
+                    refresh.lift_verdict(id);
+                    other
+                }
+            };
+        }
         if refreshed(false).await == crate::refresh::Outcome::SignInRequired {
             return dead();
         }
-        match probe(store.clone(), id, gate).await {
+        // B-5: a seat found ended (a Codex one is never renewed) is not asked again until its
+        // credential changes. Nothing remembered: no vault read.
+        if refresh.is_dead(store, id) {
+            return dead();
+        }
+        let mut seen = None;
+        match probe(store.clone(), id, gate, &mut seen).await {
             Err(error) if error == switchboard_proxy::REJECTED => match refreshed(true).await {
-                crate::refresh::Outcome::Refreshed => probe(store.clone(), id, gate).await,
+                crate::refresh::Outcome::Refreshed => {
+                    let mut again = None;
+                    let second = probe(store.clone(), id, gate, &mut again).await;
+                    // B-5 (SB-160): a 401 on the token just renewed is the provider's verdict.
+                    if let Some((_, credential)) = again {
+                        refresh.reject(id, &credential);
+                        crate::refresh::seat_ended(store, id, "usage");
+                        return dead();
+                    }
+                    second
+                }
                 crate::refresh::Outcome::SignInRequired => dead(),
-                _ => Err(error),
+                _ => match seen {
+                    // B-5: Codex is never renewed here; a 401 on two checks in a row, a minute or
+                    // more apart, is the verdict. One 401 is not (B-Q3: nothing is moved either).
+                    // B-5 fix cycle 1: the account the ordinary Codex CLI is signed in to is
+                    // exempt, as Claude Code's is (never a verdict here).
+                    Some((Provider::Codex, _)) if store.is_in_use(id) => {
+                        refresh.clear_rejection(id);
+                        Err(error)
+                    }
+                    Some((Provider::Codex, credential)) => {
+                        if refresh.note_rejection(id, &credential, now()) {
+                            crate::refresh::seat_ended(store, id, "usage");
+                            return dead();
+                        }
+                        Err(error)
+                    }
+                    _ => {
+                        refresh.clear_rejection(id);
+                        Err(error)
+                    }
+                },
             },
-            result => result,
+            result => {
+                refresh.clear_rejection(id);
+                result
+            }
         }
     };
     // One deadline below the control channel's 30 seconds, including any wait for a check of
@@ -572,6 +688,8 @@ pub(crate) async fn check(
         })
 }
 use crate::refresh::SIGN_IN;
+/// B-5 fix cycle 1: a Codex 401 this close to the token's local expiry is no verdict.
+const CODEX_EXPIRY_SKEW: i64 = 300;
 const CHECK_DEADLINE: Duration = Duration::from_secs(25);
 
 /// Renews inactive Claude tokens on their own schedule. Quota checks back off up to 30
@@ -587,8 +705,18 @@ async fn renew_due(runtime: &Runtime, time: i64, schedule: &mut RenewSchedule) {
     // N1 round 3: the key is kept only when every read succeeded or found no account; a read
     // that failed (a `security` timeout, a locked keychain) keeps the account's earlier due time
     // for this pass and is read again at the next one, never dropped until a credential is written.
-    let key = crate::refresh::credentials_key(&runtime.store, &snapshot);
+    // B-5 fix cycle 1: and on the verdicts, which change without a credential write.
+    let key = {
+        use std::hash::{Hash, Hasher};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        crate::refresh::credentials_key(&runtime.store, &snapshot).hash(&mut h);
+        runtime.refresh.verdict_generation().hash(&mut h);
+        h.finish()
+    };
     if schedule.changes != Some(key) {
+        // B-5 fix cycle 1: an ended seat (a lineage refused, a usage verdict) stays out until
+        // its credential changes, which moves the key; cached, so no read while nothing moved.
+        let ended = runtime.refresh.sign_in_required(&runtime.store);
         let previous = std::mem::take(&mut schedule.due_at);
         let (due_at, certain) = crate::blocking::run(|| {
             let mut certain = true;
@@ -596,7 +724,10 @@ async fn renew_due(runtime: &Runtime, time: i64, schedule: &mut RenewSchedule) {
                 .accounts
                 .iter()
                 .filter(|a| {
-                    a.enabled && a.provider == Provider::Claude && a.kind == AuthKind::OAuth
+                    a.enabled
+                        && a.provider == Provider::Claude
+                        && a.kind == AuthKind::OAuth
+                        && !ended.contains(&a.id)
                 })
                 .filter_map(|a| match runtime.store.stored_credential(&a.id) {
                     Ok(credential) => {
@@ -636,6 +767,10 @@ async fn renew_due(runtime: &Runtime, time: i64, schedule: &mut RenewSchedule) {
         .await;
         if outcome == crate::refresh::Outcome::Refreshed {
             done += 1;
+            schedule.retry_at.remove(&id);
+        } else if outcome == crate::refresh::Outcome::SignInRequired {
+            // B-5 fix cycle 1: out of the schedule until a credential is written (the key).
+            schedule.due_at.retain(|(due, _)| *due != id);
             schedule.retry_at.remove(&id);
         } else {
             schedule.retry_at.insert(id, time + RENEW_RETRY_SECONDS);
@@ -1010,6 +1145,177 @@ mod tests {
         runtime.store.update_fields(&id, None, Some(false)).unwrap();
         renew_due(&runtime, now(), &mut schedule).await;
         assert!(schedule.due_at.is_empty());
+    }
+    /// B-5 fix cycle 1 (idle budget): an ended Claude seat whose token comes due was asked about
+    /// every minute (three vault reads and the owner transaction each). It leaves the renewal
+    /// schedule until its credential changes, and a schedule rebuilt meanwhile leaves it out.
+    #[tokio::test]
+    async fn an_ended_seat_leaves_the_renewal_schedule_until_its_credential_changes() {
+        let root = tempfile::tempdir().unwrap();
+        let vault = Arc::new(CountingVault {
+            inner: MemoryVault::default(),
+            gets: Default::default(),
+        });
+        let runtime = Runtime::open(root.path().to_owned(), vault.clone())
+            .await
+            .unwrap();
+        let mut credential = crate::fixtures::credential("synthetic-b");
+        credential.expires_at = Some(now() + 60);
+        credential.refresh_token = Some("synthetic-b-refresh".into());
+        let id = runtime
+            .store
+            .upsert(
+                "synthetic-b".into(),
+                Provider::Claude,
+                AuthKind::OAuth,
+                "default".into(),
+                credential.clone(),
+                Some(crate::fixtures::identity("synthetic-b")),
+            )
+            .unwrap()
+            .id;
+        // A usage check found the seat ended (B-5).
+        runtime.refresh.reject(&id, &credential);
+        let start = now();
+        let mut schedule = RenewSchedule::default();
+        renew_due(&runtime, start, &mut schedule).await;
+        let reads = vault.gets.load(std::sync::atomic::Ordering::SeqCst);
+        // An idle hour, one renewal look a minute.
+        for k in 1..=60 {
+            renew_due(&runtime, start + k * RENEW_RETRY_SECONDS, &mut schedule).await;
+        }
+        assert_eq!(
+            vault.gets.load(std::sync::atomic::Ordering::SeqCst) - reads,
+            0,
+            "an ended seat is not read again on a timer"
+        );
+        assert!(schedule.due_at.iter().all(|(i, _)| *i != id));
+        // A schedule built while the seat is ended leaves it out.
+        let mut rebuilt = RenewSchedule::default();
+        renew_due(&runtime, start, &mut rebuilt).await;
+        assert!(rebuilt.due_at.iter().all(|(i, _)| *i != id));
+        // A verdict a person's check took back puts it back without a credential write.
+        runtime.refresh.lift_verdict(&id);
+        renew_due(&runtime, start, &mut rebuilt).await;
+        assert!(rebuilt.due_at.iter().any(|(i, _)| *i == id));
+        // *Sign in again*: the new credential is scheduled.
+        let mut again = crate::fixtures::credential("synthetic-b");
+        again.expires_at = Some(now() + 86_400);
+        again.refresh_token = Some("synthetic-b-new-login".into());
+        runtime
+            .store
+            .upsert(
+                "synthetic-b".into(),
+                Provider::Claude,
+                AuthKind::OAuth,
+                "default".into(),
+                again,
+                Some(crate::fixtures::identity("synthetic-b")),
+            )
+            .unwrap();
+        renew_due(&runtime, start, &mut schedule).await;
+        assert!(schedule.due_at.iter().any(|(i, _)| *i == id));
+    }
+    /// B-5 fix cycle 2 (adversarial round): the schedule is built while the seat is live and the
+    /// verdict comes afterwards, as it does on a running owner. A seat not yet due leaves the
+    /// schedule at the next pass (the rebuild's filter, moved by `verdict_generation`); a seat
+    /// that is due and is ended by its own renewal (`invalid_grant`) leaves it in that very pass
+    /// (the `SignInRequired` drop). Either way an idle hour reads nothing more from the vault.
+    #[tokio::test]
+    async fn a_verdict_after_the_schedule_was_built_takes_the_seat_out() {
+        let open = || async {
+            let root = tempfile::tempdir().unwrap();
+            let vault = Arc::new(CountingVault {
+                inner: MemoryVault::default(),
+                gets: Default::default(),
+            });
+            let runtime = Runtime::open_with(root.path().to_owned(), vault.clone(), seat::NATIVE)
+                .await
+                .unwrap();
+            (root, vault, runtime)
+        };
+        let seat = |runtime: &Runtime, expires_at: i64| {
+            let mut credential = crate::fixtures::credential("synthetic-b");
+            credential.expires_at = Some(expires_at);
+            let id = runtime
+                .store
+                .upsert(
+                    "synthetic-b".into(),
+                    Provider::Claude,
+                    AuthKind::OAuth,
+                    "default".into(),
+                    credential.clone(),
+                    Some(crate::fixtures::identity("synthetic-b")),
+                )
+                .unwrap()
+                .id;
+            (id, credential)
+        };
+        let reads = |vault: &CountingVault| vault.gets.load(std::sync::atomic::Ordering::SeqCst);
+
+        // Not yet due: due half an hour from now, inside the idle hour.
+        let (_root, vault, runtime) = open().await;
+        let start = now();
+        let (id, credential) = seat(&runtime, start + crate::refresh::MARGIN_SECONDS + 1800);
+        let mut schedule = RenewSchedule::default();
+        renew_due(&runtime, start, &mut schedule).await;
+        assert!(
+            schedule
+                .due_at
+                .iter()
+                .any(|(i, at)| *i == id && *at > start),
+            "built while the seat is live: scheduled, not yet due"
+        );
+        // A usage check ends the seat after the schedule was built.
+        runtime.refresh.reject(&id, &credential);
+        renew_due(&runtime, start, &mut schedule).await;
+        let before = reads(&vault);
+        for k in 1..=60 {
+            renew_due(&runtime, start + k * RENEW_RETRY_SECONDS, &mut schedule).await;
+        }
+        assert_eq!(
+            reads(&vault) - before,
+            0,
+            "a seat ended before it came due is never read on a timer"
+        );
+        assert!(schedule.due_at.iter().all(|(i, _)| *i != id));
+        assert!(!schedule.retry_at.contains_key(&id));
+
+        // Due now, and its own renewal ends it (`invalid_grant`).
+        let server = seat::server(&[200], (400, json!({"error": "invalid_grant"}))).await;
+        let (_root, vault, runtime) = open().await;
+        runtime
+            .refresh
+            .set_endpoint(format!("{}/token", server.base));
+        let start = now();
+        let (id, _) = seat(&runtime, start + 60);
+        let mut schedule = RenewSchedule::default();
+        renew_due(&runtime, start, &mut schedule).await;
+        assert_eq!(
+            server.grants.load(std::sync::atomic::Ordering::SeqCst),
+            1,
+            "the due seat was renewed once and refused"
+        );
+        assert_eq!(
+            runtime.refresh.sign_in_required(&runtime.store),
+            vec![id.clone()]
+        );
+        assert!(
+            schedule.due_at.iter().all(|(i, _)| *i != id) && !schedule.retry_at.contains_key(&id),
+            "the pass that ended the seat takes it out of the schedule"
+        );
+        renew_due(&runtime, start + RENEW_RETRY_SECONDS, &mut schedule).await;
+        let before = reads(&vault);
+        for k in 2..=61 {
+            renew_due(&runtime, start + k * RENEW_RETRY_SECONDS, &mut schedule).await;
+        }
+        assert_eq!(
+            reads(&vault) - before,
+            0,
+            "an ended seat is not read on a timer"
+        );
+        assert_eq!(server.grants.load(std::sync::atomic::Ordering::SeqCst), 1);
+        assert!(schedule.due_at.iter().all(|(i, _)| *i != id));
     }
     /// N1 round 3 (adversarial): a vault read that failed while the renewal schedule was built (a
     /// locked keychain, a `security` timeout) must not drop the account from the schedule until
@@ -1773,9 +2079,11 @@ mod tests {
                 Credential::parse(Provider::Claude, AuthKind::ApiKey, "synthetic-api-key").unwrap(),
             )
             .unwrap();
-        assert!(probe(store.clone(), &account.id, &UsageGate::default())
-            .await
-            .is_err());
+        assert!(
+            probe(store.clone(), &account.id, &UsageGate::default(), &mut None)
+                .await
+                .is_err()
+        );
         let health = store
             .snapshot()
             .unwrap()
@@ -1803,9 +2111,11 @@ mod tests {
             )
             .unwrap();
         vault.delete(&account.id).unwrap();
-        assert!(probe(store.clone(), &account.id, &UsageGate::default())
-            .await
-            .is_err());
+        assert!(
+            probe(store.clone(), &account.id, &UsageGate::default(), &mut None)
+                .await
+                .is_err()
+        );
         let health = store
             .snapshot()
             .unwrap()
@@ -1910,7 +2220,52 @@ mod tests {
             .usage_health(&a, "ok", start - 10, start + 3 * 3600)
             .unwrap();
         runtime.store.set_policy(policy("claude_cli")).unwrap();
+        // SB-183: a group bound to an organization, so the bindings pass also hashes the shell
+        // homes' fingerprint (`shell::homes::key`) and writes the homes and the folder map once.
+        let work = tempfile::tempdir().unwrap();
+        let acme = work.path().canonicalize().unwrap().join("acme");
+        std::fs::create_dir_all(&acme).unwrap();
+        let org = runtime.store.add_organization("Acme", &[]).unwrap();
+        let member = save(&runtime.store, "synthetic-org", "default");
+        runtime
+            .store
+            .usage_health(&member.id, "ok", start - 10, start + 3 * 3600)
+            .unwrap();
+        runtime
+            .store
+            .assign_organization(&member.id, Some(&org.id))
+            .unwrap();
+        runtime
+            .execute(crate::Operation::SaveProject {
+                pool: None,
+                name: "Acme".into(),
+                folders: vec![acme.clone()],
+                account_ids: vec![member.id.clone()],
+                base_folders: None,
+                organization: Some(org.id.clone()),
+            })
+            .await
+            .unwrap();
         runtime.store.flush().unwrap();
+        // Every file under the data folder and the group's folder, with its size and time.
+        fn files(
+            dirs: &[&std::path::Path],
+        ) -> Vec<(std::path::PathBuf, u64, std::time::SystemTime)> {
+            let mut out = Vec::new();
+            let mut stack: Vec<std::path::PathBuf> = dirs.iter().map(|d| d.to_path_buf()).collect();
+            while let Some(dir) = stack.pop() {
+                for entry in std::fs::read_dir(&dir).into_iter().flatten().flatten() {
+                    let meta = entry.metadata().unwrap();
+                    if meta.is_dir() {
+                        stack.push(entry.path());
+                    } else {
+                        out.push((entry.path(), meta.len(), meta.modified().unwrap()));
+                    }
+                }
+            }
+            out.sort();
+            out
+        }
         let mut pass = Pass::default();
         // The first pass learns what is there: the sign-in, the renewal schedule, a backup.
         CLOCK.store(start, Ordering::SeqCst);
@@ -1920,6 +2275,13 @@ mod tests {
         let writes = runtime.store.metadata_writes();
         let backup_files = || std::fs::read_dir(backups.path()).unwrap().count();
         let first_backups = backup_files();
+        assert!(
+            crate::shell::map::answer(root.path(), &acme).is_some(),
+            "the first pass wrote the organization's row"
+        );
+        let key = *runtime.bindings_key.lock().unwrap();
+        assert!(key.is_some());
+        let written = files(&[root.path(), &acme]);
         // Then an hour of passes with nothing changing.
         let passes = 3600 / PASS_SECONDS as i64;
         for k in 1..=passes {
@@ -1942,6 +2304,16 @@ mod tests {
         );
         assert_eq!(runtime.store.metadata_writes(), writes, "no metadata write");
         assert_eq!(backup_files(), first_backups, "no backup without a change");
+        assert_eq!(
+            *runtime.bindings_key.lock().unwrap(),
+            key,
+            "the bindings and shell homes' fingerprint did not move"
+        );
+        assert_eq!(
+            files(&[root.path(), &acme]),
+            written,
+            "no file was written in the data folder or the group's folder"
+        );
         // One per pass for native rotation's current account, one per three-minute source
         // sync for the signed-in account (before: every account's credential, every 10 s).
         let syncs = (3600 / INTERVAL_SECONDS) as u64;
@@ -2067,5 +2439,620 @@ mod tests {
             runtime.monitor_decisions.lock().unwrap()[0]["reason"],
             "cooldown"
         );
+    }
+
+    // B-5 (SB-160, SCN-078): a seat the organization removed reads as ended. A usage check whose
+    // 401 survives a fresh renewal (Claude), or a 401 on two checks in a row at least a minute
+    // apart (Codex, never renewed), joins `sign_in_required` until the credential changes.
+    // Nothing else is a verdict: one Codex 401, any 403, a 5xx, a token that only expired here.
+    mod seat {
+        use super::super::*;
+        use crate::fixtures::*;
+        use crate::refresh::{RefreshState, REJECTION_SPACING};
+        use axum::{
+            http::StatusCode,
+            routing::{get, post},
+            Router,
+        };
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Mutex;
+        use switchboard_core::{Credential, MemoryVault};
+
+        pub(super) struct Server {
+            pub base: String,
+            pub probes: Arc<AtomicUsize>,
+            pub grants: Arc<AtomicUsize>,
+        }
+        /// Usage answers in order (the last one repeats), for both providers' usage paths; the
+        /// token endpoint answers `token` every time.
+        pub(super) async fn server(usage: &[u16], token: (u16, serde_json::Value)) -> Server {
+            let script = Arc::new(Mutex::new(usage.to_vec()));
+            let probes = Arc::new(AtomicUsize::new(0));
+            let grants = Arc::new(AtomicUsize::new(0));
+            let answer = {
+                let (script, probes) = (script.clone(), probes.clone());
+                move || {
+                    let (script, probes) = (script.clone(), probes.clone());
+                    async move {
+                        probes.fetch_add(1, Ordering::SeqCst);
+                        let status = {
+                            let mut s = script.lock().unwrap();
+                            if s.len() > 1 {
+                                s.remove(0)
+                            } else {
+                                s[0]
+                            }
+                        };
+                        (
+                            StatusCode::from_u16(status).unwrap(),
+                            axum::Json(json!({
+                                "five_hour": {"utilization": 10.0, "resets_at": null},
+                                "rate_limit": {"primary_window": {"used_percent": 10.0}}
+                            })),
+                        )
+                    }
+                }
+            };
+            let token = {
+                let grants = grants.clone();
+                move || {
+                    let (grants, token) = (grants.clone(), token.clone());
+                    async move {
+                        grants.fetch_add(1, Ordering::SeqCst);
+                        (StatusCode::from_u16(token.0).unwrap(), axum::Json(token.1))
+                    }
+                }
+            };
+            let app = Router::new()
+                .route("/api/oauth/usage", get(answer.clone()))
+                .route("/backend-api/wham/usage", get(answer))
+                .route("/token", post(token));
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let base = format!("http://{}", listener.local_addr().unwrap());
+            tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+            Server {
+                base,
+                probes,
+                grants,
+            }
+        }
+        pub(super) fn renewed() -> (u16, serde_json::Value) {
+            (
+                200,
+                json!({"access_token":"synthetic-b-fresh","expires_in":28800,"refresh_token":"synthetic-b-fresh-refresh"}),
+            )
+        }
+        pub(super) const NATIVE: crate::NativeSources = crate::NativeSources {
+            current: signed_in,
+            activate: activates,
+            live: crate::no_live,
+            swap: crate::no_swap,
+            ..crate::UNAVAILABLE
+        };
+        pub(super) fn store() -> (tempfile::TempDir, Arc<Store>) {
+            let root = tempfile::tempdir().unwrap();
+            let store = Arc::new(
+                Store::open(root.path().to_owned(), Arc::new(MemoryVault::default())).unwrap(),
+            );
+            (root, store)
+        }
+        /// An inactive Claude seat (Claude Code is signed in as `synthetic-a`).
+        pub(super) fn claude_seat(store: &Store) -> String {
+            save(store, "synthetic-b", "default").id
+        }
+        pub(super) fn codex_credential(token: &str, expires_at: i64) -> Credential {
+            Credential {
+                access_token: token.into(),
+                refresh_token: Some(format!("{token}-refresh")),
+                id_token: None,
+                native_context: None,
+                expires_at: Some(expires_at),
+                account_id: Some("synthetic-c".into()),
+            }
+        }
+        pub(super) fn codex_seat(store: &Store, token: &str, expires_at: i64) -> String {
+            store
+                .upsert(
+                    "synthetic-c".into(),
+                    Provider::Codex,
+                    AuthKind::OAuth,
+                    "default".into(),
+                    codex_credential(token, expires_at),
+                    Some(identity("synthetic-c")),
+                )
+                .unwrap()
+                .id
+        }
+        pub(super) fn gate(server: &Server) -> UsageGate {
+            let gate = UsageGate::default();
+            *gate.origins.lock().unwrap() = Some((server.base.clone(), server.base.clone()));
+            gate
+        }
+        pub(super) async fn run(
+            store: &Arc<Store>,
+            state: &RefreshState,
+            id: &str,
+            gate: &UsageGate,
+        ) -> Result<Usage, String> {
+            let lock = tokio::sync::Mutex::new(());
+            check(store, NATIVE, state, id, Some(&lock), gate).await
+        }
+
+        #[tokio::test]
+        async fn a_claude_seat_rejected_after_a_fresh_renewal_reads_sign_in_required() {
+            let server = server(&[401], renewed()).await;
+            let (_root, store) = store();
+            let b = claude_seat(&store);
+            let state = RefreshState::at(format!("{}/token", server.base));
+            let gate = gate(&server);
+            let (result, events) =
+                crate::oplog::capture_async(run(&store, &state, &b, &gate)).await;
+            assert_eq!(result.unwrap_err(), SIGN_IN);
+            assert_eq!(server.grants.load(Ordering::SeqCst), 1, "one fresh renewal");
+            assert_eq!(
+                server.probes.load(Ordering::SeqCst),
+                2,
+                "probed before and after it"
+            );
+            assert_eq!(state.sign_in_required(&store), vec![b.clone()]);
+            assert_eq!(
+                events
+                    .iter()
+                    .filter(|(e, _)| *e == "seat_ended")
+                    .map(|(_, f)| f.clone())
+                    .collect::<Vec<_>>(),
+                vec![vec![
+                    ("provider", crate::oplog::Field::Code("claude")),
+                    ("by", crate::oplog::Field::Code("usage")),
+                    ("organization", crate::oplog::Field::Flag(false)),
+                ]]
+            );
+            // It leaves the due queue for the long backoff, and nothing keeps spending it: the
+            // next check asks neither the usage endpoint nor the token endpoint.
+            let health = store.snapshot().unwrap().accounts[0]
+                .usage_health
+                .clone()
+                .unwrap();
+            assert!(health.next_check_at >= now() + MAX_BACKOFF - 5);
+            assert_eq!(run(&store, &state, &b, &gate).await.unwrap_err(), SIGN_IN);
+            assert_eq!(server.grants.load(Ordering::SeqCst), 1);
+            assert_eq!(server.probes.load(Ordering::SeqCst), 2);
+            assert!(
+                state.is_dead(&store, &b),
+                "never handed to Claude Code either"
+            );
+            assert_eq!(
+                crate::refresh::ensure_fresh(&store, NATIVE, &state, &b, false).await,
+                crate::refresh::Outcome::SignInRequired,
+                "the scheduled renewal does not spend it"
+            );
+            assert_eq!(server.grants.load(Ordering::SeqCst), 1);
+        }
+
+        #[tokio::test]
+        async fn a_codex_seat_rejected_twice_reads_sign_in_required() {
+            let server = server(&[401], renewed()).await;
+            let (_root, store) = store();
+            let acme = store
+                .add_organization("Acme", &["example.invalid".into()])
+                .unwrap();
+            let c = codex_seat(&store, "synthetic-c-token", now() + 86_400);
+            let account = store.snapshot().unwrap().accounts.remove(0);
+            assert_eq!(
+                store.snapshot().unwrap().attribution(&account).organization,
+                Some(acme.id)
+            );
+            let state = RefreshState::default();
+            let gate = gate(&server);
+            assert_eq!(
+                run(&store, &state, &c, &gate).await.unwrap_err(),
+                switchboard_proxy::REJECTED
+            );
+            assert!(
+                state.sign_in_required(&store).is_empty(),
+                "one 401 is not a verdict"
+            );
+            state.age_first_rejection_for_test(&c, REJECTION_SPACING);
+            let (result, events) =
+                crate::oplog::capture_async(run(&store, &state, &c, &gate)).await;
+            assert_eq!(result.unwrap_err(), SIGN_IN);
+            assert_eq!(state.sign_in_required(&store), vec![c.clone()]);
+            assert_eq!(
+                server.grants.load(Ordering::SeqCst),
+                0,
+                "Codex is never renewed"
+            );
+            assert!(events.contains(&(
+                "seat_ended",
+                vec![
+                    ("provider", crate::oplog::Field::Code("codex")),
+                    ("by", crate::oplog::Field::Code("usage")),
+                    ("organization", crate::oplog::Field::Flag(true)),
+                ]
+            )));
+            let probes = server.probes.load(Ordering::SeqCst);
+            assert_eq!(run(&store, &state, &c, &gate).await.unwrap_err(), SIGN_IN);
+            assert_eq!(
+                server.probes.load(Ordering::SeqCst),
+                probes,
+                "not asked again"
+            );
+        }
+
+        #[tokio::test]
+        async fn a_single_codex_401_is_not_a_verdict() {
+            // 401, then an answer that is not a 401, then 401 again: not two in a row.
+            let server = server(&[401, 200, 401], renewed()).await;
+            let (_root, store) = store();
+            let c = codex_seat(&store, "synthetic-c-token", now() + 86_400);
+            let state = RefreshState::default();
+            let gate = gate(&server);
+            let _ = run(&store, &state, &c, &gate).await;
+            state.age_first_rejection_for_test(&c, REJECTION_SPACING);
+            let _ = run(&store, &state, &c, &gate).await;
+            state.age_first_rejection_for_test(&c, REJECTION_SPACING);
+            assert_eq!(
+                run(&store, &state, &c, &gate).await.unwrap_err(),
+                switchboard_proxy::REJECTED
+            );
+            assert_eq!(server.probes.load(Ordering::SeqCst), 3);
+            assert!(state.sign_in_required(&store).is_empty());
+            assert!(!state.is_dead(&store, &c));
+        }
+
+        #[tokio::test]
+        async fn two_quick_codex_401s_are_not_two_scheduled_checks() {
+            // A person pressing *Check* twice within a minute is not two scheduled checks.
+            let server = server(&[401], renewed()).await;
+            let (_root, store) = store();
+            let c = codex_seat(&store, "synthetic-c-token", now() + 86_400);
+            let state = RefreshState::default();
+            let gate = gate(&server);
+            let _ = run(&store, &state, &c, &gate).await;
+            let _ = run(&store, &state, &c, &gate).await;
+            assert_eq!(server.probes.load(Ordering::SeqCst), 2);
+            assert!(state.sign_in_required(&store).is_empty());
+            // The first 401 still counts: a third one a minute after it is the verdict.
+            state.age_first_rejection_for_test(&c, REJECTION_SPACING);
+            assert_eq!(run(&store, &state, &c, &gate).await.unwrap_err(), SIGN_IN);
+            assert_eq!(state.sign_in_required(&store), vec![c]);
+        }
+
+        #[tokio::test]
+        async fn a_403_is_never_a_verdict() {
+            let server = server(&[403], renewed()).await;
+            let (_root, store) = store();
+            let b = claude_seat(&store);
+            let c = codex_seat(&store, "synthetic-c-token", now() + 86_400);
+            let state = RefreshState::at(format!("{}/token", server.base));
+            let gate = gate(&server);
+            for _ in 0..3 {
+                for id in [&b, &c] {
+                    let error = run(&store, &state, id, &gate).await.unwrap_err();
+                    assert_ne!(error, SIGN_IN);
+                }
+                state.age_first_rejection_for_test(&c, REJECTION_SPACING);
+            }
+            assert_eq!(
+                server.grants.load(Ordering::SeqCst),
+                0,
+                "a 403 renews nothing"
+            );
+            assert!(state.sign_in_required(&store).is_empty());
+        }
+
+        #[tokio::test]
+        async fn a_new_credential_clears_the_rejection() {
+            let server = server(&[401], renewed()).await;
+            let (_root, store) = store();
+            let b = claude_seat(&store);
+            let c = codex_seat(&store, "synthetic-c-token", now() + 86_400);
+            let state = RefreshState::at(format!("{}/token", server.base));
+            let gate = gate(&server);
+            assert_eq!(run(&store, &state, &b, &gate).await.unwrap_err(), SIGN_IN);
+            let _ = run(&store, &state, &c, &gate).await;
+            state.age_first_rejection_for_test(&c, REJECTION_SPACING);
+            assert_eq!(run(&store, &state, &c, &gate).await.unwrap_err(), SIGN_IN);
+            let mut both = state.sign_in_required(&store);
+            both.sort();
+            let mut expected = vec![b.clone(), c.clone()];
+            expected.sort();
+            assert_eq!(both, expected);
+            // B-5 fix cycle 2: a credential with the same access token and a new refresh token
+            // (a renewal by another client that kept the access token) is a new credential too.
+            let mut renewed_elsewhere = store.stored_credential(&b).unwrap();
+            renewed_elsewhere.refresh_token = Some("synthetic-b-renewed-elsewhere".into());
+            store
+                .upsert(
+                    "synthetic-b".into(),
+                    Provider::Claude,
+                    AuthKind::OAuth,
+                    "default".into(),
+                    renewed_elsewhere,
+                    Some(identity("synthetic-b")),
+                )
+                .unwrap();
+            assert_eq!(state.sign_in_required(&store), vec![c.clone()]);
+            assert!(!state.is_dead(&store, &b));
+            let mut same_access = codex_credential("synthetic-c-token", now() + 86_400);
+            same_access.refresh_token = Some("synthetic-c-renewed-elsewhere".into());
+            store
+                .upsert(
+                    "synthetic-c".into(),
+                    Provider::Codex,
+                    AuthKind::OAuth,
+                    "default".into(),
+                    same_access,
+                    Some(identity("synthetic-c")),
+                )
+                .unwrap();
+            assert!(state.sign_in_required(&store).is_empty());
+            assert!(!state.is_dead(&store, &c));
+            // Both rejected again, for the sign-ins below.
+            assert_eq!(run(&store, &state, &b, &gate).await.unwrap_err(), SIGN_IN);
+            let _ = run(&store, &state, &c, &gate).await;
+            state.age_first_rejection_for_test(&c, REJECTION_SPACING);
+            assert_eq!(run(&store, &state, &c, &gate).await.unwrap_err(), SIGN_IN);
+            let mut both = state.sign_in_required(&store);
+            both.sort();
+            assert_eq!(both, expected);
+            // *Sign in again*: a new credential for each.
+            let mut again = credential("synthetic-b");
+            again.refresh_token = Some("synthetic-b-new-login".into());
+            store
+                .upsert(
+                    "synthetic-b".into(),
+                    Provider::Claude,
+                    AuthKind::OAuth,
+                    "default".into(),
+                    again,
+                    Some(identity("synthetic-b")),
+                )
+                .unwrap();
+            assert_eq!(state.sign_in_required(&store), vec![c.clone()]);
+            assert!(!state.is_dead(&store, &b));
+            codex_seat(&store, "synthetic-c-new-login", now() + 86_400);
+            assert!(state.sign_in_required(&store).is_empty());
+            assert!(!state.is_dead(&store, &c));
+        }
+
+        /// Adversarial: a 401 the provider took back (a blip at the edge) is answered by the
+        /// renewal path as today; only a 401 on the fresh token is a verdict, and a 5xx or a
+        /// renewal that did not happen never is.
+        #[tokio::test]
+        async fn a_transient_401_or_a_5xx_never_ends_a_claude_seat() {
+            for (usage, token) in [
+                (vec![401, 200], renewed()),
+                (vec![401, 503], renewed()),
+                (vec![401], (500, json!({"error":"server_error"}))),
+                (vec![503], renewed()),
+            ] {
+                let server = server(&usage, token).await;
+                let (_root, store) = store();
+                let b = claude_seat(&store);
+                let state = RefreshState::at(format!("{}/token", server.base));
+                let gate = gate(&server);
+                let first = run(&store, &state, &b, &gate).await;
+                assert_ne!(
+                    first.as_ref().err().map(String::as_str),
+                    Some(SIGN_IN),
+                    "{usage:?}"
+                );
+                assert!(state.sign_in_required(&store).is_empty(), "{usage:?}");
+                assert!(!state.is_dead(&store, &b), "{usage:?}");
+            }
+            // B-5 fix cycle 2: a 401 whose forced renewal does not happen (NotNeeded: a lineage
+            // Claude Swap renews, an account without a captured identity; Active: an account
+            // Claude Code used a moment ago) met no fresh token, so it is no verdict either.
+            for case in ["claude-swap", "no-identity", "recently-active"] {
+                let server = server(&[401], renewed()).await;
+                let (_root, store) = store();
+                let state = RefreshState::at(format!("{}/token", server.base));
+                let b = match case {
+                    "no-identity" => {
+                        let b = store
+                            .upsert(
+                                "synthetic-b".into(),
+                                Provider::Claude,
+                                AuthKind::OAuth,
+                                "default".into(),
+                                credential("synthetic-b"),
+                                None,
+                            )
+                            .unwrap()
+                            .id;
+                        assert!(store.snapshot().unwrap().accounts[0]
+                            .external_identity
+                            .as_ref()
+                            .is_none_or(|i| i.account_id.is_none()));
+                        b
+                    }
+                    _ => claude_seat(&store),
+                };
+                match case {
+                    "claude-swap" => state.hold_for_test("synthetic-b"),
+                    "recently-active" => state.note_active(&identity("synthetic-b")),
+                    _ => {}
+                }
+                let gate = gate(&server);
+                for _ in 0..3 {
+                    let error = run(&store, &state, &b, &gate).await.unwrap_err();
+                    assert_eq!(error, switchboard_proxy::REJECTED, "{case}");
+                }
+                assert_eq!(
+                    server.grants.load(Ordering::SeqCst),
+                    0,
+                    "{case}: no renewal"
+                );
+                assert_eq!(server.probes.load(Ordering::SeqCst), 3, "{case}");
+                assert!(state.sign_in_required(&store).is_empty(), "{case}");
+                assert!(!state.is_dead(&store, &b), "{case}");
+            }
+        }
+
+        /// Adversarial: a Codex token that only expired here (never renewed while inactive) is
+        /// refused before the network; that is no answer from the provider, never a verdict.
+        #[tokio::test]
+        async fn an_expired_codex_token_is_not_a_removed_seat() {
+            let server = server(&[401], renewed()).await;
+            let (_root, store) = store();
+            let c = codex_seat(&store, "synthetic-c-token", now() - 60);
+            let state = RefreshState::default();
+            let gate = gate(&server);
+            for _ in 0..3 {
+                assert_eq!(
+                    run(&store, &state, &c, &gate).await.unwrap_err(),
+                    switchboard_proxy::REJECTED
+                );
+                state.age_first_rejection_for_test(&c, REJECTION_SPACING);
+            }
+            assert_eq!(
+                server.probes.load(Ordering::SeqCst),
+                0,
+                "nothing reached the provider"
+            );
+            assert!(state.sign_in_required(&store).is_empty());
+        }
+
+        /// The ordinary Claude Code's own account is never renewed here, so its 401 never meets
+        /// a fresh renewal: never a verdict.
+        #[tokio::test]
+        async fn the_account_claude_code_uses_is_never_marked_ended() {
+            let server = server(&[401], renewed()).await;
+            let (_root, store) = store();
+            let a = save(&store, "synthetic-a", "default").id;
+            let state = RefreshState::at(format!("{}/token", server.base));
+            let gate = gate(&server);
+            for _ in 0..3 {
+                assert_eq!(
+                    run(&store, &state, &a, &gate).await.unwrap_err(),
+                    switchboard_proxy::REJECTED
+                );
+            }
+            assert_eq!(server.grants.load(Ordering::SeqCst), 0);
+            assert!(state.sign_in_required(&store).is_empty());
+        }
+
+        /// B-5 fix cycle 1: a false verdict has a way back. A person's *Check* (the owner's
+        /// Usage operation) asks the provider once past it, and any answer other than a 401
+        /// lifts it; the background pass alone still asks nothing.
+        #[tokio::test]
+        async fn a_person_check_lifts_a_verdict_the_provider_takes_back() {
+            for provider in [Provider::Claude, Provider::Codex] {
+                let server = server(&[401, 401, 200], renewed()).await;
+                let (_root, store) = store();
+                let id = match provider {
+                    Provider::Claude => claude_seat(&store),
+                    _ => codex_seat(&store, "synthetic-c-token", now() + 86_400),
+                };
+                let state = RefreshState::at(format!("{}/token", server.base));
+                let gate = gate(&server);
+                let _ = run(&store, &state, &id, &gate).await;
+                state.age_first_rejection_for_test(&id, REJECTION_SPACING);
+                let _ = run(&store, &state, &id, &gate).await;
+                assert_eq!(
+                    state.sign_in_required(&store),
+                    vec![id.clone()],
+                    "{provider:?}"
+                );
+                let probes = server.probes.load(Ordering::SeqCst);
+                assert_eq!(run(&store, &state, &id, &gate).await.unwrap_err(), SIGN_IN);
+                assert_eq!(
+                    server.probes.load(Ordering::SeqCst),
+                    probes,
+                    "the background pass still asks nothing ({provider:?})"
+                );
+                let lock = tokio::sync::Mutex::new(());
+                let usage = check_by_person(&store, NATIVE, &state, &id, Some(&lock), &gate).await;
+                assert!(usage.is_ok(), "{provider:?}: {usage:?}");
+                assert_eq!(server.probes.load(Ordering::SeqCst), probes + 1);
+                assert!(state.sign_in_required(&store).is_empty(), "{provider:?}");
+                assert!(!state.is_dead(&store, &id), "{provider:?}");
+            }
+        }
+
+        /// B-5 fix cycle 1: a person's check answered 401 keeps the verdict and spends nothing.
+        #[tokio::test]
+        async fn a_person_check_answered_401_keeps_the_verdict() {
+            let server = server(&[401], renewed()).await;
+            let (_root, store) = store();
+            let b = claude_seat(&store);
+            let state = RefreshState::at(format!("{}/token", server.base));
+            let gate = gate(&server);
+            assert_eq!(run(&store, &state, &b, &gate).await.unwrap_err(), SIGN_IN);
+            let (grants, probes) = (
+                server.grants.load(Ordering::SeqCst),
+                server.probes.load(Ordering::SeqCst),
+            );
+            let lock = tokio::sync::Mutex::new(());
+            assert_eq!(
+                check_by_person(&store, NATIVE, &state, &b, Some(&lock), &gate)
+                    .await
+                    .unwrap_err(),
+                SIGN_IN
+            );
+            assert_eq!(server.probes.load(Ordering::SeqCst), probes + 1);
+            assert_eq!(server.grants.load(Ordering::SeqCst), grants, "no renewal");
+            assert_eq!(state.sign_in_required(&store), vec![b]);
+        }
+
+        /// B-5 fix cycle 1 (clock skew): a Codex 401 within five minutes of the token's local
+        /// expiry may be a clock that runs ahead here; it is no verdict.
+        #[tokio::test]
+        async fn a_codex_401_near_its_local_expiry_is_no_verdict() {
+            let server = server(&[401], renewed()).await;
+            let (_root, store) = store();
+            let c = codex_seat(&store, "synthetic-c-token", now() + 30);
+            let state = RefreshState::default();
+            let gate = gate(&server);
+            for _ in 0..2 {
+                assert_eq!(
+                    run(&store, &state, &c, &gate).await.unwrap_err(),
+                    switchboard_proxy::REJECTED
+                );
+                state.age_first_rejection_for_test(&c, REJECTION_SPACING);
+            }
+            assert_eq!(
+                server.probes.load(Ordering::SeqCst),
+                2,
+                "the provider answered"
+            );
+            assert!(state.sign_in_required(&store).is_empty());
+        }
+
+        /// The ordinary Codex CLI is signed in as `synthetic-c`.
+        fn codex_signed_in(provider: Provider) -> Result<external::CapturedProfile, String> {
+            match provider {
+                Provider::Codex => Ok(external::CapturedProfile {
+                    provider,
+                    kind: AuthKind::OAuth,
+                    credential: codex_credential("synthetic-c-token", 4_000_000_000),
+                    identity: identity("synthetic-c"),
+                    label: "synthetic-c".into(),
+                }),
+                _ => signed_in(provider),
+            }
+        }
+
+        /// B-5 fix cycle 1: the account the ordinary Codex CLI is signed in to is exempt, as
+        /// Claude Code's is: its 401s are the CLI's business, never a verdict here.
+        #[tokio::test]
+        async fn the_account_codex_uses_is_never_marked_ended() {
+            let server = server(&[401], renewed()).await;
+            let (_root, store) = store();
+            let c = codex_seat(&store, "synthetic-c-token", now() + 86_400);
+            let state = RefreshState::default();
+            sync_live_sources(&store, codex_signed_in, &state);
+            let gate = gate(&server);
+            for _ in 0..2 {
+                assert_eq!(
+                    run(&store, &state, &c, &gate).await.unwrap_err(),
+                    switchboard_proxy::REJECTED
+                );
+                state.age_first_rejection_for_test(&c, REJECTION_SPACING);
+            }
+            assert_eq!(server.probes.load(Ordering::SeqCst), 2);
+            assert!(state.sign_in_required(&store).is_empty());
+        }
     }
 }

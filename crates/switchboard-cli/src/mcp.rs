@@ -17,6 +17,8 @@ const LINE_LIMIT: u64 = 1024 * 1024;
 const REFRESH_SPACING: i64 = 60;
 /// SB-145: a statistics range outside what is kept.
 const STATISTICS_DAYS: &str = "Statistics cover 1 to 90 days.";
+/// `switchboard_shell_hook_set` without its one argument.
+const SHELL_HOOK_ON: &str = "on is true or false.";
 /// SB-146: adding to one more group leaves none.
 const MOVE_ALSO_FROM: &str = "Name either also or from, not both.";
 pub(crate) const INSTRUCTIONS: &str = "Switchboard manages the Claude Code and Codex accounts on this machine. Read switchboard_status first. Remaining quota is in switchboard_usage; an unknown or stale value is not zero. A managed session changes account from the next request with switchboard_switch. A group holds repositories with accounts of its own, and a repository may be in several groups; tool names and fields call a group a project and its id a pool, but say group to the person. A repository a group's agents create or work in joins that group by itself; a repository in no group stays in the default group and is never made a group of its own. Never move account IDs to create a group. Automatic switching, when the operator turns it on, moves a group's managed sessions to its next account as one nears its limit. Folder rules are optional and off unless the operator saved one: when you start work in another repository or folder that may carry a rule, call switchboard_project_apply with it and tell the operator which rule applied. Changing the ordinary Claude Code login affects every claude session on the machine and needs global: true; ask the operator first.";
@@ -56,8 +58,8 @@ pub(crate) fn tools() -> Vec<(bool, Value)> {
         (false, json!({"name":"switchboard_accounts","title":"Switchboard accounts","description":"Stored accounts without credentials: label, provider, group id (pool), whether selected or signed in now, the lowest remaining quota, and the organization each belongs to (null: personal) with what decided it (person, provider or domain).","inputSchema":{"type":"object","properties":{"provider":{"type":"string","enum":["claude","codex"]}},"additionalProperties":false}})),
         (false, json!({"name":"switchboard_usage","title":"Remaining usage","description":"Remaining quota per account and window, with reset times and how fresh each observation is. Unknown is not zero. A window with scope feature limits one metered feature only; lowest_remaining_percent covers the account's own windows. refresh asks the provider for one account; within 60 seconds of its last check it returns that observation with a note, and until the time the provider asked for after answering a check with 429 it is refused; for an inactive Claude account it may first renew that account's expired sign-in inside Switchboard. A read-only server never asks and shows the stored observation. No credential is returned.","inputSchema":{"type":"object","properties":{"account_id":account,"refresh":{"type":"boolean","default":false}},"additionalProperties":false}})),
         (true, json!({"name":"switchboard_switch","title":"Switch account","description":"Choose the account for the next request. target session (default) switches this managed session; route selects the account in its own group for every managed session of that group; claude_cli changes the ordinary Claude Code login for every claude session on this machine and requires global: true. A response already streaming keeps its account.","inputSchema":{"type":"object","properties":{"account_id":account,"target":{"type":"string","enum":["session","route","claude_cli"],"default":"session"},"global":{"type":"boolean","default":false}},"required":["account_id"],"additionalProperties":false}})),
-        (false, json!({"name":"switchboard_sessions","title":"Sessions","description":"Sessions Switchboard launched (Claude Code, Codex): account_id, label, provider, group id (pool), mode (managed or isolated), working_directory, in_place, launched_at, started_at, continues (a workflow id or null) and state: starting, running, ended or unknown. Without all, only starting and running ones. Reads only; no credential.","inputSchema":{"type":"object","properties":{"all":{"type":"boolean","description":"Also list ended sessions."}},"additionalProperties":false}})),
-        (false, json!({"name":"switchboard_onboarding","title":"Setup steps","description":"Where setting up Switchboard stands, as steps in order: owner (the app runs), accounts (one is saved; signing in is the person's), project (the folder's group, optional; a repository in no group uses the default group, and next.command puts it in a group), mcp (this server is registered with the agent) and proving_call. Each step is done, todo (run next.command), needs_person (tell the person next.person) or optional. Reads only. The full guide: `switchboard onboard`.","inputSchema":{"type":"object","properties":{"path":path,"host":{"type":"string","enum":["claude","codex"],"description":"The coding agent being set up; default: the one this server runs for, when known."}},"additionalProperties":false}})),
+        (false, json!({"name":"switchboard_sessions","title":"Sessions","description":"Sessions Switchboard launched: Claude Code, Codex, Kimi Code, Hermes, OpenCode and catalog agents (through an API-key account's proxy or on the OpenRouter key). Each with account_id, label, agent (the catalog id, such as claude-code, codex or goose), provider (the provider the route serves: claude for an agent through the proxy), group id (pool), context (personal or org:<id>) and context_name (the organization's name, or null), mode (managed or isolated), working_directory, in_place, launched_at, started_at, continues (a workflow id or null) and state: starting, running, ended or unknown. Without all, only starting and running ones. With history, every launch of the last 90 days instead, newest first: one record per launch with launch_id, launched_by (surface: window, cli, mcp, fallback, recovery or dashboards; caller_launch_id, caller_project, caller_program, by, parent), provider_session_id, transcript (its path), turns, last_turn_at, ended (limit) and continued_as (where its work went), plus total. With launch_id, that launch with up (who launched it, to the first) and down (what it launched or what took its work over). Reads only; no credential.","inputSchema":{"type":"object","properties":{"all":{"type":"boolean","description":"Also list ended sessions."},"history":{"type":"boolean","description":"Every recorded launch, newest first, instead of the homes' current sessions."},"launch_id":{"type":"string","description":"One launch and its chain."}},"additionalProperties":false}})),
+        (false, json!({"name":"switchboard_onboarding","title":"Setup steps","description":"Where setting up Switchboard stands, as steps in order: owner (the app runs), accounts (one is saved; signing in is the person's), project (the folder's group, optional; a repository in no group uses the default group, and next.command puts it in a group), mcp (this server is registered with the agent) and proving_call. Without organizations these five are all, plus one optional organization step when PassionCode.ai is connected and lists none; with organizations, organization follows, then org_group, seat, hook and launch for each, naming it. Each step is done, todo (run next.command), needs_person (tell the person next.person; run next.command or next.alternatives once they agree) or optional. next.turn_on and next.turn_off are the person's: run one only when the person asks. degraded names reads that failed; the step they touch says so. Reads only. The full guide: `switchboard onboard`.","inputSchema":{"type":"object","properties":{"path":path,"host":{"type":"string","enum":["claude","codex"],"description":"The coding agent being set up; default: the one this server runs for, when known."}},"additionalProperties":false}})),
         (false, json!({"name":"switchboard_project_context","title":"A folder's group and rule","description":"The group a folder belongs to, as project (its name, group id as pool, folders and reserved accounts, possibly empty; null when none), and the optional folder rule per provider: the rule in force, the nearest rule in any state (paused or expired), and whether it is in effect. A group's accounts serve only sessions launched from its folders; a provider with no enabled account in the group keeps its existing launch fallback.","inputSchema":{"type":"object","properties":{"path":path},"additionalProperties":false}})),
         (false, json!({"name":"switchboard_projects","title":"Groups","description":"Every group: its id (pool), name, folders (repositories), roots (each root folder with its branch and the worktrees and clones of its repository under it), sources and the accounts reserved for it (empty for an automatically created group), then every optional folder rule with its state. Reads only.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}})),
         (true, json!({"name":"switchboard_project_edit","title":"Change a group","description":"Change a group by delta: reserve accounts for it (add_accounts), give accounts back to the default group (remove_accounts), add folders (add_folders) or take folders out (remove_folders; they are not added back by themselves), or rename it, or bind it to an organization (organization: its id or name, or personal; with an organization defined, a group runs only on accounts of its own organization, or on personal ones when it has none). Everything not named stays as it is; naming an account or folder the group does not hold is refused. Only when the operator asks. The account the ordinary Claude Code or Codex is signed in to cannot join a group.","inputSchema":{"type":"object","properties":{"pool":{"type":"string","description":"The group id, from switchboard_projects."},"name":{"type":"string"},"organization":{"type":"string","maxLength":200,"description":"An organization's id or name from switchboard_organizations, or personal."},"add_accounts":{"type":"array","items":account,"maxItems":64},"remove_accounts":{"type":"array","items":account,"maxItems":64},"add_folders":{"type":"array","items":{"type":"string","description":"An absolute folder."},"maxItems":64},"remove_folders":{"type":"array","items":{"type":"string","description":"A folder of the group, as switchboard_projects lists it."},"maxItems":64}},"required":["pool"],"additionalProperties":false}})),
@@ -81,8 +83,11 @@ pub(crate) fn tools() -> Vec<(bool, Value)> {
         (true, json!({"name":"switchboard_project_set","title":"Save folder rule","description":"Save an optional rule: this folder and its subfolders start on this account. Only when the operator asks for it. Rules never stop automatic switching. Prefer an expiry.","inputSchema":{"type":"object","properties":{"path":path,"account_id":account,"target":{"type":"string","enum":["managed","claude_cli"],"default":"managed"},"enabled":{"type":"boolean","default":true},"expires_in_hours":{"type":"integer","minimum":1,"maximum":720}},"required":["account_id"],"additionalProperties":false}})),
         (true, json!({"name":"switchboard_project_remove","title":"Remove folder rule","description":"Remove the rule saved for exactly this folder and provider.","inputSchema":{"type":"object","properties":{"path":path,"provider":{"type":"string","enum":["claude","codex"]}},"required":["provider"],"additionalProperties":false}})),
         (true, json!({"name":"switchboard_project_apply","title":"Apply folder rule","description":"Apply the folder's rule to this session when you start work in a folder. Reports what happened per provider: selected, activated, already_in_effect, no_rule, rule_paused, rule_expired, other_pool, other_session, needs_global or failed. Nothing changes without a rule in force.","inputSchema":{"type":"object","properties":{"path":path,"global":{"type":"boolean","default":false}},"additionalProperties":false}})),
-        (false, json!({"name":"switchboard_chain_get","title":"Fallback chains","description":"Which agents continue a workflow, in what order, when its executor's accounts run out: every chain the operator set (per machine, group or workflow), the presets, and the chain that applies: the workflow's own, else its group's, else the machine's. None applies until the operator sets one.","inputSchema":{"type":"object","properties":{"workflow_id":{"type":"string","description":"An Observatory workflow id (wf_ and 16 hex digits)."},"pool":{"type":"string","description":"A group id."}},"additionalProperties":false}})),
+        (false, json!({"name":"switchboard_chain_get","title":"Fallback chains","description":"Which agents continue a workflow, in what order, when its executor's accounts run out: every chain the operator set (per machine, group or workflow), the presets, and the chain that applies: the workflow's own, else its group's, else the machine's. With folder (the workflow's checkout) the group is found as the automatic fallback finds it. None applies until the operator sets one.","inputSchema":{"type":"object","properties":{"workflow_id":{"type":"string","description":"An Observatory workflow id (wf_ and 16 hex digits)."},"pool":{"type":"string","description":"A group id; with folder, the executor account's group."},"folder":{"type":"string","description":"An absolute folder: the workflow's checkout."}},"additionalProperties":false}})),
         (true, json!({"name":"switchboard_chain_set","title":"Set fallback chain","description":"Set the operator's chain for a scope, first agent tried first; an empty list clears it. Only when the operator asks. Agents are catalog ids that load MCP servers and take a prompt without a person (claude-code, codex, kimi-code, hermes, …); an agent may pin an account (account_id) or a paid key by its Observatory vault name (key: project/env/NAME), never a key value. Another agent than Claude Code or Codex never runs on a subscription sign-in.","inputSchema":{"type":"object","properties":{"scope":{"type":"string","description":"machine, project:<group id> or workflow:<wf_id>.","default":"machine"},"preset":{"type":"string","enum":["subscriptions-first"]},"executors":{"type":"array","maxItems":8,"items":{"type":"object","properties":{"agent":{"type":"string"},"account_id":account,"key":{"type":"string"}},"required":["agent"],"additionalProperties":false}}},"additionalProperties":false}})),
+        (false, json!({"name":"switchboard_ceilings","title":"Spending ceilings","description":"Spending ceilings for paid fallback agents (Hermes and OpenCode on an OpenRouter key, Claude Code or Codex on an API-key account): each ceiling with its scope and dollars (this computer's and a group's per UTC day, a task's since its first paid hand-over), the open questions a reached ceiling asked, the last hand-over and the limits. Reads only.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}})),
+        (true, json!({"name":"switchboard_ceiling_set","title":"Set a spending ceiling","description":"Set a first spending ceiling for a scope, or lower one, in dollars from 0.01 to 1000. Only when the operator asks. Raising or clearing a ceiling is done in the Switchboard window, never here. A group takes one only with its own OpenRouter key.","inputSchema":{"type":"object","properties":{"scope":{"type":"string","description":"machine, project:<group id> or workflow:<wf_id>.","default":"machine"},"usd":{"type":"number","minimum":0.01,"maximum":1000,"description":"Dollars: per UTC day for this computer and a group, since the first paid hand-over for a task."}},"required":["usd"],"additionalProperties":false}})),
+        (true, json!({"name":"switchboard_ceiling_answer","title":"Keep a reached ceiling","description":"Answer the question a reached spending ceiling asked with keep: the ceiling stays as it is. Only when the operator asks. Doubling a ceiling is answered in the Switchboard window, never here.","inputSchema":{"type":"object","properties":{"id":{"type":"string","description":"The question's id from switchboard_ceilings."},"answer":{"type":"string","enum":["keep"],"default":"keep"}},"required":["id"],"additionalProperties":false}})),
         (false, json!({"name":"switchboard_openrouter_status","title":"OpenRouter key for agents","description":"Whether the operator saved an OpenRouter key for agents, its default model, and what the key may still spend today and in total (asked of OpenRouter); with pool, that group's own key. Also lists every saved key with the group it is for (keys) and the groups with or without one (projects): an agent starting in a group's folder runs on that group's key, else on the machine's. Never a key itself.","inputSchema":{"type":"object","properties":{"pool":{"type":"string","description":"A group id from switchboard_projects; omit for the machine's key."}},"additionalProperties":false}})),
         (false, json!({"name":"switchboard_hermes_status","title":"Hermes model and provider","description":"The model and provider the operator's ordinary Hermes Agent runs on (hermes config get model): model, provider, endpoint, API mode. Never a key.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}})),
         (true, json!({"name":"switchboard_hermes_set","title":"Change Hermes's model or provider","description":"Change the provider and/or the default model of the operator's ordinary Hermes Agent through Hermes's own hermes config set. Only when the operator asks. Changing the provider makes Hermes drop an endpoint that belonged to the previous one; the new provider needs its own key in Hermes.","inputSchema":{"type":"object","properties":{"provider":{"type":"string","description":"A Hermes provider id, for example openrouter, anthropic, nous, openai-codex, kimi-coding."},"model":{"type":"string","description":"The default model, for example moonshotai/kimi-k2."}},"additionalProperties":false}})),
@@ -97,6 +102,8 @@ pub(crate) fn tools() -> Vec<(bool, Value)> {
         (true, json!({"name":"switchboard_project_suggestion","title":"Accept or decline a folder","description":"Add a folder Switchboard is still trying to add to its group now (accept), or keep it out for good (dismiss). Only when the operator asks.","inputSchema":{"type":"object","properties":{"action":{"type":"string","enum":["accept","dismiss"]},"folder":{"type":"string","minLength":1,"description":"The folder as switchboard_project_suggestions lists it."}},"required":["action","folder"],"additionalProperties":false}})),
         (true, json!({"name":"switchboard_project_sources","title":"A group's repository owners","description":"The repository owners (such as github.com/passioncode-ai) whose new repositories join a group by themselves; add and remove change the list by delta, none of them reads it. Only when the operator asks to change it.","inputSchema":{"type":"object","properties":{"pool":{"type":"string","minLength":1},"add":{"type":"array","maxItems":16,"items":{"type":"string","minLength":1}},"remove":{"type":"array","maxItems":16,"items":{"type":"string","minLength":1}}},"required":["pool"],"additionalProperties":false}})),
         (true, json!({"name":"switchboard_openrouter_model","title":"Set the agents' OpenRouter model","description":"Change the OpenRouter model agents launched on the operator's key start on, for example moonshotai/kimi-k2 or anthropic/claude-sonnet-4.5. Only when the operator asks. The key itself is saved by the operator in the app or with switchboard agents openrouter set, never through this server.","inputSchema":{"type":"object","properties":{"model":{"type":"string","description":"An OpenRouter model id: vendor/model."},"pool":{"type":"string","description":"A group id for its own key; omit for the machine's key."}},"required":["model"],"additionalProperties":false}})),
+        (false, json!({"name":"switchboard_shell_hook","title":"Terminals in organization folders","description":"Whether terminals on this computer follow organization folders (the terminal hook): its state (on, off, default_on: on because the folder map holds a folder of a group bound to an organization, default_off), the choice, whether the folder map reads, and each start file Switchboard changed with its state (written, removed_by_person, skipped_symlink, skipped_owner, skipped_zdotdir_unknown, unreadable, policy_blocked: a PowerShell profile on Windows whose execution policy, Restricted or AllSigned, keeps it from loading; Switchboard never changes the policy; constrained_language: PowerShell on Windows runs in Constrained Language Mode, where the hook cannot act); with path, the group, context and homes a terminal there gets. Reads files only.","inputSchema":{"type":"object","properties":{"path":path},"additionalProperties":false}})),
+        (true, json!({"name":"switchboard_shell_hook_set","title":"Turn the terminal hook on or off","description":"Turn the terminal hook on or off for this computer's terminals, as switchboard shell on|off does. Only when the operator asks. off takes Switchboard's block out of every start file byte for byte and keeps it out; on writes it for every shell present, with or without an organization's group. Only Switchboard's own data folder changes start files. Answers the state switchboard_shell_hook reads.","inputSchema":{"type":"object","properties":{"on":{"type":"boolean"}},"required":["on"],"additionalProperties":false}})),
     ]
     .into_iter()
     .map(|(write, mut tool)| {
@@ -108,6 +115,24 @@ pub(crate) fn tools() -> Vec<(bool, Value)> {
         (write, tool)
     })
     .collect()
+}
+
+/// `scope`: machine (the default), project:<group id> or workflow:<wf_id>.
+fn scope_arg(args: &Map<String, Value>) -> Result<switchboard_core::ChainScope, String> {
+    let text = args
+        .get("scope")
+        .and_then(Value::as_str)
+        .unwrap_or("machine");
+    match text.split_once(':') {
+        None if text == "machine" => Ok(switchboard_core::ChainScope::Machine),
+        Some(("project", pool)) if !pool.is_empty() => {
+            Ok(switchboard_core::ChainScope::Project { pool: pool.into() })
+        }
+        Some(("workflow", id)) if !id.is_empty() => {
+            Ok(switchboard_core::ChainScope::Workflow { id: id.into() })
+        }
+        _ => Err("scope is machine, project:<group id> or workflow:<wf_id>.".into()),
+    }
 }
 
 impl Server {
@@ -416,6 +441,22 @@ impl Server {
             label,
             enabled,
             elsewhere,
+        })
+        .await
+    }
+    async fn chain_get(&self, args: &Map<String, Value>) -> Result<Value, String> {
+        let text = |key: &str| args.get(key).and_then(Value::as_str).map(str::to_owned);
+        let folder = match args.get("folder") {
+            None => None,
+            Some(Value::String(f)) if std::path::Path::new(f).is_absolute() => {
+                Some(PathBuf::from(f))
+            }
+            Some(_) => return Err("folder must be absolute.".into()),
+        };
+        self.call(Operation::Chains {
+            workflow: text("workflow_id"),
+            pool: text("pool"),
+            folder,
         })
         .await
     }
@@ -759,10 +800,26 @@ impl Server {
             "switchboard_usage" => self.usage(args).await,
             "switchboard_switch" => self.switch(args).await,
             "switchboard_sessions" => {
-                self.call(Operation::Sessions {
-                    all: args.get("all").and_then(Value::as_bool).unwrap_or(false),
-                })
-                .await
+                let history = args
+                    .get("history")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false);
+                match args.get("launch_id").map(Value::as_str) {
+                    Some(Some(id)) => {
+                        self.call(Operation::Launches {
+                            launch_id: Some(id.to_owned()),
+                        })
+                        .await
+                    }
+                    Some(None) => Err(switchboard_runtime::launches::LAUNCH_NOT_FOUND.into()),
+                    None if history => self.call(Operation::Launches { launch_id: None }).await,
+                    None => {
+                        self.call(Operation::Sessions {
+                            all: args.get("all").and_then(Value::as_bool).unwrap_or(false),
+                        })
+                        .await
+                    }
+                }
             }
             "switchboard_onboarding" => match self.folder(args) {
                 Ok(folder) => {
@@ -823,6 +880,13 @@ impl Server {
                 .await
             }
             "switchboard_repository_map" => self.repository_map(args).await,
+            "switchboard_shell_hook" => self
+                .folder(args)
+                .map(|dir| crate::shell::status(Some(&self.root), Some(&dir))),
+            "switchboard_shell_hook_set" => match args.get("on").and_then(Value::as_bool) {
+                Some(on) => crate::shell::set(Some(&self.root), on),
+                None => Err(SHELL_HOOK_ON.into()),
+            },
             "switchboard_rotation" => match self.call(Operation::Snapshot).await {
                 Ok(v) => {
                     let monitor = self.call(Operation::MonitorStatus).await.unwrap_or(
@@ -842,17 +906,11 @@ impl Server {
             "switchboard_project_set" => self.project_set(args).await,
             "switchboard_project_remove" => self.project_remove(args).await,
             "switchboard_project_apply" => self.project_apply(args).await,
-            "switchboard_chain_get" => {
-                self.call(Operation::Chains {
-                    workflow: args
-                        .get("workflow_id")
-                        .and_then(Value::as_str)
-                        .map(str::to_owned),
-                    pool: args.get("pool").and_then(Value::as_str).map(str::to_owned),
-                })
-                .await
-            }
+            "switchboard_chain_get" => self.chain_get(args).await,
             "switchboard_chain_set" => self.chain_set(args).await,
+            "switchboard_ceilings" => self.call(Operation::Ceilings).await,
+            "switchboard_ceiling_set" => self.ceiling_set(args).await,
+            "switchboard_ceiling_answer" => self.ceiling_answer(args).await,
             "switchboard_openrouter_status" => {
                 let pool = args.get("pool").and_then(Value::as_str).map(str::to_owned);
                 let mut status = match self
@@ -917,21 +975,36 @@ impl Server {
         })
     }
 
-    async fn chain_set(&self, args: &Map<String, Value>) -> Result<Value, String> {
-        let scope_text = args
-            .get("scope")
-            .and_then(Value::as_str)
-            .unwrap_or("machine");
-        let scope = match scope_text.split_once(':') {
-            None if scope_text == "machine" => switchboard_core::ChainScope::Machine,
-            Some(("project", pool)) if !pool.is_empty() => {
-                switchboard_core::ChainScope::Project { pool: pool.into() }
-            }
-            Some(("workflow", id)) if !id.is_empty() => {
-                switchboard_core::ChainScope::Workflow { id: id.into() }
-            }
-            _ => return Err("scope is machine, project:<group id> or workflow:<wf_id>.".into()),
+    async fn ceiling_set(&self, args: &Map<String, Value>) -> Result<Value, String> {
+        let usd = args
+            .get("usd")
+            .and_then(Value::as_f64)
+            .ok_or("usd is a number of dollars from 0.01 to 1000.")?;
+        self.call(Operation::SetCeiling {
+            scope: scope_arg(args)?,
+            usd: Some(usd),
+            by: switchboard_runtime::spend::Surface::Mcp,
+        })
+        .await
+    }
+    /// `keep` only. `double` goes to the runtime, which refuses it with the window named, the one
+    /// sentence every surface gives.
+    async fn ceiling_answer(&self, args: &Map<String, Value>) -> Result<Value, String> {
+        use switchboard_runtime::spend::{Answer, Surface};
+        let answer = match args.get("answer").and_then(Value::as_str) {
+            None | Some("keep") => Answer::Keep,
+            Some("double") => Answer::Double,
+            Some(_) => return Err("answer is keep.".into()),
         };
+        self.call(Operation::AnswerCeiling {
+            id: required(args, "id")?.into(),
+            answer,
+            by: Surface::Mcp,
+        })
+        .await
+    }
+    async fn chain_set(&self, args: &Map<String, Value>) -> Result<Value, String> {
+        let scope = scope_arg(args)?;
         let executors: Vec<switchboard_core::Executor> = match args.get("executors") {
             Some(list) => serde_json::from_value(list.clone()).map_err(|_| {
                 "executors: each needs agent, and at most one of account_id or key."

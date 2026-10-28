@@ -5,11 +5,11 @@ import switchboardMark from '../brand/passioncode/switchboard-mark.svg';
 import { version } from '../package.json';
 import { platformLabel } from './platform';
 import { LOCALE_KEY, dateLocale, locale, parseLocaleChoice, plural, saveLocaleChoice, t, type LocaleChoice } from './i18n';
-import { demo, native, nativeAdapter, onProjectSuggestions, safeError, reportFrontendReady, reportLanguage, type Operation } from './adapter';
+import { demo, native, nativeAdapter, onProjectSuggestions, onShellHook, onSpendChanged, safeError, reportFrontendReady, reportLanguage, type Operation } from './adapter';
 import type { CardState } from './ui-logic';
-import { statAlert, POOL_PATTERN, poolChoices, poolName, inGroup, tourPlacement, firstRunHint, usableWhileBusy, APPEARANCE_KEY, attribution, groupAdmits, groupSeatsElsewhere, passioncodeLine, inOrganizationFilter, domainList, type AttributedBy, sortStatRows, nextStatSort, type StatRow, type StatSort, statCacheShare, statTokensPerRequest, chartSeries, niceMax, groupProjectRows, type ChartMetric, groupProjects, compactCount, statTokens, statTrouble, statTroubleText, statAgentName, type Statistics, EXPIRY_CHOICES, folderName, folderRows, withoutFolder, type ProjectRoot, moveTargets, mapRows, rootTargets, storedMapFolders, MAP_FOLDERS_KEY, type MapFilter, type MapRow, type RepositoryMap, sortAgents, defaultAgentChoices, modelMeta, ordinaryKimiNote, kimiLimitUntil, limitReasonText, limitTitle, agentSetupFacts, sessionHow, sessionStateLabel, kimiWindowsLine, kimiWindowsLines, openrouterCreditLine, eventAction, eventDetail, MutationClock, activeRules, autoSwitchPool, launchChoice, withFolder, replaceFolder, storedFolder, LAST_FOLDER_KEY, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, groupAccounts, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, signInNotice, dismissTermsNotice, termsNoticeDismissed, termsNoticeOn, termsNoticeText, tourWaits, usageAnswerText, usageQuestion, usageQuestionText, usageFreshness, windowReset, type Appearance } from './ui-logic';
+import { statAlert, ceilingQuestion, ceilingWarning, ceilingLine, keyLimitLine, dollars, POOL_PATTERN, poolChoices, poolName, inGroup, tourPlacement, usableWhileBusy, APPEARANCE_KEY, attribution, groupAdmits, groupSeatsElsewhere, passioncodeLine, seatEndedText, groupSeatsEndedText, organizationReleasedAt, inOrganizationFilter, domainList, type AttributedBy, sortStatRows, nextStatSort, type StatRow, type StatSort, statCacheShare, statTokensPerRequest, chartSeries, niceMax, groupProjectRows, type ChartMetric, groupProjects, compactCount, statTokens, statTrouble, statTroubleText, statAgentName, type Statistics, EXPIRY_CHOICES, folderName, folderRows, withoutFolder, type ProjectRoot, moveTargets, mapRows, rootTargets, storedMapFolders, MAP_FOLDERS_KEY, type MapFilter, type MapRow, type RepositoryMap, sortAgents, defaultAgentChoices, backgroundReads, clockedRead, chainScopeKey, afterRead, ceilingRemovalNote, modelMeta, ordinaryKimiNote, kimiLimitUntil, limitReasonText, limitTitle, agentSetupFacts, sessionHow, sessionAgentName, sessionStateLabel, kimiWindowsLine, kimiWindowsLines, openrouterCreditLine, eventAction, eventDetail, MutationClock, activeRules, autoSwitchPool, launchChoice, withFolder, replaceFolder, storedFolder, LAST_FOLDER_KEY, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, groupAccounts, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, signInNotice, signInMove, organizationMoveNote, dismissTermsNotice, termsNoticeDismissed, termsNoticeOn, termsNoticeText, tourWaits, orgSetups, releasedOrganizations, releasedSummary, orgSetupAction, orgSetupShown, orgSetupCaveat, orgSetupLeads, orgSetupPrimary, accountsOrgActionLeads, firstPrimary, orgSetupUnread, orgSetupStateLabel, orgSetupTitle, hiddenOrgSetups, ORG_SETUP_HIDDEN_KEY, accountsEmptyKey, type OrgSetup, usageAnswerText, usageQuestion, usageQuestionText, usageFreshness, windowReset, type Appearance, shellHookView, shellHookToggleNotice, shellHookNoticeText, codexHookLine, moveStep, accountsForStep, chainSummary, stepReasonText, handoverOutcomeText, handoverSkipped, shortWorkflow, TAKEOVER_ORDER } from './ui-logic';
 import agentCatalog from '../catalog/agents.json';
-import type { AnalyticsStatus, BackupInfo, PassioncodeStatus, Account, Adapter, AgentConnection, AgentInfo, AgentRow, AgentsOverview, OpenrouterModels, HermesModel, KimiAccounts, KimiRegion, KimiStatus, OpenrouterStatus, OpenrouterKeys, CodexRoute, AgentSetup, AuthKind, BackupStatus, KimiAccount, CurrentAccounts, LoginItem, Project, Restored, ExternalIdentity, MonitorStatus, ProjectRule, Provider, RotationPolicy, RuntimeStatus, SessionInfo, Snapshot, UpdateStatus } from './types';
+import type { AnalyticsStatus, Ceilings, CeilingView, CeilingQuestionView, OpenrouterCredit, BackupInfo, PassioncodeStatus, Account, Adapter, AgentConnection, AgentInfo, AgentRow, AgentsOverview, OpenrouterModels, HermesModel, KimiAccounts, KimiRegion, KimiStatus, OpenrouterStatus, OpenrouterKeys, CodexRoute, ShellHookStatus, AgentSetup, AuthKind, BackupStatus, KimiAccount, CurrentAccounts, LoginItem, Project, Restored, ExternalIdentity, MonitorStatus, ProjectRule, Provider, RotationPolicy, RuntimeStatus, SessionInfo, Snapshot, UpdateStatus, Onboarding, Chains, ChainExecutor, ChainScope, ChainStepView } from './types';
 
 const root = document.querySelector<HTMLDivElement>('#app')!;
 const announcements = document.querySelector<HTMLDivElement>('#announcements')!;
@@ -120,6 +120,41 @@ function answerUsage(focus: string, shown: boolean) {
   // The answer reports what is now true: an "on" after another tool turned the switch off stays off (round 1).
   void mutate(async () => { analyticsState = await adapter.setAnalytics(wanted, shown); }, () => usageAnswerText(wanted, analyticsState), focus);
 }
+/** SB-202 (B-8, SCN-076): "Set up {organization} on this computer", worded from the checklist the runtime computed. */
+function orgSetupCard(setup: OrgSetup, primary: boolean) {
+  const id = `org-setup-${setup.organization.id}`;
+  const card = el('section', 'org-setup'); card.setAttribute('aria-labelledby', `${id}-title`);
+  const title = el('h2', '', orgSetupTitle(setup)); title.id = `${id}-title`;
+  const list = el('ol', 'org-setup-steps');
+  for (const line of setup.lines) {
+    const item = el('li', `org-setup-step is-${line.state}`);
+    const text = el('div', 'org-setup-text'); const words = el('span', '', line.line);
+    // SB-228: a command the line names is code, as everywhere else in the window.
+    if (line.command) words.append(' ', el('code', 'address', line.command));
+    text.append(el('strong', '', line.title), words);
+    item.append(el('span', `org-setup-state is-${line.state}`, orgSetupStateLabel(line.state)), text); list.append(item);
+  }
+  card.append(title, list);
+  // SB-228: a read behind the checklist that failed, said once under the steps.
+  const caveat = orgSetupCaveat(onboarding); if (caveat) card.append(el('p', 'form-note org-setup-caveat', caveat));
+  if (onboardingError) card.append(el('p', 'form-note org-setup-error', t('The setup could not be read. Refresh to retry.')));
+  const actions = el('div', 'org-setup-actions');
+  const action = orgSetupAction(setup);
+  // F3 (VIS-21): with several cards, only the first one's action is filled.
+  const weight = primary ? 'button primary' : 'button';
+  if (action) actions.append(action.kind === 'group' ? button(action.label, () => projectDialog(undefined, action.organization), weight, `${id}-group`) : button(action.label, () => void startLogin('claude', '', action.pool), weight, `${id}-sign-in`));
+  if (page === 'accounts') actions.append(button(t('Hide'), () => { orgSetupHidden = [...orgSetupHidden, setup.organization.id]; try { noticeStore()?.setItem(ORG_SETUP_HIDDEN_KEY, JSON.stringify(orgSetupHidden)); } catch { /* hidden for this window only */ } render(); restoreFocus('page-title'); }, 'text-button', `${id}-hide`));
+  if (actions.childElementCount) card.append(actions);
+  return card;
+}
+/** SB-228 (SCN-076): the first checklist read failed: the newest organization's card with the note only. */
+function orgSetupUnreadCard(organization: { id: string; name: string }) {
+  const id = `org-setup-${organization.id}`;
+  const card = el('section', 'org-setup'); card.setAttribute('aria-labelledby', `${id}-title`);
+  const title = el('h2', '', orgSetupTitle({ organization })); title.id = `${id}-title`;
+  card.append(title, el('p', 'form-note org-setup-error', t('The setup could not be read. Refresh to retry.')));
+  return card;
+}
 function usageQuestionCard() {
   const card = el('section', 'usage-question'); card.setAttribute('aria-labelledby', 'usage-question-title');
   const title = el('h2', '', t('Share anonymous usage counts?')); title.id = 'usage-question-title';
@@ -166,6 +201,10 @@ let loginItemError = false;
 let updateState: UpdateStatus | null = null;
 let updateError = false;
 let analyticsState: AnalyticsStatus | null = null;
+/** SB-202 (B-8): the organization checklist (Tauri `onboard`), read only while an organization exists; the last read stays when one fails. */
+let onboarding: Onboarding | null = null;
+let onboardingError = false;
+let orgSetupHidden = hiddenOrgSetups(noticeStore());
 let analyticsError = false;
 let backupError = false;
 let busy = false;
@@ -174,6 +213,8 @@ let loadError = '';
 let runtimeError = false;
 let notice = '';
 let noticeError = false;
+/** SB-160 (B-4): the notice's one action (a new seat's *Move it to {group}*); a new notice drops it. */
+let noticeAction: { label: string; run: () => void } | null = null;
 let lastWorkingDirectory = storedFolder(noticeStore());
 /** The folder the next picker opens at; kept for the next start as a convenience only. */
 function rememberFolder(folder: string) { lastWorkingDirectory = folder; try { noticeStore()?.setItem(LAST_FOLDER_KEY, folder); } catch { /* remembered for this window only */ } }
@@ -193,6 +234,8 @@ const currentMatch = (account: Account) => {
   const identity = account.external_identity;
   return !!identity?.account_id && identity.account_id === current.identity?.account_id && identity.organization_id === current.identity?.organization_id;
 };
+// The account the ordinary CLI is signed in to cannot join a group (PROJECT_ACCOUNT_IN_CLI): never prefill it.
+const inCli = (account: Account) => currentMatch(account) || !!currentAccounts?.[account.provider]?.account_ids?.includes(account.id);
 interface Context { current: CurrentAccounts | null; currentFailed: boolean; monitor: MonitorStatus | null }
 /** UX-04: a read of the CLIs' sign-ins that failed (or ran out of time) is kept as failed, so In use now offers Retry instead of reading forever. */
 let currentReadFailed = false;
@@ -202,6 +245,18 @@ async function readContext(): Promise<Context> {
 }
 function applyContext(context: Context) { currentAccounts = context.current; currentReadFailed = context.currentFailed; monitor = context.monitor; }
 async function refreshContext() { applyContext(await readContext()); }
+/** F1 (SCN-079): organizations the person left on PassionCode.ai get no setup card. */
+const releasedOrgs = () => releasedOrganizations(passioncodeView, snapshot?.organizations ?? []);
+/** SB-228 (VIS-21): an organization card with its own action is on this page. */
+const orgCardLeads = () => orgSetupLeads({ onboarding, page, hidden: orgSetupHidden, usage: analyticsState, usageFailed: analyticsError, tourStep, released: releasedOrgs() });
+/** SB-202 (B-8): the checklist is read again with the account list; a machine without organizations reads nothing.
+ * F1: the connection's status (a local read) comes with it, so a left organization gets no card on Accounts either. */
+function loadOnboarding() {
+  if (!(snapshot?.organizations ?? []).length) { onboarding = null; onboardingError = false; return; }
+  if (page !== 'orgs') void loadPassioncode();
+  const stamp = clock.stamp();
+  void adapter.onboard().then((value) => { if (clock.accepts(stamp)) { onboarding = value; onboardingError = false; } }, () => { onboardingError = true; }).finally(backgroundRender);
+}
 /** Background results apply only when no user mutation began after they were requested. */
 function backgroundRender() {
   if (busy || loading || openMenu || document.querySelector('dialog')) return;
@@ -220,11 +275,11 @@ function button(text: string, action: () => void, className = '', key = ''): HTM
 }
 function announce(text: string) { announcements.textContent = ''; requestAnimationFrame(() => { announcements.textContent = text; }); }
 /** Notices may carry a backend's English refusal: it is translated here, where it is shown (L10N-04). */
-function showNotice(text: string, error = false) { notice = t(text); noticeError = error; announce(notice); }
+function showNotice(text: string, error = false) { notice = t(text); noticeError = error; noticeAction = null; announce(notice); }
 /** One way to change page: what each page reads on arrival, then focus on its title or on `focusKey`. */
 function goTo(target: Page, focusKey?: string) {
   page = target; notice = '';
-  if (target === 'activity') void loadSessions(); if (target === 'agents') void loadAgents(); if (target === 'tokens') void loadOpenrouter(); if (target === 'stats' && !stats) void loadStats(); if (target === 'orgs') void loadPassioncode();
+  if (target === 'activity') void loadSessions(); if (target === 'agents') { void loadAgents(); void loadChains(); void loadCeilings(); } if (target === 'projects') void loadChains(); if (target === 'tokens') { groupKeyStatus = null; void loadOpenrouter(); void loadCeilings(); } if (target === 'stats' && !stats) void loadStats(); if (target === 'orgs') void loadPassioncode();
   render();
   if (focusKey) { restoreFocus(focusKey); document.querySelector<HTMLElement>(`[data-focus="${focusKey}"]`)?.scrollIntoView({ block: 'start' }); }
   else document.querySelector<HTMLElement>('h1')?.focus();
@@ -244,9 +299,11 @@ async function reload() {
   loading = false;
   // UX-02, UX-03: Refresh reads statistics and the Codex switch again, so their errors clear.
   codexRouteState = null; codexRouteError = '';
+  shellHookState = null; shellHookError = '';
   if (page === 'stats') { stats = null; statsError = false; void loadStats(); }
   render();
   void adapter.agentSetup().then((value) => { agentSetup = value; agentSetupError = false; }, () => { agentSetupError = true; }).finally(backgroundRender);
+  loadOnboarding();
   // Unit tier D: these reads apply only when no action began after this Refresh.
   const readStamp = clock.stamp();
   void loadOpenrouter(readStamp);
@@ -256,6 +313,8 @@ async function reload() {
   void restorePendingLogin();
   void loadBackups(readStamp);
   if (page === 'agents') void loadAgents();
+  if (page === 'agents' || page === 'projects') void loadChains();
+  if (page === 'agents' || page === 'tokens') { groupKeyStatus = null; void loadCeilings(); }
   if (page === 'orgs') void loadPassioncode();
   void adapter.analytics().then((value) => { if (clock.accepts(readStamp)) { analyticsState = value; analyticsError = false; } }, () => { analyticsError = true; }).finally(backgroundRender);
   void adapter.loginItem().then((value) => { if (clock.accepts(readStamp)) { loginItem = value; loginItemError = false; } }, () => { loginItemError = true; }).finally(backgroundRender);
@@ -280,7 +339,7 @@ async function mutate(action: () => Promise<unknown>, success: string | (() => s
     try { snapshot = await adapter.snapshot(); loadError = ''; }
     catch { loadError = t('The action completed, but accounts could not be refreshed. Retry loading the account list.'); }
   } catch (error) { if (accountId) { try { snapshot = await adapter.snapshot(); } catch { /* Keep last snapshot. */ } } const text = safeError(error, operation); if (accountId) usageErrors.set(accountId, text); showNotice(text, true); }
-  finally { clock.end(); busy = false; render(); restoreFocus(focusKey); }
+  finally { clock.end(); busy = false; render(); restoreFocus(focusKey); loadOnboarding(); }
 }
 
 /** Returns false when a background render found nothing to change and left the DOM alone. */
@@ -334,9 +393,10 @@ function render(options: { background?: boolean } = {}): boolean {
     actions.append(button(loading ? t('Loading…') : t('Refresh'), () => void reload(), 'button quiet', 'refresh'));
     // VIS-21, UX-01: while a page shows its empty state, that state carries the one primary action.
     const empty = (list?: unknown[]) => !!snapshot && !(list ?? []).length;
-    if (page === 'accounts' && !empty(snapshot?.accounts)) actions.append(addMenu());
+    if (page === 'accounts' && !empty(snapshot?.accounts)) actions.append(addMenu(orgCardLeads() ? 'button quiet' : 'button primary'));
     if (page === 'projects' && !empty(snapshot?.projects)) actions.append(button(t('+ New group'), () => projectDialog(), 'button primary', 'new-project'));
-    if (page === 'orgs' && !empty(snapshot?.organizations)) actions.append(button(t('+ New organization'), () => organizationDialog(null), 'button primary', 'org-add'));
+    // SB-228 (VIS-21): the organization card's own action leads; this one goes quiet beside it.
+    if (page === 'orgs' && !empty(snapshot?.organizations)) actions.append(button(t('+ New organization'), () => organizationDialog(null), orgCardLeads() ? 'button quiet' : 'button primary', 'org-add'));
     header.append(actions);
   }
   main.append(header);
@@ -345,9 +405,20 @@ function render(options: { background?: boolean } = {}): boolean {
     main.append(emptyState(t('Open the native app'), t('Account storage and session launches are available in the Fabric Switchboard desktop app. This browser window has no access to your accounts.')));
     shell.append(main); return commit();
   }
-  if (notice) { const alert = el('div', `notice toast ${noticeError ? 'error' : 'success'}${tourShown() ? ' beside-tour' : ''}`); alert.append(el('span', '', notice), button(t('Dismiss'), () => { notice = ''; render(); document.querySelector<HTMLElement>('h1')?.focus(); }, 'text-button', 'dismiss-notice')); main.append(alert); }
+  if (notice) { const alert = el('div', `notice toast ${noticeError ? 'error' : 'success'}${tourShown() ? ' beside-tour' : ''}`); alert.append(el('span', '', notice)); if (noticeAction) { const action = noticeAction; alert.append(button(action.label, () => action.run(), 'text-button', 'notice-action')); } alert.append(button(t('Dismiss'), () => { notice = ''; render(); document.querySelector<HTMLElement>('h1')?.focus(); }, 'text-button', 'dismiss-notice')); main.append(alert); }
   loginBanner(main);
   if (page !== 'about' && usageQuestion(analyticsState)) main.append(usageQuestionCard());
+  if (snapshot && (page === 'accounts' || page === 'orgs')) {
+    const screen = { page, hidden: orgSetupHidden, usage: analyticsState, usageFailed: analyticsError, tourStep, released: releasedOrgs() };
+    const leader = orgSetupPrimary({ ...screen, onboarding });
+    const cards = orgSetups(onboarding, screen.released).filter((setup) => orgSetupShown({ ...screen, organization: setup.organization.id })).map((setup) => orgSetupCard(setup, setup.organization.id === leader));
+    const unread = orgSetupUnread({ onboarding, failed: onboardingError, organizations: snapshot.organizations ?? [], page, hidden: orgSetupHidden, usage: analyticsState, usageFailed: analyticsError, tourStep, released: releasedOrgs() });
+    if (unread) cards.push(orgSetupUnreadCard(unread));
+    // F1 (SCN-079): another organization's card would push each card's released line below the fold, so leaving is said above it.
+    const left = page === 'orgs' && cards.length ? releasedSummary(passioncodeView, snapshot.organizations ?? []) : null;
+    if (left) main.append(el('p', 'surface-note org-released org-released-summary', left));
+    main.append(...cards);
+  }
   if (page === 'about') renderAbout(main);
   else if (page === 'agents') renderAgents(main);
   else if (page === 'tokens') renderTokens(main);
@@ -393,7 +464,7 @@ function rulesStrip(main: HTMLElement) {
   main.append(strip);
 }
 function renderProjects(main: HTMLElement) {
-  main.append(projectsSection(), codexRouteSection(), diskMapSection(), rulesSection());
+  main.append(projectsSection(), codexRouteSection(), shellHookSection(), diskMapSection(), rulesSection());
 }
 /** SB-143: Codex sessions in a project's folders use its Codex accounts, by one switch. */
 let codexRouteState: CodexRoute | null = null; let codexRouteLoading = false; let codexRouteError = ''; let codexRouteKey = '';
@@ -414,15 +485,73 @@ function codexRouteSection() {
   const r = codexRouteState;
   if (r) {
     const line = r.on ? (r.applied ? t('On: Codex goes through Switchboard.') : t('On, but not in Codex\'s settings right now.')) : t('Off: Codex uses your own sign-in in every folder.');
-    section.append(el('p', 'account-meta', line));
+    section.append(el('p', 'account-meta section-state', line));
     if (r.projects.length) section.append(el('p', 'form-note', t('Groups with a Codex account: {names}.', { names: r.projects.join(', ') })));
     else section.append(el('p', 'form-note', t('No group has a Codex account yet. Move one into a group first.')));
+    const hookLine = codexHookLine(shellHookState); if (hookLine) section.append(el('p', 'form-note', hookLine));
     if (r.conflict) section.append(el('p', 'form-error', t(r.conflict)));
-    const act = button(r.on ? t('Turn off') : t('Turn on'), () => void mutate(async () => { codexRouteState = await adapter.codexRoute(!r.on); }, r.on ? t('Codex uses your own sign-in again.') : t('Codex sessions in group folders now use their groups\' Codex accounts. Start a new Codex session to pick it up.'), 'codex-route-toggle'), r.on || !r.projects.length ? 'button' : 'button primary', 'codex-route-toggle');
+    const act = button(r.on ? t('Turn off') : t('Turn on'), () => void mutate(async () => { codexRouteState = await adapter.codexRoute(!r.on); }, r.on ? t('Codex uses your own sign-in again.') : t('Codex sessions in group folders now use their groups\' Codex accounts. Start a new Codex session to pick it up.'), 'codex-route-toggle'), 'button', 'codex-route-toggle');
     act.disabled = !r.on && !!r.conflict;
     section.append(act);
   }
   return section;
+}
+/** SB-183 (node A-7): whether terminals follow organization folders (SCN-075), beside *Codex in group folders*. */
+let shellHookState: ShellHookStatus | null = null; let shellHookLoading = false; let shellHookError = ''; let shellHookKey = '';
+/** What the section's answer depends on: the groups, their organizations and folders. */
+const shellHookInputs = () => JSON.stringify((snapshot?.projects ?? []).map((p) => [p.pool, p.organization ?? null, p.folders.length]));
+function loadShellHook() {
+  if (shellHookLoading) return;
+  shellHookLoading = true; const key = shellHookInputs(); const stamp = clock.stamp();
+  // A read issued before *Turn off* / *Turn on* may predate it: it is not applied over the change.
+  void adapter.shellHookStatus().then((s) => { if (clock.accepts(stamp) || !shellHookState) { shellHookState = s; shellHookError = ''; } shellHookKey = key; }, (e) => { if (clock.accepts(stamp) || !shellHookState) shellHookError = t(safeError(e, 'read')); shellHookKey = key; }).finally(() => { shellHookLoading = false; render(); });
+}
+function setShellHook(on: boolean, focusKey: string) {
+  void mutate(async () => { shellHookState = await adapter.setShellHook(on); }, shellHookToggleNotice(on), focusKey);
+}
+function shellHookSection() {
+  const section = el('section', 'project-section'); section.setAttribute('aria-labelledby', 'shell-hook-heading');
+  const heading = el('h2', 'section-heading', t('Terminals in organization folders')); heading.id = 'shell-hook-heading';
+  section.append(heading, el('p', 'surface-note', t('In the folders of a group that belongs to an organization, new terminals run claude and codex in that organization\'s context: its accounts, history and settings. Leaving the folder gives your own settings back. Switchboard adds one marked block to each shell\'s start file and takes it out byte for byte when you turn this off.')));
+  if (shellHookState && shellHookKey !== shellHookInputs()) loadShellHook();
+  if (!shellHookState && !shellHookError) loadShellHook();
+  const view = shellHookView(shellHookState, shellHookError || null);
+  // F4 (wave 4 design pass): the state stands apart from the explanation above it, in body text.
+  section.append(el('p', view.state === 'reading' ? 'form-note' : 'account-meta section-state', view.line));
+  if (view.error) section.append(el('p', 'form-error', view.error));
+  if (view.retry) { section.append(button(t('Retry'), () => { shellHookError = ''; loadShellHook(); render(); }, 'button', 'shell-hook-retry')); return section; }
+  if (view.files.length) {
+    const list = el('ul', 'shell-hook-files'); list.setAttribute('aria-label', t('Start files'));
+    view.files.forEach((file, index) => {
+      const item = el('li', file.problem ? 'form-note shell-hook-problem' : 'form-note'); item.append(el('span', '', file.text));
+      if (file.command) { const command = file.command; const line = el('div', 'policy-row'); line.append(el('code', 'address', command)); const copy = button(t('Copy'), () => copyText(copy, command, t('Terminal hook')), 'text-button', `shell-hook-copy-${index}`); line.append(copy); item.append(line); }
+      list.append(item);
+    });
+    section.append(list);
+  }
+  if (view.note) section.append(el('p', 'form-note', view.note));
+  // *Add the block again* saves the choice `on` as *Turn on* does (A-7 fix cycle 1, N3): said beside it.
+  if (view.action && view.readd) section.append(el('p', 'form-note', t('Adding the block again saves your choice to keep the hook on, as Turn on does.')));
+  if (view.action) {
+    const action = view.action; const controls = el('div', 'org-card-actions');
+    const toggle = button(action.label, () => setShellHook(action.on, 'shell-hook-toggle'), 'button', 'shell-hook-toggle'); toggle.disabled = action.disabled; controls.append(toggle);
+    if (view.readd) controls.append(button(t('Add the block again'), () => setShellHook(true, 'shell-hook-readd'), 'button', 'shell-hook-readd'));
+    section.append(controls);
+  }
+  return section;
+}
+/** SCN-074 step 1: the first time the installed app wrote the terminal hook, the window says so once, with the way to Groups; read while the window is visible, then acknowledged. */
+let shellNoticeReading = false;
+function checkShellHookNotice() {
+  if (shellNoticeReading || document.hidden) return;
+  shellNoticeReading = true;
+  void adapter.shellHookNotice().then((found) => {
+    if (!found || document.hidden) return;
+    const { title, body } = shellHookNoticeText(found);
+    showNotice(`${title}. ${body}`); noticeAction = { label: t('Open Groups'), run: () => { notice = ''; goTo('projects', 'shell-hook-toggle'); } };
+    shellHookState = null; render();
+    void adapter.acknowledgeShellHookNotice().catch(() => { /* shown again at the next look */ });
+  }, () => { /* read again at the next look */ }).finally(() => { shellNoticeReading = false; });
 }
 /** SB-135 part 2: the Git repositories under the folders the person chose, each with its project or none; one moves or joins in place. Read only when the section is open. */
 let mapOpen = false; let mapFilter: MapFilter = 'unassigned'; let diskMap: RepositoryMap | null = null; let mapLoading = false; let mapError = '';
@@ -565,8 +694,12 @@ function projectsSection() {
     const folders = projectFolderList(project);
     const chips = el('p', 'account-meta', accounts.length ? accounts.map((a) => `${a.label} · ${providerName(a.provider)}`).join(', ') : t('No accounts yet, so sessions in these folders use your other accounts until you add one.'));
     details.append(title, folders, chips);
+    // C-3 (SCN-081): which chain the group's tasks fall back along; the editor is on Agents.
+    const fallback = groupChainLine(project.pool);
+    if (fallback) { const line = el('p', 'account-meta chain-line'); line.append(button(fallback, () => goTo('agents', `chain-edit-project-${project.pool}`), 'text-button chain-link', `chain-link-${project.pool}`)); details.append(line); }
     // SB-170: every account of the group belongs elsewhere now, so its folders are refused.
     if (groupOrg && groupSeatsElsewhere(snapshot!, groupOrg.id, accounts)) details.append(el('p', 'surface-note seats-elsewhere', t('None of these accounts belongs to {name} any more, so sessions in this group\'s folders are refused. Add an account of {name}, or change the group\'s organization.', { name: groupOrg.name })));
+    else { const ended = groupOrg ? groupSeatsEndedText(snapshot!, project, accounts, monitor?.sign_in_required) : null; if (ended) details.append(el('p', 'surface-note seats-ended', ended)); }
     const actions = el('div', 'management-actions');
     actions.append(button(t('Edit'), () => projectDialog(project), 'text-button', `edit-project-${project.pool}`), button(t('Delete'), () => deleteProjectDialog(project), 'text-button danger-text', `delete-project-${project.pool}`));
     card.append(details, actions); list.append(card);
@@ -616,7 +749,7 @@ function projectFolderList(project: Project) {
   }
   return wrap;
 }
-function projectDialog(existing?: Project) {
+function projectDialog(existing?: Project, organization?: string) {
   const context = openDialog(existing ? t('Edit {name}', { name: existing.name }) : t('New group'), t('Add the group\'s repositories (folders) and choose the accounts that belong to it. An account belongs to one group at a time; a repository may be in several groups.'));
   const name = input(existing?.name ?? ''); name.maxLength = 80; name.placeholder = t('e.g. Client Alpha');
   const folders = foldersPicker(context, existing?.folders ?? [], 'project-folders', existing ? projectRoots?.[existing.pool] ?? null : null);
@@ -625,13 +758,15 @@ function projectDialog(existing?: Project) {
   // SB-109 (SCN-070): with organizations, the group runs on one organization's accounts or on personal ones.
   const organizations = snapshot!.organizations ?? [];
   const orgPicker = organizations.length ? select([['personal', t('Personal accounts')], ...organizations.map((o): [string, string] => [o.id, o.name])]) : null;
-  if (orgPicker) orgPicker.value = existing?.organization && organizations.some((o) => o.id === existing.organization) ? existing.organization : 'personal';
+  if (orgPicker) orgPicker.value = existing?.organization && organizations.some((o) => o.id === existing.organization) ? existing.organization : organization && organizations.some((o) => o.id === organization) ? organization : 'personal';
+  // SB-202 (B-8): + Group for {organization} starts with its name and its seats already here.
+  if (!existing && organization) name.value = organizations.find((o) => o.id === organization)?.name ?? '';
   const chosenOrg = () => (orgPicker && orgPicker.value !== 'personal' ? orgPicker.value : null);
   if (!usable.length) picker.append(el('p', 'form-note', t('No accounts yet. Add accounts first, or save the group now and add them later.')));
   const rows: { account: Account; box: HTMLInputElement; why: HTMLElement; text: string }[] = [];
   for (const account of usable) {
     const owner = projectOf(account.pool);
-    const option = el('label', 'appearance-option login-option'); const box = el('input'); box.type = 'checkbox'; box.value = account.id; box.checked = !!existing && account.pool === existing.pool;
+    const option = el('label', 'appearance-option login-option'); const box = el('input'); box.type = 'checkbox'; box.value = account.id; box.checked = existing ? account.pool === existing.pool : !!organization && attribution(snapshot!, account).organization === organization && !inCli(account);
     const note = owner && owner.pool !== existing?.pool ? t(' · in {name}, moves here', { name: owner.name }) : '';
     const why = el('span', '', `${account.label} · ${providerName(account.provider)}${note}`);
     option.append(box, why); picker.append(option);
@@ -734,9 +869,11 @@ const catalogAgent = (id: string) => (agentCatalog as { agents: AgentInfo[] }).a
 /** SB-120: the Agents page — the default agent, what is installed and takes over work,
  * what can be installed, then the OpenRouter key and the tools registration. */
 function renderAgents(main: HTMLElement) {
+  ceilingBanners(main);
   if (agentsError && !agentsView) { const panel = el('section', 'about-panel'); panel.append(el('p', 'usage-error', t(agentsError)), button(t('Retry'), () => void loadAgents(), 'button', 'agents-retry')); main.append(panel); }
   else if (!agentsView) { const panel = el('section', 'about-panel'); panel.append(el('p', 'form-note', t('Looking for coding agents on this computer…'))); main.append(panel); }
-  else main.append(defaultAgentPanel(agentsView), installedAgentsPanel(agentsView), availableAgentsPanel(agentsView));
+  else main.append(defaultAgentPanel(agentsView), installedAgentsPanel(agentsView), chainsPanel(), availableAgentsPanel(agentsView));
+  if (!agentsView) main.append(chainsPanel());
   main.append(tokensPointer(), connectPanel());
 }
 function defaultAgentPanel(view: AgentsOverview) {
@@ -818,6 +955,163 @@ function availableAgentsPanel(view: AgentsOverview) {
   details.append(list); section.append(details, el('p', 'form-note', t('Sources for every agent: docs/research/agents-2026-10-05.md in the repository. CLI: switchboard agents status | enable | disable | default | launch.')));
   return section;
 }
+// C-3 (SB-71, SCN-080..082): the fallback chains, read with what each step would do now.
+let chainsView: Chains | null = null;
+let chainsError = '';
+/** SB-229: under the clock, so a read from before a Save never paints over the saved chain (it may
+ * only fill an empty panel); a read that answers clears an earlier failure. */
+async function loadChains() {
+  const read = await clockedRead(clock, () => adapter.chains());
+  ({ view: chainsView, error: chainsError } = afterRead({ view: chainsView, error: chainsError }, read, false, (error) => safeError(error, 'read')));
+  backgroundRender();
+}
+const chainAgentName = (id: string) => agentsView?.agents.find((a) => a.id === id)?.name ?? catalogAgent(id)?.name ?? id;
+const chainAccountLabel = (id: string) => snapshot?.accounts.find((a) => a.id === id)?.label ?? kimi?.accounts.find((k) => k.account.id === id)?.account.label;
+const scopeKey = chainScopeKey;
+const chainFor = (key: string) => chainsView?.chains.find((c) => scopeKey(c.scope) === key) ?? null;
+const scopeLabel = (scope: ChainScope) => scope.kind === 'machine' ? t('This computer') : scope.kind === 'project' ? projectOf(scope.pool)?.name ?? scope.pool : t('Task {id}', { id: shortWorkflow(scope.id) });
+/** The Groups card's line (SCN-081): the group's own chain, this computer's, or none. */
+function groupChainLine(pool: string): string | null {
+  if (!chainsView) return null;
+  if (chainFor(`project:${pool}`)) return t('Fallback: own chain');
+  return chainFor('machine') ? t('Fallback: this computer\'s chain') : t('Fallback: not set');
+}
+function chainsPanel() {
+  const section = el('section', 'about-panel chains-panel'); section.id = 'chains-panel'; section.setAttribute('aria-labelledby', 'chains-heading');
+  const heading = el('h2', '', t('Fallback chains')); heading.id = 'chains-heading';
+  section.append(heading, el('p', '', t('When a task\'s accounts run out, Switchboard hands it to the next agent in its chain. Nothing is handed over until a chain is set.')));
+  if (chainsError) {
+    const failed = el('div', 'notice error stale-list'); failed.setAttribute('role', 'status');
+    failed.append(el('span', '', `${t('Chains are unavailable. Refresh to retry.')}${chainsView ? ` ${t('The list may be out of date: the last read failed.')}` : ''}`), button(t('Retry'), () => void loadChains(), 'text-button', 'chains-retry'));
+    section.append(failed);
+  }
+  if (!chainsView) { if (!chainsError) { const reading = el('p', 'form-note', t('Reading fallback chains…')); reading.setAttribute('role', 'status'); section.append(reading); } return section; }
+  const view = chainsView;
+  if (view.ceilings_unreadable) section.append(el('p', 'usage-error', t('Spending ceilings (spend.json) could not be read, so no paid agent is handed work until they are. Delete spend.json, then restore a backup to get the ceilings back, or leave it deleted to start over with no ceilings.')));
+  if (!view.limits_known) section.append(el('p', 'form-note', t('Account limits are not known right now, so a step may read ready when its accounts have no room.')));
+  const nothingSet = !view.chains.length;
+  const list = el('div', 'chain-list');
+  list.append(chainRow({ kind: 'machine' }, nothingSet));
+  const projects = snapshot?.projects ?? [];
+  for (const project of projects) list.append(chainRow({ kind: 'project', pool: project.pool }, false));
+  for (const chain of view.chains) if (chain.scope.kind === 'workflow') list.append(chainRow(chain.scope, false));
+  section.append(list);
+  if (!projects.length) section.append(el('p', 'form-note', t('A group gets its own chain once you create one under Groups.')));
+  section.append(lastHandoverLine(view));
+  return section;
+}
+function chainRow(scope: ChainScope, primary: boolean) {
+  const key = scopeKey(scope); const chain = chainFor(key); const label = scopeLabel(scope);
+  const anchor = scope.kind === 'machine' ? 'machine' : scope.kind === 'project' ? `project-${scope.pool}` : `workflow-${scope.id}`;
+  const row = el('div', 'chain-row'); row.id = `chain-row-${anchor}`; row.setAttribute('role', 'group'); row.setAttribute('aria-label', label);
+  const head = el('div', 'chain-head'); const info = el('div', 'chain-info');
+  info.append(el('strong', 'chain-scope', label));
+  if (chain) {
+    const steps = el('ol', 'chain-steps'); steps.setAttribute('aria-label', t('{scope}: {chain}', { scope: label, chain: chainSummary(chain.executors, chainAgentName, chainAccountLabel) }));
+    for (const step of chain.executors) {
+      const pin = step.key ? null : step.account_id ? chainAccountLabel(step.account_id) ?? step.account_id : null;
+      const item = el('li', 'chain-step-chip'); const chip = el('span', 'chain-chip', chainAgentName(step.agent)); if (pin) chip.append(el('span', 'chain-pin', pin)); if (step.key) chip.append(el('span', 'chain-pin', t('key')));
+      item.append(chip); steps.append(item);
+    }
+    info.append(steps);
+  } else info.append(el('span', 'form-note', scope.kind === 'project' ? (chainFor('machine') ? t('Uses this computer\'s chain') : t('Uses this computer\'s chain, which is not set')) : t('Not set')));
+  const actions = el('div', 'management-actions');
+  if (scope.kind === 'machine' && !chain) actions.append(button(t('Use Subscriptions first'), () => void mutate(() => adapter.setChain(scope, [], 'subscriptions-first'), t('This computer\'s chain is set.'), 'chain-edit-machine').then(loadChains), primary ? 'button primary' : 'button', 'chain-preset'));
+  const editKey = `chain-edit-${anchor}`;
+  if (chain || scope.kind === 'machine') actions.append(button(t('Edit…'), () => chainDialog(scope, chain?.executors ?? [], editKey), 'button', editKey));
+  else actions.append(button(t('Set for this group…'), () => chainDialog(scope, [], editKey), 'button', editKey));
+  if (chain) actions.append(button(t('Clear'), () => clearChainDialog(scope, scope.kind === 'workflow' ? 'chain-edit-machine' : editKey), 'text-button danger-text', `chain-clear-${anchor}`));
+  head.append(info, actions); row.append(head);
+  const readiness = chain ? chainsView?.readiness[key] ?? [] : [];
+  if (readiness.length) {
+    const lines = el('ul', 'chain-readiness'); lines.setAttribute('aria-label', t('Whether each step could take a task now'));
+    for (const step of readiness) lines.append(readinessLine(step, scope.kind === 'project' ? label : undefined));
+    row.append(lines);
+  }
+  return row;
+}
+function readinessLine(step: ChainStepView, groupName?: string) {
+  const line = el('li', `chain-ready is-${step.state.replace('_', '-')}`);
+  line.append(el('span', 'chain-ready-agent', step.name ?? chainAgentName(step.agent)), el('span', '', stepReasonText(step, groupName)));
+  return line;
+}
+function lastHandoverLine(view: Chains) {
+  const wrap = el('div', 'chain-last');
+  const last = view.last_handover;
+  if (!last) { wrap.append(el('p', 'form-note', t('No hand-over yet.'))); return wrap; }
+  wrap.append(el('p', '', t('Last hand-over: {time}, task {task}: {outcome}.', { time: date(last.at), task: shortWorkflow(last.workflow), outcome: handoverOutcomeText(last.outcome) })));
+  const skipped = handoverSkipped(last.skipped, chainAgentName);
+  if (skipped.length) wrap.append(el('p', 'form-note', t('Passed over: {steps}', { steps: skipped.join('; ') })));
+  return wrap;
+}
+const chainSavedText = (scope: ChainScope) => scope.kind === 'machine' ? t('This computer\'s chain is saved.') : scope.kind === 'project' ? t('The chain of {group} is saved.', { group: scopeLabel(scope) }) : t('The chain of task {id} is saved.', { id: shortWorkflow(scope.id) });
+/** The editor (SCN-080): the steps in order, each an agent and an account, moved with buttons. */
+function chainDialog(scope: ChainScope, initial: ChainExecutor[], returnFocus: string) {
+  let steps: ChainExecutor[] = structuredClone(initial);
+  const context = openDialog(t('Fallback chain: {scope}', { scope: scopeLabel(scope) }), t('Steps are tried in order: the first agent that can take the task gets it.'), returnFocus);
+  const list = el('ol', 'chain-editor'); list.setAttribute('aria-label', t('Steps'));
+  const add = button(t('+ Add agent'), () => { const used = new Set(steps.map((s) => s.agent)); steps = [...steps, { agent: TAKEOVER_ORDER.find((a) => !used.has(a)) ?? TAKEOVER_ORDER[0] }]; paint(`chain-step-${steps.length - 1}-agent`); }, 'button row-button', 'chain-add');
+  const full = el('p', 'form-note', t('A chain holds at most 8 agents.'));
+  const kimiAccounts = (kimi?.accounts ?? []).map((k) => k.account);
+  const focusIn = (key?: string) => { if (key) context.form.querySelector<HTMLElement>(`[data-key="${key}"]`)?.focus(); };
+  const paint = (focusKey?: string) => {
+    list.replaceChildren();
+    steps.forEach((step, index) => {
+      const n = index + 1; const name = chainAgentName(step.agent);
+      const item = el('li', 'chain-step'); item.append(el('span', 'chain-step-number', `${n}.`));
+      const controls = el('div', 'chain-step-fields');
+      if (step.key) {
+        const fixed = el('div', 'chain-step-fixed'); fixed.append(el('strong', '', name), el('span', 'form-note', t('Pinned to key {name}: not automatic yet (waits for project grants)', { name: step.key })));
+        controls.append(fixed);
+      } else {
+        const agents: [string, string][] = TAKEOVER_ORDER.map((id) => [id, chainAgentName(id)]);
+        if (!TAKEOVER_ORDER.includes(step.agent)) agents.push([step.agent, t('{agent} (not automatic)', { agent: name })]);
+        const agent = select(agents); agent.value = step.agent; agent.dataset.key = `chain-step-${index}-agent`; agent.setAttribute('aria-label', t('Agent for step {n}', { n }));
+        agent.addEventListener('change', () => { steps[index] = { agent: agent.value }; paint(`chain-step-${index}-agent`); });
+        const choices = accountsForStep(step.agent, snapshot?.accounts ?? [], kimiAccounts);
+        const openrouterAgent = step.agent === 'hermes' || step.agent === 'opencode';
+        const options: [string, string][] = [['', openrouterAgent ? t('The OpenRouter key') : t('Any account with room')], ...choices.map((c): [string, string] => [c.id, c.label])];
+        if (step.account_id && !choices.some((c) => c.id === step.account_id)) options.push([step.account_id, chainAccountLabel(step.account_id) ?? step.account_id]);
+        const account = select(options); account.value = step.account_id ?? ''; account.dataset.key = `chain-step-${index}-account`; account.setAttribute('aria-label', t('Account for step {n}', { n }));
+        if (options.length === 1) { account.disabled = true; account.dataset.locked = 'true'; }
+        account.addEventListener('change', () => { steps[index] = { agent: step.agent, ...(account.value ? { account_id: account.value } : {}) }; });
+        controls.append(agent, account);
+      }
+      const moves = el('div', 'chain-step-moves');
+      const move = (delta: number) => { steps = moveStep(steps, index, delta); const to = index + delta; paint(`chain-step-${to}-${(delta < 0 ? to > 0 : to < steps.length - 1) ? (delta < 0 ? 'up' : 'down') : (delta < 0 ? 'down' : 'up')}`); };
+      const up = button(t('Move up'), () => move(-1), 'text-button', ''); up.dataset.key = `chain-step-${index}-up`; up.setAttribute('aria-label', t('Move up: step {n}, {agent}', { n, agent: name }));
+      const down = button(t('Move down'), () => move(1), 'text-button', ''); down.dataset.key = `chain-step-${index}-down`; down.setAttribute('aria-label', t('Move down: step {n}, {agent}', { n, agent: name }));
+      const remove = button(t('Remove'), () => { steps = steps.filter((_, i) => i !== index); paint(steps.length ? `chain-step-${Math.min(index, steps.length - 1)}-agent` : 'chain-add'); }, 'text-button danger-text', ''); remove.dataset.key = `chain-step-${index}-remove`; remove.setAttribute('aria-label', t('Remove: step {n}, {agent}', { n, agent: name }));
+      if (index === 0) { up.disabled = true; up.dataset.locked = 'true'; }
+      if (index === steps.length - 1) { down.disabled = true; down.dataset.locked = 'true'; }
+      moves.append(up, down, remove);
+      item.append(controls, moves); list.append(item);
+    });
+    if (!steps.length) list.append(el('li', 'chain-step is-empty form-note', t('No agents yet. Add the first one.')));
+    const atMost = steps.length >= 8; add.disabled = atMost; add.dataset.locked = String(atMost); full.hidden = !atMost;
+    add.dataset.key = 'chain-add';
+    focusIn(focusKey);
+  };
+  context.body.append(list, add, full); context.actions.append(submit(t('Save chain')));
+  paint(steps.length ? 'chain-step-0-agent' : 'chain-add');
+  context.form.addEventListener('submit', (event) => {
+    event.preventDefault();
+    if (!steps.length) { context.error.textContent = t('Add an agent, or clear the chain instead.'); add.focus(); return; }
+    const executors = steps.map((s) => ({ agent: s.agent, ...(s.account_id ? { account_id: s.account_id } : {}), ...(s.key ? { key: s.key } : {}) }));
+    // SB-229: the save is the action; the chains are read again after it, and a failed re-read never fails the save.
+    void dialogSave(context, () => adapter.setChain(scope, executors, null), chainSavedText(scope)).then(loadChains);
+  });
+}
+/** Focus goes back to the row's Edit… (this computer's for a task row, which goes when cleared). */
+function clearChainDialog(scope: ChainScope, returnFocus: string) {
+  const question = scope.kind === 'machine' ? t('Clear this computer\'s chain?') : scope.kind === 'project' ? t('Clear the chain of {group}?', { group: scopeLabel(scope) }) : t('Clear the chain of task {id}?', { id: shortWorkflow(scope.id) });
+  const consequence = scope.kind === 'machine' ? t('Nothing is handed over while no chain applies.') : scope.kind === 'project' ? t('Its tasks use this computer\'s chain again.') : t('It uses its group\'s or this computer\'s chain again.');
+  const context = openDialog(question, consequence, returnFocus);
+  const confirm = submit(t('Clear chain')); confirm.className = 'button danger'; context.actions.append(confirm);
+  const cleared = scope.kind === 'machine' ? t('This computer\'s chain is cleared.') : scope.kind === 'project' ? t('The chain of {group} is cleared.', { group: scopeLabel(scope) }) : t('The chain of task {id} is cleared.', { id: shortWorkflow(scope.id) });
+  context.form.addEventListener('submit', (event) => { event.preventDefault(); void dialogSave(context, () => adapter.setChain(scope, [], null), cleared).then(loadChains); });
+  context.actions.querySelector('button')?.focus();
+}
 /** Registering Switchboard's tools with coding agents (SB-93), shown after the agents. */
 function connectPanel() {
   const setup = el('section', 'about-panel'); setup.id = 'connect-panel'; setup.append(el('h2', '', t('Connect an agent')));
@@ -831,7 +1125,9 @@ function connectPanel() {
     setup.append(facts, el('h3', '', t('Or register the tools yourself')));
   }
   setup.append(el('p', 'form-note', agentSetup.cli_path ? t('Command-line tool: {path}', { path: agentSetup.cli_path }) : t('The switchboard command-line tool was not found on PATH.')));
-  if (agentSetup.can_link && !agentSetup.linked_cli) setup.append(button(t('Link switchboard into ~/.local/bin'), () => void mutate(async () => { await adapter.linkCli(); agentSetup = await adapter.agentSetup(); }, t('The command-line tool is linked. Agents and plugins can now start switchboard mcp.'), 'link-cli'), 'button primary', 'link-cli'));
+  // VIS-21: *Use Subscriptions first* above leads while no chain is set; then this one does.
+  const linkLeads = firstPrimary([['chain_preset', !!chainsView && !chainsView.chains.length], ['link_cli', true]]) === 'link_cli';
+  if (agentSetup.can_link && !agentSetup.linked_cli) setup.append(button(t('Link switchboard into ~/.local/bin'), () => void mutate(async () => { await adapter.linkCli(); agentSetup = await adapter.agentSetup(); }, t('The command-line tool is linked. Agents and plugins can now start switchboard mcp.'), 'link-cli'), linkLeads ? 'button primary' : 'button', 'link-cli'));
   setup.append(copyable(t('Claude Code'), agentSetup.commands.claude_code, 'copy-claude'), copyable(t('Codex CLI'), agentSetup.commands.codex, 'copy-codex'), copyable(t('Claude Code plugin (tools and the switching-accounts skill)'), agentSetup.commands.claude_plugin, 'copy-plugin'));
   setup.append(el('p', 'form-note', t('Sessions you launch from Switchboard get these tools automatically when the command-line tool is available. Isolated sessions get the read-only tools.')));
   return setup;
@@ -859,13 +1155,16 @@ function hermesDialog() {
 }
 /** Reads the key's metadata and asks OpenRouter what it may still spend; never the key. */
 async function loadOpenrouter(stamp?: number) {
-  try { const [status, keys] = await Promise.all([adapter.openrouterStatus(), adapter.openrouterKeys()]); if (stamp === undefined || clock.accepts(stamp)) { [openrouter, openrouterKeys] = [status, keys]; openrouterError = ''; } } catch (error) { openrouterError = safeError(error, 'read'); }
+  try { const [status, keys] = await Promise.all([adapter.openrouterStatus(), adapter.openrouterKeys()]); if (stamp === undefined || clock.accepts(stamp)) { [openrouter, openrouterKeys] = [status, keys]; openrouterError = ''; groupKeyStatus = null; } } catch (error) { openrouterError = safeError(error, 'read'); }
   backgroundRender();
 }
 /** SB-144: the Tokens page: the key every folder uses, and each project's own. */
 function renderTokens(main: HTMLElement) {
   if (!openrouter && !openrouterError) void loadOpenrouter();
+  if (openrouterKeys && !groupKeyStatus) loadGroupKeys();
+  ceilingBanners(main);
   main.append(el('p', 'surface-note', t('Agents that run on an API key (Hermes, OpenCode, Pi, Kimi Code CLI and others on OpenRouter) take the key of the group whose folder they start in. A folder outside every group, or a group without a key of its own, uses the machine\'s key. Nothing waits: each launch reads its key when it starts.')), openrouterPanel(), projectKeysPanel());
+  const tasks = taskCeilingsPanel(); if (tasks) main.append(tasks);
 }
 /** On Agents, where the key used to be: one line to the Tokens page. */
 function tokensPointer() {
@@ -892,10 +1191,137 @@ function projectKeysPanel() {
     const actions = el('div', 'management-actions');
     if (own) actions.append(button(t('Change model'), () => openrouterModelDialog(target), 'text-button', `key-model-${project.pool}`), button(t('Replace key'), () => openrouterKeyDialog(target), 'text-button', `key-replace-${project.pool}`), button(t('Remove key'), () => openrouterRemoveDialog(target), 'text-button danger-text', `key-remove-${project.pool}`));
     else actions.append(button(t('Add key…'), () => openrouterKeyDialog(target), 'text-button', `key-add-${project.pool}`));
-    item.append(actions); list.append(item);
+    item.append(actions);
+    item.append(groupCeilingLine(project.pool, !!own));
+    list.append(item);
   }
   section.append(list);
   return section;
+}
+/* C-7 (SB-72, SCN-083, SCN-084): spending ceilings in the window. The window is the only surface
+ * that may raise, clear or double a ceiling (C-Q1); the question has two answers of equal weight. */
+let ceilingsView: Ceilings | null = null;
+let ceilingsError = '';
+/** SB-230: `afterSave` is the re-read right after a saved change: its failure keeps what is shown
+ * and names nothing (the change stands; the next read reports). */
+async function loadCeilings(afterSave = false) {
+  const read = await clockedRead(clock, () => adapter.ceilings());
+  ({ view: ceilingsView, error: ceilingsError } = afterRead({ view: ceilingsView, error: ceilingsError }, read, afterSave, (error) => safeError(error, 'read')));
+  backgroundRender();
+}
+/** Each group key's status (its own limit at OpenRouter), read once per visit to API keys. */
+let groupKeyStatus: Record<string, OpenrouterStatus | null> | null = null; let groupKeysLoading = false;
+function loadGroupKeys() {
+  if (groupKeysLoading || !openrouterKeys) return;
+  groupKeysLoading = true;
+  const pools = openrouterKeys.keys.map((k) => k.pool).filter((pool): pool is string => !!pool);
+  void Promise.all(pools.map(async (pool) => [pool, await adapter.openrouterKeyStatus(pool).catch(() => null)] as const))
+    .then((rows) => { groupKeyStatus = Object.fromEntries(rows); })
+    .finally(() => { groupKeysLoading = false; backgroundRender(); });
+}
+const ceilingOf = (scope: ChainScope): CeilingView | null => ceilingsView?.ceilings.find((c) => scopeKey(c.scope) === scopeKey(scope)) ?? null;
+const ceilingAnchor = (scope: ChainScope) => scope.kind === 'machine' ? 'machine' : scope.kind === 'project' ? `project-${scope.pool}` : `workflow-${scope.id}`;
+/** One banner per open question, oldest first (SCN-084), on Agents and API keys. */
+function ceilingBanners(main: HTMLElement) {
+  if (ceilingsError) {
+    const failed = el('div', 'notice error stale-list'); failed.setAttribute('role', 'status');
+    // The core's own sentence for an unreadable file already says what failed; another error gets the lead.
+    const unreadable = ceilingsError.startsWith('Spending ceilings (spend.json) could not be read');
+    failed.append(el('span', '', unreadable ? t(ceilingsError) : `${t('Ceiling questions could not be read.')} ${t(ceilingsError)}`), button(t('Retry'), () => void loadCeilings(), 'text-button', 'ceilings-retry'));
+    main.append(failed);
+  }
+  for (const q of ceilingsView?.questions ?? []) main.append(ceilingBanner(q));
+}
+function ceilingBanner(q: CeilingQuestionView) {
+  const question = ceilingQuestion({ value: q.usd, double: q.double_usd, kind: q.scope.kind, scope: q.scope.kind === 'machine' ? undefined : q.scope.kind === 'workflow' ? shortWorkflow(q.scope.id) : scopeLabel(q.scope) });
+  const banner = el('section', 'login-banner ceiling-banner'); const id = `ceiling-question-${q.id}`;
+  banner.setAttribute('role', 'group'); banner.setAttribute('aria-labelledby', id);
+  const copy = el('div', 'login-copy'); const lead = el('strong', '', question.text); lead.id = id;
+  copy.append(lead, el('span', '', t('Reached {time}. No paid agent starts past it until you answer.', { time: date(q.reached_at) })));
+  if (question.note) copy.append(el('span', '', question.note));
+  const actions = el('div', 'login-actions ceiling-actions');
+  for (const action of question.actions) {
+    const control = button(action.label, () => void answerCeiling(q, action.answer), action.className, `ceiling-${action.answer}-${q.id}`);
+    if (action.disabled) { control.disabled = true; control.dataset.locked = 'true'; }
+    actions.append(control);
+  }
+  banner.append(copy, actions);
+  return banner;
+}
+function answerCeiling(q: CeilingQuestionView, answer: 'keep' | 'double') {
+  const usd = dollars(answer === 'double' ? q.double_usd ?? q.usd * 2 : q.usd);
+  const group = scopeLabel(q.scope); const task = q.scope.kind === 'workflow' ? shortWorkflow(q.scope.id) : '';
+  const success = answer === 'double'
+    ? (q.scope.kind === 'machine' ? t('This computer\'s daily ceiling is now {usd}.', { usd }) : q.scope.kind === 'project' ? t('The daily ceiling of {group} is now {usd}.', { group, usd }) : t('The ceiling of task {id} is now {usd}.', { id: task, usd }))
+    : (q.scope.kind === 'machine' ? t('This computer\'s daily ceiling stays {usd}. Paid agents wait until it resets.', { usd }) : q.scope.kind === 'project' ? t('The daily ceiling of {group} stays {usd}. Paid agents wait until it resets.', { group, usd }) : t('The ceiling of task {id} stays {usd}.', { id: task, usd }));
+  // SB-230: the answer is the action; its banner goes with it, and the ceilings are read again after.
+  void mutate(async () => { await adapter.answerCeiling(q.id, answer); if (ceilingsView) ceilingsView = { ...ceilingsView, questions: ceilingsView.questions.filter((open) => open.id !== q.id) }; }, success, 'page-title').then(() => loadCeilings(true));
+}
+/** The ceiling of this computer (machine panel) or a group (its key row), beside the key's own limit. */
+function ceilingBlock(scope: ChainScope, credit: OpenrouterCredit | null) {
+  const block = el('div', 'ceiling-block'); const anchor = ceilingAnchor(scope);
+  if (!ceilingsView) { block.append(el('p', 'form-note', ceilingsError ? t('Daily ceiling: not read') : t('Reading spending ceilings…'))); return block; }
+  const ceiling = ceilingOf(scope);
+  block.append(el('p', 'ceiling-line', ceilingLine(ceiling)));
+  if (scope.kind === 'machine') block.append(el('p', 'form-note', t('Counts every OpenRouter key saved in Switchboard, added up per UTC day.')));
+  else if (credit) block.append(el('p', 'form-note', keyLimitLine(credit)));
+  const warning = ceiling?.active ? ceilingWarning(ceiling.usd, credit) : null;
+  if (warning) block.append(el('p', 'ceiling-warning', warning));
+  const actions = el('div', 'management-actions');
+  const canSet = scope.kind === 'machine' || !!ceiling?.active || (scope.kind === 'project' && !!openrouterKeys?.keys.some((k) => k.pool === scope.pool));
+  if (canSet) actions.append(button(t('Set ceiling…'), () => ceilingDialog(scope, ceiling, `ceiling-set-${anchor}`), scope.kind === 'machine' ? 'button' : 'text-button', `ceiling-set-${anchor}`));
+  if (ceiling) actions.append(button(t('Clear'), () => clearCeilingDialog(scope, ceiling, canSet ? `ceiling-set-${anchor}` : 'page-title'), 'text-button danger-text', `ceiling-clear-${anchor}`));
+  block.append(actions);
+  return block;
+}
+/** A group key row's ceiling: its line with the key's own limit, or why it has none. */
+function groupCeilingLine(pool: string, own: boolean) {
+  if (own || ceilingOf({ kind: 'project', pool })) return ceilingBlock({ kind: 'project', pool }, own ? groupKeyStatus?.[pool]?.credit ?? null : null);
+  const block = el('div', 'ceiling-block'); block.append(el('p', 'form-note', t('A daily ceiling needs the group\'s own key.'))); return block;
+}
+/** Note 5 of the wave 4 design pass: the command is code, as everywhere else in the window (SB-228). */
+function ceilingCommandNote() { const note = el('p', 'form-note', t('Set from the command line:')); note.append(' ', el('code', 'address', 'switchboard continue --ceiling <usd>')); return note; }
+/** Task ceilings (set from the CLI or MCP): listed read-only, cleared only here. */
+function taskCeilingsPanel() {
+  const tasks = (ceilingsView?.ceilings ?? []).filter((c) => c.scope.kind === 'workflow');
+  if (!tasks.length) return null;
+  const section = el('section', 'about-panel'); section.setAttribute('aria-labelledby', 'task-ceilings-heading');
+  const heading = el('h2', '', t('Task ceilings')); heading.id = 'task-ceilings-heading';
+  section.append(heading, el('p', '', t('Counted on the key since the first paid hand-over; other work on the same key counts too.')), ceilingCommandNote());
+  const list = el('ul', 'repository-map key-list'); list.setAttribute('aria-label', t('Task ceilings'));
+  for (const c of tasks) {
+    const item = el('li', 'account-meta repository-row'); const text = el('div', 'repository-text');
+    text.append(el('span', 'repository-name', scopeLabel(c.scope)), el('span', 'folder-note', ` · ${dollars(c.usd)}`));
+    const anchor = ceilingAnchor(c.scope);
+    item.append(text, button(t('Clear'), () => clearCeilingDialog(c.scope, c, 'page-title'), 'text-button danger-text', `ceiling-clear-${anchor}`));
+    list.append(item);
+  }
+  section.append(list);
+  return section;
+}
+function ceilingDialog(scope: ChainScope, current: CeilingView | null, returnFocus: string) {
+  const name = scopeLabel(scope);
+  const context = openDialog(scope.kind === 'machine' ? t('Daily ceiling for this computer') : t('Daily ceiling for {group}', { group: name }), scope.kind === 'machine' ? t('Counts every OpenRouter key saved in Switchboard, added up per UTC day.') : t('Counts this group\'s own key, per UTC day.'), returnFocus);
+  const amount = input(current ? current.usd.toFixed(2) : '', 'number'); amount.min = '0.01'; amount.max = '1000'; amount.step = '0.01'; amount.inputMode = 'decimal';
+  const grid = el('div', 'form-grid');
+  grid.append(field(t('Dollars per UTC day'), amount, t('From $0.01 to $1,000. When it is reached, no paid agent starts until you answer.')));
+  context.body.append(grid); context.actions.append(submit(t('Save ceiling')));
+  context.form.addEventListener('submit', (event) => {
+    event.preventDefault();
+    const value = Number(amount.value);
+    if (!Number.isFinite(value) || value < 0.01 || value > 1000) { context.error.textContent = t('Enter an amount from $0.01 to $1,000.'); amount.focus(); return; }
+    const usd = dollars(Math.round(value * 100) / 100);
+    void dialogSave(context, () => adapter.setCeiling(scope, Math.round(value * 100) / 100), scope.kind === 'machine' ? t('Daily ceiling for this computer: {usd}.', { usd }) : t('Daily ceiling for {group}: {usd}.', { group: name, usd })).then(() => loadCeilings(true));
+  });
+  amount.focus();
+}
+function clearCeilingDialog(scope: ChainScope, ceiling: CeilingView, returnFocus: string) {
+  const name = scopeLabel(scope); const usd = dollars(ceiling.usd);
+  const question = scope.kind === 'machine' ? t('Remove this computer\'s daily ceiling of {usd}?', { usd }) : scope.kind === 'project' ? t('Remove the daily ceiling of {group}, {usd}?', { group: name, usd }) : t('Remove the ceiling of task {id}, {usd}?', { id: shortWorkflow(scope.id), usd });
+  const context = openDialog(question, t('Paid agents are then bound only by the key\'s own limit.'), returnFocus);
+  const confirm = submit(t('Remove ceiling')); confirm.className = 'button danger'; context.actions.append(confirm);
+  context.form.addEventListener('submit', (event) => { event.preventDefault(); void dialogSave(context, () => adapter.setCeiling(scope, null), t('Ceiling removed.')).then(() => loadCeilings(true)); });
+  context.actions.querySelector('button')?.focus();
 }
 const openrouterAgents = () => (agentCatalog as { agents: AgentInfo[] }).agents.filter((agent) => agent.openrouter);
 /** SB-79: one OpenRouter key that agents launched from Switchboard run on (SCN-045). */
@@ -908,6 +1334,8 @@ function openrouterPanel() {
   if (!openrouter) { section.append(el('p', 'form-note', t('Reading the OpenRouter key…'))); return section; }
   if (!openrouter.saved) {
     section.append(el('p', 'form-note', t('No key is saved.')), button(t('Add OpenRouter key'), () => openrouterKeyDialog(), 'button primary', 'openrouter-add'));
+    // This computer's ceiling adds up every saved key, so it is shown while a group's key is saved too.
+    if (openrouterKeys?.keys.length || ceilingOf({ kind: 'machine' })) { const ceiling = ceilingBlock({ kind: 'machine' }, null); ceiling.classList.add('is-machine'); section.append(ceiling); }
     return section;
   }
   const facts = el('div', 'openrouter-facts');
@@ -918,6 +1346,8 @@ function openrouterPanel() {
   const actions = el('div', 'management-actions');
   actions.append(button(t('Change model'), () => openrouterModelDialog(), 'button', 'openrouter-model'), button(t('Replace key'), () => openrouterKeyDialog(), 'button', 'openrouter-replace'), button(t('Remove key'), () => openrouterRemoveDialog(), 'button danger', 'openrouter-remove'));
   section.append(actions, el('p', 'form-note', t('Launch an agent on the key from Agents: its Set up button under Installed. CLI: switchboard agents launch <agent> --openrouter.')));
+  // C-7: this computer's spending ceiling, set apart from the key's own actions.
+  const ceiling = ceilingBlock({ kind: 'machine' }, openrouter.credit); ceiling.classList.add('is-machine'); section.append(ceiling);
   return section;
 }
 /** Saves (or replaces) the key; it travels to the vault once and is never shown again. */
@@ -976,9 +1406,9 @@ function openrouterModelDialog(target?: { pool: string; name: string }) {
   picker.value.focus();
 }
 function openrouterRemoveDialog(target?: { pool: string; name: string }) {
-  const context = openDialog(target ? t('Remove the key of “{name}”?', { name: target.name }) : t('Remove the OpenRouter key?'), (onWindows() ? t('Switchboard deletes it from Windows Credential Manager.') : onLinux() ? t('Switchboard deletes it from the Secret Service keyring.') : t('Switchboard deletes it from the Keychain.')) + ' ' + t('Agents already running keep working; new launches need a key again.'));
+  const context = openDialog(target ? t('Remove the key of “{name}”?', { name: target.name }) : t('Remove the OpenRouter key?'), (onWindows() ? t('Switchboard deletes it from Windows Credential Manager.') : onLinux() ? t('Switchboard deletes it from the Secret Service keyring.') : t('Switchboard deletes it from the Keychain.')) + ' ' + t('Agents already running keep working; new launches need a key again.') + (target ? ` ${ceilingRemovalNote(ceilingOf({ kind: 'project', pool: target.pool })) ?? ''}`.trimEnd() : ''));
   const confirm = submit(t('Remove key')); confirm.className = 'button danger'; context.actions.append(confirm);
-  context.form.addEventListener('submit', (event) => { event.preventDefault(); void dialogSave(context, async () => { await adapter.openrouterRemove(target?.pool ?? null); await loadOpenrouter(); }, target ? t('The key of “{name}” is removed; its agents use the machine\'s key again.', { name: target.name }) : t('OpenRouter key removed.')); });
+  context.form.addEventListener('submit', (event) => { event.preventDefault(); void dialogSave(context, async () => { await adapter.openrouterRemove(target?.pool ?? null); await loadOpenrouter(); }, target ? t('The key of “{name}” is removed; its agents use the machine\'s key again.', { name: target.name }) : t('OpenRouter key removed.')).then(() => loadCeilings(true)); });
   context.actions.querySelector('button')?.focus();
 }
 async function agentDialog(agent: AgentInfo) {
@@ -1114,13 +1544,13 @@ function menu(key: string, label: string, items: ([string, () => void] | [string
   }
   return wrapper;
 }
-function addMenu() {
+function addMenu(className = 'button primary') {
   return menu('add', t('Add account'), [
     [t('Sign in to another Claude account'), () => void startLogin('claude')],
     [t('Sign in to another Codex account'), () => void startLogin('codex')],
     [t('Import from Claude Swap'), () => void importSwap()],
     [t('Add an API key or token…'), () => addDialog()],
-  ], 'button primary', t('+ Add account'));
+  ], className, t('+ Add account'));
 }
 /** Official sign-in without a form: Terminal opens, completion is detected, the email names the account. */
 async function startLogin(provider: Provider, label = '', pool = 'default') {
@@ -1164,6 +1594,9 @@ async function pollLogin() {
     const account = await adapter.finishLogin(login.id);
     // Saved either way; a pending cleanup is reported, never a failed sign-in (SB-42).
     await loginSaved(signInNotice(account, providerName(account.provider), snapshot?.projects));
+    // SB-160 (SCN-077): a seat outside its organization's one group is offered it; nothing moves until pressed.
+    const move = signInMove(account);
+    if (move) noticeAction = { label: move.label, run: () => void mutate(() => adapter.moveAccount(move.id, move.pool), move.done, 'notice-action') };
   } catch (error) {
     const text = safeError(error, 'sign_in'); const outcome = loginOutcome(text);
     // The owner saved the account and released the sign-in; only its staging folder is left.
@@ -1181,6 +1614,7 @@ async function loginSaved(text: string) {
   await refreshContext();
   try { snapshot = await adapter.snapshot(); loadError = ''; } catch { loadError = t('The account was added, but the list could not be refreshed. Retry loading accounts.'); }
   showNotice(text);
+  loadOnboarding();
 }
 async function cancelLogin() {
   const login = pendingLogin; if (!login) return;
@@ -1233,15 +1667,22 @@ function renderAccounts(main: HTMLElement) {
   termsBanner(status);
   rulesStrip(status);
   if (status.childElementCount) main.append(status);
-  renderCurrent(main);
-  renderPolicies(main);
   const accounts = snapshot!.accounts;
-  if (!accounts.length) {
-    // A reinstall with a backup this computer can open: one press brings everything back.
-    const backup = backupStatus?.backups.filter((b) => b.openable && b.accounts > 0).sort((a, b) => b.created_at - a.created_at)[0];
-    const empty = emptyState(t('Start with one account'), backup ? plural(backup.accounts, { one: 'A backup from {date} with {n} account is on this computer. Restore it to get your accounts, groups and settings back, or add an account.', other: 'A backup from {date} with {n} accounts is on this computer. Restore it to get your accounts, groups and settings back, or add an account.' }, { date: date(backup.created_at) }) : firstRunHint(currentAccounts) === 'sign_in' ? t('Neither Claude Code nor Codex CLI is signed in on this computer. Press + Add account to sign in: Terminal opens the official sign-in, and Switchboard adds the account when you finish.') : t('Add the account Claude Code or Codex CLI already uses with Add to Switchboard above, or sign in to another account with + Add account. Nothing opens until you choose.'));
-    if (backup) empty.append(button(t('Restore from backup'), () => void mutate(async () => { const result = await adapter.restoreBackup(backup.file); backupStatus = await adapter.backups(); showRestored(result); }, t('Backup restored.'), 'empty-restore'), 'button primary', 'empty-restore'));
-    empty.append(addMenu()); main.append(empty, kimiSection()); return;
+  // A reinstall with a backup this computer can open: one press brings everything back.
+  const backup = accounts.length ? undefined : backupStatus?.backups.filter((b) => b.openable && b.accounts > 0).sort((a, b) => b.created_at - a.created_at)[0];
+  // VIS-21: an organization card above with its own action is the screen's one primary; the page's buttons go quiet.
+  const cardLeads = orgCardLeads();
+  // SB-202 (B-8): an organization's group with no seat yet leads with the seat.
+  const lead = accounts.length ? null : accountsEmptyKey({ backup: !!backup, onboarding, current: currentAccounts, released: releasedOrgs() });
+  // F2 (SCN-076 step 7): while the organization's action leads, Add to Switchboard and Turn on for Claude Code are bordered.
+  const orgLeads = accountsOrgActionLeads({ cardLeads, emptyLead: lead });
+  renderCurrent(main, orgLeads);
+  renderPolicies(main, orgLeads);
+  if (lead) {
+    const empty = emptyState(t('Start with one account'), lead.lead === 'org_seat' ? lead.line : backup ? plural(backup.accounts, { one: 'A backup from {date} with {n} account is on this computer. Restore it to get your accounts, groups and settings back, or add an account.', other: 'A backup from {date} with {n} accounts is on this computer. Restore it to get your accounts, groups and settings back, or add an account.' }, { date: date(backup.created_at) }) : lead.lead === 'sign_in' ? t('Neither Claude Code nor Codex CLI is signed in on this computer. Press + Add account to sign in: Terminal opens the official sign-in, and Switchboard adds the account when you finish.') : t('Add the account Claude Code or Codex CLI already uses with Add to Switchboard above, or sign in to another account with + Add account. Nothing opens until you choose.'));
+    if (backup) empty.append(button(t('Restore from backup'), () => void mutate(async () => { const result = await adapter.restoreBackup(backup.file); backupStatus = await adapter.backups(); showRestored(result); }, t('Backup restored.'), 'empty-restore'), cardLeads ? 'button quiet' : 'button primary', 'empty-restore'));
+    if (lead.lead === 'org_seat') { const pool = lead.pool; empty.append(button(lead.label, () => void startLogin('claude', '', pool), cardLeads ? 'button quiet' : 'button primary', 'empty-org-sign-in'), addMenu('button quiet')); main.append(empty, kimiSection()); return; }
+    empty.append(addMenu(cardLeads ? 'button quiet' : 'button primary')); main.append(empty, kimiSection()); return;
   }
   const orgBar = organizationsBar(accounts); if (orgBar) main.append(orgBar);
   const shown = accounts.filter((a) => inOrganizationFilter(snapshot!, a, orgFilter));
@@ -1444,7 +1885,10 @@ function accountRow(account: Account) {
   const project = !!projectOf(account.pool);
   row.append(icon, name, usageCell(account), primaryButton(account, { current, selected: active, signIn, project }), rowMenu(account, { current, selected: active, signIn, project }));
   if (quotaOpen.has(account.id) && account.usage) row.append(quotaDetails(account));
-  if (usageErrors.has(account.id)) row.append(el('p', 'row-error', t(usageErrors.get(account.id)!)));
+  // SB-160 (B-6, SCN-078): a seat that ended names its organization instead of the generic sentence.
+  const ended = seatEndedText(snapshot!, account, monitor?.sign_in_required);
+  if (ended) row.append(el('p', 'row-error seat-ended', ended));
+  if (usageErrors.has(account.id) && !(ended && usageErrors.get(account.id) === "This account's sign-in has ended. Sign in to it again.")) row.append(el('p', 'row-error', t(usageErrors.get(account.id)!)));
   return row;
 }
 function primaryButton(account: Account, state: { current: boolean; selected: boolean; signIn: boolean; project: boolean }) {
@@ -1601,7 +2045,7 @@ function addDialog() {
   });
   provider.focus();
 }
-function renderCurrent(main: HTMLElement) {
+function renderCurrent(main: HTMLElement, quiet = false) {
   const section = el('section', 'current-section'); section.setAttribute('aria-label', t('Accounts the CLIs use now'));
   const heading = el('div', 'section-heading');
   const proxy = el('span', 'proxy-status'); const dot = el('span', `status-dot ${runtimeError ? 'unavailable' : ''}`); dot.setAttribute('aria-hidden', 'true');
@@ -1618,7 +2062,7 @@ function renderCurrent(main: HTMLElement) {
       const matches = snapshot!.accounts.filter((account) => account.provider === provider && currentMatch(account));
       card.append(copy);
       if (matches.length) card.append(el('span', 'current-state', t('✓ Saved as {labels}', { labels: matches.map((account) => account.label).join(', ') })));
-      else card.append(button(t('Add to Switchboard'), () => void mutate(() => adapter.captureCurrent({ provider, pool: 'default' }), t('{identity} added to {provider} {where}. Switchboard keeps its sign-in up to date.', { where: inGroup('default'), identity: identityText(current.identity), provider: providerName(provider) }), `capture-${provider}`), 'button primary row-button', `capture-${provider}`));
+      else card.append(button(t('Add to Switchboard'), () => { let captured: Awaited<ReturnType<typeof adapter.captureCurrent>> | undefined; void mutate(async () => { captured = await adapter.captureCurrent({ provider, pool: 'default' }); }, () => [t('{identity} added to {provider} {where}. Switchboard keeps its sign-in up to date.', { where: inGroup('default'), identity: identityText(current.identity), provider: providerName(provider) }), captured ? organizationMoveNote(captured.label, providerName(provider), captured.organization_group) : ''].filter(Boolean).join(' '), `capture-${provider}`); }, quiet ? 'button row-button' : 'button primary row-button', `capture-${provider}`));
     } else {
       const failed = current?.status === 'unavailable' || (!current && currentReadFailed);
       copy.append(el('strong', 'current-identity muted-text', current?.status === 'missing' ? t('Not signed in') : failed ? t('Could not read the sign-in') : t('Reading…')));
@@ -1633,7 +2077,7 @@ function renderCurrent(main: HTMLElement) {
   section.append(grid); main.append(section);
 }
 const policyTarget = (target: RotationPolicy['target']) => target === 'managed' ? t('Managed route') : t('Claude Code account');
-function renderPolicies(main: HTMLElement) {
+function renderPolicies(main: HTMLElement, quiet = false) {
   const policies = snapshot!.policies ?? []; const enabled = policies.filter((policy) => policy.enabled);
   const panel = el('section', 'rotation-bar'); panel.setAttribute('aria-label', t('Automatic switching'));
   // SB-104: without the monitor's answer no row can say it is limited or signed out — say so instead of showing them all as available.
@@ -1650,7 +2094,7 @@ function renderPolicies(main: HTMLElement) {
   if (demo) copy.append(el('span', 'usage-caption', t('Demo policies are editable fixtures; no switching runs here.')));
   const actions = el('div', 'rotation-actions');
   const pool = autoSwitchPool(snapshot!.accounts, policies, (snapshot!.projects ?? []).map((p) => p.pool));
-  if (pool) actions.append(button(t('Turn on for Claude Code'), () => { const saved = policies.find((policy) => policy.provider === 'claude' && policy.pool === pool && policy.target === 'claude_cli'); void mutate(() => adapter.setPolicy({ provider: 'claude', pool, target: 'claude_cli', enabled: true, threshold_percent: saved?.threshold_percent ?? 90, hysteresis_percent: saved?.hysteresis_percent ?? 10, cooldown_seconds: saved?.cooldown_seconds ?? 1800, max_age_seconds: saved?.max_age_seconds ?? 300, last_switched_at: saved?.last_switched_at ?? null }), t('Automatic switching is on for Claude Code {where}. It moves at {threshold}% used to an account with at least {headroom} points more headroom.', { where: inGroup(pool, snapshot!.projects), threshold: saved?.threshold_percent ?? 90, headroom: saved?.hysteresis_percent ?? 10 }), 'menu-policies'); }, 'button primary row-button', 'auto-on'));
+  if (pool) actions.append(button(t('Turn on for Claude Code'), () => { const saved = policies.find((policy) => policy.provider === 'claude' && policy.pool === pool && policy.target === 'claude_cli'); void mutate(() => adapter.setPolicy({ provider: 'claude', pool, target: 'claude_cli', enabled: true, threshold_percent: saved?.threshold_percent ?? 90, hysteresis_percent: saved?.hysteresis_percent ?? 10, cooldown_seconds: saved?.cooldown_seconds ?? 1800, max_age_seconds: saved?.max_age_seconds ?? 300, last_switched_at: saved?.last_switched_at ?? null }), t('Automatic switching is on for Claude Code {where}. It moves at {threshold}% used to an account with at least {headroom} points more headroom.', { where: inGroup(pool, snapshot!.projects), threshold: saved?.threshold_percent ?? 90, headroom: saved?.hysteresis_percent ?? 10 }), 'menu-policies'); }, quiet ? 'button row-button' : 'button primary row-button', 'auto-on'));
   for (const policy of enabled) actions.append(button(enabled.length > 1 ? t('Stop {where}', { where: inGroup(policy.pool, snapshot!.projects) }) : t('Stop'), () => void mutate(() => adapter.setPolicy({ ...policy, enabled: false }), t('Automatic switching stopped for {provider} {where}.', { provider: providerName(policy.provider), where: inGroup(policy.pool, snapshot!.projects) }), 'menu-policies'), 'button quiet row-button', `stop-${policy.provider}-${policy.pool}-${policy.target}`));
   actions.append(menu('policies', t('Automatic switching settings'), [...policies.map((policy): [string, () => void] => [t('Edit {provider} {where} ({target})…', { provider: providerName(policy.provider), where: inGroup(policy.pool, snapshot!.projects), target: policyTarget(policy.target) }), () => policyDialog(policy)]), [t('New automatic switching…'), () => policyDialog()]], 'icon-button', '⚙'));
   panel.append(copy, actions); main.append(panel);
@@ -1860,7 +2304,7 @@ function sessionsPanel() {
   for (const session of sessionList) {
     const row = el('li', 'session-row'); const title = el('div', 'event-title');
     const name = el('span', 'session-name');
-    name.append(el('strong', '', `${session.provider === 'kimi' ? t('Kimi Code') : session.provider === 'hermes' ? t('Hermes Agent') : session.provider === 'opencode' ? 'OpenCode' : providerName(session.provider)} · ${session.label ?? session.account_id}`));
+    name.append(el('strong', '', `${sessionAgentName(session)} · ${session.label ?? session.account_id}`));
     // SB-110/SB-111: an organization's context shows as its badge beside the name; personal shows nothing.
     const contextOrg = session.context?.startsWith('org:') ? snapshot?.organizations?.find((o) => `org:${o.id}` === session.context) : undefined;
     if (contextOrg) { const badge = el('span', 'badge org-badge', contextOrg.name); badge.title = t("Runs in {name}'s context.", { name: contextOrg.name }); name.append(' ', badge); }
@@ -1937,7 +2381,7 @@ async function checkUpdatesNow() {
   try { updateState = await adapter.checkForUpdates(); }
   catch (error) { showNotice(safeError(error), true); }
   await loadUpdate();
-  if (updateState) showNotice(updateLine(updateState).text, updateState.state === 'failed');
+  if (updateState) showNotice(updateLine(updateState, date).text, updateState.state === 'failed');
   backgroundRender();
 }
 /** SB-55: the backend checks, downloads and installs on its own; the window only reads the state, once a minute while a check can still change it. */
@@ -1954,7 +2398,7 @@ function updateControls(panel: HTMLElement) {
   const option = el('label', 'appearance-option login-option'); const box = el('input'); box.type = 'checkbox'; box.checked = status.enabled; box.disabled = !status.available; box.dataset.focus = 'auto-update';
   box.addEventListener('change', () => { const wanted = box.checked; void mutate(async () => { updateState = await adapter.setAutoUpdate(wanted); await loadUpdate(); }, wanted ? t('Switchboard will install new versions on its own.') : t('Automatic updates are off. Switchboard will not check for new versions.'), 'auto-update'); });
   option.append(box, el('span', '', t('Install updates automatically')));
-  const line = updateLine(status);
+  const line = updateLine(status, date);
   panel.append(option, el('p', 'form-note', line.text));
   if (line.restart) panel.append(button(t('Restart to update'), () => void mutate(async () => { updateState = await adapter.restartToUpdate(); }, t('Restarting Switchboard with the new version…'), 'update-restart'), 'button', 'update-restart'));
   // LC-16: the person can always ask, with automatic updates off too.
@@ -2149,7 +2593,7 @@ function select(options: [string, string][]) { const node = el('select'); option
 function submit(text: string) { const node = el('button', 'button primary', text); node.type = 'submit'; return node; }
 async function dialogSave(context: DialogContext, action: () => Promise<unknown>, success: string, operation: Operation = 'change') {
   context.error.textContent = ''; context.setBusy(true); clock.begin();
-  try { await action(); await refreshContext(); showNotice(restoredText || success); restoredText = ''; try { snapshot = await adapter.snapshot(); loadError = ''; } catch { loadError = t('The action completed, but the list could not be refreshed. Retry loading accounts.'); } render(); context.setBusy(false); context.close(); }
+  try { await action(); await refreshContext(); showNotice(restoredText || success); restoredText = ''; try { snapshot = await adapter.snapshot(); loadError = ''; } catch { loadError = t('The action completed, but the list could not be refreshed. Retry loading accounts.'); } render(); context.setBusy(false); context.close(); loadOnboarding(); }
   catch (error) { context.error.textContent = t(safeError(error, operation)); context.setBusy(false); context.error.tabIndex = -1; context.error.focus(); }
   finally { clock.end(); }
 }
@@ -2251,21 +2695,26 @@ function organizationsBar(accounts: Account[]): HTMLElement | null {
 }
 /** SB-159 (SCN-071): the PassionCode.ai connection, read when the page opens. */
 let passioncodeView: PassioncodeStatus | null = null; let passioncodeWaiting = false; let passioncodeError = '';
+/** SB-227: an action on the connection (Connect, Read now, Disconnect) moves this on; a status read
+ * issued before or during one is not applied, so it never paints over the action's answer. */
+const passioncodeClock = new MutationClock();
 async function loadPassioncode() {
-  try { passioncodeView = await adapter.passioncode('status'); passioncodeError = ''; } catch (error) { passioncodeError = safeError(error, 'read'); }
+  const stamp = passioncodeClock.stamp();
+  try { const value = await adapter.passioncode('status'); if (passioncodeClock.accepts(stamp)) { passioncodeView = value; passioncodeError = ''; } } catch (error) { if (passioncodeClock.accepts(stamp)) passioncodeError = safeError(error, 'read'); }
   backgroundRender();
 }
 /** UX-21: the person pressed Cancel: a plain notice, not an error. */
 const PASSIONCODE_CANCELLED = 'Connecting PassionCode.ai was cancelled. Nothing changed.';
 async function passioncodeAct(action: 'connect' | 'read' | 'disconnect') {
   if (action === 'connect') { passioncodeWaiting = true; render(); }
+  passioncodeClock.begin();
   try {
     passioncodeView = await adapter.passioncode(action); passioncodeError = '';
     snapshot = await adapter.snapshot();
     if (action === 'connect') showNotice(t('Connected to PassionCode.ai: {organizations}.', { organizations: plural(passioncodeView.organizations ?? 0, { one: '{n} organization', other: '{n} organizations' }) }));
     else if (action === 'disconnect') showNotice(t('PassionCode.ai disconnected. The organizations stay here.'));
   } catch (error) { const text = safeError(error); showNotice(text, text !== PASSIONCODE_CANCELLED); }
-  finally { passioncodeWaiting = false; render(); restoreFocus(`passioncode-${action}`); }
+  finally { passioncodeClock.end(); passioncodeWaiting = false; render(); restoreFocus(`passioncode-${action}`); }
 }
 function passioncodePanel() {
   const panel = el('section', 'org-card passioncode-panel'); panel.setAttribute('aria-label', 'PassionCode.ai');
@@ -2312,6 +2761,9 @@ function renderOrganizations(main: HTMLElement) {
     actions.append(menu(`org-${o.id}`, t('More actions for {name}', { name: o.name }), [[t('Remove…'), () => organizationRemoveDialog(o.id), 'danger-text']]));
     head.append(titles, actions);
     card.append(head);
+    // SB-160 (B-7, SCN-079): left on PassionCode.ai; kept here, and the person decides what to remove.
+    const releasedAt = organizationReleasedAt(passioncodeView, o);
+    if (releasedAt !== null) card.append(el('p', 'surface-note org-released', t('Not in your PassionCode.ai organizations since {date}. Its groups still refuse other accounts. Remove it when you no longer need it.', { date: date(releasedAt) })));
     if (!members.length) card.append(el('p', 'form-note', t('No account belongs to it yet. Place one from its ⋯ menu on Accounts.')));
     else {
       const rows = el('ul', 'org-members');
@@ -2445,7 +2897,8 @@ function policyDialog(existing?: RotationPolicy) {
 
 render();
 if (demo) { const { createDemoAdapter } = await import('./demo'); adapter = createDemoAdapter(); }
-void reload();
+// SB-183 (node A-7): a first-time notice that waited (the window was closed) shows once the list is read.
+void reload().then(() => checkShellHookNotice());
 // Read monitor metadata on a bounded cadence. Quota probing belongs to the runtime.
 let refreshing = false;
 // Menus close on Escape and on a click anywhere outside them.
@@ -2460,9 +2913,16 @@ function backgroundRefresh() {
   void Promise.all([adapter.snapshot(), readContext()]).then(([data, context]) => {
     // A read issued before a user mutation may predate it; applying it would revert the change.
     if (!clock.accepts(stamp)) return;
+    // A-7 fix cycle 1 (N7): a change made elsewhere (`switchboard shell on|off`, MCP
+    // `switchboard_shell_hook_set`) reaches the Groups page at the next minute's read.
+    if (page === 'projects') shellHookKey = '';
     snapshot = data; applyContext(context); backgroundRender();
-    // SB-104: the session list is read only while it is on screen.
-    if (page === 'activity') void loadSessions();
+    // B-8, SB-104, C-7, SB-227: what the page on screen shows is read again with the list.
+    const reads = backgroundReads(page);
+    if (reads.includes('onboarding')) loadOnboarding();
+    if (reads.includes('sessions')) void loadSessions();
+    if (reads.includes('ceilings')) void loadCeilings();
+    if (reads.includes('passioncode')) void loadPassioncode();
     // SB-100: Kimi's figures refresh in the background too, every five minutes.
     if (Date.now() - kimiLoadedAt > 5 * 60_000) void loadKimi();
   }).catch(() => { /* Explicit Refresh reports a failed metadata read. */ }).finally(() => { refreshing = false; });
@@ -2471,6 +2931,12 @@ setInterval(backgroundRefresh, 60_000);
 // SB-117/SB-131: the owner says when it added a folder to a project or took a deleted one out;
 // the project list is read again at once.
 onProjectSuggestions(() => backgroundRefresh());
+// SB-183 (node A-7): the owner wrote the terminal hook for the first time; the window says so once.
+onShellHook(() => { shellHookState = null; checkShellHookNotice(); backgroundRefresh(); });
+// C-7 (SB-72): spend.json changed (a ceiling reached, set or answered); the questions are read again at once.
+onSpendChanged(() => { void loadCeilings(); });
 // A window shown after hours in the background (SB-30) reads fresh metadata at once rather
 // than at the next minute.
 document.addEventListener('visibilitychange', () => { if (!document.hidden) backgroundRefresh(); });
+// SB-183 (node A-7): a first-time notice that waited while the window was hidden shows when it is shown.
+document.addEventListener('visibilitychange', () => { if (!document.hidden) checkShellHookNotice(); });

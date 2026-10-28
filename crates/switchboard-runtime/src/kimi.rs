@@ -740,6 +740,13 @@ pub fn cancel_login(root: &Path, store: &Store, id: &str) -> Result<(), String> 
     fs::remove_dir_all(&home).map_err(|_| "The sign-in folder could not be removed.".into())
 }
 
+/// SB-201: a Kimi session's context, fixed for the session as Claude Code's and Codex's. A Kimi
+/// account belongs to no organization and serves no group's pool, so it is personal, also in an
+/// organization's folder (the more private wins; A-Q6: launched, not refused).
+fn context(store: &Store, folder: &Path) -> Result<String, String> {
+    Ok(store.snapshot()?.context_for(None, None, Some(folder)))
+}
+
 /// Starts the official `kimi` on the account's home in a folder (Terminal).
 pub fn launch(
     root: &Path,
@@ -765,10 +772,17 @@ fn launch_with(
     if credential_file(&home, &account.region).is_none() {
         return Err(KIMI_SIGNED_OUT.into());
     }
-    let env = BTreeMap::from([(
-        "KIMI_CODE_HOME".to_string(),
-        home.to_string_lossy().into_owned(),
-    )]);
+    let context = context(store, &folder)?;
+    let mut env = BTreeMap::from([
+        (
+            "KIMI_CODE_HOME".to_string(),
+            home.to_string_lossy().into_owned(),
+        ),
+        ("SWITCHBOARD_CONTEXT".to_string(), context.clone()),
+    ]);
+    // SB-212: the session's own launch id, for the record and for what it launches.
+    let launch_id = crate::launches::new_id();
+    env.insert(crate::launches::ENV.into(), launch_id.clone());
     // The session script lives beside the home, not in it: Kimi owns everything inside.
     let sessions = homes(root).join("sessions");
     private_dir(&sessions)?;
@@ -781,15 +795,11 @@ fn launch_with(
         &script(&session, program, &[], &env, false, &folder),
     )?;
     let record = json!({
-        "account_id": id, "provider": "kimi", "pool": "default", "mode": "isolated",
-        "working_directory": folder, "in_place": false,
+        "account_id": id, "provider": "kimi", "pool": "default", "context": context,
+        "mode": "isolated", "working_directory": folder, "in_place": false,
         "launched_at": switchboard_proxy::now(), "continues": null,
     });
-    private_write(
-        &session.join(SESSION_RECORD),
-        record.to_string().as_bytes(),
-        false,
-    )?;
+    crate::launches::record(root, &session, record, &launch_id)?;
     start(&path)?;
     reservation.committed = true;
     Ok(json!({"launched": true, "account": account.label}))
@@ -918,10 +928,17 @@ fn launch_continuation_with(
         private_dir(&session)?;
         let mut reservation = Reservation::new(&session).map_err(|_| KIMI_SESSION_RUNNING)?;
         add_observatory(&home, &continuation.observatory)?;
-        let env = BTreeMap::from([(
-            "KIMI_CODE_HOME".to_string(),
-            home.to_string_lossy().into_owned(),
-        )]);
+        let context = context(store, &folder)?;
+        let mut env = BTreeMap::from([
+            (
+                "KIMI_CODE_HOME".to_string(),
+                home.to_string_lossy().into_owned(),
+            ),
+            ("SWITCHBOARD_CONTEXT".to_string(), context.clone()),
+        ]);
+        // SB-212: the session's own launch id, for the record and for what it launches.
+        let launch_id = crate::launches::new_id();
+        env.insert(crate::launches::ENV.into(), launch_id.clone());
         let first = crate::continuation::prompt(continuation);
         let path = write_launch_script(
             &session,
@@ -935,15 +952,11 @@ fn launch_continuation_with(
             ),
         )?;
         let record = json!({
-            "account_id": id, "provider": "kimi", "pool": "default", "mode": "isolated",
-            "working_directory": folder, "in_place": false,
+            "account_id": id, "provider": "kimi", "pool": "default", "context": context,
+            "mode": "isolated", "working_directory": folder, "in_place": false,
             "launched_at": switchboard_proxy::now(), "continues": continuation.workflow_id,
         });
-        private_write(
-            &session.join(SESSION_RECORD),
-            record.to_string().as_bytes(),
-            false,
-        )?;
+        crate::launches::record(root, &session, record, &launch_id)?;
         start(&path)?;
         reservation.committed = true;
         Ok(json!({"launched": true, "account": account.label, "script": path}))
@@ -1607,6 +1620,9 @@ mod tests {
         let record: Value =
             serde_json::from_slice(&fs::read(session.join(SESSION_RECORD)).unwrap()).unwrap();
         assert_eq!(record["continues"], "wf_0123456789abcdef");
+        // SB-201: a Kimi account belongs to no organization: its context is personal.
+        assert_eq!(record["context"], "personal");
+        assert!(script.contains("export SWITCHBOARD_CONTEXT='personal'"));
         assert_eq!(
             continuation_preflight_with(&root, &store, &id, Some(program)).unwrap_err(),
             KIMI_SESSION_RUNNING,
@@ -1645,6 +1661,16 @@ mod tests {
         assert!(script.contains(home.to_string_lossy().as_ref()));
         assert!(!script.contains("synthetic-access"));
         assert!(!home.join("launch.command").exists());
+        // SB-201: the session's context is recorded and exported, as Claude Code's and Codex's.
+        let context = |session: &Path| {
+            let record: Value =
+                serde_json::from_slice(&fs::read(session.join(SESSION_RECORD)).unwrap()).unwrap();
+            record["context"].clone()
+        };
+        assert_eq!(context(&session), "personal");
+        assert!(script.contains("SWITCHBOARD_CONTEXT"));
+        #[cfg(not(windows))]
+        assert!(script.contains("export SWITCHBOARD_CONTEXT='personal'"));
         assert!(launch_with(
             &root,
             &store,
@@ -1678,7 +1704,20 @@ mod tests {
 
         // The session ended (its script ran and exited): the folder is free again.
         fs::remove_file(session.join(".launch-pending")).unwrap();
+        // A-Q6: in an organization's folder a Kimi session is launched and reads personal (the
+        // more private wins), never the folder's organization.
+        let acme = store.add_organization("Acme", &[]).unwrap();
+        store
+            .save_project_in(
+                None,
+                "Acme",
+                &[folder.path().canonicalize().unwrap()],
+                &[],
+                Some(Some(&acme.id)),
+            )
+            .unwrap();
         launch_with(&root, &store, &id, folder.path(), program, started).unwrap();
+        assert_eq!(context(&session), "personal");
         fs::remove_file(session.join(".launch-pending")).unwrap();
         assert!(remove(&root, &store, &id).unwrap());
         assert!(!home.exists());

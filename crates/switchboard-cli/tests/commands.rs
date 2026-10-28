@@ -513,6 +513,34 @@ fn the_stop_hook_after_a_turn_is_silent_and_never_fails() {
     assert!(!tmp.path().join("recovery.json").exists());
 }
 #[test]
+fn a_stop_input_past_the_hook_limit_answers_no_decision() {
+    // SB-210: a `Stop` input over 8 MiB could not be parsed and the hook printed
+    // `malformed_input` where Claude Code reads a decision; it now prints `{}`.
+    let tmp = tempfile::tempdir().unwrap();
+    let mut child = binary()
+        .arg("--data-dir")
+        .arg(tmp.path())
+        .args(["recovery", "hook"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut stdin = child.stdin.take().unwrap();
+    let writer = std::thread::spawn(move || {
+        let message = "x".repeat(8 * 1024 * 1024 + 16);
+        let input = serde_json::json!({"session_id": "s-1", "hook_event_name": "Stop",
+            "last_assistant_message": message});
+        // The hook stops reading at its limit; the rest of the write may fail.
+        let _ = stdin.write_all(input.to_string().as_bytes());
+    });
+    let output = child.wait_with_output().unwrap();
+    writer.join().unwrap();
+    assert!(output.status.success());
+    let answer: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(answer, serde_json::json!({}));
+}
+#[test]
 fn a_long_last_message_still_settles_the_stop_with_no_owner_running() {
     // Adversarial round 2: Claude Code puts the turn's whole last message in the Stop input; a
     // 64 KiB bound cut it and the stop stayed waiting. With no owner the CLI settles it itself.
@@ -612,6 +640,45 @@ fn offline_list_and_status_are_json_and_launch_requires_owner() {
         .unwrap();
     assert_eq!(output.status.code(), Some(1));
     assert!(String::from_utf8_lossy(&output.stderr).contains("switchboard serve"));
+}
+/// SB-201: a catalog agent launched through the proxy records the route's provider (`claude`)
+/// and its own id as `agent`; the session list names the agent, whole, not the route.
+#[test]
+fn the_session_list_names_a_proxy_agent_and_not_its_route() {
+    let tmp = tempfile::tempdir().unwrap();
+    let run = |args: &[&str]| {
+        binary()
+            .arg("--data-dir")
+            .arg(tmp.path())
+            .args(args)
+            .output()
+            .unwrap()
+    };
+    assert!(run(&["sessions", "--all"]).status.success());
+    let home = tmp.path().join("runtimes/agent-deepseek-harness-default");
+    std::fs::create_dir_all(&home).unwrap();
+    std::fs::write(
+        home.join(".session.json"),
+        serde_json::json!({"account_id": "acct", "provider": "claude",
+            "agent": "deepseek-harness", "pool": "default", "context": "personal",
+            "mode": "managed", "working_directory": "/w", "in_place": false,
+            "launched_at": 1, "continues": null})
+        .to_string(),
+    )
+    .unwrap();
+    let output = run(&["sessions", "--all"]);
+    assert!(output.status.success());
+    let text = String::from_utf8_lossy(&output.stdout);
+    let line = text.lines().find(|l| l.contains("/w")).unwrap_or_default();
+    assert!(
+        line.contains(" deepseek-harness ") && !line.contains(" claude "),
+        "{text}"
+    );
+    let output = run(&["--json", "sessions", "--all"]);
+    let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let session = &json["data"]["sessions"][0];
+    assert_eq!(session["provider"], "claude");
+    assert_eq!(session["agent"], "deepseek-harness");
 }
 #[test]
 fn an_openrouter_launch_runs_without_an_owner_and_needs_a_saved_key() {
@@ -1232,6 +1299,109 @@ fn onboard_prints_the_guide_and_reads_the_setup_without_creating_storage() {
     assert!(!output.status.success());
 }
 #[test]
+fn onboard_lists_an_organizations_group_seat_and_hook() {
+    // SB-202 (B-3): with an organization, `onboard --status` reads its group, its seats, the
+    // terminal hook (`shell status`) and the recorded contexts after the five steps.
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path().join("home");
+    std::fs::create_dir(&home).unwrap();
+    let work = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
+    let folder = work.path().canonicalize().unwrap().join("acme");
+    std::fs::create_dir_all(&folder).unwrap();
+    let run = |args: &[&str]| {
+        let output = binary()
+            .arg("--data-dir")
+            .arg(tmp.path())
+            .arg("--json")
+            .args(args)
+            .env("HOME", &home)
+            .env("USERPROFILE", &home)
+            .env_remove("CODEX_HOME")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{args:?}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        serde_json::from_slice::<serde_json::Value>(&output.stdout).unwrap()
+    };
+    let folder_text = folder.to_str().unwrap();
+    let onboard = || {
+        run(&[
+            "onboard",
+            "--status",
+            "--host",
+            "claude",
+            "--folder",
+            folder_text,
+        ])
+    };
+    let ids = |answer: &serde_json::Value| -> Vec<String> {
+        answer["data"]["steps"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|s| s["id"].as_str().unwrap().to_owned())
+            .collect()
+    };
+    let saved = run(&[
+        "project",
+        "save",
+        "--name",
+        "Acme work",
+        "--folder",
+        folder_text,
+    ]);
+    let pool = saved["data"]["pool"].as_str().unwrap().to_owned();
+    // A group and no organization: today's five steps.
+    assert_eq!(ids(&onboard()).len(), 5);
+    run(&["org", "add", "Acme", "--domain", "acme.com"]);
+    run(&["project", "edit", "--pool", &pool, "--organization", "Acme"]);
+    let answer = onboard();
+    assert_eq!(
+        ids(&answer),
+        [
+            "owner",
+            "accounts",
+            "project",
+            "mcp",
+            "proving_call",
+            "organization",
+            "org_group",
+            "seat",
+            "hook",
+            "launch"
+        ]
+    );
+    let step = |id: &str| {
+        answer["data"]["steps"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|s| s["id"] == id)
+            .unwrap()
+            .clone()
+    };
+    assert_eq!(step("org_group")["state"], "done");
+    assert_eq!(step("org_group")["organization"]["name"], "Acme");
+    let seat = step("seat");
+    assert_eq!(seat["state"], "needs_person");
+    assert!(seat["next"]["command"]
+        .as_str()
+        .unwrap()
+        .ends_with(&format!("login begin --provider claude --pool {pool}")));
+    // No owner has written the folder map: the hook reads as not on yet, from `shell status`.
+    let hook = step("hook");
+    assert_eq!(hook["state"], "optional");
+    assert!(hook["next"]["command"]
+        .as_str()
+        .unwrap()
+        .ends_with("shell status"));
+    assert_eq!(step("launch")["state"], "optional");
+    assert_eq!(answer["data"]["complete"], false);
+}
+#[test]
 fn project_bindings_are_listed_offline() {
     // SB-118 REQ-5: `switchboard project bindings` lists the bound folders; the record's
     // digest stays in the record.
@@ -1268,4 +1438,203 @@ fn project_bindings_are_listed_offline() {
         "http://127.0.0.1:4000/claude/pc"
     );
     assert!(json["data"]["bindings"][0].get("token_sha256").is_none());
+}
+/// SB-212: a synthetic launch record, 0600 on Unix as a launch writes it. On Windows it keeps
+/// the access list it inherits, which history still reads (and narrows), as after a copied folder.
+fn plant_launch(root: &std::path::Path, id: &str, extra: serde_json::Value) {
+    let dir = root.join("launches");
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut record = serde_json::json!({"launch_id": id, "account_id": "a-1",
+        "provider": "claude", "pool": "default", "launched_at": 100,
+        "home_path": "runtimes/claude-default",
+        "launched_by": {"surface": "cli", "caller_launch_id": null, "caller_project": null,
+            "caller_program": "zsh", "by": null, "parent": null}});
+    for (k, v) in extra.as_object().unwrap() {
+        record[k] = v.clone();
+    }
+    let file = dir.join(format!("{id}.json"));
+    std::fs::write(&file, record.to_string()).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600)).unwrap();
+    }
+}
+fn read_launch(root: &std::path::Path, id: &str) -> serde_json::Value {
+    serde_json::from_slice(
+        &std::fs::read(root.join("launches").join(format!("{id}.json"))).unwrap(),
+    )
+    .unwrap()
+}
+/// Runs a hook command with `input` on stdin and, when given, the session's launch id.
+fn hook_run(root: &std::path::Path, args: &[&str], input: &[u8], launch: Option<&str>) -> String {
+    let mut command = binary();
+    command
+        .arg("--data-dir")
+        .arg(root)
+        .args(args)
+        .env_remove("SWITCHBOARD_LAUNCH_ID")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    if let Some(id) = launch {
+        command.env("SWITCHBOARD_LAUNCH_ID", id);
+    }
+    let mut child = command.spawn().unwrap();
+    // A host may close the pipe early; the hook still ends well.
+    let _ = child.stdin.take().unwrap().write_all(input);
+    let output = child.wait_with_output().unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8_lossy(&output.stdout).into_owned()
+}
+#[test]
+fn a_launched_sessions_hooks_record_its_transcript_turns_and_stop_and_nothing_else_does() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    let id = "5b7f2c1e-0000-4000-8000-000000000001";
+    plant_launch(root, id, serde_json::json!({}));
+    let dir = root.to_string_lossy().into_owned();
+    // Absolute on this platform, as Claude Code reports it: `C:\...` on Windows, where a path
+    // without a drive (`/synthetic/...`) is not absolute and is rightly not recorded.
+    let transcript = root.join("projects").join("x").join("0f3c.jsonl");
+    let transcript = transcript.to_string_lossy().into_owned();
+    let start = serde_json::json!({"session_id": "0f3c", "transcript_path": transcript,
+        "cwd": dir, "hook_event_name": "SessionStart"});
+    let suggest = ["project", "suggest", "--from-hook"];
+    // Without the variable: an ordinary session, nothing is written.
+    hook_run(root, &suggest, start.to_string().as_bytes(), None);
+    assert!(read_launch(root, id)["transcript"].is_null());
+    hook_run(root, &suggest, start.to_string().as_bytes(), Some(id));
+    let record = read_launch(root, id);
+    assert_eq!(record["provider_session_id"], "0f3c");
+    assert_eq!(record["transcript"], transcript);
+    let stop = serde_json::json!({"session_id": "0f3c", "cwd": dir, "hook_event_name": "Stop"});
+    for _ in 0..2 {
+        let said = hook_run(
+            root,
+            &["recovery", "hook"],
+            stop.to_string().as_bytes(),
+            Some(id),
+        );
+        assert_eq!(
+            said.trim(),
+            "{}",
+            "a Stop hook's answer stays an empty object"
+        );
+    }
+    assert_eq!(read_launch(root, id)["turns"], 2);
+    let limit = serde_json::json!({"session_id": "0f3c", "cwd": dir, "error": "rate_limit",
+        "hook_event_name": "StopFailure"});
+    hook_run(
+        root,
+        &["--json", "recovery", "hook"],
+        limit.to_string().as_bytes(),
+        Some(id),
+    );
+    assert_eq!(read_launch(root, id)["ended"], "limit");
+    // Garbage, an oversized input and a planted id never fail a session or write anything.
+    let before = read_launch(root, id);
+    hook_run(root, &suggest, b"not json", Some(id));
+    hook_run(
+        root,
+        &["recovery", "hook"],
+        &vec![b'x'; 9 * 1024 * 1024],
+        Some(id),
+    );
+    hook_run(
+        root,
+        &["recovery", "hook"],
+        stop.to_string().as_bytes(),
+        Some("../../escape"),
+    );
+    assert_eq!(read_launch(root, id), before);
+    assert!(!root.join("escape.json").exists());
+}
+#[test]
+fn the_history_and_one_launch_with_its_chain_read_from_the_command_line() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    let (a, b, c) = (
+        "5b7f2c1e-0000-4000-8000-00000000000a",
+        "5b7f2c1e-0000-4000-8000-00000000000b",
+        "5b7f2c1e-0000-4000-8000-00000000000c",
+    );
+    plant_launch(root, a, serde_json::json!({"launched_at": 100}));
+    plant_launch(
+        root,
+        b,
+        serde_json::json!({"launched_at": 200, "launched_by": {"surface": "cli",
+            "caller_launch_id": a, "by": "voc-learn"}}),
+    );
+    plant_launch(
+        root,
+        c,
+        serde_json::json!({"launched_at": 300, "launched_by": {"surface": "cli",
+            "caller_launch_id": b}}),
+    );
+    let run = |args: &[&str]| {
+        let output = binary()
+            .arg("--data-dir")
+            .arg(root)
+            .args(args)
+            .stdin(Stdio::null())
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8_lossy(&output.stdout).into_owned()
+    };
+    let listed: serde_json::Value =
+        serde_json::from_str(&run(&["--json", "sessions", "--history"])).unwrap();
+    let ids: Vec<&str> = listed["data"]["launches"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|l| l["launch_id"].as_str().unwrap())
+        .collect();
+    assert_eq!(ids, [c, b, a], "newest first");
+    let text = run(&["sessions", "--history"]);
+    assert!(text.contains("cli:voc-learn"), "{text}");
+    let shown: serde_json::Value =
+        serde_json::from_str(&run(&["--json", "sessions", "show", b])).unwrap();
+    assert_eq!(shown["data"]["launch"]["launch_id"], b);
+    assert_eq!(shown["data"]["up"][0]["launch_id"], a);
+    assert_eq!(shown["data"]["down"][0]["launch_id"], c);
+    let text = run(&["sessions", "show", b]);
+    assert!(
+        text.contains("Launched by:") && text.contains("Then:"),
+        "{text}"
+    );
+}
+#[test]
+fn a_launcher_name_or_parent_that_is_not_one_is_refused_before_anything_is_asked() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("not-created");
+    for (flag, value) in [
+        ("--by", "two words"),
+        ("--by", "x".repeat(65).as_str()),
+        ("--parent", "../escape"),
+    ] {
+        let output = binary()
+            .arg("--data-dir")
+            .arg(&root)
+            .args(["launch", "acct", "--working-directory", "/tmp", flag, value])
+            .output()
+            .unwrap();
+        assert!(!output.status.success(), "{flag} {value}");
+        let said = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            said.contains("letters, digits") || said.contains("as the parent"),
+            "{said}"
+        );
+        assert!(!root.exists());
+    }
 }

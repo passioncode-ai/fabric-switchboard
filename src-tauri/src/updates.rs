@@ -195,6 +195,17 @@ pub fn cooldown_left(last: Option<i64>, now: i64, urgent: bool) -> i64 {
     }
 }
 
+/// When a ready update may start on its own (SB-208): the end of SB-191's pause, as Unix seconds,
+/// for the About line; none when no update waits to start on its own (`waiting` is `None`), when
+/// it is urgent (`Some(true)`), or when the pause is over. A recorded time ahead of the clock is
+/// read as now, as the watch reads it, so the time shown is never more than a period away.
+pub fn restart_after(waiting: Option<bool>, recorded: Option<i64>, now: i64) -> Option<i64> {
+    let urgent = waiting?;
+    let (last, _) = recorded_restart(recorded, now);
+    let left = cooldown_left(last, now, urgent);
+    (left > 0).then_some(now + left)
+}
+
 /// The last restart on its own as the watch uses it, and whether to write it back (SB-191): a
 /// time recorded ahead of the clock (a clock set back) becomes now, once, so the pause ends one
 /// period from now instead of holding until the clock catches up.
@@ -202,6 +213,34 @@ pub fn recorded_restart(recorded: Option<i64>, now: i64) -> (Option<i64>, bool) 
     match recorded {
         Some(at) if at > now => (Some(now), true),
         other => (other, false),
+    }
+}
+
+/// The last restart on its own as the watch reads it from one look to the next (SB-210). A time
+/// ahead of the clock is read as the look that first saw it and written back once
+/// (`recorded_restart`); when that write fails, the file keeps the future time, and reading it
+/// as now at every look slid the pause forward so the app never restarted on its own. The first
+/// look's time is kept here instead, so the pause still ends one period after it.
+#[derive(Default)]
+pub struct RestartClock {
+    ahead_seen_at: Option<i64>,
+}
+
+impl RestartClock {
+    pub fn read(&mut self, recorded: Option<i64>, now: i64) -> (Option<i64>, bool) {
+        match recorded {
+            Some(at) if at > now => match self.ahead_seen_at {
+                Some(first) => (Some(first), false),
+                None => {
+                    self.ahead_seen_at = Some(now);
+                    (Some(now), true)
+                }
+            },
+            other => {
+                self.ahead_seen_at = None;
+                (other, false)
+            }
+        }
     }
 }
 
@@ -447,10 +486,17 @@ impl Updates {
         enabled(choice.as_deref())
     }
 
-    /// `{available, reason, enabled, state, current, version, checked_at, error, needs_permission}`
-    /// for the About panel.
+    /// `{available, reason, enabled, state, current, version, checked_at, error, needs_permission,
+    /// restart_after}` for the About panel. `restart_after` (SB-208): when a ready update that
+    /// starts on its own may do so, while SB-191's pause holds it; null otherwise.
     pub fn status(&self) -> Value {
         let inner = self.lock();
+        let waiting = inner
+            .ready
+            .as_ref()
+            .filter(|ready| ready_starts_alone(ready))
+            .map(|ready| urgent(&ready.update.raw_json));
+        let restart_after = restart_after(waiting, self.restarted_at(), now());
         json!({
             "available": self.available.is_ok(),
             "reason": self.available.err(),
@@ -462,6 +508,7 @@ impl Updates {
             "error": inner.error,
             "needs_permission": cfg!(target_os = "macos")
                 && inner.ready.as_ref().is_some_and(|ready| ready.bytes.is_some()),
+            "restart_after": restart_after,
         })
     }
 
@@ -749,6 +796,7 @@ fn watch_for_idle(app: &AppHandle) {
     tauri::async_runtime::spawn(async move {
         let mut idle_before = false;
         let mut report = IdleReport::default();
+        let mut clock = RestartClock::default();
         let waiting_since = now();
         loop {
             tokio::time::sleep(IDLE_LOOK_EVERY).await;
@@ -769,7 +817,7 @@ fn watch_for_idle(app: &AppHandle) {
             };
             // SB-191: at most one restart on its own in RESTART_EVERY_SECONDS.
             let time = now();
-            let (last, rewrite) = recorded_restart(state.restarted_at(), time);
+            let (last, rewrite) = clock.read(state.restarted_at(), time);
             if rewrite {
                 state.record_restart(time);
             }
@@ -1682,11 +1730,74 @@ mod tests {
         assert_eq!(cooldown_left(later, downloaded + six, false), 0);
         assert_eq!(recorded_restart(last, downloaded), (last, false));
         assert_eq!(recorded_restart(None, downloaded), (None, false));
+        // SB-210: a future time that cannot be written back is read as the first look that saw
+        // it, every look after, so the pause ends a period after that look, not never.
+        let mut clock = RestartClock::default();
+        let future = Some(downloaded + 365 * 86_400);
+        assert_eq!(clock.read(future, downloaded), (Some(downloaded), true));
+        assert_eq!(
+            clock.read(future, downloaded + 300),
+            (Some(downloaded), false)
+        );
+        assert_eq!(cooldown_left(Some(downloaded), downloaded + six, false), 0);
+        assert_eq!(
+            clock.read(future, downloaded + six),
+            (Some(downloaded), false)
+        );
+        // Once written, or once the clock passes it, the file's time is read again.
+        assert_eq!(
+            clock.read(Some(downloaded), downloaded + 600),
+            (Some(downloaded), false)
+        );
+        assert_eq!(
+            clock.read(future, downloaded + 900),
+            (Some(downloaded + 900), true)
+        );
         assert_eq!(
             drain_from(downloaded, Some(downloaded + 9_999), downloaded, false),
             downloaded + six,
             "a future time never pushes the drain past a period from now"
         );
+    }
+
+    #[test]
+    fn a_waiting_update_says_when_the_pause_ends() {
+        // SB-208: About said a ready update starts when Switchboard is idle, but during SB-191's
+        // pause it does not; the status names the end of the pause.
+        let six = RESTART_EVERY_SECONDS;
+        let last = 1_000_000;
+        assert_eq!(
+            restart_after(Some(false), Some(last), last + 60),
+            Some(last + six),
+            "an hour into the pause it starts at the pause's end"
+        );
+        assert_eq!(restart_after(Some(false), Some(last), last + six), None);
+        assert_eq!(
+            restart_after(Some(false), None, last),
+            None,
+            "never restarted"
+        );
+        assert_eq!(
+            restart_after(Some(true), Some(last), last + 60),
+            None,
+            "urgent"
+        );
+        assert_eq!(
+            restart_after(None, Some(last), last + 60),
+            None,
+            "nothing waits to start on its own"
+        );
+        assert_eq!(
+            restart_after(Some(false), Some(last + 365 * 86_400), last),
+            Some(last + six),
+            "a time ahead of the clock holds one period from now"
+        );
+        // The status carries the field, null while nothing waits, even inside a pause.
+        let folder = tempfile::tempdir().unwrap();
+        std::fs::write(folder.path().join(RESTARTED_AT_FILE), now().to_string()).unwrap();
+        let updates = Updates::new(Ok(()), Some(folder.path().to_owned()));
+        let status = updates.status();
+        assert!(status.get("restart_after").is_some_and(Value::is_null));
     }
 
     #[test]

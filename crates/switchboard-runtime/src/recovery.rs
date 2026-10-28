@@ -304,11 +304,21 @@ pub(crate) enum Stopped {
     Again(String),
 }
 
+/// Whether a host resumed this stop (SB-209): it claimed it (`claim` sets `mode`) and the
+/// session ran after. A stop the session's own `Stop` hook resumed while it waited (SB-204) has no
+/// `mode`: the session went on by itself, so stopping again soon after is not a host's restart
+/// failing and does not raise the next stop's attempt. Read from the row as it is, so the file's
+/// format, which 0.6.x builds read strictly, does not change.
+fn resumed_by_host(row: &Wait) -> bool {
+    row.state == State::Resumed && row.mode.is_some()
+}
+
 /// Registers a stop the session reported itself (Claude Code's `StopFailure` hook, SB-115).
 /// One live stop per session still holds: a waiting stop is moved to now with one more attempt;
-/// a claimed one is closed as resumed — the session ran, since it stopped again — and a new
-/// stop follows it. A stop within 30 minutes of the session's previous resumed stop is one
-/// attempt later; otherwise the backoff starts again.
+/// a claimed one is closed as resumed (the session ran, since it stopped again) and a new
+/// stop follows it. A stop within 30 minutes of the session's previous stop a host resumed is one
+/// attempt later; otherwise, and after a stop the session resumed by itself, the backoff starts
+/// again.
 pub(crate) fn register_stop(
     root: &Path,
     snapshot: &Snapshot,
@@ -344,7 +354,7 @@ pub(crate) fn register_stop(
         attempt = claimed.attempt.saturating_add(1);
     } else if let Some(last) = rows
         .iter()
-        .filter(|r| r.session == session && r.state == State::Resumed)
+        .filter(|r| r.session == session && resumed_by_host(r))
         .max_by_key(|r| r.stopped_at)
     {
         if now - last.stopped_at <= REPEAT_WINDOW {
@@ -1165,6 +1175,47 @@ mod tests {
             220
         )
         .is_err());
+    }
+
+    #[test]
+    fn a_stop_the_session_resumed_by_itself_does_not_raise_the_next_attempt() {
+        // SB-209: a session that went on by itself (its `Stop` hook, SB-204) and hit its limit
+        // again within 30 minutes probed at 300 s, as after a host's failed restart; it starts at
+        // 120 s again.
+        let root = tempfile::tempdir().unwrap();
+        let s = snapshot();
+        let none = HashSet::new();
+        let at = |t| {
+            register_stop(
+                root.path(),
+                &s,
+                "session-1",
+                "old",
+                root.path(),
+                StopKind::Limit,
+                t,
+            )
+        };
+        let Stopped::New(first) = at(100).unwrap() else {
+            panic!()
+        };
+        assert_eq!(continued(root.path(), "session-1", 150).unwrap(), 1);
+        let Stopped::New(second) = at(200).unwrap() else {
+            panic!()
+        };
+        let rows = read(root.path()).unwrap();
+        assert!(rows
+            .iter()
+            .any(|r| r.event == first && r.state == State::Resumed));
+        assert_eq!(rows.iter().find(|r| r.event == second).unwrap().attempt, 0);
+        // A host's resume still counts: claimed, the session ran, then stopped again.
+        claim(root.path(), &second, "new", &s, &held(), &none, &none, 450).unwrap();
+        assert_eq!(continued(root.path(), "session-1", 460).unwrap(), 1);
+        let Stopped::New(third) = at(500).unwrap() else {
+            panic!()
+        };
+        let rows = read(root.path()).unwrap();
+        assert_eq!(rows.iter().find(|r| r.event == third).unwrap().attempt, 1);
     }
 
     #[test]

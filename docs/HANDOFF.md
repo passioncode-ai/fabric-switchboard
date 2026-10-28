@@ -2,6 +2,30 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-10-28: release 0.7.0 «first organization», with the stability and Windows debts closed
+
+- **Where.** `iteration/0.7.0` merged into `main` by the release pull request; run record
+  `docs/runs/2026-10-26-iteration-0.7.0/` (canvas: every node, round, fix cycle and merged gate; questions; dossiers A,
+  B, C; evidence including the wave 4 WebKit pass `evidence/wave4-webkit/design-review.md`).
+- **Done.** Waves 1 to 5 of the iteration: the terminal hook (zsh, bash, fish, PowerShell 5.1 and 7) and shell homes,
+  the organization checklist and first run, seats ended and PassionCode.ai leaving shown, contexts for every agent,
+  fallback chains and spending ceilings in the window, launch records with their chain and transcript (SB-212). The
+  operator's stability and Windows plan of 2026-10-27 ([report](reports/2026-10-27-stability-windows-debts/README.md)):
+  W1, W1b, W2 (Windows tests run and pass; the folder map's Windows rules; junctions and hard links), S1 to S5
+  (runtime reliability, urgent releases, window leftovers, spend gate edges). Runbook `docs/ORGANIZATION.md` and
+  `docs/ORGANIZATION.ru.md`.
+- **Checks run.** Nightly on the iteration and on the Windows branch green on all six jobs (runs 40581403395,
+  40585412854, 40597614931); merged gates per node in the canvas; `./scripts/check.sh` on the release tree; the
+  release workflow's own guard and nightly on the tag.
+- **Decisions.** An empty PassionCode.ai list releases nothing (SB-227); a left organization gets no setup card
+  (WebKit pass F1); one build at a time with a 4 GB floor on this Mac (canvas, build rule).
+- **Prerequisites left to people.** SB-02 (a Windows host the agent can reach), SB-01, SB-15, SB-178, SB-06 (live
+  accounts), SB-13, SB-16 (decisions); B-10 (SB-125) after 0.7.0 is installed on both machines.
+- **Exact next task.** Watch the `v0.7.0` release run to success, confirm the published assets and `latest.json`,
+  update the local install, then close the rows built in 0.7.0 (SB-71, SB-160, SB-183, SB-201, SB-202, SB-207,
+  SB-208, SB-212, SB-213, SB-214, SB-215, SB-218 to SB-230 as marked) and measure a day of `control_slow` with
+  `lock_ms` on the installed 0.7.0 for SB-174 and SB-163.
+
 ## 2026-10-26 (evening): iteration 0.7.0 «first organization», waves 1 to 3 merged
 
 - **Where.** Branch `iteration/0.7.0` at `97e698f` (not on `main` yet); the run's record is

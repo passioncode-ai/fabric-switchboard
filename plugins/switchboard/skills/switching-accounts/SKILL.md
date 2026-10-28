@@ -16,7 +16,7 @@ license: AGPL-3.0-only OR LicenseRef-PassionCode-Commercial
 compatibility: Requires Fabric Switchboard 0.4 or later on the same machine and the switchboard CLI on PATH; the plugin starts its MCP server as switchboard mcp over stdio. Without the server, the same reads and writes run through the CLI. Local only; provider calls are an explicit usage refresh and Switchboard's own renewal of inactive Claude sign-ins (never the account Claude Code uses).
 metadata:
   author: PassionCode.ai
-  version: "0.6.83"
+  version: "0.7.0"
   mcp-server: switchboard
   mcp-protocol: "2025-06-18"
 ---
@@ -67,6 +67,9 @@ the launch injected it with the session and data folder set explicitly.
 | `switchboard_project_apply` | yes | apply the folder's rule to this session |
 | `switchboard_chain_get` | no | the operator's fallback chains and the one that applies to a workflow or project |
 | `switchboard_chain_set` | yes | set a fallback chain, only when the operator asks |
+| `switchboard_ceilings` | no | spending ceilings for paid fallback agents, the questions a reached one asked, the last hand-over |
+| `switchboard_ceiling_set` | yes | set a first or a lower spending ceiling, only when the operator asks; raising or clearing one is the window's |
+| `switchboard_ceiling_answer` | yes | keep a reached ceiling, only when the operator asks; doubling it is the window's |
 | `switchboard_openrouter_status` | no | the agents' OpenRouter key: saved?, its default model, what it may still spend; never the key |
 | `switchboard_hermes_status` | no | the model, provider and endpoint the ordinary Hermes runs on; never a key |
 | `switchboard_hermes_set` | yes | change Hermes's provider and/or default model, only when the operator asks |
@@ -81,13 +84,15 @@ the launch injected it with the session and data folder set explicitly.
 | `switchboard_project_suggestion` | yes | add a waiting folder now or keep it out for good, only when the operator asks |
 | `switchboard_project_sources` | yes | a group's repository owners whose new repositories join it, by delta; only when the operator asks to change them |
 | `switchboard_openrouter_model` | yes | change the model agents start on, only when the operator asks |
+| `switchboard_shell_hook` | no | whether terminals follow organization folders, each start file Switchboard changed, and what a terminal gets in a folder |
+| `switchboard_shell_hook_set` | yes | turn the terminal hook on or off, only when the operator asks |
 
 Arguments, result fields and fixed error texts: read `references/tools.md` before the
 first write call, or when a result field is unclear.
 
 **Degraded paths: say it once, then fall back; never loop:**
 
-- **Only the 23 read tools are listed**: the server runs `--read-only` (an isolated
+- **Only the 24 read tools are listed**: the server runs `--read-only` (an isolated
   session gets that set, since a route change cannot reach it). Report reads; for a
   change, tell the operator which tool is missing and why. Do not work around it.
 - **No `switchboard_*` tool, or the server failed to connect**: use the CLI

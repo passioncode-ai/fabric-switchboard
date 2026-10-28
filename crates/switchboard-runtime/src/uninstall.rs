@@ -31,6 +31,8 @@ const OWNED: &[&str] = &[
     "pool-salts.json",
     "capability-migration.json",
     "agents-settings.json",
+    // Spending ceilings and their questions (SB-72); they travel in backups.
+    "spend.json",
     "statistics.json",
     // Usage analytics' own state, the person's answer included (issue #128): uninstalling
     // forgets the answer, and the question returns at the next first start.
@@ -39,10 +41,16 @@ const OWNED: &[&str] = &[
     "vesta.json",
     // Folders taken out of their group lately (SB-172).
     "released-folders.json",
+    // The terminal hook's choice and the installer's record (SB-183); the start-file blocks
+    // are taken out first, below.
+    "shell-hook",
+    "shell-hook.json",
     // A `serve --data-dir` over this folder logs here (SB-112).
     "logs",
     "fabric-handovers",
     "handovers",
+    // One record per launch (SB-212): ids, folders and times; the transcripts stay in the homes.
+    "launches",
     "backup-id",
     "login-item",
     "auto-update",
@@ -58,7 +66,7 @@ const OWNED: &[&str] = &[
 /// Session homes: the CLIs' own history (conversations, project memory) lives there, so
 /// uninstall keeps them and removes only the credential-bearing files Switchboard or a sign-in
 /// put there; `purge` removes them whole.
-const HOME_DIRS: &[&str] = &["homes", "runtimes"];
+const HOME_DIRS: &[&str] = &["homes", "runtimes", crate::shell::map::DIR];
 const HOME_SECRETS: &[&str] = &[
     "settings.json",
     "auth.json",
@@ -86,6 +94,8 @@ pub struct Places {
     pub remove_orphan_key: fn() -> Result<(), String>,
     /// Removes the desktop app's login item (SB-28); absent is success.
     pub remove_login_item: fn() -> Result<(), String>,
+    /// The person's home for the terminal hook's start-file blocks (SB-183); None: not looked at.
+    pub shell: Option<crate::shell::install::Host>,
 }
 /// The desktop app's login item: on macOS the LaunchAgent the autostart plugin writes, on Windows
 /// the value under the user's `Run` key (`src-tauri/src/residency.rs`).
@@ -95,11 +105,20 @@ pub const LOGIN_ITEM_WINDOWS: &str = "Fabric Switchboard";
 pub const LOGIN_ITEM_LINUX: &str = ".config/autostart/Fabric Switchboard.desktop";
 
 /// The real places: `~/.local/bin` and, on macOS, the login Keychain.
-pub fn places() -> Places {
+pub fn places(root: &Path) -> Places {
+    places_for(root, crate::default_root().ok().as_deref())
+}
+/// The terminal hook's start files are looked at only for the app's own data folder: every
+/// data folder writes the same marker into the same home, so another one's uninstall must not
+/// take out the blocks the app's folder wrote (SB-183).
+fn places_for(root: &Path, default: Option<&Path>) -> Places {
     Places {
         bin: dirs::home_dir().map(|h| h.join(".local/bin")),
         remove_orphan_key,
         remove_login_item,
+        shell: crate::shell::install::same_root(root, default)
+            .then(|| crate::shell::install::Host::process(None))
+            .flatten(),
     }
 }
 #[cfg(target_os = "macos")]
@@ -229,6 +248,12 @@ pub fn uninstall_with(
         "data_entries": if keep_data { json!([]) } else { json!(owned) },
         // SB-118: the project route Switchboard wrote into project folders' Claude Code settings.
         "claude_bindings": crate::bindings::read(root).map(|r| r.len()).unwrap_or(0),
+        // SB-183: start files holding the terminal hook's block.
+        "shell_hook_files": crate::shell::install::read_record(root)
+            .files
+            .iter()
+            .filter(|e| e.state == crate::shell::install::State::Written)
+            .count(),
         "kept": {
             "foreign_entries": foreign,
             "backups": "kept, with their key: a reinstall restores them",
@@ -245,6 +270,16 @@ pub fn uninstall_with(
     // Before the data folder goes: the record says what was written and where.
     if let Err(error) = crate::bindings::unbind_all(root) {
         failures.push(json!({"item": "claude_bindings", "error": error}));
+    }
+    // SB-183: the terminal hook's blocks, whatever the choice; each file byte for byte as before.
+    if let Some(host) = &places.shell {
+        if let Err(left) = crate::shell::install::remove_all(root, host) {
+            for path in left {
+                failures.push(
+                    json!({"path": path, "error": "Could not take the terminal hook's block out."}),
+                );
+            }
+        }
     }
     for id in &accounts {
         if let Err(error) = vault.delete(id) {
@@ -275,7 +310,25 @@ pub fn uninstall_with(
             if HOME_DIRS.contains(&name.as_str()) && !purge {
                 // History stays; every credential file in each home goes.
                 for home in std::fs::read_dir(&path).into_iter().flatten().flatten() {
-                    for secret in HOME_SECRETS {
+                    // `shell/` also holds the folder map and the hook scripts: files, not homes.
+                    if name == crate::shell::map::DIR
+                        && std::fs::symlink_metadata(home.path()).is_ok_and(|m| !m.is_dir())
+                    {
+                        if std::fs::remove_file(home.path()).is_err() {
+                            failures
+                                .push(json!({"path": home.path(), "error": "Could not remove."}));
+                        }
+                        continue;
+                    }
+                    for secret in HOME_SECRETS
+                        .iter()
+                        // A Codex shell home's config names the machine's auto capability.
+                        .chain(if name == crate::shell::map::DIR {
+                            &["config.toml"][..]
+                        } else {
+                            &[]
+                        })
+                    {
                         let file = home.path().join(secret);
                         if std::fs::symlink_metadata(&file).is_ok()
                             && std::fs::remove_file(&file).is_err()
@@ -338,6 +391,22 @@ mod tests {
         (temp, root, vault)
     }
 
+    /// SB-183: only the app's own data folder takes the terminal hook's blocks out of the home;
+    /// uninstalling another data folder never looks at the start files.
+    #[test]
+    fn only_the_apps_own_data_folder_takes_the_blocks_out() {
+        let temp = tempfile::tempdir().unwrap();
+        let (own, other) = (temp.path().join("own"), temp.path().join("other"));
+        std::fs::create_dir_all(&own).unwrap();
+        std::fs::create_dir_all(&other).unwrap();
+        assert!(places_for(&other, Some(&own)).shell.is_none());
+        assert!(places_for(&own, None).shell.is_none());
+        assert_eq!(
+            places_for(&own, Some(&own)).shell.is_some(),
+            crate::shell::install::Host::process(None).is_some()
+        );
+    }
+
     #[test]
     fn without_apply_nothing_changes() {
         let (temp, root, vault) = setup();
@@ -345,6 +414,7 @@ mod tests {
             bin: Some(temp.path().join("bin")),
             remove_orphan_key: removed_ok,
             remove_login_item: removed_ok,
+            shell: None,
         };
         let plan = uninstall(&root, vault.clone(), false, false, &places).unwrap();
         assert_eq!(plan["accounts"], 1);
@@ -387,13 +457,59 @@ mod tests {
         std::fs::create_dir_all(app_cli.parent().unwrap()).unwrap();
         std::fs::write(&app_cli, "#!/bin/sh\n").unwrap();
         std::os::unix::fs::symlink(&app_cli, bin.join("switchboard")).unwrap();
+        // SB-183: the terminal hook's block in an (injected) start file, and the shell homes.
+        let home = temp.path().join("home");
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::write(home.join(".zshrc"), "own\n").unwrap();
+        let host = crate::shell::install::Host {
+            home: home.clone(),
+            zdotdir: None,
+            login_shell: Some("zsh".into()),
+            macos: true,
+            // SAFETY: getuid has no preconditions and cannot fail.
+            uid: Some(unsafe { libc::getuid() }),
+            cli: Some(app_cli.clone()),
+            windows: None,
+        };
+        crate::shell::install::set_choice(&root, true).unwrap();
+        crate::shell::install::apply(&root, &host, true, true);
+        assert!(std::fs::read_to_string(home.join(".zshrc"))
+            .unwrap()
+            .contains(crate::shell::install::OPEN));
+        let shell_home = root.join("shell/claude-acme");
+        std::fs::create_dir_all(shell_home.join("projects")).unwrap();
+        std::fs::write(shell_home.join("projects/history.jsonl"), "kept").unwrap();
+        std::fs::write(shell_home.join("settings.json"), "{}").unwrap();
+        std::fs::create_dir_all(root.join("shell/codex-acme")).unwrap();
+        std::fs::write(root.join("shell/codex-acme/config.toml"), "capability").unwrap();
+        std::fs::write(root.join("shell/map.json"), "{}").unwrap();
         let places = Places {
             bin: Some(bin.clone()),
             remove_orphan_key: removed_ok,
             remove_login_item: removed_ok,
+            shell: Some(host),
         };
+        let plan = uninstall(&root, vault.clone(), false, false, &places).unwrap();
+        assert_eq!(plan["shell_hook_files"], 1);
         let done = uninstall(&root, vault.clone(), false, true, &places).unwrap();
         assert_eq!(done["failures"], json!([]));
+        assert_eq!(
+            std::fs::read_to_string(home.join(".zshrc")).unwrap(),
+            "own\n",
+            "the start file is given back byte for byte"
+        );
+        assert!(!root.join("shell-hook").exists() && !root.join("shell-hook.json").exists());
+        assert!(!root.join("shell/map.json").exists());
+        assert!(!root.join("shell/hook.zsh").exists());
+        assert!(
+            !root.join("shell/codex-acme/config.toml").exists(),
+            "its capability goes"
+        );
+        assert!(!shell_home.join("settings.json").exists());
+        assert!(
+            shell_home.join("projects/history.jsonl").exists(),
+            "an organization's history stays like a launched home's"
+        );
         assert!(vault.get(&id).is_err(), "the account's credential is gone");
         assert!(
             !bin.join("switchboard").exists()
@@ -426,6 +542,7 @@ mod tests {
             bin: Some(bin.clone()),
             remove_orphan_key: removed_ok,
             remove_login_item: removed_ok,
+            shell: None,
         };
         let done = uninstall(&root, vault, true, true, &places).unwrap();
         assert!(root.join("accounts.json").exists());
@@ -459,6 +576,7 @@ mod tests {
                 bin: None,
                 remove_orphan_key: removed_ok,
                 remove_login_item: counted,
+                shell: None,
             },
         )
         .unwrap();
@@ -482,6 +600,7 @@ mod tests {
                 bin: None,
                 remove_orphan_key: removed_ok,
                 remove_login_item: refused,
+                shell: None,
             },
         )
         .unwrap();
@@ -499,6 +618,7 @@ mod tests {
             bin: None,
             remove_orphan_key: removed_ok,
             remove_login_item: removed_ok,
+            shell: None,
         };
         assert!(
             uninstall(&root, vault.clone(), false, true, &places).is_err(),
@@ -510,6 +630,7 @@ mod tests {
         assert_eq!(done["data_folder_removed"], true);
     }
 
+    #[cfg(unix)]
     fn claude_snapshot(folder: &Path) -> switchboard_core::Snapshot {
         switchboard_core::Snapshot {
             projects: vec![switchboard_core::Project {
@@ -540,6 +661,7 @@ mod tests {
             ..Default::default()
         }
     }
+    #[cfg(unix)]
     fn bound_folder(temp: &tempfile::TempDir, root: &Path) -> PathBuf {
         let app = temp.path().join("app");
         std::fs::create_dir_all(app.join(".git/info")).unwrap();
@@ -547,11 +669,13 @@ mod tests {
         crate::bindings::sync(root, &claude_snapshot(&app), "127.0.0.1:4000", "session").unwrap();
         app
     }
+    #[cfg(unix)]
     fn no_places() -> Places {
         Places {
             bin: None,
             remove_orphan_key: removed_ok,
             remove_login_item: removed_ok,
+            shell: None,
         }
     }
 

@@ -258,32 +258,87 @@ async fn handle(State(state): State<Control>, request: Request<Body>) -> Respons
         // Most often a client newer than this owner (an update installed, not yet restarted).
         Err(_) => return refuse(StatusCode::BAD_REQUEST, "unknown_operation"),
     };
+    // SB-212: a launch asked for through this door is never the window's.
+    let operation = crate::from_outside(operation);
+    if let Some(refusal) = crate::window_only_refusal(&operation) {
+        return Json(Reply::Error {
+            message: refusal.into(),
+        })
+        .into_response();
+    }
     let kind = operation_kind(&operation);
     let started = std::time::Instant::now();
-    let reply = match state.runtime.execute(operation).await {
+    let (reply, lock_ms) = measure_lock_waits(state.runtime.execute(operation)).await;
+    let reply = match reply {
         Ok(value) => Reply::Ok { value },
         Err(message) => Reply::Error { message },
     };
-    slow_request(kind, started.elapsed());
+    slow_request(kind, started.elapsed(), lock_ms);
     Json(reply).into_response()
+}
+tokio::task_local! {
+    /// H-2: the store-lock waits of the control request this task answers.
+    static LOCK_WAITS: Arc<LockWaits>;
+}
+/// H-2: whether a request took the store's lock, and how long its takes waited in all.
+#[derive(Default)]
+struct LockWaits {
+    took: std::sync::atomic::AtomicBool,
+    micros: std::sync::atomic::AtomicU64,
+}
+/// The store's lock observer (`Store::observe_lock_waits`): adds each wait to the request this
+/// task answers. On any other task (the monitor, the proxy) it does nothing. Waits on tasks the
+/// request spawns are not counted; its blocking sections (`blocking::run`) are, as they run on
+/// its own task.
+pub(crate) fn lock_waited(waited: Duration) {
+    let _ = LOCK_WAITS.try_with(|waits| {
+        waits.took.store(true, std::sync::atomic::Ordering::Relaxed);
+        waits.micros.fetch_add(
+            waited.as_micros().min(u64::MAX as u128) as u64,
+            std::sync::atomic::Ordering::Relaxed,
+        );
+    });
+}
+/// Runs `work` and answers, with its result, the milliseconds it waited for the store's lock
+/// in all: None when it never took it.
+async fn measure_lock_waits<T>(work: impl std::future::Future<Output = T>) -> (T, Option<u64>) {
+    let waits = Arc::new(LockWaits::default());
+    let result = LOCK_WAITS.scope(waits.clone(), work).await;
+    let lock_ms = waits
+        .took
+        .load(std::sync::atomic::Ordering::Relaxed)
+        .then(|| waits.micros.load(std::sync::atomic::Ordering::Relaxed) / 1000);
+    (result, lock_ms)
 }
 /// SB-174: a request the owner took longer than this to answer is logged, so a client's stall
 /// can be told apart from one on the way to the owner.
 const SLOW_REQUEST: Duration = Duration::from_secs(5);
-fn slow_request(kind: &'static str, took: Duration) {
+/// H-2: `lock_ms`, the time it waited for the store's lock, is named when it took that lock.
+fn slow_request(kind: &'static str, took: Duration, lock_ms: Option<u64>) {
     if took >= SLOW_REQUEST {
-        oplog::event(
-            "control_slow",
-            &[
-                ("operation", oplog::Field::Code(kind)),
-                ("ms", oplog::Field::Number(took.as_millis() as i64)),
-            ],
-        );
+        let mut fields = vec![
+            ("operation", oplog::Field::Code(kind)),
+            ("ms", oplog::Field::Number(took.as_millis() as i64)),
+        ];
+        if let Some(lock_ms) = lock_ms {
+            fields.push((
+                "lock_ms",
+                oplog::Field::Number(lock_ms.min(i64::MAX as u64) as i64),
+            ));
+        }
+        oplog::event("control_slow", &fields);
     }
 }
 /// The operation's tag (`handovers`, `usage`, ...), never its arguments. The tags come from a
 /// request that parsed as an `Operation`, so they are the enum's own names: each is kept once.
+///
+/// A launch from outside the window arrives wrapped (`launched`, SB-212); its tag is the
+/// launch's own (`launch`, `continue`, ...), so a slow launch is told from a slow continue
+/// (SB-220).
 fn operation_kind(operation: &Operation) -> &'static str {
+    if let Operation::Launched { inner, .. } = operation {
+        return operation_kind(inner);
+    }
     static KINDS: std::sync::Mutex<Vec<&'static str>> = std::sync::Mutex::new(Vec::new());
     let tag = serde_json::to_value(operation)
         .ok()
@@ -306,6 +361,24 @@ fn operation_kind(operation: &Operation) -> &'static str {
 /// Authentication/protocol/timeouts never trigger a second, offline mutation.
 /// The caller must acquire Store's exclusive lock before any offline operation.
 pub async fn request(root: &Path, operation: &Operation) -> Result<Option<Value>, String> {
+    match request_once(root, operation).await {
+        // SB-212: an owner older than `launched` (the update window, CONTRACTS.md "Version
+        // skew") refused it with a 400 before doing anything. The bare launch is sent once,
+        // without who asked for it, so a launch keeps working until the owner restarts.
+        Err(message) if message == CONTROL_OWNER_OLDER => match operation {
+            Operation::Launched { inner, .. } => {
+                oplog::event(
+                    "launch_record",
+                    &[("outcome", oplog::Field::Code("owner_older"))],
+                );
+                request_once(root, inner).await
+            }
+            _ => Err(message),
+        },
+        answer => answer,
+    }
+}
+async fn request_once(root: &Path, operation: &Operation) -> Result<Option<Value>, String> {
     let path = root.join(FILE);
     match std::fs::symlink_metadata(&path) {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
@@ -496,10 +569,150 @@ mod tests {
             operation_kind(&Operation::Handovers),
             operation_kind(&Operation::Handovers)
         ));
+        // SB-220: a launch from outside is named by what it launches.
+        let wrapped = crate::launched(
+            Operation::Continue {
+                workflow_id: "wf_0123456789abcdef".into(),
+                id: "acct".into(),
+                mode: "managed".into(),
+                working_directory: "/work".into(),
+                in_place: true,
+            },
+            crate::launches::LaunchedBy::surface(crate::launches::Surface::Cli),
+        );
+        assert_eq!(operation_kind(&wrapped), "continue");
     }
     use super::*;
     use crate::Owner;
     use switchboard_core::{AuthKind, MemoryVault, Provider, Store};
+    #[test]
+    fn a_slow_request_names_how_long_it_waited_for_the_stores_lock() {
+        // H-2 (SB-174): `control_slow` carries `lock_ms` when the operation took the store's
+        // lock, and leaves it out when it never did; codes and numbers only.
+        let ((), events) = crate::oplog::capture_fields(|| {
+            slow_request("sessions", Duration::from_millis(6_400), Some(6_350));
+            slow_request("handovers", Duration::from_millis(5_100), None);
+            slow_request("usage", Duration::from_millis(40), Some(30));
+        });
+        assert_eq!(
+            events,
+            vec![
+                (
+                    "control_slow",
+                    vec![
+                        ("operation", oplog::Field::Code("sessions")),
+                        ("ms", oplog::Field::Number(6_400)),
+                        ("lock_ms", oplog::Field::Number(6_350)),
+                    ]
+                ),
+                (
+                    "control_slow",
+                    vec![
+                        ("operation", oplog::Field::Code("handovers")),
+                        ("ms", oplog::Field::Number(5_100)),
+                    ]
+                ),
+            ]
+        );
+    }
+    /// A vault whose removals take 400 ms: a removal holds the store's lock across its deletion.
+    #[derive(Default)]
+    struct SlowDelete(MemoryVault);
+    impl switchboard_core::Vault for SlowDelete {
+        fn get(&self, id: &str) -> Result<switchboard_core::Credential, String> {
+            self.0.get(id)
+        }
+        fn put(&self, id: &str, value: &switchboard_core::Credential) -> Result<(), String> {
+            self.0.put(id, value)
+        }
+        fn delete(&self, id: &str) -> Result<(), String> {
+            std::thread::sleep(Duration::from_millis(400));
+            self.0.delete(id)
+        }
+    }
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn an_operation_counts_the_time_it_waited_for_the_stores_lock() {
+        // H-2: the owner's store tells the request's task each wait for its lock; a request that
+        // never took it reads None.
+        let tmp = tempfile::tempdir().unwrap();
+        let owner = Owner::start(tmp.path().to_owned(), Arc::new(SlowDelete::default()))
+            .await
+            .unwrap();
+        let store = owner.runtime.store.clone();
+        let (_, untouched) = measure_lock_waits(async {}).await;
+        assert_eq!(untouched, None);
+        let (_, free) = measure_lock_waits(async { store.snapshot().unwrap() }).await;
+        assert!(free.is_some_and(|ms| ms < 100), "{free:?}");
+        let account = store
+            .add(
+                "Synthetic".into(),
+                Provider::Claude,
+                AuthKind::ApiKey,
+                "default".into(),
+                switchboard_core::Credential::parse(
+                    Provider::Claude,
+                    AuthKind::ApiKey,
+                    "synthetic",
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        let removing = {
+            let store = store.clone();
+            std::thread::spawn(move || store.remove(&account.id))
+        };
+        std::thread::sleep(Duration::from_millis(100));
+        let (_, waited) =
+            measure_lock_waits(async { crate::blocking::run(|| store.snapshot().unwrap()) }).await;
+        removing.join().unwrap().unwrap();
+        assert!(waited.is_some_and(|ms| ms >= 200), "{waited:?}");
+        owner.shutdown(Duration::from_secs(8)).await;
+    }
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_requests_lock_ms_counts_only_its_own_waits() {
+        // H-2 fix cycle 1 (adversarial): two requests answered at once each count their own
+        // waits. One waits for the store's lock behind a slow removal; the other never takes
+        // the lock and reads None, not the first one's wait.
+        let tmp = tempfile::tempdir().unwrap();
+        let owner = Owner::start(tmp.path().to_owned(), Arc::new(SlowDelete::default()))
+            .await
+            .unwrap();
+        let store = owner.runtime.store.clone();
+        let account = store
+            .add(
+                "Synthetic".into(),
+                Provider::Claude,
+                AuthKind::ApiKey,
+                "default".into(),
+                switchboard_core::Credential::parse(
+                    Provider::Claude,
+                    AuthKind::ApiKey,
+                    "synthetic",
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        let removing = {
+            let store = store.clone();
+            std::thread::spawn(move || store.remove(&account.id))
+        };
+        std::thread::sleep(Duration::from_millis(100));
+        let locking = {
+            let store = store.clone();
+            tokio::spawn(measure_lock_waits(async move {
+                crate::blocking::run(|| store.snapshot().unwrap());
+            }))
+        };
+        let lockless = tokio::spawn(measure_lock_waits(async {
+            tokio::time::sleep(Duration::from_millis(600)).await;
+        }));
+        let (_, waited) = locking.await.unwrap();
+        let (_, untouched) = lockless.await.unwrap();
+        removing.join().unwrap().unwrap();
+        assert!(waited.is_some_and(|ms| ms >= 200), "{waited:?}");
+        assert_eq!(untouched, None, "a request that took no lock names no wait");
+        owner.shutdown(Duration::from_secs(8)).await;
+    }
     async fn fixture() -> (tempfile::TempDir, Owner, Descriptor) {
         let tmp = tempfile::tempdir().unwrap();
         let owner = Owner::start(tmp.path().to_owned(), Arc::new(MemoryVault::default()))
@@ -620,6 +833,98 @@ mod tests {
         assert!(malformed_refusal(Some(env!("CARGO_PKG_VERSION")))
             .starts_with("Control request refused"));
         assert!(malformed_refusal(Some("garbage")).starts_with("Control request refused"));
+    }
+    /// SB-212 (B-1): a newer command wraps a launch in `launched`, which an owner still running
+    /// from before 0.7.0 cannot read (the update window). The 400 did nothing, so the command
+    /// sends the bare launch once, without its provenance, and the older owner runs it.
+    #[tokio::test]
+    async fn a_launch_an_older_owner_cannot_read_is_sent_again_bare() {
+        use std::sync::Mutex as StdMutex;
+        let tmp = tempfile::tempdir().unwrap();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let token = "b".repeat(64);
+        let descriptor = Descriptor {
+            protocol: 1,
+            address: listener.local_addr().unwrap(),
+            token: token.clone(),
+            pid: None,
+        };
+        private_fs::private_write(
+            &tmp.path().join(FILE),
+            &serde_json::to_vec(&descriptor).unwrap(),
+        )
+        .unwrap();
+        let seen: Arc<StdMutex<Vec<String>>> = Arc::default();
+        let observed = seen.clone();
+        let router = Router::new().fallback(move |request: Request<Body>| {
+            let observed = observed.clone();
+            let token = token.clone();
+            async move {
+                if request.uri().path() == "/v1/hello" {
+                    let nonce = request
+                        .headers()
+                        .get("x-switchboard-challenge")
+                        .unwrap()
+                        .to_str()
+                        .unwrap()
+                        .to_owned();
+                    let mut response = Json(Hello {
+                        proof: proof(&token, &nonce),
+                    })
+                    .into_response();
+                    response.headers_mut().insert(
+                        VERSION_HEADER,
+                        axum::http::HeaderValue::from_static("0.6.10"),
+                    );
+                    return response;
+                }
+                let body = to_bytes(request.into_body(), REQUEST_LIMIT).await.unwrap();
+                let value: Value = serde_json::from_slice(&body).unwrap();
+                let tag = value["operation"].as_str().unwrap_or_default().to_owned();
+                observed.lock().unwrap().push(tag.clone());
+                // An earlier owner knows `launch` and not `launched`.
+                if tag == "launched" {
+                    return StatusCode::BAD_REQUEST.into_response();
+                }
+                Json(Reply::Ok {
+                    value: serde_json::json!({"script": "ran"}),
+                })
+                .into_response()
+            }
+        });
+        let task = tokio::spawn(async move {
+            axum::serve(listener, router).await.unwrap();
+        });
+        let launch = Operation::Launch {
+            id: "acct".into(),
+            mode: "managed".into(),
+            working_directory: tmp.path().to_owned(),
+            in_place: true,
+            args: Vec::new(),
+        };
+        let wrapped = crate::launched(
+            launch,
+            crate::launches::LaunchedBy::surface(crate::launches::Surface::Dashboards),
+        );
+        let answer = request(tmp.path(), &wrapped).await.unwrap().unwrap();
+        assert_eq!(answer["script"], "ran");
+        assert_eq!(*seen.lock().unwrap(), vec!["launched", "launch"]);
+        // Anything else an older owner refuses is not sent again.
+        seen.lock().unwrap().clear();
+        let refused = request(
+            tmp.path(),
+            &Operation::Launched {
+                by: crate::launches::LaunchedBy::surface(crate::launches::Surface::Cli),
+                inner: Box::new(Operation::Launched {
+                    by: crate::launches::LaunchedBy::surface(crate::launches::Surface::Cli),
+                    inner: Box::new(Operation::Snapshot),
+                }),
+            },
+        )
+        .await;
+        assert_eq!(refused.unwrap_err(), CONTROL_OWNER_OLDER);
+        assert_eq!(*seen.lock().unwrap(), vec!["launched", "launched"]);
+        task.abort();
     }
     #[tokio::test]
     async fn the_owner_names_its_version_and_an_unknown_operation_reads_as_a_skew() {
@@ -848,6 +1153,638 @@ mod tests {
         assert!(result.unwrap_err().contains("closed its proved connection"));
         assert!(!received_mutation.load(Ordering::SeqCst));
         task.abort();
+    }
+    #[tokio::test]
+    async fn a_ceiling_answer_naming_the_window_is_refused_through_the_control_listener() {
+        // C-Q1 (C-4): the window answers in the owner's own process, never through this
+        // listener. A request that names the window, crafted by anything holding the control
+        // token (an agent running the CLI), is refused before it runs, keep and double alike.
+        let (tmp, owner, _) = fixture().await;
+        let snapshot = owner.runtime.store.snapshot().unwrap();
+        // Asked now: the owner prunes a daily question after the next UTC day.
+        let now = crate::monitor::now();
+        crate::spend::set_ceiling(
+            tmp.path(),
+            &snapshot,
+            switchboard_core::ChainScope::Machine,
+            Some(5.0),
+            crate::spend::Surface::Window,
+            now,
+        )
+        .unwrap();
+        let id = crate::spend::open_question(
+            tmp.path(),
+            &snapshot,
+            &switchboard_core::ChainScope::Machine,
+            500,
+            5.0,
+            now,
+        )
+        .unwrap()
+        .unwrap();
+        for answer in [crate::spend::Answer::Double, crate::spend::Answer::Keep] {
+            let refused = request(
+                tmp.path(),
+                &Operation::AnswerCeiling {
+                    id: id.clone(),
+                    answer,
+                    by: crate::spend::Surface::Window,
+                },
+            )
+            .await
+            .unwrap_err();
+            assert_eq!(refused, crate::spend::WINDOW_ONLY);
+        }
+        let file = crate::spend::read(tmp.path()).unwrap();
+        assert_eq!(file.ceilings[0].cents, 500, "nothing doubled");
+        assert!(file.questions[0].answer.is_none(), "still open");
+        // The CLI's own surface keeps it.
+        request(
+            tmp.path(),
+            &Operation::AnswerCeiling {
+                id,
+                answer: crate::spend::Answer::Keep,
+                by: crate::spend::Surface::Cli,
+            },
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    }
+    #[tokio::test]
+    async fn a_ceiling_is_raised_or_cleared_only_by_the_window_never_through_the_listener() {
+        // C-Q1 (C-4 fix cycle 1): anything holding the control token (an agent running the CLI
+        // or MCP) may set a first ceiling or lower one, never raise or clear one; naming the
+        // window through this listener is refused like a ceiling answer.
+        use crate::spend::Surface;
+        use switchboard_core::ChainScope;
+        let (tmp, _owner, _) = fixture().await;
+        let set = |usd: Option<f64>, by: Surface| Operation::SetCeiling {
+            scope: ChainScope::Machine,
+            usd,
+            by,
+        };
+        // No ceiling yet: the CLI sets the first one.
+        request(tmp.path(), &set(Some(5.0), Surface::Cli))
+            .await
+            .unwrap()
+            .unwrap();
+        let before = std::fs::read(tmp.path().join(crate::spend::FILE)).unwrap();
+        for by in [Surface::Cli, Surface::Mcp, Surface::Window] {
+            for usd in [Some(10.0), None] {
+                let refused = request(tmp.path(), &set(usd, by)).await.unwrap_err();
+                assert_eq!(
+                    refused,
+                    if by == Surface::Window {
+                        crate::spend::WINDOW_ONLY
+                    } else {
+                        crate::spend::RAISE_IN_WINDOW
+                    },
+                    "{by:?} {usd:?}"
+                );
+                assert_eq!(
+                    std::fs::read(tmp.path().join(crate::spend::FILE)).unwrap(),
+                    before,
+                    "spend.json unchanged"
+                );
+            }
+        }
+        // Lowering (and the same value) is accepted from the CLI and MCP.
+        request(tmp.path(), &set(Some(3.0), Surface::Mcp))
+            .await
+            .unwrap()
+            .unwrap();
+        request(tmp.path(), &set(Some(3.0), Surface::Cli))
+            .await
+            .unwrap()
+            .unwrap();
+        let file = crate::spend::read(tmp.path()).unwrap();
+        assert_eq!(file.ceilings[0].cents, 300);
+        // The offline path refuses the window the same way, before it opens the store.
+        let other = tempfile::tempdir().unwrap();
+        assert_eq!(
+            crate::execute_offline(other.path().to_owned(), set(Some(9.0), Surface::Window))
+                .await
+                .unwrap_err(),
+            crate::spend::WINDOW_ONLY
+        );
+    }
+    #[tokio::test]
+    async fn a_group_holding_a_ceiling_is_deleted_only_in_the_window_and_takes_it_along() {
+        // Risk 2 (C fix cycle 2, C-Q7): deleting a group drops its ceiling, a loosening an agent
+        // may not make (C-Q1). Through the listener and offline it is refused, the ceiling kept;
+        // the window deletes it, and a group saved again under the same id inherits nothing.
+        use crate::spend::Surface;
+        use switchboard_core::ChainScope;
+        let (tmp, owner, _) = fixture().await;
+        let store = &owner.runtime.store;
+        let folder = tmp.path().join("alpha");
+        std::fs::create_dir_all(&folder).unwrap();
+        let alpha = store
+            .save_project(None, "alpha", std::slice::from_ref(&folder), &[])
+            .unwrap();
+        store
+            .set_agent_key_for("openrouter", Some(&alpha.pool), "sk-or-v1-fixture", None)
+            .unwrap();
+        let scope = ChainScope::Project {
+            pool: alpha.pool.clone(),
+        };
+        let now = crate::monitor::now();
+        crate::spend::set_ceiling(
+            tmp.path(),
+            &store.snapshot().unwrap(),
+            scope.clone(),
+            Some(5.0),
+            Surface::Window,
+            now,
+        )
+        .unwrap();
+        let remove = |by: Surface| Operation::RemoveProject {
+            pool: alpha.pool.clone(),
+            by,
+        };
+        for by in [Surface::Cli, Surface::Mcp, Surface::Window] {
+            let refused = request(tmp.path(), &remove(by)).await.unwrap_err();
+            assert_eq!(
+                refused,
+                if by == Surface::Window {
+                    crate::spend::WINDOW_ONLY
+                } else {
+                    crate::spend::GROUP_HOLDS_CEILING
+                },
+                "{by:?}"
+            );
+        }
+        // Offline the same: no owner answers in this other data folder, the refusal comes from
+        // spend.json itself, before the store's group is touched.
+        let offline = tempfile::tempdir().unwrap();
+        crate::spend::set_ceiling(
+            offline.path(),
+            &store.snapshot().unwrap(),
+            scope.clone(),
+            Some(5.0),
+            Surface::Window,
+            now,
+        )
+        .unwrap();
+        assert_eq!(
+            crate::execute_offline(offline.path().to_owned(), remove(Surface::Cli))
+                .await
+                .unwrap_err(),
+            crate::spend::GROUP_HOLDS_CEILING
+        );
+        assert_eq!(
+            crate::execute_offline(offline.path().to_owned(), remove(Surface::Window))
+                .await
+                .unwrap_err(),
+            crate::spend::WINDOW_ONLY
+        );
+        assert!(store
+            .snapshot()
+            .unwrap()
+            .projects
+            .iter()
+            .any(|p| p.pool == alpha.pool));
+        assert_eq!(crate::spend::read(tmp.path()).unwrap().ceilings.len(), 1);
+        // The window deletes it in its own process; the ceiling goes with it.
+        owner
+            .runtime
+            .execute(remove(Surface::Window))
+            .await
+            .unwrap();
+        assert!(crate::spend::read(tmp.path()).unwrap().ceilings.is_empty());
+        let again = store
+            .save_project(None, "alpha", std::slice::from_ref(&folder), &[])
+            .unwrap();
+        assert_eq!(again.pool, alpha.pool, "the same id comes back");
+        let view = crate::spend::view(tmp.path(), &store.snapshot().unwrap(), now).unwrap();
+        assert!(view["ceilings"].as_array().unwrap().is_empty());
+        // A group without a ceiling is deleted from the CLI as before.
+        request(tmp.path(), &remove(Surface::Cli))
+            .await
+            .unwrap()
+            .unwrap();
+    }
+    #[tokio::test]
+    async fn a_capped_groups_own_key_is_removed_or_replaced_only_in_the_window() {
+        // Break 3 (C-Q9): removing or replacing a capped group's own key moves its paid steps off
+        // the key its ceiling counts, a loosening only the window makes (C-Q1).
+        use crate::spend::Surface;
+        use switchboard_core::ChainScope;
+        let (tmp, owner, _) = fixture().await;
+        let store = &owner.runtime.store;
+        let folder = tmp.path().join("alpha");
+        std::fs::create_dir_all(&folder).unwrap();
+        let alpha = store
+            .save_project(None, "alpha", std::slice::from_ref(&folder), &[])
+            .unwrap();
+        store
+            .set_agent_key_for("openrouter", Some(&alpha.pool), "sk-or-v1-fixture", None)
+            .unwrap();
+        let scope = ChainScope::Project {
+            pool: alpha.pool.clone(),
+        };
+        let now = crate::monitor::now();
+        crate::spend::set_ceiling(
+            tmp.path(),
+            &store.snapshot().unwrap(),
+            scope.clone(),
+            Some(5.0),
+            Surface::Window,
+            now,
+        )
+        .unwrap();
+        let pool = Some(alpha.pool.clone());
+        let remove = |by: Surface| Operation::AgentKeyRemove {
+            service: "openrouter".into(),
+            pool: pool.clone(),
+            by,
+        };
+        let replace = |by: Surface| Operation::AgentKeySet {
+            service: "openrouter".into(),
+            key: "sk-or-v1-fixture-two".into(),
+            model: None,
+            pool: pool.clone(),
+            by,
+        };
+        for by in [Surface::Cli, Surface::Mcp, Surface::Window] {
+            let expected = if by == Surface::Window {
+                crate::spend::WINDOW_ONLY
+            } else {
+                crate::spend::KEY_HOLDS_CEILING
+            };
+            let refused = request(tmp.path(), &remove(by)).await.unwrap_err();
+            assert_eq!(refused, expected, "remove {by:?}");
+            let refused = request(tmp.path(), &replace(by)).await.unwrap_err();
+            assert_eq!(refused, expected, "replace {by:?}");
+        }
+        let kept = store
+            .agent_key_for("openrouter", Some(&alpha.pool))
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            store.agent_key_secret(&kept).unwrap(),
+            "sk-or-v1-fixture",
+            "the key is kept"
+        );
+        // Offline the same: the refusal comes from spend.json before the key is touched. The
+        // offline store holds the same key (fix cycle 3: a key that is not saved removes nothing
+        // and is not refused).
+        let offline = tempfile::tempdir().unwrap();
+        let offline_store = Arc::new(
+            Store::open(offline.path().to_owned(), Arc::new(MemoryVault::default())).unwrap(),
+        );
+        let offline_alpha = offline_store
+            .save_project(None, "alpha", std::slice::from_ref(&folder), &[])
+            .unwrap();
+        offline_store
+            .set_agent_key_for(
+                "openrouter",
+                Some(&offline_alpha.pool),
+                "sk-or-v1-fixture",
+                None,
+            )
+            .unwrap();
+        assert_eq!(offline_alpha.pool, alpha.pool);
+        crate::spend::set_ceiling(
+            offline.path(),
+            &offline_store.snapshot().unwrap(),
+            scope.clone(),
+            Some(5.0),
+            Surface::Window,
+            now,
+        )
+        .unwrap();
+        assert_eq!(
+            crate::execute(
+                offline_store.clone(),
+                offline.path(),
+                None,
+                remove(Surface::Cli)
+            )
+            .await
+            .unwrap_err(),
+            crate::spend::KEY_HOLDS_CEILING
+        );
+        assert!(offline_store
+            .agent_key_for("openrouter", Some(&alpha.pool))
+            .unwrap()
+            .is_some());
+        assert_eq!(
+            crate::execute_offline(offline.path().to_owned(), replace(Surface::Window))
+                .await
+                .unwrap_err(),
+            crate::spend::WINDOW_ONLY
+        );
+        // The window replaces and removes it in its own process.
+        owner
+            .runtime
+            .execute(replace(Surface::Window))
+            .await
+            .unwrap();
+        owner
+            .runtime
+            .execute(remove(Surface::Window))
+            .await
+            .unwrap();
+        assert!(store
+            .agent_key_for("openrouter", Some(&alpha.pool))
+            .unwrap()
+            .is_none());
+        // A group with no ceiling: its first key is saved and removed from the CLI as before.
+        crate::spend::set_ceiling(
+            tmp.path(),
+            &store.snapshot().unwrap(),
+            scope,
+            None,
+            Surface::Window,
+            now,
+        )
+        .unwrap();
+        request(tmp.path(), &replace(Surface::Cli))
+            .await
+            .unwrap()
+            .unwrap();
+        request(tmp.path(), &remove(Surface::Cli))
+            .await
+            .unwrap()
+            .unwrap();
+    }
+    #[tokio::test]
+    async fn a_machine_key_under_a_machine_ceiling_is_removed_or_replaced_only_in_the_window() {
+        // Fix cycle 2, break 1 (C-Q9): the machine ceiling adds up every saved key's daily spend,
+        // and a task ceiling counts from its baseline key: removing or replacing such a key from
+        // the CLI or MCP would loosen the ceiling or misread the task.
+        use crate::spend::Surface;
+        use switchboard_core::ChainScope;
+        let (tmp, owner, _) = fixture().await;
+        let store = &owner.runtime.store;
+        store
+            .set_agent_key_for("openrouter", None, "sk-or-v1-fixture", None)
+            .unwrap();
+        let now = crate::monitor::now();
+        let ceiling = |root: &std::path::Path, scope: ChainScope, usd: Option<f64>| {
+            crate::spend::set_ceiling(
+                root,
+                &store.snapshot().unwrap(),
+                scope,
+                usd,
+                Surface::Window,
+                now,
+            )
+            .unwrap();
+        };
+        ceiling(tmp.path(), ChainScope::Machine, Some(5.0));
+        let remove = |by: Surface| Operation::AgentKeyRemove {
+            service: "openrouter".into(),
+            pool: None,
+            by,
+        };
+        let replace = |by: Surface| Operation::AgentKeySet {
+            service: "openrouter".into(),
+            key: "sk-or-v1-fixture-two".into(),
+            model: None,
+            pool: None,
+            by,
+        };
+        for by in [Surface::Cli, Surface::Mcp] {
+            let refused = request(tmp.path(), &remove(by)).await.unwrap_err();
+            assert_eq!(
+                refused,
+                crate::spend::KEY_COUNTED_BY_CEILING,
+                "remove {by:?}"
+            );
+            let refused = request(tmp.path(), &replace(by)).await.unwrap_err();
+            assert_eq!(
+                refused,
+                crate::spend::KEY_COUNTED_BY_CEILING,
+                "replace {by:?}"
+            );
+        }
+        let kept = store.agent_key_for("openrouter", None).unwrap().unwrap();
+        assert_eq!(store.agent_key_secret(&kept).unwrap(), "sk-or-v1-fixture");
+        // Offline the same, before the key is touched; the offline store holds a machine key.
+        let offline = tempfile::tempdir().unwrap();
+        let offline_store = Arc::new(
+            Store::open(offline.path().to_owned(), Arc::new(MemoryVault::default())).unwrap(),
+        );
+        offline_store
+            .set_agent_key_for("openrouter", None, "sk-or-v1-fixture", None)
+            .unwrap();
+        ceiling(offline.path(), ChainScope::Machine, Some(5.0));
+        for by in [Surface::Cli, Surface::Mcp] {
+            assert_eq!(
+                crate::execute(offline_store.clone(), offline.path(), None, remove(by))
+                    .await
+                    .unwrap_err(),
+                crate::spend::KEY_COUNTED_BY_CEILING
+            );
+        }
+        assert!(offline_store
+            .agent_key_for("openrouter", None)
+            .unwrap()
+            .is_some());
+        // No machine ceiling, but a task ceiling counting from the machine key: the same.
+        ceiling(tmp.path(), ChainScope::Machine, None);
+        let task = ChainScope::Workflow {
+            id: "wf_0123456789abcdef".into(),
+        };
+        ceiling(tmp.path(), task, Some(2.0));
+        crate::spend::record_baseline(
+            tmp.path(),
+            &store.snapshot().unwrap(),
+            "wf_0123456789abcdef",
+            &crate::spend::KeySlot::Machine,
+            Some(1.0),
+            now,
+        )
+        .unwrap();
+        for by in [Surface::Cli, Surface::Mcp] {
+            let refused = request(tmp.path(), &replace(by)).await.unwrap_err();
+            assert_eq!(refused, crate::spend::KEY_COUNTED_BY_CEILING, "task {by:?}");
+        }
+        // The window replaces and removes it in its own process.
+        owner
+            .runtime
+            .execute(replace(Surface::Window))
+            .await
+            .unwrap();
+        owner
+            .runtime
+            .execute(remove(Surface::Window))
+            .await
+            .unwrap();
+        assert!(store.agent_key_for("openrouter", None).unwrap().is_none());
+        // With no ceiling counting it, the machine key is saved and removed from the CLI.
+        request(tmp.path(), &replace(Surface::Cli))
+            .await
+            .unwrap()
+            .unwrap();
+        crate::spend::set_ceiling(
+            tmp.path(),
+            &store.snapshot().unwrap(),
+            ChainScope::Workflow {
+                id: "wf_0123456789abcdef".into(),
+            },
+            None,
+            Surface::Window,
+            now,
+        )
+        .unwrap();
+        request(tmp.path(), &replace(Surface::Cli))
+            .await
+            .unwrap()
+            .unwrap();
+        request(tmp.path(), &remove(Surface::Cli))
+            .await
+            .unwrap()
+            .unwrap();
+    }
+    #[tokio::test]
+    async fn a_group_whose_own_key_a_ceiling_counts_is_deleted_only_in_the_window() {
+        // Fix cycle 3, break 1 (C-Q9): deleting a group removes its own key, so a machine ceiling
+        // (every saved key's spend) or a task ceiling whose baseline is that key would lose the
+        // count. From the CLI or MCP it is refused, through the listener and offline.
+        use crate::spend::Surface;
+        use switchboard_core::ChainScope;
+        let (tmp, owner, _) = fixture().await;
+        let store = &owner.runtime.store;
+        let folder = tmp.path().join("alpha");
+        std::fs::create_dir_all(&folder).unwrap();
+        let alpha = store
+            .save_project(None, "alpha", std::slice::from_ref(&folder), &[])
+            .unwrap();
+        store
+            .set_agent_key_for("openrouter", Some(&alpha.pool), "sk-or-v1-fixture", None)
+            .unwrap();
+        let now = crate::monitor::now();
+        let ceiling = |root: &std::path::Path,
+                       snapshot: &switchboard_core::Snapshot,
+                       scope: ChainScope,
+                       usd: Option<f64>| {
+            crate::spend::set_ceiling(root, snapshot, scope, usd, Surface::Window, now).unwrap();
+        };
+        let remove = |by: Surface| Operation::RemoveProject {
+            pool: alpha.pool.clone(),
+            by,
+        };
+        let kept = |store: &Store| {
+            let s = store.snapshot().unwrap();
+            assert!(
+                s.projects.iter().any(|p| p.pool == alpha.pool),
+                "group kept"
+            );
+            assert!(
+                store
+                    .agent_key_for("openrouter", Some(&alpha.pool))
+                    .unwrap()
+                    .is_some(),
+                "key kept"
+            );
+        };
+        // An offline store of its own, with the same group and key, in another data folder.
+        let offline = tempfile::tempdir().unwrap();
+        let offline_store = Arc::new(
+            Store::open(offline.path().to_owned(), Arc::new(MemoryVault::default())).unwrap(),
+        );
+        let offline_alpha = offline_store
+            .save_project(None, "alpha", std::slice::from_ref(&folder), &[])
+            .unwrap();
+        assert_eq!(offline_alpha.pool, alpha.pool);
+        offline_store
+            .set_agent_key_for("openrouter", Some(&alpha.pool), "sk-or-v1-fixture", None)
+            .unwrap();
+        let task = ChainScope::Workflow {
+            id: "wf_0123456789abcdef".into(),
+        };
+        // (a) a machine ceiling, (b) a task ceiling counting from alpha's key.
+        for case in ["machine", "task"] {
+            for (root, s) in [
+                (tmp.path(), store.snapshot().unwrap()),
+                (offline.path(), offline_store.snapshot().unwrap()),
+            ] {
+                if case == "machine" {
+                    ceiling(root, &s, ChainScope::Machine, Some(5.0));
+                } else {
+                    ceiling(root, &s, ChainScope::Machine, None);
+                    ceiling(root, &s, task.clone(), Some(2.0));
+                    crate::spend::record_baseline(
+                        root,
+                        &s,
+                        "wf_0123456789abcdef",
+                        &crate::spend::KeySlot::Group(alpha.pool.clone()),
+                        Some(1.0),
+                        now,
+                    )
+                    .unwrap();
+                }
+            }
+            for by in [Surface::Cli, Surface::Mcp] {
+                let refused = request(tmp.path(), &remove(by)).await.unwrap_err();
+                assert_eq!(
+                    refused,
+                    crate::spend::KEY_COUNTED_BY_CEILING,
+                    "{case} {by:?}"
+                );
+                kept(store);
+                let refused =
+                    crate::execute(offline_store.clone(), offline.path(), None, remove(by))
+                        .await
+                        .unwrap_err();
+                assert_eq!(
+                    refused,
+                    crate::spend::KEY_COUNTED_BY_CEILING,
+                    "offline {case} {by:?}"
+                );
+                kept(&offline_store);
+            }
+        }
+        // The window deletes it in its own process.
+        owner
+            .runtime
+            .execute(remove(Surface::Window))
+            .await
+            .unwrap();
+        assert!(!store
+            .snapshot()
+            .unwrap()
+            .projects
+            .iter()
+            .any(|p| p.pool == alpha.pool));
+        assert!(store
+            .agent_key_for("openrouter", Some(&alpha.pool))
+            .unwrap()
+            .is_none());
+    }
+    #[tokio::test]
+    async fn removing_a_key_that_does_not_exist_is_not_refused_as_counted() {
+        // Fix cycle 3: with a machine ceiling set, removing a key nobody saved removes nothing
+        // and loosens nothing; it must not answer that a ceiling counts the key.
+        use crate::spend::Surface;
+        use switchboard_core::ChainScope;
+        let (tmp, owner, _) = fixture().await;
+        let store = &owner.runtime.store;
+        crate::spend::set_ceiling(
+            tmp.path(),
+            &store.snapshot().unwrap(),
+            ChainScope::Machine,
+            Some(5.0),
+            Surface::Window,
+            crate::monitor::now(),
+        )
+        .unwrap();
+        let answer = request(
+            tmp.path(),
+            &Operation::AgentKeyRemove {
+                service: "openrouter".into(),
+                pool: None,
+                by: Surface::Cli,
+            },
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert_eq!(answer["removed"], false);
     }
     #[cfg(unix)]
     #[tokio::test]

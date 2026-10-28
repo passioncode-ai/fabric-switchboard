@@ -45,7 +45,7 @@ Core implementer: crates/switchboard-core only. UI implementer: src/, index.html
 
 A separate loopback control server dispatches typed metadata/account operations, usage and native login/launch. Commands cannot query credentials. It authenticates before decoding a bounded body, denies browser Origins and wrong Host, and has no arbitrary URL/proxy primitive. CLI must not fall back to writing an already owned Store when a live control call is refused.
 
-Version skew (2026-10-08, found by fabric-dashboards FD-25): an update installs a newer bundle — CLI included — while the earlier owner keeps running from a temporary copy until it restarts, so the CLI can send an operation the owner cannot decode. Since 0.6.12 the identity answer (`GET /v1/hello`) carries the owner's version in the `x-switchboard-version` header (a header, because an earlier client refuses unknown fields in the `{proof}` body). A 400 then reads `CONTROL_OWNER_OLDER` (restart Switchboard to finish its update) when the owner is older or sends no version, `CONTROL_OWNER_NEWER` when the CLI is older, the plain refusal when both match; 429 reads `CONTROL_BUSY`. Every refusal of the listener is logged as `control_refused` with its status and a code (`unsafe_request`, `unauthorized`, `busy`, `too_large`, `body_timeout`, `unknown_operation`), never the request (`a_malformed_request_is_named_by_which_side_is_older`, `the_owner_names_its_version_and_an_unknown_operation_reads_as_a_skew`). A request the owner took 5 s or longer to answer is logged as `control_slow` with the operation's tag and the milliseconds, never its arguments (SB-174, `an_operation_kind_is_its_tag_and_never_its_arguments`), so a client's stall can be told apart from a wait on the way to the owner. A credential read of a second or more is logged by the next background pass as `vault_slow` with the slowest read's milliseconds; since 0.6.81 such a read no longer holds the account metadata, so `snapshot()` and every read built on it (recovery, hand-overs, agents) answer while it runs (SB-185, `a_slow_credential_read_does_not_hold_the_metadata`).
+Version skew (2026-10-08, found by fabric-dashboards FD-25): an update installs a newer bundle (CLI included) while the earlier owner keeps running from a temporary copy until it restarts, so the CLI can send an operation the owner cannot decode. Since 0.6.12 the identity answer (`GET /v1/hello`) carries the owner's version in the `x-switchboard-version` header (a header, because an earlier client refuses unknown fields in the `{proof}` body). A 400 then reads `CONTROL_OWNER_OLDER` (restart Switchboard to finish its update) when the owner is older or sends no version, `CONTROL_OWNER_NEWER` when the CLI is older, the plain refusal when both match; 429 reads `CONTROL_BUSY`. Every refusal of the listener is logged as `control_refused` with its status and a code (`unsafe_request`, `unauthorized`, `busy`, `too_large`, `body_timeout`, `unknown_operation`), never the request (`a_malformed_request_is_named_by_which_side_is_older`, `the_owner_names_its_version_and_an_unknown_operation_reads_as_a_skew`). A request the owner took 5 s or longer to answer is logged as `control_slow` with the operation's tag and the milliseconds, never its arguments (SB-174, `an_operation_kind_is_its_tag_and_never_its_arguments`; a launch from outside the window, which arrives wrapped as `launched`, is tagged by what it launches, `launch` or `continue`, SB-220), so a client's stall can be told apart from a wait on the way to the owner. Since 0.7.0 it also carries `lock_ms`, the milliseconds the request waited in all for the store's metadata lock, when it took that lock at all (H-2): the store tells its observer each take (`Store::observe_lock_waits`, zero when the lock was free), and the control handler adds the takes of the request's own task, its blocking sections included, not those of tasks it spawns (`a_slow_request_names_how_long_it_waited_for_the_stores_lock`, `an_operation_counts_the_time_it_waited_for_the_stores_lock`, `the_lock_observer_is_told_each_take_and_how_long_it_waited`). A `control_slow` with a large `lock_ms` is a wait behind the store's metadata lock; one with a small `lock_ms` is time spent elsewhere (the owner transaction, the store's credential lock, which a credential writer holds across its Keychain calls and `lock_ms` does not count, the Keychain, the machine). A credential read of a second or more is logged by the next background pass as `vault_slow` with the slowest read's milliseconds; since 0.6.81 such a read no longer holds the account metadata, so `snapshot()` and every read built on it (recovery, hand-overs, agents) answer while it runs (SB-185, `a_slow_credential_read_does_not_hold_the_metadata`).
 
 Windows protection is an OS implementation behind the same Vault/Store contract; build success does not certify provider login or screen-reader behavior. macOS signing uses an existing Developer ID private key locally without export. Notary acceptance remains a separate receipt.
 
@@ -66,7 +66,7 @@ Behaviour and decisions: [PLAN-0.4](PLAN-0.4.md). Code: `crates/switchboard-core
 - `Session` is `{mode:"managed",provider,pool}`, `{mode:"isolated",provider,account_id}` or `{mode:"native",provider?}`. Launches set `SWITCHBOARD_SESSION=managed:<provider>:<pool>` or `isolated:<provider>:<account id>`; detection falls back to an `ANTHROPIC_BASE_URL` naming the running proxy, then `CODEX_HOME` under `<app data>/runtimes/codex-<pool>`, then native (`CLAUDECODE=1` marks Claude).
 - Launch attaches the tools when a CLI is found (this CLI, the one bundled beside the desktop executable, PATH, `~/.local/bin`): Claude gets `--mcp-config=<home>/switchboard-mcp.json` (one argument: the flag is variadic, SB-94), Codex gets `[mcp_servers.switchboard]` in its private `config.toml`; isolated sessions get `mcp --read-only`. The launch result carries `agent_tools: bool`. No CLI found is not a launch failure. Every launched session, managed or isolated, also gets the Fabric project board when the operator registered it for that provider in their own user scope — Claude Code's `~/.claude.json` `mcpServers.fabric`, Codex's `$CODEX_HOME`/`~/.codex` `config.toml` `[mcp_servers.fabric]` — beside Switchboard's server in the same file or section (SB-20). Only a stdio entry with an absolute command is carried, and only its `command` and `args`, never its `env`; none registered, a URL server or an unreadable file means no board, never a failed launch (`the_operators_fabric_board_reaches_a_launched_session_without_its_env`, `no_registered_board_or_a_doubtful_entry_means_no_board_never_a_failed_launch`).
 - **The operator's setup in a launched home (SB-137, SB-130).** A Claude Code home (`CLAUDE_CONFIG_DIR`, managed or isolated) links `CLAUDE.md`, `skills`, `commands`, `agents`, `output-styles`, `plugins` and `hooks` from the operator's own folder (`CLAUDE_CONFIG_DIR`, else `~/.claude`; `carry::link_into`: a link it made before is renewed, a real file in the home is never replaced, links are made on macOS and Linux only). Its `settings.json` is the operator's `settings.json` without `env`, `apiKeyHelper`, `awsAuthRefresh`, `awsCredentialExport`, `otelHeadersHelper`, `forceLoginMethod`, `forceLoginOrgUUID` or any top-level key shaped like a secret (`key`, `token`, `secret`, `password`, `auth`, `credential`, `cookie`), then, isolated, the account's own `env`; managed writes it only when something is carried. Its `.claude.json` gets `hasCompletedOnboarding: true`, and for a continuation `projects[<working folder>].hasTrustDialogAccepted: true` (that folder only: the previous agent of the workflow worked there; operator rule of 2026-10-17, decided 2026-10-19); an ordinary launch keeps the trust question, and a `.claude.json` that is not a JSON object is left untouched. A Codex home links `AGENTS.md` only (its `config.toml` may hold secrets). Pi's own `PI_CODING_AGENT_DIR` links `AGENTS.md`, `skills`, `extensions`, `prompts`, `themes` from `PI_CODING_AGENT_DIR` or `~/.pi/agent` and gets their `settings.json` without secret-shaped keys; `auth.json` is never carried, so the launch's key still wins. Tests: `carry::tests::*`, `a_launched_home_carries_the_operators_setup_and_a_continuation_trusts_its_folder`.
-- **Project keys for agents (SB-144).** `AgentKey` carries an optional `pool`; at most one key per service and pool, the pool a project's (`KEY_POOL_INVALID` otherwise; `default` is not a project pool). `Store::agent_key_in(service, folder)` returns the key of the project whose folder contains `folder`, else the machine's (`pool: null`). Operations `AgentKeySet|AgentKeyStatus|AgentKeyModel|AgentKeyRemove` take `pool`; `AgentKeys { service }` lists `{keys:[{pool, project, saved_at, model}], projects:[{pool, name, own}]}` (never a value); `AgentKeyValue { service, folder }` resolves by folder. Every launch script's key command is `switchboard --data-dir <root> agents key --service openrouter --dir <launch folder>` (it runs before the script's `cd`), and Hermes, OpenCode and the OpenRouter launches take the default model from the same key. Deleting a project deletes its keys (metadata, then vault items); a backup restores a project key only when its project exists. CLI `agents openrouter set|status|model|remove --pool`, `agents openrouter list`, `agents key --service openrouter --dir`; MCP `switchboard_openrouter_status` (`pool`, plus `keys` and `projects`), `switchboard_openrouter_model` (`pool`); Tauri `openrouter_keys`, `openrouter_save|model|remove|status` with `pool`; the window's Tokens page (SCN-045, SCN-065). Snapshots with a pooled key are unreadable to 0.6.47 and older (`deny_unknown_fields`). Test: `an_agent_starting_in_a_project_folder_gets_that_projects_key_and_others_the_machines`.
+- **Project keys for agents (SB-144).** `AgentKey` carries an optional `pool`; at most one key per service and pool, the pool a project's (`KEY_POOL_INVALID` otherwise; `default` is not a project pool). `Store::agent_key_in(service, folder)` returns the key of the project whose folder contains `folder` (the one `Snapshot::project_for` names when several hold it), else the machine's (`pool: null`); the rule is `agent_keys::key_in`, which the runtime's spending gate and chains view call too. Operations `AgentKeySet|AgentKeyStatus|AgentKeyModel|AgentKeyRemove` take `pool`; `AgentKeys { service }` lists `{keys:[{pool, project, saved_at, model}], projects:[{pool, name, own}]}` (never a value); `AgentKeyValue { service, folder, slot }` answers exactly the key `slot` names (`"machine"` or `{"group": "<pool>"}`, SB-213; a slot whose key is gone answers `NO_AGENT_KEY`, never another key), else resolves by folder. Every launch script's key command is `switchboard --data-dir <root> agents key --service openrouter --pool <group>` or `... --machine`: the slot its start's spend gate read, resolved inside the owner transaction (`launch::key_command`; inside a gated start a slot other than the pin's refuses with `STOP_FOLDER_MOVED`), so a folder that joins another group before the script runs never makes it spend a key no gate read (`an_openrouter_script_fetches_the_slot_its_gate_read_after_its_folder_moves`). Scripts written before 0.7.0 name `--dir <launch folder>`, which still resolves by folder. Hermes, OpenCode and the OpenRouter launches take the default model from the same key. Deleting a project deletes its keys (metadata, then vault items); a backup restores a project key only when its project exists. CLI `agents openrouter set|status|model|remove --pool`, `agents openrouter list`, `agents key --service openrouter --pool|--machine|--dir`; MCP `switchboard_openrouter_status` (`pool`, plus `keys` and `projects`), `switchboard_openrouter_model` (`pool`); Tauri `openrouter_keys`, `openrouter_save|model|remove|status` with `pool`; the window's Tokens page (SCN-045, SCN-065). Snapshots with a pooled key are unreadable to 0.6.47 and older (`deny_unknown_fields`). Test: `an_agent_starting_in_a_project_folder_gets_that_projects_key_and_others_the_machines`.
 - **Codex in project folders (SB-143).** Codex strips `model_provider`, `model_providers` and `openai_base_url` from a project's `.codex/config.toml`, so one user-level provider does it: with `<data>/codex-route` = `on`, the owner writes between marker lines into `<CODEX_HOME or ~/.codex>/config.toml` a top-level `model_provider = "switchboard-auto"` (first in the file) and a `[model_providers.switchboard-auto]` table (last): `base_url = http://<proxy>/codex/_auto/v1`, `wire_api = "responses"`, `requires_openai_auth = true` (the person's own ChatGPT or API-key sign-in stays Codex's), `supports_websockets = false`, `http_headers = {X-Switchboard-Capability = <auto capability>}`; the result is parsed before it is written (0600), and the person's text outside the markers is never changed. A `model_provider` the person chose is refused (`CODEX_ROUTE_FOREIGN`), an unparsable file too (`CODEX_ROUTE_UNREADABLE`). Written at owner start, removed at owner stop, so a Codex started while Switchboard is not running reaches OpenAI directly. The proxy's `/codex/_auto/v1/responses` requires that capability (a pool's own does not count), reads the last `<cwd>` of the request's environment context, and for a folder of a project with an enabled Codex account (`codex_route::folders`, deepest folder wins) relays it as that pool's managed request with the session token (its account, fail-over and journal; the person's Authorization and `chatgpt-account-id` are dropped); any other request goes on unchanged to `<chatgpt>/backend-api/codex/responses` (when it carries `chatgpt-account-id`) or `<openai>/v1/responses`, without the capability header, recorded nowhere. Threat accepted: the capability sits in the person's own Codex config beside their `auth.json`, so a local process of that user can name another project's folder; it can already read that sign-in. Operation `CodexRoute { enabled? }` → `{on, applied, config, conflict, projects}`; CLI `project codex [on|off]`, MCP `switchboard_codex_route`, Tauri `codex_route`, Projects page *Codex in project folders* (SCN-066). Log `codex_route {outcome|switch}`. Tests: proxy `codex_through_the_user_provider_uses_the_projects_account_only_in_its_folders`, `a_request_names_its_newest_folder_and_the_deepest_project_folder_wins`; `codex_route::tests::*`.
 - **Groups (SB-146).** A `Project` is shown as a group: it holds repositories (folders) with accounts of its own. The same folder may be in several groups (`save_project` and `validate_projects` refuse only one group's folder strictly inside another group's: `FOLDER_NESTED`). `Snapshot::projects_for(path)` lists every group holding a path in creation order; `Snapshot::project_for(path)` is the group a session there works in: the first with an enabled account, else the first. Bindings (`bindings::desired`) and the Codex route (`codex_route::folders`) write a shared folder once, for the first group with an account of that provider; `launch::project_allows` accepts any of the folder's groups. `MoveRoot { folder, pool, from?, also? }`: `also` adds the repository with its worktrees and clones to one more group and leaves none; `from` names the group it leaves when it is in several (`MOVE_ROOT_NOT_IN_GROUP` when that group does not hold it); a repository the target already holds just leaves `from`. `RepositoryMap` rows carry `groups[{pool, name}]`; `project_roots` roots carry `remote`, so the window lists a group's unique projects (one per `origin`, never a worktree, clone or subfolder) when its name is hovered or focused.
 - **Project names (SB-155).** `roots::Root::name` is the name a project shows: the main checkout's folder name (a worktree root is named by the folder of its main checkout, the parent of the common `.git`; a bare repository by its folder without `.git`), else the folder's own name; never the remote's last segment (a renamed remote such as `project-observatory-dashboard` for the folder `project-observatory-open-source` keeps the folder's name). Statistics (`ProjectIndex`) and the window's group cards use it; two projects with one name read as `name (owner)`, the owner being the second-to-last segment of the project key. A subfolder of a listed folder belongs to that folder's project in the window too. A bindings sync that changed nothing writes no `claude_binding` event: a folder bound, removed or skipped is a change, and so is the set of folders holding the person's own `ANTHROPIC_*` values, compared with the previous sync's set rather than counted each time, and so is the set of folders skipped (PRD-13; `a_sync_that_changed_nothing_is_not_logged_again`).
@@ -75,7 +75,7 @@ Behaviour and decisions: [PLAN-0.4](PLAN-0.4.md). Code: `crates/switchboard-core
 - **An account used on another machine (SB-175, SB-168 D-2).** `Snapshot.elsewhere`: account id → the Unix time it was marked, written as schema version 8 while one exists (an older reader says "Unsupported account metadata version"). `Store::mark_elsewhere(id, on, now)` disables the account and clears every route to it when marking, enables it when clearing; enabling the account (`update_fields`) clears the mark; removing it removes the mark. Every rule that reads `enabled` (selection, rotation, renewal of inactive accounts, SB-98 failover, project bindings) therefore leaves it alone; `select` refuses it with `ELSEWHERE` ("This account is in use on another machine. Use one of this machine's accounts, or clear the mark if it moved here."). `Operation::Update` takes `elsewhere: bool` (CLI `accounts update --elsewhere`, MCP `switchboard_account_update.elsewhere`, Tauri `mark_elsewhere`). Encrypted backups carry the marks by old account id. Test `an_account_used_on_another_machine_is_never_chosen_here`.
 - **Settings that move to another machine (SB-176, SB-168 D-4).** `Operation::SettingsExport` (read fast path) answers a `switchboard-settings/1` bundle (`settings_bundle::export`): `{format, exported_at, groups[{name, pool, organization (name), repositories (DEC-0089 identities of the group's roots, `roots::tree`), plain_folders (roots without an origin), sources}], organizations[{name, domains}], agents {default, disabled}, policies (without `last_switched_at`)}`; no account id, credential, rule, chain or capability. `Operation::SettingsImport {bundle, under, apply}` parses it (at most 1 MiB, `format` checked, unknown fields refused), finds checkouts by identity under `under` (`roots::disk_map`, default `roots::default_under`) and plain folders at their path, and answers `{preview: {groups[{name, pool, exists, organization, folders, missing}], organizations, agents, policies}, applied}`; with `apply` it adds the missing organizations by name, makes missing groups by name with no accounts and their organization, adds found folders to an existing group of the same pool keeping its accounts and organization, sets the agents' settings and the policies (`claude_cli` ones disabled), and names each refused part in `result.refused`. CLI `settings export|import` only; no MCP tool (the parity table says why). Test `settings_bundle::tests::a_bundle_round_trips_and_names_no_account`.
 - **A group's organization (SB-109).** `Project.organization: id | null` (omitted when none; null is personal) in `accounts.json`, written as schema version 6 while a group has one (a 0.6.64 or older reader says "Unsupported account metadata version" instead of "corrupt"); in backups beside the projects as `project_organizations` (pool → id), with `organizations` and `memberships` (old account id → choice) beside them, so a 0.6.29 or older reader still opens the backup; before 0.6.65 a backup carried none of the three. Restore puts back organizations whose id, name and domains are free (`Restored.organizations`); a backup organization whose name this install already has maps onto that one, so its groups and the person's word follow it; the person's word returns only where this install has none. `Snapshot::context_admits(pool, account)`: true while no organization exists or no group reserves `pool` (`default`); else the account's attribution equals the group's organization (personal included). Enforced at placement (`Store::save_project_in`: an account moving into a group, or every account of a group whose organization changes, must fit, else `SEAT_CHOSEN`), at binding (`Store::set_project_organization` refuses while the group holds an account of another context: `SEATS_ELSEWHERE`), at selection and on the proxy's route (`Store::select`, `Store::route`: `SEAT_OUTSIDE`, for an account whose attribution moved after it was placed), in rotation and failover (such an account is never a candidate) and at launch (`launch::project_allows`). A folder in groups of different contexts: personal groups first, then creation order, in `Snapshot::project_for`, the Claude folder bindings (`bindings::desired`) and the Codex folders (`codex_route::folders`), so the more private wins (RM-28 CX-26); two organizations are not ranked. A group whose seats all left its organization keeps its folders bound: the proxy refuses the seat (closed, 409 to the session, no account text) rather than the folder falling back to the ordinary login (open); launch refuses there too. Removing an organization makes its groups personal. Operations `SaveProject` and `ProjectEdit` take `organization` (an id, a name in any case, or `personal`; left out, the group keeps its own); Tauri `save_project {organization}`; CLI `project edit --organization`; MCP `switchboard_project_edit {organization}`; `project list`, `switchboard_projects` and the window's projects carry `organization` and `organization_name`. Statistics: `organizations[{organization, name}]` (an id, `personal`, or `unknown` for a removed account) by each account's current attribution, only while an organization exists. Window: *Organization* in the group dialog (only with organizations; another context's accounts disabled with why), the organization's badge on the group card, *By organization* above *By group*. Tests: storage `a_groups_organization_keeps_its_folders_on_its_own_seats`, rotation `a_seat_outside_its_groups_organization_is_never_guessed`, codex_route `folders` SB-109 case, `a_folder_in_groups_of_two_contexts_runs_in_the_personal_one`, backup `a_reinstall_gets_organizations_their_accounts_and_groups_back`, launch `a_project_account_starts_only_in_its_folders_and_its_folders_use_only_its_accounts`, statistics `requests_are_counted_by_whose_seat_they_ran_on_once_an_organization_exists`, MCP `a_project_is_listed_and_changed_by_delta_over_mcp`, ui-logic SB-109 case, WebKit demo (SCN-070).
-- **PassionCode.ai organizations (SB-159).** `vesta.rs`: `connect` binds `127.0.0.1:0`, opens `<base>/auth/app?client_id=switchboard&redirect_uri=http://127.0.0.1:<port>/callback&code_challenge=<S256>&code_challenge_method=S256&state=<random>&scope=me.organizations` in the system browser (`/usr/bin/open`, `rundll32 url.dll,FileProtocolHandler`, `xdg-open`; spawned and reaped, never waited on), accepts loopback connections only, ignores requests that are not `/callback` with this `state`, refuses an answer whose `iss` is missing or is not the base (RFC 9207), maps `error=access_denied` to `VESTA_DENIED`, waits at most 5 minutes (`VESTA_TIMEOUT`) or until `VestaCancel` (`VESTA_CANCELLED`), then exchanges the code (`POST /v1/app-tokens/token`, form, `client_id=switchboard`, the verifier) and reads `GET /v1/me/organizations` (`{organizations: [{orgId, name, domains, role, current}]}`) with the access token. The refresh token is the only thing kept: in the OS vault (`Store::put_secret`, a UUID item), rotated on every read and saved before the read uses the new access token; `<data>/vesta.json` (0600) holds the item, the base, `connected_at`, `read_at`, `checked_at`, `organizations` and `state` (`ok`, `sign_in_again` for a refused grant or token, `provider_sign_in` for 401 `idp-sign-in-required`, `unreachable`), never a token. `Store::apply_vesta` (names compared trimmed and lowercased, as `validate` does): a linked organization (`Organization.vesta_id`, the Vesta `orgId`) takes Vesta's name unless another organization here holds it; domains add up (one typed here stays with its accounts, Vesta's join it once each, one another organization holds is left out, at most 16), so a domain Vesta drops stays until the person edits it; an unlinked one of the same name or with a shared domain is linked, keeping its accounts and assignments; the rest are added, under Vesta's name or, when that is taken, its first 68 characters and the start of its id, refused rather than published if it still cannot fit; one linked here that Vesta no longer lists keeps its accounts and loses the link. A read whose vault read or merge fails is recorded as tried (`unreachable`), so the monitor neither rotates the token nor asks a locked keychain every pass. One read, connect or disconnect at a time in a process (`vesta::TURN`): a refresh token is single use and Vesta revokes the grant when a rotated one is presented again; a new token the vault would not take turns the state to `sign_in_again`. `accounts.json` is schema version 7 while an organization is linked; backups carry organizations without the link (made again by connecting). The owner's monitor reads again when a connection is `ok` or `unreachable` and was not tried for 6 hours (`vesta::due`), never once the drain began (`grants_allowed`, checked again with `due` after the turn is taken: `sync_if_due`, so reads spawned on consecutive passes never queue a second refresh), in a spawned task outside the pass and the owner transaction, and logs `vesta_read {outcome}`; `sign_in_again` and `provider_sign_in` wait for the person. Operations (all on the fast path, none under the owner mutation lock): `VestaStatus`, `VestaConnect` (logs `vesta_connect {outcome: connected, connected_unread, denied, timeout, cancelled, failed}`; one at a time, `VESTA_BUSY`), `VestaCancel`, `VestaSync`, `VestaDisconnect` (deletes the vault item, an absent one counting as deleted and any other failure, a locked keychain, keeping the connection rather than orphaning its token, then every link, then `vesta.json`; organizations stay as local ones and the schema drops back below 7). The control client waits 420 s for `VestaConnect` (the browser's 300 s, a read holding the turn, the exchange and the read; 30 s for the rest). `switchboard uninstall` deletes `vesta.json` and the token's vault item. `Organizations` carries `passioncode` (the status) and `passioncode: bool` per organization. Tauri `passioncode {action}`; CLI `org connect|read|passioncode|disconnect`; the window's PassionCode.ai panel on *Organizations* and a *PassionCode.ai* mark on a linked organization (SCN-071). Nothing is sent but the person's own token to the person's own server; no account data leaves the machine. Tests: storage `organizations_from_passioncode_are_linked_kept_current_and_released`, runtime `vesta::tests` (a synthetic Vesta on loopback with its reuse detection: PKCE checked by the server, a stray request ignored, rotation, four reads at once, `idp-sign-in-required`, `app-token-invalid`, a refused refresh, denied, refused code, cancelled, an answer without `iss`), ui-logic SB-159 case, WebKit demo.
+- **PassionCode.ai organizations (SB-159).** `vesta.rs`: `connect` binds `127.0.0.1:0`, opens `<base>/auth/app?client_id=switchboard&redirect_uri=http://127.0.0.1:<port>/callback&code_challenge=<S256>&code_challenge_method=S256&state=<random>&scope=me.organizations` in the system browser (`/usr/bin/open`, `rundll32 url.dll,FileProtocolHandler`, `xdg-open`; spawned and reaped, never waited on), accepts loopback connections only, ignores requests that are not `/callback` with this `state`, refuses an answer whose `iss` is missing or is not the base (RFC 9207), maps `error=access_denied` to `VESTA_DENIED`, waits at most 5 minutes (`VESTA_TIMEOUT`) or until `VestaCancel` (`VESTA_CANCELLED`), then exchanges the code (`POST /v1/app-tokens/token`, form, `client_id=switchboard`, the verifier) and reads `GET /v1/me/organizations` (`{organizations: [{orgId, name, domains, role, current}]}`) with the access token. The refresh token is the only thing kept: in the OS vault (`Store::put_secret`, a UUID item), rotated on every read and saved before the read uses the new access token; `<data>/vesta.json` (0600) holds the item, the base, `connected_at`, `read_at`, `checked_at`, `organizations` and `state` (`ok`, `sign_in_again` for a refused grant or token, `provider_sign_in` for 401 `idp-sign-in-required`, `unreachable`), never a token. `Store::apply_vesta` (names compared trimmed and lowercased, as `validate` does): a linked organization (`Organization.vesta_id`, the Vesta `orgId`) takes Vesta's name unless another organization here holds it; domains add up (one typed here stays with its accounts, Vesta's join it once each, one another organization holds is left out, at most 16), so a domain Vesta drops stays until the person edits it; an unlinked one of the same name or with a shared domain is linked, keeping its accounts and assignments; the rest are added, under Vesta's name or, when that is taken, its first 68 characters and the start of its id, refused rather than published if it still cannot fit; one linked here that a well-formed read no longer lists keeps its accounts and loses the link (SB-227: only from a list with at least one row whose ids are all readable; an empty list or an unreadable id releases nothing, and a skipped row still counts as listed), and `vesta.json` records it in `released` (`[{organization, at}]`: the local id and the time of the first read that no longer listed it, never a name; 0.7.0, SB-160 node B-7, SCN-079), logged as `organization_released {count}`; it leaves `released` when a read links it again or the person removes it, and the status answers `released` so the organization card says since when it is no longer the person's on PassionCode.ai. Nothing is deleted on leaving. A read whose vault read or merge fails is recorded as tried (`unreachable`), so the monitor neither rotates the token nor asks a locked keychain every pass. One read, connect or disconnect at a time in a process (`vesta::TURN`): a refresh token is single use and Vesta revokes the grant when a rotated one is presented again; a new token the vault would not take turns the state to `sign_in_again`. `accounts.json` is schema version 7 while an organization is linked; backups carry organizations without the link (made again by connecting). The owner's monitor reads again when a connection is `ok` or `unreachable` and was not tried for 6 hours (`vesta::due`), never once the drain began (`grants_allowed`, checked again with `due` after the turn is taken: `sync_if_due`, so reads spawned on consecutive passes never queue a second refresh), in a spawned task outside the pass and the owner transaction, and logs `vesta_read {outcome}`; `sign_in_again` and `provider_sign_in` wait for the person. Operations (all on the fast path, none under the owner mutation lock): `VestaStatus`, `VestaConnect` (logs `vesta_connect {outcome: connected, connected_unread, denied, timeout, cancelled, failed}`; one at a time, `VESTA_BUSY`), `VestaCancel`, `VestaSync`, `VestaDisconnect` (deletes the vault item, an absent one counting as deleted and any other failure, a locked keychain, keeping the connection rather than orphaning its token, then every link, then `vesta.json`; organizations stay as local ones and the schema drops back below 7). The control client waits 420 s for `VestaConnect` (the browser's 300 s, a read holding the turn, the exchange and the read; 30 s for the rest). `switchboard uninstall` deletes `vesta.json` and the token's vault item. `Organizations` carries `passioncode` (the status) and `passioncode: bool` per organization. Tauri `passioncode {action}`; CLI `org connect|read|passioncode|disconnect`; the window's PassionCode.ai panel on *Organizations* and a *PassionCode.ai* mark on a linked organization (SCN-071). Nothing is sent but the person's own token to the person's own server; no account data leaves the machine. Tests: storage `organizations_from_passioncode_are_linked_kept_current_and_released`, runtime `vesta::tests` (a synthetic Vesta on loopback with its reuse detection: PKCE checked by the server, a stray request ignored, rotation, four reads at once, `idp-sign-in-required`, `app-token-invalid`, a refused refresh, denied, refused code, cancelled, an answer without `iss`), `an_organization_left_on_passioncode_is_marked_with_its_date`, ui-logic SB-159 case, WebKit demo.
 - **Statistics (SB-145, SB-147).** The proxy counts each relayed request under `day\taccount\tpool\tclient\tfolder` (`switchboard_proxy::stats`: UTC day, account id, pool, client family from `user-agent` such as `claude-code`, `codex`, `opencode`, `hermes`, else `other`, and the group folder the request came from, empty when unknown; a 0.6.52 key without the folder still reads): `requests`, `ok`, `limited`, `failed`, and `input_tokens`, `output_tokens`, `cache_read_tokens`, `cache_write_tokens` as the provider reported them in its own response. The folder (SB-147) is the folder whose own capability the request presented, else the deepest group folder holding the folder the request names (`stats::folder_hint`: the newest Codex `<cwd>`, or Claude Code's `Working directory:` line in the body's first MiB; a byte scan, nothing of the body kept), else that named folder itself (SB-157: a session outside every group, or an agent Switchboard launched on a key), which the statistics resolve through Git to the repository whose checkout holds it (`ProjectIndex::with_strays`). The owner passes every group folder with its pool (`ProxyHandle::set_stat_folders`) wherever it sets the folders' capabilities. A 429 that moved (SB-98) counts once on the refusing account; a network failure counts as failed. `ProxyHandle::take_statistics()` hands the counts over and clears them. The owner adds them to `statistics.json` (0600, `{version: 1, tallies}`, 90 days, at most 50 000 rows) every pass, writing at most every 15 min and at stop; an unreadable file starts empty. `Statistics { days? }` (1 to 90, default 30; read fast path, offline reads the file) answers `{days, from, to, since, total, groups[{pool, name}], projects[{project, name, groups[{pool, name}]}], accounts[{account_id, label, provider, kind}], agents[{agent}], routes[group, project, project_name, account and agent], by_day[{day, groups[{pool, requests, tokens}]}]}`, each row with the counts, busiest first. A project (`statistics::ProjectIndex`, built from `roots::tree` per group) is a repository with all its checkouts, keyed by its `origin` identity, or a folder outside Git keyed by its path (DEC-0089 AT-6, AT-7, AT-15); `project: ""` holds requests that named no folder. Not counted: an off-project Codex request passed through on the person's own sign-in (SB-143), and anything that does not go through the proxy. No prompt, answer or header value is kept; folder paths stay in this file on this computer.
 - Only `Owner::native` reads the ordinary CLIs' sign-in; `Owner::start` (tests, smoke) reports current accounts as unavailable.
 - `switchboard mcp [--read-only]`: stdio JSON-RPC 2.0 per the tool table in PLAN-0.4. Tool failures are results with `isError: true`; protocol faults are JSON-RPC errors (-32700 parse/oversize > 1 MiB, -32600 invalid, -32601 method, -32602 unknown tool or bad arguments). Calls wait out a held store lock for up to 8 s, asking the owner first (`STORE_WAIT`, SB-181).
@@ -153,7 +153,7 @@ Operator request 2026-10-05: a project is one or more folders (related repositor
 - Operations ([runtime](../crates/switchboard-runtime/src/lib.rs)): `LoginStatus { login_id }` → `{state: pending|complete|ended}`; `Backups` → `{directory, enabled, backups: [{file, created_at, accounts, missing, own, openable}], last_error, last_written_at}`; `BackupNow` → backup info or null (refused without a running owner on the default data folder); `RestoreBackup { file }` → `{added, skipped, failed}`, `file` must be a `switchboard-backup-<digits>-<32 hex UUID>.json` name in the backup folder; legacy `switchboard-backup-<digits>.json` names are still accepted. New generations reserve a private destination exclusively and never replace another backup (`backup::tests::same_second_partial_backup_never_replaces_the_complete_one`). Tauri commands `login_status`, `backups`, `backup_now`, `restore_backup`; CLI `login status`, `backup list|now|restore`. None returns a credential.
 - `MonitorStatus` adds `sign_in_required: [account id]` and `limited: [{account_id, until, source: managed|claude_code}]`; the MCP `switchboard_status` result adds `limited`. Decision reasons add `limit_reached`, `limit_no_eligible_account`, `switched_on_limit`.
 - `Store::rotation_decision_with(policy, current, now, limited)`; `rotation_decision` passes an empty set. `Store::adopt_refreshed`, `Store::export`, `Store::changes`, `Store::backup_id`.
-- Backup file ([backup](../crates/switchboard-core/src/backup.rs)): JSON `{format: "fabric-switchboard-backup", version: 1, created_at, accounts, missing, store, key, nonce, data}`; `data` is AES-256-GCM over the accounts, policies and credentials and, since 0.6, the project rules, projects, managed selections (`routes`) and the settings files `login-item` and `auto-update` (`SETTING_FILES`; absent in a 0.5 backup, ignored by a 0.5 reader); a rule change now counts for the next backup (`a_rule_change_counts_for_the_next_backup`). Restore maps each backup account to its id on this install, then puts back projects whose pool and folders are free, unexpired rules and selections not already set, and settings not chosen here (`a_reinstall_gets_projects_rules_selections_and_settings_back`); the result adds `projects`, `rules`, `routes`, `settings`. **A data folder created by this start** (a new install, or after `switchboard uninstall`) with no accounts restores the newest backup this machine can open at once, reported as `Backups.restored_at_start`; a store that existed before the start is never restored on its own (`a_new_data_folder_restores_the_newest_backup_and_an_existing_one_never_does`). AAD `format:v1:created_at:store:accounts:missing`; `key` is the first 16 hex digits of SHA-256 of the key.
+- Backup file ([backup](../crates/switchboard-core/src/backup.rs)): JSON `{format: "fabric-switchboard-backup", version: 1, created_at, accounts, missing, store, key, nonce, data}`; `data` is AES-256-GCM over the accounts, policies and credentials and, since 0.6, the project rules, projects, managed selections (`routes`) and the settings files `login-item`, `auto-update`, `agents-settings.json` and, since 0.7.0, `spend.json` and the terminal hook's choice `shell-hook` (`SETTING_FILES`; a restored `off` stays off, never read as the default and written over: `the_terminal_hooks_choice_survives_a_reinstall`; absent in a 0.5 backup, ignored by an older reader; each at most 4 KiB, `spend.json` at most 128 KiB, and a file past its limit is not carried: `a_backup_carries_the_spending_ceilings_whole`; restore writes a JSON setting back byte for byte, a switch word with its line end, so a `spend.json` of exactly its limit stays readable: `a_spend_file_of_exactly_the_limit_comes_back_from_a_backup_readable`); a rule change now counts for the next backup (`a_rule_change_counts_for_the_next_backup`), and so does a spending ceiling set or answered (`Store::setting_changed`; the gate's own records in `spend.json` wait for the next change-driven or daily backup). Restore maps each backup account to its id on this install, then puts back projects whose pool and folders are free, unexpired rules and selections not already set, and settings not chosen here (`a_reinstall_gets_projects_rules_selections_and_settings_back`); the result adds `projects`, `rules`, `routes`, `settings`. **A data folder created by this start** (a new install, or after `switchboard uninstall`) with no accounts restores the newest backup this machine can open at once, reported as `Backups.restored_at_start`; a store that existed before the start is never restored on its own (`a_new_data_folder_restores_the_newest_backup_and_an_existing_one_never_does`). AAD `format:v1:created_at:store:accounts:missing`; `key` is the first 16 hex digits of SHA-256 of the key.
 
 ## 0.5.1 additions
 
@@ -230,11 +230,13 @@ Account list order is display-only; it never selects/activates. Within provider/
 ## Structured sign-in result (SB-42, 2026-10-05)
 
 - `Operation::FinishLogin` returns the saved `Account` plus `login_cleanup: "done" | "pending"` and (0.6.6, SB-62) `signed_in_again: bool` — true when the identity was already saved and the sign-in updated it in place (`file_sign_in`: a sign-in without a label updates every saved copy where it is and creates an account only for a new identity; every other copy of the identity gets the new sign-in); a cleanup failure after the account was saved is no longer an error (the CLI exits 0, the desktop shows the account as added with a note). `Runtime::finish_login` keeps the last `COMPLETED_LOGINS` (16) saved sign-ins in memory: a repeated Finish returns the same account without capturing again and retries that sign-in's pending cleanup; `LoginStatus` reads a saved sign-in as `complete`; an unknown id is still *Sign-in not found. Start again.* Saved sign-ins hold no sign-in slot (`failed_login_cleanup_releases_the_slot_after_the_account_is_saved`, `completed_sign_ins_are_bounded`).
+- SB-160 (0.7.0 node B-4, SCN-077): the `FinishLogin` receipt, and the `CaptureCurrent` receipt, carry `organization_group: {pool, name}` when the account belongs to an organization (`Snapshot::attribution`) that has exactly one group (`Snapshot::organization_group`) and the account is not in it; the capture receipt adds `in_cli: true` (the ordinary CLI's account cannot join a group until the CLI switches, `PROJECT_ACCOUNT_IN_CLI`). Absent for a personal account, an organization with no group or several, or an account already in its group. Nothing moves: the window's notice offers *Move it to “{group}”* (`signInMove`, `Operation::MoveAccount` on press) or, for the CLI's account, says to switch first (`organizationMoveNote`). Test `a_new_seat_of_an_organization_outside_its_only_group_is_offered_it`.
 
 ## Uninstall (SB-29, 2026-10-05)
 
 - `switchboard uninstall [--keep-data] [--yes]` → `switchboard_runtime::uninstall::uninstall(root, vault, keep_data, apply, places)`. Without `--yes` it returns the plan (`accounts`, `cli_link`, `orphan_keychain_item`, `data_entries`, `kept`, `applied: false`) and changes nothing. The store is opened exclusively, so it refuses while an owner runs.
-- With `--yes`: `Vault::delete` for every account (shared and legacy items on macOS; DPAPI files on Windows), the orphaned 0.5.0 `ai.passioncode.fabric-switchboard.vault-key` / `v1` item through `/usr/bin/security` (absent is success), the `<home>/.local/bin/switchboard` symlink only when it points to a file named like the CLI, then — unless `--keep-data` — only the data-folder entries Switchboard writes (`accounts.json`, `instance.lock`, `control.json`, `proxy.json`, `renewal-state.json`, `usage-holds.json`, `limit-evidence.json`, `backup-id`, `homes`, `runtimes`, `logins`, `vault`, `kimi` — the Kimi Code homes, each the only copy of its login (SB-81) — `.private-*` temporaries); the folder is removed only when nothing else is in it. Each failure is reported in `failures`; nothing stops at the first. Backups and their key are never touched (`without_apply_nothing_changes`, `apply_removes_owned_things_and_keeps_the_persons_files`, `keep_data_keeps_the_folder_and_a_foreign_link_is_left_alone`, `an_empty_folder_is_removed_and_a_running_owner_refuses`).
+- With `--yes`, first (SB-183): the terminal hook's block comes out of every start file it is in (`shell::install::remove_all`, `Places::shell`, the person's home; each file byte for byte as before, whatever the choice; a start file the installer created and that holds nothing else is deleted), and the plan names `shell_hook_files` (start files holding the block). Only the app's own data folder looks at the start files (`uninstall::places(root)`: `Places::shell` is None for any other `--data-dir`, since every data folder writes the same marker into the same home; test `uninstall::tests::only_the_apps_own_data_folder_takes_the_blocks_out`, and on Linux CLI `another_data_folder_never_touches_the_start_files`). `shell-hook` and `shell-hook.json` are owned entries; `<data>/shell/` is kept like a session home: its map and hook scripts go, and in each shell home the credential-shaped files of a session home plus `config.toml` (it names the machine's auto capability) go while the history stays (`--purge` removes it whole). Test: `uninstall::tests::apply_removes_owned_things_and_keeps_the_persons_files` (an injected home).
+- With `--yes`: `Vault::delete` for every account (shared and legacy items on macOS; DPAPI files on Windows), the orphaned 0.5.0 `ai.passioncode.fabric-switchboard.vault-key` / `v1` item through `/usr/bin/security` (absent is success), the `<home>/.local/bin/switchboard` symlink only when it points to a file named like the CLI, then, unless `--keep-data`, only the data-folder entries Switchboard writes (`accounts.json`, `instance.lock`, `control.json`, `proxy.json`, `renewal-state.json`, `usage-holds.json`, `limit-evidence.json`, `backup-id`, `homes`, `runtimes`, `logins`, `vault`, `kimi` (the Kimi Code homes, each the only copy of its login, SB-81), `launches` (the launch records, SB-212), `.private-*` temporaries); the folder is removed only when nothing else is in it. Each failure is reported in `failures`; nothing stops at the first. Backups and their key are never touched (`without_apply_nothing_changes`, `apply_removes_owned_things_and_keeps_the_persons_files`, `keep_data_keeps_the_folder_and_a_foreign_link_is_left_alone`, `an_empty_folder_is_removed_and_a_running_owner_refuses`).
 
 ## Near-limit quota checks (SB-106, 2026-10-12)
 
@@ -414,10 +416,40 @@ MCP `switchboard_chain_get` (read) and `switchboard_chain_set` (write).
   workflow's chain, else the project's, else the machine's, else none.
 - Removing an account drops executors pinned to it; removing a project drops its chain; a chain left
   empty is dropped (`chains::prune`).
-- `Operation::Chains {workflow?, pool?}` → `{chains, effective, presets}`; `Operation::SetChain
-  {scope, executors, preset?}` → `{chain}` — a preset id (`subscriptions-first`) stands for the list.
-- The automatic fallback (SB-73, below) walks the chain that applies; spending ceilings for paid keys
-  are SB-72.
+- `Operation::Chains {workflow?, pool?, folder?}` → `{chains, effective, presets, readiness,
+  last_handover, ceilings_unreadable, limits_known}`; `Operation::SetChain {scope, executors,
+  preset?}` → `{chain}`; a preset id (`subscriptions-first`) stands for the list. With `folder` (a
+  workflow's checkout, canonicalized when it exists) `effective` is resolved through the group the
+  automatic fallback would choose (`fallback::chain_pool_of`, below), `pool` then standing for the
+  executor account's group; without it, `pool` alone as before. `limits_known` is false in an
+  offline answer (no owner, so no limit evidence: `readiness` cannot name a limited account).
+  MCP `switchboard_chain_get` (`workflow_id?`, `pool?`, `folder?`, an absolute folder) and CLI
+  `chain list [--workflow] [--pool] [--dir]` (`--dir` absolute) return the same answer. Tests
+  `the_chain_that_applies_is_found_through_the_checkout_folder_like_the_fallback`,
+  `handshake_lists_tools_and_rejects_malformed_messages` (`crates/switchboard-cli/tests/mcp.rs`).
+- **Readiness (0.7.0, C-2; SB-71 screen, SB-73 status).** Code:
+  `crates/switchboard-runtime/src/chain_view.rs`. `readiness` holds, for every chain set, keyed
+  `machine`, `project:<pool>` or `workflow:<id>`, one view per step of what it would do now:
+  `{agent, name, state: ready|skipped|not_automatic|not_installed, reason, paid, account_id?,
+  account_label?, key_scope?: group|machine, key?, spend?}`, built on the fallback's own
+  `resolve_with` with no executor and no workflow, after these checks in order: agents-settings.json
+  unreadable (`skipped`, `agent_settings_unreadable`), a step pinned to a key (`not_automatic`,
+  `key_pinned`, the vault name in `key`, never a value), an agent the fallback cannot run
+  (`not_automatic`, `agent_not_automatic_yet`), a disabled agent (`skipped`, `agent_disabled`), an
+  agent not on this computer (`not_installed`); then the resolution's skip reason
+  (`no_usable_account`, or `sign_in_required` for a pinned account that needs a new sign-in). A
+  group's chain is read for the group's first folder, so its account rules (SB-102) apply; this
+  computer's and a task's chains with no folder. `paid` is Hermes and OpenCode (with the
+  OpenRouter key they spend, `key_scope`) and Claude Code or Codex on an API-key account (C-Q3);
+  `spend` is null: a read never starts the workflow engine, a hand-over or a network call, and a
+  key's spend is read only at a paid hand-over (C-5). `last_handover` is spend.json's record
+  (written by the hand-over gate after every hand-over, [Spending ceilings](#spending-ceilings-sb-72-070); null until the first); `ceilings_unreadable: true` when spend.json cannot be read,
+  the chains staying readable. Tauri commands `chains` and `set_chain {scope, executors, preset?}`
+  (labels and codes only). Tests `chain_view::tests` and
+  `owner_tests::the_chain_view_names_why_each_step_would_be_skipped`.
+- The automatic fallback (SB-73, below) walks the chain that applies; its spend gate checks the
+  [spending ceilings](#spending-ceilings-sb-72-070) before every paid step. Where ceilings are
+  stored, who may set them and how the gate decides: that section.
 
 ## Automatic fallback, phase 1 (SB-73, 2026-10-06)
 
@@ -425,11 +457,11 @@ Design: [XA-01](packets/cross-agent-continuation.md) (operator decision D-1: aut
 `crates/switchboard-runtime/src/fallback.rs` (`pass`, `pass_with`, `resolve`, `executor_limited`),
 `continuation::{list_open, checkouts}`, called by the monitor after rotation.
 
-- **Trigger:** a chain applies (SB-71: the workflow's, else its executor account's project pool,
-  else the machine's — none set, nothing happens), and the executor of an open workflow without a
+- **Trigger:** a chain applies (SB-71: the workflow's, else its group's, else the machine's; none
+  set, nothing happens), and the executor of an open workflow without a
   waiting handoff has a recent limit (`LimitState::limited_ids`). When the engine names the
   executor's `accountRef`, only that account decides (one Switchboard does not hold decides
-  nothing). When it names none, the executor is taken to be the ordinary CLI of its provider — but
+  nothing). When it names none, the executor is taken to be the ordinary CLI of its provider, but
   only while no session Switchboard launched for that provider is running
   (`launch::launched_session_running`: an isolated home of one of its accounts or a managed home
   that is not idle), since such a session could be the executor on a healthy account (2026-10-07).
@@ -443,14 +475,14 @@ Design: [XA-01](packets/cross-agent-continuation.md) (operator decision D-1: aut
   executor's, not limited, not needing a new sign-in, not another saved row of the executor's or
   a limited account's login (SB-62 rows share one limit); a pinned one only if usable; else the
   provider's least-used); the hand-over is `Operation::Continue` in `isolated` mode in the first of
-  the workflow's checkouts that exists here — every refusal of `switchboard continue` applies, and
+  the workflow's checkouts that exists here; every refusal of `switchboard continue` applies, and
   the engine's silence (120 s) and rate rules decide. A refusal before the offer moves down the
   chain; a failed launch after an offer stops (the offer lapses).
 - **Phase 1** runs Claude Code and Codex; **Kimi Code on a saved Kimi Code account** joins it
   (SB-99, below), and **Hermes Agent on the saved OpenRouter key** (SB-107): a `hermes` step with
   no account and no key pin is tried when Hermes is installed, the key is saved and the
   `switchboard` command exists (`launch::hermes_continuation_basics`, no process started), never
-  for a Hermes executor. At the hand-over those basics come first; only then is the model read —
+  for a Hermes executor. At the hand-over those basics come first; only then is the model read:
   `hermes config get model --json` within 5 s in its own process group, killed with everything it
   started at the deadline (`hermes::run_within`; a Hermes that does not answer gives no model).
   The model is the one the ordinary Hermes runs on OpenRouter (`hermes::openrouter_model`, from
@@ -464,18 +496,18 @@ Design: [XA-01](packets/cross-agent-continuation.md) (operator decision D-1: aut
   folders of hand-overs that ended more than 7 days ago go at the next one,
   `prune_hermes_sessions`; `config.yaml` values are written as YAML double-quoted scalars with
   everything outside printable ASCII escaped) naming `owner agent:hermes` and a UUID
-  `sessionId` Switchboard made — Observatory wants a UUID and Hermes's own ids are not one (seen in
-  the rehearsal below: the session had to work both out) — and Terminal running `hermes chat
+  `sessionId` Switchboard made (Observatory wants a UUID and Hermes's own ids are not one, seen in
+  the rehearsal below: the session had to work both out), and Terminal running `hermes chat
   --query-file <prompt> --provider openrouter -m <model>`; on a terminal that seeds an interactive
   session with the prompt as its first turn; the key is read from `switchboard agents key --service
   openrouter` when the session starts, never written. Spend is bounded by the key's own OpenRouter
-  ceiling. Measured 2026-10-12 with Hermes 0.21.4: an empty
+  ceiling, and since 0.7.0 the [spend gate](#spending-ceilings-sb-72-070) decides whether the step starts. Measured 2026-10-12 with Hermes 0.21.4: an empty
   `HERMES_HOME` starts without the setup wizard, and the session lists
   `observatory_handoff_accept`. `switchboard continue <wf> --account hermes` is the manual path.
   **Rehearsed live 2026-10-12** (a 0.6.19 build on its own data folder, the real engine and
   OpenRouter): workflow `wf_932609d34cf14593` with a Claude executor, offered after the engine's
   two-minute silence (`handoff:9c1cc21b63c64cc2`); the Hermes session accepted it within about 30 s
-  (executor `hermes`), wrote its final checkpoint and closed the workflow — "Accepted by
+  (executor `hermes`), wrote its final checkpoint and closed the workflow: "Accepted by
   agent:hermes running model moonshotai/kimi-k2 via provider openrouter". Spend of the day's probes
   and the rehearsal together: $0.07 of the key's $10.
   `--mode managed` with Hermes or a Kimi account is refused (`MANAGED_NOT_FOR_AGENT`). Tests
@@ -485,14 +517,374 @@ Design: [XA-01](packets/cross-agent-continuation.md) (operator decision D-1: aut
   `hermes_config_escapes_every_value_into_plain_ascii`,
   `finished_hermes_hand_overs_go_after_a_week_and_nothing_else_does`. Other agents,
   a step pinned to a project's paid key, and Kimi Code on a paid key are skipped
-  (`agent_not_automatic_yet`) until their launch recipes and ceilings exist (SB-72, SB-96, SB-73
-  phase 2). A Hermes executor at its limit is not detected yet.
+  (`agent_not_automatic_yet`) until their launch recipes and the project grant they need exist
+  (SB-96, SB-73 phase 2). A Hermes executor at its limit is not detected yet.
+- **The spend gate (0.7.0, C-5; SB-72):** before each paid step the hand-over asks the gate of
+  [Spending ceilings](#spending-ceilings-sb-72-070); a step it skips moves the chain on.
 - **Evidence:** log event `fallback` with `offered`, `launch_failed`, `every_step_refused`,
-  `no_usable_executor`, `no_checkout` or `engine_unreadable`; store event `fallback`
-  `offered` / `failed`. Never: stopping the old session, a `--force` handoff, a credential in the
+  `no_usable_executor`, `no_checkout`, `engine_unreadable`, `group_ambiguous` or `no_chain`, and
+  since 0.7.0 `key_exhausted`, `ceiling_reached`, `spend_unknown` or `ceilings_unreadable` when the
+  gate skipped every step it reached and none was tried; log event `spend_gate` with `verdict`
+  (`run`, `spend_unread`, `key_exhausted`, `ceiling_reached`, `spend_unknown`,
+  `ceilings_unreadable`) for each paid step reached, or `record` `unwritten` when the last
+  hand-over could not be written; store event `fallback` `offered` / `failed`. Never: stopping the old session, a `--force` handoff, a credential in the
   pack or the prompt.
+- **The group's chain follows the checkout (0.7.0, C-8):** the group is chosen after the engine
+  names the workflow's checkout (`fallback::chain_pool`): the executor account's group when it
+  holds the checkout; else the one group holding the checkout, whoever's account worked there
+  (plain `claude` in a group's folder runs on the ordinary sign-in, which stays in the default
+  group); else, with several groups holding it (SB-146) and none of them the executor's, the
+  group `Snapshot::project_for` names (the first holding group with an enabled account, an
+  organization's group last when organizations exist; else the first), the one the folder's proxy
+  route and paid key use, logged `group_ambiguous`; with no group holding it, the executor
+  account's group as before. The engine is asked for the checkout whenever the workflow's, the
+  executor group's or the machine's chain is set, or any group has a chain. When no chain applies
+  to the chosen group the pass logs `no_chain` and leaves no retry mark, so a chain set meanwhile
+  is used at the next scan; the 15-minute mark is set once a chain resolves, and also after
+  `engine_unreadable` and `no_checkout`, which are attempts not repeated every minute. Tests
+  `a_groups_chain_applies_to_a_workflow_in_its_folder_on_the_ordinary_cli`,
+  `a_folder_in_several_groups_takes_the_group_its_proxy_route_uses_and_logs_ambiguous`,
+  `no_chain_for_the_checkouts_group_is_logged_and_tried_again_at_the_next_scan`.
 
 - **SB-129 (2026-10-14):** an executor that names no account (`lease.executor` without `accountRef`) is taken to be the ordinary CLI of its provider only while its workflow is being worked: the engine's `silentSeconds` is at most `UNNAMED_EXECUTOR_SILENCE` (3600). A workflow silent longer, or whose silence the engine does not report, is skipped (`unnamed_and_stale`; test `an_unnamed_executor_counts_only_while_its_workflow_is_worked`). An executor with an `accountRef` is decided by that account alone, as before.
+
+## Spending ceilings (SB-72, 0.7.0)
+
+Design: [dossier C](runs/2026-10-26-iteration-0.7.0/dossier-c-chains-and-ceilings.md) parts C
+and D; decisions C-Q1 to C-Q9 in [questions](runs/2026-10-26-iteration-0.7.0/questions.md);
+scenarios SCN-083 and SCN-084 in [scenarios](ux/scenarios.md). Code:
+`crates/switchboard-runtime/src/spend.rs` (the file, the rules, `decide`) and
+`crates/switchboard-runtime/src/fallback.rs` (the gate). The operator rule it follows: a reached
+ceiling is a question, "double or keep", with no recommended answer, and only the operator doubles
+(fabric-workspace `knowledge/authority.md`, cited in dossier C section 5). In brief, each point
+detailed in the two entries below:
+
+- **Ceilings.** One per scope (`ChainScope`): this computer's, per UTC day, counting every saved
+  OpenRouter key's `usage_daily` added up; a group's, per UTC day, only on the group's own
+  OpenRouter key (`spend::group_has_own_key`, `spend.rs:390`); a task's (one workflow), counting its
+  key's `usage` since the task's first paid hand-over (C-Q2, labelled: it over-counts when agents
+  share the key and is checked only at a start). Whole cents from $0.01 to $1,000
+  (`MIN_CENTS`, `MAX_CENTS`, `spend.rs:28-29`). The key's own limit at OpenRouter stays the only
+  bound on what a running session spends; a ceiling decides whether a paid agent starts.
+- **Who may loosen one.** Only the window, in the app's own process: raising, clearing, doubling
+  (C-Q1), deleting a group that holds a ceiling (C-Q7), and removing or replacing a key a ceiling
+  counts (C-Q9). The CLI and MCP set a first ceiling, lower one and answer *keep*
+  (`switchboard ceiling list|set|keep`, `crates/switchboard-cli/src/main.rs:769`;
+  `continue --ceiling`, `:170`; MCP `switchboard_ceilings`, `switchboard_ceiling_set`,
+  `switchboard_ceiling_answer`, `crates/switchboard-cli/src/mcp.rs:88-90`). The window's Tauri
+  commands `ceilings`, `set_ceiling`, `answer_ceiling` (`src-tauri/src/main.rs:798`, `:834`,
+  `:848`) always speak as the window.
+- **The gate.** Every paid start through Switchboard passes it once: a paid step of the automatic
+  fallback (`fallback::spend_gate`, `fallback.rs:1162`), a paid start by hand (C-Q8,
+  `fallback::gate_by_hand`, `:1412`: `continue` onto Hermes, OpenCode or an API-key account,
+  `agents launch --openrouter`, `agents launch` through the proxy on an API-key account, `launch`
+  on an API-key account), and a queued paid hand-over when a console takes it or the background
+  opens it (`fallback::gate_take`, `:1455`). Paid means Hermes and OpenCode on an OpenRouter key,
+  and Claude Code or Codex on an API-key account (C-Q3: no spend is read for those, so under a
+  ceiling they read `spend_unknown`); a subscription sign-in and Kimi Code on a saved Kimi account
+  are never gated. `spend::decide` (`spend.rs:958`) skips, in order: `key_exhausted` (less than
+  $0.50 left of the key's own limit, `MIN_REMAINING_USD`, `spend.rs:32`, with or without a
+  ceiling), `ceiling_reached`, `spend_unknown`; with no covering ceiling an unread key runs
+  (`spend_unread`). One gate at a time in the process (`HAND_OVER`, `fallback.rs:947`).
+- **The budget.** A fallback pass's gates together, and a start by hand's gates together, take at
+  most `GATE_BUDGET`, 20 s (`fallback.rs:1047`), counted only inside the gates (`GateBudget`,
+  `:1053`, SB-214); each OpenRouter read gets what is left, at most `SPEND_READ_TIMEOUT`, 12 s
+  (`:1151`; the read itself times out at 10 s, `crates/switchboard-runtime/src/agent_keys.rs:14`), and a read cut short is
+  unknown, never zero. The background's sweep of queued hand-overs has one budget per pass; a
+  console's take waits for its turn at most `TAKE_TURN_WAIT`, 10 s (`lib.rs:3330`).
+- **The key slot a gate read (SB-213, S5).** The gate decides on the key the start's folder
+  resolves to (`spend::key_slot`, `spend.rs:400`; the same rule as the launch,
+  `agent_keys::key_in`, `crates/switchboard-core/src/agent_keys.rs:309`), pins it
+  (`fallback::Pin`, `fallback.rs:964`) and compares it again inside the owner transaction; a start
+  whose folder moved to another group is gated once more on its new key, and moved again is
+  refused (`STOP_FOLDER_MOVED`). The session script names the slot the gate read
+  (`launch::key_command`, `launch.rs:2133`, through `switchboard agents key --service openrouter
+  --pool <group>` or `--machine`, `crates/switchboard-cli/src/main.rs:861-865`), so a move after
+  the transaction changes nothing it spends.
+- **Questions.** A reached ceiling opens one question per scope and value (`spend::open_question`,
+  `spend.rs:686`): *Double to $2X* (window only) or *Keep $X*, two answers of equal weight; a
+  doubled ceiling is tied to its new value and the next hit asks again (`spend::answer`, `:754`;
+  `a_doubled_ceiling_is_tied_to_its_value_and_the_next_hit_asks_again`, `spend.rs:1133`).
+  The app posts one notification per new question (`suggestions::reached_ceilings`,
+  `src-tauri/src/suggestions.rs:128`).
+- **Records.** `<data>/spend.json` (0600, at most 128 KiB, `spend.rs:20-25`; carried in backups,
+  `crates/switchboard-core/src/backup.rs:77`; removed by `switchboard uninstall`,
+  `crates/switchboard-runtime/src/uninstall.rs:35`): ceilings, questions, task baselines and the
+  last hand-over, never a key or a label. Log events `ceiling` (set, cleared, reached, kept,
+  doubled, removed) and `spend_gate` (each paid step's verdict, `fallback.rs:1303`). Analytics:
+  the counts `chains`, `ceilings` and `ceiling_questions` in `app_active`, no event, no id or
+  amount ([ANALYTICS](ANALYTICS.md#chains-and-ceilings-070), C-Q6).
+- **Not covered.** A running managed session moved onto an API-key account without a start
+  (`switchboard_switch`, automatic switching, SB-98's failover) is not gated (C-N2, SB-217); paid
+  starts moved off a capped group's key by moving its folder or disabling its accounts are no longer
+  counted by that group's ceiling (C-N1, SB-216); after a downgrade to 0.6.x paid steps run with no
+  ceiling. Waiting outside this repository: keyed pins checked against the project's grant (SB-96)
+  and per-grant metering through the proxy, which would replace the task measure (SB-97).
+
+- **Spending ceilings, storage (0.7.0, C-4; the hand-over gate that enforces them is C-5).** Code:
+  `crates/switchboard-runtime/src/spend.rs`. `<data>/spend.json` (0600, at most 128 KiB, carried in
+  backups, removed by `switchboard uninstall`), never `Snapshot`, so a 0.6.x build still reads the
+  store after a downgrade. Content: `{version: 1, ceilings: [{scope, cents, set_at,
+  doubled_from?}], questions: [{id: "q_" + 16 hex, scope, cents, spent, reached_at, answer?:
+  keep|double, answered_at?, answered_by?: window|cli|mcp}], baselines: [{workflow, key: machine
+  or a pool, usage (a number, or null when the key's total could not be read at the task's first
+  paid hand-over), at}], last_handover?}`; at most 256 ceilings (one per `ChainScope`: the
+  machine's, at most 63 groups' and at most 192 tasks', so the machine's and a group's always
+  have room: `At most 192 task ceilings. ...`, `At most 63 group ceilings. ...`;
+  `task_ceilings_leave_room_for_the_machine_and_the_groups`), 64 questions, 256 baselines. The
+  largest file these caps allow is about 104 KiB (`the_largest_file_the_caps_allow_fits_under_the_limit`);
+  a write past 128 KiB is refused with its own sentence (`The spending ceilings file is full. ...`,
+  `a_write_past_the_limit_is_refused_with_its_own_sentence_and_nothing_written`), never as
+  unreadable. A task ceiling stays until the window clears it. A ceiling is whole cents from $0.01 to $1,000 (`spend::cents`: zero,
+  negative, NaN, infinite or out-of-range amounts are refused and nothing is written). Machine
+  and group ceilings count per UTC day; a group takes one only with its own OpenRouter key
+  (`Give this group its own key under API keys first.`), and one whose key was removed is kept
+  and shown inactive (`inactive_reason: no_own_key`); a task ceiling counts the key's usage since
+  the task's first paid hand-over (C-Q2). Setting a scope's value closes its open questions: an
+  answer is tied to the value it was asked about. `keep` is accepted from every surface,
+  `double` only with `by: window` (`Doubling a ceiling is answered in the Switchboard window.`,
+  C-Q1), doubling past $1,000 is refused and the question stays open. `by: window` is accepted
+  only in the app's own process: the control listener and an offline command refuse it before it
+  runs (`Only the Switchboard window answers as the window. ...`;
+  `a_ceiling_answer_naming_the_window_is_refused_through_the_control_listener`,
+  `an_offline_command_cannot_answer_a_ceiling_as_the_window`). A removed group takes its
+  ceiling, questions and baselines along; answered questions and baselines go after 30 days (the
+  baseline of a task that still has a ceiling stays, so the task is never counted from zero
+  again: `a_clock_set_back_drops_nothing_and_answers_still_work`), an
+  open daily question after the next UTC day, an open task question 7 days after it was asked; a
+  clock set back drops nothing. When 64 questions are held, a new one takes the slot of the
+  oldest answered question, else of the oldest open task question, and a machine or group
+  question then of the oldest open question, so it always gets one
+  (`a_machine_question_always_fits_and_open_task_questions_age_out`). Deleting a group
+  (`Operation::RemoveProject {pool, by}`, `by` defaulting to `cli`) prunes spend.json under its
+  write lock, so a group saved again under the same id inherits nothing; a group that holds a
+  ceiling is deleted only with `by: window` in the app's own process (C-Q7): from the CLI, MCP,
+  the control listener or an offline command it is refused (`This group has a spending ceiling.
+  Delete the group in the Switchboard window, where its ceiling goes with it.`, `by: window`
+  there refused as `WINDOW_ONLY`), the group and the ceiling kept, and a spend.json that cannot be
+  read refuses every group deletion
+  (`a_group_holding_a_ceiling_is_deleted_only_in_the_window_and_takes_it_along`,
+  `deleting_a_group_takes_its_ceiling_questions_and_baselines_and_keeps_the_rest`). A file that cannot
+  be read, is not a JSON object, or breaks any of these rules is an error, never "no ceilings":
+  `spend::check` then skips every paid step (`ceilings_unreadable`) and every write is refused.
+  Ceilings are no boundary against a process running as the operator: a hand edit that keeps
+  every rule, or deleting the file, loosens or removes them (a backup or the log shows it later).
+  After a downgrade to 0.6.x paid steps run with no ceiling (0.6.x has no gate and never reads
+  spend.json), and its `switchboard uninstall` leaves `spend.json` behind, since 0.6.x does not know
+  the file. A ceiling set or answered through `SetCeiling` or `AnswerCeiling` counts as a change
+  for the next backup (`Store::setting_changed`, so the change-driven backup takes it within its
+  60 s spacing; `spending_ceilings_are_set_read_and_answered_through_the_runtime`), and so does
+  every hand-over, whose gate writes questions, baselines and the last hand-over (C-5, below). `backup::MAX_SPEND_SETTING` equals
+  `spend::MAX_BYTES`, so every file this build writes is carried
+  (`every_spend_file_this_build_writes_fits_a_backup`).
+  `spend::decide` (pure; called by C-5) counts no ceiling of a group the snapshot no longer holds
+  (`a_ceiling_of_a_removed_group_covers_no_step`), counts a negative or NaN usage read as unknown
+  and a huge one as spend (`a_provider_read_that_is_negative_nan_or_huge_is_never_counted_as_spend`),
+  and skips a paid step, in order: `key_exhausted` when the
+  key's own limit has less than $0.50 left, with or without a ceiling; `ceiling_reached` naming
+  the strictest reached ceiling; `spend_unknown` when a covering ceiling's spend could not be
+  read (an API-key Claude Code or Codex account under a ceiling is always unknown, C-Q3); with no
+  covering ceiling an unread key runs (`spend_unread`). Log event `ceiling` with `action`
+  (`set`, `cleared`, `reached`, `kept`, `doubled`, `removed` when a deleted group's ceiling went
+  with it, `remove_failed` when spend.json could not be written after a group was deleted, the
+  next change pruning it) and `scope` (`machine`, `project`,
+  `workflow`). `Operation::Ceilings` → `{ceilings, questions, last_handover, limits}`;
+  `Operation::SetCeiling {scope, usd, by}` (`usd: null` clears; a body without `usd` or `by` is
+  refused, never read as a clear) → `{ceiling}`. From `by: cli` or `by: mcp` only a first ceiling
+  of a scope or a value no higher than its current one is accepted; raising or clearing one is
+  refused (`Raising or clearing a ceiling is done in the Switchboard window. ...`, decided against
+  the file under its write lock, nothing written), and `by: window` through the control listener
+  or an offline command is refused like a ceiling answer (`WINDOW_ONLY`;
+  `a_ceiling_is_raised_or_cleared_only_by_the_window_never_through_the_listener`);
+  `Operation::AnswerCeiling {id, answer, by}` → `{answer, ceiling}`. CLI (0.7.0, C-6)
+  `switchboard ceiling list|set [--scope] <usd>|keep <id>` and `switchboard continue --ceiling
+  <usd>` (the task's ceiling is set before anything is offered, a refusal stopping the continue)
+  send `by: cli`; there is no CLI command to raise, double or clear one. MCP
+  `switchboard_ceilings` (read), `switchboard_ceiling_set {scope?, usd}` (`usd` required, never a
+  clear) and `switchboard_ceiling_answer {id, answer?: keep}` (a `double` reaches the runtime and
+  is refused with the window named) send `by: mcp`; the read-only server lists only the first
+  (`ceiling_answer_double_over_mcp_is_refused_with_the_window_named`,
+  `ceilings_are_set_lowered_listed_and_kept_from_the_cli_and_never_raised`,
+  `handshake_lists_tools_and_rejects_malformed_messages`). One read-modify-write of
+  spend.json at a time in a process (`two_surfaces_setting_one_ceiling_at_once_never_loosen_it`,
+  `four_scopes_set_at_once_are_all_kept`). `spend::key_slot(snapshot, folder)` names the key a
+  paid step in `folder` spends, for the gate's `PaidStep::key` (C-5) and the chains view's
+  `key_scope`; it and `Store::agent_key_in` share one rule, `agent_keys::key_in`
+  (`the_view_and_the_gate_name_the_key_a_launch_in_the_folder_uses`). An unreadable spend.json
+  names the order of recovery: delete it first, since a restore never writes over an existing
+  setting. Tests in `spend::tests` and
+  `spending_ceilings_are_set_read_and_answered_through_the_runtime`.
+  The window (0.7.0, C-7): Tauri commands `ceilings`, `set_ceiling {scope, usd}` (`usd: null`
+  clears) and `answer_ceiling {id, answer}` run in the app's own process and always send
+  `by: window`, the one surface that may raise, clear or double (C-Q1;
+  `tests::the_windows_ceiling_commands_speak_as_the_window` in `src-tauri/src/main.rs`). The
+  question's two answers share one class with no primary and no recommended flag
+  (`ceilingQuestion` in `src/ui-logic.ts`, `scripts/test-ui-logic.mjs`). The app's 15-second
+  look stats spend.json and, only when its stamp moved, reads the ceilings and posts one system
+  notification per newly opened question (`suggestions::reached_ceilings`,
+  `a_reached_ceiling_is_announced_once_per_question`), then emits `spend-changed` to the window.
+- **The spend gate (0.7.0, C-5; SB-72, dossier C part D).** Code: `fallback::spend_gate`, called
+  by `hand_over` before each `Step::Run`. Not paid, never gated and nothing read: a subscription
+  sign-in and Kimi Code on a saved Kimi account. Paid: Hermes and OpenCode, on the OpenRouter key
+  a launch in the checkout folder uses (`spend::key_slot`, never the chain's group), and Claude
+  Code or Codex on an API-key account (C-Q3; nothing is read for it, OpenRouter is not its
+  provider). For a paid step the gate reads `spend.json` (unreadable: skipped
+  `ceilings_unreadable`), then asks OpenRouter `GET /key` for that key
+  (`agent_keys::spend_read`, the 10 s read of `credit`, given up at 12 s) and, while a machine
+  ceiling is set, for every other saved OpenRouter key at once (`agent_keys::other_keys`); a
+  failed, refused or late read is unknown, never zero. It reads `spend.json` again after the
+  reads and decides on the ceilings as they are then (`spend::decide`): a machine ceiling set
+  during the reads counts the keys not read as unknown
+  (`a_ceiling_set_while_the_spend_is_read_is_obeyed`). Skips, each a reason of the hand-over and
+  the chain moving on: `key_exhausted` (less than $0.50 left of the key's own limit, with or
+  without a ceiling), `ceiling_reached` (the question opens once per scope and value,
+  `spend::open_question`), `spend_unknown` (a covering ceiling whose spend could not be read);
+  with no covering ceiling an unread key runs (`spend_unread` in the log). A step that runs on a
+  read total records the task's baseline (`spend::record_baseline`, the first one kept) before
+  the launch, so a restart between the decision and the offer never loses it
+  (`a_restart_between_the_decision_and_the_offer_keeps_the_tasks_baseline`); a baseline that
+  cannot be written skips the step as `spend_unknown` when a task ceiling covers it. One
+  hand-over at a time in the process (`HAND_OVER`, its gate and launch together), so two never
+  both start on the last dollar (`two_hand_overs_racing_for_the_last_dollar_are_decided_one_after_the_other`);
+  the same lock and the same gate cover every paid start by hand (C-Q8): `continue` (also
+  `--to-console` and on the default agent) onto Hermes, OpenCode or an API-key account,
+  `agents launch --openrouter`, `agents launch` through the proxy on an API-key account, and
+  `launch` on an API-key account (`fallback::gate_by_hand`). `Runtime::execute` resolves the
+  start's account first (`paid_start`: the default agent's account for a `continue` that names
+  none, the pool's selected account for a launch through the proxy, where a subscription account
+  is refused by the launch itself as `AGENT_SUBSCRIPTION_REFUSED`, never as an unknown spend), and
+  only a start that is paid takes `HAND_OVER` and passes its gate, both before the owner
+  transaction, the order a hand-over takes them in; a slow spend read holds up no other operation
+  and no start that is not paid
+  (`a_slow_paid_gate_by_hand_holds_up_neither_a_read_nor_a_subscription_launch`,
+  `a_proxy_launch_on_a_subscription_account_is_refused_as_such_under_a_ceiling`). SB-213: the
+  gate decides on the key the start's folder resolves to then (`fallback::Pin`, the
+  `spend::key_slot` of the gated snapshot); a folder that joins another group before the launch
+  (`SaveProject`, the monitor's `add_found`, both under the owner transaction) would start on a
+  key, and under a ceiling, no gate read. So the key is compared again inside the owner
+  transaction, where no project changes (`Pin::holds`, a snapshot read: no network, no file). A
+  start by hand whose key moved lets the transaction go, is gated once more on the key it spends
+  now, and takes the transaction again; moved a second time, it is refused with
+  `STOP_FOLDER_MOVED` (log `spend_gate folder_moved=gated_again|refused`). Its gates share one
+  `GATE_BUDGET` counted inside the gates only (`fallback::by_hand_budget`, a `GateBudget`), so the
+  wait for the transaction between them is not charged
+  (`the_wait_for_the_owner_transaction_is_not_charged_to_a_start_by_hands_gates`), and the second
+  gate runs without the transaction, as the first does
+  (`a_slow_second_gate_after_a_move_holds_up_no_subscription_launch`). The
+  automatic fallback's paid step carries its pin in the task-local mark (`fallback::pinned`), a
+  start by hand its own once admitted (`fallback::as_gated`); no pin outlives its step
+  (`a_fallback_steps_pin_reaches_no_later_operation`). The fallback's step holds `HAND_OVER`
+  across the step and cannot gate again mid-step, so a moved key refuses the step before the
+  offer and the chain moves on. The session script the start writes names the gated slot
+  (`agents key --pool|--machine`, `launch::key_command`), so a move after the transaction changes
+  nothing it spends. A start refused for a moved key drops the task baseline its gate wrote
+  (`Pin::release`, `spend::forget_baseline`: only that record, matched by workflow, key and time;
+  safe because its gate still holds `HAND_OVER`, so no other start counted from it), so the task
+  is never counted on a key it did not spend
+  (`a_baseline_written_for_a_start_that_moved_goes_and_the_second_gate_counts_from_zero`). The
+  lock order stays `HAND_OVER`, then the gate (no transaction), then the owner transaction, then
+  `SPEND_WRITE` and the store's locks; a release after the transaction was let go takes
+  `SPEND_WRITE` alone, the fallback's inside the transaction, both in that order
+  (`a_folder_moved_to_a_capped_group_during_a_paid_gate_by_hand_never_starts_ungated`,
+  `a_folder_that_moves_again_during_the_second_gate_is_refused`,
+  `a_folder_moved_during_the_fallbacks_gate_refuses_its_paid_step`). A paid
+  hand-over queued for a console records what it spends (`paid` in its record) and the key slot
+  its script names (`key`, SB-213, from the launch's `keySlot`), and passes the gate again, with
+  `HAND_OVER`, when a console takes it (`HandoverTake`: refused, it stays waiting) and when the
+  background opens it in Terminal (`handovers::sweep`: refused, it is taken without a start, log
+  `handover outcome=spend_refused`). Both gate through `fallback::gate_take`: the gate must have
+  read the slot the record names, and the folder must still resolve to the key it read; a folder
+  that moved since it was queued or during the gate refuses it with `STOP_FOLDER_MOVED`. A record
+  queued before 0.7.0 names no slot and its script fetches its folder's key when it runs, so for
+  it only a move during the take's gate is caught
+  (`a_queued_paid_hand_over_is_gated_again_when_it_is_taken`,
+  `a_queued_hand_over_whose_folder_moved_since_it_was_queued_is_refused_when_taken`,
+  `a_folder_moved_during_a_takes_gate_refuses_the_take`,
+  `the_sweep_refuses_a_hand_over_whose_folder_moved_since_it_was_queued`,
+  `a_queued_hand_over_records_the_key_slot_its_script_names`,
+  `handovers::tests::a_paid_hand_over_the_gate_refuses_is_taken_without_a_start`). SB-215: what a
+  queued hand-over spends is its record's `paid`; a record without it (queued before 0.7.0, or
+  while the snapshot was unreadable) is classified when it is taken as the start it is now
+  (`fallback::handover_paid`: Hermes and OpenCode on the OpenRouter key, the record's `account`
+  on the current snapshot, an older record by its agent and label), and what cannot be placed (no
+  snapshot, an unknown agent, a removed account) is taken as paid on an API-key account, never
+  as free (`a_record_without_paid_is_classified_by_what_it_spends_now_and_fails_closed`,
+  `a_hand_over_queued_without_paid_is_gated_when_a_console_takes_it`). A console's take waits for
+  `HAND_OVER` at most `TAKE_TURN_WAIT` (10 s), then answers `handovers::BUSY` and the hand-over
+  keeps waiting (FD-71; `a_paid_take_behind_a_hand_over_in_progress_answers_busy_and_keeps_it_waiting`).
+  The background's sweep gives its gates one `GATE_BUDGET` (20 s) per pass and starts a gate only
+  while a whole 12 s read still fits, since a read cut short is unknown and would refuse the
+  hand-over for good; a due paid hand-over left over waits for the next pass (log `handover`
+  `outcome=gate_deferred` with `count`;
+  `handovers::tests::a_sweeps_gates_stay_inside_its_budget_and_the_rest_wait_for_the_next_pass`).
+  The counted-key refusal reads a saved key that could not be read as saved: with a ceiling
+  counting it, `AgentKeySet` and `AgentKeyRemove` from the CLI or MCP are refused rather than let
+  through (`spend::saved_or_unknown`, `a_key_read_that_failed_counts_as_a_saved_key`). A start by hand the gate
+  skips is refused with the reason's sentence (`spend::refusal`: `STOP_KEY_EXHAUSTED`,
+  `STOP_CEILING_REACHED`, `STOP_SPEND_UNKNOWN`, `UNREADABLE`; a moved key `STOP_FOLDER_MOVED`) before anything is offered or
+  started; a paid continue writes the task's baseline like a hand-over. The fallback's own step
+  runs its `Continue` inside a task-local mark (`fallback::gated`), so it is gated once and never
+  waits on its own turn
+  (`the_automatic_fallback_gates_its_step_once_and_never_waits_on_itself`,
+  `a_paid_continue_by_hand_past_a_reached_machine_ceiling_is_refused_and_offers_nothing`,
+  `a_paid_continue_by_hand_writes_the_tasks_baseline`,
+  `an_agent_launched_on_the_openrouter_key_past_a_ceiling_is_refused`). One pass's gates together
+  take at most `GATE_BUDGET` (20 s), across all its workflows (at most 4): only the time spent
+  inside the gates is counted (`fallback::GateBudget`, SB-214), so the engine's reads
+  (`show_within`), the wait for `HAND_OVER` and an earlier workflow's launch never leave a later
+  paid step with nothing; each read gets what is left of it, at most 12 s, and a read cut short
+  is unknown (`two_slow_paid_steps_end_inside_the_passes_gate_budget`,
+  `a_passes_gates_stay_inside_one_budget_across_its_workflows`,
+  `a_passes_gate_budget_counts_only_time_inside_its_gates`). A task's first
+  paid hand-over whose key total could not be read records a baseline with `usage: null`, so a
+  task ceiling set later reads `spend_unknown`, never zero
+  (`a_first_paid_hand_over_with_its_total_unread_leaves_a_later_task_ceiling_unknown`). The
+  hand-over's writes (`open_question`, `record_baseline`, `record_handover`) carry the snapshot of
+  the start of their pass and prune only by age, never a missing group, so a ceiling the window
+  set meanwhile for a new group survives them
+  (`a_ceiling_set_meanwhile_for_a_new_group_survives_the_hand_overs_writes`). Removing or
+  replacing a saved OpenRouter key whose spend a ceiling counts is the window's (C-Q9):
+  `AgentKeyRemove` and `AgentKeySet` carry `by`, and the CLI and MCP are refused under the spend
+  write lock (`spend::guard_group_key`), through the control listener and offline: a group's own
+  key while the group holds a ceiling (`KEY_HOLDS_CEILING`); any saved key, the machine's
+  included, while a machine ceiling adds them up, and the key a task ceiling counts from, its
+  baseline (`KEY_COUNTED_BY_CEILING`). A first key is saved as before, and removing a key that
+  is not saved removes nothing and is not refused
+  (`control::tests::a_capped_groups_own_key_is_removed_or_replaced_only_in_the_window`,
+  `control::tests::a_machine_key_under_a_machine_ceiling_is_removed_or_replaced_only_in_the_window`,
+  `control::tests::removing_a_key_that_does_not_exist_is_not_refused_as_counted`). Whether the
+  slot holds a key is read inside that lock (SB-223), and the lock is the core's `SPEND_WRITE`,
+  which a backup's restore also holds while it puts a saved key or `spend.json` back: a first key
+  the window or a restore saves while a CLI replacement waits is one that replacement replaces,
+  so it is refused (`spend::tests::a_first_key_saved_while_a_cli_replacement_waits_is_one_it_replaces`,
+  `two_cli_saves_of_one_slot_at_once_save_one_first_key_and_refuse_the_other`,
+  `a_backups_key_is_put_back_under_the_spend_write_lock`); a group's key saved while the group is
+  deleted is refused or goes with it (`a_key_save_racing_the_groups_removal_leaves_no_key_without_its_group`). Deleting a
+  group (`switchboard project delete`, `RemoveProject`) removes its own OpenRouter key with it, so
+  the same rule holds there: from the CLI or MCP a group that holds its own key is refused with
+  `KEY_COUNTED_BY_CEILING` while a machine ceiling is set or a task ceiling counts from that key,
+  under the spend write lock (`spend::remove_group`), through the control listener and offline;
+  the group and its key stay, and the window deletes it
+  (`control::tests::a_group_whose_own_key_a_ceiling_counts_is_deleted_only_in_the_window`). A
+  hand-over records its folder canonicalized, as the first gate read it, so the gate at the take
+  and the background's gate read the same group's key (`fallback::queue_handover`,
+  `a_hand_over_records_the_canonical_folder_so_its_take_reads_the_groups_key`).
+  OpenRouter's own report of a key's spend may lag a running agent, so a ceiling decides whether
+  a step starts, never what a running session spends (the key's own limit bounds that). With no
+  step tried, the hand-over's outcome is the first skip the gate gave. Every hand-over writes
+  `last_handover {at, workflow, outcome, skipped: [{agent, reason}]}` (at most 8) to `spend.json`
+  and counts as a change for the next backup. Nothing is read from OpenRouter unless a paid step
+  is reached (`nothing_is_read_from_openrouter_when_no_paid_step_is_reached`). Tests in
+  `fallback::tests` (`a_hermes_step_on_a_key_with_nothing_left_is_skipped_not_offered`,
+  `a_reached_group_ceiling_skips_the_paid_step_and_opens_one_question`,
+  `an_unread_balance_with_a_ceiling_is_a_denial_and_without_one_runs`,
+  `a_subscription_step_is_never_gated`,
+  `a_key_whose_read_times_out_is_unknown_under_a_ceiling_and_runs_without_one`,
+  `a_key_whose_total_went_down_is_never_counted_as_less_spend`,
+  `an_api_key_claude_step_under_a_ceiling_is_unknown_and_reads_nothing`,
+  `an_opencode_step_under_a_ceiling_it_cannot_read_is_gated_like_hermes`,
+  `the_last_hand_over_is_recorded_with_its_skipped_steps`) and
+  `agent_keys::tests::the_gate_reads_a_saved_keys_spend_and_an_unanswered_read_is_unknown`.
 
 ## Launch in place (SB-75, 2026-10-06)
 
@@ -576,7 +968,20 @@ Code: `launch::sessions`, `launch::session_running` (factored out of `ensure_idl
 - Every Claude Code or Codex launch (Terminal or in place, managed or isolated, continuation
   included) writes `<home>/.session.json` (0600) before the session starts: `account_id`,
   `provider`, `pool`, `mode`, `working_directory` (canonical), `in_place`, `launched_at`,
-  `continues`. A failed write fails the launch before Terminal opens.
+  `continues`. A failed write fails the launch before Terminal opens. Since 0.7.0 (SB-201) a
+  Kimi Code launch or continuation, a Hermes or OpenCode continuation, an agent launched on the
+  OpenRouter key (`runtimes/agent-<recipe>-openrouter`, `provider`, `agent` and `account_id` the
+  recipe id, `pool` `openrouter`, `label` its model or null) and an agent launched through the
+  proxy (`runtimes/agent-<agent>-<pool>`, `provider` `claude`: the provider the proxy route
+  `/claude/<pool>` serves, so a reader comparing it with the route sees no false move; `agent` the
+  catalog id, `account_id` its API-key account, `mode` `managed`) write one too, `context`
+  included. `agent` is optional in the record: `Operation::Sessions` fills it for a record that
+  names none from its provider (`claude` gives `claude-code`, `kimi` gives `kimi-code`; `codex`,
+  `hermes` and `opencode` are their own ids; any other leaves it null), so the list has one field
+  for the agent. Tests: `a_proxy_agent_launch_records_its_context` (goose and codex: `provider`
+  `claude`), `an_openrouter_launch_records_its_session_and_context`,
+  `the_session_list_names_an_organizations_context`,
+  `the_session_list_names_a_proxy_agent_and_not_its_route` (the CLI line names the agent).
 - **Context (SB-110, 0.6.80).** The record also carries `context`, and the session's environment
   `SWITCHBOARD_CONTEXT` (scrubbed from the inherited environment like `SWITCHBOARD_SESSION`):
   `Snapshot::session_context` in the contract's form (`personal`, `org:<id>`): the group of the
@@ -587,15 +992,137 @@ Code: `launch::sessions`, `launch::session_running` (factored out of `ensure_idl
   Tests: core `a_sessions_context_follows_its_group_else_its_account_and_the_more_private_wins`,
   `a_launch_records_its_session_and_the_list_follows_its_process`,
   `the_session_list_names_an_organizations_context`.
+  SB-201 (0.7.0): the rule is `Snapshot::context_for(own, pool, folder)`, which
+  `session_context` calls with the account's organization and pool. A session on no account
+  takes `Snapshot::key_context`: the group's own OpenRouter key gives that group's context, the
+  machine's key and a Kimi account (no organization, no pool) give `personal`, also in an
+  organization's folder (the more private wins; a Kimi session there is launched, not refused).
+  A proxy agent takes its account's `session_context`. Tests: core
+  `a_session_without_an_account_takes_its_keys_group_else_personal`; runtime
+  `a_launch_needs_a_signed_in_home_and_writes_its_script_outside_it`,
+  `a_continuation_runs_its_first_turn_then_resumes_the_session_interactively`,
+  `a_hermes_continuation_seeds_its_session_with_the_handoff_and_never_holds_the_key`,
+  `an_opencode_continuation_runs_on_its_own_config_and_never_holds_the_key`,
+  `an_openrouter_launch_records_its_session_and_context`,
+  `a_proxy_agent_launch_records_its_context`.
 - The list scans `homes/` and `runtimes/` only, directory entries only (a link is skipped), and
   homes with a record. State comes from the same markers that keep one session per home:
   `.launch-pending` not expired → `starting`; `session_running` → `running` / `ended`; an
   unreadable marker → `unknown`. The owner answers it without its transaction lock (a read).
 - The window reads it through the Tauri command `sessions` (`all: false`) and shows it on Activity → *Sessions* (SB-65, SCN-051), refreshed with the metadata (once a minute) and on Refresh.
-- Not covered yet (packet SS-01, SB-65): agents launched through `switchboard agents launch` and
-  Kimi Code sessions, active requests per session, and acting on a session (open, drain, close).
+- Not covered yet (packet SS-01, SB-65): active requests per session, and acting on a session
+  (open, drain, close).
 - Test: `a_launch_records_its_session_and_the_list_follows_its_process`; MCP
   `handshake_lists_tools_and_rejects_malformed_messages` (`switchboard_sessions`).
+
+## Launch records and their chain (SB-212, 2026-10-26)
+
+Code: `crates/switchboard-runtime/src/launches.rs`, `launch::home_state`, `Operation::Launched`,
+`Operation::LaunchEvent`, `Operation::Launches`, `from_outside` and `launched` in `lib.rs`, CLI
+`launch --by/--parent/--surface`, `sessions --history`, `sessions show`, the plugin's hooks
+through `project suggest --from-hook` and `recovery hook`, MCP `switchboard_sessions`.
+
+- **One record per launch.** A home is reused, so its `.session.json` names only its latest
+  launch. Every launch that writes one (Claude Code, Codex, Kimi Code, Hermes and OpenCode
+  continuations, agents through the proxy or on the OpenRouter key) also writes
+  `<data>/launches/<launch_id>.json` (0600, a rename) with the same fields plus `launch_id` (a
+  UUID v4), `launched_by` and `home_path` (the home relative to the data folder); `.session.json`
+  gains `launch_id` and `launched_by`. A failed write of `.session.json` fails the launch as
+  before; a failed write of the record is logged (`launch_record` `failed`) and never fails it.
+  A record and the home's `.session.json` hold no capability, so they are read as the other
+  records are (`read_private`), never by the strict read kept for `control.json` and
+  `proxy.json`: one whose access was widened (a copied data folder, a Windows file that inherited
+  its folder's access list) is narrowed again and stays in the history
+  (`launches::tests::a_record_whose_permissions_were_widened_stays_in_the_history`; in nightly
+  run 40564415348 of 2026-10-27 the strict read gave both Windows runners an empty history from
+  records planted with an inherited access list).
+  The session's script exports `SWITCHBOARD_LAUNCH_ID=<launch_id>`; the variable is in the
+  scrubbed list, so one inherited from a caller never reaches a session that has its own.
+- **`launched_by`**, every key present, null when unknown: `surface` (`window`, `cli`, `mcp`,
+  `fallback`, `recovery`, `dashboards`; `mcp` is reserved, since no MCP tool launches a session
+  yet, and `dashboards` and `recovery` are written only when the caller passes `--surface
+  dashboards` or `--surface recovery`), `caller_launch_id` (the `SWITCHBOARD_LAUNCH_ID` of the
+  process that ran `switchboard`, when it is a launch id), `caller_project` (the pool of the group
+  holding the caller's folder; the folder itself is never stored), `caller_program` (the parent
+  process's name from the kernel, the first word without its folder, at most 64 safe characters,
+  never an argument: `launches::program_name`), `by` (`--by`, at most 64 letters, digits, dots,
+  hyphens or underscores) and `parent` (`--parent`, a launch id). A request through the control
+  listener or offline is never `window`: a bare launch reads as `cli`, and a claimed `window`
+  becomes `cli` (`from_outside`). The automatic fallback's hand-over is `fallback`. A malformed
+  `by` or `parent` is refused before anything runs (`launches::BY_INVALID`,
+  `launches::PARENT_INVALID`); a malformed caller id is dropped. A launch answer carries
+  `launch_id`. `LaunchedBy` ignores a field it does not know, so a later command's new field
+  reaches this owner as if it were absent (`a_field_this_version_does_not_know_is_ignored`).
+- **An older owner.** In the update window (§ Version skew above) an owner from before 0.7.0
+  cannot read `launched` and answers 400, having done nothing. The command then sends the bare
+  launch once, without who asked for it, and logs `launch_record` `outcome=owner_older`; the
+  launch runs and nothing records it until the owner restarts. No other operation is sent again
+  (`control::tests::a_launch_an_older_owner_cannot_read_is_sent_again_bare`).
+- **What it did.** The plugin's hooks report on the session's own record when
+  `SWITCHBOARD_LAUNCH_ID` is set (`Operation::LaunchEvent`, through the owner when it runs, else
+  offline under the store's lock; bounded by the hooks' 1.5 s; never fails the session):
+  `SessionStart` writes `provider_session_id` (the input's `session_id`) and `transcript` (its
+  `transcript_path`, absolute) and `session_started_at`, only when the input names a valid
+  session id or an absolute transcript path: any other JSON object writes nothing, not even
+  `session_started_at` (`a_start_without_a_session_or_a_transcript_writes_nothing`); `Stop`
+  writes `last_turn_at` and adds one to `turns`; `StopFailure` on `rate_limit` or `billing_error`
+  writes `ended: "limit"` and `ended_at`. Without the variable, or with an input that is not a
+  JSON object, nothing is asked. The `Stop` hook makes at most two calls of 1.5 s each (the turn,
+  and a recovery stop the session has), side by side since SB-220, so it takes up to 1.5 s, well
+  inside the plugin's 5 s timeout; `StopFailure` registers its stop beside the record's update,
+  not after it.
+  **A nested session (SB-218).** A launched session's children inherit `SWITCHBOARD_LAUNCH_ID`,
+  so a `claude -p` it runs in the same home reports on its parent's record. A `SessionStart` under
+  a session id other than the one stored is a nested session unless its `source` is `clear`,
+  `compact` or `resume` (the launch's own process under a new session, which moves the record to
+  it): its id is added to `nested_sessions` (at most 16, each once) and the parent's
+  `provider_session_id` and `transcript` stay; a `Stop` or `StopFailure` of a session other than
+  the stored one changes nothing and answers `{"recorded": false, "nested": true}`
+  (`launches::tests::a_nested_session_in_the_same_home_never_overwrites_its_parent`). The hook
+  sends `source` only for those three values; an owner from before it refuses the field, and the
+  hook sends the start once more without it, which that owner records as before.
+- **Where it went.** `continued_as` is set once, where the successor is known, and only to a
+  launch that started: a launch naming a
+  `parent` sets `{kind: "launch", id}` on it; a continuation of a workflow sets it on the latest
+  earlier launch that continued the same workflow; a hand-over left for a console
+  (`fallback::queue_handover`) adds `handover: <id>` to the launch it holds and turns the earlier
+  launch's into `{kind: "handover", id: <hand-over id>, launch_id}`. `workflow` is reserved. A
+  launch whose operation fails after its record was written (Terminal did not open, a hand-over
+  could not be queued) never started: its record gets `ended: "not_started"` and `ended_at`, a
+  `continued_as` naming it is set back to null, and it is never taken for a workflow's latest
+  launch, so the next launch that starts takes the link
+  (`a_launch_that_never_started_is_not_where_the_work_went`). A first session that continues no
+  workflow and names no parent gets no `continued_as` from the fallback or a recovery: they hand
+  over a workflow, and only a launch that continued that workflow is linked.
+  **Without reading every record (SB-219).** A launch names the records it took over in
+  `continued_from` (a list, empty when none), and each workflow keeps an index of the launches
+  that continued it, `launches/by-workflow/<workflow>.json` (0600, at most 64 ids, pruned with the
+  records after 90 days unwritten); a hand-over and a launch that never started read only the
+  records `continued_from` names, and a continuation only the workflow's indexed launches. A
+  record from before it has no `continued_from`, and a workflow with no index is found by one full
+  scan, which seeds the index. The records' file work runs in a blocking section, off the async
+  workers (`launches::tests::linking_a_continuation_among_thousands_of_records_reads_no_full_scan`,
+  3,000 records).
+- **The plain session list says it too.** `sessions()` (CLI `sessions`, MCP `switchboard_sessions` without `history`) copies `provider_session_id`, `transcript`, `session_started_at`, `last_turn_at`, `turns`, `ended`, `ended_at` and `continued_as` from the record of the launch a home's `.session.json` names (`launches::add_outcome`), so the card of a home's latest session says how it ended and where its work went (fabric-dashboards, board `62d78b7f`, 2026-10-26). A missing record leaves the row as before (`a_plain_session_list_says_how_a_launch_ended_and_where_its_work_went`).
+- **Reading.** `Operation::Launches {}` lists every record newest first, at most 500, with `total`
+  and each record's `state` now: its home's own (`starting`, `running`, `ended`, `unknown`) while
+  the home's `.session.json` still names this launch, else `ended`. `Operation::Launches
+  {launch_id}` answers `{launch, up, down}`: `up` follows `parent`, else `caller_launch_id`, else
+  the launch whose `continued_as` names it, to the first; `down` lists, breadth first, the
+  launches naming it as caller or parent (`via: child`) and the one it continued as (`via:
+  continued_as`), 64 at most each way; a record no longer kept reads `missing: true`. Only
+  `<id>.json` regular files are read, and `home_path` is followed only inside `homes`,
+  `runtimes` or `kimi`. Records written before 0.7.0 have no `launch_id` and list as before.
+- **Retention.** The background pass removes records not written for 90 days, at its first pass
+  and then at most once an hour (`launch_records_pruned` with `count`); `switchboard uninstall`
+  removes `launches/`. Nothing of it is sent to analytics.
+- Tests: `launch::tests::two_launches_of_one_home_keep_two_records_and_each_script_names_its_own`,
+  `a_chain_of_three_launches_follows_the_variable_each_session_exports`,
+  `a_launch_naming_its_parent_continues_it_and_the_parent_says_so`, `launches::tests::*`,
+  `launch_record_tests::*`, CLI
+  `a_launched_sessions_hooks_record_its_transcript_turns_and_stop_and_nothing_else_does`,
+  `the_history_and_one_launch_with_its_chain_read_from_the_command_line`,
+  `a_launcher_name_or_parent_that_is_not_one_is_refused_before_anything_is_asked`.
 
 ## Installed agents, switching and the default agent (SB-119/SB-120, 2026-10-14)
 
@@ -688,7 +1215,22 @@ CLI `onboard` (`onboard_status`), MCP `switchboard_onboarding`. Scenario SCN-050
   client name from `initialize`, ASCII letters, digits, space, `._-`, at most 64) after its first
   answered tool call, once per server process, and only into a data folder that exists.
 - Commands in `next` use the CLI's absolute path when `agent_cli()` finds it, shell-quoted.
-- Tests: `onboarding::tests` (6), `onboard_prints_the_guide_and_reads_the_setup_without_creating_storage`,
+- The organization checklist (SB-202, 0.7.0 node B-3, SCN-076): after the five steps, only on a
+  computer with an organization, `organization` (done), then per organization, newest first,
+  `org_group` (done when `Snapshot::organization_group` finds its one group; `todo` otherwise,
+  with `next.command` the settings import and `next.alternatives` `project save` then
+  `project edit --organization`, or no `next` when two groups are bound), `seat` (done when
+  `organization_seats` holds an account that is enabled, not in `elsewhere` and not in the
+  monitor's `sign_in_required`; else `needs_person` with `login begin --pool <group>`), `hook`
+  (always `optional`; read from `switchboard shell status`'s `hook`, never the start files;
+  `next.turn_off` names `shell off` when it is on, `next.command` `shell on` when it is off) and
+  `launch` (done when a recorded session's context is `org:<id>`, else `optional` with a managed
+  launch in the group's first folder). Each carries `organization: {id, name}`. With no
+  organization and PassionCode.ai connected (`vesta.json`), one optional `organization` step;
+  with neither, exactly the five steps. The CLI reads `MonitorStatus`, `Sessions {all}` and
+  `shell status` only when an organization exists.
+- Tests: `onboarding::tests` (9), `onboard_prints_the_guide_and_reads_the_setup_without_creating_storage`,
+  `onboard_lists_an_organizations_group_seat_and_hook`,
   `onboarding_reports_the_steps_and_the_first_answered_call_proves_the_connection`.
 
 ## Interface language (SB-76, 2026-10-07)
@@ -1008,7 +1550,10 @@ written by an earlier version still reads. Evidence:
   marks it `resumed` and logs `recovery_continued` with `settled`; with no owner running the
   CLI settles it under the store's lock. An unreadable file asks nothing. The input is read up
   to 8 MiB, since a Stop input carries the turn's whole last message. Its stdout is `{}`:
-  Claude Code reads a Stop hook's output as a decision. Evidence:
+  Claude Code reads a Stop hook's output as a decision. An input past 8 MiB cannot be parsed and
+  also answers `{}`, never `malformed_input` (SB-210; the turn is then not counted and a stop it
+  had stays waiting until a later turn settles it). Evidence:
+  `a_stop_input_past_the_hook_limit_answers_no_decision`,
   `a_session_that_goes_on_by_itself_settles_its_stop`,
   `the_stop_hook_after_a_turn_is_silent_and_never_fails`,
   `a_long_last_message_still_settles_the_stop_with_no_owner_running`,
@@ -1040,7 +1585,76 @@ still saved and still holds that token: a removal or a sign-in meanwhile keeps i
 (SB-179). Evidence: `adopting_a_renewal_never_holds_the_account_list_across_keychain_reads`,
 `a_renewal_never_writes_an_account_removed_while_its_reads_ran`,
 `a_sign_in_stored_while_a_renewal_reads_keeps_its_place`,
-`a_renewal_writes_under_the_lock_so_a_removal_waits_for_it`.
+`a_renewal_writes_under_the_lock_so_a_removal_waits_for_it`. Since H-2 (0.7.0) "the lock" for
+the re-read and the write is the store's credential lock, not the metadata lock (below).
+
+**No Keychain call holds the account metadata (H-2, 0.7.0; SB-174, SB-206).** On 2026-10-27, on
+0.6.83, a renewal's `store` phase held the store's metadata lock up to 69.3 s (the Keychain write
+of the successor), and `sessions` and `recovery`, which start with `snapshot()`, waited 63 to
+64 s behind it. The store now has two locks. Every writer of an account's credential
+(`adopt_refreshed_for`, `upsert`/`add` through `save_account`, `renew_rows`,
+`restore_missing_credential`, `remove`) and of an agent key (`set_agent_key_for`,
+`remove_agent_key_for`, and `remove_project`, which deletes its group's keys) holds the
+**credential lock** across its Keychain reads and writes, so they never interleave with each
+other; the **metadata lock** that `snapshot()`
+and every read wait on is taken under it, never the other way round, and only for the metadata.
+
+- A renewal writes the successor under the credential lock, taking the metadata lock only to
+  check that the account is still saved. It stores no metadata, so a crash after the write
+  leaves the row naming an item that holds the working successor; a refused write leaves the
+  spent token stored and the successor with the runtime (`refresh.rs` `stash`), which stores it
+  on the next pass. No token is lost (`a_renewals_slow_credential_write_does_not_hold_the_metadata`,
+  `a_renewal_whose_write_fails_leaves_the_stored_token_and_the_metadata_as_they_were`).
+- `save_account` plans under the metadata lock (which rows' tokens to compare, which row the
+  save is), reads those rows without it, writes the credential, then takes the metadata lock
+  again and publishes the same plan against the metadata as it is then. Only credential writers
+  add or remove an account or change its credential, and they wait for the credential lock, so
+  the reads stay true; a group change can still land meanwhile, and then the first write is put
+  back and the save planned again, at most 4 times; a save that finds the group changed under
+  all 4 gives up with `Account groups kept changing while the account was saved`, the old
+  credential back in place. Between a write and its put-back the row holds the new credential
+  for that moment; the row is the same login's (its identity, or its token when the identity is
+  unknown, matched the save), so no lineage crosses to another account. A refused metadata write
+  puts the old credential back (or removes the new item), as before
+  (`saving_an_account_reads_and_writes_the_keychain_without_holding_the_metadata`,
+  `a_save_whose_metadata_cannot_be_written_puts_the_old_credential_back`,
+  `a_save_whose_credential_write_fails_changes_nothing`,
+  `a_login_moved_into_the_group_while_its_save_writes_is_updated_not_copied`,
+  `a_save_under_constant_group_changes_gives_up_after_four_attempts`).
+- `renew_rows` checks the rows, reads every row's credential, writes them, then publishes, all
+  Keychain calls outside the metadata lock; a failure puts every written row back
+  (`renewing_rows_reads_and_writes_the_keychain_without_holding_the_metadata`).
+- An agent key is saved the same way: planned under the metadata lock, its old value read and
+  the new one written without it, the plan published against the metadata as it is then, the
+  old value put back (or the new item removed) when that fails. A key's removal and a group's
+  removal publish the metadata first and delete the items after the metadata lock is released
+  (`saving_and_removing_agent_keys_never_holds_the_metadata`,
+  `an_agent_key_whose_metadata_cannot_be_written_puts_the_old_key_back`).
+- The credential lock is always taken first, the metadata lock under it: a removal, a renewal or
+  a restore that waits for a save's write waits without the metadata lock, so snapshots answer
+  and the save publishes (`a_removal_during_a_saves_held_write_neither_deadlocks_nor_stalls_a_snapshot`,
+  `a_renewal_racing_a_held_save_never_deadlocks`,
+  `a_restore_waits_for_a_removal_or_a_save_and_never_overwrites_their_item`).
+- The order of the credential and the metadata is the one before H-2: the credential first, so
+  a crash between them leaves metadata that names a credential that works.
+- These tests read "not held behind a Keychain call" as a snapshot wait under 80 % of the slow
+  vault's call, now one second: a snapshot held behind a call waits all of it (S2: the fixed
+  150 ms bound before failed at load average ~58, where a snapshot also waits for a core and
+  for a metadata write; `not_behind_keychain` in `crates/switchboard-core/tests/storage.rs`).
+- A quota check compares its credential under the metadata lock (`same_generation`). A write no
+  longer holds that lock, so the store's vault wrapper marks each item while a write or a
+  removal of it runs, and a check that finds its item marked is refused as `credential_changed`,
+  as it would be once the write landed (`a_quota_verdict_read_while_a_renewal_writes_is_refused_as_a_change`,
+  `a_write_in_flight_during_the_generation_read_is_still_seen`). The mark is cleared when the
+  write returns and when it panics, after the write count moved
+  (`a_panicking_put_leaves_no_item_marked`, `the_write_count_moves_before_the_in_flight_mark_clears`). A save's own publication still
+  clears a verdict of the old generation, from the metadata as it is at publication.
+- Left under the metadata lock: `remove`'s deletion (so a selection cannot route to the account
+  between the route check and the deletion), and the Keychain reads of `route`, `credential`,
+  selection and the rotation's candidate check, which validate the credential they select (a
+  write in flight lands before or after such a read: the account's old or new credential).
+- `lock_ms` counts the request's own waits for the metadata lock only, never another
+  request's (`a_requests_lock_ms_counts_only_its_own_waits`).
 
 **Sign-ins needed (SB-182, PRD-01).** `recovery`, `RecoveryClaim` and `MonitorStatus` read the
 accounts whose rejected lineage nothing replaced (`RefreshState::sign_in_required`): each such
@@ -1076,12 +1690,73 @@ under it, read again only if a credential was written meanwhile. Evidence:
 `a_quota_checks_generation_read_does_not_hold_the_metadata`,
 `a_credential_written_after_the_generation_read_is_still_seen`.
 
+**A seat the provider ended (SB-160 leaving, iteration 0.7.0 node B-5).** `sign_in_required` and
+`RefreshState::is_dead` also name an account whose stored credential a quota check found rejected:
+a Claude usage 401 that survives a fresh renewal (`monitor::check` renews once after a 401 and
+probes again; a 401 on the renewed token is the verdict), or, for Codex (never renewed while
+inactive), a 401 on two checks in a row on the same credential, the second at least
+`refresh::REJECTION_SPACING` (60 s) after the first. Only the provider's own 401 counts: a token
+that expired on this machine is refused before the network and says nothing; a Codex 401 within
+`monitor::CODEX_EXPIRY_SKEW` (300 s) of the token's local expiry may be a clock running ahead here
+and is no verdict; a 403, a 429, a 5xx, an unreachable provider or any answer between two Codex
+401s is no verdict and breaks the row; the account Claude Code is signed in to is never renewed
+here, so its 401 never is one, and the account the ordinary Codex CLI is signed in to (the monitor's
+in-use set, `Store::is_in_use`) is exempt the same way. The verdict is
+the fingerprint of the whole stored credential (access and refresh token) in memory
+(`RefreshState::rejected`), never in the renewal journal: any new credential (a sign-in, a
+renewal by Claude Code or Claude Swap) clears it, and a restart forgets it, so a provider's mistake
+costs one run at most and the next check finds a real removal again. Until then the account is
+handled as a dead lineage: no quota check reaches the provider (the account leaves the due queue
+for 30 minutes and its check answers the sign-in message), no renewal is granted, native
+activation refuses it, and native rotation, fallback chains and recovery skip it, as they skip
+every account in `sign_in_required`. An ended Claude seat leaves the renewal schedule until its
+credential or a verdict changes (`RefreshState::verdict_generation` is part of the schedule's key),
+so its due token is not read every minute. A quota check a person asks for (the owner's `Usage`
+operation and the offline CLI's, `monitor::check_by_person`; never the background pass) asks the
+provider once past a usage verdict, without a renewal: a 401 keeps the verdict, any other answer
+takes it back (`RefreshState::lift_verdict`); a lineage the token endpoint refused is not asked
+past. Nothing moves a session or replays a request (B-Q3). Known limit: the proxy's own failover
+(SB-98's 429 move and SB-101's unusable-route failover) does not read this set, so a request on a
+group's route can still be moved to an ended seat (board row SB-211). An ended seat that is a
+group's selected route stops renewing, so its token runs out and the route falls to the recorded
+SB-101 failover for an expired token: the pool moves to its next usable account, and a group with
+no other usable seat answers the session 409 ("Select a usable account in this pool first.").
+The Codex row's 60 s spacing is measured in wall-clock time (`monitor::now`), not a monotonic
+clock: a forward jump of the machine's clock between two Codex 401s can shorten it, so two checks
+less than a minute apart may give a verdict; a person's check (`monitor::check_by_person`) takes a
+wrong verdict back on the provider's next answer that is not a 401.
+Both an `invalid_grant` (also from `refresh::renew_idle_live`, once per lineage) and this verdict
+log `seat_ended {provider, by: renewal|usage, organization: true|false}` once. Evidence:
+`monitor::tests::seat::*`
+(`a_claude_seat_rejected_after_a_fresh_renewal_reads_sign_in_required`,
+`a_codex_seat_rejected_twice_reads_sign_in_required`, `a_single_codex_401_is_not_a_verdict`,
+`two_quick_codex_401s_are_not_two_scheduled_checks`, `a_403_is_never_a_verdict`,
+`a_new_credential_clears_the_rejection`, `a_transient_401_or_a_5xx_never_ends_a_claude_seat`,
+`an_expired_codex_token_is_not_a_removed_seat`,
+`the_account_claude_code_uses_is_never_marked_ended`,
+`a_person_check_lifts_a_verdict_the_provider_takes_back`,
+`a_person_check_answered_401_keeps_the_verdict`,
+`a_codex_401_near_its_local_expiry_is_no_verdict`,
+`the_account_codex_uses_is_never_marked_ended`),
+`monitor::tests::an_ended_seat_leaves_the_renewal_schedule_until_its_credential_changes`,
+`monitor::tests::a_verdict_after_the_schedule_was_built_takes_the_seat_out`,
+`usage_gate_tests::a_persons_usage_operation_lifts_a_verdict_through_the_owner_and_the_offline_arm`,
+`refresh::tests::invalid_grant_logs_the_seat_as_ended_by_renewal`,
+`refresh::tests::an_idle_live_lineage_rejected_by_the_provider_is_dead`,
+`oplog::tests::a_flag_is_written_as_a_json_boolean`.
+
 The hand-over queue is `<data>/handovers/`, records 0600, at most 16 pending before
 the monitor starts overflow in Terminal; recording refuses at 256 directory entries
 (including permanent `.taken` receipts). Individual records are at most 16 KiB.
 Exclusive private-file creation chooses one taker on every platform; the receipt remains
 after completion or a crash and prevents republication. A pending record with a receipt
-is not offered again. Expired/unparseable deadlines never launch.
+is not offered again. Expired/unparseable deadlines never launch. Since 0.7.0 a record
+carries `paid` and `account` (the account id it continues on), and a field this build does not
+know is ignored, not refused (SB-215,
+`handovers::tests::a_record_with_a_field_this_build_does_not_know_is_still_read`); builds before
+0.7.0 refuse unknown fields, and every record 0.7.0 queues carries `account`, so after a downgrade
+to 0.6.x every queued record reads as unparseable and is removed by the sweep, its offer lost (an older build cannot be
+fixed from here).
 `fabric-handovers` absent means off. Pending/taken records and recovery state are
 operational state, excluded from account backups and removed by uninstall. A queue
 record never contains a prompt or credential. Evidence: `handovers::tests`,
@@ -1105,5 +1780,566 @@ read. New record fields `kind`, `attempt` and `mode` default for SB-114 files.
 `Operation::RecoveryHook` registers a session's own stop: the account is
 `LimitState::bound(session)`, else the ordinary Claude Code's. One live stop per session
 holds: a waiting stop moves to now with `attempt + 1`; a claimed one becomes `resumed` and
-a new stop follows; a stop within 1800 s of the session's last resumed stop is one attempt
-later. Evidence: `recovery::tests`, CLI `recovery_hook_never_fails_the_session`.
+a new stop follows; a stop within 1800 s of the session's last stop a host resumed (claimed,
+then resumed: it carries `mode`) is one attempt later. A stop the session's own `Stop` hook
+resumed while it waited (SB-204) has no `mode` and does not count, so a session that went on by
+itself and stopped again starts the backoff at 120 s (SB-209,
+`a_stop_the_session_resumed_by_itself_does_not_raise_the_next_attempt`); the file's format is
+unchanged. Evidence: `recovery::tests`, CLI `recovery_hook_never_fails_the_session`.
+
+## Context binding in 0.7.0: where each contract lives (SB-183, SB-201, node A-9)
+
+Dossier A section 5 ([dossier](runs/2026-10-26-iteration-0.7.0/dossier-a-context-binding.md))
+named the contracts the context binding touches. Each is recorded in the section named here; the
+code and the test given are the proof (paths at the iteration's head, `a476db1`).
+
+| Contract | Recorded in | Code | Proof |
+|---|---|---|---|
+| One context rule for every session: the group of the pool, else the group of the folder, else what pays; disagreement gives `personal` | [Session list](#session-list-sb-95-2026-10-11) | `Snapshot::context_for` `crates/switchboard-core/src/organizations.rs:202`, `session_context` `:190`, `key_context` `:227` | core `a_session_without_an_account_takes_its_keys_group_else_personal` (`organizations.rs:760`) |
+| Kimi Code, Hermes, OpenCode, OpenRouter and proxy agent launches carry `context` and `SWITCHBOARD_CONTEXT`; the last two write a `.session.json` | [Session list](#session-list-sb-95-2026-10-11) | `crates/switchboard-runtime/src/launch.rs`, `kimi.rs` | `an_openrouter_launch_records_its_session_and_context` (`launch.rs:4471`), `a_proxy_agent_launch_records_its_context` (`launch.rs:4534`) |
+| The folder map v1 and the `shell env` answer | [The terminal hook's folder map](#the-terminal-hooks-folder-map-sb-183-node-a-1-2026-10-26) | `crates/switchboard-runtime/src/shell/map.rs:19-32` (version, 1 MiB, file names), `write` `:68`, `read` `:102` | `the_longest_folder_of_an_organization_group_answers_its_homes_and_context` (`map.rs:427`); CLI `shell_env_answers_without_the_owner_or_the_store_lock_within_25_ms` (`crates/switchboard-cli/tests/shell.rs:73`) |
+| `SWITCHBOARD_CONTEXT`, `CLAUDE_CONFIG_DIR` and `CODEX_HOME` of a plain session in an organization's folder, the person's own given back on leaving | [The terminal hook's scripts](#the-terminal-hooks-scripts-sb-183-node-a-2-2026-10-26) | `shell/scripts.rs` `script` `:103`, templates `hook.zsh`, `hook.bash`, `hook.fish`, `core.sh` | `entering_and_leaving_restores_unset_and_set_values` (`scripts.rs:364`), `the_saved_values_are_not_exported` (`:476`) |
+| The person's start files: markers, the choice `shell-hook`, the record `shell-hook.json`, on by default (D-3) | [The terminal hook's start files](#the-terminal-hooks-start-files-sb-183-node-a-3-2026-10-26) | `shell/install.rs` markers `:34-35`, `set_choice` `:386`, `apply` `:643`, `remove_all` `:966` | `the_block_goes_in_and_comes_out_leaving_the_file_byte_identical` (`install.rs:1044`), `default_on_only_on_an_installed_build_with_an_organization_group_and_off_wins` (`:1179`) |
+| PowerShell 5.1 and 7 profiles, the execution policy read and never changed, Constrained Language Mode | [The terminal hook for PowerShell](#the-terminal-hook-for-powershell-sb-183-node-a-8-2026-10-27) | `shell/windows.rs` `PROFILE` `:29`, `profile_paths` `:57`, `profile_policy` `:128`, `lockdown` `:176`; `shell/hook.ps1` | `profile_paths_follow_the_documents_folder_for_each_edition` (`windows.rs:507`), `the_ps1_transition_matches_the_posix_one` (`:834`) |
+| The organizations' shell homes, keyed by pool (H-2), with a placeholder token and no credential | [The organizations' shell homes](#the-organizations-shell-homes-sb-183-node-a-4-2026-10-26) | `shell/homes.rs` `PLACEHOLDER` `:34`, `rows` `:99`, `sync` `:267`; called from `Runtime::bindings_pass` (`crates/switchboard-runtime/src/lib.rs:1146`) | `an_organization_pools_shell_home_has_the_placeholder_carried_links_and_no_credential` (`homes.rs:539`); the client side measured in [the A-0 record](evidence/shell-home-measurement-2026-10.md) |
+| A folder inside Switchboard's data folder is never the person's own | [The person's own Claude Code and Codex folders](#the-persons-own-claude-code-and-codex-folders-sb-183-node-a-5-2026-10-26) | `crates/switchboard-runtime/src/person.rs:34-53`, `inside` `:75` | `a_config_dir_inside_switchboards_data_is_never_the_persons_own` (`person.rs:114`) |
+| Uninstall takes the blocks out and owns `shell-hook`, `shell-hook.json` | [Uninstall](#uninstall-sb-29-2026-10-05) | `crates/switchboard-runtime/src/uninstall.rs:46-47` (`OWNED`), `:69` (`shell` kept as a home folder) | `apply_removes_owned_things_and_keeps_the_persons_files` (`uninstall.rs:442`) |
+| CLI `switchboard shell status`, `env`, `on`, `off`, `init <shell>` (zsh, bash, fish, pwsh) | [CLI](CLI.md#terminals-in-an-organizations-folders-sb-183-070) | `crates/switchboard-cli/src/main.rs:244` (`Shell`), `crates/switchboard-cli/src/shell.rs:18-56` (`ShellCmd`) | the CLI tests in `crates/switchboard-cli/tests/shell.rs` |
+| MCP `switchboard_shell_hook` (read) and `switchboard_shell_hook_set` (write, hidden under `--read-only`) | the start files section | `crates/switchboard-cli/src/mcp.rs:105-106`, `:883-886` | `handshake_lists_tools_and_rejects_malformed_messages` (`crates/switchboard-cli/tests/mcp.rs:139`, the hook tools at `:217-223`) |
+| The window's section *Terminals in organization folders* | SCN-075 in [scenarios](ux/scenarios.md) | `shellHookSection` in `src/main.ts` | `the_shell_hook_section_reads_every_state` (`scripts/test-ui-logic.mjs:973`) |
+| Lifecycle: the shell homes, map, scripts and start files in *Writes*; the hook's question in its own row | [AGENTS.md](../AGENTS.md#lifecycle) | as above | `python3 scripts/check_docs.py` |
+| The design decision H-3, amended for D-3, PowerShell and the shell homes | [design](research/session-home-per-context-2026-10-24.md) H-3 | none | none (a record of a decision) |
+
+**Guarded by two proxy tests (node A-6, 2026-10-28).** The proxy facts the shell homes rely on are
+pinned beside the existing capability tests (`a_pool_capability_reaches_its_pool_only`,
+`crates/switchboard-proxy/src/tests.rs:1440`):
+
+- `a_placeholder_bearer_with_a_folder_header_reaches_its_pool` (`tests.rs:2212`): the placeholder
+  bearer `switchboard-shell` with a folder's capability header reaches that folder's pool on its
+  account; the placeholder alone, or with the header on another pool, answers 401 and reaches no
+  provider; neither the placeholder nor the capability is forwarded.
+- `an_auto_request_from_an_unmapped_folder_carries_no_sign_in_upstream` (`tests.rs:2287`): a
+  request to `/codex/_auto/v1` as the Codex shell home sends it (the auto capability, no
+  `Authorization`) from a folder no group maps, or naming no folder, reaches `/v1/responses` with no
+  `authorization`, `chatgpt-account-id` or `x-api-key` and no account's token; the same request from
+  a mapped folder carries that pool's sign-in.
+
+Each was shown to catch its defect by planting it in `lib.rs` and watching the test fail, then
+restoring: the placeholder accepted as a capability, the header ignored beside a bearer, an unmapped
+folder routed to the default pool, and a sign-in attached to the unmapped request. The client side
+is measured in [the A-0 record](evidence/shell-home-measurement-2026-10.md).
+
+## The terminal hook's folder map (SB-183, node A-1, 2026-10-26)
+
+Code: `switchboard_runtime::shell::map` (`read`, `write`, `Map::lookup`, `answer`, `env_line`,
+`status`), CLI `shell status` and `shell env` (`crates/switchboard-cli/src/shell.rs`). Design:
+[dossier A](runs/2026-10-26-iteration-0.7.0/dossier-a-context-binding.md) part A; scenario SCN-074.
+
+- **Map.** `<data>/shell/map.json`, 0600, at most 1 MiB, written in one rename by `map::write`
+  (the owner's bindings pass calls it, node A-4, section below):
+  `{"version": 1, "rows": [{"folder", "pool", "context", "claude", "codex"}]}`. `folder` is an
+  absolute group folder (its subfolders and worktrees belong to it); `context` is `org:<id>`;
+  `claude` is true when the folder's Claude Code is bound to the group, `codex` when the pool has
+  an enabled Codex account. Folders, pools and organization ids only: never a capability or a
+  token. Shell homes are `<data>/shell/claude-<pool>` and `<data>/shell/codex-<pool>`.
+- **One row per folder.** Which group a folder belongs to is decided once, by the writer (node
+  A-4), never by the lookup: a folder gets a row only when the group `Snapshot::project_for`
+  chooses for it (`crates/switchboard-core/src/projects.rs:297`) is bound to an organization, and
+  no row when that group is personal; `folder` is written in `canonicalize()` form.
+  `map::write` refuses two rows that name the same folder, compared component by component (on
+  Windows as the lookup compares them, below), with
+  “Two rows of the terminal folder map name the same folder.” and writes nothing. Test:
+  `shell::map::tests::the_map_holds_one_row_per_folder`.
+- **Lookup.** The longest row folder that holds the folder wins, compared whole component by
+  whole component, the folder matched with its links resolved: a link inside a group's folder
+  that leads out of it (`/w/acme/out -> /w/mine`) is the folder it leads to and answers nothing
+  of the group's, and a link from outside that leads into a group's folder answers that group.
+  Only a folder that cannot be resolved (it does not exist or cannot be read) is matched as
+  given. A row is skipped when its folder is not absolute, its pool is not `[A-Za-z0-9._-]` (or
+  starts with `.`), or its pool or context is empty, longer than 256 characters or holds a space
+  or a control character. A folder with a `..` step is never matched (`/w/acme/../mine` is not
+  inside `/w/acme`). Of two rows of the same length the earlier one wins, every time (a map with
+  two rows for one folder, written by hand or by an older writer, answers its first); a row that
+  names its folder through a link holds no folder that resolves. On Windows folders compare as
+  Windows names them (`map::windows_key`, W2 2026-10-27): rows are written as `canonicalize`
+  answers (`\\?\C:\...`) and a terminal asks with `$PWD` (`C:\...`), so the verbatim prefix is
+  dropped (`\\?\UNC\host\share` is `\\host\share`), `/` reads as `\`, empty and `.` steps are
+  skipped and every part is compared without regard to case; a folder that is not absolute (no
+  drive and root, no share) or has a `..` step has no key and is never matched. This holds for a
+  folder that does not exist too, which `canonicalize` cannot resolve. Tests:
+  `shell::map::tests::a_windows_folder_compares_as_windows_names_it` (pure text, every platform),
+  `a_windows_terminal_folder_finds_its_verbatim_row` and
+  `shell::homes::tests::windows_rows_are_verbatim_and_a_plain_spelling_finds_them` (Windows),
+  `shell::map::tests::a_link_out_of_a_group_folder_never_answers_its_homes`,
+  `shell::map::tests::a_folder_with_a_parent_step_is_never_matched`,
+  `shell::map::tests::a_row_stored_through_a_link_loses_to_the_resolved_folder`.
+- **`shell env --shell <zsh|bash|fish|pwsh> --dir <folder>`** prints `none` or
+  `<pool>\t<context>\t<claude home or ->\t<codex home or ->`. `none` also when `<data>/shell-hook`
+  reads `off`, the map is missing, unreadable, over 1 MiB or of another version, the folder is
+  not absolute, the row has neither home there, or an argument is malformed. The Claude home is
+  answered only in the row's own folder (the folder itself, or the same folder through a link):
+  Claude Code 2.1.299 reads Switchboard's route only from `.claude/settings.local.json` in the
+  folder it starts in, git repository or not, so below it the home's placeholder would reach the
+  provider (measured: [shell home measurement](evidence/shell-home-measurement-2026-10.md),
+  cases `subfolder` and `subfolder-git`). Below the bound folder the answer is `-` for Claude and
+  the Codex home as above; a group with only Claude answers `none` there, so `claude` runs in the
+  person's own settings, as it does there without the hook (SB-118 binds group folders and
+  worktrees, not their subfolders). Test:
+  `shell::map::tests::the_claude_home_is_answered_in_the_bound_folder_itself_only`. It is answered in `main`
+  before the async runtime starts, takes no store lock, opens no control connection, silences
+  panics, exits 0 and writes nothing to stderr; `--help` still reaches the ordinary parser. Tests:
+  `shell::map::tests::the_longest_folder_of_an_organization_group_answers_its_homes_and_context`,
+  CLI `shell_env_answers_without_the_owner_or_the_store_lock_within_25_ms` (the store's lock held
+  and a control port that never answers; the fastest of seven warm calls within 25 ms),
+  `shell_env_says_none_when_off_missing_unknown_version_or_outside`,
+  `shell_env_never_writes_to_stderr_and_exits_zero`.
+- **Choice.** `<data>/shell-hook`: `on`, `off`, anything else or absent is the default. Written by
+  `switchboard shell on|off` (`shell::install::set_choice`; section below).
+- **`shell status [--dir <folder>]`** (`--json`: `{"ok": true, "data": ...}`) answers `hook`
+  (`on`, `off`, `default_on` when no choice is made and the map holds a valid row, else
+  `default_off`), `choice`, `map` (`ok`, `missing`, `unreadable`, `unknown_version`), `folder`,
+  `terminal` (`hook_loaded`: `SWITCHBOARD_SHELL_HOOK` is `1`; `launched_session`:
+  `SWITCHBOARD_SESSION` is set), `here` (`group`, `context`, `claude_home`, `codex_home`, or null:
+  what `shell env` answers there) and `files`. It reads files only and never fails. `files` comes
+  from the installer's record `<data>/shell-hook.json` (node A-3 writes it): the reader takes
+  `{"files": [{"shell", "path", "state"}]}`, ignores other fields and skips an entry without the
+  three strings; an absent or broken record gives `[]`. Test:
+  `shell_status_reads_the_map_and_the_record_without_the_owner_and_never_fails`.
+
+## The terminal hook's scripts (SB-183, node A-2, 2026-10-26)
+
+Code: `switchboard_runtime::shell::scripts` (`script`, `hook_path`), templates
+`crates/switchboard-runtime/src/shell/hook.zsh`, `hook.bash`, `hook.fish` and `core.sh` (the
+transition zsh and bash share), and `hook.ps1` (PowerShell, node A-8); CLI
+`switchboard shell init <zsh|bash|fish|pwsh>`. Design:
+[dossier A](runs/2026-10-26-iteration-0.7.0/dossier-a-context-binding.md) part A "The hook scripts".
+
+- **Files.** `<data>/shell/hook.<zsh|bash|fish>` and `hook.ps1`, 0600, each naming the CLI's
+  absolute path and the data folder, single-quoted for its shell (fish: `\\` and `\'`;
+  PowerShell: a quote doubled). A path that is not absolute,
+  not valid text or holds a control character gets no script (`script` answers None; `shell
+  init` refuses with “The hook cannot name this executable or the data folder: a path is not
+  absolute or not valid text.”). Test: `shell::scripts::tests::a_path_that_is_not_text_gets_no_script`.
+- **Triggers.** zsh: `add-zsh-hook chpwd`, inside `emulate -L zsh`; bash: a `PROMPT_COMMAND` entry
+  (string form, macOS's bash 3.2) put first, acting only when `$PWD` changed and returning the
+  status the prompt shows; fish: `--on-variable PWD`. Each acts once at load. Loading twice
+  registers once (the `_switchboard_shell` guard). Tests: `bash_3_2_syntax_is_accepted` (`bash -n`
+  on `/bin/bash` 3.2.57 and `zsh -n`), `loading_twice_registers_once_and_bash_keeps_the_persons_prompt_command`,
+  `an_answer_of_another_form_changes_nothing_and_the_prompt_keeps_its_status` (five fields, a
+  relative home, and since fix cycle 2 an answer of two lines, which bash had taken: none of
+  the three variables moves).
+- **The question.** `<cli> --data-dir <data> shell env --shell <shell> --dir "$PWD"`, stderr and
+  stdin closed. The answer is used only when it is one line of four tab-separated fields with a
+  pool, a context and two homes that are `-` or absolute. Anything else reads as `none`: a CLI that is
+  not executable (the app removed or moved), one that exits non-zero (an older CLI without
+  `shell env`), an answer of another form, and in zsh a CLI silent for ten seconds (then two
+  more for its exit status, which must be 0). So what the hook holds is given back and nothing
+  it does not hold changes; nothing is printed. zsh runs the CLI disowned, holding none of the
+  terminal's files, so nothing waits for it after a timeout; bash and fish wait for the CLI
+  (bash has no output timeout that also works in its POSIX mode, fish has none). Tests:
+  `a_missing_old_or_failing_cli_gives_the_held_values_back` (the CLI deleted, exiting 2, or
+  answering two fields, after entering a group's folder: leaving gives the person's values
+  back), `a_hanging_cli_never_holds_a_zsh_prompt`.
+- **fish** reads `conf.d` in every fish, scripts included: the hook loads only when
+  `status is-interactive`. Test: `a_fish_script_never_runs_the_hook` (the CLI never asked).
+- **The transition**, per variable (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `SWITCHBOARD_CONTEXT`):
+  entering a folder where the answer names a value, the person's own (its value, or that it was
+  not set) is kept in a shell variable that is never exported, then the value is exported;
+  moving on, the new value; where the answer names none, the person's own is set back or unset.
+  A variable whose value is no longer what the hook set is the person's: the hook lets it go and
+  never writes over it. `SWITCHBOARD_SESSION` set (a terminal Switchboard launched): the hook does
+  not load. A home inside `<data>/shell/` found at load (a shell started from a hooked terminal,
+  which never sees its parent's saved values) is held with "not set" as the person's own, with
+  an `org:` context beside it. On load it exports `SWITCHBOARD_SHELL_HOOK=1`. The hook's own
+  variables (`_switchboard_*`) are never exported, `set -a` included (bash and zsh turn it off
+  before the hook's first assignment and on again after loading and after each prompt, so the
+  person's `set -a` stays theirs). Tests (real `/bin/zsh` and `/bin/bash`; fish when installed,
+  else skipped with the reason): `entering_and_leaving_restores_unset_and_set_values`,
+  `a_value_the_person_set_inside_is_never_restored_over`, `a_launched_sessions_shell_is_never_touched`,
+  `the_saved_values_are_not_exported` (`set -a` on before the hook loads and again after),
+  `set_a_stays_on_after_loading_and_after_a_prompt` (bash and zsh), `a_missing_cli_prints_nothing`,
+  `paths_with_spaces_and_quotes_survive_every_shell`,
+  `a_shell_started_inside_an_organization_folder_gives_the_home_back_on_leaving`; CLI
+  `shell_init_prints_a_hook_that_follows_the_folder_map_with_the_real_cli` (the printed script,
+  loaded by zsh and bash, with the real `shell env`). A variable set back is exported, whether or
+  not the person had exported it.
+- **Covered since fix cycle 1.** fish 4.9.3 (Homebrew) ran every test above on 2026-10-26 (run
+  interactive, `fish --no-config -i -c`); a machine without fish still skips them with the
+  reason. PowerShell: the next sections but one (node A-8).
+
+## The terminal hook's start files (SB-183, node A-3, 2026-10-26)
+
+Code: `switchboard_runtime::shell::install` (`Host`, `apply`, `remove_all`, `set_choice`,
+`read_record`), `Runtime::enable_shell_hook` and the bindings pass (`shell_hook_follow`), CLI
+`switchboard shell on|off`, `uninstall`. Design: [dossier A](runs/2026-10-26-iteration-0.7.0/dossier-a-context-binding.md)
+part A "On by default, safely"; operator decision D-3 (on by default on a computer holding an
+organization's group, off by one command); A-Q3 assumed (a linked start file is skipped).
+
+- **Who writes.** The installed app only: `src-tauri` calls `Runtime::enable_shell_hook` when the
+  executable is an installed build (`residency::packaged`) and not the smoke check, and the
+  runtime goes on only for the app's own data folder (`install::is_default_root`) and, on macOS,
+  only for an app inside `/Applications` or `~/Applications` (`install::installed_app`: never a
+  bundle opened from a download or build folder, nor a translocated copy), with the person's home
+  (`install::Host::process`: `HOME`, `ZDOTDIR`, the login shell from `SHELL`, the user id) and the
+  CLI `install::hook_cli` names (`launch::agent_cli` in a release build; a development build
+  never names itself, only an installed copy beside the app, on `PATH` or in `~/.local/bin`).
+  `serve`, a development build, `--data-dir` and every test owner never get a home. The person
+  may also run `switchboard shell on|off` themselves, for the app's own data folder only: another
+  `--data-dir` is refused with “Only Switchboard's own data folder can change your terminals'
+  start files. Run this command without --data-dir.”, since every data folder would write the
+  same marker into the same home; a development build with no installed CLI to name refuses
+  `shell on` with “No installed switchboard command was found for the hook to run. Install Fabric
+  Switchboard, then run this command again.” The two runtime checks are in
+  `Runtime::enable_shell_hook_when`, the data folder first, so the installed check and the home
+  can be given by a test. Tests: `owner_tests::no_test_or_dev_build_touches_the_real_home`,
+  `owner_tests::an_installed_app_over_another_data_folder_writes_no_start_file` (the installed
+  check given as true and a home given: nothing written, the installed check never asked),
+  `owner_tests::the_installed_owner_follows_the_presence_of_an_organization_group`,
+  `shell::install::tests::only_the_apps_own_data_folder_and_an_installed_app_touch_the_home`,
+  CLI `another_data_folder_never_touches_the_start_files`. Not covered: `residency::packaged`
+  itself is unchanged (the location rule lives in the runtime, so the login item and the updater
+  keep their own predicate).
+- **One run at a time.** Every run (`apply`, `remove_all`, the notice's writes) holds an advisory
+  `flock` on the data folder itself from its first read to its last write, so the owner's run
+  and `switchboard shell on|off` or `uninstall` from another process never interleave between a
+  start file's read and its rename. The folder rather than `shell-hook.json`: the record is
+  replaced by a rename, which a lock on it would not survive, and a lock file would be one more
+  entry in a data folder that never had an organization's group (the store's own lock is the
+  file `instance.lock`, so the two never meet). Test:
+  `a_second_run_waits_for_the_first` (`shell off` started between the owner's read and rename
+  waits; the file ends as it was and the record agrees).
+- **When.** At the owner's start (`enable_shell_hook`), and in a bindings pass whose
+  fingerprint moved when whether the folder map (just written by the same pass) holds a valid
+  row flipped (`shell::map::organizations_present`); never on a timer, never on an idle pass. Log event
+  `shell_hook` (`wanted`, `written`, `removed`, `skipped`, `changed`, `no_hook`), numbers and
+  flags only.
+- **The rule.** Wanted when `<data>/shell-hook` is `on`, or absent while the folder map holds a
+  valid row (`shell::map::organizations_mapped`: a folder of a group bound to an existing
+  organization that `project_for` gives that group and that exists on disk); `off` takes every
+  block out and never writes again. The installer and `shell status` (so the window, MCP and
+  onboarding's `hook` step) decide `default_on` by this one rule from the same file, so a written
+  block and the reported state agree (A-7 fix cycle 1; a group whose only folder a personal group
+  takes is neither written nor reported). Tests:
+  `owner_tests::the_hook_reported_is_the_hook_written`,
+  `shell::install::tests::default_on_only_on_an_installed_build_with_an_organization_group_and_off_wins`,
+  `the_last_organization_group_leaving_removes_the_default_block`.
+- **Where** (macOS and Linux; on Windows the PowerShell profiles only, node A-8 below): zsh
+  `${ZDOTDIR:-$HOME}/.zshrc`, created only when zsh is the login shell and never when the app
+  cannot know where zsh reads it: an app started from the Dock or at login does not see the
+  `ZDOTDIR` a person exports in `~/.zshenv`, so with no `ZDOTDIR` in this process, no
+  `~/.zshrc`, and a `~/.zshenv` (any) or a `~/.zprofile` that names `ZDOTDIR` or cannot be read,
+  nothing is created and the record says `skipped_zdotdir_unknown`; `shell status` gives the line
+  to add (`eval "$(switchboard shell init zsh)"`). An existing `~/.zshrc` is written as before.
+  Test: `no_zshrc_is_created_when_zshenv_may_move_zdotdir`; bash, on macOS the first
+  existing of `.bash_profile`, `.bash_login`, `.profile` (else `.bash_profile`), on Linux
+  `.bashrc`, only when it exists or bash is the login shell; fish its own file
+  `~/.config/fish/conf.d/fabric-switchboard.fish`, only when `~/.config/fish` exists. Test:
+  `the_start_files_follow_the_shells_present`.
+- **What.** The hook script `<data>/shell/hook.<shell>` (node A-2) and one block appended at the
+  end of the start file: `# >>> Fabric Switchboard: shell hook (SB-183) >>>`, one line that
+  reads the script only when it is readable (`if [ -r '<hook>' ]; then . '<hook>'; fi`, fish
+  `if test -r '<hook>'; source '<hook>'; end`), `# <<< Fabric Switchboard <<<`. A file without a
+  final line break gets one before the block, recorded, and taken out with it. Taking the block
+  out gives the file back byte for byte; its mode is kept; the write is a file in the same
+  folder renamed over it. Lines inside the markers are Switchboard's and are rewritten. No CLI to
+  name, or a data folder whose path is not text: no script and no block (`no_hook`). A start file
+  the installer created is recorded `created` and deleted when the block comes out and nothing
+  else is left in it (one the person wrote into keeps their lines; one the person had is never
+  deleted). Tests: `a_start_file_the_installer_created_is_deleted_when_the_block_goes`,
+  `the_block_goes_in_and_comes_out_leaving_the_file_byte_identical` (no final break, CRLF,
+  an empty file, non-ASCII text; mode 0640 kept), `a_data_folder_that_is_not_text_writes_no_block`.
+- **Never written.** A start file that is a link (`skipped_symlink`), another user's
+  (`skipped_owner`), not a regular file, over 1 MiB or not valid text (`unreadable`), one whose
+  opening or closing marker was changed (`unreadable`: neither rewritten nor taken out), and one
+  that changed between the read and the rename (size or time differ: left as it is, the
+  temporary file removed, tried again next time). Tests:
+  `a_symlinked_foreign_owned_or_changed_rc_is_never_written`,
+  `a_block_with_a_changed_marker_is_the_persons_and_never_touched`.
+- **Never fought.** A block (or the fish file, or a start file) the person took out after
+  Switchboard wrote it is recorded `removed_by_person` and not written back until the person's
+  own `switchboard shell on`. Test: `a_block_the_person_removed_is_not_written_back`.
+- **Record** `<data>/shell-hook.json` (0600): `{"files": [{"shell", "path", "state",
+  "newline_added", "created", "at"}], "notice_pending"}`, `state` one of `written`,
+  `removed_by_person`, `skipped_symlink`, `skipped_owner`, `skipped_zdotdir_unknown`,
+  `unreadable`, `policy_blocked` (a PowerShell profile whose execution policy keeps it from
+  running: not written, node A-8), `constrained_language` (that profile's PowerShell edition runs
+  in Constrained Language Mode on this computer: not written, SB-225); `created` only when true,
+  `notice_pending` only while one waits; what `shell status` shows. Nothing ever written and
+  nothing wanted: no record.
+- **The first-time notice.** The first run that writes a block while no choice is made saves
+  `notice_pending: {organization, group}` in the record (`install::set_notice`, under the run
+  lock, only while a block is written); it waits there across restarts until the window
+  acknowledges it and is dropped when the hook is no longer wanted. The window reads it with the
+  Tauri command `shell_hook_notice` (`Runtime::shell_hook_notice`: `{organization, group}` or
+  null) and clears it with `acknowledge_shell_hook_notice`; the adapter's `shellHookNotice` and
+  `acknowledgeShellHookNotice`. Test:
+  `lifecycle_tests::the_first_time_notice_waits_for_the_window_across_a_restart` (a second and a
+  third owner over the same folder: there until acknowledged, then never again). Only an owner
+  holding the installed app's home answers or acknowledges it, so a development build or
+  `serve` over the same data folder neither posts nor clears it (A-7 fix cycle 1); the group it
+  names is one whose folder the map holds. Test:
+  `owner_tests::only_the_installed_owner_reads_or_acknowledges_the_notice`. Where it shows
+  (node A-7): the app's folder watcher (`src-tauri/src/suggestions.rs` `watch`) reads it when the
+  folder counter moves and at least every 5 minutes, posts one system notification
+  (`shell_hook_text`, English or Russian as the menu) once per run while it waits, and emits
+  `shell-hook`; the window reads it when the list is first read, on that event and when it is
+  shown, shows the same words as a notice with *Open Groups* (`shellHookNoticeText` in
+  `src/ui-logic.ts`) and acknowledges it. A notice the window never showed is posted again at the
+  next start. Test: `suggestions::tests::the_shell_hook_notice_names_the_organization_and_the_way_out`.
+- **CLI.** `switchboard shell on` saves `on` and writes now (a block the person took out
+  included); `switchboard shell off` saves `off` and takes every block out now; both answer
+  `shell status`. The choice that cannot be saved answers “The terminal hook's choice could not be
+  saved in Switchboard's data folder.” Test: CLI
+  `shell_on_and_off_write_and_take_out_the_block_in_the_given_home_only` (a temporary `HOME` with
+  the app's own data folder in it; the hook names the installed CLI in `~/.local/bin`, not the
+  development build running the test).
+- **Window and MCP (node A-7).** `Runtime::shell_hook_status` answers what `shell status` reads
+  without the terminal's own fields (`terminal`, `here`, `folder`), plus `can_change` (this owner
+  holds the installed app's home, `enable_shell_hook`), `organizations` (the names of the
+  organizations whose groups the folder map holds, sorted), `codex_organizations` (those of them
+  whose map rows carry a Codex account: the Codex section's line names only these) and `home` (to show start files as `~/...`).
+  `Runtime::set_shell_hook(on)` saves the choice and runs the installer at once, as
+  `shell on|off` does, then answers the status; an owner without the installed app's home refuses
+  with “Only the installed app changes terminal settings.” and changes nothing. Tauri
+  `shell_hook_status`, `set_shell_hook {on}`; the adapter's `shellHookStatus`, `setShellHook`;
+  the Groups page's *Terminals in organization folders* (`shellHookSection`, its view
+  `shellHookView`). MCP `switchboard_shell_hook {path?}` reads `shell status` for a folder (also
+  under `--read-only`); `switchboard_shell_hook_set {on}` is `shell on|off` (a write tool, absent
+  under `--read-only`; from another data folder refused like the CLI). Parity: `shell status` →
+  `switchboard_shell_hook`, `shell on|off` → `switchboard_shell_hook_set`. Tests:
+  `lifecycle_tests::the_windows_switch_turns_the_hook_off_and_on_through_the_owner`, MCP
+  `handshake_lists_tools_and_rejects_malformed_messages`, `mcp_parity`, ui-logic
+  `the_shell_hook_section_reads_every_state`.
+- **Uninstall** takes every block out first (section "Uninstall"). `remove_all` keeps a block it
+  could not take out (a changed marker) in the record and names the file as a failure. Test:
+  `remove_all_takes_every_block_out_whatever_the_choice` (a fish file the person added lines to
+  keeps them).
+
+## The terminal hook for PowerShell (SB-183, node A-8, 2026-10-27)
+
+Code: `switchboard_runtime::shell::windows` (`profile_path`, `profile_paths`, `Policy`,
+`effective`, `profile_policy`, `group_policy`, `config_policy`, `Host`, `process_host`), the template
+`crates/switchboard-runtime/src/shell/hook.ps1`, `shell::install` (`Host::windows`, states
+`policy_blocked` and `constrained_language`), `lockdown`, CLI `switchboard shell init pwsh`
+(`scripts::init_script`). Design:
+[dossier A](runs/2026-10-26-iteration-0.7.0/dossier-a-context-binding.md) row A-8; A-Q4 (the
+execution policy is never changed) assumed; A-Q7's carried links on Windows came with SB-226
+(section "The organizations' shell homes"). SB-225 (W2, 2026-10-27): base64 paths for `shell
+init`, the load-time question only in an interactive host, UTF-16LE profiles, Constrained
+Language Mode.
+
+- **Where.** `Microsoft.PowerShell_profile.ps1` (the console host's profile for the current user,
+  which Windows Terminal and the PowerShell window load) in `<Documents>\WindowsPowerShell\`
+  (Windows PowerShell 5.1) and `<Documents>\PowerShell\` (PowerShell 7). `<Documents>` is the
+  Documents known folder from `dirs::document_dir` (`SHGetKnownFolderPath`), so a Documents folder
+  OneDrive or a domain policy redirected is the one PowerShell reads. 5.1 counts when
+  `%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe` exists, 7 when `pwsh.exe` is in
+  `%ProgramFiles%\PowerShell\7` or on `PATH` (an app alias in `WindowsApps` is not a `$PSHOME`),
+  or its profile folder exists. Each profile is created when absent, with its folder. On Windows
+  these are the only start files (`cmd.exe` and Git Bash are not covered); on macOS and Linux a
+  test gives a `windows::Host` to install into an injected Documents folder. Test:
+  `windows::tests::profile_paths_follow_the_documents_folder_for_each_edition`.
+- **The block** is A-3's, with one line: `if (Test-Path -LiteralPath '<hook>') { . '<hook>' }`.
+  Windows PowerShell 5.1 reads a profile without a byte order mark in the system code page, so the
+  line stays ASCII: a hook path that is not ASCII is carried as base64 of its UTF-8 and read inside
+  a script block (`& { $f = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('...'));
+  if (Test-Path -LiteralPath $f) { . $f } }`). Everything else (markers, the person's removal, a
+  link, another user's or unreadable file, the created-file rule, byte-for-byte removal) is A-3's
+  unchanged. A profile may be UTF-16LE with its byte order mark (Windows PowerShell 5.1's `>` and
+  `Out-File` write it): it is read, written and given back in UTF-16LE, byte for byte. UTF-16
+  without the mark (valid UTF-8 full of NULs), a lone surrogate, an odd length or any NUL reads
+  `unreadable` and is never written; only PowerShell profiles are read as UTF-16, so a `.zshrc`
+  that starts with `FF FE` stays `unreadable`. Tests:
+  `install::tests::a_utf16_profile_is_written_in_its_own_encoding_and_given_back_byte_identical`, `install::tests::a_powershell_profile_gets_the_block_and_gives_it_back_byte_identical`
+  (CRLF and no final break kept, the 7 profile created and deleted again),
+  `a_powershell_block_the_person_removed_is_not_written_back` (and a linked profile skipped),
+  `a_hook_path_that_is_not_ascii_keeps_the_powershell_block_ascii`.
+- **The script** `<data>/shell/hook.ps1`, written with a UTF-8 byte order mark (`shell init pwsh`
+  prints it without one, for `| Out-String | Invoke-Expression`, and with the CLI and data paths
+  as base64 of their UTF-8 decoded as it runs: Windows PowerShell 5.1 reads a command's output in
+  the console's code page, which would garble a path that is not ASCII; the printed script is
+  ASCII, `scripts::init_script`, `ps_base64`). One script for 5.1 and 7: the
+  same transition as `core.sh` (the person's values kept in global variables, which no child
+  process sees; a value the person changed is theirs; `SWITCHBOARD_SESSION` set: not loaded; a
+  home inherited under `<data>\shell\` held, compared without regard to case), the same question
+  (`shell env --shell pwsh --dir <the location's file system path>`, through
+  `System.Diagnostics.Process` with no window, ten seconds for the CLI and two for its output,
+  exit status 0, stderr read and dropped), the same answer rules (one line, four fields, homes
+  `-` or rooted). Trigger: the `prompt` function is wrapped (5.1 has no location-changed event),
+  acting when `(Get-Location).Path` changed, and handing the person's prompt the `$?` and
+  `$LASTEXITCODE` it would have seen. At load it asks once, only in a shell a person types in
+  (SB-225): not when PowerShell was started with `-NonInteractive`, or with `-Command`, `-File`,
+  `-CommandWithArgs` or `-EncodedCommand` (any prefix PowerShell takes, after `-` or `/`) unless
+  `-NoExit` keeps it open; such a run asks at its first prompt, if any. `$global:
+  _switchboard_interactive`, set before the hook loads, decides it instead. In Constrained
+  Language Mode (`$ExecutionContext.SessionState.LanguageMode` is not `FullLanguage`) the hook
+  does nothing and sets no variable. A location that is not a file system folder
+  (`HKLM:`) reads as `none`. Every function is `global:` and every error is caught, so the file
+  works in any scope and never fails the profile. A prompt defined after the block replaces the
+  wrapper. The CLI and data paths are single-quoted with every character PowerShell reads as a
+  single quote doubled (U+0027 and the typographic U+2018, U+2019, U+201A, U+201B), and the CLI
+  path loses the `\\?\` prefix a canonical Windows path carries (`\\?\UNC\` becomes `\\`;
+  `install::plain_path`). A variable the hook gives back as unset is removed with
+  `[NullString]::Value`: a bare `$null` reaches .NET as an empty string, which .NET 9
+  (PowerShell 7.5 and later) keeps as an empty value. Tests:
+  `windows::tests::the_ps1_hook_names_its_paths_quoted_and_keeps_its_state_global` (with
+  PowerShell present, the written file also parses with no error through
+  `[System.Management.Automation.Language.Parser]::ParseFile`),
+  `the_ps1_transition_matches_the_posix_one` (under every PowerShell present: `pwsh` anywhere and,
+  on Windows, also Windows PowerShell 5.1's `powershell.exe`, against a stub CLI, a POSIX script or
+  on Windows a batch file; with scenarios for the non-interactive load, the argument rules and
+  `shell init`'s base64 read through a command's output; run with PowerShell 7.6.9 on macOS on
+  2026-10-27, where it caught the empty-value restore; skipped with the reason where no
+  PowerShell is installed),
+  `install::tests::the_cli_a_hook_names_has_no_verbatim_prefix`,
+  CLI `shell_init_pwsh_prints_the_powershell_hook_naming_this_cli`.
+- **The execution policy** is read, never changed, and no process is started for it: the scopes of
+  `Get-ExecutionPolicy -List` in its order (MachinePolicy, UserPolicy, Process, CurrentUser,
+  LocalMachine), the first set wins, except Process (`PSExecutionPolicyPreference`): that scope
+  belongs to the process reading it, here the app, and a terminal the person opens starts with
+  its own, so it is never read (`profile_policy`); none set (or `Default`) is `Restricted` on a Windows client
+  and `RemoteSigned` on Windows Server (`InstallationType`). 5.1: Group Policy
+  `HKLM`/`HKCU\SOFTWARE\Policies\Microsoft\Windows\PowerShell` (`EnableScripts` 0 is
+  `Restricted`, 1 applies `ExecutionPolicy`), CurrentUser and
+  LocalMachine `HKCU`/`HKLM\SOFTWARE\Microsoft\PowerShell\1\ShellIds\Microsoft.PowerShell`
+  `ExecutionPolicy`. 7: Group Policy `...\Policies\Microsoft\PowerShellCore` (or 5.1's when
+  `UseWindowsPowerShellPolicySetting` is 1), CurrentUser `<Documents>\PowerShell\powershell.config.json`
+  and LocalMachine `$PSHOME\powershell.config.json` (`Microsoft.PowerShell:ExecutionPolicy`; a
+  `$PSHOME` that cannot be found is read as the file PowerShell 7 ships, `RemoteSigned`).
+  `Restricted` loads no profile and `AllSigned` refuses the unsigned hook: that profile is not
+  written (a block an earlier run wrote stays until `shell off`) and is recorded `policy_blocked`,
+  keeping what an earlier run did to it (`newline_added`, `created`), so `shell off` during the
+  block or after it is lifted still gives the person's bytes back and deletes a profile
+  Switchboard created,
+  which the window, MCP `switchboard_shell_hook` and `shell status` show (SCN-075). The next run
+  under a policy that allows local scripts writes it. Tests:
+  `windows::tests::a_restricted_or_allsigned_policy_reads_as_policy_blocked`,
+  `install::tests::a_blocked_policy_leaves_the_profile_alone_and_records_policy_blocked`,
+  `a_policy_that_turns_blocked_keeps_what_off_gives_back`.
+- **Constrained Language Mode** (SB-225), as PowerShell decides it for a script with no
+  signature: Windows Defender Application Control enforcing user-mode code integrity
+  (`WldpGetLockdownPolicy` for the PowerShell host answers `WLDP_LOCKDOWN_UMCIENFORCE_FLAG`; audit
+  alone does not count) holds both editions; the machine's `__PSLockdownPolicy`
+  (`HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Environment`, decimal or `0x`
+  hexadecimal) with its enforce bit 4 holds Windows PowerShell 5.1 only, since a release build of
+  PowerShell 7 ignores it (`windows::lockdown` answers a `Lockdown` per edition). Then that
+  edition's profile is not written and reads `constrained_language` (window, MCP, `shell
+  status`), with the same record rules as `policy_blocked`; the mode is never changed.
+  `WldpGetLockdownPolicy` is looked up in System32's `wldp.dll` when asked, so a Windows without
+  it reads as no lockdown rather than an app that cannot start. AppLocker's script rules are not read: there the hook's own check leaves it inert.
+  Tests: `windows::tests::constrained_language_mode_is_read_from_application_control_and_the_lockdown_variable`,
+  `install::tests::constrained_language_mode_writes_no_profile_and_says_so`.
+- **Not covered.** The run lock (`flock` on the data folder) does not
+  exist on Windows. The Windows build is checked by `cargo xwin check --target
+  x86_64-pc-windows-msvc -p switchboard-runtime -p switchboard-cli` (2026-10-27, exit 0); the
+  PowerShell hook has run in PowerShell 7.6.9 on macOS only. The nightly's Windows runners run the
+  transition under Windows PowerShell 5.1 and PowerShell 7 and the Windows-only tests; a person's
+  Windows host has not run any of this (SB-02).
+
+## The organizations' shell homes (SB-183, node A-4, 2026-10-26)
+
+Code: `switchboard_runtime::shell::homes` (`rows`, `key`, `sync`), called from the owner's
+bindings pass (`Runtime::bindings_pass`, `crates/switchboard-runtime/src/lib.rs`) after the Claude
+bindings are synced. Design: [dossier A](runs/2026-10-26-iteration-0.7.0/dossier-a-context-binding.md)
+part A "Homes" and "The folder map"; A-Q1 assumed (a shell home per group, not the launched
+managed home); measured in [the A-0 record](evidence/shell-home-measurement-2026-10.md).
+
+- **When.** In the same pass as the Claude bindings, only when the pass's fingerprint moved: the
+  bindings' own (groups, folders, worktrees, Claude accounts, the proxy address, the pools' salts)
+  plus `homes::key` (each group's organization, the pools' Codex accounts and, on a computer
+  with an organization's group, the stamp of the person's `settings.json` and which carried
+  names exist). Every file is written only when its bytes change. A computer that never had an
+  organization's group gets nothing, not even `<data>/shell/`. Test:
+  `owner_tests::an_idle_pass_writes_nothing` (a map and a home taken away are not written back by
+  five passes with nothing changed; the group turning personal rewrites the map), and
+  `monitor::tests::an_idle_hour_on_a_fake_clock_stays_inside_the_budget` with an organization's
+  group (120 passes: the bindings fingerprint, `homes::key` included, does not move, and no file
+  under the data folder or the group's folder changes size or time).
+- **Rows.** One per folder: each folder of a group bound to an existing organization, and each
+  worktree the Claude bindings write inside one (`bindings::desired`), when
+  `Snapshot::project_for` names that group there (a folder also in a personal group has no row:
+  the more private wins). `folder` is `canonicalize()`'s form (on Windows `\\?\C:\...`, which the
+  reader matches because it resolves the folder it is asked about the same way; test
+  `windows_rows_are_verbatim_and_a_plain_spelling_finds_them`, Windows only, not yet run: SB-02);
+  a folder that does not exist has no row. `context` is `org:<id>`; `claude` is true when the
+  Claude bindings hold the folder's route now (`bindings::Report::bound_folders`: written or
+  unchanged, never a folder whose values are the person's); `codex` when the pool has an enabled
+  Codex account. Tests: `shell::homes::tests::a_personal_group_gets_no_shell_home_and_no_map_row`,
+  `worktrees_and_folders_the_person_keeps_get_their_own_rows`,
+  `rows_are_written_in_canonical_form_for_folders_that_exist`.
+- **Claude shell home** `<data>/shell/claude-<pool>` (0700), for a pool with a row whose `claude`
+  is true: links to the person's carried files (`carry::CLAUDE_LINKS`, from `person::claude_dir`,
+  through `carry::link_into_shell_home`: symbolic links on macOS and Linux; on Windows, SB-226,
+  a folder as a directory junction to any local drive and a file as a hard link on the volume of
+  Switchboard's data, neither needing a privilege or an administrator; a junction's target is
+  written as Windows names it (`/` read as `\`, `carry::junction_target`), or none is made; a
+  junction is renewed when it leads elsewhere; each hard link is recorded in
+  `<home>/.switchboard-links` with the file's identity (volume serial and file index), and only a
+  home file that still has it is Switchboard's (`carry::file_step`): linked again when the person's
+  file was replaced, removed when the person's file is gone; the homes' fingerprint counts each
+  carried file's time there so the next pass does it; a real file in the home, or one a session
+  replaced there, is never replaced or removed and leaves the record; a file on another volume and
+  anything on a network share are not carried), `.claude.json` with `hasCompletedOnboarding` and, when the person
+  registered one, `mcpServers.fabric` (the board server, as launches carry it; other keys of the
+  file are Claude Code's and stay), and `settings.json` (0600) = the person's carried settings
+  without what signs in, with `env` = `{"ANTHROPIC_AUTH_TOKEN": "switchboard-shell"}`. The
+  placeholder is a fixed word, not a credential: the folder's `settings.local.json` carries the
+  route and the folder's capability header and the proxy authenticates by the header. Test:
+  `an_organization_pools_shell_home_has_the_placeholder_carried_links_and_no_credential` (no
+  capability, no credential file and none of the person's secrets anywhere in the home; on
+  Windows the file and folder read through the home), on Windows
+  `carry::windows_tests::a_shell_home_on_windows_carries_folders_as_junctions_and_files_as_hard_links`,
+  `a_deleted_source_takes_its_hard_link_out_of_the_shell_home`,
+  `a_home_file_a_session_replaced_is_kept`, `a_source_named_with_slashes_gets_a_junction_that_resolves`
+  and `a_junction_names_local_folders_only`; the decisions on every platform:
+  `carry::tests::a_shell_homes_hard_link_is_replaced_or_removed_only_while_it_is_still_switchboards`,
+  `the_hard_link_record_keeps_each_files_identity_and_reads_an_earlier_one`,
+  `a_junction_target_is_written_as_windows_names_it_or_not_at_all`.
+- **Codex shell home** `<data>/shell/codex-<pool>` (0700), for a pool with an enabled Codex
+  account: an `AGENTS.md` link and `config.toml` (0600) with SB-143's marked provider blocks
+  (`codex_route::with_provider`): `base_url = "http://<proxy>/codex/_auto/v1"`, the machine's auto
+  capability as `X-Switchboard-Capability`, `requires_openai_auth = false`, no `env_key` and no
+  `auth.json`; the person's own lines in that file stay. Test:
+  `a_codex_shell_home_routes_to_auto_with_no_sign_in` (a rotated capability is written in).
+- **Repointed.** A proxy that had to move at start rewrites the Codex shell homes' address with
+  the managed homes' (`launch::repoint_managed` reads `<data>/shell/` too), and the first pass
+  with the new address writes the same bytes. Test: `a_port_change_repoints_shell_homes`.
+- **Kept.** A group that leaves its organization (or is deleted) loses its rows; its homes stay
+  on disk as the organization's history. Test:
+  `a_pool_that_leaves_its_organization_keeps_its_home_and_loses_its_rows`.
+- **Failures.** A home that cannot be written or a map `map::write` refuses is logged as the
+  event `shell_homes` (`rows`, `homes_written`, `failed`, `map`: `written`, `unchanged`,
+  `refused`), numbers and codes only, and tried again when the fingerprint next moves; nothing
+  reaches a request's answer. A synthetic owner (tests, the smoke check) carries nothing of the
+  real home (`NativeSources::shell` = `homes::NO_SOURCES`).
+
+## The person's own Claude Code and Codex folders (SB-183, node A-5, 2026-10-26)
+
+Code: `switchboard_runtime::person` (`claude_dir`, `codex_dir`, `codex_home`). A process started
+in a hooked terminal or inside a launched session sees one of Switchboard's homes as
+`CLAUDE_CONFIG_DIR` or `CODEX_HOME`; a value inside Switchboard's data folder (the default data
+folder, compared as written and with links resolved through the nearest existing parent) is never
+the person's, and `~/.claude` or `~/.codex` is used instead (`~/.pi/agent` for Pi's
+`PI_CODING_AGENT_DIR`). These readers of the person's folders go through it:
+`carry::claude_user_dir` and `carry::pi_user_dir` (what a launched home links from),
+`limits::transcript_files` (the limit scan), `codex_route::config_path` (SB-143's provider),
+`launch::user_scope` and `launch::board_server` (the MCP servers a launch copies), `agents::setup`
+and the CLI's `onboard --status`.
+
+Two readers still follow the process's variables as they are. `projects::detect_session` (which
+session is asking) reads `CODEX_HOME` only to recognise a home Switchboard launched. The native
+sign-in context, `external::context`, reads `CLAUDE_CONFIG_DIR` or `CODEX_HOME` and refuses a
+Switchboard home rather than reading past it: `capture_current` and `capture_current_cached`
+(`accounts capture` and the owner's “in use now” probe; the background probe may answer the source's locked or needs-access state first, and never captures), `activate_claude` and `lock_live` answer
+“This session runs in a Switchboard home or a terminal in an organization's folder. Run this from
+another terminal.” when it lies inside the data folder (Copylot reports 21ec4932 en-US and
+a38bab30 ru-RU; `src/adapter.ts` and `src/locales/ru.ts` carry it). The refusal applies where the
+operation runs: an offline CLI command, or `serve` started in such a terminal; a CLI command
+answered by a running owner uses the owner's own environment. Whether the context's reads should
+go through `person` instead, keeping the refusal for writes, is question A-Q8 (assumed, not done
+in 0.7.0 node A-5). Tests: `person::tests::a_config_dir_inside_switchboards_data_is_never_the_persons_own`,
+`carry::tests::a_launch_from_a_hooked_terminal_links_from_the_persons_folder`,
+`carry::tests::a_pi_launch_from_a_switchboard_home_links_from_the_persons_pi_folder`,
+`codex_route::tests::the_route_is_never_written_into_a_shell_home`,
+`external::tests::a_capture_from_a_switchboard_home_is_refused`,
+`external::tests::a_home_inside_switchboards_data_folder_is_refused`.

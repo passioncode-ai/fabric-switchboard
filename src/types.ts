@@ -17,10 +17,12 @@ export interface BackupInfo { file: string; created_at: number; accounts: number
 export interface Restored { added: number; skipped: number; failed: number; projects?: number; rules?: number; routes?: number; settings?: number }
 export interface BackupStatus { directory: string | null; enabled: boolean; backups: BackupInfo[]; last_error: string | null; last_written_at: number | null; restored_at_start?: { file: string; created_at: number; restored: Restored } | null }
 /** A session Switchboard launched (SB-95): its launch record and its state now. */
-export interface SessionInfo { account_id: string; label: string | null; provider: Provider | 'kimi' | 'hermes' | 'opencode'; pool: string; mode: 'managed' | 'isolated'; working_directory: string; in_place: boolean; launched_at: number; /** SB-110: `personal` or `org:<id>`; absent on sessions launched before 0.6.80. */ context?: string; started_at: number | null; continues: string | null; state: 'starting' | 'running' | 'ended' | 'unknown' }
+export interface SessionInfo { account_id: string; label: string | null; /** The provider the session's route serves; `claude` for an agent through an API-key account's proxy, and since 0.7.0 the recipe id for an agent on the OpenRouter key (SB-201). */ provider: Provider | 'kimi' | 'hermes' | 'opencode' | (string & {}); /** SB-201: the agent's catalog id (`claude-code`, `codex`, `kimi-code`, `goose`...); null or absent when unknown. */ agent?: string | null; pool: string; mode: 'managed' | 'isolated'; working_directory: string; in_place: boolean; launched_at: number; /** SB-110: `personal` or `org:<id>`; absent on sessions launched before 0.6.80. */ context?: string; started_at: number | null; continues: string | null; state: 'starting' | 'running' | 'ended' | 'unknown' }
 export interface MonitorStatus { running: boolean; interval_seconds: number; sign_in_required?: string[]; limited?: AccountLimit[]; claude_swap_accounts?: number; renewal_blocked?: boolean; claude_swap_switching?: boolean; decisions?: { provider: Provider; pool: string; target: RotationPolicy['target']; reason: string; candidate_id: string | null }[] }
 export interface CaptureInput { provider: Provider; label?: string; pool: string }
 export interface ImportResult { imported: Account[]; failed: number; skipped: number; claude_swap_running?: boolean }
+/** SB-160 (B-4): the one group of a new seat's organization, when the seat landed outside it. */
+export interface OrganizationGroupOffer { pool: string; name: string; in_cli?: boolean }
 export interface Account {
   id: string; label: string; provider: Provider; kind: AuthKind; pool: string;
   external_identity?: ExternalIdentity | null; usage_health?: UsageHealth | null;
@@ -38,7 +40,7 @@ export interface ProjectInput { pool?: string; name: string; folders: string[]; 
 /** SB-158: an organization accounts may belong to; `provider_organizations` are `claude:<uuid>` or `codex:<workspace>`. */
 export interface Organization { id: string; name: string; domains?: string[]; provider_organizations?: string[]; created_at: number; /** SB-159: its organization on PassionCode.ai. */ vesta_id?: string | null }
 /** SB-159: the PassionCode.ai connection, no token. */
-export interface PassioncodeStatus { connected: boolean; base: string; state?: 'ok' | 'sign_in_again' | 'provider_sign_in' | 'unreachable'; connected_at?: number; read_at?: number | null; checked_at?: number | null; organizations?: number; cancelled?: boolean; disconnected?: boolean }
+export interface PassioncodeStatus { connected: boolean; base: string; state?: 'ok' | 'sign_in_again' | 'provider_sign_in' | 'unreachable'; connected_at?: number; read_at?: number | null; checked_at?: number | null; organizations?: number; cancelled?: boolean; disconnected?: boolean; /** SB-160 (B-7): organizations a read stopped listing, by local id, since `at`. */ released?: { organization: string; at: number }[] }
 export interface Snapshot { accounts: Account[]; routes: Record<string, string>; events: Event[]; policies?: RotationPolicy[]; rules?: ProjectRule[]; projects?: Project[]; organizations?: Organization[]; /** account id → organization id or `personal` */ memberships?: Record<string, string>; /** SB-175: account id → when it was marked as used on another machine */ elsewhere?: Record<string, number> }
 export interface RuntimeStatus { proxy_address: string; platform: string; live_mode: string }
 export interface AddInput { label: string; provider: Provider; kind: AuthKind; pool: string; secret: string }
@@ -46,7 +48,7 @@ export interface LoginInput { provider: Provider; label: string; pool: string }
 export interface Adapter {
   snapshot(): Promise<Snapshot>;
   currentAccounts(): Promise<CurrentAccounts>;
-  captureCurrent(input: CaptureInput): Promise<Account>;
+  captureCurrent(input: CaptureInput): Promise<Account & { organization_group?: OrganizationGroupOffer }>;
   importClaudeSwap(pool: string): Promise<ImportResult>;
   activateNative(id: string): Promise<void>;
   setPolicy(policy: RotationPolicy): Promise<void>;
@@ -66,7 +68,7 @@ export interface Adapter {
   loginStatus(loginId: string): Promise<{ state: 'pending' | 'complete' | 'ended' }>;
   pendingLogins(): Promise<{ logins: { login_id: string; provider: Provider; label: string; pool: string; state: 'pending' | 'complete' | 'ended' }[] }>;
   /** The saved account; `login_cleanup: 'pending'` when its temporary sign-in folder is still to be removed (SB-42). */
-  finishLogin(loginId: string): Promise<Account & { login_cleanup?: 'done' | 'pending'; signed_in_again?: boolean }>;
+  finishLogin(loginId: string): Promise<Account & { login_cleanup?: 'done' | 'pending'; signed_in_again?: boolean; organization_group?: OrganizationGroupOffer }>;
   cancelLogin(loginId: string): Promise<void>;
   probe(id: string): Promise<Usage>;
   setProjectRule(input: ProjectRuleInput): Promise<unknown>;
@@ -116,6 +118,16 @@ export interface Adapter {
   /** The ordinary Hermes's model and provider (SB-80). */
   hermesModel(): Promise<HermesModel>;
   agentsOverview(): Promise<AgentsOverview>;
+  /** SB-71 (C-2): every fallback chain with what each step would do now and the last hand-over. */
+  chains(): Promise<Chains>;
+  /** Sets a scope's chain in order; an empty list clears it; `preset` stands for the list. */
+  setChain(scope: ChainScope, executors: ChainExecutor[], preset?: string | null): Promise<{ chain: Chain | null }>;
+  /** SB-72 (C-7): every spending ceiling, the open questions oldest first and the last hand-over; numbers and codes only. */
+  ceilings(): Promise<Ceilings>;
+  /** Sets a scope's ceiling in dollars, or clears it with `null`; the window may raise or clear (C-Q1). */
+  setCeiling(scope: ChainScope, usd: number | null): Promise<unknown>;
+  /** Answers a reached ceiling's question: `double` only from the window, `keep` from anywhere. */
+  answerCeiling(id: string, answer: 'keep' | 'double'): Promise<unknown>;
   agentEnable(agent: string, enabled: boolean): Promise<unknown>;
   agentDefault(agent: string | null): Promise<unknown>;
   openrouterModels(): Promise<OpenrouterModels>;
@@ -133,6 +145,16 @@ export interface Adapter {
   launchOnOpenrouter(agent: string, model: string | null, workingDirectory: string): Promise<{ model: string | null; model_choice: 'launch' | 'agent' }>;
   loginItem(): Promise<LoginItem>;
   setLoginItem(enabled: boolean): Promise<LoginItem>;
+  /** The terminal hook's first-time notice (SB-183), kept until acknowledged; null when none waits. */
+  shellHookNotice(): Promise<ShellHookNotice | null>;
+  /** The window showed the notice: it is not given again. */
+  acknowledgeShellHookNotice(): Promise<void>;
+  /** SB-183 (node A-7): the Groups page's *Terminals in organization folders* section. */
+  shellHookStatus(): Promise<ShellHookStatus>;
+  /** SB-202 (B-8): the organization checklist for the first run. */
+  onboard(): Promise<Onboarding>;
+  /** Turn off / Turn on: the same as `switchboard shell off|on`, refused outside the installed app. */
+  setShellHook(on: boolean): Promise<ShellHookStatus>;
   /** Anonymous usage analytics (docs/ANALYTICS.md); unavailable outside a release build. */
   analytics(): Promise<AnalyticsStatus>;
   /** The shared switch, and the person's answer in this app: nothing is sent before it (issue #128).
@@ -146,7 +168,42 @@ export interface Adapter {
   /** The person's check (LC-16): runs with automatic updates off too; resolves with the status after. */
   checkForUpdates(): Promise<UpdateStatus>;
 }
+/** SB-71 (C-2): a fallback chain's scope: this computer, a group (`pool`) or one task (a workflow id). */
+export type ChainScope = { kind: 'machine' } | { kind: 'project'; pool: string } | { kind: 'workflow'; id: string };
+/** One step: an agent, optionally pinned to a saved account or to a key by its vault name (never a value). */
+export interface ChainExecutor { agent: string; account_id?: string | null; key?: string | null }
+export interface Chain { scope: ChainScope; executors: ChainExecutor[]; updated_at: number }
+/** What a step would do now (`chain_view::preview`): codes, never words; `spend` stays null until a hand-over reads it (C-5). */
+export interface ChainStepView {
+  agent: string; name: string | null;
+  state: 'ready' | 'skipped' | 'not_automatic' | 'not_installed';
+  /** `agent_disabled`, `no_usable_account`, `sign_in_required`, `key_pinned`, `agent_not_automatic_yet`, `agent_settings_unreadable`, ... */
+  reason: string | null;
+  account_id?: string; account_label?: string;
+  /** Hermes and OpenCode on an OpenRouter key, or Claude Code and Codex on an API-key account. */
+  paid: boolean;
+  key_scope?: 'group' | 'machine' | null; key?: string; spend?: null;
+}
+/** The last automatic hand-over pass, from spend.json (written by the hand-over gate, C-5). */
+export interface LastHandover { at: number; workflow: string; outcome: string; skipped: { agent: string; reason: string }[] }
+export interface ChainPreset { id: string; agents: { agent: string; name: string | null }[] }
+/** `readiness` is keyed `machine`, `project:<pool>` or `workflow:<id>`. */
+export interface Chains { chains: Chain[]; effective: Chain | null; presets: ChainPreset[]; readiness: Record<string, ChainStepView[]>; last_handover: LastHandover | null; ceilings_unreadable: boolean; limits_known: boolean }
+/** One spending ceiling as `spend::view` gives it: machine and group per UTC day, a task since its first paid hand-over. */
+export interface CeilingView { scope: ChainScope; cents: number; usd: number; set_at: number; doubled_from: number | null; active: boolean; inactive_reason: 'no_own_key' | null }
+/** An open question of a reached ceiling; `double_usd` is null when doubling would pass $1,000. */
+export interface CeilingQuestionView { id: string; scope: ChainScope; cents: number; usd: number; double_usd: number | null; spent: number; reached_at: number }
+export interface Ceilings { ceilings: CeilingView[]; questions: CeilingQuestionView[]; last_handover: LastHandover | null; limits: { min_usd: number; max_usd: number; min_remaining_usd: number } }
 export interface LoginItem { available: boolean; enabled: boolean }
+/** The organization and its group whose presence put the terminal hook in place (SB-183). */
+export interface ShellHookNotice { organization: string; group: string }
+/** One start file the terminal hook changed or left alone, as `shell-hook.json` records it. */
+export interface ShellHookFile { shell: string; path: string; state: string }
+/** What `switchboard shell status` reads, for the window: `hook` is on, off, default_on (a group belongs to an organization) or default_off; `can_change` is false outside the installed app. */
+/** SB-202 (B-8): one step of `switchboard onboard`, as the window reads it through the Tauri `onboard` command. */
+export interface OnboardStep { id: string; state: 'done' | 'todo' | 'needs_person' | 'optional'; summary: string; next?: unknown; organization?: { id: string; name: string }; group?: { pool: string; name: string }; groups?: string[]; ended?: number; terminals?: 'active' | 'pending' | 'off' | 'waiting' | 'unread' }
+export interface Onboarding { complete: boolean; degraded: string[]; steps: OnboardStep[] }
+export interface ShellHookStatus { hook: 'on' | 'off' | 'default_on' | 'default_off'; choice: 'on' | 'off' | 'default'; map: string; files: ShellHookFile[]; organizations: string[]; /** Organizations whose folder map rows carry a Codex account. */ codex_organizations?: string[]; /** SB-222: organization groups the folder map holds no row for, and why. */ unmapped?: { organization: string; group: string; reason: 'held' | 'missing' | 'no_folder'; held_by: string | null }[]; can_change: boolean; home: string | null }
 /** Usage analytics (docs/ANALYTICS.md): `disclosed` is whether the person answered the switch in this app (issue #128); `sent_before`, whether an earlier version may already have reported this install. */
 export interface AnalyticsStatus { available: boolean; enabled: boolean; disclosed?: boolean; sent_before?: boolean }
 /** One entry of catalog/agents.json (third-party agents, 0.6). */
@@ -184,4 +241,6 @@ export interface UpdateStatus {
   checked_at: number | null;
   error: string | null;
   needs_permission: boolean;
+  /** SB-208: when a ready update may start on its own, while SB-191's pause holds it (Unix seconds); null otherwise. */
+  restart_after: number | null;
 }

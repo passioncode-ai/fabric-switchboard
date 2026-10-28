@@ -66,6 +66,10 @@ pub(crate) struct Report {
     pub skipped: Vec<String>,
     /// Folders whose `ANTHROPIC_*` values are the person's, not Switchboard's: left untouched.
     pub user_values_present: Vec<String>,
+    /// SB-183: the folders whose Claude Code route is Switchboard's after this sync (written or
+    /// unchanged), for the terminal hook's folder map; never a folder whose values are the
+    /// person's.
+    pub bound_folders: std::collections::BTreeSet<String>,
     /// SB-133: each pool's folder capabilities, for the proxy (`folder_tokens`).
     pub tokens: std::collections::HashMap<String, Vec<String>>,
     /// SB-172: the capabilities of folders taken out of their group in the last `RELEASED_FOR`,
@@ -549,6 +553,7 @@ pub(crate) fn sync_salted(
                     (Applied::Unchanged, None) => false,
                     (Applied::UserValues, _) => unreachable!(),
                 };
+                report.bound_folders.insert(text.to_owned());
                 if matches!(result, Applied::Written(_)) {
                     report.bound += 1;
                 } else {

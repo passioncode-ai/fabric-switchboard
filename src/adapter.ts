@@ -12,6 +12,16 @@ export function onProjectSuggestions(callback: () => void) {
   if (!native) return;
   void import('@tauri-apps/api/event').then(({ listen }) => listen('project-suggestions', () => callback())).catch(() => { /* the minute refresh still reads them */ });
 }
+/** SB-183 (node A-7): the owner wrote the terminal hook for the first time; the window shows its notice. */
+export function onShellHook(callback: () => void) {
+  if (!native) return;
+  void import('@tauri-apps/api/event').then(({ listen }) => listen('shell-hook', () => callback())).catch(() => { /* read again when the window is shown */ });
+}
+/** SB-72 (C-7): spend.json changed (a ceiling set or answered, a question opened); the window reads the ceilings again. */
+export function onSpendChanged(callback: () => void) {
+  if (!native) return;
+  void import('@tauri-apps/api/event').then(({ listen }) => listen('spend-changed', () => callback())).catch(() => { /* read again with the minute's refresh */ });
+}
 export const demo = !native && new URLSearchParams(location.search).get('demo') === '1';
 export const nativeAdapter: Adapter = {
   snapshot: () => readWithDeadline(invoke('snapshot')),
@@ -70,6 +80,11 @@ export const nativeAdapter: Adapter = {
   openrouterKeys: () => readWithDeadline(invoke('openrouter_keys')),
   hermesModel: () => readWithDeadline(invoke('hermes_model'), 20_000),
   agentsOverview: () => readWithDeadline(invoke('agents_overview'), 20_000),
+  chains: () => readWithDeadline(invoke('chains'), 20_000),
+  setChain: (scope, executors, preset) => invoke('set_chain', { scope, executors, preset: preset ?? null }),
+  ceilings: () => readWithDeadline(invoke('ceilings')),
+  setCeiling: (scope, usd) => invoke('set_ceiling', { scope, usd }),
+  answerCeiling: (id, answer) => invoke('answer_ceiling', { id, answer }),
   agentEnable: (agent, enabled) => invoke('agent_enable', { agent, enabled }),
   agentDefault: (agent) => invoke('agent_default', { agent }),
   openrouterModels: () => readWithDeadline(invoke('openrouter_models'), 20_000),
@@ -86,6 +101,11 @@ export const nativeAdapter: Adapter = {
   launchOnOpenrouter: (agent, model, workingDirectory) => invoke('launch_agent', { agent, pool: '', workingDirectory, via: 'openrouter', model }),
   loginItem: () => readWithDeadline(invoke('login_item')),
   setLoginItem: (enabled) => invoke('set_login_item', { enabled }),
+  shellHookNotice: () => readWithDeadline(invoke('shell_hook_notice')),
+  acknowledgeShellHookNotice: async () => { await invoke('acknowledge_shell_hook_notice'); },
+  shellHookStatus: () => readWithDeadline(invoke('shell_hook_status')),
+  onboard: () => readWithDeadline(invoke('onboard')),
+  setShellHook: (on) => invoke('set_shell_hook', { on }),
   analytics: () => readWithDeadline(invoke('analytics_status')),
   setAnalytics: (enabled, question) => invoke('set_analytics', { enabled, question: question ?? null }),
   updateStatus: () => readWithDeadline(invoke('update_status')),
@@ -103,6 +123,9 @@ const safeErrors = new Set([
   'Choose a model for this launch, or set the key\'s default model on the API keys page or with switchboard agents openrouter model.',
   'This account belongs to a group. Launch it from one of the group\'s folders.',
   'This folder belongs to a group. Launch one of the group\'s accounts.',
+  // The terminal hook (SB-183, node A-7).
+  'Only the installed app changes terminal settings.',
+  'The terminal hook\'s choice could not be saved in Switchboard\'s data folder.',
   // Organizations (SB-158).
   'Organization not found.',
   'Another organization already has this name.',
@@ -184,6 +207,23 @@ const safeErrors = new Set([
   'A Kimi Code account runs only Kimi Code.',
   "This account's Kimi MCP settings (mcp.json) cannot be read, so Switchboard did not change them. Fix or remove that file, then try again.",
   'A chain holds at most 8 agents.',
+  // Spending ceilings (SB-72, C-4): each names the fix.
+  'Spending ceilings (spend.json) could not be read, so no paid agent is handed work until they are. Delete spend.json, then restore a backup to get the ceilings back, or leave it deleted to start over with no ceilings.',
+  'Enter an amount from $0.01 to $1,000.',
+  'Give this group its own key under API keys first.',
+  'That group id names no group.',
+  'Doubling a ceiling is answered in the Switchboard window.',
+  // C-Q8: a paid start by hand (a launch from the window) refused by the spend gate.
+  'This OpenRouter key has less than $0.50 left of its own limit, so no paid agent starts on it.',
+  'A spending ceiling is reached, so no paid agent starts. Its question waits in the Switchboard window.',
+  'A spending ceiling covers this start and its spend could not be read, so no paid agent starts.',
+  // SB-213: the start's folder moved to another group (another key) after its gate read the key.
+  'This folder moved to another group while its spend was checked, so no paid agent starts. Start it again.',
+  'Doubling would pass $1,000, the most a ceiling may be. Set a ceiling of up to $1,000 instead.',
+  'No open question with that id: it was answered, or its ceiling changed or was removed.',
+  'At most 192 task ceilings. Clear one in the Switchboard window first.',
+  'At most 63 group ceilings. Clear one in the Switchboard window first.',
+  'The spending ceilings file is full. Clear a task ceiling in the Switchboard window, then try again.',
   // Launch in place (SB-75).
   'Launching in place runs on macOS and Linux for now.',
   'Agent arguments are at most 16 plain values of up to 1024 characters each.',
@@ -254,7 +294,7 @@ const safeErrors = new Set([
   'Keep switchboard.exe from the download folder, or add it to PATH.',
   'Finish an existing sign-in before starting another.',
   "This account's sign-in has ended. Sign in to it again.",
-  'This session runs in a Switchboard home. Switch the ordinary Claude Code from the app or a normal terminal.',
+  "This session runs in a Switchboard home or a terminal in an organization's folder. Run this from another terminal.",
   "Switchboard has not stored this account's renewed sign-in yet. Retry in a minute.",
   'Claude Code is signed in to an account Switchboard has not saved; switching would sign it out. Add it first (In use now → Add to Switchboard).',
   'The Claude Code sign-in does not match the account named in its settings. Sign in again in Claude Code (claude /login), then retry.',
@@ -295,6 +335,7 @@ const safeErrors = new Set([
   'Usage unavailable. Check the account and retry later.',
 ]);
 const coreErrors: Record<string, string> = {
+  'The hook cannot name this executable or the data folder: a path is not absolute or not valid text.': 'The terminal hook could not be written: the path of Switchboard or of its data folder is not plain text. Reinstall Switchboard, then turn it on again.',
   // Window rewrites of backend sentences (CPY-04, CPY-05, D-1): current actions, groups, and the next step.
   'Account saved; isolated login cleanup needs attention.': 'The account was saved. A temporary sign-in folder was left behind; Switchboard removes it before the next sign-in.',
   'Native activation requires a Claude OAuth profile.': 'Switching Claude Code needs a Claude account signed in with OAuth.',
@@ -382,6 +423,7 @@ const coreErrors: Record<string, string> = {
   'Account metadata is corrupt; restore a known-good backup': 'Account metadata could not be read. Restore a known-good backup before continuing.',
   'Unsupported account metadata version': 'This account metadata version is not supported. Open it with a compatible Switchboard version.',
   'Account metadata could not be saved': 'Account metadata could not be saved. Check storage access and retry.',
+  'Account groups kept changing while the account was saved': 'The account\'s group kept changing while it was being saved, so nothing was saved. Wait a moment, then retry.',
   'Storage failure; credential cleanup requires recovery': 'The account could not be saved and credential cleanup needs recovery. Check storage before retrying.',
   'Native vault is not implemented on this platform': 'Native credential storage is not available on this platform. Use a supported native build.',
   'Secure metadata storage is not implemented on this platform': 'Secure account storage is not available on this platform. Use a supported native build.',

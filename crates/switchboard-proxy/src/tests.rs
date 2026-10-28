@@ -2178,3 +2178,180 @@ async fn statistics_count_each_request_and_the_providers_own_token_usage_only() 
     p.shutdown().await;
     up.abort();
 }
+
+/// Adds a synthetic account to `pool` and selects it there.
+fn add_in(store: &Store, provider: Provider, label: &str, token: &str, pool: &str) -> String {
+    let credential = Credential {
+        access_token: token.into(),
+        refresh_token: None,
+        id_token: None,
+        native_context: None,
+        expires_at: None,
+        account_id: Some(format!("identity-{label}")),
+    };
+    let a = store
+        .add(
+            label.into(),
+            provider,
+            AuthKind::OAuth,
+            pool.into(),
+            credential,
+        )
+        .unwrap();
+    store.select(provider, pool, &a.id).unwrap();
+    a.id
+}
+
+// SB-183 node A-6: the organizations' shell homes (`switchboard_runtime::shell::homes`) sign a
+// plain `claude` in with the fixed placeholder `ANTHROPIC_AUTH_TOKEN` (`PLACEHOLDER`,
+// `switchboard-shell`), and the folder's own `settings.local.json` adds the route and the
+// folder's capability header. The proxy must authenticate by the header alone: the placeholder
+// with the header reaches the folder's pool, the placeholder alone or for another pool reaches
+// nothing, and the placeholder is never forwarded.
+#[tokio::test]
+async fn a_placeholder_bearer_with_a_folder_header_reaches_its_pool() {
+    const PLACEHOLDER: &str = "switchboard-shell";
+    let (_root, s) = store();
+    add_in(&s, Provider::Claude, "team", "synthetic-team", "team");
+    add_in(&s, Provider::Claude, "mine", "synthetic-default", "default");
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let router = Router::new().route(
+        "/v1/messages",
+        post(move |headers: HeaderMap| {
+            let tx = tx.clone();
+            async move {
+                tx.send(headers).unwrap();
+                "{}"
+            }
+        }),
+    );
+    let (url, up) = fixture(router).await;
+    let p = start(s.clone(), url).await;
+    // After the migration window: only a folder's own capability stands for its pool.
+    p.set_legacy_until(1);
+    let folder = crate::folder_token(&p.pool_capability("team"), "/work/org-app");
+    p.set_folder_tokens([("team".to_owned(), vec![folder.clone()])].into());
+    let client = reqwest::Client::new();
+    let to = |pool: &str| format!("http://{}/claude/{pool}/v1/messages", p.address());
+    let send = |pool: &str, header: Option<&str>| {
+        let mut call = client.post(to(pool)).bearer_auth(PLACEHOLDER).body("{}");
+        if let Some(value) = header {
+            call = call.header(crate::CAPABILITY_HEADER, value);
+        }
+        call.send()
+    };
+    let reached = send("team", Some(&folder)).await.unwrap();
+    assert_eq!(
+        reached.status(),
+        200,
+        "the placeholder with the folder's header"
+    );
+    let h = rx.try_recv().expect("the request reached the provider");
+    assert_eq!(
+        h["authorization"], "Bearer synthetic-team",
+        "its pool's account"
+    );
+    assert!(!h.contains_key(crate::CAPABILITY_HEADER));
+    for (name, value) in &h {
+        let value = value.to_str().unwrap_or_default();
+        assert!(
+            !value.contains(PLACEHOLDER),
+            "{name} carried the placeholder"
+        );
+        assert!(!value.contains(&folder), "{name} carried the capability");
+    }
+    // The placeholder alone is no sign-in, and the header counts for its own pool only.
+    let alone = send("team", None).await.unwrap();
+    assert_eq!(alone.status(), 401, "the placeholder alone");
+    let alone_default = send("default", None).await.unwrap();
+    assert_eq!(
+        alone_default.status(),
+        401,
+        "the placeholder alone, default pool"
+    );
+    let elsewhere = send("default", Some(&folder)).await.unwrap();
+    assert_eq!(elsewhere.status(), 401, "another pool");
+    assert!(
+        rx.try_recv().is_err(),
+        "a refused request never reaches upstream"
+    );
+    p.shutdown().await;
+    up.abort();
+}
+
+// SB-183 node A-6: a shell home's Codex goes through the `_auto` provider with the machine's auto
+// capability and no sign-in of its own (`requires_openai_auth = false`). A folder no group maps
+// must go on with no credential at all, so it is refused upstream: closed, never a group's
+// account (dossier A, "Homes"). A mapped folder shows the same request does carry its pool's.
+#[tokio::test]
+async fn an_auto_request_from_an_unmapped_folder_carries_no_sign_in_upstream() {
+    let (_r, s) = store();
+    add_in(&s, Provider::Codex, "team", "synthetic-team", "team");
+    add_in(&s, Provider::Codex, "mine", "synthetic-default", "default");
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let record = |path: &'static str| {
+        let tx = tx.clone();
+        post(move |h: HeaderMap| {
+            let tx = tx.clone();
+            async move {
+                tx.send((path, h)).unwrap();
+                "ok"
+            }
+        })
+    };
+    let router = Router::new()
+        .route("/v1/responses", record("/v1/responses"))
+        .route("/backend-api/codex/responses", record("/backend-api"));
+    let (url, up) = fixture(router).await;
+    let p = start(s, url).await;
+    p.set_codex_folders(vec![("/w/org-app".into(), "team".into())]);
+    let body = |cwd: Option<&str>| {
+        let text = cwd.map_or("hello".to_owned(), |c| {
+            format!("<environment_context>\n  <cwd>{c}</cwd>\n</environment_context>")
+        });
+        serde_json::json!({"model": "gpt-5", "input": [
+            {"type": "message", "role": "user", "content": [{"type": "input_text", "text": text}]}
+        ]})
+        .to_string()
+    };
+    // As the shell home's config.toml sends it: the capability header, no Authorization.
+    let send = |cwd: Option<&str>| {
+        reqwest::Client::new()
+            .post(format!("http://{}/codex/_auto/v1/responses", p.address()))
+            .header(CAPABILITY_HEADER, p.auto_capability())
+            .body(body(cwd))
+            .send()
+    };
+    for cwd in [Some("/w/elsewhere"), Some("/w/org-app-old"), None] {
+        let response = send(cwd).await.unwrap();
+        assert_eq!(response.status(), 200, "{cwd:?} passed on as it came");
+        let (path, h) = rx.try_recv().expect("the request reached upstream");
+        assert_eq!(path, "/v1/responses", "{cwd:?}");
+        for name in [
+            "authorization",
+            "chatgpt-account-id",
+            "x-api-key",
+            CAPABILITY_HEADER,
+        ] {
+            assert!(!h.contains_key(name), "{cwd:?} carried {name}");
+        }
+        for (name, value) in &h {
+            let value = value.to_str().unwrap_or_default();
+            assert!(
+                !value.contains("synthetic-"),
+                "{cwd:?}: {name} carried a sign-in"
+            );
+            assert!(
+                !value.contains("identity-"),
+                "{cwd:?}: {name} carried an account"
+            );
+        }
+    }
+    // The contrast: a mapped folder's request carries its pool's sign-in.
+    let mapped = send(Some("/w/org-app/src")).await.unwrap();
+    assert_eq!(mapped.status(), 200);
+    let (_, h) = rx.try_recv().expect("the mapped request reached upstream");
+    assert_eq!(h["authorization"], "Bearer synthetic-team");
+    p.shutdown().await;
+    up.abort();
+}

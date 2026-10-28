@@ -11,9 +11,9 @@ Words: the person reads **group** for what tool names and fields call a project,
 group's id is its `pool` (`default` is the default group). **Automatic switching** is what tool
 names and fields call rotation. Say group and automatic switching to the person.
 
-`switchboard mcp --read-only` lists only the 23 tools that read (every tool under
-[Read tools](#read-tools)) and none of the 22 that write. A session Switchboard launches in
-isolated mode gets that set. The server lists 45 tools; each has a section below.
+`switchboard mcp --read-only` lists only the 24 tools that read (every tool under
+[Read tools](#read-tools)) and none of the 24 that write. A session Switchboard launches in
+isolated mode gets that set. The server lists 48 tools; each has a section below.
 
 ## Contents
 
@@ -80,22 +80,39 @@ Annotations: `readOnlyHint: true`.
   never asks the provider: it answers with the stored observation and `note` = "This server is
   read-only: showing the stored observation without asking the provider."
 
-### `switchboard_sessions`: `all?` (boolean)
+### `switchboard_sessions`: `all?` (boolean), `history?` (boolean), `launch_id?` (string)
 
-`{sessions[]}`: the Claude Code, Codex and Kimi Code sessions Switchboard launched: `account_id`,
-`label`, `provider`, `pool` (the group id), `context` (`personal` or `org:<id>`, fixed at the session's start;
-absent before 0.6.80 and on Kimi Code, Hermes and OpenCode sessions), `context_name` (the organization's name), `mode`, `working_directory`,
+`{sessions[]}`: the sessions Switchboard launched (Claude Code, Codex, Kimi Code, Hermes,
+OpenCode and catalog agents): `account_id`, `label`, `agent` (the catalog id, such as
+`claude-code`, `codex` or `goose`; null when unknown), `provider` (the provider the route serves:
+`claude` for an agent through an API-key account's proxy), `pool` (the group id), `context` (`personal` or `org:<id>`, fixed at the session's start;
+absent before 0.6.80, and on Kimi Code, Hermes and OpenCode sessions before 0.7.0), `context_name` (the organization's name), `mode`, `working_directory`,
 `in_place`, `launched_at`, `started_at`, `continues`, `home` and `state` (`starting`,
 `running`, `ended`, `unknown`).
 Without `all`, only starting and running ones. A session started outside Switchboard is not
 listed.
 
+With `history` (SB-212): `{launches[], total}`, every launch of the last 90 days, newest first
+(at most 500), one record per launch even when a later launch reused its home: the fields above
+plus `launch_id`, `launched_by` (`surface`: `window`, `cli`, `mcp`, `fallback`, `recovery` or
+`dashboards`; `caller_launch_id`, `caller_project`, `caller_program`, `by`, `parent`),
+`provider_session_id`, `transcript` (the path of its transcript), `turns`, `last_turn_at`, `ended`
+(`limit` when it stopped on one), `ended_at`, `handover` and `continued_as` (`{kind, id}`: the
+launch or hand-over its work went to). With `launch_id`: `{launch, up, down}`, that launch, who
+launched it up to the first launch, and what it launched or what took its work over.
+
 ### `switchboard_onboarding`: `path?` (absolute folder), `host?` (`claude` or `codex`)
 
-Where setting Switchboard up stands: `{complete, host, folder, steps[]}`, steps in order
+Where setting Switchboard up stands: `{complete, degraded, host, folder, steps[]}`, steps in order
 `owner`, `accounts`, `project` (the folder's group), `mcp`, `proving_call`, each `{id, state, summary, next}`.
+Those five are all on a computer without organizations, plus one optional `organization` step
+when PassionCode.ai is connected and lists none. With organizations, `organization` follows,
+then `org_group`, `seat`, `hook` and `launch` for each, each carrying `organization: {id, name}`.
 `state` is `done`, `todo` (run `next.command`, or call `next.tool`), `needs_person` (tell
-the person `next.person`) or `optional`. Reads only; the same as
+the person `next.person`; run `next.command`, or `next.alternatives` in order (save the group, then bind it; the bind alone when a group for those folders already exists), once they agree) or
+`optional`. `next.turn_on` and `next.turn_off` (the `hook` step) are the person's switches: run
+one only when the person asks. `degraded` names reads that failed (`snapshot`, `sign_ins`,
+`sessions`); the step each touches says so. Reads only; the same as
 `switchboard onboard --status --json`. The guide is `switchboard onboard`.
 
 ### `switchboard_project_context`: `path?` (absolute folder)
@@ -161,15 +178,37 @@ Sessions that stopped on a limit and the accounts ready to continue them: each s
 `{enabled, handovers[]}`: whether hand-overs open in Fabric's console, and those waiting for a
 console, oldest first.
 
-### `switchboard_chain_get`: `workflow_id?`, `pool?`
+### `switchboard_chain_get`: `workflow_id?`, `pool?`, `folder?`
 
-`{chains[], effective, presets[]}`. A chain is `{scope, executors[], updated_at}`: `scope` is
+`{chains[], effective, presets[], readiness, last_handover, ceilings_unreadable, limits_known}`. A chain is `{scope, executors[], updated_at}`: `scope` is
 `{kind: "machine"}`, `{kind: "project", pool}` (a group) or `{kind: "workflow", id}`; each executor is
 `{agent, account_id?, key?}`: a catalog agent id, optionally pinned to an account or to a paid
 key by its Observatory vault name (`project/env/NAME`; never a value). `effective` is the chain
 that applies (the workflow's own, else the group's, else the machine's) or null: **no chain
-applies until the operator sets one**. `presets` lists ready-made orders
-(`subscriptions-first`: claude-code → codex → kimi-code → hermes).
+applies until the operator sets one**. With `folder` (the workflow's checkout, an absolute
+folder) the group is found as the automatic fallback finds it: the executor's group (`pool`) when
+it holds the folder, else the one group holding it, else, when several do, the group its proxy route
+and paid key use; a relative `folder` is refused. `presets` lists ready-made orders
+(`subscriptions-first`: claude-code → codex → kimi-code → hermes). `readiness` says per chain
+what each step would do now; `limits_known` is false when no Switchboard owner runs, so readiness
+cannot name a limited account; `last_handover` and `ceilings_unreadable` come from the spending
+ceilings' file.
+
+### `switchboard_ceilings`
+
+`{ceilings[], questions[], last_handover, limits}`: the spending ceilings for paid fallback
+agents (Hermes and OpenCode on an OpenRouter key, Claude Code or Codex on an API-key account).
+A ceiling is `{scope, cents, usd, set_at, doubled_from, active, inactive_reason}`: `scope` as in
+a chain; this computer's and a group's count per UTC day, a task's on the key since its first
+paid hand-over; a group's ceiling whose own key was removed reads `active: false`,
+`inactive_reason: "no_own_key"`. Each open question is `{id, scope, cents, usd, double_usd,
+spent, reached_at}`: a paid step reached that ceiling at a hand-over and was skipped.
+`last_handover` is `{at, workflow, outcome, skipped[{agent, reason}]}` or null; `limits` names
+`min_usd`, `max_usd` and `min_remaining_usd` (a paid step is skipped on a key with less than
+that left of its own limit). Before every paid hand-over the key's spend is read from
+OpenRouter; a reached ceiling, a nearly spent key, or a ceiling whose spend cannot be read skips
+the step. A spending ceilings file that cannot be read is refused (*"Spending ceilings
+(spend.json) could not be read, …"*) and no paid agent is handed work until it reads again.
 
 ### `switchboard_openrouter_status`: `pool?`
 
@@ -288,6 +327,24 @@ Without `enabled`, the state (`on`, `applied`, `conflict` and the groups with a 
 `true` or `false` changes whether Codex in group folders uses the group's accounts, only when the
 operator asks.
 
+### `switchboard_shell_hook`: `path?`
+
+Whether this computer's terminals follow organization folders, as `switchboard shell status`
+reads it: `hook` (`on`, `off`, `default_on` because the folder map holds a folder of a group
+bound to an organization, `default_off`), `choice`, `map`, each start file in `files` with its
+`state` (`written`, `removed_by_person`, `skipped_symlink`, `skipped_owner`,
+`skipped_zdotdir_unknown`, `unreadable`, `policy_blocked`: a PowerShell profile on Windows whose
+execution policy, `Restricted` or `AllSigned`, keeps it from loading; Switchboard never changes
+the policy; `constrained_language`: PowerShell on Windows runs in Constrained Language Mode,
+where the hook cannot act), and in `here` the group, context and homes a terminal gets in
+`path` (default the agent's folder). Reads files only.
+
+### `switchboard_shell_hook_set`: `on`
+
+Only when the operator asks. `false` takes Switchboard's block out of every start file byte for
+byte and keeps it out; `true` writes it for every shell present. Answers what
+`switchboard_shell_hook` reads. From another data folder it is refused and nothing changes.
+
 ### `switchboard_project_suggestion`: `action`, `folder`
 
 Only when the operator asks. `accept` adds a waiting folder to its group now; `dismiss` keeps it
@@ -361,6 +418,22 @@ and `headless`), else *“… cannot take over a workflow …”*. Claude Code a
 provider's accounts; any other agent on an API-key account or a paid key, never on a
 subscription sign-in. Returns `{chain}` (null when cleared).
 
+### `switchboard_ceiling_set`: `scope?`, `usd`
+
+Only when the operator asks. `scope` is `machine` (default), `project:<group id>` or
+`workflow:<wf_id>`; `usd` is dollars from 0.01 to 1000 (per UTC day for this computer and a
+group, since the first paid hand-over for a task). A first ceiling for a scope or a value no
+higher than the current one is accepted; raising or clearing one is refused (*"Raising or
+clearing a ceiling is done in the Switchboard window. …"*): tell the operator to do it in the
+window. Returns `{ceiling}` (`scope`, `cents`, `set_at`).
+
+### `switchboard_ceiling_answer`: `id`, `answer?`
+
+Only when the operator asks. Answers an open question from `switchboard_ceilings` with `keep`
+(the default and the only answer here): the ceiling stays as it is and the question closes.
+`double` is refused (*"Doubling a ceiling is answered in the Switchboard window."*), the
+question staying open for the operator in the window. Returns `{answer, ceiling}`.
+
 ### `switchboard_hermes_set`: `provider?`, `model?`
 
 Only when the operator asks. Runs Hermes's own `hermes config set model.provider` (first) and
@@ -394,3 +467,13 @@ Fixed texts the server returns with `isError: true`; relay them and offer the re
 | "Name one account_id to refresh." | `refresh` needs one `account_id` |
 | "Group not found." | call `switchboard_projects` for current group ids |
 | "Statistics cover 1 to 90 days." | pass `days` from 1 to 90 |
+| "Raising or clearing a ceiling is done in the Switchboard window…" | set a first or a lower ceiling, or ask the operator to raise or clear it in the window |
+| "Doubling a ceiling is answered in the Switchboard window." | keep it here, or ask the operator to double it in the window |
+| "Give this group its own key under API keys first." | the operator saves the group's own OpenRouter key, then the ceiling |
+| "No open question with that id…" | call `switchboard_ceilings` for the open questions |
+| "Only Switchboard's own data folder can change your terminals' start files…" | run the server without `--data-dir`, or ask the operator to use the app's switch |
+| "No installed switchboard command was found for the hook to run…" | install Fabric Switchboard, then turn it on again |
+| "on is true or false." | `switchboard_shell_hook_set` takes `on`: `true` or `false` |
+| "The hook cannot name this executable or the data folder…" | Switchboard or its data folder sits at a path that is not absolute or not valid text: reinstall, then turn it on again |
+| "The terminal hook's choice could not be saved in Switchboard's data folder." | the data folder is not writable; nothing changed, try again once it is |
+| "Your home folder could not be found, so no start file was changed." | the server runs without a home folder (`HOME`); run it as the person's own user |

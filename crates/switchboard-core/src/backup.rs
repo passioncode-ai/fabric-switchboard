@@ -67,10 +67,30 @@ pub struct Restored {
     pub organizations: usize,
 }
 /// Settings Switchboard keeps as small files in its data folder, carried by every backup so a
-/// reinstall gets them back (`login-item`: open at login, SB-28; `auto-update`: the updater).
-pub const SETTING_FILES: &[&str] = &["login-item", "auto-update", "agents-settings.json"];
-/// A setting file carried in a backup: a word for the switches, a small JSON for the agents (SB-120).
+/// reinstall gets them back (`login-item`: open at login, SB-28; `auto-update`: the updater;
+/// `spend.json`: the spending ceilings, SB-72; `shell-hook`: the terminal hook's `on` or `off`,
+/// SB-183, so a restored `off` is never read as the default and written over).
+pub const SETTING_FILES: &[&str] = &[
+    "login-item",
+    "auto-update",
+    "agents-settings.json",
+    "spend.json",
+    "shell-hook",
+];
+/// A setting file carried in a backup: a word for the switches, a small JSON for the agents
+/// (SB-120); the spending ceilings' file holds up to 256 ceilings and their questions (SB-72,
+/// the runtime's `spend::MAX_BYTES`). A file past its limit is not carried.
 const MAX_SETTING: u64 = 4096;
+/// The runtime's `spend::MAX_BYTES`: a test there fails when the two part (a spend.json the
+/// runtime writes must always fit a backup).
+pub const MAX_SPEND_SETTING: u64 = 128 * 1024;
+fn setting_limit(name: &str) -> u64 {
+    if name == "spend.json" {
+        MAX_SPEND_SETTING
+    } else {
+        MAX_SETTING
+    }
+}
 
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -226,7 +246,8 @@ pub fn write(
     let settings = SETTING_FILES
         .iter()
         .filter_map(|name| {
-            let bytes = private_fs::read_private(&store.root().join(name), MAX_SETTING).ok()?;
+            let bytes =
+                private_fs::read_private(&store.root().join(name), setting_limit(name)).ok()?;
             let text = String::from_utf8(bytes).ok()?.trim().to_owned();
             (!text.is_empty()).then(|| ((*name).to_owned(), text))
         })
@@ -664,7 +685,10 @@ pub fn restore(
     for copy in payload.agent_keys {
         // Never over a key saved on this install.
         // A project key returns only when its project is back too (`set_agent_key_for` refuses one
-        // whose project is gone).
+        // whose project is gone). Under the spend write lock (SB-223): a replacement from the CLI
+        // decides whether it replaces a key under the same lock, so a key put back here is one
+        // it sees.
+        let _spend = crate::SPEND_WRITE.lock().unwrap_or_else(|p| p.into_inner());
         if store
             .agent_key_for(&copy.service, copy.pool.as_deref())?
             .is_none()
@@ -677,16 +701,31 @@ pub fn restore(
     }
     for (name, value) in payload.settings {
         let path = store.root().join(&name);
+        // `spend.json` is written under the runtime's spend write lock (SB-223).
+        let _spend = (name == "spend.json")
+            .then(|| crate::SPEND_WRITE.lock().unwrap_or_else(|p| p.into_inner()));
         // Only the known settings, never over a choice made on this install.
         if SETTING_FILES.contains(&name.as_str())
-            && value.len() as u64 <= MAX_SETTING
+            && value.len() as u64 <= setting_limit(&name)
             && !path.exists()
-            && private_fs::private_write(&path, format!("{value}\n").as_bytes()).is_ok()
+            && private_fs::private_write(&path, &restored_bytes(&name, &value)).is_ok()
         {
             result.settings += 1;
         }
     }
     Ok(result)
+}
+
+/// A setting as it is written back. A JSON setting comes back byte for byte as its owner wrote it
+/// (they write no line end, and the backup's trim keeps every byte of such a file), so a file of
+/// exactly its read limit stays readable (`spend.json`, C fix cycle 2). A switch word keeps its
+/// line end.
+fn restored_bytes(name: &str, value: &str) -> Vec<u8> {
+    if name.ends_with(".json") {
+        value.as_bytes().to_vec()
+    } else {
+        format!("{value}\n").into_bytes()
+    }
 }
 
 /// macOS key: one generic password, 64 hex characters, written through `security -i`.
@@ -1010,6 +1049,63 @@ mod tests {
     const PERSONAL_WORD: &str = crate::organizations::PERSONAL;
 
     #[test]
+    fn a_backup_carries_the_spending_ceilings_whole() {
+        // SB-72 (C-4): spend.json holds money values the operator set; a reinstall gets them back
+        // byte for byte, also when the file is larger than a switch's 4 KiB.
+        let temp = tempfile::tempdir().unwrap();
+        let backups = temp.path().join("backups");
+        let keys = Keys::default();
+        let original = store(&temp.path().join("one"));
+        save(&original, "synthetic-a", "token-a-secret");
+        let ceilings: Vec<String> = (0..120)
+            .map(|i| {
+                format!(
+                    r#"{{"scope":{{"kind":"workflow","id":"wf_{i:016x}"}},"cents":250,"set_at":1}}"#
+                )
+            })
+            .collect();
+        let body = format!(
+            r#""version":1,"ceilings":[{{"scope":{{"kind":"machine"}},"cents":500,"set_at":1}},{}]}}"#,
+            ceilings.join(",")
+        );
+        assert!(body.len() > 4096 && body.len() < MAX_SPEND_SETTING as usize);
+        // C fix cycle 2: exactly the limit, padded inside the object (the backup's trim keeps
+        // it); a restore that added a line end made it one byte too long to read.
+        let spend = format!(
+            "{{{}{body}",
+            " ".repeat(MAX_SPEND_SETTING as usize - body.len() - 1)
+        );
+        assert_eq!(spend.len() as u64, MAX_SPEND_SETTING);
+        std::fs::write(original.root().join("spend.json"), &spend).unwrap();
+        let info = write(&original, &backups, &keys, 1_000).unwrap().unwrap();
+        let fresh = store(&temp.path().join("two"));
+        let restored = restore(&fresh, &backups, &info.file, &keys).unwrap();
+        assert_eq!(restored.settings, 1);
+        assert_eq!(
+            std::fs::read_to_string(fresh.root().join("spend.json")).unwrap(),
+            spend,
+            "byte for byte, no line end added"
+        );
+        // A file past the limit is not carried (nor restored): never a truncated copy.
+        let third = store(&temp.path().join("three"));
+        save(&third, "synthetic-b", "token-b-secret");
+        std::fs::write(
+            third.root().join("spend.json"),
+            vec![b' '; MAX_SPEND_SETTING as usize + 1],
+        )
+        .unwrap();
+        let big = write(&third, &backups, &keys, 2_000).unwrap().unwrap();
+        let fourth = store(&temp.path().join("four"));
+        assert_eq!(
+            restore(&fourth, &backups, &big.file, &keys)
+                .unwrap()
+                .settings,
+            0
+        );
+        assert!(!fourth.root().join("spend.json").exists());
+    }
+
+    #[test]
     fn a_reinstall_gets_projects_rules_selections_and_settings_back() {
         let temp = tempfile::tempdir().unwrap();
         let backups = temp.path().join("backups");
@@ -1125,6 +1221,26 @@ mod tests {
                 .unwrap()
                 .trim(),
             "on"
+        );
+    }
+    /// SB-183: the terminal hook's choice travels like the other switches, so a reinstall that
+    /// restores a backup keeps `off` off (absent would read as the default, and the owner would
+    /// write the start-file blocks again).
+    #[test]
+    fn the_terminal_hooks_choice_survives_a_reinstall() {
+        let temp = tempfile::tempdir().unwrap();
+        let backups = temp.path().join("backups");
+        let keys = Keys::default();
+        let original = store(&temp.path().join("one"));
+        save(&original, "synthetic-a", "token-a-secret");
+        std::fs::write(original.root().join("shell-hook"), "off\n").unwrap();
+        let info = write(&original, &backups, &keys, 1_000).unwrap().unwrap();
+        let fresh = store(&temp.path().join("two"));
+        let restored = restore(&fresh, &backups, &info.file, &keys).unwrap();
+        assert_eq!(restored.settings, 1);
+        assert_eq!(
+            std::fs::read_to_string(fresh.root().join("shell-hook")).unwrap(),
+            "off\n"
         );
     }
     #[test]

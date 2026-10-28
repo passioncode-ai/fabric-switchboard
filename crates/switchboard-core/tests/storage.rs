@@ -1497,6 +1497,60 @@ fn a_folder_in_groups_of_two_contexts_runs_in_the_personal_one() {
 }
 
 #[test]
+fn a_read_releases_only_an_organization_truly_absent_from_a_well_formed_list() {
+    // SB-227 (B-7): rows `apply_vesta` skips (a name over 80 characters, a row past the 32nd), a
+    // row with an id it cannot read, and a 200 with an empty list never unlink an organization;
+    // only a well-formed list that no longer names it does.
+    use switchboard_core::organizations::VestaOrganization;
+    let (_root, _vault, store) = setup();
+    let vesta = |id: &str, name: &str| VestaOrganization {
+        id: id.into(),
+        name: name.into(),
+        domains: Vec::new(),
+    };
+    let first: Vec<VestaOrganization> = (0..32)
+        .map(|i| vesta(&format!("v-{i:02}"), &format!("Org {i:02}")))
+        .collect();
+    assert_eq!(store.apply_vesta(&first).unwrap().added, 32);
+    let linked = |store: &switchboard_core::Store| {
+        store
+            .snapshot()
+            .unwrap()
+            .organizations
+            .iter()
+            .filter(|o| o.vesta_id.is_some())
+            .count()
+    };
+    assert_eq!(linked(&store), 32);
+    // v-00's name grew past 80 characters; one more organization came first, so v-31 is the
+    // 33rd row; and a row whose id cannot be read sits among them.
+    let mut read = vec![vesta("v-new", "New")];
+    read.extend(first.iter().cloned());
+    read[1].name = "N".repeat(81);
+    for odd in [vec![vesta("bad id", "Odd")], Vec::new()] {
+        let mut with = read.clone();
+        with.extend(odd);
+        let applied = store.apply_vesta(&with).unwrap();
+        assert_eq!(applied.released, 0, "{applied:?}");
+        assert_eq!(linked(&store), 32);
+    }
+    // A 200 with an empty list: no proof of leaving.
+    let applied = store.apply_vesta(&[]).unwrap();
+    assert_eq!(applied.released, 0);
+    assert_eq!(linked(&store), 32);
+    // A row with an id that cannot be read: not well formed, nothing released.
+    let applied = store
+        .apply_vesta(&[vesta("v-00", "Org 00"), vesta("bad id", "Odd")])
+        .unwrap();
+    assert_eq!(applied.released, 0);
+    // A well-formed list without v-05: only v-05 is released.
+    let rest: Vec<VestaOrganization> = first.iter().filter(|v| v.id != "v-05").cloned().collect();
+    let applied = store.apply_vesta(&rest).unwrap();
+    assert_eq!(applied.released, 1);
+    assert_eq!(linked(&store), 31);
+}
+
+#[test]
 fn organizations_from_passioncode_are_linked_kept_current_and_released() {
     // SB-159 (SCN-071): a typed organization of the same name or a shared domain is linked, not
     // duplicated; a new one is added; a rename and a new domain arrive; one the person left
@@ -2268,8 +2322,9 @@ fn a_sign_in_stored_while_a_renewal_reads_keeps_its_place() {
 
 #[test]
 fn a_renewal_writes_under_the_lock_so_a_removal_waits_for_it() {
-    // Adversarial round 2 of H-1: the write runs under the lock, so a removal arriving during
-    // the write deletes what it wrote instead of being undone by it.
+    // Adversarial round 2 of H-1: the write runs under the lock (since H-2 the credential lock,
+    // which a removal takes too), so a removal arriving during the write deletes what it wrote
+    // instead of being undone by it.
     let root = tempfile::tempdir().unwrap();
     let vault = Arc::new(SlowVault {
         inner: MemoryVault::default(),
@@ -2308,4 +2363,1099 @@ fn a_renewal_writes_under_the_lock_so_a_removal_waits_for_it() {
         vault.inner.get(&id).is_err(),
         "a removed account has no credential"
     );
+}
+
+/// H-2 (SB-174, SB-206): the longest of the snapshot waits seen while `work` runs on another
+/// thread, a snapshot taken every 10 ms; and what `work` answered.
+fn longest_snapshot_wait<T: Send + 'static>(
+    store: &Arc<Store>,
+    work: impl FnOnce() -> T + Send + 'static,
+) -> (std::time::Duration, T) {
+    let worker = std::thread::spawn(work);
+    let mut longest = std::time::Duration::ZERO;
+    while !worker.is_finished() {
+        let started = std::time::Instant::now();
+        store.snapshot().unwrap();
+        longest = longest.max(started.elapsed());
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    (longest, worker.join().unwrap())
+}
+/// The Keychain delay of the SB-206 and H-2 slow vaults below. Before S2 the tests read a
+/// snapshot wait over a fixed 150 ms as "held behind a Keychain call", and failed at load average
+/// ~58: on a busy Mac a snapshot also waits for a core and for the metadata write (`publish`)
+/// it queues behind. A call of a whole second keeps the two apart.
+const KEYCHAIN_DELAY: std::time::Duration = std::time::Duration::from_secs(1);
+/// Whether a snapshot that waited `waited` was not held behind a Keychain call of `keychain`. One
+/// that was waits the whole call, less the 10 ms between snapshots; the bound, 80 % of the call,
+/// leaves the machine's load the rest.
+fn not_behind_keychain(waited: std::time::Duration, keychain: std::time::Duration) -> bool {
+    waited < keychain.mul_f64(0.8)
+}
+
+#[test]
+fn a_renewals_slow_credential_write_does_not_hold_the_metadata() {
+    // H-2 (SB-174, 2026-10-27 on 0.6.83): a renewal's `store` phase held the store's lock up to
+    // 69.3 s, a Keychain write under it, and `sessions` and `recovery` waited 63 to 64 s in
+    // `snapshot()`. The write now runs under the credential lock only.
+    let root = tempfile::tempdir().unwrap();
+    let vault = Arc::new(SlowVault {
+        inner: MemoryVault::default(),
+        delay: std::time::Duration::ZERO,
+        put_delay: KEYCHAIN_DELAY,
+    });
+    let store = Arc::new(Store::open(root.path().into(), vault.clone()).unwrap());
+    let id = store
+        .upsert(
+            "Account".into(),
+            Provider::Claude,
+            AuthKind::OAuth,
+            "default".into(),
+            lineage("a-old", "spent"),
+            None,
+        )
+        .unwrap()
+        .id;
+    let adopting = store.clone();
+    let (waited, adopted) = longest_snapshot_wait(&store, move || {
+        adopting.adopt_refreshed_for(Provider::Claude, "spent", &lineage("a-new", "next"), None)
+    });
+    let (updated, _) = adopted.unwrap();
+    assert_eq!(updated, vec![id.clone()]);
+    assert_eq!(
+        vault.inner.get(&id).unwrap().refresh_token.as_deref(),
+        Some("next")
+    );
+    assert!(
+        not_behind_keychain(waited, KEYCHAIN_DELAY),
+        "a snapshot waited {waited:?} behind a renewal's credential write"
+    );
+}
+
+#[test]
+fn saving_an_account_reads_and_writes_the_keychain_without_holding_the_metadata() {
+    // SB-206: `save_account` compared each saved row's token and wrote the new credential with
+    // the store's lock held; a snapshot waited out every one of those Keychain calls.
+    let root = tempfile::tempdir().unwrap();
+    let vault = Arc::new(SlowVault {
+        inner: MemoryVault::default(),
+        delay: KEYCHAIN_DELAY,
+        put_delay: KEYCHAIN_DELAY,
+    });
+    let store = Arc::new(Store::open(root.path().into(), vault.clone()).unwrap());
+    for n in 0..2 {
+        store
+            .upsert(
+                format!("Account {n}"),
+                Provider::Claude,
+                AuthKind::OAuth,
+                "default".into(),
+                lineage(&format!("a-{n}"), &format!("r-{n}")),
+                None,
+            )
+            .unwrap();
+    }
+    // Two token comparisons and one write: three Keychain calls.
+    let saving = store.clone();
+    let (waited, saved) = longest_snapshot_wait(&store, move || {
+        saving.upsert(
+            "Account 2".into(),
+            Provider::Claude,
+            AuthKind::OAuth,
+            "default".into(),
+            lineage("a-2", "r-2"),
+            None,
+        )
+    });
+    let saved = saved.unwrap();
+    assert_eq!(store.snapshot().unwrap().accounts.len(), 3);
+    assert_eq!(
+        vault.inner.get(&saved.id).unwrap().access_token,
+        "a-2".to_string()
+    );
+    assert!(
+        not_behind_keychain(waited, KEYCHAIN_DELAY),
+        "a snapshot waited {waited:?} behind a save's Keychain calls"
+    );
+}
+
+#[test]
+fn renewing_rows_reads_and_writes_the_keychain_without_holding_the_metadata() {
+    // SB-206: `renew_rows` read every row's old credential and wrote the new one under the lock.
+    use switchboard_core::ExternalIdentity;
+    let identity = ExternalIdentity {
+        account_id: Some("synthetic-a".into()),
+        organization_id: None,
+        email: Some("synthetic-a@example.invalid".into()),
+    };
+    let root = tempfile::tempdir().unwrap();
+    let vault = Arc::new(SlowVault {
+        inner: MemoryVault::default(),
+        delay: KEYCHAIN_DELAY,
+        put_delay: KEYCHAIN_DELAY,
+    });
+    let store = Arc::new(Store::open(root.path().into(), vault.clone()).unwrap());
+    let rows: Vec<(String, Option<String>)> = ["default", "work"]
+        .iter()
+        .map(|pool| {
+            let id = store
+                .upsert(
+                    "A".into(),
+                    Provider::Claude,
+                    AuthKind::OAuth,
+                    (*pool).into(),
+                    lineage("a-old", "old"),
+                    Some(identity.clone()),
+                )
+                .unwrap()
+                .id;
+            (id, None)
+        })
+        .collect();
+    let renewing = store.clone();
+    let ids: Vec<String> = rows.iter().map(|(id, _)| id.clone()).collect();
+    let (waited, renewed) = longest_snapshot_wait(&store, move || {
+        renewing.renew_rows(Provider::Claude, &rows, &lineage("a-new", "new"), &identity)
+    });
+    assert_eq!(renewed.unwrap().len(), 2);
+    for id in &ids {
+        assert_eq!(
+            vault.inner.get(id).unwrap().refresh_token.as_deref(),
+            Some("new")
+        );
+    }
+    assert!(
+        not_behind_keychain(waited, KEYCHAIN_DELAY),
+        "a snapshot waited {waited:?} behind a renewal of rows"
+    );
+}
+
+#[test]
+fn a_renewal_whose_write_fails_leaves_the_stored_token_and_the_metadata_as_they_were() {
+    // H-2 (c): the credential is written first and nothing else changes; a refused write leaves
+    // the spent token stored, so the runtime keeps the successor it holds (`stash`) and stores
+    // it on the next pass: no token is lost.
+    let root = tempfile::tempdir().unwrap();
+    let vault = Arc::new(FaultVault::default());
+    let store = Store::open(root.path().into(), vault.clone()).unwrap();
+    let id = store
+        .upsert(
+            "Account".into(),
+            Provider::Claude,
+            AuthKind::OAuth,
+            "default".into(),
+            lineage("a-old", "spent"),
+            None,
+        )
+        .unwrap()
+        .id;
+    let before = serde_json::to_string(&store.snapshot().unwrap().accounts).unwrap();
+    vault.fail_put.store(true, Ordering::SeqCst);
+    assert!(store
+        .adopt_refreshed_for(Provider::Claude, "spent", &lineage("a-new", "next"), None)
+        .is_err());
+    vault.fail_put.store(false, Ordering::SeqCst);
+    assert_eq!(
+        vault.memory.get(&id).unwrap().refresh_token.as_deref(),
+        Some("spent")
+    );
+    assert_eq!(
+        serde_json::to_string(&store.snapshot().unwrap().accounts).unwrap(),
+        before
+    );
+    // The next pass stores the kept successor.
+    let (updated, _) = store
+        .adopt_refreshed_for(Provider::Claude, "spent", &lineage("a-new", "next"), None)
+        .unwrap();
+    assert_eq!(updated, vec![id.clone()]);
+}
+
+#[test]
+fn a_save_whose_metadata_cannot_be_written_puts_the_old_credential_back() {
+    // H-2 (c): an update writes the new credential first, outside the metadata lock; a refused
+    // publication puts the old one back, so the saved row still names a credential that works.
+    use switchboard_core::ExternalIdentity;
+    let identity = ExternalIdentity {
+        account_id: Some("synthetic-a".into()),
+        organization_id: None,
+        email: Some("synthetic-a@example.invalid".into()),
+    };
+    let (root, vault, store) = setup();
+    let id = store
+        .upsert(
+            "A".into(),
+            Provider::Claude,
+            AuthKind::OAuth,
+            "default".into(),
+            lineage("a-old", "old"),
+            Some(identity.clone()),
+        )
+        .unwrap()
+        .id;
+    fs::remove_file(root.path().join("accounts.json")).unwrap();
+    fs::create_dir(root.path().join("accounts.json")).unwrap();
+    assert!(store
+        .upsert(
+            "Renamed".into(),
+            Provider::Claude,
+            AuthKind::OAuth,
+            "default".into(),
+            lineage("a-new", "new"),
+            Some(identity.clone()),
+        )
+        .is_err());
+    fs::remove_dir(root.path().join("accounts.json")).unwrap();
+    assert_eq!(
+        vault.get(&id).unwrap().refresh_token.as_deref(),
+        Some("old")
+    );
+    assert_eq!(store.snapshot().unwrap().accounts[0].label, "A");
+    // A refused renewal of rows does the same for every row it wrote.
+    fs::create_dir(root.path().join("accounts.json")).unwrap();
+    assert!(store
+        .renew_rows(
+            Provider::Claude,
+            &[(id.clone(), Some("Renamed".into()))],
+            &lineage("a-new", "new"),
+            &identity,
+        )
+        .is_err());
+    fs::remove_dir(root.path().join("accounts.json")).unwrap();
+    assert_eq!(
+        vault.get(&id).unwrap().refresh_token.as_deref(),
+        Some("old")
+    );
+}
+
+#[test]
+fn a_save_whose_credential_write_fails_changes_nothing() {
+    // H-2 (c): the credential goes first; when the vault refuses it, the metadata is untouched.
+    use switchboard_core::ExternalIdentity;
+    let identity = ExternalIdentity {
+        account_id: Some("synthetic-a".into()),
+        organization_id: None,
+        email: Some("synthetic-a@example.invalid".into()),
+    };
+    let root = TempDir::new().unwrap();
+    let vault = Arc::new(FaultVault::default());
+    let store = Store::open(root.path().into(), vault.clone()).unwrap();
+    let id = store
+        .upsert(
+            "A".into(),
+            Provider::Claude,
+            AuthKind::OAuth,
+            "default".into(),
+            lineage("a-old", "old"),
+            Some(identity.clone()),
+        )
+        .unwrap()
+        .id;
+    let before = serde_json::to_string(&store.snapshot().unwrap().accounts).unwrap();
+    vault.fail_put.store(true, Ordering::SeqCst);
+    let refused = store
+        .upsert(
+            "Renamed".into(),
+            Provider::Claude,
+            AuthKind::OAuth,
+            "default".into(),
+            lineage("a-new", "new"),
+            Some(identity.clone()),
+        )
+        .unwrap_err();
+    assert!(!refused.contains("sensitive"));
+    assert!(store
+        .renew_rows(
+            Provider::Claude,
+            &[(id.clone(), Some("Renamed".into()))],
+            &lineage("a-new", "new"),
+            &identity,
+        )
+        .is_err());
+    vault.fail_put.store(false, Ordering::SeqCst);
+    assert_eq!(
+        serde_json::to_string(&store.snapshot().unwrap().accounts).unwrap(),
+        before
+    );
+    assert_eq!(
+        vault.memory.get(&id).unwrap().refresh_token.as_deref(),
+        Some("old")
+    );
+}
+
+#[test]
+fn a_login_moved_into_the_group_while_its_save_writes_is_updated_not_copied() {
+    // H-2 adversarial: the save no longer holds the metadata while it writes, so a group change
+    // can land between its decision and its publication. Here the same login is moved into the
+    // group during the write: the save puts its first write back, plans again and updates the
+    // moved row. No second copy of the login in one group, no orphan Keychain item.
+    use switchboard_core::ExternalIdentity;
+    let identity = ExternalIdentity {
+        account_id: Some("synthetic-a".into()),
+        organization_id: None,
+        email: Some("synthetic-a@example.invalid".into()),
+    };
+    let root = TempDir::new().unwrap();
+    let vault = Arc::new(PutGateVault::default());
+    let store = Arc::new(Store::open(root.path().into(), vault.clone()).unwrap());
+    let folder = TempDir::new().unwrap();
+    let folder = folder.path().canonicalize().unwrap();
+    let elsewhere = store
+        .upsert(
+            "A".into(),
+            Provider::Claude,
+            AuthKind::OAuth,
+            "default".into(),
+            lineage("a-old", "old"),
+            Some(identity.clone()),
+        )
+        .unwrap();
+    let group = store
+        .save_project(
+            None,
+            "Synthetic group",
+            std::slice::from_ref(&folder),
+            std::slice::from_ref(&elsewhere.id),
+        )
+        .unwrap();
+    let (entered, put_started) = std::sync::mpsc::channel();
+    *vault.put_entered.lock().unwrap() = Some(entered);
+    *vault.hold_put.lock().unwrap() = true;
+    let saving = {
+        let store = store.clone();
+        let identity = identity.clone();
+        std::thread::spawn(move || {
+            store.upsert(
+                "A".into(),
+                Provider::Claude,
+                AuthKind::OAuth,
+                "default".into(),
+                lineage("a-new", "new"),
+                Some(identity),
+            )
+        })
+    };
+    put_started
+        .recv_timeout(std::time::Duration::from_secs(5))
+        .unwrap();
+    // The write waits; the login leaves its group for `default` meanwhile, without waiting for
+    // the write (before H-2 the group change waited on the store's lock the save held).
+    let (moved, move_answered) = std::sync::mpsc::channel();
+    {
+        let store = store.clone();
+        let pool = group.pool.clone();
+        std::thread::spawn(move || {
+            let _ = moved.send(store.save_project(Some(&pool), "Synthetic group", &[folder], &[]));
+        });
+    }
+    let answered = move_answered.recv_timeout(std::time::Duration::from_secs(3));
+    *vault.hold_put.lock().unwrap() = false;
+    vault.released.notify_all();
+    answered
+        .expect("the group change waited for the save's Keychain write")
+        .unwrap();
+    *vault.hold_put.lock().unwrap() = false;
+    vault.released.notify_all();
+    let saved = saving.join().unwrap().unwrap();
+    assert_eq!(saved.id, elsewhere.id, "the moved row was updated");
+    let accounts = store.snapshot().unwrap().accounts;
+    assert_eq!(accounts.len(), 1, "one copy of the login");
+    assert_eq!(accounts[0].pool, "default");
+    assert_eq!(
+        vault
+            .inner
+            .get(&elsewhere.id)
+            .unwrap()
+            .refresh_token
+            .as_deref(),
+        Some("new")
+    );
+}
+
+#[test]
+fn a_quota_verdict_read_while_a_renewal_writes_is_refused_as_a_change() {
+    // H-2 adversarial: a renewal's write no longer holds the metadata lock, so a quota check can
+    // compare its credential under that lock while the write is in flight. Before, it waited
+    // for the write and read the successor; it must still not keep a verdict of the old item.
+    let root = TempDir::new().unwrap();
+    let vault = Arc::new(PutGateVault::default());
+    let store = Arc::new(Store::open(root.path().into(), vault.clone()).unwrap());
+    let id = store
+        .upsert(
+            "Account".into(),
+            Provider::Claude,
+            AuthKind::OAuth,
+            "default".into(),
+            lineage("a-old", "spent"),
+            None,
+        )
+        .unwrap()
+        .id;
+    let (entered, put_started) = std::sync::mpsc::channel();
+    *vault.put_entered.lock().unwrap() = Some(entered);
+    *vault.hold_put.lock().unwrap() = true;
+    let adopting = {
+        let store = store.clone();
+        std::thread::spawn(move || {
+            store.adopt_refreshed_for(Provider::Claude, "spent", &lineage("a-new", "next"), None)
+        })
+    };
+    put_started
+        .recv_timeout(std::time::Duration::from_secs(5))
+        .unwrap();
+    let at = now();
+    let refused = store
+        .usage_health_credential(&id, &lineage("a-old", "spent"), "failed", at, at + 600)
+        .unwrap_err();
+    *vault.hold_put.lock().unwrap() = false;
+    vault.released.notify_all();
+    assert_eq!(
+        Store::usage_refusal_code(&refused),
+        Some("credential_changed"),
+        "{refused}"
+    );
+    let (updated, _) = adopting.join().unwrap().unwrap();
+    assert_eq!(updated, vec![id.clone()]);
+    assert!(store.snapshot().unwrap().accounts[0].usage_health.is_none());
+}
+
+/// A vault whose removals wait `delay`: a removal holds the metadata lock across its deletion.
+struct SlowDelete {
+    inner: MemoryVault,
+    delay: std::time::Duration,
+}
+impl Vault for SlowDelete {
+    fn get(&self, id: &str) -> Result<Credential, String> {
+        self.inner.get(id)
+    }
+    fn put(&self, id: &str, value: &Credential) -> Result<(), String> {
+        self.inner.put(id, value)
+    }
+    fn delete(&self, id: &str) -> Result<(), String> {
+        std::thread::sleep(self.delay);
+        self.inner.delete(id)
+    }
+}
+static LONGEST_LOCK_WAIT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static LOCK_TAKES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+fn note_lock_wait(waited: std::time::Duration) {
+    LOCK_TAKES.fetch_add(1, Ordering::SeqCst);
+    LONGEST_LOCK_WAIT.fetch_max(waited.as_millis() as u64, Ordering::SeqCst);
+}
+
+#[test]
+fn the_lock_observer_is_told_each_take_and_how_long_it_waited() {
+    // H-2: `control_slow` carries `lock_ms`, the time an operation waited for the store's lock;
+    // the store tells its observer each take, zero when the lock was free.
+    let root = TempDir::new().unwrap();
+    let vault = Arc::new(SlowDelete {
+        inner: MemoryVault::default(),
+        delay: std::time::Duration::from_millis(400),
+    });
+    let store = Arc::new(Store::open(root.path().into(), vault).unwrap());
+    let account = add(&store, "synthetic-observed");
+    store.observe_lock_waits(note_lock_wait);
+    let takes = LOCK_TAKES.load(Ordering::SeqCst);
+    store.snapshot().unwrap();
+    assert!(
+        LOCK_TAKES.load(Ordering::SeqCst) > takes,
+        "a free take is told"
+    );
+    let removing = {
+        let store = store.clone();
+        std::thread::spawn(move || store.remove(&account.id))
+    };
+    std::thread::sleep(std::time::Duration::from_millis(100));
+    store.snapshot().unwrap();
+    removing.join().unwrap().unwrap();
+    assert!(
+        LONGEST_LOCK_WAIT.load(Ordering::SeqCst) >= 200,
+        "the wait behind the removal is told: {} ms",
+        LONGEST_LOCK_WAIT.load(Ordering::SeqCst)
+    );
+}
+
+/// H-2 fix cycle 1: a vault whose reads, writes and removals can each be held at their entry
+/// until released, telling `entered` which one waits. Writes run one at a time, in the order
+/// they arrive, so a write that queues behind a held one lands after it.
+#[derive(Default)]
+struct GateVault {
+    inner: MemoryVault,
+    gates: std::sync::Mutex<Gates>,
+    released: std::sync::Condvar,
+    entered: std::sync::Mutex<Option<std::sync::mpsc::Sender<&'static str>>>,
+    one_write_at_a_time: std::sync::Mutex<()>,
+    writes: std::sync::atomic::AtomicUsize,
+}
+#[derive(Default)]
+struct Gates {
+    get: bool,
+    put: bool,
+    delete: bool,
+}
+impl GateVault {
+    fn hold(&self, set: impl FnOnce(&mut Gates)) {
+        set(&mut self.gates.lock().unwrap());
+    }
+    fn release(&self) {
+        *self.gates.lock().unwrap() = Gates::default();
+        self.released.notify_all();
+    }
+    fn wait_if_held(&self, op: &'static str, held: impl Fn(&Gates) -> bool) {
+        let mut gates = self.gates.lock().unwrap();
+        if held(&gates) {
+            if let Some(tx) = self.entered.lock().unwrap().as_ref() {
+                let _ = tx.send(op);
+            }
+            while held(&gates) {
+                gates = self.released.wait(gates).unwrap();
+            }
+        }
+    }
+    fn entered(&self) -> std::sync::mpsc::Receiver<&'static str> {
+        let (tx, rx) = std::sync::mpsc::channel();
+        *self.entered.lock().unwrap() = Some(tx);
+        rx
+    }
+}
+impl Vault for GateVault {
+    fn get(&self, id: &str) -> Result<Credential, String> {
+        self.wait_if_held("get", |g| g.get);
+        self.inner.get(id)
+    }
+    fn put(&self, id: &str, value: &Credential) -> Result<(), String> {
+        let _turn = self.one_write_at_a_time.lock().unwrap();
+        self.wait_if_held("put", |g| g.put);
+        self.writes.fetch_add(1, Ordering::SeqCst);
+        self.inner.put(id, value)
+    }
+    fn delete(&self, id: &str) -> Result<(), String> {
+        let _turn = self.one_write_at_a_time.lock().unwrap();
+        self.wait_if_held("delete", |g| g.delete);
+        self.writes.fetch_add(1, Ordering::SeqCst);
+        self.inner.delete(id)
+    }
+}
+const ANSWER: std::time::Duration = std::time::Duration::from_secs(5);
+/// Runs `work` on its own thread; its answer arrives on the returned channel.
+fn answer<T: Send + 'static>(
+    work: impl FnOnce() -> T + Send + 'static,
+) -> std::sync::mpsc::Receiver<T> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(work());
+    });
+    rx
+}
+/// One snapshot taken on its own thread: how long it waited, or a failure when it did not
+/// answer within `ANSWER` (a snapshot stuck behind a lock-order defect).
+fn timed_snapshot(store: &Arc<Store>) -> std::time::Duration {
+    let store = store.clone();
+    answer(move || {
+        let started = std::time::Instant::now();
+        store.snapshot().unwrap();
+        started.elapsed()
+    })
+    .recv_timeout(ANSWER)
+    .expect("a snapshot answered")
+}
+fn identity(name: &str) -> switchboard_core::ExternalIdentity {
+    switchboard_core::ExternalIdentity {
+        account_id: Some(format!("synthetic-{name}")),
+        organization_id: None,
+        email: Some(format!("synthetic-{name}@example.invalid")),
+    }
+}
+fn upsert_in(
+    store: &Store,
+    pool: &str,
+    who: &str,
+    credential: Credential,
+) -> Result<Account, String> {
+    store.upsert(
+        "Synthetic".into(),
+        Provider::Claude,
+        AuthKind::OAuth,
+        pool.into(),
+        credential,
+        Some(identity(who)),
+    )
+}
+
+#[test]
+fn a_removal_during_a_saves_held_write_neither_deadlocks_nor_stalls_a_snapshot() {
+    // H-2 fix cycle 1 (adversarial): a removal waits for the credential lock a save holds
+    // across its write, and must not hold the metadata lock while it waits: a snapshot answers
+    // meanwhile, and the save's publication is not stuck behind the removal.
+    let root = TempDir::new().unwrap();
+    let vault = Arc::new(GateVault::default());
+    let store = Arc::new(Store::open(root.path().into(), vault.clone()).unwrap());
+    let doomed = upsert_in(&store, "default", "doomed", lineage("a-doomed", "r-doomed")).unwrap();
+    let entered = vault.entered();
+    vault.hold(|g| g.put = true);
+    let saved = {
+        let store = store.clone();
+        answer(move || upsert_in(&store, "default", "kept", lineage("a-kept", "r-kept")))
+    };
+    assert_eq!(entered.recv_timeout(ANSWER).unwrap(), "put");
+    let removed = {
+        let store = store.clone();
+        let id = doomed.id.clone();
+        answer(move || store.remove(&id))
+    };
+    std::thread::sleep(std::time::Duration::from_millis(100));
+    let waited = timed_snapshot(&store);
+    assert!(
+        not_behind_keychain(waited, ANSWER),
+        "a snapshot waited {waited:?} behind a removal waiting for a save"
+    );
+    vault.release();
+    let saved = saved
+        .recv_timeout(ANSWER)
+        .expect("the save answered")
+        .unwrap();
+    removed
+        .recv_timeout(ANSWER)
+        .expect("the removal answered")
+        .unwrap();
+    let accounts = store.snapshot().unwrap().accounts;
+    assert_eq!(accounts.len(), 1);
+    assert_eq!(accounts[0].id, saved.id);
+    assert!(vault.inner.get(&doomed.id).is_err());
+}
+
+#[test]
+fn a_renewal_racing_a_held_save_never_deadlocks() {
+    // H-2 fix cycle 1 (adversarial): a renewal (adopt_refreshed_for, renew_rows) takes the
+    // credential lock before the metadata lock, as a save does; the other order deadlocks once
+    // the save's write returns and it wants the metadata lock the renewal holds.
+    let root = TempDir::new().unwrap();
+    let vault = Arc::new(GateVault::default());
+    let store = Arc::new(Store::open(root.path().into(), vault.clone()).unwrap());
+    let renewed = upsert_in(&store, "default", "renewed", lineage("a-old", "spent")).unwrap();
+    let entered = vault.entered();
+
+    vault.hold(|g| g.put = true);
+    let saved = {
+        let store = store.clone();
+        answer(move || upsert_in(&store, "default", "other", lineage("a-other", "r-other")))
+    };
+    assert_eq!(entered.recv_timeout(ANSWER).unwrap(), "put");
+    let adopted = {
+        let store = store.clone();
+        answer(move || {
+            store.adopt_refreshed_for(Provider::Claude, "spent", &lineage("a-new", "next"), None)
+        })
+    };
+    std::thread::sleep(std::time::Duration::from_millis(100));
+    vault.release();
+    saved
+        .recv_timeout(ANSWER)
+        .expect("the save answered")
+        .unwrap();
+    let (updated, _) = adopted
+        .recv_timeout(ANSWER)
+        .expect("the renewal answered")
+        .unwrap();
+    assert_eq!(updated, vec![renewed.id.clone()]);
+
+    // The same with a sign-in renewing its rows.
+    vault.hold(|g| g.put = true);
+    let saved = {
+        let store = store.clone();
+        answer(move || upsert_in(&store, "default", "third", lineage("a-third", "r-third")))
+    };
+    assert_eq!(entered.recv_timeout(ANSWER).unwrap(), "put");
+    let rows_renewed = {
+        let store = store.clone();
+        let rows = vec![(renewed.id.clone(), None)];
+        answer(move || {
+            store.renew_rows(
+                Provider::Claude,
+                &rows,
+                &lineage("a-signed", "signed"),
+                &identity("renewed"),
+            )
+        })
+    };
+    std::thread::sleep(std::time::Duration::from_millis(100));
+    vault.release();
+    saved
+        .recv_timeout(ANSWER)
+        .expect("the save answered")
+        .unwrap();
+    assert_eq!(
+        rows_renewed
+            .recv_timeout(ANSWER)
+            .expect("the renewal of rows answered")
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(
+        vault
+            .inner
+            .get(&renewed.id)
+            .unwrap()
+            .refresh_token
+            .as_deref(),
+        Some("signed")
+    );
+}
+
+#[test]
+fn a_restore_waits_for_a_removal_or_a_save_and_never_overwrites_their_item() {
+    // H-2 fix cycle 1 (adversarial): `restore_missing_credential` reads the item, then writes
+    // the backup when none works. It holds the credential lock across both, so a save writing
+    // the same item, or a removal deleting it, never lands between its read and its write.
+    let root = TempDir::new().unwrap();
+    let vault = Arc::new(GateVault::default());
+    let store = Arc::new(Store::open(root.path().into(), vault.clone()).unwrap());
+    let backup = lineage("a-backup", "r-backup");
+    let account = upsert_in(&store, "default", "restored", lineage("a-old", "r-old")).unwrap();
+    // The item holds a credential that does not work, so the restore would write the backup.
+    let mut broken = lineage("a-old", "r-old");
+    broken.access_token = "not a token".into();
+    vault.inner.put(&account.id, &broken).unwrap();
+    let entered = vault.entered();
+
+    // A save of the same login, held in its write: the restore waits, then finds it.
+    vault.hold(|g| g.put = true);
+    let saved = {
+        let store = store.clone();
+        answer(move || upsert_in(&store, "default", "restored", lineage("a-new", "r-new")))
+    };
+    assert_eq!(entered.recv_timeout(ANSWER).unwrap(), "put");
+    let restored = {
+        let store = store.clone();
+        let id = account.id.clone();
+        let backup = backup.clone();
+        answer(move || store.restore_missing_credential(&id, &backup))
+    };
+    std::thread::sleep(std::time::Duration::from_millis(100));
+    vault.release();
+    assert_eq!(
+        saved
+            .recv_timeout(ANSWER)
+            .expect("the save answered")
+            .unwrap()
+            .id,
+        account.id
+    );
+    assert_eq!(
+        restored.recv_timeout(ANSWER).expect("the restore answered"),
+        Ok(false),
+        "the save's credential works; nothing is restored"
+    );
+    assert_eq!(
+        vault
+            .inner
+            .get(&account.id)
+            .unwrap()
+            .refresh_token
+            .as_deref(),
+        Some("r-new")
+    );
+
+    // A removal held in its deletion: the restore waits and finds no account.
+    vault.inner.put(&account.id, &broken).unwrap();
+    vault.hold(|g| g.delete = true);
+    let removed = {
+        let store = store.clone();
+        let id = account.id.clone();
+        answer(move || store.remove(&id))
+    };
+    assert_eq!(entered.recv_timeout(ANSWER).unwrap(), "delete");
+    let restored = {
+        let store = store.clone();
+        let id = account.id.clone();
+        let backup = backup.clone();
+        answer(move || store.restore_missing_credential(&id, &backup))
+    };
+    std::thread::sleep(std::time::Duration::from_millis(100));
+    vault.release();
+    removed
+        .recv_timeout(ANSWER)
+        .expect("the removal answered")
+        .unwrap();
+    assert!(restored
+        .recv_timeout(ANSWER)
+        .expect("the restore answered")
+        .is_err());
+    assert!(vault.inner.get(&account.id).is_err(), "no orphan item");
+
+    // A removal that lands while the restore reads: it waits for the restore, then deletes
+    // what the restore wrote. Without the credential lock the restore would write the backup
+    // after the deletion, an item no row names.
+    let account = upsert_in(&store, "default", "restored", lineage("a-old", "r-old")).unwrap();
+    vault.inner.put(&account.id, &broken).unwrap();
+    vault.hold(|g| g.get = true);
+    let restored = {
+        let store = store.clone();
+        let id = account.id.clone();
+        answer(move || store.restore_missing_credential(&id, &backup))
+    };
+    assert_eq!(entered.recv_timeout(ANSWER).unwrap(), "get");
+    let removed = {
+        let store = store.clone();
+        let id = account.id.clone();
+        answer(move || store.remove(&id))
+    };
+    std::thread::sleep(std::time::Duration::from_millis(100));
+    vault.release();
+    assert_eq!(
+        restored.recv_timeout(ANSWER).expect("the restore answered"),
+        Ok(true)
+    );
+    removed
+        .recv_timeout(ANSWER)
+        .expect("the removal answered")
+        .unwrap();
+    assert!(store.snapshot().unwrap().accounts.is_empty());
+    assert!(vault.inner.get(&account.id).is_err(), "no orphan item");
+}
+
+/// A vault that, on each write of `trigger`'s token, moves the login between `default` and a
+/// group, so a save finds its group changed under every write.
+#[derive(Default)]
+struct MovingVault {
+    inner: MemoryVault,
+    store: std::sync::OnceLock<std::sync::Weak<Store>>,
+    group: std::sync::OnceLock<(String, std::path::PathBuf, String)>,
+    writes: std::sync::atomic::AtomicUsize,
+}
+impl Vault for MovingVault {
+    fn get(&self, id: &str) -> Result<Credential, String> {
+        self.inner.get(id)
+    }
+    fn put(&self, id: &str, value: &Credential) -> Result<(), String> {
+        self.writes.fetch_add(1, Ordering::SeqCst);
+        let result = self.inner.put(id, value);
+        if value.access_token == "a-contended" {
+            if let (Some(store), Some((pool, folder, login))) = (
+                self.store.get().and_then(std::sync::Weak::upgrade),
+                self.group.get(),
+            ) {
+                let in_default = store
+                    .snapshot()
+                    .unwrap()
+                    .accounts
+                    .iter()
+                    .any(|a| &a.id == login && a.pool == "default");
+                let members: &[String] = if in_default {
+                    std::slice::from_ref(login)
+                } else {
+                    &[]
+                };
+                store
+                    .save_project(
+                        Some(pool),
+                        "Synthetic group",
+                        std::slice::from_ref(folder),
+                        members,
+                    )
+                    .unwrap();
+            }
+        }
+        result
+    }
+    fn delete(&self, id: &str) -> Result<(), String> {
+        self.writes.fetch_add(1, Ordering::SeqCst);
+        self.inner.delete(id)
+    }
+}
+
+#[test]
+fn a_save_under_constant_group_changes_gives_up_after_four_attempts() {
+    // H-2 fix cycle 1 (adversarial): a group change under each write makes a save put its write
+    // back and plan again. It stops after `SAVE_ATTEMPTS` (4) with its own error, the old
+    // credential in place and no second row.
+    let root = TempDir::new().unwrap();
+    let vault = Arc::new(MovingVault::default());
+    let store = Arc::new(Store::open(root.path().into(), vault.clone()).unwrap());
+    let folder = TempDir::new().unwrap();
+    let folder = folder.path().canonicalize().unwrap();
+    let login = upsert_in(&store, "default", "contended", lineage("a-old", "r-old")).unwrap();
+    let group = store
+        .save_project(
+            None,
+            "Synthetic group",
+            std::slice::from_ref(&folder),
+            std::slice::from_ref(&login.id),
+        )
+        .unwrap();
+    vault.store.set(Arc::downgrade(&store)).unwrap();
+    vault
+        .group
+        .set((group.pool.clone(), folder, login.id.clone()))
+        .unwrap();
+    let before = vault.writes.load(Ordering::SeqCst);
+    let saving = store.clone();
+    let refused = answer(move || {
+        upsert_in(
+            &saving,
+            "default",
+            "contended",
+            lineage("a-contended", "r-new"),
+        )
+    })
+    .recv_timeout(std::time::Duration::from_secs(10))
+    .expect("the save gave up")
+    .unwrap_err();
+    assert_eq!(
+        refused,
+        "Account groups kept changing while the account was saved"
+    );
+    let writes = vault.writes.load(Ordering::SeqCst) - before;
+    assert!(
+        (1..=8).contains(&writes),
+        "{writes} writes and put-backs for 4 attempts"
+    );
+    let accounts = store.snapshot().unwrap().accounts;
+    assert_eq!(accounts.len(), 1, "one row");
+    assert_eq!(
+        vault.inner.get(&login.id).unwrap().refresh_token.as_deref(),
+        Some("r-old")
+    );
+}
+
+/// A vault whose writes panic while `panic_put` is set.
+#[derive(Default)]
+struct PanicVault {
+    inner: MemoryVault,
+    panic_put: AtomicBool,
+}
+impl Vault for PanicVault {
+    fn get(&self, id: &str) -> Result<Credential, String> {
+        self.inner.get(id)
+    }
+    fn put(&self, id: &str, value: &Credential) -> Result<(), String> {
+        if self.panic_put.load(Ordering::SeqCst) {
+            panic!("synthetic panic in a credential write");
+        }
+        self.inner.put(id, value)
+    }
+    fn delete(&self, id: &str) -> Result<(), String> {
+        self.inner.delete(id)
+    }
+}
+
+#[test]
+fn a_panicking_put_leaves_no_item_marked() {
+    // H-2 fix cycle 1 (adversarial P4c): the store marks an item while it is written; a write
+    // that panics must clear its mark too, or every later quota check of that account is
+    // refused as `credential_changed`.
+    let root = TempDir::new().unwrap();
+    let vault = Arc::new(PanicVault::default());
+    let store = Arc::new(Store::open(root.path().into(), vault.clone()).unwrap());
+    let account = upsert_in(&store, "default", "panicked", lineage("a-old", "r-old")).unwrap();
+    vault.panic_put.store(true, Ordering::SeqCst);
+    let panicked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        upsert_in(&store, "default", "panicked", lineage("a-new", "r-new"))
+    }));
+    assert!(panicked.is_err(), "the write panicked");
+    vault.panic_put.store(false, Ordering::SeqCst);
+    let at = now();
+    store
+        .usage_health_credential(
+            &account.id,
+            &lineage("a-old", "r-old"),
+            "failed",
+            at,
+            at + 600,
+        )
+        .expect("a quota observation of the stored credential is accepted");
+}
+
+#[test]
+fn saving_and_removing_agent_keys_never_holds_the_metadata() {
+    // H-2 fix cycle 1: `set_agent_key_for` read the replaced key and wrote the new one, and
+    // `remove_agent_key_for` and `remove_project` deleted key items, all with the metadata lock
+    // held; a snapshot waited out each Keychain call.
+    let root = TempDir::new().unwrap();
+    let vault = Arc::new(SlowAgentVault {
+        inner: MemoryVault::default(),
+        delay: KEYCHAIN_DELAY,
+    });
+    let store = Arc::new(Store::open(root.path().into(), vault.clone()).unwrap());
+    let folder = TempDir::new().unwrap();
+    let folder = folder.path().canonicalize().unwrap();
+    let group = store
+        .save_project(None, "Synthetic group", std::slice::from_ref(&folder), &[])
+        .unwrap();
+    store
+        .set_agent_key_for("openrouter", None, "sk-or-v1-first", None)
+        .unwrap();
+    let saving = store.clone();
+    let (waited, saved) = longest_snapshot_wait(&store, move || {
+        saving.set_agent_key_for("openrouter", None, "sk-or-v1-second", None)
+    });
+    let saved = saved.unwrap();
+    assert_eq!(
+        vault.inner.get(&saved.id).unwrap().access_token,
+        "sk-or-v1-second"
+    );
+    assert!(
+        not_behind_keychain(waited, KEYCHAIN_DELAY),
+        "a snapshot waited {waited:?} behind an agent key's save"
+    );
+    let removing = store.clone();
+    let (waited, removed) = longest_snapshot_wait(&store, move || {
+        removing.remove_agent_key_for("openrouter", None)
+    });
+    assert_eq!(removed, Ok(true));
+    assert!(vault.inner.get(&saved.id).is_err());
+    assert!(
+        not_behind_keychain(waited, KEYCHAIN_DELAY),
+        "a snapshot waited {waited:?} behind an agent key's removal"
+    );
+    let pool = group.pool.clone();
+    let pool_key = store
+        .set_agent_key_for("openrouter", Some(&pool), "sk-or-v1-group", None)
+        .unwrap();
+    let removing = store.clone();
+    let (waited, removed) = longest_snapshot_wait(&store, move || removing.remove_project(&pool));
+    removed.unwrap();
+    assert!(vault.inner.get(&pool_key.id).is_err());
+    assert!(store.snapshot().unwrap().agent_keys.is_empty());
+    assert!(
+        not_behind_keychain(waited, KEYCHAIN_DELAY),
+        "a snapshot waited {waited:?} behind a group's key deletions"
+    );
+}
+
+#[test]
+fn an_agent_key_whose_metadata_cannot_be_written_puts_the_old_key_back() {
+    // H-2 fix cycle 1: the key's item is written before its metadata, outside the metadata
+    // lock; a refused publication puts the old value back (or removes a new item).
+    let (root, vault, store) = setup();
+    let first = store
+        .set_agent_key_for("openrouter", None, "sk-or-v1-first", None)
+        .unwrap();
+    fs::remove_file(root.path().join("accounts.json")).unwrap();
+    fs::create_dir(root.path().join("accounts.json")).unwrap();
+    assert!(store
+        .set_agent_key_for("openrouter", None, "sk-or-v1-second", None)
+        .is_err());
+    fs::remove_dir(root.path().join("accounts.json")).unwrap();
+    assert_eq!(vault.get(&first.id).unwrap().access_token, "sk-or-v1-first");
+}
+
+/// A vault whose every Keychain call waits `delay`.
+struct SlowAgentVault {
+    inner: MemoryVault,
+    delay: std::time::Duration,
+}
+impl Vault for SlowAgentVault {
+    fn get(&self, id: &str) -> Result<Credential, String> {
+        std::thread::sleep(self.delay);
+        self.inner.get(id)
+    }
+    fn put(&self, id: &str, value: &Credential) -> Result<(), String> {
+        std::thread::sleep(self.delay);
+        self.inner.put(id, value)
+    }
+    fn delete(&self, id: &str) -> Result<(), String> {
+        std::thread::sleep(self.delay);
+        self.inner.delete(id)
+    }
 }

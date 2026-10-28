@@ -68,6 +68,11 @@ impl Slot {
                 // Release builds only (the App Key), the real data folder only (docs/ANALYTICS.md).
                 if !self.smoke {
                     owner.runtime.enable_analytics(self.launch);
+                    // SB-183: only an installed build writes the terminal hook's start files
+                    // (never a development build); the runtime checks the data folder too.
+                    if std::env::current_exe().is_ok_and(|exe| residency::packaged(&exe)) {
+                        owner.runtime.enable_shell_hook();
+                    }
                 }
             });
             *owner = Some(started.map_err(|error| {
@@ -610,7 +615,10 @@ async fn remove_project(pool: String, state: State<'_, Slot>) -> Result<Value, S
     state
         .runtime()
         .await?
-        .execute(Operation::RemoveProject { pool })
+        .execute(Operation::RemoveProject {
+            pool,
+            by: switchboard_runtime::spend::Surface::Window,
+        })
         .await
 }
 /// Hermes's model and provider (SB-80): read, and changed only on the person's request.
@@ -748,7 +756,104 @@ async fn openrouter_save(
             key,
             model,
             pool,
+            by: switchboard_runtime::spend::Surface::Window,
         })
+        .await
+}
+/// SB-71 (C-2): every fallback chain, the presets, what each step would do now (`readiness`) and
+/// the last hand-over. Labels and codes only, never a credential.
+#[tauri::command]
+async fn chains(state: State<'_, Slot>) -> Result<Value, String> {
+    state
+        .runtime()
+        .await?
+        .execute(Operation::Chains {
+            workflow: None,
+            pool: None,
+            folder: None,
+        })
+        .await
+}
+/// Sets a scope's chain in order (an empty list clears it); a preset id may stand for the list.
+#[tauri::command]
+async fn set_chain(
+    scope: switchboard_core::ChainScope,
+    executors: Vec<switchboard_core::Executor>,
+    preset: Option<String>,
+    state: State<'_, Slot>,
+) -> Result<Value, String> {
+    state
+        .runtime()
+        .await?
+        .execute(Operation::SetChain {
+            scope,
+            executors,
+            preset,
+        })
+        .await
+}
+/// SB-72 (C-7): every spending ceiling, the open questions oldest first and the last hand-over;
+/// numbers and codes only. An unreadable spend.json is the core's error, never "none".
+#[tauri::command]
+async fn ceilings(state: State<'_, Slot>) -> Result<Value, String> {
+    state.runtime().await?.execute(Operation::Ceilings).await
+}
+/// The window's own operations on ceilings: always as the window (C-Q1), which alone may raise,
+/// clear or double a ceiling. They run in the app's process, never through the control listener.
+fn window_set_ceiling(scope: switchboard_core::ChainScope, usd: Option<f64>) -> Operation {
+    Operation::SetCeiling {
+        scope,
+        usd,
+        by: switchboard_runtime::spend::Surface::Window,
+    }
+}
+fn window_answer_ceiling(id: String, answer: switchboard_runtime::spend::Answer) -> Operation {
+    Operation::AnswerCeiling {
+        id,
+        answer,
+        by: switchboard_runtime::spend::Surface::Window,
+    }
+}
+/// SB-230: the refusal for an amount that is neither dollars nor `null`, in the window's own words.
+const CEILING_AMOUNT: &str = "Enter an amount from $0.01 to $1,000.";
+/// `set_ceiling`'s amount: a number of dollars sets, `null` clears, anything else is refused.
+fn ceiling_amount(usd: Value) -> Result<Option<f64>, String> {
+    match usd {
+        Value::Null => Ok(None),
+        Value::Number(n) => n
+            .as_f64()
+            .map(Some)
+            .ok_or_else(|| CEILING_AMOUNT.to_owned()),
+        _ => Err(CEILING_AMOUNT.to_owned()),
+    }
+}
+/// Sets a scope's ceiling in dollars, or clears it with `usd: null`. SB-230: `usd` is a JSON value,
+/// not `Option<f64>`, so a call that leaves it out is refused by Tauri's argument lookup rather than
+/// read as a clear nobody asked for (as `SetCeiling`'s `spend::present` refuses it on the wire).
+#[tauri::command]
+async fn set_ceiling(
+    scope: switchboard_core::ChainScope,
+    usd: Value,
+    state: State<'_, Slot>,
+) -> Result<Value, String> {
+    let usd = ceiling_amount(usd)?;
+    state
+        .runtime()
+        .await?
+        .execute(window_set_ceiling(scope, usd))
+        .await
+}
+/// Answers a reached ceiling's question: `double` or `keep`, from the person in the window.
+#[tauri::command]
+async fn answer_ceiling(
+    id: String,
+    answer: switchboard_runtime::spend::Answer,
+    state: State<'_, Slot>,
+) -> Result<Value, String> {
+    state
+        .runtime()
+        .await?
+        .execute(window_answer_ceiling(id, answer))
         .await
 }
 /// SB-120: every catalog agent — installed, enabled for switching, default, command.
@@ -813,6 +918,7 @@ async fn openrouter_remove(pool: Option<String>, state: State<'_, Slot>) -> Resu
         .execute(Operation::AgentKeyRemove {
             service: "openrouter".into(),
             pool,
+            by: switchboard_runtime::spend::Surface::Window,
         })
         .await
 }
@@ -860,6 +966,103 @@ async fn agent_setup(state: State<'_, Slot>) -> Result<Value, String> {
     }
     Ok(setup)
 }
+/// SB-202 (B-8): the organization checklist for the window's first run, the same steps
+/// `switchboard onboard` reads, filled from this owner. Only the organization steps are read by
+/// the window; the agent's MCP registration is not looked up here.
+#[tauri::command]
+async fn onboard(state: State<'_, Slot>) -> Result<Value, String> {
+    let runtime = state.runtime().await?;
+    let snapshot = runtime.execute(Operation::Snapshot).await?;
+    let (saved, partial) = switchboard_runtime::onboarding::read_snapshot(&snapshot);
+    let organizations = saved.as_ref().is_some_and(|s| !s.organizations.is_empty());
+    let (monitor, sessions, shell) = if organizations {
+        (
+            runtime.execute(Operation::MonitorStatus).await.ok(),
+            runtime
+                .execute(Operation::Sessions { all: true })
+                .await
+                .ok(),
+            Some(runtime.shell_hook_status()),
+        )
+    } else {
+        (None, None, None)
+    };
+    let root = runtime.root.clone();
+    let passioncode = tokio::task::spawn_blocking(move || {
+        switchboard_runtime::vesta::status(&root).is_ok_and(|v| v["connected"] == true)
+    })
+    .await
+    .unwrap_or(false);
+    let probe = onboard_probe(OnboardReads {
+        snapshot: &snapshot,
+        saved,
+        partial,
+        monitor: monitor.as_ref(),
+        sessions: sessions.as_ref(),
+        shell,
+        passioncode,
+    });
+    Ok(switchboard_runtime::onboarding::steps(&probe))
+}
+/// What `onboard` read; a read that failed is `None` and named in `degraded`.
+struct OnboardReads<'a> {
+    snapshot: &'a Value,
+    saved: Option<switchboard_core::Snapshot>,
+    partial: bool,
+    monitor: Option<&'a Value>,
+    sessions: Option<&'a Value>,
+    shell: Option<Value>,
+    passioncode: bool,
+}
+fn onboard_probe(reads: OnboardReads<'_>) -> switchboard_runtime::onboarding::Probe {
+    let mut probe = switchboard_runtime::onboarding::Probe {
+        owner_online: true,
+        passioncode: reads.passioncode,
+        ..Default::default()
+    };
+    for provider in ["claude", "codex"] {
+        let count = reads.snapshot["accounts"].as_array().map_or(0, |accounts| {
+            accounts
+                .iter()
+                .filter(|a| a["provider"] == provider && a["enabled"] == true)
+                .count()
+        });
+        probe.accounts.push((provider.into(), count));
+    }
+    if reads.partial {
+        probe.degraded.push("snapshot".into());
+    }
+    if reads
+        .saved
+        .as_ref()
+        .is_some_and(|s| !s.organizations.is_empty())
+    {
+        let ids = |value: Option<&Value>, list: &str, field: Option<&str>| -> Option<Vec<String>> {
+            Some(
+                value?[list]
+                    .as_array()?
+                    .iter()
+                    .filter_map(|item| match field {
+                        Some(field) => item[field].as_str(),
+                        None => item.as_str(),
+                    })
+                    .map(str::to_owned)
+                    .collect(),
+            )
+        };
+        match ids(reads.monitor, "sign_in_required", None) {
+            Some(list) => probe.sign_in_required = list,
+            None => probe.degraded.push("sign_ins".into()),
+        }
+        match ids(reads.sessions, "sessions", Some("context")) {
+            Some(list) => probe.contexts = list,
+            None => probe.degraded.push("sessions".into()),
+        }
+        probe.shell = reads.shell;
+    }
+    probe.snapshot = reads.saved;
+    probe
+}
 #[tauri::command]
 fn link_cli() -> Result<Value, String> {
     switchboard_runtime::agents::link_bundled_cli()
@@ -899,6 +1102,35 @@ async fn set_analytics(
     question: Option<bool>,
 ) -> Result<Value, String> {
     slot.runtime().await?.set_analytics(enabled, question)
+}
+/// SB-183 (node A-3): the terminal hook's first-time notice, `{organization, group}`, or null.
+/// It waits in `shell-hook.json` until the window acknowledges it, so a restart before the window
+/// showed it keeps it; node A-7 draws it.
+#[tauri::command]
+async fn shell_hook_notice(state: State<'_, Slot>) -> Result<Value, String> {
+    Ok(state
+        .runtime()
+        .await?
+        .shell_hook_notice()
+        .unwrap_or(Value::Null))
+}
+/// SB-183 (node A-7): the Groups page's *Terminals in organization folders* section: the hook's
+/// state, each start file, the organizations it follows and whether this app may change it.
+#[tauri::command]
+async fn shell_hook_status(state: State<'_, Slot>) -> Result<Value, String> {
+    Ok(state.runtime().await?.shell_hook_status())
+}
+/// *Turn off* / *Turn on* in that section: the same as `switchboard shell off|on`, through the
+/// installed owner; any other app refuses and changes nothing.
+#[tauri::command]
+async fn set_shell_hook(state: State<'_, Slot>, on: bool) -> Result<Value, String> {
+    state.runtime().await?.set_shell_hook(on)
+}
+/// The window showed the first-time notice: never shown again.
+#[tauri::command]
+async fn acknowledge_shell_hook_notice(state: State<'_, Slot>) -> Result<Value, String> {
+    state.runtime().await?.acknowledge_shell_hook_notice();
+    Ok(Value::Null)
 }
 /// Whether Switchboard opens at login (SB-28). Unavailable in a development build and the smoke
 /// check.
@@ -1099,6 +1331,11 @@ fn main() {
             set_language,
             login_item,
             set_login_item,
+            shell_hook_notice,
+            acknowledge_shell_hook_notice,
+            shell_hook_status,
+            onboard,
+            set_shell_hook,
             update_status,
             set_auto_update,
             restart_to_update,
@@ -1163,6 +1400,11 @@ fn main() {
             organization_assign,
             passioncode,
             agents_overview,
+            chains,
+            set_chain,
+            ceilings,
+            set_ceiling,
+            answer_ceiling,
             agent_enable,
             agent_default,
             openrouter_models,
@@ -1241,6 +1483,54 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
+    /// B-8: the window's checklist is filled from this owner's reads; a read that failed is
+    /// named, and a machine without organizations reads nothing more.
+    #[test]
+    fn the_window_checklist_reads_the_owner_and_names_what_failed() {
+        let snapshot = json!({"accounts": [
+            {"provider": "claude", "enabled": true},
+            {"provider": "claude", "enabled": false},
+            {"provider": "codex", "enabled": true}
+        ]});
+        let mut saved = switchboard_core::Snapshot::default();
+        let reads = |saved: Option<switchboard_core::Snapshot>, monitor: Option<&'static Value>| {
+            onboard_probe(OnboardReads {
+                snapshot: Box::leak(Box::new(snapshot.clone())),
+                saved,
+                partial: false,
+                monitor,
+                sessions: None,
+                shell: Some(json!({"hook": "off"})),
+                passioncode: true,
+            })
+        };
+        let plain = reads(Some(saved.clone()), None);
+        assert_eq!(
+            plain.accounts,
+            vec![("claude".into(), 1), ("codex".into(), 1)]
+        );
+        assert!(
+            plain.degraded.is_empty(),
+            "no organization: nothing more read"
+        );
+        assert!(plain.shell.is_none());
+        saved
+            .organizations
+            .push(switchboard_core::organizations::Organization {
+                id: "o-acme".into(),
+                name: "Acme".into(),
+                domains: vec![],
+                provider_organizations: vec![],
+                created_at: 1,
+                vesta_id: None,
+            });
+        let monitor: &'static Value = Box::leak(Box::new(json!({"sign_in_required": ["a-1"]})));
+        let probe = reads(Some(saved), Some(monitor));
+        assert_eq!(probe.sign_in_required, vec!["a-1".to_owned()]);
+        assert_eq!(probe.degraded, vec!["sessions".to_owned()]);
+        assert_eq!(probe.shell, Some(json!({"hook": "off"})));
+        assert!(probe.passioncode);
+    }
     use super::*;
 
     fn args(list: &[&str]) -> Vec<String> {
@@ -1250,6 +1540,60 @@ mod tests {
             .collect()
     }
 
+    /// SB-230: `set_ceiling` takes its amount as a JSON value, so a call without `usd` is refused
+    /// by Tauri (a non-optional argument is looked up with `deserialize_any`, which fails on an
+    /// absent key, tauri 2.12 `ipc/command.rs` `CommandItem::deserialize_json`) instead of being
+    /// read as a clear, as `Option<f64>` was; `null` clears, a number sets, anything else refuses.
+    #[test]
+    fn set_ceiling_refuses_anything_but_dollars_or_null() {
+        assert_eq!(ceiling_amount(json!(null)), Ok(None));
+        assert_eq!(ceiling_amount(json!(5.5)), Ok(Some(5.5)));
+        assert_eq!(ceiling_amount(json!(5)), Ok(Some(5.0)));
+        for refused in [json!("5"), json!(true), json!([5]), json!({"usd": 5})] {
+            assert_eq!(ceiling_amount(refused), Err(CEILING_AMOUNT.to_owned()));
+        }
+    }
+
+    /// C-7 (C-Q1): the window's ceiling commands always speak as the window, and the answer
+    /// and amount travel unchanged; `answer` reads the window's words `keep` and `double`.
+    #[test]
+    fn the_windows_ceiling_commands_speak_as_the_window() {
+        use switchboard_runtime::spend::{Answer, Surface};
+        let set = window_set_ceiling(switchboard_core::ChainScope::Machine, Some(5.0));
+        assert!(matches!(
+            set,
+            Operation::SetCeiling { scope: switchboard_core::ChainScope::Machine, usd: Some(u), by: Surface::Window } if u == 5.0
+        ));
+        let clear = window_set_ceiling(
+            switchboard_core::ChainScope::Project {
+                pool: "alpha".into(),
+            },
+            None,
+        );
+        assert!(matches!(
+            clear,
+            Operation::SetCeiling {
+                usd: None,
+                by: Surface::Window,
+                ..
+            }
+        ));
+        let answer: Answer = serde_json::from_value(json!("double")).unwrap();
+        assert!(matches!(
+            window_answer_ceiling("q_0123456789abcdef".into(), answer),
+            Operation::AnswerCeiling { answer: Answer::Double, by: Surface::Window, ref id } if id == "q_0123456789abcdef"
+        ));
+        assert!(serde_json::from_value::<Answer>(json!("raise")).is_err());
+        // The window's scope shape is the core's.
+        let scope: switchboard_core::ChainScope =
+            serde_json::from_value(json!({"kind": "project", "pool": "alpha"})).unwrap();
+        assert_eq!(
+            scope,
+            switchboard_core::ChainScope::Project {
+                pool: "alpha".into()
+            }
+        );
+    }
     /// SB-30: an argument the app does not know never stops it from starting.
     #[test]
     fn unknown_arguments_are_ignored_and_background_is_recognised() {

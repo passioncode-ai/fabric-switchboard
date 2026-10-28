@@ -24,7 +24,8 @@
 # published. A published release is never rewritten: a fix is a new tag.
 #
 # Release:    merge the release PR (versions + a `## X.Y.Z` CHANGELOG section), then push an
-#             annotated vX.Y.Z tag on the merge commit.
+#             annotated vX.Y.Z tag on the merge commit. An `Urgent: <reason>` line in that
+#             section marks latest.json urgent (SB-207), before the publish job attests it.
 # Rehearsal:  push vX.Y.Z-rc.N (the push trigger ignores it), then
 #             gh workflow run release.yml --ref vX.Y.Z-rc.N -f publish=false
 #             The signed set is kept as a workflow artifact for 14 days; no release is created.
@@ -216,7 +217,7 @@ jobs:
       - run: npm ci
       - name: Native storage and runtime fixtures
         run: |
-          cargo test -p switchboard-core -p switchboard-runtime -p switchboard-cli --locked
+          cargo test -p switchboard-core -p switchboard-runtime -p switchboard-cli --locked --no-fail-fast
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Build the CLI (static CRT) and the desktop executable
         run: |
@@ -405,7 +406,7 @@ jobs:
       - run: npm ci
       - name: Native storage and runtime tests, against a real Secret Service
         run: |
-          dbus-run-session -- sh -c 'printf "%s" synthetic-unlock | gnome-keyring-daemon --unlock --components=secrets >/dev/null && SWITCHBOARD_SECRET_SERVICE_TEST=1 cargo test -p switchboard-core -p switchboard-runtime -p switchboard-cli -p switchboard-proxy --locked'
+          dbus-run-session -- sh -c 'printf "%s" synthetic-unlock | gnome-keyring-daemon --unlock --components=secrets >/dev/null && SWITCHBOARD_SECRET_SERVICE_TEST=1 cargo test -p switchboard-core -p switchboard-runtime -p switchboard-cli -p switchboard-proxy --locked --no-fail-fast'
       - name: Build the CLI, the app, the .deb and the AppImage
         env:
           # linuxdeploy is itself an AppImage: extract-and-run needs no FUSE on the runner; no

@@ -263,6 +263,23 @@ check(() => {
   assert.equal((main.match(/loginOutcome\(/g) ?? []).length, 4, 'status poll, finish, cancel and Try again (its cancel, SB-67) each classify');
 });
 
+// SB-213 fix cycle 1, P10: every spend-gate stop sentence (spend.rs `pub const STOP_*`) reaches the
+// window as the backend wrote it: listed verbatim in safeErrors and never rewritten by coreErrors.
+check(() => {
+  const spend = readFileSync(new URL('../crates/switchboard-runtime/src/spend.rs', import.meta.url), 'utf8');
+  const stops = [...spend.matchAll(/pub const (STOP_\w+): &str =\s*"((?:[^"\\]|\\.)*)";/g)];
+  assert(stops.length >= 4, `the STOP_* sentences were found (${stops.length})`);
+  const adapter = readFileSync(new URL('../src/adapter.ts', import.meta.url), 'utf8');
+  const safeStart = adapter.indexOf('const safeErrors = new Set([');
+  const safe = adapter.slice(safeStart, adapter.indexOf(']);', safeStart));
+  const core = adapter.slice(adapter.indexOf('const coreErrors'));
+  for (const [, name, sentence] of stops) {
+    const quoted = `'${sentence.replace(/'/g, "\\'")}'`;
+    assert(safe.includes(`  ${quoted},`), `${name} is in safeErrors verbatim`);
+    assert(!core.includes(quoted), `${name} is not rewritten by coreErrors`);
+  }
+});
+
 // Lifecycle LC-08: the sign-in poll runs only while a sign-in waits; without one, no timer wakes.
 check(() => {
   const timers = new Map(); let next = 0;
@@ -406,6 +423,12 @@ check(() => {
   // A ready update stays offered even after the switch is turned off: it is already installed.
   assert.equal(logic.updateLine({ ...base, enabled: false, state: 'ready', version: '0.7.0' }).restart, true);
   assert.match(logic.updateLine({ ...base, state: 'ready', version: '0.7.0', needs_permission: true }).text, /administrator password/);
+  // SB-208: during SB-191's six-hour pause the line says from when it starts on its own.
+  const paused = logic.updateLine({ ...base, state: 'ready', version: '0.7.0', restart_after: 1_800_000_000 }, (s) => `at ${s}`);
+  assert.equal(paused.restart, true);
+  assert.equal(paused.text, 'Version 0.7.0 is ready. It starts on its own when Switchboard is idle in the background after at 1800000000 or opens again, or restart now.');
+  assert.match(logic.updateLine({ ...base, state: 'ready', version: '0.7.0', restart_after: 1_800_000_000 }).text, /after 2027-01-15 08:00 or opens again/);
+  assert.doesNotMatch(logic.updateLine({ ...base, state: 'ready', version: '0.7.0', restart_after: null }).text, /after/);
 });
 
 // SB-62: a sign-in of an identity already saved is announced as signed in again, never as added.
@@ -415,6 +438,22 @@ check(() => {
   assert.equal(logic.signInNotice({ label: 'Work A', pool: 'alpha' }, 'Claude Code', [{ pool: 'alpha', name: 'Alpha Web' }]), 'Work A added to Claude Code in group “Alpha Web”.');
   assert.equal(logic.signInNotice({ label: 'Work A', pool: 'work', signed_in_again: true }, 'Claude Code'), 'Work A is signed in again in Claude Code in group work (no folders).');
   assert.match(logic.signInNotice({ label: 'Work A', pool: 'work', signed_in_again: true, login_cleanup: 'pending' }, 'Claude Code'), /^Work A is signed in again in Claude Code in group work \(no folders\)\. Switchboard could not remove its temporary sign-in folder yet/);
+});
+
+// SB-160 (B-4, SCN-077): signInNotice offers the organization's group a new seat landed outside of;
+// the ordinary CLI's own account is told to switch first; a personal seat is offered nothing.
+check(() => {
+  const offer = { pool: 'acme-work', name: 'Acme work' };
+  assert.equal(logic.signInNotice({ label: 'me@acme.com', pool: 'default', organization_group: offer }, 'Claude Code'), 'me@acme.com added to Claude Code in the default group.');
+  assert.deepEqual(logic.signInMove({ id: 'a-1', label: 'me@acme.com', organization_group: offer }), { id: 'a-1', pool: 'acme-work', label: 'Move it to “Acme work”', done: 'me@acme.com moved to group “Acme work”.' });
+  assert.equal(logic.signInMove({ id: 'a-1', label: 'me@acme.com' }), null, 'a personal seat: no offer');
+  const inCli = { ...offer, in_cli: true };
+  assert.equal(logic.signInMove({ id: 'a-1', label: 'me@acme.com', organization_group: inCli }), null, 'the CLI account cannot move yet');
+  assert.equal(logic.signInMove({ id: 'a-1', label: 'me@acme.com', pool: 'default', login_cleanup: 'done', signed_in_again: false, organization_group: inCli }), null, 'a login finish receipt with in_cli (B-4): no move');
+  assert.equal(logic.organizationMoveNote('me@acme.com', 'Claude Code', inCli), 'Switch Claude Code to another account first to move me@acme.com to group “Acme work”.');
+  assert.equal(logic.organizationMoveNote('me@acme.com', 'Claude Code', offer), '');
+  assert.equal(logic.organizationMoveNote('me@acme.com', 'Claude Code', undefined), '');
+  assert.equal(logic.signInNotice({ label: 'me@acme.com', pool: 'default', organization_group: inCli }, 'Claude Code'), 'me@acme.com added to Claude Code in the default group. Switch Claude Code to another account first to move me@acme.com to group “Acme work”.');
 });
 
 // L10N-01…04 (fabric-workspace knowledge/localization.md): language, Russian plurals, placeholders.
@@ -448,6 +487,8 @@ check(() => {
   assert.equal(logic.loginOutcome('Sign-in not found. Start again.'), 'forgotten');
   assert.equal(i18n.t('Sign-in not found. Start again.'), 'Вход не найден. Начните заново.');
   assert.match(logic.signInNotice({ label: 'Work', pool: 'work', signed_in_again: true }, 'Claude Code'), /^Вход в аккаунт Work выполнен снова \(Claude Code\) в группе work \(без папок\)\.$/);
+  assert.equal(logic.signInMove({ id: 'a-1', label: 'Work', organization_group: { pool: 'acme-work', name: 'Acme work' } }).label, 'Перенести в «Acme work»');
+  assert.match(logic.signInNotice({ label: 'Work', pool: 'default', organization_group: { pool: 'acme-work', name: 'Acme work', in_cli: true } }, 'Claude Code'), /Сначала переключите Claude Code на другой аккаунт, чтобы перенести Work в группу «Acme work»\.$/);
   i18n.setLocale('en');
 });
 // A backend sentence with a name in it is shown, and translated by its template (L10N-04).
@@ -652,6 +693,14 @@ check(() => {
   assert.equal(logic.statTroubleText(c), '25%');
   assert.equal(logic.statAgentName('codex'), 'Codex CLI');
   assert.equal(logic.statAgentName('something-new'), 'Other client');
+  // SB-201: a session names its agent; an agent through the proxy records provider claude.
+  assert.equal(logic.sessionAgentName({ agent: 'goose', provider: 'claude' }), 'Goose');
+  assert.equal(logic.sessionAgentName({ agent: 'codex', provider: 'claude' }), 'Codex CLI');
+  assert.equal(logic.sessionAgentName({ agent: 'kimi-code', provider: 'kimi' }), 'Kimi Code');
+  assert.equal(logic.sessionAgentName({ agent: 'deepseek-harness', provider: 'claude' }), 'deepseek-harness', 'an unnamed agent by its id');
+  assert.equal(logic.sessionAgentName({ provider: 'claude' }), 'Claude Code', 'an older record without agent');
+  assert.equal(logic.sessionAgentName({ agent: null, provider: 'hermes' }), 'Hermes Agent');
+  assert.equal(logic.sessionAgentName({ provider: 'crush' }), 'Crush');
 });
 // SB-146: a group's projects are its repositories by name: no worktree, clone or subfolder, one per origin.
 check(() => {
@@ -753,6 +802,50 @@ check(() => {
   assert.equal(logic.groupSeatsElsewhere(snap, 'o1', [work, account('w2', 'ops@acme.example')]), false);
   assert.equal(logic.groupSeatsElsewhere(snap, 'o1', []), false, 'an empty group has its own note');
   assert.equal(logic.groupSeatsElsewhere(snap, null, [work]), false);
+});
+// SB-160 (B-6, SCN-078): an ended seat of an organization names it.
+check(() => {
+  const account = (id, email) => ({ id, label: email, provider: 'claude', external_identity: { account_id: id, organization_id: null, email } });
+  const work = account('w', 'dev@acme.example'); const home = account('h', 'me@home.example');
+  const snap = { organizations: [{ id: 'o1', name: 'Acme', domains: ['acme.example'] }], memberships: {} };
+  assert.equal(logic.seatEndedText(snap, work, ['w']), "dev@acme.example's sign-in has ended. If Acme removed your seat, ask its administrator; to keep using it, sign in again.", 'an ended seat of an organization names it');
+  assert.equal(logic.seatEndedText(snap, work, []), null, 'a signed-in seat says nothing');
+  assert.equal(logic.seatEndedText(snap, work, undefined), null, 'no monitor read yet: nothing');
+  assert.equal(logic.seatEndedText(snap, home, ['h']), null, 'a personal account keeps today\'s text');
+  assert.equal(logic.seatEndedText({}, work, ['w']), null, 'no organizations: today\'s text');
+  snap.memberships.w = 'personal';
+  assert.equal(logic.seatEndedText(snap, work, ['w']), null, 'placed as personal: today\'s text');
+});
+// SB-160 (B-6, SCN-078): a group whose seats all ended says so.
+check(() => {
+  const account = (id, email) => ({ id, label: email, provider: 'claude', external_identity: { account_id: id, organization_id: null, email } });
+  const a = account('a', 'dev@acme.example'); const b = account('b', 'ops@acme.example'); const home = account('h', 'me@home.example');
+  const snap = { organizations: [{ id: 'o1', name: 'Acme', domains: ['acme.example'] }], memberships: {} };
+  const group = { name: 'Acme web', organization: 'o1' };
+  assert.equal(logic.groupSeatsEndedText(snap, group, [a, b], ['a', 'b']), "None of Acme web's accounts is signed in. Sessions in its folders are refused until one is.", 'a group whose seats all ended says so');
+  assert.equal(logic.groupSeatsEndedText(snap, group, [a, b], ['a']), null, 'one seat still signed in');
+  assert.equal(logic.groupSeatsEndedText(snap, group, [a, b, home], ['a', 'b']), "None of Acme web's accounts is signed in. Sessions in its folders are refused until one is.", 'an account of another context is refused anyway');
+  assert.equal(logic.groupSeatsEndedText(snap, group, [home], ['h']), null, 'every account elsewhere: SB-170\'s line instead');
+  assert.equal(logic.groupSeatsEndedText(snap, group, [], []), null, 'an empty group has its own note');
+  assert.equal(logic.groupSeatsEndedText(snap, { name: 'Mine', organization: null }, [home], ['h']), null, 'a personal group: no seats');
+  assert.equal(logic.groupSeatsEndedText(snap, group, [a, b], undefined), null);
+});
+// SB-160 (B-7, SCN-079): an organization left on PassionCode.ai is marked with its date until it is linked again.
+check(() => {
+  const status = { connected: true, released: [{ organization: 'o1', at: 1000 }] };
+  assert.equal(logic.organizationReleasedAt(status, { id: 'o1', vesta_id: null }), 1000);
+  assert.equal(logic.organizationReleasedAt(status, { id: 'o1', vesta_id: 'v-acme' }), null, 'linked again');
+  assert.equal(logic.organizationReleasedAt(status, { id: 'o2', vesta_id: null }), null);
+  // SB-227: the minute's background pass reads the PassionCode.ai status again while Organizations
+  // is on screen (a local file read), so a mark a background read made shows without reopening it.
+  assert.deepEqual(logic.backgroundReads('orgs'), ['onboarding', 'passioncode']);
+  assert.deepEqual(logic.backgroundReads('accounts'), ['onboarding']);
+  assert.deepEqual(logic.backgroundReads('activity'), ['sessions']);
+  assert.deepEqual(logic.backgroundReads('agents'), ['ceilings']);
+  assert.deepEqual(logic.backgroundReads('tokens'), ['ceilings']);
+  assert.deepEqual(logic.backgroundReads('stats'), []);
+  assert.equal(logic.organizationReleasedAt({ connected: false }, { id: 'o1' }), null, 'disconnected: no line');
+  assert.equal(logic.organizationReleasedAt(null, { id: 'o1' }), null);
 });
 // SB-159: the PassionCode.ai panel's sentence for each state.
 check(() => {
@@ -876,4 +969,431 @@ check(() => {
   assert.match(main, /\$\{tourShown\(\) \? ' beside-tour' : ''\}/, 'the toast moves aside only beside a tour on screen');
   assert.doesNotMatch(main, /tourStep !== null \? ' beside-tour'/);
 });
+const i18nForShell = await load('../src/i18n.ts');
+// SB-183 (node A-7), the_shell_hook_section_reads_every_state: the Groups page's *Terminals in
+// organization folders* reads reading, failed, on by default with its organization, on, off, off
+// by default, installed but inactive, every start file's state (a link and ZDOTDIR with the line
+// to add), outside the installed app, a block the person took out, and the notices (SCN-074, SCN-075).
+check(() => {
+  const home = '/Users/ana';
+  const base = { choice: 'default', map: 'ok', files: [], organizations: ['Acme'], codex_organizations: ['Acme'], can_change: true, home };
+  const reading = logic.shellHookView(null);
+  assert.equal(reading.state, 'reading'); assert.equal(reading.action, null); assert.equal(reading.retry, false);
+  const failed = logic.shellHookView(null, 'Switchboard could not read its own state.');
+  assert.equal(failed.state, 'failed'); assert.equal(failed.retry, true);
+  assert.equal(failed.line, "The terminal hook's state could not be read.");
+  assert.equal(failed.error, 'Switchboard could not read its own state.');
+  const written = [{ shell: 'zsh', path: `${home}/.zshrc`, state: 'written' }, { shell: 'fish', path: `${home}/.config/fish/conf.d/fabric-switchboard.fish`, state: 'written' }];
+  const byDefault = logic.shellHookView({ ...base, hook: 'default_on', files: written });
+  assert.equal(byDefault.state, 'default_on');
+  assert.equal(byDefault.line, "On: new terminals in Acme's folders work in its context.");
+  assert.deepEqual(byDefault.files.map((f) => f.text), ['zsh: ~/.zshrc, added', 'fish: its own file, added']);
+  assert.deepEqual(byDefault.action, { label: 'Turn off', on: false, disabled: false });
+  assert.equal(byDefault.note, null); assert.equal(byDefault.readd, false); assert.equal(byDefault.error, null);
+  assert.equal(logic.shellHookView({ ...base, hook: 'default_on', files: written, organizations: ['Acme', 'Globex'] }).line, 'On: new terminals in organization folders work in their context.');
+  const on = logic.shellHookView({ ...base, hook: 'on', choice: 'on', files: written });
+  assert.equal(on.state, 'on'); assert.equal(on.line, 'On: new terminals in organization folders work in their context.');
+  const off = logic.shellHookView({ ...base, hook: 'off', choice: 'off' });
+  assert.equal(off.state, 'off'); assert.equal(off.line, 'Off: new terminals keep your own settings.');
+  assert.deepEqual(off.action, { label: 'Turn on', on: true, disabled: false });
+  const none = logic.shellHookView({ ...base, hook: 'default_off', organizations: [] });
+  assert.equal(none.state, 'default_off'); assert.equal(none.line, 'Off: no group belongs to an organization on this computer.');
+  assert.equal(none.action.label, 'Turn on');
+  // SB-222: off by default while an organization's group exists, but holds no row: the line names it.
+  const held = logic.shellHookView({ ...base, hook: 'default_off', organizations: [], unmapped: [{ organization: 'Acme', group: 'Acme web', reason: 'held', held_by: 'Mine' }, { organization: 'Globex', group: 'G', reason: 'missing', held_by: null }] });
+  assert.equal(held.state, 'default_off');
+  assert.equal(held.line, 'Off: Acme\'s folders belong to the group “Mine”, so terminals there keep your own settings.');
+  assert.equal(logic.shellHookView({ ...base, hook: 'default_off', organizations: [], unmapped: [{ organization: 'Globex', group: 'G', reason: 'missing', held_by: null }] }).line, 'Off: Globex\'s folders are not on this computer.');
+  assert.equal(logic.shellHookView({ ...base, hook: 'default_off', organizations: [], unmapped: [{ organization: 'Globex', group: 'G', reason: 'no_folder', held_by: null }] }).line, 'Off: Globex\'s group “G” has no folder yet.');
+  assert.equal(logic.shellHookView({ ...base, hook: 'default_off', organizations: [], unmapped: [] }).line, 'Off: no group belongs to an organization on this computer.');
+  assert.equal(logic.shellHookView({ ...base, hook: 'off', choice: 'off', unmapped: [{ organization: 'Globex', group: 'G', reason: 'missing', held_by: null }] }).line, 'Off: new terminals keep your own settings.', 'the person\'s own off is not explained away');
+  // Wanted, but no start file holds it: installed but inactive, with each file's reason.
+  const skipped = [
+    { shell: 'zsh', path: `${home}/.zshrc`, state: 'skipped_symlink' },
+    { shell: 'zsh', path: `${home}/.zshrc`, state: 'skipped_zdotdir_unknown' },
+    { shell: 'bash', path: `${home}/.bash_profile`, state: 'skipped_owner' },
+    { shell: 'bash', path: '/etc/bashrc', state: 'unreadable' },
+    { shell: 'pwsh', path: 'C:\\Users\\ana\\Documents\\PowerShell\\Microsoft.PowerShell_profile.ps1', state: 'policy_blocked' },
+    { shell: 'pwsh', path: 'C:\\Users\\ana\\Documents\\WindowsPowerShell\\Microsoft.PowerShell_profile.ps1', state: 'constrained_language' },
+  ];
+  const inactive = logic.shellHookView({ ...base, hook: 'default_on', files: skipped });
+  assert.equal(inactive.state, 'inactive');
+  assert.equal(inactive.line, 'On, but no start file holds the hook yet, so terminals do not follow organization folders.');
+  assert.equal(inactive.action.label, 'Turn off', 'the person can still turn the choice off');
+  assert.deepEqual(inactive.files.map((f) => f.command), ['eval "$(switchboard shell init zsh)"', 'eval "$(switchboard shell init zsh)"', null, null, null, null]);
+  assert.ok(inactive.files.every((f) => f.problem));
+  assert.equal(inactive.files[0].text, '~/.zshrc is a link, so Switchboard did not change it. Add this line yourself:');
+  assert.match(inactive.files[1].text, /ZDOTDIR/);
+  assert.equal(inactive.files[2].text, '~/.bash_profile belongs to another user, so Switchboard did not change it.');
+  assert.equal(inactive.files[3].text, '/etc/bashrc could not be read, so Switchboard did not change it.', 'a path outside the home stays whole');
+  assert.match(inactive.files[4].text, /^PowerShell's execution policy stops profiles from loading/);
+  assert.equal(inactive.files[5].text, 'PowerShell runs in Constrained Language Mode on this computer, so the hook is inactive there. Switchboard does not change this mode. Whoever manages this computer sets it.');
+  assert.equal(logic.shellHookView({ ...base, hook: 'on', files: [] }).state, 'inactive', 'on with no shell present');
+  assert.equal(logic.shellInitLine('fish'), 'switchboard shell init fish | source');
+  // A linked PowerShell profile (node A-8): the line PowerShell reads.
+  assert.equal(logic.shellInitLine('pwsh'), 'switchboard shell init pwsh | Out-String | Invoke-Expression');
+  const linked = logic.shellHookView({ ...base, hook: 'default_on', files: [{ shell: 'pwsh', path: 'C:\\Users\\ana\\Documents\\PowerShell\\Microsoft.PowerShell_profile.ps1', state: 'skipped_symlink' }] });
+  assert.equal(linked.files[0].command, 'switchboard shell init pwsh | Out-String | Invoke-Expression');
+  // A block the person took out: said, and the window can add it back.
+  const removed = logic.shellHookView({ ...base, hook: 'default_on', files: [written[0], { shell: 'bash', path: `${home}/.bash_profile`, state: 'removed_by_person' }] });
+  assert.equal(removed.state, 'default_on');
+  assert.equal(removed.files[1].text, 'You took the block out of ~/.bash_profile, so Switchboard does not add it back.');
+  assert.equal(removed.readd, true);
+  // Outside the installed app (a development build, serve): read, never changed.
+  const dev = logic.shellHookView({ ...base, hook: 'default_on', files: written, can_change: false });
+  assert.equal(dev.action.disabled, true); assert.equal(dev.readd, false);
+  assert.equal(dev.note, 'Only the installed app changes terminal settings.');
+  // The folder map from another version, or unreadable: said under the state.
+  assert.match(logic.shellHookView({ ...base, hook: 'default_on', files: written, map: 'unknown_version' }).error, /another version/);
+  assert.match(logic.shellHookView({ ...base, hook: 'default_on', files: written, map: 'unreadable' }).error, /could not be read/);
+  // A save that failed keeps the state and names the cause.
+  const saveFailed = logic.shellHookView({ ...base, hook: 'off', choice: 'off' }, "The terminal hook's choice could not be saved in Switchboard's data folder.");
+  assert.equal(saveFailed.state, 'off'); assert.match(saveFailed.error, /could not be saved/);
+  // The notices.
+  assert.equal(logic.shellHookToggleNotice(false), 'The terminal hook is off. New terminals keep your own settings; terminals already open switch back at their next change of folder.');
+  assert.equal(logic.shellHookToggleNotice(true), 'The terminal hook is on. New terminals in organization folders work in their context.');
+  assert.deepEqual(logic.shellHookNoticeText({ organization: 'Acme', group: 'Acme web' }), {
+    title: "Terminals now work in Acme's context in its folders",
+    body: "New terminals opened in Acme web's folders run claude and codex on Acme's accounts and history. Turn this off under Groups.",
+  });
+  // SCN-066: the Codex section says what the hook does to Codex in an organization's folders.
+  assert.equal(logic.codexHookLine({ ...base, hook: 'default_on', files: written }), "In Acme's folders, new terminals use its Codex accounts whether this is on or off.");
+  assert.equal(logic.codexHookLine({ ...base, hook: 'off', choice: 'off' }), null);
+  assert.equal(logic.codexHookLine({ ...base, hook: 'default_on', files: skipped }), null, 'inactive says nothing about Codex');
+  // A-7 fix cycle 1 (N1): only organizations whose map rows carry a Codex account are named.
+  assert.equal(logic.codexHookLine({ ...base, hook: 'default_on', files: written, codex_organizations: [] }), null, 'no Codex account: nothing about Codex');
+  assert.equal(logic.codexHookLine({ ...base, hook: 'default_on', files: written, organizations: ['Acme', 'Globex'], codex_organizations: ['Globex'] }), "In Globex's folders, new terminals use its Codex accounts whether this is on or off.");
+  assert.equal(logic.codexHookLine({ ...base, hook: 'default_on', files: written, organizations: ['Acme', 'Globex'], codex_organizations: ['Acme', 'Globex'] }), 'In organization folders, new terminals use their Codex accounts whether this is on or off.');
+  // Russian: every line has its entry, with the organization kept.
+  i18nForShell.setLocale('ru');
+  try {
+    const ru = logic.shellHookView({ ...base, hook: 'default_on', files: written });
+    assert.match(ru.line, /Acme/); assert.doesNotMatch(ru.line, /new terminals/);
+    assert.notEqual(ru.action.label, 'Turn off');
+    assert.doesNotMatch(logic.shellHookToggleNotice(false), /terminal hook/);
+    assert.match(logic.shellHookNoticeText({ organization: 'Acme', group: 'Acme web' }).body, /Acme web/);
+  } finally { i18nForShell.setLocale('en'); }
+});
+// SB-202 (B-8, SCN-076): the window's first run on an organization machine.
+{
+  const org = { id: 'o-acme', name: 'Acme' };
+  const group = { pool: 'acme-work', name: 'Acme work' };
+  const five = ['owner', 'accounts', 'project', 'mcp', 'proving_call'].map((id) => ({ id, state: 'done', summary: id }));
+  const withOrg = (extra) => ({ complete: false, degraded: [], steps: [...five, { id: 'organization', state: 'done', summary: 'x' }, ...extra.map((s) => ({ organization: org, summary: 'english', ...s }))] });
+  const noGroup = withOrg([{ id: 'org_group', state: 'needs_person', groups: [] }, { id: 'seat', state: 'needs_person' }, { id: 'hook', state: 'optional', terminals: 'waiting' }, { id: 'launch', state: 'optional' }]);
+  const noSeat = withOrg([{ id: 'org_group', state: 'done', group }, { id: 'seat', state: 'needs_person', ended: 0 }, { id: 'hook', state: 'optional', terminals: 'active' }, { id: 'launch', state: 'optional' }]);
+  const ready = withOrg([{ id: 'org_group', state: 'done', group }, { id: 'seat', state: 'done' }, { id: 'hook', state: 'optional', terminals: 'active' }, { id: 'launch', state: 'optional' }]);
+  const asked = { available: true, enabled: true, disclosed: false };
+  const answered = { available: true, enabled: true, disclosed: true };
+  // the organization card waits for the usage question and the tour
+  check(() => {
+    const [setup] = logic.orgSetups(noGroup);
+    assert.equal(setup.organization.name, 'Acme');
+    assert.equal(logic.orgSetupTitle(setup), 'Set up Acme on this computer');
+    assert.deepEqual(setup.lines.map((l) => [l.id, l.state]), [['organization', 'done'], ['org_group', 'needs_person'], ['seat', 'needs_person'], ['hook', 'optional'], ['launch', 'optional']]);
+    assert.equal(setup.lines[1].line, 'Acme has no group on this computer yet.');
+    assert.deepEqual(logic.orgSetupAction(setup), { kind: 'group', organization: 'o-acme', label: '+ Group for Acme' });
+    const shown = (usage, tourStep, page = 'accounts', hidden = [], failed = false) => logic.orgSetupShown({ page, organization: 'o-acme', hidden, usage, usageFailed: failed, tourStep });
+    assert.equal(shown(asked, null), false, 'the usage question comes first');
+    assert.equal(shown(null, null), false, 'its status is still being read');
+    assert.equal(shown(answered, 0), false, 'then the tour');
+    assert.equal(shown(answered, null), true, 'then the card');
+    assert.equal(shown(null, null, 'accounts', [], true), true, 'a failed status read does not hold the card back');
+    assert.equal(shown(answered, null, 'orgs'), true, 'on top of Organizations too');
+    assert.equal(shown(answered, null, 'agents'), false, 'nowhere else');
+    assert.equal(shown(answered, null, 'accounts', ['o-acme']), false, 'Hide keeps it off Accounts');
+    assert.equal(shown(answered, null, 'orgs', ['o-acme']), true, 'and on Organizations');
+    const [seat] = logic.orgSetups(noSeat);
+    assert.deepEqual(logic.orgSetupAction(seat), { kind: 'sign_in', pool: 'acme-work', label: 'Sign in with your Acme address' });
+    assert.equal(seat.lines[2].line, 'Sign in with your Acme address. It goes to the group “Acme work”.');
+    // SB-228: the command is code of its own, not words in the line.
+    assert.equal(seat.lines[3].line, "Terminals in Acme's folders work in its context. To turn this off:");
+    assert.equal(seat.lines[3].command, 'switchboard shell off');
+    assert.equal(seat.lines[2].command, undefined);
+    const ended = logic.orgSetups(withOrg([{ id: 'org_group', state: 'done', group }, { id: 'seat', state: 'needs_person', ended: 2 }]))[0];
+    // Note 6 of the wave 4 design pass: the card gives the account card's way out too.
+    assert.equal(ended.lines[2].line, 'Your Acme accounts in “Acme work” must sign in again. If Acme removed your seat, ask its administrator.');
+    const two = logic.orgSetups(withOrg([{ id: 'org_group', state: 'needs_person', groups: ['Acme web', 'Acme two'] }, { id: 'seat', state: 'needs_person' }]))[0];
+    assert.equal(two.lines[1].line, 'Keep one group for Acme on this computer: Acme web, Acme two.');
+    assert.equal(logic.orgSetupAction(two), null, 'which group stays is the person\'s');
+    assert.deepEqual(logic.orgSetups(ready), [], 'every step done or optional: the card goes');
+    // Several organizations: one card each, in the checklist's order (newest first).
+    const globex = { id: 'o-globex', name: 'Globex' };
+    const both = { ...noGroup, steps: [...noGroup.steps, { id: 'org_group', state: 'needs_person', organization: globex, groups: [] }] };
+    assert.deepEqual(logic.orgSetups(both).map((s) => s.organization.name), ['Acme', 'Globex']);
+    assert.equal(logic.orgSetupStateLabel('needs_person'), 'Needs you');
+  });
+  // SB-228: the card's caveat from `degraded`, one line, the widest read first.
+  check(() => {
+    assert.equal(logic.orgSetupCaveat(noSeat), null);
+    assert.equal(logic.orgSetupCaveat(null), null);
+    assert.equal(logic.orgSetupCaveat({ ...noSeat, degraded: ['sessions'] }), 'The recorded sessions could not be read, so First launch may read not done.');
+    assert.equal(logic.orgSetupCaveat({ ...noSeat, degraded: ['sessions', 'sign_ins'] }), 'Whether a sign-in ended could not be read, so Your seat may read signed in when it is not.');
+    assert.equal(logic.orgSetupCaveat({ ...noSeat, degraded: ['sign_ins', 'snapshot'] }), "Part of Switchboard's saved settings could not be read, so a step may be wrong or missing.");
+    assert.equal(logic.orgSetupCaveat({ ...noSeat, degraded: ['something_new'] }), 'Part of the setup could not be read, so a step may be wrong.');
+  });
+  // SB-228 (VIS-21): the card's own action is the screen's one primary when the card is shown with one.
+  check(() => {
+    const leads = (onboarding, page = 'accounts', usage = answered, tourStep = null, hidden = []) => logic.orgSetupLeads({ onboarding, page, hidden, usage, usageFailed: false, tourStep });
+    assert.equal(leads(noSeat), true);
+    assert.equal(leads(noSeat, 'orgs'), true);
+    assert.equal(leads(noSeat, 'accounts', asked), false, 'the usage question first: the card is not shown');
+    assert.equal(leads(noSeat, 'accounts', answered, 0), false, 'the tour first');
+    assert.equal(leads(noSeat, 'accounts', answered, null, ['o-acme']), false, 'hidden on Accounts');
+    assert.equal(leads(noSeat, 'orgs', answered, null, ['o-acme']), true, 'still on Organizations');
+    assert.equal(leads(ready), false, 'no card');
+    const two = withOrg([{ id: 'org_group', state: 'needs_person', groups: ['Acme web', 'Acme two'] }, { id: 'seat', state: 'needs_person' }]);
+    assert.equal(leads(two), false, 'a card with no action of its own leads nothing');
+  });
+  // SB-228 (SCN-076): the first checklist read failed: a card with the note, for the newest organization.
+  check(() => {
+    const organizations = [{ id: 'o-old', name: 'Old', created_at: 1 }, { id: 'o-acme', name: 'Acme', created_at: 5 }];
+    const unread = (input) => logic.orgSetupUnread({ onboarding: null, failed: true, organizations, page: 'accounts', hidden: [], usage: answered, usageFailed: false, tourStep: null, ...input });
+    assert.deepEqual(unread({}), { id: 'o-acme', name: 'Acme' });
+    assert.deepEqual(unread({ page: 'orgs' }), { id: 'o-acme', name: 'Acme' });
+    assert.equal(unread({ onboarding: noSeat }), null, 'a read before: the card keeps its steps and shows the note itself');
+    assert.equal(unread({ failed: false }), null, 'still reading');
+    assert.equal(unread({ organizations: [] }), null, 'no organization, no card');
+    assert.equal(unread({ page: 'agents' }), null);
+    assert.equal(unread({ usage: asked }), null, 'the usage question first');
+    assert.deepEqual(unread({ hidden: ['o-acme'] }), { id: 'o-old', name: 'Old' }, 'Hide on Accounts holds for that organization');
+    assert.equal(unread({ hidden: ['o-acme', 'o-old'] }), null);
+  });
+  // the empty Accounts page on an organization machine leads with the seat
+  check(() => {
+    const signedIn = { claude: { status: 'available' }, codex: null };
+    assert.deepEqual(logic.accountsEmptyKey({ backup: false, onboarding: noSeat, current: signedIn }), { lead: 'org_seat', organization: 'Acme', group: 'Acme work', pool: 'acme-work', line: 'Sign in with your Acme address. It goes to the group “Acme work”.', label: 'Sign in with your Acme address' });
+    assert.equal(logic.accountsEmptyKey({ backup: true, onboarding: noSeat, current: signedIn }).lead, 'backup', 'a backup to restore still comes first');
+    assert.equal(logic.accountsEmptyKey({ backup: false, onboarding: noGroup, current: signedIn }).lead, 'add_current', 'no group yet: the card asks for it, the page keeps its line');
+  });
+  // guard: no organization, no card, today's empty state
+  check(() => {
+    const plain = { complete: true, degraded: [], steps: five };
+    assert.deepEqual(logic.orgSetups(plain), []);
+    assert.deepEqual(logic.orgSetups(null), []);
+    assert.equal(logic.accountsEmptyKey({ backup: false, onboarding: plain, current: { claude: { status: 'missing' }, codex: null } }).lead, 'sign_in');
+    assert.equal(logic.accountsEmptyKey({ backup: false, onboarding: null, current: { claude: { status: 'available' } } }).lead, 'add_current');
+    assert.equal(logic.accountsEmptyKey({ backup: false, onboarding: null, current: null }).lead, 'reading');
+    const lonely = { complete: true, degraded: [], steps: [...five, { id: 'organization', state: 'optional', summary: 'PassionCode.ai lists no organization for you yet.' }] };
+    assert.deepEqual(logic.orgSetups(lonely), [], 'PassionCode.ai listing none: no card');
+  });
+  // F1 (wave 4 design pass, SCN-079): an organization the person left on PassionCode.ai gets no setup card
+  check(() => {
+    const contoso = { id: 'o-contoso', name: 'Contoso' };
+    const both = { ...noSeat, steps: [...noSeat.steps, { id: 'org_group', state: 'needs_person', organization: contoso, groups: [] }, { id: 'seat', state: 'needs_person', organization: contoso }] };
+    const organizations = [{ id: 'o-acme', name: 'Acme', created_at: 1, vesta_id: 'v-acme' }, { id: 'o-contoso', name: 'Contoso', created_at: 5, vesta_id: null }];
+    const status = { connected: true, released: [{ organization: 'o-contoso', at: 1000 }] };
+    const released = logic.releasedOrganizations(status, organizations);
+    assert.deepEqual(released, ['o-contoso']);
+    assert.deepEqual(logic.releasedOrganizations({ connected: false, released: status.released }, organizations), [], 'a disconnect is not leaving');
+    assert.deepEqual(logic.releasedOrganizations(null, organizations), [], 'not read yet: nothing is left out');
+    assert.deepEqual(logic.orgSetups(both).map((s) => s.organization.name), ['Acme', 'Contoso'], 'without the list, both');
+    assert.deepEqual(logic.orgSetups(both, released).map((s) => s.organization.name), ['Acme'], 'the left one has no card');
+    const leftOnly = withOrg([{ id: 'org_group', state: 'needs_person', groups: [] }, { id: 'seat', state: 'needs_person' }]);
+    assert.equal(logic.orgSetupLeads({ onboarding: leftOnly, page: 'orgs', hidden: [], usage: answered, usageFailed: false, tourStep: null, released: ['o-acme'] }), false, 'no card, so nothing leads');
+    assert.equal(logic.accountsEmptyKey({ backup: false, onboarding: noSeat, current: { claude: { status: 'available' }, codex: null }, released: ['o-acme'] }).lead, 'add_current', 'the empty page does not lead with a left organization\'s seat');
+    const unread = logic.orgSetupUnread({ onboarding: null, failed: true, organizations, page: 'accounts', hidden: [], usage: answered, usageFailed: false, tourStep: null, released });
+    assert.deepEqual(unread, { id: 'o-acme', name: 'Acme' }, 'the read-failed card skips the left one too');
+    // Above another organization's card, leaving is said at the top of Organizations too.
+    assert.equal(logic.releasedSummary(status, organizations), 'Contoso is no longer in your PassionCode.ai organizations. It stays here with its groups until you remove it.');
+    const fabrikam = { id: 'o-fab', name: 'Fabrikam', created_at: 2, vesta_id: null };
+    assert.equal(logic.releasedSummary({ connected: true, released: [...status.released, { organization: 'o-fab', at: 900 }] }, [...organizations, fabrikam]), 'Contoso, Fabrikam are no longer in your PassionCode.ai organizations. They stay here with their groups until you remove them.');
+    assert.equal(logic.releasedSummary({ connected: false, released: status.released }, organizations), null);
+    assert.equal(logic.releasedSummary(null, organizations), null);
+  });
+  // F2, F3 (wave 4 design pass, SCN-076 step 7, VIS-21): one filled button per screen
+  check(() => {
+    const globex = { id: 'o-globex', name: 'Globex' };
+    const two = { ...noSeat, steps: [...noSeat.steps, { id: 'org_group', state: 'needs_person', organization: globex, groups: [] }, { id: 'seat', state: 'needs_person', organization: globex }] };
+    const screen = { page: 'orgs', hidden: [], usage: answered, usageFailed: false, tourStep: null };
+    assert.equal(logic.orgSetupPrimary({ ...screen, onboarding: two }), 'o-acme', 'two cards: only the first one\'s action is primary');
+    assert.equal(logic.orgSetupPrimary({ ...screen, page: 'accounts', hidden: ['o-acme'], onboarding: two }), 'o-globex', 'the first card shown');
+    assert.equal(logic.orgSetupPrimary({ ...screen, onboarding: two, released: ['o-acme'] }), 'o-globex');
+    const noAction = withOrg([{ id: 'org_group', state: 'needs_person', groups: ['Acme web', 'Acme two'] }, { id: 'seat', state: 'needs_person' }]);
+    const twoFirstQuiet = { ...noAction, steps: [...noAction.steps, { id: 'org_group', state: 'needs_person', organization: globex, groups: [] }] };
+    assert.equal(logic.orgSetupPrimary({ ...screen, onboarding: twoFirstQuiet }), 'o-globex', 'a card with no action of its own is skipped');
+    assert.equal(logic.orgSetupPrimary({ ...screen, onboarding: ready }), null);
+    // Accounts: while the organization's action leads, Add to Switchboard and Turn on for Claude Code go quiet.
+    assert.equal(logic.accountsOrgActionLeads({ cardLeads: true, emptyLead: null }), true, 'the card leads');
+    assert.equal(logic.accountsOrgActionLeads({ cardLeads: false, emptyLead: { lead: 'org_seat', organization: 'Acme', group: 'Acme work', pool: 'acme-work', line: '', label: '' } }), true, 'after Hide: the empty page\'s seat sign-in leads');
+    assert.equal(logic.accountsOrgActionLeads({ cardLeads: false, emptyLead: { lead: 'add_current' } }), false, 'no organization lead: the page keeps its buttons');
+    assert.equal(logic.accountsOrgActionLeads({ cardLeads: false, emptyLead: null }), false);
+    // The first action offered, in the page's reading order, is the one filled button.
+    assert.equal(logic.firstPrimary([['chain_preset', true], ['link_cli', true]]), 'chain_preset', 'Agents: the chain preset above Connect');
+    assert.equal(logic.firstPrimary([['chain_preset', false], ['link_cli', true]]), 'link_cli');
+    assert.equal(logic.firstPrimary([['chain_preset', false], ['link_cli', false]]), null);
+  });
+}
+// C-3 (SB-71): the fallback chains panel and its editor.
+{
+  // SB-229: the window's hand copies stay tied to the runtime: the takeover order is SWITCHABLE
+  // (agent_catalog.rs), and a chain's key is chain_view::scope_key's.
+  check(() => {
+    const catalog = readFileSync(new URL('../crates/switchboard-runtime/src/agent_catalog.rs', import.meta.url), 'utf8');
+    const switchable = /pub const SWITCHABLE: &\[&str\] = &\[([^\]]*)\]/.exec(catalog);
+    assert.ok(switchable, 'SWITCHABLE is declared in agent_catalog.rs');
+    assert.deepEqual(logic.TAKEOVER_ORDER, [...switchable[1].matchAll(/"([^"]+)"/g)].map((m) => m[1]));
+    const view = readFileSync(new URL('../crates/switchboard-runtime/src/chain_view.rs', import.meta.url), 'utf8');
+    for (const form of ['ChainScope::Machine => "machine".into()', 'ChainScope::Project { pool } => format!("project:{pool}")', 'ChainScope::Workflow { id } => format!("workflow:{id}")']) assert.ok(view.includes(form), form);
+    assert.equal(logic.chainScopeKey({ kind: 'machine' }), 'machine');
+    assert.equal(logic.chainScopeKey({ kind: 'project', pool: 'alpha' }), 'project:alpha');
+    assert.equal(logic.chainScopeKey({ kind: 'workflow', id: 'wf_0123456789abcdef' }), 'workflow:wf_0123456789abcdef');
+  });
+  // SB-229: a re-read is applied only when no action began after it was issued, and its
+  // failure is reported only then too; a success says so, so the caller clears its error.
+  {
+    const clock = new logic.MutationClock();
+    const later = () => { let settle; const promise = new Promise((resolve, reject) => { settle = { resolve, reject }; }); return { promise, settle }; };
+    assert.deepEqual(await logic.clockedRead(clock, async () => 7), { state: 'applied', value: 7 });
+    const failed = await logic.clockedRead(clock, async () => { throw new Error('read failed'); });
+    assert.equal(failed.state, 'failed'); assert.equal(failed.error.message, 'read failed');
+    // An action began while the read was out: neither its value nor its failure is applied.
+    let pending = later(); let read = logic.clockedRead(clock, () => pending.promise); clock.begin(); clock.end(); pending.settle.resolve(1);
+    assert.deepEqual(await read, { state: 'stale', value: 1 }, 'its value comes back marked stale: it may only fill an empty view');
+    pending = later(); read = logic.clockedRead(clock, () => pending.promise); clock.begin(); pending.settle.reject(new Error('x'));
+    assert.deepEqual(await read, { state: 'stale' }, 'a failure during an action is not reported');
+    clock.end();
+    // Issued during an action: stale too.
+    clock.begin(); read = logic.clockedRead(clock, async () => 2); clock.end();
+    assert.deepEqual(await read, { state: 'stale', value: 2 });
+    cases += 1;
+  }
+
+  // Move up and Move down give the new order; a move past either end changes nothing.
+  check(() => {
+    assert.deepEqual(logic.moveStep(['claude-code', 'codex'], 1, -1), ['codex', 'claude-code']);
+    assert.deepEqual(logic.moveStep(['claude-code', 'codex', 'hermes'], 0, 1), ['codex', 'claude-code', 'hermes']);
+    assert.deepEqual(logic.moveStep(['claude-code', 'codex'], 0, -1), ['claude-code', 'codex']);
+    assert.deepEqual(logic.moveStep(['claude-code', 'codex'], 1, 1), ['claude-code', 'codex']);
+    const list = ['a', 'b']; logic.moveStep(list, 1, -1); assert.deepEqual(list, ['a', 'b'], 'the list given is not changed');
+  });
+  // The account choice mirrors the core's rules (chains.rs validate_executor) and what the fallback runs.
+  check(() => {
+    const subscription = { id: 'c1', label: 'Work Max', provider: 'claude', kind: 'oauth', enabled: true };
+    const claudeApi = { id: 'c2', label: 'Claude API', provider: 'claude', kind: 'api_key', enabled: true };
+    const codex = { id: 'x1', label: 'Codex Pro', provider: 'codex', kind: 'oauth', enabled: true };
+    const off = { id: 'c3', label: 'Old', provider: 'claude', kind: 'oauth', enabled: false };
+    const kimi = [{ id: 'k1', label: 'Kimi one' }];
+    assert.deepEqual(logic.accountsForStep('hermes', [subscription]), [], 'another agent never runs on a subscription sign-in');
+    assert.deepEqual(logic.accountsForStep('opencode', [claudeApi], kimi), [], 'OpenRouter agents run on the key, never pinned');
+    assert.deepEqual(logic.accountsForStep('claude-code', [subscription, claudeApi, codex, off]).map((a) => a.id), ['c1', 'c2']);
+    assert.deepEqual(logic.accountsForStep('codex', [subscription, codex]).map((a) => a.id), ['x1']);
+    assert.deepEqual(logic.accountsForStep('kimi-code', [subscription, codex], kimi), [{ id: 'k1', label: 'Kimi one' }]);
+    assert.deepEqual(logic.accountsForStep('aider', [claudeApi]), [], 'an agent the fallback cannot run gets no pin');
+  });
+  // The chain in one line, its steps in order with a pinned account named.
+  check(() => {
+    const names = { 'claude-code': 'Claude Code', codex: 'Codex', 'kimi-code': 'Kimi Code', hermes: 'Hermes' };
+    const nameOf = (id) => names[id] ?? id;
+    assert.equal(logic.chainSummary([], nameOf), 'Not set');
+    assert.equal(logic.chainSummary(null, nameOf), 'Not set');
+    assert.equal(logic.chainSummary(['claude-code', 'codex', 'kimi-code', 'hermes'].map((agent) => ({ agent })), nameOf), 'Claude Code → Codex → Kimi Code → Hermes');
+    assert.equal(logic.chainSummary([{ agent: 'codex', account_id: 'x1' }, { agent: 'opencode' }], nameOf, (id) => (id === 'x1' ? 'Codex Pro' : undefined)), 'Codex (Codex Pro) → opencode');
+    assert.equal(logic.chainSummary([{ agent: 'hermes', key: 'alpha/prod/OPENROUTER_API_KEY' }], nameOf), 'Hermes (key alpha/prod/OPENROUTER_API_KEY)');
+  });
+  // One readiness line per step, for every state and reason the chains view gives.
+  check(() => {
+    const step = (state, reason = null, extra = {}) => ({ agent: 'claude-code', name: 'Claude Code', state, reason, paid: false, ...extra });
+    assert.equal(logic.stepReasonText(step('ready', null, { account_label: 'Work Max' })), 'Ready: Work Max');
+    assert.equal(logic.stepReasonText(step('ready')), 'Ready');
+    assert.equal(logic.stepReasonText(step('ready', null, { paid: true, key_scope: 'group', spend: null }), 'Alpha web'), 'Ready: the key of Alpha web. Spend not read yet.');
+    assert.equal(logic.stepReasonText(step('ready', null, { paid: true, key_scope: 'machine', spend: null })), "Ready: this computer's key. Spend not read yet.");
+    assert.equal(logic.stepReasonText(step('ready', null, { paid: true, account_label: 'Claude API' })), 'Ready: Claude API. Spend not read yet.');
+    assert.equal(logic.stepReasonText(step('skipped', 'no_usable_account')), 'Skipped: no account with room');
+    assert.equal(logic.stepReasonText(step('skipped', 'agent_disabled')), 'Skipped: disabled under Installed');
+    assert.equal(logic.stepReasonText(step('skipped', 'sign_in_required')), 'Skipped: needs a sign-in');
+    assert.equal(logic.stepReasonText(step('skipped', 'agent_settings_unreadable')), 'Skipped: agent settings could not be read');
+    assert.equal(logic.stepReasonText(step('skipped', 'ceiling_reached')), "Skipped: today's ceiling reached");
+    assert.equal(logic.stepReasonText(step('skipped', 'key_exhausted')), 'Skipped: less than $0.50 left on the key');
+    assert.equal(logic.stepReasonText(step('skipped', 'spend_unknown')), 'Skipped: spend could not be read');
+    assert.equal(logic.stepReasonText(step('skipped', 'something_new')), 'Skipped (something_new)');
+    assert.equal(logic.stepReasonText(step('not_automatic', 'agent_not_automatic_yet')), 'Not automatic yet');
+    assert.equal(logic.stepReasonText(step('not_automatic', 'key_pinned', { key: 'alpha/prod/OPENROUTER_API_KEY' })), 'Pinned to key alpha/prod/OPENROUTER_API_KEY: not automatic yet (waits for project grants)');
+    assert.equal(logic.stepReasonText(step('not_installed')), 'Not installed');
+  });
+  // The last hand-over in a line: its outcome, then the steps passed over with their reasons.
+  check(() => {
+    const nameOf = (id) => ({ hermes: 'Hermes', codex: 'Codex' })[id] ?? id;
+    assert.equal(logic.handoverOutcomeText('offered'), 'handed over');
+    assert.equal(logic.handoverOutcomeText('launch_failed'), 'the launch failed after the offer');
+    assert.equal(logic.handoverOutcomeText('every_step_refused'), 'every step was refused');
+    assert.equal(logic.handoverOutcomeText('no_usable_executor'), 'no agent could take it');
+    assert.equal(logic.handoverOutcomeText('ceiling_reached'), "today's ceiling reached");
+    assert.deepEqual(logic.handoverSkipped([{ agent: 'hermes', reason: 'no_usable_account' }, { agent: 'codex', reason: 'agent_disabled' }], nameOf), ['Hermes: no account with room', 'Codex: disabled under Installed']);
+    assert.equal(logic.shortWorkflow('wf_0123456789abcdef'), 'wf_01234567');
+  });
+}
+// C-7 (SB-72): spending ceilings in the window.
+{
+  // The question has two answers of equal weight: the same class, neither primary, none recommended.
+  check(() => {
+    const q = logic.ceilingQuestion({ value: 5 });
+    assert.equal(q.actions.length, 2);
+    const [double, keep] = q.actions;
+    assert.equal(double.answer, 'double');
+    assert.equal(keep.answer, 'keep');
+    assert.equal(double.label, 'Double to $10.00');
+    assert.equal(keep.label, 'Keep $5.00');
+    assert.equal(double.className, keep.className, 'the same class');
+    assert.ok(!double.className.includes('primary') && !keep.className.includes('primary'), 'neither is primary');
+    for (const action of q.actions) assert.ok(!('recommended' in action), 'no recommended flag');
+    assert.equal(double.disabled, false);
+    assert.equal(q.note, null);
+    assert.equal(logic.ceilingQuestion({ value: 5, kind: 'machine' }).text, "This computer's daily ceiling of $5.00 is reached.");
+    assert.equal(logic.ceilingQuestion({ value: 3, kind: 'project', scope: 'Alpha Web' }).text, "Alpha Web's daily ceiling of $3.00 is reached.");
+    assert.equal(logic.ceilingQuestion({ value: 2, kind: 'workflow', scope: 'wf_01234567' }).text, 'The ceiling of task wf_01234567, $2.00, is reached.');
+    // Doubling past $1,000 is refused by the core: the button stays beside Keep, unavailable, and the note says why.
+    const top = logic.ceilingQuestion({ value: 600, double: null });
+    assert.equal(top.actions[0].disabled, true);
+    assert.equal(top.actions[0].className, top.actions[1].className);
+    assert.equal(top.note, 'Doubling would pass $1,000, the most a ceiling may be. Set a ceiling of up to $1,000 instead.');
+    assert.equal(logic.ceilingQuestion({ value: 5, double: 10 }).actions[0].label, 'Double to $10.00');
+  });
+  // The key's own limit beside Switchboard's ceiling: a warning when a running agent can pass it.
+  check(() => {
+    const monthly = logic.ceilingWarning(5, { limit: 20, limit_reset: 'monthly' });
+    assert.equal(monthly, "The key's own limit resets monthly, not daily. A running agent can spend up to the key's own limit; Switchboard's ceiling only decides whether it is started.");
+    assert.match(logic.ceilingWarning(5, { limit: 20, limit_reset: 'weekly' }), /resets weekly, not daily/);
+    assert.match(logic.ceilingWarning(5, { limit: 20, limit_reset: null }), /never resets/);
+    assert.equal(logic.ceilingWarning(5, { limit: 10, limit_reset: 'daily' }), "The key's own limit, $10.00 a day, is higher than this ceiling. A running agent can spend up to the key's own limit; Switchboard's ceiling only decides whether it is started.");
+    assert.match(logic.ceilingWarning(5, { limit: null, limit_reset: null }), /no spending limit of its own/);
+    assert.equal(logic.ceilingWarning(5, { limit: 5, limit_reset: 'daily' }), null, 'a daily limit no higher than the ceiling: nothing to warn');
+    assert.equal(logic.ceilingWarning(5, null), null, 'the key was not read: nothing to say');
+    assert.equal(logic.ceilingWarning(null, { limit: 20, limit_reset: 'monthly' }), null, 'no ceiling: nothing to compare');
+  });
+  // The ceiling line on the machine panel and each group row.
+  check(() => {
+    assert.equal(logic.ceilingLine(null), 'Daily ceiling: not set');
+    assert.equal(logic.ceilingLine({ usd: 5, doubled_from: null, active: true }), 'Daily ceiling: $5.00');
+    assert.equal(logic.ceilingLine({ usd: 10, doubled_from: 5, active: true }), 'Daily ceiling: $10.00, doubled from $5.00');
+    assert.equal(logic.ceilingLine({ usd: 3, doubled_from: null, active: false }), 'Inactive: this group has no key of its own now. Daily ceiling: $3.00');
+    // SB-230: thousands are grouped, as the window writes $1,000 elsewhere; both languages alike (a window-wide decision).
+    assert.equal(logic.dollars(1000), '$1,000.00');
+    assert.equal(logic.dollars(1234567.5), '$1,234,567.50');
+    assert.equal(logic.dollars(999.999), '$1,000.00');
+    assert.equal(logic.dollars(0.5), '$0.50');
+    // SB-230: removing a capped group's key says its ceiling stops counting.
+    assert.equal(logic.ceilingRemovalNote({ usd: 3, active: true }), 'Its daily ceiling of $3.00 stops counting until the group has a key of its own again.');
+    assert.equal(logic.ceilingRemovalNote({ usd: 3, active: false }), null, 'already inactive');
+    assert.equal(logic.ceilingRemovalNote(null), null);
+    // SB-230: a re-read right after a saved answer that fails keeps what is shown and shows no error;
+    // any other failed read names it; a stale read changes nothing; an answer clears the error.
+    const shown = { view: { questions: [1] }, error: '' };
+    const text = (e) => `read: ${e.message}`;
+    assert.deepEqual(logic.afterRead(shown, { state: 'applied', value: { questions: [] } }, false, text), { view: { questions: [] }, error: '' });
+    assert.deepEqual(logic.afterRead({ ...shown, error: 'old' }, { state: 'applied', value: shown.view }, false, text).error, '');
+    assert.deepEqual(logic.afterRead(shown, { state: 'failed', error: new Error('x') }, true, text), shown);
+    assert.deepEqual(logic.afterRead(shown, { state: 'failed', error: new Error('x') }, false, text), { view: shown.view, error: 'read: x' });
+    assert.deepEqual(logic.afterRead(shown, { state: 'stale' }, false, text), shown);
+    // A stale read never replaces what is shown, but fills an empty view (a page opened while an
+    // action ran would otherwise read "Reading…" until the next Refresh); a later read corrects it.
+    assert.deepEqual(logic.afterRead(shown, { state: 'stale', value: { questions: [] } }, false, text), shown);
+    assert.deepEqual(logic.afterRead({ view: null, error: '' }, { state: 'stale', value: { questions: [2] } }, false, text), { view: { questions: [2] }, error: '' });
+    assert.deepEqual(logic.afterRead({ view: null, error: 'old' }, { state: 'stale', value: { questions: [2] } }, false, text), { view: { questions: [2] }, error: 'old' }, 'its error stays: the read is not trusted to clear it');
+    assert.equal(logic.keyLimitLine({ limit: 20, limit_reset: 'monthly' }), "Key's own limit: $20.00, resets monthly");
+    assert.equal(logic.keyLimitLine({ limit: 10, limit_reset: 'daily' }), "Key's own limit: $10.00, resets daily");
+    assert.equal(logic.keyLimitLine({ limit: 10, limit_reset: null }), "Key's own limit: $10.00, never resets");
+    assert.equal(logic.keyLimitLine({ limit: null, limit_reset: null }), "Key's own limit: none");
+  });
+}
 console.log(`${cases} ui-logic cases passed, including quota priority and wall-clock countdowns.`);

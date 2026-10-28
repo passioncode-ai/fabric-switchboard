@@ -40,5 +40,17 @@
 .usage-question > p.usage-question-sent { color: inherit; font-weight: 600; }
 .usage-question-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); margin-top: var(--space-1); }
 .usage-question-actions .login-option { margin-top: 0; }
+/* SB-202 (B-8, SCN-076): the organization card, after the usage question and the tour. */
+.org-setup { max-width: 980px; display: grid; gap: var(--space-3); margin-bottom: var(--space-4); padding: var(--space-4) var(--space-5); border: 1px solid var(--border-strong); border-radius: var(--r-card); background: var(--panel); }
+.org-setup h2 { font-size: var(--t-heading); font-weight: 650; letter-spacing: -.01em; }
+.org-setup-steps { display: grid; gap: var(--space-2); margin: 0; padding: 0; list-style: none; }
+.org-setup-step { display: grid; grid-template-columns: 7.5rem minmax(0, 1fr); align-items: start; gap: var(--space-3); }
+.org-setup-state { justify-self: start; padding: 2px 8px; border-radius: 999px; font-size: var(--t-chip); font-weight: 600; white-space: nowrap; color: var(--muted); border: 1px solid var(--border-strong); }
+.org-setup-state.is-done { color: var(--ok); background: var(--ok-weak); border-color: transparent; }
+.org-setup-state.is-needs_person, .org-setup-state.is-todo { color: var(--warn); background: var(--warn-weak); border-color: transparent; }
+.org-setup-text { display: grid; gap: 2px; min-width: 0; overflow-wrap: anywhere; }
+.org-setup-text > span { color: var(--muted); }
+.org-setup-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); }
+.org-setup-error { margin: 0; }
 .about-panel > p.usage-question-sent { margin-top: var(--space-3); color: inherit; font-weight: 600; }
 .about-panel > .usage-question-actions { margin-top: var(--space-2); }
