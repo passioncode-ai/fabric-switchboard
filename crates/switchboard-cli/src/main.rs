@@ -1983,8 +1983,18 @@ pub(crate) async fn onboard_status(
         probe.project = Some(resolved["project"].clone()).filter(|p| !p.is_null());
         // SB-202: the organization checklist's reads, only where an organization exists. The
         // `hook` step reads `shell status` (SB-183's record), never the start files.
-        probe.passioncode =
-            switchboard_runtime::vesta::status(root).is_ok_and(|v| v["connected"] == true);
+        let passioncode = switchboard_runtime::vesta::status(root).ok();
+        probe.passioncode = passioncode.as_ref().is_some_and(|v| v["connected"] == true);
+        // F1 of the wave 4 design pass (SCN-079): what the person left there is not set up again.
+        if probe.passioncode {
+            probe.released = passioncode
+                .as_ref()
+                .and_then(|v| v["released"].as_array())
+                .into_iter()
+                .flatten()
+                .filter_map(|r| r["organization"].as_str().map(str::to_owned))
+                .collect();
+        }
         // Read leniently: the owner answering may be another version (its snapshot may carry
         // keys this CLI does not know). What could not be read is named, never dropped.
         let (saved, partial) = onboarding::read_snapshot(&snapshot);

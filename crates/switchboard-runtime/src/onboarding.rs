@@ -64,6 +64,10 @@ pub struct Probe {
     pub shell: Option<Value>,
     /// SB-202: PassionCode.ai is connected.
     pub passioncode: bool,
+    /// F1 of the wave 4 design pass (SCN-079): the organizations the person left on
+    /// PassionCode.ai (`vesta.json`'s `released`, read while connected), by local id. One that
+    /// is not linked again gets no setup steps.
+    pub released: Vec<String>,
     /// SB-202: reads that failed or were partial (`snapshot`, `sign_ins`, `sessions`).
     pub degraded: Vec<String>,
 }
@@ -347,22 +351,42 @@ fn organization_steps(probe: &Probe, cli: &str) -> Vec<Value> {
     }
     let mut organizations: Vec<_> = snapshot.organizations.iter().collect();
     organizations.sort_by_key(|o| std::cmp::Reverse(o.created_at));
-    let names = organizations
-        .iter()
-        .map(|o| o.name.as_str())
-        .collect::<Vec<_>>()
-        .join(", ");
+    // F1 of the wave 4 design pass (SCN-079): one the person left on PassionCode.ai, and not
+    // linked again, is not set up again; the step names it under `left` (additive).
+    let (left, organizations): (Vec<_>, Vec<_>) = organizations
+        .into_iter()
+        .partition(|o| o.vesta_id.is_none() && probe.released.contains(&o.id));
+    let join = |list: &[&switchboard_core::organizations::Organization]| {
+        list.iter()
+            .map(|o| o.name.as_str())
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    let names = join(&organizations);
     let partial = if degraded("snapshot") {
         " Part of Switchboard's saved settings could not be read, so a step below may be wrong or missing."
     } else {
         ""
     };
-    let mut steps = vec![step(
-        "organization",
-        "done",
-        format!("Organizations on this computer: {names}.{partial}"),
-        Value::Null,
-    )];
+    let summary = match (organizations.is_empty(), left.is_empty()) {
+        (true, _) => format!(
+            "No organization to set up: you left {} on PassionCode.ai.{partial}",
+            join(&left)
+        ),
+        (false, true) => format!("Organizations on this computer: {names}.{partial}"),
+        (false, false) => format!(
+            "Organizations on this computer: {names}. Left on PassionCode.ai, so not set up here: {}.{partial}",
+            join(&left)
+        ),
+    };
+    let mut first = step("organization", "done", summary, Value::Null);
+    if !left.is_empty() {
+        first["left"] = json!(left
+            .iter()
+            .map(|o| json!({"id": o.id, "name": o.name}))
+            .collect::<Vec<_>>());
+    }
+    let mut steps = vec![first];
     let provider = match probe.host {
         Some(Host::Codex) => "codex",
         _ => "claude",
@@ -944,6 +968,93 @@ mod tests {
             .unwrap()
             .contains("lists no organization"));
         assert_eq!(answer["complete"], true);
+    }
+
+    /// F1 of the wave 4 design pass (SCN-079): an organization the person left on PassionCode.ai
+    /// is not offered for setup again; the `organization` step names it under `left`.
+    #[test]
+    fn an_organization_left_on_passioncode_is_not_set_up_again() {
+        let contoso = switchboard_core::organizations::Organization {
+            id: "o-contoso".into(),
+            name: "Contoso".into(),
+            domains: vec!["contoso.com".into()],
+            provider_organizations: vec![],
+            created_at: 5,
+            vesta_id: None,
+        };
+        let mut probe = acme();
+        probe
+            .snapshot
+            .as_mut()
+            .unwrap()
+            .organizations
+            .push(contoso.clone());
+        probe.passioncode = true;
+        probe.released = vec!["o-contoso".into()];
+        let answer = steps(&probe);
+        let names = |answer: &Value| -> Vec<String> {
+            answer["steps"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter_map(|s| s["organization"]["id"].as_str().map(str::to_owned))
+                .collect()
+        };
+        assert!(
+            !names(&answer).iter().any(|id| id == "o-contoso"),
+            "{answer}"
+        );
+        assert_eq!(names(&answer).len(), 4, "Acme's four steps only");
+        let organization = by_id(&answer, "organization");
+        assert_eq!(organization["state"], "done");
+        assert_eq!(
+            organization["left"],
+            json!([{"id": "o-contoso", "name": "Contoso"}])
+        );
+        assert_eq!(
+            organization["summary"],
+            "Organizations on this computer: Acme. Left on PassionCode.ai, so not set up here: Contoso."
+        );
+        assert_eq!(answer["complete"], true);
+        // Linked again: offered as before.
+        probe.snapshot.as_mut().unwrap().organizations[1].vesta_id = Some("v-contoso".into());
+        assert!(names(&steps(&probe)).iter().any(|id| id == "o-contoso"));
+        // The only organization was left: nothing to set up, and the step says so.
+        let mut alone = acme();
+        alone.snapshot.as_mut().unwrap().organizations = vec![contoso];
+        alone.passioncode = true;
+        alone.released = vec!["o-contoso".into()];
+        let answer = steps(&alone);
+        assert_eq!(
+            ids(&answer),
+            [
+                "owner",
+                "accounts",
+                "project",
+                "mcp",
+                "proving_call",
+                "organization"
+            ]
+        );
+        assert_eq!(
+            by_id(&answer, "organization")["summary"],
+            "No organization to set up: you left Contoso on PassionCode.ai."
+        );
+        assert_eq!(answer["complete"], true);
+        // Without the list (not connected, or nothing left), every organization keeps its steps.
+        let mut kept = acme();
+        kept.snapshot.as_mut().unwrap().organizations.push(
+            switchboard_core::organizations::Organization {
+                id: "o-contoso".into(),
+                name: "Contoso".into(),
+                domains: vec![],
+                provider_organizations: vec![],
+                created_at: 5,
+                vesta_id: None,
+            },
+        );
+        assert_eq!(names(&steps(&kept)).len(), 8);
+        assert!(by_id(&steps(&kept), "organization")["left"].is_null());
     }
 
     /// B-8: the window words the card in its own language from these fields, never by reading
