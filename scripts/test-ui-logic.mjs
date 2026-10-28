@@ -1194,6 +1194,12 @@ check(() => {
     assert.equal(logic.accountsEmptyKey({ backup: false, onboarding: noSeat, current: { claude: { status: 'available' }, codex: null }, released: ['o-acme'] }).lead, 'add_current', 'the empty page does not lead with a left organization\'s seat');
     const unread = logic.orgSetupUnread({ onboarding: null, failed: true, organizations, page: 'accounts', hidden: [], usage: answered, usageFailed: false, tourStep: null, released });
     assert.deepEqual(unread, { id: 'o-acme', name: 'Acme' }, 'the read-failed card skips the left one too');
+    // Above another organization's card, leaving is said at the top of Organizations too.
+    assert.equal(logic.releasedSummary(status, organizations), 'Contoso is no longer in your PassionCode.ai organizations. It stays here with its groups until you remove it.');
+    const fabrikam = { id: 'o-fab', name: 'Fabrikam', created_at: 2, vesta_id: null };
+    assert.equal(logic.releasedSummary({ connected: true, released: [...status.released, { organization: 'o-fab', at: 900 }] }, [...organizations, fabrikam]), 'Contoso, Fabrikam are no longer in your PassionCode.ai organizations. They stay here with their groups until you remove them.');
+    assert.equal(logic.releasedSummary({ connected: false, released: status.released }, organizations), null);
+    assert.equal(logic.releasedSummary(null, organizations), null);
   });
   // F2, F3 (wave 4 design pass, SCN-076 step 7, VIS-21): one filled button per screen
   check(() => {

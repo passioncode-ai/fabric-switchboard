@@ -2,7 +2,7 @@
 // exercise them directly. main.ts owns rendering; these functions own decisions.
 import type { ShellHookNotice, ShellHookStatus, Onboarding, OnboardStep, ChainExecutor, ChainScope, ChainStepView } from './types';
 import type { Account, AccountLimit, Organization, OrganizationGroupOffer, AgentRow, AgentSetup, OpenrouterCredit, RecommendedModel, SessionInfo, ProjectRule, RotationPolicy, UpdateStatus, Usage, UsageWindow } from './types';
-import { t } from './i18n';
+import { t, plural } from './i18n';
 
 export type Appearance = 'system' | 'dark' | 'light';
 export type Theme = 'dark' | 'light';
@@ -1205,6 +1205,13 @@ const ORG_STEP_TITLES = (): Record<OrgSetupStepId, string> => ({ organization: t
  * not linked again), by id. None while the connection is not read or is disconnected. */
 export function releasedOrganizations(status: Parameters<typeof organizationReleasedAt>[0], organizations: readonly Pick<Organization, 'id' | 'vesta_id'>[]): string[] {
   return organizations.filter((o) => organizationReleasedAt(status, o) !== null).map((o) => o.id);
+}
+/** F1 (SCN-079): the line at the top of Organizations, while another organization's setup card
+ * would push each card's own released line below the fold: which organizations the person left. */
+export function releasedSummary(status: Parameters<typeof organizationReleasedAt>[0], organizations: readonly Pick<Organization, 'id' | 'name' | 'vesta_id'>[]): string | null {
+  const names = organizations.filter((o) => organizationReleasedAt(status, o) !== null).map((o) => o.name);
+  if (!names.length) return null;
+  return plural(names.length, { one: '{names} is no longer in your PassionCode.ai organizations. It stays here with its groups until you remove it.', other: '{names} are no longer in your PassionCode.ai organizations. They stay here with their groups until you remove them.' }, { names: names.join(', ') });
 }
 /** Every organization whose checklist is not complete yet, in the checklist's order (newest first).
  * An organization the person left on PassionCode.ai (`released`) gets no card: its line on
