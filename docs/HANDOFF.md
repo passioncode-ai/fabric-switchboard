@@ -21,10 +21,17 @@
   (WebKit pass F1); one build at a time with a 4 GB floor on this Mac (canvas, build rule).
 - **Prerequisites left to people.** SB-02 (a Windows host the agent can reach), SB-01, SB-15, SB-178, SB-06 (live
   accounts), SB-13, SB-16 (decisions); B-10 (SB-125) after 0.7.0 is installed on both machines.
-- **Exact next task.** Watch the `v0.7.0` release run to success, confirm the published assets and `latest.json`,
-  update the local install, then close the rows built in 0.7.0 (SB-71, SB-160, SB-183, SB-201, SB-202, SB-207,
-  SB-208, SB-212, SB-213, SB-214, SB-215, SB-218 to SB-230 as marked) and measure a day of `control_slow` with
-  `lock_ms` on the installed 0.7.0 for SB-174 and SB-163.
+- **Released.** Tag `v0.7.0` on `c8b066e`; release run 40626842636 succeeded on its second attempt (2026-10-28,
+  published 08:20 UTC): 24 assets for macOS universal, Windows x64 and arm64, Linux x64 and arm64, `latest.json` 0.7.0
+  with seven platforms, `SHA256SUMS` and its signature. The first attempt's guard refused: nightly run 40627045056 on
+  the tag failed on windows-11-arm only, `shell_env_answers_without_the_owner_or_the_store_lock_within_25_ms` at
+  26.3 ms at best, most of it Windows process creation; that job passed on rerun, and the test now measures the
+  command's own cost above a bare start on Windows (PR #337, `3a21df0`, for the next release). Rows built in 0.7.0
+  closed (SB-71, SB-160, SB-183, SB-201, SB-202, SB-207 to SB-210, SB-212 to SB-215, SB-218 to SB-220, SB-222 to
+  SB-228); SB-221, SB-229 and SB-230 stay open for what they name as left. SB-242 filed (moving accounts to another
+  machine, coordinator MV-7).
+- **Exact next task.** Measure a day of `control_slow` with `lock_ms` on the installed 0.7.0 for SB-174 and SB-163,
+  then take SB-242's operator decision and the next board row by priority.
 
 ## 2026-10-26 (evening): iteration 0.7.0 «first organization», waves 1 to 3 merged
 
