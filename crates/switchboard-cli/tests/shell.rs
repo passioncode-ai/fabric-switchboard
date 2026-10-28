@@ -123,12 +123,33 @@ fn shell_env_answers_without_the_owner_or_the_store_lock_within_25_ms() {
         })
         .collect();
     times.sort();
+    // What starting this binary costs before it does anything: the fastest of seven warm
+    // `--version` calls. On Windows creating a process alone takes about 20 ms (26.3 ms at best
+    // for `shell env` on the arm64 runner of nightly run 40627045056), so there the budget is
+    // the command's own cost above that start.
+    let mut starts: Vec<Duration> = (0..7)
+        .map(|_| {
+            let started = Instant::now();
+            let output = binary().arg("--version").output().unwrap();
+            let elapsed = started.elapsed();
+            assert!(output.status.success());
+            elapsed
+        })
+        .collect();
+    starts.sort();
     // The command's own cost is the fastest warm call: the others add only what the machine's
     // scheduler does to any process (a busy build machine, a slower CI runner).
-    assert!(
-        times[0] <= Duration::from_millis(25),
-        "shell env took {:?} at best (all: {times:?})",
+    let budget = Duration::from_millis(25);
+    let own = if cfg!(windows) {
+        times[0].saturating_sub(starts[0])
+    } else {
         times[0]
+    };
+    assert!(
+        own <= budget,
+        "shell env took {:?} at best, a bare start {:?} (all: {times:?}; starts: {starts:?})",
+        times[0],
+        starts[0]
     );
     drop(lock);
 }

@@ -1890,7 +1890,9 @@ Code: `switchboard_runtime::shell::map` (`read`, `write`, `Map::lookup`, `answer
   panics, exits 0 and writes nothing to stderr; `--help` still reaches the ordinary parser. Tests:
   `shell::map::tests::the_longest_folder_of_an_organization_group_answers_its_homes_and_context`,
   CLI `shell_env_answers_without_the_owner_or_the_store_lock_within_25_ms` (the store's lock held
-  and a control port that never answers; the fastest of seven warm calls within 25 ms),
+  and a control port that never answers; the fastest of seven warm calls within 25 ms, on Windows
+  25 ms above the fastest of seven warm `switchboard --version` calls, since creating a process
+  there costs about 20 ms by itself),
   `shell_env_says_none_when_off_missing_unknown_version_or_outside`,
   `shell_env_never_writes_to_stderr_and_exits_zero`.
 - **Choice.** `<data>/shell-hook`: `on`, `off`, anything else or absent is the default. Written by
