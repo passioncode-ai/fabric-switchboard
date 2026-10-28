@@ -84,4 +84,6 @@ Keep the desktop app or `switchboard serve` running for managed sessions. The re
 
 **Live-provider limit:** login and end-to-end requests with real provider accounts are **not yet verified**. Local synthetic tests and successful packaging do not prove that acceptance. Review the release notes before testing your accounts.
 
+Setting up an organization's work (its group, your seat, terminals in its folders, launching and leaving): [ORGANIZATION.md](ORGANIZATION.md), in Russian [ORGANIZATION.ru.md](ORGANIZATION.ru.md).
+
 Building from source and signing artifacts are documented separately in [DISTRIBUTION.md](DISTRIBUTION.md).

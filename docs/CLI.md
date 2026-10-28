@@ -183,7 +183,7 @@ switchboard project bindings    # the folders bound, with their pool and route
 
 Leaving a project removes only what Switchboard wrote, and `switchboard uninstall` removes every binding. Never print that file in a chat: its token opens the pool on this computer. See the [SB-118 packet](packets/sb-118-claude-bindings.md).
 
-### Terminals in an organization's folders (SB-183, 0.7.0, in progress)
+### Terminals in an organization's folders (SB-183, 0.7.0)
 
 In a group bound to an organization, a terminal with Switchboard's shell hook runs plain `claude`
 and `codex` in that group's shell homes, with `SWITCHBOARD_CONTEXT=org:<id>`, and gives the
@@ -415,7 +415,7 @@ Before every paid step of an automatic hand-over (Hermes or OpenCode on an OpenR
 Code or Codex on an API-key account) Switchboard reads the key's spend from OpenRouter and skips
 the step when the key has less than $0.50 left of its own limit, when a spending ceiling is
 reached (a question opens: double it or keep it), or when a ceiling covers it and its spend cannot
-be read (0.7.0, SB-72; [contract](CONTRACTS.md)). A ceiling is a daily dollar amount for this
+be read (0.7.0, SB-72; [contract](CONTRACTS.md#spending-ceilings-sb-72-070)). A ceiling is a daily dollar amount for this
 computer (every saved OpenRouter key added up per UTC day) or for a group on its own key, or one
 for a task counted on its key since the task's first paid hand-over.
 
