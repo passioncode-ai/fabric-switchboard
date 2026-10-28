@@ -1554,6 +1554,44 @@ fn failover_moves_the_pool_off_a_refused_account_and_holds_it() {
     assert_eq!(store.route(Provider::Claude, "default").unwrap().0.id, b);
 }
 
+/// SB-211: a seat the provider ended (0.7.0 B-5) never receives SB-98's one replay, even when it
+/// is the least used account left; the runtime's next pass can bring it back after a sign-in.
+#[test]
+fn failover_never_moves_a_request_onto_an_ended_seat() {
+    let (_root, _vault, store) = setup();
+    let now = clock();
+    let a = account(&store, "org-a", now);
+    let b = account(&store, "org-b", now);
+    let c = account(&store, "org-c", now);
+    observe(&store, &a, 20., now);
+    observe(&store, &b, 50., now);
+    observe(&store, &c, 10., now);
+    store.select(Provider::Claude, "default", &a).unwrap();
+    store.mark_ended(&c);
+
+    let (moved, _) = store
+        .failover(Provider::Claude, "default", &a, OAUTH, now)
+        .unwrap()
+        .unwrap();
+    assert_eq!(moved.id, b, "c is the least used but its seat ended");
+
+    // The pass replaces the set: c signed in again and is a candidate once more.
+    store.set_ended(std::collections::HashSet::new());
+    let (moved, _) = store
+        .failover(Provider::Claude, "default", &b, OAUTH, now)
+        .unwrap()
+        .unwrap();
+    assert_eq!(moved.id, c);
+
+    // Only ended seats left besides the refused one: nothing usable, the route stays.
+    store.set_ended(std::collections::HashSet::from([a.clone(), b.clone()]));
+    assert!(store
+        .failover(Provider::Claude, "default", &c, OAUTH, now)
+        .unwrap()
+        .is_none());
+    assert_eq!(store.route(Provider::Claude, "default").unwrap().0.id, c);
+}
+
 /// SB-101: a selected account whose credential expired no longer stops the pool: it moves to the
 /// next usable account, and — unlike a limit — the expired account is not held.
 #[test]

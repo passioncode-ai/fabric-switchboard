@@ -624,6 +624,8 @@ pub(crate) fn seat_ended(store: &Store, id: &str, by: &'static str) {
     let Some(account) = snapshot.accounts.iter().find(|a| a.id == id) else {
         return;
     };
+    // SB-211: the proxy's failover leaves it out at once, not only from the next pass.
+    store.mark_ended(id);
     let organization = snapshot.attribution(account).organization.is_some();
     crate::oplog::event(
         "seat_ended",

@@ -203,6 +203,15 @@ impl Pass {
                 .usage_gate
                 .refused_within(time, PACED_AFTER_REFUSAL_SECONDS),
         );
+        // SB-211: the proxy's failover leaves an ended seat out, as rotation does; cached until a
+        // credential or a verdict changes, so no read while nothing moved.
+        runtime.store.set_ended(
+            runtime
+                .refresh
+                .sign_in_required(&runtime.store)
+                .into_iter()
+                .collect(),
+        );
         // With the same slack as the schedules it sets: passes 30 s apart, stamped in whole
         // seconds, may be 59 s apart.
         if time.abs_diff(self.last_pull_in)

@@ -6,6 +6,10 @@ release pull request renames `Unreleased` to the version. While Windows signing 
 that section must say `windows_authenticode: NOT_SIGNED`. Notes of 0.5.3-beta.1 and earlier are
 on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/releases).
 
+## Unreleased
+
+- A request a provider refused for a limit is never moved onto a seat the provider has ended: the one retry on another account of the group skips accounts that need a new sign-in (SB-211).
+
 ## 0.7.0
 
 The first organization release ([plan](docs/reports/2026-10-25-audit-and-plan/README.md) section 3B; decisions D-3, D-5 and D-6 there): a person of an organization sets a computer up from one checklist, terminals in the organization's folders work in its context, and paid fallback agents start only under the spending ceilings you set.

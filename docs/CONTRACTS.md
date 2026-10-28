@@ -346,7 +346,8 @@ could hurt as well as help. Decided and built:
   is gone) and `api_key_only` for Chat Completions. A subscription session never moves onto a
   pay-per-token key, and a pool's key route shared with agents never moves onto a subscription
   sign-in (agents would get 403). Candidate: `failover_candidate` — measured lately and below full
-  first, then last known usage, never still full.
+  first, then last known usage, never still full. Held out: the limited accounts, the account it leaves and the
+  seats the provider ended (SB-211).
 - **Compare and move.** The route changes only while it still names the refused (or broken)
   account (`select_transaction` with an expectation); a refusal that comes back after another
   request or the person moved the pool takes the route as it is. Concurrent refusals no longer
@@ -1715,9 +1716,12 @@ so its due token is not read every minute. A quota check a person asks for (the 
 operation and the offline CLI's, `monitor::check_by_person`; never the background pass) asks the
 provider once past a usage verdict, without a renewal: a 401 keeps the verdict, any other answer
 takes it back (`RefreshState::lift_verdict`); a lineage the token endpoint refused is not asked
-past. Nothing moves a session or replays a request (B-Q3). Known limit: the proxy's own failover
-(SB-98's 429 move and SB-101's unusable-route failover) does not read this set, so a request on a
-group's route can still be moved to an ended seat (board row SB-211). An ended seat that is a
+past. Nothing moves a session or replays a request (B-Q3). The proxy's own failover (SB-98's 429 move
+and SB-101's unusable-route failover) leaves this set out too (SB-211, after 0.7.0): the runtime
+hands it to the store at each background pass (`Store::set_ended`) and at once when a seat ends
+(`refresh::seat_ended` calls `Store::mark_ended`), and `Store::move_route` holds it beside the
+limited accounts, so SB-98's one replay never lands on an ended seat; a new sign-in brings the
+account back at the next pass. Test `failover_never_moves_a_request_onto_an_ended_seat`. An ended seat that is a
 group's selected route stops renewing, so its token runs out and the route falls to the recorded
 SB-101 failover for an expired token: the pool moves to its next usable account, and a group with
 no other usable seat answers the session 409 ("Select a usable account in this pool first.").
