@@ -1256,7 +1256,23 @@ type OrgSetupScreen = { page: string; hidden: string[]; usage: UsageStatus | nul
 /** SB-228 (VIS-21): a card with an action of its own is on screen, so its action is the screen's
  * one primary and the page's buttons (+ New organization, Restore from backup, + Add account) go quiet. */
 export function orgSetupLeads(input: OrgSetupScreen & { onboarding: Onboarding | null | undefined }): boolean {
-  return orgSetups(input.onboarding, input.released).some((setup) => !!orgSetupAction(setup) && orgSetupShown({ ...input, organization: setup.organization.id }));
+  return orgSetupPrimary(input) !== null;
+}
+/** F3 (wave 4 design pass, VIS-21): with several cards on screen, only the first one shown with an
+ * action of its own has the filled button; the others' actions are bordered. Its organization's id. */
+export function orgSetupPrimary(input: OrgSetupScreen & { onboarding: Onboarding | null | undefined }): string | null {
+  return orgSetups(input.onboarding, input.released).find((setup) => !!orgSetupAction(setup) && orgSetupShown({ ...input, organization: setup.organization.id }))?.organization.id ?? null;
+}
+/** F2 (wave 4 design pass, SCN-076 step 7, VIS-21): on Accounts an organization's own action (its
+ * card's, or the empty page's seat sign-in after *Hide*) is the screen's one primary, so *Add to
+ * Switchboard* and *Turn on for Claude Code* go quiet beside it. */
+export function accountsOrgActionLeads(input: { cardLeads: boolean; emptyLead: AccountsEmptyKey | null }): boolean {
+  return input.cardLeads || input.emptyLead?.lead === 'org_seat';
+}
+/** VIS-21: one filled button per screen: of the actions a page offers to lead, in its reading
+ * order, the first one offered is filled; the others are bordered. */
+export function firstPrimary<T extends string>(offered: readonly (readonly [T, boolean])[]): T | null {
+  return offered.find(([, on]) => on)?.[0] ?? null;
 }
 /** SB-228 (SCN-076): the first checklist read failed, so there are no steps to show: the card of
  * the newest organization it would be shown for, with the read-failed note only. Null once any

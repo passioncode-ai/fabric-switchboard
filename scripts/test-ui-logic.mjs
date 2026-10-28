@@ -1194,6 +1194,28 @@ check(() => {
     const unread = logic.orgSetupUnread({ onboarding: null, failed: true, organizations, page: 'accounts', hidden: [], usage: answered, usageFailed: false, tourStep: null, released });
     assert.deepEqual(unread, { id: 'o-acme', name: 'Acme' }, 'the read-failed card skips the left one too');
   });
+  // F2, F3 (wave 4 design pass, SCN-076 step 7, VIS-21): one filled button per screen
+  check(() => {
+    const globex = { id: 'o-globex', name: 'Globex' };
+    const two = { ...noSeat, steps: [...noSeat.steps, { id: 'org_group', state: 'needs_person', organization: globex, groups: [] }, { id: 'seat', state: 'needs_person', organization: globex }] };
+    const screen = { page: 'orgs', hidden: [], usage: answered, usageFailed: false, tourStep: null };
+    assert.equal(logic.orgSetupPrimary({ ...screen, onboarding: two }), 'o-acme', 'two cards: only the first one\'s action is primary');
+    assert.equal(logic.orgSetupPrimary({ ...screen, page: 'accounts', hidden: ['o-acme'], onboarding: two }), 'o-globex', 'the first card shown');
+    assert.equal(logic.orgSetupPrimary({ ...screen, onboarding: two, released: ['o-acme'] }), 'o-globex');
+    const noAction = withOrg([{ id: 'org_group', state: 'needs_person', groups: ['Acme web', 'Acme two'] }, { id: 'seat', state: 'needs_person' }]);
+    const twoFirstQuiet = { ...noAction, steps: [...noAction.steps, { id: 'org_group', state: 'needs_person', organization: globex, groups: [] }] };
+    assert.equal(logic.orgSetupPrimary({ ...screen, onboarding: twoFirstQuiet }), 'o-globex', 'a card with no action of its own is skipped');
+    assert.equal(logic.orgSetupPrimary({ ...screen, onboarding: ready }), null);
+    // Accounts: while the organization's action leads, Add to Switchboard and Turn on for Claude Code go quiet.
+    assert.equal(logic.accountsOrgActionLeads({ cardLeads: true, emptyLead: null }), true, 'the card leads');
+    assert.equal(logic.accountsOrgActionLeads({ cardLeads: false, emptyLead: { lead: 'org_seat', organization: 'Acme', group: 'Acme work', pool: 'acme-work', line: '', label: '' } }), true, 'after Hide: the empty page\'s seat sign-in leads');
+    assert.equal(logic.accountsOrgActionLeads({ cardLeads: false, emptyLead: { lead: 'add_current' } }), false, 'no organization lead: the page keeps its buttons');
+    assert.equal(logic.accountsOrgActionLeads({ cardLeads: false, emptyLead: null }), false);
+    // The first action offered, in the page's reading order, is the one filled button.
+    assert.equal(logic.firstPrimary([['chain_preset', true], ['link_cli', true]]), 'chain_preset', 'Agents: the chain preset above Connect');
+    assert.equal(logic.firstPrimary([['chain_preset', false], ['link_cli', true]]), 'link_cli');
+    assert.equal(logic.firstPrimary([['chain_preset', false], ['link_cli', false]]), null);
+  });
 }
 // C-3 (SB-71): the fallback chains panel and its editor.
 {
