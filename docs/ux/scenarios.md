@@ -1220,7 +1220,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Errors & recovery:** a broken settings file is reported in the log (`claude_binding` skipped) and left for the person to fix. A folder skipped because its values are the person's gets no shell home either: the hook leaves it alone.
 **Status:** draft
 **Meaning:** operator 2026-10-14 (SB-118). Amended for 0.7.0: what the shell hook adds in organization folders (decision D-3 of 2026-10-25, dossier A part A).
-**Coverage:** `bindings::tests`; proxy `a_pool_capability_reaches_its_pool_only`; live measurement in the SB-118 packet. The 0.7.0 addition (shell home in organization folders): NOT_RUN, none yet (nodes A-0, A-4, A-6).
+**Coverage:** `bindings::tests`; proxy `a_pool_capability_reaches_its_pool_only`; live measurement in the SB-118 packet. The 0.7.0 addition (shell home in organization folders): proxy guard `a_placeholder_bearer_with_a_folder_header_reaches_its_pool` (node A-6); the live route NOT_RUN, none yet (nodes A-0, A-4).
 **Product:** unobserved
 **Traces:** SB-118 packet, SB-183, SCN-074
 
@@ -1404,7 +1404,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Errors & recovery:** every refusal names its cause and leaves Codex's file as it was.
 **Status:** draft
 **Meaning:** operator request 2026-10-19 (SB-143). Amended for 0.7.0: organization folders route Codex through the shell home whatever the switch (decision D-3 of 2026-10-25, dossier A part A item 3).
-**Coverage:** proxy `codex_through_the_user_provider_uses_the_projects_account_only_in_its_folders`, `a_request_names_its_newest_folder_and_the_deepest_project_folder_wins`; `codex_route::tests::*`; MCP handshake; WebKit demo. The 0.7.0 organization line under the state (node A-7): ui-logic `the_shell_hook_section_reads_every_state` (`codexHookLine`: shown only while the hook is on, a start file holds it and an organization's folder map rows carry a Codex account; one name, several, none, inactive, off; A-7 fix cycle 1); the organization route itself (`codex` through the group's Codex shell home): NOT_RUN, none yet (nodes A-0, A-4, A-6).
+**Coverage:** proxy `codex_through_the_user_provider_uses_the_projects_account_only_in_its_folders`, `a_request_names_its_newest_folder_and_the_deepest_project_folder_wins`; `codex_route::tests::*`; MCP handshake; WebKit demo. The 0.7.0 organization line under the state (node A-7): ui-logic `the_shell_hook_section_reads_every_state` (`codexHookLine`: shown only while the hook is on, a start file holds it and an organization's folder map rows carry a Codex account; one name, several, none, inactive, off; A-7 fix cycle 1); the organization route itself (`codex` through the group's Codex shell home): proxy guard `an_auto_request_from_an_unmapped_folder_carries_no_sign_in_upstream` (node A-6); live NOT_RUN, none yet (nodes A-0, A-4).
 **Product:** unobserved
 **Traces:** SB-143, SB-183, SCN-074
 

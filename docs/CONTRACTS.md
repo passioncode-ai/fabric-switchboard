@@ -1809,13 +1809,24 @@ code and the test given are the proof (paths at the iteration's head, `a476db1`)
 | Lifecycle: the shell homes, map, scripts and start files in *Writes*; the hook's question in its own row | [AGENTS.md](../AGENTS.md#lifecycle) | as above | `python3 scripts/check_docs.py` |
 | The design decision H-3, amended for D-3, PowerShell and the shell homes | [design](research/session-home-per-context-2026-10-24.md) H-3 | none | none (a record of a decision) |
 
-**Not guarded by a proxy test.** Node A-6 (two proxy tests that pin the facts the shell homes rely
-on: a placeholder bearer with a folder's capability header reaches its pool, and an `_auto` request
-from an unmapped folder carries no sign-in upstream) was not built in 0.7.0:
-`grep -n "placeholder" crates/switchboard-proxy/src/tests.rs` prints nothing. The client side is
-measured ([A-0](evidence/shell-home-measurement-2026-10.md)); the proxy side rests on its existing
-capability tests (`a_pool_capability_reaches_its_pool_only`, `crates/switchboard-proxy/src/tests.rs:1440`).
-A board row is proposed in [the wave 5 backlog](runs/2026-10-26-iteration-0.7.0/wave5-backlog.md).
+**Guarded by two proxy tests (node A-6, 2026-10-28).** The proxy facts the shell homes rely on are
+pinned beside the existing capability tests (`a_pool_capability_reaches_its_pool_only`,
+`crates/switchboard-proxy/src/tests.rs:1440`):
+
+- `a_placeholder_bearer_with_a_folder_header_reaches_its_pool` (`tests.rs:2212`): the placeholder
+  bearer `switchboard-shell` with a folder's capability header reaches that folder's pool on its
+  account; the placeholder alone, or with the header on another pool, answers 401 and reaches no
+  provider; neither the placeholder nor the capability is forwarded.
+- `an_auto_request_from_an_unmapped_folder_carries_no_sign_in_upstream` (`tests.rs:2287`): a
+  request to `/codex/_auto/v1` as the Codex shell home sends it (the auto capability, no
+  `Authorization`) from a folder no group maps, or naming no folder, reaches `/v1/responses` with no
+  `authorization`, `chatgpt-account-id` or `x-api-key` and no account's token; the same request from
+  a mapped folder carries that pool's sign-in.
+
+Each was shown to catch its defect by planting it in `lib.rs` and watching the test fail, then
+restoring: the placeholder accepted as a capability, the header ignored beside a bearer, an unmapped
+folder routed to the default pool, and a sign-in attached to the unmapped request. The client side
+is measured in [the A-0 record](evidence/shell-home-measurement-2026-10.md).
 
 ## The terminal hook's folder map (SB-183, node A-1, 2026-10-26)
 

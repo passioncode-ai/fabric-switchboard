@@ -172,7 +172,8 @@ Branch `w5/docs` from the iteration head `a476db1`, documentation only, one comm
 - **A-9** `107f2e0`: CONTRACTS "Context binding in 0.7.0" maps every contract of dossier A section 5 to
   its section, code (file:line) and test; AGENTS.md lifecycle row for the hook's `shell env` question and
   PowerShell in *Writes*; design H-3 amended (on by default, PowerShell, shell homes); CLI.md's hook section
-  no longer "in progress". Found: node A-6 (proxy guard tests) was never built; proposed as a row.
+  no longer "in progress". Found: node A-6 (proxy guard tests) was never built; proposed as a row
+  (built afterwards on `w5/a6-cq6`, 2026-10-28; row `new-1` done).
 - **C-9** `07294c3`: CONTRACTS `## Spending ceilings (SB-72, 0.7.0)`, the storage and the gate moved under
   it with a summary (ceilings, who loosens, gate, budget, key slot, questions, records, not covered);
   AGENTS.md `GET /key` only at a paid start; ANALYTICS.md records C-Q6 as not built; terminology and
