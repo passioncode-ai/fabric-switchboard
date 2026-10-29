@@ -10,9 +10,13 @@
 - **Done.** PR #343 (`9f16fbb`): `switchboard_core::windows::check_foreign_file`, the `external_file_refused` log
   event; Windows tests failed on the old code (nightly 40661988382) and pass with the fix (40661940136); gate
   `./scripts/check.sh` 1075 passed. Also in 0.7.1: SB-211 (PR #340), SB-239 (PR #341).
-- **Exact next task.** Watch the `v0.7.1` release run, confirm assets and `latest.json`, the local install, then ask
-  the tester (through fabric-workspace) to retry adding an account after the app updates; if it is refused again, the
-  log's `external_file_refused` `check` names the cause. Close SB-243, SB-211, SB-239 on that evidence.
+- **Released.** `v0.7.1` on `1a3a3e3`, release run 40672152722 (second attempt; the first guard refused on a loaded-runner
+  timing test, fixed in PR #345), published 2026-10-28 13:20 UTC, 25 assets, `latest.json` 0.7.1; installed here
+  (owner started 0.7.1 2026-10-29 07:50 UTC). The tester was asked through fabric-workspace to retry.
+- **Measured.** A day on 0.7.0 for SB-174 and SB-163 (rows carry the figures): no `control_slow` past 10 s; the
+  remaining holds are `renew_live` inside `source_sync` (up to 12.8 s) and a renewal's `checks` (16.5 s).
+- **Exact next task.** Close SB-243 when the tester's retry succeeds (or read `external_file_refused`'s `check`);
+  then the SB-163 design note: take the live sign-in's token grant (`renew_live`) out of the owner transaction.
 
 ## 2026-10-28: release 0.7.0 «first organization», with the stability and Windows debts closed
 
