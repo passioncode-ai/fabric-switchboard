@@ -6,6 +6,10 @@ release pull request renames `Unreleased` to the version. While Windows signing 
 that section must say `windows_authenticode: NOT_SIGNED`. Notes of 0.5.3-beta.1 and earlier are
 on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/releases).
 
+## Unreleased
+
+- The background sync no longer reads the Claude Code and Codex sign-ins every three minutes: they are read only when they changed, and before the step that holds other changes back, so the window, CLI and MCP no longer wait seconds behind a slow Keychain read (SB-163).
+
 ## 0.7.1
 
 - On Windows, accounts can be added again when Claude Code ran as administrator or with UAC off: its sign-in files belong to the Administrators group then, and Switchboard refused them as unsafe, so no account could be saved (SB-243). A refused sign-in file now names the check that refused it in the log.

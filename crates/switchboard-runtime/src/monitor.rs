@@ -363,20 +363,50 @@ impl Pass {
             self.swap_last_signature = signature;
             self.swap_was_running = Some(running);
         }
+        // SB-163: the sign-ins this sync reads, read before the owner transaction: a read that
+        // waits on the Keychain (a `security` call on a swapping machine took up to 12 s) no
+        // longer holds control writes behind it. Under the transaction the same calls answer
+        // from the watch, or read again only if a source changed in between.
+        let current = runtime.native.current;
+        crate::blocking::run(|| prime_live_sources(current, claude));
         let mut mutation = runtime.hold("source_sync").await;
         // Claude Code left its token expired: renew it under Claude Code's locks so managed
         // sessions and quota checks on that account keep working.
-        if claude {
-            crate::refresh::renew_idle_live(&runtime.store, runtime.native, &runtime.refresh).await;
+        let renewed = if claude {
+            let outcome =
+                crate::refresh::renew_idle_live(&runtime.store, runtime.native, &runtime.refresh)
+                    .await;
             mutation.phase("renew_live");
-        }
+            !matches!(outcome, crate::refresh::Outcome::NotNeeded)
+        } else {
+            false
+        };
         crate::refresh::follow_claude_swap(&runtime.store, &runtime.refresh, swap);
         mutation.phase("swap");
         sync_live_sources(&runtime.store, runtime.native.current, &runtime.refresh);
         mutation.phase("sync");
-        runtime.invalidate_current();
+        // SB-163: the sign-in sources are read afresh only after a renewal may have written
+        // Claude Code's sign-in; otherwise their watch stands (LC-04) and the next sync probes.
+        // Before, every sync forgot it and read both sign-ins again every 180 s.
+        if renewed {
+            runtime.invalidate_current();
+        } else {
+            runtime.invalidate_current_accounts();
+        }
         self.last_source_sync = time;
     }
+}
+
+/// SB-163: reads the sign-ins `sync_sources` uses through `current` (cached: a probe while
+/// nothing changed), before the owner transaction is taken.
+fn prime_live_sources(
+    current: fn(Provider) -> Result<external::CapturedProfile, String>,
+    claude: bool,
+) {
+    if claude {
+        let _ = current(Provider::Claude);
+    }
+    let _ = current(Provider::Codex);
 }
 
 /// A schedule stamped ahead of a clock that was set back would otherwise stall probes.
@@ -2199,6 +2229,9 @@ mod tests {
             crate::NativeSources {
                 current: watched,
                 activate: activates,
+                // SB-163: the runtime forgets this test's watch as it forgets the real one, so
+                // a source sync that read the sign-ins again every 180 s fails the budget.
+                forget: || GATE.forget(),
                 ..crate::UNAVAILABLE
             },
         )

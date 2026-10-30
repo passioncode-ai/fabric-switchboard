@@ -648,6 +648,9 @@ pub(crate) struct NativeSources {
     /// SB-183: what an organization's shell home carries of the person's (their folders and
     /// board server); nothing for a synthetic owner.
     pub(crate) shell: shell::homes::Sources,
+    /// Forgets what `current` remembered of the sign-in sources, so its next call reads them
+    /// again (`external::forget_current`); nothing for a synthetic owner (SB-163).
+    pub(crate) forget: fn(),
 }
 pub(crate) type Activate = fn(
     &Credential,
@@ -669,6 +672,7 @@ pub(crate) const UNAVAILABLE: NativeSources = NativeSources {
     transcripts: |_| Vec::new(),
     codex_config: || None,
     shell: shell::homes::NO_SOURCES,
+    forget: || {},
 };
 /// Claude Swap as a synthetic owner sees it: absent.
 pub(crate) fn no_swap() -> Result<external::ImportBatch, String> {
@@ -689,6 +693,7 @@ pub(crate) const NATIVE: NativeSources = NativeSources {
     transcripts: limits::transcript_files,
     codex_config: codex_route::config_path,
     shell: shell::homes::NATIVE,
+    forget: external::forget_current,
 };
 impl NativeSources {
     /// The read for an operation a person asked for.
@@ -2282,7 +2287,12 @@ impl Runtime {
         }
     }
     fn invalidate_current(&self) {
-        external::forget_current();
+        (self.native.forget)();
+        self.invalidate_current_accounts();
+    }
+    /// SB-163: the runtime's answer to `current` only; the sign-in sources' watch is kept, so
+    /// the next read is a probe, not a read, while Claude Code and Codex changed nothing.
+    fn invalidate_current_accounts(&self) {
         if let Ok(mut cache) = self.current_cache.lock() {
             cache.generation = cache.generation.wrapping_add(1);
             cache.entry = None;
