@@ -39,6 +39,7 @@ pub mod suggest;
 pub mod uninstall;
 mod usage_gate;
 pub mod vesta;
+pub mod walks;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{
@@ -3913,6 +3914,8 @@ async fn execute(
                 "presets": agent_catalog::presets(),
                 "readiness": readiness,
                 "last_handover": last_handover,
+                // SB-82 (D-3): the newest walks with the contract's probe results.
+                "walks": walks::recent(root, 20),
                 "ceilings_unreadable": ceilings_unreadable,
                 // Offline there is no owner: no limit evidence, so `readiness` cannot name a
                 // limited account.
@@ -8741,7 +8744,33 @@ mod owner_tests {
         assert_eq!(steps[1]["state"], "not_automatic");
         assert_eq!(steps[1]["reason"], "key_pinned");
         assert_eq!(view["last_handover"], Value::Null);
+        assert_eq!(view["walks"], json!([]));
         assert_eq!(view["ceilings_unreadable"], false);
+        // SB-82 (D-3): a walk the automatic fallback recorded is read back.
+        walks::append(
+            root.path(),
+            &walks::of(
+                7,
+                "wf_0123456789abcdef",
+                &[("cursor-cli".to_owned(), "agent_not_automatic_yet")],
+                None,
+            ),
+        )
+        .unwrap();
+        let read = runtime
+            .execute(Operation::Chains {
+                workflow: None,
+                pool: None,
+                folder: None,
+            })
+            .await
+            .unwrap();
+        assert_eq!(read["walks"][0]["event"], "runner-exhausted");
+        assert_eq!(
+            read["walks"][0]["passed_over"][0]["runner_kind"],
+            "cursor-agent"
+        );
+        assert_eq!(read["walks"][0]["passed_over"][0]["probe"], "not-admitted");
         // The last hand-over is read from spend.json, never from Snapshot events.
         std::fs::write(
             root.path().join(spend::FILE),

@@ -26,6 +26,8 @@ const EXCLUDED_FILES = {
   'crates/switchboard-runtime/src/handovers.rs': 'CLI-only hand-over queue; no renderer caller',
   // Automatic fallback logs fixed outcome codes and never returns these errors to a renderer.
   'crates/switchboard-runtime/src/fallback.rs': 'background fallback only; errors become outcome codes',
+  // SB-82: the fallback's walk record. A write that fails is logged (`fallback` walk unwritten), never returned.
+  'crates/switchboard-runtime/src/walks.rs': 'background walk record; a failed write is logged, never a renderer reply',
 
   // Unit tests of the proxy (`mod tests;`), never compiled into the app.
   'crates/switchboard-proxy/src/tests.rs': 'test module',

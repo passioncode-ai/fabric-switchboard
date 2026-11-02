@@ -885,6 +885,11 @@ pub(crate) async fn pass_with_reads<F, Fut, R, RFut>(
         let done = hand_over(&pinned_act, &gate, id, &dir, &steps).await;
         log(done.outcome);
         record_last(&runtime.root, &snapshot, id, &done, now);
+        // SB-82 (D-3): the walk's record with the contract's probe results.
+        let walk = crate::walks::of(now, id, &done.passed, done.selected.clone());
+        if crate::walks::append(&runtime.root, &walk).is_err() {
+            oplog::event("fallback", &[("walk", oplog::Field::Code("unwritten"))]);
+        }
         // The gate's records (a question, a baseline, this hand-over) ride the next backup.
         runtime.store.setting_changed();
         let _ = runtime.store.record(
@@ -1090,6 +1095,11 @@ pub(crate) enum Gate {
 pub(crate) struct HandOver {
     pub outcome: &'static str,
     pub skipped: Vec<(String, &'static str)>,
+    /// SB-82 (D-3): every candidate the walk passed over, in order, a refused offer and a launch
+    /// that failed after its offer included (`skipped` keeps what `last_handover` always named).
+    pub passed: Vec<(String, &'static str)>,
+    /// The agent and account an offer was made for.
+    pub selected: Option<(String, String)>,
 }
 
 /// Tries the chain's steps in order, each through `gate` first (the spend gate for a paid step,
@@ -1118,25 +1128,42 @@ where
     let mut tried = false;
     let mut gated: Option<&'static str> = None;
     let mut skipped = Vec::new();
-    let done = |outcome, skipped| HandOver { outcome, skipped };
+    let mut passed: Vec<(String, &'static str)> = Vec::new();
+    let done = |outcome, skipped, passed, selected| HandOver {
+        outcome,
+        skipped,
+        passed,
+        selected,
+    };
     for step in steps {
         let (agent, account_id) = match step {
             Step::Skip { agent, reason } => {
                 skipped.push((agent.clone(), *reason));
+                passed.push((agent.clone(), *reason));
                 continue;
             }
             Step::Run { agent, account_id } => (agent, account_id),
         };
         if let Gate::Skip(reason) = gate(agent.clone(), account_id.clone()).await {
             skipped.push((agent.clone(), reason));
+            passed.push((agent.clone(), reason));
             gated.get_or_insert(reason);
             continue;
         }
         tried = true;
         match act(workflow.to_owned(), account_id.clone(), dir.to_path_buf()).await {
-            Ok(_) => return done("offered", skipped),
-            Err(error) if error.starts_with("Offered ") => return done("launch_failed", skipped),
-            Err(_) => continue,
+            Ok(_) => {
+                let selected = Some((agent.clone(), account_id.clone()));
+                return done("offered", skipped, passed, selected);
+            }
+            Err(error) if error.starts_with("Offered ") => {
+                passed.push((agent.clone(), "launch_failed"));
+                return done("launch_failed", skipped, passed, None);
+            }
+            Err(_) => {
+                passed.push((agent.clone(), "offer_refused"));
+                continue;
+            }
         }
     }
     let outcome = match (tried, gated) {
@@ -1144,7 +1171,7 @@ where
         (false, Some(reason)) => reason,
         (false, None) => "no_usable_executor",
     };
-    done(outcome, skipped)
+    done(outcome, skipped, passed, None)
 }
 
 /// How long the gate waits for one key's spend: OpenRouter's own read gives up at 10 s.
@@ -2643,11 +2670,36 @@ mod tests {
             }
         };
         let open = |_: String, _: String| async { Gate::Run };
-        assert_eq!(
-            hand_over(&act, &open, WF, dir.path(), &steps).await.outcome,
-            "launch_failed"
-        );
+        let done = hand_over(&act, &open, WF, dir.path(), &steps).await;
+        assert_eq!(done.outcome, "launch_failed");
         assert_eq!(*tried.lock().unwrap(), ["refuses", "offered-then-failed"]);
+        // SB-82 (D-3): every candidate the walk passed over, in order, the refused offer and the
+        // launch that failed after its offer included; nothing selected.
+        let passed: Vec<(&str, &str)> = done.passed.iter().map(|(a, r)| (a.as_str(), *r)).collect();
+        assert_eq!(
+            passed,
+            [
+                ("kimi-code", "agent_not_automatic_yet"),
+                ("claude-code", "offer_refused"),
+                ("codex", "launch_failed"),
+            ]
+        );
+        assert!(done.selected.is_none());
+        let walk = crate::walks::of(1, WF, &done.passed, done.selected.clone());
+        let probes: Vec<&str> = walk.passed_over.iter().map(|p| p.probe.as_str()).collect();
+        assert_eq!(probes, ["not-admitted", "refused", "spawn-failed"]);
+        assert_eq!(walk.event, "runner-exhausted");
+        // An offer selects its candidate.
+        let offers = |_: String, _: String, _: PathBuf| async { Ok::<(), String>(()) };
+        let done = hand_over(&offers, &open, WF, dir.path(), &steps).await;
+        assert_eq!(
+            done.selected,
+            Some(("claude-code".into(), "refuses".into()))
+        );
+        assert_eq!(
+            done.passed,
+            [("kimi-code".to_owned(), "agent_not_automatic_yet")]
+        );
         let only_skips = vec![Step::Skip {
             agent: "hermes".into(),
             reason: "agent_not_automatic_yet",
@@ -3270,6 +3322,8 @@ mod tests {
                 ("hermes".into(), "ceiling_reached"),
                 ("kimi-code".into(), "no_usable_account"),
             ],
+            passed: vec![],
+            selected: None,
         };
         record_last(root.path(), &snapshot, WF, &done, T);
         let last = spend::read(root.path()).unwrap().last_handover.unwrap();
@@ -3339,6 +3393,8 @@ mod tests {
         let done = HandOver {
             outcome: "offered",
             skipped: vec![],
+            passed: vec![],
+            selected: None,
         };
         record_last(root.path(), &older, WF, &done, T + 1);
         spend::open_question(root.path(), &older, &ChainScope::Machine, 500, 5.0, T + 1).unwrap();
