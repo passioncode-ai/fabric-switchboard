@@ -509,6 +509,13 @@ async fn project_rules_are_optional_visible_and_applied_on_request() {
         json!({"account_id": ids[1], "path": alpha, "expires_in_hours": 0}),
     );
     assert!(error && message.as_str().unwrap().contains("720"));
+    // SB-189: a backend refusal reaches the agent as the sentence the window shows a person.
+    let (error, message) = agent.tool(
+        "switchboard_project_set",
+        json!({"account_id": ids[1], "path": "/nonexistent-switchboard-test-folder"}),
+    );
+    assert!(error);
+    assert_eq!(message, "Choose an existing folder.");
     let (error, saved) = agent.tool(
         "switchboard_project_set",
         json!({"account_id": ids[1], "path": alpha, "expires_in_hours": 8}),
@@ -681,7 +688,38 @@ fn project_commands_work_offline_from_the_cli() {
         .output()
         .unwrap();
     assert_eq!(output.status.code(), Some(1));
-    assert!(String::from_utf8_lossy(&output.stderr).contains("Account not found"));
+    // SB-189: the CLI prints the sentence the window shows, not the backend's own text.
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(
+        stderr.trim(),
+        "This account no longer exists. Refresh the account list.",
+        "{stderr}"
+    );
+    // `--json` keeps the backend's text in `raw` for a script that matches it.
+    let output = Command::new(env!("CARGO_BIN_EXE_switchboard"))
+        .arg("--data-dir")
+        .arg(data.path())
+        .args([
+            "--json",
+            "project",
+            "set",
+            "--account",
+            "00000000-0000-4000-8000-000000000000",
+            "--path",
+        ])
+        .arg(projects.path())
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    let body: Value = serde_json::from_slice(&output.stderr).unwrap();
+    assert_eq!(
+        body["error"],
+        "This account no longer exists. Refresh the account list."
+    );
+    assert!(body["raw"]
+        .as_str()
+        .unwrap()
+        .starts_with("Account not found"));
     let output = Command::new(env!("CARGO_BIN_EXE_switchboard"))
         .arg("--data-dir")
         .arg(data.path())

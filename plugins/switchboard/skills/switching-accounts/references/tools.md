@@ -451,7 +451,7 @@ step (the app, or `switchboard agents openrouter set|remove`), never this server
 
 ## Refusals
 
-Fixed texts the server returns with `isError: true`; relay them and offer the remedy:
+Fixed texts the server returns with `isError: true`, the same sentences the window shows a person (SB-189); relay them and offer the remedy:
 
 | Text begins | Remedy |
 |---|---|
@@ -463,7 +463,7 @@ Fixed texts the server returns with `isError: true`; relay them and offer the re
 | "No account with id …" | call `switchboard_accounts` for current ids |
 | "Pass an absolute folder." | pass an absolute `path` |
 | "expires_in_hours must be 1 to 720." | pick an expiry in range |
-| "Choose an existing project folder." | the folder is missing or inside Switchboard's data folder |
+| "Choose an existing folder." | the folder is missing or inside Switchboard's data folder |
 | "Name one account_id to refresh." | `refresh` needs one `account_id` |
 | "Group not found." | call `switchboard_projects` for current group ids |
 | "Statistics cover 1 to 90 days." | pass `days` from 1 to 90 |

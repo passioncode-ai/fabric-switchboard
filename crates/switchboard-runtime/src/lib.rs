@@ -26,6 +26,7 @@ mod monitor;
 pub mod onboarding;
 pub mod oplog;
 pub mod person;
+pub mod person_errors;
 pub mod projects;
 pub mod recovery;
 mod refresh;
@@ -5516,7 +5517,7 @@ fn file_sign_in(
         .ok_or("Account not found")?;
     Ok((account, true))
 }
-pub(crate) const UNSAVED_CURRENT: &str = "Claude Code is signed in to an account Switchboard has not saved; switching would sign it out. Add it first (In use now → Add to Switchboard).";
+pub(crate) const UNSAVED_CURRENT: &str = "Claude Code is signed in to an account Switchboard has not saved; switching would sign it out. Add it first (In use now → Add to Switchboard, or switchboard accounts capture --provider claude).";
 fn replace_native(
     store: &Store,
     account: &Account,

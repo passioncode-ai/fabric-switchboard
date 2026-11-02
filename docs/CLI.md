@@ -16,6 +16,8 @@ Help/version do not open account storage. Default data root is shared with GUI: 
 
 Words (decision D-1 of the 0.6.82 iteration): help and output say **group** for what the commands, flags and JSON fields call a project, and **group id** for its `pool`; **automatic switching** for what they call rotation. Command names, flags and fields stay as they are. A command group run without its command (`switchboard accounts`) prints that group's help and exits 2; with `--json` it prints `{"ok": false, "error": "Name a command. Run switchboard accounts --help."}`. Empty cells of text output show `-`. `--data-dir ABSOLUTE_PATH` selects a deliberately separate metadata root. Credentials stay in the native vault by UUID; never mix metadata roots casually or treat this flag as account export.
 
+A refusal prints the sentence the window shows for it (SB-189): what happened and what to do, in English, on stderr with exit 1. With `--json` it is `{"ok":false,"error":<that sentence>,"raw":<the backend's own text>}`, `raw` present only when the two differ; a script that matches refusals reads `raw`.
+
 ## Account management
 
 ```sh

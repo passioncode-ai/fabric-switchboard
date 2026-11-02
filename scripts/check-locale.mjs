@@ -92,6 +92,8 @@ for (const file of sources) {
   };
   visit(sf);
 }
+// SB-189: the runtime's table of the sentences a person reads (src/adapter.ts imports it).
+for (const sentence of new Set(Object.values(JSON.parse(readFileSync(new URL('../crates/switchboard-runtime/src/person-errors.json', import.meta.url), 'utf8')).sentences))) add(sentence, 'crates/switchboard-runtime/src/person-errors.json');
 // Update texts from the native side.
 const updates = readFileSync(join(ROOT, 'src-tauri/src/updates.rs'), 'utf8');
 for (const match of updates.matchAll(/pub const [A-Z_]+: &str =\s*"((?:[^"\\]|\\.)*)";/g)) {

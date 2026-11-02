@@ -352,6 +352,10 @@ export function extractAdapter(root) {
     ts.forEachChild(node, visit);
   };
   visit(file);
+  // SB-189: the mapped sentences are the runtime's table, which adapter.ts imports and the CLI
+  // and MCP print; an entry there counts as mapped exactly like a coreErrors literal did.
+  const table = join(root, 'crates/switchboard-runtime/src/person-errors.json');
+  if (existsSync(table)) for (const [raw, sentence] of Object.entries(JSON.parse(readFileSync(table, 'utf8')).sentences)) core.set(raw, sentence);
   return { safe, core };
 }
 
@@ -415,7 +419,7 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
     if (!templates.has(format.value.replaceAll('{}', '{name}'))) problems.push(`formatted backend message without a template in src/formatted-errors.ts (${format.path}:${format.line}): ${JSON.stringify(format.value)}`);
   }
   if (problems.length) {
-    console.error(`${problems.length} error-vocabulary problem(s). Add each message to src/adapter.ts (safeErrors verbatim, or coreErrors with an actionable sentence), or allowlist it here with the reason it never reaches the UI:`);
+    console.error(`${problems.length} error-vocabulary problem(s). Add each message to src/adapter.ts (safeErrors verbatim) or to crates/switchboard-runtime/src/person-errors.json (an actionable sentence), or allowlist it here with the reason it never reaches the UI:`);
     for (const problem of problems) console.error(`  - ${problem}`);
     process.exit(1);
   }

@@ -1076,9 +1076,10 @@ impl Server {
                             json!({"content": [{"type": "text", "text": value.to_string()}], "structuredContent": value, "isError": false}),
                         )
                     }
+                    // SB-189: the agent relays the sentence the window shows a person.
                     Some(Err(message)) => ok(
                         id,
-                        json!({"content": [{"type": "text", "text": message}], "isError": true}),
+                        json!({"content": [{"type": "text", "text": switchboard_runtime::person_errors::for_person(&message)}], "isError": true}),
                     ),
                 }
             }
