@@ -20,6 +20,10 @@
 - **Exact next task.** A week on 0.7.3 (to 2026-11-09): SB-163 closes with no `source_sync` hold over 5 s (read
   `transaction_held` in switchboard.log). SB-243 still waits for the Windows tester; SB-237 step 2 for the next
   `proxy_failover`. Next row by priority without an outside blocker meanwhile.
+- **After the release (unreleased on `main`).** SB-135's last part, module checkouts: PR #355 (`0c5f6af`), Git
+  submodules under the repository holding them as `module`, on the disk map with `module_of` and no action; gate 1080
+  passed, WebKit on the demo in en and ru. Rows closed with their receipts: SB-211, SB-239 (released in 0.7.1, PR #354),
+  SB-206 (built in 0.7.0 as H-2). Next rows without an outside blocker: SB-189 (one error text for every surface), SB-82.
 
 ## 2026-10-30: release 0.7.2, the source sync stops re-reading the sign-ins (SB-163)
 
