@@ -2,6 +2,24 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-11-02 (night): SB-82 designed, nodes N2 and N1 merged
+
+- **Done.** Design [runner-routes-2026-11-02](research/runner-routes-2026-11-02.md) (PR #361, `126ff3d`): a chain is a
+  host order (`basis: host-order`) until a contract route is pinned. N2, PR #362 (`8c9f869`): chains accept the
+  contract's runner kinds (`cursor-agent` is stored as `cursor-cli`), readiness steps carry `runner_kind`. N1, PR #363
+  (`1e657e3`): `fallback-walks.jsonl`, one record per automatic hand-over with every candidate passed over and its
+  contract probe result; `walks` in `chain list --json` and MCP `switchboard_chain_get`. Gates 1082 and 1084 passed.
+- **Asked.** D-6 (may a fallback hand work to an agent with weaker permissions) is the operator's: Fabric question
+  `dae679d2-8165-4b70-ad7d-f7692a9f4ee2`; Fabric was asked on the board whether its fallback order reads Switchboard's
+  machine chain (message `ed2c935c-e04a-4255-844d-4ce067942e8b`).
+- **Disk.** A full gate's debug target is 11 to 14 GB; the machine had 5 GB free while two were kept (coordinator,
+  2026-11-02 21:20 UTC). Use one `CARGO_TARGET_DIR` for every branch of a task and `cargo clean` it right after the
+  gate; start a gate only with at least 20 GB free (`df -h /System/Volumes/Data`).
+- **Exact next task.** SB-82 N3 (design D-4 and D-5): a missing `claude` or `codex` binary is `not-installed` at the
+  walk, before the offer; an unattended walk passes over an account with no usage observation as `quota-unknown`
+  (`fallback.rs` `resolve_with` and `used()`, `kimi.rs` `used`), `switchboard continue` by hand keeps its ranking.
+  Then N4 once the operator answers D-6. Unreleased on `main`: N1, N2.
+
 ## 2026-11-02 (evening): one refusal sentence on every surface (SB-189), submodules (SB-135), release 0.7.5
 
 - **Done.** SB-189, PR #357 (`a9c2609`): `crates/switchboard-runtime/src/person-errors.json` gives each backend refusal
