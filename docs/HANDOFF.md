@@ -14,8 +14,12 @@
 - **Checks.** Tests `a_live_grant_runs_outside_the_transaction_and_a_sign_in_stored_meanwhile_stands` (fails when the
   store phase skips the transaction: mutation run 2026-11-02) and `a_rejected_live_grant_does_not_mark_a_sign_in_stored_meanwhile`;
   gate `./scripts/check.sh` (result in the pull request).
-- **Exact next task.** Release the SB-163 change with SB-237 step 1 (0.7.3), then a week on it: SB-163 closes with no
-  `source_sync` hold over 5 s. SB-243 still waits for the Windows tester; SB-237 step 2 for the next `proxy_failover`.
+- **Merged.** PR #351 (`5d08e1e`), gate `./scripts/check.sh` 1078 passed.
+- **Released.** `v0.7.3` on `39854d0` (release PR #352), release run 41476384214, nightly on the tag 41476747467 green,
+  published 2026-11-02 17:41 UTC with 25 assets, `latest.json` 0.7.3. The installed app takes it by its own update check.
+- **Exact next task.** A week on 0.7.3 (to 2026-11-09): SB-163 closes with no `source_sync` hold over 5 s (read
+  `transaction_held` in switchboard.log). SB-243 still waits for the Windows tester; SB-237 step 2 for the next
+  `proxy_failover`. Next row by priority without an outside blocker meanwhile.
 
 ## 2026-10-30: release 0.7.2, the source sync stops re-reading the sign-ins (SB-163)
 
