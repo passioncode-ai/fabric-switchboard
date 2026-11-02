@@ -9,9 +9,12 @@
   again inside the transaction.
 - **Done.** PR #347 (`a71b18e`): reads before the transaction, the watch forgotten only after a live renewal; the
   idle-hour test now sees the forget (40 reads an hour on the old code). Gate 1075 tests passed.
-- **Exact next task.** Watch the `v0.7.2` release run, confirm assets, `latest.json` and the local install; after a
-  day on 0.7.2 read `transaction_held` and `control_slow` again for SB-163 and SB-174 (`renewal` `checks` is what is
-  left). SB-243 waits for the Windows tester's retry on 0.7.1 or later.
+- **Released.** `v0.7.2` (release run 41052973193, nightly on the tag 41053227415 green), `latest.json` 0.7.2,
+  installed here (owner 0.7.2 since 2026-10-30 13:49 UTC).
+- **Measured.** Three days on 0.7.2: one `transaction_held` (a live renewal's grant, 15.0 s) against 20 a day on
+  0.7.0; every `control_slow` is a provider quota check a caller asked for. SB-174 closed; SB-163 open for the grant.
+- **Exact next task.** SB-243 waits for the Windows tester's retry on 0.7.1 or later. Next row by priority without an
+  outside blocker: SB-237 (a group's managed sessions share one route), design note first.
 
 ## 2026-10-28: release 0.7.1, accounts can be added on Windows again (SB-243)
 
