@@ -70,3 +70,15 @@ copies), found by the 0.6.79 review and fixed with tests.
 **Measuring it.** In 0.6.77 and 0.6.78 the renewal took the lock without `hold`, so it could not
 log `transaction_held` at all: the absence of `renewal` lines in those versions proves nothing.
 From 0.6.79 each span logs as `renewal` or `usage_renewal`, phase `checks` or `store`.
+
+**T-2 for the live sign-in (SB-163, after 0.7.2).** `renew_idle_live`, the renewal of the
+sign-in Claude Code left expired, ran its grant inside `source_sync` (phase `renew_live`, the one
+hold left on 0.7.2: 15.0 s). Its grant now runs before that transaction, and the transaction is
+taken only to store what the grant left (step `live_renewal`). Claude Code's own locks, held from
+the byte check to the write, are what keep a native activation out (activation takes the same
+locks), and the spent token is in flight, so a switch to the account is refused (`RENEWING`).
+A sign-in stored for a copy meanwhile stands, as in SB-179
+(`a_live_grant_runs_outside_the_transaction_and_a_sign_in_stored_meanwhile_stands`,
+`a_rejected_live_grant_does_not_mark_a_sign_in_stored_meanwhile`). A rotation that collides
+with such a grant waits for Claude Code's locks (up to 9 s, `LOCK_WAIT`) under the transaction,
+as it did before.
