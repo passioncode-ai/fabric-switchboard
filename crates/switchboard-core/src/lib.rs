@@ -37,7 +37,7 @@ pub use chains::{provider_agent, workflow_id_valid, Chain, ChainScope, Executor,
 pub use credential::Credential;
 pub use organizations::{Attribution, By, Organization};
 pub use projects::{pool_from_name, Project, ProjectRule, RuleResolution, FOLDER_NESTED};
-pub use rotation::{Fits, RotationDecision, RotationPolicy};
+pub use rotation::{FailoverTally, Fits, RotationDecision, RotationPolicy};
 pub use vault::{MemoryVault, NativeVault, Vault};
 /// The store's exclusive lock is held by another process: a running, draining or starting
 /// owner, or another offline command.
@@ -332,6 +332,8 @@ pub struct Store {
     /// verdict) and that no new credential has replaced, as the runtime last said (SB-211).
     /// Memory only; a failover never moves a request onto one.
     ended: Mutex<std::collections::HashSet<String>>,
+    /// What the proxy's failovers did since the runtime last took it (SB-237). Memory only.
+    failover_tally: Mutex<rotation::FailoverTally>,
 }
 
 pub(crate) fn now() -> i64 {
@@ -804,6 +806,7 @@ impl Store {
             refused: Default::default(),
             paced: Default::default(),
             ended: Default::default(),
+            failover_tally: Default::default(),
         })
     }
     /// The private data folder this store owns.
@@ -918,6 +921,13 @@ impl Store {
         if let Ok(mut ended) = self.ended.lock() {
             ended.insert(id.to_owned());
         }
+    }
+    /// SB-237: what the proxy's failovers did since the last call; cleared by it.
+    pub fn take_failover_tally(&self) -> rotation::FailoverTally {
+        self.failover_tally
+            .lock()
+            .map(|mut tally| std::mem::take(&mut *tally))
+            .unwrap_or_default()
     }
     pub fn ended(&self) -> std::collections::HashSet<String> {
         self.ended
@@ -1103,11 +1113,18 @@ impl Store {
         held.extend(self.ended());
         held.extend(from.map(str::to_owned));
         let Some(id) = self.failover_candidate(&policy, &held, fits, now)? else {
+            if let Ok(mut tally) = self.failover_tally.lock() {
+                tally.exhausted += 1;
+                let _ = self.failover_misses(&policy, &held, fits, now, &mut tally);
+            }
             return Ok(None);
         };
         // Compare and move: only a route still on `from` changes.
         if self.select_transaction(provider, pool, &id, Some(now), Some(from))? {
             let _ = self.record("rotation", Some(&id), "switched");
+            if let Ok(mut tally) = self.failover_tally.lock() {
+                tally.moved += 1;
+            }
         }
         Ok(self
             .route(provider, pool)

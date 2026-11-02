@@ -6,6 +6,10 @@ release pull request renames `Unreleased` to the version. While Windows signing 
 that section must say `windows_authenticode: NOT_SIGNED`. Notes of 0.5.3-beta.1 and earlier are
 on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/releases).
 
+## Unreleased
+
+- The log now counts the proxy's moves to another account of a group, and when none is left, why each of the group's accounts was left out, so a group whose sessions all stop at once can be explained (SB-237).
+
 ## 0.7.2
 
 - The background sync no longer reads the Claude Code and Codex sign-ins every three minutes: they are read only when they changed, and before the step that holds other changes back, so the window, CLI and MCP no longer wait seconds behind a slow Keychain read (SB-163).

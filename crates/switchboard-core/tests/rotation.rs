@@ -1554,6 +1554,46 @@ fn failover_moves_the_pool_off_a_refused_account_and_holds_it() {
     assert_eq!(store.route(Provider::Claude, "default").unwrap().0.id, b);
 }
 
+/// SB-237: the proxy's failovers are counted, and a failover that found nothing says, per
+/// account of the pool, which rule left it out, so a group that stops at once is explained.
+#[test]
+fn failovers_are_counted_and_an_exhausted_pool_says_why() {
+    let (_root, _vault, store) = setup();
+    let now = clock();
+    let a = account(&store, "org-a", now);
+    let b = account(&store, "org-b", now);
+    let c = account(&store, "org-c", now);
+    observe(&store, &a, 20., now);
+    observe(&store, &b, 50., now);
+    observe(&store, &c, 100., now);
+    store.select(Provider::Claude, "default", &a).unwrap();
+    assert!(store.take_failover_tally().is_empty());
+
+    // a refused: b takes the route (c is full).
+    let (moved, _) = store
+        .failover(Provider::Claude, "default", &a, OAUTH, now)
+        .unwrap()
+        .unwrap();
+    assert_eq!(moved.id, b);
+    // b refused too: a is held, b is the one refused, c is full; nothing is left.
+    assert!(store
+        .failover(Provider::Claude, "default", &b, OAUTH, now)
+        .unwrap()
+        .is_none());
+    let tally = store.take_failover_tally();
+    assert_eq!(
+        tally,
+        switchboard_core::FailoverTally {
+            moved: 1,
+            exhausted: 1,
+            held: 2,
+            full: 1,
+            ..Default::default()
+        }
+    );
+    assert!(store.take_failover_tally().is_empty(), "taken once");
+}
+
 /// SB-211: a seat the provider ended (0.7.0 B-5) never receives SB-98's one replay, even when it
 /// is the least used account left; the runtime's next pass can bring it back after a sign-in.
 #[test]

@@ -952,6 +952,30 @@ fn scan_limits(runtime: &Runtime, native_sources: bool, time: i64) {
         runtime.limits.refused(&snapshot, &refusals, time);
     }
     runtime.store.set_limited(runtime.limits.limited_ids(time));
+    log_failovers(&runtime.store.take_failover_tally());
+}
+
+/// SB-237: what the proxy's failovers did since the last pass, one `proxy_failover` line when
+/// any ran; counts only (LC-12).
+fn log_failovers(tally: &switchboard_core::FailoverTally) {
+    if tally.is_empty() {
+        return;
+    }
+    use crate::oplog::Field::Number;
+    let n = |v: u64| Number(v as i64);
+    crate::oplog::event(
+        "proxy_failover",
+        &[
+            ("moved", n(tally.moved)),
+            ("exhausted", n(tally.exhausted)),
+            ("alone", n(tally.alone)),
+            ("held", n(tally.held)),
+            ("kind", n(tally.kind)),
+            ("context", n(tally.context)),
+            ("credential", n(tally.credential)),
+            ("full", n(tally.full)),
+        ],
+    );
 }
 
 fn rotate(runtime: &Runtime, native_sources: bool) -> Result<(), String> {
