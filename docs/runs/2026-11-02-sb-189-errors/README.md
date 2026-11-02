@@ -70,4 +70,10 @@ wording together with `add_refusal` and the window's keys") predates a shared ta
   failed on the six reworded sentences until ru had them; full gate in the pull request.
 - [x] 9 Docs: CONTRACTS *One sentence per refusal (SB-189)*, CLI.md, plugin `tools.md`, scenarios (SCN quote of
   `UNSAVED_CURRENT`), CHANGELOG, backlog SB-189.
-- [ ] 10 Acceptance: merged, then released with the next version.
+- [x] Certification: one blind seam reading (task-pipeline verifier-seam). Verdict fail on text only: the plugin's
+  refusal table, three doc quotes of CLI output, and *switchboard accounts capture* without its required
+  `--provider`; all fixed (`--provider claude`, Copylot en `780748e3-657b-49c1-8a64-7e8a133ba1cd`, ru
+  `64d99b4a-2fb4-4eac-9630-2ba30b75330f`). Its risks: `backup list`'s last error now goes through the table (fixed);
+  the subscription-sign-in quote in SCN-036 updated; fabric-dashboards reads the `--json` refusal from stdout (that
+  repository's, filed on the board as a finding, message `32fb431d-53b9-46c1-88ca-6191eb2eedf5`).
+- [x] 10 Acceptance: REQ-1..REQ-7 each have their evidence above; gate `./scripts/check.sh` exit 0, 1082 tests passed after the review fixes. Merged by the pull request; released with the next version (the row closes then).

@@ -769,7 +769,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 1. Agents → *Installed* lists the agents found on this computer (SCN-057); *Available to install* lists the rest with their install commands. Each agent's level (launch, through Switchboard, tools only) is in [AGENT-SUPPORT.md](../AGENT-SUPPORT.md).
 2. Set up on an agent → choose the pool → the dialog shows the command that registers the tools, the endpoints, the key command (`switchboard agents key`) and, for launchable agents, Launch in folder.
 3. Launch → the agent opens in Terminal in the folder, on the pool's API-key account; Switchboard switches accounts for it.
-**Alt paths:** The pool's selected account is a subscription sign-in → “This pool's selected account is a subscription sign-in, which its provider allows only in Claude Code or Codex. Select an API-key account in this pool for other agents.” A project's account outside its folders, or a foreign account inside them, is refused as for any launch. Tools-only agents have no endpoint step.
+**Alt paths:** The pool's selected account is a subscription sign-in → “The account selected in this group is a subscription sign-in, which its provider allows only in Claude Code or Codex. Select an API-key account in this group for other agents.” A project's account outside its folders, or a foreign account inside them, is refused as for any launch. Tools-only agents have no endpoint step.
 **Expected result:** every listed agent gets Switchboard's tools; the ones that accept an endpoint use Switchboard's accounts within the providers' terms.
 **UI elements:** Installed rows, Set up dialog, copyable commands.
 **States covered:** each level, pool chosen, launch refused (subscription, project), MCP-only.

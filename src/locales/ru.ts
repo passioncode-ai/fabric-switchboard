@@ -166,7 +166,7 @@ export const RU: Record<string, string> = {
   "The sign-in changed while it was being added. Try again.": "Вход изменился, пока аккаунт добавлялся. Повторите.",
   "Open Claude Code once, then switch.": "Один раз откройте Claude Code, затем переключите.",
   "Add this Claude account again (In use now → Add to Switchboard, or switchboard accounts capture --provider claude), then switch.": "Добавьте этот аккаунт Claude ещё раз («Сейчас используется» → «Добавить в Switchboard» или switchboard accounts capture --provider claude), затем переключите.",
-  "Add this account first (In use now → Add to Switchboard, or switchboard accounts capture), then switch.": "Сначала добавьте этот аккаунт («Сейчас используется» → «Добавить в Switchboard» или switchboard accounts capture), затем переключите.",
+  "Add this account first (In use now → Add to Switchboard, or switchboard accounts capture --provider claude), then switch.": "Сначала добавьте этот аккаунт («Сейчас используется» → «Добавить в Switchboard» или switchboard accounts capture --provider claude), затем переключите.",
   "Switching Claude Code needs a Claude account signed in with OAuth.": "Чтобы переключить Claude Code, нужен аккаунт Claude со входом через OAuth.",
   "The account was saved. A temporary sign-in folder was left behind; Switchboard removes it before the next sign-in.": "Аккаунт сохранён. Временная папка входа осталась; Switchboard удалит её перед следующим входом.",
   "Save the account": "Сохранить аккаунт",

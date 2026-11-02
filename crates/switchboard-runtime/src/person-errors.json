@@ -19,7 +19,7 @@
     "Another Switchboard instance owns this account storage": "Another Switchboard window owns the account storage. Close that instance, then retry.",
     "Backup state unavailable.": "Switchboard could not read its own state. Restart Switchboard, then retry.",
     "CLI home must be an absolute path.": "The CLI config folder (CLAUDE_CONFIG_DIR or CODEX_HOME) must be an absolute path. Fix the variable, then retry.",
-    "Capture or import this profile before native activation.": "Add this account first (In use now → Add to Switchboard, or switchboard accounts capture), then switch.",
+    "Capture or import this profile before native activation.": "Add this account first (In use now → Add to Switchboard, or switchboard accounts capture --provider claude), then switch.",
     "Capture this Claude profile again before native activation.": "Add this Claude account again (In use now → Add to Switchboard, or switchboard accounts capture --provider claude), then switch.",
     "Captured Codex login has no identity token. Sign in again or use managed mode.": "This Codex sign-in has no identity token. Sign in to it again, or launch a managed session.",
     "Choose a model for this launch, or set the default model of the OpenRouter key under Agents.": "Choose a model for this launch, or set the key's default model on the API keys page or with switchboard agents openrouter model.",

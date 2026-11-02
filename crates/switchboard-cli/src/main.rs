@@ -2517,6 +2517,8 @@ fn print_result(value: &Value, cli: &Cli) {
         } => {
             println!("Folder: {}", text(&value["directory"]));
             if let Some(error) = value["last_error"].as_str() {
+                // SB-189: the sentence the window shows for the same failure.
+                let error = switchboard_runtime::person_errors::for_person(error);
                 println!("Last automatic backup failed: {error}");
             }
             let backups = value["backups"].as_array().cloned().unwrap_or_default();

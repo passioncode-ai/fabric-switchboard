@@ -53,7 +53,7 @@ Windows protection is an OS implementation behind the same Vault/Store contract;
 
 - A backend refusal's own text (`Err("Project not found.")`) is the internal vocabulary: classifiers (`add_refusal`), tests and the log match it, and it does not change for a person.
 - What a person reads is the sentence `crates/switchboard-runtime/src/person-errors.json` gives it (193 backend texts, 134 sentences, each saying what happened and what to do). `switchboard_runtime::person_errors::for_person(raw)` returns it, or `raw` when the table has none; the CLI prints it (text and `--json` `error`, with the backend's text in `raw` when they differ), the MCP server returns it as the `isError` text, and `src/adapter.ts` imports the same file as `coreErrors`, so the window cannot drift from the terminal. Backend sentences already written for a person (`safeErrors`) and the templated ones (`src/formatted-errors.ts`) are shown as they are on every surface.
-- A sentence that names a window control names the CLI route too (*In use now → Add to Switchboard, or switchboard accounts capture*); the window translates the sentence, the CLI and MCP print English.
+- A sentence that names a window control names the CLI route too (*In use now → Add to Switchboard, or switchboard accounts capture --provider claude*); the window translates the sentence, the CLI and MCP print English.
 - `scripts/check-error-vocabulary.mjs` counts an entry of the table as mapped and still fails on a backend text in neither the table, `safeErrors` nor its allowlist; `scripts/check-locale.mjs` collects the table's sentences for the Russian locale. Tests: `person_errors::tests::*` (the table parses; every sentence is final, has no em dash and maps to itself), `crates/switchboard-cli/tests/mcp.rs` `project_commands_work_offline_from_the_cli` (stderr and `--json` `raw`) and `project_rules_are_optional_visible_and_applied_on_request` (`switchboard_project_set` on a missing folder answers *Choose an existing folder.*; it fails when the MCP server prints the backend's text).
 
 ## Current account and quota extension (0.3)
@@ -1931,8 +1931,9 @@ transition zsh and bash share), and `hook.ps1` (PowerShell, node A-8); CLI
   absolute path and the data folder, single-quoted for its shell (fish: `\\` and `\'`;
   PowerShell: a quote doubled). A path that is not absolute,
   not valid text or holds a control character gets no script (`script` answers None; `shell
-  init` refuses with “The hook cannot name this executable or the data folder: a path is not
-  absolute or not valid text.”). Test: `shell::scripts::tests::a_path_that_is_not_text_gets_no_script`.
+  init` refuses with “The terminal hook could not be written: the path of Switchboard or of its data
+  folder is not plain text. Reinstall Switchboard, then turn it on again.”, its backend text being
+  “The hook cannot name this executable or the data folder: a path is not absolute or not valid text.”, SB-189). Test: `shell::scripts::tests::a_path_that_is_not_text_gets_no_script`.
 - **Triggers.** zsh: `add-zsh-hook chpwd`, inside `emulate -L zsh`; bash: a `PROMPT_COMMAND` entry
   (string form, macOS's bash 3.2) put first, acting only when `$PWD` changed and returning the
   status the prompt shows; fish: `--on-variable PWD`. Each acts once at load. Loading twice
