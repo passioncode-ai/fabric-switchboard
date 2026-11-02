@@ -8,6 +8,8 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+## 0.7.3
+
 - Renewing the sign-in Claude Code left expired no longer holds back the window, CLI and MCP while the request to Anthropic is out: Switchboard waits only to store the new sign-in, as it already did for its other accounts (SB-163).
 - The log now counts the proxy's moves to another account of a group, and when none is left, why each of the group's accounts was left out, so a group whose sessions all stop at once can be explained (SB-237).
 
