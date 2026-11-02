@@ -1334,10 +1334,10 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Steps:**
 1. Open Groups → each card lists its repositories, each with its folder count, its main folder and, indented under it, its worktrees and clones by name with their kind and branch (“alpha-web-wt-login · worktree · login”); past six repositories *Show all repositories ({n})* (SB-147; the “+2 worktrees and clones” line is gone).
 3. *Edit* → the dialog lists them under their root; × on the root removes it together with them (its label says so), × on one of them removes only that one.
-**Alt paths:** a folder that is no Git checkout is a root of its own; a repository whose main checkout is not in the project keeps its first listed folder as root; a clone (same `origin`, its own `.git`) goes under the main checkout as *clone*; the tree cannot be read (Git files unreadable) → the flat list as before. Agents read the same tree in `project list` and MCP `switchboard_projects` (`roots`).
+**Alt paths:** a folder that is no Git checkout is a root of its own; a repository whose main checkout is not in the project keeps its first listed folder as root; a clone (same `origin`, its own `.git`) goes under the main checkout as *clone*; a module checkout (a Git submodule) of a listed repository goes under it as *module* (SB-135); the tree cannot be read (Git files unreadable) → the flat list as before. Agents read the same tree in `project list` and MCP `switchboard_projects` (`roots`).
 **Expected result:** a project with a dozen worktrees reads as its few repositories; removing a repository leaves none of its worktrees behind.
 **UI elements:** group card rows, *Show all repositories ({n})*, dialog folder rows (indented), × with its label.
-**States covered:** root with worktrees, root with a clone, no main checkout, non-Git folder, tree unreadable.
+**States covered:** root with worktrees, root with a clone, root with a module, no main checkout, non-Git folder, tree unreadable.
 **Errors & recovery:** none of its own; a save refused for another reason keeps the dialog open with the error (SCN-034).
 **Status:** draft
 **Meaning:** operator request 2026-10-18 (SB-135, first part).
@@ -1355,10 +1355,10 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 2. *Add folder…* (system picker, starts at the last folder chosen) → the list is read again under the chosen folders; × next to one stops looking there; the choice is remembered across restarts.
 3. *Add to group…* on a loose repository → a dialog lists the groups; choose one, *Add* → “beta-cli added to group “Alpha Web”.”, the row leaves the loose list; its worktrees join by themselves (SCN-055).
 4. *All (n)* → every repository with its groups; *Move…* on one of a group's folders → choose another group, *Move* → it and its worktrees and clones are now that group's.
-**Alt paths:** a repository inside a group's folder reads “Inside a folder of “P”” and has no action (it moves with that folder); the group's only repository cannot move (“This is the group's only repository…”), the group keeps it; no groups yet → the dialog says to create one first; more than 2,000 repositories or 20,000 folders → the first ones and a note to choose a narrower folder. Agents: `switchboard project map`, `switchboard project move-root`, MCP `switchboard_repository_map` and `switchboard_project_move_root`.
+**Alt paths:** a repository inside a group's folder reads “Inside a folder of “P”” and has no action (it moves with that folder); a module checkout (a Git submodule) is listed right after the repository holding it, marked *module*, with no action of its own (SB-135); the group's only repository cannot move (“This is the group's only repository…”), the group keeps it; no groups yet → the dialog says to create one first; more than 2,000 repositories or 20,000 folders → the first ones and a note to choose a narrower folder. Agents: `switchboard project map`, `switchboard project move-root`, MCP `switchboard_repository_map` and `switchboard_project_move_root`.
 **Expected result:** every repository on disk is either in a project or visibly loose, and one action puts it where it belongs with its whole tree.
 **UI elements:** section heading, *Show repositories* toggle, folder list with × and *Add folder…*, *Look again*, filter (*Not in a group*, *All*), repository rows (name, place, branch, path, one action), move dialog (radio list, current marked “(now)”).
-**States covered:** closed, loading, empty (nothing loose / no repositories), list, truncated, error (a folder cannot be read), dialog success and refusal.
+**States covered:** closed, loading, empty (nothing loose / no repositories), list, module row, truncated, error (a folder cannot be read), dialog success and refusal.
 **Errors & recovery:** a refused move keeps the dialog open with the reason; when the second save of a move is refused, the first is undone, so nothing is half moved.
 **Status:** draft
 **Meaning:** operator request 2026-10-16 (SB-135, second part).

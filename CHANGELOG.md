@@ -8,6 +8,8 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- Git submodules show under the repository that holds them, as *module*, in a group's repositories and in *Repositories on disk*, where they move with that repository and have no button of their own (SB-135).
+
 ## 0.7.3
 
 - Renewing the sign-in Claude Code left expired no longer holds back the window, CLI and MCP while the request to Anthropic is out: Switchboard waits only to store the new sign-in, as it already did for its other accounts (SB-163).

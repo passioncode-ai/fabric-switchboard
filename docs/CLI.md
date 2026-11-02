@@ -327,7 +327,7 @@ switchboard project edit --pool client-alpha --organization Acme   # SB-109: the
 switchboard project rotate-capability --pool client-alpha   # the folders' capability leaked: the old one is refused, a new one is written
 switchboard project codex [on|off]     # SB-143: Codex sessions in project folders use the projects' Codex accounts (one provider in Codex's config.toml)
 switchboard stats [--days 30]            # SB-145/SB-147: requests and the provider's token counts by group, project, account, agent and day (1-90 days)
-switchboard project map [--under ~/DATA]   # SB-135: Git repositories on disk, each with its project or none (default ~/DATA, else home)
+switchboard project map [--under ~/DATA]   # SB-135: Git repositories on disk, each with its project or none, and their modules (`module_of`) (default ~/DATA, else home)
 switchboard project move-root --folder /work/bot --pool client-beta   # SB-135: a repository with its worktrees and clones into another group, in one step
 switchboard project move-root --folder /work/bot --pool tools --also   # SB-146: into one more group; it stays in its others (--from <group> picks the one it leaves)
 switchboard project delete --pool client-alpha  # its accounts stay in the pool, no longer reserved

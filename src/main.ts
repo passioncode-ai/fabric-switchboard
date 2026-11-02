@@ -602,7 +602,7 @@ function diskMapSection() {
     const text = el('div', 'repository-text'); const name = el('span', 'repository-name', row.name); name.title = row.folder;
     const groups = row.groups ?? (row.pool && row.project ? [{ pool: row.pool, name: row.project }] : []);
     const where = row.project === null ? t('Not in a group') : row.place === 'inside' ? t('Inside a folder of “{name}”', { name: row.project }) : groups.length > 1 ? t('Groups {names}', { names: groups.map((g) => t('“{name}”', { name: g.name })).join(', ') }) : t('Group “{name}”', { name: row.project });
-    text.append(name, el('span', 'folder-note', ` · ${where}${row.branch ? ` · ${row.branch}` : ''}`), el('span', 'repository-path', row.folder));
+    text.append(name, el('span', 'folder-note', ` · ${where}${row.module_of ? ` · ${t('module')}` : ''}${row.branch ? ` · ${row.branch}` : ''}`), el('span', 'repository-path', row.folder));
     item.append(text);
     if (row.action) {
       const act = button(row.action === 'assign' ? t('Add to group…') : t('Move…'), () => moveRootDialog(row), 'text-button', `move-root-${row.folder}`);
@@ -717,7 +717,7 @@ function wantRoots() {
   rootsLoading = true;
   void adapter.projectRoots().then((roots) => { projectRoots = roots; rootsKey = key; }, () => { rootsKey = key; }).finally(() => { rootsLoading = false; render(); });
 }
-const derivedText = (kind: 'worktree' | 'clone' | null, branch: string | null) => [kind === 'clone' ? t('clone') : kind === 'worktree' ? t('worktree') : '', branch ?? ''].filter(Boolean).join(' · ');
+const derivedText = (kind: 'worktree' | 'clone' | 'module' | null, branch: string | null) => [kind === 'clone' ? t('clone') : kind === 'worktree' ? t('worktree') : kind === 'module' ? t('module') : '', branch ?? ''].filter(Boolean).join(' · ');
 function projectFolderList(project: Project) {
   wantRoots();
   const wrap = el('div', 'project-folder-block');

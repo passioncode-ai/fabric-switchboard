@@ -621,9 +621,9 @@ export function moveTargets(currentPool: string, projects: { pool: string; name:
   });
 }
 /** SB-135: a project's folders as Git sees them: each root with its worktrees and clones. */
-export interface DerivedFolder { folder: string; kind: 'worktree' | 'clone'; branch: string | null }
+export interface DerivedFolder { folder: string; kind: 'worktree' | 'clone' | 'module'; branch: string | null }
 export interface ProjectRoot { folder: string; branch: string | null; derived: DerivedFolder[]; remote?: string | null; name?: string }
-export interface FolderRow { folder: string; depth: 0 | 1; kind: 'worktree' | 'clone' | null; branch: string | null; derived: number }
+export interface FolderRow { folder: string; depth: 0 | 1; kind: 'worktree' | 'clone' | 'module' | null; branch: string | null; derived: number }
 /** The rows of a folder list: each root, then (when `open`) its derived folders under it; a folder the tree does not know (just added, or the tree not read yet) is a root of its own, in its place. */
 export function folderRows(folders: string[], roots: ProjectRoot[] | null, open = true): FolderRow[] {
   const listed = new Set(folders); const placed = new Set<string>(); const rows: FolderRow[] = [];
@@ -670,15 +670,15 @@ export function withoutFolder(folders: string[], roots: ProjectRoot[] | null, fo
   return folders.filter((f) => !gone.has(f));
 }
 /** SB-135 part 2: the Git repositories on disk with their projects (`repository_map`). */
-export interface FoundRepository { folder: string; remote: string | null; branch: string | null; pool: string | null; project: string | null; place: 'folder' | 'inside' | null; groups?: { pool: string; name: string }[] }
+export interface FoundRepository { folder: string; remote: string | null; branch: string | null; pool: string | null; project: string | null; place: 'folder' | 'inside' | null; groups?: { pool: string; name: string }[]; module_of?: string | null }
 export interface RepositoryMap { under: string[]; repositories: FoundRepository[]; truncated: boolean }
 export type MapFilter = 'unassigned' | 'all';
 export interface MapRow extends FoundRepository { name: string; action: 'assign' | 'move' | null }
-/** The rows the disk map shows: the unassigned ones only, or all; a repository inside a project folder moves with that folder, so it has no action of its own. */
+/** The rows the disk map shows: the unassigned ones only, or all; a repository inside a project folder moves with that folder, and a module checkout with the repository holding it, so neither has an action of its own. */
 export function mapRows(map: RepositoryMap | null, filter: MapFilter): MapRow[] {
   return (map?.repositories ?? [])
     .filter((r) => filter === 'all' || !r.pool)
-    .map((r) => ({ ...r, name: folderName(r.folder), action: !r.pool ? 'assign' as const : r.place === 'folder' ? 'move' as const : null }));
+    .map((r) => ({ ...r, name: folderName(r.folder), action: r.module_of ? null : !r.pool ? 'assign' as const : r.place === 'folder' ? 'move' as const : null }));
 }
 /** Where a repository can go: each project by name, the one it is in now marked (and not chosen again). */
 export function rootTargets(currentPool: string | null, projects: { pool: string; name: string }[]): { pool: string; name: string; current: boolean }[] {
