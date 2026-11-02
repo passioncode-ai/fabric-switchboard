@@ -534,6 +534,20 @@ Design: [XA-01](packets/cross-agent-continuation.md) (operator decision D-1: aut
   (SB-96, SB-73 phase 2). A Hermes executor at its limit is not detected yet.
 - **The spend gate (0.7.0, C-5; SB-72):** before each paid step the hand-over asks the gate of
   [Spending ceilings](#spending-ceilings-sb-72-070); a step it skips moves the chain on.
+- **The walk record (SB-82 D-3, [design](research/runner-routes-2026-11-02.md)).** Every hand-over appends one line
+  to `<data>/fallback-walks.jsonl` (0600, the newest 200 kept, `walks::{of, append, recent}`) in the shape of
+  fabric-agent-contract's `runner-route-event`: `{at, event: runner-selected | runner-exhausted, basis: host-order,
+  workflow, unattended, passed_over: [{agent, runner_kind, probe, detail}], selected?: {agent, runner_kind,
+  account_id, spawned}}`. Each candidate the walk passed over is named once, in order: a skipped step, a step the
+  spend gate skipped, an offer refused before it existed (`offer_refused`) and a launch that failed after its offer
+  (`launch_failed`). `probe` is the contract's closed set (`walks::probe`: `agent_not_automatic_yet` →
+  `not-admitted`, `spend_unknown` and `ceilings_unreadable` → `quota-unknown`, `launch_failed` → `spawn-failed`,
+  every other reason → `refused`); `detail` is Switchboard's own reason. `basis: host-order` says a chain is
+  Switchboard's own order, not a contract route revision (as Fabric ADR-0125 decision 1 says of its fallback order).
+  `Operation::Chains` (CLI `chain list --json`, MCP `switchboard_chain_get`) answers the newest 20 as `walks`; a
+  record that cannot be written logs `fallback` with `walk: unwritten`. Tests: `walks::tests::*`,
+  `a_refusal_moves_down_the_chain_and_a_failed_launch_after_the_offer_stops`,
+  `the_chain_view_names_why_each_step_would_be_skipped`.
 - **Evidence:** log event `fallback` with `offered`, `launch_failed`, `every_step_refused`,
   `no_usable_executor`, `no_checkout`, `engine_unreadable`, `group_ambiguous` or `no_chain`, and
   since 0.7.0 `key_exhausted`, `ceiling_reached`, `spend_unknown` or `ceilings_unreadable` when the
