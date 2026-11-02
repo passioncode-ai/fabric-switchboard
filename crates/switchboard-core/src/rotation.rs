@@ -313,6 +313,72 @@ impl Store {
             .map(|(a, _, _)| a.id.clone()))
     }
 }
+/// SB-237: what the proxy's failovers did since the runtime last looked, counts only. When a
+/// failover found nothing, each other account of the pool is counted once under the first
+/// rule `failover_candidate` refused it by, so a group that stops at once says why.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct FailoverTally {
+    /// Requests moved to another account of their pool.
+    pub moved: u64,
+    /// Requests for which no account of the pool was left.
+    pub exhausted: u64,
+    /// Of those, pools with no other account of the provider at all.
+    pub alone: u64,
+    /// Accounts left out: held by a limit, refused just now, or a seat the provider ended.
+    pub held: u64,
+    /// Accounts of another kind than the request's (subscription and API key never mix).
+    pub kind: u64,
+    /// Accounts of another organization than the group's.
+    pub context: u64,
+    /// Accounts disabled, or whose stored credential is missing, invalid or expired.
+    pub credential: u64,
+    /// Accounts measured or last known full.
+    pub full: u64,
+}
+impl FailoverTally {
+    pub fn is_empty(&self) -> bool {
+        *self == FailoverTally::default()
+    }
+}
+impl Store {
+    /// SB-237: `failover_candidate` found nothing: each other account of the pool, counted
+    /// under the first of its rules that left it out.
+    pub(crate) fn failover_misses(
+        &self,
+        policy: &RotationPolicy,
+        held: &std::collections::HashSet<String>,
+        fits: Fits,
+        now: i64,
+        tally: &mut FailoverTally,
+    ) -> Result<(), String> {
+        let state = self.lock()?;
+        let mut others = 0;
+        for a in state
+            .accounts
+            .iter()
+            .filter(|a| a.provider == policy.provider && a.pool == policy.pool)
+        {
+            others += 1;
+            let slot = if held.contains(&a.id) {
+                &mut tally.held
+            } else if !fits.admits(a) {
+                &mut tally.kind
+            } else if !state.context_admits(&a.pool, a) {
+                &mut tally.context
+            } else if !self.rotation_credential_eligible(a, policy, now) {
+                &mut tally.credential
+            } else {
+                &mut tally.full
+            };
+            *slot += 1;
+        }
+        // The account the request left is one of them, and always held.
+        if others <= 1 {
+            tally.alone += 1;
+        }
+        Ok(())
+    }
+}
 impl Store {
     /// The account a switch or a failover would most likely take next, for a check brought
     /// forward (SB-106): `failover_candidate`'s order — measured lately and below full first,
