@@ -3944,6 +3944,15 @@ async fn execute(
                 }
                 None => executors,
             };
+            // SB-82 (D-2): a chain may name an agent by the contract's runner kind; it is
+            // stored under Switchboard's id.
+            let executors: Vec<_> = executors
+                .into_iter()
+                .map(|mut e| {
+                    e.agent = agent_catalog::from_contract(&e.agent).to_owned();
+                    e
+                })
+                .collect();
             for e in &executors {
                 if !agent_catalog::can_continue(&e.agent) {
                     return Err(format!(
@@ -8456,6 +8465,32 @@ mod owner_tests {
             .await
             .unwrap_err();
         assert!(refused.contains("cannot take over a workflow"), "{refused}");
+        // SB-82 (D-2): the contract's runner kind is accepted and stored under Switchboard's id.
+        let named = runtime
+            .execute(Operation::SetChain {
+                scope: switchboard_core::ChainScope::Workflow {
+                    id: "wf_00000000000000ff".into(),
+                },
+                executors: vec![switchboard_core::Executor {
+                    agent: "cursor-agent".into(),
+                    account_id: None,
+                    key: None,
+                }],
+                preset: None,
+            })
+            .await
+            .unwrap();
+        assert_eq!(named["chain"]["executors"][0]["agent"], "cursor-cli");
+        runtime
+            .execute(Operation::SetChain {
+                scope: switchboard_core::ChainScope::Workflow {
+                    id: "wf_00000000000000ff".into(),
+                },
+                executors: vec![],
+                preset: None,
+            })
+            .await
+            .unwrap();
         runtime
             .execute(Operation::SetChain {
                 scope: switchboard_core::ChainScope::Workflow {

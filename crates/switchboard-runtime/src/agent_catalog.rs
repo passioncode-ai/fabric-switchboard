@@ -20,6 +20,16 @@ pub fn contract_id(id: &str) -> &str {
         .map_or(id, |(_, theirs)| theirs)
 }
 
+/// SB-82 (D-2): Switchboard's id for an agent named by the contract's runner kind
+/// (`cursor-agent` → `cursor-cli`); any other id is returned as it is. Stored ids stay
+/// Switchboard's, so nothing already saved changes.
+pub fn from_contract(id: &str) -> &str {
+    CONTRACT_ALIASES
+        .iter()
+        .find(|(_, theirs)| *theirs == id)
+        .map_or(id, |(ours, _)| ours)
+}
+
 /// The whole catalog, as embedded.
 pub fn catalog() -> Value {
     serde_json::from_str(CATALOG).unwrap_or_else(|_| json!({"agents": []}))
@@ -295,6 +305,13 @@ mod tests {
         assert!(wrong.is_empty(), "{}", wrong.join("\n"));
         assert_eq!(contract_id("kiro-cli"), "kiro");
         assert_eq!(contract_id("codex"), "codex");
+        // SB-82 (D-2): the way back, for a chain that names the contract's kind.
+        assert_eq!(from_contract("cursor-agent"), "cursor-cli");
+        assert_eq!(from_contract("kiro"), "kiro-cli");
+        assert_eq!(from_contract("codex"), "codex");
+        for (ours, theirs) in CONTRACT_ALIASES {
+            assert_eq!(from_contract(contract_id(ours)), *ours, "{theirs}");
+        }
     }
 
     #[test]

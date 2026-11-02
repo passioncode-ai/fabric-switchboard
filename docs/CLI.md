@@ -390,6 +390,7 @@ per task (one workflow); the narrowest set chain applies, and **none applies unt
 ```sh
 switchboard chain set --preset subscriptions-first            # claude-code → codex → kimi-code → hermes
 switchboard chain set --scope project:alpha-web codex claude-code
+# an agent may be named by the contract's runner kind (cursor-agent); it is stored as Switchboard's id (cursor-cli), SB-82
 switchboard chain set --scope workflow:wf_0123456789abcdef codex@ACCOUNT_ID kimi-code#my-project/prod/OPENROUTER_API_KEY
 switchboard chain list [--workflow wf_…] [--pool …]          # every chain, presets, the one that applies
 switchboard chain clear --scope workflow:wf_0123456789abcdef

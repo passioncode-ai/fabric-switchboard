@@ -8,6 +8,7 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- A fallback chain accepts agents named by the Fabric agent contract's runner kinds (such as `cursor-agent`), and its steps show that kind beside Switchboard's own name (SB-82).
 ## 0.7.5
 
 - 0.7.4 was tagged but not published: its release guard refused on a test that used a folder path Windows does not read as absolute. Its changes ship here.
