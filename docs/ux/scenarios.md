@@ -1361,7 +1361,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **States covered:** closed, loading, empty (nothing loose / no repositories), list, module row, truncated, error (a folder cannot be read), dialog success and refusal.
 **Errors & recovery:** a refused move keeps the dialog open with the reason; when the second save of a move is refused, the first is undone, so nothing is half moved.
 **Status:** draft
-**Meaning:** operator request 2026-10-16 (SB-135, second part).
+**Meaning:** operator request 2026-10-16 (SB-135, second part). Module rows (SB-135, 2026-11-02): checked in WebKit on the demo (Playwright 1.63.0 WebKit, 1100 px, en and ru): the module row follows its repository, reads “Inside a folder of “Alpha Web” · module” («подмодуль») and has no button.
 **Coverage:** `roots::tests::the_disk_map_lists_repositories_with_their_projects_and_skips_dependencies`, owner `a_root_moves_to_another_project_with_its_worktrees_in_one_step`, MCP `project_edit` test (map and move tools, read-only server), `scripts/test-ui-logic.mjs` (`mapRows`, `rootTargets`, `storedMapFolders`); checked in WebKit on the demo in English and Russian.
 **Product:** unobserved
 **Traces:** ST-001, FLW-01
