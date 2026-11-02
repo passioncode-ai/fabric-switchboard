@@ -54,9 +54,11 @@ check(() => {
     { folder: '/d/app', remote: null, branch: 'main', pool: 'p', project: 'P', place: 'folder' },
     { folder: '/d/shared/tool', remote: null, branch: null, pool: 'p', project: 'P', place: 'inside' },
     { folder: '/d/loose', remote: null, branch: 'main', pool: null, project: null, place: null },
+    { folder: '/d/loose/vendor/lib', remote: null, branch: null, pool: null, project: null, place: null, module_of: '/d/loose' },
+    { folder: '/d/app/vendor/lib', remote: null, branch: null, pool: 'p', project: 'P', place: 'inside', module_of: '/d/app' },
   ] };
-  assert.deepEqual(logic.mapRows(map, 'unassigned').map((r) => [r.name, r.action]), [['loose', 'assign']]);
-  assert.deepEqual(logic.mapRows(map, 'all').map((r) => r.action), ['move', null, 'assign'], 'inside a project folder: no action of its own');
+  assert.deepEqual(logic.mapRows(map, 'unassigned').map((r) => [r.name, r.action]), [['loose', 'assign'], ['lib', null]], 'a module moves with its repository, never on its own');
+  assert.deepEqual(logic.mapRows(map, 'all').map((r) => r.action), ['move', null, 'assign', null, null], 'inside a project folder: no action of its own');
   assert.deepEqual(logic.mapRows(null, 'all'), []);
   assert.deepEqual(logic.rootTargets('b', [{ pool: 'b', name: 'Beta' }, { pool: 'a', name: 'Alpha' }]), [{ pool: 'a', name: 'Alpha', current: false }, { pool: 'b', name: 'Beta', current: true }]);
   assert.deepEqual(logic.storedMapFolders({ getItem: () => '["/x", 3, ""]' }), ['/x']);

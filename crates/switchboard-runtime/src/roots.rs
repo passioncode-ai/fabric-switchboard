@@ -2,14 +2,15 @@
 //! ворктри»): a project's folders shown as roots with the folders derived from them. A derived
 //! folder is a linked worktree of a root's repository, or a clone with the same `origin`; it
 //! belongs to the root's project and is listed under it, not beside it. The project still stores
-//! a flat folder list; the tree is read from Git when it is asked for.
+//! a flat folder list; the tree is read from Git when it is asked for. A module checkout (a Git
+//! submodule) goes under the repository that holds it, as `module`.
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 
 #[derive(Serialize, Clone, Debug, PartialEq, Eq)]
 pub struct Derived {
     pub folder: String,
-    /// `worktree` or `clone`.
+    /// `worktree`, `clone` or `module` (a submodule of the root's repository).
     pub kind: &'static str,
     pub branch: Option<String>,
 }
@@ -56,6 +57,8 @@ pub(crate) struct Checkout {
     pub remote: Option<String>,
     pub main: bool,
     pub branch: Option<String>,
+    /// For a module checkout (a submodule), the common Git folder of the repository holding it.
+    pub module_of: Option<PathBuf>,
 }
 
 /// The checkout a folder is, if it is one (its top, not a subfolder of it).
@@ -66,12 +69,41 @@ pub(crate) fn checkout(dir: &Path) -> Option<Checkout> {
         .as_deref()
         .and_then(|h| h.trim().strip_prefix("ref: refs/heads/"))
         .map(str::to_owned);
+    let module_of = superproject(&repo.common);
     Some(Checkout {
         common: repo.common,
         remote: repo.remote,
         main: repo.main,
         branch,
+        module_of,
     })
+}
+/// The common Git folder of the repository a submodule's Git folder belongs to: Git keeps a
+/// submodule's folder at `<git folder>/modules/<name>` (a name may hold slashes, and a module of a
+/// linked worktree sits under that worktree's own Git folder). None for any other folder.
+fn superproject(common: &Path) -> Option<PathBuf> {
+    let mut at = common.parent();
+    while let Some(dir) = at {
+        if dir.file_name().is_some_and(|n| n == "modules") {
+            let gitdir = dir.parent()?;
+            if gitdir.join("HEAD").is_file() && gitdir.join("config").is_file() {
+                return Some(match std::fs::read_to_string(gitdir.join("commondir")) {
+                    Ok(text) => {
+                        let path = PathBuf::from(text.trim());
+                        let path = if path.is_absolute() {
+                            path
+                        } else {
+                            gitdir.join(path)
+                        };
+                        path.canonicalize().unwrap_or(path)
+                    }
+                    Err(_) => gitdir.to_path_buf(),
+                });
+            }
+        }
+        at = dir.parent();
+    }
+    None
 }
 
 /// A project's folders as roots and their derived folders, in the order the roots first appear.
@@ -123,6 +155,17 @@ pub(crate) fn group(folders: &[(String, Option<Checkout>)]) -> Vec<Root> {
             }),
         }
     }
+    // A repository that is a module of another listed repository goes under that one's root.
+    let module_of: Vec<Option<usize>> = groups
+        .iter()
+        .enumerate()
+        .map(|(gi, g)| {
+            let outer = folders[g.root].1.as_ref()?.module_of.as_ref()?;
+            groups.iter().enumerate().position(|(oi, o)| {
+                oi != gi && folders[o.root].1.as_ref().map(|c| &c.common) == Some(outer)
+            })
+        })
+        .collect();
     let derived = |i: usize, kind: &'static str| Derived {
         folder: folders[i].0.clone(),
         kind,
@@ -131,7 +174,7 @@ pub(crate) fn group(folders: &[(String, Option<Checkout>)]) -> Vec<Root> {
     let mut roots: Vec<(usize, Root)> = Vec::new();
     let mut taken = vec![false; groups.len()];
     for (gi, g) in groups.iter().enumerate() {
-        if taken[gi] {
+        if taken[gi] || module_of[gi].is_some() {
             continue;
         }
         taken[gi] = true;
@@ -152,6 +195,13 @@ pub(crate) fn group(folders: &[(String, Option<Checkout>)]) -> Vec<Root> {
                 root.derived.push(derived(other.root, "clone"));
                 root.derived
                     .extend(other.members.iter().map(|&m| derived(m, "worktree")));
+            }
+        }
+        for (mi, module) in groups.iter().enumerate() {
+            if module_of[mi] == Some(gi) {
+                root.derived.push(derived(module.root, "module"));
+                root.derived
+                    .extend(module.members.iter().map(|&m| derived(m, "module")));
             }
         }
         // A root keeps the place of its repository's first listed folder.
@@ -202,6 +252,10 @@ pub struct Found {
     pub place: Option<&'static str>,
     /// SB-146: every group that holds it (as itself or around it), in creation order.
     pub groups: Vec<GroupRef>,
+    /// SB-135: for a module checkout (a submodule), the folder of the repository holding it; it
+    /// moves with that repository.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub module_of: Option<String>,
 }
 
 #[derive(Serialize, Clone, Debug, PartialEq, Eq)]
@@ -245,7 +299,8 @@ pub fn default_under() -> Option<PathBuf> {
 }
 
 /// The main checkouts under `under` (a linked worktree is listed under its root on the project
-/// page, not here). The walk does not go into a repository, a hidden folder or `MAP_SKIP`.
+/// page, not here), each followed by the module checkouts its `.gitmodules` names. The walk does
+/// not go into a repository otherwise, nor into a hidden folder or `MAP_SKIP`.
 pub fn disk_map(under: &[PathBuf], snapshot: &switchboard_core::Snapshot) -> DiskMap {
     let mut starts: Vec<PathBuf> = under.iter().filter_map(|u| u.canonicalize().ok()).collect();
     starts.sort();
@@ -271,6 +326,15 @@ pub fn disk_map(under: &[PathBuf], snapshot: &switchboard_core::Snapshot) -> Dis
         if let Ok(meta) = std::fs::symlink_metadata(&dotgit) {
             if meta.is_dir() {
                 repositories.push(found(&dir, snapshot));
+                for module in modules(&dir) {
+                    if repositories.len() >= MAP_REPOSITORIES {
+                        truncated = true;
+                        break;
+                    }
+                    let mut row = found(&module, snapshot);
+                    row.module_of = Some(dir.to_string_lossy().into_owned());
+                    repositories.push(row);
+                }
             }
             // A chosen folder is walked even when it is a repository itself (`~/DATA` with a
             // `.git` of its own, 2026-10-19: the map listed one row instead of hundreds).
@@ -308,6 +372,50 @@ pub fn disk_map(under: &[PathBuf], snapshot: &switchboard_core::Snapshot) -> Dis
     }
 }
 
+/// The module checkouts of the repository at `dir`: each `path` its `.gitmodules` names that holds
+/// a checkout (its `.git` a file) inside `dir`. One level: a module's own modules are not read.
+fn modules(dir: &Path) -> Vec<PathBuf> {
+    /// A `.gitmodules` larger than this is not read.
+    const GITMODULES_LIMIT: u64 = 256 * 1024;
+    let file = dir.join(".gitmodules");
+    if std::fs::symlink_metadata(&file).map_or(true, |m| !m.is_file() || m.len() > GITMODULES_LIMIT)
+    {
+        return Vec::new();
+    }
+    let Ok(text) = std::fs::read_to_string(&file) else {
+        return Vec::new();
+    };
+    let mut found = Vec::new();
+    for line in text.lines() {
+        let Some(path) = line
+            .trim()
+            .strip_prefix("path")
+            .map(str::trim_start)
+            .and_then(|r| r.strip_prefix('='))
+            .map(str::trim)
+        else {
+            continue;
+        };
+        let relative = Path::new(path);
+        // Only a path inside the repository: no `..`, no absolute path.
+        if path.is_empty()
+            || relative.is_absolute()
+            || relative
+                .components()
+                .any(|c| !matches!(c, std::path::Component::Normal(_)))
+        {
+            continue;
+        }
+        let module = dir.join(relative);
+        if std::fs::symlink_metadata(module.join(".git")).is_ok_and(|m| m.is_file())
+            && !found.contains(&module)
+        {
+            found.push(module);
+        }
+    }
+    found
+}
+
 fn found(dir: &Path, snapshot: &switchboard_core::Snapshot) -> Found {
     let c = checkout(dir);
     let text = dir.to_string_lossy().into_owned();
@@ -334,6 +442,7 @@ fn found(dir: &Path, snapshot: &switchboard_core::Snapshot) -> Found {
                 name: p.name.clone(),
             })
             .collect(),
+        module_of: None,
     }
 }
 
@@ -347,6 +456,7 @@ mod tests {
             remote: remote.map(str::to_owned),
             main,
             branch: Some(branch.to_owned()),
+            module_of: None,
         })
     }
 
@@ -496,6 +606,103 @@ mod tests {
         assert_eq!(roots[0].folder, text(&main));
         assert_eq!(roots[0].branch.as_deref(), Some("main"));
         assert_eq!(roots[0].derived[0].branch.as_deref(), Some("feature"));
+    }
+
+    /// SB-135 (the part left after 0.6.45): a module checkout goes under the repository that
+    /// holds it, in a project's tree and on the disk map, read from real Git.
+    #[test]
+    #[cfg(unix)]
+    fn a_module_checkout_goes_under_the_repository_that_holds_it() {
+        let temp = tempfile::tempdir().unwrap();
+        let base = temp.path().canonicalize().unwrap();
+        let git = |args: &[&str], dir: &Path| {
+            let out = std::process::Command::new("git")
+                .args(["-c", "user.name=t", "-c", "user.email=t@e.test"])
+                .args(["-c", "protocol.file.allow=always"])
+                .args(args)
+                .current_dir(dir)
+                .env("GIT_CONFIG_GLOBAL", "/dev/null")
+                .env("GIT_CONFIG_SYSTEM", "/dev/null")
+                .output()
+                .unwrap();
+            assert!(out.status.success(), "git {args:?}: {out:?}");
+        };
+        let (lib, app) = (base.join("lib"), base.join("org/app"));
+        for dir in [&lib, &app] {
+            std::fs::create_dir_all(dir).unwrap();
+            git(&["init", "-q", "-b", "main"], dir);
+            git(&["commit", "-q", "--allow-empty", "-m", "x"], dir);
+        }
+        git(
+            &[
+                "submodule",
+                "add",
+                "-q",
+                lib.to_str().unwrap(),
+                "vendor/lib",
+            ],
+            &app,
+        );
+        let module = app.join("vendor/lib");
+        let text = |p: &Path| p.to_string_lossy().into_owned();
+        // In a project's folders, listed before its repository: still under it.
+        let roots = tree(&[text(&module), text(&app), text(&lib)]);
+        let folders: Vec<&str> = roots.iter().map(|r| r.folder.as_str()).collect();
+        assert_eq!(folders, [text(&app), text(&lib)]);
+        assert_eq!(roots[0].derived.len(), 1);
+        assert_eq!(roots[0].derived[0].folder, text(&module));
+        assert_eq!(roots[0].derived[0].kind, "module");
+        assert_eq!(roots[0].name, "app");
+        // Without the repository holding it, a module is a root of its own.
+        let alone = tree(&[text(&module)]);
+        assert_eq!(alone.len(), 1);
+        assert!(alone[0].derived.is_empty());
+        // On the disk map: right after its repository, with where it belongs.
+        let snapshot = switchboard_core::Snapshot {
+            projects: vec![switchboard_core::Project {
+                pool: "p".into(),
+                name: "P".into(),
+                folders: vec![text(&app)],
+                created_at: 1,
+                sources: vec![],
+                organization: None,
+            }],
+            ..Default::default()
+        };
+        let map = disk_map(std::slice::from_ref(&base), &snapshot);
+        let listed: Vec<(String, Option<&str>, Option<String>)> = map
+            .repositories
+            .iter()
+            .map(|r| (r.folder.clone(), r.place, r.module_of.clone()))
+            .collect();
+        assert_eq!(
+            listed,
+            [
+                (text(&lib), None, None),
+                (text(&app), Some("folder"), None),
+                (text(&module), Some("inside"), Some(text(&app))),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_gitmodules_path_outside_its_repository_is_not_followed() {
+        let work = tempfile::tempdir().unwrap();
+        let work = work.path().canonicalize().unwrap();
+        let app = work.join("app");
+        std::fs::create_dir_all(app.join(".git")).unwrap();
+        std::fs::create_dir_all(work.join("other")).unwrap();
+        std::fs::write(work.join("other/.git"), "gitdir: /nowhere\n").unwrap();
+        std::fs::create_dir_all(app.join("real")).unwrap();
+        std::fs::write(app.join("real/.git"), "gitdir: ../.git/modules/real\n").unwrap();
+        std::fs::create_dir_all(app.join("plain")).unwrap();
+        std::fs::write(
+            app.join(".gitmodules"),
+            "[submodule \"a\"]\n\tpath = ../other\n[submodule \"b\"]\n\tpath = /etc\n\
+             [submodule \"c\"]\n\tpath = plain\n[submodule \"d\"]\n\tpath = real\n",
+        )
+        .unwrap();
+        assert_eq!(modules(&app), [app.join("real")]);
     }
 
     #[test]

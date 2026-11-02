@@ -502,7 +502,10 @@ export function createDemoAdapter(): Adapter {
       }
       const folders = [...seen.values()];
       const loose = looseRepositories.map((folder) => ({ folder, remote: null, branch: 'main', pool: null, project: null, place: null }));
-      return { under: under.length ? under : ['/srv/projects'], repositories: [...folders, ...loose].sort((a, b) => a.folder.localeCompare(b.folder)), truncated: false };
+      // SB-135: the first group folder holds a Git submodule, listed right after it with no action of its own.
+      const first = folders[0];
+      const modules = first ? [{ folder: `${first.folder}/vendor/ui-kit`, remote: null, branch: null, pool: first.pool, project: first.project, place: 'inside' as const, groups: first.groups, module_of: first.folder }] : [];
+      return { under: under.length ? under : ['/srv/projects'], repositories: [...folders, ...modules, ...loose].sort((a, b) => a.folder.localeCompare(b.folder)), truncated: false };
     },
     async projectRoots() {
       await pause();
