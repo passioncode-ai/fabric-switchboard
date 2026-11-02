@@ -14,7 +14,10 @@
   under its temporary folder; released as 0.7.5.
 - **Open.** fabric-dashboards reads Switchboard's `--json` refusal from stdout (that repository's; board finding
   `32fb431d-53b9-46c1-88ca-6191eb2eedf5`). SB-189 and SB-135 close once 0.7.5 is published.
-- **Exact next task.** Confirm 0.7.5 published and installed, close SB-189 and SB-135 with the release receipt; then the
+- **Released.** `v0.7.5` on `c7cc661`, release run 41507172102 (second attempt: the first guard refused because the
+  nightly's `checks` job got no macOS arm64 runner twice, GitHub capacity; attempt 3 of nightly 41507517452 green),
+  published 2026-11-02 20:48 UTC with 25 assets, `latest.json` 0.7.5. SB-189 and SB-135 closed.
+- **Exact next task.** (done: 0.7.5 published; SB-189 and SB-135 closed with the release receipt); then the
   week on 0.7.3+ for SB-163 (to 2026-11-09). Next rows without an outside blocker: SB-82, SB-192.
 
 ## 2026-11-02: the live sign-in's renewal grant leaves the owner transaction (SB-163), SB-237 step 1
