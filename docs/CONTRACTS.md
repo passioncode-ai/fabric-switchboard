@@ -414,6 +414,11 @@ MCP `switchboard_chain_get` (read) and `switchboard_chain_set` (write).
   `Chain {scope, executors, updated_at}`; `ChainScope` is `{kind: "machine"}`,
   `{kind: "project", pool}` (an existing project) or `{kind: "workflow", id}` (`wf_` + 16 hex);
   `Executor {agent, account_id?, key?}` — at most 8 per chain, one chain per scope, at most 256.
+- **Runner kinds (SB-82 D-2, [design](research/runner-routes-2026-11-02.md)).** `SetChain` also takes an agent named by
+  fabric-agent-contract's runner kind (`cursor-agent`, `kiro`) and stores Switchboard's id (`cursor-cli`, `kiro-cli`;
+  `agent_catalog::from_contract`); stored ids never change, and each `readiness` step carries `runner_kind` beside
+  `agent` (`agent_catalog::contract_id`). Tests: `agent_catalog::tests` (both ways),
+  `fallback_chains_take_a_preset_refuse_agents_that_cannot_continue_and_resolve`.
 - Validation on every publish (`validate_chains`): an agent id is `[a-z0-9-]{1,40}`; an account or a
   key, not both; a key is an Observatory vault name `project/env/NAME`, never for Claude Code or
   Codex; `claude-code` / `codex` pinned only to an account of that provider; any other agent pinned

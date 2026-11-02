@@ -86,6 +86,11 @@ pub(crate) fn preview(
         .map(|(e, step)| {
             let mut view = serde_json::Map::new();
             view.insert("agent".into(), Value::String(e.agent.clone()));
+            // SB-82 (D-2): the contract's runner kind beside Switchboard's id.
+            view.insert(
+                "runner_kind".into(),
+                Value::String(crate::agent_catalog::contract_id(&e.agent).to_owned()),
+            );
             view.insert("name".into(), name(&e.agent));
             let (state, reason) = if !inputs.settings_readable {
                 // The fallback hands nothing over while agents-settings.json cannot be read.
@@ -313,6 +318,7 @@ mod tests {
         let steps = f.run(&s, &c, None);
         assert_eq!(steps.len(), 4);
         assert_eq!(steps[0]["agent"], "codex");
+        assert_eq!(steps[0]["runner_kind"], "codex");
         assert_eq!(steps[0]["state"], "skipped");
         assert_eq!(steps[0]["reason"], "agent_disabled");
         // A key pin is kept and named (a vault name, never a value), waiting for SB-96.
