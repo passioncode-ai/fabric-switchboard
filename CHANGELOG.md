@@ -8,6 +8,7 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- The CLI and the MCP server print the same refusal sentences as the window, saying what happened and what to do, instead of the backend's own text; `--json` keeps that text in `raw`. Messages that named only a window button now name the command too (SB-189).
 - Git submodules show under the repository that holds them, as *module*, in a group's repositories and in *Repositories on disk*, where they move with that repository and have no button of their own (SB-135).
 
 ## 0.7.3

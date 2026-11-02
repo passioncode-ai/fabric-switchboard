@@ -17,6 +17,8 @@ const url = (path) => {
   return data;
 };
 const load = async (path) => import(url(path));
+// SB-189: the runtime's table of the sentences a person reads, shared by the window, the CLI and MCP.
+const personErrors = JSON.parse(readFileSync(new URL('../crates/switchboard-runtime/src/person-errors.json', import.meta.url), 'utf8')).sentences;
 const logic = await load('../src/ui-logic.ts');
 let cases = 0;
 const check = (fn) => { fn(); cases += 1; };
@@ -189,7 +191,8 @@ check(() => {
     'Account home cleanup failed. Close its sessions and retry.',
     'Sign-in credential unavailable. Check Keychain access and finish login.',
   ]) assert(source.includes(`  '${message}',`), `verbatim: ${message}`);
-  for (const message of ['Label, pool or identity is invalid', 'Account identity is ambiguous in this pool', 'Terminal could not open.', 'Sign-in cleanup needs Keychain access.', 'Rotation time precedes the last switch']) assert(source.includes(`  '${message}': '`), `mapped: ${message}`);
+  // SB-189: the mapped sentences live in the runtime's table, which the window imports.
+  for (const message of ['Label, pool or identity is invalid', 'Account identity is ambiguous in this pool', 'Terminal could not open.', 'Sign-in cleanup needs Keychain access.', 'Rotation time precedes the last switch']) assert(Object.hasOwn(personErrors, message), `mapped: ${message}`);
 });
 
 // Project rules: paused wins over expired; only active rules raise the Accounts strip.
@@ -259,7 +262,7 @@ check(() => {
 check(() => {
   const adapter = readFileSync(new URL('../src/adapter.ts', import.meta.url), 'utf8');
   assert(adapter.includes(`  '${logic.LOGIN_FORGOTTEN}',`), `verbatim: ${logic.LOGIN_FORGOTTEN}`);
-  assert(adapter.includes(`  '${logic.LOGIN_SAVED_CLEANUP}': '${logic.LOGIN_SAVED_CLEANUP_SHOWN}',`), 'the cleanup sentence is mapped to the one loginOutcome reads (CPY-05)');
+  assert.equal(personErrors[logic.LOGIN_SAVED_CLEANUP], logic.LOGIN_SAVED_CLEANUP_SHOWN, 'the cleanup sentence is mapped to the one loginOutcome reads (CPY-05)');
   const main = readFileSync(new URL('../src/main.ts', import.meta.url), 'utf8');
   assert(!main.includes(logic.LOGIN_FORGOTTEN) && !main.includes(logic.LOGIN_SAVED_CLEANUP), 'main.ts classifies sign-in errors through loginOutcome');
   assert.equal((main.match(/loginOutcome\(/g) ?? []).length, 4, 'status poll, finish, cancel and Try again (its cancel, SB-67) each classify');
@@ -274,11 +277,10 @@ check(() => {
   const adapter = readFileSync(new URL('../src/adapter.ts', import.meta.url), 'utf8');
   const safeStart = adapter.indexOf('const safeErrors = new Set([');
   const safe = adapter.slice(safeStart, adapter.indexOf(']);', safeStart));
-  const core = adapter.slice(adapter.indexOf('const coreErrors'));
   for (const [, name, sentence] of stops) {
     const quoted = `'${sentence.replace(/'/g, "\\'")}'`;
     assert(safe.includes(`  ${quoted},`), `${name} is in safeErrors verbatim`);
-    assert(!core.includes(quoted), `${name} is not rewritten by coreErrors`);
+    assert(!Object.hasOwn(personErrors, sentence), `${name} is not rewritten by the person-errors table`);
   }
 });
 

@@ -451,7 +451,7 @@ step (the app, or `switchboard agents openrouter set|remove`), never this server
 
 ## Refusals
 
-Fixed texts the server returns with `isError: true`; relay them and offer the remedy:
+Fixed texts the server returns with `isError: true`, the same sentences the window shows a person (SB-189); relay them and offer the remedy:
 
 | Text begins | Remedy |
 |---|---|
@@ -463,7 +463,7 @@ Fixed texts the server returns with `isError: true`; relay them and offer the re
 | "No account with id …" | call `switchboard_accounts` for current ids |
 | "Pass an absolute folder." | pass an absolute `path` |
 | "expires_in_hours must be 1 to 720." | pick an expiry in range |
-| "Choose an existing project folder." | the folder is missing or inside Switchboard's data folder |
+| "Choose an existing folder." | the folder is missing or inside Switchboard's data folder |
 | "Name one account_id to refresh." | `refresh` needs one `account_id` |
 | "Group not found." | call `switchboard_projects` for current group ids |
 | "Statistics cover 1 to 90 days." | pass `days` from 1 to 90 |
@@ -474,6 +474,6 @@ Fixed texts the server returns with `isError: true`; relay them and offer the re
 | "Only Switchboard's own data folder can change your terminals' start files…" | run the server without `--data-dir`, or ask the operator to use the app's switch |
 | "No installed switchboard command was found for the hook to run…" | install Fabric Switchboard, then turn it on again |
 | "on is true or false." | `switchboard_shell_hook_set` takes `on`: `true` or `false` |
-| "The hook cannot name this executable or the data folder…" | Switchboard or its data folder sits at a path that is not absolute or not valid text: reinstall, then turn it on again |
+| "The terminal hook could not be written…" | Switchboard or its data folder sits at a path that is not absolute or not valid text: reinstall, then turn it on again |
 | "The terminal hook's choice could not be saved in Switchboard's data folder." | the data folder is not writable; nothing changed, try again once it is |
 | "Your home folder could not be found, so no start file was changed." | the server runs without a home folder (`HOME`); run it as the person's own user |

@@ -2517,6 +2517,8 @@ fn print_result(value: &Value, cli: &Cli) {
         } => {
             println!("Folder: {}", text(&value["directory"]));
             if let Some(error) = value["last_error"].as_str() {
+                // SB-189: the sentence the window shows for the same failure.
+                let error = switchboard_runtime::person_errors::for_person(error);
                 println!("Last automatic backup failed: {error}");
             }
             let backups = value["backups"].as_array().cloned().unwrap_or_default();
@@ -3176,10 +3178,17 @@ async fn start() -> ExitCode {
             ExitCode::SUCCESS
         }
         Err(error) => {
+            // SB-189: the sentence the window shows, which says what to do; `--json` keeps the
+            // backend's own text in `raw` for a script that matches it.
+            let sentence = switchboard_runtime::person_errors::for_person(&error);
             if cli.json {
-                eprintln!("{}", json!({"ok":false,"error":error}));
+                let mut body = json!({"ok":false,"error":sentence});
+                if sentence != error {
+                    body["raw"] = json!(error);
+                }
+                eprintln!("{body}");
             } else {
-                eprintln!("{error}");
+                eprintln!("{sentence}");
             }
             ExitCode::from(1)
         }
