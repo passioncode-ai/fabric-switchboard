@@ -963,18 +963,9 @@ impl Drop for Release {
 }
 /// Hands a kept successor to the copies that should have it. Ok: the ids updated; the other
 /// holders of the spent token are remembered as dead and the successor is forgotten. Err: the
-/// vault refused a write and the successor stays kept for the next pass.
-fn settle(
-    store: &Store,
-    state: &RefreshState,
-    consumed: &str,
-    kept: &Kept,
-) -> Result<Vec<String>, ()> {
-    settle_as(store, state, consumed, kept, true)
-}
-/// `settle`; `owner_fallback` false leaves the named owner's other copies alone (SB-179: a
-/// sign-in stored while the grant was out stands, and its expiry is earlier than the
-/// successor's by the grant's own length).
+/// vault refused a write and the successor stays kept for the next pass. `owner_fallback`
+/// false leaves the named owner's other copies alone (SB-179: a sign-in stored while the grant
+/// was out stands, and its expiry is earlier than the successor's by the grant's own length).
 fn settle_as(
     store: &Store,
     state: &RefreshState,
@@ -1259,10 +1250,17 @@ pub(crate) fn renewed_item(live: &[u8], refreshed: &Credential) -> Option<Vec<u8
 /// left its token expired for `IDLE_EXPIRED_SECONDS` and only under Claude Code's own locks;
 /// the item must be byte-identical under the locks to what was checked, or nothing is sent.
 /// Keeps managed sessions and quota checks on that account alive while Claude Code is idle.
+///
+/// SB-163: the grant runs outside the owner transaction (`lock`), which is taken only to store
+/// what the grant left. Claude Code's own locks, held from the check to the write, keep a
+/// native activation from interleaving (it takes the same locks), and the spent token is in
+/// flight, so a switch to the account is refused meanwhile. A sign-in stored for a copy while
+/// the grant was out stands: the successor goes only where the spent token still is.
 pub(crate) async fn renew_idle_live(
     store: &Store,
     native: NativeSources,
     state: &RefreshState,
+    lock: Option<&tokio::sync::Mutex<()>>,
 ) -> Outcome {
     let time = now();
     let Ok(live) = (native.current)(Provider::Claude) else {
@@ -1291,10 +1289,10 @@ pub(crate) async fn renew_idle_live(
     {
         return Outcome::NotNeeded;
     }
-    let Ok(lock) = (native.live)() else {
+    let Ok(live_lock) = (native.live)() else {
         return Outcome::Transient;
     };
-    let Ok(Some(before)) = lock.read() else {
+    let Ok(Some(before)) = live_lock.read() else {
         return Outcome::Transient;
     };
     let unchanged =
@@ -1309,14 +1307,26 @@ pub(crate) async fn renew_idle_live(
         None => match spend(state, &live.credential).await {
             Ok(kept) => kept,
             Err(Failure::Permanent) => {
-                for copy in &copies {
+                drop(live_lock);
+                let _held = hold_store(lock).await;
+                // A copy signed in again while the grant was out holds another lineage: the
+                // rejection says nothing about it (SB-179's rule, applied here by SB-163).
+                let spent: Vec<_> = copies
+                    .iter()
+                    .filter(|copy| holds(store, &copy.id, &consumed))
+                    .collect();
+                for copy in &spent {
                     remember_dead(state, &copy.id, &consumed);
                 }
                 // B-5 fix cycle 1: one seat, however many copies hold its lineage.
-                if let Some(copy) = copies.first() {
+                if let Some(copy) = spent.first() {
                     seat_ended(store, &copy.id, "renewal");
                 }
-                return Outcome::SignInRequired;
+                return if spent.is_empty() {
+                    Outcome::NotNeeded
+                } else {
+                    Outcome::SignInRequired
+                };
             }
             Err(Failure::Transient | Failure::Systemic) => return Outcome::Transient,
         },
@@ -1328,7 +1338,9 @@ pub(crate) async fn renew_idle_live(
     // SB-101: the provider has already spent the old token, so the successor goes into the
     // vault now — a quit or crash before the next pass must not leave it only in memory. The
     // kept copy stays, and the next pass still writes Claude Code's item first.
-    if lock.write(&item).is_err() {
+    if live_lock.write(&item).is_err() {
+        drop(live_lock);
+        let _held = hold_store(lock).await;
         let owner = kept
             .owner
             .clone()
@@ -1338,7 +1350,7 @@ pub(crate) async fn renew_idle_live(
         }
         return Outcome::Transient;
     }
-    drop(lock);
+    drop(live_lock);
     let foreign = kept
         .owner
         .as_deref()
@@ -1359,12 +1371,38 @@ pub(crate) async fn renew_idle_live(
             },
         );
     }
+    let _held = hold_store(lock).await;
+    // A copy signed in again while the grant was out (its token is neither the spent one nor
+    // the successor) stands: the successor is not filed over it through the owner's copies.
+    let successor = kept.refreshed.refresh_token.as_deref();
+    let replaced = copies.iter().any(|copy| {
+        store
+            .stored_credential(&copy.id)
+            .ok()
+            .and_then(|c| c.refresh_token)
+            .is_some_and(|t| t != consumed && Some(t.as_str()) != successor)
+    });
     // The copies get the successor only if it is theirs; otherwise they hold a spent token.
-    match settle(store, state, &consumed, &kept) {
+    match settle_as(store, state, &consumed, &kept, !replaced) {
         Err(()) => Outcome::Transient,
         Ok(_) if foreign.is_some() => Outcome::SignInRequired,
         Ok(_) => Outcome::Refreshed,
     }
+}
+/// The owner transaction for what a live renewal stores, logged as `live_renewal` when long.
+async fn hold_store(lock: Option<&tokio::sync::Mutex<()>>) -> Option<crate::Held<'_>> {
+    match lock {
+        Some(lock) => Some(crate::hold_on(lock, "live_renewal").await),
+        None => None,
+    }
+}
+/// True while the stored credential of `id` still holds the refresh token `token`.
+fn holds(store: &Store, id: &str, token: &str) -> bool {
+    store
+        .stored_credential(id)
+        .ok()
+        .and_then(|c| c.refresh_token)
+        .is_some_and(|t| t == token)
 }
 /// What the monitor saw of Claude Swap this pass.
 pub(crate) enum SwapView {
@@ -3604,7 +3642,7 @@ mod tests {
         let state = RefreshState::default();
         // signed_in's live token is far from expiry: Claude Code renews it, not Switchboard.
         assert_eq!(
-            renew_idle_live(&store, SIGNED_IN_A, &state).await,
+            renew_idle_live(&store, SIGNED_IN_A, &state, None).await,
             Outcome::NotNeeded
         );
     }
@@ -3666,7 +3704,7 @@ mod tests {
         let (_root, store) = idle_setup(IDLE_ITEM());
         let state = RefreshState::at(url);
         assert_eq!(
-            renew_idle_live(&store, IDLE_A, &state).await,
+            renew_idle_live(&store, IDLE_A, &state, None).await,
             Outcome::Refreshed
         );
         assert_eq!(calls.load(Ordering::SeqCst), 1);
@@ -3691,7 +3729,7 @@ mod tests {
         let (_root, store) = idle_setup(IDLE_ITEM());
         let state = RefreshState::at(url);
         assert_eq!(
-            renew_idle_live(&store, IDLE_A, &state).await,
+            renew_idle_live(&store, IDLE_A, &state, None).await,
             Outcome::SignInRequired
         );
         // The spent token's successor reached Claude Code, so it stays signed in.
@@ -3726,7 +3764,7 @@ mod tests {
         WRITE_FAILS.with(|f| f.set(true));
         let state = RefreshState::at(url);
         assert_eq!(
-            renew_idle_live(&store, IDLE_A, &state).await,
+            renew_idle_live(&store, IDLE_A, &state, None).await,
             Outcome::Transient
         );
         assert!(has_stash(&state, "synthetic-a-refresh"));
@@ -3741,7 +3779,7 @@ mod tests {
         // and every copy holding the spent token gets it, not just the first.
         WRITE_FAILS.with(|f| f.set(false));
         assert_eq!(
-            renew_idle_live(&store, IDLE_A, &state).await,
+            renew_idle_live(&store, IDLE_A, &state, None).await,
             Outcome::Refreshed
         );
         assert_eq!(calls.load(Ordering::SeqCst), 1);
@@ -3766,10 +3804,143 @@ mod tests {
         );
         let state = RefreshState::at(url);
         assert_eq!(
-            renew_idle_live(&store, IDLE_A, &state).await,
+            renew_idle_live(&store, IDLE_A, &state, None).await,
             Outcome::NotNeeded
         );
         assert_eq!(calls.load(Ordering::SeqCst), 0);
+    }
+    /// SB-163 (design note owner-transaction-2026-10-23, T-2 for the live sign-in): the grant
+    /// that renews Claude Code's idle sign-in leaves the owner transaction. While it is on the
+    /// network the transaction is free and a native switch to the account is refused; a sign-in
+    /// stored meanwhile for one copy stands, the copy still holding the spent token gets the
+    /// successor, and Claude Code's item gets it too.
+    #[tokio::test]
+    async fn a_live_grant_runs_outside_the_transaction_and_a_sign_in_stored_meanwhile_stands() {
+        let app = Router::new().route(
+            "/token",
+            post(|| async {
+                tokio::time::sleep(Duration::from_millis(400)).await;
+                Json(json!({"access_token":"fresh-access","expires_in":28800,"refresh_token":"fresh-refresh","account":{"uuid":"synthetic-a"}}))
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let (_root, store) = idle_setup(IDLE_ITEM());
+        let state = Arc::new(RefreshState::at(format!("http://{address}/token")));
+        let lock = Arc::new(tokio::sync::Mutex::new(()));
+        let work = id_of(&store, "synthetic-a", "work");
+        let renewal = {
+            let (store, state, lock) = (store.clone(), state.clone(), lock.clone());
+            tokio::spawn(async move { renew_idle_live(&store, IDLE_A, &state, Some(&lock)).await })
+        };
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert!(state.in_flight(&store, &work));
+        let held = lock
+            .try_lock()
+            .expect("the live grant holds the owner transaction");
+        assert_eq!(
+            crate::activate_native(&store, &work, None, IDLE_A, Some(&state)).unwrap_err(),
+            RENEWING
+        );
+        // The person signs the work copy in again meanwhile.
+        let mut new = expired("synthetic-a");
+        new.access_token = "signed-in-again".into();
+        new.refresh_token = Some("signed-in-again-r".into());
+        new.expires_at = Some(now() + 28_000);
+        store
+            .upsert(
+                "synthetic-a".into(),
+                Provider::Claude,
+                AuthKind::OAuth,
+                "work".into(),
+                new,
+                Some(identity("synthetic-a")),
+            )
+            .unwrap();
+        // The grant answers while the transaction is still held: Claude Code's item has its
+        // successor at once, and the store waits for the transaction.
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        assert!(!renewal.is_finished());
+        assert_eq!(
+            live_item()["claudeAiOauth"]["refreshToken"],
+            "fresh-refresh"
+        );
+        assert_eq!(
+            store
+                .stored_credential(&id_of(&store, "synthetic-a", "default"))
+                .unwrap()
+                .refresh_token
+                .as_deref(),
+            Some("synthetic-a-refresh")
+        );
+        drop(held);
+        assert_eq!(renewal.await.unwrap(), Outcome::Refreshed);
+        assert_eq!(
+            live_item()["claudeAiOauth"]["refreshToken"],
+            "fresh-refresh"
+        );
+        assert_eq!(
+            store
+                .stored_credential(&work)
+                .unwrap()
+                .refresh_token
+                .as_deref(),
+            Some("signed-in-again-r"),
+            "the sign-in stored meanwhile stands"
+        );
+        let default = id_of(&store, "synthetic-a", "default");
+        assert_eq!(
+            store
+                .stored_credential(&default)
+                .unwrap()
+                .refresh_token
+                .as_deref(),
+            Some("fresh-refresh")
+        );
+        assert!(!has_stash(&state, "synthetic-a-refresh"));
+    }
+    /// SB-163: a live grant the provider rejects while a copy is signed in again says nothing
+    /// about that copy; only the copies still holding the spent token need a new sign-in.
+    #[tokio::test]
+    async fn a_rejected_live_grant_does_not_mark_a_sign_in_stored_meanwhile() {
+        let app = Router::new().route(
+            "/token",
+            post(|| async {
+                tokio::time::sleep(Duration::from_millis(400)).await;
+                (
+                    axum::http::StatusCode::BAD_REQUEST,
+                    Json(json!({"error":"invalid_grant"})),
+                )
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let (_root, store) = idle_setup(IDLE_ITEM());
+        let state = Arc::new(RefreshState::at(format!("http://{address}/token")));
+        let lock = Arc::new(tokio::sync::Mutex::new(()));
+        let renewal = {
+            let (store, state, lock) = (store.clone(), state.clone(), lock.clone());
+            tokio::spawn(async move { renew_idle_live(&store, IDLE_A, &state, Some(&lock)).await })
+        };
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        let mut new = expired("synthetic-a");
+        new.refresh_token = Some("signed-in-again-r".into());
+        new.expires_at = Some(now() + 28_000);
+        store
+            .upsert(
+                "synthetic-a".into(),
+                Provider::Claude,
+                AuthKind::OAuth,
+                "work".into(),
+                new,
+                Some(identity("synthetic-a")),
+            )
+            .unwrap();
+        assert_eq!(renewal.await.unwrap(), Outcome::SignInRequired);
+        assert!(state.is_dead(&store, &id_of(&store, "synthetic-a", "default")));
+        assert!(!state.is_dead(&store, &id_of(&store, "synthetic-a", "work")));
     }
     #[tokio::test]
     async fn an_idle_live_lineage_rejected_by_the_provider_is_dead() {
@@ -3777,7 +3948,7 @@ mod tests {
         let (_root, store) = idle_setup(IDLE_ITEM());
         let state = RefreshState::at(url);
         let (outcome, events) =
-            crate::oplog::capture_async(renew_idle_live(&store, IDLE_A, &state)).await;
+            crate::oplog::capture_async(renew_idle_live(&store, IDLE_A, &state, None)).await;
         assert_eq!(outcome, Outcome::SignInRequired);
         assert!(state.is_dead(&store, &id_of(&store, "synthetic-a", "work")));
         // B-5 fix cycle 1: the idle Claude Code account's `invalid_grant` is a seat that ended

@@ -2,6 +2,21 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-11-02: the live sign-in's renewal grant leaves the owner transaction (SB-163), SB-237 step 1
+
+- **Why.** Three days on 0.7.2 left one hold over 5 s: `source_sync` 15.0 s, all in `renew_live`, the network grant
+  that renews the sign-in Claude Code left expired. SB-179 had already moved the other accounts' grants out.
+- **Done.** SB-237 step 1, PR #350 (`3c4d3df`): the `proxy_failover` log line. SB-163 on branch
+  `fix/sb-163-live-grant`: `refresh::renew_idle_live` takes `lock` and holds it only to store (step `live_renewal`);
+  the monitor calls it before `hold("source_sync")`. Claude Code's locks (held from the byte check to the write) and the
+  in-flight token keep a native activation out; a sign-in stored for a copy meanwhile stands. Design recorded in
+  [the owner-transaction note](research/owner-transaction-2026-10-23.md) §4.
+- **Checks.** Tests `a_live_grant_runs_outside_the_transaction_and_a_sign_in_stored_meanwhile_stands` (fails when the
+  store phase skips the transaction: mutation run 2026-11-02) and `a_rejected_live_grant_does_not_mark_a_sign_in_stored_meanwhile`;
+  gate `./scripts/check.sh` (result in the pull request).
+- **Exact next task.** Release the SB-163 change with SB-237 step 1 (0.7.3), then a week on it: SB-163 closes with no
+  `source_sync` hold over 5 s. SB-243 still waits for the Windows tester; SB-237 step 2 for the next `proxy_failover`.
+
 ## 2026-10-30: release 0.7.2, the source sync stops re-reading the sign-ins (SB-163)
 
 - **Why.** A day on 0.7.0 still held the owner transaction 5 to 13 s about once an hour in `source_sync`'s

@@ -369,18 +369,22 @@ impl Pass {
         // from the watch, or read again only if a source changed in between.
         let current = runtime.native.current;
         crate::blocking::run(|| prime_live_sources(current, claude));
-        let mut mutation = runtime.hold("source_sync").await;
         // Claude Code left its token expired: renew it under Claude Code's locks so managed
-        // sessions and quota checks on that account keep working.
-        let renewed = if claude {
-            let outcome =
-                crate::refresh::renew_idle_live(&runtime.store, runtime.native, &runtime.refresh)
-                    .await;
-            mutation.phase("renew_live");
-            !matches!(outcome, crate::refresh::Outcome::NotNeeded)
-        } else {
-            false
-        };
+        // sessions and quota checks on that account keep working. SB-163: the grant runs
+        // outside the owner transaction, taken only to store its result (`live_renewal`);
+        // on 0.7.2 it was the one hold left, 15 s of network inside `source_sync`.
+        let renewed = claude
+            && !matches!(
+                crate::refresh::renew_idle_live(
+                    &runtime.store,
+                    runtime.native,
+                    &runtime.refresh,
+                    Some(&runtime.mutations),
+                )
+                .await,
+                crate::refresh::Outcome::NotNeeded
+            );
+        let mut mutation = runtime.hold("source_sync").await;
         crate::refresh::follow_claude_swap(&runtime.store, &runtime.refresh, swap);
         mutation.phase("swap");
         sync_live_sources(&runtime.store, runtime.native.current, &runtime.refresh);
