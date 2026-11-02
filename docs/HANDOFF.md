@@ -2,17 +2,19 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
-## 2026-11-02 (evening): one refusal sentence on every surface (SB-189), submodules (SB-135), release 0.7.4
+## 2026-11-02 (evening): one refusal sentence on every surface (SB-189), submodules (SB-135), release 0.7.5
 
 - **Done.** SB-189, PR #357 (`a9c2609`): `crates/switchboard-runtime/src/person-errors.json` gives each backend refusal
   the sentence a person reads; the CLI (`--json` keeps `raw`), MCP and the window print the same one; run record
   [docs/runs/2026-11-02-sb-189-errors](runs/2026-11-02-sb-189-errors/README.md) with its seam review. SB-135's last
   part, PR #355 (`0c5f6af`): Git submodules under their repository as `module`.
-- **Release.** 0.7.4 from this pull request (version files and the CHANGELOG section); the tag, the run and the
-  published check follow it.
+- **Release.** `v0.7.4` (`18e65ee`, release PR #358) was refused by its guard: the nightly on the tag
+  (41501978651) failed on both Windows jobs in the new MCP test, whose `/nonexistent-…` path is not absolute on Windows
+  (`Pass an absolute folder.` instead of the expected sentence). Never published. The test now takes a missing folder
+  under its temporary folder; released as 0.7.5.
 - **Open.** fabric-dashboards reads Switchboard's `--json` refusal from stdout (that repository's; board finding
-  `32fb431d-53b9-46c1-88ca-6191eb2eedf5`). SB-189 and SB-135 close once 0.7.4 is published.
-- **Exact next task.** Confirm 0.7.4 published and installed, close SB-189 and SB-135 with the release receipt; then the
+  `32fb431d-53b9-46c1-88ca-6191eb2eedf5`). SB-189 and SB-135 close once 0.7.5 is published.
+- **Exact next task.** Confirm 0.7.5 published and installed, close SB-189 and SB-135 with the release receipt; then the
   week on 0.7.3+ for SB-163 (to 2026-11-09). Next rows without an outside blocker: SB-82, SB-192.
 
 ## 2026-11-02: the live sign-in's renewal grant leaves the owner transaction (SB-163), SB-237 step 1

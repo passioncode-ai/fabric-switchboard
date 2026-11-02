@@ -512,7 +512,8 @@ async fn project_rules_are_optional_visible_and_applied_on_request() {
     // SB-189: a backend refusal reaches the agent as the sentence the window shows a person.
     let (error, message) = agent.tool(
         "switchboard_project_set",
-        json!({"account_id": ids[1], "path": "/nonexistent-switchboard-test-folder"}),
+        // Absolute on every platform (a drive letter on Windows), and missing.
+        json!({"account_id": ids[1], "path": alpha.join("missing")}),
     );
     assert!(error);
     assert_eq!(message, "Choose an existing folder.");
