@@ -288,6 +288,8 @@ mod tests {
                 hermes_ready: self.hermes_ready,
                 opencode_ready: false,
                 disabled: self.disabled.clone(),
+                missing: HashSet::new(),
+                unattended: false,
             };
             let installed = |agent: &str| !self.missing.contains(agent);
             let inputs = Inputs {
@@ -404,6 +406,8 @@ mod tests {
             hermes_ready: false,
             opencode_ready: false,
             disabled: HashSet::new(),
+            missing: HashSet::new(),
+            unattended: false,
         };
         let inputs = Inputs {
             limited: &f.limited,
