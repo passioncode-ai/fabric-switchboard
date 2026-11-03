@@ -1303,6 +1303,13 @@ check(() => {
     assert.equal(logic.stepReasonText(step('ready', null, { paid: true, key_scope: 'group', spend: null }), 'Alpha web'), 'Ready: the key of Alpha web. Spend not read yet.');
     assert.equal(logic.stepReasonText(step('ready', null, { paid: true, key_scope: 'machine', spend: null })), "Ready: this computer's key. Spend not read yet.");
     assert.equal(logic.stepReasonText(step('ready', null, { paid: true, account_label: 'Claude API' })), 'Ready: Claude API. Spend not read yet.');
+    // SB-245: an agent that asks for no approval never takes a Claude Code or Codex task (SB-82 D-6).
+    assert.equal(logic.stepReasonText(step('ready', null, { account_label: 'Kimi personal', containment: 'none' })), 'Ready: Kimi personal. Takes no Claude Code or Codex task.');
+    assert.equal(logic.stepReasonText(step('ready', null, { paid: true, key_scope: 'machine', spend: null, containment: 'none' })), "Ready: this computer's key. Spend not read yet. Takes no Claude Code or Codex task.");
+    assert.equal(logic.stepReasonText(step('ready', null, { account_label: 'Work Max', containment: 'asks' })), 'Ready: Work Max');
+    assert.equal(logic.stepReasonText(step('skipped', 'not_installed')), 'Skipped: not installed');
+    assert.equal(logic.stepReasonText(step('skipped', 'quota_unknown')), 'Skipped: remaining quota not seen yet');
+    assert.equal(logic.stepReasonText(step('skipped', 'permission_mode')), 'Skipped: asks for less approval than the agent before it');
     assert.equal(logic.stepReasonText(step('skipped', 'no_usable_account')), 'Skipped: no account with room');
     assert.equal(logic.stepReasonText(step('skipped', 'agent_disabled')), 'Skipped: disabled under Installed');
     assert.equal(logic.stepReasonText(step('skipped', 'sign_in_required')), 'Skipped: needs a sign-in');
@@ -1317,13 +1324,14 @@ check(() => {
   });
   // The last hand-over in a line: its outcome, then the steps passed over with their reasons.
   check(() => {
-    const nameOf = (id) => ({ hermes: 'Hermes', codex: 'Codex' })[id] ?? id;
+    const nameOf = (id) => ({ hermes: 'Hermes', codex: 'Codex', 'kimi-code': 'Kimi Code', 'claude-code': 'Claude Code' })[id] ?? id;
     assert.equal(logic.handoverOutcomeText('offered'), 'handed over');
     assert.equal(logic.handoverOutcomeText('launch_failed'), 'the launch failed after the offer');
     assert.equal(logic.handoverOutcomeText('every_step_refused'), 'every step was refused');
     assert.equal(logic.handoverOutcomeText('no_usable_executor'), 'no agent could take it');
     assert.equal(logic.handoverOutcomeText('ceiling_reached'), "today's ceiling reached");
     assert.deepEqual(logic.handoverSkipped([{ agent: 'hermes', reason: 'no_usable_account' }, { agent: 'codex', reason: 'agent_disabled' }], nameOf), ['Hermes: no account with room', 'Codex: disabled under Installed']);
+    assert.deepEqual(logic.handoverSkipped([{ agent: 'kimi-code', reason: 'permission_mode' }, { agent: 'claude-code', reason: 'quota_unknown' }], nameOf), ['Kimi Code: asks for less approval than the agent before it', 'Claude Code: remaining quota not seen yet']);
     assert.equal(logic.shortWorkflow('wf_0123456789abcdef'), 'wf_01234567');
   });
 }

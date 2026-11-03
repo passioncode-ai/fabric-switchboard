@@ -811,16 +811,22 @@ export function skipReasonText(reason: string | null | undefined): string | null
     case 'key_exhausted': return t('less than $0.50 left on the key');
     case 'spend_unknown': return t('spend could not be read');
     case 'ceilings_unreadable': return t('spending ceilings could not be read');
+    // SB-82 N3 and N4 (SB-245): judged before the offer.
+    case 'not_installed': return t('not installed');
+    case 'quota_unknown': return t('remaining quota not seen yet');
+    case 'permission_mode': return t('asks for less approval than the agent before it');
     default: return null;
   }
 }
 /** One readiness line for a step (SCN-082): ready on which account or key, or why not. A paid
  * step's spend is read only at a hand-over, so the window says it has not been read. */
-export function stepReasonText(step: Pick<ChainStepView, 'state' | 'reason' | 'paid' | 'account_label' | 'key_scope' | 'key'>, groupName?: string): string {
+export function stepReasonText(step: Pick<ChainStepView, 'state' | 'reason' | 'paid' | 'account_label' | 'key_scope' | 'key' | 'containment'>, groupName?: string): string {
   if (step.state === 'ready') {
     const where = step.key_scope === 'group' ? (groupName ? t('the key of {group}', { group: groupName }) : t('the group\'s key')) : step.key_scope === 'machine' ? t('this computer\'s key') : step.account_label ?? '';
     const line = where ? t('Ready: {where}', { where }) : t('Ready');
-    return step.paid ? `${line}. ${t('Spend not read yet.')}` : line;
+    const base = step.paid ? `${line}. ${t('Spend not read yet.')}` : line;
+    // SB-245: the automatic fallback never hands a Claude Code or Codex task to an agent that asks for no approval (SB-82 D-6).
+    return step.containment === 'none' ? `${base}${base.endsWith('.') ? '' : '.'} ${t('Takes no Claude Code or Codex task.')}` : base;
   }
   if (step.state === 'not_installed') return t('Not installed');
   if (step.state === 'not_automatic') return step.reason === 'key_pinned' && step.key ? t('Pinned to key {name}: not automatic yet (waits for project grants)', { name: step.key }) : t('Not automatic yet');

@@ -566,8 +566,13 @@ Design: [XA-01](packets/cross-agent-continuation.md) (operator decision D-1: aut
   Claude Code and Codex `asks`, Kimi Code `none`, an executor the engine names otherwise `asks`) and passes over every
   step of a weaker class as `permission_mode` (probe `refused`), before its account, key or spend is looked at. So
   after a Claude Code or Codex executor only Claude Code or Codex take over; the `subscriptions-first` preset's Kimi
-  Code and Hermes steps serve a Kimi Code executor. `switchboard continue` by hand and the chain view do not apply it.
-  Test: `a_step_that_asks_less_than_its_executor_is_passed_over`.
+  Code and Hermes steps serve a Kimi Code executor. `switchboard continue` by hand and the chain view do not apply it;
+  the chain view's steps carry `containment` (`asks` or `none`, SB-245), and the window adds “Takes no Claude Code or
+  Codex task.” to a ready step of class `none` and names the three new skip reasons (`not_installed`, `quota_unknown`,
+  `permission_mode`) in its readiness and *Passed over* lines (SCN-082). Tests:
+  `a_step_that_asks_less_than_its_executor_is_passed_over`,
+  `not_installed_a_sign_in_and_unreadable_agent_settings_are_named`, `stepReasonText` and `handoverSkipped` in
+  `scripts/test-ui-logic.mjs`.
 - **Evidence:** log event `fallback` with `offered`, `launch_failed`, `every_step_refused`,
   `no_usable_executor`, `no_checkout`, `engine_unreadable`, `group_ambiguous` or `no_chain`, and
   since 0.7.0 `key_exhausted`, `ceiling_reached`, `spend_unknown` or `ceilings_unreadable` when the
