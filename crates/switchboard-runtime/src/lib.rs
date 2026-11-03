@@ -3885,6 +3885,7 @@ async fn execute(
                     disabled,
                     missing: HashSet::new(),
                     unattended: false,
+                    floor: crate::agent_catalog::Containment::None,
                 };
                 let catalog = agent_catalog::catalog();
                 let installed = |agent: &str| {

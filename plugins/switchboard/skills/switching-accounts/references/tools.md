@@ -189,7 +189,7 @@ applies until the operator sets one**. With `folder` (the workflow's checkout, a
 folder) the group is found as the automatic fallback finds it: the executor's group (`pool`) when
 it holds the folder, else the one group holding it, else, when several do, the group its proxy route
 and paid key use; a relative `folder` is refused. `presets` lists ready-made orders
-(`subscriptions-first`: claude-code → codex → kimi-code → hermes). `readiness` says per chain
+(`subscriptions-first`: claude-code → codex → kimi-code → hermes; the automatic fallback never hands a Claude Code or Codex task to Kimi Code, Hermes or OpenCode, which ask for no approval, SB-82 D-6). `readiness` says per chain
 what each step would do now; `limits_known` is false when no Switchboard owner runs, so readiness
 cannot name a limited account; `last_handover` and `ceilings_unreadable` come from the spending
 ceilings' file.

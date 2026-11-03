@@ -82,6 +82,10 @@ pub(crate) struct KimiChoice<'a> {
     /// with no usage observation as `quota_unknown`; `switchboard continue` by hand keeps the
     /// ranking that puts such an account last.
     pub unattended: bool,
+    /// SB-82 D-6 (the operator, 2026-11-02, Fabric question `dae679d2`: refuse a looser agent):
+    /// the executor's containment. A step whose agent asks less before acting is passed over as
+    /// `permission_mode`, never run in a weaker mode. `Containment::None` admits every agent.
+    pub floor: crate::agent_catalog::Containment,
 }
 
 /// What `KimiChoice::used` answers for a Kimi Code account it has never seen.
@@ -110,6 +114,7 @@ pub(crate) fn resolve(
         disabled: HashSet::new(),
         missing: HashSet::new(),
         unattended: false,
+        floor: crate::agent_catalog::Containment::None,
     };
     resolve_with(
         snapshot,
@@ -164,6 +169,12 @@ pub(crate) fn resolve_with(
                 return Step::Skip {
                     agent: e.agent.clone(),
                     reason: "agent_disabled",
+                };
+            }
+            if crate::agent_catalog::containment(&e.agent) < kimi.floor {
+                return Step::Skip {
+                    agent: e.agent.clone(),
+                    reason: "permission_mode",
                 };
             }
             let kimi_pin = e
@@ -346,6 +357,28 @@ pub(crate) fn unnamed_and_stale(workflow: &Value, executor: &Value) -> bool {
         .is_none_or(|s| s > UNNAMED_EXECUTOR_SILENCE)
 }
 
+/// SB-82 D-6: the containment of a workflow's executor, from the engine's `provider`. One this
+/// cannot name is taken to ask, so nothing looser is chosen for it.
+pub(crate) fn executor_containment(executor: &Value) -> crate::agent_catalog::Containment {
+    // A test's Hermes Agent is the paid step the spend-gate tests hand over; whether a Claude
+    // Code executor may be followed by it is decided in tests of its own.
+    #[cfg(test)]
+    if TEST_HERMES_READY.try_with(|_| ()).is_ok() {
+        return crate::agent_catalog::Containment::None;
+    }
+    let name = executor
+        .get("provider")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    if continuation::executor_is_kimi(name) {
+        return crate::agent_catalog::containment("kimi-code");
+    }
+    match continuation::executor_provider(name) {
+        Some(provider) => crate::agent_catalog::containment(provider_agent(provider)),
+        None => crate::agent_catalog::Containment::Asks,
+    }
+}
+
 /// A workflow run by Kimi Code on a saved Kimi account that the background view finds limited
 /// (SB-99). Only `accountRef` decides: the ordinary `kimi` is shown, not watched.
 pub(crate) fn kimi_executor_limited(
@@ -481,6 +514,7 @@ pub(crate) fn account_for_default(
         disabled: HashSet::new(),
         missing: HashSet::new(),
         unattended: false,
+        floor: crate::agent_catalog::Containment::None,
     };
     let sign_in: HashSet<String> = runtime
         .refresh
@@ -744,7 +778,7 @@ pub(crate) async fn pass_with_reads<F, Fut, R, RFut>(
     let kimi_usable =
         |id: &str| crate::kimi::continuation_preflight(&runtime.root, &runtime.store, id).is_ok();
     let kimi_used = |id: &str| runtime.kimi_watch.used(id);
-    let kimi = KimiChoice {
+    let mut kimi = KimiChoice {
         ids: kimi_ids.clone(),
         usable: &kimi_usable,
         used: &kimi_used,
@@ -763,6 +797,7 @@ pub(crate) async fn pass_with_reads<F, Fut, R, RFut>(
             .map(str::to_owned)
             .collect(),
         unattended: true,
+        floor: crate::agent_catalog::Containment::None,
     };
     // The engine is a child process with a deadline: off the async workers, so a slow engine
     // never holds the monitor's thread.
@@ -830,6 +865,8 @@ pub(crate) async fn pass_with_reads<F, Fut, R, RFut>(
             },
         };
         examined += 1;
+        // SB-82 D-6: no step that asks less before acting than this workflow's executor.
+        kimi.floor = executor_containment(&executor);
         // C-8: the group's chain is chosen by the checkout below, so the engine is asked for it
         // whenever a chain could apply: the workflow's, the executor group's or the machine's
         // (as before), or any group's.
@@ -1751,6 +1788,7 @@ mod tests {
                 disabled: HashSet::new(),
                 missing: HashSet::new(),
                 unattended: false,
+                floor: crate::agent_catalog::Containment::None,
             };
             resolve_with(
                 &snapshot,
@@ -1820,6 +1858,7 @@ mod tests {
                 disabled: disabled.iter().map(|d| d.to_string()).collect(),
                 missing: HashSet::new(),
                 unattended: false,
+                floor: crate::agent_catalog::Containment::None,
             };
             resolve_with(
                 &snapshot,
@@ -1898,6 +1937,7 @@ mod tests {
             disabled: HashSet::new(),
             missing: HashSet::new(),
             unattended: false,
+            floor: crate::agent_catalog::Containment::None,
         };
         let limited: HashSet<String> = ["claude-limited".to_string()].into();
         let pick = |executor: &[String], limited: &HashSet<String>| {
@@ -1948,6 +1988,7 @@ mod tests {
             disabled: HashSet::new(),
             missing: HashSet::new(),
             unattended: false,
+            floor: crate::agent_catalog::Containment::None,
         };
         let run = |id: &str| Step::Run {
             agent: "kimi-code".into(),
@@ -2102,6 +2143,7 @@ mod tests {
             disabled: HashSet::new(),
             missing: missing.iter().map(|a| (*a).to_owned()).collect(),
             unattended,
+            floor: crate::agent_catalog::Containment::None,
         }
     }
 
@@ -2200,6 +2242,70 @@ mod tests {
                 run("kimi-code", "kimi-unseen"),
             ]
         );
+    }
+
+    #[test]
+    fn a_step_that_asks_less_than_its_executor_is_passed_over() {
+        // SB-82 D-6, the operator's answer of 2026-11-02 (Fabric question dae679d2, «Пропускать
+        // агента с более слабыми ограничениями»): before, a Claude Code session at its limit
+        // could be continued by `kimi -p`, which asks for no approval.
+        let snapshot = Snapshot {
+            accounts: vec![account("codex-a", Provider::Codex, Some(20.0))],
+            ..Default::default()
+        };
+        let none = HashSet::new();
+        let walk = |floor| {
+            let mut kimi = choice(&[], true, &["kimi-a"], &|_| 10.0);
+            kimi.hermes_ready = true;
+            kimi.opencode_ready = true;
+            kimi.floor = floor;
+            resolve_with(
+                &snapshot,
+                &chain(&[
+                    ("kimi-code", None),
+                    ("hermes", None),
+                    ("opencode", None),
+                    ("codex", None),
+                ]),
+                None,
+                &none,
+                &none,
+                None,
+                &kimi,
+            )
+        };
+        let refused = |agent: &str| Step::Skip {
+            agent: agent.into(),
+            reason: "permission_mode",
+        };
+        let codex = Step::Run {
+            agent: "codex".into(),
+            account_id: "codex-a".into(),
+        };
+        use crate::agent_catalog::Containment;
+        assert_eq!(
+            walk(Containment::Asks),
+            vec![
+                refused("kimi-code"),
+                refused("hermes"),
+                refused("opencode"),
+                codex
+            ]
+        );
+        assert_eq!(crate::walks::probe("permission_mode"), "refused");
+        // A Kimi Code executor asks for nothing: every agent may follow it.
+        let open = walk(Containment::None);
+        assert!(
+            open.iter().all(|s| matches!(s, Step::Run { .. })),
+            "{open:?}"
+        );
+        let of = |provider: &str| executor_containment(&json!({ "provider": provider }));
+        assert_eq!(of("claude-code"), Containment::Asks);
+        assert_eq!(of("codex"), Containment::Asks);
+        assert_eq!(of("kimi"), Containment::None);
+        // An executor the engine names otherwise gets nothing looser than asking.
+        assert_eq!(of("someone-else"), Containment::Asks);
+        assert_eq!(executor_containment(&Value::Null), Containment::Asks);
     }
 
     #[test]
