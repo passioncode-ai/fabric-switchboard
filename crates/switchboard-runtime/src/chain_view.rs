@@ -290,6 +290,7 @@ mod tests {
                 disabled: self.disabled.clone(),
                 missing: HashSet::new(),
                 unattended: false,
+                floor: crate::agent_catalog::Containment::None,
             };
             let installed = |agent: &str| !self.missing.contains(agent);
             let inputs = Inputs {
@@ -408,6 +409,7 @@ mod tests {
             disabled: HashSet::new(),
             missing: HashSet::new(),
             unattended: false,
+            floor: crate::agent_catalog::Containment::None,
         };
         let inputs = Inputs {
             limited: &f.limited,

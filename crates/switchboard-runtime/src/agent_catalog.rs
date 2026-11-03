@@ -58,6 +58,23 @@ pub fn switchable(id: &str) -> bool {
     SWITCHABLE.contains(&id)
 }
 
+/// SB-82 D-6: how an agent Switchboard launches asks before it acts, weakest first. Claude Code
+/// runs under the operator's own settings and Codex under its defaults, both asking for
+/// approval; Kimi Code (`kimi -p`), Hermes and OpenCode, as launched now, ask for none, and so
+/// does any agent this list does not name.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Containment {
+    None,
+    Asks,
+}
+
+pub fn containment(id: &str) -> Containment {
+    match id {
+        "claude-code" | "codex" => Containment::Asks,
+        _ => Containment::None,
+    }
+}
+
 /// Ready-made chains (operator, 2026-10-06: subscriptions first, then paid agents). A preset is
 /// only a starting order; nothing applies until the operator sets a chain.
 pub const PRESETS: &[(&str, &[&str])] = &[(

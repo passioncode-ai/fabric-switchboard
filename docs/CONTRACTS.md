@@ -559,6 +559,15 @@ Design: [XA-01](packets/cross-agent-continuation.md) (operator decision D-1: aut
   and the chain view keep the old ranking (an unobserved account last, but chosen). Tests:
   `a_missing_binary_is_passed_over_before_the_offer_and_the_next_step_runs`,
   `an_unattended_walk_passes_over_an_unobserved_account_and_a_person_runs_it`.
+- **Never a looser agent (SB-82 D-6; the operator, 2026-11-02, Fabric question `dae679d2`: «Пропускать агента с
+  более слабыми ограничениями»).** Each agent has a containment class (`agent_catalog::containment`): `asks` for
+  Claude Code (the operator's own settings) and Codex (its defaults), `none` for Kimi Code (`kimi -p`), Hermes,
+  OpenCode and any other agent. The automatic fallback takes the executor's class (`fallback::executor_containment`:
+  Claude Code and Codex `asks`, Kimi Code `none`, an executor the engine names otherwise `asks`) and passes over every
+  step of a weaker class as `permission_mode` (probe `refused`), before its account, key or spend is looked at. So
+  after a Claude Code or Codex executor only Claude Code or Codex take over; the `subscriptions-first` preset's Kimi
+  Code and Hermes steps serve a Kimi Code executor. `switchboard continue` by hand and the chain view do not apply it.
+  Test: `a_step_that_asks_less_than_its_executor_is_passed_over`.
 - **Evidence:** log event `fallback` with `offered`, `launch_failed`, `every_step_refused`,
   `no_usable_executor`, `no_checkout`, `engine_unreadable`, `group_ambiguous` or `no_chain`, and
   since 0.7.0 `key_exhausted`, `ceiling_reached`, `spend_unknown` or `ceilings_unreadable` when the
