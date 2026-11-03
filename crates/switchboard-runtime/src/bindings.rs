@@ -365,12 +365,39 @@ fn is_ours(value: &Value, current: &str, previous: Option<&Binding>, base: bool)
         })
 }
 
+/// `http://127.0.0.1:<port>/claude/<pool>`: a route to Switchboard's own proxy, whichever
+/// folder, pool or port it was written for.
+fn is_switchboard_route(value: &Value) -> bool {
+    let Some(rest) = value
+        .as_str()
+        .and_then(|t| t.strip_prefix("http://127.0.0.1:"))
+    else {
+        return false;
+    };
+    let Some((port, pool)) = rest.split_once("/claude/") else {
+        return false;
+    };
+    !port.is_empty()
+        && port.bytes().all(|b| b.is_ascii_digit())
+        && !pool.is_empty()
+        && !pool.contains('/')
+}
+
+/// A capability header: only Switchboard's proxy reads `X-Switchboard-Capability`.
+fn is_switchboard_header(value: &Value) -> bool {
+    value
+        .as_str()
+        .and_then(|t| t.strip_prefix("X-Switchboard-Capability: "))
+        .is_some_and(|t| !t.is_empty() && !t.contains(['\r', '\n']))
+}
+
 /// Writes the route into one folder, never over a value that is the person's.
 fn apply(
     folder: &Path,
     base_url: &str,
     token: &str,
     previous: Option<&Binding>,
+    known: &std::collections::HashSet<String>,
 ) -> Result<Applied, ()> {
     let path = settings_path(folder);
     let existing = read_settings(&path)?;
@@ -380,15 +407,19 @@ fn apply(
         let Value::Object(env) = env else {
             return Err(());
         };
+        // SB-244: a folder copied with its settings file carries the values Switchboard wrote
+        // for another folder. A Switchboard route and capability header are Switchboard's in any
+        // folder: only its proxy reads them.
         let base_ok = env
             .get(BASE_URL)
-            .is_none_or(|v| is_ours(v, base_url, previous, true));
-        let token_ok = env
-            .get(AUTH_TOKEN)
-            .is_none_or(|v| is_ours(v, token, previous, false));
+            .is_none_or(|v| is_ours(v, base_url, previous, true) || is_switchboard_route(v));
+        let token_ok = env.get(AUTH_TOKEN).is_none_or(|v| {
+            is_ours(v, token, previous, false)
+                || v.as_str().is_some_and(|t| known.contains(&sha256(t)))
+        });
         let header_ok = env
             .get(CUSTOM_HEADERS)
-            .is_none_or(|v| header_ours(v, token, previous));
+            .is_none_or(|v| header_ours(v, token, previous) || is_switchboard_header(v));
         if !base_ok || !token_ok || !header_ok {
             return Ok(Applied::UserValues);
         }
@@ -529,6 +560,9 @@ pub(crate) fn sync_salted(
         ..Report::default()
     };
     let rows = read(root)?;
+    // Every capability Switchboard recorded writing, in any folder (SB-244).
+    let known: std::collections::HashSet<String> =
+        rows.iter().map(|r| r.token_sha256.clone()).collect();
     let mut kept: Vec<Binding> = Vec::new();
     let mut left: Vec<(String, String)> = Vec::new();
     for (folder, pool) in &want {
@@ -544,7 +578,7 @@ pub(crate) fn sync_salted(
                 let _ = unapply(old);
             }
         }
-        match apply(folder, &base_url, &token, previous) {
+        match apply(folder, &base_url, &token, previous, &known) {
             Ok(result @ (Applied::Written(_) | Applied::Unchanged)) => {
                 let created = match (result, previous) {
                     (Applied::Written(written), Some(old)) => written || old.created,
@@ -1101,6 +1135,95 @@ mod tests {
             new,
             folder_capability("session", "pc", &salts, canonical.to_str().unwrap())
         );
+    }
+
+    #[test]
+    fn a_folder_copied_with_its_settings_file_is_rewritten_by_a_rotation() {
+        // SB-244 (2026-11-03): two full clones copied with their source's settings file kept
+        // the old capability through a rotation that answered `skipped: 0`, because the copied
+        // values matched no record of their own folder and were taken for the person's.
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("data");
+        std::fs::create_dir_all(&root).unwrap();
+        let app = temp.path().join("app");
+        let copy = temp.path().join("app-copy");
+        let stale = temp.path().join("app-stale");
+        for folder in [&app, &copy, &stale] {
+            git(folder);
+        }
+        let first = Snapshot {
+            projects: vec![project("pc", &[&app])],
+            accounts: vec![account("pc")],
+            ..Default::default()
+        };
+        sync(&root, &first, "127.0.0.1:4000", "session").unwrap();
+        std::fs::create_dir_all(copy.join(SETTINGS_DIR)).unwrap();
+        std::fs::copy(settings_path(&app), settings_path(&copy)).unwrap();
+        // A copy from before an earlier rotation, on an older port: no record names its value.
+        std::fs::create_dir_all(stale.join(SETTINGS_DIR)).unwrap();
+        std::fs::write(
+            settings_path(&stale),
+            r#"{"env":{"ANTHROPIC_BASE_URL":"http://127.0.0.1:3999/claude/pc","ANTHROPIC_CUSTOM_HEADERS":"X-Switchboard-Capability: from-an-earlier-salt"},"permissions":{"allow":["Bash(ls)"]}}"#,
+        )
+        .unwrap();
+        let snapshot = Snapshot {
+            projects: vec![project("pc", &[&app, &copy, &stale])],
+            accounts: vec![account("pc")],
+            ..Default::default()
+        };
+        let salts: std::collections::HashMap<String, String> =
+            [("pc".to_owned(), "synthetic-salt".to_owned())].into();
+        let report = sync_salted(&root, &snapshot, "127.0.0.1:4000", "session", &salts).unwrap();
+        assert_eq!(report.bound, 3, "{report:?}");
+        assert!(report.user_values_present.is_empty(), "{report:?}");
+        assert!(report.skipped.is_empty(), "{report:?}");
+        for folder in [&app, &copy, &stale] {
+            let canonical = folder.canonicalize().unwrap();
+            let e = env(folder).unwrap();
+            assert_eq!(e[BASE_URL], "http://127.0.0.1:4000/claude/pc");
+            assert_eq!(
+                e[CUSTOM_HEADERS],
+                header_value(&folder_capability(
+                    "session",
+                    "pc",
+                    &salts,
+                    canonical.to_str().unwrap()
+                ))
+            );
+        }
+        // The rest of a copied file stays as it was.
+        let kept: Value =
+            serde_json::from_str(&std::fs::read_to_string(settings_path(&stale)).unwrap()).unwrap();
+        assert_eq!(kept["permissions"]["allow"][0], "Bash(ls)");
+    }
+
+    #[test]
+    fn a_route_to_somewhere_else_is_still_the_persons() {
+        // SB-244 recognises only Switchboard's own route and header; anything near it stays.
+        for text in [
+            "http://127.0.0.1:4000/claude/pc/extra",
+            "http://127.0.0.1:/claude/pc",
+            "http://127.0.0.1:4000/claude/",
+            "http://localhost:4000/claude/pc",
+            "https://127.0.0.1:4000/claude/pc",
+            "http://127.0.0.1:4000/codex/pc",
+        ] {
+            assert!(!is_switchboard_route(&Value::String(text.into())), "{text}");
+        }
+        assert!(is_switchboard_route(&Value::String(
+            "http://127.0.0.1:4000/claude/pc".into()
+        )));
+        for text in [
+            "X-Other: value",
+            "X-Switchboard-Capability: ",
+            "X-Switchboard-Capability: a\nX-Other: b",
+        ] {
+            assert!(
+                !is_switchboard_header(&Value::String(text.into())),
+                "{text}"
+            );
+        }
+        assert!(!is_switchboard_header(&Value::Bool(true)));
     }
 
     #[test]

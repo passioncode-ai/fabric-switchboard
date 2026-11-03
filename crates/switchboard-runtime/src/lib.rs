@@ -4718,9 +4718,22 @@ async fn execute(
                 "capability_rotated",
                 &[("folders", oplog::Field::Number(report.bound as i64))],
             );
+            // SB-244: every folder of the group that still holds an old value is named, with
+            // why, so `skipped: 0` means every folder carries the new capability.
+            let not_rewritten: Vec<Value> = report
+                .skipped
+                .iter()
+                .map(|f| json!({"folder": f, "reason": "unreadable"}))
+                .chain(
+                    report
+                        .user_values_present
+                        .iter()
+                        .map(|f| json!({"folder": f, "reason": "persons_values"})),
+                )
+                .collect();
             Ok(
                 json!({"pool": pool, "rotated": true, "folders_rewritten": report.bound,
-                "skipped": report.skipped.len(),
+                "skipped": not_rewritten.len(), "not_rewritten": not_rewritten,
                 "note": "The old capability is refused now. A Claude Code session already running in one of these folders keeps the old one until it restarts."}),
             )
         }
