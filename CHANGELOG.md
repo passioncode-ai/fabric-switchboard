@@ -8,6 +8,7 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- The automatic fallback no longer offers work to Claude Code or Codex when its command is not installed, and goes on to the next agent of the chain instead of stopping. It also passes over an account whose remaining quota it has never seen, which may be the one at its limit; `switchboard continue` by hand still uses such an account (SB-82).
 - Each automatic hand-over now keeps a record of every agent it passed over and why, in the Fabric agent contract's words (`not-admitted`, `quota-unknown`, `refused`, `spawn-failed`), and the agent it chose; `switchboard --json chain list` and the MCP chain tool show the newest 20 (SB-82).
 - `switchboard project rotate-capability` now rewrites a folder that was copied together with another folder's settings file, which it used to leave with the old capability while answering `skipped: 0`. Its answer counts and names, in `not_rewritten`, every folder of the group it could not rewrite, with the reason (SB-244).
 - A fallback chain accepts agents named by the Fabric agent contract's runner kinds (such as `cursor-agent`), and its steps show that kind beside Switchboard's own name (SB-82).

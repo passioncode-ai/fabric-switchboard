@@ -541,13 +541,24 @@ Design: [XA-01](packets/cross-agent-continuation.md) (operator decision D-1: aut
   account_id, spawned}}`. Each candidate the walk passed over is named once, in order: a skipped step, a step the
   spend gate skipped, an offer refused before it existed (`offer_refused`) and a launch that failed after its offer
   (`launch_failed`). `probe` is the contract's closed set (`walks::probe`: `agent_not_automatic_yet` →
-  `not-admitted`, `spend_unknown` and `ceilings_unreadable` → `quota-unknown`, `launch_failed` → `spawn-failed`,
-  every other reason → `refused`); `detail` is Switchboard's own reason. `basis: host-order` says a chain is
+  `not-admitted`, `not_installed` → `not-installed`, `sign_in_required` → `not-connected`, `spend_unknown`,
+  `ceilings_unreadable` and `quota_unknown` → `quota-unknown`, `launch_failed` → `spawn-failed`, every other
+  reason → `refused`); `detail` is Switchboard's own reason. `basis: host-order` says a chain is
   Switchboard's own order, not a contract route revision (as Fabric ADR-0125 decision 1 says of its fallback order).
   `Operation::Chains` (CLI `chain list --json`, MCP `switchboard_chain_get`) answers the newest 20 as `walks`; a
   record that cannot be written logs `fallback` with `walk: unwritten`. Tests: `walks::tests::*`,
   `a_refusal_moves_down_the_chain_and_a_failed_launch_after_the_offer_stops`,
   `the_chain_view_names_why_each_step_would_be_skipped`.
+- **Judged before the offer (SB-82 D-4, D-5).** The automatic fallback looks up the `claude` and `codex` binaries
+  (`launch::find_program`, file checks only, and only for an agent a chain names) before it resolves a chain: a
+  `claude-code` or `codex` step whose binary is missing is skipped as `not_installed` and the walk goes on, where
+  before it was offered and failed at the launch (`launch_failed`), which ended the walk. The same walk
+  (`KimiChoice::unattended`) takes only an account with a usage observation: a Claude Code, Codex or Kimi Code
+  step whose usable accounts have none is skipped as `quota_unknown`, since an unobserved account may be the one at
+  its limit, and an observed account goes before an unobserved one whatever its use. `switchboard continue` by hand
+  and the chain view keep the old ranking (an unobserved account last, but chosen). Tests:
+  `a_missing_binary_is_passed_over_before_the_offer_and_the_next_step_runs`,
+  `an_unattended_walk_passes_over_an_unobserved_account_and_a_person_runs_it`.
 - **Evidence:** log event `fallback` with `offered`, `launch_failed`, `every_step_refused`,
   `no_usable_executor`, `no_checkout`, `engine_unreadable`, `group_ambiguous` or `no_chain`, and
   since 0.7.0 `key_exhausted`, `ceiling_reached`, `spend_unknown` or `ceilings_unreadable` when the

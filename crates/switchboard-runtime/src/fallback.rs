@@ -75,7 +75,17 @@ pub(crate) struct KimiChoice<'a> {
     pub opencode_ready: bool,
     /// Agents the person disabled for taking over work on the Agents page (SB-120): skipped.
     pub disabled: HashSet<String>,
+    /// SB-82 (D-4): `claude-code` or `codex` steps whose binary is not on this machine, passed
+    /// over as `not_installed` before the offer instead of failing at the launch.
+    pub missing: HashSet<String>,
+    /// SB-82 (D-5): the automatic fallback, with no person watching. It passes over an account
+    /// with no usage observation as `quota_unknown`; `switchboard continue` by hand keeps the
+    /// ranking that puts such an account last.
+    pub unattended: bool,
 }
+
+/// What `KimiChoice::used` answers for a Kimi Code account it has never seen.
+pub(crate) const KIMI_UNSEEN: f64 = 1000.0;
 
 /// Resolves the chain in order, never to the executor's own account, a disabled one, one with a
 /// recent limit, or one that needs a new sign-in — nor to another saved row of the same identity
@@ -98,6 +108,8 @@ pub(crate) fn resolve(
         hermes_ready: false,
         opencode_ready: false,
         disabled: HashSet::new(),
+        missing: HashSet::new(),
+        unattended: false,
     };
     resolve_with(
         snapshot,
@@ -162,15 +174,20 @@ pub(crate) fn resolve_with(
                 && e.key.is_none()
                 && (kimi_pin.is_some() || e.account_id.is_none())
             {
-                let chosen = match kimi_pin {
-                    Some(id) => kimi_usable(id).then(|| id.to_owned()),
-                    None => kimi
-                        .ids
-                        .iter()
-                        .filter(|id| kimi_usable(id))
-                        .min_by(|a, b| (kimi.used)(a).total_cmp(&(kimi.used)(b)))
-                        .cloned(),
+                let observed = |id: &str| !kimi.unattended || (kimi.used)(id) < KIMI_UNSEEN;
+                let candidates: Vec<&String> = match kimi_pin {
+                    Some(id) => kimi.ids.iter().filter(|k| *k == id).collect(),
+                    None => kimi.ids.iter().collect(),
                 };
+                let usable: Vec<&String> = candidates
+                    .into_iter()
+                    .filter(|id| kimi_usable(id))
+                    .collect();
+                let chosen = usable
+                    .iter()
+                    .filter(|id| observed(id))
+                    .min_by(|a, b| (kimi.used)(a).total_cmp(&(kimi.used)(b)))
+                    .map(|id| (*id).clone());
                 return match chosen {
                     Some(account_id) => Step::Run {
                         agent: e.agent.clone(),
@@ -178,7 +195,11 @@ pub(crate) fn resolve_with(
                     },
                     None => Step::Skip {
                         agent: e.agent.clone(),
-                        reason: "no_usable_account",
+                        reason: if usable.is_empty() {
+                            "no_usable_account"
+                        } else {
+                            "quota_unknown"
+                        },
                     },
                 };
             }
@@ -231,28 +252,37 @@ pub(crate) fn resolve_with(
                     reason: "agent_not_automatic_yet",
                 };
             };
-            let account = match &e.account_id {
-                Some(id) => snapshot
-                    .accounts
-                    .iter()
-                    .find(|a| &a.id == id && a.provider == provider)
-                    .filter(|a| usable(a))
-                    .cloned(),
-                None => snapshot
-                    .accounts
-                    .iter()
-                    .filter(|a| a.provider == provider && usable(a))
-                    .min_by(|a, b| used(a).total_cmp(&used(b)))
-                    .cloned(),
-            };
+            if kimi.missing.contains(&e.agent) {
+                return Step::Skip {
+                    agent: e.agent.clone(),
+                    reason: "not_installed",
+                };
+            }
+            let candidates: Vec<&Account> = snapshot
+                .accounts
+                .iter()
+                .filter(|a| {
+                    a.provider == provider
+                        && e.account_id.as_ref().is_none_or(|id| &a.id == id)
+                        && usable(a)
+                })
+                .collect();
+            let account = candidates
+                .iter()
+                .filter(|a| !kimi.unattended || a.usage.is_some())
+                .min_by(|a, b| used(a).total_cmp(&used(b)));
             match account {
                 Some(a) => Step::Run {
                     agent: e.agent.clone(),
-                    account_id: a.id,
+                    account_id: a.id.clone(),
                 },
                 None => Step::Skip {
                     agent: e.agent.clone(),
-                    reason: "no_usable_account",
+                    reason: if candidates.is_empty() {
+                        "no_usable_account"
+                    } else {
+                        "quota_unknown"
+                    },
                 },
             }
         })
@@ -449,6 +479,8 @@ pub(crate) fn account_for_default(
         hermes_ready: false,
         opencode_ready: false,
         disabled: HashSet::new(),
+        missing: HashSet::new(),
+        unattended: false,
     };
     let sign_in: HashSet<String> = runtime
         .refresh
@@ -722,6 +754,15 @@ pub(crate) async fn pass_with_reads<F, Fut, R, RFut>(
         opencode_ready: wants(crate::launch::OPENCODE_TARGET)
             && crate::launch::opencode_continuation_ready(&runtime.store),
         disabled,
+        // SB-82 (D-4): looked up only for a chain that has the agent (file checks, nothing
+        // spawned).
+        missing: [Provider::Claude, Provider::Codex]
+            .into_iter()
+            .map(provider_agent)
+            .filter(|agent| wants(agent) && !test_binary_present(agent))
+            .map(str::to_owned)
+            .collect(),
+        unattended: true,
     };
     // The engine is a child process with a deadline: off the async workers, so a slow engine
     // never holds the monitor's thread.
@@ -938,6 +979,21 @@ fn record_last(
 tokio::task_local! {
     /// A test's Hermes Agent, ready for a chain step without an installed `hermes`.
     pub(crate) static TEST_HERMES_READY: ();
+    /// The agents whose binary a test's machine lacks; without it every binary is present.
+    pub(crate) static TEST_MISSING_BINARIES: HashSet<String>;
+}
+
+/// Whether the `claude` or `codex` binary of a chain step's agent is on this machine.
+fn test_binary_present(agent: &str) -> bool {
+    #[cfg(test)]
+    return TEST_MISSING_BINARIES
+        .try_with(|missing| !missing.contains(agent))
+        .unwrap_or(true);
+    #[cfg(not(test))]
+    [Provider::Claude, Provider::Codex]
+        .into_iter()
+        .find(|p| provider_agent(*p) == agent)
+        .is_none_or(|p| crate::launch::find_program(p.as_str()).is_some())
 }
 fn test_hermes_ready() -> bool {
     #[cfg(test)]
@@ -1693,6 +1749,8 @@ mod tests {
                 hermes_ready: ready,
                 opencode_ready: false,
                 disabled: HashSet::new(),
+                missing: HashSet::new(),
+                unattended: false,
             };
             resolve_with(
                 &snapshot,
@@ -1760,6 +1818,8 @@ mod tests {
                 hermes_ready: false,
                 opencode_ready: ready,
                 disabled: disabled.iter().map(|d| d.to_string()).collect(),
+                missing: HashSet::new(),
+                unattended: false,
             };
             resolve_with(
                 &snapshot,
@@ -1836,6 +1896,8 @@ mod tests {
             hermes_ready: false,
             opencode_ready: false,
             disabled: HashSet::new(),
+            missing: HashSet::new(),
+            unattended: false,
         };
         let limited: HashSet<String> = ["claude-limited".to_string()].into();
         let pick = |executor: &[String], limited: &HashSet<String>| {
@@ -1884,6 +1946,8 @@ mod tests {
             hermes_ready: false,
             opencode_ready: false,
             disabled: HashSet::new(),
+            missing: HashSet::new(),
+            unattended: false,
         };
         let run = |id: &str| Step::Run {
             agent: "kimi-code".into(),
@@ -2002,6 +2066,138 @@ mod tests {
                     agent: "kimi-code".into(),
                     reason: "no_usable_account"
                 },
+            ]
+        );
+    }
+
+    /// A usage observation for a saved account, as a quota check records it.
+    fn observed(store: &switchboard_core::Store, id: &str) {
+        store
+            .observe(
+                id,
+                Usage {
+                    windows: vec![],
+                    used_percent: 5.0,
+                    observed_at: crate::monitor::now(),
+                    resets_at: None,
+                    source: "claude_oauth".into(),
+                },
+            )
+            .unwrap();
+    }
+
+    /// SB-82 N3: the choice of the automatic fallback (`unattended`) or of a person.
+    fn choice<'a>(
+        missing: &[&str],
+        unattended: bool,
+        kimi_ids: &[&str],
+        kimi_used: &'a (dyn Fn(&str) -> f64 + Sync),
+    ) -> KimiChoice<'a> {
+        KimiChoice {
+            ids: kimi_ids.iter().map(|id| (*id).to_owned()).collect(),
+            usable: &|_| true,
+            used: kimi_used,
+            hermes_ready: false,
+            opencode_ready: false,
+            disabled: HashSet::new(),
+            missing: missing.iter().map(|a| (*a).to_owned()).collect(),
+            unattended,
+        }
+    }
+
+    #[test]
+    fn a_missing_binary_is_passed_over_before_the_offer_and_the_next_step_runs() {
+        // SB-82 D-4: before, the walk offered the workflow to `claude-code` and failed at the
+        // launch (`launch_failed`), which ended the walk.
+        let snapshot = Snapshot {
+            accounts: vec![
+                account("claude-a", Provider::Claude, Some(10.0)),
+                account("codex-a", Provider::Codex, Some(20.0)),
+            ],
+            ..Default::default()
+        };
+        let none = HashSet::new();
+        let steps = resolve_with(
+            &snapshot,
+            &chain(&[("claude-code", None), ("codex", None)]),
+            None,
+            &none,
+            &none,
+            None,
+            &choice(&["claude-code"], true, &[], &|_| 0.0),
+        );
+        assert_eq!(
+            steps,
+            vec![
+                Step::Skip {
+                    agent: "claude-code".into(),
+                    reason: "not_installed"
+                },
+                Step::Run {
+                    agent: "codex".into(),
+                    account_id: "codex-a".into()
+                },
+            ]
+        );
+        assert_eq!(crate::walks::probe("not_installed"), "not-installed");
+    }
+
+    #[test]
+    fn an_unattended_walk_passes_over_an_unobserved_account_and_a_person_runs_it() {
+        // SB-82 D-5: with no usage observation the account may be the one at its limit.
+        let snapshot = Snapshot {
+            accounts: vec![
+                account("claude-unseen", Provider::Claude, None),
+                account("codex-seen", Provider::Codex, Some(90.0)),
+                account("codex-unseen", Provider::Codex, None),
+            ],
+            ..Default::default()
+        };
+        let none = HashSet::new();
+        let walk = |unattended: bool| {
+            resolve_with(
+                &snapshot,
+                &chain(&[
+                    ("claude-code", None),
+                    ("codex", None),
+                    ("claude-code", Some("claude-unseen")),
+                    ("kimi-code", None),
+                ]),
+                None,
+                &none,
+                &none,
+                None,
+                &choice(&[], unattended, &["kimi-unseen"], &|_| KIMI_UNSEEN),
+            )
+        };
+        let skip = |agent: &str| Step::Skip {
+            agent: agent.into(),
+            reason: "quota_unknown",
+        };
+        let run = |agent: &str, id: &str| Step::Run {
+            agent: agent.into(),
+            account_id: id.into(),
+        };
+        assert_eq!(
+            walk(true),
+            vec![
+                skip("claude-code"),
+                // An observed account goes before an unobserved one, even at 90 %.
+                run("codex", "codex-seen"),
+                skip("claude-code"),
+                skip("kimi-code"),
+            ]
+        );
+        assert_eq!(crate::walks::probe("quota_unknown"), "quota-unknown");
+        // `switchboard continue` by hand keeps the ranking: an unobserved account goes last
+        // but runs.
+        assert_eq!(
+            walk(false),
+            vec![
+                run("claude-code", "claude-unseen"),
+                run("codex", "codex-seen"),
+                run("claude-code", "claude-unseen"),
+                run("kimi-code", "kimi-unseen"),
             ]
         );
     }
@@ -2265,6 +2461,8 @@ mod tests {
         let runtime = crate::fixtures::runtime(root.path(), signed_in, activates).await;
         let a = save(&runtime.store, "synthetic-a", "default");
         let b = save(&runtime.store, "synthetic-b", "default");
+        // SB-82 D-5: the automatic fallback hands work only to an observed account.
+        observed(&runtime.store, &b.id);
         // Claude Code wrote a limit marker a minute ago for the account in use (synthetic-a).
         let projects = root.path().join("claude").join("projects").join("-p");
         std::fs::create_dir_all(&projects).unwrap();
@@ -2345,6 +2543,8 @@ mod tests {
         let runtime = crate::fixtures::runtime(root.path(), signed_in, activates).await;
         let a = save(&runtime.store, "synthetic-a", "default");
         let c = save(&runtime.store, "synthetic-c", "default");
+        // SB-82 D-5: the automatic fallback hands work only to an observed account.
+        observed(&runtime.store, &c.id);
         let repo = tempfile::tempdir().unwrap();
         let repo_path = repo.path().canonicalize().unwrap();
         let group = runtime
@@ -2498,6 +2698,8 @@ mod tests {
         let runtime = crate::fixtures::runtime(root.path(), signed_in, activates).await;
         let a = save(&runtime.store, "synthetic-a", "default");
         let c = save(&runtime.store, "synthetic-c", "default");
+        // SB-82 D-5: the automatic fallback hands work only to an observed account.
+        observed(&runtime.store, &c.id);
         let repo = tempfile::tempdir().unwrap();
         let repo_path = repo.path().canonicalize().unwrap();
         let other = tempfile::tempdir().unwrap();

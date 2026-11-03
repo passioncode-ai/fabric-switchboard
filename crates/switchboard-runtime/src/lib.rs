@@ -3883,6 +3883,8 @@ async fn execute(
                     opencode_ready: wants(launch::OPENCODE_TARGET)
                         && launch::opencode_continuation_ready(&store),
                     disabled,
+                    missing: HashSet::new(),
+                    unattended: false,
                 };
                 let catalog = agent_catalog::catalog();
                 let installed = |agent: &str| {
