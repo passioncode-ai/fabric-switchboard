@@ -22,7 +22,8 @@
 - **After the tag.** SB-245, PR #369 (`9ca561d`): the chain view's steps carry `containment`; the window adds “Takes
   no Claude Code or Codex task.” to a ready Kimi Code, Hermes or OpenCode step and names the three new skip reasons,
   which showed as codes (Copylot en-US `a6309838`, `e457b138`, ru-RU `62f59430`, pass). Not in 0.7.6; ships next.
-  Not run: the window in a browser.
+  Observed in WebKit (Playwright) on the demo (`?demo=1`, 1280 px): “Ready: Kimi · work. Takes no Claude Code or
+  Codex task.” under the machine chain.
 - **Open.** D-7 (Fabric's reply on board message `ed2c935c`), SB-163 closes after a week with no `source_sync` hold
   over 5 s (to 2026-11-09).
 - **Exact next task.** Confirm release 0.7.6 (assets, `latest.json`, the installed app updates; a guard refused for a
