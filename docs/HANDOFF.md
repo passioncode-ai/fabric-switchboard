@@ -12,8 +12,10 @@
   walk passes over an account with no usage observation as `quota_unknown`. SB-82 N4, PR #367 (`f73ec78`): D-6 was
   answered by the operator on 2026-11-02 21:52Z (Fabric question `dae679d2`, refuse a looser agent); a step whose
   agent asks less than the executor (Kimi Code, Hermes, OpenCode after Claude Code or Codex) is `permission_mode`.
-  Scenarios SCN-039 and SCN-040 name the new skips. Release PR #368 (`bdd8b65`), tag `v0.7.6`, release run
-  41634545241; notes checked with Copylot (report `21c66272`, pass).
+  Scenarios SCN-039 and SCN-040 name the new skips. **Released** `v0.7.6` on `bdd8b65` (release PR #368): nightly on
+  the tag 41634845155 green, release run 41634545241 green, published 2026-11-03 13:18:58Z with 25 assets, `latest.json`
+  0.7.6 for seven platforms; notes checked with Copylot (report `21c66272`, pass). The app on this Mac was 0.7.5 at
+  publication and updates itself (download at the next 5-minute check, restart when idle).
 - **Board.** The coordinator's rule until 21.11 (CO-409, thread `44c43a06`): this session runs a watcher (session
   cron `cf714165`, minutes 7, 20, 33 and 46: `com.list {unread: true}`, `com.reply` to what is addressed here,
   `com.read_ack`). All 509 unread messages were read and marked on 2026-11-03; the two findings above were answered
@@ -26,9 +28,9 @@
   Codex task.” under the machine chain.
 - **Open.** D-7 (Fabric's reply on board message `ed2c935c`), SB-163 closes after a week with no `source_sync` hold
   over 5 s (to 2026-11-09).
-- **Exact next task.** Confirm release 0.7.6 (assets, `latest.json`, the installed app updates; a guard refused for a
-  missing runner reruns with `gh run rerun --failed`), close SB-244 in the backlog as released, then the next P1 or
-  P2 row of [the board](evidence/backlog.md) that waits on nobody.
+- **Exact next task.** Confirm the installed app reads 0.7.6 (`update_install` then `owner_started` with `0.7.6` in
+  the log), then the next P1 or P2 row of [the board](evidence/backlog.md) that waits on nobody; SB-245 ships with
+  the next release.
 
 ## 2026-11-02 (night): SB-82 designed, nodes N2 and N1 merged
 
