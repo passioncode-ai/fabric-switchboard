@@ -326,7 +326,7 @@ switchboard project save --name "Client Alpha" --folder /work/alpha-web --folder
 switchboard project save --pool client-alpha --name "Client Alpha" --folder /work/alpha-web   # update; omitted accounts go back to default
 switchboard project edit --pool client-alpha --add-account <id> --remove-folder /work/old   # SB-134: change by delta; the rest stays
 switchboard project edit --pool client-alpha --organization Acme   # SB-109: the group runs only on Acme's accounts (`personal` for personal ones)
-switchboard project rotate-capability --pool client-alpha   # the folders' capability leaked: the old one is refused, a new one is written
+switchboard project rotate-capability --pool client-alpha   # the folders' capability leaked: the old one is refused, a new one is written; `skipped` and `not_rewritten` name each folder still holding an old value (SB-244)
 switchboard project codex [on|off]     # SB-143: Codex sessions in project folders use the projects' Codex accounts (one provider in Codex's config.toml)
 switchboard stats [--days 30]            # SB-145/SB-147: requests and the provider's token counts by group, project, account, agent and day (1-90 days)
 switchboard project map [--under ~/DATA]   # SB-135: Git repositories on disk, each with its project or none, and their modules (`module_of`) (default ~/DATA, else home)
