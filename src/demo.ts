@@ -204,7 +204,7 @@ export function createDemoAdapter(): Adapter {
   if (chainsParam === 'reasons') demoChains[0] = { scope: { kind: 'machine' }, executors: reasonSteps.map((r) => r.executor), updated_at: now() - 60 };
   const scopeKey = (scope: ChainScope) => (scope.kind === 'machine' ? 'machine' : scope.kind === 'project' ? `project:${scope.pool}` : `workflow:${scope.id}`);
   const stepView = (e: ChainExecutor, pool: string | null): ChainStepView => {
-    const base = { agent: e.agent, name: catalogAgents.find((a) => a.id === e.agent)?.name ?? null, paid: false };
+    const base = { agent: e.agent, name: catalogAgents.find((a) => a.id === e.agent)?.name ?? null, paid: false, containment: (e.agent === 'claude-code' || e.agent === 'codex' ? 'asks' : 'none') as 'asks' | 'none' };
     if (e.key) return { ...base, state: 'not_automatic', reason: 'key_pinned', key: e.key };
     if (!SWITCHABLE.includes(e.agent)) return { ...base, state: 'not_automatic', reason: 'agent_not_automatic_yet' };
     if (agentDisabled.has(e.agent)) return { ...base, state: 'skipped', reason: 'agent_disabled' };

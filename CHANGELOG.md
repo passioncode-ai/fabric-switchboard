@@ -8,6 +8,7 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- Agents → *Fallback chains* says “Takes no Claude Code or Codex task.” on a ready Kimi Code, Hermes or OpenCode step, and names the new reasons a hand-over passed an agent over: not installed, remaining quota not seen yet, asks for less approval than the agent before it (SB-245).
 ## 0.7.6
 
 - The automatic fallback never hands a Claude Code or Codex task to an agent that asks for less approval before it acts: Kimi Code, Hermes and OpenCode, as Switchboard launches them, ask for none, so after Claude Code or Codex only Claude Code or Codex take over. `switchboard continue` by hand is unchanged (SB-82).

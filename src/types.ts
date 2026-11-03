@@ -177,6 +177,8 @@ export interface Chain { scope: ChainScope; executors: ChainExecutor[]; updated_
 export interface ChainStepView {
   agent: string; name: string | null;
   state: 'ready' | 'skipped' | 'not_automatic' | 'not_installed';
+  /** SB-245: `none` for an agent that asks for no approval, which the automatic fallback never follows a Claude Code or Codex executor with (SB-82 D-6). */
+  containment?: 'asks' | 'none';
   /** `agent_disabled`, `no_usable_account`, `sign_in_required`, `key_pinned`, `agent_not_automatic_yet`, `agent_settings_unreadable`, ... */
   reason: string | null;
   account_id?: string; account_label?: string;

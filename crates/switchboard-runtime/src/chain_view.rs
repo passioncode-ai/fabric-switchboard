@@ -92,6 +92,18 @@ pub(crate) fn preview(
                 Value::String(crate::agent_catalog::contract_id(&e.agent).to_owned()),
             );
             view.insert("name".into(), name(&e.agent));
+            // SB-245: the automatic fallback never follows a Claude Code or Codex executor with an
+            // agent of a weaker class (SB-82 D-6).
+            view.insert(
+                "containment".into(),
+                Value::String(
+                    match crate::agent_catalog::containment(&e.agent) {
+                        crate::agent_catalog::Containment::Asks => "asks",
+                        crate::agent_catalog::Containment::None => "none",
+                    }
+                    .into(),
+                ),
+            );
             let (state, reason) = if !inputs.settings_readable {
                 // The fallback hands nothing over while agents-settings.json cannot be read.
                 ("skipped", Some("agent_settings_unreadable"))
@@ -441,6 +453,14 @@ mod tests {
         assert_eq!(steps[0]["state"], "not_installed");
         assert_eq!(steps[1]["state"], "skipped");
         assert_eq!(steps[1]["reason"], "sign_in_required");
+        // SB-245: each step's containment class (SB-82 D-6).
+        assert_eq!(steps[0]["containment"], "asks");
+        let kimi = f.run(
+            &s,
+            &chain(ChainScope::Machine, vec![step("kimi-code")]),
+            None,
+        );
+        assert_eq!(kimi[0]["containment"], "none");
         // A limited pinned account has no room.
         let mut g = Fixture::new();
         g.limited.insert("claude-api".into());
