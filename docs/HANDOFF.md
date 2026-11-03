@@ -2,6 +2,33 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-11-03: SB-244 fixed, SB-82 N3 and N4 merged, release 0.7.6
+
+- **Done.** SB-244 (Fabric board finding `d3072c61`, thread `f26f7dc0`), PR #365 (`26edd4b`): a folder copied with
+  another folder's `.claude/settings.local.json` is rewritten by `project rotate-capability` (a Switchboard route,
+  capability header and recorded token are Switchboard's in every folder), and the answer names every folder it did
+  not rewrite (`not_rewritten`). Same PR: `COMMERCIAL-LICENSE.md` from the workspace template (finding `8f945695`).
+  SB-82 N3, PR #366 (`3e9057f`): a missing `claude` or `codex` is `not_installed` before the offer; an unattended
+  walk passes over an account with no usage observation as `quota_unknown`. SB-82 N4, PR #367 (`f73ec78`): D-6 was
+  answered by the operator on 2026-11-02 21:52Z (Fabric question `dae679d2`, refuse a looser agent); a step whose
+  agent asks less than the executor (Kimi Code, Hermes, OpenCode after Claude Code or Codex) is `permission_mode`.
+  Scenarios SCN-039 and SCN-040 name the new skips. Release PR #368 (`bdd8b65`), tag `v0.7.6`, release run
+  41634545241; notes checked with Copylot (report `21c66272`, pass).
+- **Board.** The coordinator's rule until 21.11 (CO-409, thread `44c43a06`): this session runs a watcher (session
+  cron `cf714165`, minutes 7, 20, 33 and 46: `com.list {unread: true}`, `com.reply` to what is addressed here,
+  `com.read_ack`). All 509 unread messages were read and marked on 2026-11-03; the two findings above were answered
+  in their threads. The watcher dies with the session: a new session sets it again until CO-409 ships.
+- **Gates.** `./scripts/check.sh` exit 0 for each of #365, #366 and #367; each target removed after its gate.
+- **After the tag.** SB-245, PR #369 (`9ca561d`): the chain view's steps carry `containment`; the window adds “Takes
+  no Claude Code or Codex task.” to a ready Kimi Code, Hermes or OpenCode step and names the three new skip reasons,
+  which showed as codes (Copylot en-US `a6309838`, `e457b138`, ru-RU `62f59430`, pass). Not in 0.7.6; ships next.
+  Not run: the window in a browser.
+- **Open.** D-7 (Fabric's reply on board message `ed2c935c`), SB-163 closes after a week with no `source_sync` hold
+  over 5 s (to 2026-11-09).
+- **Exact next task.** Confirm release 0.7.6 (assets, `latest.json`, the installed app updates; a guard refused for a
+  missing runner reruns with `gh run rerun --failed`), close SB-244 in the backlog as released, then the next P1 or
+  P2 row of [the board](evidence/backlog.md) that waits on nobody.
+
 ## 2026-11-02 (night): SB-82 designed, nodes N2 and N1 merged
 
 - **Done.** Design [runner-routes-2026-11-02](research/runner-routes-2026-11-02.md) (PR #361, `126ff3d`): a chain is a
