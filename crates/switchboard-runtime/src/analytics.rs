@@ -274,18 +274,22 @@ impl Analytics {
         // sshlg-growth consent contract a48f41e): a person who answered here under issue #128
         // while the shared switch reads off said no, and stays off; every other install is on.
         let mut migrate = false;
+        // Off for this run only, not written: the shared file could not be read, so the old
+        // answer is decided at a later start (the state keeps its old rule until then).
+        let mut deferred = false;
         if state.rule < RULE && state.enabled.is_none() && state.disclosed_at.is_some() {
             match installation(&shared) {
                 Ok((i, _)) => {
                     state.enabled = Some(i.analytics);
                     migrate = true;
                 }
-                // Not readable now: off for this run, decided at a later start.
-                Err(_) => state.enabled = Some(false),
+                Err(_) => deferred = true,
             }
         }
-        state.rule = RULE;
-        let on = state.on();
+        if !deferred {
+            state.rule = RULE;
+        }
+        let on = state.on() && !deferred;
         let client = Self {
             key: key.to_owned(),
             host: host.trim_end_matches('/').to_owned(),
@@ -334,7 +338,7 @@ impl Analytics {
         let state = self.state.lock().unwrap_or_else(|p| p.into_inner());
         json!({
             "available": true,
-            "enabled": state.on(),
+            "enabled": self.on(),
             "notice_pending": state.notice_at.is_none(),
         })
     }
@@ -1263,6 +1267,37 @@ mod tests {
             assert_eq!(shared_bytes(&shared).len(), before.len());
         }
         assert_eq!(names(&server), ["app_started"], "only the one who said yes");
+    }
+
+    #[tokio::test]
+    async fn an_old_answer_is_decided_at_a_later_start_when_the_shared_file_cannot_be_read() {
+        // Review of SB-246: off for that run only. Writing `rule: 2` with `enabled: false` then
+        // would keep a person who had said yes off for good.
+        let server = Server::default();
+        let url = serve(server.clone()).await;
+        let data = tempfile::tempdir().unwrap();
+        let shared = data.path().join("PassionCode");
+        let old = br#"{"installed":true,"disclosed_at":1791165882}"#;
+        std::fs::write(data.path().join(STATE_FILE), old).unwrap();
+        // The shared file cannot be read: a folder in its place.
+        std::fs::create_dir_all(shared.join(SHARED_FILE)).unwrap();
+        let client = Analytics::new("k", &url, shared.clone(), data.path());
+        assert_eq!(client.status()["enabled"], false, "fail closed for the run");
+        everything(&client, "ordinary");
+        client.flush().await;
+        assert!(server.bodies.lock().unwrap().is_empty());
+        // The person reads the notice in that run: the state is written, the old answer not.
+        client.acknowledge();
+        let kept = state_file(data.path());
+        assert!(kept["notice_at"].is_i64(), "{kept}");
+        assert!(kept.get("enabled").is_none(), "{kept}");
+        assert_ne!(kept["rule"], RULE, "still the old rule: {kept}");
+        // Readable again and on: the old answer is decided now, once.
+        std::fs::remove_dir(shared.join(SHARED_FILE)).unwrap();
+        set_shared_enabled(&shared, true).unwrap();
+        let restarted = Analytics::new("k", &url, shared.clone(), data.path());
+        assert_eq!(restarted.status()["enabled"], true);
+        assert_eq!(state_file(data.path())["enabled"], true);
     }
 
     #[tokio::test]
