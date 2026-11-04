@@ -91,10 +91,45 @@ fn enabled_by_default() -> bool {
     true
 }
 
-/// `<data dir>/PassionCode`: `~/Library/Application Support/PassionCode` on macOS,
-/// `%APPDATA%\PassionCode` on Windows.
+/// The PassionCode family's shared folder: `~/Library/Application Support/PassionCode` on macOS,
+/// `%APPDATA%\PassionCode` on Windows, `$XDG_CONFIG_HOME/PassionCode` (else
+/// `~/.config/PassionCode`) on Linux, where the launcher, Fabric, Fabric Dashboards and Fabric
+/// Inbox keep it. Until SB-252 (the launcher's finding `90763aa9`, 2026-11-04) Switchboard used
+/// the data folder, which differs on Linux only (`~/.local/share`), so its installation id there
+/// was its own; the first start after it moves that id to the family's folder.
 pub fn shared_folder() -> Option<PathBuf> {
-    dirs::data_dir().map(|d| d.join(SHARED_FOLDER))
+    let folder = dirs::config_dir()?.join(SHARED_FOLDER);
+    if cfg!(target_os = "linux") {
+        if let Some(old) = dirs::data_dir().map(|d| d.join(SHARED_FOLDER)) {
+            adopt(&folder, &old);
+        }
+    }
+    Some(folder)
+}
+
+/// SB-252: brings an installation id from the folder Switchboard used before into the family's,
+/// when the family's has none yet; it never replaces a file another app wrote (the copy is
+/// linked into place, which fails if one is there). The old file is left as it was. True when
+/// it moved the id.
+pub(crate) fn adopt(folder: &Path, old: &Path) -> bool {
+    let path = folder.join(SHARED_FILE);
+    if path.exists() {
+        return false;
+    }
+    let Ok(bytes) = std::fs::read(old.join(SHARED_FILE)) else {
+        return false;
+    };
+    if parse(&bytes).is_err() || std::fs::create_dir_all(folder).is_err() {
+        return false;
+    }
+    let temporary = folder.join(format!(".{SHARED_FILE}.{}", uuid::Uuid::new_v4()));
+    if std::fs::write(&temporary, &bytes).is_err() {
+        let _ = std::fs::remove_file(&temporary);
+        return false;
+    }
+    let linked = std::fs::hard_link(&temporary, &path).is_ok();
+    let _ = std::fs::remove_file(&temporary);
+    linked
 }
 
 /// Reads the shared installation, creating it when no PassionCode app has yet. Creation never
@@ -967,6 +1002,34 @@ mod tests {
             .iter()
             .map(|e| e["eventName"].as_str().unwrap().to_owned())
             .collect()
+    }
+
+    #[test]
+    fn an_id_kept_in_the_old_folder_moves_to_the_familys_once_and_never_over_another() {
+        let home = tempfile::tempdir().unwrap();
+        let old = home.path().join("share").join(SHARED_FOLDER);
+        let family = home.path().join("config").join(SHARED_FOLDER);
+        // Nothing to move: no file in the old folder.
+        assert!(!adopt(&family, &old));
+        assert!(!family.join(SHARED_FILE).exists());
+        let (mine, _) = installation(&old).unwrap();
+        assert!(adopt(&family, &old));
+        let (moved, created) = installation(&family).unwrap();
+        assert_eq!((moved.id, created), (mine.id.clone(), false));
+        assert!(old.join(SHARED_FILE).exists(), "the old file stays");
+        // Once only, and never over a file the family already has.
+        assert!(!adopt(&family, &old));
+        let other = home.path().join("other").join(SHARED_FOLDER);
+        let (theirs, _) = installation(&other).unwrap();
+        assert!(!adopt(&other, &old));
+        assert_eq!(installation(&other).unwrap().0.id, theirs.id);
+        // A file that is not ours to trust is not moved.
+        let broken = home.path().join("broken").join(SHARED_FOLDER);
+        std::fs::create_dir_all(&broken).unwrap();
+        std::fs::write(broken.join(SHARED_FILE), b"{not json").unwrap();
+        let empty = home.path().join("empty").join(SHARED_FOLDER);
+        assert!(!adopt(&empty, &broken));
+        assert!(!empty.join(SHARED_FILE).exists());
     }
 
     #[test]

@@ -8,6 +8,8 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- On Linux, Switchboard now keeps the installation number it shares with the other PassionCode apps in the same folder they use (`~/.config/PassionCode`), so one person using several of them counts once there too (SB-252).
+
 ## 0.7.9
 
 - With *Install updates automatically* off, Switchboard still looks for new versions every five minutes and tells you when one is out, with an *Update* button in About; nothing is downloaded until you press it. Before, it did not look at all (SB-249).
