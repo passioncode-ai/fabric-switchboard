@@ -234,7 +234,7 @@ export interface OpenrouterKeys { service: 'openrouter'; keys: { pool: string | 
 export interface OpenrouterStatus { service: 'openrouter'; saved: boolean; saved_at: number | null; model: string | null; credit: OpenrouterCredit | null; credit_error: string | null }
 /** What `switchboard agents connect` returns: commands and snippets, never a key. */
 export interface AgentConnection { name: string; level: string; mcp: { supported: boolean; add_command: string | null; config_path: string | null; config_snippet: string | null }; anthropic: { base_url: string; env: Record<string, string>; config_snippet: string | null } | null; openai: { base_url: string } | null; key_command: string | null; requires: string | null; launch: string | null; warning: string | null; notes: string | null }
-export type UpdatePhase = 'idle' | 'checking' | 'downloading' | 'ready' | 'failed';
+export type UpdatePhase = 'idle' | 'checking' | 'downloading' | 'ready' | 'failed' | 'available';
 export interface UpdateStatus {
   available: boolean;
   reason: string | null;

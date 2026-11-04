@@ -346,6 +346,8 @@ pub enum Phase {
     Downloading,
     Ready,
     Failed,
+    /// SB-249: automatic updates are off and a newer version is out; nothing was downloaded.
+    Available,
 }
 
 impl Phase {
@@ -356,6 +358,7 @@ impl Phase {
             Phase::Downloading => "downloading",
             Phase::Ready => "ready",
             Phase::Failed => "failed",
+            Phase::Available => "available",
         }
     }
 }
@@ -612,8 +615,8 @@ pub fn start(app: &AppHandle) {
     });
 }
 
-/// One check: nothing while switched off. While an update waits it still runs (SB-105), so a later
-/// release replaces the waiting one.
+/// One check. While switched off it only reads the feed and offers what it finds (SB-249). While
+/// an update waits it still runs (SB-105), so a later release replaces the waiting one.
 async fn check_once(app: &AppHandle) -> Phase {
     check(app, false).await
 }
@@ -623,7 +626,7 @@ async fn check_once(app: &AppHandle) -> Phase {
 async fn check(app: &AppHandle, manual: bool) -> Phase {
     let state = app.state::<Updates>();
     if !manual && !state.is_enabled() {
-        return Phase::Idle;
+        return offer(app).await;
     }
     let waiting = {
         let mut inner = state.lock();
@@ -695,9 +698,73 @@ fn logs_check(code: &'static str) -> bool {
     let Ok(mut last) = LAST_LOGGED.lock() else {
         return true;
     };
-    let repeat = code == "current" && *last == Some("current");
+    let repeat = matches!(code, "current" | "available") && *last == Some(code);
     *last = Some(code);
     !repeat
+}
+
+/// SB-249 (the operator, 2026-11-04, relayed by Fabric: «в настройках можно выключить, но
+/// уведомление всё равно приходит»): automatic updates are off. The feed is read on the same
+/// cadence, nothing is downloaded, and a newer version is announced once and offered in About,
+/// where *Update* runs the person's own check (`check_now`), which downloads and installs it.
+async fn offer(app: &AppHandle) -> Phase {
+    let state = app.state::<Updates>();
+    {
+        let inner = state.lock();
+        if inner.restart.is_some() || inner.stalled || inner.ready.is_some() {
+            return inner.phase;
+        }
+    }
+    let found = newer(app).await;
+    let mut inner = state.lock();
+    inner.checked_at = Some(now());
+    let (code, announce) = match found {
+        Ok(Some(version)) => {
+            inner.phase = Phase::Available;
+            inner.version = Some(version.clone());
+            inner.error = None;
+            ("available", Some(version))
+        }
+        Ok(None) => {
+            inner.phase = Phase::Idle;
+            inner.version = None;
+            inner.error = None;
+            ("current", None)
+        }
+        Err(message) => {
+            inner.phase = Phase::Failed;
+            inner.version = None;
+            inner.error = Some(message);
+            let code = if message == NEEDS_MIGRATION {
+                "needs_migration"
+            } else {
+                "check_failed"
+            };
+            (code, None)
+        }
+    };
+    let phase = inner.phase;
+    drop(inner);
+    if let Some(version) = announce {
+        crate::residency::show_available(app, &version);
+    }
+    if logs_check(code) {
+        event("update_check", &[("outcome", Field::Code(code))]);
+    }
+    phase
+}
+
+/// The newer version the feed offers, read without downloading anything.
+async fn newer(app: &AppHandle) -> Result<Option<String>, &'static str> {
+    let builder = app.updater_builder().timeout(CHECK_TIMEOUT);
+    #[cfg(target_os = "macos")]
+    let builder = builder.target(MACOS_TARGET);
+    let updater = builder.build().map_err(|_| CHECK_FAILED)?;
+    match updater.check().await.map_err(|_| CHECK_FAILED)? {
+        Some(update) if needs_migration(&update.raw_json) => Err(NEEDS_MIGRATION),
+        Some(update) => Ok(Some(update.version)),
+        None => Ok(None),
+    }
 }
 
 /// The same rule for the checks made while an update waits (PRD-14, iteration 2026-10-24): one

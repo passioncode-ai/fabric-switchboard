@@ -415,7 +415,9 @@ check(() => {
   const base = { available: true, reason: null, enabled: true, state: 'idle', current: '0.6.0', version: null, error: null, needs_permission: false };
   assert.deepEqual(logic.updateLine({ ...base, available: false, enabled: false, reason: 'Automatic updates work in the installed app only.' }), { text: 'Automatic updates work in the installed app only.', restart: false });
   assert.match(logic.updateLine(base).text, /0\.6\.0 is the latest/);
-  assert.equal(logic.updateLine({ ...base, enabled: false }).text, 'Version 0.6.0. Automatic updates are off.');
+  assert.equal(logic.updateLine({ ...base, enabled: false }).text, 'Version 0.6.0. Automatic updates are off; Switchboard tells you when a new version is out.');
+  // SB-249: off still reads the feed; a newer version is offered with Update, never installed alone.
+  assert.deepEqual(logic.updateLine({ ...base, enabled: false, state: 'available', version: '0.7.0' }), { text: 'Version 0.7.0 is out. Press Update to install it.', restart: false, install: true });
   assert.equal(logic.updateLine({ ...base, state: 'downloading', version: '0.7.0' }).text, 'Downloading version 0.7.0…');
   assert.equal(logic.updateLine({ ...base, state: 'failed', error: 'Could not check for updates. Switchboard tries again within the hour.' }).text, 'Could not check for updates. Switchboard tries again within the hour.');
   // SB-104: a manual check with automatic updates off still says how it went.

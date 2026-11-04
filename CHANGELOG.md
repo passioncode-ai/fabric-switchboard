@@ -8,6 +8,7 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- With *Install updates automatically* off, Switchboard still looks for new versions every five minutes and tells you when one is out, with an *Update* button in About; nothing is downloaded until you press it. Before, it did not look at all (SB-249).
 - New `switchboard dispatch`, Fabric's command for a board request nobody answered: it starts the default agent (Claude Code or Codex) with no person and no Terminal on an account of the folder's group, at most one run per request, and stops it on `switchboard dispatch stop` or after its time limit (SB-247).
 - A Codex session Switchboard starts now runs the hooks of your own `~/.codex/hooks.json` that you already trusted, as your own Codex does; before, Codex skipped them there because the session's home did not carry that trust (SB-247).
 
