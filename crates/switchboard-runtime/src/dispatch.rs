@@ -180,8 +180,9 @@ pub(crate) fn header(workflow: &str, handoff: &str, request: &str) -> String {
 pub(crate) fn prompt(handoff: &str, provider: Provider, account_id: &str) -> String {
     format!(
         "Fabric started this session for one board request; no person is watching it. \
-First call observatory_handoff_accept with handoffId {handoff}, this session's own sessionId and executor \
-{{\"provider\": \"{provider}\", \"accountRef\": \"{account}\"}}. The checkpoint in that answer is the request: \
+First call observatory_handoff_accept with owner agent:{provider}, idempotencyKey accept-{handoff} (the same one \
+if you call it again), handoffId {handoff}, this session's own sessionId (the same one if you call it again) and \
+executor {{\"provider\": \"{provider}\", \"accountRef\": \"{account}\"}}. The checkpoint in that answer is the request: \
 obey its constraints first and write observatory_checkpoint_write after every step with the leaseId the answer \
 returns, each time carrying that answer's checkpoint.body whole and unchanged except for your own progress (or \
 observatory_checkpoint_latest's when you lost it): a checkpoint replaces the body whole, and the pack's own fields are \
@@ -566,6 +567,11 @@ mod tests {
         let text = prompt("handoff:0123456789abcdef", Provider::Claude, account);
         assert!(text.starts_with("Fabric started this session for one board request"));
         assert!(text.contains("handoffId handoff:0123456789abcdef"));
+        // Every field Observatory's accept requires (fabric-agent-adapter, board 1b522784).
+        assert!(text.contains("owner agent:claude-code"));
+        assert!(text.contains("idempotencyKey accept-handoff:0123456789abcdef"));
+        assert!(prompt("handoff:0123456789abcdef", Provider::Codex, account)
+            .contains("owner agent:codex"));
         assert!(text.contains("\"provider\": \"claude-code\""));
         assert!(text.contains(&crate::continuation::account_ref(account)));
         assert!(!text.contains(account), "a UUID never goes to the engine");

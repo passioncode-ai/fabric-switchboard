@@ -246,6 +246,16 @@ background starts included, and installs that never answered in Switchboard are 
 growth sees a step up at that release. Installs that answered off under issue #128 while the shared
 switch read off stay uncounted.
 
+### Breaks in the series
+
+- **`app_installed.first_passioncode_app`, from the release of the PassionCode launcher 0.2.76
+  (date to be named by the launcher on board thread `3f490ae7`).** The launcher starts counting
+  and creates the shared `PassionCode/installation.json` at its own first counted start, often
+  before Switchboard first runs, so on machines the launcher set up `first_passioncode_app` reads
+  `false` more often (announcement `b48dd437`, 2026-11-04). It is a change in what is measured, not
+  in what people do: read the drop as a break in the series, never as a finding. The launcher sends
+  the same `install_id` and `iid`, so joining installs across apps still works.
+
 ## Cross-app tasks
 
 | App | Task |
