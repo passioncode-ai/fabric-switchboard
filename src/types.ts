@@ -159,7 +159,9 @@ export interface Adapter {
   analytics(): Promise<AnalyticsStatus>;
   /** The shared switch, and the person's answer in this app: nothing is sent before it (issue #128).
    * `question` is the switch the question showed when this answers it; absent for About's switch, which always sets it. */
-  setAnalytics(enabled: boolean, question?: boolean): Promise<AnalyticsStatus>;
+  setAnalytics(enabled: boolean): Promise<AnalyticsStatus>;
+  /** The first-run usage notice's OK (SB-246). */
+  analyticsNoticeSeen(): Promise<AnalyticsStatus>;
   /** Automatic updates (SB-55): on by default; unavailable outside the installed app. */
   updateStatus(): Promise<UpdateStatus>;
   setAutoUpdate(enabled: boolean): Promise<UpdateStatus>;
@@ -206,8 +208,8 @@ export interface ShellHookFile { shell: string; path: string; state: string }
 export interface OnboardStep { id: string; state: 'done' | 'todo' | 'needs_person' | 'optional'; summary: string; next?: unknown; organization?: { id: string; name: string }; group?: { pool: string; name: string }; groups?: string[]; ended?: number; terminals?: 'active' | 'pending' | 'off' | 'waiting' | 'unread' }
 export interface Onboarding { complete: boolean; degraded: string[]; steps: OnboardStep[] }
 export interface ShellHookStatus { hook: 'on' | 'off' | 'default_on' | 'default_off'; choice: 'on' | 'off' | 'default'; map: string; files: ShellHookFile[]; organizations: string[]; /** Organizations whose folder map rows carry a Codex account. */ codex_organizations?: string[]; /** SB-222: organization groups the folder map holds no row for, and why. */ unmapped?: { organization: string; group: string; reason: 'held' | 'missing' | 'no_folder'; held_by: string | null }[]; can_change: boolean; home: string | null }
-/** Usage analytics (docs/ANALYTICS.md): `disclosed` is whether the person answered the switch in this app (issue #128); `sent_before`, whether an earlier version may already have reported this install. */
-export interface AnalyticsStatus { available: boolean; enabled: boolean; disclosed?: boolean; sent_before?: boolean }
+/** Usage analytics (docs/ANALYTICS.md): `enabled` is Switchboard's own switch (SB-246); `notice_pending`, whether the first-run notice still waits for OK. */
+export interface AnalyticsStatus { available: boolean; enabled: boolean; notice_pending?: boolean }
 /** One entry of catalog/agents.json (third-party agents, 0.6). */
 export interface AgentInfo { id: string; name: string; maker?: string | null; kind: string; url: string; level: 'mcp' | 'proxy' | 'launch'; binary?: string | null; openrouter_rank?: number | null; proxy_ok?: boolean | null; mcp: { supported: boolean }; notes?: string | null; subscription_warning?: string | null; openrouter?: { model_flag: string[] | null; model_env: string | null; default: boolean; notes: string | null } | null }
 /** What OpenRouter says the saved key may spend (`GET /key`), in US dollars; null where it has no limit. */

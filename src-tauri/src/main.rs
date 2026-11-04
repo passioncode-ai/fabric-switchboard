@@ -1088,20 +1088,20 @@ fn launch(arguments: impl IntoIterator<Item = String>) -> Launch {
     }
     launch
 }
-/// Anonymous usage analytics (docs/ANALYTICS.md): `{available, enabled, disclosed, sent_before}`;
-/// `set_analytics` is also the person's answer that lets anything be sent (issue #128); `question`
-/// carries the switch the question showed, absent for About's switch.
+/// Anonymous usage analytics (docs/ANALYTICS.md): `{available, enabled, notice_pending}`;
+/// `set_analytics` is Switchboard's own switch (SB-246), `analytics_notice_seen` the first-run
+/// notice's *OK*.
 #[tauri::command]
 async fn analytics_status(slot: State<'_, Slot>) -> Result<Value, String> {
     Ok(slot.runtime().await?.analytics_status())
 }
 #[tauri::command]
-async fn set_analytics(
-    slot: State<'_, Slot>,
-    enabled: bool,
-    question: Option<bool>,
-) -> Result<Value, String> {
-    slot.runtime().await?.set_analytics(enabled, question)
+async fn set_analytics(slot: State<'_, Slot>, enabled: bool) -> Result<Value, String> {
+    slot.runtime().await?.set_analytics(enabled)
+}
+#[tauri::command]
+async fn analytics_notice_seen(slot: State<'_, Slot>) -> Result<Value, String> {
+    Ok(slot.runtime().await?.analytics_notice_seen())
 }
 /// SB-183 (node A-3): the terminal hook's first-time notice, `{organization, group}`, or null.
 /// It waits in `shell-hook.json` until the window acknowledges it, so a restart before the window
@@ -1342,6 +1342,7 @@ fn main() {
             check_for_updates,
             analytics_status,
             set_analytics,
+            analytics_notice_seen,
             snapshot,
             current_accounts,
             capture_current,

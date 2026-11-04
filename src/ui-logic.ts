@@ -564,31 +564,24 @@ export function termsNoticeOn(page: string, dismissed: boolean): 'banner' | 'pan
 }
 
 /**
- * Usage counts: nothing is sent before the person has answered the switch once in this app
- * (issue #128, operator decision 2026-10-08, Fabric ADR-0127; docs/ANALYTICS.md). The window asks
- * when the build can send (`available`), the shared switch is on and this app has no answer yet
- * (`disclosed === false`). A status that is missing, unreadable or from an older backend without
- * `disclosed` asks nothing: the backend still sends nothing until it is answered.
+ * Usage counts (SB-246, operator decision 2026-11-04; docs/ANALYTICS.md): on by default and sent
+ * from the first start; a first-run notice says so once. It shows when the build can send
+ * (`available`), Switchboard's switch is on and the notice was not acknowledged yet
+ * (`notice_pending === true`). A status that is missing, unreadable or from an older backend
+ * without `notice_pending` shows nothing.
  */
-export interface UsageStatus { available: boolean; enabled: boolean; disclosed?: boolean; sent_before?: boolean }
-export function usageQuestion(status: UsageStatus | null | undefined): boolean {
-  return !!status && status.available && status.enabled && status.disclosed === false;
+export interface UsageStatus { available: boolean; enabled: boolean; notice_pending?: boolean }
+export function usageNotice(status: UsageStatus | null | undefined): boolean {
+  return !!status && status.available && status.enabled && status.notice_pending === true;
 }
-/** What the question says about what has left so far: an install from 0.6.81 or earlier may already have sent counts. */
-export function usageQuestionText(status: UsageStatus | null | undefined): string {
-  return status?.sent_before
-    ? t('An earlier version of Switchboard may already have sent these counts from this computer. Nothing more is sent until you answer.')
-    : t('Nothing has been sent yet. Nothing is sent until you answer.');
+/** What a change of Switchboard's own switch made true. */
+export function usageAnswerText(wanted: boolean): string {
+  return wanted ? t('Anonymous usage analytics are on.') : t('Anonymous usage analytics are off for Switchboard.');
 }
-/** What an answer changed, from the status the backend returned: an "on" given after another tool turned the shared switch off leaves it off and says so. */
-export function usageAnswerText(wanted: boolean, status: UsageStatus | null | undefined): string {
-  if (wanted && status && !status.enabled) return t('Usage counts stay off: another PassionCode.ai tool on this computer turned them off. Switch them on in About to count again.');
-  return wanted ? t('Anonymous usage analytics are on.') : t('Anonymous usage analytics are off for every PassionCode.ai tool on this computer.');
-}
-/** The first-run tour waits while the usage question is open or its status is still being read. */
+/** The first-run tour waits while the usage notice is open or its status is still being read. */
 export function tourWaits(status: UsageStatus | null | undefined, statusFailed: boolean): boolean {
   if (statusFailed) return false;
-  return status == null || usageQuestion(status);
+  return status == null || usageNotice(status);
 }
 
 /**
@@ -1249,7 +1242,7 @@ export function orgSetupAction(setup: OrgSetup): OrgSetupAction | null {
   if (first.id === 'seat' && setup.group) return { kind: 'sign_in', pool: setup.group.pool, label: seatLabel(setup.organization.name) };
   return null;
 }
-/** One first-run card at a time: the usage question, then the tour, then this card; on Accounts and on top of Organizations, and after Hide on Organizations only. */
+/** One first-run card at a time: the usage notice, then the tour, then this card; on Accounts and on top of Organizations, and after Hide on Organizations only. */
 export function orgSetupShown(input: { page: string; organization: string; hidden: string[]; usage: UsageStatus | null | undefined; usageFailed: boolean; tourStep: number | null }): boolean {
   if (tourWaits(input.usage, input.usageFailed) || input.tourStep !== null) return false;
   if (input.page === 'orgs') return true;

@@ -33,14 +33,14 @@
 .pool-field > [hidden] { display: none; }
 /* Inside the shared status block the terms notice is one line of it, not a box in a box. */
 .status-stack .terms-notice { border: 0; padding: 0; margin: 0; background: none; }
-/* Issue #128 (SCN-073): the usage question on first start, above the page, until it is answered. */
+/* SB-246 (SCN-073): the usage notice on first start, above the page, until OK or Turn off. */
 .usage-question { max-width: 980px; display: grid; gap: var(--space-2); margin-bottom: var(--space-4); padding: var(--space-4) var(--space-5); border: 1px solid var(--border-strong); border-radius: var(--r-card); background: var(--panel); }
 .usage-question h2 { font-size: var(--t-heading); font-weight: 650; letter-spacing: -.01em; }
 .usage-question > p { margin: 0; color: var(--muted); }
 .usage-question > p.usage-question-sent { color: inherit; font-weight: 600; }
 .usage-question-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); margin-top: var(--space-1); }
 .usage-question-actions .login-option { margin-top: 0; }
-/* SB-202 (B-8, SCN-076): the organization card, after the usage question and the tour. */
+/* SB-202 (B-8, SCN-076): the organization card, after the usage notice and the tour. */
 .org-setup { max-width: 980px; display: grid; gap: var(--space-3); margin-bottom: var(--space-4); padding: var(--space-4) var(--space-5); border: 1px solid var(--border-strong); border-radius: var(--r-card); background: var(--panel); }
 .org-setup h2 { font-size: var(--t-heading); font-weight: 650; letter-spacing: -.01em; }
 .org-setup-steps { display: grid; gap: var(--space-2); margin: 0; padding: 0; list-style: none; }
