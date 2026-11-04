@@ -655,6 +655,27 @@ impl Analytics {
         );
         self.track("project_changed", props);
     }
+    /// SB-247: a `switchboard dispatch` answered: `state` (`started`, `running`, `refused`), the
+    /// refusal's code, the agent's kind (`claude`, `codex`, `other`, `none`) and the platform.
+    /// Codes only: never the folder, the workflow, the hand-over or the prompt.
+    pub fn dispatch(&self, state: &str, reason: Option<&str>, agent_kind: &str) {
+        let mut props = Map::new();
+        props.insert("state".into(), json!(state));
+        if let Some(reason) = reason {
+            props.insert("reason".into(), json!(reason));
+        }
+        props.insert("agent_kind".into(), json!(agent_kind));
+        props.insert("platform".into(), json!(std::env::consts::OS));
+        self.track("dispatch", props);
+    }
+    /// SB-247: a dispatched run ended: `outcome` (`exited`, `stopped`, `timed_out`) and how long it
+    /// ran, as a bucket (`under_1m`, `1_5m`, `5_15m`, `15_60m`, `over_60m`).
+    pub fn dispatch_ended(&self, outcome: &str, duration: &str) {
+        let mut props = Map::new();
+        props.insert("outcome".into(), json!(outcome));
+        props.insert("duration".into(), json!(duration));
+        self.track("dispatch_ended", props);
+    }
     /// A switch of the account in use or of a pool's managed route.
     pub fn switched(&self, provider: &str, target: &str, cause: &str) {
         let mut props = Map::new();
@@ -1028,6 +1049,9 @@ mod tests {
         let two = snapshot(vec![account("acct-2", Provider::Codex, AuthKind::ApiKey)]);
         client.reconcile(&two, "sign_in");
         client.switched("codex", "managed", "manual");
+        // SB-247: a dispatch answers and its run ends, as codes only.
+        client.dispatch("refused", Some("no_agent"), "claude");
+        client.dispatch_ended("timed_out", "15_60m");
         client.flush().await;
         assert_eq!(
             names(&server),
@@ -1037,7 +1061,9 @@ mod tests {
                 "app_active",
                 "account_added",
                 "account_removed",
-                "account_switched"
+                "account_switched",
+                "dispatch",
+                "dispatch_ended"
             ]
         );
         assert_eq!(server.keys.lock().unwrap()[0], "A-SH-0000000000");

@@ -60,6 +60,9 @@ pub enum Surface {
     Recovery,
     /// Fabric Dashboards' console, which says so with `--surface dashboards`.
     Dashboards,
+    /// Fabric's dispatcher, through `switchboard dispatch` (SB-247): a session started for a
+    /// board request nobody answered, with no person.
+    Fabric,
 }
 
 /// Who launched a session. A request may carry `caller_folder`; the owner turns it into
@@ -300,6 +303,97 @@ fn update(root: &Path, id: &str, change: impl FnOnce(&mut Value) -> bool) -> boo
     };
     change(&mut record) && write(root, id, &record).is_ok()
 }
+/// SB-247: one record as stored, with its state now (`with_state`); none for an id with no
+/// record.
+pub(crate) fn get(root: &Path, id: &str) -> Option<Value> {
+    read(root, id).map(|r| with_state(root, r))
+}
+/// SB-247: sets `ended` (with `ended_at`, and `fields` beside it) on launch `id` when nothing set
+/// it yet, under the records' lock; whether this call set it. A dispatched run's end is set once:
+/// by its stop, its time limit or its own exit, whichever comes first.
+pub(crate) fn end_once(
+    root: &Path,
+    id: &str,
+    ended: &str,
+    now: i64,
+    fields: &[(&str, Value)],
+) -> bool {
+    if !valid_id(id) {
+        return false;
+    }
+    crate::blocking::run(|| {
+        let _writing = writing();
+        update(root, id, |r| {
+            if !r["ended"].is_null() {
+                return false;
+            }
+            r["ended"] = ended.into();
+            r["ended_at"] = now.into();
+            for (key, value) in fields {
+                r[*key] = value.clone();
+            }
+            true
+        })
+    })
+}
+/// SB-247: takes back an `ended` this process set a moment ago (a stop that could not end its
+/// run), so the record says the run goes on.
+pub(crate) fn unend(root: &Path, id: &str, ended: &str) {
+    if !valid_id(id) {
+        return;
+    }
+    crate::blocking::run(|| {
+        let _writing = writing();
+        update(root, id, |r| {
+            if r["ended"].as_str() != Some(ended) {
+                return false;
+            }
+            r["ended"] = Value::Null;
+            r["ended_at"] = Value::Null;
+            true
+        })
+    });
+}
+/// SB-247: the dispatched run of `workflow` that is starting or running now, by its launch id:
+/// a record with a `dispatch` block, no `ended` and its home still running it. The workflow's
+/// index names its launches; a workflow without one is found by one full scan.
+pub(crate) fn live_dispatch(root: &Path, workflow: &str) -> Option<(String, Value)> {
+    let candidates: Vec<(String, Value)> =
+        match workflow_key(workflow).and_then(|k| indexed(root, k)) {
+            Some(ids) => ids
+                .into_iter()
+                .filter_map(|id| read(root, &id).map(|r| (id, r)))
+                .collect(),
+            None => all(root).into_iter().collect(),
+        };
+    candidates
+        .into_iter()
+        .filter(|(_, r)| {
+            r["continues"].as_str() == Some(workflow)
+                && r["dispatch"].is_object()
+                && r["ended"].is_null()
+        })
+        .map(|(id, r)| (id, with_state(root, r)))
+        .filter(|(_, r)| {
+            matches!(
+                r["state"].as_str(),
+                Some("starting" | "running" | "unknown")
+            )
+        })
+        .max_by_key(|(_, r)| r["launched_at"].as_i64().unwrap_or(0))
+}
+/// SB-247: the home a record ran in, while that home still holds this launch.
+pub(crate) fn own_home(root: &Path, record: &Value) -> Option<PathBuf> {
+    let home = home_of(root, record)?;
+    let id = record["launch_id"].as_str()?;
+    let current = switchboard_core::private_fs::read_private(
+        &home.join(crate::launch::SESSION_RECORD),
+        MAX_RECORD,
+    )
+    .ok()
+    .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())?;
+    (current["launch_id"].as_str() == Some(id)).then_some(home)
+}
 #[cfg(test)]
 thread_local! {
     /// How many full scans of the records this thread made (SB-219).
@@ -330,6 +424,9 @@ fn all(root: &Path) -> BTreeMap<String, Value> {
 /// reads those records instead of every record. A workflow with no index (records from before
 /// it) is found by one full scan, which seeds its index.
 const BY_WORKFLOW: &str = "by-workflow";
+/// SB-247: the folder of dispatched runs' logs (`<launch_id>.log`, 0600), kept as long as the
+/// records.
+pub(crate) const LOGS: &str = "logs";
 const WORKFLOW_INDEX_MAX: usize = 64;
 fn workflow_key(workflow: &str) -> Option<&str> {
     ((1..=64).contains(&workflow.len())
@@ -859,18 +956,21 @@ pub fn prune(root: &Path, now: std::time::SystemTime) -> usize {
         }
     }
     // SB-219: a workflow's index not written for as long goes too; it names no kept record.
-    if let Ok(entries) = fs::read_dir(root.join(DIR).join(BY_WORKFLOW)) {
-        for entry in entries.flatten() {
-            let old = fs::symlink_metadata(entry.path()).is_ok_and(|meta| {
-                meta.file_type().is_file()
-                    && meta
-                        .modified()
-                        .ok()
-                        .and_then(|t| now.duration_since(t).ok())
-                        .is_some_and(|age| age > keep)
-            });
-            if old {
-                let _ = fs::remove_file(entry.path());
+    // SB-247: so does a dispatched run's log.
+    for folder in [BY_WORKFLOW, LOGS] {
+        if let Ok(entries) = fs::read_dir(root.join(DIR).join(folder)) {
+            for entry in entries.flatten() {
+                let old = fs::symlink_metadata(entry.path()).is_ok_and(|meta| {
+                    meta.file_type().is_file()
+                        && meta
+                            .modified()
+                            .ok()
+                            .and_then(|t| now.duration_since(t).ok())
+                            .is_some_and(|age| age > keep)
+                });
+                if old {
+                    let _ = fs::remove_file(entry.path());
+                }
             }
         }
     }

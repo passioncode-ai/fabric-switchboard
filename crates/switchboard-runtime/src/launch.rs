@@ -2491,11 +2491,43 @@ fn launch_full(
     extra: &[String],
     in_place: bool,
 ) -> Result<(bool, Option<PathBuf>), String> {
+    launch_core(
+        root,
+        store,
+        proxy,
+        id,
+        mode,
+        working_directory,
+        host,
+        continuation,
+        extra,
+        in_place,
+        None,
+    )
+    .map(|(tools, script, _)| (tools, script))
+}
+#[allow(clippy::too_many_arguments)]
+fn launch_core(
+    root: &Path,
+    store: &Arc<Store>,
+    proxy: &ProxyHandle,
+    id: &str,
+    mode: &str,
+    working_directory: &Path,
+    host: &Host,
+    continuation: Option<&Continuation>,
+    extra: &[String],
+    in_place: bool,
+    headless: Option<&Headless>,
+) -> Result<(bool, Option<PathBuf>, Option<Dispatched>), String> {
     if !extra_valid(extra) {
         return Err(EXTRA_ARGS_INVALID.into());
     }
     let (working_directory, account) = validate(root, store, id, mode, working_directory)?;
-    let program = (host.binary)(account.provider)?;
+    let program = match headless {
+        Some(h) => h.program.clone(),
+        None => (host.binary)(account.provider)?,
+    };
     let homes = root.join(if mode == "managed" {
         "runtimes"
     } else {
@@ -2666,6 +2698,53 @@ fn launch_full(
     // would read the first prompt or a caller's plain value after a separate flag as another
     // config file; a caller's own `--mcp-config` still adds to it (SB-94, measured on 2.1.296).
     let config = config.map(|path| format!("--mcp-config={path}"));
+    // SB-247: a dispatched run starts no interactive session (`headless_args`).
+    if let Some(h) = headless {
+        let args = headless_args(account.provider, config.as_deref(), h);
+        let launch_id = crate::launches::new_id();
+        env.insert(crate::launches::ENV.into(), launch_id.clone());
+        env.insert(DISPATCH_ENV.into(), h.workflow.clone());
+        let record = json!({
+            "account_id": account.id,
+            "provider": account.provider.as_str(),
+            "pool": account.pool,
+            "context": context,
+            "mode": mode,
+            "working_directory": working_directory,
+            "in_place": false,
+            "launched_at": switchboard_proxy::now(),
+            "continues": h.workflow,
+            "dispatch": {
+                "workflow": h.workflow,
+                "permissions": h.permissions.as_str(),
+                "timeout_minutes": h.timeout_minutes,
+                "deadline": h.deadline,
+                "log": format!("{}/{}/{launch_id}.log", crate::launches::DIR, crate::launches::LOGS),
+            },
+        });
+        crate::launches::record(root, &home, record, &launch_id)?;
+        let child = spawn_headless(
+            root,
+            &home,
+            &program,
+            &args,
+            &env,
+            &working_directory,
+            &launch_id,
+        )?;
+        reservation.committed = true;
+        journal_launch(store, id, mode);
+        return Ok((
+            cli.is_some(),
+            None,
+            Some(Dispatched {
+                launch_id,
+                account_id: account.id.clone(),
+                provider: account.provider,
+                child,
+            }),
+        ));
+    }
     let mut args: Vec<&str> = config.iter().map(String::as_str).collect();
     // Both CLIs start an interactive session with a positional first message.
     if let Some(first) = &first {
@@ -2698,7 +2777,311 @@ fn launch_full(
     }
     reservation.committed = true;
     journal_launch(store, id, mode);
-    Ok((cli.is_some(), in_place.then_some(path)))
+    Ok((cli.is_some(), in_place.then_some(path), None))
+}
+/// SB-247: the variable a dispatched run carries: the workflow Fabric opened for its board
+/// request.
+pub const DISPATCH_ENV: &str = "FABRIC_DISPATCH_WORKFLOW";
+/// SB-247: how much a dispatched run may do without asking (`--permissions`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Permissions {
+    /// The agent's own defaults: it asks, and with nobody to answer it is refused.
+    Ask,
+    /// Claude Code `--dangerously-skip-permissions`, Codex
+    /// `--dangerously-bypass-approvals-and-sandbox`.
+    All,
+}
+impl Permissions {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Permissions::Ask => "ask",
+            Permissions::All => "all",
+        }
+    }
+}
+/// SB-247: what makes a launch a dispatched run instead of a Terminal session.
+pub(crate) struct Headless {
+    /// The provider CLI, as `dispatch::program` found it.
+    pub program: PathBuf,
+    pub workflow: String,
+    /// The first prompt: accept the hand-over, then the request.
+    pub prompt: String,
+    /// The exit contract, appended to the system prompt (Claude Code) or put before the prompt
+    /// (Codex, which has no such flag).
+    pub contract: String,
+    pub permissions: Permissions,
+    pub timeout_minutes: u32,
+    /// When the time limit stops it (Unix seconds).
+    pub deadline: i64,
+}
+/// SB-247: a dispatched run that started. The owner keeps `child` to reap it and record its end.
+pub(crate) struct Dispatched {
+    pub launch_id: String,
+    pub account_id: String,
+    pub provider: Provider,
+    pub child: std::process::Child,
+}
+/// SB-247: the arguments of a non-interactive run: `claude -p` with the exit contract appended to
+/// the system prompt, or `codex exec` with the contract before the prompt; the prompt last.
+pub(crate) fn headless_args(provider: Provider, config: Option<&str>, h: &Headless) -> Vec<String> {
+    let mut args: Vec<String> = Vec::new();
+    match provider {
+        Provider::Claude => {
+            args.extend(config.map(str::to_owned));
+            args.push("-p".into());
+            args.push("--append-system-prompt".into());
+            args.push(h.contract.clone());
+            if h.permissions == Permissions::All {
+                args.push("--dangerously-skip-permissions".into());
+            }
+            args.push(h.prompt.clone());
+        }
+        Provider::Codex => {
+            args.push("exec".into());
+            if h.permissions == Permissions::All {
+                args.push("--dangerously-bypass-approvals-and-sandbox".into());
+            }
+            args.push(format!("{}\n\n{}", h.contract, h.prompt));
+        }
+    }
+    args
+}
+pub const DISPATCH_FAILED: &str =
+    "The dispatched session did not start: its program could not be run.";
+pub const DISPATCH_WOULD_NOT_STOP: &str =
+    "The dispatched session did not stop. End its process by hand, then stop it again.";
+/// SB-247: the PATH a run started by the owner gets: the program's own folder first (a
+/// `#!/usr/bin/env node` launcher finds its `node` beside it), then the owner's, then the
+/// per-user and Homebrew folders the desktop app's PATH lacks.
+fn headless_path(program: &Path) -> std::ffi::OsString {
+    let mut dirs: Vec<PathBuf> = program
+        .parent()
+        .map(Path::to_path_buf)
+        .into_iter()
+        .collect();
+    if let Some(path) = std::env::var_os("PATH") {
+        dirs.extend(std::env::split_paths(&path));
+    }
+    if let Some(home) = std::env::var_os("HOME") {
+        dirs.push(PathBuf::from(home).join(".local/bin"));
+    }
+    dirs.extend([
+        PathBuf::from("/opt/homebrew/bin"),
+        PathBuf::from("/usr/local/bin"),
+    ]);
+    let mut seen = std::collections::BTreeSet::new();
+    dirs.retain(|d| seen.insert(d.clone()));
+    std::env::join_paths(dirs).unwrap_or_default()
+}
+/// SB-247: starts a dispatched run from the owner's own process: no Terminal, no PowerShell. It
+/// leads its own process group (Unix) or a new process group with no window (Windows), reads
+/// nothing on stdin and writes stdout and stderr to `launches/logs/<launch_id>.log` (0600). Its
+/// marker (`.session-pid`, `.session-process`) is the one a Terminal session's script writes, so
+/// the session list, the one-session-per-home rule and the launch record read it as they read any
+/// session; then the home's reservation goes.
+fn spawn_headless(
+    root: &Path,
+    home: &Path,
+    program: &Path,
+    args: &[String],
+    env: &BTreeMap<String, String>,
+    working_directory: &Path,
+    launch_id: &str,
+) -> Result<std::process::Child, String> {
+    let logs = root.join(crate::launches::DIR).join(crate::launches::LOGS);
+    private_dir(&root.join(crate::launches::DIR))?;
+    private_dir(&logs)?;
+    let log = switchboard_core::private_fs::create_new(&logs.join(format!("{launch_id}.log")))
+        .map_err(|_| DISPATCH_FAILED)?;
+    let err = log.try_clone().map_err(|_| DISPATCH_FAILED)?;
+    let mut command = Command::new(program);
+    command
+        .args(args)
+        .current_dir(working_directory)
+        .stdin(std::process::Stdio::null())
+        .stdout(log)
+        .stderr(err);
+    for name in CONFLICTS {
+        command.env_remove(name);
+    }
+    command.envs(env).env("PATH", headless_path(program));
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        command.process_group(0);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        // CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW.
+        command.creation_flags(0x0000_0200 | 0x0800_0000);
+    }
+    let mut child = command.spawn().map_err(|_| DISPATCH_FAILED.to_string())?;
+    if let Err(error) = write_marker(home, &child) {
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err(error);
+    }
+    let _ = fs::remove_file(home.join(".launch-pending"));
+    Ok(child)
+}
+#[cfg(unix)]
+fn write_marker(home: &Path, child: &std::process::Child) -> Result<(), String> {
+    private_write(
+        &home.join(".session-pid"),
+        child.id().to_string().as_bytes(),
+        false,
+    )
+}
+#[cfg(windows)]
+fn write_marker(home: &Path, child: &std::process::Child) -> Result<(), String> {
+    let created = switchboard_core::windows::process_created(child.id())?;
+    private_write(
+        &home.join(".session-process"),
+        json!({"pid": child.id(), "created": created})
+            .to_string()
+            .as_bytes(),
+        false,
+    )
+}
+/// SB-247: a dispatched run, prepared exactly as a continuation launch is (the
+/// account's isolated home, its tools, the Observatory server, the record), started by
+/// `spawn_headless` instead of a Terminal script.
+pub(crate) fn dispatch_session(
+    root: &Path,
+    store: &Arc<Store>,
+    proxy: &ProxyHandle,
+    id: &str,
+    working_directory: &Path,
+    continuation: &Continuation,
+    headless: &Headless,
+) -> Result<Dispatched, String> {
+    launch_core(
+        root,
+        store,
+        proxy,
+        id,
+        "isolated",
+        working_directory,
+        dispatch_host(),
+        Some(continuation),
+        &[],
+        false,
+        Some(headless),
+    )?
+    .2
+    .ok_or_else(|| DISPATCH_FAILED.to_string())
+}
+#[cfg(test)]
+tokio::task_local! {
+    /// A test's stand-in for the provider CLI of a dispatched run. With it set the run's host is
+    /// `SANDBOX`: nothing of the operator's own (tools, board, user folder) is read.
+    pub(crate) static TEST_DISPATCH_PROGRAM: PathBuf;
+}
+#[cfg(test)]
+fn sandbox_binary(_: Provider) -> Result<PathBuf, String> {
+    TEST_DISPATCH_PROGRAM
+        .try_with(PathBuf::clone)
+        .map_err(|_| "Provider CLI not found. Install the official CLI and retry.".into())
+}
+#[cfg(test)]
+fn sandbox_terminal(_: &Path) -> Result<(), String> {
+    panic!("a dispatched run opened Terminal")
+}
+#[cfg(test)]
+fn sandbox_nothing() -> Option<PathBuf> {
+    None
+}
+#[cfg(test)]
+fn sandbox_no_board(_: Provider) -> Option<McpServer> {
+    None
+}
+#[cfg(test)]
+fn sandbox_no_scope(_: Provider) -> Option<PathBuf> {
+    None
+}
+#[cfg(test)]
+const SANDBOX: Host = Host {
+    binary: sandbox_binary,
+    agent_cli: sandbox_nothing,
+    board: sandbox_no_board,
+    start_terminal: sandbox_terminal,
+    user_scope: sandbox_no_scope,
+};
+fn dispatch_host() -> &'static Host {
+    #[cfg(test)]
+    return &SANDBOX;
+    #[cfg(not(test))]
+    &NATIVE
+}
+/// SB-247: the provider CLI a dispatched run starts: the one a launch uses. In a unit test only
+/// the stand-in, never the CLI installed on this computer.
+pub(crate) fn dispatch_program(provider: Provider) -> Result<PathBuf, String> {
+    (dispatch_host().binary)(provider)
+}
+/// SB-247: stops the dispatched run `home` holds: its process group (SIGTERM, then SIGKILL after
+/// `grace`) on Unix, `taskkill /T /F` on Windows. Ok once the home is idle; a home already idle
+/// is Ok at once.
+#[cfg(unix)]
+pub(crate) fn stop_dispatched(home: &Path, grace: Duration) -> Result<(), String> {
+    if !session_running(home)? {
+        return Ok(());
+    }
+    let pid = read_regular(&home.join(".session-pid"))
+        .ok()
+        .and_then(|text| text.trim().parse::<libc::pid_t>().ok())
+        .filter(|pid| *pid > 0)
+        .ok_or(DISPATCH_WOULD_NOT_STOP)?;
+    for signal in [libc::SIGTERM, libc::SIGKILL] {
+        signal_session(pid, signal);
+        if !running_within(home, grace) {
+            return Ok(());
+        }
+    }
+    Err(DISPATCH_WOULD_NOT_STOP.into())
+}
+#[cfg(windows)]
+pub(crate) fn stop_dispatched(home: &Path, grace: Duration) -> Result<(), String> {
+    use std::os::windows::process::CommandExt;
+    if !session_running(home)? {
+        return Ok(());
+    }
+    let value: serde_json::Value =
+        serde_json::from_str(&read_regular(&home.join(".session-process"))?)
+            .map_err(|_| DISPATCH_WOULD_NOT_STOP)?;
+    let pid = value["pid"]
+        .as_u64()
+        .and_then(|x| u32::try_from(x).ok())
+        .filter(|x| *x > 0)
+        .ok_or(DISPATCH_WOULD_NOT_STOP)?;
+    let system = std::env::var_os("SystemRoot")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(r"C:\Windows"));
+    let _ = Command::new(system.join("System32").join("taskkill.exe"))
+        .args(["/PID", &pid.to_string(), "/T", "/F"])
+        .creation_flags(0x0800_0000)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status();
+    if running_within(home, grace + grace) {
+        Err(DISPATCH_WOULD_NOT_STOP.into())
+    } else {
+        Ok(())
+    }
+}
+/// Whether `home` still runs its session after waiting up to `wait` for it to end.
+fn running_within(home: &Path, wait: Duration) -> bool {
+    let deadline = std::time::Instant::now() + wait;
+    loop {
+        if !session_running(home).unwrap_or(true) {
+            return false;
+        }
+        if std::time::Instant::now() >= deadline {
+            return true;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
 }
 /// Written beside `launch.command` by every Claude Code or Codex launch (SB-95).
 pub(crate) const SESSION_RECORD: &str = ".session.json";

@@ -292,6 +292,10 @@ impl Pass {
         .await;
         // SB-212: launch records not written for 90 days go, looked for at most once an hour.
         crate::launches::prune_due(&runtime.root, time);
+        // SB-247: a dispatched run past its time limit is stopped; one that ended while no owner
+        // watched it is recorded. Nothing is read while no run is watched.
+        let analytics = runtime.analytics();
+        crate::blocking::run(|| crate::dispatch::sweep(&runtime.root, time, analytics.as_deref()));
         // Analytics: the daily active event and accounts added by any path; sends what waits.
         if let Some(client) = runtime.analytics() {
             if let Ok(snapshot) = runtime.store.snapshot() {
