@@ -2570,6 +2570,11 @@ fn launch_core(
             }
         }
     }
+    // SB-247: Codex runs the linked hooks only when this home's own config.toml trusts them.
+    let hook_trust = match (account.provider, &user) {
+        (Provider::Codex, Some(user)) => crate::carry::codex_hook_trust(&home, user),
+        _ => String::new(),
+    };
     if account.provider == Provider::Claude {
         crate::carry::claude_state(&home, continuation.map(|_| working_directory.as_path()))?;
         let settings_path = home.join("settings.json");
@@ -2639,7 +2644,7 @@ fn launch_core(
             }
             Provider::Codex => {
                 env.insert("SWITCHBOARD_LOCAL_TOKEN".into(), proxy.token().into());
-                let config=format!("model_provider = \"switchboard\"\ncli_auth_credentials_store = \"file\"\n[model_providers.switchboard]\nname = \"Fabric Switchboard\"\nbase_url = \"{base}/v1\"\nenv_key = \"SWITCHBOARD_LOCAL_TOKEN\"\nwire_api = \"responses\"\nrequires_openai_auth = false\nsupports_websockets = false\n{}", tools.codex_section);
+                let config=format!("model_provider = \"switchboard\"\ncli_auth_credentials_store = \"file\"\n[model_providers.switchboard]\nname = \"Fabric Switchboard\"\nbase_url = \"{base}/v1\"\nenv_key = \"SWITCHBOARD_LOCAL_TOKEN\"\nwire_api = \"responses\"\nrequires_openai_auth = false\nsupports_websockets = false\n{}\n{hook_trust}", tools.codex_section);
                 private_write(&home.join("config.toml"), config.as_bytes(), false)?;
             }
         }
@@ -2687,7 +2692,7 @@ fn launch_core(
                 private_write(
                     &home.join("config.toml"),
                     format!(
-                        "cli_auth_credentials_store = \"file\"\n{}",
+                        "cli_auth_credentials_store = \"file\"\n{}\n{hook_trust}",
                         tools.codex_section
                     )
                     .as_bytes(),
@@ -5638,6 +5643,34 @@ mod tests {
         fs::write(user.path().join("AGENTS.md"), "codex rules").unwrap();
         fs::write(user.path().join("hooks.json"), r#"{"hooks":{}}"#).unwrap();
         fs::write(user.path().join("auth.json"), "operator sign-in").unwrap();
+        // The person trusts their own hook; Codex runs it only where config.toml says so.
+        let theirs = user.path().join("hooks.json");
+        let mut person = toml::Table::new();
+        person.insert("model".into(), "never-copied".into());
+        let mut state = toml::Table::new();
+        let entry = |hash: &str| {
+            let mut e = toml::Table::new();
+            e.insert("trusted_hash".into(), hash.into());
+            e.insert("enabled".into(), true.into());
+            e.insert("note".into(), "never-copied".into());
+            toml::Value::Table(e)
+        };
+        state.insert(
+            format!("{}:session_start:0:0", theirs.display()),
+            entry("sha256:aa"),
+        );
+        state.insert(
+            "plugin@market:hooks/hooks.json:stop:0:0".into(),
+            entry("sha256:bb"),
+        );
+        let mut hooks = toml::Table::new();
+        hooks.insert("state".into(), toml::Value::Table(state));
+        person.insert("hooks".into(), toml::Value::Table(hooks));
+        fs::write(
+            user.path().join("config.toml"),
+            toml::to_string(&person).unwrap(),
+        )
+        .unwrap();
         let codex = f.add(
             Provider::Codex,
             AuthKind::ApiKey,
@@ -5656,6 +5689,21 @@ mod tests {
                 "{name} is a link"
             );
         }
+        let config: toml::Table =
+            toml::from_str(&fs::read_to_string(home.join("config.toml")).unwrap()).unwrap();
+        let carried = config["hooks"]["state"].as_table().unwrap();
+        assert_eq!(
+            carried.len(),
+            1,
+            "only the person's own hooks.json: {carried:?}"
+        );
+        let ours = &carried[&format!("{}:session_start:0:0", home.join("hooks.json").display())];
+        assert_eq!(ours["trusted_hash"].as_str(), Some("sha256:aa"));
+        assert_eq!(ours["enabled"].as_bool(), Some(true));
+        assert!(ours.get("note").is_none());
+        assert!(!fs::read_to_string(home.join("config.toml"))
+            .unwrap()
+            .contains("never-copied"));
         assert!(!fs::symlink_metadata(home.join("auth.json"))
             .unwrap()
             .file_type()
