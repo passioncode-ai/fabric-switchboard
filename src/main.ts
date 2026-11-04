@@ -106,7 +106,7 @@ const noticeStore = () => { try { return localStorage; } catch { return null; } 
  * and sent from the first start. A first-run notice says so once: OK acknowledges it, Turn off
  * turns Switchboard's own switch off (and acknowledges it too). About's switch is the same one.
  */
-const USAGE_COUNTED = () => t('Switchboard counts installs, days of use and how many accounts are saved, by provider and type, to help PassionCode.ai improve its apps. It never sends account names, e-mail addresses, sign-ins, group names or what you do with your accounts. A random installation number, shared by the PassionCode.ai tools on this computer, lets one person using several of them count once.');
+const USAGE_COUNTED = () => t('Switchboard counts installs, days of use, how many accounts are saved, by provider and type, and the errors it runs into, by a fixed code, to help PassionCode.ai improve its apps. It never sends account names, e-mail addresses, sign-ins, group names, error messages or what you do with your accounts. A random installation number, shared by the PassionCode.ai tools on this computer, lets one person using several of them count once.');
 /** Switchboard's own switch (SB-246); the notice says what is now true. */
 function setUsage(wanted: boolean, focus: string) {
   void mutate(async () => { analyticsState = await adapter.setAnalytics(wanted); }, () => usageAnswerText(wanted), focus);
@@ -148,7 +148,7 @@ function orgSetupUnreadCard(organization: { id: string; name: string }) {
 }
 function usageNoticeCard() {
   const card = el('section', 'usage-question'); card.setAttribute('aria-labelledby', 'usage-question-title');
-  const title = el('h2', '', t('Anonymous usage counts are on')); title.id = 'usage-question-title';
+  const title = el('h2', '', t('Anonymous usage and error counts are on')); title.id = 'usage-question-title';
   const actions = el('div', 'usage-question-actions');
   actions.append(
     button(t('OK'), () => void mutate(async () => { analyticsState = await adapter.analyticsNoticeSeen(); }, '', 'page-title'), 'button primary', 'usage-ok'),
@@ -2409,7 +2409,7 @@ function analyticsPanel() {
   if (!analyticsState) { panel.append(el('p', 'form-note', t('Reading the analytics setting…'))); return panel; }
   const option = el('label', 'appearance-option login-option'); const box = el('input'); box.type = 'checkbox'; box.checked = analyticsState.enabled; box.disabled = !analyticsState.available; box.dataset.focus = 'analytics';
   box.addEventListener('change', () => setUsage(box.checked, 'analytics'));
-  option.append(box, el('span', '', t('Share anonymous usage counts')));
+  option.append(box, el('span', '', t('Share anonymous usage and error counts')));
   panel.append(option, el('p', 'form-note', analyticsState.available ? t('This switch applies to Switchboard only.') : t('Only installed release builds send analytics; this build sends nothing.')));
   return panel;
 }

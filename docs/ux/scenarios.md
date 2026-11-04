@@ -938,10 +938,10 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Entry point:** About → *Usage analytics*.
 **Steps:**
 1. Read what is sent: counts of installs, days of use and saved accounts by provider and type; never names, e-mail addresses, sign-ins or group names (docs/ANALYTICS.md).
-2. Uncheck *Share anonymous usage counts* → “Anonymous usage analytics are off for Switchboard.”; check it → “Anonymous usage analytics are on.”
+2. Uncheck *Share anonymous usage and error counts* → “Anonymous usage analytics are off for Switchboard.”; check it → “Anonymous usage analytics are on.”
 **Alt paths:** the switch is on by default, a fresh install and every install that never answered here included, whatever another PassionCode.ai tool chose (SB-246); an install that answered off under the old question (issue #128) while the shared switch read off shows it off. A development or demo build says “Only installed release builds send analytics; this build sends nothing.”; while reading, “Reading the analytics setting…”; a read failure says “The analytics setting is unavailable. Refresh to retry.”; a save failure shows the error and leaves the checkbox as it was.
 **Expected result:** one switch, Switchboard's own (it turns Switchboard off or on only and never writes the shared installation file), and the person sees its state; off drops what waits and nothing more leaves; on again counts under the same installation number.
-**UI elements:** checkbox “Share anonymous usage counts”, help “This switch applies to Switchboard only.”
+**UI elements:** checkbox “Share anonymous usage and error counts”, help “This switch applies to Switchboard only.”
 **States covered:** on, off, unavailable (build), reading, read failed, save failed.
 **Errors & recovery:** a failed save keeps the old state and can be retried.
 **Status:** draft
@@ -1546,7 +1546,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Preconditions:** the installed release app (it carries the analytics key); Switchboard's switch is on; the notice was not acknowledged yet (a first start, or an install from before SB-246, which sees it once).
 **Entry point:** automatic, above every page but About, from the first time the window opens; About → *Usage analytics* holds the same switch (SCN-044).
 **Steps:**
-1. Open the window → above the page: “Anonymous usage counts are on”, what is counted (installs, days of use, saved accounts by provider and type; never names, e-mail addresses, sign-ins, group names or what you do with your accounts; one random installation number shared by the PassionCode.ai tools), *OK*, *Turn off*, and “You can turn them off at any time in About. This applies to Switchboard only.”
+1. Open the window → above the page: “Anonymous usage and error counts are on”, what is counted (installs, days of use, saved accounts by provider and type, the errors it runs into by a fixed code (SB-248); never names, e-mail addresses, sign-ins, group names, error messages or what you do with your accounts; one random installation number shared by the PassionCode.ai tools), *OK*, *Turn off*, and “You can turn them off at any time in About. This applies to Switchboard only.”
 2. *OK* → the notice goes and is not shown again; focus returns to the page title, and the five-step tour (SCN-035) starts.
 3. Or *Turn off* → “Anonymous usage analytics are off for Switchboard.”; the notice goes and nothing more leaves.
 **Alt paths:** counts already go before the notice is read (SB-246): a background start (login item, lifecycle broker) or a window never opened sends its start and the day; another PassionCode.ai tool's switch does not change Switchboard's; an install that answered off under the old question (issue #128) while the shared switch read off stays off and shows no notice; a save failure shows the error and keeps the notice; a development or demo build shows nothing (demo: `?demo=1&usage=notice` shows it).
