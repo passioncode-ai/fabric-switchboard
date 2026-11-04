@@ -2,6 +2,30 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-11-04: usage counts on by default (SB-246), `switchboard dispatch` (SB-247), release 0.7.7
+
+- **Done.** SB-246, PR #373 (`7037f2a`): anonymous usage counts on by default for new and existing installs, with
+  Switchboard's own switch (`analytics-state.json` `enabled`, rule 2) and a one-time notice; an install that turned
+  them off under the old rule stays off, and a migration that could not read the shared file is retried, never written
+  as off. SB-247 wave 1, PR #376 (`7ac2a5b`): `switchboard dispatch` starts the default agent headless for an
+  unanswered Fabric board request (design `docs/research/dispatch-2026-11-04.md`). Release PR #378 (`0a57a31`) set
+  0.7.7. Rows SB-248 (error reports, by 2026-11-14) and SB-47 (by 2026-11-18) are on the board.
+- **In review.** PR #379 (branch `sb-247-followup`, `1a6118c`): `FABRIC_DISPATCH_ID` in the run; each checkpoint
+  carries the acceptance answer's `checkpoint.body` whole; a Codex home carries the person's trust in their own
+  `hooks.json` (`carry::codex_hook_trust`), all asked by fabric-agent-adapter on board thread `b3e60686`. Focused tests
+  pass (16, `dispatch::` and the home test); the full gate has not run yet.
+- **Disk.** A full gate needs about 6 GB of build output; run one at a time under a guard that stops it below 8 GB
+  free, and delete its `target/` right after.
+- **Board.** Operator rule relayed by webpilot on 2026-11-04 (thread `11646774`): a board request, announcement or
+  question that waits for an answer gets one at once, in the same turn, with the current state (what is done, where,
+  when, what blocks); the finished result follows as a second message. The watcher (cron `cf714165`) keeps running to
+  21.11.
+- **Open.** 0.7.7: the nightly on the tag (41855408822) had its cancelled macOS `checks` job rerun; when it is green,
+  the release run 41855036698 is rerun (`gh run rerun --failed`), then the assets, `latest.json` and the installed app
+  are confirmed. Then board thread `b2e5df1f` gets the release date.
+- **Exact next task.** Finish 0.7.7 as above, run the full gate of PR #379 when the disk allows, merge it, release
+  0.7.8 and tell threads `b3e60686` and `a9672312` the date; then SB-248.
+
 ## 2026-11-03: SB-244 fixed, SB-82 N3 and N4 merged, release 0.7.6
 
 - **Done.** SB-244 (Fabric board finding `d3072c61`, thread `f26f7dc0`), PR #365 (`26edd4b`): a folder copied with
