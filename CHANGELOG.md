@@ -8,6 +8,8 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+## 0.7.9
+
 - With *Install updates automatically* off, Switchboard still looks for new versions every five minutes and tells you when one is out, with an *Update* button in About; nothing is downloaded until you press it. Before, it did not look at all (SB-249).
 - With anonymous usage data on, Switchboard also counts the errors it hits (a failed update check, a usage check that could not reach the provider, a crash) by a fixed code, and sends each day's counts once the day is over, so PassionCode sees what goes wrong for people. Never an error's text, a path, an account or a name. About turns it off with the usage counts (SB-248).
 
