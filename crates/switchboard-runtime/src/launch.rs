@@ -54,6 +54,7 @@ const CONFLICTS: &[&str] = &[
     "FABRIC_DISPATCH_WORKFLOW",
     "FABRIC_DISPATCH_HANDOFF",
     "FABRIC_DISPATCH_REQUEST",
+    "FABRIC_DISPATCH_ID",
 ];
 #[cfg(windows)]
 const CLI_NAME: &str = "switchboard.exe";
@@ -2712,6 +2713,10 @@ fn launch_core(
         env.insert(DISPATCH_ENV.into(), h.workflow.clone());
         env.insert(DISPATCH_HANDOFF_ENV.into(), h.handoff.clone());
         env.insert(DISPATCH_REQUEST_ENV.into(), h.request.clone());
+        // Fabric's dispatch id (`--dispatch-id`), when it gave one: the adapter keys the run on it.
+        if let Some(id) = h.by["id"].as_str() {
+            env.insert(DISPATCH_ID_ENV.into(), id.to_owned());
+        }
         let record = json!({
             "account_id": account.id,
             "provider": account.provider.as_str(),
@@ -2795,6 +2800,8 @@ pub const DISPATCH_ENV: &str = "FABRIC_DISPATCH_WORKFLOW";
 /// SB-247: the hand-over Fabric opened, and the board request the run answers.
 pub const DISPATCH_HANDOFF_ENV: &str = "FABRIC_DISPATCH_HANDOFF";
 pub const DISPATCH_REQUEST_ENV: &str = "FABRIC_DISPATCH_REQUEST";
+/// SB-247: Fabric's id for the dispatch (`--dispatch-id`), absent without the flag.
+pub const DISPATCH_ID_ENV: &str = "FABRIC_DISPATCH_ID";
 /// SB-247: how much a dispatched run may do without asking (`--permissions`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
