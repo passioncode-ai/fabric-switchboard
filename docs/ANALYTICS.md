@@ -31,7 +31,7 @@ the two-tier idea of 2026-11-03, which was not built.
   opens included (`on_by_default_a_background_start_sends_from_the_first_start`,
   `through_the_runtime_a_background_start_sends_the_start_and_the_day`).
 - **A notice, not a question.** The window shows a first-run notice above every page but About
-  (SCN-073): “Anonymous usage counts are on”, what is counted, *OK* and *Turn off*, and “You can
+  (SCN-073): “Anonymous usage and error counts are on”, what is counted, *OK* and *Turn off*, and “You can
   turn them off at any time in About. This applies to Switchboard only.” *OK* records `notice_at`
   (Unix seconds) in `<data>/analytics-state.json`; *Turn off* turns the switch off and records it
   too. Nothing waits for the notice: it only tells. An install that answered the old question
@@ -39,7 +39,7 @@ the two-tier idea of 2026-11-03, which was not built.
   (`the_notice_waits_until_acknowledged_and_ok_changes_nothing_else`,
   `an_install_that_answered_under_the_old_rule_sees_the_notice_once`).
 - **Switchboard's own switch.** The switch is `enabled` in `<data>/analytics-state.json`
-  (absent = on), set by About → *Share anonymous usage counts* (SCN-044) or the notice's
+  (absent = on), set by About → *Share anonymous usage and error counts* (SCN-044) or the notice's
   *Turn off*. It turns Switchboard off or on only: the shared `PassionCode/installation.json`
   supplies the installation id and is never written for the switch, and its `analytics` field,
   another app's, is no longer read
@@ -109,16 +109,51 @@ else identifies the machine or the person.
 | `account_switched` | the account in use or a pool's managed route changes | `provider`, `target` (`native`, `managed`), `cause` (`manual`, `rotation`, `limit`) |
 | `dispatch` | `switchboard dispatch` answered (SB-247, Fabric's start of the default agent for a board request; the owner sends it, so only the installed app counts it) | `state` (`started`, `running`, `refused`), `reason` (the refusal code, only when refused: `no_agent`, `not_in_group`, `ceiling_reached`, `spend_unknown`, `agent_not_installed`, `permission_mode`, `handoff_refused`), `agent_kind` (`claude`, `codex`, `other`, `none`), `platform` (`macos`, `windows`, `linux`); never the folder, the workflow, the hand-over, the account or the prompt |
 | `dispatch_ended` | a dispatched run ended, recorded once | `outcome` (`exited`, `stopped`, `timed_out`), `duration` (`under_1m`, `1_5m`, `5_15m`, `15_60m`, `over_60m`) |
+| `app_error` | once a UTC day is over, one event per class and code of the errors this copy hit that day, the largest first, at most 30 a day; a day older than a week goes unsent ([below](#errors-sb-248)) | `class` (the log event, such as `update_check`, `usage_check`, `launch_record`, or `panic`), `code` (its fixed code, such as `check_failed`, `unreachable`, `failed`, or a panic's source file stem, such as `monitor`), `count`, `day` (`YYYY-MM-DD`, UTC); never an error's text, a path, an account or a name |
 
 **Never sent:** account ids, labels, e-mail addresses, organisation ids, pool names, paths,
-tokens, provider responses or errors, quota figures, and (0.7.0) a chain's or ceiling's scope,
+tokens, provider responses or error messages, quota figures, and (0.7.0) a chain's or ceiling's scope,
 group id, workflow id, question id, agent, key name or amount. The test
 `events_carry_counts_and_the_installation_id_never_an_identity` sends accounts whose id, label,
 identity and pool are planted strings, and chains and ceilings with a planted group id, workflow
 id, question id, account, key name and amount, and fails if any of them reaches the server.
+Since SB-248 it also sends a day's `app_error`; `each_day_that_is_over_sends_its_errors_by_class_and_code_and_off_sends_none` checks that event's props are exactly `class`, `code`, `count`, `day` and the ids every event carries.
 
 Accounts present when analytics first runs are counted in `app_installed`, not reported as added.
 An account added or removed while analytics is off is never reported later.
+
+## Errors (SB-248)
+
+The operator, 2026-11-04 about 12:25 UTC (coordinator session `74a9440a`): «убедиться, что есть
+логирование ошибок. и мы можем корректно видеть, если появляются какие-то проблемы у наших
+клиентов»; and 09:45 UTC: «анонимные данные об использовании и об ошибках». Source:
+[`crates/switchboard-runtime/src/errors.rs`](../crates/switchboard-runtime/src/errors.rs).
+
+- **What counts.** A line of Switchboard's own log (`switchboard.log`) that `errors::classify`
+  reads as an error: an event that is one by name (`hard_exit`, `transaction_held`,
+  `control_slow`, `vault_slow`, `control_refused`, `external_file_refused`, `dispatch_timeout`,
+  `usage_holds_unsaved`, `usage_holds_unreadable`, `analytics_state_unwritable`), any event with a
+  failure code (`failed`, `unreadable`, `unsaved`, `unwritten`, `unwritable`, `config_unreadable`,
+  `bundle_unknown`, `panicked`, `check_failed`, `download_failed`, `signature_failed`,
+  `install_failed`), a `usage_check` that failed as a check (`unreachable`, `http_error`,
+  `interrupted`, `rejected`, `too_large`, `unavailable`, `no_windows`, `other`, `vault`; a limit
+  or an account the provider no longer has is an answer, not an error) and an `update_download`
+  cut short (`partial`). And a panic of the installed app's owner, named by the stem of the source
+  file that panicked. The log holds fixed codes, numbers and flags only, by construction, so
+  nothing else can reach the count (`only_failures_count_and_under_codes_only`,
+  `a_panic_is_named_by_its_file_stem_only`).
+- **Where it waits.** In memory, then `<data>/error-counts.json` (0600: per UTC day, class and
+  code, a count; at most 64 pairs a day, the rarest dropped), written only on a background pass
+  that counted something; with nothing counted, the file is looked at once a day.
+- **When it leaves.** On the first background pass after a UTC day is over, one `app_error` per
+  class and code, the largest first, at most 30 a day
+  (`a_day_is_sent_once_it_is_over_the_largest_first_and_at_most_thirty`). This is sshlg-growth's
+  shape (its answer to fabric-inbox of 2026-11-04 on board thread `b2e5df1f`): `where` filters
+  read string `class` and `code`, and `count` is the number.
+- **Off.** With Switchboard's switch off nothing is counted for long and the file is deleted when
+  it is turned off (`a_day_older_than_a_week_goes_unsent_and_off_forgets_everything`).
+- **Not yet.** A refusal a person reads in the window, the CLI or MCP (SB-189's sentences) is not
+  counted: most are answers to what the person typed, and one that matters already logs its code.
 
 ## Chains and ceilings (0.7.0)
 

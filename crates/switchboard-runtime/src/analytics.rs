@@ -374,6 +374,7 @@ impl Analytics {
             if let Ok(mut queue) = self.queue.lock() {
                 queue.clear();
             }
+            crate::errors::discard(&self.root);
         }
         Ok(self.status())
     }
@@ -568,7 +569,32 @@ impl Analytics {
             state.active_day = Some(day);
             self.save(&state);
         }
+        self.errors(day);
         self.reconcile(snapshot, "sync");
+    }
+
+    /// SB-248: the errors of each day that is over, one `app_error` per class and code (string
+    /// `class` and `code`, numeric `count`, `day` as `YYYY-MM-DD`). Off forgets what was counted.
+    /// Nothing is read or written on a pass with nothing counted and no past day waiting.
+    fn errors(&self, today: i64) {
+        if !self.on() {
+            crate::errors::forget_pending();
+            return;
+        }
+        let due = crate::errors::take_due(&self.root, today);
+        let mut unsent = Vec::new();
+        for (day, class, code, count) in due {
+            let mut props = Map::new();
+            props.insert("class".into(), json!(class));
+            props.insert("code".into(), json!(code));
+            props.insert("count".into(), json!(count));
+            props.insert("day".into(), json!(crate::errors::date(day)));
+            if !self.track("app_error", props) {
+                unsent.push((day, class, code, count));
+            }
+        }
+        // The shared file could not be read just now: the counts wait for a later pass.
+        crate::errors::restore(unsent);
     }
 
     /// Emits `account_added` / `account_removed` for the difference from the accounts already
@@ -1024,6 +1050,12 @@ mod tests {
         .unwrap();
         // SB-246: sent from a background start, with no answer asked for.
         client.started("background", &one);
+        // SB-248: yesterday's errors, as codes only.
+        crate::errors::add(
+            crate::errors::day(now()) - 1,
+            "update_check".into(),
+            "check_failed".into(),
+        );
         client.tick(&one, now());
         // A new account by a sign-in, and one removed.
         let two = snapshot(vec![account("acct-2", Provider::Codex, AuthKind::ApiKey)]);
@@ -1039,6 +1071,7 @@ mod tests {
                 "app_installed",
                 "app_started",
                 "app_active",
+                "app_error",
                 "account_added",
                 "account_removed",
                 "account_switched",
@@ -1089,10 +1122,11 @@ mod tests {
             sent[0]["props"].get("chains").is_none(),
             "app_installed unchanged"
         );
-        assert_eq!(sent[3]["props"]["method"], "sign_in");
-        assert_eq!(sent[3]["props"]["provider"], "codex");
-        assert_eq!(sent[3]["props"]["kind"], "api_key");
-        assert_eq!(sent[4]["props"]["provider"], "claude");
+        assert_eq!(sent[3]["props"]["class"], "update_check");
+        assert_eq!(sent[4]["props"]["method"], "sign_in");
+        assert_eq!(sent[4]["props"]["provider"], "codex");
+        assert_eq!(sent[4]["props"]["kind"], "api_key");
+        assert_eq!(sent[5]["props"]["provider"], "claude");
         let event = &sent[0];
         assert!(event["timestamp"].as_str().unwrap().ends_with(".000Z"));
         assert!(event["sessionId"].as_str().unwrap().parse::<u128>().is_ok());
@@ -1101,6 +1135,51 @@ mod tests {
             .unwrap()
             .starts_with("switchboard-analytics@"));
         assert_eq!(client.pending(), 0);
+    }
+
+    #[tokio::test]
+    async fn each_day_that_is_over_sends_its_errors_by_class_and_code_and_off_sends_none() {
+        let server = Server::default();
+        let url = serve(server.clone()).await;
+        let folder = tempfile::tempdir().unwrap();
+        let shared = folder.path().join("PassionCode");
+        let client = Analytics::new("k", &url, shared.clone(), folder.path());
+        let one = snapshot(vec![account("acct-1", Provider::Claude, AuthKind::OAuth)]);
+        let today = 20_001;
+        crate::errors::add(today - 1, "update_check".into(), "check_failed".into());
+        crate::errors::add(today - 1, "update_check".into(), "check_failed".into());
+        crate::errors::add(today - 1, "panic".into(), "monitor".into());
+        crate::errors::add(today, "usage_check".into(), "unreachable".into());
+        client.tick(&one, 86_400 * today + 10);
+        client.flush().await;
+        let errors: Vec<Value> = events(&server)
+            .into_iter()
+            .filter(|e| e["eventName"] == "app_error")
+            .collect();
+        assert_eq!(errors.len(), 2, "today's error waits: {errors:?}");
+        let id = installation(&shared).unwrap().0.id;
+        assert_eq!(
+            errors[0]["props"],
+            json!({"class": "update_check", "code": "check_failed", "count": 2,
+                   "day": "2024-10-04", "install_id": id, "iid": id, "environment": ENVIRONMENT})
+        );
+        assert_eq!(errors[1]["props"]["class"], "panic");
+        assert_eq!(errors[1]["props"]["code"], "monitor");
+        // Off forgets what was counted, on disk too, and nothing leaves afterwards.
+        client.set_enabled(false).unwrap();
+        assert!(!folder.path().join(crate::errors::FILE).exists());
+        crate::errors::add(today + 1, "hard_exit".into(), "logged".into());
+        client.tick(&one, 86_400 * (today + 3));
+        client.set_enabled(true).unwrap();
+        client.tick(&one, 86_400 * (today + 4));
+        client.flush().await;
+        assert_eq!(
+            events(&server)
+                .iter()
+                .filter(|e| e["eventName"] == "app_error")
+                .count(),
+            2
+        );
     }
 
     /// Everything this app can report, in one go: a start, a day, an account added and

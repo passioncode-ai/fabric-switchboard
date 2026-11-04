@@ -37,6 +37,8 @@ const OWNED: &[&str] = &[
     // Usage analytics' own state, Switchboard's switch and the notice's acknowledgement included
     // (SB-246): uninstalling forgets both, and the notice returns at the next first start.
     "analytics-state.json",
+    // Error counts waiting for their day to be over (SB-248).
+    "error-counts.json",
     // The PassionCode.ai connection (SB-159); its token's vault item is deleted below.
     "vesta.json",
     // Folders taken out of their group lately (SB-172).
@@ -434,6 +436,7 @@ mod tests {
     fn uninstall_forgets_the_usage_answer() {
         // SB-246: the switch and the notice live in this app's analytics state, which is ours.
         assert!(OWNED.contains(&crate::analytics::STATE_FILE));
+        assert!(OWNED.contains(&crate::errors::FILE));
     }
 
     // Unix only: it links the CLI with `std::os::unix::fs::symlink` (round 2, item 3).
