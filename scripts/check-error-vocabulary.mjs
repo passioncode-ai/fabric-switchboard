@@ -43,6 +43,9 @@ const EXCLUDED_FILES = {
   // that operation: no Tauri command does (src-tauri has no continue command). A desktop entry
   // point for it adds its messages to src/adapter.ts and removes this line.
   'crates/switchboard-runtime/src/continuation.rs': 'CLI-only workflow continuation; no renderer request reaches it',
+  // SB-247: `switchboard dispatch` is Fabric's command; only the CLI sends Operation::Dispatch
+  // and DispatchStop, and its refusals are answers with a code, not errors.
+  'crates/switchboard-runtime/src/dispatch.rs': 'CLI-only dispatch for Fabric; no renderer request reaches it',
 };
 // Messages that are error literals in the sources above but can never reach the UI.
 // Every entry names why. Keep this list short: a doubtful message gets a mapping instead.
@@ -54,6 +57,10 @@ const ALLOWLIST = {
   'Give a launch id from switchboard sessions --history as the parent.': 'SB-212 launch --parent: CLI only',
   'No launch has that id. List them with switchboard sessions --history.': 'SB-212 sessions show: CLI and MCP only',
   'Only a launch can name who launched it.': 'SB-212 Launched wraps only launches; the window never sends it',
+  // runtime launch.rs (SB-247): a dispatched run is started and stopped only by `switchboard
+  // dispatch`, Fabric's command; the window sends neither.
+  'The dispatched session did not start: its program could not be run.': 'SB-247 dispatch: CLI only',
+  'The dispatched session did not stop. End its process by hand, then stop it again.': 'SB-247 dispatch stop: CLI only',
   // runtime settings_bundle.rs parse(): SB-176 settings import runs from the CLI only; the window
   // has no import, so this prints to the terminal.
   'This is not a Switchboard settings file (switchboard-settings/1).': 'SB-176 settings import is CLI-only',

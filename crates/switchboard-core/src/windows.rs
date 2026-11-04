@@ -515,6 +515,22 @@ pub(crate) fn crypt(data: &[u8], encrypt: bool) -> Result<Vec<u8>, String> {
     }
     Ok(result)
 }
+/// SB-247: when process `pid` started, as Windows UTC FILETIME: the `created` a session marker
+/// records and [`process_matches`] compares.
+pub fn process_created(pid: u32) -> Result<u64, String> {
+    unsafe {
+        let h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+        if h.is_null() {
+            return Err("Session process cannot be inspected".into());
+        }
+        let h = Handle(h);
+        let (mut start, mut exit, mut kernel, mut user) = (zeroed(), zeroed(), zeroed(), zeroed());
+        if GetProcessTimes(h.0, &mut start, &mut exit, &mut kernel, &mut user) == 0 {
+            return Err("Session process cannot be inspected".into());
+        }
+        Ok((start.dwHighDateTime as u64) << 32 | start.dwLowDateTime as u64)
+    }
+}
 /// True only for the same living process incarnation; timestamp is Windows UTC FILETIME.
 pub fn process_matches(pid: u32, created: u64) -> Result<bool, String> {
     unsafe {

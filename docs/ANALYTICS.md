@@ -107,6 +107,8 @@ else identifies the machine or the person.
 | `account_removed` | an account disappears | `provider`, `kind`, `accounts` |
 | `project_changed` | a project created, changed or removed by the person (folders Switchboard adds or takes out by itself, SB-131, send nothing; the next person's change carries the current counts) | `change` (`created`, `updated`, `removed`), `projects`, `folders`, `project_accounts` — counts, never a name or a path |
 | `account_switched` | the account in use or a pool's managed route changes | `provider`, `target` (`native`, `managed`), `cause` (`manual`, `rotation`, `limit`) |
+| `dispatch` | `switchboard dispatch` answered (SB-247, Fabric's start of the default agent for a board request; the owner sends it, so only the installed app counts it) | `state` (`started`, `running`, `refused`), `reason` (the refusal code, only when refused: `no_agent`, `not_in_group`, `ceiling_reached`, `spend_unknown`, `agent_not_installed`, `permission_mode`, `handoff_refused`), `agent_kind` (`claude`, `codex`, `other`, `none`), `platform` (`macos`, `windows`, `linux`); never the folder, the workflow, the hand-over, the account or the prompt |
+| `dispatch_ended` | a dispatched run ended, recorded once | `outcome` (`exited`, `stopped`, `timed_out`), `duration` (`under_1m`, `1_5m`, `5_15m`, `15_60m`, `over_60m`) |
 
 **Never sent:** account ids, labels, e-mail addresses, organisation ids, pool names, paths,
 tokens, provider responses or errors, quota figures, and (0.7.0) a chain's or ceiling's scope,

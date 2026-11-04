@@ -170,6 +170,43 @@ enum Command {
         #[arg(long, value_name = "USD")]
         ceiling: Option<f64>,
     },
+    /// Fabric's command: start the default agent, with no person, on a workflow Fabric
+    /// opened for a board request nobody answered, and stop it. Claude Code runs as `claude -p`,
+    /// Codex as `codex exec`, in the account's isolated home, from Switchboard's own process (no
+    /// Terminal). Answers the run's `launch_id` and `state` (`started`, `running` or `refused`
+    /// with a `reason` code). Requires a running desktop app or serve.
+    #[command(args_conflicts_with_subcommands = true, subcommand_negates_reqs = true)]
+    Dispatch {
+        #[command(subcommand)]
+        command: Option<DispatchCommand>,
+        /// The project's folder the session runs in (absolute).
+        #[arg(long, required = true)]
+        dir: Option<PathBuf>,
+        /// The workflow Fabric wrote for the request, `wf_` and 16 hex digits.
+        #[arg(long, required = true)]
+        workflow: Option<String>,
+        /// The hand-over Fabric offered to the default agent's provider (`handoff:` and 16 hex
+        /// digits); the session accepts it for the account Switchboard chooses.
+        #[arg(long, required = true)]
+        handoff: Option<String>,
+        /// The board request the session answers, a UUID. Without it, the workflow's
+        /// `board-request:` artifact names it; given, it wins.
+        #[arg(long)]
+        request: Option<String>,
+        /// Fabric's own id for this dispatch, kept in the launch record (`launched_by.dispatch.id`).
+        #[arg(long)]
+        dispatch_id: Option<String>,
+        /// Why the session starts: `request`, a board request nobody answered.
+        #[arg(long, value_enum, default_value = "request")]
+        reason: DispatchReason,
+        /// `ask`: the agent's own defaults. `all`: Claude Code with
+        /// --dangerously-skip-permissions, Codex with --dangerously-bypass-approvals-and-sandbox.
+        #[arg(long, value_enum, default_value = "ask")]
+        permissions: DispatchPermissions,
+        /// Stop the run after this many minutes, 1 to 1440.
+        #[arg(long, default_value_t = 60, value_parser = clap::value_parser!(u32).range(1..=1440))]
+        timeout_minutes: u32,
+    },
     /// Own the vault, inference proxy and private CLI control listener until Ctrl-C or
     /// SIGTERM, then stop within ten seconds.
     Serve,
@@ -1043,6 +1080,30 @@ enum Login {
     },
 }
 #[derive(Subcommand)]
+enum DispatchCommand {
+    /// Stop a dispatched run: its process group (`taskkill /T` on Windows). Answers `stopped`, or
+    /// `already_ended` for a run that had ended.
+    Stop {
+        /// The run's launch id, as `switchboard dispatch` answered it.
+        #[arg(long)]
+        launch_id: String,
+    },
+}
+/// Why `switchboard dispatch` starts a session.
+#[derive(Clone, Copy, ValueEnum)]
+enum DispatchReason {
+    /// A board request nobody answered.
+    Request,
+}
+/// How much a dispatched run may do without asking.
+#[derive(Clone, Copy, ValueEnum)]
+enum DispatchPermissions {
+    /// The agent's own defaults.
+    Ask,
+    /// Everything the agent can skip asking for.
+    All,
+}
+#[derive(Subcommand)]
 enum SessionsCommand {
     /// One launch with its chain: who launched it, up to the first launch, and the launches it
     /// started or that took its work over.
@@ -1312,6 +1373,38 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                 choice: (organization != "auto").then(|| organization.clone()),
             },
         },
+        Command::Dispatch {
+            command: Some(DispatchCommand::Stop { launch_id }),
+            ..
+        } => Operation::DispatchStop {
+            launch_id: launch_id.clone(),
+        },
+        Command::Dispatch {
+            command: None,
+            dir,
+            workflow,
+            handoff,
+            request,
+            dispatch_id,
+            reason: DispatchReason::Request,
+            permissions,
+            timeout_minutes,
+        } => switchboard_runtime::launched(
+            Operation::Dispatch {
+                working_directory: dir.clone().unwrap_or_default(),
+                workflow_id: workflow.clone().unwrap_or_default(),
+                handoff_id: handoff.clone().unwrap_or_default(),
+                reason: switchboard_runtime::dispatch::Reason::Request,
+                permissions: match permissions {
+                    DispatchPermissions::Ask => switchboard_runtime::launch::Permissions::Ask,
+                    DispatchPermissions::All => switchboard_runtime::launch::Permissions::All,
+                },
+                timeout_minutes: *timeout_minutes,
+                request_id: request.clone(),
+                dispatch_id: dispatch_id.clone(),
+            },
+            launches::LaunchedBy::from_caller(launches::Surface::Fabric, None, None),
+        ),
         Command::Sessions {
             command: Some(SessionsCommand::Show { launch_id }),
             ..
@@ -2299,7 +2392,8 @@ fn launch_line(l: &Value) -> String {
         text(&l["working_directory"]),
         utc(&l["launched_at"]),
     );
-    if let Some(ended) = l["ended"].as_str() {
+    // SB-247: a dispatched run's end is an object, `{kind, exit_code?, at}`.
+    if let Some(ended) = l["ended"].as_str().or_else(|| l["ended"]["kind"].as_str()) {
         line.push_str(&format!(" · stopped: {ended}"));
     }
     if let Some(kind) = l["continued_as"]["kind"].as_str() {
@@ -2380,6 +2474,20 @@ fn print_result(value: &Value, cli: &Cli) {
     }
     let text = |v: &Value| v.as_str().unwrap_or(PLACEHOLDER).to_string();
     match &cli.command {
+        Command::Dispatch { command: None, .. } => match value["state"].as_str() {
+            Some("refused") => println!("{} ({})", text(&value["message"]), text(&value["reason"])),
+            _ => println!(
+                "{} {} on {}: {}",
+                text(&value["state"]),
+                text(&value["launch_id"]),
+                text(&value["agent"]),
+                text(&value["account_id"])
+            ),
+        },
+        Command::Dispatch {
+            command: Some(DispatchCommand::Stop { .. }),
+            ..
+        } => println!("{} {}", text(&value["launch_id"]), text(&value["state"])),
         Command::Org { command: Org::List } => {
             let organizations = value["organizations"]
                 .as_array()
@@ -3393,6 +3501,11 @@ mod mcp_parity {
         ("login cancel", Tool("switchboard_login")),
         ("launch", Not(LAUNCH)),
         ("continue", Not(LAUNCH)),
+        // `dispatch` itself starts a run as `sessions` lists them: one decision for both.
+        (
+            "dispatch stop",
+            Not("SB-247: Fabric's dispatcher starts and stops these runs with the CLI; an agent reads them with switchboard_sessions"),
+        ),
         ("serve", Not(PROCESS)),
         ("mcp", Not(PROCESS)),
         ("agents list", Tool("switchboard_agents")),

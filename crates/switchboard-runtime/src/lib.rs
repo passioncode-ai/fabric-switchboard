@@ -12,6 +12,7 @@ mod chain_view;
 mod codex_route;
 pub mod continuation;
 pub mod control;
+pub mod dispatch;
 pub mod external;
 #[cfg(target_os = "macos")]
 mod external_keychain;
@@ -152,6 +153,28 @@ pub enum Operation {
         /// terminal (an embedded console, SB-108), instead of opening Terminal.
         #[serde(default)]
         in_place: bool,
+    },
+    /// SB-247: Fabric's start of the default agent, with no person, on a workflow Fabric opened
+    /// for a board request and offered to the agent's provider (`handoff_id`). The answer is the
+    /// run's `launch_id`, agent, account and `state` (`started`, `running`, `refused` with a
+    /// `reason` code).
+    Dispatch {
+        working_directory: PathBuf,
+        workflow_id: String,
+        handoff_id: String,
+        reason: dispatch::Reason,
+        permissions: launch::Permissions,
+        timeout_minutes: u32,
+        /// The board request (`--request`); none: the packet's `board-request:` artifact.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        request_id: Option<String>,
+        /// Fabric's own id for this dispatch (`--dispatch-id`), for the launch record.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        dispatch_id: Option<String>,
+    },
+    /// SB-247: stops a dispatched run (`state`: `stopped`, `already_ended`).
+    DispatchStop {
+        launch_id: String,
     },
     /// SB-108, by hand: offer a workflow like `Continue` and leave its prepared session for
     /// Fabric's console (`switchboard handovers`) instead of opening Terminal; nobody taking it
@@ -1016,6 +1039,9 @@ impl Runtime {
                 // session's hook gives up after 1.5 s and must not wait out the transaction.
                 | Operation::LaunchEvent { .. }
                 | Operation::Launches { .. }
+                // SB-247: a stop signals a process and waits up to seconds for it to end; its
+                // record is written under the records' own lock.
+                | Operation::DispatchStop { .. }
         ) {
             return execute(self.store.clone(), &self.root, Some(self), operation).await;
         }
@@ -3271,6 +3297,7 @@ fn is_launch(operation: &Operation) -> bool {
             | Operation::ContinueToConsole { .. }
             | Operation::LaunchAgent { .. }
             | Operation::KimiLaunch { .. }
+            | Operation::Dispatch { .. }
     )
 }
 /// SB-212: `operation` with who asked for it, when it launches a session; any other operation
@@ -3456,6 +3483,150 @@ fn continue_checks(
     working_directory
         .canonicalize()
         .map_err(|_| "Choose an existing project directory.".to_string())
+}
+/// SB-247: `Operation::Dispatch` past its argument checks: a running run of the same workflow,
+/// then every refusal before anything starts (the default agent, its program, the folder, the
+/// hand-over Fabric opened, an account with room, the spend gate), then the account's isolated
+/// home and the non-interactive run. A refusal is an answer (`state: refused`); a failure past
+/// the refusals is an error.
+#[allow(clippy::too_many_arguments)]
+async fn dispatch_start(
+    store: &Arc<Store>,
+    root: &Path,
+    runtime: &Runtime,
+    working_directory: &Path,
+    workflow_id: &str,
+    handoff_id: &str,
+    permissions: launch::Permissions,
+    timeout_minutes: u32,
+    request_id: Option<&str>,
+    dispatch_id: Option<&str>,
+) -> Result<Value, String> {
+    if let Some((id, record)) = crate::blocking::run(|| launches::live_dispatch(root, workflow_id))
+    {
+        let agent = match record["provider"].as_str() {
+            Some("codex") => "codex",
+            _ => "claude-code",
+        };
+        return Ok(json!({
+            "launch_id": id,
+            "agent": agent,
+            "account_id": record["account_id"],
+            "state": "running",
+        }));
+    }
+    let (agent, provider) = match dispatch::default_agent(root) {
+        Ok(found) => found,
+        Err(refusal) => return Ok(refusal),
+    };
+    let refuse = |reason| Ok(dispatch::refused(Some(&agent), reason));
+    let Ok(program) = launch::dispatch_program(provider) else {
+        return refuse(dispatch::AGENT_NOT_INSTALLED);
+    };
+    let Some(folder) = dispatch::folder(root, working_directory) else {
+        return refuse(dispatch::NOT_IN_GROUP);
+    };
+    // Fabric opened the hand-over (D-1): it must be waiting for this workflow and provider.
+    let Ok(bin) = continuation::observatory() else {
+        return refuse(dispatch::HANDOFF_REFUSED);
+    };
+    let shown = match continuation::show(&bin, workflow_id) {
+        Ok(shown) if dispatch::handoff_waiting(&shown, workflow_id, handoff_id, provider) => shown,
+        _ => return refuse(dispatch::HANDOFF_REFUSED),
+    };
+    // The request: the flag wins over the packet; a dispatch with neither is malformed.
+    let packet = dispatch::packet(&shown);
+    let request = request_id
+        .map(str::to_owned)
+        .or_else(|| packet.request.clone())
+        .ok_or(dispatch::NO_REQUEST)?;
+    let Ok(id) = fallback::account_for_default(
+        runtime,
+        &agent,
+        &continuation::executor_of(&shown),
+        &folder,
+        monitor::now(),
+    ) else {
+        return refuse(dispatch::NO_AGENT);
+    };
+    if let Some(kind) = fallback::paid_kind(&store.snapshot()?, &id) {
+        if let Err(error) =
+            fallback::gate_by_hand(store, root, Some(workflow_id), &folder, kind).await
+        {
+            return refuse(dispatch::gate_reason(&error));
+        }
+    }
+    // As `continue` starts an isolated session: with hours left on its token.
+    let (native, refresh_state) = (runtime.native, &runtime.refresh);
+    refresh::learn_live_owner(store, native, refresh_state).await;
+    let short = store
+        .stored_credential(&id)
+        .is_ok_and(|c| short_lived(&c, monitor::now()));
+    if refresh::ensure_fresh(store, native, refresh_state, &id, short).await
+        == refresh::Outcome::Active
+    {
+        adopt_live(store, native, refresh_state, &id);
+    }
+    launch::preflight(root, store, &id, "isolated", &folder)?;
+    let Ok(observatory) = continuation::observatory_mcp(&bin) else {
+        return refuse(dispatch::HANDOFF_REFUSED);
+    };
+    let resumed = continuation::Continuation {
+        workflow_id: workflow_id.to_owned(),
+        handoff_id: handoff_id.to_owned(),
+        observatory,
+        previous_provider: None,
+    };
+    let deadline = monitor::now() + i64::from(timeout_minutes) * 60;
+    let headless = launch::Headless {
+        program,
+        workflow: workflow_id.to_owned(),
+        handoff: handoff_id.to_owned(),
+        request: request.clone(),
+        header: dispatch::header(workflow_id, handoff_id, &request),
+        prompt: dispatch::prompt(handoff_id, provider, &id),
+        contract: dispatch::EXIT_CONTRACT.to_owned(),
+        by: json!({
+            "id": dispatch_id,
+            "request": request,
+            "thread": packet.thread,
+            "project": packet.project,
+            "workflow": workflow_id,
+        }),
+        permissions,
+        timeout_minutes,
+        deadline,
+    };
+    let started = match launch::dispatch_session(
+        root,
+        store,
+        &runtime.proxy,
+        &id,
+        &folder,
+        &resumed,
+        &headless,
+    ) {
+        Ok(started) => started,
+        Err(error) if dispatch::busy(&error) => return refuse(dispatch::NO_AGENT),
+        Err(error) => return Err(error),
+    };
+    let launch_id = started.launch_id.clone();
+    let account_id = started.account_id.clone();
+    dispatch::live_add(root, &launch_id, deadline);
+    dispatch::watch(root, launch_id.clone(), started.child, runtime.analytics());
+    oplog::event(
+        "dispatch",
+        &[(
+            "agent",
+            oplog::Field::Code(dispatch::agent_kind(Some(&agent))),
+        )],
+    );
+    Ok(json!({
+        "launch_id": launch_id,
+        "agent": agent,
+        "account_id": account_id,
+        "state": "started",
+    }))
 }
 async fn execute(
     store: Arc<Store>,
@@ -4205,6 +4376,70 @@ async fn execute(
                 launch::launch(root, &store, &runtime.proxy, &id, &mode, &working_directory)?;
             Ok(
                 json!({"message": "Terminal launch requested. Provider response is not yet verified.", "agent_tools": agent_tools}),
+            )
+        }
+        Operation::Dispatch {
+            working_directory,
+            workflow_id,
+            handoff_id,
+            reason: dispatch::Reason::Request,
+            permissions,
+            timeout_minutes,
+            request_id,
+            dispatch_id,
+        } => {
+            let runtime = needs_owner()?;
+            if !(1..=dispatch::MAX_TIMEOUT_MINUTES).contains(&timeout_minutes) {
+                return Err(dispatch::TIMEOUT_INVALID.into());
+            }
+            if !continuation::valid_workflow_id(&workflow_id) {
+                return Err(continuation::BAD_WORKFLOW_ID.into());
+            }
+            if !continuation::valid_handoff_id(&handoff_id) {
+                return Err(dispatch::HANDOFF_INVALID.into());
+            }
+            if request_id
+                .as_deref()
+                .is_some_and(|r| !dispatch::valid_request(r))
+            {
+                return Err(dispatch::REQUEST_INVALID.into());
+            }
+            if dispatch_id
+                .as_deref()
+                .is_some_and(|d| !launches::valid_name(d))
+            {
+                return Err(dispatch::DISPATCH_ID_INVALID.into());
+            }
+            let answer = dispatch_start(
+                &store,
+                root,
+                runtime,
+                &working_directory,
+                &workflow_id,
+                &handoff_id,
+                permissions,
+                timeout_minutes,
+                request_id.as_deref(),
+                dispatch_id.as_deref(),
+            )
+            .await?;
+            if let Some(client) = runtime.analytics() {
+                client.dispatch(
+                    answer["state"].as_str().unwrap_or_default(),
+                    answer["reason"].as_str(),
+                    dispatch::agent_kind(answer["agent"].as_str()),
+                );
+            }
+            Ok(answer)
+        }
+        Operation::DispatchStop { launch_id } => {
+            let analytics = runtime.and_then(Runtime::analytics);
+            dispatch::stop(
+                root,
+                &launch_id,
+                dispatch::STOPPED,
+                monitor::now(),
+                analytics.as_deref(),
             )
         }
         // Taken by `Runtime::execute` before this point; an offline caller has no owner.
