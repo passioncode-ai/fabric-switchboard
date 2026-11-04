@@ -2,6 +2,31 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-11-04 (evening): releases 0.7.7, 0.7.8 and 0.7.9; SB-248, SB-249 and SB-252
+
+- **Released.** v0.7.7 (SB-246) published 19:12:58Z; v0.7.8 (SB-247 `switchboard dispatch` with
+  #379 and #382: `FABRIC_DISPATCH_ID`, checkpoints carry the accepted `checkpoint.body`, the
+  five `observatory_handoff_accept` fields, Codex homes carry the person's hook trust) published
+  20:25:15Z; v0.7.9 (SB-248 anonymous error counts, SB-249 a new version announced with automatic
+  updates off) published 22:14:02Z. Each: 25 assets, `latest.json` for seven platforms. Board
+  told: threads `b2e5df1f`, `b3e60686`, `a9672312`, `f7758225`.
+- **CI.** A GitHub Actions outage (16:17Z) and scarce macOS runners cancelled the 0.7.7 nightly's
+  macOS job three times; once a run cannot be retried, dispatch `nightly.yml` on the tag yourself,
+  then rerun the release's failed jobs. The first 0.7.9 macOS build failed in `smoke_native`
+  (readiness) on the runner; the rerun passed with the same commit.
+- **Merged, not released.** SB-252 (PR #390, `1a0d5c2`): on Linux the shared
+  `installation.json` lives in `$XDG_CONFIG_HOME/PassionCode` like the rest of the family, an id in
+  the old folder moves there once. Rows SB-249 to SB-252 are on the board (SB-250 log digests wait
+  for the contract's DEC-0153; SB-251 several macOS users on one Mac).
+- **Board rule** (the operator via webpilot, 2026-11-04): answer a request or announcement in the
+  same turn with the current state (`com.reply`), the result as a second `com.reply` (DEC-0152).
+- **Disk.** Local gates run with `CARGO_INCREMENTAL=0` and line-table debug info (about 4 GB of
+  output instead of 6) under a guard that stops below 8 GB; free space was 8 to 14 GB all day.
+- **Exact next task.** Confirm the installed app updated to 0.7.9 (`update_install`, then
+  `owner_started` with 0.7.9 in the log). Then release 0.7.10 with SB-252 and tell the launcher on
+  thread `bf0eeb31`; then SB-250 against DEC-0153's schemas (Fabric's `opsDigest.ts` is the
+  reference), then SB-47.
+
 ## 2026-11-04: usage counts on by default (SB-246), `switchboard dispatch` (SB-247), release 0.7.7
 
 - **Done.** SB-246, PR #373 (`7037f2a`): anonymous usage counts on by default for new and existing installs, with
