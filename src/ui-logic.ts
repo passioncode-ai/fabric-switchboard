@@ -464,7 +464,7 @@ export function intervalWhile(tick: () => void, ms: number, timers: Timers = bro
 
 /** What About says about automatic updates (SB-55), and whether "Restart to update" is offered.
  * `when` formats a time (Unix seconds) for the line that says when a paused update starts (SB-208). */
-export function updateLine(status: Pick<UpdateStatus, 'available' | 'reason' | 'enabled' | 'state' | 'current' | 'version' | 'error' | 'needs_permission' | 'restart_after'>, when: (seconds: number) => string = (seconds) => new Date(seconds * 1000).toISOString().slice(0, 16).replace('T', ' ')): { text: string; restart: boolean } {
+export function updateLine(status: Pick<UpdateStatus, 'available' | 'reason' | 'enabled' | 'state' | 'current' | 'version' | 'error' | 'needs_permission' | 'restart_after'>, when: (seconds: number) => string = (seconds) => new Date(seconds * 1000).toISOString().slice(0, 16).replace('T', ' ')): { text: string; restart: boolean; install?: boolean } {
   if (!status.available) return { text: t(status.reason ?? 'Automatic updates work in the installed app only.'), restart: false };
   if (status.state === 'ready' && status.version) {
     return status.needs_permission
@@ -478,7 +478,9 @@ export function updateLine(status: Pick<UpdateStatus, 'available' | 'reason' | '
   if (status.state === 'failed' && status.error) return { text: t(status.error), restart: false };
   if (status.state === 'checking') return { text: t('Checking for updates…'), restart: false };
   if (status.state === 'downloading' && status.version) return { text: t('Downloading version {version}…', { version: status.version }), restart: false };
-  if (!status.enabled) return { text: t('Version {version}. Automatic updates are off.', { version: status.current }), restart: false };
+  // SB-249: off still reads the feed; a newer version is offered, installed only on *Update*.
+  if (status.state === 'available' && status.version) return { text: t('Version {version} is out. Press Update to install it.', { version: status.version }), restart: false, install: true };
+  if (!status.enabled) return { text: t('Version {version}. Automatic updates are off; Switchboard tells you when a new version is out.', { version: status.current }), restart: false };
   return { text: t('Version {version} is the latest. Switchboard checks again every five minutes.', { version: status.current }), restart: false };
 }
 

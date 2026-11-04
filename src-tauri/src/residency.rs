@@ -276,6 +276,44 @@ pub fn show_update(app: &AppHandle, version: &str) {
     }
 }
 
+/// SB-249: automatic updates are off and a newer version is out.
+pub fn update_available_text(version: &str, ru: bool) -> (String, String) {
+    if ru {
+        (
+            "Доступно обновление".into(),
+            format!("Вышел Fabric Switchboard {version}. Автообновление выключено: откройте «О программе» в Switchboard и нажмите «Обновить»."),
+        )
+    } else {
+        (
+            "Update available".into(),
+            format!("Fabric Switchboard {version} is out. Automatic updates are off: open About in Switchboard and press Update."),
+        )
+    }
+}
+
+/// The version an "Update available" notification was shown for (one per version, SB-249).
+static OFFERED: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
+/// Says once per version that a newer one is out while automatic updates are off (SB-249).
+pub fn show_available(app: &AppHandle, version: &str) {
+    if first_for(&OFFERED, version) {
+        use tauri_plugin_notification::NotificationExt;
+        let (title, body) = update_available_text(version, in_russian());
+        let _ = app.notification().builder().title(title).body(body).show();
+    }
+}
+
+/// Whether `version` was not announced yet through `shown`, and records it.
+pub(crate) fn first_for(shown: &std::sync::Mutex<Option<String>>, version: &str) -> bool {
+    shown.lock().is_ok_and(|mut shown| {
+        let new = shown.as_deref() != Some(version);
+        if new {
+            *shown = Some(version.to_owned());
+        }
+        new
+    })
+}
+
 /// Removes "Restart to update" again: the update it offered was discarded.
 pub fn hide_update(app: &AppHandle) {
     if let Ok(mut ready) = READY.lock() {
@@ -346,6 +384,21 @@ pub fn tray(app: &AppHandle) -> tauri::Result<()> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn an_available_update_is_announced_once_per_version_in_both_languages() {
+        static SHOWN: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+        assert!(first_for(&SHOWN, "0.7.9"));
+        assert!(!first_for(&SHOWN, "0.7.9"));
+        assert!(first_for(&SHOWN, "0.8.0"));
+        let (title, body) = update_available_text("0.7.9", false);
+        assert_eq!(title, "Update available");
+        assert!(body.contains("0.7.9") && body.contains("Update"));
+        let (title, body) = update_available_text("0.7.9", true);
+        assert_eq!(title, "Доступно обновление");
+        assert!(body.contains("0.7.9") && body.contains("«Обновить»"));
+        assert!(!format!("{body}{title}").contains('\u{2014}'));
+    }
+
     use super::*;
 
     #[test]
