@@ -2159,26 +2159,26 @@ impl Runtime {
     pub(crate) fn analytics(&self) -> Option<Arc<analytics::Analytics>> {
         self.analytics.lock().ok().and_then(|slot| slot.clone())
     }
-    /// `{available, enabled, disclosed, sent_before}` for the first-run notice and About.
+    /// `{available, enabled, notice_pending}` for the first-run notice and About (SB-246).
     /// Unavailable outside a release desktop build, where no notice is shown.
     pub fn analytics_status(&self) -> Value {
         self.analytics().map_or_else(
-            || json!({"available": false, "enabled": false, "disclosed": false, "sent_before": false}),
+            || json!({"available": false, "enabled": false, "notice_pending": false}),
             |a| a.status(),
         )
     }
-    /// The person's switch, shared by every PassionCode app on this machine, and their answer
-    /// in this app (issue #128): until it, nothing is sent. `question` is the switch the question
-    /// showed when this is its answer (an "on" given after another app changed the switch since
-    /// is not written back); `None` is About's switch, which always sets it.
-    pub fn set_analytics(&self, enabled: bool, question: Option<bool>) -> Result<Value, String> {
+    /// Switchboard's own usage switch (SB-246): it turns Switchboard off or on only and never
+    /// writes the shared installation file. Off drops what waits.
+    pub fn set_analytics(&self, enabled: bool) -> Result<Value, String> {
         let client = self.analytics().ok_or_else(|| {
             "Usage analytics are available in the installed app only.".to_string()
         })?;
-        match question {
-            Some(shown) => client.answer(enabled, shown),
-            None => client.set_enabled(enabled),
-        }
+        client.set_enabled(enabled)
+    }
+    /// The first-run notice was read (*OK*); it is not shown again.
+    pub fn analytics_notice_seen(&self) -> Value {
+        self.analytics()
+            .map_or_else(|| self.analytics_status(), |a| a.acknowledge())
     }
     /// After an operation: accounts it added or removed, a switch it made; then a send.
     fn report(&self, kind: &Reported) {

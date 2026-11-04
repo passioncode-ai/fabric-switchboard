@@ -9,6 +9,10 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 ## Unreleased
 
 - New `switchboard dispatch`, Fabric's command for a board request nobody answered: it starts the default agent (Claude Code or Codex) with no person and no Terminal on an account of the folder's group, at most one run per request, and stops it on `switchboard dispatch stop` or after its time limit (SB-247).
+
+## 0.7.7
+
+- Anonymous usage counts are on by default and sent from the first start, for new and existing installs; a notice says so once, and About turns them off for Switchboard only. An install that turned them off before stays off (SB-246).
 - Agents → *Fallback chains* says “Takes no Claude Code or Codex task.” on a ready Kimi Code, Hermes or OpenCode step, and names the new reasons a hand-over passed an agent over: not installed, remaining quota not seen yet, asks for less approval than the agent before it (SB-245).
 ## 0.7.6
 

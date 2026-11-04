@@ -594,49 +594,49 @@ check(() => {
   assert.match(main, /let termsDismissed = termsNoticeDismissed\(noticeStore\(\)\);/, 'the stored choice is read at start');
 });
 
-// Issue #128 (SCN-073, SCN-044): nothing is sent before the person answers the usage switch once.
-// The window asks only when the build can send, the switch is on and this app has no answer; the
-// tour waits for the question (and for the status read) so one first-run card shows at a time.
+// SB-246 (SCN-073, SCN-044; operator decision 2026-11-04): usage counts are on by default and
+// sent from the first start; a first-run notice says so once. It shows only when the build can
+// send, Switchboard's switch is on and the notice waits; the tour waits for it (and for the
+// status read) so one first-run card shows at a time.
 check(() => {
-  const ask = { available: true, enabled: true, disclosed: false, sent_before: false };
-  assert.equal(logic.usageQuestion(ask), true, 'first start of a release build: asked');
-  assert.equal(logic.usageQuestion({ ...ask, disclosed: true }), false, 'answered: never asked again');
-  assert.equal(logic.usageQuestion({ ...ask, enabled: false }), false, 'switched off (here or by another app): nothing to ask');
-  assert.equal(logic.usageQuestion({ ...ask, available: false }), false, 'a development build sends nothing and asks nothing');
-  assert.equal(logic.usageQuestion({ available: true, enabled: true }), false, 'an older backend without the field: no question');
-  assert.equal(logic.usageQuestion(null), false, 'unread or unreadable: no question');
-  assert.equal(logic.usageQuestionText(ask), 'Nothing has been sent yet. Nothing is sent until you answer.');
-  assert.equal(logic.usageQuestionText({ ...ask, sent_before: true }), 'An earlier version of Switchboard may already have sent these counts from this computer. Nothing more is sent until you answer.', 'an upgraded install is not told nothing was sent');
+  const pending = { available: true, enabled: true, notice_pending: true };
+  assert.equal(logic.usageNotice(pending), true, 'first start of a release build: the notice');
+  assert.equal(logic.usageNotice({ ...pending, notice_pending: false }), false, 'acknowledged: never again');
+  assert.equal(logic.usageNotice({ ...pending, enabled: false }), false, 'switched off in Switchboard: nothing to announce');
+  assert.equal(logic.usageNotice({ ...pending, available: false }), false, 'a development build sends nothing and shows nothing');
+  assert.equal(logic.usageNotice({ available: true, enabled: true }), false, 'an older backend without the field: no notice');
+  assert.equal(logic.usageNotice({ available: true, enabled: true, disclosed: false }), false, 'the old question field is not read');
+  assert.equal(logic.usageNotice(null), false, 'unread or unreadable: no notice');
   assert.equal(logic.tourWaits(null, false), true, 'the tour waits for the status read');
   assert.equal(logic.tourWaits(null, true), false, 'a failed read never holds the tour');
-  assert.equal(logic.tourWaits(ask, false), true, 'the question comes first');
-  assert.equal(logic.tourWaits({ ...ask, disclosed: true }, false), false, 'answered: the tour shows');
-  // Round 1: an "on" answered after another tool turned the shared switch off stays off, and says so.
-  assert.equal(logic.usageAnswerText(true, { ...ask, enabled: true, disclosed: true }), 'Anonymous usage analytics are on.');
-  assert.equal(logic.usageAnswerText(true, { ...ask, enabled: false, disclosed: true }), 'Usage counts stay off: another PassionCode.ai tool on this computer turned them off. Switch them on in About to count again.');
-  assert.equal(logic.usageAnswerText(false, { ...ask, enabled: false, disclosed: true }), 'Anonymous usage analytics are off for every PassionCode.ai tool on this computer.');
+  assert.equal(logic.tourWaits(pending, false), true, 'the notice comes first');
+  assert.equal(logic.tourWaits({ ...pending, notice_pending: false }, false), false, 'acknowledged: the tour shows');
+  assert.equal(logic.usageAnswerText(true), 'Anonymous usage analytics are on.');
+  assert.equal(logic.usageAnswerText(false), 'Anonymous usage analytics are off for Switchboard.');
   i18n.setLocale('ru');
-  assert.equal(logic.usageQuestionText(ask), 'Пока ничего не отправлено. До вашего ответа ничего не отправится.');
+  assert.equal(logic.usageAnswerText(false), 'Анонимная аналитика использования для Switchboard выключена.');
   i18n.setLocale('en');
 });
-// The wiring: the question sits above every page but About, where the panel asks the same thing;
-// both answer through setAnalytics with the one choice; Escape never ends a tour that is not shown.
+// The wiring: the notice sits above every page but About; OK acknowledges it, Turn off and
+// About's checkbox set Switchboard's own switch; Escape never ends a tour that is not shown.
 check(() => {
   const main = readFileSync(new URL('../src/main.ts', import.meta.url), 'utf8');
-  assert.match(main, /if \(page !== 'about' && usageQuestion\(analyticsState\)\) main\.append\(usageQuestionCard\(\)\);/, 'the question above the page');
+  assert.match(main, /if \(page !== 'about' && usageNotice\(analyticsState\)\) main\.append\(usageNoticeCard\(\)\);/, 'the notice above the page');
+  const card = main.slice(main.indexOf('function usageNoticeCard() {'), main.indexOf('let termsDismissed'));
+  assert.match(card, /adapter\.analyticsNoticeSeen\(\)/, 'OK acknowledges the notice');
+  assert.match(card, /setUsage\(false, 'page-title'\)/, 'Turn off turns the switch off');
+  assert.match(card, /This applies to Switchboard only\./, 'and says the switch is this app\'s');
   const about = main.slice(main.indexOf('function analyticsPanel() {'), main.indexOf('function backupsPanel() {'));
-  assert.match(about, /if \(usageQuestion\(analyticsState\)\) \{/, 'About asks while unanswered');
-  assert.match(about, /usageQuestionText\(analyticsState\)/, 'with the same line on what was sent');
-  assert.match(about, /answerUsage\('analytics', shown\)/, 'and Continue answers it, with the switch it showed');
-  assert.match(main, /analyticsState = await adapter\.setAnalytics\(wanted\);/, 'the answer goes to the backend');
-  assert.match(main, /function tourShown\(\): boolean \{ return tourStep !== null && \(native \|\| demo\) && !tourWaits\(analyticsState, analyticsError\); \}/, 'the tour waits for the question');
+  assert.match(about, /box\.addEventListener\('change', \(\) => setUsage\(box\.checked, 'analytics'\)\);/, 'About sets the same switch');
+  assert.match(about, /t\('This switch applies to Switchboard only\.'\)/, 'for Switchboard only');
+  assert.doesNotMatch(main, /every PassionCode\.ai tool on this computer/, 'no line says the switch is shared');
+  assert.match(main, /analyticsState = await adapter\.setAnalytics\(wanted\);/, 'the choice goes to the backend');
+  assert.match(main, /\(\) => usageAnswerText\(wanted\)/, 'and its line says what is now true');
+  assert.match(main, /function tourShown\(\): boolean \{ return tourStep !== null && \(native \|\| demo\) && !tourWaits\(analyticsState, analyticsError\); \}/, 'the tour waits for the notice');
   assert.match(main, /event\.key === 'Escape' && !openMenu && tourShown\(\)/, 'Escape ends only a tour on screen');
-  // Round 1: the status is read again in the background (every minute and when the window is shown),
-  // so a question drawn before another tool turned the switch off is dropped, not answered with a stale "on".
   const refresh = main.slice(main.indexOf('function backgroundRefresh() {'), main.indexOf('setInterval(backgroundRefresh, 60_000);'));
   assert.match(refresh, /adapter\.analytics\(\)\.then\(\(value\) => \{ if \(clock\.accepts\(stamp\)\) \{ analyticsState = value;/, 'backgroundRefresh reads the analytics status');
   assert.match(main, /document\.addEventListener\('visibilitychange', \(\) => \{ if \(!document\.hidden\) backgroundRefresh\(\); \}\);/, 'and so does showing the window');
-  assert.match(main, /\(\) => usageAnswerText\(wanted, analyticsState\)/, 'the answer reports what is now true');
 });
 
 // Launch (operator decision 2026-10-09): managed only for the pool's selected account while the
@@ -926,16 +926,6 @@ check(() => {
   assert.doesNotMatch(ru, /группе Группа|группы Группа|в Группа/, 'a group phrase, not a group label, after a preposition');
   assert.doesNotMatch(ru, /в группе \{group\}|группы \{group\}/, 'sentences take {where} (inGroup), not {group}');
 });
-// Round 2 (N6): About's switch is a deliberate choice and always sets the shared switch; only the
-// question's answer carries the switch it showed, and both notices say what is now true.
-check(() => {
-  const main = readFileSync(new URL('../src/main.ts', import.meta.url), 'utf8');
-  const answer = main.slice(main.indexOf('function answerUsage('), main.indexOf('function usageQuestionCard() {'));
-  assert.match(answer, /adapter\.setAnalytics\(wanted, shown\)/, 'the answer names the switch the question showed');
-  const about = main.slice(main.indexOf('function analyticsPanel() {'), main.indexOf('function backupsPanel() {'));
-  assert.match(about, /box\.addEventListener\('change', \(\) => \{ const wanted = box\.checked; void mutate\(async \(\) => \{ analyticsState = await adapter\.setAnalytics\(wanted\); \}, \(\) => usageAnswerText\(wanted, analyticsState\), 'analytics'\); \}\);/, "About's notice reports what is now true");
-  assert.doesNotMatch(about, /wanted \? t\('Anonymous usage analytics are on\.'\)/, 'never a fixed "on"');
-});
 // Round 2: N5's window fixes keep their regression checks (unit tier A to D, G).
 check(() => {
   const main = readFileSync(new URL('../src/main.ts', import.meta.url), 'utf8');
@@ -1087,9 +1077,9 @@ check(() => {
   const noGroup = withOrg([{ id: 'org_group', state: 'needs_person', groups: [] }, { id: 'seat', state: 'needs_person' }, { id: 'hook', state: 'optional', terminals: 'waiting' }, { id: 'launch', state: 'optional' }]);
   const noSeat = withOrg([{ id: 'org_group', state: 'done', group }, { id: 'seat', state: 'needs_person', ended: 0 }, { id: 'hook', state: 'optional', terminals: 'active' }, { id: 'launch', state: 'optional' }]);
   const ready = withOrg([{ id: 'org_group', state: 'done', group }, { id: 'seat', state: 'done' }, { id: 'hook', state: 'optional', terminals: 'active' }, { id: 'launch', state: 'optional' }]);
-  const asked = { available: true, enabled: true, disclosed: false };
-  const answered = { available: true, enabled: true, disclosed: true };
-  // the organization card waits for the usage question and the tour
+  const asked = { available: true, enabled: true, notice_pending: true };
+  const answered = { available: true, enabled: true, notice_pending: false };
+  // the organization card waits for the usage notice and the tour
   check(() => {
     const [setup] = logic.orgSetups(noGroup);
     assert.equal(setup.organization.name, 'Acme');
@@ -1098,7 +1088,7 @@ check(() => {
     assert.equal(setup.lines[1].line, 'Acme has no group on this computer yet.');
     assert.deepEqual(logic.orgSetupAction(setup), { kind: 'group', organization: 'o-acme', label: '+ Group for Acme' });
     const shown = (usage, tourStep, page = 'accounts', hidden = [], failed = false) => logic.orgSetupShown({ page, organization: 'o-acme', hidden, usage, usageFailed: failed, tourStep });
-    assert.equal(shown(asked, null), false, 'the usage question comes first');
+    assert.equal(shown(asked, null), false, 'the usage notice comes first');
     assert.equal(shown(null, null), false, 'its status is still being read');
     assert.equal(shown(answered, 0), false, 'then the tour');
     assert.equal(shown(answered, null), true, 'then the card');
@@ -1141,7 +1131,7 @@ check(() => {
     const leads = (onboarding, page = 'accounts', usage = answered, tourStep = null, hidden = []) => logic.orgSetupLeads({ onboarding, page, hidden, usage, usageFailed: false, tourStep });
     assert.equal(leads(noSeat), true);
     assert.equal(leads(noSeat, 'orgs'), true);
-    assert.equal(leads(noSeat, 'accounts', asked), false, 'the usage question first: the card is not shown');
+    assert.equal(leads(noSeat, 'accounts', asked), false, 'the usage notice first: the card is not shown');
     assert.equal(leads(noSeat, 'accounts', answered, 0), false, 'the tour first');
     assert.equal(leads(noSeat, 'accounts', answered, null, ['o-acme']), false, 'hidden on Accounts');
     assert.equal(leads(noSeat, 'orgs', answered, null, ['o-acme']), true, 'still on Organizations');
@@ -1159,7 +1149,7 @@ check(() => {
     assert.equal(unread({ failed: false }), null, 'still reading');
     assert.equal(unread({ organizations: [] }), null, 'no organization, no card');
     assert.equal(unread({ page: 'agents' }), null);
-    assert.equal(unread({ usage: asked }), null, 'the usage question first');
+    assert.equal(unread({ usage: asked }), null, 'the usage notice first');
     assert.deepEqual(unread({ hidden: ['o-acme'] }), { id: 'o-old', name: 'Old' }, 'Hide on Accounts holds for that organization');
     assert.equal(unread({ hidden: ['o-acme', 'o-old'] }), null);
   });

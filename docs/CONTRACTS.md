@@ -34,6 +34,7 @@ All Rust types use snake_case JSON fields and lowercase enum strings (AuthKind: 
 - `launch_account(id,mode,workingDirectory) -> { message:String }`, mode `isolated` or `managed`; workingDirectory is an absolute existing project directory outside app data. Backend fixed provider binaries; no shell interpolation.
 - `begin_login(provider,label,pool) -> { login_id:String, message:String }`; `finish_login(loginId) -> Account`; `cancel_login(loginId) -> ()`; isolated official CLI login and native credential capture; no global logout.
 - `probe_usage(id) -> Usage` with fixed HTTPS allowlist; unknown is an error, never zero.
+- Usage analytics (SB-246, [ANALYTICS](ANALYTICS.md#on-by-default-switchboards-own-switch-sb-246)): `analytics_status() -> {available, enabled, notice_pending}`; `set_analytics(enabled) -> same`, Switchboard's own switch in `<data>/analytics-state.json` (never the shared installation file), off drops what waits; `analytics_notice_seen() -> same`, the first-run notice's *OK*. Refusal outside a release desktop build: `Usage analytics are available in the installed app only.`
 Frontend: Rust IPC is authoritative; pure mock fixtures only behind explicit browser demo marker. Errors announced, no credential query endpoints. Add credential input cleared after use. UI reports limitations of launched sessions versus external ones.
 
 ## Ownership
