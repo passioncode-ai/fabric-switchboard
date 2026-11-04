@@ -13,6 +13,7 @@ mod codex_route;
 pub mod continuation;
 pub mod control;
 pub mod dispatch;
+pub mod errors;
 pub mod external;
 #[cfg(target_os = "macos")]
 mod external_keychain;
@@ -2144,6 +2145,8 @@ impl Runtime {
         if default_root().ok().as_deref() != Some(self.root.as_path()) {
             return;
         }
+        // SB-248: a release owner's panics count for the error report too.
+        errors::install_panic_counter(&self.root);
         self.enable_analytics_with(key, analytics::HOST, shared, launch);
     }
     pub(crate) fn enable_analytics_with(
