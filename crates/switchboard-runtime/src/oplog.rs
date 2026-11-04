@@ -250,6 +250,8 @@ pub(crate) fn capture_end() -> Vec<Captured> {
 pub fn event(event: &'static str, fields: &[(&'static str, Field)]) {
     // SB-248: an error line also counts for the anonymous error report.
     crate::errors::note(event, fields);
+    // SB-250: and every line counts in its hour's operations digest.
+    crate::digest::note(event, fields);
     #[cfg(test)]
     CAPTURED.with(|c| {
         if let Some(events) = c.borrow_mut().as_mut() {

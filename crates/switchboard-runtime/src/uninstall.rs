@@ -39,6 +39,8 @@ const OWNED: &[&str] = &[
     "analytics-state.json",
     // Error counts waiting for their day to be over (SB-248).
     "error-counts.json",
+    // Hourly and daily operations digests of Switchboard's own log (SB-250).
+    "digests",
     // The PassionCode.ai connection (SB-159); its token's vault item is deleted below.
     "vesta.json",
     // Folders taken out of their group lately (SB-172).

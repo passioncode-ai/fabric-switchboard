@@ -8,6 +8,8 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- Switchboard now sums up its own log every hour and every day on your computer, counting what it did and what failed by name, so a sudden run of failures stands out in its log. Nothing of it leaves your computer (SB-250).
+
 ## 0.7.10
 
 - On Linux, Switchboard now keeps the installation number it shares with the other PassionCode apps in the same folder they use (`~/.config/PassionCode`), so one person using several of them counts once there too (SB-252).
