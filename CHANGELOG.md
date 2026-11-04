@@ -8,6 +8,8 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+## 0.7.11
+
 - The automatic fallback no longer takes over the work of a session Fabric started for a board request, even when that session looks like an ordinary one; Fabric alone hands such work on (SB-253).
 - Switchboard now sums up its own log every hour and every day on your computer, counting what it did and what failed by name, so a sudden run of failures stands out in its log. Nothing of it leaves your computer (SB-250).
 
