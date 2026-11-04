@@ -12,6 +12,7 @@ mod chain_view;
 mod codex_route;
 pub mod continuation;
 pub mod control;
+mod digest;
 pub mod dispatch;
 pub mod errors;
 pub mod external;

@@ -290,6 +290,8 @@ impl Pass {
             &crate::fallback::HAND_OVER,
         )
         .await;
+        // SB-250: each closed hour's operations digest, and each finished day's.
+        crate::blocking::run(|| crate::digest::tick(&runtime.root, time));
         // SB-212: launch records not written for 90 days go, looked for at most once an hour.
         crate::launches::prune_due(&runtime.root, time);
         // SB-247: a dispatched run past its time limit is stopped; one that ended while no owner

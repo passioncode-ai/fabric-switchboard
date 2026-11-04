@@ -350,7 +350,7 @@ pub(crate) fn day(time: i64) -> i64 {
     time.div_euclid(86_400)
 }
 
-fn now() -> i64 {
+pub(crate) fn now() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)

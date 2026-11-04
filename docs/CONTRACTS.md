@@ -2416,3 +2416,31 @@ in 0.7.0 node A-5). Tests: `person::tests::a_config_dir_inside_switchboards_data
 `codex_route::tests::the_route_is_never_written_into_a_shell_home`,
 `external::tests::a_capture_from_a_switchboard_home_is_refused`,
 `external::tests::a_home_inside_switchboards_data_folder_is_refused`.
+
+## Operations digests (SB-250, 2026-11-04)
+
+Switchboard reads its own operations log as fabric-agent-contract DEC-0153
+(`docs/specification/ops-digest.md`, draft `a0e7b53d`) and Fabric ADR-0188 describe;
+`crates/switchboard-runtime/src/digest.rs`.
+
+- **Counting (OD-3).** Every line `oplog::event` takes is counted by its event name (the `op`,
+  `[a-z_]` codes, inside OD-2's grammar) and outcome in its UTC hour, whether or not a log is
+  installed: `failed` when `errors::classify` reads it as an error (SB-248), `unknown` when a code
+  field says `unknown`, `outcome_unknown` or `deferred`, `ok` otherwise
+  (`an_error_line_counts_as_failed_and_an_unknown_one_as_unknown`).
+- **Writing (OD-1, OD-6).** The owner's background pass appends each closed hour as one
+  `ops.digest.hourly@1` line to `<data>/digests/hourly-YYYY-MM.jsonl`, an empty hour it ran through
+  included; an hour before the owner's first pass is a gap. Once an hour of the next UTC day is
+  written, the day before folds into one `ops.digest.daily@1` line of `daily-YYYY-MM.jsonl`, each
+  hour once (OD-5), and never twice for one day. The folder is 0700, the files 0600; monthly files
+  older than three months are removed
+  (`the_log_counts_by_outcome_and_each_hour_the_owner_ran_through_is_written_once`,
+  `a_day_folds_each_hour_once_and_sums_its_rises`, `files_older_than_three_months_go`).
+- **Rises (OD-4, OD-8).** An operation with at least 10 failures in an hour and at least twice the
+  hour before's (none counts as one; a gap compares with nothing) is in `risen`, and is logged as
+  `failures_rose` with `op`, `failed` and `previous`
+  (`a_rise_is_ten_failures_and_twice_the_hour_before_and_a_gap_compares_with_none`).
+- **What it holds (OD-7).** Operation names and counts only; nothing leaves the machine. Sending the
+  daily digest onward (ADR-0188 §3, Fabric CO-503 and Observatory OBS-330) is not built yet.
+  `switchboard uninstall` removes `digests`.
+
