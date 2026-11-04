@@ -34,8 +34,8 @@ const OWNED: &[&str] = &[
     // Spending ceilings and their questions (SB-72); they travel in backups.
     "spend.json",
     "statistics.json",
-    // Usage analytics' own state, the person's answer included (issue #128): uninstalling
-    // forgets the answer, and the question returns at the next first start.
+    // Usage analytics' own state, Switchboard's switch and the notice's acknowledgement included
+    // (SB-246): uninstalling forgets both, and the notice returns at the next first start.
     "analytics-state.json",
     // The PassionCode.ai connection (SB-159); its token's vault item is deleted below.
     "vesta.json",
@@ -432,7 +432,7 @@ mod tests {
 
     #[test]
     fn uninstall_forgets_the_usage_answer() {
-        // Issue #128 round 1: the answer lives in this app's analytics state, which is ours.
+        // SB-246: the switch and the notice live in this app's analytics state, which is ours.
         assert!(OWNED.contains(&crate::analytics::STATE_FILE));
     }
 

@@ -8,6 +8,7 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- Anonymous usage counts are on by default and sent from the first start, for new and existing installs; a notice says so once, and About turns them off for Switchboard only. An install that turned them off before stays off (SB-246).
 - Agents → *Fallback chains* says “Takes no Claude Code or Codex task.” on a ready Kimi Code, Hermes or OpenCode step, and names the new reasons a hand-over passed an agent over: not installed, remaining quota not seen yet, asks for less approval than the agent before it (SB-245).
 ## 0.7.6
 

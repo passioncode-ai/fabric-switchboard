@@ -121,7 +121,7 @@ Working for an organization (a company group, its seats, terminals in its folder
   (Hermes, Kilo Code, Cline, Goose, OpenCode, …): tools, proxy and launch, with sources.
 - [Usage analytics](docs/ANALYTICS.md): what release builds send (counts and kinds, never
   account names, e-mail addresses or sign-ins), the installation id PassionCode.ai tools share, and
-  the switch that turns it off for all of them.
+  Switchboard's own switch that turns it off (SB-246).
 
 ## Running from source
 

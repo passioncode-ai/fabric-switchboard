@@ -7,7 +7,7 @@ import { platformLabel } from './platform';
 import { LOCALE_KEY, dateLocale, locale, parseLocaleChoice, plural, saveLocaleChoice, t, type LocaleChoice } from './i18n';
 import { demo, native, nativeAdapter, onProjectSuggestions, onShellHook, onSpendChanged, safeError, reportFrontendReady, reportLanguage, type Operation } from './adapter';
 import type { CardState } from './ui-logic';
-import { statAlert, ceilingQuestion, ceilingWarning, ceilingLine, keyLimitLine, dollars, POOL_PATTERN, poolChoices, poolName, inGroup, tourPlacement, usableWhileBusy, APPEARANCE_KEY, attribution, groupAdmits, groupSeatsElsewhere, passioncodeLine, seatEndedText, groupSeatsEndedText, organizationReleasedAt, inOrganizationFilter, domainList, type AttributedBy, sortStatRows, nextStatSort, type StatRow, type StatSort, statCacheShare, statTokensPerRequest, chartSeries, niceMax, groupProjectRows, type ChartMetric, groupProjects, compactCount, statTokens, statTrouble, statTroubleText, statAgentName, type Statistics, EXPIRY_CHOICES, folderName, folderRows, withoutFolder, type ProjectRoot, moveTargets, mapRows, rootTargets, storedMapFolders, MAP_FOLDERS_KEY, type MapFilter, type MapRow, type RepositoryMap, sortAgents, defaultAgentChoices, backgroundReads, clockedRead, chainScopeKey, afterRead, ceilingRemovalNote, modelMeta, ordinaryKimiNote, kimiLimitUntil, limitReasonText, limitTitle, agentSetupFacts, sessionHow, sessionAgentName, sessionStateLabel, kimiWindowsLine, kimiWindowsLines, openrouterCreditLine, eventAction, eventDetail, MutationClock, activeRules, autoSwitchPool, launchChoice, withFolder, replaceFolder, storedFolder, LAST_FOLDER_KEY, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, groupAccounts, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, signInNotice, signInMove, organizationMoveNote, dismissTermsNotice, termsNoticeDismissed, termsNoticeOn, termsNoticeText, tourWaits, orgSetups, releasedOrganizations, releasedSummary, orgSetupAction, orgSetupShown, orgSetupCaveat, orgSetupLeads, orgSetupPrimary, accountsOrgActionLeads, firstPrimary, orgSetupUnread, orgSetupStateLabel, orgSetupTitle, hiddenOrgSetups, ORG_SETUP_HIDDEN_KEY, accountsEmptyKey, type OrgSetup, usageAnswerText, usageQuestion, usageQuestionText, usageFreshness, windowReset, type Appearance, shellHookView, shellHookToggleNotice, shellHookNoticeText, codexHookLine, moveStep, accountsForStep, chainSummary, stepReasonText, handoverOutcomeText, handoverSkipped, shortWorkflow, TAKEOVER_ORDER } from './ui-logic';
+import { statAlert, ceilingQuestion, ceilingWarning, ceilingLine, keyLimitLine, dollars, POOL_PATTERN, poolChoices, poolName, inGroup, tourPlacement, usableWhileBusy, APPEARANCE_KEY, attribution, groupAdmits, groupSeatsElsewhere, passioncodeLine, seatEndedText, groupSeatsEndedText, organizationReleasedAt, inOrganizationFilter, domainList, type AttributedBy, sortStatRows, nextStatSort, type StatRow, type StatSort, statCacheShare, statTokensPerRequest, chartSeries, niceMax, groupProjectRows, type ChartMetric, groupProjects, compactCount, statTokens, statTrouble, statTroubleText, statAgentName, type Statistics, EXPIRY_CHOICES, folderName, folderRows, withoutFolder, type ProjectRoot, moveTargets, mapRows, rootTargets, storedMapFolders, MAP_FOLDERS_KEY, type MapFilter, type MapRow, type RepositoryMap, sortAgents, defaultAgentChoices, backgroundReads, clockedRead, chainScopeKey, afterRead, ceilingRemovalNote, modelMeta, ordinaryKimiNote, kimiLimitUntil, limitReasonText, limitTitle, agentSetupFacts, sessionHow, sessionAgentName, sessionStateLabel, kimiWindowsLine, kimiWindowsLines, openrouterCreditLine, eventAction, eventDetail, MutationClock, activeRules, autoSwitchPool, launchChoice, withFolder, replaceFolder, storedFolder, LAST_FOLDER_KEY, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, groupAccounts, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, signInNotice, signInMove, organizationMoveNote, dismissTermsNotice, termsNoticeDismissed, termsNoticeOn, termsNoticeText, tourWaits, orgSetups, releasedOrganizations, releasedSummary, orgSetupAction, orgSetupShown, orgSetupCaveat, orgSetupLeads, orgSetupPrimary, accountsOrgActionLeads, firstPrimary, orgSetupUnread, orgSetupStateLabel, orgSetupTitle, hiddenOrgSetups, ORG_SETUP_HIDDEN_KEY, accountsEmptyKey, type OrgSetup, usageAnswerText, usageNotice, usageFreshness, windowReset, type Appearance, shellHookView, shellHookToggleNotice, shellHookNoticeText, codexHookLine, moveStep, accountsForStep, chainSummary, stepReasonText, handoverOutcomeText, handoverSkipped, shortWorkflow, TAKEOVER_ORDER } from './ui-logic';
 import agentCatalog from '../catalog/agents.json';
 import type { AnalyticsStatus, Ceilings, CeilingView, CeilingQuestionView, OpenrouterCredit, BackupInfo, PassioncodeStatus, Account, Adapter, AgentConnection, AgentInfo, AgentRow, AgentsOverview, OpenrouterModels, HermesModel, KimiAccounts, KimiRegion, KimiStatus, OpenrouterStatus, OpenrouterKeys, CodexRoute, ShellHookStatus, AgentSetup, AuthKind, BackupStatus, KimiAccount, CurrentAccounts, LoginItem, Project, Restored, ExternalIdentity, MonitorStatus, ProjectRule, Provider, RotationPolicy, RuntimeStatus, SessionInfo, Snapshot, UpdateStatus, Onboarding, Chains, ChainExecutor, ChainScope, ChainStepView } from './types';
 
@@ -57,7 +57,7 @@ function tourGo(step: number | null) {
   if (step === null) { try { localStorage.setItem(TOUR_KEY, '1'); } catch { /* the tour shows again next start */ } render(); restoreFocus('page-title'); return; }
   page = tour()[step].page; if (page === 'agents' && !agentsView) void loadAgents(); render(); restoreFocus('tour-title'); placeTour(true);
 }
-/** The tour waits for the usage question (issue #128): one first-run card at a time, the question first. */
+/** The tour waits for the usage notice (SB-246): one first-run card at a time, the notice first. */
 function tourShown(): boolean { return tourStep !== null && (native || demo) && !tourWaits(analyticsState, analyticsError); }
 /** The first selector of a step that is on the page (UX-30: the setup prompt may still be reading). */
 function tourTarget(scope: ParentNode, step: number): HTMLElement | null {
@@ -102,23 +102,14 @@ function tourCard(step: number) {
 /** Provider terms (operator decision 2026-10-08, SCN-049): a banner on Accounts until dismissed, always in About. */
 const noticeStore = () => { try { return localStorage; } catch { return null; } };
 /**
- * Usage counts (issue #128, operator decision 2026-10-08; docs/ANALYTICS.md, SCN-073): on by
- * default, but nothing is sent until the person answers once, here or in About. Both show what is
- * counted and the same switch; the choice waits in `usageChoice` until Continue.
+ * Usage counts (SB-246, operator decision 2026-11-04; docs/ANALYTICS.md, SCN-073): on by default
+ * and sent from the first start. A first-run notice says so once: OK acknowledges it, Turn off
+ * turns Switchboard's own switch off (and acknowledges it too). About's switch is the same one.
  */
-let usageChoice = true;
 const USAGE_COUNTED = () => t('Switchboard counts installs, days of use and how many accounts are saved, by provider and type, to help PassionCode.ai improve its apps. It never sends account names, e-mail addresses, sign-ins, group names or what you do with your accounts. A random installation number, shared by the PassionCode.ai tools on this computer, lets one person using several of them count once.');
-function usageSwitch(focus: string) {
-  const option = el('label', 'appearance-option login-option'); const box = el('input'); box.type = 'checkbox'; box.checked = usageChoice; box.dataset.focus = focus;
-  box.addEventListener('change', () => { usageChoice = box.checked; });
-  option.append(box, el('span', '', t('Share anonymous usage counts')));
-  return option;
-}
-/** `shown` is the shared switch the question was drawn with: an "on" given after another tool changed it since is not written back (round 2). */
-function answerUsage(focus: string, shown: boolean) {
-  const wanted = usageChoice;
-  // The answer reports what is now true: an "on" after another tool turned the switch off stays off (round 1).
-  void mutate(async () => { analyticsState = await adapter.setAnalytics(wanted, shown); }, () => usageAnswerText(wanted, analyticsState), focus);
+/** Switchboard's own switch (SB-246); the notice says what is now true. */
+function setUsage(wanted: boolean, focus: string) {
+  void mutate(async () => { analyticsState = await adapter.setAnalytics(wanted); }, () => usageAnswerText(wanted), focus);
 }
 /** SB-202 (B-8, SCN-076): "Set up {organization} on this computer", worded from the checklist the runtime computed. */
 function orgSetupCard(setup: OrgSetup, primary: boolean) {
@@ -155,12 +146,15 @@ function orgSetupUnreadCard(organization: { id: string; name: string }) {
   card.append(title, el('p', 'form-note org-setup-error', t('The setup could not be read. Refresh to retry.')));
   return card;
 }
-function usageQuestionCard() {
+function usageNoticeCard() {
   const card = el('section', 'usage-question'); card.setAttribute('aria-labelledby', 'usage-question-title');
-  const title = el('h2', '', t('Share anonymous usage counts?')); title.id = 'usage-question-title';
-  const actions = el('div', 'usage-question-actions'); const shown = !!analyticsState?.enabled;
-  actions.append(usageSwitch('usage-switch'), button(t('Continue'), () => answerUsage('page-title', shown), 'button primary', 'usage-continue'));
-  card.append(title, el('p', '', USAGE_COUNTED()), el('p', 'usage-question-sent', usageQuestionText(analyticsState)), actions, el('p', 'form-note', t('This switch applies to every PassionCode.ai tool on this computer. You can change it later in About.')));
+  const title = el('h2', '', t('Anonymous usage counts are on')); title.id = 'usage-question-title';
+  const actions = el('div', 'usage-question-actions');
+  actions.append(
+    button(t('OK'), () => void mutate(async () => { analyticsState = await adapter.analyticsNoticeSeen(); }, '', 'page-title'), 'button primary', 'usage-ok'),
+    button(t('Turn off'), () => setUsage(false, 'page-title'), 'button', 'usage-turn-off'),
+  );
+  card.append(title, el('p', '', USAGE_COUNTED()), actions, el('p', 'form-note', t('You can turn them off at any time in About. This applies to Switchboard only.')));
   return card;
 }
 let termsDismissed = termsNoticeDismissed(noticeStore());
@@ -407,7 +401,7 @@ function render(options: { background?: boolean } = {}): boolean {
   }
   if (notice) { const alert = el('div', `notice toast ${noticeError ? 'error' : 'success'}${tourShown() ? ' beside-tour' : ''}`); alert.append(el('span', '', notice)); if (noticeAction) { const action = noticeAction; alert.append(button(action.label, () => action.run(), 'text-button', 'notice-action')); } alert.append(button(t('Dismiss'), () => { notice = ''; render(); document.querySelector<HTMLElement>('h1')?.focus(); }, 'text-button', 'dismiss-notice')); main.append(alert); }
   loginBanner(main);
-  if (page !== 'about' && usageQuestion(analyticsState)) main.append(usageQuestionCard());
+  if (page !== 'about' && usageNotice(analyticsState)) main.append(usageNoticeCard());
   if (snapshot && (page === 'accounts' || page === 'orgs')) {
     const screen = { page, hidden: orgSetupHidden, usage: analyticsState, usageFailed: analyticsError, tourStep, released: releasedOrgs() };
     const leader = orgSetupPrimary({ ...screen, onboarding });
@@ -2404,24 +2398,17 @@ function updateControls(panel: HTMLElement) {
   // LC-16: the person can always ask, with automatic updates off too.
   else if (status.available && status.state !== 'checking' && status.state !== 'downloading') panel.append(button(t('Check for updates'), () => void checkUpdatesNow(), 'button', 'update-check'));
 }
-/** Anonymous usage analytics (docs/ANALYTICS.md): what is sent, and the switch every PassionCode.ai tool shares. */
+/** Anonymous usage analytics (docs/ANALYTICS.md): what is sent, and Switchboard's own switch (SB-246). */
 function analyticsPanel() {
   const panel = el('section', 'about-panel'); panel.setAttribute('aria-labelledby', 'analytics-heading');
   const heading = el('h2', '', t('Usage analytics')); heading.id = 'analytics-heading';
   panel.append(heading, el('p', '', USAGE_COUNTED()));
   if (analyticsError) { panel.append(el('p', 'form-note', t('The analytics setting is unavailable. Refresh to retry.'))); return panel; }
   if (!analyticsState) { panel.append(el('p', 'form-note', t('Reading the analytics setting…'))); return panel; }
-  // Issue #128: not answered yet. The same choice as the first-run question; Continue answers it.
-  if (usageQuestion(analyticsState)) {
-    const actions = el('div', 'usage-question-actions'); const shown = analyticsState.enabled; actions.append(usageSwitch('analytics'), button(t('Continue'), () => answerUsage('analytics', shown), 'button', 'usage-continue-about'));
-    panel.append(el('p', 'usage-question-sent', usageQuestionText(analyticsState)), actions, el('p', 'form-note', t('This switch applies to every PassionCode.ai tool on this computer.')));
-    return panel;
-  }
   const option = el('label', 'appearance-option login-option'); const box = el('input'); box.type = 'checkbox'; box.checked = analyticsState.enabled; box.disabled = !analyticsState.available; box.dataset.focus = 'analytics';
-  // A deliberate choice: it always sets the shared switch (round 2), and the notice says what is now true.
-  box.addEventListener('change', () => { const wanted = box.checked; void mutate(async () => { analyticsState = await adapter.setAnalytics(wanted); }, () => usageAnswerText(wanted, analyticsState), 'analytics'); });
+  box.addEventListener('change', () => setUsage(box.checked, 'analytics'));
   option.append(box, el('span', '', t('Share anonymous usage counts')));
-  panel.append(option, el('p', 'form-note', analyticsState.available ? t('This switch applies to every PassionCode.ai tool on this computer.') : t('Only installed release builds send analytics; this build sends nothing.')));
+  panel.append(option, el('p', 'form-note', analyticsState.available ? t('This switch applies to Switchboard only.') : t('Only installed release builds send analytics; this build sends nothing.')));
   return panel;
 }
 function backupsPanel() {
@@ -2907,8 +2894,8 @@ document.addEventListener('click', (event) => { if (openMenu && !(event.target a
 function backgroundRefresh() {
   if ((!native && !demo) || refreshing || openMenu || document.hidden || document.querySelector('dialog') || busy || loading) return;
   refreshing = true; const stamp = clock.stamp();
-  // Issue #128 round 1: another PassionCode.ai tool may have turned the shared switch off since
-  // the usage question was drawn; a fresh status drops a question that no longer applies.
+  // SB-246: the usage status is read again so a notice acknowledged or turned off elsewhere (About,
+  // another window) is dropped.
   void adapter.analytics().then((value) => { if (clock.accepts(stamp)) { analyticsState = value; analyticsError = false; backgroundRender(); } }, () => { /* the next pass reads it again */ });
   void Promise.all([adapter.snapshot(), readContext()]).then(([data, context]) => {
     // A read issued before a user mutation may predate it; applying it would revert the change.

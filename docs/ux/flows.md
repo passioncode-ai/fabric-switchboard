@@ -49,11 +49,11 @@ A failed read never replaces a list already on screen (SCN-043): the list stays,
 
 ## FLW-04: Set up an organization's work on a computer (0.7.0)
 Traces: SB-202, SB-160, SCN-076, SCN-077, SCN-074, SCN-050, SCN-073, SCN-035
-Entry points: the window after the usage question and the tour; `switchboard onboard` (the person's coding agent); the runbook `docs/ORGANIZATION.md`.
+Entry points: the window after the usage notice and the tour; `switchboard onboard` (the person's coding agent); the runbook `docs/ORGANIZATION.md`.
 Success exit: `switchboard onboard --status --json` answers `"complete": true` and the card is gone.
 ```mermaid
 flowchart TD
- A[Usage question SCN-073] --> B[Tour SCN-035]
+ A[Usage notice SCN-073] --> B[Tour SCN-035]
  B --> C{Organization on this computer?}
  C -->|no| Z[Today's first run: empty Accounts SCN-001, five onboard steps]
  C -->|no, connect| P[Organizations: Connect PassionCode.ai SCN-071]
