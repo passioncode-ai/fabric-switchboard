@@ -138,7 +138,7 @@ pub fn valid_workflow_id(id: &str) -> bool {
             .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
 
-fn valid_handoff_id(id: &str) -> bool {
+pub(crate) fn valid_handoff_id(id: &str) -> bool {
     id.len() == 24
         && id.starts_with("handoff:")
         && id[8..]

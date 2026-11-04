@@ -95,10 +95,11 @@ listed.
 With `history` (SB-212): `{launches[], total}`, every launch of the last 90 days, newest first
 (at most 500), one record per launch even when a later launch reused its home: the fields above
 plus `launch_id`, `launched_by` (`surface`: `window`, `cli`, `mcp`, `fallback`, `recovery`,
-`dashboards` or `fabric`, a run `switchboard dispatch` started for a board request, SB-247;
-`caller_launch_id`, `caller_project`, `caller_program`, `by`, `parent`), `provider_session_id`,
-`transcript` (the path of its transcript), `turns`, `last_turn_at`, `ended` (`limit` when it
-stopped on one; a dispatched run's `exited`, `stopped` or `timed_out`), `ended_at`, `handover` and `continued_as` (`{kind, id}`: the
+`dashboards` or `fabric`, a run `switchboard dispatch` started for a board request, SB-247, with
+`launched_by.dispatch` `{id, request, thread, project, workflow}`; `caller_launch_id`,
+`caller_project`, `caller_program`, `by`, `parent`), `provider_session_id`, `transcript` (the path
+of its transcript), `turns`, `last_turn_at`, `ended` (`limit` when it stopped on one; a dispatched
+run's `{kind: exited | stopped | timed_out, exit_code?, at}`), `ended_at`, `handover` and `continued_as` (`{kind, id}`: the
 launch or hand-over its work went to). With `launch_id`: `{launch, up, down}`, that launch, who
 launched it up to the first launch, and what it launched or what took its work over.
 

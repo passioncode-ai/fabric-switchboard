@@ -170,7 +170,7 @@ enum Command {
         #[arg(long, value_name = "USD")]
         ceiling: Option<f64>,
     },
-    /// Fabric's command (SB-247): start the default agent, with no person, on a workflow Fabric
+    /// Fabric's command: start the default agent, with no person, on a workflow Fabric
     /// opened for a board request nobody answered, and stop it. Claude Code runs as `claude -p`,
     /// Codex as `codex exec`, in the account's isolated home, from Switchboard's own process (no
     /// Terminal). Answers the run's `launch_id` and `state` (`started`, `running` or `refused`
@@ -189,6 +189,13 @@ enum Command {
         /// digits); the session accepts it for the account Switchboard chooses.
         #[arg(long, required = true)]
         handoff: Option<String>,
+        /// The board request the session answers, a UUID. Without it, the workflow's
+        /// `board-request:` artifact names it; given, it wins.
+        #[arg(long)]
+        request: Option<String>,
+        /// Fabric's own id for this dispatch, kept in the launch record (`launched_by.dispatch.id`).
+        #[arg(long)]
+        dispatch_id: Option<String>,
         /// Why the session starts: `request`, a board request nobody answered.
         #[arg(long, value_enum, default_value = "request")]
         reason: DispatchReason,
@@ -202,6 +209,7 @@ enum Command {
     },
     /// Own the vault, inference proxy and private CLI control listener until Ctrl-C or
     /// SIGTERM, then stop within ten seconds.
+    Serve,
     /// Other coding agents (Hermes, Kilo Code, Cline, Goose, OpenCode, …): how each connects to
     /// `switchboard mcp` and the proxy, and launching those configured by environment alone.
     Agents {
@@ -1376,6 +1384,8 @@ async fn run(cli: &Cli) -> Result<Value, String> {
             dir,
             workflow,
             handoff,
+            request,
+            dispatch_id,
             reason: DispatchReason::Request,
             permissions,
             timeout_minutes,
@@ -1390,6 +1400,8 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                     DispatchPermissions::All => switchboard_runtime::launch::Permissions::All,
                 },
                 timeout_minutes: *timeout_minutes,
+                request_id: request.clone(),
+                dispatch_id: dispatch_id.clone(),
             },
             launches::LaunchedBy::from_caller(launches::Surface::Fabric, None, None),
         ),
@@ -2380,7 +2392,8 @@ fn launch_line(l: &Value) -> String {
         text(&l["working_directory"]),
         utc(&l["launched_at"]),
     );
-    if let Some(ended) = l["ended"].as_str() {
+    // SB-247: a dispatched run's end is an object, `{kind, exit_code?, at}`.
+    if let Some(ended) = l["ended"].as_str().or_else(|| l["ended"]["kind"].as_str()) {
         line.push_str(&format!(" · stopped: {ended}"));
     }
     if let Some(kind) = l["continued_as"]["kind"].as_str() {

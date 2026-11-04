@@ -165,6 +165,12 @@ pub enum Operation {
         reason: dispatch::Reason,
         permissions: launch::Permissions,
         timeout_minutes: u32,
+        /// The board request (`--request`); none: the packet's `board-request:` artifact.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        request_id: Option<String>,
+        /// Fabric's own id for this dispatch (`--dispatch-id`), for the launch record.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        dispatch_id: Option<String>,
     },
     /// SB-247: stops a dispatched run (`state`: `stopped`, `already_ended`).
     DispatchStop {
@@ -3493,6 +3499,8 @@ async fn dispatch_start(
     handoff_id: &str,
     permissions: launch::Permissions,
     timeout_minutes: u32,
+    request_id: Option<&str>,
+    dispatch_id: Option<&str>,
 ) -> Result<Value, String> {
     if let Some((id, record)) = crate::blocking::run(|| launches::live_dispatch(root, workflow_id))
     {
@@ -3526,6 +3534,12 @@ async fn dispatch_start(
         Ok(shown) if dispatch::handoff_waiting(&shown, workflow_id, handoff_id, provider) => shown,
         _ => return refuse(dispatch::HANDOFF_REFUSED),
     };
+    // The request: the flag wins over the packet; a dispatch with neither is malformed.
+    let packet = dispatch::packet(&shown);
+    let request = request_id
+        .map(str::to_owned)
+        .or_else(|| packet.request.clone())
+        .ok_or(dispatch::NO_REQUEST)?;
     let Ok(id) = fallback::account_for_default(
         runtime,
         &agent,
@@ -3567,8 +3581,18 @@ async fn dispatch_start(
     let headless = launch::Headless {
         program,
         workflow: workflow_id.to_owned(),
-        prompt: dispatch::prompt(workflow_id, handoff_id, provider, &id),
+        handoff: handoff_id.to_owned(),
+        request: request.clone(),
+        header: dispatch::header(workflow_id, handoff_id, &request),
+        prompt: dispatch::prompt(handoff_id, provider, &id),
         contract: dispatch::EXIT_CONTRACT.to_owned(),
+        by: json!({
+            "id": dispatch_id,
+            "request": request,
+            "thread": packet.thread,
+            "project": packet.project,
+            "workflow": workflow_id,
+        }),
         permissions,
         timeout_minutes,
         deadline,
@@ -4361,6 +4385,8 @@ async fn execute(
             reason: dispatch::Reason::Request,
             permissions,
             timeout_minutes,
+            request_id,
+            dispatch_id,
         } => {
             let runtime = needs_owner()?;
             if !(1..=dispatch::MAX_TIMEOUT_MINUTES).contains(&timeout_minutes) {
@@ -4368,6 +4394,21 @@ async fn execute(
             }
             if !continuation::valid_workflow_id(&workflow_id) {
                 return Err(continuation::BAD_WORKFLOW_ID.into());
+            }
+            if !continuation::valid_handoff_id(&handoff_id) {
+                return Err(dispatch::HANDOFF_INVALID.into());
+            }
+            if request_id
+                .as_deref()
+                .is_some_and(|r| !dispatch::valid_request(r))
+            {
+                return Err(dispatch::REQUEST_INVALID.into());
+            }
+            if dispatch_id
+                .as_deref()
+                .is_some_and(|d| !launches::valid_name(d))
+            {
+                return Err(dispatch::DISPATCH_ID_INVALID.into());
             }
             let answer = dispatch_start(
                 &store,
@@ -4378,6 +4419,8 @@ async fn execute(
                 &handoff_id,
                 permissions,
                 timeout_minutes,
+                request_id.as_deref(),
+                dispatch_id.as_deref(),
             )
             .await?;
             if let Some(client) = runtime.analytics() {

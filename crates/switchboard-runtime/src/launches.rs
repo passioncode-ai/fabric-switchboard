@@ -308,15 +308,16 @@ fn update(root: &Path, id: &str, change: impl FnOnce(&mut Value) -> bool) -> boo
 pub(crate) fn get(root: &Path, id: &str) -> Option<Value> {
     read(root, id).map(|r| with_state(root, r))
 }
-/// SB-247: sets `ended` (with `ended_at`, and `fields` beside it) on launch `id` when nothing set
-/// it yet, under the records' lock; whether this call set it. A dispatched run's end is set once:
-/// by its stop, its time limit or its own exit, whichever comes first.
+/// SB-247: sets `ended` on launch `id` when nothing set it yet, under the records' lock; whether
+/// this call set it. A dispatched run's end is the object `{kind, exit_code?, at}` (Fabric
+/// Dashboards FD-137 reads it), with `ended_at` beside it as every record has; it is set once: by
+/// its stop, its time limit or its own exit, whichever comes first.
 pub(crate) fn end_once(
     root: &Path,
     id: &str,
-    ended: &str,
+    kind: &str,
     now: i64,
-    fields: &[(&str, Value)],
+    exit_code: Option<i32>,
 ) -> bool {
     if !valid_id(id) {
         return false;
@@ -327,25 +328,26 @@ pub(crate) fn end_once(
             if !r["ended"].is_null() {
                 return false;
             }
-            r["ended"] = ended.into();
-            r["ended_at"] = now.into();
-            for (key, value) in fields {
-                r[*key] = value.clone();
+            let mut ended = json!({"kind": kind, "at": now});
+            if let Some(code) = exit_code {
+                ended["exit_code"] = code.into();
             }
+            r["ended"] = ended;
+            r["ended_at"] = now.into();
             true
         })
     })
 }
-/// SB-247: takes back an `ended` this process set a moment ago (a stop that could not end its
-/// run), so the record says the run goes on.
-pub(crate) fn unend(root: &Path, id: &str, ended: &str) {
+/// SB-247: takes back an `ended` of `kind` this process set a moment ago (a stop that could not
+/// end its run), so the record says the run goes on.
+pub(crate) fn unend(root: &Path, id: &str, kind: &str) {
     if !valid_id(id) {
         return;
     }
     crate::blocking::run(|| {
         let _writing = writing();
         update(root, id, |r| {
-            if r["ended"].as_str() != Some(ended) {
+            if r["ended"]["kind"].as_str() != Some(kind) {
                 return false;
             }
             r["ended"] = Value::Null;
@@ -482,10 +484,24 @@ fn pointing_at(root: &Path, id: &str) -> Vec<(String, Value)> {
 /// Writes a launch's `.session.json` in `dir` (its failure fails the launch, as before) and its
 /// record in `launches/` (best effort: a launch never fails for its history), then links it to
 /// the launch it continues. `record` is what `.session.json` held before SB-212.
-pub(crate) fn record(root: &Path, dir: &Path, mut record: Value, id: &str) -> Result<(), String> {
+pub(crate) fn record(root: &Path, dir: &Path, record: Value, id: &str) -> Result<(), String> {
+    record_by(root, dir, record, id, None)
+}
+/// `record` with `launched_by.dispatch` (SB-247): the dispatch that started the launch,
+/// `{id, request, thread, project, workflow}`, set by the owner, never by the caller.
+pub(crate) fn record_by(
+    root: &Path,
+    dir: &Path,
+    mut record: Value,
+    id: &str,
+    dispatch: Option<Value>,
+) -> Result<(), String> {
     let by = current_by();
     record["launch_id"] = id.into();
     record["launched_by"] = by.stored();
+    if let Some(dispatch) = dispatch {
+        record["launched_by"]["dispatch"] = dispatch;
+    }
     crate::launch::private_write(
         &dir.join(crate::launch::SESSION_RECORD),
         record.to_string().as_bytes(),

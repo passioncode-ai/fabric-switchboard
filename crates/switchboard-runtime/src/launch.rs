@@ -50,6 +50,10 @@ const CONFLICTS: &[&str] = &[
     "SWITCHBOARD_CONTEXT",
     // SB-212: every launched session gets its own; one inherited from a caller never leaks.
     "SWITCHBOARD_LAUNCH_ID",
+    // SB-247: a session started inside a dispatched run is not that run.
+    "FABRIC_DISPATCH_WORKFLOW",
+    "FABRIC_DISPATCH_HANDOFF",
+    "FABRIC_DISPATCH_REQUEST",
 ];
 #[cfg(windows)]
 const CLI_NAME: &str = "switchboard.exe";
@@ -2559,7 +2563,9 @@ fn launch_core(
                 crate::carry::link_into(&home, user, crate::carry::CLAUDE_LINKS);
             }
             Provider::Codex => {
-                crate::carry::link_into(&home, user, &["AGENTS.md"]);
+                // SB-247: the person's hooks (`hooks.json`, where fabric-agent-adapter installs
+                // its hook) come along as Claude Code's settings do.
+                crate::carry::link_into(&home, user, CODEX_LINKS);
             }
         }
     }
@@ -2704,6 +2710,8 @@ fn launch_core(
         let launch_id = crate::launches::new_id();
         env.insert(crate::launches::ENV.into(), launch_id.clone());
         env.insert(DISPATCH_ENV.into(), h.workflow.clone());
+        env.insert(DISPATCH_HANDOFF_ENV.into(), h.handoff.clone());
+        env.insert(DISPATCH_REQUEST_ENV.into(), h.request.clone());
         let record = json!({
             "account_id": account.id,
             "provider": account.provider.as_str(),
@@ -2722,7 +2730,7 @@ fn launch_core(
                 "log": format!("{}/{}/{launch_id}.log", crate::launches::DIR, crate::launches::LOGS),
             },
         });
-        crate::launches::record(root, &home, record, &launch_id)?;
+        crate::launches::record_by(root, &home, record, &launch_id, Some(h.by.clone()))?;
         let child = spawn_headless(
             root,
             &home,
@@ -2740,7 +2748,6 @@ fn launch_core(
             Some(Dispatched {
                 launch_id,
                 account_id: account.id.clone(),
-                provider: account.provider,
                 child,
             }),
         ));
@@ -2779,9 +2786,15 @@ fn launch_core(
     journal_launch(store, id, mode);
     Ok((cli.is_some(), in_place.then_some(path), None))
 }
+/// What a Codex home Switchboard launches carries from the person's own Codex folder (SB-137,
+/// SB-247): links, never a copy; nothing that signs in.
+pub(crate) const CODEX_LINKS: &[&str] = &["AGENTS.md", "hooks.json"];
 /// SB-247: the variable a dispatched run carries: the workflow Fabric opened for its board
 /// request.
 pub const DISPATCH_ENV: &str = "FABRIC_DISPATCH_WORKFLOW";
+/// SB-247: the hand-over Fabric opened, and the board request the run answers.
+pub const DISPATCH_HANDOFF_ENV: &str = "FABRIC_DISPATCH_HANDOFF";
+pub const DISPATCH_REQUEST_ENV: &str = "FABRIC_DISPATCH_REQUEST";
 /// SB-247: how much a dispatched run may do without asking (`--permissions`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -2805,11 +2818,18 @@ pub(crate) struct Headless {
     /// The provider CLI, as `dispatch::program` found it.
     pub program: PathBuf,
     pub workflow: String,
-    /// The first prompt: accept the hand-over, then the request.
+    pub handoff: String,
+    /// The board request's id (`--request`, else the packet's `board-request:`).
+    pub request: String,
+    /// The prompt's first line, `dispatch::header`.
+    pub header: String,
+    /// The text after it: accept the hand-over, then the request.
     pub prompt: String,
-    /// The exit contract, appended to the system prompt (Claude Code) or put before the prompt
+    /// The exit contract, appended to the system prompt (Claude Code) or put after the header
     /// (Codex, which has no such flag).
     pub contract: String,
+    /// The record's `launched_by.dispatch`: `{id, request, thread, project, workflow}`.
+    pub by: Value,
     pub permissions: Permissions,
     pub timeout_minutes: u32,
     /// When the time limit stops it (Unix seconds).
@@ -2819,11 +2839,11 @@ pub(crate) struct Headless {
 pub(crate) struct Dispatched {
     pub launch_id: String,
     pub account_id: String,
-    pub provider: Provider,
     pub child: std::process::Child,
 }
 /// SB-247: the arguments of a non-interactive run: `claude -p` with the exit contract appended to
-/// the system prompt, or `codex exec` with the contract before the prompt; the prompt last.
+/// the system prompt, or `codex exec` with the contract after the header; the prompt last, its
+/// first line the header and an empty line after it.
 pub(crate) fn headless_args(provider: Provider, config: Option<&str>, h: &Headless) -> Vec<String> {
     let mut args: Vec<String> = Vec::new();
     match provider {
@@ -2835,14 +2855,14 @@ pub(crate) fn headless_args(provider: Provider, config: Option<&str>, h: &Headle
             if h.permissions == Permissions::All {
                 args.push("--dangerously-skip-permissions".into());
             }
-            args.push(h.prompt.clone());
+            args.push(format!("{}\n\n{}", h.header, h.prompt));
         }
         Provider::Codex => {
             args.push("exec".into());
             if h.permissions == Permissions::All {
                 args.push("--dangerously-bypass-approvals-and-sandbox".into());
             }
-            args.push(format!("{}\n\n{}", h.contract, h.prompt));
+            args.push(format!("{}\n\n{}\n\n{}", h.header, h.contract, h.prompt));
         }
     }
     args
@@ -5606,6 +5626,37 @@ mod tests {
         let trusted: Vec<&String> = state["projects"].as_object().unwrap().keys().collect();
         assert_eq!(trusted.len(), 1, "only the workflow's folder: {trusted:?}");
         assert!(Path::new(trusted[0]).ends_with(f.project.file_name().unwrap()));
+        // SB-247: a Codex home links the person's instructions and hooks (fabric-agent-adapter's
+        // hook lives in `hooks.json`); its sign-in and config are Switchboard's own.
+        fs::write(user.path().join("AGENTS.md"), "codex rules").unwrap();
+        fs::write(user.path().join("hooks.json"), r#"{"hooks":{}}"#).unwrap();
+        fs::write(user.path().join("auth.json"), "operator sign-in").unwrap();
+        let codex = f.add(
+            Provider::Codex,
+            AuthKind::ApiKey,
+            "default",
+            "synthetic-api-key",
+        );
+        continuation_here_with(
+            &f.root, &f.store, &proxy, &codex, "isolated", &f.project, &host, &resumed,
+        )
+        .unwrap();
+        let home = f.root.join("homes").join(&codex);
+        for name in CODEX_LINKS {
+            assert_eq!(
+                fs::read_link(home.join(name)).unwrap(),
+                user.path().join(name),
+                "{name} is a link"
+            );
+        }
+        assert!(!fs::symlink_metadata(home.join("auth.json"))
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        assert_ne!(
+            fs::read_to_string(home.join("auth.json")).unwrap(),
+            "operator sign-in"
+        );
     }
     #[cfg(not(windows))]
     #[tokio::test]
