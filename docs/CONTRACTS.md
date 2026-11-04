@@ -589,7 +589,9 @@ Design: [XA-01](packets/cross-agent-continuation.md) (operator decision D-1: aut
   `not_installed_a_sign_in_and_unreadable_agent_settings_are_named`, `stepReasonText` and `handoverSkipped` in
   `scripts/test-ui-logic.mjs`.
 - **Evidence:** log event `fallback` with `offered`, `launch_failed`, `every_step_refused`,
-  `no_usable_executor`, `no_checkout`, `engine_unreadable`, `group_ambiguous` or `no_chain`, and
+  `no_usable_executor`, `no_checkout`, `engine_unreadable`, `group_ambiguous` or `no_chain`,
+  `fabric_request` (SB-253: the workflow serves a Fabric board request, its packet names
+  `board-request:`, so Fabric alone hands it on; `a_board_requests_workflow_is_never_the_fallbacks`), and
   since 0.7.0 `key_exhausted`, `ceiling_reached`, `spend_unknown` or `ceilings_unreadable` when the
   gate skipped every step it reached and none was tried; log event `spend_gate` with `verdict`
   (`run`, `spend_unread`, `key_exhausted`, `ceiling_reached`, `spend_unknown`,

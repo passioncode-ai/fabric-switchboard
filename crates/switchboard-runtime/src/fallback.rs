@@ -357,6 +357,24 @@ pub(crate) fn unnamed_and_stale(workflow: &Value, executor: &Value) -> bool {
         .is_none_or(|s| s > UNNAMED_EXECUTOR_SILENCE)
 }
 
+/// SB-253 (fabric-agent-adapter, board 8592b7fb, 2026-11-04): a workflow that serves a Fabric
+/// board request (its packet names `board-request:` among its `kind: "other"` artifacts, Fabric
+/// spec §3.4) is Fabric's to hand on (§3.6), never the automatic fallback's, even when its lease
+/// names no account (a run cleared before its first accept) and looks like the ordinary CLI's.
+pub(crate) fn serves_board_request(shown: &Value) -> bool {
+    shown
+        .pointer("/checkpoint/body/artifacts")
+        .and_then(Value::as_array)
+        .is_some_and(|artifacts| {
+            artifacts.iter().any(|a| {
+                a["kind"].as_str() == Some("other")
+                    && a["ref"]
+                        .as_str()
+                        .is_some_and(|r| r.starts_with("board-request:"))
+            })
+        })
+}
+
 /// SB-82 D-6: the containment of a workflow's executor, from the engine's `provider`. One this
 /// cannot name is taken to ask, so nothing looser is chosen for it.
 pub(crate) fn executor_containment(executor: &Value) -> crate::agent_catalog::Containment {
@@ -900,6 +918,12 @@ pub(crate) async fn pass_with_reads<F, Fut, R, RFut>(
             log("engine_unreadable");
             continue;
         };
+        // SB-253: a board request's workflow is handed on by Fabric only.
+        if serves_board_request(&shown) {
+            runtime.fallback.mark(id, now);
+            log("fabric_request");
+            continue;
+        }
         let Some(dir) = continuation::checkouts(&shown).into_iter().next() else {
             runtime.fallback.mark(id, now);
             log("no_checkout");
@@ -1717,6 +1741,27 @@ mod tests {
                 .collect(),
             updated_at: 1,
         }
+    }
+
+    #[test]
+    fn a_board_requests_workflow_is_never_the_fallbacks() {
+        let shown = |artifacts: Value| json!({"checkpoint": {"body": {"artifacts": artifacts}}});
+        assert!(serves_board_request(&shown(json!([
+            {"kind": "git", "path": "/x"},
+            {"kind": "other", "ref": "board-request:3f2a8c1e-5b6d-4e7f-8a9b-0c1d2e3f4a5b"}
+        ]))));
+        // Any value: the request is Fabric's whether or not it reads as a UUID.
+        assert!(serves_board_request(&shown(
+            json!([{"kind": "other", "ref": "board-request:x"}])
+        )));
+        assert!(!serves_board_request(&shown(
+            json!([{"kind": "other", "ref": "board-thread:t"}])
+        )));
+        assert!(!serves_board_request(&shown(
+            json!([{"kind": "file", "ref": "board-request:x"}])
+        )));
+        assert!(!serves_board_request(&shown(json!([]))));
+        assert!(!serves_board_request(&json!({})));
     }
 
     #[test]
