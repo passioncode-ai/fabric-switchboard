@@ -188,6 +188,7 @@ All PassionCode.ai tools share one file:
 |---|---|
 | macOS | `~/Library/Application Support/PassionCode/installation.json` |
 | Windows | `%APPDATA%\PassionCode\installation.json` |
+| Linux | `$XDG_CONFIG_HOME/PassionCode/installation.json`, else `~/.config/PassionCode/installation.json` (since SB-252; before it Switchboard alone used `~/.local/share/PassionCode`, and its first start after the change moves that id to the family's folder when the family's has none, `an_id_kept_in_the_old_folder_moves_to_the_familys_once_and_never_over_another`) |
 
 ```json
 { "version": 1, "id": "<random UUID v4>", "analytics": true, "created_at": 1791165882 }
@@ -255,6 +256,12 @@ switch read off stay uncounted.
   `false` more often (announcement `b48dd437`, 2026-11-04). It is a change in what is measured, not
   in what people do: read the drop as a break in the series, never as a finding. The launcher sends
   the same `install_id` and `iid`, so joining installs across apps still works.
+
+- **Linux installation ids, from the release that carries SB-252.** A Linux install where
+  another PassionCode app had already created the family's file (`~/.config/PassionCode`) reports
+  that app's id from then on instead of the one Switchboard kept in `~/.local/share/PassionCode`:
+  one more install in growth's count, joined with the other apps from then on. Where the family's
+  file did not exist, Switchboard's own id moves there and nothing changes.
 
 ## Cross-app tasks
 
