@@ -49,6 +49,59 @@ pub(crate) fn pi_user_dir_from(sources: &crate::person::Sources) -> Option<PathB
 
 /// Links each of `names` that exists in `source` into `home`. A link Switchboard made before is
 /// renewed; a real file or folder in `home` is never replaced. Returns how many links point there.
+/// SB-247 (fabric-agent-adapter, 2026-11-04): Codex 0.165 runs a hook from `hooks.json` only
+/// when the same `CODEX_HOME`'s `config.toml` trusts it, under
+/// `hooks.state."<that hooks.json>:<event>:<i>:<j>"` with the `trusted_hash` the person accepted.
+/// A Codex home links the person's own `hooks.json`, so the person's trust in that very file is
+/// carried under the home's path. Only entries of the person's own `hooks.json` come along (a
+/// plugin's stay behind, its hooks are not linked), and of each only `trusted_hash`,
+/// `trusted_content_hash` (strings) and `enabled` (a boolean); nothing else of the person's
+/// `config.toml` is kept. A hook the person edited after trusting it stays untrusted here as it
+/// does at home. Empty when the home does not link the person's `hooks.json`, the file does not
+/// read, or the person trusts none of it.
+pub(crate) fn codex_hook_trust(home: &Path, user: &Path) -> String {
+    let theirs = user.join("hooks.json");
+    let ours = home.join("hooks.json");
+    if std::fs::read_link(&ours).ok().as_deref() != Some(theirs.as_path()) {
+        return String::new();
+    }
+    let Some(state) = std::fs::read_to_string(user.join("config.toml"))
+        .ok()
+        .and_then(|text| text.parse::<toml::Table>().ok())
+        .and_then(|config| config.get("hooks")?.get("state")?.as_table().cloned())
+    else {
+        return String::new();
+    };
+    let from = format!("{}:", theirs.display());
+    let to = format!("{}:", ours.display());
+    let mut carried = toml::Table::new();
+    for (key, entry) in state {
+        let (Some(rest), Some(entry)) = (key.strip_prefix(&from), entry.as_table()) else {
+            continue;
+        };
+        let kept: toml::Table = entry
+            .iter()
+            .filter(|(name, value)| match name.as_str() {
+                "trusted_hash" | "trusted_content_hash" => value.is_str(),
+                "enabled" => value.is_bool(),
+                _ => false,
+            })
+            .map(|(name, value)| (name.clone(), value.clone()))
+            .collect();
+        if kept.contains_key("trusted_hash") {
+            carried.insert(format!("{to}{rest}"), toml::Value::Table(kept));
+        }
+    }
+    if carried.is_empty() {
+        return String::new();
+    }
+    let mut hooks = toml::Table::new();
+    hooks.insert("state".into(), toml::Value::Table(carried));
+    let mut config = toml::Table::new();
+    config.insert("hooks".into(), toml::Value::Table(hooks));
+    toml::to_string(&config).unwrap_or_default()
+}
+
 pub(crate) fn link_into(home: &Path, source: &Path, names: &[&str]) -> usize {
     if same_dir(home, source) {
         return 0;
