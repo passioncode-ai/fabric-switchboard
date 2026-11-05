@@ -616,8 +616,23 @@ mod tests {
         );
     }
     /// A vault whose removals take 400 ms: a removal holds the store's lock across its deletion.
+    /// `started` turns true as a deletion begins, so a test waits for the lock to be held instead
+    /// of sleeping a guess (SB-261: a slow runner measured 182 ms against the 200 ms floor).
     #[derive(Default)]
-    struct SlowDelete(MemoryVault);
+    struct SlowDelete(MemoryVault, std::sync::atomic::AtomicBool);
+    impl SlowDelete {
+        /// Blocks until a deletion holds the store's lock (at most 10 s).
+        fn wait_started(&self) {
+            let deadline = std::time::Instant::now() + Duration::from_secs(10);
+            while !self.1.load(std::sync::atomic::Ordering::SeqCst) {
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "the removal never began"
+                );
+                std::thread::sleep(Duration::from_millis(1));
+            }
+        }
+    }
     impl switchboard_core::Vault for SlowDelete {
         fn get(&self, id: &str) -> Result<switchboard_core::Credential, String> {
             self.0.get(id)
@@ -626,6 +641,7 @@ mod tests {
             self.0.put(id, value)
         }
         fn delete(&self, id: &str) -> Result<(), String> {
+            self.1.store(true, std::sync::atomic::Ordering::SeqCst);
             std::thread::sleep(Duration::from_millis(400));
             self.0.delete(id)
         }
@@ -635,7 +651,8 @@ mod tests {
         // H-2: the owner's store tells the request's task each wait for its lock; a request that
         // never took it reads None.
         let tmp = tempfile::tempdir().unwrap();
-        let owner = Owner::start(tmp.path().to_owned(), Arc::new(SlowDelete::default()))
+        let vault = Arc::new(SlowDelete::default());
+        let owner = Owner::start(tmp.path().to_owned(), vault.clone())
             .await
             .unwrap();
         let store = owner.runtime.store.clone();
@@ -661,7 +678,7 @@ mod tests {
             let store = store.clone();
             std::thread::spawn(move || store.remove(&account.id))
         };
-        std::thread::sleep(Duration::from_millis(100));
+        vault.wait_started();
         let (_, waited) =
             measure_lock_waits(async { crate::blocking::run(|| store.snapshot().unwrap()) }).await;
         removing.join().unwrap().unwrap();
@@ -674,7 +691,8 @@ mod tests {
         // waits. One waits for the store's lock behind a slow removal; the other never takes
         // the lock and reads None, not the first one's wait.
         let tmp = tempfile::tempdir().unwrap();
-        let owner = Owner::start(tmp.path().to_owned(), Arc::new(SlowDelete::default()))
+        let vault = Arc::new(SlowDelete::default());
+        let owner = Owner::start(tmp.path().to_owned(), vault.clone())
             .await
             .unwrap();
         let store = owner.runtime.store.clone();
@@ -696,7 +714,7 @@ mod tests {
             let store = store.clone();
             std::thread::spawn(move || store.remove(&account.id))
         };
-        std::thread::sleep(Duration::from_millis(100));
+        vault.wait_started();
         let locking = {
             let store = store.clone();
             tokio::spawn(measure_lock_waits(async move {
