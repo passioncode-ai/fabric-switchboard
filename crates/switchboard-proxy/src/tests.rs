@@ -2355,3 +2355,75 @@ async fn an_auto_request_from_an_unmapped_folder_carries_no_sign_in_upstream() {
     p.shutdown().await;
     up.abort();
 }
+#[tokio::test]
+async fn two_users_owners_on_one_computer_never_share_a_port_or_a_token() {
+    // SB-251: each macOS user runs an owner over their own data folder. The second owner,
+    // asking for the port the first holds, moves to one of its own, and neither proxy takes
+    // the other's session token or pool capability (loopback is shared by every local user).
+    let hits = Arc::new(AtomicUsize::new(0));
+    let seen = hits.clone();
+    let (url, up) = fixture(Router::new().fallback(move || {
+        let seen = seen.clone();
+        async move {
+            seen.fetch_add(1, Ordering::SeqCst);
+            "{}"
+        }
+    }))
+    .await;
+    let mut proxies = Vec::new();
+    let mut roots = Vec::new();
+    for label in ["a", "b"] {
+        let (root, s) = store();
+        let account = add(&s, Provider::Claude, AuthKind::ApiKey, label, "synthetic");
+        s.select(Provider::Claude, "default", &account.id).unwrap();
+        let wanted = proxies.first().map(|p: &ProxyHandle| p.address().port());
+        let p = ProxyHandle::start_at(
+            s,
+            url.clone(),
+            url.clone(),
+            url.clone(),
+            Timeouts::default(),
+            wanted,
+            None,
+        )
+        .await
+        .unwrap();
+        proxies.push(p);
+        roots.push(root);
+    }
+    let (a, b) = (&proxies[0], &proxies[1]);
+    assert_ne!(a.address().port(), b.address().port());
+    assert_ne!(a.token(), b.token());
+    let client = reqwest::Client::new();
+    for (to, from) in [(a, b), (b, a)] {
+        let endpoint = format!("http://{}/claude/default/v1/messages", to.address());
+        for token in [
+            from.token().to_owned(),
+            crate::pool_token(from.token(), "default"),
+        ] {
+            let status = client
+                .post(&endpoint)
+                .bearer_auth(&token)
+                .body("{}")
+                .send()
+                .await
+                .unwrap()
+                .status();
+            assert_eq!(status, 401);
+        }
+        let own = client
+            .post(&endpoint)
+            .bearer_auth(to.token())
+            .body("{}")
+            .send()
+            .await
+            .unwrap()
+            .status();
+        assert!(own.is_success(), "{own}");
+    }
+    assert_eq!(hits.load(Ordering::SeqCst), 2, "only each owner's own requests went out");
+    for p in proxies {
+        p.shutdown().await;
+    }
+    up.abort();
+}

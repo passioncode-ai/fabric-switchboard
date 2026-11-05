@@ -165,6 +165,7 @@ Operator request 2026-10-05: a project is one or more folders (related repositor
   - `switchboard_proxy::pool_token(session, pool)` = SHA-256 of `switchboard-pool:<pool>:<session>`, in hex. It is accepted as the session token for `/claude|codex/<pool>/…`, and only as a bearer.
   - `bindings::sync` writes `env.ANTHROPIC_BASE_URL` and `env.ANTHROPIC_CUSTOM_HEADERS` (`X-Switchboard-Capability: <pool capability>`, SB-140; up to 0.6.37 `env.ANTHROPIC_AUTH_TOKEN`, which Claude Code counts as an auth source and which turned off claude.ai connectors; a sync removes that older value wherever it is still Switchboard's) into `<folder>/.claude/settings.local.json` (0600, atomic) for every folder of a project with an enabled Claude account, and for worktrees of its repositories inside a project folder.
   - It appends `.claude/settings.local.json` to the repository's `info/exclude`.
+  - It never reads or writes a folder whose settings file, `.claude` folder or the folder itself belongs to another user of the computer, or that this user cannot look into (SB-251, [Several users on one Mac](#several-users-on-one-mac-sb-251-2026-11-05)).
   - It records `{folder, pool, base_url, token_sha256, created}` in `<data>/claude-bindings.json` (0600; operational, not backed up, removed by uninstall after `unbind_all`).
   - It removes only values equal to what it wrote and never touches a file that is not a JSON object.
   - Runs from a real owner's pass when `bindings::key` moved, under the owner transaction; log `claude_binding` (bound, removed, skipped counts).
@@ -2446,3 +2447,25 @@ Switchboard reads its own operations log as fabric-agent-contract DEC-0153
   daily digest onward (ADR-0188 §3, Fabric CO-503 and Observatory OBS-330) is not built yet.
   `switchboard uninstall` removes `digests`.
 
+## Several users on one Mac (SB-251, 2026-11-05)
+
+Each macOS user runs their own Switchboard (Studio plan Q1 a, approved 2026-11-04): the app, its
+data folder, Keychain items, log and login item are that user's own.
+
+- **Ports and tokens.** The proxy asks for the port its `proxy.json` recorded and, when another
+  program (another user's owner included) holds it, binds an ephemeral loopback port of its own;
+  the control port is ephemeral. Loopback is shared by every user of the computer, so each proxy
+  takes only its own session token, pool capabilities and folder capabilities, all derived from
+  its own random session token
+  (`two_users_owners_on_one_computer_never_share_a_port_or_a_token`).
+- **A folder both users work in.** Claude Code reads one `.claude/settings.local.json` for every
+  session in a folder, so it can carry one user's route only. The user who owns the folder, its
+  `.claude` folder or the settings file keeps it: another user's owner neither reads nor writes
+  it, keeps no binding row for it, does not retry it as a failure and counts it as `another_user`
+  in `claude_binding` and in `project rotate-capability`'s `not_rewritten`
+  (`a_file_folder_or_settings_folder_of_another_user_is_another_users`,
+  `a_folder_whose_settings_this_user_cannot_see_is_left_to_its_owner`). The file is 0600, so the
+  other user's Claude Code cannot read it either: their sessions there run on their own sign-in,
+  or through their own Switchboard when they launch them from it.
+- **Not proved yet.** A run with two real users on one Mac (both owners, a shared folder, the
+  terminal hook) is an operator-assisted acceptance task.
