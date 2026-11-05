@@ -22,6 +22,7 @@ mod fallback;
 pub mod handovers;
 mod headless_login;
 pub mod hermes;
+mod inbox;
 pub mod kimi;
 pub mod launch;
 pub mod launches;
