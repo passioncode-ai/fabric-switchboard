@@ -8,7 +8,12 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+## 0.7.16
+
 - New: `switchboard inbox set`, `inbox status` and `inbox remove` save, check and delete the Fabric Inbox key that the coming Claude sign-in autopilot will read its sign-in mail with. The key stays in your vault and no agent tool can reach it (SB-256).
+- On Windows, switching Claude accounts no longer stops with a permissions message when Claude Code releases its account lock at the same moment; Switchboard waits for it instead (SB-263).
+- If your Claude `settings.json` is a link to a file you keep elsewhere, such as in a dotfiles folder, terminals in an organization's folders now pick up your changes to that file (SB-262).
+- On a Mac, Switchboard keeps hold of the keychains it uses for as long as it runs, which avoids a rare crash in the macOS Security framework seen once in 0.7.11 (SB-254).
 
 ## 0.7.15
 
