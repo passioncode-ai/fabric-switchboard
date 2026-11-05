@@ -642,6 +642,7 @@ impl Server {
                         .and_then(Value::as_str)
                         .unwrap_or("default")
                         .into(),
+                    headless: false,
                 })
                 .await
             }

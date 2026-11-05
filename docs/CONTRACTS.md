@@ -2522,3 +2522,35 @@ data folder, Keychain items, log and login item are that user's own.
   or through their own Switchboard when they launch them from it.
 - **Not proved yet.** A run with two real users on one Mac (both owners, a shared folder, the
   terminal hook) is an operator-assisted acceptance task.
+
+## Headless sign-in (SB-256 N1, 2026-11-05)
+
+A Claude sign-in the owner runs itself, with no Terminal, for the sign-in autopilot
+([design](research/signin-autopilot-2026-11-05.md)); `crates/switchboard-runtime/src/headless_login.rs`.
+
+- **Start.** `BeginLogin { headless: true }` (CLI `login begin --headless`; Claude on macOS and Linux
+  only, otherwise *Signing in without Terminal works for Claude on macOS and Linux*) creates the usual
+  staging home and journal, then spawns `claude auth login` there as the owner's child in its own
+  process group: `CLAUDE_CONFIG_DIR` set and the same variables unset as a Terminal sign-in,
+  `BROWSER` pointing at a script in the home that only appends the URL it is given to
+  `.browser-urls`, stdin a pipe the owner keeps, stdout and stderr appended to `login.log` (0600).
+  `.headless` marks the home.
+- **The URL.** `LoginStatus` answers `manual_url` while pending: from the log, the first URL (an OSC 8
+  hyperlink or plain) on `claude.com` or `claude.ai`, an `/oauth/authorize` path and the redirect
+  `https://platform.claude.com/oauth/code/callback`; any other host or redirect is never returned
+  (`the_manual_url_is_the_one_that_sends_the_code_to_platform_claude_com`). Measured with Claude Code
+  2.1.299 on 2026-11-05: it calls `BROWSER` with the loopback URL and prints the manual one, then
+  reads a code from a pipe and exchanges it (a bogus code: `Login failed: Request failed with status
+  code 400`, exit 1).
+- **The code.** `SubmitLoginCode { login_id, code }` (CLI `login code`, stdin only) checks its shape
+  (printable ASCII without spaces, at most 512) and writes it with a line feed to the CLI's input; it
+  is never stored, logged or returned. No MCP tool takes it: a code never travels in an agent's tool
+  call.
+- **Finish.** A thread reaps the child: exit 0 writes `.completed` (`complete`), so capture and
+  `FinishLogin` are a Terminal sign-in's; any other exit, or an owner that did not start it (after a
+  restart), reads `ended`. `CancelLogin` sends SIGTERM to the child's process group, SIGKILL after 3 s,
+  then cleans as before (`a_pasted_code_completes_the_sign_in_and_the_browser_url_is_only_recorded`,
+  `a_refused_code_ends_the_sign_in_without_completing_it`, `stopping_ends_the_cli_and_its_group`).
+- **Not built yet.** The window, the browser service and the mail (nodes N2 to N4); the
+  operator-assisted acceptance with a real account (N5).
+

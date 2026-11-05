@@ -194,6 +194,10 @@
     "Vault unavailable": "Storage unavailable. Check native credential storage access and retry.",
     "Windows private storage unavailable": "A private Switchboard file or folder failed its safety check. Make sure the app’s data folder belongs to you and is not shared, then retry.",
     "Windows system directory unavailable.": "Windows did not report its system folder, so Terminal could not open. Restart Switchboard, then retry.",
-    "Name a provider (claude or codex) or a launch id.": "Name a provider (claude or codex) or a launch id, to say whose account to show."
+    "Name a provider (claude or codex) or a launch id.": "Name a provider (claude or codex) or a launch id, to say whose account to show.",
+    "Sign-in could not start.": "The sign-in could not start. Check that Claude Code is installed, then try again.",
+    "That is not a sign-in code. Copy the code the sign-in page shows.": "That is not a sign-in code. Copy the whole code the sign-in page shows.",
+    "This sign-in is not waiting for a code. Start it again.": "This sign-in is not waiting for a code. Start the sign-in again.",
+    "A sign-in without Terminal is available for Claude on macOS and Linux only.": "Signing in without Terminal works for Claude on macOS and Linux. Use the ordinary sign-in."
   }
 }
