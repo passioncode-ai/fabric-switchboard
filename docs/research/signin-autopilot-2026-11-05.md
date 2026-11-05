@@ -80,6 +80,31 @@ Generic seams: Switchboard is open source, so it calls "a browser service" and "
 capability, configured by the person (service key, caller token and Inbox key names in the
 Observatory vault), and depends on no browser service's internals.
 
+## Decision: where the Fabric Inbox key lives (2026-11-05)
+
+Decided by fabric-switchboard as the safest reversible choice (the operator's rule: an open
+question is decided by recorded decisions, then the project's goal, then the safest reversible
+option), recorded here before the client is built:
+
+- **Which key.** A Fabric Inbox `read` key limited to the sign-in mailbox (fabric-inbox
+  `docs/agents/mcp.md`, "A Read or Mail key can be limited to mailboxes"), made by the person in
+  Fabric Inbox's Settings, Agent access. It can read that mailbox and nothing else, and sends
+  nothing. Making it is the person's: Fabric Inbox shows its Client Secret once.
+- **Where it is kept.** In Switchboard's own vault (the Keychain on macOS, the vault every
+  account credential and agent key already uses, `switchboard_core::Vault`): the Client Secret
+  as the vault item, and in the store's metadata only the server's `https` origin, the Client Id
+  and when it was saved. Not in the Observatory vault (Switchboard is open source and runs on
+  machines without it), never in an environment file, `settings.json` or a command line.
+- **How it gets there.** `switchboard inbox set --origin <https://...> --client-id <id>` reads the
+  secret from standard input, as `login code` does; the window gets the same form. `inbox status`
+  says whether one is saved and whether the server answered, never the secret; `inbox remove`
+  deletes the vault item.
+- **How it is used.** Only the sign-in autopilot reads it, for `list_accounts`, `search_mailbox`
+  and `read_message` over Fabric Inbox's `/mcp` (Streamable HTTP, the `CF-Access-Client-Id` and
+  `CF-Access-Client-Secret` headers), redirects refused, `https` only (a test stand-in on
+  `http://127.0.0.1:<port>`, as `SWITCHBOARD_OPENROUTER_BASE` is).
+- **Reversible.** Removing the key turns the autopilot off; every sign-in then runs as today.
+
 ## Human gates that stay
 
 A CAPTCHA, a code field, a device check or any page the browser service does not recognise stops
