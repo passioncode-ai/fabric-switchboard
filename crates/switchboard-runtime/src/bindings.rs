@@ -66,6 +66,9 @@ pub(crate) struct Report {
     pub skipped: Vec<String>,
     /// Folders whose `ANTHROPIC_*` values are the person's, not Switchboard's: left untouched.
     pub user_values_present: Vec<String>,
+    /// SB-251: folders whose `.claude` folder or settings file belongs to another user of this
+    /// computer: neither read nor written, never retried as a failure.
+    pub another_user: Vec<String>,
     /// SB-183: the folders whose Claude Code route is Switchboard's after this sync (written or
     /// unchanged), for the terminal hook's folder map; never a folder whose values are the
     /// person's.
@@ -347,6 +350,34 @@ enum Applied {
     Unchanged,
     /// An `ANTHROPIC_*` value is the person's, not Switchboard's: the folder is left untouched.
     UserValues,
+    /// SB-251: the `.claude` folder or its settings file belongs to another user of this
+    /// computer, whose own Switchboard writes it: the folder is left untouched.
+    AnotherUser,
+}
+
+/// SB-251: whether the folder's settings file, the `.claude` folder that holds it or the folder
+/// itself belongs to another user of this computer. One settings file serves every Claude Code
+/// session in the folder, so two users' owners would take turns overwriting each other's route;
+/// the user who owns the file keeps it. A path this user cannot even look at counts as another
+/// user's too.
+#[cfg(unix)]
+fn another_users(path: &Path) -> bool {
+    // SAFETY: getuid has no preconditions and cannot fail.
+    owned_by_another(path, unsafe { libc::getuid() })
+}
+#[cfg(unix)]
+fn owned_by_another(path: &Path, me: u32) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    path.ancestors()
+        .take(3)
+        .any(|p| match std::fs::symlink_metadata(p) {
+            Ok(meta) => meta.uid() != me,
+            Err(e) => e.kind() == std::io::ErrorKind::PermissionDenied,
+        })
+}
+#[cfg(not(unix))]
+fn another_users(_path: &Path) -> bool {
+    false
 }
 
 /// A value in the settings file is Switchboard's when it is the one about to be written or
@@ -400,6 +431,9 @@ fn apply(
     known: &std::collections::HashSet<String>,
 ) -> Result<Applied, ()> {
     let path = settings_path(folder);
+    if another_users(&path) {
+        return Ok(Applied::AnotherUser);
+    }
     let existing = read_settings(&path)?;
     let created = existing.is_none();
     let mut map = existing.unwrap_or_default();
@@ -450,6 +484,10 @@ fn apply(
 /// wrote goes; a key the person edited stays.
 fn unapply(row: &Binding) -> Result<bool, ()> {
     let path = settings_path(Path::new(&row.folder));
+    // SB-251: the file is another user's now: nothing in it is this owner's to remove.
+    if another_users(&path) {
+        return Ok(false);
+    }
     let Some(mut map) = read_settings(&path)? else {
         return Ok(false);
     };
@@ -585,7 +623,7 @@ pub(crate) fn sync_salted(
                     (Applied::Written(written), None) => written,
                     (Applied::Unchanged, Some(old)) => old.created,
                     (Applied::Unchanged, None) => false,
-                    (Applied::UserValues, _) => unreachable!(),
+                    (Applied::UserValues | Applied::AnotherUser, _) => unreachable!(),
                 };
                 report.bound_folders.insert(text.to_owned());
                 if matches!(result, Applied::Written(_)) {
@@ -609,6 +647,9 @@ pub(crate) fn sync_salted(
                     kept.push(old.clone());
                 }
             }
+            // SB-251: another user's file; this owner keeps no row for it, so nothing is
+            // retried and nothing of the other user's is ever removed.
+            Ok(Applied::AnotherUser) => report.another_user.push(text.to_owned()),
             // Still ours but not writable now: kept to try again.
             Err(()) => {
                 report.skipped.push(text.to_owned());
@@ -1195,6 +1236,61 @@ mod tests {
         let kept: Value =
             serde_json::from_str(&std::fs::read_to_string(settings_path(&stale)).unwrap()).unwrap();
         assert_eq!(kept["permissions"]["allow"][0], "Bash(ls)");
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn a_file_folder_or_settings_folder_of_another_user_is_another_users() {
+        // SB-251: the uid of the file, its `.claude` folder or the project folder decides.
+        let tmp = tempfile::tempdir().unwrap();
+        let folder = tmp.path().canonicalize().unwrap();
+        let path = settings_path(&folder);
+        // SAFETY: getuid has no preconditions and cannot fail.
+        let me = unsafe { libc::getuid() };
+        assert!(
+            !owned_by_another(&path, me),
+            "nothing there yet, the folder is mine"
+        );
+        assert!(
+            owned_by_another(&path, me + 1),
+            "the folder is someone else's"
+        );
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, "{}").unwrap();
+        assert!(!owned_by_another(&path, me));
+        assert!(owned_by_another(&path, me + 1));
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn a_folder_whose_settings_this_user_cannot_see_is_left_to_its_owner() {
+        // SB-251: a `.claude` folder this user cannot search is another user's (as on a shared
+        // folder the other user bound first): no write, no row, no retry as a failure.
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let data = tmp.path().canonicalize().unwrap();
+        let shared = data.join("shared");
+        git(&shared);
+        let dir = shared.join(".claude");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o000)).unwrap();
+        let s = Snapshot {
+            projects: vec![project("pc", &[&shared])],
+            accounts: vec![account("pc")],
+            ..Default::default()
+        };
+        let report = sync(root.path(), &s, "127.0.0.1:4000", "session").unwrap();
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+        if unsafe { libc::getuid() } == 0 {
+            return; // root searches any folder; the rule is about other users.
+        }
+        let folder = shared.to_string_lossy().into_owned();
+        assert_eq!(report.another_user, vec![folder]);
+        assert_eq!((report.bound, report.skipped.len()), (0, 0));
+        assert!(report.bound_folders.is_empty());
+        assert!(read(root.path()).unwrap().is_empty());
+        assert!(!settings_path(&shared).exists());
     }
 
     #[test]
