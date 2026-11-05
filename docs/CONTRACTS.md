@@ -1027,6 +1027,11 @@ Code: `launch::sweep_logins` (`sweep_logins_with` for tests), called once from
   by `/usr/bin/security` in an unlocked keychain → deleted silently, then the home; locked,
   unavailable or an access list that would ask → both kept. A failed delete keeps the home, so an
   item is never orphaned. Elsewhere the credentials live inside the home and go with it.
+- Keychains are kept (SB-254 part 1): the first time the process holds a keychain (the default
+  one when the vault opens, the one an item lives in at its first probe) it keeps one reference to
+  it until it exits (`keychain_macos::keep_for_life`), so Security never tears that keychain down on
+  a background queue, where the 0.7.11 owner died once (2026-11-05). Not reproduced; a mitigation.
+  Test: `each_keychain_is_kept_once_for_the_life_of_the_process`.
 - Log: `login_leftovers` with `removed`, `running`, `kept` (numbers only), only when one is
   non-zero. Test: `a_start_removes_forgotten_sign_ins_and_keeps_what_still_runs_or_would_ask`.
 

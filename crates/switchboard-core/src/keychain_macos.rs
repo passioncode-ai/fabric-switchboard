@@ -94,6 +94,12 @@ pub(crate) struct MacKeychain {
 
 impl MacKeychain {
     pub(crate) fn detect() -> (Build, Self) {
+        static DEFAULT: std::sync::Once = std::sync::Once::new();
+        DEFAULT.call_once(|| {
+            if let Ok(keychain) = SecKeychain::default() {
+                keep_for_life(keychain.as_CFTypeRef());
+            }
+        });
         let (build, trust) = detect_build();
         (build, Self { file: None, trust })
     }
@@ -493,6 +499,7 @@ impl MacKeychain {
             return ItemProbe::Unavailable;
         }
         let keychain = unsafe { CFType::wrap_under_create_rule(keychain) };
+        keep_for_life(keychain.as_CFTypeRef());
         let mut lock_state = 0u32;
         if unsafe { SecKeychainGetStatus(keychain.as_CFTypeRef(), &mut lock_state) } != 0
             || lock_state & UNLOCKED == 0
@@ -512,6 +519,31 @@ impl MacKeychain {
             tool_trusted,
         }
     }
+}
+
+/// SB-254 part 1: the owner died once (2026-11-05 04:20Z, crash report in the backlog) inside
+/// Security, when a `KeychainImpl` this process had let go was torn down on a background dispatch
+/// queue and its CSSM detach threw (`std::terminate`, no Switchboard frame). Switchboard never needs
+/// a keychain to go away, so the first time it holds one (the default keychain at start, the one an
+/// item lives in at its first probe) it keeps one reference to it for the life of the process:
+/// Security then keeps the same object and never runs that teardown. Not reproduced; a mitigation.
+fn keep_for_life(keychain: CFTypeRef) {
+    if !keychain.is_null() && first_time(keychain as usize) {
+        // One retain that is never released.
+        unsafe { core_foundation::base::CFRetain(keychain) };
+    }
+}
+/// Whether `handle` is new to this process (at most a few: one per keychain file).
+fn first_time(handle: usize) -> bool {
+    static KEPT: std::sync::Mutex<Vec<usize>> = std::sync::Mutex::new(Vec::new());
+    let Ok(mut kept) = KEPT.lock() else {
+        return false;
+    };
+    if kept.contains(&handle) || kept.len() >= 64 {
+        return false;
+    }
+    kept.push(handle);
+    true
 }
 
 /// Whether the item's access list lets `tool` decrypt it without asking: a decrypt entry that
@@ -663,6 +695,20 @@ mod tests {
         }
     }
     const ID: &str = "0f6a4c1e-2b9d-4e0a-8f57-6c3d2b1a9e84";
+
+    #[test]
+    fn each_keychain_is_kept_once_for_the_life_of_the_process() {
+        // SB-254 part 1: fake handles, so the real keychains this process keeps are not touched.
+        let (a, b) = (usize::MAX - 7, usize::MAX - 15);
+        assert!(first_time(a));
+        assert!(
+            !first_time(a),
+            "a keychain already kept is not retained again"
+        );
+        assert!(first_time(b));
+        // A null handle is never retained.
+        keep_for_life(std::ptr::null());
+    }
 
     #[test]
     fn created_items_trust_the_listed_executables_by_requirement() {
