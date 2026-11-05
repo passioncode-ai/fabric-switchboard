@@ -2564,6 +2564,37 @@ A Claude sign-in the owner runs itself, with no Terminal, for the sign-in autopi
   N2 and N3, see *The Fabric Inbox key* below and `inbox.rs`); the operator-assisted acceptance with a
   real account (N5).
 
+## An organization with its GitHub repositories (SB-264, SB-265, 2026-11-05)
+
+Design `docs/research/organization-wizard-2026-11-05.md`; scenarios SCN-085, SCN-086.
+
+- **Several folders at once (SB-264).** The window's *Add folders…* calls the Tauri command
+  `pick_folders` (the dialog plugin's several-folder picker, `src-tauri/src/main.rs`); each chosen
+  folder joins the list once, in the order picked (`withFolders`). *Change…* stays one folder.
+- **GitHub through `gh` (SB-265).** `crates/switchboard-runtime/src/github.rs` runs the person's own
+  GitHub CLI (found by `launch::find_program`), never through a shell, in its own process group with
+  a deadline (30 s for a read, 30 min for a clone), with `GH_PROMPT_DISABLED`, `GIT_TERMINAL_PROMPT=0`
+  and a `PATH` holding `gh`'s and `git`'s folders. Switchboard stores no GitHub token.
+  - `GithubOwners` → `{available, reason, owners}`: the login (`gh api user`), then the organizations
+    (`gh api user/orgs`) by name; no `gh` → `reason: missing`, `gh` signed out (`gh auth status`
+    fails) → `signed_out`, never an error.
+  - `GithubRepositories { owner }` → `{owner, clone_into, repositories: [{name, url, archived, fork,
+    folder}]}` from `gh repo list <owner> --limit 1000`; `folder` is the checkout whose `origin` is
+    `github.com/<owner>/<name>` (any case) in the repository map under `~/DATA` (else home) and every
+    group folder's parent; `clone_into` is the folder holding most of them, else that default.
+  - `GithubClone { owner, name, into }` clones with `gh repo clone` into `into/.<name>.switchboard-partial`
+    and renames it to `into/<name>` once it has `.git`; a folder of that name already there is never
+    written into (*Clone folder exists*), a failed clone leaves nothing (*Clone failed*), a partial an
+    earlier run left is removed first.
+  - All three run outside the owner transaction; their refusals have sentences in
+    `person-errors.json`. No CLI command or MCP tool calls them (the window's wizard only).
+- **The wizard.** *+ New organization* adds the organization (`OrganizationAdd`), then its group
+  (`SaveProject`: its name, the chosen folders on disk and the added ones, no accounts, bound to it)
+  and `ProjectSources` `github.com/<owner>`; missing repositories are then cloned one at a time by the
+  window, each added with `MoveRoot { also: true }` (the first one makes the group when no folder was
+  saved), with *Cloning n of m* and the result on the organization's card.
+- Tests: `github::tests::*` (a stand-in `gh`), the ui-logic SB-264 and SB-265 cases.
+
 ## The Fabric Inbox key (SB-256 N3, 2026-11-05)
 
 The key the sign-in autopilot reads Anthropic's sign-in mail with

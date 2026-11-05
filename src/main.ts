@@ -7,9 +7,9 @@ import { platformLabel } from './platform';
 import { LOCALE_KEY, dateLocale, locale, parseLocaleChoice, plural, saveLocaleChoice, t, type LocaleChoice } from './i18n';
 import { demo, native, nativeAdapter, onProjectSuggestions, onShellHook, onSpendChanged, safeError, reportFrontendReady, reportLanguage, type Operation } from './adapter';
 import type { CardState } from './ui-logic';
-import { statAlert, ceilingQuestion, ceilingWarning, ceilingLine, keyLimitLine, dollars, POOL_PATTERN, poolChoices, poolName, inGroup, tourPlacement, usableWhileBusy, APPEARANCE_KEY, attribution, groupAdmits, groupSeatsElsewhere, passioncodeLine, seatEndedText, groupSeatsEndedText, organizationReleasedAt, inOrganizationFilter, domainList, type AttributedBy, sortStatRows, nextStatSort, type StatRow, type StatSort, statCacheShare, statTokensPerRequest, chartSeries, niceMax, groupProjectRows, type ChartMetric, groupProjects, compactCount, statTokens, statTrouble, statTroubleText, statAgentName, type Statistics, EXPIRY_CHOICES, folderName, folderRows, withoutFolder, type ProjectRoot, moveTargets, mapRows, rootTargets, storedMapFolders, MAP_FOLDERS_KEY, type MapFilter, type MapRow, type RepositoryMap, sortAgents, defaultAgentChoices, backgroundReads, clockedRead, chainScopeKey, afterRead, ceilingRemovalNote, modelMeta, ordinaryKimiNote, kimiLimitUntil, limitReasonText, limitTitle, agentSetupFacts, sessionHow, sessionAgentName, sessionStateLabel, kimiWindowsLine, kimiWindowsLines, openrouterCreditLine, eventAction, eventDetail, MutationClock, activeRules, autoSwitchPool, launchChoice, withFolder, replaceFolder, storedFolder, LAST_FOLDER_KEY, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, groupAccounts, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, signInNotice, signInMove, organizationMoveNote, dismissTermsNotice, termsNoticeDismissed, termsNoticeOn, termsNoticeText, tourWaits, orgSetups, releasedOrganizations, releasedSummary, orgSetupAction, orgSetupShown, orgSetupCaveat, orgSetupLeads, orgSetupPrimary, accountsOrgActionLeads, firstPrimary, orgSetupUnread, orgSetupStateLabel, orgSetupTitle, hiddenOrgSetups, ORG_SETUP_HIDDEN_KEY, accountsEmptyKey, type OrgSetup, usageAnswerText, usageNotice, usageFreshness, windowReset, type Appearance, shellHookView, shellHookToggleNotice, shellHookNoticeText, codexHookLine, moveStep, accountsForStep, chainSummary, stepReasonText, handoverOutcomeText, handoverSkipped, shortWorkflow, TAKEOVER_ORDER } from './ui-logic';
+import { statAlert, ceilingQuestion, ceilingWarning, ceilingLine, keyLimitLine, dollars, POOL_PATTERN, poolChoices, poolName, inGroup, tourPlacement, usableWhileBusy, APPEARANCE_KEY, attribution, groupAdmits, groupSeatsElsewhere, passioncodeLine, seatEndedText, groupSeatsEndedText, organizationReleasedAt, inOrganizationFilter, domainList, type AttributedBy, sortStatRows, nextStatSort, type StatRow, type StatSort, statCacheShare, statTokensPerRequest, chartSeries, niceMax, groupProjectRows, type ChartMetric, groupProjects, compactCount, statTokens, statTrouble, statTroubleText, statAgentName, type Statistics, EXPIRY_CHOICES, folderName, folderRows, withoutFolder, type ProjectRoot, moveTargets, mapRows, rootTargets, storedMapFolders, MAP_FOLDERS_KEY, type MapFilter, type MapRow, type RepositoryMap, sortAgents, defaultAgentChoices, backgroundReads, clockedRead, chainScopeKey, afterRead, ceilingRemovalNote, modelMeta, ordinaryKimiNote, kimiLimitUntil, limitReasonText, limitTitle, agentSetupFacts, sessionHow, sessionAgentName, sessionStateLabel, kimiWindowsLine, kimiWindowsLines, openrouterCreditLine, eventAction, eventDetail, MutationClock, activeRules, autoSwitchPool, launchChoice, withFolders, githubDefaultSelection, githubPlan, githubSource, replaceFolder, storedFolder, LAST_FOLDER_KEY, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, groupAccounts, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, signInNotice, signInMove, organizationMoveNote, dismissTermsNotice, termsNoticeDismissed, termsNoticeOn, termsNoticeText, tourWaits, orgSetups, releasedOrganizations, releasedSummary, orgSetupAction, orgSetupShown, orgSetupCaveat, orgSetupLeads, orgSetupPrimary, accountsOrgActionLeads, firstPrimary, orgSetupUnread, orgSetupStateLabel, orgSetupTitle, hiddenOrgSetups, ORG_SETUP_HIDDEN_KEY, accountsEmptyKey, type OrgSetup, usageAnswerText, usageNotice, usageFreshness, windowReset, type Appearance, shellHookView, shellHookToggleNotice, shellHookNoticeText, codexHookLine, moveStep, accountsForStep, chainSummary, stepReasonText, handoverOutcomeText, handoverSkipped, shortWorkflow, TAKEOVER_ORDER } from './ui-logic';
 import agentCatalog from '../catalog/agents.json';
-import type { AnalyticsStatus, Ceilings, CeilingView, CeilingQuestionView, OpenrouterCredit, BackupInfo, PassioncodeStatus, Account, Adapter, AgentConnection, AgentInfo, AgentRow, AgentsOverview, OpenrouterModels, HermesModel, KimiAccounts, KimiRegion, KimiStatus, OpenrouterStatus, OpenrouterKeys, CodexRoute, ShellHookStatus, AgentSetup, AuthKind, BackupStatus, KimiAccount, CurrentAccounts, LoginItem, Project, Restored, ExternalIdentity, MonitorStatus, ProjectRule, Provider, RotationPolicy, RuntimeStatus, SessionInfo, Snapshot, UpdateStatus, Onboarding, Chains, ChainExecutor, ChainScope, ChainStepView } from './types';
+import type { AnalyticsStatus, Ceilings, CeilingView, CeilingQuestionView, OpenrouterCredit, BackupInfo, PassioncodeStatus, Account, Adapter, AgentConnection, AgentInfo, AgentRow, AgentsOverview, OpenrouterModels, HermesModel, KimiAccounts, KimiRegion, KimiStatus, OpenrouterStatus, OpenrouterKeys, CodexRoute, ShellHookStatus, AgentSetup, AuthKind, BackupStatus, KimiAccount, CurrentAccounts, LoginItem, Project, Restored, ExternalIdentity, MonitorStatus, ProjectRule, Provider, RotationPolicy, RuntimeStatus, SessionInfo, Snapshot, UpdateStatus, Onboarding, Chains, ChainExecutor, ChainScope, ChainStepView, GithubRepository } from './types';
 
 const root = document.querySelector<HTMLDivElement>('#app')!;
 const announcements = document.querySelector<HTMLDivElement>('#announcements')!;
@@ -575,7 +575,7 @@ function diskMapSection() {
     }
     list.append(item);
   }
-  const add = button(t('Add folder…'), () => void chooseFolder(mapFolders.at(-1) ?? diskMap?.under[0] ?? '', (text) => { mapError = text; render(); }).then((folder) => { if (folder && !mapFolders.includes(folder)) { mapFolders = [...mapFolders, folder]; saveMapFolders(); loadMap(); } }), 'button row-button', 'disk-map-add');
+  const add = button(t('Add folders…'), () => void chooseFolders(mapFolders.at(-1) ?? diskMap?.under[0] ?? '', (text) => { mapError = text; render(); }).then((chosen) => { const next = withFolders(mapFolders, chosen); if (next.length > mapFolders.length) { mapFolders = next; saveMapFolders(); loadMap(); } }), 'button row-button', 'disk-map-add');
   const again = button(t('Look again'), () => loadMap(), 'text-button', 'disk-map-refresh'); again.disabled = mapLoading;
   where.append(list, add, again);
   section.append(groupField(t('Look under'), where));
@@ -2535,6 +2535,11 @@ async function chooseFolder(start: string, report: (text: string) => void): Prom
   try { const folder = await adapter.pickFolder(start || lastWorkingDirectory || undefined); if (folder) rememberFolder(folder); return folder; }
   catch (error) { report(t(safeError(error))); return null; }
 }
+/** SB-264: several folders from one system picker opened at `start`; a failure through `report`. */
+async function chooseFolders(start: string, report: (text: string) => void): Promise<string[]> {
+  try { const folders = await adapter.pickFolders(start || lastWorkingDirectory || undefined); const last = folders.at(-1); if (last) rememberFolder(last); return folders; }
+  catch (error) { report(t(safeError(error))); return []; }
+}
 /**
  * One folder, chosen with the system picker and never typed (operator decision 2026-10-09, every
  * PassionCode.ai product). `value()` is the chosen folder; `require()` returns it or, with none chosen,
@@ -2556,7 +2561,7 @@ function folderPicker(context: DialogContext, initial: string, key: string, lock
 function foldersPicker(context: DialogContext, initial: string[], key: string, roots: ProjectRoot[] | null = null) {
   let folders = [...initial];
   const node = el('div', 'folder-picker-list'); const list = el('ul', 'folder-list');
-  const add = button(t('Add folder…'), () => void chooseFolder(folders.at(-1) ?? '', (text) => { context.error.textContent = text; }).then((folder) => { if (folder) { folders = withFolder(folders, folder); context.error.textContent = ''; paint(); } }), 'button row-button', `${key}-add`);
+  const add = button(t('Add folders…'), () => void chooseFolders(folders.at(-1) ?? '', (text) => { context.error.textContent = text; }).then((chosen) => { if (chosen.length) { folders = withFolders(folders, chosen); context.error.textContent = ''; paint(); } }), 'button row-button', `${key}-add`);
   const paint = () => {
     list.replaceChildren();
     if (!folders.length) list.append(el('li', 'folder-path is-empty', t('No folder chosen')));
@@ -2750,6 +2755,7 @@ function renderOrganizations(main: HTMLElement) {
     actions.append(menu(`org-${o.id}`, t('More actions for {name}', { name: o.name }), [[t('Remove…'), () => organizationRemoveDialog(o.id), 'danger-text']]));
     head.append(titles, actions);
     card.append(head);
+    const importing = orgImports.get(o.id); if (importing) card.append(orgImportView(importing));
     // SB-160 (B-7, SCN-079): left on PassionCode.ai; kept here, and the person decides what to remove.
     const releasedAt = organizationReleasedAt(passioncodeView, o);
     if (releasedAt !== null) card.append(el('p', 'surface-note org-released', t('Not in your PassionCode.ai organizations since {date}. Its groups still refuse other accounts. Remove it when you no longer need it.', { date: date(releasedAt) })));
@@ -2772,6 +2778,7 @@ function renderOrganizations(main: HTMLElement) {
 }
 /** SB-158: add an organization (`id` null) or change one: its name and the domains it owns. */
 function organizationDialog(id: string | null) {
+  if (!id) { organizationCreateDialog(); return; }
   const current = id ? snapshot!.organizations?.find((o) => o.id === id) : undefined;
   const context = openDialog(current ? t('Edit {name}', { name: current.name }) : t('Add organization'), t('Accounts with an address on these domains belong to it. You can always place an account yourself.'));
   const name = input(current?.name ?? ''); name.maxLength = 80; name.placeholder = t('Company name');
@@ -2785,6 +2792,118 @@ function organizationDialog(id: string | null) {
     void dialogSave(context, () => current ? adapter.organizationEdit(current.id, name.value.trim(), list) : adapter.organizationAdd(name.value.trim(), list), current ? t('{name} saved.', { name: name.value.trim() }) : t('{name} added.', { name: name.value.trim() }));
   });
   name.focus();
+}
+/** SB-265: an import of an organization's GitHub repositories, shown on its card until the window reloads. */
+interface OrgImport { owner: string; into: string; total: number; done: number; cloned: number; problems: { name: string; reason: string }[]; finished: boolean }
+const orgImports = new Map<string, OrgImport>();
+function orgImportView(job: OrgImport) {
+  const node = el('div', 'surface-note org-import'); node.setAttribute('aria-live', 'polite');
+  if (!job.finished) { node.append(el('p', '', t('Cloning {n} of {m}…', { n: Math.min(job.done + 1, job.total), m: job.total }))); return node; }
+  node.append(el('p', '', plural(job.cloned, { one: '{n} repository cloned into {folder}.', other: '{n} repositories cloned into {folder}.' }, { folder: job.into })));
+  if (job.problems.length) { const list = el('ul'); for (const p of job.problems) list.append(el('li', '', t('{name}: {reason}', { name: p.name, reason: p.reason }))); node.append(list); }
+  return node;
+}
+async function reloadAfterChange() {
+  await refreshContext();
+  try { snapshot = await adapter.snapshot(); loadError = ''; } catch { loadError = t('The action completed, but the list could not be refreshed. Retry loading accounts.'); }
+  render(); loadOnboarding();
+}
+/**
+ * SB-265 (SCN-085): a new organization with its group in one step: the repositories of a GitHub
+ * owner the person's `gh` can see (the ones here, and the missing ones cloned after), and folders
+ * the person adds. The group is bound to the organization and takes that owner's new repositories.
+ */
+function organizationCreateDialog() {
+  const context = openDialog(t('Add organization'), t('Accounts with an address on its domains belong to it. Its repositories and folders go into its own group.'));
+  const name = input(''); name.maxLength = 80; name.placeholder = t('Company name');
+  const domains = input(''); domains.required = false; domains.placeholder = 'example.com';
+  const grid = el('div', 'form-grid'); grid.append(field(t('Name'), name), field(t('Domains'), domains, t('Optional. Separate several with commas.')));
+  const owner = el('select'); owner.append(new Option(t('None'), '')); owner.disabled = true;
+  const ownerField = field(t('GitHub organization'), owner); const ownerHelp = el('span', 'field-help', t('Reading your GitHub organizations…')); ownerField.append(ownerHelp);
+  const repoBox = el('div', 'github-repos'); repoBox.hidden = true;
+  const repoStatus = el('p', 'form-note'); repoStatus.setAttribute('aria-live', 'polite');
+  const repoList = el('fieldset', 'project-accounts'); repoList.append(el('legend', 'field-label', t('Repositories')));
+  const tools = el('div', 'github-repo-tools'); tools.hidden = true;
+  let repos: GithubRepository[] = []; let selected = new Set<string>(); let readSequence = 0;
+  const intoSlot = el('div', 'github-into'); intoSlot.hidden = true; let intoPicker: ReturnType<typeof folderPicker> | null = null;
+  const paintCount = () => { const plan = githubPlan(repos, selected); repoStatus.textContent = t('{n} on this computer, {m} to clone.', { n: plan.onDisk.length, m: plan.toClone.length }); intoSlot.hidden = !plan.toClone.length; };
+  const paintRepos = () => {
+    repoList.querySelectorAll('label').forEach((node) => node.remove());
+    for (const r of repos) {
+      const option = el('label', 'appearance-option login-option'); const box = el('input'); box.type = 'checkbox'; box.value = r.name; box.checked = selected.has(r.name);
+      box.addEventListener('change', () => { if (box.checked) selected.add(r.name); else selected.delete(r.name); paintCount(); });
+      const marks = [r.archived ? t('archived') : '', r.fork ? t('fork') : ''].filter(Boolean).join(', ');
+      const where = !r.folder ? t('not here yet') : folderName(r.folder) === r.name ? t('on this computer') : t('on this computer · {folder}', { folder: folderName(r.folder) });
+      const text = el('span', '', `${r.name} · ${where}${marks ? ` · ${marks}` : ''}`); if (r.folder) text.title = r.folder;
+      option.append(box, text); repoList.append(option);
+    }
+    paintCount();
+  };
+  const all = button(t('Select all'), () => { selected = new Set(repos.map((r) => r.name)); paintRepos(); }, 'text-button', 'org-repos-all');
+  const none = button(t('Select none'), () => { selected = new Set(); paintRepos(); }, 'text-button', 'org-repos-none');
+  tools.append(all, none);
+  const loadRepos = async (login: string) => {
+    const sequence = ++readSequence; repos = []; selected = new Set(); paintRepos(); tools.hidden = true; repoList.hidden = true; intoSlot.hidden = true; repoBox.hidden = !login;
+    if (!login) return;
+    repoStatus.textContent = t('Reading {owner}’s repositories…', { owner: login });
+    try {
+      const view = await adapter.githubRepositories(login); if (sequence !== readSequence) return;
+      repos = view.repositories; selected = new Set(githubDefaultSelection(repos));
+      intoPicker = folderPicker(context, view.clone_into ?? '', 'org-clone-into'); intoSlot.replaceChildren(groupField(t('Clone into'), intoPicker.node, t('Missing repositories are cloned here, each into a folder of its name.')));
+      if (!repos.length) { repoStatus.textContent = t('{owner} has no repositories you can see.', { owner: login }); return; }
+      tools.hidden = false; repoList.hidden = false; paintRepos();
+    } catch (error) { if (sequence === readSequence) repoStatus.textContent = t(safeError(error)); }
+  };
+  owner.addEventListener('change', () => void loadRepos(owner.value));
+  repoBox.append(repoStatus, tools, repoList, intoSlot);
+  const extra = foldersPicker(context, [], 'org-folders');
+  context.body.classList.add('org-create');
+  context.body.append(grid, ownerField, repoBox, groupField(t('Folders'), extra.node, t('Optional. Folders you keep that belong to this organization.')));
+  void adapter.githubOwners().then((view) => {
+    if (!view.available) { ownerHelp.textContent = view.reason === 'signed_out' ? t('To choose from your GitHub organizations, sign in to GitHub with gh auth login.') : t('To choose from your GitHub organizations, install the GitHub CLI and run gh auth login.'); return; }
+    for (const o of view.owners) owner.append(new Option(o.kind === 'user' ? t('{login} (you)', { login: o.login }) : o.login, o.login));
+    owner.disabled = false; ownerHelp.textContent = t('Optional. Its repositories go into the organization’s group, and new ones join it later.');
+  }).catch((error) => { ownerHelp.textContent = t(safeError(error)); });
+  context.actions.append(submit(t('Create')));
+  context.form.addEventListener('submit', (event) => {
+    event.preventDefault();
+    const orgName = name.value.trim(); const login = owner.value; const plan = githubPlan(repos, selected);
+    const folders = withFolders(plan.onDisk, extra.value()); const into = intoPicker?.value() ?? '';
+    if (plan.toClone.length && !into) { intoPicker?.require(); return; }
+    void (async () => {
+      context.error.textContent = ''; context.setBusy(true); clock.begin();
+      let organizationId = '';
+      try { const added = await adapter.organizationAdd(orgName, domainList(domains.value)) as { organization: { id: string } }; organizationId = added.organization.id; }
+      catch (error) { context.error.textContent = t(safeError(error)); context.setBusy(false); clock.end(); context.error.tabIndex = -1; context.error.focus(); return; }
+      let pool: string | null = null; let groupError = '';
+      if (folders.length) {
+        try { const saved = await adapter.saveProject({ name: orgName, folders, accountIds: [], organization: organizationId }) as { pool: string }; pool = saved.pool; if (login) await adapter.projectSources(pool, [githubSource(login)]); }
+        catch (error) { groupError = t(safeError(error)); }
+      }
+      clock.end(); await reloadAfterChange(); context.setBusy(false); context.close();
+      if (groupError) { showNotice(t('{name} was added, but its group was not saved: {reason}', { name: orgName, reason: groupError })); return; }
+      showNotice(folders.length || plan.toClone.length ? t('{name}: added with its group.', { name: orgName }) : t('{name} added.', { name: orgName }));
+      if (plan.toClone.length) void runOrgImport(organizationId, orgName, login, into, plan.toClone, pool);
+    })();
+  });
+  name.focus();
+}
+/** SB-265: clones one repository at a time; each one cloned joins the organization's group at once (the first makes the group when none was saved). */
+async function runOrgImport(organizationId: string, orgName: string, owner: string, into: string, names: string[], pool: string | null) {
+  const job: OrgImport = { owner, into, total: names.length, done: 0, cloned: 0, problems: [], finished: false };
+  orgImports.set(organizationId, job); render();
+  for (const repo of names) {
+    try {
+      const { folder } = await adapter.githubClone(owner, repo, into);
+      if (pool) await adapter.moveRoot(folder, pool, true);
+      else { const saved = await adapter.saveProject({ name: orgName, folders: [folder], accountIds: [], organization: organizationId }) as { pool: string }; pool = saved.pool; await adapter.projectSources(pool, [githubSource(owner)]); }
+      job.cloned += 1;
+    } catch (error) { job.problems.push({ name: repo, reason: t(safeError(error)) }); }
+    job.done += 1;
+    try { snapshot = await adapter.snapshot(); } catch { /* the next render keeps the last list */ }
+    render();
+  }
+  job.finished = true; render();
 }
 function organizationRemoveDialog(id: string) {
   const o = snapshot!.organizations?.find((x) => x.id === id); if (!o) return;

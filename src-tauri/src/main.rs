@@ -357,6 +357,28 @@ async fn pick_folder(
         .and_then(|f| f.into_path().ok())
         .map(|p| p.to_string_lossy().into_owned()))
 }
+/// SB-264: several folders chosen at once with the system picker (several selection); an empty
+/// list when the person closed it without choosing.
+#[tauri::command]
+async fn pick_folders(start: Option<String>, app: tauri::AppHandle) -> Result<Vec<String>, String> {
+    use tauri_plugin_dialog::DialogExt;
+    let window = app.get_webview_window("main").ok_or(FOLDER_PICKER_FAILED)?;
+    let (sender, picked) = tokio::sync::oneshot::channel();
+    let mut picker = app.dialog().file().set_parent(&window);
+    if let Some(start) = start.filter(|s| std::path::Path::new(s).is_dir()) {
+        picker = picker.set_directory(start);
+    }
+    picker.pick_folders(move |folders| {
+        let _ = sender.send(folders);
+    });
+    let folders = picked.await.map_err(|_| FOLDER_PICKER_FAILED)?;
+    Ok(folders
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|f| f.into_path().ok())
+        .map(|p| p.to_string_lossy().into_owned())
+        .collect())
+}
 #[tauri::command]
 async fn cancel_login(login_id: String, state: State<'_, Slot>) -> Result<Value, String> {
     state
@@ -481,6 +503,51 @@ async fn organization_add(
         .runtime()
         .await?
         .execute(Operation::OrganizationAdd { name, domains })
+        .await
+}
+/// SB-265: the GitHub owners the person's `gh` can see.
+#[tauri::command]
+async fn github_owners(state: State<'_, Slot>) -> Result<Value, String> {
+    state
+        .runtime()
+        .await?
+        .execute(Operation::GithubOwners)
+        .await
+}
+/// SB-265: one owner's repositories matched with this computer.
+#[tauri::command]
+async fn github_repositories(owner: String, state: State<'_, Slot>) -> Result<Value, String> {
+    state
+        .runtime()
+        .await?
+        .execute(Operation::GithubRepositories { owner })
+        .await
+}
+/// SB-265: clones one repository into a folder the person chose.
+#[tauri::command]
+async fn github_clone(
+    owner: String,
+    name: String,
+    into: std::path::PathBuf,
+    state: State<'_, Slot>,
+) -> Result<Value, String> {
+    state
+        .runtime()
+        .await?
+        .execute(Operation::GithubClone { owner, name, into })
+        .await
+}
+/// SB-265: the owners whose new repositories join a group by themselves (`github.com/<owner>`).
+#[tauri::command]
+async fn project_sources(
+    pool: String,
+    sources: Vec<String>,
+    state: State<'_, Slot>,
+) -> Result<Value, String> {
+    state
+        .runtime()
+        .await?
+        .execute(Operation::ProjectSources { pool, sources })
         .await
 }
 #[tauri::command]
@@ -1371,6 +1438,11 @@ fn main() {
             restore_backup,
             cancel_login,
             pick_folder,
+            pick_folders,
+            github_owners,
+            github_repositories,
+            github_clone,
+            project_sources,
             probe_usage,
             set_project_rule,
             remove_project_rule,

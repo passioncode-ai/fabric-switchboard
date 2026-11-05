@@ -19,6 +19,7 @@ pub mod external;
 #[cfg(target_os = "macos")]
 mod external_keychain;
 mod fallback;
+pub mod github;
 pub mod handovers;
 mod headless_login;
 pub mod hermes;
@@ -358,6 +359,18 @@ pub enum Operation {
     VestaSync,
     /// Deletes the token; the organizations stay as local ones.
     VestaDisconnect,
+    /// SB-265: the GitHub owners the person's `gh` can see (their login, then organizations).
+    GithubOwners,
+    /// SB-265: one owner's repositories, each with its folder on this computer, and where clones go.
+    GithubRepositories {
+        owner: String,
+    },
+    /// SB-265: clones one repository into `into/<name>` with `gh repo clone`; never over a folder.
+    GithubClone {
+        owner: String,
+        name: String,
+        into: PathBuf,
+    },
     /// SB-256: saves the Fabric Inbox key the sign-in autopilot reads: its Client Secret into the
     /// vault, the server and the Client Id beside it. Only the CLI sends it, from standard input.
     InboxSet {
@@ -1059,6 +1072,10 @@ impl Runtime {
                 | Operation::VestaCancel
                 | Operation::VestaSync
                 | Operation::VestaDisconnect
+                // SB-265: `gh` runs outside the store; a clone takes minutes.
+                | Operation::GithubOwners
+                | Operation::GithubRepositories { .. }
+                | Operation::GithubClone { .. }
                 // SB-256: the vault and `inbox.json` only; a check waits on Fabric Inbox.
                 | Operation::InboxSet { .. }
                 | Operation::InboxStatus { .. }
@@ -5162,6 +5179,14 @@ async fn execute(
         }
         Operation::VestaSync => vesta::sync(root, &store).await,
         Operation::VestaDisconnect => vesta::disconnect(root, &store).await,
+        Operation::GithubOwners => blocking::run(github::owners),
+        Operation::GithubRepositories { owner } => {
+            let snapshot = store.snapshot()?;
+            blocking::run(move || github::repositories(&owner, &snapshot))
+        }
+        Operation::GithubClone { owner, name, into } => {
+            blocking::run(move || github::clone(&owner, &name, &into))
+        }
         Operation::InboxSet {
             origin,
             client_id,
