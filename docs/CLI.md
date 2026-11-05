@@ -373,6 +373,18 @@ Each launch writes `.session.json` beside its `launch.command` (0600): `account_
 
 Since 0.7.0 (SB-212) every launch also keeps a record of its own, `launches/<launch_id>.json`, because a home is reused and its `.session.json` names only its latest launch. `--history` lists them (`{launches: [...], total}`, at most 500): the same fields plus `launch_id`, `launched_by` (`surface`: `window`, `cli`, `mcp`, `fallback`, `recovery`, `dashboards` or `fabric` for `dispatch` (SB-247); `caller_launch_id`, `caller_project`, `caller_program`, `by`, `parent`), what the session's hooks reported (`provider_session_id`, `transcript`, `turns`, `last_turn_at`, `ended: limit`; `nested_sessions`, the sessions a launched session started inside itself, SB-218) and `continued_as` (where its work went: a later launch or a hand-over), with `continued_from` on the launch that took the work over (SB-219). Each line shows the id, state, agent, who launched it (`cli:voc-learn` with `--by`), folder, time, a limit stop and where the work went. `show LAUNCH_ID` adds the account, group, provider session, transcript path and turns, then *Launched by* (up the chain to the first launch) and *Then* (what it launched or what took its work over). Every launched session carries `SWITCHBOARD_LAUNCH_ID`, so a `switchboard launch` run inside it names it as the caller with no flag. Records are kept 90 days. The fields: [CONTRACTS](CONTRACTS.md#launch-records-and-their-chain-sb-212-2026-10-26).
 
+### Provenance (SB-47)
+
+`switchboard --json provenance --provider <claude|codex> [--pool <id>]` answers which account
+serves that group's managed requests (the default group when `--pool` is left out), and
+`switchboard --json provenance --launch-id <id>` the account and session of one launch. Fabric
+reads it (COM-11; board thread `82241ad5`). Fields: `provider`, `pool`, `account_ref` (the
+account's handle `sb-…`, never its id), `identity_revision`, `mode` (`managed` for a group, null
+for a launch), `changed_at`, `cause` (`manual`, `rotation`, `limit`, `failover` or `unknown`),
+`replaced` (`{account_ref, limit}` or null) and `session` (`{launch_id, dispatch_id, workflow}` for
+a launch, else null). MCP: `switchboard_provenance`. Reads only; no credential
+([CONTRACTS](CONTRACTS.md#provenance-sb-47-2026-11-05)).
+
 ### Setting up with a coding agent (SB-93)
 
 `switchboard onboard` prints the guide a coding agent follows ([docs/AGENT-ONBOARDING.md](AGENT-ONBOARDING.md), built into the CLI). `switchboard onboard --status [--folder <absolute dir>] [--host claude|codex] [--json]` reads where setup stands and writes nothing (it creates no data folder):

@@ -40,7 +40,7 @@
   `installation.json` lives in `$XDG_CONFIG_HOME/PassionCode` like the rest of the family, an id in
   the old folder moves there once. Rows SB-249 to SB-252 are on the board (SB-250 log digests wait
   for the contract's DEC-0153; SB-251 several macOS users on one Mac).
-- **Board rule** (the operator via webpilot, 2026-11-04): answer a request or announcement in the
+- **Board rule** (the operator via another of his agents, 2026-11-04): answer a request or announcement in the
   same turn with the current state (`com.reply`), the result as a second `com.reply` (DEC-0152).
 - **Disk.** Local gates run with `CARGO_INCREMENTAL=0` and line-table debug info (about 4 GB of
   output instead of 6) under a guard that stops below 8 GB; free space was 8 to 14 GB all day.
@@ -63,7 +63,7 @@
   pass (16, `dispatch::` and the home test); the full gate has not run yet.
 - **Disk.** A full gate needs about 6 GB of build output; run one at a time under a guard that stops it below 8 GB
   free, and delete its `target/` right after.
-- **Board.** Operator rule relayed by webpilot on 2026-11-04 (thread `11646774`): a board request, announcement or
+- **Board.** Operator rule relayed by another of the operator's agents on 2026-11-04 (thread `11646774`): a board request, announcement or
   question that waits for an answer gets one at once, in the same turn, with the current state (what is done, where,
   when, what blocks); the finished result follows as a second message. The watcher (cron `cf714165`) keeps running to
   21.11.

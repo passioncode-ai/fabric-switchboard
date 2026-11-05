@@ -103,6 +103,18 @@ run's `{kind: exited | stopped | timed_out, exit_code?, at}`), `ended_at`, `hand
 launch or hand-over its work went to). With `launch_id`: `{launch, up, down}`, that launch, who
 launched it up to the first launch, and what it launched or what took its work over.
 
+
+### `switchboard_provenance`: `provider?` (`claude` or `codex`), `pool?` (string), `launch_id?` (string)
+
+Which account serves a provider's group (the default group when `pool` is left out), or one
+launch, since when and why (SB-47, Fabric COM-11): `provider`, `pool`, `account_ref` (the
+account's handle `sb-…`, never its id), `identity_revision` (a hash of the provider's identity, or
+null), `mode` (`managed` for a group, null for a launch), `changed_at` (Unix seconds; null when the
+journal no longer holds the choice), `cause` (`manual`, `rotation`, `limit`, `failover` or
+`unknown`), `replaced` (`{account_ref, limit}` of the account it replaced, `limit` the owner's
+evidence `{kind, resets_at, confidence}` or null; null when none is known) and `session`
+(`{launch_id, dispatch_id, workflow}` for a launch, else null). Give `provider` or `launch_id`.
+Reads only; no credential.
 ### `switchboard_onboarding`: `path?` (absolute folder), `host?` (`claude` or `codex`)
 
 Where setting Switchboard up stands: `{complete, degraded, host, folder, steps[]}`, steps in order

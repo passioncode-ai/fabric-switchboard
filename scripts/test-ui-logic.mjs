@@ -515,6 +515,10 @@ check(() => {
   assert.equal(logic.eventAction('account_added'), 'Account added');
   assert.equal(logic.eventDetail('rate_limited'), 'rate limited');
   assert.equal(logic.eventDetail('4xx'), 'HTTP 4xx');
+  // SB-47: the causes of a move the journal names.
+  assert.equal(logic.eventDetail('switched_on_limit'), 'switched on a limit');
+  assert.equal(logic.eventDetail('failover'), 'moved after a refusal');
+  assert.equal(logic.eventDetail('unusable'), 'moved off an unusable account');
   assert.equal(logic.eventAction('future_action'), 'Other event (future action)', 'an unknown action shows as recorded, framed (UX-26)');
   assert.equal(logic.eventDetail('some_new_outcome'), 'some new outcome');
   i18n.setLocale('ru');
