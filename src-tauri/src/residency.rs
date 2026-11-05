@@ -91,7 +91,8 @@ pub(crate) fn with_keep_alive(plist: &str) -> Option<String> {
         return None;
     }
     let at = plist.rfind("</dict>")?;
-    Some(format!("{}  {KEEP_ALIVE}\n{}", &plist[..at], &plist[at..]))
+    // Before `</dict>`, after its own indentation, so the closing line keeps its form.
+    Some(format!("{}{KEEP_ALIVE}\n  {}", &plist[..at], &plist[at..]))
 }
 
 /// Adds `KEEP_ALIVE` to the login item the autostart plugin just wrote (it has no option for
