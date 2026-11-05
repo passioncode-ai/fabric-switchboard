@@ -2421,7 +2421,11 @@ async fn two_users_owners_on_one_computer_never_share_a_port_or_a_token() {
             .status();
         assert!(own.is_success(), "{own}");
     }
-    assert_eq!(hits.load(Ordering::SeqCst), 2, "only each owner's own requests went out");
+    assert_eq!(
+        hits.load(Ordering::SeqCst),
+        2,
+        "only each owner's own requests went out"
+    );
     for p in proxies {
         p.shutdown().await;
     }

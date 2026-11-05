@@ -368,10 +368,12 @@ fn another_users(path: &Path) -> bool {
 #[cfg(unix)]
 fn owned_by_another(path: &Path, me: u32) -> bool {
     use std::os::unix::fs::MetadataExt;
-    path.ancestors().take(3).any(|p| match std::fs::symlink_metadata(p) {
-        Ok(meta) => meta.uid() != me,
-        Err(e) => e.kind() == std::io::ErrorKind::PermissionDenied,
-    })
+    path.ancestors()
+        .take(3)
+        .any(|p| match std::fs::symlink_metadata(p) {
+            Ok(meta) => meta.uid() != me,
+            Err(e) => e.kind() == std::io::ErrorKind::PermissionDenied,
+        })
 }
 #[cfg(not(unix))]
 fn another_users(_path: &Path) -> bool {
@@ -1245,8 +1247,14 @@ mod tests {
         let path = settings_path(&folder);
         // SAFETY: getuid has no preconditions and cannot fail.
         let me = unsafe { libc::getuid() };
-        assert!(!owned_by_another(&path, me), "nothing there yet, the folder is mine");
-        assert!(owned_by_another(&path, me + 1), "the folder is someone else's");
+        assert!(
+            !owned_by_another(&path, me),
+            "nothing there yet, the folder is mine"
+        );
+        assert!(
+            owned_by_another(&path, me + 1),
+            "the folder is someone else's"
+        );
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(&path, "{}").unwrap();
         assert!(!owned_by_another(&path, me));
