@@ -2452,7 +2452,9 @@ Switchboard reads its own operations log as fabric-agent-contract DEC-0153
   computer slept through are never written as empty ones. At the drain the hours counted and not
   yet written, the hour the owner stops in among them, go to `<data>/digests/open.json` (0600); the
   next owner reads it once at its first pass, removes it, goes on counting an hour that is still
-  current and writes the others once closed; a crash leaves no file and no partial line. At its
+  current and writes the others once closed, before it folds any missed day (DEC-0153 round 5,
+  `6eb61183`; `the_stopping_hour_is_written_before_its_day_folds`); a crash leaves no file and no
+  partial line. At its
   first pass an owner takes the last hourly line already written as the hour before, so the hour
   right after a restart compares with it. A line counts at most 4096 operations, the rest as
   `other_operations`
