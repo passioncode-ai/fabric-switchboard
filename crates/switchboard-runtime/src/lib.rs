@@ -20,6 +20,7 @@ pub mod external;
 mod external_keychain;
 mod fallback;
 pub mod handovers;
+mod headless_login;
 pub mod hermes;
 pub mod kimi;
 pub mod launch;
@@ -191,6 +192,15 @@ pub enum Operation {
         provider: Provider,
         label: String,
         pool: String,
+        /// SB-256 N1: the owner runs the CLI itself, no Terminal; the status carries the manual
+        /// sign-in URL and `SubmitLoginCode` gives it the code.
+        #[serde(default)]
+        headless: bool,
+    },
+    /// SB-256 N1: the code the sign-in page showed, for a sign-in begun with `headless`.
+    SubmitLoginCode {
+        login_id: String,
+        code: String,
     },
     FinishLogin {
         login_id: String,
@@ -1775,6 +1785,7 @@ impl Runtime {
         provider: Provider,
         label: String,
         pool: String,
+        headless: bool,
     ) -> Result<Value, String> {
         self.retry_login_cleanup();
         let mut logins = self
@@ -1784,12 +1795,14 @@ impl Runtime {
         if logins.len() >= launch::MAX_LOGINS {
             return Err("Finish an existing sign-in before starting another.".into());
         }
-        let login = launch::begin_login(&self.root, provider, label, pool)?;
+        let login = launch::begin_login(&self.root, provider, label, pool, headless)?;
         let id = login.id.clone();
         logins.insert(id.clone(), login);
-        Ok(
-            json!({"login_id": id, "message": "Finish official sign-in in Terminal, then finish sign-in in Switchboard."}),
-        )
+        Ok(if headless {
+            json!({"login_id": id, "headless": true, "message": "Open the sign-in URL from the status, then give Switchboard the code the page shows."})
+        } else {
+            json!({"login_id": id, "message": "Finish official sign-in in Terminal, then finish sign-in in Switchboard."})
+        })
     }
     /// Saves the signed-in account and cleans its staging home. The result is the account with
     /// `login_cleanup: "done" | "pending"`: a saved account is a success even when the staging
@@ -1943,7 +1956,22 @@ impl Runtime {
                 Err("Sign-in not found. Start again.".into())
             };
         };
-        Ok(json!({"state": launch::login_state(login)}))
+        let state = launch::login_state(login);
+        Ok(match launch::headless_url(login) {
+            Some(url) if state == "pending" => json!({"state": state, "manual_url": url}),
+            _ => json!({"state": state}),
+        })
+    }
+    /// SB-256 N1: hands the code to a headless sign-in's CLI; the status then reads `complete`
+    /// or `ended`.
+    fn submit_login_code(&self, id: &str, code: &str) -> Result<Value, String> {
+        let logins = self
+            .logins
+            .lock()
+            .map_err(|_| "Sign-in state unavailable.")?;
+        let login = logins.get(id).ok_or("Sign-in not found. Start again.")?;
+        launch::submit_login_code(login, code)?;
+        Ok(json!({"submitted": true}))
     }
     fn retry_login_cleanup(&self) {
         if let Ok(mut stale) = self.stale_logins.lock() {
@@ -4706,7 +4734,11 @@ async fn execute(
             provider,
             label,
             pool,
-        } => needs_owner()?.begin_login(provider, label, pool),
+            headless,
+        } => needs_owner()?.begin_login(provider, label, pool, headless),
+        Operation::SubmitLoginCode { login_id, code } => {
+            needs_owner()?.submit_login_code(&login_id, &code)
+        }
         Operation::FinishLogin { login_id } => needs_owner()?.finish_login(&login_id),
         Operation::LoginStatus { login_id } => needs_owner()?.login_status(&login_id),
         Operation::PendingLogins => Ok(match runtime {

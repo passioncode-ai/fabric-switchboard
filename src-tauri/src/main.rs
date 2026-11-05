@@ -287,6 +287,7 @@ async fn begin_login(
             provider,
             label,
             pool,
+            headless: false,
         })
         .await
 }

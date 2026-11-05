@@ -1075,6 +1075,16 @@ enum Login {
         /// The group id the account joins (`default`: the default group).
         #[arg(long, default_value = "default")]
         pool: String,
+        /// Claude only, macOS and Linux: run the sign-in without Terminal; `login status` then
+        /// gives the sign-in URL and `login code` takes the code its page shows.
+        #[arg(long)]
+        headless: bool,
+    },
+    /// Give a sign-in begun with --headless the code its page showed, piped on stdin.
+    Code {
+        /// The id `login begin` printed.
+        #[arg(long)]
+        login_id: String,
     },
     /// pending, complete (ready to finish) or ended (Terminal exited without signing in).
     Status {
@@ -1498,10 +1508,16 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                 provider,
                 label,
                 pool,
+                headless,
             } => Operation::BeginLogin {
                 provider: (*provider).into(),
                 label: label.clone(),
                 pool: pool.clone(),
+                headless: *headless,
+            },
+            Login::Code { login_id } => Operation::SubmitLoginCode {
+                login_id: login_id.clone(),
+                code: read_secret()?,
             },
             Login::Status { login_id } => Operation::LoginStatus {
                 login_id: login_id.clone(),
@@ -3522,6 +3538,10 @@ mod mcp_parity {
         ("login status", Tool("switchboard_login")),
         ("login finish", Tool("switchboard_login")),
         ("login cancel", Tool("switchboard_login")),
+        (
+            "login code",
+            Not("SB-256 N1: the sign-in autopilot gives the code on the owner's side; a person types it into the CLI, and a code never travels in an agent's tool call"),
+        ),
         ("launch", Not(LAUNCH)),
         ("continue", Not(LAUNCH)),
         // `dispatch` itself starts a run as `sessions` lists them: one decision for both.

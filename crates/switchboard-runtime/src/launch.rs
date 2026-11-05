@@ -799,8 +799,13 @@ pub fn begin_login(
     provider: Provider,
     label: String,
     pool: String,
+    headless: bool,
 ) -> Result<Login, String> {
     validate_fields(&label, &pool)?;
+    // SB-256 N1: the owner runs the CLI itself; only Claude's sign-in reads a pasted code.
+    if headless && (provider != Provider::Claude || cfg!(windows)) {
+        return Err(HEADLESS_CLAUDE_ONLY.into());
+    }
     let program = binary(provider)?;
     private_dir(&root.join("logins"))?;
     let id = Uuid::new_v4().to_string();
@@ -840,7 +845,12 @@ pub fn begin_login(
         journal.to_string().as_bytes(),
         false,
     )?;
-    open_terminal(&home, &script(&home, &program, &args, &env, true, &home))?;
+    if headless {
+        crate::headless_login::start(&home, &program, &env, CONFLICTS)?;
+        let _ = fs::remove_file(home.join(".launch-pending"));
+    } else {
+        open_terminal(&home, &script(&home, &program, &args, &env, true, &home))?;
+    }
     reservation.committed = true;
     Ok(Login {
         id,
@@ -934,11 +944,22 @@ pub fn capture_login(login: &Login) -> Result<Credential, String> {
     };
     Credential::parse(login.provider, AuthKind::OAuth, &material)
 }
+pub(crate) const HEADLESS_CLAUDE_ONLY: &str =
+    "A sign-in without Terminal is available for Claude on macOS and Linux only.";
 /// Where an official sign-in stands, read from its private home only — no credential.
 /// `ended` means the Terminal session exited without the provider CLI succeeding.
 pub fn login_state(login: &Login) -> &'static str {
     if read_regular(&login.home.join(".completed")).is_ok_and(|v| v == "complete") {
         return "complete";
+    }
+    // SB-256 N1: a sign-in this owner runs ended when its CLI is no longer running here (it
+    // exited without success, or a previous owner started it).
+    if login.home.join(crate::headless_login::MARKER).exists() {
+        return if crate::headless_login::running(&login.home) {
+            "pending"
+        } else {
+            "ended"
+        };
     }
     #[cfg(unix)]
     let marker = login.home.join(".session-pid");
@@ -955,7 +976,19 @@ pub fn capture_login_profile(login: &Login) -> Result<crate::external::CapturedP
     }
     crate::external::capture_at(login.provider, &login.home)
 }
+/// SB-256 N1: the manual sign-in URL of a sign-in this owner runs, once the CLI printed it.
+pub fn headless_url(login: &Login) -> Option<String> {
+    crate::headless_login::manual_url(&login.home)
+}
+/// SB-256 N1: the code the sign-in page showed, to the CLI of a sign-in this owner runs.
+pub fn submit_login_code(login: &Login, code: &str) -> Result<(), String> {
+    if !login.home.join(crate::headless_login::MARKER).exists() {
+        return Err(crate::headless_login::NOT_WAITING.into());
+    }
+    crate::headless_login::submit_code(&login.home, code)
+}
 pub fn cancel_login(login: &Login) -> Result<(), String> {
+    crate::headless_login::stop(&login.home, Duration::from_secs(3));
     end_sign_in(&login.home)?;
     // A cancelled/failed sign-in may never have created a vault item.
     #[cfg(target_os = "macos")]
