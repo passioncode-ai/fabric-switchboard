@@ -235,10 +235,10 @@ pub(crate) fn tick(root: &Path, now: i64) {
         let catch_up = !std::mem::replace(&mut s.caught_up, true);
         (closed, s.written.clone(), catch_up)
     });
-    if catch_up {
-        fold_missed_days(root, now);
-    }
     if due.is_empty() {
+        if catch_up {
+            fold_missed_days(root, now);
+        }
         return;
     }
     let mut previous = previous;
@@ -280,6 +280,11 @@ pub(crate) fn tick(root: &Path, now: i64) {
         daily(root, day);
     }
     with_state(|s| s.written = previous);
+    // DEC-0153 OD-1 and OD-5 (6eb61183): the hours kept from the last owner are written before
+    // the missed days fold, or a day's daily line would lose its last hour for good.
+    if catch_up {
+        fold_missed_days(root, now);
+    }
     prune(&root.join(DIR), now);
 }
 
@@ -887,6 +892,28 @@ mod tests {
         assert_eq!(hourly.len(), 1);
         assert_eq!(hourly[0].from, "2024-10-04T10:00:00Z");
         assert_eq!(hourly[0].total.failed, 1);
+    }
+
+    #[test]
+    fn the_stopping_hour_is_written_before_its_day_folds() {
+        // DEC-0153 round 5: an owner ran on day D from 20:00 to 23:30 and stopped; the next one
+        // starts on D+1 at 09:00. The daily line of D holds 20:00 to 23:00, four hours.
+        let root = tempfile::tempdir().unwrap();
+        let dir = root.path().join(DIR);
+        COUNTING.with(|c| c.set(true));
+        restart();
+        for h in 20..24 {
+            tick(root.path(), DAY0 + h * HOUR + 60);
+        }
+        count_at("usage_check", "ok", DAY0 + 23 * HOUR + 1800);
+        save_open(root.path());
+        restart();
+        tick(root.path(), DAY0 + DAY + 9 * HOUR + 60);
+        COUNTING.with(|c| c.set(false));
+        let daily = read::<Daily>(&dir.join("daily-2024-10.jsonl"));
+        let days: Vec<(&str, u64)> = daily.iter().map(|d| (d.day.as_str(), d.hours)).collect();
+        assert_eq!(days, [("2024-10-04", 4)]);
+        assert_eq!(daily[0].total.ok, 1);
     }
 
     #[test]
