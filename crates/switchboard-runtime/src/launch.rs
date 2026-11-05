@@ -194,15 +194,12 @@ fn agent_tools(
 /// The name the operator registers Fabric's board server under (`fabric-mcp`, ADR-0134).
 const FABRIC_BOARD: &str = "fabric";
 /// The board server as the operator registered it in the provider's user scope: Claude Code's
-/// `~/.claude.json` `mcpServers.fabric`, Codex's `config.toml` `[mcp_servers.fabric]`. Only a
+/// `.claude.json` `mcpServers.fabric` (in the person's own `CLAUDE_CONFIG_DIR` when they set one,
+/// SB-260, else `~/.claude.json`), Codex's `config.toml` `[mcp_servers.fabric]`. Only a
 /// stdio entry with an absolute command is carried, and only its command and arguments: an
 /// `env` may hold a secret, and a secret is never copied into a launched home. Absent,
 /// unreadable or half-written means no board, never a failed launch.
-fn user_board_server(
-    provider: Provider,
-    home: &Path,
-    codex_home: Option<&Path>,
-) -> Option<McpServer> {
+fn user_board_server(provider: Provider, home: &Path, own_dir: Option<&Path>) -> Option<McpServer> {
     let strings = |args: Option<Vec<Option<String>>>| -> Option<Vec<String>> {
         args.unwrap_or_default().into_iter().collect()
     };
@@ -210,7 +207,9 @@ fn user_board_server(
         Provider::Claude => {
             use std::io::Read;
             let mut bytes = Vec::new();
-            fs::File::open(home.join(".claude.json"))
+            let file =
+                own_dir.map_or_else(|| home.join(".claude.json"), |d| d.join(".claude.json"));
+            fs::File::open(file)
                 .ok()?
                 .take(32 * 1024 * 1024)
                 .read_to_end(&mut bytes)
@@ -228,7 +227,7 @@ fn user_board_server(
             (entry.get("command")?.as_str()?.to_string(), strings(args)?)
         }
         Provider::Codex => {
-            let dir = codex_home
+            let dir = own_dir
                 .map(Path::to_path_buf)
                 .unwrap_or_else(|| home.join(".codex"));
             let config: toml::Table = fs::read_to_string(dir.join("config.toml"))
@@ -257,8 +256,11 @@ fn user_board_server(
 /// The board server of this machine's operator, read from their real user scope.
 pub(crate) fn board_server(provider: Provider) -> Option<McpServer> {
     let home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })?;
-    let codex_home = crate::person::codex_home();
-    user_board_server(provider, Path::new(&home), codex_home.as_deref())
+    let own_dir = match provider {
+        Provider::Claude => crate::person::claude_config(),
+        Provider::Codex => crate::person::codex_home(),
+    };
+    user_board_server(provider, Path::new(&home), own_dir.as_deref())
 }
 pub(crate) fn private_dir(path: &Path) -> Result<(), String> {
     switchboard_core::private_fs::private_dir(path)
@@ -3401,6 +3403,22 @@ mod tests {
         assert_eq!(claude.args, ["--runner", "claude-code"]);
         let codex = user_board_server(Provider::Codex, &user, None).unwrap();
         assert_eq!(codex.args, ["--runner", "codex"]);
+        // SB-260: with their own CLAUDE_CONFIG_DIR, Claude Code keeps user-scope servers in that
+        // folder's `.claude.json`, and the board is read there, not from `~/.claude.json`.
+        let own = temp.path().join("own-claude");
+        fs::create_dir_all(&own).unwrap();
+        fs::write(
+            own.join(".claude.json"),
+            json!({"mcpServers": {"fabric": {"type": "stdio", "command": BOARD, "args": ["--own"]}}})
+                .to_string(),
+        )
+        .unwrap();
+        let mine = user_board_server(Provider::Claude, &user, Some(&own)).unwrap();
+        assert_eq!(mine.args, ["--own"]);
+        assert!(
+            user_board_server(Provider::Claude, &temp.path().join("nowhere"), Some(&own)).is_some(),
+            "the home's `.claude.json` is not needed then"
+        );
         let off = temp.path().join("off");
         fs::create_dir_all(off.join(".codex")).unwrap();
         fs::write(
