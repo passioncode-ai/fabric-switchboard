@@ -8,6 +8,10 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+## 0.7.14
+
+- A Claude Code session Switchboard starts, and a terminal its hook moved into a group's home, now names your own Claude folder in `SWITCHBOARD_CLAUDE_SOURCE_DIR`, so tools that change your Claude Code settings save them where they stay (SB-259).
+
 ## 0.7.13
 
 - New: `switchboard login begin --provider claude --headless` signs in to Claude without opening Terminal; `login status` gives the sign-in page and `login code` takes the code it shows (SB-256).
