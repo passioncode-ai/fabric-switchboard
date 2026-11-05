@@ -2,6 +2,34 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-11-05 (evening): releases 0.7.13 and 0.7.14; SB-259, SB-260, SB-261 and SB-256 N2, N3 merged
+
+- **Released.** v0.7.13 (SB-256 N1, SB-257, SB-258) and v0.7.14 published 2026-11-05 20:13:04Z
+  (25 assets, `latest.json` 0.7.14 for seven platforms): SB-259, `SWITCHBOARD_CLAUDE_SOURCE_DIR`
+  for the PassionCode launcher (PR #412 `dadae14`), told on thread `16ebb95e`, where the launcher's
+  0.2.76 waited for it. The installed app downloaded and installed 0.7.14 at 20:13:19Z (log
+  `update_install installed`). The first nightly on the v0.7.14 tag failed on a timing test
+  (SB-261); its rerun passed at 19:35Z and the release ran green.
+- **Merged, not released (0.7.15).** SB-260: the board server read from the person's own
+  `CLAUDE_CONFIG_DIR` (PR #414 `2774798`) and a real `plugins` or `skills` folder in a home moved
+  aside once to `<name>.before-switchboard` and linked (PR #415 `b1440b1`), both from the
+  launcher's blind reading. SB-261 (PR #416 `5591660`): the two lock-wait tests wait for the slow
+  removal to start instead of sleeping 100 ms. SB-256 N2 (PR #417 `087c57c`) and N3's parsing and
+  wait (PR #418 `9b19bfd`) in `crates/switchboard-runtime/src/inbox.rs`, called by nothing yet.
+- **Decided.** Where the Fabric Inbox key lives (design note, PR #419 `ef047d9`): a read key limited
+  to the sign-in mailbox, its Client Secret in Switchboard's own vault, origin and Client Id beside
+  it, entered with `switchboard inbox set` from standard input.
+- **Found.** The N3 parsing merged in #418 read raw search rows (`emails`, `sender`, `recipient`,
+  `id`); Fabric Inbox's `search_mailbox` tool answers `{"messages": [{"messageId", "from", "to",
+  "date"}]}` for every mailbox (fabric-inbox `workers/mcp/tools.ts`). Fixed on branch
+  `sb-256-inbox-client` with the client (`Client`: `/mcp`, the CF Access headers, redirects refused,
+  `inbox_refused`, `inbox_failed`, `inbox_unreachable`) and each mailbox's `accountId`; not called
+  by anything yet, so nothing shipped behaves wrongly.
+- **Exact next task.** Gate and merge `sb-256-inbox-client`; then the key's storage
+  (`inbox.json` beside the vault item, as `vesta.json`) with `switchboard inbox set|status|remove`,
+  owner operations, MCP parity rows and Copylot-checked sentences; release 0.7.15 (SB-260, SB-261,
+  SB-256 N2 and N3); then SB-254 part 1.
+
 ## 2026-11-05 (day): release 0.7.12; SB-257, SB-258 and the sign-in autopilot's first node merged
 
 - **Released.** v0.7.12 published 2026-11-05 16:19:04Z (25 assets, `latest.json` 0.7.12 for seven
