@@ -2640,6 +2640,6 @@ session Switchboard launched, or a terminal its hook moved into a group's home, 
   `shell_init_prints_a_hook_that_follows_the_folder_map_with_the_real_cli`,
   `the_saved_values_are_not_exported`).
 - **Reading it.** Set: write the person's `settings.json` (and user-level MCP servers) in that
-  folder, read plugins and skills from the home (they are links there). Unset: the session is not
+  folder, read plugins and skills from the home (they are links there on macOS and Linux; on Windows, directory junctions since SB-266, none before it). Unset: the session is not
   in a Switchboard home.
 
