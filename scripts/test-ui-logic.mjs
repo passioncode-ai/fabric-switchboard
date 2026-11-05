@@ -654,6 +654,20 @@ check(() => {
   assert.deepEqual(logic.withFolder(['/a'], '/b'), ['/a', '/b']);
   assert.deepEqual(logic.withFolder(['/a', '/b'], '/a'), ['/a', '/b']);
   assert.deepEqual(logic.withFolder(['/a'], ''), ['/a']);
+  // SB-265: the organization dialog's GitHub repositories.
+  {
+    const repos = [
+      { name: 'app', archived: false, fork: false, folder: '/w/app' },
+      { name: 'api', archived: false, fork: false, folder: null },
+      { name: 'old', archived: true, fork: false, folder: null },
+      { name: 'lib', archived: false, fork: true, folder: null },
+      { name: 'kept', archived: true, fork: false, folder: '/w/kept' },
+    ];
+    assert.deepEqual(logic.githubDefaultSelection(repos), ['app', 'api', 'kept']);
+    assert.deepEqual(logic.githubPlan(repos, new Set(['app', 'api', 'lib'])), { onDisk: ['/w/app'], toClone: ['api', 'lib'] });
+    assert.deepEqual(logic.githubPlan(repos, new Set()), { onDisk: [], toClone: [] });
+    assert.equal(logic.githubSource('Acme-Labs'), 'github.com/acme-labs');
+  }
   // SB-264: folders picked together join in order, each once.
   assert.deepEqual(logic.withFolders(['/a'], ['/b', '/a', '/c', '/b']), ['/a', '/b', '/c']);
   assert.deepEqual(logic.withFolders(['/a'], []), ['/a']);

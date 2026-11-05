@@ -1386,3 +1386,19 @@ export function keyLimitLine(credit: Pick<OpenrouterCredit, 'limit' | 'limit_res
   if (credit.limit_reset === 'monthly') return t('Key\'s own limit: {limit}, resets monthly', { limit });
   return t('Key\'s own limit: {limit}, never resets', { limit });
 }
+
+/** SB-265: a repository of the GitHub owner the organization dialog lists. */
+export interface GithubPick { name: string; archived: boolean; fork: boolean; folder: string | null }
+/** SB-265: preselected: every repository on this computer, and every missing one that is neither archived nor a fork. */
+export function githubDefaultSelection(repos: GithubPick[]): string[] {
+  return repos.filter((r) => r.folder || (!r.archived && !r.fork)).map((r) => r.name);
+}
+/** SB-265: what *Create* does with the chosen repositories: the folders already here, and the names to clone. */
+export function githubPlan(repos: GithubPick[], selected: ReadonlySet<string>): { onDisk: string[]; toClone: string[] } {
+  const chosen = repos.filter((r) => selected.has(r.name));
+  return { onDisk: chosen.flatMap((r) => (r.folder ? [r.folder] : [])), toClone: chosen.filter((r) => !r.folder).map((r) => r.name) };
+}
+/** SB-265: the source a group of a GitHub owner takes new repositories by. */
+export function githubSource(owner: string): string {
+  return `github.com/${owner.toLowerCase()}`;
+}

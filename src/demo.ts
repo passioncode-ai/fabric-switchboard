@@ -413,6 +413,34 @@ export function createDemoAdapter(): Adapter {
       list.push(organization); log('organization', '', 'added');
       return { organization };
     },
+    // SB-265: `?gh=missing` or `?gh=signed_out` shows the wizard without its GitHub step.
+    async githubOwners() {
+      await pause();
+      const gh = new URLSearchParams(location.search).get('gh');
+      if (gh === 'missing' || gh === 'signed_out') return { available: false, reason: gh, owners: [] };
+      return { available: true, reason: null, owners: [{ login: 'demo-person', kind: 'user' }, { login: 'acme-labs', kind: 'organization' }, { login: 'empty-org', kind: 'organization' }] };
+    },
+    async githubRepositories(owner) {
+      await pause();
+      if (owner !== 'acme-labs') return { owner, clone_into: '/Users/demo/Projects', repositories: [] };
+      return { owner, clone_into: '/Users/demo/Projects/acme', repositories: [
+        { name: 'acme-app', url: 'https://github.com/acme-labs/acme-app', archived: false, fork: false, folder: '/Users/demo/Projects/acme/acme-app' },
+        { name: 'acme-api', url: 'https://github.com/acme-labs/acme-api', archived: false, fork: false, folder: null },
+        { name: 'acme-site', url: 'https://github.com/acme-labs/acme-site', archived: false, fork: false, folder: null },
+        { name: 'legacy-tools', url: 'https://github.com/acme-labs/legacy-tools', archived: true, fork: false, folder: null },
+        { name: 'forked-lib', url: 'https://github.com/acme-labs/forked-lib', archived: false, fork: true, folder: null },
+      ] };
+    },
+    async githubClone(_owner, name, into) {
+      await pause(); await pause();
+      if (name === 'acme-site') throw new Error('Clone folder exists');
+      return { folder: `${into}/${name}` };
+    },
+    async projectSources(pool, sources) {
+      await pause();
+      const project = state.projects?.find((p) => p.pool === pool); if (project) (project as { sources?: string[] }).sources = sources;
+      return {};
+    },
     async organizationEdit(id, name, domains) {
       await pause();
       const o = state.organizations?.find((x) => x.id === id); if (!o) throw new Error('Organization not found.');

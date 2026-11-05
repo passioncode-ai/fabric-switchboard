@@ -505,6 +505,47 @@ async fn organization_add(
         .execute(Operation::OrganizationAdd { name, domains })
         .await
 }
+/// SB-265: the GitHub owners the person's `gh` can see.
+#[tauri::command]
+async fn github_owners(state: State<'_, Slot>) -> Result<Value, String> {
+    state.runtime().await?.execute(Operation::GithubOwners).await
+}
+/// SB-265: one owner's repositories matched with this computer.
+#[tauri::command]
+async fn github_repositories(owner: String, state: State<'_, Slot>) -> Result<Value, String> {
+    state
+        .runtime()
+        .await?
+        .execute(Operation::GithubRepositories { owner })
+        .await
+}
+/// SB-265: clones one repository into a folder the person chose.
+#[tauri::command]
+async fn github_clone(
+    owner: String,
+    name: String,
+    into: std::path::PathBuf,
+    state: State<'_, Slot>,
+) -> Result<Value, String> {
+    state
+        .runtime()
+        .await?
+        .execute(Operation::GithubClone { owner, name, into })
+        .await
+}
+/// SB-265: the owners whose new repositories join a group by themselves (`github.com/<owner>`).
+#[tauri::command]
+async fn project_sources(
+    pool: String,
+    sources: Vec<String>,
+    state: State<'_, Slot>,
+) -> Result<Value, String> {
+    state
+        .runtime()
+        .await?
+        .execute(Operation::ProjectSources { pool, sources })
+        .await
+}
 #[tauri::command]
 async fn organization_edit(
     id: String,
@@ -1394,6 +1435,10 @@ fn main() {
             cancel_login,
             pick_folder,
             pick_folders,
+            github_owners,
+            github_repositories,
+            github_clone,
+            project_sources,
             probe_usage,
             set_project_rule,
             remove_project_rule,

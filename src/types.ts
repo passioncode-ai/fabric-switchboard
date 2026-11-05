@@ -90,6 +90,14 @@ export interface Adapter {
   moveAccount(id: string, pool: string): Promise<unknown>;
   /** SB-158: organizations. `choice` is an organization's id, `personal`, or null to let the rules decide. */
   organizationAdd(name: string, domains: string[]): Promise<unknown>;
+  /** SB-265: the GitHub owners the person's `gh` can see. */
+  githubOwners(): Promise<GithubOwners>;
+  /** SB-265: one owner's repositories matched with this computer. */
+  githubRepositories(owner: string): Promise<GithubRepositories>;
+  /** SB-265: clones one repository into `into/<name>`; never over a folder. */
+  githubClone(owner: string, name: string, into: string): Promise<{ folder: string }>;
+  /** SB-265: owners whose new repositories join the group by themselves. */
+  projectSources(pool: string, sources: string[]): Promise<unknown>;
   organizationEdit(id: string, name: string | null, domains: string[] | null): Promise<unknown>;
   organizationRemove(id: string): Promise<unknown>;
   organizationAssign(account: string, choice: string | null): Promise<unknown>;
@@ -250,3 +258,9 @@ export interface UpdateStatus {
   /** SB-208: when a ready update may start on its own, while SB-191's pause holds it (Unix seconds); null otherwise. */
   restart_after: number | null;
 }
+
+/** SB-265: what `gh` can see: the person's login, then their organizations. */
+export interface GithubOwners { available: boolean; reason: 'missing' | 'signed_out' | null; owners: { login: string; kind: 'user' | 'organization' }[] }
+/** SB-265: one owner's repositories; `folder` is its checkout on this computer. */
+export interface GithubRepository { name: string; url: string | null; archived: boolean; fork: boolean; folder: string | null }
+export interface GithubRepositories { owner: string; clone_into: string | null; repositories: GithubRepository[] }
