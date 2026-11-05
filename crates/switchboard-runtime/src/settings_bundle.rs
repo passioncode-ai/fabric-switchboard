@@ -139,6 +139,13 @@ pub struct PlannedGroup {
     pub folders: Vec<String>,
     /// Repositories and plain folders with no checkout here.
     pub missing: Vec<String>,
+    /// SB-268: the missing repositories on GitHub (`github.com/<owner>/<name>`), which an import
+    /// with `clone` clones into its folder.
+    #[serde(default)]
+    pub clonable: Vec<String>,
+    /// SB-267: owners whose new repositories join the group by themselves (`github.com/<owner>`).
+    #[serde(default)]
+    pub sources: Vec<String>,
 }
 #[derive(Serialize, Debug, PartialEq)]
 pub struct Plan {
@@ -189,6 +196,11 @@ pub fn plan(snapshot: &Snapshot, bundle: &Bundle, under: &[PathBuf]) -> Plan {
                     _ => missing.push(plain.clone()),
                 }
             }
+            let clonable = missing
+                .iter()
+                .filter(|m| github_repository(m).is_some())
+                .cloned()
+                .collect();
             PlannedGroup {
                 name: g.name.clone(),
                 pool: g.pool.clone(),
@@ -196,6 +208,8 @@ pub fn plan(snapshot: &Snapshot, bundle: &Bundle, under: &[PathBuf]) -> Plan {
                 organization: g.organization.clone(),
                 folders,
                 missing,
+                clonable,
+                sources: g.sources.clone(),
             }
         })
         .collect();
@@ -223,7 +237,35 @@ pub fn plan(snapshot: &Snapshot, bundle: &Bundle, under: &[PathBuf]) -> Plan {
 /// policies; a policy for the ordinary Claude Code lands switched off, so an import never starts
 /// changing this machine's own sign-in. Each part that is refused is named; the rest stays.
 pub fn apply(store: &Store, root: &Path, bundle: &Bundle, plan: &Plan) -> Value {
+    apply_with(store, root, bundle, plan, None, &|_, _, _| {
+        Err(crate::github::GH_FAILED.to_string())
+    })
+}
+
+/// A repository identity on GitHub as `(owner, name)`.
+fn github_repository(identity: &str) -> Option<(&str, &str)> {
+    let rest = identity.strip_prefix("github.com/")?;
+    let (owner, name) = rest.split_once('/')?;
+    (crate::github::owner_valid(owner) && !name.is_empty() && !name.contains('/'))
+        .then_some((owner, name))
+}
+
+/// Clones one repository (`owner`, `name`) into a folder; answers the checkout's folder.
+pub type Cloner<'a> = dyn Fn(&str, &str, &Path) -> Result<PathBuf, String> + 'a;
+
+/// [`apply`], cloning each group's [`PlannedGroup::clonable`] repositories into `clone_into` first
+/// (SB-268) with `clone`, so a new member's Mac with no checkout yet gets its organization's
+/// groups. A clone that fails is named; the rest goes on.
+pub fn apply_with(
+    store: &Store,
+    root: &Path,
+    bundle: &Bundle,
+    plan: &Plan,
+    clone_into: Option<&Path>,
+    clone: &Cloner,
+) -> Value {
     let mut refused: Vec<String> = Vec::new();
+    let mut cloned = 0;
     for o in &bundle.organizations {
         if plan.organizations.contains(&o.name)
             && store.add_organization(&o.name, &o.domains).is_err()
@@ -243,15 +285,32 @@ pub fn apply(store: &Store, root: &Path, bundle: &Bundle, plan: &Plan) -> Value 
             .map(|o| o.id.clone())
     };
     let mut groups = 0;
+    // SB-267: where each of the bundle's pools landed here, so its policies follow.
+    let mut pools: std::collections::BTreeMap<String, String> = std::collections::BTreeMap::new();
     for g in &plan.groups {
-        if g.folders.is_empty() {
+        let mut planned = g.folders.clone();
+        if let Some(into) = clone_into {
+            for identity in &g.clonable {
+                let Some((owner, name)) = github_repository(identity) else {
+                    continue;
+                };
+                match clone(owner, name, into) {
+                    Ok(folder) => {
+                        cloned += 1;
+                        planned.push(folder.to_string_lossy().into_owned());
+                    }
+                    Err(_) => refused.push(format!("clone {identity}")),
+                }
+            }
+        }
+        if planned.is_empty() {
             continue;
         }
         let here = snapshot.projects.iter().find(|p| p.pool == g.pool);
         let result = match here {
             Some(p) => {
                 let mut folders: Vec<PathBuf> = p.folders.iter().map(PathBuf::from).collect();
-                folders.extend(g.folders.iter().map(PathBuf::from));
+                folders.extend(planned.iter().map(PathBuf::from));
                 let accounts: Vec<String> = snapshot
                     .accounts
                     .iter()
@@ -261,14 +320,28 @@ pub fn apply(store: &Store, root: &Path, bundle: &Bundle, plan: &Plan) -> Value 
                 store.save_project_in(Some(&p.pool), &p.name, &folders, &accounts, None)
             }
             None => {
-                let folders: Vec<PathBuf> = g.folders.iter().map(PathBuf::from).collect();
+                let folders: Vec<PathBuf> = planned.iter().map(PathBuf::from).collect();
                 let org = g.organization.as_deref().and_then(org_id);
                 // A new group takes its pool from its name here (`pool_from_name`).
                 store.save_project_in(None, &g.name, &folders, &[], org.as_deref().map(Some))
             }
         };
         match result {
-            Ok(_) => groups += 1,
+            Ok(project) => {
+                groups += 1;
+                pools.insert(g.pool.clone(), project.pool.clone());
+                if !g.sources.is_empty() {
+                    let mut sources = project.sources.clone();
+                    for source in &g.sources {
+                        if !sources.contains(source) {
+                            sources.push(source.clone());
+                        }
+                    }
+                    if store.set_project_sources(&project.pool, &sources).is_err() {
+                        refused.push(format!("sources of {}", g.name));
+                    }
+                }
+            }
             Err(_) => refused.push(format!("group {}", g.name)),
         }
     }
@@ -282,9 +355,21 @@ pub fn apply(store: &Store, root: &Path, bundle: &Bundle, plan: &Plan) -> Value 
         }
     }
     let mut policies = 0;
+    let here: Vec<String> = store
+        .snapshot()
+        .map(|s| s.projects.into_iter().map(|p| p.pool).collect())
+        .unwrap_or_default();
     for p in &bundle.policies {
         let mut p = p.clone();
         p.last_switched_at = None;
+        // SB-267: a policy follows its group to the pool it landed in; one whose group is not
+        // here is left out rather than naming a pool that does not exist.
+        if let Some(pool) = pools.get(&p.pool) {
+            p.pool = pool.clone();
+        } else if p.pool != "default" && !here.contains(&p.pool) {
+            refused.push(format!("a rotation policy of {}", p.pool));
+            continue;
+        }
         if p.target == "claude_cli" {
             p.enabled = false;
         }
@@ -293,7 +378,7 @@ pub fn apply(store: &Store, root: &Path, bundle: &Bundle, plan: &Plan) -> Value 
             Err(_) => refused.push("a rotation policy".into()),
         }
     }
-    json!({"applied": true, "groups": groups, "policies": policies, "refused": refused})
+    json!({"applied": true, "groups": groups, "cloned": cloned, "policies": policies, "refused": refused})
 }
 
 #[cfg(test)]
@@ -385,5 +470,147 @@ mod tests {
         assert_eq!(snap.projects[0].name, "Alpha");
         assert!(snap.projects[0].organization.is_some());
         assert_eq!(snap.organizations[0].name, "Acme");
+    }
+
+    /// A checkout folder as `gh repo clone` leaves it, with its `origin`.
+    fn checkout(folder: &Path, remote: &str) {
+        std::fs::create_dir_all(folder.join(".git")).unwrap();
+        std::fs::write(
+            folder.join(".git/config"),
+            format!("[remote \"origin\"]\n\turl = {remote}\n"),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn an_import_keeps_a_groups_sources_and_its_policies_follow_its_pool() {
+        // SB-267: the GitHub owner a group takes new repositories from travels, and a policy of a
+        // group whose pool is taken here by another name lands on the group's new pool.
+        let work = tempfile::tempdir().unwrap();
+        let work = work.path().canonicalize().unwrap();
+        checkout(&work.join("app"), "https://github.com/acme/app");
+        let policy = |pool: &str| RotationPolicy {
+            provider: switchboard_core::Provider::Claude,
+            pool: pool.into(),
+            target: "managed".into(),
+            enabled: true,
+            threshold_percent: 90.0,
+            hysteresis_percent: 5.0,
+            cooldown_seconds: 300,
+            max_age_seconds: 600,
+            last_switched_at: None,
+        };
+        let bundle = Bundle {
+            format: FORMAT.into(),
+            exported_at: 1,
+            groups: vec![Group {
+                name: "Acme".into(),
+                pool: "acme-old".into(),
+                organization: None,
+                repositories: vec!["github.com/acme/app".into()],
+                plain_folders: vec![],
+                sources: vec!["github.com/acme".into()],
+            }],
+            organizations: vec![],
+            agents: None,
+            policies: vec![policy("acme-old"), policy("elsewhere")],
+        };
+        let root = tempfile::tempdir().unwrap();
+        let store = open_store(root.path());
+        let preview = plan(
+            &store.snapshot().unwrap(),
+            &bundle,
+            std::slice::from_ref(&work),
+        );
+        assert_eq!(preview.groups[0].sources, vec!["github.com/acme"]);
+        let done = apply(&store, root.path(), &bundle, &preview);
+        let snap = store.snapshot().unwrap();
+        let group = &snap.projects[0];
+        assert_eq!(group.sources, vec!["github.com/acme"]);
+        assert_eq!(done["policies"], 1, "{done}");
+        assert!(
+            snap.policies
+                .iter()
+                .any(|p| p.pool == group.pool && p.enabled),
+            "the policy follows the group to {}",
+            group.pool
+        );
+        assert!(!snap
+            .policies
+            .iter()
+            .any(|p| p.pool == "acme-old" || p.pool == "elsewhere"));
+        assert_eq!(done["refused"], json!(["a rotation policy of elsewhere"]));
+    }
+
+    #[test]
+    fn a_new_members_mac_clones_the_groups_repositories_and_gets_the_group() {
+        // SB-268: nothing is checked out yet; the plan names what can be cloned, and an import
+        // that clones makes the organization's group from the clones.
+        let bundle = Bundle {
+            format: FORMAT.into(),
+            exported_at: 1,
+            groups: vec![Group {
+                name: "Acme".into(),
+                pool: "acme".into(),
+                organization: Some("Acme".into()),
+                repositories: vec![
+                    "github.com/acme/app".into(),
+                    "github.com/acme/broken".into(),
+                    "gitlab.com/acme/other".into(),
+                ],
+                plain_folders: vec![],
+                sources: vec!["github.com/acme".into()],
+            }],
+            organizations: vec![Organization {
+                name: "Acme".into(),
+                domains: vec!["acme.example".into()],
+            }],
+            agents: None,
+            policies: vec![],
+        };
+        let root = tempfile::tempdir().unwrap();
+        let into = tempfile::tempdir().unwrap();
+        let into = into.path().canonicalize().unwrap();
+        let store = open_store(root.path());
+        let preview = plan(
+            &store.snapshot().unwrap(),
+            &bundle,
+            std::slice::from_ref(&into),
+        );
+        let group = &preview.groups[0];
+        assert!(group.folders.is_empty());
+        assert_eq!(
+            group.clonable,
+            vec!["github.com/acme/app", "github.com/acme/broken"]
+        );
+        // Without cloning, nothing is made: a group needs a folder.
+        let fresh_root = tempfile::tempdir().unwrap();
+        let fresh = open_store(fresh_root.path());
+        let none = apply(&fresh, fresh_root.path(), &bundle, &preview);
+        assert_eq!(none["groups"], 0, "{none}");
+        // With cloning: each clone becomes a folder of the group; a failed one is named.
+        let clone = |owner: &str, name: &str, into: &Path| {
+            if name == "broken" {
+                return Err(crate::github::CLONE_FAILED.to_string());
+            }
+            let folder = into.join(name);
+            checkout(&folder, &format!("https://github.com/{owner}/{name}"));
+            Ok(folder)
+        };
+        let done = apply_with(&store, root.path(), &bundle, &preview, Some(&into), &clone);
+        assert_eq!(
+            (&done["groups"], &done["cloned"]),
+            (&json!(1), &json!(1)),
+            "{done}"
+        );
+        assert_eq!(done["refused"], json!(["clone github.com/acme/broken"]));
+        let snap = store.snapshot().unwrap();
+        let made = &snap.projects[0];
+        assert_eq!(
+            made.folders,
+            vec![into.join("app").to_string_lossy().into_owned()]
+        );
+        assert_eq!(made.sources, vec!["github.com/acme"]);
+        assert!(made.organization.is_some());
     }
 }
