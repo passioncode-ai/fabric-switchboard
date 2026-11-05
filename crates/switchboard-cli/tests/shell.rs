@@ -472,7 +472,7 @@ fn shell_init_prints_a_hook_that_follows_the_folder_map_with_the_real_cli() {
         let hook = root.join(format!("hook-test.{shell}"));
         std::fs::write(&hook, &script).unwrap();
         let body = format!(
-            ". '{}'\ncd '{}'\n{prompt}\necho \"in=${{CLAUDE_CONFIG_DIR-unset}} ctx=${{SWITCHBOARD_CONTEXT-unset}}\"\ncd '{}'\n{prompt}\necho \"out=${{CLAUDE_CONFIG_DIR-unset}} ctx=${{SWITCHBOARD_CONTEXT-unset}}\"",
+            ". '{}'\ncd '{}'\n{prompt}\necho \"in=${{CLAUDE_CONFIG_DIR-unset}} ctx=${{SWITCHBOARD_CONTEXT-unset}} src=${{SWITCHBOARD_CLAUDE_SOURCE_DIR-unset}}\"\ncd '{}'\n{prompt}\necho \"out=${{CLAUDE_CONFIG_DIR-unset}} ctx=${{SWITCHBOARD_CONTEXT-unset}} src=${{SWITCHBOARD_CLAUDE_SOURCE_DIR-unset}}\"",
             hook.display(),
             acme.display(),
             elsewhere.display()
@@ -493,13 +493,17 @@ fn shell_init_prints_a_hook_that_follows_the_folder_map_with_the_real_cli() {
         let text = String::from_utf8_lossy(&out.stdout);
         assert!(
             text.contains(&format!(
-                "in={} ctx=org:o-acme",
+                "in={} ctx=org:o-acme src=/own home",
                 root.join("shell").join("claude-acme").display()
             )),
             "{shell}: {text}{}",
             String::from_utf8_lossy(&out.stderr)
         );
-        assert!(text.contains("out=/own home ctx=unset"), "{shell}: {text}");
+        // SB-259: the person's own Claude folder while a group's home is in use, then nothing.
+        assert!(
+            text.contains("out=/own home ctx=unset src=unset"),
+            "{shell}: {text}"
+        );
         assert!(
             out.stderr.is_empty(),
             "{shell}: {}",

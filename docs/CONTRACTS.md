@@ -2556,3 +2556,25 @@ A Claude sign-in the owner runs itself, with no Terminal, for the sign-in autopi
 - **Not built yet.** The window, the browser service and the mail (nodes N2 to N4); the
   operator-assisted acceptance with a real account (N5).
 
+## The operator's Claude folder in a Switchboard home (SB-259, 2026-11-05)
+
+Asked by the PassionCode launcher (passioncode PC-129, board thread `16ebb95e`): a Claude Code
+session Switchboard launched, or a terminal its hook moved into a group's home, has
+`CLAUDE_CONFIG_DIR` pointing at a Switchboard home whose `settings.json` is rebuilt at every launch
+(`carry::claude_settings`), so a tool writing the person's settings there loses them.
+
+- **Launches.** Every Claude Code launch (Terminal, in place, continuation, dispatch) carries
+  `SWITCHBOARD_CLAUDE_SOURCE_DIR`, the absolute path of the operator's own Claude folder the home
+  was built from (their `CLAUDE_CONFIG_DIR`, else `~/.claude`; never a Switchboard home); it is
+  unset first like the other `SWITCHBOARD_*` names (`launch::SOURCE_DIR`,
+  `a_launched_home_carries_the_operators_setup_and_a_continuation_trusts_its_folder`).
+- **The terminal hook.** While the hook holds `CLAUDE_CONFIG_DIR` in a group's home it also exports
+  `SWITCHBOARD_CLAUDE_SOURCE_DIR`: the person's own `CLAUDE_CONFIG_DIR` from before, else
+  `$HOME/.claude`; a shell started inside such a terminal keeps the value its parent named; leaving
+  the folder takes it away with the home (zsh, bash, fish, PowerShell;
+  `shell_init_prints_a_hook_that_follows_the_folder_map_with_the_real_cli`,
+  `the_saved_values_are_not_exported`).
+- **Reading it.** Set: write the person's `settings.json` (and user-level MCP servers) in that
+  folder, read plugins and skills from the home (they are links there). Unset: the session is not
+  in a Switchboard home.
+

@@ -1,7 +1,7 @@
 # The transition both zsh and bash run (SB-183, node A-2). POSIX words only, and bash 3.2's
 # (macOS's /bin/bash). Variables of the hook start with _switchboard_ and are never exported.
 #
-# Per managed variable N (claude, codex, context): _switchboard_m_N is 1 while the hook holds
+# Per managed variable N (claude, codex, context, source): _switchboard_m_N is 1 while the hook holds
 # it, _switchboard_v_N is the value it set, _switchboard_w_N is 1 when the person's own value
 # was set and _switchboard_s_N is that value.
 
@@ -66,6 +66,18 @@ _switchboard_inherit() {
       fi
       ;;
   esac
+  # SB-259: the person's own Claude folder the parent named, kept for this shell's homes.
+  case ${SWITCHBOARD_CLAUDE_SOURCE_DIR-} in
+    /*)
+      if [ "${_switchboard_m_claude-}" = 1 ]; then
+        _switchboard_src=$SWITCHBOARD_CLAUDE_SOURCE_DIR
+        _switchboard_m_source=1
+        _switchboard_v_source=$SWITCHBOARD_CLAUDE_SOURCE_DIR
+        _switchboard_w_source=0
+        _switchboard_s_source=
+      fi
+      ;;
+  esac
   return 0
 }
 
@@ -99,7 +111,7 @@ _switchboard_parse() {
 # A CLI that is missing, older, failing or slow, or an answer of another form, reads as `none`:
 # what the hook holds is given back, and nothing it does not hold changes.
 _switchboard_apply() {
-  local _sb_line _sb_tab _sb_nl _sb_rest _sb_pool _sb_context _sb_claude _sb_codex
+  local _sb_line _sb_tab _sb_nl _sb_rest _sb_pool _sb_context _sb_claude _sb_codex _sb_source
   [ -z "${SWITCHBOARD_SESSION-}" ] || return 0
   _sb_line=
   if [ ! -x "$_switchboard_cli" ] || ! _switchboard_ask; then
@@ -116,5 +128,18 @@ _switchboard_apply() {
   _switchboard_var claude CLAUDE_CONFIG_DIR "$_sb_claude"
   _switchboard_var codex CODEX_HOME "$_sb_codex"
   _switchboard_var context SWITCHBOARD_CONTEXT "$_sb_context"
+  # SB-259: while a group's home is CLAUDE_CONFIG_DIR, the person's own Claude folder.
+  _sb_source=
+  if [ -n "$_sb_claude" ] && [ "${_switchboard_m_claude-}" = 1 ]; then
+    if [ "${_switchboard_w_claude-0}" = 1 ]; then
+      _sb_source=${_switchboard_s_claude-}
+    elif [ -n "${_switchboard_src-}" ]; then
+      _sb_source=$_switchboard_src
+    elif [ -n "${HOME-}" ]; then
+      _sb_source=$HOME/.claude
+    fi
+    case $_sb_source in /*) ;; *) _sb_source= ;; esac
+  fi
+  _switchboard_var source SWITCHBOARD_CLAUDE_SOURCE_DIR "$_sb_source"
   return 0
 }
