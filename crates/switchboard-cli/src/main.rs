@@ -46,7 +46,7 @@ enum Command {
         #[command(subcommand)]
         command: Org,
     },
-    /// The Fabric Inbox key the Claude sign-in autopilot reads its sign-in mail with (SB-256).
+    /// The Fabric Inbox key the Claude sign-in autopilot reads its sign-in mail with.
     /// Make a read key limited to the sign-in mailbox in Fabric Inbox's Settings, Agent access.
     Inbox {
         #[command(subcommand)]
