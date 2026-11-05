@@ -654,6 +654,9 @@ check(() => {
   assert.deepEqual(logic.withFolder(['/a'], '/b'), ['/a', '/b']);
   assert.deepEqual(logic.withFolder(['/a', '/b'], '/a'), ['/a', '/b']);
   assert.deepEqual(logic.withFolder(['/a'], ''), ['/a']);
+  // SB-264: folders picked together join in order, each once.
+  assert.deepEqual(logic.withFolders(['/a'], ['/b', '/a', '/c', '/b']), ['/a', '/b', '/c']);
+  assert.deepEqual(logic.withFolders(['/a'], []), ['/a']);
   assert.equal(logic.storedFolder(null), '');
   assert.equal(logic.storedFolder({ getItem: () => { throw new Error('blocked'); } }), '');
   assert.equal(logic.storedFolder({ getItem: () => ' /Users/a/p ' }), '/Users/a/p');

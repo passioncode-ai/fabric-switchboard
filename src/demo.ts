@@ -336,6 +336,7 @@ export function createDemoAdapter(): Adapter {
     async launch(id, mode, workingDirectory) { await pause(); if (!isAbsoluteProjectPath(workingDirectory)) throw new Error('Choose an existing project directory.'); const item = enabled(id); if (mode === 'managed' && state.routes[`${item.provider}:${item.pool}`] !== id) throw new Error('Managed mode requires a selected account in this pool.'); log('session.launched', id, `Synthetic ${mode} launch`); return { message: 'Synthetic launch recorded; no terminal was opened.' }; },
     // The browser demo has no file system: the picker answers with one synthetic folder.
     async pickFolder() { await pause(); return '/Users/demo/Projects/switchboard-demo'; },
+    async pickFolders() { await pause(); return ['/Users/demo/Projects/switchboard-demo', '/Users/demo/Projects/switchboard-site']; },
     async beginLogin(input) { await pause(); const login_id = crypto.randomUUID(); logins.set(login_id, { ...input, started: Date.now() }); return { login_id, message: 'Synthetic sign-in opened; it completes on its own in a few seconds.' }; },
     // A synthetic Terminal "finishes" three seconds after it opened.
     async pendingLogins() { return { logins: [...logins.entries()].map(([id, login]) => ({ login_id: id, provider: login.provider, label: login.label, pool: login.pool, state: (Date.now() - login.started > 3000 ? 'complete' : 'pending') as 'pending' | 'complete' })) }; },

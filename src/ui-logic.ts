@@ -604,6 +604,10 @@ export function launchChoice(selectedInPool: boolean, proxyRunning: boolean): { 
 export function withFolder(folders: string[], folder: string): string[] {
   return !folder || folders.includes(folder) ? folders : [...folders, folder];
 }
+/** SB-264: folders picked together join in the order picked; one already listed, or picked twice, once. */
+export function withFolders(folders: string[], chosen: string[]): string[] {
+  return chosen.reduce(withFolder, folders);
+}
 /** SB-131: a folder changed with the picker takes the old one's place; one already listed is not added twice. */
 export function replaceFolder(folders: string[], old: string, folder: string): string[] {
   if (!folder || !folders.includes(old)) return folders;

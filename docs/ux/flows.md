@@ -48,7 +48,7 @@ flowchart LR
 A failed read never replaces a list already on screen (SCN-043): the list stays, a line above it offers *Retry*. Remove of a selected account goes through *Disable and remove* in the same dialog (SCN-010), not back to the list. Restore from About asks first (SCN-030).
 
 ## FLW-04: Set up an organization's work on a computer (0.7.0)
-Traces: SB-202, SB-160, SCN-076, SCN-077, SCN-074, SCN-050, SCN-073, SCN-035
+Traces: SB-202, SB-160, SB-265, SCN-076, SCN-077, SCN-074, SCN-050, SCN-073, SCN-035, SCN-085
 Entry points: the window after the usage notice and the tour; `switchboard onboard` (the person's coding agent); the runbook `docs/ORGANIZATION.md`.
 Success exit: `switchboard onboard --status --json` answers `"complete": true` and the card is gone.
 ```mermaid
@@ -60,6 +60,12 @@ flowchart TD
  P -->|consent denied or cancelled| P_err[Notice, nothing changes]
  P_err --> P
  P -->|organizations read| D
+ C -->|yes, new: + New organization| W[Organization dialog SCN-085: name, GitHub owner, repositories, folders]
+ W -->|gh missing or signed out| W_err[No GitHub step, folders only]
+ W_err --> W
+ W -->|created with its group| D
+ W -->|repositories to clone| X[Card: Cloning n of m, then the result]
+ X --> D
  C -->|yes| D[Screen: Accounts with the organization card]
  D --> E{One group bound to it?}
  E -->|none| F[+ Group for organization: group dialog prefilled]

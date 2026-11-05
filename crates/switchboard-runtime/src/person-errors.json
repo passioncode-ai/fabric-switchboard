@@ -23,7 +23,7 @@
     "Capture this Claude profile again before native activation.": "Add this Claude account again (In use now → Add to Switchboard, or switchboard accounts capture --provider claude), then switch.",
     "Captured Codex login has no identity token. Sign in again or use managed mode.": "This Codex sign-in has no identity token. Sign in to it again, or launch a managed session.",
     "Choose a model for this launch, or set the default model of the OpenRouter key under Agents.": "Choose a model for this launch, or set the key's default model on the API keys page or with switchboard agents openrouter model.",
-    "Choose absolute project folders.": "Add each folder with Add folder…, or give each its full path.",
+    "Choose absolute project folders.": "Add the folders with Add folders…, or give each its full path.",
     "Choose an absolute project folder.": "Choose the folder with the folder picker, or give its full path.",
     "Choose an existing project directory.": "Choose an existing folder.",
     "Choose an existing project folder.": "Choose an existing folder.",

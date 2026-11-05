@@ -41,6 +41,7 @@ export const nativeAdapter: Adapter = {
   select: ({ id, provider, pool }) => invoke('select_account', { id, provider, pool }),
   launch: (id, mode, workingDirectory) => invoke('launch_account', { id, mode, workingDirectory }),
   pickFolder: (start) => invoke('pick_folder', { start: start ?? null }),
+  pickFolders: (start) => invoke('pick_folders', { start: start ?? null }),
   beginLogin: (input) => invoke('begin_login', { ...input }),
   loginStatus: (loginId) => readWithDeadline(invoke('login_status', { loginId })),
   pendingLogins: () => readWithDeadline(invoke('pending_logins')),

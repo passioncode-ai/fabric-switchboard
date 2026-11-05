@@ -357,6 +357,28 @@ async fn pick_folder(
         .and_then(|f| f.into_path().ok())
         .map(|p| p.to_string_lossy().into_owned()))
 }
+/// SB-264: several folders chosen at once with the system picker (several selection); an empty
+/// list when the person closed it without choosing.
+#[tauri::command]
+async fn pick_folders(start: Option<String>, app: tauri::AppHandle) -> Result<Vec<String>, String> {
+    use tauri_plugin_dialog::DialogExt;
+    let window = app.get_webview_window("main").ok_or(FOLDER_PICKER_FAILED)?;
+    let (sender, picked) = tokio::sync::oneshot::channel();
+    let mut picker = app.dialog().file().set_parent(&window);
+    if let Some(start) = start.filter(|s| std::path::Path::new(s).is_dir()) {
+        picker = picker.set_directory(start);
+    }
+    picker.pick_folders(move |folders| {
+        let _ = sender.send(folders);
+    });
+    let folders = picked.await.map_err(|_| FOLDER_PICKER_FAILED)?;
+    Ok(folders
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|f| f.into_path().ok())
+        .map(|p| p.to_string_lossy().into_owned())
+        .collect())
+}
 #[tauri::command]
 async fn cancel_login(login_id: String, state: State<'_, Slot>) -> Result<Value, String> {
     state
@@ -1371,6 +1393,7 @@ fn main() {
             restore_backup,
             cancel_login,
             pick_folder,
+            pick_folders,
             probe_usage,
             set_project_rule,
             remove_project_rule,

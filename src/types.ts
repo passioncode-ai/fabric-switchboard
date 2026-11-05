@@ -64,6 +64,8 @@ export interface Adapter {
   launch(id: string, mode: 'isolated' | 'managed', workingDirectory: string): Promise<{ message: string; agent_tools?: boolean }>;
   /** A folder chosen with the system picker, opened at `start` when that is a folder; null when the person closed it. */
   pickFolder(start?: string): Promise<string | null>;
+  /** SB-264: several folders from one system picker; empty when it was closed. */
+  pickFolders(start?: string): Promise<string[]>;
   beginLogin(input: LoginInput): Promise<{ login_id: string; message: string }>;
   loginStatus(loginId: string): Promise<{ state: 'pending' | 'complete' | 'ended' }>;
   pendingLogins(): Promise<{ logins: { login_id: string; provider: Provider; label: string; pool: string; state: 'pending' | 'complete' | 'ended' }[] }>;
