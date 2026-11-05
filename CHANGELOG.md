@@ -8,6 +8,10 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+## 0.7.15
+
+- If you keep your Claude settings in your own folder (`CLAUDE_CONFIG_DIR`), sessions Switchboard starts now find the Fabric board server you added there. A session's home that already had its own `plugins` or `skills` folder now uses yours; the old folder stays beside it as `plugins.before-switchboard` or `skills.before-switchboard` (SB-260).
+
 ## 0.7.14
 
 - A Claude Code session Switchboard starts, and a terminal its hook moved into a group's home, now names your own Claude folder in `SWITCHBOARD_CLAUDE_SOURCE_DIR`, so tools that change your Claude Code settings save them where they stay (SB-259).
