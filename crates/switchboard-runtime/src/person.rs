@@ -38,6 +38,11 @@ pub fn claude_dir() -> Option<PathBuf> {
 pub fn codex_dir() -> Option<PathBuf> {
     codex_dir_from(&Sources::process())
 }
+/// The `CLAUDE_CONFIG_DIR` the person set themselves, if any (None: Claude Code uses `~/.claude`
+/// and `~/.claude.json`).
+pub fn claude_config() -> Option<PathBuf> {
+    own("CLAUDE_CONFIG_DIR", &Sources::process())
+}
 /// The `CODEX_HOME` the person set themselves, if any (None: Codex uses `~/.codex`).
 pub fn codex_home() -> Option<PathBuf> {
     own("CODEX_HOME", &Sources::process())
