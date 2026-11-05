@@ -2444,8 +2444,39 @@ Switchboard reads its own operations log as fabric-agent-contract DEC-0153
   `failures_rose` with `op`, `failed` and `previous`
   (`a_rise_is_ten_failures_and_twice_the_hour_before_and_a_gap_compares_with_none`).
 - **What it holds (OD-7).** Operation names and counts only; nothing leaves the machine. Sending the
-  daily digest onward (ADR-0188 §3, Fabric CO-503 and Observatory OBS-330) is not built yet.
+  daily digest onward is Fabric's (CO-503, decided 2026-11-05 on board thread `f7758225`): Switchboard
+  has no fabric-service descriptor, so Fabric keeps its `digests` folder in a built-in list of
+  known hosts (source `app`) and reads `daily-YYYY-MM.jsonl` itself; Switchboard sends nothing.
+  Moving the folder is announced on that thread before the release that moves it.
   `switchboard uninstall` removes `digests`.
+
+## Provenance (SB-47, 2026-11-05)
+
+Fabric COM-11 (issue #36, packet `docs/packets/com-11-provenance.md`), in the shape Fabric
+accepted on board thread `82241ad5` (reply `63ae923f`): read through
+`switchboard --json provenance` (MCP `switchboard_provenance` for agents), accounts by handle
+only, no generation of Fabric's (a run takes its slot with `com.enroll`, so the session links to
+Fabric through `dispatch_id` and `workflow`). `crates/switchboard-runtime/src/provenance.rs`.
+
+- **Which account.** A group's route (`routes["<provider>:<pool>"]`), or a launch's recorded
+  `account_id`, as `account_ref` (`continuation::account_ref`, the same handle the dispatch prompt
+  names) and `identity_revision`, the first 16 hex digits of SHA-256 over the provider's identity
+  Switchboard holds; never the UUID, a label, an e-mail or a credential
+  (`a_groups_account_by_handle_since_when_and_why`).
+- **Since when and why.** The store's journal: the last `account_selected` of that account is
+  `changed_at`; a `rotation` line right after it names the cause, `switched` → `rotation`,
+  `switched_on_limit` → `limit` (the monitor writes it since SB-47), `failover` or `unusable` →
+  `failover` (the proxy's 429 move and an unusable account's, `Store::move_route`); none is
+  `manual`. A choice the bounded journal no longer holds is `unknown` with `changed_at` null, never
+  guessed (`a_launch_names_its_dispatch_and_workflow_and_a_group_with_no_choice_is_unknown`).
+- **What it replaced.** The previous `account_selected` of another account of the same group, as
+  `{account_ref, limit}`, `limit` the owner's evidence (`Limits::report`) `{kind, resets_at,
+  confidence}` or null; offline there is no evidence.
+- **Which session.** With `--launch-id`, `session` is `{launch_id, dispatch_id, workflow}` from the
+  launch record (`launched_by.dispatch`, else `continues`).
+- **Journal.** `rotation` details are `switched`, `failed`, `switched_on_limit`, `failover` and
+  `unusable`; the window labels the new three (“switched on a limit”, “moved after a refusal”,
+  “moved off an unusable account”; Copylot en-US `9b04170d`, ru-RU `ddbe4ede`).
 
 ## Several users on one Mac (SB-251, 2026-11-05)
 

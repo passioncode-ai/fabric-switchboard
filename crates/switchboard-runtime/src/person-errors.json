@@ -193,6 +193,7 @@
     "User home unavailable.": "Switchboard could not identify your user account or home folder. Restart Switchboard from your own user session, then retry.",
     "Vault unavailable": "Storage unavailable. Check native credential storage access and retry.",
     "Windows private storage unavailable": "A private Switchboard file or folder failed its safety check. Make sure the app’s data folder belongs to you and is not shared, then retry.",
-    "Windows system directory unavailable.": "Windows did not report its system folder, so Terminal could not open. Restart Switchboard, then retry."
+    "Windows system directory unavailable.": "Windows did not report its system folder, so Terminal could not open. Restart Switchboard, then retry.",
+    "Name a provider (claude or codex) or a launch id.": "Name a provider (claude or codex) or a launch id, to say whose account to show."
   }
 }

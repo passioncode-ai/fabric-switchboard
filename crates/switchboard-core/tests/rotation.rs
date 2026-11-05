@@ -1531,7 +1531,8 @@ fn failover_moves_the_pool_off_a_refused_account_and_holds_it() {
         .events
         .iter()
         .any(|e| e.action == "rotation"
-            && e.detail == "switched"
+            // SB-47: the journal names the cause, for provenance.
+            && e.detail == "failover"
             && e.account_id.as_deref() == Some(c.as_str())));
     let refused: Vec<String> = store
         .take_refusals()

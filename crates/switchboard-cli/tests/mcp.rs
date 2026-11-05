@@ -171,6 +171,7 @@ async fn handshake_lists_tools_and_rejects_malformed_messages() {
             "switchboard_usage",
             "switchboard_switch",
             "switchboard_sessions",
+            "switchboard_provenance",
             "switchboard_onboarding",
             "switchboard_project_context",
             "switchboard_projects",

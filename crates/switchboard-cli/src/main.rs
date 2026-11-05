@@ -85,6 +85,19 @@ enum Command {
         #[command(subcommand)]
         command: Option<SessionsCommand>,
     },
+    /// Which account serves a provider's group (or one launch), since when and why: its handle,
+    /// never its id, and the limit of the account it replaced. Fabric reads it. Reads only.
+    Provenance {
+        /// The provider whose group to read; give it or `--launch-id`.
+        #[arg(long, value_enum)]
+        provider: Option<ProviderArg>,
+        /// The group's id (`switchboard projects list`); the default group when left out.
+        #[arg(long, conflicts_with = "launch_id")]
+        pool: Option<String>,
+        /// One launch's account and session (`switchboard sessions --history`).
+        #[arg(long)]
+        launch_id: Option<String>,
+    },
     /// Inspect the actual signed-in accounts in the ordinary provider CLIs.
     Current,
     /// Automatic switching: move to the group's next account as one nears its quota. Works while
@@ -1413,6 +1426,15 @@ async fn run(cli: &Cli) -> Result<Value, String> {
         },
         Command::Sessions { history: true, .. } => Operation::Launches { launch_id: None },
         Command::Sessions { all, .. } => Operation::Sessions { all: *all },
+        Command::Provenance {
+            provider,
+            pool,
+            launch_id,
+        } => Operation::Provenance {
+            provider: provider.map(Into::into),
+            pool: pool.clone(),
+            launch_id: launch_id.clone(),
+        },
         Command::Current => Operation::CurrentAccounts,
         Command::Backup { command } => match command {
             Backup::List => Operation::Backups,
@@ -3492,6 +3514,7 @@ mod mcp_parity {
         ("status", Tool("switchboard_status")),
         // `sessions` itself (and its `--all`, `--history`) answers through the same tool.
         ("sessions show", Tool("switchboard_sessions")),
+        ("provenance", Tool("switchboard_provenance")),
         ("current", Tool("switchboard_status")),
         ("rotation status", Tool("switchboard_rotation")),
         ("rotation set", Tool("switchboard_rotation_set")),
