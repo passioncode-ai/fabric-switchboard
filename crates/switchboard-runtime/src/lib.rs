@@ -2516,12 +2516,44 @@ fn load_proxy_record(root: &Path) -> Option<ProxyRecord> {
 async fn start_proxy(root: &Path, store: Arc<Store>) -> Result<ProxyHandle, String> {
     let proxy_store = store.clone();
     let record = load_proxy_record(root);
-    let proxy = ProxyHandle::start_on(
-        store,
+    let mut proxy = ProxyHandle::start_on(
+        store.clone(),
         record.as_ref().map(|r| r.port),
         record.as_ref().map(|r| r.token.clone()),
     )
     .await?;
+    // SB-269: the recorded port was held by another program, which may have been another macOS
+    // user's while this owner was down: sessions kept sending this token and every capability
+    // derived from it there. The proxy starts again on its new port with a new token, so none of
+    // them is accepted any more; routes and managed homes are rewritten below.
+    let mut renewed: Vec<(String, String)> = Vec::new();
+    if let Some(old) = record.as_ref().filter(|r| r.port != proxy.address().port()) {
+        let port = proxy.address().port();
+        proxy.shutdown().await;
+        proxy = ProxyHandle::start_on(store, Some(port), None).await?;
+        let salts = read_pool_salts(root);
+        renewed.push((old.token.clone(), proxy.token().to_owned()));
+        renewed.push((
+            switchboard_proxy::agent_token(&old.token),
+            proxy.agent_token().to_owned(),
+        ));
+        if let Ok(snapshot) = proxy_store.snapshot() {
+            let mut pools: Vec<String> = snapshot.projects.iter().map(|p| p.pool.clone()).collect();
+            pools.push("default".into());
+            pools.push(switchboard_proxy::AUTO_POOL.into());
+            for pool in pools {
+                let salt = salts.get(&pool).map(String::as_str);
+                renewed.push((
+                    switchboard_proxy::pool_token_salted(&old.token, &pool, salt),
+                    switchboard_proxy::pool_token_salted(proxy.token(), &pool, salt),
+                ));
+            }
+        }
+        oplog::event(
+            "proxy_rotated",
+            &[("reason", oplog::Field::Code("port_taken"))],
+        );
+    }
     let salts = read_pool_salts(root);
     proxy.set_pool_salts(salts.clone());
     // SB-133: the folders' own capabilities from the first request on, and the window in which a
@@ -2557,7 +2589,7 @@ async fn start_proxy(root: &Path, store: Arc<Store>) -> Result<ProxyHandle, Stri
         }
     }
     if let Some(old) = record.filter(|r| r.port != port) {
-        let homes = launch::repoint_managed(root, old.port, port);
+        let homes = launch::repoint_managed(root, old.port, port, &renewed);
         oplog::event(
             "proxy_port_changed",
             &[
@@ -9803,7 +9835,7 @@ mod lifecycle_tests {
     }
 
     #[tokio::test]
-    async fn a_taken_port_moves_the_proxy_and_repoints_managed_homes_with_the_same_token() {
+    async fn a_taken_port_moves_the_proxy_renews_its_token_and_repoints_managed_homes() {
         let tmp = tempfile::tempdir().unwrap();
         let first = owner(tmp.path()).await;
         let old = first.runtime.proxy.address();
@@ -9816,7 +9848,10 @@ mod lifecycle_tests {
         let config = runtimes.join("codex-team/config.toml");
         switchboard_core::private_fs::private_write(
             &script,
-            format!("export ANTHROPIC_BASE_URL='http://{old}/claude/team'\n").as_bytes(),
+            format!(
+                "export ANTHROPIC_BASE_URL='http://{old}/claude/team'\nexport ANTHROPIC_AUTH_TOKEN='{token}'\n"
+            )
+            .as_bytes(),
         )
         .unwrap();
         switchboard_core::private_fs::private_write(
@@ -9847,24 +9882,34 @@ mod lifecycle_tests {
         let second = owner(tmp.path()).await;
         let new = second.runtime.proxy.address();
         assert_ne!(new.port(), old.port());
+        // SB-269: whoever held the port may have read the token sessions sent there, so it is
+        // renewed and the old one refused.
+        let renewed = second.runtime.proxy.token().to_owned();
+        assert_ne!(renewed, token, "a moved proxy takes a new token");
         assert_eq!(
-            second.runtime.proxy.token(),
-            token,
-            "sessions keep their token"
+            status_as_holder(new, &token).await,
+            reqwest::StatusCode::UNAUTHORIZED
+        );
+        assert_ne!(
+            status_as_holder(new, &renewed).await,
+            reqwest::StatusCode::UNAUTHORIZED
         );
         assert_eq!(
             std::fs::read_to_string(&script).unwrap(),
-            format!("export ANTHROPIC_BASE_URL='http://{new}/claude/team'\n")
+            format!(
+                "export ANTHROPIC_BASE_URL='http://{new}/claude/team'\nexport ANTHROPIC_AUTH_TOKEN='{renewed}'\n"
+            )
         );
         assert_eq!(
             std::fs::read_to_string(&config).unwrap(),
             format!("base_url = \"http://{new}/codex/team/v1\"\n")
         );
         drop(squatter);
-        // The new port is the recorded one from now on.
+        // The new port and token are the recorded ones from now on: a start there keeps them.
         second.shutdown(Duration::from_secs(5)).await;
         let third = owner(tmp.path()).await;
         assert_eq!(third.runtime.proxy.address(), new);
+        assert_eq!(third.runtime.proxy.token(), renewed);
     }
 
     #[tokio::test]
