@@ -2435,7 +2435,10 @@ Switchboard reads its own operations log as fabric-agent-contract DEC-0153
   `ops.digest.hourly@1` line to `<data>/digests/hourly-YYYY-MM.jsonl`, an empty hour it ran through
   included; an hour before the owner's first pass is a gap. Once an hour of the next UTC day is
   written, the day before folds into one `ops.digest.daily@1` line of `daily-YYYY-MM.jsonl`, each
-  hour once (OD-5), and never twice for one day. The folder is 0700, the files 0600; monthly files
+  hour once (OD-5), and never twice for one day. The owner's first pass also folds every closed day
+  of the last 40 that has hourly lines and no daily one, so a day the owner was not running at
+  midnight still gets its digest (OD-5 as of DEC-0153 `6bb6ce04`, SB-254;
+  `a_day_the_owner_was_not_running_at_midnight_is_folded_at_its_next_start`). The folder is 0700, the files 0600; monthly files
   older than three months are removed
   (`the_log_counts_by_outcome_and_each_hour_the_owner_ran_through_is_written_once`,
   `a_day_folds_each_hour_once_and_sums_its_rises`, `files_older_than_three_months_go`).

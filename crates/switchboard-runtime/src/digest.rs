@@ -98,6 +98,9 @@ struct State {
     written: Option<(i64, Hourly)>,
     /// This owner's first pass: an hour before it is a gap, never an empty hour.
     first: Option<i64>,
+    /// OD-5: the days that closed with hourly lines and no daily one were folded at this
+    /// owner's first pass.
+    caught_up: bool,
 }
 
 #[cfg(not(test))]
@@ -180,7 +183,7 @@ pub(crate) fn tick(root: &Path, now: i64) {
         return;
     }
     let current = now.div_euclid(HOUR) * HOUR;
-    let (due, previous) = with_state(|s| {
+    let (due, previous, catch_up) = with_state(|s| {
         let first = s.first.get_or_insert(now).div_euclid(HOUR) * HOUR;
         // The hour of the lines counted so far closes when the clock has left it.
         if s.hour.is_some_and(|h| h < current) {
@@ -202,8 +205,12 @@ pub(crate) fn tick(root: &Path, now: i64) {
         }
         let written = s.written.as_ref().map(|(h, _)| *h);
         closed.retain(|h, _| written.is_none_or(|w| *h > w));
-        (closed, s.written.clone())
+        let catch_up = !std::mem::replace(&mut s.caught_up, true);
+        (closed, s.written.clone(), catch_up)
     });
+    if catch_up {
+        fold_missed_days(root, now);
+    }
     if due.is_empty() {
         return;
     }
@@ -343,6 +350,33 @@ pub(crate) fn fold_day(day: i64, hourly: &[Hourly]) -> Option<Daily> {
         total,
         risen,
     })
+}
+
+/// How far back the first pass looks for a day left without its daily digest (OD-5).
+const CATCH_UP_DAYS: i64 = 40;
+
+/// OD-5: once per owner, every closed day of the last `CATCH_UP_DAYS` that has hourly lines and
+/// no daily one is folded, so a day the owner was not running at midnight (a crash, a quit, a
+/// computer asleep) still gets its daily digest. Reads the hourly files of those months once.
+fn fold_missed_days(root: &Path, now: i64) {
+    let dir = root.join(DIR);
+    let today = now.div_euclid(DAY);
+    let first = today - CATCH_UP_DAYS;
+    let mut months: Vec<String> = (first..today).map(|d| month(d * DAY)).collect();
+    months.dedup();
+    let mut dates = std::collections::BTreeSet::new();
+    for m in &months {
+        for h in read::<Hourly>(&dir.join(format!("hourly-{m}.jsonl"))) {
+            if let Some(date) = h.from.get(..10) {
+                dates.insert(date.to_owned());
+            }
+        }
+    }
+    for day in first..today {
+        if dates.contains(&crate::errors::date(day)) {
+            daily(root, day);
+        }
+    }
 }
 
 /// Writes the daily digest of `day` unless its month's file already holds one for it.
@@ -629,6 +663,26 @@ mod tests {
                 0o600
             );
         }
+    }
+
+    #[test]
+    fn a_day_the_owner_was_not_running_at_midnight_is_folded_at_its_next_start() {
+        // OD-5 (DEC-0153 6bb6ce04): an owner that ended before midnight (here 2024-10-04 23:00)
+        // left that day's hours and no daily line; the next owner folds it at its first pass,
+        // once, and never folds today.
+        let root = tempfile::tempdir().unwrap();
+        let dir = root.path().join(DIR);
+        for hour in [DAY0 + 21 * HOUR, DAY0 + 22 * HOUR, DAY0 + DAY + 2 * HOUR] {
+            let digest = fold_hour(hour, &hour_of(&[]), None);
+            append(&dir, &format!("hourly-{}.jsonl", month(hour)), &digest);
+        }
+        COUNTING.with(|c| c.set(true));
+        tick(root.path(), DAY0 + DAY + 3 * HOUR + 60);
+        tick(root.path(), DAY0 + DAY + 3 * HOUR + 90);
+        COUNTING.with(|c| c.set(false));
+        let daily = read::<Daily>(&dir.join("daily-2024-10.jsonl"));
+        let days: Vec<(&str, u64)> = daily.iter().map(|d| (d.day.as_str(), d.hours)).collect();
+        assert_eq!(days, [("2024-10-04", 2)]);
     }
 
     #[test]
