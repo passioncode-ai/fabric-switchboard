@@ -6,8 +6,8 @@ Design note, 2026-11-05. Status: designed, not built. Owner: fabric-switchboard.
 
 In the operator's words (session 38adf103, 2026-11-05): signing in to a new account, or again to
 an existing one, opens Claude Code's sign-in; if the account's e-mail is one Fabric Inbox
-receives, the e-mail is typed on the sign-in page by webpilot, acting as the person in a real
-browser; Anthropic mails a sign-in link to that address; the link is opened in the same browser,
+receives, the e-mail is typed on the sign-in page by the operator's browser service, acting as
+the person in a real browser; Anthropic mails a sign-in link to that address; the link is opened in the same browser,
 everything is confirmed to the end; then the browser and the console are closed and the account is
 signed in in Switchboard.
 
@@ -30,12 +30,11 @@ signed in in Switchboard.
   recipient and subject and `read_message` with `includeHtml` (the link); there is no push, so a
   reader polls; Cloudflare addresses receive at once, Gmail/IMAP/Outlook every few minutes; mail
   text is untrusted and suspicious mail is held (fabric-inbox `docs/agents/mcp.md`).
-- webpilot (a private local Fabric service): `webpilot.run` and `webpilot.browse` start a fresh
-  headless browser per call and close it at the end; state between calls survives only in a stored
-  profile's cookie folder; loopback navigation is refused (`navigation_refused`); CAPTCHA, 2FA and
-  "verification code" pages stop the run as `input_required` for a person; no detection evasion
-  and no human-like typing by design; a caller authenticates with its own caller token; runs spend
-  OpenRouter within per-agent budgets (webpilot repository, read 2026-11-05).
+- The browser service is a local Fabric service the person runs (its own repository and rules).
+  What Switchboard relies on is only its capability contract: a run that opens a URL in a stored
+  browser profile, works toward a goal on allowlisted hosts, stops for a person on a CAPTCHA or a
+  code field, and returns a value read from the final page. Whether it keeps one profile's session
+  between two runs is asked of its owner on the board.
 
 ## Design
 
@@ -58,25 +57,23 @@ signed in in Switchboard.
 6. **Finish.** Switchboard writes the code to the child's stdin; the CLI exchanges it and exits 0;
    the ordinary capture and `FinishLogin` follow. The window shows each step and where it waits.
 
-Generic seams: Switchboard is open source and webpilot private, so Switchboard calls "a browser
-service" and "a mailbox" by Fabric capability, configured by the person (service key, caller token
-and Inbox key names in the Observatory vault), never webpilot's internals.
+Generic seams: Switchboard is open source, so it calls "a browser service" and "a mailbox" by
+capability, configured by the person (service key, caller token and Inbox key names in the
+Observatory vault), and depends on no browser service's internals.
 
 ## Human gates that stay
 
 A CAPTCHA, a code field, a device check or any page the browser service does not recognise stops
 the autopilot where it is and shows the person the page; the person finishes it, or cancels and
-uses the ordinary sign-in. Creating the Fabric Inbox read key and webpilot's caller token are the
-person's (both are shown once). Switchboard adds no detection evasion: the browser is a real one
+uses the ordinary sign-in. Creating the Fabric Inbox read key and the browser service's caller token
+are the person's (both are shown once). Switchboard adds no detection evasion: the browser is a real one
 with a stored profile, nothing more.
 
 ## Needs from other projects
 
-- **webpilot:** (a) two calls that share one stored profile's session for a sign-in flow, cookies
-  without an expiry kept between them; (b) a run that may end on an allowlisted page and return a
-  value read from it (`output`), which `browse` has; (c) whether the publish guard lets
-  "Authorize" and "Continue" through (it does by its word list) and refuses nothing on Claude's
-  consent page.
+- **The browser service:** two runs that share one stored profile's session for a sign-in, and a
+  run that ends on an allowlisted page and returns a value read from it; asked of its owner on the
+  board.
 - **Fabric Inbox:** none; a read key limited to the sign-in mailbox is enough.
 
 ## Not known yet (decided at the operator-assisted acceptance)
