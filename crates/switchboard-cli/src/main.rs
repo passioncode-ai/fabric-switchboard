@@ -46,6 +46,12 @@ enum Command {
         #[command(subcommand)]
         command: Org,
     },
+    /// The Fabric Inbox key the Claude sign-in autopilot reads its sign-in mail with.
+    /// Make a read key limited to the sign-in mailbox in Fabric Inbox's Settings, Agent access.
+    Inbox {
+        #[command(subcommand)]
+        command: Inbox,
+    },
     /// Settings that move to another machine: groups by their repositories, organizations, the
     /// agents' settings and automatic switching. No account or credential.
     Settings {
@@ -542,6 +548,26 @@ enum SettingsCmd {
         #[arg(long)]
         apply: bool,
     },
+}
+#[derive(Subcommand)]
+enum Inbox {
+    /// Save the key: its Client Secret is read from standard input and kept in the vault.
+    Set {
+        /// Your Fabric Inbox's https address, such as https://inbox.example.com.
+        #[arg(long)]
+        origin: String,
+        /// The key's Client Id, as Fabric Inbox showed it.
+        #[arg(long)]
+        client_id: String,
+    },
+    /// Whether a key is saved and for which server (never the key).
+    Status {
+        /// Also ask the server whether it answers the key.
+        #[arg(long)]
+        check: bool,
+    },
+    /// Delete the saved key.
+    Remove,
 }
 #[derive(Subcommand)]
 enum Org {
@@ -1369,6 +1395,15 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                     apply: *apply,
                 }
             }
+        },
+        Command::Inbox { command } => match command {
+            Inbox::Set { origin, client_id } => Operation::InboxSet {
+                origin: origin.clone(),
+                client_id: client_id.clone(),
+                secret: read_secret()?,
+            },
+            Inbox::Status { check } => Operation::InboxStatus { check: *check },
+            Inbox::Remove => Operation::InboxRemove,
         },
         Command::Org { command } => match command {
             Org::List => Operation::Organizations,
@@ -3511,6 +3546,15 @@ mod mcp_parity {
         ("org remove", Tool("switchboard_organization_set")),
         ("org assign", Tool("switchboard_organization_set")),
         ("org connect", Not(PERSON)),
+        (
+            "inbox set",
+            Not("SB-256: the person makes the Fabric Inbox key and pastes its secret; a secret never travels in an agent's tool call"),
+        ),
+        (
+            "inbox status",
+            Not("SB-256: the sign-in autopilot reads the key on the owner's side; an agent has nothing to do with it"),
+        ),
+        ("inbox remove", Not(PERSON)),
         ("org read", Tool("switchboard_organization_set")),
         ("org passioncode", Tool("switchboard_organizations")),
         ("org disconnect", Not(PERSON)),

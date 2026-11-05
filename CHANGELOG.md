@@ -8,6 +8,8 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- New: `switchboard inbox set`, `inbox status` and `inbox remove` save, check and delete the Fabric Inbox key that the coming Claude sign-in autopilot will read its sign-in mail with. The key stays in your vault and no agent tool can reach it (SB-256).
+
 ## 0.7.15
 
 - If you keep your Claude settings in your own folder (`CLAUDE_CONFIG_DIR`), sessions Switchboard starts now find the Fabric board server you added there. A session's home that already had its own `plugins` or `skills` folder now uses yours; the old folder stays beside it as `plugins.before-switchboard` or `skills.before-switchboard` (SB-260).

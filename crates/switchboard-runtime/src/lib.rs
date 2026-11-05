@@ -358,6 +358,21 @@ pub enum Operation {
     VestaSync,
     /// Deletes the token; the organizations stay as local ones.
     VestaDisconnect,
+    /// SB-256: saves the Fabric Inbox key the sign-in autopilot reads: its Client Secret into the
+    /// vault, the server and the Client Id beside it. Only the CLI sends it, from standard input.
+    InboxSet {
+        origin: String,
+        client_id: String,
+        secret: String,
+    },
+    /// Whether a Fabric Inbox key is saved and for which server; with `check`, whether the server
+    /// answers it. Never the Client Id or the secret.
+    InboxStatus {
+        #[serde(default)]
+        check: bool,
+    },
+    /// Deletes the saved Fabric Inbox key.
+    InboxRemove,
     /// SB-122: moves one account into a project's pool, or back to `default`. Joining or leaving
     /// a project is that project's save (`ProjectEdit`), with its refusals; an account left in a
     /// deleted project's pool goes back to `default` by itself.
@@ -1044,6 +1059,10 @@ impl Runtime {
                 | Operation::VestaCancel
                 | Operation::VestaSync
                 | Operation::VestaDisconnect
+                // SB-256: the vault and `inbox.json` only; a check waits on Fabric Inbox.
+                | Operation::InboxSet { .. }
+                | Operation::InboxStatus { .. }
+                | Operation::InboxRemove
                 | Operation::AgentsOverview
                 | Operation::OpenrouterModels
                 // Hand-overs are files: listing reads them, and taking one is claimed by an
@@ -5143,6 +5162,19 @@ async fn execute(
         }
         Operation::VestaSync => vesta::sync(root, &store).await,
         Operation::VestaDisconnect => vesta::disconnect(root, &store).await,
+        Operation::InboxSet {
+            origin,
+            client_id,
+            secret,
+        } => inbox::set(root, &store, &origin, &client_id, &secret),
+        Operation::InboxStatus { check } => {
+            if check {
+                inbox::check(root, &store).await
+            } else {
+                inbox::status(root)
+            }
+        }
+        Operation::InboxRemove => inbox::remove(root, &store),
         Operation::OrganizationAdd { name, domains } => {
             let organization = store.add_organization(&name, &domains)?;
             Ok(json!({"organization": organization}))

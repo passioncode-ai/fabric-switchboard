@@ -458,6 +458,154 @@ impl Reader for Client {
     }
 }
 
+/// Where the key lives (design note, "Decision: where the Fabric Inbox key lives"): its Client
+/// Secret is a vault item of Switchboard's own (`Store::put_secret`); this file (0600) beside the
+/// store names that item, the server's origin, the Client Id and when it was saved, never the
+/// secret. Only the sign-in autopilot reads the key.
+const FILE: &str = "inbox.json";
+/// Refusals; `person-errors.json` gives each its sentence.
+pub const INBOX_ORIGIN_INVALID: &str = "Inbox origin invalid";
+pub const INBOX_KEY_INVALID: &str = "Inbox key invalid";
+pub const INBOX_NOT_SAVED: &str = "No inbox key saved";
+pub const INBOX_UNREADABLE: &str = "Inbox key unreadable";
+/// One save or removal at a time in this process, so a vault item is never orphaned.
+static TURN: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Link {
+    /// The vault item holding the Client Secret.
+    item: String,
+    origin: String,
+    client_id: String,
+    saved_at: i64,
+}
+
+fn link_path(root: &std::path::Path) -> std::path::PathBuf {
+    root.join(FILE)
+}
+fn read_link(root: &std::path::Path) -> Result<Option<Link>, String> {
+    let file = link_path(root);
+    if std::fs::symlink_metadata(&file).is_err() {
+        return Ok(None);
+    }
+    let bytes = switchboard_core::private_fs::read_private(&file, 16 * 1024)
+        .map_err(|_| INBOX_UNREADABLE)?;
+    let link: Link = serde_json::from_slice(&bytes).map_err(|_| INBOX_UNREADABLE)?;
+    // A file edited by hand to point elsewhere is not used.
+    if origin(&link.origin).as_deref() != Some(link.origin.as_str()) || !token(&link.client_id) {
+        return Err(INBOX_UNREADABLE.into());
+    }
+    Ok(Some(link))
+}
+fn now() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs() as i64)
+}
+
+/// Whether a key is saved, for which server and since when; never the Client Id or the secret.
+pub fn status(root: &std::path::Path) -> Result<Value, String> {
+    Ok(match read_link(root)? {
+        Some(link) => json!({"saved": true, "origin": link.origin, "saved_at": link.saved_at}),
+        None => json!({"saved": false, "origin": null, "saved_at": null}),
+    })
+}
+
+/// Saves (or replaces) the key: the secret into the vault (the same item when one is saved), then
+/// the file. A file that cannot be written leaves no new vault item behind.
+pub fn set(
+    root: &std::path::Path,
+    store: &switchboard_core::Store,
+    origin_text: &str,
+    client_id: &str,
+    secret: &str,
+) -> Result<Value, String> {
+    let origin = origin(origin_text).ok_or(INBOX_ORIGIN_INVALID)?;
+    let (client_id, secret) = (client_id.trim(), secret.trim());
+    if !token(client_id) || !token(secret) {
+        return Err(INBOX_KEY_INVALID.into());
+    }
+    let _turn = TURN.lock().map_err(|_| INBOX_UNREADABLE)?;
+    let before = read_link(root).ok().flatten();
+    let item = store.put_secret(before.as_ref().map(|l| l.item.as_str()), secret)?;
+    let link = Link {
+        item: item.clone(),
+        origin,
+        client_id: client_id.to_owned(),
+        saved_at: now(),
+    };
+    let written = serde_json::to_vec(&link)
+        .map_err(|_| INBOX_UNREADABLE.to_string())
+        .and_then(|bytes| switchboard_core::private_fs::private_write(&link_path(root), &bytes));
+    if let Err(error) = written {
+        if before.is_none() {
+            let _ = store.delete_secret(&item);
+        }
+        return Err(error);
+    }
+    status(root)
+}
+
+/// Deletes the key: the vault item, then the file. A vault that refuses (a locked keychain) keeps
+/// both, so no secret is left without its file.
+pub fn remove(root: &std::path::Path, store: &switchboard_core::Store) -> Result<Value, String> {
+    let _turn = TURN.lock().map_err(|_| INBOX_UNREADABLE)?;
+    // An unreadable file names no item it can be trusted for: it alone goes.
+    if let Some(link) = read_link(root).ok().flatten() {
+        store.delete_secret(&link.item)?;
+    }
+    let existed = match std::fs::remove_file(link_path(root)) {
+        Ok(()) => true,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => false,
+        Err(_) => return Err(INBOX_UNREADABLE.into()),
+    };
+    Ok(json!({"removed": existed}))
+}
+
+/// The vault item of the saved key, for `uninstall`.
+pub(crate) fn vault_item(root: &std::path::Path) -> Option<String> {
+    read_link(root).ok().flatten().map(|l| l.item)
+}
+
+/// A client with the saved key.
+pub(crate) fn client(
+    root: &std::path::Path,
+    store: &switchboard_core::Store,
+) -> Result<Client, String> {
+    let link = read_link(root)?.ok_or(INBOX_NOT_SAVED)?;
+    let secret = store.secret(&link.item)?;
+    Client::new(&link.origin, &link.client_id, &secret).ok_or_else(|| INBOX_UNREADABLE.into())
+}
+
+/// [`status`], and with a saved key whether the server answers it: `answer` is `ok` with the
+/// number of mailboxes it may read, or `refused`, `failed` or `unreachable`.
+pub async fn check(
+    root: &std::path::Path,
+    store: &switchboard_core::Store,
+) -> Result<Value, String> {
+    let mut view = status(root)?;
+    if view["saved"] != true {
+        return Ok(view);
+    }
+    let client = client(root, store)?;
+    match client.mailboxes().await {
+        Ok(boxes) => {
+            view["answer"] = json!("ok");
+            view["mailboxes"] = json!(boxes.len());
+        }
+        Err(code) => {
+            view["answer"] = json!(match code.as_str() {
+                INBOX_REFUSED => "refused",
+                INBOX_FAILED => "failed",
+                _ => "unreachable",
+            });
+            view["mailboxes"] = Value::Null;
+        }
+    }
+    Ok(view)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -851,6 +999,146 @@ mod tests {
         // Nobody listening.
         let gone = Client::new("http://127.0.0.1:9", "client.access", "fixture-secret").unwrap();
         assert_eq!(gone.mailboxes().await, Err(INBOX_UNREACHABLE.to_string()));
+    }
+
+    fn store(root: &std::path::Path) -> switchboard_core::Store {
+        switchboard_core::Store::open(
+            root.to_owned(),
+            std::sync::Arc::new(switchboard_core::MemoryVault::default()),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn a_saved_key_keeps_its_secret_in_the_vault_and_shows_only_the_server() {
+        let root = tempfile::tempdir().unwrap();
+        let store = store(root.path());
+        assert_eq!(status(root.path()).unwrap()["saved"], false);
+        assert_eq!(
+            client(root.path(), &store).err().as_deref(),
+            Some(INBOX_NOT_SAVED)
+        );
+        let saved = set(
+            root.path(),
+            &store,
+            "https://Inbox.Example.com/",
+            " client.access ",
+            "fixture-secret\n",
+        )
+        .unwrap();
+        assert_eq!(saved["saved"], true);
+        assert_eq!(saved["origin"], "https://inbox.example.com");
+        let file = std::fs::read_to_string(root.path().join(FILE)).unwrap();
+        assert!(
+            !file.contains("fixture-secret"),
+            "the file never holds the secret"
+        );
+        assert!(!saved.to_string().contains("client.access"));
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(root.path().join(FILE))
+                .unwrap()
+                .permissions()
+                .mode();
+            assert_eq!(mode & 0o777, 0o600);
+        }
+        let item = vault_item(root.path()).unwrap();
+        assert_eq!(store.secret(&item).unwrap(), "fixture-secret");
+        assert!(client(root.path(), &store).is_ok());
+        // Saving again replaces the same vault item.
+        set(
+            root.path(),
+            &store,
+            "https://inbox.example.com",
+            "id2",
+            "secret-2",
+        )
+        .unwrap();
+        assert_eq!(vault_item(root.path()).unwrap(), item);
+        assert_eq!(store.secret(&item).unwrap(), "secret-2");
+        // Removing deletes the vault item and the file; again, nothing is there to remove.
+        assert_eq!(remove(root.path(), &store).unwrap()["removed"], true);
+        assert!(store.secret(&item).is_err());
+        assert_eq!(status(root.path()).unwrap()["saved"], false);
+        assert_eq!(remove(root.path(), &store).unwrap()["removed"], false);
+    }
+
+    #[test]
+    fn a_wrong_server_or_key_saves_nothing_and_a_hand_edited_file_is_not_used() {
+        let root = tempfile::tempdir().unwrap();
+        let store = store(root.path());
+        let refused = |origin: &str, id: &str, secret: &str| {
+            set(root.path(), &store, origin, id, secret).err()
+        };
+        assert_eq!(
+            refused("http://inbox.example.com", "id", "secret").as_deref(),
+            Some(INBOX_ORIGIN_INVALID)
+        );
+        assert_eq!(
+            refused("https://inbox.example.com", "id", "two words").as_deref(),
+            Some(INBOX_KEY_INVALID)
+        );
+        assert_eq!(
+            refused("https://inbox.example.com", "", "secret").as_deref(),
+            Some(INBOX_KEY_INVALID)
+        );
+        assert!(!root.path().join(FILE).exists());
+        set(
+            root.path(),
+            &store,
+            "https://inbox.example.com",
+            "id",
+            "secret",
+        )
+        .unwrap();
+        let file = root.path().join(FILE);
+        let edited = std::fs::read_to_string(&file)
+            .unwrap()
+            .replace("https://inbox.example.com", "http://evil.example");
+        switchboard_core::private_fs::private_write(&file, edited.as_bytes()).unwrap();
+        assert_eq!(status(root.path()).err().as_deref(), Some(INBOX_UNREADABLE));
+        assert_eq!(
+            client(root.path(), &store).err().as_deref(),
+            Some(INBOX_UNREADABLE)
+        );
+        // Removing still clears an unreadable file.
+        assert_eq!(remove(root.path(), &store).unwrap()["removed"], true);
+    }
+
+    #[tokio::test]
+    async fn a_check_says_whether_the_server_answers_the_saved_key() {
+        let root = tempfile::tempdir().unwrap();
+        let store = store(root.path());
+        assert_eq!(check(root.path(), &store).await.unwrap()["saved"], false);
+        let server = stand_in(200, false).await;
+        set(
+            root.path(),
+            &store,
+            &server,
+            "client.access",
+            "fixture-secret",
+        )
+        .unwrap();
+        let view = check(root.path(), &store).await.unwrap();
+        assert_eq!(
+            (&view["answer"], &view["mailboxes"]),
+            (&json!("ok"), &json!(1))
+        );
+        let server = stand_in(403, false).await;
+        set(
+            root.path(),
+            &store,
+            &server,
+            "client.access",
+            "fixture-secret",
+        )
+        .unwrap();
+        let view = check(root.path(), &store).await.unwrap();
+        assert_eq!(
+            (&view["answer"], &view["mailboxes"]),
+            (&json!("refused"), &Value::Null)
+        );
     }
 
     #[test]
