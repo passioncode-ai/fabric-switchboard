@@ -3,7 +3,8 @@
 //! every other one keeps the ordinary Terminal sign-in. The mailboxes come from Fabric Inbox's
 //! account list (`list_accounts`, `GET /api/inbox`: each account's `email` and, for a Cloudflare
 //! address that keeps the mail of every other address on its domain, `catchAll: true`), read by
-//! the Inbox client of node N3; here they are data only, never an instruction.
+//! the Inbox client of node N3; here they are data only, never an instruction. N3's parsing is
+//! here too: which message in a mailbox search is Anthropic's sign-in mail, and its one link.
 #![cfg_attr(not(test), allow(dead_code))]
 
 use switchboard_core::ExternalIdentity;
@@ -82,6 +83,182 @@ pub(crate) fn receives(email: &str, mailboxes: &[Mailbox]) -> Option<Receives> {
 /// A new account has none; the person types it.
 pub(crate) fn sign_in_email(identity: Option<&ExternalIdentity>) -> Option<String> {
     address(identity?.email.as_deref()?)
+}
+
+/// The domains Anthropic's sign-in mail comes from: the address's domain is one of these or ends
+/// in `.` and one of these. Mail from anywhere else is never read for a link.
+const SENDER_DOMAINS: &[&str] = &["anthropic.com", "claude.ai", "claude.com"];
+/// The hosts a sign-in link may lead to (SB-256 design, step 4), each with its subdomains.
+const LINK_HOSTS: &[&str] = &["claude.ai", "claude.com"];
+/// Pages Anthropic's mail links to that are never a sign-in.
+const NOT_SIGN_IN: &[&str] = &["/legal", "/privacy", "/terms", "/support", "/unsubscribe"];
+
+fn under(host: &str, domains: &[&str]) -> bool {
+    domains
+        .iter()
+        .any(|d| host == *d || host.strip_suffix(d).is_some_and(|rest| rest.ends_with('.')))
+}
+
+/// The address inside a header such as `Claude <no-reply@mail.anthropic.com>`, or the header
+/// itself when it is a plain address.
+fn header_address(header: &str) -> Option<String> {
+    let inner = match (header.rfind('<'), header.rfind('>')) {
+        (Some(open), Some(close)) if open < close => &header[open + 1..close],
+        _ => header,
+    };
+    address(inner)
+}
+
+/// When a message arrived: RFC 3339 (`2026-11-05T19:00:00Z`) or RFC 2822 (`Thu, 05 Nov 2026
+/// 19:00:00 +0000`), as Fabric Inbox's providers write it; seconds since the epoch.
+fn arrived(date: &str) -> Option<i64> {
+    use time::format_description::well_known::{Rfc2822, Rfc3339};
+    let date = date.trim();
+    time::OffsetDateTime::parse(date, &Rfc3339)
+        .or_else(|_| time::OffsetDateTime::parse(date, &Rfc2822))
+        .ok()
+        .map(|t| t.unix_timestamp())
+}
+
+/// The id of the newest sign-in message in a mailbox search's answer (`{"emails": [...]}` for a
+/// Cloudflare mailbox, `{"messages": [...]}` for a Gmail, IMAP or Outlook account): one to
+/// `email`, from one of Anthropic's domains, that arrived at or after `since` (seconds since the
+/// epoch, the moment the browser asked for the mail). A row with an unreadable date never counts.
+pub(crate) fn sign_in_message(
+    answer: &serde_json::Value,
+    email: &str,
+    since: i64,
+) -> Option<String> {
+    let email = address(email)?;
+    let rows = answer
+        .get("emails")
+        .or_else(|| answer.get("messages"))?
+        .as_array()?;
+    rows.iter()
+        .filter_map(|row| {
+            let text = |key: &str| row.get(key).and_then(|v| v.as_str());
+            let sender = header_address(text("sender")?)?;
+            let domain = sender.split_once('@')?.1.to_owned();
+            let to_us = text("recipient")?
+                .split(',')
+                .filter_map(header_address)
+                .any(|r| r == email);
+            let at = arrived(text("date")?)?;
+            let id = text("id").or_else(|| text("providerMessageId"))?;
+            (under(&domain, SENDER_DOMAINS) && to_us && at >= since).then(|| (at, id.to_owned()))
+        })
+        .max_by_key(|(at, _)| *at)
+        .map(|(_, id)| id)
+}
+
+/// Why a message gave no sign-in link.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum NoLink {
+    /// No `https` link to a sign-in host.
+    None,
+    /// More than one different link to a sign-in host: none is guessed.
+    Several,
+}
+
+/// The one sign-in link in a message's text and HTML: `https`, on claude.ai or claude.com (or a
+/// subdomain), not a legal, privacy, terms, support or unsubscribe page. The same link written
+/// twice (text and HTML, `&amp;` in HTML) counts once; two different ones are refused, and the
+/// mail's words are never followed.
+pub(crate) fn sign_in_link(text: &str, html: Option<&str>) -> Result<String, NoLink> {
+    let pattern = regex::Regex::new(r#"https://[^\s"'<>()\]]+"#).expect("a fixed pattern");
+    let mut found: Vec<String> = Vec::new();
+    for source in [text, html.unwrap_or("")] {
+        for m in pattern.find_iter(source) {
+            let link = m
+                .as_str()
+                .replace("&amp;", "&")
+                .trim_end_matches(['.', ',', ';', ':'])
+                .to_owned();
+            let rest = &link["https://".len()..];
+            let end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
+            let host = rest[..end].to_lowercase();
+            let path = rest[end..].split(['?', '#']).next().unwrap_or("");
+            if host.contains(['@', ':']) || !under(&host, LINK_HOSTS) {
+                continue;
+            }
+            if path.is_empty() || path == "/" || NOT_SIGN_IN.iter().any(|p| path.starts_with(p)) {
+                continue;
+            }
+            if !found.contains(&link) {
+                found.push(link);
+            }
+        }
+    }
+    match found.len() {
+        0 => Err(NoLink::None),
+        1 => Ok(found.remove(0)),
+        _ => Err(NoLink::Several),
+    }
+}
+
+/// How often the mailbox is searched while a sign-in waits for its mail, and for how long (SB-256
+/// design, step 4).
+pub(crate) const POLL_EVERY: std::time::Duration = std::time::Duration::from_secs(5);
+pub(crate) const POLL_FOR: std::time::Duration = std::time::Duration::from_secs(300);
+
+/// What the sign-in reads of one mailbox: the client of Fabric Inbox's agent protocol, a fake in
+/// tests. Errors are short codes, never a message's text.
+pub(crate) trait Reader {
+    /// A search of the mailbox for mail to `email` (`search_mailbox`'s answer).
+    fn search(&self, email: &str) -> Result<serde_json::Value, String>;
+    /// One message's text and HTML (`read_message` with `includeHtml`).
+    fn read(&self, id: &str) -> Result<(String, Option<String>), String>;
+}
+
+/// How waiting for the sign-in mail ended.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum Waited {
+    /// The one sign-in link of the mail.
+    Link(String),
+    /// The mail came without one usable link; a person signs in.
+    NoLink(NoLink),
+    /// No mail in time; the last error the mailbox gave, if every look failed.
+    TimedOut(Option<String>),
+}
+
+/// Searches `reader` every `every` until Anthropic's sign-in mail to `email`, sent at or after
+/// `since` (seconds since the epoch), is there, then takes its link. A failed search or read is
+/// tried again at the next look; after `give_up` it times out. `elapsed` and `sleep` are the
+/// clock, so a test runs it without waiting.
+pub(crate) fn wait_for_link(
+    reader: &dyn Reader,
+    email: &str,
+    since: i64,
+    every: std::time::Duration,
+    give_up: std::time::Duration,
+    elapsed: &dyn Fn() -> std::time::Duration,
+    sleep: &dyn Fn(std::time::Duration),
+) -> Waited {
+    let mut last_error = None;
+    let mut found_any = false;
+    loop {
+        match reader.search(email) {
+            Ok(answer) => {
+                found_any = true;
+                if let Some(id) = sign_in_message(&answer, email, since) {
+                    match reader.read(&id) {
+                        Ok((text, html)) => {
+                            return match sign_in_link(&text, html.as_deref()) {
+                                Ok(link) => Waited::Link(link),
+                                Err(why) => Waited::NoLink(why),
+                            };
+                        }
+                        Err(e) => last_error = Some(e),
+                    }
+                }
+            }
+            Err(e) => last_error = Some(e),
+        }
+        if elapsed() + every > give_up {
+            return Waited::TimedOut(if found_any { None } else { last_error });
+        }
+        sleep(every);
+    }
 }
 
 #[cfg(test)]
@@ -169,6 +346,171 @@ mod tests {
         ] {
             assert_eq!(address(bad), None, "{bad}");
         }
+    }
+
+    #[test]
+    fn the_newest_sign_in_mail_to_the_address_since_the_request_is_chosen() {
+        let since = arrived("2026-11-05T19:00:00Z").unwrap();
+        let answer = json!({"emails": [
+            {"id": "old", "sender": "Claude <no-reply@mail.anthropic.com>", "recipient": "signin@one.example", "date": "2026-11-05T18:59:59Z"},
+            {"id": "first", "sender": "Claude <no-reply@mail.anthropic.com>", "recipient": "signin@one.example", "date": "2026-11-05T19:00:10Z"},
+            {"id": "newest", "sender": "no-reply@anthropic.com", "recipient": "Other <x@one.example>, SignIn@One.example", "date": "Thu, 05 Nov 2026 19:01:00 +0000"},
+            {"id": "spoof", "sender": "Claude <no-reply@anthropic.com.evil.example>", "recipient": "signin@one.example", "date": "2026-11-05T19:05:00Z"},
+            {"id": "elsewhere", "sender": "no-reply@anthropic.com", "recipient": "other@one.example", "date": "2026-11-05T19:06:00Z"},
+            {"id": "undated", "sender": "no-reply@anthropic.com", "recipient": "signin@one.example", "date": "soon"}
+        ]});
+        assert_eq!(
+            sign_in_message(&answer, "signin@one.example", since),
+            Some("newest".into())
+        );
+        // A Gmail, IMAP or Outlook account's rows come as messages.
+        let rows = json!({"messages": [
+            {"providerMessageId": "g1", "sender": "Claude <no-reply@claude.com>", "recipient": "person@mail.example", "date": "2026-11-05T19:00:00Z"}
+        ]});
+        assert_eq!(
+            sign_in_message(&rows, "person@mail.example", since),
+            Some("g1".into())
+        );
+        assert_eq!(sign_in_message(&answer, "nobody@one.example", since), None);
+        assert_eq!(
+            sign_in_message(&json!({"emails": "x"}), "signin@one.example", since),
+            None
+        );
+    }
+
+    #[test]
+    fn exactly_one_https_link_to_a_sign_in_host_is_taken() {
+        let html = r#"<a href="https://claude.ai/magic-link?token=a&amp;b=1">Sign in</a>
+            <a href="https://www.anthropic.com/legal/privacy">Privacy</a>
+            <a href="https://claude.ai/legal/terms">Terms</a> <a href="https://claude.ai/">Claude</a>"#;
+        let text = "Sign in: https://claude.ai/magic-link?token=a&b=1.";
+        assert_eq!(
+            sign_in_link(text, Some(html)),
+            Ok("https://claude.ai/magic-link?token=a&b=1".into())
+        );
+        // Plain http, a look-alike host, credentials in the host: none of them.
+        assert_eq!(
+            sign_in_link(
+                "http://claude.ai/x https://claude.ai.evil.example/x https://claude.ai@evil.example/x",
+                None
+            ),
+            Err(NoLink::None)
+        );
+        assert_eq!(
+            sign_in_link("https://claude.ai/a https://login.claude.com/b", None),
+            Err(NoLink::Several)
+        );
+        assert_eq!(sign_in_link("", None), Err(NoLink::None));
+    }
+
+    /// A mailbox that answers each look from a script: the n-th search gets the n-th answer (the
+    /// last one again after that), and reads come from `bodies`.
+    type Body = Result<(String, Option<String>), String>;
+    struct Script {
+        searches: Vec<Result<serde_json::Value, String>>,
+        bodies: Vec<(&'static str, Body)>,
+        looks: std::cell::Cell<usize>,
+        reads: std::cell::Cell<usize>,
+    }
+    impl Reader for Script {
+        fn search(&self, _email: &str) -> Result<serde_json::Value, String> {
+            let n = self.looks.get();
+            self.looks.set(n + 1);
+            self.searches[n.min(self.searches.len() - 1)].clone()
+        }
+        fn read(&self, id: &str) -> Result<(String, Option<String>), String> {
+            let n = self.reads.get();
+            self.reads.set(n + 1);
+            let matching: Vec<_> = self.bodies.iter().filter(|(i, _)| *i == id).collect();
+            matching[n.min(matching.len() - 1)].1.clone()
+        }
+    }
+    fn run(script: &Script) -> (Waited, std::time::Duration) {
+        let clock = std::cell::Cell::new(std::time::Duration::ZERO);
+        let waited = wait_for_link(
+            script,
+            "signin@one.example",
+            arrived("2026-11-05T19:00:00Z").unwrap(),
+            POLL_EVERY,
+            POLL_FOR,
+            &|| clock.get(),
+            &|d| clock.set(clock.get() + d),
+        );
+        (waited, clock.get())
+    }
+    fn mail() -> serde_json::Value {
+        json!({"emails": [{"id": "m1", "sender": "no-reply@mail.anthropic.com", "recipient": "signin@one.example", "date": "2026-11-05T19:00:30Z"}]})
+    }
+
+    #[test]
+    fn the_wait_takes_the_link_once_the_mail_arrives_and_retries_a_failed_look() {
+        let script = Script {
+            searches: vec![
+                Ok(json!({"emails": []})),
+                Err("unreachable".into()),
+                Ok(mail()),
+            ],
+            bodies: vec![
+                ("m1", Err("unreachable".into())),
+                (
+                    "m1",
+                    Ok(("Sign in: https://claude.ai/magic-link?t=1".into(), None)),
+                ),
+            ],
+            looks: Default::default(),
+            reads: Default::default(),
+        };
+        let (waited, after) = run(&script);
+        assert_eq!(
+            waited,
+            Waited::Link("https://claude.ai/magic-link?t=1".into())
+        );
+        assert_eq!(
+            script.looks.get(),
+            4,
+            "the read that failed is tried at the next look"
+        );
+        assert_eq!(after, POLL_EVERY * 3);
+    }
+
+    #[test]
+    fn the_wait_ends_without_a_link_when_none_comes_in_time() {
+        let empty = Script {
+            searches: vec![Ok(json!({"emails": []}))],
+            bodies: vec![],
+            looks: Default::default(),
+            reads: Default::default(),
+        };
+        let (waited, after) = run(&empty);
+        assert_eq!(waited, Waited::TimedOut(None));
+        assert!(after <= POLL_FOR, "{after:?}");
+        // A look at the start and one every POLL_EVERY up to and including POLL_FOR.
+        assert_eq!(
+            empty.looks.get() as u64,
+            POLL_FOR.as_secs() / POLL_EVERY.as_secs() + 1
+        );
+        // A mailbox that never answers names its last error.
+        let down = Script {
+            searches: vec![Err("forbidden".into())],
+            bodies: vec![],
+            looks: Default::default(),
+            reads: Default::default(),
+        };
+        assert_eq!(run(&down).0, Waited::TimedOut(Some("forbidden".into())));
+        // The mail with two different links stops at once for a person.
+        let two = Script {
+            searches: vec![Ok(mail())],
+            bodies: vec![(
+                "m1",
+                Ok(("https://claude.ai/a https://claude.ai/b".into(), None)),
+            )],
+            looks: Default::default(),
+            reads: Default::default(),
+        };
+        assert_eq!(
+            run(&two),
+            (Waited::NoLink(NoLink::Several), std::time::Duration::ZERO)
+        );
     }
 
     #[test]
