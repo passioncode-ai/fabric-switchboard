@@ -123,6 +123,22 @@ pub(crate) fn link_into(home: &Path, source: &Path, names: &[&str]) -> usize {
                     continue;
                 }
             }
+            Ok(m) if m.is_dir() && MOVED_ASIDE.contains(name) && from.is_dir() => {
+                // SB-260: the home's own folder hides the operator's from every session there.
+                // It is moved aside once, never deleted, and put back when no link can be made.
+                let Some(aside) = aside_name(home, name) else {
+                    continue;
+                };
+                if std::fs::rename(&to, &aside).is_err() {
+                    continue;
+                }
+                if symlink(&from, &to).is_ok() {
+                    linked += 1;
+                } else {
+                    let _ = std::fs::rename(&aside, &to);
+                }
+                continue;
+            }
             Ok(_) => continue,
             Err(_) => {}
         }
@@ -131,6 +147,25 @@ pub(crate) fn link_into(home: &Path, source: &Path, names: &[&str]) -> usize {
         }
     }
     linked
+}
+
+/// Folders a home may hold for real that [`link_into`] moves aside to link the operator's
+/// (SB-260): plugins and skills a session installed into a home before it had the link. Any
+/// other real file or folder in a home is the home's and is never moved.
+const MOVED_ASIDE: &[&str] = &["plugins", "skills"];
+
+/// A free name beside `name` in `home` for a folder moved aside: `<name>.before-switchboard`,
+/// else with a number. None when a hundred are taken.
+fn aside_name(home: &Path, name: &str) -> Option<PathBuf> {
+    (0..100).find_map(|n| {
+        let candidate = match n {
+            0 => home.join(format!("{name}.before-switchboard")),
+            n => home.join(format!("{name}.before-switchboard-{n}")),
+        };
+        std::fs::symlink_metadata(&candidate)
+            .is_err()
+            .then_some(candidate)
+    })
 }
 
 /// [`link_into`] for an organization's shell home (SB-226). Elsewhere exactly [`link_into`]. On
@@ -657,6 +692,38 @@ mod tests {
         );
         // The operator's own folder is never linked into itself.
         assert_eq!(link_into(user.path(), user.path(), CLAUDE_LINKS), 0);
+    }
+
+    #[test]
+    fn a_real_plugins_or_skills_folder_in_the_home_is_moved_aside_once_and_linked() {
+        let user = tempfile::tempdir().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        for name in ["plugins", "skills", "agents"] {
+            std::fs::create_dir(user.path().join(name)).unwrap();
+            std::fs::create_dir(home.path().join(name)).unwrap();
+            std::fs::write(home.path().join(name).join("own.txt"), name).unwrap();
+        }
+        // An earlier folder moved aside keeps its name; the next one takes a number.
+        std::fs::create_dir(home.path().join("skills.before-switchboard")).unwrap();
+        assert_eq!(link_into(home.path(), user.path(), CLAUDE_LINKS), 2);
+        for (name, aside) in [
+            ("plugins", "plugins.before-switchboard"),
+            ("skills", "skills.before-switchboard-1"),
+        ] {
+            let to = home.path().join(name);
+            assert_eq!(std::fs::read_link(&to).unwrap(), user.path().join(name));
+            assert_eq!(
+                std::fs::read_to_string(home.path().join(aside).join("own.txt")).unwrap(),
+                name,
+                "moved aside, never deleted"
+            );
+        }
+        // Any other real folder is the home's and stays.
+        assert!(!home.path().join("agents").is_symlink());
+        assert!(home.path().join("agents/own.txt").is_file());
+        // Again: the links are kept and nothing more is moved.
+        assert_eq!(link_into(home.path(), user.path(), CLAUDE_LINKS), 2);
+        assert!(!home.path().join("plugins.before-switchboard-1").exists());
     }
 
     #[test]
