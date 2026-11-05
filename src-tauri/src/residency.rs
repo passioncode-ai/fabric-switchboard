@@ -97,21 +97,20 @@ pub(crate) fn with_keep_alive(plist: &str) -> Option<String> {
 /// Adds `KEEP_ALIVE` to the login item the autostart plugin just wrote (it has no option for
 /// it), replacing the file by a rename in its folder. launchd reads it at the next login.
 #[cfg(target_os = "macos")]
-fn keep_alive_after_crash() -> Result<(), String> {
-    let home = std::env::var_os("HOME").ok_or("no home folder")?;
+fn keep_alive_after_crash() -> Result<(), ()> {
+    let home = std::env::var_os("HOME").ok_or(())?;
     let path = Path::new(&home)
         .join("Library/LaunchAgents")
         .join(format!("{LOGIN_ITEM_NAME}.plist"));
-    let text = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
+    let text = std::fs::read_to_string(&path).map_err(|_| ())?;
     let Some(text) = with_keep_alive(&text) else {
         return Ok(());
     };
     let temporary = path.with_extension("plist.tmp");
     std::fs::write(&temporary, text)
         .and_then(|()| std::fs::rename(&temporary, &path))
-        .map_err(|e| {
+        .map_err(|_| {
             let _ = std::fs::remove_file(&temporary);
-            e.to_string()
         })
 }
 
