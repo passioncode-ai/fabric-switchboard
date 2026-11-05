@@ -4,8 +4,8 @@
 //!
 //! Every line the log takes (`oplog::event`) is counted by its event name and outcome in the UTC
 //! hour it happened: `failed` when `errors::classify` reads it as an error (SB-248), `unknown`
-//! when it says its outcome is not known, `ok` otherwise. Each closed hour the owner ran through,
-//! an empty one included, folds into one `ops.digest.hourly@1` line of
+//! when it says its outcome is not known, `ok` otherwise. Each closed hour the owner saw itself
+//! running in (SB-257: a pass or a counted line), an empty one included, folds into one `ops.digest.hourly@1` line of
 //! `<data>/digests/hourly-YYYY-MM.jsonl`; each UTC day the day's hourly lines fold into one
 //! `ops.digest.daily@1` line of `daily-YYYY-MM.jsonl` (0600, the folder 0700). Counts only: the
 //! log's codes are fixed `&'static str`, so no value reaches a digest. Failures of an operation that
@@ -24,6 +24,11 @@ const RISE_MIN_FAILED: u64 = 10;
 const RISE_FACTOR: u64 = 2;
 /// Monthly files older than this many months are removed.
 const KEEP_MONTHS: i64 = 3;
+/// SB-257, DEC-0153 OD-1: the hour an owner stops in, kept for the next owner to write.
+const OPEN: &str = "open.json";
+/// A line counts at most this many operations; the rest count under `OTHER` (DEC-0153).
+const MAX_OPS: usize = 4096;
+const OTHER: &str = "other_operations";
 /// Codes that say the outcome is not known.
 const UNKNOWN: &[&str] = &["unknown", "outcome_unknown", "deferred"];
 /// SB-255, OD-3: answers that say an operation was not done because of setup, policy or the
@@ -116,6 +121,9 @@ struct State {
     /// OD-5: the days that closed with hourly lines and no daily one were folded at this
     /// owner's first pass.
     caught_up: bool,
+    /// SB-257, OD-1: the hours this owner saw itself running in (a pass or a counted line); an
+    /// hour the computer slept through is never written as an empty one.
+    seen: std::collections::BTreeSet<i64>,
 }
 
 #[cfg(not(test))]
@@ -179,6 +187,11 @@ fn count_at(op: &'static str, outcome: &str, at: i64) {
                 s.hour = Some(hour);
             }
         }
+        let op = if s.counts.len() >= MAX_OPS - 1 && !s.counts.contains_key(op) {
+            OTHER
+        } else {
+            op
+        };
         let c = s.counts.entry(op).or_default();
         match outcome {
             "ok" => c.ok += 1,
@@ -198,8 +211,13 @@ pub(crate) fn tick(root: &Path, now: i64) {
         return;
     }
     let current = now.div_euclid(HOUR) * HOUR;
+    let starting = with_state(|s| s.first.is_none());
+    if starting {
+        resume(root, current);
+    }
     let (due, previous, catch_up) = with_state(|s| {
-        let first = s.first.get_or_insert(now).div_euclid(HOUR) * HOUR;
+        s.first.get_or_insert(now);
+        s.seen.insert(current);
         // The hour of the lines counted so far closes when the clock has left it.
         if s.hour.is_some_and(|h| h < current) {
             let counts = std::mem::take(&mut s.counts);
@@ -207,17 +225,11 @@ pub(crate) fn tick(root: &Path, now: i64) {
             s.hour = Some(current);
         }
         let mut closed: BTreeMap<i64, Hour> = std::mem::take(&mut s.closed).into_iter().collect();
-        // Empty hours this owner ran through after the last one written.
-        let mut hour = s
-            .written
-            .as_ref()
-            .map(|(h, _)| h + HOUR)
-            .unwrap_or(first)
-            .max(first);
-        while hour < current {
-            closed.entry(hour).or_default();
-            hour += HOUR;
+        // Empty hours this owner saw itself running in (SB-257: never one it slept through).
+        for hour in s.seen.range(..current) {
+            closed.entry(*hour).or_default();
         }
+        s.seen.retain(|h| *h >= current);
         let written = s.written.as_ref().map(|(h, _)| *h);
         closed.retain(|h, _| written.is_none_or(|w| *h > w));
         let catch_up = !std::mem::replace(&mut s.caught_up, true);
@@ -365,6 +377,138 @@ pub(crate) fn fold_day(day: i64, hourly: &[Hourly]) -> Option<Daily> {
         total,
         risen,
     })
+}
+
+/// SB-257, OD-1: at the drain, the hours counted and not yet written (the hour the owner stops
+/// in among them) go to `open.json` for the next owner; an owner that crashes leaves none, and
+/// never a partial line.
+pub(crate) fn save_open(root: &Path) {
+    #[cfg(test)]
+    if !COUNTING.with(|c| c.get()) {
+        return;
+    }
+    let hours: Vec<OpenHour> = with_state(|s| {
+        let mut hours: Vec<OpenHour> = s.closed.iter().map(|(h, c)| OpenHour::of(*h, c)).collect();
+        if let Some(h) = s.hour {
+            if !s.counts.is_empty() || s.seen.contains(&h) {
+                hours.push(OpenHour::of(h, &s.counts));
+            }
+        }
+        let written = s.written.as_ref().map(|(h, _)| *h);
+        hours.retain(|o| written.is_none_or(|w| o.hour > w));
+        hours
+    });
+    if hours.is_empty() {
+        return;
+    }
+    let dir = root.join(DIR);
+    let _ = std::fs::create_dir_all(&dir);
+    if let Ok(text) = serde_json::to_string(&hours) {
+        let temporary = dir.join(format!("{OPEN}.tmp"));
+        let written = {
+            let mut options = std::fs::OpenOptions::new();
+            options.write(true).create(true).truncate(true);
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::OpenOptionsExt;
+                options.mode(0o600);
+            }
+            options
+                .open(&temporary)
+                .and_then(|mut f| f.write_all(text.as_bytes()))
+        };
+        if written.is_ok() {
+            let _ = std::fs::rename(&temporary, dir.join(OPEN));
+        } else {
+            let _ = std::fs::remove_file(&temporary);
+        }
+    }
+}
+
+/// One hour's counts as the drain keeps them.
+#[derive(Serialize, Deserialize)]
+struct OpenHour {
+    hour: i64,
+    ops: BTreeMap<String, Counts>,
+}
+impl OpenHour {
+    fn of(hour: i64, counts: &Hour) -> Self {
+        OpenHour {
+            hour,
+            ops: counts.iter().map(|(k, v)| ((*k).to_owned(), *v)).collect(),
+        }
+    }
+}
+
+/// SB-257, OD-1, at this owner's first pass: `previous` is the last hourly line already written
+/// (this month's or the one before), and the hours the last owner kept at its drain come back:
+/// one before this hour is written once closed, this hour's counts go on. Hours already written
+/// are never written again; `open.json` is read once and removed.
+fn resume(root: &Path, current: i64) {
+    let dir = root.join(DIR);
+    let last = [month(current), month(current - 32 * DAY)]
+        .iter()
+        .flat_map(|m| read::<Hourly>(&dir.join(format!("hourly-{m}.jsonl"))))
+        .filter_map(|h| Some((hour_from_stamp(&h.from)?, h)))
+        .filter(|(h, _)| *h < current)
+        .max_by_key(|(h, _)| *h);
+    let open: Vec<OpenHour> = std::fs::read_to_string(dir.join(OPEN))
+        .ok()
+        .and_then(|t| serde_json::from_str(&t).ok())
+        .unwrap_or_default();
+    let _ = std::fs::remove_file(dir.join(OPEN));
+    with_state(|s| {
+        // Lines counted before this first pass in an hour that has already closed.
+        if let Some(h) = s.hour.filter(|h| *h < current) {
+            let counts = std::mem::take(&mut s.counts);
+            s.closed.push((h, counts));
+            s.hour = None;
+        }
+        if s.written.is_none() {
+            s.written = last;
+        }
+        let written = s.written.as_ref().map(|(h, _)| *h);
+        for o in open {
+            if written.is_some_and(|w| o.hour <= w) || o.hour > current {
+                continue;
+            }
+            let target: &mut Hour = if o.hour == current {
+                s.hour = Some(current);
+                &mut s.counts
+            } else {
+                match s.closed.iter().position(|(h, _)| *h == o.hour) {
+                    Some(i) => &mut s.closed[i].1,
+                    None => {
+                        s.closed.push((o.hour, Hour::new()));
+                        &mut s.closed.last_mut().expect("just pushed").1
+                    }
+                }
+            };
+            for (op, c) in o.ops {
+                if !crate::errors::valid(&op) && op != OTHER {
+                    continue;
+                }
+                // The names are the log's fixed codes; a bounded few are kept for the process.
+                let op: &'static str = Box::leak(op.into_boxed_str());
+                target.entry(op).or_default().add(c);
+            }
+        }
+    });
+}
+
+/// The start of the hour `YYYY-MM-DDTHH:00:00Z` names.
+fn hour_from_stamp(stamp: &str) -> Option<i64> {
+    let y: i64 = stamp.get(0..4)?.parse().ok()?;
+    let m: i64 = stamp.get(5..7)?.parse().ok()?;
+    let d: i64 = stamp.get(8..10)?.parse().ok()?;
+    let h: i64 = stamp.get(11..13)?.parse().ok()?;
+    // Days from the civil date (Howard Hinnant's algorithm).
+    let y = if m <= 2 { y - 1 } else { y };
+    let era = y.div_euclid(400);
+    let yoe = y - era * 400;
+    let doy = (153 * (m + if m > 2 { -3 } else { 9 }) + 2) / 5 + d - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    Some((era * 146_097 + doe - 719_468) * DAY + h * HOUR)
 }
 
 /// How far back the first pass looks for a day left without its daily digest (OD-5).
@@ -637,7 +781,9 @@ mod tests {
         // Inside the hour: nothing is written.
         tick(root.path(), start + 30);
         assert!(!root.path().join(DIR).exists());
-        // Three hours later (one counted, two empty), across midnight.
+        // Two empty hours the owner was seen in, across midnight, then the next hour.
+        tick(root.path(), DAY0 + 23 * HOUR + 5);
+        tick(root.path(), DAY0 + DAY + 5);
         tick(root.path(), DAY0 + DAY + HOUR + 5);
         tick(root.path(), DAY0 + DAY + HOUR + 35);
         COUNTING.with(|c| c.set(false));
@@ -698,6 +844,124 @@ mod tests {
         let daily = read::<Daily>(&dir.join("daily-2024-10.jsonl"));
         let days: Vec<(&str, u64)> = daily.iter().map(|d| (d.day.as_str(), d.hours)).collect();
         assert_eq!(days, [("2024-10-04", 2)]);
+    }
+
+    /// A new owner process: the digest's memory starts empty.
+    fn restart() {
+        STATE.with(|s| *s.borrow_mut() = None);
+    }
+
+    #[test]
+    fn hours_the_computer_slept_through_are_never_written() {
+        // SB-257, OD-1: a pass at 10:00, the computer asleep, the next pass at 15:00.
+        let root = tempfile::tempdir().unwrap();
+        COUNTING.with(|c| c.set(true));
+        restart();
+        count_at("usage_check", "ok", DAY0 + 10 * HOUR + 60);
+        tick(root.path(), DAY0 + 10 * HOUR + 90);
+        tick(root.path(), DAY0 + 15 * HOUR + 30);
+        COUNTING.with(|c| c.set(false));
+        let hourly = read::<Hourly>(&root.path().join(DIR).join("hourly-2024-10.jsonl"));
+        let froms: Vec<&str> = hourly.iter().map(|h| h.from.as_str()).collect();
+        assert_eq!(froms, ["2024-10-04T10:00:00Z"]);
+    }
+
+    #[test]
+    fn the_hour_an_owner_stops_in_is_written_by_the_next_one_once() {
+        // SB-257, OD-1: counted at 10:20, stopped at 10:40 (kept), the next owner starts at
+        // 12:05: 10:00 is written with its counts and `open.json` is gone.
+        let root = tempfile::tempdir().unwrap();
+        let dir = root.path().join(DIR);
+        COUNTING.with(|c| c.set(true));
+        restart();
+        tick(root.path(), DAY0 + 10 * HOUR + 30);
+        count_at("usage_check", "failed", DAY0 + 10 * HOUR + 1200);
+        save_open(root.path());
+        assert!(dir.join(OPEN).exists());
+        restart();
+        tick(root.path(), DAY0 + 12 * HOUR + 300);
+        tick(root.path(), DAY0 + 12 * HOUR + 330);
+        COUNTING.with(|c| c.set(false));
+        assert!(!dir.join(OPEN).exists());
+        let hourly = read::<Hourly>(&dir.join("hourly-2024-10.jsonl"));
+        assert_eq!(hourly.len(), 1);
+        assert_eq!(hourly[0].from, "2024-10-04T10:00:00Z");
+        assert_eq!(hourly[0].total.failed, 1);
+    }
+
+    #[test]
+    fn a_restart_inside_the_hour_goes_on_counting_it_and_writes_it_once() {
+        let root = tempfile::tempdir().unwrap();
+        COUNTING.with(|c| c.set(true));
+        restart();
+        tick(root.path(), DAY0 + 10 * HOUR + 30);
+        count_at("usage_check", "ok", DAY0 + 10 * HOUR + 600);
+        save_open(root.path());
+        restart();
+        count_at("usage_check", "ok", DAY0 + 10 * HOUR + 900);
+        tick(root.path(), DAY0 + 10 * HOUR + 930);
+        tick(root.path(), DAY0 + 11 * HOUR + 30);
+        COUNTING.with(|c| c.set(false));
+        let hourly = read::<Hourly>(&root.path().join(DIR).join("hourly-2024-10.jsonl"));
+        assert_eq!(hourly.len(), 1);
+        assert_eq!(hourly[0].total.ok, 2);
+    }
+
+    #[test]
+    fn after_a_restart_the_next_hour_compares_with_the_last_line_written() {
+        // SB-257, OD-1: after a restart the hour compares with the line written before it, not
+        // with nothing. 10:00 had 8 failures; the next owner counts 20 at 11:00: a rise against 8.
+        let root = tempfile::tempdir().unwrap();
+        let dir = root.path().join(DIR);
+        let mut before = Hour::new();
+        before.insert(
+            "usage_check",
+            Counts {
+                ok: 0,
+                failed: 8,
+                unknown: 0,
+            },
+        );
+        append(
+            &dir,
+            "hourly-2024-10.jsonl",
+            &fold_hour(DAY0 + 10 * HOUR, &before, None),
+        );
+        COUNTING.with(|c| c.set(true));
+        restart();
+        tick(root.path(), DAY0 + 11 * HOUR + 5);
+        for i in 0..20 {
+            count_at("usage_check", "failed", DAY0 + 11 * HOUR + 60 + i);
+        }
+        tick(root.path(), DAY0 + 12 * HOUR + 5);
+        COUNTING.with(|c| c.set(false));
+        let hourly = read::<Hourly>(&dir.join("hourly-2024-10.jsonl"));
+        assert_eq!(hourly.len(), 2);
+        assert_eq!(hourly[1].risen.len(), 1, "{:?}", hourly[1].risen);
+        assert_eq!(hourly[1].risen[0].previous, 8);
+    }
+
+    #[test]
+    fn past_four_thousand_and_ninety_six_operations_the_rest_count_as_one() {
+        COUNTING.with(|c| c.set(true));
+        restart();
+        let at = DAY0 + 10 * HOUR;
+        for i in 0..MAX_OPS + 10 {
+            let op: &'static str = Box::leak(format!("op_{i}").into_boxed_str());
+            count_at(op, "ok", at);
+        }
+        let (len, other) = with_state(|s| (s.counts.len(), s.counts.get(OTHER).map(|c| c.ok)));
+        COUNTING.with(|c| c.set(false));
+        restart();
+        assert_eq!(len, MAX_OPS);
+        assert_eq!(other, Some(11));
+    }
+
+    #[test]
+    fn a_stamp_reads_back_as_its_hour() {
+        for hour in [DAY0, DAY0 + 23 * HOUR, 0, 19_000 * DAY + 5 * HOUR] {
+            assert_eq!(hour_from_stamp(&stamp(hour)), Some(hour));
+        }
     }
 
     #[test]

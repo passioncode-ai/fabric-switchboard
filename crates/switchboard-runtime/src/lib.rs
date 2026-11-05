@@ -2705,6 +2705,8 @@ impl Owner {
         runtime.codex_route_sync(false);
         runtime.absorb_statistics();
         runtime.statistics.save(&runtime.root, monitor::now(), true);
+        // SB-257: the hour the owner stops in is written by the next one once it has closed.
+        digest::save_open(&runtime.root);
         let _ = runtime.store.flush();
         drop(transaction);
         let millis = started.elapsed().as_millis() as u64;
