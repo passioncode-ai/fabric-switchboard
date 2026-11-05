@@ -196,6 +196,71 @@ pub(crate) fn sign_in_link(text: &str, html: Option<&str>) -> Result<String, NoL
     }
 }
 
+/// How often the mailbox is searched while a sign-in waits for its mail, and for how long (SB-256
+/// design, step 4).
+pub(crate) const POLL_EVERY: std::time::Duration = std::time::Duration::from_secs(5);
+pub(crate) const POLL_FOR: std::time::Duration = std::time::Duration::from_secs(300);
+
+/// What the sign-in reads of one mailbox: the client of Fabric Inbox's agent protocol, a fake in
+/// tests. Errors are short codes, never a message's text.
+pub(crate) trait Reader {
+    /// A search of the mailbox for mail to `email` (`search_mailbox`'s answer).
+    fn search(&self, email: &str) -> Result<serde_json::Value, String>;
+    /// One message's text and HTML (`read_message` with `includeHtml`).
+    fn read(&self, id: &str) -> Result<(String, Option<String>), String>;
+}
+
+/// How waiting for the sign-in mail ended.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum Waited {
+    /// The one sign-in link of the mail.
+    Link(String),
+    /// The mail came without one usable link; a person signs in.
+    NoLink(NoLink),
+    /// No mail in time; the last error the mailbox gave, if every look failed.
+    TimedOut(Option<String>),
+}
+
+/// Searches `reader` every `every` until Anthropic's sign-in mail to `email`, sent at or after
+/// `since` (seconds since the epoch), is there, then takes its link. A failed search or read is
+/// tried again at the next look; after `give_up` it times out. `elapsed` and `sleep` are the
+/// clock, so a test runs it without waiting.
+pub(crate) fn wait_for_link(
+    reader: &dyn Reader,
+    email: &str,
+    since: i64,
+    every: std::time::Duration,
+    give_up: std::time::Duration,
+    elapsed: &dyn Fn() -> std::time::Duration,
+    sleep: &dyn Fn(std::time::Duration),
+) -> Waited {
+    let mut last_error = None;
+    let mut found_any = false;
+    loop {
+        match reader.search(email) {
+            Ok(answer) => {
+                found_any = true;
+                if let Some(id) = sign_in_message(&answer, email, since) {
+                    match reader.read(&id) {
+                        Ok((text, html)) => {
+                            return match sign_in_link(&text, html.as_deref()) {
+                                Ok(link) => Waited::Link(link),
+                                Err(why) => Waited::NoLink(why),
+                            };
+                        }
+                        Err(e) => last_error = Some(e),
+                    }
+                }
+            }
+            Err(e) => last_error = Some(e),
+        }
+        if elapsed() + every > give_up {
+            return Waited::TimedOut(if found_any { None } else { last_error });
+        }
+        sleep(every);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -336,6 +401,116 @@ mod tests {
             Err(NoLink::Several)
         );
         assert_eq!(sign_in_link("", None), Err(NoLink::None));
+    }
+
+    /// A mailbox that answers each look from a script: the n-th search gets the n-th answer (the
+    /// last one again after that), and reads come from `bodies`.
+    type Body = Result<(String, Option<String>), String>;
+    struct Script {
+        searches: Vec<Result<serde_json::Value, String>>,
+        bodies: Vec<(&'static str, Body)>,
+        looks: std::cell::Cell<usize>,
+        reads: std::cell::Cell<usize>,
+    }
+    impl Reader for Script {
+        fn search(&self, _email: &str) -> Result<serde_json::Value, String> {
+            let n = self.looks.get();
+            self.looks.set(n + 1);
+            self.searches[n.min(self.searches.len() - 1)].clone()
+        }
+        fn read(&self, id: &str) -> Result<(String, Option<String>), String> {
+            let n = self.reads.get();
+            self.reads.set(n + 1);
+            let matching: Vec<_> = self.bodies.iter().filter(|(i, _)| *i == id).collect();
+            matching[n.min(matching.len() - 1)].1.clone()
+        }
+    }
+    fn run(script: &Script) -> (Waited, std::time::Duration) {
+        let clock = std::cell::Cell::new(std::time::Duration::ZERO);
+        let waited = wait_for_link(
+            script,
+            "signin@one.example",
+            arrived("2026-11-05T19:00:00Z").unwrap(),
+            POLL_EVERY,
+            POLL_FOR,
+            &|| clock.get(),
+            &|d| clock.set(clock.get() + d),
+        );
+        (waited, clock.get())
+    }
+    fn mail() -> serde_json::Value {
+        json!({"emails": [{"id": "m1", "sender": "no-reply@mail.anthropic.com", "recipient": "signin@one.example", "date": "2026-11-05T19:00:30Z"}]})
+    }
+
+    #[test]
+    fn the_wait_takes_the_link_once_the_mail_arrives_and_retries_a_failed_look() {
+        let script = Script {
+            searches: vec![
+                Ok(json!({"emails": []})),
+                Err("unreachable".into()),
+                Ok(mail()),
+            ],
+            bodies: vec![
+                ("m1", Err("unreachable".into())),
+                (
+                    "m1",
+                    Ok(("Sign in: https://claude.ai/magic-link?t=1".into(), None)),
+                ),
+            ],
+            looks: Default::default(),
+            reads: Default::default(),
+        };
+        let (waited, after) = run(&script);
+        assert_eq!(
+            waited,
+            Waited::Link("https://claude.ai/magic-link?t=1".into())
+        );
+        assert_eq!(
+            script.looks.get(),
+            4,
+            "the read that failed is tried at the next look"
+        );
+        assert_eq!(after, POLL_EVERY * 3);
+    }
+
+    #[test]
+    fn the_wait_ends_without_a_link_when_none_comes_in_time() {
+        let empty = Script {
+            searches: vec![Ok(json!({"emails": []}))],
+            bodies: vec![],
+            looks: Default::default(),
+            reads: Default::default(),
+        };
+        let (waited, after) = run(&empty);
+        assert_eq!(waited, Waited::TimedOut(None));
+        assert!(after <= POLL_FOR, "{after:?}");
+        // A look at the start and one every POLL_EVERY up to and including POLL_FOR.
+        assert_eq!(
+            empty.looks.get() as u64,
+            POLL_FOR.as_secs() / POLL_EVERY.as_secs() + 1
+        );
+        // A mailbox that never answers names its last error.
+        let down = Script {
+            searches: vec![Err("forbidden".into())],
+            bodies: vec![],
+            looks: Default::default(),
+            reads: Default::default(),
+        };
+        assert_eq!(run(&down).0, Waited::TimedOut(Some("forbidden".into())));
+        // The mail with two different links stops at once for a person.
+        let two = Script {
+            searches: vec![Ok(mail())],
+            bodies: vec![(
+                "m1",
+                Ok(("https://claude.ai/a https://claude.ai/b".into(), None)),
+            )],
+            looks: Default::default(),
+            reads: Default::default(),
+        };
+        assert_eq!(
+            run(&two),
+            (Waited::NoLink(NoLink::Several), std::time::Duration::ZERO)
+        );
     }
 
     #[test]
