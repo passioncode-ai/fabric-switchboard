@@ -508,7 +508,11 @@ async fn organization_add(
 /// SB-265: the GitHub owners the person's `gh` can see.
 #[tauri::command]
 async fn github_owners(state: State<'_, Slot>) -> Result<Value, String> {
-    state.runtime().await?.execute(Operation::GithubOwners).await
+    state
+        .runtime()
+        .await?
+        .execute(Operation::GithubOwners)
+        .await
 }
 /// SB-265: one owner's repositories matched with this computer.
 #[tauri::command]
