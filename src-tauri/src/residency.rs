@@ -78,6 +78,43 @@ pub fn plugin<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
     builder.build()
 }
 
+/// SB-254: launchd starts the app again when it ends with a failure (a crash), never after a
+/// quit, which ends with 0; a start that keeps failing is tried at most every 30 s.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+const KEEP_ALIVE: &str = "<key>KeepAlive</key>\n  <dict>\n    <key>SuccessfulExit</key>\n    <false/>\n  </dict>\n  <key>ThrottleInterval</key>\n  <integer>30</integer>";
+
+/// The login item's property list with `KEEP_ALIVE` added before its closing `</dict>`; `None`
+/// when it already has a `KeepAlive` (the person's or ours) or is not a property list.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub(crate) fn with_keep_alive(plist: &str) -> Option<String> {
+    if plist.contains("<key>KeepAlive</key>") || !plist.contains("<key>RunAtLoad</key>") {
+        return None;
+    }
+    let at = plist.rfind("</dict>")?;
+    // Before `</dict>`, after its own indentation, so the closing line keeps its form.
+    Some(format!("{}{KEEP_ALIVE}\n  {}", &plist[..at], &plist[at..]))
+}
+
+/// Adds `KEEP_ALIVE` to the login item the autostart plugin just wrote (it has no option for
+/// it), replacing the file by a rename in its folder. launchd reads it at the next login.
+#[cfg(target_os = "macos")]
+fn keep_alive_after_crash() -> Result<(), ()> {
+    let home = std::env::var_os("HOME").ok_or(())?;
+    let path = Path::new(&home)
+        .join("Library/LaunchAgents")
+        .join(format!("{LOGIN_ITEM_NAME}.plist"));
+    let text = std::fs::read_to_string(&path).map_err(|_| ())?;
+    let Some(text) = with_keep_alive(&text) else {
+        return Ok(());
+    };
+    let temporary = path.with_extension("plist.tmp");
+    std::fs::write(&temporary, text)
+        .and_then(|()| std::fs::rename(&temporary, &path))
+        .map_err(|_| {
+            let _ = std::fs::remove_file(&temporary);
+        })
+}
+
 /// Applies the saved choice at start. Enabling again rewrites the entry with the current path,
 /// so a moved app keeps opening at login. Failures are logged, never fatal.
 pub fn apply_at_start(app: &AppHandle, root: &Path) {
@@ -88,6 +125,18 @@ pub fn apply_at_start(app: &AppHandle, root: &Path) {
         AtStart::Leave => return,
         AtStart::Enable => {
             let done = manager.enable().map_err(|e| e.to_string());
+            #[cfg(target_os = "macos")]
+            if done.is_ok() && keep_alive_after_crash().is_err() {
+                // The item still opens the app at login; only the restart after a crash is
+                // missing, so the start goes on.
+                switchboard_runtime::oplog::event(
+                    "login_item",
+                    &[(
+                        "keep_alive",
+                        switchboard_runtime::oplog::Field::Code("failed"),
+                    )],
+                );
+            }
             if done.is_ok() && choice.is_none() {
                 let _ = write_choice(root, true);
             }
@@ -408,6 +457,27 @@ mod tests {
         assert_eq!(at_start(Some("off\n"), true), AtStart::Disable);
         // An unreadable choice falls back to the default rather than failing the start.
         assert_eq!(at_start(Some("garbage"), true), AtStart::Enable);
+    }
+
+    #[test]
+    fn the_login_item_restarts_the_app_after_a_crash_never_after_a_quit() {
+        // SB-254: what tauri-plugin-autostart 2 (auto-launch 0.6) writes.
+        let written = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<plist version=\"1.0\">\n  <dict>\n  <key>Label</key>\n  <string>ai.passioncode.fabric-switchboard</string>\n  <key>ProgramArguments</key>\n  <array><string>/Applications/Fabric Switchboard.app/Contents/MacOS/fabric-switchboard</string><string>--background</string></array>\n  <key>RunAtLoad</key>\n  <true/>\n  </dict>\n</plist>";
+        let kept = with_keep_alive(written).unwrap();
+        let at = kept.find("<key>KeepAlive</key>").unwrap();
+        assert!(at > kept.find("<key>RunAtLoad</key>").unwrap());
+        assert!(at < kept.rfind("</dict>").unwrap());
+        assert!(kept.contains("<key>SuccessfulExit</key>\n    <false/>"));
+        assert!(kept.contains("<key>ThrottleInterval</key>\n  <integer>30</integer>"));
+        assert!(kept.ends_with("  </dict>\n</plist>"));
+        // Once only, and never over a KeepAlive someone else set.
+        assert_eq!(with_keep_alive(&kept), None);
+        let theirs = written.replace(
+            "<key>RunAtLoad</key>",
+            "<key>KeepAlive</key><true/><key>RunAtLoad</key>",
+        );
+        assert_eq!(with_keep_alive(&theirs), None);
+        assert_eq!(with_keep_alive("not a plist"), None);
     }
 
     #[test]
