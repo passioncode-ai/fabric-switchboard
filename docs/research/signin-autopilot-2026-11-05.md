@@ -1,6 +1,6 @@
 # Sign-in autopilot: the browser step of a Claude sign-in done for the person (SB-256)
 
-Design note, 2026-11-05. Status: designed, not built. Owner: fabric-switchboard.
+Design note, 2026-11-05. Status: N1 released in 0.7.13; N2 built (`crates/switchboard-runtime/src/inbox.rs`); N3 to N5 not built. Owner: fabric-switchboard.
 
 ## What the operator asked
 
@@ -46,6 +46,14 @@ signed in in Switchboard.
 2. **The account's e-mail.** "Sign in again" passes the account's known e-mail; a new account asks
    for one. The autopilot runs only when that address is one Fabric Inbox receives (its mailbox
    list, or a domain whose catch-all it serves); otherwise the ordinary Terminal sign-in runs.
+   Built as N2 (`inbox.rs`): `sign_in_email` takes the e-mail captured with the account
+   (`ExternalIdentity.email`); `mailboxes` reads Fabric Inbox's account list (each account's
+   `email`, and `catchAll: true` on a Cloudflare address that keeps its domain's other mail;
+   `GET /api/inbox` in fabric-inbox `workers/routes/inbox.ts`); `receives` answers `Mailbox` for
+   an exact address and `CatchAll` for an address on a catch-all's domain, compared trimmed and
+   lower-case, and nothing for a subdomain or anything not a plain address. A catch-all can lose
+   an address to a Cloudflare rule the list does not show; the mail search of step 4 then finds
+   nothing in time and the ordinary sign-in runs. Tests: `inbox::tests::*`.
 3. **Browser, step 1.** Switchboard asks the browser service to open the manual URL in a dedicated
    stored profile, type the e-mail and continue, and stop on the "check your e-mail" page.
 4. **The mail.** Switchboard polls Fabric Inbox (every 5 s for up to 5 minutes) for a message to that
