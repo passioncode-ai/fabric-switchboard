@@ -8,6 +8,8 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- When Switchboard finds that another program took the port its proxy used, it now starts with a new key for its sessions, so nothing the other program may have received still works. Sessions started before have to be started again (SB-269).
+
 ## 0.7.17
 
 - New: adding an organization can bring in its GitHub organization's repositories. Choose one of the GitHub organizations your GitHub CLI can see; the ones already on this computer go into the organization's group, the missing ones are cloned into a folder you pick, and new repositories join the group later. Folders you already keep can be added in the same dialog (SB-265).
