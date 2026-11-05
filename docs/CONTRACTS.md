@@ -2447,6 +2447,20 @@ Switchboard reads its own operations log as fabric-agent-contract DEC-0153
   older than three months are removed
   (`the_log_counts_by_outcome_and_each_hour_the_owner_ran_through_is_written_once`,
   `a_day_folds_each_hour_once_and_sums_its_rises`, `files_older_than_three_months_go`).
+- **Stops, restarts and sleep (SB-257, DEC-0153 OD-1 as of `ddf5b684`).** An hour is written only
+  when the owner saw itself running in it (a background pass or a counted line), so hours the
+  computer slept through are never written as empty ones. At the drain the hours counted and not
+  yet written, the hour the owner stops in among them, go to `<data>/digests/open.json` (0600); the
+  next owner reads it once at its first pass, removes it, goes on counting an hour that is still
+  current and writes the others once closed; a crash leaves no file and no partial line. At its
+  first pass an owner takes the last hourly line already written as the hour before, so the hour
+  right after a restart compares with it. A line counts at most 4096 operations, the rest as
+  `other_operations`
+  (`hours_the_computer_slept_through_are_never_written`,
+  `the_hour_an_owner_stops_in_is_written_by_the_next_one_once`,
+  `a_restart_inside_the_hour_goes_on_counting_it_and_writes_it_once`,
+  `after_a_restart_the_next_hour_compares_with_the_last_line_written`,
+  `past_four_thousand_and_ninety_six_operations_the_rest_count_as_one`).
 - **Rises (OD-4, OD-8).** An operation with at least 10 failures in an hour and at least twice the
   hour before's (none counts as one; a gap compares with nothing) is in `risen`, and is logged as
   `failures_rose` with `op`, `failed` and `previous`
