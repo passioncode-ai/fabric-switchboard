@@ -86,8 +86,9 @@ enum Command {
         command: Option<SessionsCommand>,
     },
     /// Which account serves a provider's group (or one launch), since when and why: its handle,
-    /// never its id, and the limit of the account it replaced. Read by Fabric (SB-47). Reads only.
+    /// never its id, and the limit of the account it replaced. Fabric reads it. Reads only.
     Provenance {
+        /// The provider whose group to read; give it or `--launch-id`.
         #[arg(long, value_enum)]
         provider: Option<ProviderArg>,
         /// The group's id (`switchboard projects list`); the default group when left out.
@@ -3513,6 +3514,7 @@ mod mcp_parity {
         ("status", Tool("switchboard_status")),
         // `sessions` itself (and its `--all`, `--history`) answers through the same tool.
         ("sessions show", Tool("switchboard_sessions")),
+        ("provenance", Tool("switchboard_provenance")),
         ("current", Tool("switchboard_status")),
         ("rotation status", Tool("switchboard_rotation")),
         ("rotation set", Tool("switchboard_rotation_set")),
