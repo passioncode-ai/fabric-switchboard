@@ -243,7 +243,14 @@ pub(crate) fn key(snapshot: &Snapshot, sources: &Sources) -> u64 {
                         .and_then(|m| m.modified())
                         .ok()
                 };
-                stamp("settings.json").hash(&mut h);
+                // SB-262: settings.json is copied, not linked, so a link the person keeps it
+                // behind (dotfiles) counts by its target's time as well as its own.
+                let settings = user.join("settings.json");
+                (
+                    stamp("settings.json"),
+                    std::fs::metadata(&settings).and_then(|m| m.modified()).ok(),
+                )
+                    .hash(&mut h);
                 for name in crate::carry::CLAUDE_LINKS
                     .iter()
                     .chain(["AGENTS.md"].iter())
@@ -533,6 +540,49 @@ mod tests {
         let f = w.work.join(name);
         std::fs::create_dir_all(&f).unwrap();
         f
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_settings_file_kept_behind_a_link_counts_its_targets_changes() {
+        // SB-262 (the PassionCode launcher's blind reading, thread `16ebb95e`): a settings.json
+        // that is a link to a dotfiles copy changed only its target, and the homes were not built
+        // again.
+        static USER: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+        let w = world();
+        let user = w.work.join("claude");
+        let dotfiles = w.work.join("dotfiles");
+        std::fs::create_dir_all(&user).unwrap();
+        std::fs::create_dir_all(&dotfiles).unwrap();
+        let target = dotfiles.join("settings.json");
+        std::fs::write(&target, "{}").unwrap();
+        std::os::unix::fs::symlink(&target, user.join("settings.json")).unwrap();
+        USER.set(user).unwrap();
+        let sources = Sources {
+            user: |_| USER.get().cloned(),
+            board: |_| None,
+        };
+        let acme = folder(&w, "acme");
+        let snapshot = Snapshot {
+            organizations: vec![org(O1)],
+            projects: vec![group("acme", &[&acme], Some(O1))],
+            accounts: vec![account("a", "acme", Provider::Claude)],
+            ..Snapshot::default()
+        };
+        let before = key(&snapshot, &sources);
+        assert_eq!(key(&snapshot, &sources), before, "nothing changed");
+        std::fs::write(&target, "{\"permissions\": {}}").unwrap();
+        std::fs::File::options()
+            .write(true)
+            .open(&target)
+            .unwrap()
+            .set_modified(std::time::SystemTime::now() + std::time::Duration::from_secs(60))
+            .unwrap();
+        assert_ne!(
+            key(&snapshot, &sources),
+            before,
+            "the target's change counts"
+        );
     }
 
     #[test]
