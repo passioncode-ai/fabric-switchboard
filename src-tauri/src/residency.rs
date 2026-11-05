@@ -126,18 +126,16 @@ pub fn apply_at_start(app: &AppHandle, root: &Path) {
         AtStart::Enable => {
             let done = manager.enable().map_err(|e| e.to_string());
             #[cfg(target_os = "macos")]
-            if done.is_ok() {
-                if keep_alive_after_crash().is_err() {
-                    // The item still opens the app at login; only the restart after a crash is
-                    // missing, so the start goes on.
-                    switchboard_runtime::oplog::event(
-                        "login_item",
-                        &[(
-                            "keep_alive",
-                            switchboard_runtime::oplog::Field::Code("failed"),
-                        )],
-                    );
-                }
+            if done.is_ok() && keep_alive_after_crash().is_err() {
+                // The item still opens the app at login; only the restart after a crash is
+                // missing, so the start goes on.
+                switchboard_runtime::oplog::event(
+                    "login_item",
+                    &[(
+                        "keep_alive",
+                        switchboard_runtime::oplog::Field::Code("failed"),
+                    )],
+                );
             }
             if done.is_ok() && choice.is_none() {
                 let _ = write_choice(root, true);
