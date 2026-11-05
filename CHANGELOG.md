@@ -8,6 +8,8 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- When two people share a Mac, each with their own Switchboard, a project folder both of them work in keeps the Claude Code route of the person who set it up first; the other person's Switchboard leaves that folder alone instead of overwriting it (SB-251).
+
 ## 0.7.11
 
 - The automatic fallback no longer takes over the work of a session Fabric started for a board request, even when that session looks like an ordinary one; Fabric alone hands such work on (SB-253).

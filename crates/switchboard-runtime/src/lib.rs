@@ -1282,6 +1282,10 @@ impl Runtime {
                                 "user_values",
                                 oplog::Field::Number(report.user_values_present.len() as i64),
                             ),
+                            (
+                                "another_user",
+                                oplog::Field::Number(report.another_user.len() as i64),
+                            ),
                         ],
                     );
                 }
@@ -3034,8 +3038,9 @@ fn canonical_near(path: &Path) -> PathBuf {
     path.to_owned()
 }
 /// What the previous bindings sync left as it was (PRD-13): the folders holding the person's own
-/// `ANTHROPIC_*` values and the folders skipped, each sorted.
-type BindingSets = (Vec<String>, Vec<String>);
+/// `ANTHROPIC_*` values, the folders skipped and the folders of another user (SB-251), each
+/// sorted.
+type BindingSets = (Vec<String>, Vec<String>, Vec<String>);
 /// Whether a bindings sync is worth a `claude_binding` line (SB-155): a folder bound or removed,
 /// or a change in the set of folders skipped or holding the person's own values since `last`,
 /// the sets at the previous sync (PRD-13: an unchanged set logged every sync; N1 round 1: the
@@ -3047,10 +3052,14 @@ fn binding_changed(report: &bindings::Report, last: &mut Option<BindingSets>) ->
         list.dedup();
         list
     };
-    let sets = (sorted(&report.user_values_present), sorted(&report.skipped));
+    let sets = (
+        sorted(&report.user_values_present),
+        sorted(&report.skipped),
+        sorted(&report.another_user),
+    );
     let sets_changed = match last.as_ref() {
         Some(previous) => *previous != sets,
-        None => !sets.0.is_empty() || !sets.1.is_empty(),
+        None => !sets.0.is_empty() || !sets.1.is_empty() || !sets.2.is_empty(),
     };
     *last = Some(sets);
     sets_changed || report.bound + report.removed > 0
@@ -4971,6 +4980,12 @@ async fn execute(
                         .user_values_present
                         .iter()
                         .map(|f| json!({"folder": f, "reason": "persons_values"})),
+                )
+                .chain(
+                    report
+                        .another_user
+                        .iter()
+                        .map(|f| json!({"folder": f, "reason": "another_user"})),
                 )
                 .collect();
             Ok(
