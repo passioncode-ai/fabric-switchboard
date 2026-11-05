@@ -2358,7 +2358,9 @@ managed home); measured in [the A-0 record](evidence/shell-home-measurement-2026
   anything on a network share are not carried), `.claude.json` with `hasCompletedOnboarding` and, when the person
   registered one, `mcpServers.fabric` (the board server, as launches carry it; other keys of the
   file are Claude Code's and stay), and `settings.json` (0600) = the person's carried settings
-  without what signs in, with `env` = `{"ANTHROPIC_AUTH_TOKEN": "switchboard-shell"}`. The
+  without what signs in (rebuilt when the person's `settings.json` changes: the fingerprint counts its
+  time and, when it is a link, its target's, SB-262,
+  `a_settings_file_kept_behind_a_link_counts_its_targets_changes`), with `env` = `{"ANTHROPIC_AUTH_TOKEN": "switchboard-shell"}`. The
   placeholder is a fixed word, not a credential: the folder's `settings.local.json` carries the
   route and the folder's capability header and the proxy authenticates by the header. Test:
   `an_organization_pools_shell_home_has_the_placeholder_carried_links_and_no_credential` (no
