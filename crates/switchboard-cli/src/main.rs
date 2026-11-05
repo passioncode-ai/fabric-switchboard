@@ -547,6 +547,11 @@ enum SettingsCmd {
         /// machine's own), the agents' settings and the automatic switching settings.
         #[arg(long)]
         apply: bool,
+        /// With `--apply`: clone the groups' repositories that are on GitHub but not on this
+        /// computer into the first `--under` folder, with your GitHub CLI (`gh`), so their groups
+        /// are made from them.
+        #[arg(long)]
+        clone: bool,
     },
 }
 #[derive(Subcommand)]
@@ -1377,7 +1382,12 @@ async fn run(cli: &Cli) -> Result<Value, String> {
         Command::Stats { days } => Operation::Statistics { days: Some(*days) },
         Command::Settings { command } => match command {
             SettingsCmd::Export => Operation::SettingsExport,
-            SettingsCmd::Import { file, under, apply } => {
+            SettingsCmd::Import {
+                file,
+                under,
+                apply,
+                clone,
+            } => {
                 let meta = std::fs::metadata(file).map_err(|_| "Settings file unavailable.")?;
                 if meta.len() > switchboard_runtime::settings_bundle::MAX_BYTES as u64 {
                     return Err(switchboard_runtime::settings_bundle::NOT_A_BUNDLE.into());
@@ -1389,10 +1399,14 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                 if value.get("format").is_none() && value["data"].get("format").is_some() {
                     value = value["data"].take();
                 }
+                if *clone && !*apply {
+                    return Err("Clone with --apply: a preview clones nothing.".into());
+                }
                 Operation::SettingsImport {
                     bundle: value,
                     under: under.clone(),
                     apply: *apply,
+                    clone: *clone,
                 }
             }
         },

@@ -422,6 +422,10 @@ pub enum Operation {
         under: Vec<PathBuf>,
         #[serde(default)]
         apply: bool,
+        /// SB-268: with `apply`, clone the groups' missing GitHub repositories into the first
+        /// `under` folder with the person's `gh` first.
+        #[serde(default)]
+        clone: bool,
     },
     /// SB-145: what the proxy relayed in the last `days` days (1 to 90, default 30), by project,
     /// account, coding agent and day: requests, outcomes and the provider's token counts. Reads
@@ -5468,6 +5472,7 @@ async fn execute(
             bundle,
             under,
             apply,
+            clone,
         } => {
             let bytes = serde_json::to_vec(&bundle).map_err(|_| settings_bundle::NOT_A_BUNDLE)?;
             let bundle = settings_bundle::parse(&bytes)?;
@@ -5481,7 +5486,27 @@ async fn execute(
             if !apply {
                 return Ok(json!({"preview": plan, "applied": false}));
             }
-            let done = settings_bundle::apply(&store, root, &bundle, &plan);
+            let done = if clone {
+                let into = under[0].clone();
+                blocking::run(|| {
+                    settings_bundle::apply_with(
+                        &store,
+                        root,
+                        &bundle,
+                        &plan,
+                        Some(&into),
+                        &|owner, name, into| {
+                            let done = github::clone(owner, name, into)?;
+                            done["folder"]
+                                .as_str()
+                                .map(PathBuf::from)
+                                .ok_or_else(|| github::CLONE_FAILED.to_string())
+                        },
+                    )
+                })
+            } else {
+                settings_bundle::apply(&store, root, &bundle, &plan)
+            };
             Ok(json!({"preview": plan, "applied": true, "result": done}))
         }
         Operation::RepositoryMap { under } => {
