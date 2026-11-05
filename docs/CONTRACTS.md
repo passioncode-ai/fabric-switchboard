@@ -2444,7 +2444,10 @@ Switchboard reads its own operations log as fabric-agent-contract DEC-0153
   `failures_rose` with `op`, `failed` and `previous`
   (`a_rise_is_ten_failures_and_twice_the_hour_before_and_a_gap_compares_with_none`).
 - **What it holds (OD-7).** Operation names and counts only; nothing leaves the machine. Sending the
-  daily digest onward (ADR-0188 §3, Fabric CO-503 and Observatory OBS-330) is not built yet.
+  daily digest onward is Fabric's (CO-503, decided 2026-11-05 on board thread `f7758225`): Switchboard
+  has no fabric-service descriptor, so Fabric keeps its `digests` folder in a built-in list of
+  known hosts (source `app`) and reads `daily-YYYY-MM.jsonl` itself; Switchboard sends nothing.
+  Moving the folder is announced on that thread before the release that moves it.
   `switchboard uninstall` removes `digests`.
 
 ## Provenance (SB-47, 2026-11-05)
