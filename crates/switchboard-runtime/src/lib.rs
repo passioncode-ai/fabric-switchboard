@@ -2589,7 +2589,7 @@ async fn start_proxy(root: &Path, store: Arc<Store>) -> Result<ProxyHandle, Stri
         }
     }
     if let Some(old) = record.filter(|r| r.port != port) {
-        let homes = launch::repoint_managed_with(root, old.port, port, &renewed);
+        let homes = launch::repoint_managed(root, old.port, port, &renewed);
         oplog::event(
             "proxy_port_changed",
             &[

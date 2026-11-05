@@ -614,12 +614,9 @@ pub(crate) fn open_terminal(home: &Path, content: &str) -> Result<(), String> {
 /// the organizations' Codex shell homes (SB-183) at the new port, before the first bindings pass
 /// rewrites the shell homes anyway. Only the exact loopback address is replaced; nothing else is
 /// touched. Returns how many files changed.
-pub(crate) fn repoint_managed(root: &Path, old: u16, new: u16) -> usize {
-    repoint_managed_with(root, old, new, &[])
-}
-/// [`repoint_managed`], also replacing each `(old, new)` secret in the same files (SB-269: the
-/// proxy's token and what is derived from it, renewed when the proxy moved).
-pub(crate) fn repoint_managed_with(
+/// Each `(old, new)` secret is replaced in the same files (SB-269: the proxy's token and what is
+/// derived from it, renewed when the proxy moved).
+pub(crate) fn repoint_managed(
     root: &Path,
     old: u16,
     new: u16,

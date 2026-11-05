@@ -786,7 +786,7 @@ mod tests {
         let config = map::codex_home(&w.root, "acme").join("config.toml");
         // The owner's start found its port taken: the generated files follow at once, before
         // the first bindings pass.
-        assert_eq!(crate::launch::repoint_managed(&w.root, 4100, 4200), 1);
+        assert_eq!(crate::launch::repoint_managed(&w.root, 4100, 4200, &[]), 1);
         let text = std::fs::read_to_string(&config).unwrap();
         assert!(text.contains("http://127.0.0.1:4200/codex/_auto/v1"));
         assert!(!text.contains(":4100/"));

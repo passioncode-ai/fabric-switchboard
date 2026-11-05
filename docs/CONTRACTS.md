@@ -2518,7 +2518,7 @@ data folder, Keychain items, log and login item are that user's own.
   program (another user's owner included) holds it, binds an ephemeral loopback port of its own
   and takes a new session token there (SB-269): whoever held the port may have received the token
   or a capability derived from it from sessions that kept sending, so the old ones are refused;
-  the managed homes' generated files get the new port and token (`launch::repoint_managed_with`),
+  the managed homes' generated files get the new port and token (`launch::repoint_managed`),
   the folder routes and the Codex configuration follow at once (their fingerprint holds the address),
   and the log says `proxy_rotated` (`port_taken`)
   (`a_taken_port_moves_the_proxy_renews_its_token_and_repoints_managed_homes`);
