@@ -7,7 +7,7 @@
 //!
 //! - A Claude shell home holds the person's carried files as links (SB-137: `CLAUDE.md`,
 //!   skills, commands, agents, output styles, plugins, hooks; on Windows folders as directory
-//!   junctions and files as hard links, SB-226, `carry::link_into_shell_home`), a `.claude.json`
+//!   junctions and files as hard links, SB-226, `carry::link_into_home`), a `.claude.json`
 //!   past the first-run screens with the Fabric board server (a plain `claude` takes no
 //!   `--mcp-config`), and a `settings.json` of the person's carried settings with one `env`
 //!   value: a fixed placeholder `ANTHROPIC_AUTH_TOKEN`. The placeholder is not a secret: the
@@ -344,7 +344,7 @@ fn claude_home(root: &Path, pool: &str, sources: &Sources) -> Result<bool, ()> {
     crate::launch::private_dir(&home).map_err(|_| ())?;
     let user = (sources.user)(Provider::Claude);
     if let Some(user) = &user {
-        crate::carry::link_into_shell_home(&home, user, crate::carry::CLAUDE_LINKS);
+        crate::carry::link_into_home(&home, user, crate::carry::CLAUDE_LINKS);
     }
     let mut written = false;
     // `.claude.json` is Claude Code's own file too (projects, history): only two keys are ours.
@@ -399,7 +399,7 @@ fn codex_home(
     crate::launch::private_dir(&root.join(map::DIR)).map_err(|_| ())?;
     crate::launch::private_dir(&home).map_err(|_| ())?;
     if let Some(user) = (sources.user)(Provider::Codex) {
-        crate::carry::link_into_shell_home(&home, &user, &["AGENTS.md"]);
+        crate::carry::link_into_home(&home, &user, &["AGENTS.md"]);
     }
     let path = home.join("config.toml");
     let text = match std::fs::read_to_string(&path) {
