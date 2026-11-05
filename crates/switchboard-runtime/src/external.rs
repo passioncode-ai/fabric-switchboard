@@ -1575,6 +1575,16 @@ fn acquire_lock_waiting(path: &Path, stale: Duration, wait: Duration) -> Result<
                 }
                 std::thread::sleep(Duration::from_millis(250));
             }
+            // SB-263: on Windows a lock directory its holder is removing (delete pending) refuses
+            // a new one with access denied until its last handle closes. That is waited out like
+            // a held lock; only a refusal that lasts to the deadline is a permission problem.
+            Err(error)
+                if cfg!(windows)
+                    && error.kind() == std::io::ErrorKind::PermissionDenied
+                    && std::time::Instant::now() < deadline =>
+            {
+                std::thread::sleep(Duration::from_millis(25));
+            }
             Err(_) => {
                 return Err("Claude account lock is unavailable. Check permissions of the Claude config directory.".into())
             }
