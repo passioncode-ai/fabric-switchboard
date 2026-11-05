@@ -2,6 +2,28 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-11-05 (night): releases 0.7.10 and 0.7.11; SB-250 and SB-253; SB-47 waits for its gate
+
+- **Released.** v0.7.10 (SB-252, Linux keeps the shared `installation.json` with the family)
+  published 2026-11-04 23:26:46Z; v0.7.11 (SB-250 `ops.digest.hourly@1` and `daily@1` in
+  `<data>/digests`, PR #393; SB-253 the automatic fallback never takes a Fabric board request's
+  workflow, PR #394; release PR #395 `b8e7ab9`) published 2026-11-05 00:49:54Z after one rerun
+  (Windows x64 failed registering the PowerShell Gallery on the runner). Each: 25 assets,
+  `latest.json` for seven platforms. The app on this Mac reads 0.7.11. Backlog closed in PR #396
+  (`272dd90`). Board told: threads `b3e60686` (adapter, SB-253) and `f7758225` (SB-250; OD-5 of
+  DEC-0153 revision `21bb0246` checked against `digest::fold_day`).
+- **In review, not merged.** SB-47 provenance (COM-11), branch `sb-47-provenance` (`95c6238`,
+  worktree `~/DATA/_worktrees/sb-47`): `switchboard provenance`, MCP `switchboard_provenance`,
+  the operation `Provenance`, rotation details `switched_on_limit`, `failover` and `unusable`
+  (design and contract in `docs/CONTRACTS.md`, "Provenance (SB-47, 2026-11-05)"). Focused tests
+  pass; the full gate waits for 13 GB of free disk (7 GB now) in a background wait that logs to
+  `~/DATA/_worktrees/sb47-gate.log`.
+- **Waits.** DEC-0153 merge in fabric-agent-contract, then `pnpm validate` on live digest lines;
+  sending the daily digest waits for Fabric CO-503 and Observatory OBS-330.
+- **Exact next task.** Run the full gate on `sb-47-provenance` once disk allows, open its PR,
+  merge, release 0.7.12, then answer Fabric on thread `82241ad5` with the commit and version
+  (promised by 2026-11-18). After that: SB-251 (several macOS users on one Mac, target 0.8.0).
+
 ## 2026-11-04 (evening): releases 0.7.7, 0.7.8 and 0.7.9; SB-248, SB-249 and SB-252
 
 - **Released.** v0.7.7 (SB-246) published 19:12:58Z; v0.7.8 (SB-247 `switchboard dispatch` with
