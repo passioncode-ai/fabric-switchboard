@@ -2825,7 +2825,7 @@ function organizationCreateDialog() {
   const repoList = el('fieldset', 'project-accounts'); repoList.append(el('legend', 'field-label', t('Repositories')));
   const tools = el('div', 'github-repo-tools'); tools.hidden = true;
   let repos: GithubRepository[] = []; let selected = new Set<string>(); let readSequence = 0;
-  const intoSlot = el('div'); intoSlot.hidden = true; let intoPicker: ReturnType<typeof folderPicker> | null = null;
+  const intoSlot = el('div', 'github-into'); intoSlot.hidden = true; let intoPicker: ReturnType<typeof folderPicker> | null = null;
   const paintCount = () => { const plan = githubPlan(repos, selected); repoStatus.textContent = t('{n} on this computer, {m} to clone.', { n: plan.onDisk.length, m: plan.toClone.length }); intoSlot.hidden = !plan.toClone.length; };
   const paintRepos = () => {
     repoList.querySelectorAll('label').forEach((node) => node.remove());
@@ -2833,7 +2833,7 @@ function organizationCreateDialog() {
       const option = el('label', 'appearance-option login-option'); const box = el('input'); box.type = 'checkbox'; box.value = r.name; box.checked = selected.has(r.name);
       box.addEventListener('change', () => { if (box.checked) selected.add(r.name); else selected.delete(r.name); paintCount(); });
       const marks = [r.archived ? t('archived') : '', r.fork ? t('fork') : ''].filter(Boolean).join(', ');
-      const where = r.folder ? t('on this computer · {folder}', { folder: folderName(r.folder) }) : t('not here yet');
+      const where = !r.folder ? t('not here yet') : folderName(r.folder) === r.name ? t('on this computer') : t('on this computer · {folder}', { folder: folderName(r.folder) });
       const text = el('span', '', `${r.name} · ${where}${marks ? ` · ${marks}` : ''}`); if (r.folder) text.title = r.folder;
       option.append(box, text); repoList.append(option);
     }
@@ -2857,6 +2857,7 @@ function organizationCreateDialog() {
   owner.addEventListener('change', () => void loadRepos(owner.value));
   repoBox.append(repoStatus, tools, repoList, intoSlot);
   const extra = foldersPicker(context, [], 'org-folders');
+  context.body.classList.add('org-create');
   context.body.append(grid, ownerField, repoBox, groupField(t('Folders'), extra.node, t('Optional. Folders you keep that belong to this organization.')));
   void adapter.githubOwners().then((view) => {
     if (!view.available) { ownerHelp.textContent = view.reason === 'signed_out' ? t('To choose from your GitHub organizations, sign in to GitHub with gh auth login.') : t('To choose from your GitHub organizations, install the GitHub CLI and run gh auth login.'); return; }

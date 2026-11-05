@@ -1039,6 +1039,7 @@ export const RU: Record<string, string> = {
   "archived": "в архиве",
   "fork": "форк",
   "on this computer · {folder}": "на этом компьютере · {folder}",
+  "on this computer": "на этом компьютере",
   "not here yet": "ещё не здесь",
   "Select all": "Выбрать все",
   "Select none": "Снять все",
