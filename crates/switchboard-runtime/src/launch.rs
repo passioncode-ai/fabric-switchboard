@@ -26,6 +26,8 @@ pub struct Login {
     pub signed_in_again: bool,
     home: PathBuf,
 }
+/// SB-259: names the operator's own Claude folder in a session Switchboard launched.
+pub(crate) const SOURCE_DIR: &str = "SWITCHBOARD_CLAUDE_SOURCE_DIR";
 const CONFLICTS: &[&str] = &[
     "ANTHROPIC_API_KEY",
     "ANTHROPIC_AUTH_TOKEN",
@@ -47,6 +49,7 @@ const CONFLICTS: &[&str] = &[
     "CLAUDE_CODE_SUBPROCESS_ENV_SCRUB",
     "SWITCHBOARD_LOCAL_TOKEN",
     "SWITCHBOARD_SESSION",
+    "SWITCHBOARD_CLAUDE_SOURCE_DIR",
     "SWITCHBOARD_CONTEXT",
     // SB-212: every launched session gets its own; one inherited from a caller never leaks.
     "SWITCHBOARD_LAUNCH_ID",
@@ -2658,6 +2661,12 @@ fn launch_core(
         .into(),
         home.to_string_lossy().into_owned(),
     );
+    // SB-259 (passioncode PC-129): the operator's own Claude folder this home was built from, for
+    // a tool that writes the person's settings: the home's `settings.json` is rebuilt at every
+    // launch, so a write there is lost.
+    if let (Provider::Claude, Some(user)) = (account.provider, &user) {
+        env.insert(SOURCE_DIR.into(), user.to_string_lossy().into_owned());
+    }
     if mode == "managed" {
         let (selected, _) = store.route(account.provider, &account.pool)?;
         if selected.id != account.id {
@@ -5655,6 +5664,15 @@ mod tests {
         assert_eq!(
             fs::read_to_string(home.join("CLAUDE.md")).unwrap(),
             "operator rules"
+        );
+        // SB-259: the session names the folder its home was built from.
+        let script = fs::read_to_string(home.join("launch.command")).unwrap();
+        assert!(
+            script.contains(&format!(
+                "export {SOURCE_DIR}={}",
+                quote(&user.path().to_string_lossy())
+            )),
+            "{script}"
         );
         assert!(home.join("skills").is_dir());
         let settings: serde_json::Value =

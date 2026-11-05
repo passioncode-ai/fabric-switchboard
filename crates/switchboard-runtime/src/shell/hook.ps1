@@ -124,6 +124,16 @@ if ($ExecutionContext.SessionState.LanguageMode -eq 'FullLanguage' -and
             _switchboard_var 'claude' 'CLAUDE_CONFIG_DIR' $claude
             _switchboard_var 'codex' 'CODEX_HOME' $codex
             _switchboard_var 'context' 'SWITCHBOARD_CONTEXT' $context
+            # SB-259: while a group's home is CLAUDE_CONFIG_DIR, the person's own Claude folder.
+            $source = ''
+            $own = $global:_switchboard_held['claude']
+            if ($claude -and $own) {
+                if ($own['w']) { $source = $own['s'] }
+                elseif ($global:_switchboard_src) { $source = $global:_switchboard_src }
+                elseif ($HOME) { $source = [System.IO.Path]::Combine($HOME, '.claude') }
+                if ($source -and -not [System.IO.Path]::IsPathRooted($source)) { $source = '' }
+            }
+            _switchboard_var 'source' 'SWITCHBOARD_CLAUDE_SOURCE_DIR' $source
         }
 
         # A home inherited from a hooked terminal this shell was started in (its parent saved the
@@ -144,6 +154,13 @@ if ($ExecutionContext.SessionState.LanguageMode -eq 'FullLanguage' -and
             $context = [Environment]::GetEnvironmentVariable('SWITCHBOARD_CONTEXT')
             if ($found -and $context -and $context.StartsWith('org:', [System.StringComparison]::Ordinal)) {
                 $global:_switchboard_held['context'] = @{ 'v' = $context; 'w' = $false; 's' = $null }
+            }
+            # SB-259: the person's own Claude folder the parent named, kept for this shell's homes.
+            $source = [Environment]::GetEnvironmentVariable('SWITCHBOARD_CLAUDE_SOURCE_DIR')
+            if ($global:_switchboard_held.ContainsKey('claude') -and $source -and
+                [System.IO.Path]::IsPathRooted($source)) {
+                $global:_switchboard_src = $source
+                $global:_switchboard_held['source'] = @{ 'v' = $source; 'w' = $false; 's' = $null }
             }
         }
 

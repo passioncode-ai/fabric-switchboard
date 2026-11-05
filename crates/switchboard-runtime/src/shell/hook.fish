@@ -88,6 +88,19 @@ if status is-interactive; and not set -q SWITCHBOARD_SESSION; and not set -q _sw
         _switchboard_var claude CLAUDE_CONFIG_DIR "$claude"
         _switchboard_var codex CODEX_HOME "$codex"
         _switchboard_var context SWITCHBOARD_CONTEXT "$context"
+        # SB-259: while a group's home is CLAUDE_CONFIG_DIR, the person's own Claude folder.
+        set -l source ""
+        if test -n "$claude"; and set -q _switchboard_m_claude; and test "$_switchboard_m_claude" = 1
+            if test "$_switchboard_w_claude" = 1
+                set source "$_switchboard_s_claude"
+            else if set -q _switchboard_src; and test -n "$_switchboard_src"
+                set source "$_switchboard_src"
+            else if set -q HOME; and test -n "$HOME"
+                set source "$HOME/.claude"
+            end
+            string match -q -- '/*' "$source"; or set source ""
+        end
+        _switchboard_var source SWITCHBOARD_CLAUDE_SOURCE_DIR "$source"
         return 0
     end
 
@@ -114,6 +127,14 @@ if status is-interactive; and not set -q SWITCHBOARD_SESSION; and not set -q _sw
         set -g _switchboard_v_context "$SWITCHBOARD_CONTEXT"
         set -g _switchboard_w_context 0
         set -g _switchboard_s_context ""
+    end
+    # SB-259: the person's own Claude folder the parent named, kept for this shell's homes.
+    if set -q _switchboard_m_claude; and set -q SWITCHBOARD_CLAUDE_SOURCE_DIR; and string match -q -- '/*' "$SWITCHBOARD_CLAUDE_SOURCE_DIR"
+        set -g _switchboard_src "$SWITCHBOARD_CLAUDE_SOURCE_DIR"
+        set -g _switchboard_m_source 1
+        set -g _switchboard_v_source "$SWITCHBOARD_CLAUDE_SOURCE_DIR"
+        set -g _switchboard_w_source 0
+        set -g _switchboard_s_source ""
     end
     set -gx SWITCHBOARD_SHELL_HOOK 1
     _switchboard_apply

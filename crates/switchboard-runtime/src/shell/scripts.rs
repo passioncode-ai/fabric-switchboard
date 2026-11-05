@@ -501,9 +501,16 @@ mod tests {
                 inside.contains(&format!("CLAUDE_CONFIG_DIR={}", w.acme_claude)),
                 "{k}: {out}{err}"
             );
+            // SB-259 names the person's own folder on purpose, in one variable; nowhere else.
+            let named = "SWITCHBOARD_CLAUDE_SOURCE_DIR=/own/secret-home";
+            assert!(inside.contains(named), "{k}: {inside}");
             assert!(
-                !inside.contains("/own/secret-home"),
+                !inside.replace(named, "").contains("/own/secret-home"),
                 "{k}: the saved value leaked: {inside}"
+            );
+            assert!(
+                !outside.contains("SWITCHBOARD_CLAUDE_SOURCE_DIR"),
+                "{k}: {outside}"
             );
             assert!(!inside.contains("_switchboard"), "{k}: {inside}");
             assert!(inside.contains("SWITCHBOARD_SHELL_HOOK=1"), "{k}");
