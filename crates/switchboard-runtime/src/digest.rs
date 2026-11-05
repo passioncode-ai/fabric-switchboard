@@ -26,6 +26,21 @@ const RISE_FACTOR: u64 = 2;
 const KEEP_MONTHS: i64 = 3;
 /// Codes that say the outcome is not known.
 const UNKNOWN: &[&str] = &["unknown", "outcome_unknown", "deferred"];
+/// SB-255, OD-3: answers that say an operation was not done because of setup, policy or the
+/// provider's own wait, not that it tried and failed: counted `unknown`, so an unfinished setup
+/// never reads as a rise in failures (OD-4).
+const NOT_DONE: &[&str] = &[
+    "absent",
+    "declined",
+    "denied",
+    "held",
+    "locked",
+    "no_account",
+    "rate_limited",
+    "refused",
+    "skipped",
+    "superseded",
+];
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct Counts {
@@ -132,7 +147,7 @@ pub(crate) fn outcome(event: &'static str, fields: &[(&'static str, Field)]) -> 
     }
     let unknown = fields
         .iter()
-        .any(|(_, f)| matches!(f, Field::Code(c) if UNKNOWN.contains(c)));
+        .any(|(_, f)| matches!(f, Field::Code(c) if UNKNOWN.contains(c) || NOT_DONE.contains(c)));
     if unknown {
         "unknown"
     } else {
@@ -683,6 +698,47 @@ mod tests {
         let daily = read::<Daily>(&dir.join("daily-2024-10.jsonl"));
         let days: Vec<(&str, u64)> = daily.iter().map(|d| (d.day.as_str(), d.hours)).collect();
         assert_eq!(days, [("2024-10-04", 2)]);
+    }
+
+    #[test]
+    fn a_setup_or_policy_answer_counts_as_unknown_and_never_as_done() {
+        // SB-255: the published map in CONTRACTS, "Operations digests".
+        let code = Field::Code;
+        for (event, field, value) in [
+            ("recovery_hook", "result", "refused"),
+            ("recovery_hook", "result", "no_account"),
+            ("usage_check", "outcome", "rate_limited"),
+            ("usage_check", "outcome", "superseded"),
+            ("credential_source", "state", "refused"),
+            ("credential_source", "state", "absent"),
+            ("update_restart", "outcome", "refused"),
+        ] {
+            assert_eq!(
+                outcome(event, &[(field, code(value))]),
+                "unknown",
+                "{event} {value}"
+            );
+        }
+        // Still failed: an error SB-248 counts; still done: the operation's own success.
+        assert_eq!(
+            outcome("usage_check", &[("outcome", code("unreachable"))]),
+            "failed"
+        );
+        assert_eq!(
+            outcome("update_check", &[("outcome", code("check_failed"))]),
+            "failed"
+        );
+        for (event, value) in [
+            ("recovery_hook", "again"),
+            ("update_check", "current"),
+            ("analytics_flush", "sent"),
+        ] {
+            assert_eq!(
+                outcome(event, &[("outcome", code(value))]),
+                "ok",
+                "{event} {value}"
+            );
+        }
     }
 
     #[test]
