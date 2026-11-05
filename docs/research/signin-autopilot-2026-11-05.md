@@ -1,6 +1,6 @@
 # Sign-in autopilot: the browser step of a Claude sign-in done for the person (SB-256)
 
-Design note, 2026-11-05. Status: N1 released in 0.7.13; N2 built (`crates/switchboard-runtime/src/inbox.rs`); N3 built in the same module (parsing, the wait and the Fabric Inbox client), the key's storage and its commands not yet; N4 and N5 not built. Owner: fabric-switchboard.
+Design note, 2026-11-05. Status: N1 released in 0.7.13; N2 built (`crates/switchboard-runtime/src/inbox.rs`); N3 built in the same module (parsing, the wait, the Fabric Inbox client, the key's storage and `switchboard inbox set|status|remove`); N4 and N5 not built. Owner: fabric-switchboard.
 
 ## What the operator asked
 

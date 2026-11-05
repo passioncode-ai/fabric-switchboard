@@ -196,6 +196,21 @@ switchboard project bindings    # the folders bound, with their pool and route
 
 Leaving a project removes only what Switchboard wrote, and `switchboard uninstall` removes every binding. Never print that file in a chat: its token opens the pool on this computer. See the [SB-118 packet](packets/sb-118-claude-bindings.md).
 
+### The Fabric Inbox key (SB-256)
+
+```sh
+pbpaste | switchboard inbox set --origin https://inbox.example.com --client-id CLIENT_ID
+switchboard inbox status            # saved, the server and since when; never the key
+switchboard inbox status --check    # and whether the server answers it, with how many mailboxes
+switchboard inbox remove
+```
+
+The key the Claude sign-in autopilot reads its sign-in mail with: a Fabric Inbox `read` key limited
+to the sign-in mailbox, made in Fabric Inbox's Settings, Agent access (its Client Secret is shown
+once: copy it, then run `inbox set`, which reads it from standard input, so it stays out of your
+shell history). It is kept in the vault; `inbox.json` beside the store names the server and the
+Client Id. No MCP tool touches it.
+
 ### Terminals in an organization's folders (SB-183, 0.7.0)
 
 In a group bound to an organization, a terminal with Switchboard's shell hook runs plain `claude`

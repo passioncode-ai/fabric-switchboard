@@ -43,6 +43,8 @@ const OWNED: &[&str] = &[
     "digests",
     // The PassionCode.ai connection (SB-159); its token's vault item is deleted below.
     "vesta.json",
+    // The Fabric Inbox key's file (SB-256); its secret's vault item is deleted below.
+    "inbox.json",
     // Folders taken out of their group lately (SB-172).
     "released-folders.json",
     // The terminal hook's choice and the installer's record (SB-183); the start-file blocks
@@ -293,6 +295,11 @@ pub fn uninstall_with(
     if let Some(item) = crate::vesta::vault_item(root) {
         if let Err(error) = vault.delete(&item) {
             failures.push(json!({"item": "passioncode_token", "error": error}));
+        }
+    }
+    if let Some(item) = crate::inbox::vault_item(root) {
+        if let Err(error) = vault.delete(&item) {
+            failures.push(json!({"item": "fabric_inbox_key", "error": error}));
         }
     }
     if let Err(error) = (places.remove_orphan_key)() {

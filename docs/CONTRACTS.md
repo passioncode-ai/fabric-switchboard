@@ -2553,8 +2553,35 @@ A Claude sign-in the owner runs itself, with no Terminal, for the sign-in autopi
   restart), reads `ended`. `CancelLogin` sends SIGTERM to the child's process group, SIGKILL after 3 s,
   then cleans as before (`a_pasted_code_completes_the_sign_in_and_the_browser_url_is_only_recorded`,
   `a_refused_code_ends_the_sign_in_without_completing_it`, `stopping_ends_the_cli_and_its_group`).
-- **Not built yet.** The window, the browser service and the mail (nodes N2 to N4); the
-  operator-assisted acceptance with a real account (N5).
+- **Not built yet.** The window and the browser service (node N4; the e-mail check and the mail are
+  N2 and N3, see *The Fabric Inbox key* below and `inbox.rs`); the operator-assisted acceptance with a
+  real account (N5).
+
+## The Fabric Inbox key (SB-256 N3, 2026-11-05)
+
+The key the sign-in autopilot reads Anthropic's sign-in mail with
+([design](research/signin-autopilot-2026-11-05.md), "Decision: where the Fabric Inbox key lives");
+`crates/switchboard-runtime/src/inbox.rs`.
+
+- **Save.** `InboxSet { origin, client_id, secret }` (CLI `inbox set --origin --client-id`, the
+  secret from standard input only) takes `https://<host>[:<port>]` or a loopback test stand-in
+  (`http://127.0.0.1:<port>`), and a Client Id and Client Secret of printable ASCII without spaces;
+  otherwise *That is not your Fabric Inbox's address* or *That is not a Fabric Inbox key*. The secret
+  goes to the vault (`Store::put_secret`, the same item when one is saved); `<data>/inbox.json`
+  (0600) names that item, the origin, the Client Id and when it was saved. A file that cannot be
+  written leaves no new vault item behind.
+- **Status.** `InboxStatus` (CLI `inbox status`) answers `saved`, `origin` and `saved_at`, never the
+  Client Id or the secret; with `check` (CLI `--check`) it also asks the server for `list_accounts`
+  and adds `answer` (`ok`, `refused`, `failed` or `unreachable`) and `mailboxes` (how many the key
+  may read). A file edited to name another kind of origin is not used (*could not be read*).
+- **Remove.** `InboxRemove` (CLI `inbox remove`) deletes the vault item, then the file; a vault that
+  refuses keeps both. `switchboard uninstall` deletes both too.
+- **Agents.** No MCP tool saves, reads or removes it (`inbox set`, `inbox status` and `inbox remove`
+  are `Not` in the CLI's parity table): the person makes the key, and a secret never travels in an
+  agent's tool call.
+- Tests: `inbox::tests::a_saved_key_keeps_its_secret_in_the_vault_and_shows_only_the_server`,
+  `a_wrong_server_or_key_saves_nothing_and_a_hand_edited_file_is_not_used`,
+  `a_check_says_whether_the_server_answers_the_saved_key`.
 
 ## The operator's Claude folder in a Switchboard home (SB-259, 2026-11-05)
 
