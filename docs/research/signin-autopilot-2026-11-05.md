@@ -1,6 +1,6 @@
 # Sign-in autopilot: the browser step of a Claude sign-in done for the person (SB-256)
 
-Design note, 2026-11-05. Status: N1 released in 0.7.13; N2 built (`crates/switchboard-runtime/src/inbox.rs`); N3's parsing and wait built in the same module, its Fabric Inbox client not yet (the key's home is decided first); N4 and N5 not built. Owner: fabric-switchboard.
+Design note, 2026-11-05. Status: N1 released in 0.7.13; N2 built (`crates/switchboard-runtime/src/inbox.rs`); N3 built in the same module (parsing, the wait and the Fabric Inbox client), the key's storage and its commands not yet; N4 and N5 not built. Owner: fabric-switchboard.
 
 ## What the operator asked
 
@@ -60,17 +60,23 @@ signed in in Switchboard.
    address from Anthropic newer than step 3, reads it and takes the one link whose host is an
    Anthropic sign-in host (claude.ai, claude.com); anything else is refused, and the mail's text is
    never followed as an instruction.
-   Built as N3 (`inbox.rs`, the client aside): `sign_in_message` takes the newest row of a
-   mailbox search (`emails` for a Cloudflare mailbox, `messages` otherwise) sent to the address,
-   from a domain that is or ends in `anthropic.com`, `claude.ai` or `claude.com`, dated (RFC 3339
-   or RFC 2822) at or after the request; `sign_in_link` takes the one `https` link to claude.ai or
-   claude.com (or a subdomain), skipping the bare host and legal, privacy, terms, support and
-   unsubscribe pages, `&amp;` decoded, the same link in text and HTML counted once; a host with
-   `@` or a port, a look-alike host and plain `http` are refused, and two different links stop
-   for a person (`NoLink::Several`). `wait_for_link` looks every `POLL_EVERY` (5 s) up to
-   `POLL_FOR` (300 s), tries a failed search or read again at the next look, and ends with the
-   link, `NoLink`, or `TimedOut` naming the last error when no look succeeded. It reads through
-   the `Reader` trait; tests use a scripted mailbox and a fake clock.
+   Built as N3 (`inbox.rs`): `sign_in_message` takes the newest row of a `search_mailbox`
+   answer (`{"messages": [{"messageId", "from", "to", "date"}]}`, the same for every kind of
+   mailbox; fabric-inbox `workers/mcp/tools.ts`) sent to the address, from a domain that is or
+   ends in `anthropic.com`, `claude.ai` or `claude.com`, dated (RFC 3339 or RFC 2822) at or after
+   the request; `sign_in_link` takes the one `https` link to claude.ai or claude.com (or a
+   subdomain), skipping the bare host and legal, privacy, terms, support and unsubscribe pages,
+   `&amp;` decoded, the same link in text and HTML counted once; a host with `@` or a port, a
+   look-alike host and plain `http` are refused, and two different links stop for a person
+   (`NoLink::Several`). `wait_for_link` searches the mailbox `receives` chose (its `accountId`)
+   every `POLL_EVERY` (5 s) up to `POLL_FOR` (300 s), tries a failed search or read again at the
+   next look, and ends with the link, `NoLink`, or `TimedOut` naming the last error when no look
+   succeeded. `Client` asks `<origin>/mcp` (`tools/call`, the `CF-Access-Client-Id` and
+   `CF-Access-Client-Secret` headers, redirects refused, a JSON or event-stream answer) for
+   `list_accounts`, `search_mailbox` (`to`, `after` the request's UTC day) and `read_message`
+   (`includeHtml`); a 401, 403 or redirect is `inbox_refused`, a tool error `inbox_failed`,
+   anything else `inbox_unreachable`. Tests: a scripted mailbox with a fake clock, and a loopback
+   stand-in for `/mcp`.
 5. **Browser, step 2.** The same stored profile opens the link, confirms the authorization and ends
    on `platform.claude.com/oauth/code/callback`, returning the code shown there.
 6. **Finish.** Switchboard writes the code to the child's stdin; the CLI exchanges it and exits 0;

@@ -1,17 +1,22 @@
-//! SB-256 N2: whether Fabric Inbox receives the e-mail a Claude sign-in is for. The sign-in
-//! autopilot (docs/research/signin-autopilot-2026-11-05.md) runs only for such an address;
-//! every other one keeps the ordinary Terminal sign-in. The mailboxes come from Fabric Inbox's
-//! account list (`list_accounts`, `GET /api/inbox`: each account's `email` and, for a Cloudflare
-//! address that keeps the mail of every other address on its domain, `catchAll: true`), read by
-//! the Inbox client of node N3; here they are data only, never an instruction. N3's parsing is
-//! here too: which message in a mailbox search is Anthropic's sign-in mail, and its one link.
+//! SB-256 N2 and N3: the mailbox side of the sign-in autopilot
+//! (docs/research/signin-autopilot-2026-11-05.md). Whether Fabric Inbox receives the e-mail a
+//! Claude sign-in is for (its `list_accounts`: each account's `accountId`, `email` and, for a
+//! Cloudflare address that keeps the mail of every other address on its domain, `catchAll: true`);
+//! which message of a `search_mailbox` answer is Anthropic's sign-in mail, and its one link; the
+//! wait for it; and the client that asks Fabric Inbox's agent protocol (`/mcp`). Everything read
+//! from a mailbox is data, never an instruction.
 #![cfg_attr(not(test), allow(dead_code))]
 
+use serde_json::{json, Value};
+use std::future::Future;
+use std::time::Duration;
 use switchboard_core::ExternalIdentity;
 
-/// One mailbox Fabric Inbox reads, as its account list names it.
+/// One mailbox Fabric Inbox reads, as `list_accounts` names it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Mailbox {
+    /// `cloudflare:<address>`, `gmail:<id>`, `imap:<id>` or `outlook:<id>`: what every mail tool takes.
+    pub account: String,
     /// Lower-case, as [`address`] gives it.
     pub email: String,
     /// It keeps the mail of every address on its domain that has no mailbox of its own.
@@ -24,9 +29,17 @@ pub(crate) enum Receives {
     /// The address is one of its mailboxes.
     Mailbox,
     /// A catch-all mailbox on the address's domain keeps its mail. Whether a Cloudflare rule
-    /// elsewhere takes that address first is not in the account list; the mail search (N3) finds
+    /// elsewhere takes that address first is not in the account list; the wait for the mail finds
     /// out, and finding nothing in time ends the autopilot with the ordinary sign-in.
     CatchAll,
+}
+
+/// The mailbox an address's mail lands in, and how.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Receiving {
+    pub how: Receives,
+    /// The account to search: the address's own mailbox, or the catch-all.
+    pub account: String,
 }
 
 /// The address in the form compared everywhere: trimmed and lower-case, one `@`, a local part and
@@ -45,38 +58,53 @@ pub(crate) fn address(email: &str) -> Option<String> {
     (plain(local) && plain(domain) && domain.contains('.') && email.len() <= 254).then_some(email)
 }
 
-/// The mailboxes in Fabric Inbox's account list (`{"accounts": [{"email", "catchAll"}, ...]}`).
-/// An entry without a usable e-mail is skipped; a list that is not one gives none.
-pub(crate) fn mailboxes(answer: &serde_json::Value) -> Vec<Mailbox> {
+/// The mailboxes in a `list_accounts` answer (`{"accounts": [{"accountId", "email", "catchAll"},
+/// ...]}`). An entry without an account id or a usable e-mail is skipped; an answer that is not
+/// such a list gives none.
+pub(crate) fn mailboxes(answer: &Value) -> Vec<Mailbox> {
     let Some(accounts) = answer.get("accounts").and_then(|a| a.as_array()) else {
         return Vec::new();
     };
     accounts
         .iter()
-        .filter_map(|account| {
-            let email = address(account.get("email")?.as_str()?)?;
-            let catch_all = account
+        .filter_map(|entry| {
+            let account = entry.get("accountId")?.as_str()?;
+            if account.is_empty() || account.len() > 320 {
+                return None;
+            }
+            let email = address(entry.get("email")?.as_str()?)?;
+            let catch_all = entry
                 .get("catchAll")
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false);
-            Some(Mailbox { email, catch_all })
+            Some(Mailbox {
+                account: account.to_owned(),
+                email,
+                catch_all,
+            })
         })
         .collect()
 }
 
-/// Whether Fabric Inbox receives `email`: one of its mailboxes is that address, or a catch-all
-/// mailbox serves its domain. None for an address it does not receive, or one that is not an
-/// address.
-pub(crate) fn receives(email: &str, mailboxes: &[Mailbox]) -> Option<Receives> {
+/// Whether Fabric Inbox receives `email`, and in which mailbox: the mailbox that is that address,
+/// else a catch-all mailbox on its domain. None for an address it does not receive, or one that
+/// is not an address.
+pub(crate) fn receives(email: &str, mailboxes: &[Mailbox]) -> Option<Receiving> {
     let email = address(email)?;
-    if mailboxes.iter().any(|m| m.email == email) {
-        return Some(Receives::Mailbox);
+    if let Some(m) = mailboxes.iter().find(|m| m.email == email) {
+        return Some(Receiving {
+            how: Receives::Mailbox,
+            account: m.account.clone(),
+        });
     }
     let domain = email.split_once('@')?.1;
     mailboxes
         .iter()
-        .any(|m| m.catch_all && m.email.split_once('@').is_some_and(|(_, d)| d == domain))
-        .then_some(Receives::CatchAll)
+        .find(|m| m.catch_all && m.email.split_once('@').is_some_and(|(_, d)| d == domain))
+        .map(|m| Receiving {
+            how: Receives::CatchAll,
+            account: m.account.clone(),
+        })
 }
 
 /// The e-mail a sign-in again is for: the one the provider gave when the account was captured.
@@ -120,31 +148,24 @@ fn arrived(date: &str) -> Option<i64> {
         .map(|t| t.unix_timestamp())
 }
 
-/// The id of the newest sign-in message in a mailbox search's answer (`{"emails": [...]}` for a
-/// Cloudflare mailbox, `{"messages": [...]}` for a Gmail, IMAP or Outlook account): one to
-/// `email`, from one of Anthropic's domains, that arrived at or after `since` (seconds since the
-/// epoch, the moment the browser asked for the mail). A row with an unreadable date never counts.
-pub(crate) fn sign_in_message(
-    answer: &serde_json::Value,
-    email: &str,
-    since: i64,
-) -> Option<String> {
+/// The id of the newest sign-in message in a `search_mailbox` answer (`{"messages": [{"messageId",
+/// "from", "to", "date"}, ...]}`, the same for every kind of mailbox): one to `email`, from one of
+/// Anthropic's domains, that arrived at or after `since` (seconds since the epoch, the moment the
+/// browser asked for the mail). A row with an unreadable date never counts.
+pub(crate) fn sign_in_message(answer: &Value, email: &str, since: i64) -> Option<String> {
     let email = address(email)?;
-    let rows = answer
-        .get("emails")
-        .or_else(|| answer.get("messages"))?
-        .as_array()?;
+    let rows = answer.get("messages")?.as_array()?;
     rows.iter()
         .filter_map(|row| {
             let text = |key: &str| row.get(key).and_then(|v| v.as_str());
-            let sender = header_address(text("sender")?)?;
+            let sender = header_address(text("from")?)?;
             let domain = sender.split_once('@')?.1.to_owned();
-            let to_us = text("recipient")?
+            let to_us = text("to")?
                 .split(',')
                 .filter_map(header_address)
                 .any(|r| r == email);
             let at = arrived(text("date")?)?;
-            let id = text("id").or_else(|| text("providerMessageId"))?;
+            let id = text("messageId").filter(|id| !id.is_empty() && id.len() <= 300)?;
             (under(&domain, SENDER_DOMAINS) && to_us && at >= since).then(|| (at, id.to_owned()))
         })
         .max_by_key(|(at, _)| *at)
@@ -198,16 +219,25 @@ pub(crate) fn sign_in_link(text: &str, html: Option<&str>) -> Result<String, NoL
 
 /// How often the mailbox is searched while a sign-in waits for its mail, and for how long (SB-256
 /// design, step 4).
-pub(crate) const POLL_EVERY: std::time::Duration = std::time::Duration::from_secs(5);
-pub(crate) const POLL_FOR: std::time::Duration = std::time::Duration::from_secs(300);
+pub(crate) const POLL_EVERY: Duration = Duration::from_secs(5);
+pub(crate) const POLL_FOR: Duration = Duration::from_secs(300);
 
-/// What the sign-in reads of one mailbox: the client of Fabric Inbox's agent protocol, a fake in
-/// tests. Errors are short codes, never a message's text.
+/// What the sign-in reads of a mailbox: [`Client`], a fake in tests. Errors are short codes, never
+/// a message's text.
 pub(crate) trait Reader {
-    /// A search of the mailbox for mail to `email` (`search_mailbox`'s answer).
-    fn search(&self, email: &str) -> Result<serde_json::Value, String>;
+    /// A search of `account` for mail to `email` from the day `since` falls on (`search_mailbox`).
+    fn search(
+        &self,
+        account: &str,
+        email: &str,
+        since: i64,
+    ) -> impl Future<Output = Result<Value, String>> + Send;
     /// One message's text and HTML (`read_message` with `includeHtml`).
-    fn read(&self, id: &str) -> Result<(String, Option<String>), String>;
+    fn read(
+        &self,
+        account: &str,
+        id: &str,
+    ) -> impl Future<Output = Result<(String, Option<String>), String>> + Send;
 }
 
 /// How waiting for the sign-in mail ended.
@@ -221,27 +251,29 @@ pub(crate) enum Waited {
     TimedOut(Option<String>),
 }
 
-/// Searches `reader` every `every` until Anthropic's sign-in mail to `email`, sent at or after
+/// Searches `account` every `every` until Anthropic's sign-in mail to `email`, sent at or after
 /// `since` (seconds since the epoch), is there, then takes its link. A failed search or read is
 /// tried again at the next look; after `give_up` it times out. `elapsed` and `sleep` are the
 /// clock, so a test runs it without waiting.
-pub(crate) fn wait_for_link(
-    reader: &dyn Reader,
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn wait_for_link<R: Reader, S: Future<Output = ()>>(
+    reader: &R,
+    account: &str,
     email: &str,
     since: i64,
-    every: std::time::Duration,
-    give_up: std::time::Duration,
-    elapsed: &dyn Fn() -> std::time::Duration,
-    sleep: &dyn Fn(std::time::Duration),
+    every: Duration,
+    give_up: Duration,
+    elapsed: impl Fn() -> Duration,
+    sleep: impl Fn(Duration) -> S,
 ) -> Waited {
     let mut last_error = None;
     let mut found_any = false;
     loop {
-        match reader.search(email) {
+        match reader.search(account, email, since).await {
             Ok(answer) => {
                 found_any = true;
                 if let Some(id) = sign_in_message(&answer, email, since) {
-                    match reader.read(&id) {
+                    match reader.read(account, &id).await {
                         Ok((text, html)) => {
                             return match sign_in_link(&text, html.as_deref()) {
                                 Ok(link) => Waited::Link(link),
@@ -257,7 +289,172 @@ pub(crate) fn wait_for_link(
         if elapsed() + every > give_up {
             return Waited::TimedOut(if found_any { None } else { last_error });
         }
-        sleep(every);
+        sleep(every).await;
+    }
+}
+
+/// The server did not answer, or answered something that is not the protocol.
+pub(crate) const INBOX_UNREACHABLE: &str = "inbox_unreachable";
+/// The key was refused (401 or 403, or a redirect to a sign-in, which is never followed).
+pub(crate) const INBOX_REFUSED: &str = "inbox_refused";
+/// The tool answered with an error (a mailbox the key may not read, a bad argument).
+pub(crate) const INBOX_FAILED: &str = "inbox_failed";
+const REQUEST: Duration = Duration::from_secs(15);
+const MAX_ANSWER: usize = 4 * 1024 * 1024;
+
+/// A Fabric Inbox server's origin as the client takes it: `https://<host>[:<port>]` with nothing
+/// after it but an optional `/`, or a test stand-in on `http://127.0.0.1:<port>`. None otherwise.
+pub(crate) fn origin(text: &str) -> Option<String> {
+    let text = text.trim().trim_end_matches('/').to_lowercase();
+    let digits = |p: &str| !p.is_empty() && p.len() <= 5 && p.bytes().all(|b| b.is_ascii_digit());
+    if let Some(port) = text.strip_prefix("http://127.0.0.1:") {
+        return digits(port).then_some(text);
+    }
+    let rest = text.strip_prefix("https://")?;
+    let (host, port) = match rest.split_once(':') {
+        Some((host, port)) => (host, Some(port)),
+        None => (rest, None),
+    };
+    let host_ok = host.len() <= 253
+        && host.contains('.')
+        && !host.starts_with(['.', '-'])
+        && host
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'-');
+    (host_ok && port.is_none_or(digits)).then_some(text)
+}
+
+/// A key's Client Id or Client Secret as the client sends it: printable ASCII, no space.
+fn token(text: &str) -> bool {
+    !text.is_empty() && text.len() <= 1024 && text.bytes().all(|b| b.is_ascii_graphic())
+}
+
+/// Fabric Inbox's agent protocol (`<origin>/mcp`, Streamable HTTP, no session), called with a
+/// key's Cloudflare Access service token. Only `list_accounts`, `search_mailbox` and
+/// `read_message` are asked; redirects are never followed.
+pub(crate) struct Client {
+    endpoint: String,
+    client_id: String,
+    secret: String,
+    http: reqwest::Client,
+}
+
+impl Client {
+    pub(crate) fn new(origin_text: &str, client_id: &str, secret: &str) -> Option<Self> {
+        let origin = origin(origin_text)?;
+        if !token(client_id) || !token(secret) {
+            return None;
+        }
+        let http = reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .timeout(REQUEST)
+            .build()
+            .ok()?;
+        Some(Self {
+            endpoint: format!("{origin}/mcp"),
+            client_id: client_id.to_owned(),
+            secret: secret.to_owned(),
+            http,
+        })
+    }
+
+    /// One `tools/call`; the tool's answer as JSON (its `structuredContent`, else its first text).
+    async fn call(&self, tool: &str, arguments: Value) -> Result<Value, String> {
+        let body = json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+            "params": {"name": tool, "arguments": arguments}});
+        let response = self
+            .http
+            .post(&self.endpoint)
+            .header("CF-Access-Client-Id", &self.client_id)
+            .header("CF-Access-Client-Secret", &self.secret)
+            .header("Accept", "application/json, text/event-stream")
+            .json(&body)
+            .send()
+            .await
+            .map_err(|_| INBOX_UNREACHABLE.to_string())?;
+        let status = response.status();
+        if status.is_redirection() || status.as_u16() == 401 || status.as_u16() == 403 {
+            return Err(INBOX_REFUSED.into());
+        }
+        if !status.is_success() {
+            return Err(INBOX_UNREACHABLE.into());
+        }
+        let bytes = response
+            .bytes()
+            .await
+            .map_err(|_| INBOX_UNREACHABLE.to_string())?;
+        if bytes.len() > MAX_ANSWER {
+            return Err(INBOX_UNREACHABLE.into());
+        }
+        let text = String::from_utf8_lossy(&bytes);
+        // A server may answer as an event stream: its last `data:` line is the response.
+        let json_text = if text.trim_start().starts_with('{') {
+            text.to_string()
+        } else {
+            text.lines()
+                .filter_map(|l| l.strip_prefix("data:"))
+                .next_back()
+                .unwrap_or("")
+                .trim()
+                .to_owned()
+        };
+        let reply: Value =
+            serde_json::from_str(&json_text).map_err(|_| INBOX_UNREACHABLE.to_string())?;
+        if reply.get("error").is_some() {
+            return Err(INBOX_FAILED.into());
+        }
+        let result = reply.get("result").ok_or(INBOX_UNREACHABLE)?;
+        if result.get("isError").and_then(Value::as_bool) == Some(true) {
+            return Err(INBOX_FAILED.into());
+        }
+        if let Some(structured) = result.get("structuredContent") {
+            return Ok(structured.clone());
+        }
+        result
+            .pointer("/content/0/text")
+            .and_then(Value::as_str)
+            .and_then(|t| serde_json::from_str(t).ok())
+            .ok_or_else(|| INBOX_UNREACHABLE.to_string())
+    }
+
+    /// The mailboxes the key reads.
+    pub(crate) async fn mailboxes(&self) -> Result<Vec<Mailbox>, String> {
+        Ok(mailboxes(&self.call("list_accounts", json!({})).await?))
+    }
+}
+
+/// The UTC day `seconds` falls on, as `search_mailbox`'s `after` takes it.
+fn day(seconds: i64) -> String {
+    time::OffsetDateTime::from_unix_timestamp(seconds)
+        .map(|t| t.date().to_string())
+        .unwrap_or_else(|_| "1970-01-01".into())
+}
+
+impl Reader for Client {
+    async fn search(&self, account: &str, email: &str, since: i64) -> Result<Value, String> {
+        self.call(
+            "search_mailbox",
+            json!({"accountId": account, "to": email, "after": day(since), "limit": 20}),
+        )
+        .await
+    }
+    async fn read(&self, account: &str, id: &str) -> Result<(String, Option<String>), String> {
+        let message = self
+            .call(
+                "read_message",
+                json!({"accountId": account, "messageId": id, "includeHtml": true}),
+            )
+            .await?;
+        let text = message
+            .get("text")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_owned();
+        let html = message
+            .get("html")
+            .and_then(Value::as_str)
+            .map(str::to_owned);
+        Ok((text, html))
     }
 }
 
@@ -265,38 +462,38 @@ pub(crate) fn wait_for_link(
 mod tests {
     use super::*;
     use serde_json::json;
+    use std::sync::Mutex;
 
     fn list() -> Vec<Mailbox> {
-        // As Fabric Inbox's account list answers: a Cloudflare address, a catch-all on another
-        // domain, a Gmail account and entries without a usable e-mail.
+        // As `list_accounts` answers: a Cloudflare address, a catch-all on another domain, a
+        // hidden Gmail account, and entries without an account id or a usable e-mail.
         mailboxes(&json!({
             "accounts": [
-                {"id": "cloudflare:signin@one.example", "provider": "cloudflare", "email": "SignIn@One.example"},
-                {"id": "cloudflare:all@two.example", "provider": "cloudflare", "email": "all@two.example", "catchAll": true},
-                {"id": "gmail:7", "provider": "gmail", "email": "person@mail.example", "hidden": true},
-                {"id": "gmail:8", "provider": "gmail"},
-                {"id": "cloudflare:x", "provider": "cloudflare", "email": "not an address"}
+                {"accountId": "cloudflare:signin@one.example", "provider": "cloudflare", "email": "SignIn@One.example", "hidden": false, "catchAll": false},
+                {"accountId": "cloudflare:all@two.example", "provider": "cloudflare", "email": "all@two.example", "catchAll": true},
+                {"accountId": "gmail:7", "provider": "gmail", "email": "person@mail.example", "hidden": true},
+                {"provider": "gmail", "email": "noid@mail.example"},
+                {"accountId": "gmail:8", "provider": "gmail"},
+                {"accountId": "cloudflare:x", "provider": "cloudflare", "email": "not an address"}
             ]
         }))
     }
+    fn mailbox(account: &str, email: &str, catch_all: bool) -> Mailbox {
+        Mailbox {
+            account: account.into(),
+            email: email.into(),
+            catch_all,
+        }
+    }
 
     #[test]
-    fn the_account_list_gives_each_mailbox_with_its_catch_all() {
+    fn the_account_list_gives_each_mailbox_with_its_account_and_catch_all() {
         assert_eq!(
             list(),
             vec![
-                Mailbox {
-                    email: "signin@one.example".into(),
-                    catch_all: false
-                },
-                Mailbox {
-                    email: "all@two.example".into(),
-                    catch_all: true
-                },
-                Mailbox {
-                    email: "person@mail.example".into(),
-                    catch_all: false
-                },
+                mailbox("cloudflare:signin@one.example", "signin@one.example", false),
+                mailbox("cloudflare:all@two.example", "all@two.example", true),
+                mailbox("gmail:7", "person@mail.example", false),
             ]
         );
         assert!(mailboxes(&json!({"accounts": "none"})).is_empty());
@@ -306,18 +503,24 @@ mod tests {
     #[test]
     fn an_address_is_received_by_its_mailbox_or_its_domains_catch_all_and_nothing_else() {
         let boxes = list();
+        let at = |how, account: &str| {
+            Some(Receiving {
+                how,
+                account: account.into(),
+            })
+        };
         assert_eq!(
             receives(" SIGNIN@one.example ", &boxes),
-            Some(Receives::Mailbox)
+            at(Receives::Mailbox, "cloudflare:signin@one.example")
         );
         // A hidden mailbox still receives its mail.
         assert_eq!(
             receives("person@mail.example", &boxes),
-            Some(Receives::Mailbox)
+            at(Receives::Mailbox, "gmail:7")
         );
         assert_eq!(
             receives("anyone@two.example", &boxes),
-            Some(Receives::CatchAll)
+            at(Receives::CatchAll, "cloudflare:all@two.example")
         );
         // Another address on a domain without a catch-all, a subdomain, another domain.
         assert_eq!(receives("other@one.example", &boxes), None);
@@ -351,29 +554,23 @@ mod tests {
     #[test]
     fn the_newest_sign_in_mail_to_the_address_since_the_request_is_chosen() {
         let since = arrived("2026-11-05T19:00:00Z").unwrap();
-        let answer = json!({"emails": [
-            {"id": "old", "sender": "Claude <no-reply@mail.anthropic.com>", "recipient": "signin@one.example", "date": "2026-11-05T18:59:59Z"},
-            {"id": "first", "sender": "Claude <no-reply@mail.anthropic.com>", "recipient": "signin@one.example", "date": "2026-11-05T19:00:10Z"},
-            {"id": "newest", "sender": "no-reply@anthropic.com", "recipient": "Other <x@one.example>, SignIn@One.example", "date": "Thu, 05 Nov 2026 19:01:00 +0000"},
-            {"id": "spoof", "sender": "Claude <no-reply@anthropic.com.evil.example>", "recipient": "signin@one.example", "date": "2026-11-05T19:05:00Z"},
-            {"id": "elsewhere", "sender": "no-reply@anthropic.com", "recipient": "other@one.example", "date": "2026-11-05T19:06:00Z"},
-            {"id": "undated", "sender": "no-reply@anthropic.com", "recipient": "signin@one.example", "date": "soon"}
+        // As `search_mailbox` answers, for every kind of mailbox.
+        let answer = json!({"messages": [
+            {"accountId": "a", "messageId": "old", "from": "Claude <no-reply@mail.anthropic.com>", "to": "signin@one.example", "date": "2026-11-05T18:59:59Z"},
+            {"accountId": "a", "messageId": "first", "from": "Claude <no-reply@mail.anthropic.com>", "to": "signin@one.example", "date": "2026-11-05T19:00:10Z"},
+            {"accountId": "a", "messageId": "newest", "from": "no-reply@anthropic.com", "to": "Other <x@one.example>, SignIn@One.example", "date": "Thu, 05 Nov 2026 19:01:00 +0000"},
+            {"accountId": "a", "messageId": "spoof", "from": "Claude <no-reply@anthropic.com.evil.example>", "to": "signin@one.example", "date": "2026-11-05T19:05:00Z"},
+            {"accountId": "a", "messageId": "elsewhere", "from": "no-reply@anthropic.com", "to": "other@one.example", "date": "2026-11-05T19:06:00Z"},
+            {"accountId": "a", "messageId": "undated", "from": "no-reply@anthropic.com", "to": "signin@one.example", "date": "soon"},
+            {"accountId": "a", "messageId": "", "from": "no-reply@claude.com", "to": "signin@one.example", "date": "2026-11-05T19:07:00Z"}
         ]});
         assert_eq!(
             sign_in_message(&answer, "signin@one.example", since),
             Some("newest".into())
         );
-        // A Gmail, IMAP or Outlook account's rows come as messages.
-        let rows = json!({"messages": [
-            {"providerMessageId": "g1", "sender": "Claude <no-reply@claude.com>", "recipient": "person@mail.example", "date": "2026-11-05T19:00:00Z"}
-        ]});
-        assert_eq!(
-            sign_in_message(&rows, "person@mail.example", since),
-            Some("g1".into())
-        );
         assert_eq!(sign_in_message(&answer, "nobody@one.example", since), None);
         assert_eq!(
-            sign_in_message(&json!({"emails": "x"}), "signin@one.example", since),
+            sign_in_message(&json!({"messages": "x"}), "signin@one.example", since),
             None
         );
     }
@@ -403,114 +600,257 @@ mod tests {
         assert_eq!(sign_in_link("", None), Err(NoLink::None));
     }
 
-    /// A mailbox that answers each look from a script: the n-th search gets the n-th answer (the
-    /// last one again after that), and reads come from `bodies`.
     type Body = Result<(String, Option<String>), String>;
+    /// A mailbox that answers each look from a script: the n-th search gets the n-th answer (the
+    /// last one again after that), and reads come from `bodies` in order.
     struct Script {
-        searches: Vec<Result<serde_json::Value, String>>,
-        bodies: Vec<(&'static str, Body)>,
-        looks: std::cell::Cell<usize>,
-        reads: std::cell::Cell<usize>,
+        searches: Vec<Result<Value, String>>,
+        bodies: Vec<Body>,
+        looks: Mutex<usize>,
+        reads: Mutex<usize>,
+    }
+    impl Script {
+        fn new(searches: Vec<Result<Value, String>>, bodies: Vec<Body>) -> Self {
+            Self {
+                searches,
+                bodies,
+                looks: Mutex::new(0),
+                reads: Mutex::new(0),
+            }
+        }
     }
     impl Reader for Script {
-        fn search(&self, _email: &str) -> Result<serde_json::Value, String> {
-            let n = self.looks.get();
-            self.looks.set(n + 1);
-            self.searches[n.min(self.searches.len() - 1)].clone()
+        async fn search(&self, account: &str, _email: &str, _since: i64) -> Result<Value, String> {
+            assert_eq!(account, "cloudflare:signin@one.example");
+            let mut n = self.looks.lock().unwrap();
+            *n += 1;
+            self.searches[(*n - 1).min(self.searches.len() - 1)].clone()
         }
-        fn read(&self, id: &str) -> Result<(String, Option<String>), String> {
-            let n = self.reads.get();
-            self.reads.set(n + 1);
-            let matching: Vec<_> = self.bodies.iter().filter(|(i, _)| *i == id).collect();
-            matching[n.min(matching.len() - 1)].1.clone()
+        async fn read(&self, _account: &str, id: &str) -> Result<(String, Option<String>), String> {
+            assert_eq!(id, "m1");
+            let mut n = self.reads.lock().unwrap();
+            *n += 1;
+            self.bodies[(*n - 1).min(self.bodies.len() - 1)].clone()
         }
     }
-    fn run(script: &Script) -> (Waited, std::time::Duration) {
-        let clock = std::cell::Cell::new(std::time::Duration::ZERO);
+    async fn run(script: &Script) -> (Waited, Duration) {
+        let clock = Mutex::new(Duration::ZERO);
         let waited = wait_for_link(
             script,
+            "cloudflare:signin@one.example",
             "signin@one.example",
             arrived("2026-11-05T19:00:00Z").unwrap(),
             POLL_EVERY,
             POLL_FOR,
-            &|| clock.get(),
-            &|d| clock.set(clock.get() + d),
-        );
-        (waited, clock.get())
+            || *clock.lock().unwrap(),
+            |d| {
+                *clock.lock().unwrap() += d;
+                std::future::ready(())
+            },
+        )
+        .await;
+        let after = *clock.lock().unwrap();
+        (waited, after)
     }
-    fn mail() -> serde_json::Value {
-        json!({"emails": [{"id": "m1", "sender": "no-reply@mail.anthropic.com", "recipient": "signin@one.example", "date": "2026-11-05T19:00:30Z"}]})
+    fn mail() -> Value {
+        json!({"messages": [{"accountId": "cloudflare:signin@one.example", "messageId": "m1", "from": "no-reply@mail.anthropic.com", "to": "signin@one.example", "date": "2026-11-05T19:00:30Z"}]})
     }
 
-    #[test]
-    fn the_wait_takes_the_link_once_the_mail_arrives_and_retries_a_failed_look() {
-        let script = Script {
-            searches: vec![
-                Ok(json!({"emails": []})),
-                Err("unreachable".into()),
+    #[tokio::test]
+    async fn the_wait_takes_the_link_once_the_mail_arrives_and_retries_a_failed_look() {
+        let script = Script::new(
+            vec![
+                Ok(json!({"messages": []})),
+                Err(INBOX_UNREACHABLE.into()),
                 Ok(mail()),
             ],
-            bodies: vec![
-                ("m1", Err("unreachable".into())),
-                (
-                    "m1",
-                    Ok(("Sign in: https://claude.ai/magic-link?t=1".into(), None)),
-                ),
+            vec![
+                Err(INBOX_UNREACHABLE.into()),
+                Ok(("Sign in: https://claude.ai/magic-link?t=1".into(), None)),
             ],
-            looks: Default::default(),
-            reads: Default::default(),
-        };
-        let (waited, after) = run(&script);
+        );
+        let (waited, after) = run(&script).await;
         assert_eq!(
             waited,
             Waited::Link("https://claude.ai/magic-link?t=1".into())
         );
         assert_eq!(
-            script.looks.get(),
+            *script.looks.lock().unwrap(),
             4,
             "the read that failed is tried at the next look"
         );
         assert_eq!(after, POLL_EVERY * 3);
     }
 
-    #[test]
-    fn the_wait_ends_without_a_link_when_none_comes_in_time() {
-        let empty = Script {
-            searches: vec![Ok(json!({"emails": []}))],
-            bodies: vec![],
-            looks: Default::default(),
-            reads: Default::default(),
-        };
-        let (waited, after) = run(&empty);
+    #[tokio::test]
+    async fn the_wait_ends_without_a_link_when_none_comes_in_time() {
+        let empty = Script::new(vec![Ok(json!({"messages": []}))], vec![]);
+        let (waited, after) = run(&empty).await;
         assert_eq!(waited, Waited::TimedOut(None));
         assert!(after <= POLL_FOR, "{after:?}");
         // A look at the start and one every POLL_EVERY up to and including POLL_FOR.
         assert_eq!(
-            empty.looks.get() as u64,
+            *empty.looks.lock().unwrap() as u64,
             POLL_FOR.as_secs() / POLL_EVERY.as_secs() + 1
         );
         // A mailbox that never answers names its last error.
-        let down = Script {
-            searches: vec![Err("forbidden".into())],
-            bodies: vec![],
-            looks: Default::default(),
-            reads: Default::default(),
-        };
-        assert_eq!(run(&down).0, Waited::TimedOut(Some("forbidden".into())));
-        // The mail with two different links stops at once for a person.
-        let two = Script {
-            searches: vec![Ok(mail())],
-            bodies: vec![(
-                "m1",
-                Ok(("https://claude.ai/a https://claude.ai/b".into(), None)),
-            )],
-            looks: Default::default(),
-            reads: Default::default(),
-        };
+        let down = Script::new(vec![Err(INBOX_REFUSED.into())], vec![]);
         assert_eq!(
-            run(&two),
-            (Waited::NoLink(NoLink::Several), std::time::Duration::ZERO)
+            run(&down).await.0,
+            Waited::TimedOut(Some(INBOX_REFUSED.into()))
         );
+        // The mail with two different links stops at once for a person.
+        let two = Script::new(
+            vec![Ok(mail())],
+            vec![Ok(("https://claude.ai/a https://claude.ai/b".into(), None))],
+        );
+        assert_eq!(
+            run(&two).await,
+            (Waited::NoLink(NoLink::Several), Duration::ZERO)
+        );
+    }
+
+    #[test]
+    fn only_an_https_origin_or_a_loopback_stand_in_is_a_server() {
+        assert_eq!(
+            origin(" HTTPS://Inbox.Example.com/ "),
+            Some("https://inbox.example.com".into())
+        );
+        assert_eq!(
+            origin("https://inbox.example.com:8443"),
+            Some("https://inbox.example.com:8443".into())
+        );
+        assert_eq!(
+            origin("http://127.0.0.1:4321"),
+            Some("http://127.0.0.1:4321".into())
+        );
+        for bad in [
+            "",
+            "inbox.example.com",
+            "http://inbox.example.com",
+            "https://inbox.example.com/mcp",
+            "https://user@inbox.example.com",
+            "https://inbox.example.com:",
+            "https://inbox.example.com:99999x",
+            "https://localhost",
+            "https://inbox.example.com?x=1",
+            "http://127.0.0.1",
+            "http://127.0.0.1:80/x",
+        ] {
+            assert_eq!(origin(bad), None, "{bad}");
+        }
+        assert!(Client::new("https://inbox.example.com", "id", "se cret").is_none());
+        assert!(Client::new("https://inbox.example.com", "", "secret").is_none());
+    }
+
+    /// A stand-in for Fabric Inbox's `/mcp`: checks the key's headers, answers `list_accounts`,
+    /// `search_mailbox` and `read_message`, and answers `status` for anything else.
+    async fn stand_in(status: u16, stream: bool) -> String {
+        use axum::{http::HeaderMap, routing::post, Json, Router};
+        let app = Router::new().route(
+            "/mcp",
+            post(move |headers: HeaderMap, Json(body): Json<Value>| async move {
+                let header = |n: &str| headers.get(n).and_then(|v| v.to_str().ok()).unwrap_or("");
+                assert_eq!(header("cf-access-client-id"), "client.access");
+                assert_eq!(header("cf-access-client-secret"), "fixture-secret");
+                assert_eq!(body["method"], "tools/call");
+                let args = &body["params"]["arguments"];
+                let answer = match body["params"]["name"].as_str().unwrap() {
+                    "list_accounts" => json!({"accounts": [{"accountId": "cloudflare:signin@one.example", "email": "signin@one.example", "catchAll": false}]}),
+                    "search_mailbox" => {
+                        assert_eq!(args["accountId"], "cloudflare:signin@one.example");
+                        assert_eq!(args["to"], "signin@one.example");
+                        assert_eq!(args["after"], "2026-11-05");
+                        mail()
+                    }
+                    "read_message" => {
+                        assert_eq!(args["includeHtml"], true);
+                        json!({"messageId": "m1", "text": "Sign in", "html": "<a href=\"https://claude.ai/magic-link?t=1\">x</a>"})
+                    }
+                    _ => unreachable!(),
+                };
+                let reply = json!({"jsonrpc": "2.0", "id": 1, "result": {"content": [{"type": "text", "text": answer.to_string()}]}});
+                let text = if stream {
+                    format!("event: message\ndata: {reply}\n\n")
+                } else {
+                    reply.to_string()
+                };
+                (axum::http::StatusCode::from_u16(status).unwrap(), text)
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        format!("http://127.0.0.1:{port}")
+    }
+
+    #[tokio::test]
+    async fn the_client_lists_searches_and_reads_through_the_agent_protocol() {
+        for stream in [false, true] {
+            let server = stand_in(200, stream).await;
+            let client = Client::new(&server, "client.access", "fixture-secret").unwrap();
+            let boxes = client.mailboxes().await.unwrap();
+            let at = receives("signin@one.example", &boxes).unwrap();
+            let waited = wait_for_link(
+                &client,
+                &at.account,
+                "signin@one.example",
+                arrived("2026-11-05T19:00:00Z").unwrap(),
+                POLL_EVERY,
+                POLL_FOR,
+                || Duration::ZERO,
+                |_| std::future::ready(()),
+            )
+            .await;
+            assert_eq!(
+                waited,
+                Waited::Link("https://claude.ai/magic-link?t=1".into())
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn a_refused_key_a_redirect_and_a_tool_error_are_named() {
+        for (status, code) in [
+            (403, INBOX_REFUSED),
+            (401, INBOX_REFUSED),
+            (302, INBOX_REFUSED),
+            (500, INBOX_UNREACHABLE),
+        ] {
+            let client = Client::new(
+                &stand_in(status, false).await,
+                "client.access",
+                "fixture-secret",
+            )
+            .unwrap();
+            assert_eq!(client.mailboxes().await, Err(code.to_string()), "{status}");
+        }
+        // A tool error: isError in the result.
+        use axum::{routing::post, Router};
+        let app = Router::new().route(
+            "/mcp",
+            post(|| async {
+                json!({"jsonrpc": "2.0", "id": 1, "result": {"isError": true, "content": [{"type": "text", "text": "forbidden mailbox"}]}}).to_string()
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let client = Client::new(
+            &format!("http://127.0.0.1:{port}"),
+            "client.access",
+            "fixture-secret",
+        )
+        .unwrap();
+        assert_eq!(
+            client
+                .search("cloudflare:a@b.example", "a@b.example", 0)
+                .await,
+            Err(INBOX_FAILED.to_string())
+        );
+        // Nobody listening.
+        let gone = Client::new("http://127.0.0.1:9", "client.access", "fixture-secret").unwrap();
+        assert_eq!(gone.mailboxes().await, Err(INBOX_UNREACHABLE.to_string()));
     }
 
     #[test]
