@@ -31,6 +31,7 @@ pub mod oplog;
 pub mod person;
 pub mod person_errors;
 pub mod projects;
+mod provenance;
 pub mod recovery;
 mod refresh;
 pub mod roots;
@@ -215,6 +216,16 @@ pub enum Operation {
     },
     ResolveProject {
         path: PathBuf,
+    },
+    /// SB-47 (Fabric COM-11): which account serves a provider's group (or one launch), since when
+    /// and why, by handle only.
+    Provenance {
+        #[serde(default)]
+        provider: Option<Provider>,
+        #[serde(default)]
+        pool: Option<String>,
+        #[serde(default)]
+        launch_id: Option<String>,
     },
     /// The sessions Switchboard launched and their state (SB-95); `all` adds ended ones.
     Sessions {
@@ -1004,6 +1015,7 @@ impl Runtime {
                 | Operation::MonitorStatus
                 | Operation::ResolveProject { .. }
                 | Operation::Sessions { .. }
+                | Operation::Provenance { .. }
                 | Operation::CurrentAccounts
                 | Operation::LoginStatus { .. }
                 | Operation::PendingLogins
@@ -5496,6 +5508,30 @@ async fn execute(
                     Ok(json!({"launches": listed, "total": total}))
                 }
             }
+        }
+        Operation::Provenance {
+            provider,
+            pool,
+            launch_id,
+        } => {
+            let snapshot = store.snapshot()?;
+            let launch = match launch_id {
+                Some(id) => {
+                    let mut shown = crate::blocking::run(|| launches::show(root, &id))?;
+                    Some(shown["launch"].take())
+                }
+                None => None,
+            };
+            let limited = runtime
+                .map(|r| r.limits.report(monitor::now()))
+                .unwrap_or_default();
+            provenance::build(
+                &snapshot,
+                provider,
+                pool.as_deref(),
+                launch.as_ref(),
+                &limited,
+            )
         }
         Operation::Sessions { all } => {
             let snapshot = store.snapshot()?;

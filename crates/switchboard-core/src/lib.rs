@@ -449,7 +449,11 @@ pub(crate) fn event_valid(action: &str, detail: &str) -> bool {
         "kimi_account" => matches!(detail, "added" | "removed"),
         "organization" => matches!(detail, "added" | "updated" | "removed" | "assigned"),
         "activation" => matches!(detail, "completed" | "failed"),
-        "rotation" => matches!(detail, "switched" | "failed"),
+        // SB-47: the cause of a move, for provenance: a limit, a 429 failover, an unusable account.
+        "rotation" => matches!(
+            detail,
+            "switched" | "failed" | "switched_on_limit" | "failover" | "unusable"
+        ),
         "launch" | "login" => matches!(
             detail,
             "started" | "completed" | "failed" | "cancelled" | "isolated" | "managed"
@@ -1076,7 +1080,7 @@ impl Store {
         if let Ok(mut refused) = self.refused.lock() {
             refused.insert(from.to_owned(), now);
         }
-        self.move_route(provider, pool, Some(from), fits, now)
+        self.move_route(provider, pool, Some(from), fits, now, "failover")
     }
     /// The pool's selected account cannot serve a request — its credential expired, it was
     /// switched off, or it is gone (SB-101, SB-102): the pool moves to its best account that
@@ -1097,7 +1101,7 @@ impl Store {
             .routes
             .get(&format!("{}:{}", provider.as_str(), pool))
             .cloned();
-        self.move_route(provider, pool, from.as_deref(), fits, now)
+        self.move_route(provider, pool, from.as_deref(), fits, now, "unusable")
     }
     fn move_route(
         &self,
@@ -1106,6 +1110,7 @@ impl Store {
         from: Option<&str>,
         fits: Fits,
         now: i64,
+        cause: &str,
     ) -> Result<Option<(Account, Credential)>, String> {
         let policy = self.failover_policy(provider, pool)?;
         let mut held = self.limited();
@@ -1121,7 +1126,7 @@ impl Store {
         };
         // Compare and move: only a route still on `from` changes.
         if self.select_transaction(provider, pool, &id, Some(now), Some(from))? {
-            let _ = self.record("rotation", Some(&id), "switched");
+            let _ = self.record("rotation", Some(&id), cause);
             if let Ok(mut tally) = self.failover_tally.lock() {
                 tally.moved += 1;
             }

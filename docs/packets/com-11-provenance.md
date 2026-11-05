@@ -1,7 +1,9 @@
 # Packet COM-11 (Switchboard part) — provider, account and session provenance for Fabric
 
-**State:** researched 2026-10-05; implementation waits for Fabric's COM-01 contract and COM-03
-identity/replacement/fence schema. **Canonical status:** Fabric
+**State:** built 2026-11-05 (SB-47) in the shape Fabric accepted on board thread `82241ad5`:
+no `fabric_generation` (a run takes its slot with `com.enroll`), read through CLI `--json`,
+`account_ref` only ([CONTRACTS](../CONTRACTS.md#provenance-sb-47-2026-11-05)). The research below
+is history. **Canonical status:** Fabric
 [execution spine](https://github.com/passioncode-ai/fabric/blob/3b2878fc9283db5fc9a81697ba8538a01630b8d9/docs/evidence/plans/2026-10-04-project-communications.md)
 (COM-11, COM-12). **Owner issue:** [#36](https://github.com/passioncode-ai/fabric-switchboard/issues/36).
 **Board:** SB-47. This packet is the owner's research and proposal, not a second copy of COM status.

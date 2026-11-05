@@ -1112,10 +1112,15 @@ fn rotate(runtime: &Runtime, native_sources: bool) -> Result<(), String> {
                     reason = "switch_failed".into();
                 }
                 // Journal after the outcome is fixed; a write failure cannot undo a switch.
+                // SB-47: a switch on a limit says so, for provenance.
                 let _ = runtime.store.record(
                     "rotation",
                     Some(id),
-                    if result.is_ok() { "switched" } else { "failed" },
+                    match (&result, reason.as_str()) {
+                        (Ok(_), "switched_on_limit") => "switched_on_limit",
+                        (Ok(_), _) => "switched",
+                        (Err(_), _) => "failed",
+                    },
                 );
             }
             let failed = reason == "activation_failed" || reason == "switch_failed";

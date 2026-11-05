@@ -8,6 +8,8 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- New `switchboard provenance` (and the MCP tool `switchboard_provenance`): which account serves a group or a launch, since when and why, by its handle only, for Fabric (SB-47). The activity list now says why an account was switched: on a limit, after a refusal, or off an unusable account.
+
 ## 0.7.11
 
 - The automatic fallback no longer takes over the work of a session Fabric started for a board request, even when that session looks like an ordinary one; Fabric alone hands such work on (SB-253).

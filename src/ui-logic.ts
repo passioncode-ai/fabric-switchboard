@@ -148,6 +148,10 @@ export function eventDetail(detail: string): string {
     case 'cleared': return t('cleared');
     case 'offered': return t('offered');
     case 'switched': return t('switched');
+    // SB-47: the cause of a move, journaled for provenance.
+    case 'switched_on_limit': return t('switched on a limit');
+    case 'failover': return t('moved after a refusal');
+    case 'unusable': return t('moved off an unusable account');
     case 'cancelled': return t('cancelled');
     case 'isolated': return t('isolated session');
     case 'managed': return t('managed session');
