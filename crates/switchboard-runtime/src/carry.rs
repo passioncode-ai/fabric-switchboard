@@ -102,6 +102,8 @@ pub(crate) fn codex_hook_trust(home: &Path, user: &Path) -> String {
     toml::to_string(&config).unwrap_or_default()
 }
 
+// SB-266: on Windows every home links through `link_into_home` (junctions and hard links).
+#[cfg_attr(windows, allow(dead_code))]
 pub(crate) fn link_into(home: &Path, source: &Path, names: &[&str]) -> usize {
     if same_dir(home, source) {
         return 0;
@@ -168,7 +170,8 @@ fn aside_name(home: &Path, name: &str) -> Option<PathBuf> {
     })
 }
 
-/// [`link_into`] for an organization's shell home (SB-226). Elsewhere exactly [`link_into`]. On
+/// [`link_into`] for a home Switchboard prepares: an organization's shell home (SB-226) and, since
+/// SB-266, a launched home. Elsewhere exactly [`link_into`]. On
 /// Windows, where a symbolic link needs a privilege a person seldom holds, a folder is linked by
 /// a directory junction (any local drive) and a file by a hard link (same volume only), neither
 /// of which needs it or an administrator: a junction always shows the folder as it is now; a hard
@@ -179,7 +182,7 @@ fn aside_name(home: &Path, name: &str) -> Option<PathBuf> {
 /// starts the pass when the file's time moves) and removed when the person's file is gone. A home
 /// file with another identity (a real file, or one a session replaced by rename) is never replaced
 /// or removed, and its name leaves the record.
-pub(crate) fn link_into_shell_home(home: &Path, source: &Path, names: &[&str]) -> usize {
+pub(crate) fn link_into_home(home: &Path, source: &Path, names: &[&str]) -> usize {
     #[cfg(windows)]
     return windows_links::link_into(home, source, names);
     #[cfg(not(windows))]
@@ -384,6 +387,33 @@ mod windows_links {
                     return false;
                 }
             }
+            // SB-266, as SB-260 on macOS and Linux: a real `plugins` or `skills` folder in the
+            // home is moved aside once, never deleted, and put back when no junction can be made.
+            Ok(m)
+                if m.is_dir()
+                    && from.is_dir()
+                    && to
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .is_some_and(|n| super::MOVED_ASIDE.contains(&n)) =>
+            {
+                let (Some(home), Some(name)) =
+                    (to.parent(), to.file_name().and_then(|n| n.to_str()))
+                else {
+                    return false;
+                };
+                let Some(aside) = super::aside_name(home, name) else {
+                    return false;
+                };
+                if std::fs::rename(to, &aside).is_err() {
+                    return false;
+                }
+                if junction(from, to).is_ok() {
+                    return true;
+                }
+                let _ = std::fs::rename(&aside, to);
+                return false;
+            }
             Ok(_) => return false,
             Err(_) => {}
         }
@@ -565,8 +595,9 @@ fn same_dir(a: &Path, b: &Path) -> bool {
 fn symlink(from: &Path, to: &Path) -> std::io::Result<()> {
     std::os::unix::fs::symlink(from, to)
 }
-/// Windows needs a privilege for symbolic links; nothing is linked there yet.
+/// Windows needs a privilege for symbolic links: its homes link through `link_into_home` (SB-266).
 #[cfg(not(unix))]
+#[allow(dead_code)]
 fn symlink(_from: &Path, _to: &Path) -> std::io::Result<()> {
     Err(std::io::Error::other("links are not made on this platform"))
 }
@@ -1005,10 +1036,7 @@ mod windows_tests {
         .unwrap();
         std::fs::create_dir(user.path().join("commands")).unwrap();
         std::fs::write(home.path().join("commands"), "the home's own").unwrap();
-        assert_eq!(
-            link_into_shell_home(home.path(), user.path(), CLAUDE_LINKS),
-            2
-        );
+        assert_eq!(link_into_home(home.path(), user.path(), CLAUDE_LINKS), 2);
         // The folder: a junction that resolves, and shows what is added later.
         let skills = home.path().join("skills");
         assert!(std::fs::symlink_metadata(&skills)
@@ -1038,17 +1066,11 @@ mod windows_tests {
         .unwrap();
         assert_eq!(std::fs::read_to_string(&claude).unwrap(), "edited");
         let record = home.path().join(windows_links::RECORD);
-        assert_eq!(
-            link_into_shell_home(home.path(), user.path(), CLAUDE_LINKS),
-            2
-        );
+        assert_eq!(link_into_home(home.path(), user.path(), CLAUDE_LINKS), 2);
         assert_eq!(std::fs::read_to_string(&claude).unwrap(), "replaced");
         // A pass with nothing new writes nothing.
         let stamp = std::fs::metadata(&record).unwrap().modified().unwrap();
-        assert_eq!(
-            link_into_shell_home(home.path(), user.path(), CLAUDE_LINKS),
-            2
-        );
+        assert_eq!(link_into_home(home.path(), user.path(), CLAUDE_LINKS), 2);
         assert_eq!(
             std::fs::metadata(&record).unwrap().modified().unwrap(),
             stamp
@@ -1066,12 +1088,12 @@ mod windows_tests {
         let other_home = tempfile::tempdir().unwrap();
         std::fs::write(other_home.path().join("CLAUDE.md"), "mine").unwrap();
         assert_eq!(
-            link_into_shell_home(other_home.path(), user.path(), CLAUDE_LINKS),
+            link_into_home(other_home.path(), user.path(), CLAUDE_LINKS),
             2,
             "skills and commands; the person's CLAUDE.md stays"
         );
         assert_eq!(
-            link_into_shell_home(other_home.path(), elsewhere.path(), CLAUDE_LINKS),
+            link_into_home(other_home.path(), elsewhere.path(), CLAUDE_LINKS),
             1
         );
         assert_eq!(
@@ -1083,7 +1105,7 @@ mod windows_tests {
             "mine"
         );
         // A hard link Switchboard made follows a new source too.
-        link_into_shell_home(home.path(), elsewhere.path(), CLAUDE_LINKS);
+        link_into_home(home.path(), elsewhere.path(), CLAUDE_LINKS);
         assert_eq!(std::fs::read_to_string(&claude).unwrap(), "other rules");
         // Taking the links away never touches the person's files.
         std::fs::remove_dir(home.path().join("skills")).unwrap();
@@ -1103,10 +1125,7 @@ mod windows_tests {
             "moved"
         );
         // The person's own folder is never linked into itself.
-        assert_eq!(
-            link_into_shell_home(user.path(), user.path(), CLAUDE_LINKS),
-            0
-        );
+        assert_eq!(link_into_home(user.path(), user.path(), CLAUDE_LINKS), 0);
     }
 
     /// Seam B1: a person's file that is gone takes Switchboard's hard link with it.
@@ -1115,30 +1134,21 @@ mod windows_tests {
         let user = tempfile::tempdir().unwrap();
         let home = tempfile::tempdir().unwrap();
         std::fs::write(user.path().join("CLAUDE.md"), "rules").unwrap();
-        assert_eq!(
-            link_into_shell_home(home.path(), user.path(), CLAUDE_LINKS),
-            1
-        );
+        assert_eq!(link_into_home(home.path(), user.path(), CLAUDE_LINKS), 1);
         let claude = home.path().join("CLAUDE.md");
         let record = home.path().join(windows_links::RECORD);
         assert!(std::fs::read_to_string(&record)
             .unwrap()
             .starts_with("CLAUDE.md\t"));
         std::fs::remove_file(user.path().join("CLAUDE.md")).unwrap();
-        assert_eq!(
-            link_into_shell_home(home.path(), user.path(), CLAUDE_LINKS),
-            0
-        );
+        assert_eq!(link_into_home(home.path(), user.path(), CLAUDE_LINKS), 0);
         assert!(!claude.exists(), "no stale copy of a deleted file");
         assert!(!std::fs::read_to_string(&record)
             .unwrap()
             .contains("CLAUDE.md"));
         // Back: linked again.
         std::fs::write(user.path().join("CLAUDE.md"), "new rules").unwrap();
-        assert_eq!(
-            link_into_shell_home(home.path(), user.path(), CLAUDE_LINKS),
-            1
-        );
+        assert_eq!(link_into_home(home.path(), user.path(), CLAUDE_LINKS), 1);
         assert_eq!(std::fs::read_to_string(&claude).unwrap(), "new rules");
     }
 
@@ -1149,14 +1159,11 @@ mod windows_tests {
         let user = tempfile::tempdir().unwrap();
         let home = tempfile::tempdir().unwrap();
         std::fs::write(user.path().join("CLAUDE.md"), "rules").unwrap();
-        link_into_shell_home(home.path(), user.path(), CLAUDE_LINKS);
+        link_into_home(home.path(), user.path(), CLAUDE_LINKS);
         let claude = home.path().join("CLAUDE.md");
         std::fs::write(home.path().join("CLAUDE.md.tmp"), "the session's edit").unwrap();
         std::fs::rename(home.path().join("CLAUDE.md.tmp"), &claude).unwrap();
-        assert_eq!(
-            link_into_shell_home(home.path(), user.path(), CLAUDE_LINKS),
-            0
-        );
+        assert_eq!(link_into_home(home.path(), user.path(), CLAUDE_LINKS), 0);
         assert_eq!(
             std::fs::read_to_string(&claude).unwrap(),
             "the session's edit"
@@ -1172,13 +1179,13 @@ mod windows_tests {
             user.path().join("CLAUDE.md"),
         )
         .unwrap();
-        link_into_shell_home(home.path(), user.path(), CLAUDE_LINKS);
+        link_into_home(home.path(), user.path(), CLAUDE_LINKS);
         assert_eq!(
             std::fs::read_to_string(&claude).unwrap(),
             "the session's edit"
         );
         std::fs::remove_file(user.path().join("CLAUDE.md")).unwrap();
-        link_into_shell_home(home.path(), user.path(), CLAUDE_LINKS);
+        link_into_home(home.path(), user.path(), CLAUDE_LINKS);
         assert_eq!(
             std::fs::read_to_string(&claude).unwrap(),
             "the session's edit"
@@ -1193,14 +1200,14 @@ mod windows_tests {
         std::fs::create_dir(user.path().join("skills")).unwrap();
         std::fs::write(user.path().join("skills").join("a.md"), "skill").unwrap();
         let slashed = std::path::PathBuf::from(user.path().to_string_lossy().replace('\\', "/"));
-        assert_eq!(link_into_shell_home(home.path(), &slashed, CLAUDE_LINKS), 1);
+        assert_eq!(link_into_home(home.path(), &slashed, CLAUDE_LINKS), 1);
         assert_eq!(
             std::fs::read_to_string(home.path().join("skills").join("a.md")).unwrap(),
             "skill"
         );
         // The next pass keeps the junction it made.
         let made = std::fs::read_link(home.path().join("skills")).unwrap();
-        assert_eq!(link_into_shell_home(home.path(), &slashed, CLAUDE_LINKS), 1);
+        assert_eq!(link_into_home(home.path(), &slashed, CLAUDE_LINKS), 1);
         assert_eq!(
             std::fs::read_link(home.path().join("skills")).unwrap(),
             made
@@ -1214,5 +1221,34 @@ mod windows_tests {
         assert!(windows_links::junction(Path::new(r"\\server\share\skills"), &link).is_err());
         assert!(!link.exists(), "nothing left behind");
         assert!(windows_links::junction(Path::new("relative"), &link).is_err());
+    }
+
+    #[test]
+    fn a_launched_home_on_windows_moves_a_real_plugins_folder_aside_and_joins_the_persons() {
+        // SB-266: a launched home gets the same junctions; a real `plugins` folder there is moved
+        // aside once (SB-260) and the person's joined in its place.
+        let user = tempfile::tempdir().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(user.path().join("plugins")).unwrap();
+        std::fs::write(user.path().join("plugins").join("p.json"), "theirs").unwrap();
+        std::fs::create_dir_all(home.path().join("plugins")).unwrap();
+        std::fs::write(home.path().join("plugins").join("own.json"), "own").unwrap();
+        assert_eq!(link_into_home(home.path(), user.path(), CLAUDE_LINKS), 1);
+        assert_eq!(
+            std::fs::read_to_string(home.path().join("plugins").join("p.json")).unwrap(),
+            "theirs"
+        );
+        assert_eq!(
+            std::fs::read_to_string(
+                home.path()
+                    .join("plugins.before-switchboard")
+                    .join("own.json")
+            )
+            .unwrap(),
+            "own",
+            "moved aside, never deleted"
+        );
+        assert_eq!(link_into_home(home.path(), user.path(), CLAUDE_LINKS), 1);
+        assert!(!home.path().join("plugins.before-switchboard-1").exists());
     }
 }

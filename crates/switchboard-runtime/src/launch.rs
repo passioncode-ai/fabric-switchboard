@@ -2146,7 +2146,7 @@ fn carry_pi(own: &Path) -> Result<(), String> {
     let Some(user) = crate::carry::pi_user_dir() else {
         return Ok(());
     };
-    crate::carry::link_into(own, &user, crate::carry::PI_LINKS);
+    crate::carry::link_into_home(own, &user, crate::carry::PI_LINKS);
     if let Some(settings) = crate::carry::pi_settings(&user) {
         private_write(
             &own.join("settings.json"),
@@ -2599,12 +2599,12 @@ fn launch_core(
     if let Some(user) = &user {
         match account.provider {
             Provider::Claude => {
-                crate::carry::link_into(&home, user, crate::carry::CLAUDE_LINKS);
+                crate::carry::link_into_home(&home, user, crate::carry::CLAUDE_LINKS);
             }
             Provider::Codex => {
                 // SB-247: the person's hooks (`hooks.json`, where fabric-agent-adapter installs
                 // its hook) come along as Claude Code's settings do.
-                crate::carry::link_into(&home, user, CODEX_LINKS);
+                crate::carry::link_into_home(&home, user, CODEX_LINKS);
             }
         }
     }
