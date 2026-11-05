@@ -8,6 +8,8 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- On a Mac, Switchboard now starts again by itself if it ever stops unexpectedly; quitting it still keeps it closed. The change takes effect after your next login (SB-254).
+
 - When two people share a Mac, each with their own Switchboard, a project folder both of them work in keeps the Claude Code route of the person who set it up first; the other person's Switchboard leaves that folder alone instead of overwriting it (SB-251).
 
 ## 0.7.11

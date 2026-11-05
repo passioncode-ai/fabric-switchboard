@@ -2495,12 +2495,18 @@ pub const DRAIN_DEADLINE: std::time::Duration = std::time::Duration::from_secs(8
 pub const HARD_EXIT_AFTER: std::time::Duration = std::time::Duration::from_secs(10);
 /// Arms the backstop: a plain thread that ends the process if the orderly stop overruns.
 pub fn arm_hard_exit(after: std::time::Duration) {
+    arm_hard_exit_with(after, 1);
+}
+/// The backstop with the exit status the process ends with. The app ends a stop it was asked
+/// for with 0 (SB-254): its login item restarts it after a crash, never after a quit, and a
+/// drain that overran is still the quit the person asked for.
+pub fn arm_hard_exit_with(after: std::time::Duration, code: i32) {
     let _ = std::thread::Builder::new()
         .name("switchboard-hard-exit".into())
         .spawn(move || {
             std::thread::sleep(after);
             oplog::event("hard_exit", &[]);
-            std::process::exit(1);
+            std::process::exit(code);
         });
 }
 /// Resolves on the first stop request the process receives: `SIGTERM` or `SIGINT` (Unix),

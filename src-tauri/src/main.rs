@@ -1305,7 +1305,10 @@ fn main() {
                         &[("signal", switchboard_runtime::oplog::Field::Code(signal))],
                     );
                     handle.state::<updates::Updates>().note_signal();
-                    switchboard_runtime::arm_hard_exit(switchboard_runtime::HARD_EXIT_AFTER);
+                    switchboard_runtime::arm_hard_exit_with(
+                        switchboard_runtime::HARD_EXIT_AFTER,
+                        0,
+                    );
                     handle.exit(0);
                 }
             });
@@ -1463,7 +1466,7 @@ fn main() {
         // owner stops its timers, finishes or abandons work in flight by the deadline,
         // removes its descriptor and releases the store (lifecycle LC-01).
         if let tauri::RunEvent::Exit = event {
-            switchboard_runtime::arm_hard_exit(switchboard_runtime::HARD_EXIT_AFTER);
+            switchboard_runtime::arm_hard_exit_with(switchboard_runtime::HARD_EXIT_AFTER, 0);
             let slot = handle.state::<Slot>();
             let owner = tauri::async_runtime::block_on(async { slot.owner.lock().await.take() });
             if let Some(owner) = owner {
