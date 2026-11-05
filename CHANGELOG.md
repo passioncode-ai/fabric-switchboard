@@ -8,6 +8,12 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+## 0.7.13
+
+- New: `switchboard login begin --provider claude --headless` signs in to Claude without opening Terminal; `login status` gives the sign-in page and `login code` takes the code it shows (SB-256).
+- A session Fabric starts for a board request keeps its work open until the request is settled, so Fabric can pick it up again (SB-258).
+- Switchboard's hourly summaries of its own log no longer count hours your Mac slept through, and they keep the hour Switchboard was quit in (SB-257).
+
 ## 0.7.12
 
 - On a Mac, Switchboard now starts again by itself if it ever stops unexpectedly; quitting it still keeps it closed. The change takes effect after your next login (SB-254).
