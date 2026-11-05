@@ -8,8 +8,11 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+## 0.7.17
+
 - New: adding an organization can bring in its GitHub organization's repositories. Choose one of the GitHub organizations your GitHub CLI can see; the ones already on this computer go into the organization's group, the missing ones are cloned into a folder you pick, and new repositories join the group later. Folders you already keep can be added in the same dialog (SB-265).
 - Add folders… now takes several folders from one picker (SB-264).
+- On Windows, sessions Switchboard starts now see your Claude plugins, skills and other folders: they are joined into the session's home as on macOS and Linux (SB-266).
 
 ## 0.7.16
 
