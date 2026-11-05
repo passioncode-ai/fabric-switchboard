@@ -2,6 +2,35 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-11-05 (day): release 0.7.12; SB-257, SB-258 and the sign-in autopilot's first node merged
+
+- **Released.** v0.7.12 published 2026-11-05 16:19:04Z (25 assets, `latest.json` 0.7.12 for seven
+  platforms; release PR #404 `e6da46f`): SB-47 provenance (PR #402), SB-251 several macOS users on
+  one Mac (PR #398), SB-254 part 2 the login item starts Switchboard again after a crash, SB-255 the
+  digest's published outcome map and DEC-0153 OD-5 missed days (PR #403). Two GitHub outages hit
+  the release: the nightly on the tag was cancelled once (rerun green), and `publish` failed twice
+  on HTTP 500/502 uploading assets; rerunning only `publish` finished it.
+- **Merged, not released (0.7.13).** SB-257 (PR #405 `32f94ce`, PR #408 `032a5ff`): digest hours
+  only when the owner was seen in them, the stopping hour kept in `digests/open.json`, `previous`
+  after a restart, kept hours written before missed days fold (DEC-0153 rounds 4 and 5). SB-258
+  (PR #407 `758b36e`): a dispatched run closes its workflow only once its board request is settled
+  (finding by passioncode-vesta, thread `b0afcbd9`). SB-256 N1 (PR #406 `5ac0e1f`): `login begin
+  --headless`, `manual_url` in the status, `login code` on stdin.
+- **Sign-in autopilot (SB-256).** Design `docs/research/signin-autopilot-2026-11-05.md`. Measured
+  with Claude Code 2.1.299: it honours `BROWSER`, prints a manual URL redirecting to
+  `platform.claude.com` and reads a pasted code from a pipe. The browser service's owner answered on
+  thread `8870fb87` (its BL-172, measurements by 2026-11-12). The Fabric Inbox read key and the
+  browser service's caller token are the operator's to create. Note: commit `8ded90a` on public main
+  carried a private agent's internals for a few minutes; fixed forward in `6d69db5`, history not
+  rewritten.
+- **Crash on 2026-11-05 04:20Z (SB-254 part 1, open).** The 0.7.11 owner died with SIGABRT in the
+  Security framework (`KeychainImpl` released on a background queue); report
+  `~/Library/Logs/DiagnosticReports/fabric-switchboard-2026-11-05-052056.ips`.
+- **Exact next task.** Release 0.7.13 (SB-257, SB-258, SB-256 N1), answer threads `b0afcbd9` and
+  `f7758225` with the version; then SB-256 N2 and N3 (the account's e-mail, the Fabric Inbox check,
+  reading the sign-in mail, the key stored in the OS vault, design decision in the note), then
+  SB-254 part 1.
+
 ## 2026-11-05 (night): releases 0.7.10 and 0.7.11; SB-250 and SB-253; SB-47 waits for its gate
 
 - **Released.** v0.7.10 (SB-252, Linux keeps the shared `installation.json` with the family)
