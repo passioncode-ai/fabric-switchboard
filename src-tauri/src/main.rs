@@ -430,6 +430,7 @@ async fn remove_project_rule(
 }
 /// A project: its folders and the accounts reserved for them (0.6). `pool` updates one.
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 async fn save_project(
     pool: Option<String>,
     name: String,
@@ -437,12 +438,15 @@ async fn save_project(
     account_ids: Vec<String>,
     base_folders: Option<Vec<std::path::PathBuf>>,
     organization: Option<String>,
+    organizations: Option<Vec<String>>,
     state: State<'_, Slot>,
 ) -> Result<Value, String> {
     state
         .runtime()
         .await?
         .execute(Operation::SaveProject {
+            organizations,
+            move_accounts: false,
             pool,
             name,
             folders,
@@ -575,12 +579,17 @@ async fn organization_remove(id: String, state: State<'_, Slot>) -> Result<Value
 async fn organization_assign(
     account: String,
     choice: Option<String>,
+    organizations: Option<Vec<String>>,
     state: State<'_, Slot>,
 ) -> Result<Value, String> {
     state
         .runtime()
         .await?
-        .execute(Operation::OrganizationAssign { account, choice })
+        .execute(Operation::OrganizationAssign {
+            account,
+            choice,
+            organizations,
+        })
         .await
 }
 /// SB-159: the PassionCode.ai connection: `status`, `connect` (browser sign-in, waits up to

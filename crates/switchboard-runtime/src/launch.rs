@@ -1594,6 +1594,28 @@ fn codex_auth_snapshot(
         AuthKind::SetupToken => Err("Codex does not support setup tokens.".into()),
     }
 }
+/// SB-282: the pool a session of `account` in `folder` runs in: its home when its own group (or
+/// none) holds the folder, else the first group that shares it and holds the folder.
+pub(crate) fn serving_pool(
+    snapshot: &switchboard_core::Snapshot,
+    account: &switchboard_core::Account,
+    folder: &Path,
+) -> String {
+    let holds = |pool: &str| {
+        snapshot
+            .project_of_pool(pool)
+            .is_some_and(|p| p.folders.iter().any(|f| folder.starts_with(Path::new(f))))
+    };
+    if holds(&account.pool) {
+        return account.pool.clone();
+    }
+    snapshot
+        .pools_of(account)
+        .into_iter()
+        .find(|p| holds(p))
+        .unwrap_or(&account.pool)
+        .to_owned()
+}
 pub(crate) const PROJECT_ACCOUNT_OUTSIDE: &str =
     "This account belongs to a group. Launch it from one of the group's folders.";
 pub(crate) const PROJECT_FOLDER_FOREIGN: &str =
@@ -1605,28 +1627,48 @@ pub(crate) fn project_allows(
     account: &switchboard_core::Account,
     folder: &Path,
 ) -> Result<(), String> {
-    // SB-109: a group runs only on accounts of its own organization (or personal ones).
-    if !snapshot.context_admits(&account.pool, account) {
-        return Err(switchboard_core::organizations::SEAT_OUTSIDE.into());
-    }
-    if let Some(owner) = snapshot.project_of_pool(&account.pool) {
-        if !owner
-            .folders
+    // SB-109: a group runs only on accounts of its own organizations (or personal ones).
+    // SB-282: an account several groups share starts in the folders of any of them that takes
+    // its context.
+    let groups: Vec<&switchboard_core::Project> = snapshot
+        .pools_of(account)
+        .into_iter()
+        .filter_map(|p| snapshot.project_of_pool(p))
+        .collect();
+    if groups.is_empty() {
+        if !snapshot.context_admits(&account.pool, account) {
+            return Err(switchboard_core::organizations::SEAT_OUTSIDE.into());
+        }
+    } else {
+        let serving: Vec<&&switchboard_core::Project> = groups
             .iter()
-            .any(|f| folder.starts_with(Path::new(f)))
+            .filter(|g| g.folders.iter().any(|f| folder.starts_with(Path::new(f))))
+            .collect();
+        if !groups
+            .iter()
+            .any(|g| snapshot.context_admits(&g.pool, account))
         {
+            return Err(switchboard_core::organizations::SEAT_OUTSIDE.into());
+        }
+        if serving.is_empty() {
             return Err(PROJECT_ACCOUNT_OUTSIDE.into());
+        }
+        if !serving
+            .iter()
+            .any(|g| snapshot.context_admits(&g.pool, account))
+        {
+            return Err(switchboard_core::organizations::SEAT_OUTSIDE.into());
         }
     }
     // SB-146: a folder in several groups may run on any of them; another account is refused
     // only while one of its groups has its own account for the provider.
     let here = snapshot.projects_for(folder);
-    if !here.iter().any(|p| p.pool == account.pool) {
+    if !here.iter().any(|p| snapshot.serves(account, &p.pool)) {
         let has_own = here.iter().any(|p| {
             snapshot
                 .accounts
                 .iter()
-                .any(|a| a.pool == p.pool && a.provider == account.provider && a.enabled)
+                .any(|a| snapshot.serves(a, &p.pool) && a.provider == account.provider && a.enabled)
         });
         if has_own {
             return Err(PROJECT_FOLDER_FOREIGN.into());
@@ -1692,7 +1734,7 @@ fn launch_agent_with(
     // SB-201: the account's context, as a Claude Code launch on it would have.
     let context = store
         .snapshot()?
-        .session_context(&account, Some(&working_directory));
+        .serving_context(&account, pool, Some(&working_directory));
     let mut env = BTreeMap::from([
         (
             "SWITCHBOARD_SESSION".to_string(),
@@ -2578,6 +2620,9 @@ fn launch_core(
         return Err(EXTRA_ARGS_INVALID.into());
     }
     let (working_directory, account) = validate(root, store, id, mode, working_directory)?;
+    // SB-282: a managed session runs in the group whose folder it starts in, which may share
+    // the account rather than hold it.
+    let pool = serving_pool(&store.snapshot()?, &account, &working_directory);
     let program = match headless {
         Some(h) => h.program.clone(),
         None => (host.binary)(account.provider)?,
@@ -2589,7 +2634,7 @@ fn launch_core(
     });
     private_dir(&homes)?;
     let name = if mode == "managed" {
-        format!("{}-{}", account.provider.as_str(), account.pool)
+        format!("{}-{}", account.provider.as_str(), pool)
     } else {
         account.id.clone()
     };
@@ -2597,7 +2642,7 @@ fn launch_core(
     private_dir(&home)?;
     let mut reservation = Reservation::new(&home)?;
     let session = if mode == "managed" {
-        format!("managed:{}:{}", account.provider.as_str(), account.pool)
+        format!("managed:{}:{}", account.provider.as_str(), pool)
     } else {
         format!("isolated:{}:{}", account.provider.as_str(), account.id)
     };
@@ -2656,7 +2701,7 @@ fn launch_core(
     // SB-110: the session's context, fixed for the session (CX-26), for whatever reads it.
     let context = store
         .snapshot()?
-        .session_context(&account, Some(&working_directory));
+        .serving_context(&account, &pool, Some(&working_directory));
     let mut env = BTreeMap::from([
         ("SWITCHBOARD_SESSION".to_string(), session),
         ("SWITCHBOARD_CONTEXT".to_string(), context.clone()),
@@ -2681,7 +2726,7 @@ fn launch_core(
         env.insert(SOURCE_DIR.into(), user.to_string_lossy().into_owned());
     }
     if mode == "managed" {
-        let (selected, _) = store.route(account.provider, &account.pool)?;
+        let (selected, _) = store.route(account.provider, &pool)?;
         if selected.id != account.id {
             return Err("Select this account before launching managed mode.".into());
         }
@@ -2689,7 +2734,7 @@ fn launch_core(
             "http://{}/{}/{}",
             proxy.address(),
             account.provider.as_str(),
-            account.pool
+            pool
         );
         match account.provider {
             Provider::Claude => {
@@ -2780,7 +2825,7 @@ fn launch_core(
         let record = json!({
             "account_id": account.id,
             "provider": account.provider.as_str(),
-            "pool": account.pool,
+            "pool": pool,
             "context": context,
             "mode": mode,
             "working_directory": working_directory,
@@ -2834,7 +2879,7 @@ fn launch_core(
     let record = json!({
         "account_id": account.id,
         "provider": account.provider.as_str(),
-        "pool": account.pool,
+        "pool": pool,
         "context": context,
         "mode": mode,
         "working_directory": working_directory,
@@ -3272,12 +3317,13 @@ mod tests {
                 account("codex", "default", Provider::Codex),
             ],
             projects: vec![Project {
+                shared_accounts: Vec::new(),
                 pool: "alpha".into(),
                 name: "Alpha".into(),
                 folders: vec!["/work/web".into(), "/work/api".into()],
                 created_at: 1,
                 sources: vec![],
-                organization: None,
+                organizations: Vec::new(),
             }],
             ..Default::default()
         };
@@ -3316,7 +3362,7 @@ mod tests {
             project_allows(&with_org, &with_org.accounts[0], Path::new("/work/web")).unwrap_err(),
             switchboard_core::organizations::SEAT_OUTSIDE
         );
-        with_org.projects[0].organization = Some("00000000-0000-4000-8000-000000000001".into());
+        with_org.projects[0].organizations = vec!["00000000-0000-4000-8000-000000000001".into()];
         assert!(project_allows(&with_org, &with_org.accounts[0], Path::new("/work/web")).is_ok());
     }
 

@@ -140,6 +140,16 @@ struct Payload {
     memberships: BTreeMap<String, String>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     project_organizations: BTreeMap<String, String>,
+    /// SB-282: a group's further organizations beyond its first (pool → ids), kept apart so a
+    /// reader without them still restores the first.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    project_more_organizations: BTreeMap<String, Vec<String>>,
+    /// SB-282: accounts a group shares from another (pool → old account ids), and the
+    /// organizations an account also works for (old account id → organization ids).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    project_shared_accounts: BTreeMap<String, Vec<String>>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    also_organizations: BTreeMap<String, Vec<String>>,
     /// SB-175: accounts marked as used on another machine (old account id → when).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     elsewhere: BTreeMap<String, i64>,
@@ -279,14 +289,28 @@ pub fn write(
         project_organizations: snapshot
             .projects
             .iter()
-            .filter_map(|p| Some((p.pool.clone(), p.organization.clone()?)))
+            .filter_map(|p| Some((p.pool.clone(), p.organizations.first()?.clone())))
             .collect(),
+        project_more_organizations: snapshot
+            .projects
+            .iter()
+            .filter(|p| p.organizations.len() > 1)
+            .map(|p| (p.pool.clone(), p.organizations[1..].to_vec()))
+            .collect(),
+        project_shared_accounts: snapshot
+            .projects
+            .iter()
+            .filter(|p| !p.shared_accounts.is_empty())
+            .map(|p| (p.pool.clone(), p.shared_accounts.clone()))
+            .collect(),
+        also_organizations: snapshot.also_organizations.clone(),
         projects: snapshot
             .projects
             .into_iter()
             .map(|p| Project {
                 sources: Vec::new(),
-                organization: None,
+                organizations: Vec::new(),
+                shared_accounts: Vec::new(),
                 ..p
             })
             .collect(),
@@ -615,11 +639,24 @@ pub fn restore(
         if let Some(sources) = payload.project_sources.get(&project.pool) {
             project.sources = sources.clone();
         }
-        project.organization = payload
+        let mut organizations: Vec<String> = Vec::new();
+        let named = payload
             .project_organizations
             .get(&project.pool)
-            .and_then(|o| org_ids.get(o))
-            .cloned();
+            .into_iter()
+            .chain(
+                payload
+                    .project_more_organizations
+                    .get(&project.pool)
+                    .into_iter()
+                    .flatten(),
+            );
+        for o in named.filter_map(|o| org_ids.get(o)) {
+            if !organizations.contains(o) {
+                organizations.push(o.clone());
+            }
+        }
+        project.organizations = organizations;
         if store.restore_project(project).is_ok() {
             result.projects += 1;
         }
@@ -639,6 +676,20 @@ pub fn restore(
         if let (Some(id), Some(choice)) = (ids.get(old), choice) {
             let _ = store.restore_membership(id, &choice);
         }
+    }
+    // SB-282: the organizations an account also works for, and the groups that share it.
+    for (old, list) in &payload.also_organizations {
+        let list: Vec<String> = list
+            .iter()
+            .filter_map(|o| org_ids.get(o).cloned())
+            .collect();
+        if let Some(id) = ids.get(old) {
+            let _ = store.restore_also_organizations(id, &list);
+        }
+    }
+    for (pool, old) in &payload.project_shared_accounts {
+        let list: Vec<String> = old.iter().filter_map(|o| ids.get(o).cloned()).collect();
+        let _ = store.restore_shared_accounts(pool, &list);
     }
     let now = crate::now();
     let here = store.snapshot()?;
@@ -867,12 +918,13 @@ mod tests {
         }
         let snapshot = crate::Snapshot {
             projects: vec![Project {
+                shared_accounts: Vec::new(),
                 pool: "app".into(),
                 name: "App".into(),
                 folders: vec!["/work/app".into()],
                 created_at: 1,
                 sources: vec!["github.com/example".into()],
-                organization: None,
+                organizations: Vec::new(),
             }],
             ..Default::default()
         };
@@ -892,7 +944,7 @@ mod tests {
                 .cloned()
                 .map(|p| Project {
                     sources: Vec::new(),
-                    organization: None,
+                    organizations: Vec::new(),
                     ..p
                 })
                 .collect(),
@@ -902,6 +954,9 @@ mod tests {
             organizations: vec![],
             memberships: BTreeMap::new(),
             project_organizations: BTreeMap::new(),
+            project_more_organizations: BTreeMap::new(),
+            project_shared_accounts: BTreeMap::new(),
+            also_organizations: BTreeMap::new(),
             elsewhere: BTreeMap::new(),
         };
         let json = serde_json::to_vec(&payload).unwrap();
@@ -1004,7 +1059,7 @@ mod tests {
         let snap = fresh.snapshot().unwrap();
         assert_eq!(snap.organizations[0].id, acme.id);
         assert_eq!(
-            snap.projects[0].organization.as_deref(),
+            snap.projects[0].primary_organization(),
             Some(acme.id.as_str())
         );
         let b2 = snap
@@ -1029,7 +1084,7 @@ mod tests {
         let snap = other.snapshot().unwrap();
         assert_eq!(snap.organizations.len(), 1);
         assert_eq!(
-            snap.projects[0].organization.as_deref(),
+            snap.projects[0].primary_organization(),
             Some(own.id.as_str())
         );
         // SB-170: an install whose organization holds the backup's domain under another name
@@ -1042,11 +1097,68 @@ mod tests {
         assert_eq!(restored.organizations, 0);
         let snap = renamed.snapshot().unwrap();
         assert_eq!(
-            snap.projects[0].organization.as_deref(),
+            snap.projects[0].primary_organization(),
             Some(held.id.as_str())
         );
     }
     const PERSONAL_WORD: &str = crate::organizations::PERSONAL;
+
+    #[test]
+    fn a_backup_keeps_every_many_link() {
+        // SB-282: a group of two organizations, an account two groups serve and an account of
+        // two organizations all come back from a backup.
+        let temp = tempfile::tempdir().unwrap();
+        let backups = temp.path().join("backups");
+        let keys = Keys::default();
+        let original = store(&temp.path().join("one"));
+        let a = save(&original, "synthetic-a", "token-a-secret");
+        let acme = original.add_organization("Acme", &[]).unwrap();
+        let beta = original.add_organization("Beta", &[]).unwrap();
+        original
+            .assign_organizations(&a.id, &[acme.id.clone(), beta.id.clone()])
+            .unwrap();
+        let (one, two) = (temp.path().join("r1"), temp.path().join("r2"));
+        std::fs::create_dir_all(&one).unwrap();
+        std::fs::create_dir_all(&two).unwrap();
+        let both = Some(vec![acme.id.clone(), beta.id.clone()]);
+        original
+            .save_project_with(
+                None,
+                "Alpha",
+                &[one],
+                std::slice::from_ref(&a.id),
+                both,
+                true,
+            )
+            .unwrap();
+        let beta_only = Some(vec![beta.id.clone()]);
+        original
+            .save_project_with(
+                None,
+                "Beta",
+                &[two],
+                std::slice::from_ref(&a.id),
+                beta_only,
+                true,
+            )
+            .unwrap();
+        let snap = original.snapshot().unwrap();
+        assert_eq!(snap.accounts[0].pool, "alpha");
+        assert_eq!(snap.pools_of(&snap.accounts[0]), vec!["alpha", "beta"]);
+        let info = write(&original, &backups, &keys, 1_000).unwrap().unwrap();
+        let fresh = store(&temp.path().join("two"));
+        restore(&fresh, &backups, &info.file, &keys).unwrap();
+        let snap = fresh.snapshot().unwrap();
+        let alpha = snap.project_of_pool("alpha").unwrap();
+        assert_eq!(alpha.organizations, vec![acme.id.clone(), beta.id.clone()]);
+        let a2 = &snap.accounts[0];
+        assert_eq!(snap.pools_of(a2), vec!["alpha", "beta"]);
+        let attribution = snap.attribution(a2);
+        assert_eq!(
+            attribution.organizations(),
+            vec![acme.id.as_str(), beta.id.as_str()]
+        );
+    }
 
     #[test]
     fn a_backup_carries_the_spending_ceilings_whole() {

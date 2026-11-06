@@ -314,18 +314,26 @@ pub(crate) fn project_view(
     snapshot: &switchboard_core::Snapshot,
     project: &switchboard_core::Project,
 ) -> Value {
+    // SB-282: its own accounts, then those another group shares with it (`shared: true`).
     let accounts: Vec<Value> = snapshot
-        .accounts
-        .iter()
-        .filter(|a| a.pool == project.pool)
-        .map(account_view)
+        .pool_accounts(&project.pool)
+        .into_iter()
+        .map(|a| {
+            let mut view = account_view(a);
+            if a.pool != project.pool {
+                view["shared"] = json!(true);
+            }
+            view
+        })
         .collect();
-    let organization_name = project
-        .organization
-        .as_deref()
-        .and_then(|id| snapshot.organization(id))
-        .map(|o| o.name.clone());
-    json!({"pool": project.pool, "name": project.name, "folders": project.folders, "created_at": project.created_at, "sources": project.sources, "accounts": accounts, "organization": project.organization, "organization_name": organization_name})
+    let name_of = |id: &str| snapshot.organization(id).map(|o| o.name.clone());
+    let organization_name = project.primary_organization().and_then(name_of);
+    let organization_names: Vec<String> = project
+        .organizations
+        .iter()
+        .filter_map(|id| name_of(id))
+        .collect();
+    json!({"pool": project.pool, "name": project.name, "folders": project.folders, "created_at": project.created_at, "sources": project.sources, "accounts": accounts, "organization": project.primary_organization(), "organization_name": organization_name, "organizations": project.organizations, "organization_names": organization_names, "shared_accounts": project.shared_accounts})
 }
 
 fn outcome(provider: Provider, action: &str, account: Option<&Account>, message: String) -> Value {

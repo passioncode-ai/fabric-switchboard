@@ -1382,7 +1382,7 @@ fn a_groups_organization_keeps_its_folders_on_its_own_seats() {
             std::slice::from_ref(&work.id),
         )
         .unwrap();
-    assert_eq!(alpha.organization, None);
+    assert!(alpha.organizations.is_empty());
     let acme = store
         .add_organization("Acme", &["acme.example".into()])
         .unwrap();
@@ -1405,7 +1405,7 @@ fn a_groups_organization_keeps_its_folders_on_its_own_seats() {
     let alpha = store
         .set_project_organization(&alpha.pool, Some(&acme.id))
         .unwrap();
-    assert_eq!(alpha.organization.as_deref(), Some(acme.id.as_str()));
+    assert_eq!(alpha.primary_organization(), Some(acme.id.as_str()));
     let err = store
         .save_project(
             None,
@@ -1433,7 +1433,7 @@ fn a_groups_organization_keeps_its_folders_on_its_own_seats() {
             std::slice::from_ref(&work.id),
         )
         .unwrap();
-    assert_eq!(kept.organization.as_deref(), Some(acme.id.as_str()));
+    assert_eq!(kept.primary_organization(), Some(acme.id.as_str()));
     // A personal group with a personal seat; turning it into Acme's is refused while it holds it.
     let beta = store
         .save_project(
@@ -1471,9 +1471,289 @@ fn a_groups_organization_keeps_its_folders_on_its_own_seats() {
     store.remove_organization(&acme.id).unwrap();
     let snapshot = store.snapshot().unwrap();
     assert_eq!(
-        snapshot.project_of_pool(&alpha.pool).unwrap().organization,
+        snapshot
+            .project_of_pool(&alpha.pool)
+            .unwrap()
+            .primary_organization(),
         None
     );
+}
+
+#[test]
+fn a_group_of_two_organizations_takes_seats_of_both_and_no_others() {
+    // SB-282: a group may belong to several organizations; it admits the seats of each, refuses
+    // a personal one, and cannot drop an organization whose seat it still holds.
+    use switchboard_core::ExternalIdentity;
+    let (root, _vault, store) = setup();
+    let seat = |email: &str, refresh: &str| {
+        store
+            .upsert(
+                email.into(),
+                Provider::Claude,
+                AuthKind::OAuth,
+                "default".into(),
+                Credential::parse(
+                    Provider::Claude,
+                    AuthKind::OAuth,
+                    &format!(
+                        r#"{{"claudeAiOauth":{{"accessToken":"a-{refresh}","refreshToken":"{refresh}"}}}}"#
+                    ),
+                )
+                .unwrap(),
+                Some(ExternalIdentity {
+                    account_id: Some(format!("synthetic-{refresh}")),
+                    organization_id: None,
+                    email: Some(email.into()),
+                }),
+            )
+            .unwrap()
+    };
+    let acme_seat = seat("dev@acme.example", "a");
+    let beta_seat = seat("dev@beta.example", "b");
+    let home = seat("me@home.invalid", "h");
+    let acme = store
+        .add_organization("Acme", &["acme.example".into()])
+        .unwrap();
+    let beta = store
+        .add_organization("Beta", &["beta.example".into()])
+        .unwrap();
+    let dir = root.path().join("shared");
+    std::fs::create_dir_all(&dir).unwrap();
+    let both = vec![acme.id.clone(), beta.id.clone()];
+    let err = store
+        .save_project_with(
+            None,
+            "Shared",
+            std::slice::from_ref(&dir),
+            &[acme_seat.id.clone(), home.id.clone()],
+            Some(both.clone()),
+            true,
+        )
+        .unwrap_err();
+    assert!(err.contains("belongs to another organization"), "{err}");
+    let shared = store
+        .save_project_with(
+            None,
+            "Shared",
+            std::slice::from_ref(&dir),
+            &[acme_seat.id.clone(), beta_seat.id.clone()],
+            Some(both),
+            true,
+        )
+        .unwrap();
+    assert_eq!(shared.organizations, vec![acme.id.clone(), beta.id.clone()]);
+    let snapshot = store.snapshot().unwrap();
+    for id in [&acme_seat.id, &beta_seat.id] {
+        let a = snapshot.accounts.iter().find(|a| &a.id == id).unwrap();
+        assert!(snapshot.context_admits(&shared.pool, a));
+    }
+    // Beta's seat is still there: the group cannot become Acme's alone.
+    let err = store
+        .set_project_organizations(&shared.pool, vec![acme.id.clone()])
+        .unwrap_err();
+    assert!(err.contains("elsewhere. Move"), "{err}");
+    // Saving without naming organizations keeps both.
+    let kept = store
+        .save_project(
+            Some(&shared.pool),
+            "Shared",
+            std::slice::from_ref(&dir),
+            std::slice::from_ref(&acme_seat.id),
+        )
+        .unwrap();
+    assert_eq!(kept.organizations.len(), 2);
+}
+
+#[test]
+fn one_account_serves_two_groups_with_one_credential() {
+    // SB-282: an account at home in one group is shared by another; it is routed there, its
+    // route goes when the share does, and moving it (MoveAccount) still moves its home.
+    let (root, _vault, store) = setup();
+    let oauth = |refresh: &str| {
+        Credential::parse(
+            Provider::Claude,
+            AuthKind::OAuth,
+            &format!(
+                r#"{{"claudeAiOauth":{{"accessToken":"a-{refresh}","refreshToken":"{refresh}"}}}}"#
+            ),
+        )
+        .unwrap()
+    };
+    let a = store
+        .upsert(
+            "dev@example.com".into(),
+            Provider::Claude,
+            AuthKind::OAuth,
+            "default".into(),
+            oauth("x"),
+            None,
+        )
+        .unwrap();
+    let (one, two) = (root.path().join("one"), root.path().join("two"));
+    std::fs::create_dir_all(&one).unwrap();
+    std::fs::create_dir_all(&two).unwrap();
+    let first = store
+        .save_project(
+            None,
+            "First",
+            std::slice::from_ref(&one),
+            std::slice::from_ref(&a.id),
+        )
+        .unwrap();
+    let second = store
+        .save_project(
+            None,
+            "Second",
+            std::slice::from_ref(&two),
+            std::slice::from_ref(&a.id),
+        )
+        .unwrap();
+    assert_eq!(second.shared_accounts, vec![a.id.clone()]);
+    let snapshot = store.snapshot().unwrap();
+    let held = snapshot.accounts.iter().find(|x| x.id == a.id).unwrap();
+    assert_eq!(held.pool, first.pool, "its home stays");
+    assert!(snapshot.serves(held, &second.pool));
+    assert_eq!(snapshot.pool_accounts(&second.pool).len(), 1);
+    assert_eq!(snapshot.accounts.len(), 1, "no copy");
+    store.select(Provider::Claude, &second.pool, &a.id).unwrap();
+    assert_eq!(
+        store.route(Provider::Claude, &second.pool).unwrap().0.id,
+        a.id
+    );
+    // Taken out of the second group: no longer served there, its route there is gone.
+    store
+        .save_project(
+            Some(&second.pool),
+            "Second",
+            std::slice::from_ref(&two),
+            &[],
+        )
+        .unwrap();
+    let snapshot = store.snapshot().unwrap();
+    assert!(snapshot
+        .project_of_pool(&second.pool)
+        .unwrap()
+        .shared_accounts
+        .is_empty());
+    assert!(store.route(Provider::Claude, &second.pool).is_err());
+    assert_eq!(snapshot.accounts[0].pool, first.pool);
+    // Shared again, then removing the second group drops the share and its route.
+    store
+        .save_project(
+            Some(&second.pool),
+            "Second",
+            std::slice::from_ref(&two),
+            std::slice::from_ref(&a.id),
+        )
+        .unwrap();
+    store.select(Provider::Claude, &second.pool, &a.id).unwrap();
+    store.remove_project(&second.pool).unwrap();
+    assert!(store.snapshot().unwrap().routes.is_empty());
+    // A move (share off) takes its home: the third group holds it as its own.
+    let three = root.path().join("three");
+    std::fs::create_dir_all(&three).unwrap();
+    let third = store
+        .save_project_with(
+            None,
+            "Third",
+            &[three],
+            std::slice::from_ref(&a.id),
+            None,
+            false,
+        )
+        .unwrap();
+    let snapshot = store.snapshot().unwrap();
+    assert_eq!(snapshot.accounts[0].pool, third.pool);
+    assert!(third.shared_accounts.is_empty());
+}
+
+#[test]
+fn one_account_of_two_organizations_serves_the_groups_of_both() {
+    // SB-282: the person says an account works for two organizations; groups of either take
+    // it, a personal group does not, and a session runs in the organization the group shares.
+    let (root, _vault, store) = setup();
+    let a = store
+        .upsert(
+            "dev@example.com".into(),
+            Provider::Claude,
+            AuthKind::OAuth,
+            "default".into(),
+            Credential::parse(
+                Provider::Claude,
+                AuthKind::OAuth,
+                r#"{"claudeAiOauth":{"accessToken":"a-y","refreshToken":"y"}}"#,
+            )
+            .unwrap(),
+            None,
+        )
+        .unwrap();
+    let acme = store.add_organization("Acme", &[]).unwrap();
+    let beta = store.add_organization("Beta", &[]).unwrap();
+    let attribution = store
+        .assign_organizations(&a.id, &[acme.id.clone(), beta.id.clone(), acme.id.clone()])
+        .unwrap();
+    assert_eq!(attribution.organization.as_deref(), Some(acme.id.as_str()));
+    assert_eq!(attribution.also, vec![beta.id.clone()]);
+    let dirs: Vec<_> = ["a", "b", "p"]
+        .iter()
+        .map(|n| {
+            let d = root.path().join(n);
+            std::fs::create_dir_all(&d).unwrap();
+            d
+        })
+        .collect();
+    let in_acme = store
+        .save_project_with(
+            None,
+            "A",
+            &dirs[..1],
+            std::slice::from_ref(&a.id),
+            Some(vec![acme.id.clone()]),
+            true,
+        )
+        .unwrap();
+    let in_beta = store
+        .save_project_with(
+            None,
+            "B",
+            &dirs[1..2],
+            std::slice::from_ref(&a.id),
+            Some(vec![beta.id.clone()]),
+            true,
+        )
+        .unwrap();
+    let err = store
+        .save_project_with(
+            None,
+            "P",
+            &dirs[2..],
+            std::slice::from_ref(&a.id),
+            Some(vec![]),
+            true,
+        )
+        .unwrap_err();
+    assert!(err.contains("belongs to another organization"), "{err}");
+    let snapshot = store.snapshot().unwrap();
+    let held = snapshot.accounts.iter().find(|x| x.id == a.id).unwrap();
+    assert!(snapshot.context_admits(&in_acme.pool, held));
+    assert!(snapshot.context_admits(&in_beta.pool, held));
+    assert_eq!(
+        snapshot.serving_context(held, &in_beta.pool, None),
+        format!("org:{}", beta.id)
+    );
+    assert_eq!(
+        snapshot.serving_context(held, &in_acme.pool, None),
+        format!("org:{}", acme.id)
+    );
+    // Its seat counts for both organizations.
+    assert_eq!(snapshot.organization_seats(&beta.id).len(), 1);
+    assert_eq!(snapshot.organization_seats(&acme.id).len(), 1);
+    // Removing Beta leaves the account Acme's only; an empty list lets the rules decide.
+    store.remove_organization(&beta.id).unwrap();
+    let snapshot = store.snapshot().unwrap();
+    assert!(snapshot.also_organizations.is_empty());
+    store.assign_organizations(&a.id, &[]).unwrap();
+    assert!(store.snapshot().unwrap().memberships.is_empty());
 }
 
 #[test]

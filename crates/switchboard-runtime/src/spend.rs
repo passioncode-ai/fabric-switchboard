@@ -1065,12 +1065,13 @@ mod tests {
 
     fn group(pool: &str) -> Project {
         Project {
+            shared_accounts: Vec::new(),
             pool: pool.into(),
             name: pool.into(),
             folders: vec![format!("/work/{pool}")],
             created_at: 1,
             sources: vec![],
-            organization: None,
+            organizations: Vec::new(),
         }
     }
     fn key(pool: Option<&str>) -> AgentKey {

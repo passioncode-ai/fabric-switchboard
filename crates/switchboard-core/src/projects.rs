@@ -205,8 +205,8 @@ impl Store {
 /// A project: one or more folders (repositories) and the pool of accounts reserved for them
 /// (operator request 2026-10-05). Its accounts serve only sessions started inside its folders;
 /// inside its folders, sessions of a provider it has accounts for use only those accounts.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(from = "ProjectWire", into = "ProjectWire")]
 pub struct Project {
     /// The pool the project's accounts are in; also the project's stable id.
     pub pool: String,
@@ -215,12 +215,101 @@ pub struct Project {
     pub created_at: i64,
     /// Repository owners whose new repositories Switchboard suggests for this project
     /// (`github.com/passioncode-ai`, SB-117). Set by a person, never guessed.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub sources: Vec<String>,
-    /// The organization whose accounts this group runs on (SB-109); none is personal. Only
-    /// read while at least one organization exists.
+    /// The organizations whose accounts this group runs on (SB-109, SB-282: none, one or
+    /// several, in the person's order); empty is personal. The first is the group's own context
+    /// where no account decides (a terminal in its folder, its saved key). Only read while at
+    /// least one organization exists.
+    pub organizations: Vec<String>,
+    /// SB-282: accounts whose home is another pool that serve this group too, in the person's
+    /// order. Their credential and quota record stay one; only their home pool holds them.
+    pub shared_accounts: Vec<String>,
+}
+/// Most organizations one group is bound to (SB-282).
+pub const MAX_GROUP_ORGANIZATIONS: usize = 16;
+/// A group as `accounts.json` holds it: one organization as `organization`, which every
+/// reader since 0.6.65 knows, several as `organizations` (schema version 9, SB-282).
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ProjectWire {
+    pool: String,
+    name: String,
+    folders: Vec<String>,
+    created_at: i64,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    sources: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub organization: Option<String>,
+    organization: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    organizations: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    shared_accounts: Vec<String>,
+}
+impl From<ProjectWire> for Project {
+    fn from(w: ProjectWire) -> Self {
+        let mut organizations: Vec<String> = w.organization.into_iter().collect();
+        for o in w.organizations {
+            if !organizations.contains(&o) {
+                organizations.push(o);
+            }
+        }
+        Project {
+            pool: w.pool,
+            name: w.name,
+            folders: w.folders,
+            created_at: w.created_at,
+            sources: w.sources,
+            organizations,
+            shared_accounts: w.shared_accounts,
+        }
+    }
+}
+impl From<Project> for ProjectWire {
+    fn from(p: Project) -> Self {
+        let (organization, organizations) = if p.organizations.len() == 1 {
+            (p.organizations.into_iter().next(), Vec::new())
+        } else {
+            (None, p.organizations)
+        };
+        ProjectWire {
+            pool: p.pool,
+            name: p.name,
+            folders: p.folders,
+            created_at: p.created_at,
+            sources: p.sources,
+            organization,
+            organizations,
+            shared_accounts: p.shared_accounts,
+        }
+    }
+}
+impl Project {
+    /// The group's own context where no account decides (SB-282): its first organization;
+    /// none is personal.
+    pub fn primary_organization(&self) -> Option<&str> {
+        self.organizations.first().map(String::as_str)
+    }
+    /// Whether the group is bound to `organization`.
+    pub fn bound_to(&self, organization: &str) -> bool {
+        self.organizations.iter().any(|o| o == organization)
+    }
+    /// The group's contexts in order (SB-282): personal (none) for a personal group, else its
+    /// organizations.
+    pub fn contexts(&self) -> Vec<Option<&str>> {
+        if self.organizations.is_empty() {
+            vec![None]
+        } else {
+            self.organizations
+                .iter()
+                .map(|o| Some(o.as_str()))
+                .collect()
+        }
+    }
+    /// Whether an account so attributed may serve the group (SB-109, SB-282): their contexts
+    /// meet, personal included.
+    pub fn admits(&self, attribution: &crate::organizations::Attribution) -> bool {
+        self.contexts().into_iter().any(|c| attribution.holds(c))
+    }
 }
 const MAX_PROJECTS: usize = 64;
 const MAX_SOURCES: usize = 16;
@@ -234,6 +323,46 @@ pub const FOLDER_NESTED: &str = "A folder sits inside a folder of another group.
 fn inside(a: &str, b: &str) -> bool {
     Path::new(a).starts_with(Path::new(b))
 }
+
+/// The organizations a person named for a group, in their order, each once: `personal` and
+/// blanks are dropped, an unknown one is refused (SB-282).
+fn organizations_checked(snapshot: &Snapshot, list: Vec<String>) -> Result<Vec<String>, String> {
+    let mut out: Vec<String> = Vec::new();
+    for id in list {
+        let id = id.trim();
+        if id.is_empty() || id == crate::organizations::PERSONAL || out.iter().any(|o| o == id) {
+            continue;
+        }
+        if snapshot.organization(id).is_none() {
+            return Err(crate::organizations::ORGANIZATION_NOT_FOUND.into());
+        }
+        out.push(id.to_owned());
+    }
+    if out.len() > MAX_GROUP_ORGANIZATIONS {
+        return Err(GROUP_ORGANIZATIONS_TOO_MANY.into());
+    }
+    Ok(out)
+}
+/// SB-282: a route to an account the pool no longer shares (taken out, or its group removed) is
+/// dropped, as a moved account's route in its old pool is.
+fn shared_routes_prune(s: &mut Snapshot) {
+    let keep: Vec<String> = s
+        .routes
+        .iter()
+        .filter(|(key, id)| {
+            s.accounts.iter().any(|a| {
+                &&a.id == id
+                    && s.pools_of(a)
+                        .iter()
+                        .any(|p| **key == format!("{}:{}", a.provider.as_str(), p))
+            })
+        })
+        .map(|(k, _)| k.clone())
+        .collect();
+    s.routes.retain(|k, _| keep.contains(k));
+}
+/// Refusal: more organizations than one group holds (SB-282).
+pub const GROUP_ORGANIZATIONS_TOO_MANY: &str = "A group can belong to at most 16 organizations.";
 
 /// A pool name from a project name: lowercase letters, digits and hyphens.
 pub fn pool_from_name(name: &str) -> String {
@@ -268,6 +397,16 @@ pub(crate) fn validate_projects(s: &Snapshot) -> Result<(), String> {
             || p.sources.iter().any(|s| !source_valid(s))
             || p.folders.iter().any(|f| !path_valid(f))
             || p.created_at <= 0
+            || p.organizations.len() > MAX_GROUP_ORGANIZATIONS
+            || p.shared_accounts.len() > MAX_ACCOUNTS
+            || p.shared_accounts.iter().enumerate().any(|(i, id)| {
+                p.shared_accounts[..i].contains(id)
+                    || !s.accounts.iter().any(|a| &a.id == id && a.pool != p.pool)
+            })
+            || p.organizations
+                .iter()
+                .enumerate()
+                .any(|(i, o)| p.organizations[..i].contains(o))
         {
             return Err("Invalid project metadata".into());
         }
@@ -297,7 +436,7 @@ impl Snapshot {
     pub fn project_for(&self, path: &Path) -> Option<&Project> {
         let mut all = self.projects_for(path);
         if !self.organizations.is_empty() {
-            all.sort_by_key(|p| p.organization.is_some());
+            all.sort_by_key(|p| !p.organizations.is_empty());
         }
         all.iter()
             .find(|p| self.accounts.iter().any(|a| a.pool == p.pool && a.enabled))
@@ -314,6 +453,37 @@ impl Snapshot {
     /// The project that reserves `pool`, if any.
     pub fn project_of_pool(&self, pool: &str) -> Option<&Project> {
         self.projects.iter().find(|p| p.pool == pool)
+    }
+    /// Whether `account` serves `pool` (SB-282): its home pool, or a group that shares it.
+    pub fn serves(&self, account: &crate::Account, pool: &str) -> bool {
+        account.pool == pool
+            || self
+                .project_of_pool(pool)
+                .is_some_and(|p| p.shared_accounts.iter().any(|id| id == &account.id))
+    }
+    /// The accounts that serve `pool`: its own, then those other groups share with it.
+    pub fn pool_accounts(&self, pool: &str) -> Vec<&crate::Account> {
+        let mut out: Vec<&crate::Account> =
+            self.accounts.iter().filter(|a| a.pool == pool).collect();
+        if let Some(p) = self.project_of_pool(pool) {
+            for id in &p.shared_accounts {
+                if let Some(a) = self.accounts.iter().find(|a| &a.id == id && a.pool != pool) {
+                    out.push(a);
+                }
+            }
+        }
+        out
+    }
+    /// The pools an account serves: its home, then each group sharing it (SB-282).
+    pub fn pools_of<'a>(&'a self, account: &'a crate::Account) -> Vec<&'a str> {
+        std::iter::once(account.pool.as_str())
+            .chain(
+                self.projects
+                    .iter()
+                    .filter(|p| p.pool != account.pool && p.shared_accounts.contains(&account.id))
+                    .map(|p| p.pool.as_str()),
+            )
+            .collect()
     }
 }
 
@@ -340,6 +510,23 @@ impl Store {
         folders: &[std::path::PathBuf],
         accounts: &[String],
         organization: Option<Option<&str>>,
+    ) -> Result<Project, String> {
+        let organizations = organization.map(|o| o.map(str::to_owned).into_iter().collect());
+        self.save_project_with(pool, name, folders, accounts, organizations, true)
+    }
+    /// [`Store::save_project`], also setting the group's organizations when given (SB-282: an
+    /// empty list makes it personal); left out, a saved group keeps its own. With `share`, a
+    /// listed account whose home is another group serves this one too and keeps its home
+    /// (SB-282); without it, it moves here (`MoveAccount`). An account in no group's pool moves
+    /// here either way.
+    pub fn save_project_with(
+        &self,
+        pool: Option<&str>,
+        name: &str,
+        folders: &[std::path::PathBuf],
+        accounts: &[String],
+        organizations: Option<Vec<String>>,
+        share: bool,
     ) -> Result<Project, String> {
         let name = name.trim();
         if !crate::label_valid(name) {
@@ -413,12 +600,44 @@ impl Store {
                 return Err("Account not found".into());
             }
         }
-        // Membership: listed accounts in, the project's others out to `default`.
+        // SB-282: listed accounts at home in another group are shared, in the person's order.
+        let shared: Vec<String> = accounts
+            .iter()
+            .filter(|id| {
+                share
+                    && candidate.accounts.iter().any(|a| {
+                        &&a.id == id
+                            && a.pool != pool
+                            && candidate.projects.iter().any(|p| p.pool == a.pool)
+                    })
+            })
+            .cloned()
+            .collect();
+        for id in &shared {
+            let account = candidate.accounts.iter().find(|a| &a.id == id).unwrap();
+            let clash = candidate.accounts.iter().any(|b| {
+                b.id != account.id
+                    && b.provider == account.provider
+                    && b.pool == pool
+                    && accounts.contains(&b.id)
+                    && b.external_identity
+                        .as_ref()
+                        .zip(account.external_identity.as_ref())
+                        .is_some_and(|(x, y)| x.matches(y))
+            });
+            if clash {
+                return Err(
+                    "This account is already saved in that pool. Remove the other copy first."
+                        .into(),
+                );
+            }
+        }
+        // Membership: listed accounts in (or shared), the project's others out to `default`.
         let moves: Vec<(String, String)> = candidate
             .accounts
             .iter()
             .filter_map(|a| {
-                if accounts.contains(&a.id) && a.pool != pool {
+                if accounts.contains(&a.id) && a.pool != pool && !shared.contains(&a.id) {
                     Some((a.id.clone(), pool.clone()))
                 } else if !accounts.contains(&a.id) && a.pool == pool {
                     Some((a.id.clone(), "default".to_string()))
@@ -451,26 +670,23 @@ impl Store {
                 );
             }
         }
-        let current = existing.and_then(|i| candidate.projects[i].organization.clone());
-        let organization = match organization {
-            Some(Some(id)) => {
-                if candidate.organization(id).is_none() {
-                    return Err(crate::organizations::ORGANIZATION_NOT_FOUND.into());
-                }
-                Some(id.to_owned())
-            }
-            Some(None) => None,
+        let current =
+            existing.map_or_else(Vec::new, |i| candidate.projects[i].organizations.clone());
+        let organizations = match organizations {
+            Some(list) => organizations_checked(&candidate, list)?,
             None => current.clone(),
         };
-        // SB-109: an account joins a group of its own context only; a group whose organization
-        // changes takes only accounts of the new one.
+        // SB-109, SB-282: an account joins a group of its own context only; a group whose
+        // organizations change keeps only accounts of the new ones.
         if !candidate.organizations.is_empty() {
-            for a in candidate
-                .accounts
-                .iter()
-                .filter(|a| accounts.contains(&a.id) && (a.pool != pool || organization != current))
-            {
-                if candidate.attribution(a).organization != organization {
+            let group = Project {
+                organizations: organizations.clone(),
+                ..Default::default()
+            };
+            for a in candidate.accounts.iter().filter(|a| {
+                accounts.contains(&a.id) && (a.pool != pool || organizations != current)
+            }) {
+                if !group.admits(&candidate.attribution(a)) {
                     return Err(crate::organizations::SEAT_CHOSEN.into());
                 }
             }
@@ -482,6 +698,10 @@ impl Store {
                 a.pool = to.clone();
                 old
             };
+            // A group that shared it and is now its home holds it as its own.
+            for p in candidate.projects.iter_mut().filter(|p| &p.pool == to) {
+                p.shared_accounts.retain(|s| s != id);
+            }
             // The route it held in its old pool no longer applies there.
             if candidate.routes.get(&old) == Some(id) {
                 candidate.routes.remove(&old);
@@ -502,13 +722,15 @@ impl Store {
             folders: folder_list,
             created_at,
             sources,
-            organization,
+            organizations,
+            shared_accounts: shared,
         };
         match existing {
             Some(i) => candidate.projects[i] = project.clone(),
             None => candidate.projects.push(project.clone()),
         }
         candidate.projects.sort_by(|a, b| a.name.cmp(&b.name));
+        shared_routes_prune(&mut candidate);
         append_event(
             &mut candidate,
             "project",
@@ -531,16 +753,27 @@ impl Store {
         organization: Option<&str>,
     ) -> Result<Project, String> {
         let organization = organization.filter(|o| *o != crate::organizations::PERSONAL);
+        self.set_project_organizations(pool, organization.map(str::to_owned).into_iter().collect())
+    }
+    /// Binds a group to these organizations (SB-282: none is personal, several share it, the
+    /// first is its own context). Refused while the group holds an account of another context.
+    pub fn set_project_organizations(
+        &self,
+        pool: &str,
+        organizations: Vec<String>,
+    ) -> Result<Project, String> {
         let mut state = self.lock()?;
         let mut candidate = state.clone();
-        if let Some(id) = organization {
-            if candidate.organization(id).is_none() {
-                return Err(crate::organizations::ORGANIZATION_NOT_FOUND.into());
-            }
-        }
-        if candidate.accounts.iter().any(|a| {
-            a.pool == pool && candidate.attribution(a).organization.as_deref() != organization
-        }) {
+        let organizations = organizations_checked(&candidate, organizations)?;
+        let group = Project {
+            organizations: organizations.clone(),
+            ..Default::default()
+        };
+        if candidate
+            .accounts
+            .iter()
+            .any(|a| candidate.serves(a, pool) && !group.admits(&candidate.attribution(a)))
+        {
             return Err(crate::organizations::SEATS_ELSEWHERE.into());
         }
         let project = candidate
@@ -548,12 +781,40 @@ impl Store {
             .iter_mut()
             .find(|p| p.pool == pool)
             .ok_or("Project not found.")?;
-        project.organization = organization.map(str::to_owned);
+        project.organizations = organizations;
         let project = project.clone();
         append_event(&mut candidate, "project", None, "updated");
         self.publish(&mut state, candidate)?;
         self.changed();
         Ok(project)
+    }
+    /// SB-282: shares these accounts with the group of `pool` from a backup, where the group
+    /// holds no share yet; an account at home there, or unknown, is left out.
+    pub fn restore_shared_accounts(&self, pool: &str, ids: &[String]) -> Result<(), String> {
+        let mut state = self.lock()?;
+        let mut candidate = state.clone();
+        let accounts = candidate.accounts.clone();
+        let project = candidate
+            .projects
+            .iter_mut()
+            .find(|p| p.pool == pool)
+            .ok_or("Project not found.")?;
+        if !project.shared_accounts.is_empty() {
+            return Err("Nothing to restore.".into());
+        }
+        for id in ids {
+            if accounts.iter().any(|a| &a.id == id && a.pool != pool)
+                && !project.shared_accounts.contains(id)
+            {
+                project.shared_accounts.push(id.clone());
+            }
+        }
+        if project.shared_accounts.is_empty() {
+            return Err("Nothing to restore.".into());
+        }
+        self.publish(&mut state, candidate)?;
+        self.changed();
+        Ok(())
     }
     /// SB-122: moves an account whose pool no project reserves (a deleted project leaves its
     /// accounts there) back to `default`. A project's account leaves through `save_project`.
@@ -603,14 +864,11 @@ impl Store {
     pub fn restore_project(&self, mut project: Project) -> Result<(), String> {
         let mut state = self.lock()?;
         let mut candidate = state.clone();
-        // An organization this install does not hold leaves the group personal.
-        if project
-            .organization
-            .as_deref()
-            .is_some_and(|o| candidate.organization(o).is_none())
-        {
-            project.organization = None;
-        }
+        // An organization this install does not hold leaves the group (personal when none is
+        // left).
+        project
+            .organizations
+            .retain(|o| candidate.organization(o).is_some());
         if candidate.projects.iter().any(|p| p.pool == project.pool) {
             return Err("Project already here.".into());
         }
@@ -667,6 +925,7 @@ impl Store {
             .ok_or("Project not found.")?;
         let project = candidate.projects.remove(index);
         crate::chains::prune(&mut candidate);
+        shared_routes_prune(&mut candidate);
         // SB-144: the project's own agent keys go with it, so a later project of the same pool
         // never inherits them; the vault items are deleted after the metadata (a leftover item is
         // unreachable).

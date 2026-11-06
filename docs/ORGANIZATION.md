@@ -72,7 +72,9 @@ reads `done`.
 ## 3. Your organization's group
 
 A group is a set of project folders with accounts of its own. Sessions in its folders use only
-its accounts. Your organization needs one group on this computer.
+its accounts. Your organization needs at least one group on this computer. It may have several,
+and one group may belong to several organizations; an account may serve several groups and work
+for several organizations (SB-282).
 
 Once the organization exists, the window shows the card *Set up {organization} on this computer*
 above Accounts and at the top of *Organizations*. It lists the five steps of this guide and offers

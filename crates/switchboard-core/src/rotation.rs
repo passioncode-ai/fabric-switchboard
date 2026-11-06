@@ -135,10 +135,9 @@ impl Store {
         }
         let state = self.lock()?;
         let current = current_id.and_then(|id| {
-            state
-                .accounts
-                .iter()
-                .find(|a| a.id == id && a.provider == policy.provider && a.pool == policy.pool)
+            state.accounts.iter().find(|a| {
+                a.id == id && a.provider == policy.provider && state.serves(a, &policy.pool)
+            })
         });
         let Some(current) = current else {
             return Ok(hold("current_unavailable"));
@@ -160,9 +159,9 @@ impl Store {
             .filter(|a| {
                 a.id != current.id
                     && a.provider == policy.provider
-                    && a.pool == policy.pool
+                    && state.serves(a, &policy.pool)
                     && !limited.contains(&a.id)
-                    && state.context_admits(&a.pool, a)
+                    && state.context_admits(&policy.pool, a)
             })
             .filter_map(|a| fresh_usage(a, policy, now).map(|used| (a, used)))
             .filter(|(a, used)| {
@@ -194,9 +193,9 @@ impl Store {
                 .filter(|a| {
                     a.id != current.id
                         && a.provider == policy.provider
-                        && a.pool == policy.pool
+                        && state.serves(a, &policy.pool)
                         && !limited.contains(&a.id)
-                        && state.context_admits(&a.pool, a)
+                        && state.context_admits(&policy.pool, a)
                         && self.rotation_credential_eligible(a, policy, now)
                 })
                 .filter_map(|a| {
@@ -289,10 +288,10 @@ impl Store {
             .iter()
             .filter(|a| {
                 a.provider == policy.provider
-                    && a.pool == policy.pool
+                    && state.serves(a, &policy.pool)
                     && !held.contains(&a.id)
                     && fits.admits(a)
-                    && state.context_admits(&a.pool, a)
+                    && state.context_admits(&policy.pool, a)
                     && self.rotation_credential_eligible(a, policy, now)
             })
             .filter_map(|a| match fresh_usage(a, policy, now) {
@@ -356,14 +355,14 @@ impl Store {
         for a in state
             .accounts
             .iter()
-            .filter(|a| a.provider == policy.provider && a.pool == policy.pool)
+            .filter(|a| a.provider == policy.provider && state.serves(a, &policy.pool))
         {
             others += 1;
             let slot = if held.contains(&a.id) {
                 &mut tally.held
             } else if !fits.admits(a) {
                 &mut tally.kind
-            } else if !state.context_admits(&a.pool, a) {
+            } else if !state.context_admits(&policy.pool, a) {
                 &mut tally.context
             } else if !self.rotation_credential_eligible(a, policy, now) {
                 &mut tally.credential
@@ -397,7 +396,7 @@ impl Store {
             .iter()
             .filter(|a| {
                 a.provider == policy.provider
-                    && a.pool == policy.pool
+                    && state.serves(a, &policy.pool)
                     && a.enabled
                     && a.kind == AuthKind::OAuth
                     && !held.contains(&a.id)

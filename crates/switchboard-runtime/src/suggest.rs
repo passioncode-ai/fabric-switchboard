@@ -1250,6 +1250,7 @@ mod tests {
             projects: projects
                 .iter()
                 .map(|(pool, folders, sources)| Project {
+                    shared_accounts: Vec::new(),
                     pool: (*pool).into(),
                     name: (*pool).into(),
                     folders: folders
@@ -1258,7 +1259,7 @@ mod tests {
                         .collect(),
                     created_at: 1,
                     sources: sources.iter().map(|s| (*s).into()).collect(),
-                    organization: None,
+                    organizations: Vec::new(),
                 })
                 .collect(),
             ..Default::default()

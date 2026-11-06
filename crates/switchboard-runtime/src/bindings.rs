@@ -198,15 +198,14 @@ pub(crate) fn desired(snapshot: &Snapshot) -> Vec<(PathBuf, String)> {
     // contexts is written for the personal one (the more private wins), as `project_for` says.
     let mut projects: Vec<_> = snapshot.projects.iter().collect();
     if !snapshot.organizations.is_empty() {
-        projects.sort_by_key(|p| p.organization.is_some());
+        projects.sort_by_key(|p| !p.organizations.is_empty());
     }
     for project in projects {
         // A group whose seats left its organization keeps its folders: the proxy refuses the seat
         // (closed), rather than the folder falling back to the ordinary login (open). SB-109.
-        let claude = snapshot
-            .accounts
-            .iter()
-            .any(|a| a.pool == project.pool && a.provider == Provider::Claude && a.enabled);
+        let claude = snapshot.accounts.iter().any(|a| {
+            snapshot.serves(a, &project.pool) && a.provider == Provider::Claude && a.enabled
+        });
         if !claude {
             continue;
         }
@@ -791,6 +790,7 @@ mod tests {
     }
     fn project(pool: &str, folders: &[&Path]) -> Project {
         Project {
+            shared_accounts: Vec::new(),
             pool: pool.into(),
             name: pool.into(),
             folders: folders
@@ -799,7 +799,7 @@ mod tests {
                 .collect(),
             created_at: 1,
             sources: vec![],
-            organization: None,
+            organizations: Vec::new(),
         }
     }
     fn env(folder: &Path) -> Option<Map<String, Value>> {
@@ -932,7 +932,7 @@ mod tests {
         }))
         .unwrap();
         let mut group = project("pc", &[&app]);
-        group.organization = Some(acme.id.clone());
+        group.organizations = vec![acme.id.clone()];
         let seat = account("pc");
         let s = Snapshot {
             projects: vec![group],

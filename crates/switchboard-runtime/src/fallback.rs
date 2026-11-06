@@ -1775,12 +1775,13 @@ mod tests {
                 account("claude-free", Provider::Claude, Some(60.0)),
             ],
             projects: vec![switchboard_core::Project {
+                shared_accounts: Vec::new(),
                 pool: "client-alpha".into(),
                 name: "Client Alpha".into(),
                 folders: vec!["/work/alpha".into()],
                 created_at: 1,
                 sources: vec![],
-                organization: None,
+                organizations: Vec::new(),
             }],
             ..Default::default()
         };
@@ -2765,12 +2766,13 @@ mod tests {
     #[test]
     fn a_folder_in_several_groups_takes_the_group_its_proxy_route_uses_and_logs_ambiguous() {
         let group = |pool: &str, folder: &str| switchboard_core::Project {
+            shared_accounts: Vec::new(),
             pool: pool.into(),
             name: pool.into(),
             folders: vec![folder.into()],
             created_at: 1,
             sources: vec![],
-            organization: None,
+            organizations: Vec::new(),
         };
         let mut in_beta = account("in-beta", Provider::Claude, None);
         in_beta.pool = "beta".into();
@@ -3120,12 +3122,13 @@ mod tests {
         Snapshot {
             accounts: vec![account("claude-sub", Provider::Claude, Some(1.0)), api],
             projects: vec![switchboard_core::Project {
+                shared_accounts: Vec::new(),
                 pool: "alpha".into(),
                 name: "Alpha".into(),
                 folders: vec![dir.display().to_string()],
                 created_at: 1,
                 sources: vec![],
-                organization: None,
+                organizations: Vec::new(),
             }],
             agent_keys: keys,
             ..Default::default()

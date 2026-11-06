@@ -1443,6 +1443,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 3. *Also add…* on a repository → a dialog lists only the groups it is not in yet → *Add* → “{name} added to group «B».”; it stays in its other groups.
 4. *Move…* on a repository in several groups → it leaves the group shown and joins the chosen one.
 5. A session started in a folder held by several groups works on the first of them that has an account for its provider; a launch from a group's own card uses that group.
+6. One account may serve several groups (SB-282): in a group's dialog an account of another group reads “ · in {name}, also serves this group”; checking it keeps it in its own group and adds it to this one, whose card lists it with “shared from {name}” and whose account card carries a quiet badge per extra group (“Also serves {name}.”). One sign-in and one quota serve both; a managed launch in either group's folder runs in that group. Unchecking it in this group (“An account another group holds only stops serving this one.”) leaves its own group untouched; *Move to another pool…* still moves it.
 **Alt paths:** one group's folder inside another group's folder → refused (“A folder sits inside a folder of another group. Add the repository itself to that group instead.”); a group's only folder cannot leave it; a repository already in every group has no *Also add…*; a repository in no group stays in the default group and is offered *Add to group…*.
 **Expected result:** groups read as sets of projects, a project can be shared, and nothing creates a group by itself.
 **UI elements:** group name with tooltip, *Also add…*, the add-to-group dialog, the “Groups …” line.
@@ -1480,23 +1481,24 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Preconditions:** at least one organization exists (SCN-069); at least one group. With no organization, nothing below is shown and nothing is refused.
 **Entry point:** *Groups* → a group's *Edit…* (or *+ New group*).
 **Steps:**
-1. The group dialog shows *Organization*: *Personal* and each organization by name; a new group starts on *Personal*.
-2. Choosing an organization lists, among *Accounts*, that organization's accounts as choosable; another context's accounts are shown disabled with why (“Belongs to {name}.” or “Personal account.”).
-3. *Save group* → “Group “{name}” saved.”; the group's card carries the organization's badge (no badge for *Personal*).
+1. The group dialog shows *Organizations*: a check box for each organization by name and the note “Sessions in this group's folders run only on accounts of the organizations you check, or only on personal accounts when you check none.”; a new group starts with none checked (SB-282: none, one or several).
+2. Checking organizations lists, among *Accounts*, the accounts of any of them as choosable; another context's accounts are shown disabled with why (“Belongs to {name}.”, every organization of the account, or “Personal account.”).
+3. *Save group* → “Group “{name}” saved.”; the group's card carries a badge for each of its organizations (none for a personal group). One organization may have several groups.
+3a. An account may work for several organizations (SB-282): its ⋯ → *Organization…* → *Belongs to* and the check boxes *Also works for* (“Groups of these organizations take this account too.”); its card carries a badge for each, the extra ones titled “You said it also works for {name}.”. Groups of any of them take it, and a session runs in the organization its group and the account share.
 4. Sessions in the group's folders run only on its accounts; a request on an account that no longer belongs to the group's organization (its domain or team moved) is refused with “This account belongs to another organization than this group. Move it, or change the group's organization.” and rotation skips it.
 5. A folder in two groups of different contexts runs in the personal one (the more private wins), fixed for the session.
 5a. When none of a group's accounts belongs to its organization any more, the group keeps its folders (requests there are refused, never moved to the ordinary sign-in) and its card says “None of these accounts belongs to {name} any more, so sessions in this group's folders are refused. Add an account of {name}, or change the group's organization.” (SB-170).
 6. *Statistics* shows *By organization* above *By group* (each organization and *Personal*, by whose seat the request ran on).
 **Alt paths:** the window disables another context's accounts, so a save naming one (CLI, MCP) is refused with “An account chosen for this group belongs to another organization. Choose accounts of the group's organization, or change it.”; choosing an organization while the group still holds another context's account → refused with “This group still holds accounts that belong elsewhere. Move them out first.”, the dialog stays open; removing an organization turns its groups personal.
 **Expected result:** a company's work stays on its seats and personal work on personal seats, by the folder alone; nothing at the provider changes and nothing leaves the computer.
-**UI elements:** the *Organization* select in the group dialog, disabled account options with their reason, the badge on the group card, the *By organization* table.
-**States covered:** no organization (nothing shown); a personal group; an organization's group; a cross-context account in the pool (refused at save, skipped at run time); a folder in groups of two contexts; an organization removed.
+**UI elements:** the *Organizations* check boxes in the group dialog, disabled account options with their reason, the badges on the group card, the *Also works for* check boxes in the account's organization dialog, the *By organization* table.
+**States covered:** no organization (nothing shown); a personal group; an organization's group; a group of several organizations; several groups of one organization; an account of several organizations; a cross-context account in the pool (refused at save, skipped at run time); a folder in groups of two contexts; an organization removed (a group or account keeps its other organizations, personal when none is left).
 **Errors & recovery:** a refusal keeps the dialog open with its reason; a refused request names the account and the way out.
 **Status:** draft
 **Meaning:** operator decisions 2026-10-12 (RM-28 CX-26, CX-28) and 2026-10-21 (SB-158 design), SB-109.
 **Coverage:** core `organizations::tests` SB-109 cases, runtime statistics test, `bindings::tests::a_group_whose_seats_all_left_its_organization_stays_bound`, core backup `a_reinstall_gets_organizations_their_accounts_and_groups_back` (by domain, SB-170), ui-logic SB-109 and SB-170 cases, WebKit demo.
 **Product:** unobserved
-**Traces:** SB-109, SB-111
+**Traces:** SB-109, SB-111, SB-282
 ## SCN-071: Keep organizations current from PassionCode.ai
 **Persona:** P-01
 **Goal:** A person who is a member of organizations on PassionCode.ai (Vesta, `org.passioncode.ai`) gets them in Switchboard with their names and domains, kept current, without typing them; Switchboard keeps working the same without it (operator 2026-10-21: «связь с организацией … если нет, будет просто стандартный switchboard»; decision on board thread `63af7559`: a browser sign-in with a loopback redirect and PKCE, a read-only token for `GET /v1/me/organizations`, kept in the OS vault, read at start and at most every 6 hours).

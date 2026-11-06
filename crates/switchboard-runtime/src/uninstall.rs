@@ -653,6 +653,7 @@ mod tests {
     fn claude_snapshot(folder: &Path) -> switchboard_core::Snapshot {
         switchboard_core::Snapshot {
             projects: vec![switchboard_core::Project {
+                shared_accounts: Vec::new(),
                 pool: "pc".into(),
                 name: "pc".into(),
                 folders: vec![folder
@@ -662,7 +663,7 @@ mod tests {
                     .into_owned()],
                 created_at: 1,
                 sources: vec![],
-                organization: None,
+                organizations: Vec::new(),
             }],
             accounts: vec![switchboard_core::Account {
                 id: "id-pc".into(),

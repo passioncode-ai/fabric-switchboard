@@ -28,11 +28,25 @@ fn schema_version(snapshot: &Snapshot) -> u32 {
     // refuses the unknown field the same way.
     // Version 7 only while an organization is linked to PassionCode.ai (SB-159).
     // Version 8 only while an account is marked as used on another machine (SB-175).
-    if !snapshot.elsewhere.is_empty() {
+    // Version 9 only while a link is many (SB-282): a group of several organizations, an account
+    // a group shares from another, or an account of several organizations. A 0.7.20 or older
+    // reader would refuse the unknown fields.
+    if snapshot
+        .projects
+        .iter()
+        .any(|p| p.organizations.len() > 1 || !p.shared_accounts.is_empty())
+        || !snapshot.also_organizations.is_empty()
+    {
+        9
+    } else if !snapshot.elsewhere.is_empty() {
         8
     } else if snapshot.organizations.iter().any(|o| o.vesta_id.is_some()) {
         7
-    } else if snapshot.projects.iter().any(|p| p.organization.is_some()) {
+    } else if snapshot
+        .projects
+        .iter()
+        .any(|p| !p.organizations.is_empty())
+    {
         6
     } else if snapshot.projects.iter().any(|p| !p.sources.is_empty()) {
         5
@@ -126,7 +140,7 @@ pub(crate) fn open(root: &Path) -> Result<(File, Snapshot), String> {
             }
             let disk: Disk = serde_json::from_slice(&bytes)
                 .map_err(|_| "Account metadata is corrupt; restore a known-good backup")?;
-            if !matches!(disk.schema_version, 1..=8) {
+            if !matches!(disk.schema_version, 1..=9) {
                 return Err("Unsupported account metadata version".into());
             }
             validate_snapshot(&disk.snapshot)?;
@@ -208,7 +222,7 @@ pub(crate) fn open(root: &Path) -> Result<(File, Snapshot), String> {
         let bytes = read_private(&path, MAX_FILE)?;
         let disk: Disk = serde_json::from_slice(&bytes)
             .map_err(|_| "Account metadata is corrupt; restore a known-good backup")?;
-        if !matches!(disk.schema_version, 1..=8) {
+        if !matches!(disk.schema_version, 1..=9) {
             return Err("Unsupported account metadata version".into());
         }
         validate_snapshot(&disk.snapshot)?;

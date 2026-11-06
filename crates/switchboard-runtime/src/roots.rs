@@ -872,12 +872,13 @@ mod tests {
         // On the disk map: right after its repository, with where it belongs.
         let snapshot = switchboard_core::Snapshot {
             projects: vec![switchboard_core::Project {
+                shared_accounts: Vec::new(),
                 pool: "p".into(),
                 name: "P".into(),
                 folders: vec![text(&app)],
                 created_at: 1,
                 sources: vec![],
-                organization: None,
+                organizations: Vec::new(),
             }],
             ..Default::default()
         };
@@ -937,6 +938,7 @@ mod tests {
         repo(&app.join("module"));
         let snapshot = switchboard_core::Snapshot {
             projects: vec![switchboard_core::Project {
+                shared_accounts: Vec::new(),
                 pool: "p".into(),
                 name: "P".into(),
                 folders: vec![
@@ -945,7 +947,7 @@ mod tests {
                 ],
                 created_at: 1,
                 sources: vec![],
-                organization: None,
+                organizations: Vec::new(),
             }],
             ..Default::default()
         };

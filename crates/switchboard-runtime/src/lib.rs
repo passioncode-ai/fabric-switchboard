@@ -287,6 +287,14 @@ pub enum Operation {
         /// group keeps its own.
         #[serde(default)]
         organization: Option<String>,
+        /// SB-282: every organization of the group, each by id or name, in order (empty, or
+        /// `personal` alone: personal). Wins over `organization`.
+        #[serde(default)]
+        organizations: Option<Vec<String>>,
+        /// SB-282: a listed account at home in another group moves here (`MoveAccount`)
+        /// instead of being shared.
+        #[serde(default)]
+        move_accounts: bool,
     },
     /// Deletes a group. `by` names the surface (C-Q7): a group holding a spending ceiling is
     /// deleted only by the window, since its ceiling goes with it; the CLI and MCP are refused.
@@ -318,6 +326,12 @@ pub enum Operation {
         /// SB-109: as in `SaveProject`.
         #[serde(default)]
         organization: Option<String>,
+        /// SB-282: as in `SaveProject`.
+        #[serde(default)]
+        organizations: Option<Vec<String>>,
+        /// SB-282: as in `SaveProject`.
+        #[serde(default)]
+        move_accounts: bool,
     },
     /// SB-143: whether Codex sessions in a project's folders use its Codex accounts (one
     /// user-level provider at the proxy). `enabled` none: the state only.
@@ -348,6 +362,11 @@ pub enum Operation {
         account: String,
         #[serde(default)]
         choice: Option<String>,
+        /// SB-282: every context of the account in order, each an organization's id or name or
+        /// `personal`: the first as `choice`, the rest organizations it also works for. Empty
+        /// lets the rules decide. Wins over `choice`.
+        #[serde(default)]
+        organizations: Option<Vec<String>>,
     },
     /// SB-159: the PassionCode.ai connection (no token in the answer).
     VestaStatus,
@@ -1813,7 +1832,7 @@ impl Runtime {
                 let accounts: Vec<String> = snapshot
                     .accounts
                     .iter()
-                    .filter(|a| a.pool == project.pool)
+                    .filter(|a| snapshot.serves(a, &project.pool))
                     .map(|a| a.id.clone())
                     .collect();
                 match self
@@ -2169,7 +2188,8 @@ impl Runtime {
         let names: std::collections::BTreeSet<String> = pools
             .iter()
             .filter_map(|pool| snapshot.project_of_pool(pool))
-            .filter_map(|p| snapshot.organization(p.organization.as_deref()?))
+            .flat_map(|p| p.organizations.iter())
+            .filter_map(|id| snapshot.organization(id))
             .map(|o| o.name.clone())
             .collect();
         names.into_iter().collect()
@@ -2230,13 +2250,10 @@ impl Runtime {
             let pools = self.shell_hook_pools(false);
             let notice = self.store.snapshot().ok().and_then(|s| {
                 let group = pools.iter().find_map(|pool| {
-                    s.project_of_pool(pool).filter(|p| {
-                        p.organization
-                            .as_deref()
-                            .is_some_and(|o| s.organization(o).is_some())
-                    })
+                    s.project_of_pool(pool)
+                        .filter(|p| p.organizations.iter().any(|o| s.organization(o).is_some()))
                 })?;
-                let organization = s.organization(group.organization.as_deref()?)?;
+                let organization = group.organizations.iter().find_map(|o| s.organization(o))?;
                 Some(shell::install::Notice {
                     organization: organization.name.clone(),
                     group: group.name.clone(),
@@ -2934,7 +2951,7 @@ fn add_suggested_folders(
             let accounts: Vec<String> = snapshot
                 .accounts
                 .iter()
-                .filter(|a| a.pool == project.pool)
+                .filter(|a| snapshot.serves(a, &project.pool))
                 .map(|a| a.id.clone())
                 .collect();
             store.save_project(Some(&project.pool), &project.name, &folders, &accounts)
@@ -2990,7 +3007,7 @@ fn add_suggested_folder(
     let accounts: Vec<String> = snapshot
         .accounts
         .iter()
-        .filter(|a| a.pool == project.pool)
+        .filter(|a| snapshot.serves(a, &project.pool))
         .map(|a| a.id.clone())
         .collect();
     let saved = store.save_project(Some(&project.pool), &project.name, &folders, &accounts)?;
@@ -3081,7 +3098,7 @@ fn project_edit(
     let mut accounts: Vec<String> = snapshot
         .accounts
         .iter()
-        .filter(|a| a.pool == project.pool)
+        .filter(|a| snapshot.serves(a, &project.pool))
         .map(|a| a.id.clone())
         .collect();
     for id in remove_accounts {
@@ -3105,6 +3122,8 @@ fn project_edit(
         account_ids: accounts,
         base_folders: Some(held),
         organization: None,
+        organizations: None,
+        move_accounts: false,
     })
 }
 /// SB-109: a group's organization as the person names it (its id, its name in any case, or
@@ -3119,12 +3138,38 @@ fn group_organization(
     if named.is_empty() || named.eq_ignore_ascii_case(switchboard_core::organizations::PERSONAL) {
         return Ok(Some(None));
     }
+    organization_id(snapshot, named).map(|id| Some(Some(id)))
+}
+/// An organization by its id or its name in any case (SB-109).
+fn organization_id(snapshot: &switchboard_core::Snapshot, named: &str) -> Result<String, String> {
     snapshot
         .organizations
         .iter()
         .find(|o| o.id == named || o.name.eq_ignore_ascii_case(named))
-        .map(|o| Some(Some(o.id.clone())))
+        .map(|o| o.id.clone())
         .ok_or_else(|| switchboard_core::organizations::ORGANIZATION_NOT_FOUND.into())
+}
+/// SB-282: a group's organizations as the person names them: `organizations` (each an id or a
+/// name; `personal` and blanks stand for none) wins over `organization`; neither keeps the
+/// group's own.
+fn group_organizations(
+    snapshot: &switchboard_core::Snapshot,
+    organization: Option<&str>,
+    organizations: Option<&[String]>,
+) -> Result<Option<Vec<String>>, String> {
+    if let Some(list) = organizations {
+        let mut ids = Vec::new();
+        for named in list.iter().map(|n| n.trim()) {
+            if named.is_empty()
+                || named.eq_ignore_ascii_case(switchboard_core::organizations::PERSONAL)
+            {
+                continue;
+            }
+            ids.push(organization_id(snapshot, named)?);
+        }
+        return Ok(Some(ids));
+    }
+    Ok(group_organization(snapshot, organization)?.map(|o| o.into_iter().collect()))
 }
 /// The account a stopped session in a project's folder was using: the pool's selected Claude
 /// account, else its first enabled Claude OAuth account.
@@ -3138,7 +3183,7 @@ fn project_stop_account(snapshot: &switchboard_core::Snapshot, pool: &str) -> Op
             .accounts
             .iter()
             .find(|a| {
-                a.pool == pool
+                snapshot.serves(a, pool)
                     && a.provider == Provider::Claude
                     && a.enabled
                     && a.kind == AuthKind::OAuth
@@ -3322,7 +3367,8 @@ fn organization_offer(snapshot: &switchboard_core::Snapshot, account: &Account) 
                 })
         })
     });
-    (group.pool != account.pool && !held).then(|| json!({"pool": group.pool, "name": group.name}))
+    (!snapshot.serves(account, &group.pool) && !held)
+        .then(|| json!({"pool": group.pool, "name": group.name}))
 }
 /// Refusal: an account the ordinary CLI is signed in to cannot join a project.
 pub const PROJECT_ACCOUNT_IN_CLI: &str = "This account is signed in to the ordinary Claude Code or Codex, which every folder uses. Switch the CLI to another account first, then add this one to the project.";
@@ -4863,9 +4909,12 @@ async fn execute(
             account_ids,
             base_folders,
             organization,
+            organizations,
+            move_accounts,
         } => {
             let before = store.snapshot()?;
-            let organization = group_organization(&before, organization.as_deref())?;
+            let organizations =
+                group_organizations(&before, organization.as_deref(), organizations.as_deref())?;
             let held: Vec<String> = pool
                 .as_deref()
                 .and_then(|p| before.projects.iter().find(|x| x.pool == p))
@@ -4951,12 +5000,13 @@ async fn execute(
                         .collect()
                 })
                 .unwrap_or_default();
-            let project = store.save_project_in(
+            let project = store.save_project_with(
                 pool.as_deref(),
                 &name,
                 &folders,
                 &account_ids,
-                organization.as_ref().map(Option::as_deref),
+                organizations,
+                !move_accounts,
             )?;
             let gone_text: Vec<String> = gone
                 .iter()
@@ -5150,6 +5200,8 @@ async fn execute(
             add_folders,
             remove_folders,
             organization,
+            organizations,
+            move_accounts,
         } => {
             let snapshot = store.snapshot()?;
             // SB-135: a root taken out takes its worktrees and clones with it.
@@ -5182,10 +5234,14 @@ async fn execute(
             )?;
             if let Operation::SaveProject {
                 organization: chosen,
+                organizations: chosen_all,
+                move_accounts: moving,
                 ..
             } = &mut save
             {
                 *chosen = organization;
+                *chosen_all = organizations;
+                *moving = move_accounts;
             }
             // The same admission, refusals and memory of removals as a whole save (SaveProject).
             Box::pin(execute(store, root, runtime, save)).await
@@ -5271,10 +5327,33 @@ async fn execute(
             let organization = store.remove_organization(&id)?;
             Ok(json!({"removed": organization.id, "name": organization.name}))
         }
-        Operation::OrganizationAssign { account, choice } => {
-            let attribution = store.assign_organization(&account, choice.as_deref())?;
+        Operation::OrganizationAssign {
+            account,
+            choice,
+            organizations,
+        } => {
+            let attribution = match organizations {
+                Some(list) => {
+                    let snapshot = store.snapshot()?;
+                    let mut ids = Vec::new();
+                    for named in &list {
+                        let named = named.trim();
+                        if named.eq_ignore_ascii_case(switchboard_core::organizations::PERSONAL) {
+                            ids.push(switchboard_core::organizations::PERSONAL.to_owned());
+                        } else if ids.is_empty()
+                            && named.eq_ignore_ascii_case(switchboard_core::organizations::AUTO)
+                        {
+                            ids.push(switchboard_core::organizations::AUTO.to_owned());
+                        } else {
+                            ids.push(organization_id(&snapshot, named)?);
+                        }
+                    }
+                    store.assign_organizations(&account, &ids)?
+                }
+                None => store.assign_organization(&account, choice.as_deref())?,
+            };
             Ok(
-                json!({"account": account, "organization": attribution.organization, "by": attribution.by}),
+                json!({"account": account, "organization": attribution.organization, "by": attribution.by, "also": attribution.also}),
             )
         }
         Operation::MoveAccount { id, pool } => {
@@ -5298,6 +5377,8 @@ async fn execute(
                     add_folders: Vec::new(),
                     remove_folders: Vec::new(),
                     organization: None,
+                    organizations: None,
+                    move_accounts: true,
                 };
             if pool != "default" {
                 if snapshot.project_of_pool(&pool).is_none() {
@@ -5369,6 +5450,8 @@ async fn execute(
             let named = canonical_near(&folder);
             let edit =
                 |pool: &str, add: Vec<PathBuf>, remove: Vec<PathBuf>| Operation::ProjectEdit {
+                    organizations: None,
+                    move_accounts: false,
                     pool: pool.to_owned(),
                     name: None,
                     add_accounts: Vec::new(),
@@ -6377,6 +6460,8 @@ mod owner_tests {
         }
         let saved = runtime
             .execute(Operation::SaveProject {
+                organizations: None,
+                move_accounts: false,
                 pool: None,
                 name: "Agents".into(),
                 folders: vec![work.join("repo")],
@@ -6807,6 +6892,8 @@ mod owner_tests {
         let b = save(&runtime.store, "synthetic-b", "default");
         let repo = tempfile::tempdir().unwrap();
         let save_with = |ids: Vec<String>| Operation::SaveProject {
+            organizations: None,
+            move_accounts: false,
             pool: None,
             name: "Alpha".into(),
             folders: vec![repo.path().to_owned()],
@@ -6856,6 +6943,8 @@ mod owner_tests {
         let repo = tempfile::tempdir().unwrap();
         runtime
             .execute(Operation::SaveProject {
+                organizations: None,
+                move_accounts: false,
                 pool: None,
                 name: "Alpha".into(),
                 folders: vec![repo.path().to_owned()],
@@ -6898,6 +6987,8 @@ mod owner_tests {
         std::fs::create_dir_all(&a).unwrap();
         std::fs::create_dir_all(&b).unwrap();
         let save = |name: &str, folders: Vec<PathBuf>| Operation::SaveProject {
+            organizations: None,
+            move_accounts: false,
             pool: Some("p".into()),
             name: name.into(),
             folders,
@@ -6907,6 +6998,8 @@ mod owner_tests {
         };
         runtime
             .execute(Operation::SaveProject {
+                organizations: None,
+                move_accounts: false,
                 pool: None,
                 name: "P".into(),
                 folders: vec![a.clone(), b.clone()],
@@ -7000,6 +7093,8 @@ mod owner_tests {
         ] {
             runtime
                 .execute(Operation::SaveProject {
+                    organizations: None,
+                    move_accounts: false,
                     pool: None,
                     name: name.into(),
                     folders,
@@ -7034,6 +7129,8 @@ mod owner_tests {
         // One group's folder inside another group's folder stays refused.
         let nested = runtime
             .execute(Operation::SaveProject {
+                organizations: None,
+                move_accounts: false,
                 pool: Some("empty".into()),
                 name: "Empty".into(),
                 folders: vec![shared.clone(), own.join("sub")],
@@ -7128,6 +7225,8 @@ mod owner_tests {
         std::fs::create_dir_all(&loose).unwrap();
         runtime
             .execute(Operation::SaveProject {
+                organizations: None,
+                move_accounts: false,
                 pool: None,
                 name: "App".into(),
                 folders: vec![main.clone()],
@@ -7467,6 +7566,8 @@ mod owner_tests {
             .unwrap();
         let mine = runtime
             .execute(Operation::SaveProject {
+                organizations: None,
+                move_accounts: false,
                 pool: None,
                 name: "Mine".into(),
                 folders: vec![acme.clone()],
@@ -7511,6 +7612,8 @@ mod owner_tests {
         std::fs::create_dir_all(&elsewhere).unwrap();
         runtime
             .execute(Operation::SaveProject {
+                organizations: None,
+                move_accounts: false,
                 pool: Some(pool),
                 name: "Mine".into(),
                 folders: vec![elsewhere],
@@ -7578,6 +7681,8 @@ mod owner_tests {
             .unwrap();
         runtime
             .execute(Operation::SaveProject {
+                organizations: None,
+                move_accounts: false,
                 pool: None,
                 name: "Acme".into(),
                 folders: vec![acme.clone()],
@@ -7609,6 +7714,8 @@ mod owner_tests {
             .unwrap();
         runtime
             .execute(Operation::SaveProject {
+                organizations: None,
+                move_accounts: false,
                 pool: None,
                 name: "Acme".into(),
                 folders: vec![acme.clone()],
@@ -7674,6 +7781,8 @@ mod owner_tests {
         let one = fixtures::save(&runtime.store, "synthetic-one", "default").id;
         runtime
             .execute(Operation::SaveProject {
+                organizations: None,
+                move_accounts: false,
                 pool: None,
                 name: "App".into(),
                 folders: vec![app.clone()],
@@ -7781,6 +7890,8 @@ mod owner_tests {
         );
         runtime
             .execute(Operation::SaveProject {
+                organizations: None,
+                move_accounts: false,
                 pool: None,
                 name: "Apps".into(),
                 folders: vec![wt.clone(), main.clone(), other.clone()],
@@ -7799,6 +7910,8 @@ mod owner_tests {
         assert_eq!(tree[0].derived[0].folder, wt.to_string_lossy());
         runtime
             .execute(Operation::ProjectEdit {
+                organizations: None,
+                move_accounts: false,
                 pool: "apps".into(),
                 name: None,
                 add_accounts: vec![],
@@ -7872,6 +7985,8 @@ mod owner_tests {
         ] {
             runtime
                 .execute(Operation::SaveProject {
+                    organizations: None,
+                    move_accounts: false,
                     pool: None,
                     name: name.into(),
                     folders,
@@ -8002,6 +8117,8 @@ mod owner_tests {
         let two = fixtures::save(&runtime.store, "synthetic-two", "default").id;
         runtime
             .execute(Operation::SaveProject {
+                organizations: None,
+                move_accounts: false,
                 pool: None,
                 name: "App".into(),
                 folders: vec![a.clone(), b.clone()],
@@ -8015,6 +8132,8 @@ mod owner_tests {
                     remove_accounts: Vec<String>,
                     add_folders: Vec<PathBuf>,
                     remove_folders: Vec<PathBuf>| Operation::ProjectEdit {
+            organizations: None,
+            move_accounts: false,
             pool: "app".into(),
             name: None,
             add_accounts,
@@ -8086,6 +8205,97 @@ mod owner_tests {
     }
 
     #[tokio::test]
+    async fn an_account_added_to_a_second_group_serves_both() {
+        // SB-282: «аккаунт может быть перевязан к нескольким группам»: added by delta, an account
+        // at home in one group keeps that home and serves the other; its view says shared, it
+        // launches in the folders of both, and taking it out stops only the share.
+        let root = tempfile::tempdir().unwrap();
+        let runtime = fixtures::runtime(root.path(), signed_out, activates).await;
+        let work = tempfile::tempdir().unwrap();
+        let work = work.path().canonicalize().unwrap();
+        let (a, b, c) = (work.join("a"), work.join("b"), work.join("c"));
+        for d in [&a, &b, &c] {
+            std::fs::create_dir_all(d).unwrap();
+        }
+        let one = fixtures::save(&runtime.store, "synthetic-one", "default").id;
+        for (name, folder) in [("App", &a), ("Web", &b)] {
+            runtime
+                .execute(Operation::SaveProject {
+                    organizations: None,
+                    move_accounts: false,
+                    pool: None,
+                    name: name.into(),
+                    folders: vec![folder.clone()],
+                    account_ids: vec![],
+                    base_folders: None,
+                    organization: None,
+                })
+                .await
+                .unwrap();
+        }
+        let edit = |pool: &str, add: Vec<String>, remove: Vec<String>| Operation::ProjectEdit {
+            pool: pool.into(),
+            name: None,
+            add_accounts: add,
+            remove_accounts: remove,
+            add_folders: vec![],
+            remove_folders: vec![],
+            organization: None,
+            organizations: None,
+            move_accounts: false,
+        };
+        runtime
+            .execute(edit("app", vec![one.clone()], vec![]))
+            .await
+            .unwrap();
+        let view = runtime
+            .execute(edit("web", vec![one.clone()], vec![]))
+            .await
+            .unwrap();
+        assert_eq!(view["accounts"][0]["shared"], true, "{view}");
+        assert_eq!(view["shared_accounts"], json!([one]));
+        let snapshot = runtime.store.snapshot().unwrap();
+        let account = snapshot.accounts.iter().find(|x| x.id == one).unwrap();
+        assert_eq!(account.pool, "app");
+        assert_eq!(snapshot.pools_of(account), vec!["app", "web"]);
+        for folder in [&a, &b] {
+            assert!(crate::launch::project_allows(&snapshot, account, folder).is_ok());
+        }
+        assert_eq!(
+            crate::launch::project_allows(&snapshot, account, &c).unwrap_err(),
+            crate::launch::PROJECT_ACCOUNT_OUTSIDE
+        );
+        // A managed session runs in the group of the folder it starts in.
+        assert_eq!(crate::launch::serving_pool(&snapshot, account, &a), "app");
+        assert_eq!(crate::launch::serving_pool(&snapshot, account, &b), "web");
+        // Taken out of Web: still App's own.
+        runtime
+            .execute(edit("web", vec![], vec![one.clone()]))
+            .await
+            .unwrap();
+        let snapshot = runtime.store.snapshot().unwrap();
+        assert_eq!(snapshot.pools_of(&snapshot.accounts[0]), vec!["app"]);
+        // Shared again, then moved there: Web holds it as its own, App lets it go.
+        runtime
+            .execute(edit("web", vec![one.clone()], vec![]))
+            .await
+            .unwrap();
+        runtime
+            .execute(Operation::MoveAccount {
+                id: one.clone(),
+                pool: "web".into(),
+            })
+            .await
+            .unwrap();
+        let snapshot = runtime.store.snapshot().unwrap();
+        assert_eq!(snapshot.accounts[0].pool, "web");
+        assert!(snapshot
+            .projects
+            .iter()
+            .all(|p| p.shared_accounts.is_empty()));
+    }
+
+    #[tokio::test]
     async fn an_account_moves_between_projects_and_back_to_default() {
         // SB-122: «аккаунты между пулами перемещать через UI, три точки, добавить в пул, выбор».
         let root = tempfile::tempdir().unwrap();
@@ -8100,6 +8310,8 @@ mod owner_tests {
         for (name, folder) in [("App", &a), ("Web", &b)] {
             runtime
                 .execute(Operation::SaveProject {
+                    organizations: None,
+                    move_accounts: false,
                     pool: None,
                     name: name.into(),
                     folders: vec![folder.clone()],
@@ -8183,6 +8395,8 @@ mod owner_tests {
         }
         runtime
             .execute(Operation::SaveProject {
+                organizations: None,
+                move_accounts: false,
                 pool: None,
                 name: "App".into(),
                 folders: vec![main.clone(), worktree.clone()],
@@ -8221,6 +8435,8 @@ mod owner_tests {
         }
         runtime
             .execute(Operation::SaveProject {
+                organizations: None,
+                move_accounts: false,
                 pool: None,
                 name: "App".into(),
                 folders: vec![main.clone(), worktree.clone()],
@@ -8298,6 +8514,8 @@ mod owner_tests {
         git(&main);
         runtime
             .execute(Operation::SaveProject {
+                organizations: None,
+                move_accounts: false,
                 pool: None,
                 name: "App".into(),
                 folders: vec![main.clone()],
@@ -8339,6 +8557,8 @@ mod owner_tests {
         // The person takes the clone out: it does not come back.
         runtime
             .execute(Operation::SaveProject {
+                organizations: None,
+                move_accounts: false,
                 pool: Some("app".into()),
                 name: "App".into(),
                 folders: vec![main.clone(), older.clone()],
@@ -8362,6 +8582,8 @@ mod owner_tests {
         let with_manual = vec![main.clone(), older.clone(), manual.clone()];
         runtime
             .execute(Operation::SaveProject {
+                organizations: None,
+                move_accounts: false,
                 pool: Some("app".into()),
                 name: "App".into(),
                 folders: with_manual,
@@ -8373,6 +8595,8 @@ mod owner_tests {
             .unwrap();
         runtime
             .execute(Operation::SaveProject {
+                organizations: None,
+                move_accounts: false,
                 pool: Some("app".into()),
                 name: "App".into(),
                 folders: vec![main.clone(), older.clone()],
@@ -8398,6 +8622,8 @@ mod owner_tests {
             .unwrap();
         runtime
             .execute(Operation::SaveProject {
+                organizations: None,
+                move_accounts: false,
                 pool: None,
                 name: "App again".into(),
                 folders: vec![main.clone()],

@@ -798,13 +798,13 @@ check(() => {
 check(() => {
   const account = (id, provider, email, org) => ({ id, label: email, provider, external_identity: { account_id: org, organization_id: org, email } });
   const snap = { organizations: [{ id: 'o1', name: 'Acme', domains: ['acme.example'] }, { id: 'o2', name: 'Beta', domains: [], provider_organizations: ['claude:team-b'] }], memberships: {} };
-  assert.deepEqual(logic.attribution({}, account('a', 'claude', 'me@acme.example', 'x')), { organization: null, by: null });
-  assert.deepEqual(logic.attribution(snap, account('a', 'claude', 'dev@acme.example', 'team-x')), { organization: 'o1', by: 'domain' });
-  assert.deepEqual(logic.attribution(snap, account('b', 'claude', 'dev@acme.example', 'team-b')), { organization: 'o2', by: 'provider' });
+  assert.deepEqual(logic.attribution({}, account('a', 'claude', 'me@acme.example', 'x')), { organization: null, by: null, also: [] });
+  assert.deepEqual(logic.attribution(snap, account('a', 'claude', 'dev@acme.example', 'team-x')), { organization: 'o1', by: 'domain', also: [] });
+  assert.deepEqual(logic.attribution(snap, account('b', 'claude', 'dev@acme.example', 'team-b')), { organization: 'o2', by: 'provider', also: [] });
   snap.memberships.b = 'personal';
-  assert.deepEqual(logic.attribution(snap, account('b', 'claude', 'dev@acme.example', 'team-b')), { organization: null, by: 'person' });
+  assert.deepEqual(logic.attribution(snap, account('b', 'claude', 'dev@acme.example', 'team-b')), { organization: null, by: 'person', also: [] });
   snap.memberships.a = 'o2';
-  assert.deepEqual(logic.attribution(snap, account('a', 'claude', 'dev@acme.example', 'team-x')), { organization: 'o2', by: 'person' });
+  assert.deepEqual(logic.attribution(snap, account('a', 'claude', 'dev@acme.example', 'team-x')), { organization: 'o2', by: 'person', also: [] });
   assert.equal(logic.providerOrganization(account('c', 'codex', 'x@gmail.com', 'ws-1')), 'codex:ws-1');
   assert.equal(logic.accountDomain({ label: 'Work', external_identity: null }), null);
   assert.equal(logic.accountDomain({ label: 'x@Acme.Example.', external_identity: null }), 'acme.example');
@@ -1130,9 +1130,27 @@ check(() => {
     const ended = logic.orgSetups(withOrg([{ id: 'org_group', state: 'done', group }, { id: 'seat', state: 'needs_person', ended: 2 }]))[0];
     // Note 6 of the wave 4 design pass: the card gives the account card's way out too.
     assert.equal(ended.lines[2].line, 'Your Acme accounts in “Acme work” must sign in again. If Acme removed your seat, ask its administrator.');
-    const two = logic.orgSetups(withOrg([{ id: 'org_group', state: 'needs_person', groups: ['Acme web', 'Acme two'] }, { id: 'seat', state: 'needs_person' }]))[0];
-    assert.equal(two.lines[1].line, 'Keep one group for Acme on this computer: Acme web, Acme two.');
-    assert.equal(logic.orgSetupAction(two), null, 'which group stays is the person\'s');
+    // SB-282: an organization may have several groups; the first is the one the card signs in to.
+    const two = logic.orgSetups(withOrg([{ id: 'org_group', state: 'done', group, groups: ['Acme web', 'Acme two'] }, { id: 'seat', state: 'needs_person' }]))[0];
+    assert.equal(two.lines[1].line, 'Its groups are “Acme web”, “Acme two”.');
+    assert.equal(logic.orgSetupAction(two)?.kind, 'sign_in', 'several groups need no choice');
+    // SB-282: many-to-many links, as switchboard-core decides them.
+    {
+      const orgs = [{ id: 'o-a', name: 'A', domains: ['a.example'], created_at: 1 }, { id: 'o-b', name: 'B', domains: ['b.example'], created_at: 1 }];
+      const acct = { id: 'x', label: 'dev@a.example', provider: 'claude', pool: 'one', external_identity: null };
+      const snap = { organizations: orgs, also_organizations: { x: ['o-b', 'o-a', 'o-missing'] }, projects: [{ pool: 'one', organizations: ['o-a', 'o-b'] }, { pool: 'two', organization: 'o-b', shared_accounts: ['x'] }, { pool: 'three' }] };
+      const at = logic.attribution(snap, acct);
+      assert.deepEqual([at.organization, at.also], ['o-a', ['o-b']], 'the first context from the domain, the rest from the person, each once');
+      assert.equal(logic.groupAdmits(snap, ['o-b'], acct), true);
+      assert.equal(logic.groupAdmits(snap, [], acct), false, 'a personal group refuses it');
+      assert.deepEqual(logic.groupOrganizations(snap.projects[0]), ['o-a', 'o-b']);
+      assert.deepEqual(logic.groupOrganizations(snap.projects[1]), ['o-b']);
+      assert.deepEqual(logic.groupOrganizations(snap.projects[2]), []);
+      assert.equal(logic.servesPool(snap, acct, 'two'), true);
+      assert.equal(logic.servesPool(snap, acct, 'three'), false);
+      assert.deepEqual(logic.sharedGroups(snap, acct).map((p) => p.pool), ['two']);
+      assert.equal(logic.inOrganizationFilter(snap, acct, 'o-b'), true, 'the filter finds it under each of its organizations');
+    }
     assert.deepEqual(logic.orgSetups(ready), [], 'every step done or optional: the card goes');
     // Several organizations: one card each, in the checklist's order (newest first).
     const globex = { id: 'o-globex', name: 'Globex' };

@@ -1,7 +1,7 @@
 // Pure interface rules, kept free of DOM access so scripts/test-ui-logic.mjs can
 // exercise them directly. main.ts owns rendering; these functions own decisions.
 import type { ShellHookNotice, ShellHookStatus, Onboarding, OnboardStep, ChainExecutor, ChainScope, ChainStepView } from './types';
-import type { Account, AccountLimit, Organization, OrganizationGroupOffer, AgentRow, AgentSetup, OpenrouterCredit, RecommendedModel, SessionInfo, ProjectRule, RotationPolicy, UpdateStatus, Usage, UsageWindow } from './types';
+import type { Account, AccountLimit, Organization, OrganizationGroupOffer, Project, AgentRow, AgentSetup, OpenrouterCredit, RecommendedModel, SessionInfo, ProjectRule, RotationPolicy, UpdateStatus, Usage, UsageWindow } from './types';
 import { t, plural } from './i18n';
 
 export type Appearance = 'system' | 'dark' | 'light';
@@ -285,7 +285,22 @@ export interface AccountGroup<T> { provider: Account['provider']; count: number;
  * `organizations::tests` and `scripts/test-ui-logic.mjs`.
  */
 export type AttributedBy = 'person' | 'provider' | 'domain';
-export interface OrgSnapshot { organizations?: Organization[]; memberships?: Record<string, string> }
+export interface OrgSnapshot { organizations?: Organization[]; memberships?: Record<string, string>; also_organizations?: Record<string, string[]> }
+/** SB-282: a group's organizations in order, from either form the store writes (`organization`
+ * for one, `organizations` for several); empty is personal. */
+export function groupOrganizations(group: Pick<Project, 'organization' | 'organizations'> | null | undefined): string[] {
+  if (!group) return [];
+  if (group.organizations?.length) return group.organizations;
+  return group.organization ? [group.organization] : [];
+}
+/** SB-282: whether `account` serves `pool`: its own pool, or a group that shares it. */
+export function servesPool(snapshot: { projects?: Pick<Project, 'pool' | 'shared_accounts'>[] }, account: Pick<Account, 'id' | 'pool'>, pool: string): boolean {
+  return account.pool === pool || !!(snapshot.projects ?? []).find((p) => p.pool === pool)?.shared_accounts?.includes(account.id);
+}
+/** SB-282: the groups an account serves besides its own pool (shares). */
+export function sharedGroups<P extends Pick<Project, 'pool' | 'shared_accounts'>>(snapshot: { projects?: P[] }, account: Pick<Account, 'id' | 'pool'>): P[] {
+  return (snapshot.projects ?? []).filter((p) => p.pool !== account.pool && (p.shared_accounts ?? []).includes(account.id));
+}
 export function providerOrganization(account: Pick<Account, 'provider' | 'external_identity'>): string | null {
   const identity = account.external_identity;
   const id = account.provider === 'claude' ? identity?.organization_id : identity?.account_id;
@@ -298,7 +313,23 @@ export function accountDomain(account: Pick<Account, 'label' | 'external_identit
   const domain = email.slice(at + 1).trim().replace(/\.$/, '').toLowerCase();
   return /^([a-z0-9]([a-z0-9-]*[a-z0-9])?\.)+[a-z0-9]([a-z0-9-]*[a-z0-9])?$/.test(domain) ? domain : null;
 }
-export function attribution(snapshot: OrgSnapshot, account: Pick<Account, 'id' | 'label' | 'provider' | 'external_identity'>): { organization: string | null; by: AttributedBy | null } {
+export interface Attribution { organization: string | null; by: AttributedBy | null; /** SB-282: organizations the account also works for, beyond `organization`. */ also: string[] }
+export function attribution(snapshot: OrgSnapshot, account: Pick<Account, 'id' | 'label' | 'provider' | 'external_identity'>): Attribution {
+  const first = firstAttribution(snapshot, account);
+  const known = new Set((snapshot.organizations ?? []).map((o) => o.id));
+  const also: string[] = [];
+  for (const o of snapshot.also_organizations?.[account.id] ?? []) if (known.has(o) && o !== first.organization && !also.includes(o)) also.push(o);
+  return { ...first, also };
+}
+/** SB-282: whether an account holds `context` (null: personal): its first context or one it also works for. */
+export function holdsContext(at: Pick<Attribution, 'organization' | 'also'>, context: string | null): boolean {
+  return context === null ? at.organization === null : at.organization === context || at.also.includes(context);
+}
+/** SB-282: every organization an account belongs to, its first first. */
+export function accountOrganizations(at: Pick<Attribution, 'organization' | 'also'>): string[] {
+  return [...(at.organization ? [at.organization] : []), ...at.also];
+}
+function firstAttribution(snapshot: OrgSnapshot, account: Pick<Account, 'id' | 'label' | 'provider' | 'external_identity'>): { organization: string | null; by: AttributedBy | null } {
   const organizations = snapshot.organizations ?? [];
   const choice = snapshot.memberships?.[account.id];
   if (choice === 'personal') return { organization: null, by: 'person' };
@@ -311,18 +342,22 @@ export function attribution(snapshot: OrgSnapshot, account: Pick<Account, 'id' |
   if (owner) return { organization: owner.id, by: 'domain' };
   return { organization: null, by: null };
 }
-/** SB-109: whether `account` may serve a group bound to `organization` (null: personal), as
- * `Snapshot::context_admits`: always while no organization exists. */
-export function groupAdmits(snapshot: OrgSnapshot, organization: string | null, account: Pick<Account, 'id' | 'label' | 'provider' | 'external_identity'>): boolean {
+/** SB-109, SB-282: whether `account` may serve a group bound to `organizations` (one id, a list,
+ * or null/empty: personal), as `Snapshot::context_admits`: their contexts meet; always while no
+ * organization exists. */
+export function groupAdmits(snapshot: OrgSnapshot, organizations: string | string[] | null, account: Pick<Account, 'id' | 'label' | 'provider' | 'external_identity'>): boolean {
   if (!(snapshot.organizations ?? []).length) return true;
-  return attribution(snapshot, account).organization === organization;
+  const list = organizations === null ? [] : typeof organizations === 'string' ? [organizations] : organizations;
+  const at = attribution(snapshot, account);
+  return list.length ? list.some((o) => holdsContext(at, o)) : holdsContext(at, null);
 }
 /** SB-170: a group bound to an organization whose accounts all belong elsewhere now (their
  * domain or team moved, or the person placed them): its folders keep the group's route and every
  * request is refused (fail closed), so its card says why. */
-export function groupSeatsElsewhere(snapshot: OrgSnapshot, organization: string | null, accounts: Pick<Account, 'id' | 'label' | 'provider' | 'external_identity'>[]): boolean {
-  if (!organization || !accounts.length) return false;
-  return !accounts.some((a) => groupAdmits(snapshot, organization, a));
+export function groupSeatsElsewhere(snapshot: OrgSnapshot, organizations: string | string[] | null, accounts: Pick<Account, 'id' | 'label' | 'provider' | 'external_identity'>[]): boolean {
+  const list = organizations === null ? [] : typeof organizations === 'string' ? [organizations] : organizations;
+  if (!list.length || !accounts.length) return false;
+  return !accounts.some((a) => groupAdmits(snapshot, list, a));
 }
 /** SB-160 (B-6, SCN-078): the card line of a seat the provider no longer accepts (the monitor's
  * `sign_in_required`), naming its organization; null for a personal account or a signed-in one,
@@ -337,10 +372,10 @@ export function seatEndedText(snapshot: OrgSnapshot, account: Pick<Account, 'id'
 /** SB-160 (B-6, SCN-078): a group bound to an organization whose seats (its accounts of that
  * organization) have all ended says so; a group whose accounts all belong elsewhere keeps
  * SB-170's line instead, and an empty group its own note. */
-export function groupSeatsEndedText(snapshot: OrgSnapshot, group: { name: string; organization?: string | null }, accounts: Pick<Account, 'id' | 'label' | 'provider' | 'external_identity'>[], signInRequired: string[] | undefined): string | null {
-  const organization = group.organization ?? null;
-  if (!organization || !signInRequired) return null;
-  const seats = accounts.filter((a) => groupAdmits(snapshot, organization, a));
+export function groupSeatsEndedText(snapshot: OrgSnapshot, group: { name: string; organization?: string | null; organizations?: string[] }, accounts: Pick<Account, 'id' | 'label' | 'provider' | 'external_identity'>[], signInRequired: string[] | undefined): string | null {
+  const organizations = groupOrganizations(group);
+  if (!organizations.length || !signInRequired) return null;
+  const seats = accounts.filter((a) => groupAdmits(snapshot, organizations, a));
   if (!seats.length || !seats.every((a) => signInRequired.includes(a.id))) return null;
   return t("None of {group}'s accounts is signed in. Sessions in its folders are refused until one is.", { group: group.name });
 }
@@ -376,8 +411,8 @@ export function passioncodeLine(status: { connected: boolean; state?: string; re
 /** The Accounts filter (SB-158): every account, the personal ones, or one organization's. */
 export function inOrganizationFilter(snapshot: OrgSnapshot, account: Pick<Account, 'id' | 'label' | 'provider' | 'external_identity'>, filter: string): boolean {
   if (filter === 'all') return true;
-  const at = attribution(snapshot, account).organization;
-  return filter === 'personal' ? at === null : at === filter;
+  const at = attribution(snapshot, account);
+  return holdsContext(at, filter === 'personal' ? null : filter);
 }
 /** "a.example, b.example" from what a person typed: commas, spaces or new lines. */
 export function domainList(text: string): string[] {
@@ -1189,8 +1224,10 @@ const seatLabel = (organization: string) => t('Sign in with your {organization} 
 function orgSetupLine(step: OnboardStep, organization: string, group: { pool: string; name: string } | null): string {
   switch (step.id) {
     case 'org_group':
+      // SB-282: an organization may have several groups.
+      if (step.state === 'done' && (step.groups ?? []).length > 1) return t('Its groups are {groups}.', { groups: (step.groups ?? []).map((g) => `“${g}”`).join(', ') });
       if (step.state === 'done' && step.group) return t('Its group is “{group}”.', { group: step.group.name });
-      return (step.groups ?? []).length > 1 ? t('Keep one group for {organization} on this computer: {groups}.', { organization, groups: (step.groups ?? []).join(', ') }) : t('{organization} has no group on this computer yet.', { organization });
+      return t('{organization} has no group on this computer yet.', { organization });
     case 'seat':
       if (step.state === 'done') return group ? t('Your {organization} account in “{group}” is signed in.', { organization, group: group.name }) : t('Your {organization} account is signed in.', { organization });
       if (!group) return t('Sign in once the group exists.');

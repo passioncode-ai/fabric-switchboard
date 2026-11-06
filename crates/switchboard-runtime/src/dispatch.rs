@@ -241,7 +241,7 @@ pub const DISPATCH_ID_INVALID: &str =
 
 /// The exit contract (spec §3.4, §6): Claude Code's appended system prompt; for Codex, after the
 /// header.
-pub const EXIT_CONTRACT: &str = "You run with no person, for one Fabric board request. Do the request, answer it in its board thread, complete it (completed, or failed_known with the reason when an error stops you), then end the session. Close the workflow with the final checkpoint only once the request is settled: the board accepted your complete or reconcile, or com.get reads it answered, finished or outcome_unknown. A run that leaves it queued, claimed, accepted or in progress writes its checkpoint without closing, so Fabric can take the workflow back. Never wait for a person: money, deletion and publication go through fabric_effect_request.";
+pub const EXIT_CONTRACT: &str = "You run with no person, for one Fabric board request. Do the request, answer it in its board thread, complete it (completed, or failed_known with the reason when an error stops you), then end the session. If com.enroll is refused, follow Fabric's board.read-at-start: reply only at an absent slot of generation 0, and always ask the operator. Close the workflow with the final checkpoint only once the request is settled: the board accepted your complete or reconcile, or com.get reads it answered, finished or outcome_unknown. A run that leaves it queued, claimed, accepted or in progress writes its checkpoint without closing, so Fabric can take the workflow back. Never wait for a person: money, deletion and publication go through fabric_effect_request.";
 
 /// A run the owner watches for its time limit.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

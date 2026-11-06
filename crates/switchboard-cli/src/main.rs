@@ -416,11 +416,16 @@ enum Project {
         /// A folder of the group to take out; repeat for each. It is not added back by itself.
         #[arg(long = "remove-folder")]
         remove_folders: Vec<PathBuf>,
-        /// The organization whose accounts the group runs on (its id or name from `switchboard
-        /// org list`), or `personal`. With an organization defined, a group takes only accounts
-        /// of its own organization, or personal ones when it has none.
+        /// An organization whose accounts the group runs on (its id or name from `switchboard
+        /// org list`), or `personal`; repeat for a group of several organizations, the first
+        /// being its own context. With an organization defined, a group takes only accounts of
+        /// its organizations, or personal ones when it has none.
         #[arg(long)]
-        organization: Option<String>,
+        organization: Vec<String>,
+        /// With `--add-account`: move each account here from its group. Without it, an account
+        /// at home in another group keeps its home and serves this group too.
+        #[arg(long = "move-accounts")]
+        move_accounts: bool,
     },
     /// Move a group's repository (its root folder), with the worktrees and clones under it,
     /// into another group in one step; a repository in no group joins the named one. A group
@@ -624,12 +629,14 @@ enum Org {
         id: String,
     },
     /// Say where one account belongs: an organization's id, `personal`, or `auto` to let the
-    /// rules decide again.
+    /// rules decide again. Name several for an account that works for more than one: the first
+    /// is its own, the rest it also works for.
     Assign {
         /// The account id (`switchboard accounts list`).
         account: String,
-        /// An organization's id, `personal`, or `auto`.
-        organization: String,
+        /// An organization's id or name, `personal`, or `auto`; several are allowed.
+        #[arg(required = true, num_args = 1..)]
+        organization: Vec<String>,
     },
 }
 
@@ -1455,9 +1462,17 @@ async fn run(cli: &Cli) -> Result<Value, String> {
             Org::Assign {
                 account,
                 organization,
-            } => Operation::OrganizationAssign {
-                account: account.clone(),
-                choice: (organization != "auto").then(|| organization.clone()),
+            } => match organization.as_slice() {
+                [one] => Operation::OrganizationAssign {
+                    account: account.clone(),
+                    choice: (one != "auto").then(|| one.clone()),
+                    organizations: None,
+                },
+                several => Operation::OrganizationAssign {
+                    account: account.clone(),
+                    choice: None,
+                    organizations: Some(several.to_vec()),
+                },
             },
         },
         Command::Dispatch {
@@ -1871,6 +1886,8 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                 folders,
                 accounts,
             } => Operation::SaveProject {
+                organizations: None,
+                move_accounts: false,
                 pool: pool.clone(),
                 name: name.clone(),
                 folders: folders
@@ -1895,7 +1912,10 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                 add_folders,
                 remove_folders,
                 organization,
+                move_accounts,
             } => Operation::ProjectEdit {
+                organizations: (organization.len() > 1).then(|| organization.clone()),
+                move_accounts: *move_accounts,
                 pool: pool.clone(),
                 name: name.clone(),
                 add_accounts: add_accounts.clone(),
@@ -1906,7 +1926,7 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                     .collect::<Result<Vec<_>, _>>()?,
                 // A folder to take out may be gone from disk: taken as given.
                 remove_folders: remove_folders.clone(),
-                organization: organization.clone(),
+                organization: (organization.len() == 1).then(|| organization[0].clone()),
             },
             Project::MoveRoot {
                 folder: path,
@@ -3837,7 +3857,8 @@ mod onboard_commands {
             folders: vec!["/work/acme".into()],
             created_at: 1,
             sources: vec![],
-            organization: Some("o-acme".into()),
+            organizations: vec!["o-acme".into()],
+            shared_accounts: vec![],
         });
         snapshot.accounts.push(switchboard_core::Account {
             id: "a-1".into(),
@@ -3880,7 +3901,7 @@ mod onboard_commands {
             out.push(probe);
         }
         let mut unbound = acme();
-        unbound.snapshot.as_mut().unwrap().projects[0].organization = None;
+        unbound.snapshot.as_mut().unwrap().projects[0].organizations = Vec::new();
         out.push(unbound);
         let mut two = acme();
         let snapshot = two.snapshot.as_mut().unwrap();
