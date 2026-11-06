@@ -20,6 +20,8 @@ sha2 = "0.10"
 chrono = { version = "0.4", default-features = false, features = ["std"] }
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_NetworkManagement_IpHelper", "Win32_Security", "Win32_System_Threading"] }
 [features]
 # Lets another crate's tests point the usage probe at a local synthetic upstream. Enabled only
 # through dev-dependencies, so no shipped binary can send a credential anywhere but the fixed

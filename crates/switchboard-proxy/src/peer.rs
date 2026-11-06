@@ -6,9 +6,10 @@
 //!
 //! macOS: `net.inet.tcp.pcblist64` lists every TCP socket with its owner's uid, readable without
 //! privileges (`netstat` reads the same list). Linux: `/proc/net/tcp` and `/proc/net/tcp6`.
-//! On those two an owner that cannot be read (the peer closed already, or the list could not be
-//! read) is refused too, as the norm asks. Elsewhere (Windows, SB-274) no owner is read and the
-//! capability alone guards the connection.
+//! Windows (SB-274): `GetExtendedTcpTable` names the peer socket's process, whose token user is
+//! compared by SID with this process's; a process this one may not open counts as another user's.
+//! An owner that cannot be read (the peer closed already, or the table could not be read) is
+//! refused too, as the norm asks.
 use axum::serve::Listener;
 use std::{
     net::SocketAddr,
@@ -38,8 +39,49 @@ fn owner_on(_local_port: u16, _peer_port: u16) -> Option<u32> {
     None
 }
 
-/// This process's uid where the peer's owner can be read (macOS, Linux); `None` elsewhere, where
-/// the listener checks nothing.
+/// Who this process runs as, for the peer to be compared with.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Me {
+    /// Nothing is checked: a system where the peer's owner cannot be read.
+    Unchecked,
+    /// This uid (macOS, Linux).
+    Uid(u32),
+    /// This process's token user (Windows).
+    TokenUser,
+}
+
+/// Who this process runs as on this system.
+pub fn me() -> Me {
+    #[cfg(windows)]
+    {
+        Me::TokenUser
+    }
+    #[cfg(not(windows))]
+    {
+        own_uid().map_or(Me::Unchecked, Me::Uid)
+    }
+}
+
+/// Whether the peer of the connection from `peer` to `local` runs as `me`. Blocking: it reads the
+/// system's socket table.
+pub fn same_user(me: Me, local: SocketAddr, peer: SocketAddr) -> bool {
+    match me {
+        Me::Unchecked => true,
+        Me::Uid(uid) => admits(uid, owner(local, peer)),
+        Me::TokenUser => token_user_matches(local.port(), peer.port()),
+    }
+}
+
+#[cfg(windows)]
+fn token_user_matches(local_port: u16, peer_port: u16) -> bool {
+    windows::same_user(local_port, peer_port)
+}
+#[cfg(not(windows))]
+fn token_user_matches(_local_port: u16, _peer_port: u16) -> bool {
+    false
+}
+
+/// This process's uid where the peer's owner can be read (macOS, Linux); `None` elsewhere.
 pub fn own_uid() -> Option<u32> {
     #[cfg(any(target_os = "macos", target_os = "linux"))]
     {
@@ -157,11 +199,147 @@ fn admits(uid: u32, found: Option<u32>) -> bool {
     found == Some(uid)
 }
 
+/// SB-274: the IPv4 TCP table of `GetExtendedTcpTable` (`MIB_TCPTABLE_OWNER_PID`): a row count,
+/// then rows of six `u32`s (state, local address, local port, remote address, remote port, owning
+/// pid), each port in network order in its low 16 bits. Answers the pid of the peer's socket, whose
+/// local port is the peer's and whose remote port is ours.
+#[cfg(any(windows, test))]
+fn pid_in(table: &[u8], local_port: u16, peer_port: u16) -> Option<u32> {
+    let u32_at = |at: usize| -> Option<u32> {
+        table
+            .get(at..at + 4)
+            .map(|b| u32::from_ne_bytes([b[0], b[1], b[2], b[3]]))
+    };
+    let port = |value: u32| u16::from_be(value as u16);
+    let rows = usize::try_from(u32_at(0)?).ok()?;
+    (0..rows.min(table.len().saturating_sub(4) / 24)).find_map(|row| {
+        let at = 4 + row * 24;
+        (port(u32_at(at + 8)?) == peer_port && port(u32_at(at + 16)?) == local_port)
+            .then(|| u32_at(at + 20))
+            .flatten()
+    })
+}
+
+#[cfg(windows)]
+mod windows {
+    use windows_sys::Win32::{
+        Foundation::{CloseHandle, ERROR_INSUFFICIENT_BUFFER, HANDLE, NO_ERROR},
+        NetworkManagement::IpHelper::{GetExtendedTcpTable, TCP_TABLE_OWNER_PID_CONNECTIONS},
+        Security::{EqualSid, GetTokenInformation, TokenUser, TOKEN_QUERY, TOKEN_USER},
+        System::Threading::{
+            GetCurrentProcess, OpenProcess, OpenProcessToken, PROCESS_QUERY_LIMITED_INFORMATION,
+        },
+    };
+    const AF_INET: u32 = 2;
+
+    /// The connected IPv4 TCP sockets with their owning pids, as `GetExtendedTcpTable` writes them.
+    fn table() -> Option<Vec<u8>> {
+        let mut size: u32 = 0;
+        for _ in 0..4 {
+            // u64 words keep the table aligned for the kernel's writes.
+            let mut words = vec![0u64; (size as usize).div_ceil(8).max(1)];
+            let mut len = u32::try_from(words.len() * 8).ok()?;
+            // SAFETY: `words` holds `len` writable bytes; the call writes at most `len` and, when
+            // that is too few, sets `len` to the size it needs.
+            let rc = unsafe {
+                GetExtendedTcpTable(
+                    words.as_mut_ptr().cast(),
+                    &mut len,
+                    0,
+                    AF_INET,
+                    TCP_TABLE_OWNER_PID_CONNECTIONS,
+                    0,
+                )
+            };
+            if rc == NO_ERROR {
+                let bytes: Vec<u8> = words.iter().flat_map(|w| w.to_ne_bytes()).collect();
+                return Some(bytes[..(len as usize).min(bytes.len())].to_vec());
+            }
+            if rc != ERROR_INSUFFICIENT_BUFFER {
+                return None;
+            }
+            // The table grows between calls; leave room.
+            size = len + len / 8 + 1024;
+        }
+        None
+    }
+
+    /// An open handle, closed when dropped.
+    struct Handle(HANDLE);
+    impl Drop for Handle {
+        fn drop(&mut self) {
+            if !self.0.is_null() {
+                // SAFETY: the handle was opened by this module and is closed once.
+                unsafe { CloseHandle(self.0) };
+            }
+        }
+    }
+
+    /// The `TOKEN_USER` of `process` (its SID points inside the returned buffer).
+    fn token_user(process: HANDLE) -> Option<Vec<u64>> {
+        let mut token: HANDLE = std::ptr::null_mut();
+        // SAFETY: `token` receives a handle this function owns from here on.
+        if unsafe { OpenProcessToken(process, TOKEN_QUERY, &mut token) } == 0 {
+            return None;
+        }
+        let token = Handle(token);
+        let mut len: u32 = 0;
+        // SAFETY: a size query: no buffer, `len` receives the size.
+        unsafe { GetTokenInformation(token.0, TokenUser, std::ptr::null_mut(), 0, &mut len) };
+        if len == 0 {
+            return None;
+        }
+        let mut words = vec![0u64; (len as usize).div_ceil(8)];
+        let capacity = u32::try_from(words.len() * 8).ok()?;
+        // SAFETY: `words` holds `capacity` writable bytes, aligned for `TOKEN_USER`.
+        let ok = unsafe {
+            GetTokenInformation(
+                token.0,
+                TokenUser,
+                words.as_mut_ptr().cast(),
+                capacity,
+                &mut len,
+            )
+        };
+        (ok != 0).then_some(words)
+    }
+
+    /// Whether the process that owns the peer's socket runs as this process's user.
+    pub(super) fn same_user(local_port: u16, peer_port: u16) -> bool {
+        let Some(pid) = table().and_then(|t| super::pid_in(&t, local_port, peer_port)) else {
+            return false;
+        };
+        if pid == std::process::id() {
+            return true;
+        }
+        // SAFETY: the pseudo-handle of this process needs no closing.
+        let Some(mine) = token_user(unsafe { GetCurrentProcess() }) else {
+            return false;
+        };
+        // SAFETY: a handle this function owns from here on; null when the process may not be
+        // opened, which counts as another user's.
+        let process = Handle(unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) });
+        if process.0.is_null() {
+            return false;
+        }
+        let Some(theirs) = token_user(process.0) else {
+            return false;
+        };
+        // SAFETY: both buffers start with a `TOKEN_USER` the kernel wrote, whose SID points inside
+        // the same buffer, alive for this call.
+        unsafe {
+            let a = &*(mine.as_ptr() as *const TOKEN_USER);
+            let b = &*(theirs.as_ptr() as *const TOKEN_USER);
+            EqualSid(a.User.Sid, b.User.Sid) != 0
+        }
+    }
+}
+
 /// A listener that hands axum only connections whose peer is this process's own account, counting
 /// the ones it closed (another account's, or one whose owner could not be read).
 pub struct OwnUser {
     pub inner: tokio::net::TcpListener,
-    pub uid: Option<u32>,
+    pub me: Me,
     pub refused: Arc<AtomicU64>,
 }
 
@@ -172,17 +350,17 @@ impl Listener for OwnUser {
     async fn accept(&mut self) -> (Self::Io, Self::Addr) {
         loop {
             let (io, peer) = Listener::accept(&mut self.inner).await;
-            let Some(uid) = self.uid else {
+            let me = self.me;
+            if me == Me::Unchecked {
                 return (io, peer);
-            };
+            }
             let Ok(local) = io.local_addr() else {
                 return (io, peer);
             };
-            let found = tokio::task::spawn_blocking(move || owner(local, peer))
+            let same = tokio::task::spawn_blocking(move || same_user(me, local, peer))
                 .await
-                .ok()
-                .flatten();
-            if admits(uid, found) {
+                .unwrap_or(false);
+            if same {
                 return (io, peer);
             }
             self.refused
@@ -248,12 +426,64 @@ mod tests {
     }
 
     #[test]
+    fn a_windows_tcp_row_names_the_peers_pid() {
+        let row = |lport: u16, rport: u16, pid: u32| {
+            let port = |p: u16| u32::from(p.to_be());
+            [5, 0x0100_007f, port(lport), 0x0100_007f, port(rport), pid]
+        };
+        let rows = [
+            row(4000, 5555, 1),
+            row(5555, 4000, 4242),
+            row(4001, 5555, 3),
+        ];
+        let mut table = (rows.len() as u32).to_ne_bytes().to_vec();
+        for r in rows {
+            for v in r {
+                table.extend_from_slice(&v.to_ne_bytes());
+            }
+        }
+        assert_eq!(pid_in(&table, 4000, 5555), Some(4242));
+        assert_eq!(pid_in(&table, 4000, 1), None);
+        // A count larger than the table never reads past it.
+        let mut short = table.clone();
+        short[0..4].copy_from_slice(&99u32.to_ne_bytes());
+        short.truncate(4 + 24);
+        assert_eq!(pid_in(&short, 4000, 5555), None);
+        assert_eq!(pid_in(&[], 4000, 5555), None);
+    }
+
+    #[test]
     fn a_proc_net_tcp_line_names_its_uid() {
         let table = "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode\n   0: 0100007F:0FA0 0100007F:15B3 01 00000000:00000000 00:00000000 00000000  1000        0 1 1\n   1: 0100007F:15B3 0100007F:0FA0 01 00000000:00000000 00:00000000 00000000  1001        0 2 1\n";
         assert_eq!(owner_in_proc(table, 4000, 5555), Some(1001));
         assert_eq!(owner_in_proc(table, 5555, 4000), Some(1000));
         assert_eq!(owner_in_proc(table, 4000, 1), None);
         assert_eq!(owner_in_proc("header only\n", 4000, 5555), None);
+    }
+
+    /// On every system the listener checks, a connection this process opens is its own user's.
+    #[cfg(any(target_os = "macos", target_os = "linux", windows))]
+    #[tokio::test]
+    async fn a_connection_from_this_user_is_this_users() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let _client = tokio::net::TcpStream::connect(address).await.unwrap();
+        let (server, peer) = listener.accept().await.unwrap();
+        let local = server.local_addr().unwrap();
+        assert_ne!(me(), Me::Unchecked);
+        let same = tokio::task::spawn_blocking(move || {
+            (
+                same_user(me(), local, peer),
+                same_user(me(), local, SocketAddr::from(([127, 0, 0, 1], 1))),
+            )
+        })
+        .await
+        .unwrap();
+        assert_eq!(
+            same,
+            (true, false),
+            "a socket that is not there is nobody's"
+        );
     }
 
     /// The live check of the layout: a connection this process opens is owned by its own uid.
@@ -281,7 +511,7 @@ mod tests {
         // Pretending this process is another account makes its own connection a foreign one.
         let mut other = OwnUser {
             inner,
-            uid: own_uid().map(|u| u.wrapping_add(1)),
+            me: Me::Uid(own_uid().unwrap().wrapping_add(1)),
             refused: refused.clone(),
         };
         let _first = tokio::net::TcpStream::connect(address).await.unwrap();
@@ -297,7 +527,7 @@ mod tests {
         let address = inner.local_addr().unwrap();
         let mut own = OwnUser {
             inner,
-            uid: own_uid(),
+            me: me(),
             refused: refused.clone(),
         };
         let client = tokio::net::TcpStream::connect(address).await.unwrap();

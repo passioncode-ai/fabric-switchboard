@@ -284,7 +284,7 @@ impl ProxyHandle {
         let foreign_refused = Arc::new(std::sync::atomic::AtomicU64::new(0));
         let listener = peer::OwnUser {
             inner: listener,
-            uid: peer::own_uid(),
+            me: peer::me(),
             refused: foreign_refused.clone(),
         };
         let task = tokio::spawn(async move {
