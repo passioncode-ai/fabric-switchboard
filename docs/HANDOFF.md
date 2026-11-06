@@ -2,6 +2,23 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-11-06 (early morning): release 0.7.18; SB-272, SB-276, SB-277, SB-279 merged for 0.7.19
+
+- **Released.** v0.7.18 published 2026-11-06 02:41:22Z (25 assets, `latest.json` 0.7.18 for seven
+  platforms; release PR #439 `6cc5c3f`, nightly on the tag green 01:22Z): SB-267, SB-268, SB-269,
+  SB-270, SB-271, SB-273, SB-274, SB-275. The proxy now refuses loopback connections from another
+  user on macOS, Linux and Windows (DEC-0154 HA-2 server side).
+- **Merged, not released (0.7.19).** SB-272 (PR #441 `983b821`: `settings export --sign`,
+  `settings signer`, `settings import --signer`), SB-276 (PR #440 `d6c0fa4`: the contract's
+  DEC-0153 digest vectors; `fold_day` with a day out of range answers none), SB-277 (PR #442,
+  docs: a `~/Applications` copy matches the Keychain access list by designated requirement),
+  SB-279 (PR #444, docs: link the CLI of your own copy of the app).
+- **Waiting.** SB-278 (the proxy's port claim) waits for DEC-0154's acceptance and tag (contract
+  thread `1fe66e6e`; service-id `ai.passioncode.fabric-switchboard` confirmed there). SB-251
+  acceptance and the three Claude accounts failing their quota checks are the operator's.
+- **Exact next task.** When DEC-0154 is tagged: SB-278. Otherwise release 0.7.19 (SB-272, SB-276),
+  then the oldest P1 rows of the backlog that need no person (SB-71, SB-73, SB-96 chains).
+
 ## 2026-11-06 (night): releases 0.7.15 to 0.7.17; studio-spaces wave merged for 0.7.18
 
 - **Released.** v0.7.15 (2026-11-05 22:16:26Z: SB-260, SB-261), v0.7.16 (23:12:30Z: `switchboard
