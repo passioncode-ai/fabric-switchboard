@@ -8,11 +8,14 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+## 0.7.18
+
 - When Switchboard finds that another program took the port its proxy used, it now starts with a new key for its sessions, so nothing the other program may have received still works. Sessions started before have to be started again (SB-269).
 - Switchboard now refuses connections to its local proxy that come from another user account on the same computer, even when they carry a valid key, on macOS, Linux and Windows (SB-273, SB-274).
 - `switchboard settings import` now keeps each group's GitHub sources, so new repositories keep joining the group on the new computer, and moves rotation policies along with their group (SB-267).
 - `switchboard settings import --apply --clone` also clones the group's repositories that are on GitHub but not yet on this computer, using your GitHub CLI, so a new teammate's computer gets the organization's groups in one step (SB-268).
 - The settings file now also carries your Fabric Inbox key's address and Client Id (never its secret), the Claude and ChatGPT teams your organizations follow, the terminal hook's on or off, and the spending ceilings of the computer and its groups. Importing it never raises a ceiling, and sets the terminal hook only where you have not chosen yet (SB-270).
+- New guide for moving to another Mac or adding another macOS user on this one: what the settings file carries, what you enter again, and how to stop the old computer renewing accounts you moved (docs/MOVING.md, also in Russian; SB-271).
 
 ## 0.7.17
 
