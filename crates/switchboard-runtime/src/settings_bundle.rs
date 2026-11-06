@@ -2,12 +2,14 @@
 //! by their repositories' identities (DEC-0089 item 2), so the other machine finds its own
 //! checkouts of them; organizations by name and domains; the agents' settings; rotation policies.
 //! Accounts, rules and fallback chains name account ids and stay behind: the other machine signs
-//! in to its own seats (SB-168 D-1). Import is a preview until it is applied.
+//! in to its own seats (SB-168 D-1). SB-270 adds the Fabric Inbox key's server and Client Id (its
+//! secret stays behind), the organizations' provider teams, the terminal hook's choice and the
+//! spending ceilings of the computer and its groups. Import is a preview until it is applied.
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
-use switchboard_core::{RotationPolicy, Snapshot, Store};
+use switchboard_core::{ChainScope, RotationPolicy, Snapshot, Store};
 
 pub const FORMAT: &str = "switchboard-settings/1";
 /// A bundle is a small JSON document; anything larger is not one.
@@ -26,6 +28,29 @@ pub struct Bundle {
     pub agents: Option<Agents>,
     #[serde(default)]
     pub policies: Vec<RotationPolicy>,
+    /// SB-270: the Fabric Inbox key's server and Client Id; its secret is never in the file.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inbox: Option<Inbox>,
+    /// SB-270: the terminal hook's choice, `on` or `off`, when the person made one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shell_hook: Option<String>,
+    /// SB-270: spending ceilings of the computer and of its groups.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ceilings: Vec<Ceiling>,
+}
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct Inbox {
+    pub origin: String,
+    pub client_id: String,
+}
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct Ceiling {
+    /// The group's pool in the file; none for the computer's own ceiling.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group: Option<String>,
+    pub cents: u32,
 }
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -50,6 +75,10 @@ pub struct Organization {
     pub name: String,
     #[serde(default)]
     pub domains: Vec<String>,
+    /// SB-270: its provider teams (`claude:<uuid>`, `codex:<workspace>`), so the team's seats
+    /// signed in on the other computer follow it there too.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub provider_organizations: Vec<String>,
 }
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -100,6 +129,7 @@ pub fn export(root: &Path, snapshot: &Snapshot, now: i64) -> Bundle {
             .map(|o| Organization {
                 name: o.name.clone(),
                 domains: o.domains.clone(),
+                provider_organizations: o.provider_organizations.clone(),
             })
             .collect(),
         agents,
@@ -111,6 +141,30 @@ pub fn export(root: &Path, snapshot: &Snapshot, now: i64) -> Bundle {
                 ..p.clone()
             })
             .collect(),
+        inbox: crate::inbox::carried(root).map(|(origin, client_id)| Inbox { origin, client_id }),
+        shell_hook: match crate::shell::map::choice(root) {
+            crate::shell::map::Choice::On => Some("on".into()),
+            crate::shell::map::Choice::Off => Some("off".into()),
+            crate::shell::map::Choice::Default => None,
+        },
+        ceilings: crate::spend::read(root)
+            .map(|file| {
+                file.ceilings
+                    .iter()
+                    .filter_map(|c| match &c.scope {
+                        ChainScope::Machine => Some(Ceiling {
+                            group: None,
+                            cents: c.cents,
+                        }),
+                        ChainScope::Project { pool } => Some(Ceiling {
+                            group: Some(pool.clone()),
+                            cents: c.cents,
+                        }),
+                        ChainScope::Workflow { .. } => None,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default(),
     }
 }
 
@@ -154,11 +208,42 @@ pub struct Plan {
     pub organizations: Vec<String>,
     pub agents: bool,
     pub policies: usize,
+    /// SB-270: provider teams the file gives its organizations, not yet held here.
+    pub provider_organizations: usize,
+    /// SB-270: the Fabric Inbox key's server, and whether a key for it is saved here.
+    pub inbox: Option<PlannedInbox>,
+    /// SB-270: the terminal hook's choice, set only where this computer has none.
+    pub shell_hook: Option<PlannedChoice>,
+    /// SB-270: each spending ceiling and what import does with it.
+    pub ceilings: Vec<PlannedCeiling>,
+}
+#[derive(Serialize, Debug, PartialEq)]
+pub struct PlannedInbox {
+    pub origin: String,
+    /// `saved` (a key for this server is saved here), `other` (one for another server is), `none`.
+    pub here: &'static str,
+    /// What the person runs to save the key here; the secret is typed, never carried.
+    pub command: Option<String>,
+}
+#[derive(Serialize, Debug, PartialEq)]
+pub struct PlannedChoice {
+    pub choice: String,
+    /// `set` when this computer has no choice yet, else `kept` (its own choice stays).
+    pub action: &'static str,
+}
+#[derive(Serialize, Debug, PartialEq)]
+pub struct PlannedCeiling {
+    /// The group's name, or none for the computer's own ceiling.
+    pub group: Option<String>,
+    pub cents: u32,
+    /// `set` (none here), `lower` (here it is higher), `kept` (here it is lower or equal: import
+    /// never raises one) or `needs_key` (the group has no key of its own here yet).
+    pub action: &'static str,
 }
 
 /// What importing `bundle` would do here, finding checkouts under `under`. Reads Git files, writes
 /// nothing.
-pub fn plan(snapshot: &Snapshot, bundle: &Bundle, under: &[PathBuf]) -> Plan {
+pub fn plan(root: &Path, snapshot: &Snapshot, bundle: &Bundle, under: &[PathBuf]) -> Plan {
     let map = crate::roots::disk_map(under, snapshot);
     let groups = bundle
         .groups
@@ -224,11 +309,98 @@ pub fn plan(snapshot: &Snapshot, bundle: &Bundle, under: &[PathBuf]) -> Plan {
         })
         .map(|o| o.name.clone())
         .collect();
+    let held: Vec<&String> = snapshot
+        .organizations
+        .iter()
+        .flat_map(|o| &o.provider_organizations)
+        .collect();
+    let provider_organizations = bundle
+        .organizations
+        .iter()
+        .flat_map(|o| &o.provider_organizations)
+        .filter(|k| !held.contains(k))
+        .count();
+    let inbox = bundle.inbox.as_ref().and_then(|i| {
+        let origin = crate::inbox::origin(&i.origin)?;
+        if !crate::inbox::client_id_valid(&i.client_id) {
+            return None;
+        }
+        let here = match crate::inbox::carried(root) {
+            Some((saved, _)) if saved == origin => "saved",
+            Some(_) => "other",
+            None => "none",
+        };
+        let command = (here != "saved").then(|| {
+            format!(
+                "switchboard inbox set --origin {origin} --client-id {}",
+                i.client_id
+            )
+        });
+        Some(PlannedInbox {
+            origin,
+            here,
+            command,
+        })
+    });
+    let shell_hook = bundle
+        .shell_hook
+        .as_deref()
+        .filter(|c| matches!(*c, "on" | "off"))
+        .map(|choice| PlannedChoice {
+            choice: choice.to_owned(),
+            action: match crate::shell::map::choice(root) {
+                crate::shell::map::Choice::Default => "set",
+                _ => "kept",
+            },
+        });
+    let file = crate::spend::read(root).unwrap_or_default();
+    let ceilings = bundle
+        .ceilings
+        .iter()
+        .filter(|c| (crate::spend::MIN_CENTS..=crate::spend::MAX_CENTS).contains(&c.cents))
+        .filter_map(|c| {
+            let (name, scope) = match &c.group {
+                None => (None, Some(ChainScope::Machine)),
+                Some(pool) => {
+                    let name = bundle.groups.iter().find(|g| &g.pool == pool)?.name.clone();
+                    let here = snapshot.projects.iter().find(|p| &p.pool == pool);
+                    (
+                        Some(name),
+                        here.map(|p| ChainScope::Project {
+                            pool: p.pool.clone(),
+                        }),
+                    )
+                }
+            };
+            let action = match &scope {
+                Some(ChainScope::Project { pool })
+                    if !crate::spend::group_has_own_key(snapshot, pool) =>
+                {
+                    "needs_key"
+                }
+                None => "needs_key",
+                Some(scope) => match file.ceilings.iter().find(|h| &h.scope == scope) {
+                    None => "set",
+                    Some(h) if h.cents > c.cents => "lower",
+                    Some(_) => "kept",
+                },
+            };
+            Some(PlannedCeiling {
+                group: name,
+                cents: c.cents,
+                action,
+            })
+        })
+        .collect();
     Plan {
         groups,
         organizations,
         agents: bundle.agents.is_some(),
         policies: bundle.policies.len(),
+        provider_organizations,
+        inbox,
+        shell_hook,
+        ceilings,
     }
 }
 
@@ -378,7 +550,97 @@ pub fn apply_with(
             Err(_) => refused.push("a rotation policy".into()),
         }
     }
-    json!({"applied": true, "groups": groups, "cloned": cloned, "policies": policies, "refused": refused})
+    // SB-270: the organizations' provider teams, so their seats signed in here follow them.
+    let mut provider_organizations = 0;
+    if let Ok(current) = store.snapshot() {
+        for o in &bundle.organizations {
+            if o.provider_organizations.is_empty() {
+                continue;
+            }
+            let Some(id) = current
+                .organizations
+                .iter()
+                .find(|h| h.name.trim().eq_ignore_ascii_case(o.name.trim()))
+                .map(|h| h.id.clone())
+            else {
+                continue;
+            };
+            match store.learn_provider_organizations(&id, &o.provider_organizations) {
+                Ok(added) => provider_organizations += added,
+                Err(_) => refused.push(format!("provider teams of {}", o.name)),
+            }
+        }
+    }
+    // SB-270: the terminal hook's choice, only where this computer has none; the installed app
+    // brings the start files in line with it at its next start.
+    let mut shell_hook = None;
+    if let Some(planned) = plan.shell_hook.as_ref().filter(|p| p.action == "set") {
+        match crate::shell::install::set_choice(root, planned.choice == "on") {
+            Ok(()) => shell_hook = Some(planned.choice.clone()),
+            Err(_) => refused.push("terminal hook".into()),
+        }
+    }
+    // SB-270: spending ceilings, only ever set where there is none or lowered: import never
+    // raises one (the CLI's rule, C-Q1). A group's needs its own key here first.
+    let mut ceilings = 0;
+    if let Ok(current) = store.snapshot() {
+        let file = crate::spend::read(root).unwrap_or_default();
+        for c in &bundle.ceilings {
+            let (label, scope) = match &c.group {
+                None => ("this computer".to_owned(), ChainScope::Machine),
+                Some(pool) => {
+                    let Some(group) = bundle.groups.iter().find(|g| &g.pool == pool) else {
+                        continue;
+                    };
+                    let landed = pools.get(pool).cloned().or_else(|| {
+                        current
+                            .projects
+                            .iter()
+                            .any(|p| &p.pool == pool)
+                            .then(|| pool.clone())
+                    });
+                    let Some(landed) = landed else {
+                        refused.push(format!("ceiling of {}", group.name));
+                        continue;
+                    };
+                    (group.name.clone(), ChainScope::Project { pool: landed })
+                }
+            };
+            if file
+                .ceilings
+                .iter()
+                .any(|h| h.scope == scope && h.cents <= c.cents)
+            {
+                continue;
+            }
+            match crate::spend::set_ceiling(
+                root,
+                &current,
+                scope,
+                Some(f64::from(c.cents) / 100.0),
+                crate::spend::Surface::Cli,
+                crate::monitor::now(),
+            ) {
+                Ok(_) => ceilings += 1,
+                Err(e) if e == crate::spend::NO_OWN_KEY => {
+                    refused.push(format!("ceiling of {label} (it needs its own key here)"))
+                }
+                Err(_) => refused.push(format!("ceiling of {label}")),
+            }
+        }
+    }
+    let inbox = plan.inbox.as_ref().and_then(|i| i.command.clone());
+    json!({
+        "applied": true,
+        "groups": groups,
+        "cloned": cloned,
+        "policies": policies,
+        "provider_organizations": provider_organizations,
+        "shell_hook": shell_hook,
+        "ceilings": ceilings,
+        "inbox_command": inbox,
+        "refused": refused,
+    })
 }
 
 #[cfg(test)]
@@ -452,6 +714,7 @@ mod tests {
         .unwrap();
         let fresh = open_store(other.path());
         let preview = plan(
+            other.path(),
             &fresh.snapshot().unwrap(),
             &bundle,
             std::slice::from_ref(&there),
@@ -514,10 +777,14 @@ mod tests {
             organizations: vec![],
             agents: None,
             policies: vec![policy("acme-old"), policy("elsewhere")],
+            inbox: None,
+            shell_hook: None,
+            ceilings: vec![],
         };
         let root = tempfile::tempdir().unwrap();
         let store = open_store(root.path());
         let preview = plan(
+            root.path(),
             &store.snapshot().unwrap(),
             &bundle,
             std::slice::from_ref(&work),
@@ -564,15 +831,20 @@ mod tests {
             organizations: vec![Organization {
                 name: "Acme".into(),
                 domains: vec!["acme.example".into()],
+                provider_organizations: vec![],
             }],
             agents: None,
             policies: vec![],
+            inbox: None,
+            shell_hook: None,
+            ceilings: vec![],
         };
         let root = tempfile::tempdir().unwrap();
         let into = tempfile::tempdir().unwrap();
         let into = into.path().canonicalize().unwrap();
         let store = open_store(root.path());
         let preview = plan(
+            root.path(),
             &store.snapshot().unwrap(),
             &bundle,
             std::slice::from_ref(&into),
@@ -612,5 +884,214 @@ mod tests {
         );
         assert_eq!(made.sources, vec!["github.com/acme"]);
         assert!(made.organization.is_some());
+    }
+
+    #[test]
+    fn the_inbox_server_teams_hook_and_ceilings_travel_and_import_never_raises_a_ceiling() {
+        // SB-270: one computer carries what the person set up; the other gets it without the
+        // Inbox secret, keeps its own terminal choice and never ends up with a higher ceiling.
+        let work = tempfile::tempdir().unwrap();
+        let work = work.path().canonicalize().unwrap();
+        checkout(&work.join("app"), "https://github.com/acme/app");
+        let old_root = tempfile::tempdir().unwrap();
+        let old = open_store(old_root.path());
+        let acme = old.add_organization("Acme", &[]).unwrap();
+        assert_eq!(
+            old.learn_provider_organizations(&acme.id, &["claude:team-1".into(), "bad".into()])
+                .unwrap(),
+            1
+        );
+        let alpha = old
+            .save_project_in(
+                None,
+                "Alpha",
+                &[work.join("app")],
+                &[],
+                Some(Some(&acme.id)),
+            )
+            .unwrap();
+        old.set_agent_key_for(
+            "openrouter",
+            Some(&alpha.pool),
+            "sk-or-v1-synthetic-a",
+            None,
+        )
+        .unwrap();
+        crate::inbox::set(
+            old_root.path(),
+            &old,
+            "https://inbox.example.com",
+            "client-id-synthetic",
+            "secret-synthetic-never-carried",
+        )
+        .unwrap();
+        crate::shell::install::set_choice(old_root.path(), false).unwrap();
+        let snap = old.snapshot().unwrap();
+        for (scope, usd) in [
+            (ChainScope::Machine, 5.0),
+            (
+                ChainScope::Project {
+                    pool: alpha.pool.clone(),
+                },
+                3.0,
+            ),
+        ] {
+            crate::spend::set_ceiling(
+                old_root.path(),
+                &snap,
+                scope,
+                Some(usd),
+                crate::spend::Surface::Window,
+                1,
+            )
+            .unwrap();
+        }
+        let bundle = export(old_root.path(), &old.snapshot().unwrap(), 2);
+        let text = String::from_utf8(serde_json::to_vec(&bundle).unwrap()).unwrap();
+        assert!(!text.contains("secret-synthetic"), "{text}");
+        assert!(!text.contains("sk-or-v1"), "{text}");
+        let bundle = parse(text.as_bytes()).unwrap();
+        assert_eq!(
+            bundle.inbox,
+            Some(Inbox {
+                origin: "https://inbox.example.com".into(),
+                client_id: "client-id-synthetic".into(),
+            })
+        );
+        assert_eq!(
+            bundle.organizations[0].provider_organizations,
+            vec!["claude:team-1"]
+        );
+        assert_eq!(bundle.shell_hook.as_deref(), Some("off"));
+        assert_eq!(
+            bundle.ceilings,
+            vec![
+                Ceiling {
+                    group: None,
+                    cents: 500
+                },
+                Ceiling {
+                    group: Some(alpha.pool.clone()),
+                    cents: 300
+                },
+            ]
+        );
+
+        // The other computer: a lower ceiling of its own, its own terminal choice, no key yet.
+        let new_root = tempfile::tempdir().unwrap();
+        let new = open_store(new_root.path());
+        crate::spend::set_ceiling(
+            new_root.path(),
+            &new.snapshot().unwrap(),
+            ChainScope::Machine,
+            Some(2.0),
+            crate::spend::Surface::Window,
+            1,
+        )
+        .unwrap();
+        crate::shell::install::set_choice(new_root.path(), true).unwrap();
+        let preview = plan(
+            new_root.path(),
+            &new.snapshot().unwrap(),
+            &bundle,
+            std::slice::from_ref(&work),
+        );
+        assert_eq!(preview.provider_organizations, 1);
+        let inbox = preview.inbox.as_ref().unwrap();
+        assert_eq!(
+            (inbox.origin.as_str(), inbox.here),
+            ("https://inbox.example.com", "none")
+        );
+        assert_eq!(
+            inbox.command.as_deref(),
+            Some("switchboard inbox set --origin https://inbox.example.com --client-id client-id-synthetic")
+        );
+        assert_eq!(
+            preview.shell_hook,
+            Some(PlannedChoice {
+                choice: "off".into(),
+                action: "kept"
+            })
+        );
+        assert_eq!(
+            preview.ceilings,
+            vec![
+                PlannedCeiling {
+                    group: None,
+                    cents: 500,
+                    action: "kept"
+                },
+                PlannedCeiling {
+                    group: Some("Alpha".into()),
+                    cents: 300,
+                    action: "needs_key"
+                },
+            ]
+        );
+        let done = apply(&new, new_root.path(), &bundle, &preview);
+        assert_eq!(done["provider_organizations"], 1, "{done}");
+        assert_eq!(done["shell_hook"], Value::Null, "{done}");
+        assert_eq!(done["ceilings"], 0, "{done}");
+        assert_eq!(done["inbox_command"], json!(inbox.command), "{done}");
+        assert_eq!(
+            done["refused"],
+            json!(["ceiling of Alpha (it needs its own key here)"]),
+        );
+        // Nothing of the Inbox key is saved without its secret; the hook and ceiling stay.
+        assert_eq!(crate::inbox::carried(new_root.path()), None);
+        assert_eq!(
+            crate::shell::map::choice(new_root.path()),
+            crate::shell::map::Choice::On
+        );
+        let file = crate::spend::read(new_root.path()).unwrap();
+        assert_eq!(file.ceilings.len(), 1);
+        assert_eq!(file.ceilings[0].cents, 200);
+        let snap = new.snapshot().unwrap();
+        assert_eq!(
+            snap.organizations[0].provider_organizations,
+            vec!["claude:team-1"]
+        );
+
+        // Once the group has its key, a second import sets its ceiling; a choice-less computer
+        // takes the hook's choice; a lower file ceiling lowers this one.
+        let pool = snap.projects[0].pool.clone();
+        new.set_agent_key_for("openrouter", Some(&pool), "sk-or-v1-synthetic-b", None)
+            .unwrap();
+        std::fs::remove_file(new_root.path().join(crate::shell::map::CHOICE)).unwrap();
+        let mut lower = bundle.clone();
+        lower.ceilings[0].cents = 100;
+        let preview = plan(
+            new_root.path(),
+            &new.snapshot().unwrap(),
+            &lower,
+            std::slice::from_ref(&work),
+        );
+        assert_eq!(
+            preview
+                .ceilings
+                .iter()
+                .map(|c| c.action)
+                .collect::<Vec<_>>(),
+            vec!["lower", "set"]
+        );
+        let done = apply(&new, new_root.path(), &lower, &preview);
+        assert_eq!(
+            (&done["ceilings"], &done["shell_hook"]),
+            (&json!(2), &json!("off")),
+            "{done}"
+        );
+        let file = crate::spend::read(new_root.path()).unwrap();
+        let cents = |scope: &ChainScope| {
+            file.ceilings
+                .iter()
+                .find(|c| &c.scope == scope)
+                .map(|c| c.cents)
+        };
+        assert_eq!(cents(&ChainScope::Machine), Some(100));
+        assert_eq!(cents(&ChainScope::Project { pool }), Some(300));
+        assert_eq!(
+            crate::shell::map::choice(new_root.path()),
+            crate::shell::map::Choice::Off
+        );
     }
 }

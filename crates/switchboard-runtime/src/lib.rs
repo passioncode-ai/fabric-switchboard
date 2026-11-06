@@ -5525,7 +5525,7 @@ async fn execute(
                 under
             };
             let snapshot = store.snapshot()?;
-            let plan = blocking::run(|| settings_bundle::plan(&snapshot, &bundle, &under));
+            let plan = blocking::run(|| settings_bundle::plan(root, &snapshot, &bundle, &under));
             if !apply {
                 return Ok(json!({"preview": plan, "applied": false}));
             }

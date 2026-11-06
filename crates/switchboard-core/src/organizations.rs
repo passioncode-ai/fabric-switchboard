@@ -607,6 +607,45 @@ impl Store {
         self.changed();
         Ok(())
     }
+    /// SB-270: provider organizations (`claude:<uuid>`, `codex:<workspace>`) a settings file
+    /// carried for this organization, so the team's seats signed in here follow it. One another
+    /// organization already holds stays with that one; the rest are added up to the limit.
+    /// Answers how many were added.
+    pub fn learn_provider_organizations(&self, id: &str, keys: &[String]) -> Result<usize, String> {
+        let mut state = self.lock()?;
+        let mut candidate = state.clone();
+        if candidate.organization(id).is_none() {
+            return Err(ORGANIZATION_NOT_FOUND.into());
+        }
+        let held: Vec<String> = candidate
+            .organizations
+            .iter()
+            .flat_map(|o| o.provider_organizations.clone())
+            .collect();
+        let mut added = 0;
+        if let Some(o) = candidate.organizations.iter_mut().find(|o| o.id == id) {
+            for key in keys {
+                let valid = key.len() <= 300
+                    && (key.starts_with("claude:") || key.starts_with("codex:"))
+                    && !key.chars().any(char::is_control);
+                if valid
+                    && !held.contains(key)
+                    && !o.provider_organizations.contains(key)
+                    && o.provider_organizations.len() < MAX_PROVIDER_ORGANIZATIONS
+                {
+                    o.provider_organizations.push(key.clone());
+                    added += 1;
+                }
+            }
+        }
+        if added == 0 {
+            return Ok(0);
+        }
+        append_event(&mut candidate, "organization", None, "updated");
+        self.publish(&mut state, candidate)?;
+        self.changed();
+        Ok(added)
+    }
     /// The person's word on one account: an organization's id, [`PERSONAL`], or none to let the
     /// rules decide again. Assigning to an organization also records the account's provider
     /// organization there (and nowhere else), so the team's other seats follow; keeping it

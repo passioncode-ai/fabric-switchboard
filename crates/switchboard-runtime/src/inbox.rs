@@ -504,6 +504,18 @@ fn now() -> i64 {
         .map_or(0, |d| d.as_secs() as i64)
 }
 
+/// SB-270: the saved key's server and Client Id, which a settings file carries to another
+/// computer (never the secret, which stays in this computer's vault).
+pub(crate) fn carried(root: &std::path::Path) -> Option<(String, String)> {
+    read_link(root)
+        .ok()
+        .flatten()
+        .map(|link| (link.origin, link.client_id))
+}
+/// SB-270: whether `token` is a Client Id the key can be saved with.
+pub(crate) fn client_id_valid(client_id: &str) -> bool {
+    token(client_id)
+}
 /// Whether a key is saved, for which server and since when; never the Client Id or the secret.
 pub fn status(root: &std::path::Path) -> Result<Value, String> {
     Ok(match read_link(root)? {
