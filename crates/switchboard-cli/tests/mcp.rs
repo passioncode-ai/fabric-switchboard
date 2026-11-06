@@ -1151,6 +1151,8 @@ async fn accounts_rotation_activity_and_queues_are_reachable_over_mcp() {
         json!({"account_id": ids[2], "label": "Personal 2", "enabled": false}),
     );
     assert!(!error, "{renamed}");
+    // SB-286: an operation that answers nothing still gives structured content an object.
+    assert_eq!(renamed, json!({"ok": true}));
     let (_, accounts) = agent.tool("switchboard_accounts", json!({}));
     let personal = accounts["accounts"]
         .as_array()

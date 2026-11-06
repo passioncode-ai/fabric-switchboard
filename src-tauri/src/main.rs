@@ -430,6 +430,7 @@ async fn remove_project_rule(
 }
 /// A project: its folders and the accounts reserved for them (0.6). `pool` updates one.
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 async fn save_project(
     pool: Option<String>,
     name: String,

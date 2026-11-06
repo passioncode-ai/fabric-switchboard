@@ -1114,6 +1114,13 @@ impl Server {
                             let client = self.client.lock().ok().and_then(|c| c.clone());
                             onboarding::record_proof(&self.root, client.as_deref(), now());
                         }
+                        // SB-286: structured content is an object; an operation that answers
+                        // nothing (an update, a selection) says so as `{"ok": true}`.
+                        let value = match value {
+                            Value::Object(_) => value,
+                            Value::Null => json!({"ok": true}),
+                            other => json!({"result": other}),
+                        };
                         ok(
                             id,
                             json!({"content": [{"type": "text", "text": value.to_string()}], "structuredContent": value, "isError": false}),

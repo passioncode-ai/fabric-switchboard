@@ -1558,7 +1558,7 @@ fn a_group_of_two_organizations_takes_seats_of_both_and_no_others() {
             Some(&shared.pool),
             "Shared",
             std::slice::from_ref(&dir),
-            &[acme_seat.id.clone()],
+            std::slice::from_ref(&acme_seat.id),
         )
         .unwrap();
     assert_eq!(kept.organizations.len(), 2);
