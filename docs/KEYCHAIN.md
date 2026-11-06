@@ -44,7 +44,10 @@ installed 0.4.0-beta.1 is in none of them.
    compiled without it trusts no team, so it is a development build (decision 2) whatever signs it
    (`keychain_macos.rs`, tests `a_build_without_the_team_variable_trusts_no_team` and
    `only_a_well_formed_team_id_becomes_a_requirement`). Keychain stores each as a designated requirement, so a later update signed by the same
-   team with the same identifier matches without a prompt, wherever it is installed.
+   team with the same identifier matches without a prompt, wherever it is installed: a copy the
+   PassionCode launcher puts in a user's `~/Applications` (its PC-145) opens the items a copy in
+   `/Applications` made, with no path of its own in the list (SB-277; the measurement on two real
+   users is part of SB-251's acceptance).
 2. **Namespaces by build.** A team-signed build uses `ai.passioncode.fabric-switchboard.shared`. Any
    other build (ad hoc, unsigned, another team, or compiled without a team) uses `ai.passioncode.fabric-switchboard.development`
    and never reads, moves or deletes the user's items.
