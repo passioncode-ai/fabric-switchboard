@@ -285,6 +285,10 @@ pub struct Snapshot {
     /// The person's word per account: an organization's id or `personal` (SB-158).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub memberships: BTreeMap<String, String>,
+    /// SB-282: the person's word that an account also works for these organizations, beyond
+    /// the one `memberships` or the rules give it.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub also_organizations: BTreeMap<String, Vec<String>>,
     /// SB-175 (SB-168 D-2): accounts the person marked as used on another machine, with when.
     /// Such an account is disabled here: never renewed, rotated to or switched to.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
@@ -535,7 +539,11 @@ pub(crate) fn validate_snapshot(s: &Snapshot) -> Result<(), String> {
     kimi_accounts::validate_kimi_accounts(s)?;
     for (key, id) in &s.routes {
         if !s.accounts.iter().any(|a| {
-            a.id == *id && a.enabled && *key == format!("{}:{}", a.provider.as_str(), a.pool)
+            a.id == *id
+                && a.enabled
+                && s.pools_of(a)
+                    .iter()
+                    .any(|p| *key == format!("{}:{}", a.provider.as_str(), p))
         }) {
             return Err("Invalid route metadata".into());
         }
@@ -1889,6 +1897,10 @@ impl Store {
         candidate.accounts.retain(|a| a.id != id);
         candidate.rules.retain(|r| r.account_id != id);
         candidate.memberships.remove(id);
+        candidate.also_organizations.remove(id);
+        for p in &mut candidate.projects {
+            p.shared_accounts.retain(|s| s != id);
+        }
         candidate.elsewhere.remove(id);
         chains::prune(&mut candidate);
         append_event(&mut candidate, "account_removed", Some(id), "success");
@@ -1940,7 +1952,7 @@ impl Store {
         let a = state
             .accounts
             .iter()
-            .find(|a| a.id == id && a.provider == provider && a.pool == pool && a.enabled)
+            .find(|a| a.id == id && a.provider == provider && state.serves(a, pool) && a.enabled)
             .ok_or("Account is unavailable in this provider and pool")?;
         if !state.context_admits(pool, a) {
             return Err(organizations::SEAT_OUTSIDE.into());
@@ -1990,7 +2002,7 @@ impl Store {
         state
             .accounts
             .iter()
-            .find(|a| &a.id == id && a.provider == provider && a.pool == pool)
+            .find(|a| &a.id == id && a.provider == provider && state.serves(a, pool))
             .cloned()
     }
     pub fn route(&self, provider: Provider, pool: &str) -> Result<(Account, Credential), String> {
@@ -2002,7 +2014,7 @@ impl Store {
         let a = state
             .accounts
             .iter()
-            .find(|a| a.id == *id && a.provider == provider && a.pool == pool)
+            .find(|a| a.id == *id && a.provider == provider && state.serves(a, pool))
             .ok_or("Selected account unavailable")?;
         if !state.context_admits(pool, a) {
             return Err(organizations::SEAT_OUTSIDE.into());

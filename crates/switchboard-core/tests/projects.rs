@@ -220,15 +220,90 @@ fn schema_six_is_written_only_while_a_group_has_an_organization() {
     drop(store);
     let reopened = Store::open(root.path().into(), Arc::new(MemoryVault::default())).unwrap();
     assert_eq!(
-        reopened.snapshot().unwrap().projects[0]
-            .organization
-            .as_deref(),
+        reopened.snapshot().unwrap().projects[0].primary_organization(),
         Some(acme.id.as_str())
     );
     reopened
         .set_project_organization(&group.pool, None)
         .unwrap();
     assert_eq!(schema(root.path()), 4);
+}
+
+#[test]
+fn a_group_of_several_organizations_is_schema_nine_and_keeps_their_order() {
+    // SB-282: one organization is still `organization` (schema 6, any 0.6.65+ reader), several
+    // are `organizations` (schema 9, which a 0.7.20 reader refuses by name).
+    let (root, store) = setup();
+    let alpha = project(&root, "alpha");
+    let group = store
+        .save_project(None, "Alpha", std::slice::from_ref(&alpha), &[])
+        .unwrap();
+    let acme = store.add_organization("Acme", &[]).unwrap();
+    let beta = store.add_organization("Beta", &[]).unwrap();
+    let saved = store
+        .set_project_organizations(
+            &group.pool,
+            vec![
+                beta.id.clone(),
+                "personal".into(),
+                acme.id.clone(),
+                beta.id.clone(),
+            ],
+        )
+        .unwrap();
+    assert_eq!(saved.organizations, vec![beta.id.clone(), acme.id.clone()]);
+    assert_eq!(schema(root.path()), 9);
+    let disk: serde_json::Value =
+        serde_json::from_slice(&fs::read(root.path().join("accounts.json")).unwrap()).unwrap();
+    let written = &disk["snapshot"]["projects"][0];
+    assert!(written.get("organization").is_none(), "{written}");
+    assert_eq!(
+        written["organizations"],
+        serde_json::json!([beta.id, acme.id])
+    );
+    drop(store);
+    let reopened = Store::open(root.path().into(), Arc::new(MemoryVault::default())).unwrap();
+    assert_eq!(
+        reopened.snapshot().unwrap().projects[0].organizations,
+        vec![beta.id.clone(), acme.id.clone()]
+    );
+    // An unknown organization is refused and changes nothing.
+    assert!(reopened
+        .set_project_organizations(&group.pool, vec!["no-such".into()])
+        .is_err());
+    // Removing one organization leaves the group in the other: one again, schema 6.
+    reopened.remove_organization(&beta.id).unwrap();
+    assert_eq!(
+        reopened.snapshot().unwrap().projects[0].organizations,
+        vec![acme.id.clone()]
+    );
+    assert_eq!(schema(root.path()), 6);
+    let disk: serde_json::Value =
+        serde_json::from_slice(&fs::read(root.path().join("accounts.json")).unwrap()).unwrap();
+    assert_eq!(
+        disk["snapshot"]["projects"][0]["organization"],
+        acme.id.as_str()
+    );
+}
+
+#[test]
+fn two_groups_of_one_organization_both_belong_to_it() {
+    // SB-282: an organization may have several groups.
+    let (root, store) = setup();
+    let alpha = project(&root, "alpha");
+    let beta = project(&root, "beta");
+    let acme = store.add_organization("Acme", &[]).unwrap();
+    for (name, folder) in [("Alpha", &alpha), ("Beta", &beta)] {
+        let group = store
+            .save_project(None, name, std::slice::from_ref(folder), &[])
+            .unwrap();
+        store
+            .set_project_organization(&group.pool, Some(&acme.id))
+            .unwrap();
+    }
+    let snapshot = store.snapshot().unwrap();
+    assert_eq!(snapshot.organization_groups(&acme.id).len(), 2);
+    assert_eq!(schema(root.path()), 6);
 }
 
 #[test]
