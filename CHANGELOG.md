@@ -8,6 +8,8 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+## 0.7.19
+
 - An administrator can now sign the settings file with `switchboard settings export --sign` and publish the key `switchboard settings signer` prints. Members import with `--signer` and the key: a file that key did not sign, or one changed after signing, is refused (SB-272).
 
 ## 0.7.18
