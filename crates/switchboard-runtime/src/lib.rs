@@ -39,6 +39,7 @@ pub mod recovery;
 mod refresh;
 pub mod roots;
 pub mod settings_bundle;
+pub mod settings_signing;
 pub mod shell;
 pub mod spend;
 mod statistics;
@@ -412,8 +413,14 @@ pub enum Operation {
     RepositoryMap {
         under: Vec<PathBuf>,
     },
-    /// SB-176: this machine's settings as a `switchboard-settings/1` bundle (no credential).
-    SettingsExport,
+    /// SB-176: this machine's settings as a `switchboard-settings/1` bundle (no credential);
+    /// SB-272: with `sign`, signed with this computer's settings signing key.
+    SettingsExport {
+        #[serde(default)]
+        sign: bool,
+    },
+    /// SB-272: the public key this computer signs settings files with, made on first use.
+    SettingsSigner,
     /// SB-176: what importing `bundle` would do here, finding checkouts under `under` (`~/DATA`
     /// by default); with `apply`, does it.
     SettingsImport {
@@ -426,6 +433,9 @@ pub enum Operation {
         /// `under` folder with the person's `gh` first.
         #[serde(default)]
         clone: bool,
+        /// SB-272: the organization's published key; the file must be signed by it.
+        #[serde(default)]
+        signer: Option<String>,
     },
     /// SB-145: what the proxy relayed in the last `days` days (1 to 90, default 30), by project,
     /// account, coding agent and day: requests, outcomes and the provider's token counts. Reads
@@ -1066,7 +1076,7 @@ impl Runtime {
                 | Operation::ProjectSuggestions
                 | Operation::ProjectBindings
                 | Operation::RepositoryMap { .. }
-                | Operation::SettingsExport
+                | Operation::SettingsExport { .. }
                 | Operation::Statistics { .. }
                 | Operation::Organizations
                 // SB-159: each takes the store's lock only to write what it read; a connection
@@ -1082,6 +1092,8 @@ impl Runtime {
                 | Operation::GithubClone { .. }
                 // SB-256: the vault and `inbox.json` only; a check waits on Fabric Inbox.
                 | Operation::InboxSet { .. }
+                // SB-272: the vault and `settings-signing.json` only.
+                | Operation::SettingsSigner
                 | Operation::InboxStatus { .. }
                 | Operation::InboxRemove
                 | Operation::AgentsOverview
@@ -5506,19 +5518,36 @@ async fn execute(
                 blocking::run(|| statistics::ProjectIndex::build(&snapshot).with_strays(&folders));
             Ok(stats.report(&snapshot, &index, days, monitor::now()))
         }
-        Operation::SettingsExport => Ok(json!(settings_bundle::export(
-            root,
-            &store.snapshot()?,
-            monitor::now()
-        ))),
+        Operation::SettingsExport { sign } => {
+            let mut bundle = settings_bundle::export(root, &store.snapshot()?, monitor::now());
+            if sign {
+                let message = settings_bundle::signed_message(&bundle);
+                bundle.signature = Some(settings_signing::sign(root, &store, &message)?);
+            }
+            Ok(json!(bundle))
+        }
+        Operation::SettingsSigner => settings_signing::signer(root, &store),
         Operation::SettingsImport {
             bundle,
             under,
             apply,
             clone,
+            signer,
         } => {
             let bytes = serde_json::to_vec(&bundle).map_err(|_| settings_bundle::NOT_A_BUNDLE)?;
             let bundle = settings_bundle::parse(&bytes)?;
+            if signer
+                .as_deref()
+                .is_some_and(|k| settings_signing::public_key(k).is_none())
+            {
+                return Err(settings_signing::SIGNER_INVALID.into());
+            }
+            // SB-272: whether the file is signed, and by the key the person named.
+            let signature = settings_signing::verify(
+                &settings_bundle::signed_message(&bundle),
+                bundle.signature.as_ref(),
+                signer.as_deref(),
+            );
             let under = if under.is_empty() {
                 vec![roots::default_under().ok_or("Home folder unavailable. Choose a folder.")?]
             } else {
@@ -5527,7 +5556,10 @@ async fn execute(
             let snapshot = store.snapshot()?;
             let plan = blocking::run(|| settings_bundle::plan(root, &snapshot, &bundle, &under));
             if !apply {
-                return Ok(json!({"preview": plan, "applied": false}));
+                return Ok(json!({"preview": plan, "signature": signature, "applied": false}));
+            }
+            if let Some(refusal) = settings_signing::refusal(&signature) {
+                return Err(refusal.into());
             }
             let done = if clone {
                 let into = under[0].clone();
@@ -5550,7 +5582,7 @@ async fn execute(
             } else {
                 settings_bundle::apply(&store, root, &bundle, &plan)
             };
-            Ok(json!({"preview": plan, "applied": true, "result": done}))
+            Ok(json!({"preview": plan, "signature": signature, "applied": true, "result": done}))
         }
         Operation::RepositoryMap { under } => {
             let snapshot = store.snapshot()?;
