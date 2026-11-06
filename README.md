@@ -67,6 +67,9 @@ app, signing in). `switchboard onboard --status` shows where setup stands.
 Working for an organization (a company group, its seats, terminals in its folders): follow
 [docs/ORGANIZATION.md](docs/ORGANIZATION.md) ([Russian](docs/ORGANIZATION.ru.md)) after step 1.
 
+Moving to another Mac, or adding another macOS user: [docs/MOVING.md](docs/MOVING.md)
+([Russian](docs/MOVING.ru.md)).
+
 1. **Install** the published build: [macOS ZIP](https://passioncode.ai/switchboard/download/macos)
    (redirects to the [latest release](https://github.com/passioncode-ai/fabric-switchboard/releases/latest)),
    check it against `SHA256SUMS` from the release

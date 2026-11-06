@@ -3876,7 +3876,7 @@ mod onboard_commands {
         out
     }
     /// Shell words: single quotes as `onboarding` writes them; a `<placeholder>` is one word.
-    fn words(command: &str) -> Vec<String> {
+    pub(super) fn words(command: &str) -> Vec<String> {
         let mut out = Vec::new();
         let mut word = String::new();
         let (mut quoted, mut placeholder, mut any) = (false, false, false);
@@ -3948,5 +3948,60 @@ mod onboard_commands {
             seen.into_iter().collect::<Vec<_>>(),
             ["alternatives", "command", "turn_off", "turn_on"]
         );
+    }
+}
+
+/// SB-271: every `switchboard` command the moving guide names, in English and Russian, in its
+/// code blocks and in its prose, parses as a command of this CLI.
+#[cfg(test)]
+mod moving_commands {
+    use super::{onboard_commands::words, Cli};
+    use clap::Parser;
+
+    /// The commands of one guide: each line of a `sh` block, and each inline code span that is a
+    /// command; a pipe's last part and the text before a redirection or a comment.
+    fn commands(text: &str) -> Vec<String> {
+        let mut out = Vec::new();
+        let mut in_block = false;
+        for line in text.lines() {
+            let trimmed = line.trim();
+            if trimmed.starts_with("```") {
+                in_block = trimmed == "```sh";
+                continue;
+            }
+            if in_block {
+                out.push(trimmed.to_owned());
+                continue;
+            }
+            for (i, span) in line.split('`').enumerate() {
+                if i % 2 == 1 && span.starts_with("switchboard ") {
+                    out.push(span.to_owned());
+                }
+            }
+        }
+        out.into_iter()
+            .map(|c| {
+                let c = c.rsplit(" | ").next().unwrap_or_default();
+                let c = c.split(" > ").next().unwrap_or_default();
+                c.split(" # ").next().unwrap_or_default().trim().to_owned()
+            })
+            .filter(|c| c.starts_with("switchboard "))
+            .collect()
+    }
+
+    #[test]
+    fn every_command_the_moving_guide_names_exists() {
+        for (guide, text) in [
+            ("MOVING.md", include_str!("../../../docs/MOVING.md")),
+            ("MOVING.ru.md", include_str!("../../../docs/MOVING.ru.md")),
+        ] {
+            let found = commands(text);
+            assert!(found.len() >= 15, "{guide}: {}", found.len());
+            for command in found {
+                if let Err(error) = Cli::try_parse_from(words(&command)) {
+                    panic!("{guide}: `{command}` does not parse: {error}");
+                }
+            }
+        }
     }
 }

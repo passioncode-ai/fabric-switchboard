@@ -86,4 +86,6 @@ Keep the desktop app or `switchboard serve` running for managed sessions. The re
 
 Setting up an organization's work (its group, your seat, terminals in its folders, launching and leaving): [ORGANIZATION.md](ORGANIZATION.md), in Russian [ORGANIZATION.ru.md](ORGANIZATION.ru.md).
 
+Moving to another Mac, or adding another macOS user on this one (the settings file, what you enter again, accounts used elsewhere): [MOVING.md](MOVING.md), in Russian [MOVING.ru.md](MOVING.ru.md).
+
 Building from source and signing artifacts are documented separately in [DISTRIBUTION.md](DISTRIBUTION.md).
