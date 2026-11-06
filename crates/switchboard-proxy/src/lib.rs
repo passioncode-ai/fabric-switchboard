@@ -1,4 +1,5 @@
 //! Credential-injecting loopback gateway. A request owns its route snapshot until EOF.
+pub mod peer;
 pub mod stats;
 use axum::{
     body::{to_bytes, Body},
@@ -127,6 +128,8 @@ pub struct ProxyHandle {
     slots: Arc<Semaphore>,
     stats: stats::Stats,
     stat_folders: StatFolders,
+    /// SB-273: connections closed because another account's process opened them.
+    foreign_refused: Arc<std::sync::atomic::AtomicU64>,
 }
 /// Requests relayed at once; each holds a slot until its response stream ends. 16 was too few for
 /// a machine with two dozen agent sessions streaming at once (2026-10-18): the rest got 503.
@@ -278,6 +281,12 @@ impl ProxyHandle {
             .route("/claude/{pool}/api/hello", get(connectivity))
             .with_state(state);
         let (stop, rx) = oneshot::channel();
+        let foreign_refused = Arc::new(std::sync::atomic::AtomicU64::new(0));
+        let listener = peer::OwnUser {
+            inner: listener,
+            uid: peer::own_uid(),
+            refused: foreign_refused.clone(),
+        };
         let task = tokio::spawn(async move {
             let _ = axum::serve(listener, router)
                 .with_graceful_shutdown(async {
@@ -300,6 +309,7 @@ impl ProxyHandle {
             slots,
             stats,
             stat_folders,
+            foreign_refused,
         })
     }
     /// Managed requests in flight, streams included: zero means no managed session is waiting
@@ -335,6 +345,12 @@ impl ProxyHandle {
             .lock()
             .map(|mut s| std::mem::take(&mut *s))
             .unwrap_or_default()
+    }
+    /// SB-273: connections closed since the last call because their process belongs to another
+    /// account of this machine.
+    pub fn take_foreign_refused(&self) -> u64 {
+        self.foreign_refused
+            .swap(0, std::sync::atomic::Ordering::Relaxed)
     }
     pub fn token(&self) -> &str {
         &self.token

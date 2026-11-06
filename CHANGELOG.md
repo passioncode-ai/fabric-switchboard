@@ -9,6 +9,9 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 ## Unreleased
 
 - When Switchboard finds that another program took the port its proxy used, it now starts with a new key for its sessions, so nothing the other program may have received still works. Sessions started before have to be started again (SB-269).
+- Switchboard now refuses connections to its local proxy that come from another user account on the same computer, even when they carry a valid key (SB-273).
+- `switchboard settings import` now keeps each group's GitHub sources, so new repositories keep joining the group on the new computer, and moves rotation policies along with their group (SB-267).
+- `switchboard settings import --apply --clone` also clones the group's repositories that are on GitHub but not yet on this computer, using your GitHub CLI, so a new teammate's computer gets the organization's groups in one step (SB-268).
 
 ## 0.7.17
 

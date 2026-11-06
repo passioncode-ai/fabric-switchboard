@@ -1647,6 +1647,17 @@ impl Runtime {
     /// SB-156: hands the proxy's counts to the statistics with each folder already resolved to
     /// its project, so a count outlives the checkout it came from.
     pub(crate) fn absorb_statistics(&self) {
+        // SB-273: connections the proxy closed because another account's process opened them.
+        let foreign = self.proxy.take_foreign_refused();
+        if foreign > 0 {
+            oplog::event(
+                "proxy_refused_foreign_user",
+                &[(
+                    "count",
+                    oplog::Field::Number(i64::try_from(foreign).unwrap_or(i64::MAX)),
+                )],
+            );
+        }
         let new = self.proxy.take_statistics();
         if new.is_empty() {
             return;
