@@ -33,15 +33,15 @@ export interface ProjectRule { path: string; provider: Provider; account_id: str
 export interface ProjectRuleInput { path: string; accountId: string; target: ProjectRule['target']; enabled: boolean; expiresAt: number | null }
 export interface AgentSetup { cli_path: string | null; bundled_cli: string | null; linked_cli: string | null; can_link: boolean; translocated?: boolean; commands: { claude_code: string; codex: string; claude_plugin: string }; connected?: { claude_code: boolean; codex: boolean }; agent_prompt?: string; proved?: { client: string | null; at: number } | null }
 /** A project's folders and the pool of accounts reserved for them (0.6). */
-export interface Project { pool: string; name: string; folders: string[]; created_at: number; sources?: string[]; /** SB-109: the organization the group runs on; none is personal. */ organization?: string | null }
+export interface Project { pool: string; name: string; folders: string[]; created_at: number; sources?: string[]; /** SB-109: the organization the group runs on; none is personal. One organization arrives here. */ organization?: string | null; /** SB-282: a group of several organizations arrives as this list instead (`groupOrganizations` reads both). */ organizations?: string[]; /** SB-282: accounts at home in another group that serve this one too. */ shared_accounts?: string[] }
 /** A folder Switchboard found that looks like a project's (SB-117); it joins only on Add. */
 export interface ProjectSuggestion { folder: string; name: string; pool: string; project: string | null; reason: 'worktree' | 'same_repository' | 'ecosystem' | 'worked'; repository: string; first_seen: number }
-export interface ProjectInput { pool?: string; name: string; folders: string[]; accountIds: string[]; /** SB-131: the folders the dialog opened with. */ baseFolders?: string[]; /** SB-109: an organization's id or `personal`; left out, the group keeps its own. */ organization?: string }
+export interface ProjectInput { pool?: string; name: string; folders: string[]; accountIds: string[]; /** SB-131: the folders the dialog opened with. */ baseFolders?: string[]; /** SB-109: an organization's id or `personal`; left out, the group keeps its own. */ organization?: string; /** SB-282: every organization of the group in order (empty: personal); wins over `organization`. */ organizations?: string[] }
 /** SB-158: an organization accounts may belong to; `provider_organizations` are `claude:<uuid>` or `codex:<workspace>`. */
 export interface Organization { id: string; name: string; domains?: string[]; provider_organizations?: string[]; created_at: number; /** SB-159: its organization on PassionCode.ai. */ vesta_id?: string | null }
 /** SB-159: the PassionCode.ai connection, no token. */
 export interface PassioncodeStatus { connected: boolean; base: string; state?: 'ok' | 'sign_in_again' | 'provider_sign_in' | 'unreachable'; connected_at?: number; read_at?: number | null; checked_at?: number | null; organizations?: number; cancelled?: boolean; disconnected?: boolean; /** SB-160 (B-7): organizations a read stopped listing, by local id, since `at`. */ released?: { organization: string; at: number }[] }
-export interface Snapshot { accounts: Account[]; routes: Record<string, string>; events: Event[]; policies?: RotationPolicy[]; rules?: ProjectRule[]; projects?: Project[]; organizations?: Organization[]; /** account id → organization id or `personal` */ memberships?: Record<string, string>; /** SB-175: account id → when it was marked as used on another machine */ elsewhere?: Record<string, number> }
+export interface Snapshot { accounts: Account[]; routes: Record<string, string>; events: Event[]; policies?: RotationPolicy[]; rules?: ProjectRule[]; projects?: Project[]; organizations?: Organization[]; /** account id → organization id or `personal` */ memberships?: Record<string, string>; /** SB-282: account id → organizations it also works for */ also_organizations?: Record<string, string[]>; /** SB-175: account id → when it was marked as used on another machine */ elsewhere?: Record<string, number> }
 export interface RuntimeStatus { proxy_address: string; platform: string; live_mode: string }
 export interface AddInput { label: string; provider: Provider; kind: AuthKind; pool: string; secret: string }
 export interface LoginInput { provider: Provider; label: string; pool: string }
@@ -100,7 +100,7 @@ export interface Adapter {
   projectSources(pool: string, sources: string[]): Promise<unknown>;
   organizationEdit(id: string, name: string | null, domains: string[] | null): Promise<unknown>;
   organizationRemove(id: string): Promise<unknown>;
-  organizationAssign(account: string, choice: string | null): Promise<unknown>;
+  /** SB-282: `organizations` names every context of the account in order and wins over `choice`. */ organizationAssign(account: string, choice: string | null, organizations?: string[]): Promise<unknown>;
   passioncode(action: 'status' | 'connect' | 'cancel' | 'read' | 'disconnect'): Promise<PassioncodeStatus>;
   /** SB-146: `also` adds it to one more group; `from` names the group it leaves when it is in several. */
   moveRoot(folder: string, pool: string, also?: boolean, from?: string | null): Promise<unknown>;

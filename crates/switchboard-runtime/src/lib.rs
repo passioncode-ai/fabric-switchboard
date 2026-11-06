@@ -5340,6 +5340,10 @@ async fn execute(
                         let named = named.trim();
                         if named.eq_ignore_ascii_case(switchboard_core::organizations::PERSONAL) {
                             ids.push(switchboard_core::organizations::PERSONAL.to_owned());
+                        } else if ids.is_empty()
+                            && named.eq_ignore_ascii_case(switchboard_core::organizations::AUTO)
+                        {
+                            ids.push(switchboard_core::organizations::AUTO.to_owned());
                         } else {
                             ids.push(organization_id(&snapshot, named)?);
                         }

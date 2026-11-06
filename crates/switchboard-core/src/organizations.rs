@@ -11,6 +11,8 @@ pub const MAX_ORGANIZATIONS: usize = 32;
 const MAX_DOMAINS: usize = 16;
 const MAX_PROVIDER_ORGANIZATIONS: usize = 64;
 /// The word a person's assignment stores when they keep an account personal.
+/// SB-282: in a list of an account's contexts, the first one left to the rules.
+pub const AUTO: &str = "auto";
 pub const PERSONAL: &str = "personal";
 
 pub const ORGANIZATION_NOT_FOUND: &str = "Organization not found.";
@@ -771,8 +773,9 @@ impl Store {
         self.assign(account, choice, also)
     }
     /// SB-282: the person's word on every context of one account, in order: the first as
-    /// [`Store::assign_organization`] takes it (an organization or [`PERSONAL`]), the rest
-    /// organizations it also works for. An empty list lets the rules decide again.
+    /// [`Store::assign_organization`] takes it (an organization, [`PERSONAL`], or `auto` to let
+    /// the rules decide it), the rest organizations it also works for. An empty list lets the
+    /// rules decide again and drops the rest.
     pub fn assign_organizations(
         &self,
         account: &str,
@@ -789,7 +792,8 @@ impl Store {
             }
             also.push(o.to_owned());
         }
-        self.assign(account, Some(first), Some(also))
+        let first = (first != AUTO).then_some(first);
+        self.assign(account, first, Some(also))
     }
     fn assign(
         &self,

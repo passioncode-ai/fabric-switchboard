@@ -8,6 +8,8 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- Organizations and groups now link many to many (SB-282): an organization may have several groups, and a group may belong to several organizations or to none. An account may serve several groups with one sign-in and one quota, and may work for several organizations. In the group dialog the organizations are check boxes; an account of another group is shared rather than moved, and *Move to another pool…* still moves it. A file with such links is schema 9, which 0.7.20 and older do not open.
+
 ## 0.7.20
 
 - A group's folder list now shows each repository once, under its main copy, even when a copy kept in a worktrees folder was added first, and names that copy after its repository. An agent's data folder (`fabric-data` beside `fabric`, `mobile-publisher-data` beside `mobile-publisher-agent`) is listed under its project instead of as a project of its own (SB-281).

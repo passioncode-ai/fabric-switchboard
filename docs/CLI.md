@@ -37,6 +37,7 @@ switchboard --json events
 switchboard org add "Acme" --domain acme.example --domain acme.dev
 switchboard org list                                   # organizations, then each account and why
 switchboard org assign ACCOUNT_UUID ORGANIZATION_ID     # or personal, or auto
+switchboard org assign ACCOUNT_UUID auto Acme Beta      # SB-282: the rules decide its first; it also works for Acme and Beta
 switchboard org edit ORGANIZATION_ID --name "Acme Inc." --domain acme.example
 switchboard org remove ORGANIZATION_ID
 ```
@@ -356,6 +357,9 @@ switchboard project save --name "Client Alpha" --folder /work/alpha-web --folder
 switchboard project save --pool client-alpha --name "Client Alpha" --folder /work/alpha-web   # update; omitted accounts go back to default
 switchboard project edit --pool client-alpha --add-account <id> --remove-folder /work/old   # SB-134: change by delta; the rest stays
 switchboard project edit --pool client-alpha --organization Acme   # SB-109: the group runs only on Acme's accounts (`personal` for personal ones)
+switchboard project edit --pool shared --organization Acme --organization Beta   # SB-282: a group of two organizations, Acme first
+switchboard project edit --pool client-alpha --add-account <id>   # SB-282: an account of another group keeps its home and serves this one too
+switchboard project edit --pool client-alpha --add-account <id> --move-accounts   # moves it here instead
 switchboard project rotate-capability --pool client-alpha   # the folders' capability leaked: the old one is refused, a new one is written; `skipped` and `not_rewritten` name each folder still holding an old value (SB-244)
 switchboard project codex [on|off]     # SB-143: Codex sessions in project folders use the projects' Codex accounts (one provider in Codex's config.toml)
 switchboard stats [--days 30]            # SB-145/SB-147: requests and the provider's token counts by group, project, account, agent and day (1-90 days)

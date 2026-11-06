@@ -1,6 +1,6 @@
 import { isAbsoluteProjectPath } from './platform';
 import type { StatCounts, Statistics } from './ui-logic';
-import { attribution, groupAdmits, providerOrganization } from './ui-logic';
+import { attribution, groupAdmits, groupOrganizations, providerOrganization, servesPool } from './ui-logic';
 import agentCatalogData from '../catalog/agents.json';
 import { version } from '../package.json';
 import type { PassioncodeStatus, Ceilings, CeilingView, CeilingQuestionView, Account, OrganizationGroupOffer, Adapter, AgentSetup, CurrentAccounts, ExternalIdentity, HermesModel, KimiAccounts, LoginInput, OpenrouterStatus, ProjectSuggestion, Snapshot, UpdateStatus, AgentRow, AgentsOverview, RecommendedModel, Chain, ChainExecutor, ChainScope, ChainStepView, LastHandover, ShellHookFile, ShellHookStatus, Onboarding, OnboardStep } from './types';
@@ -80,8 +80,8 @@ export function createDemoAdapter(): Adapter {
   const organizationOffer = (item: Account): OrganizationGroupOffer | undefined => {
     const organization = attribution(state, item).organization;
     if (!organization) return undefined;
-    const bound = (state.projects ?? []).filter((p) => p.organization === organization);
-    if (bound.length !== 1 || bound[0].pool === item.pool) return undefined;
+    const bound = (state.projects ?? []).filter((p) => groupOrganizations(p).includes(organization));
+    if (bound.length !== 1 || servesPool(state, item, bound[0].pool)) return undefined;
     const id = item.external_identity;
     const held = !!id?.account_id && state.accounts.some((a) => a.pool === bound[0].pool && a.provider === item.provider && a.external_identity?.account_id === id.account_id && a.external_identity?.organization_id === id.organization_id);
     return held ? undefined : { pool: bound[0].pool, name: bound[0].name };
@@ -147,10 +147,11 @@ export function createDemoAdapter(): Adapter {
     if (organizations.length) steps.push({ id: 'organization', state: 'done', summary: 'Organizations on this computer.' });
     for (const o of organizations) {
       const organization = { id: o.id, name: o.name };
-      const bound = (state.projects ?? []).filter((p) => p.organization === o.id);
-      const group = bound.length === 1 ? { pool: bound[0].pool, name: bound[0].name } : null;
-      steps.push(group ? { id: 'org_group', state: 'done', summary: '', organization, group } : { id: 'org_group', state: 'needs_person', summary: '', organization, groups: bound.map((p) => p.name) });
-      const seats = group ? state.accounts.filter((a) => a.pool === group.pool && attribution(state, a).organization === o.id) : [];
+      // SB-282: an organization may have several groups; the first is the one the steps name.
+      const bound = (state.projects ?? []).filter((p) => groupOrganizations(p).includes(o.id));
+      const group = bound.length ? { pool: bound[0].pool, name: bound[0].name } : null;
+      steps.push(group ? { id: 'org_group', state: 'done', summary: '', organization, group, ...(bound.length > 1 ? { groups: bound.map((p) => p.name) } : {}) } : { id: 'org_group', state: 'needs_person', summary: '', organization });
+      const seats = state.accounts.filter((a) => bound.some((p) => servesPool(state, a, p.pool)) && groupAdmits(state, o.id, a));
       const ended = seats.filter((a) => signInRequired.has(a.id)).length;
       steps.push({ id: 'seat', state: seats.some((a) => a.enabled && !signInRequired.has(a.id)) ? 'done' : 'needs_person', summary: '', organization, ended });
       steps.push({ id: 'hook', state: 'optional', summary: '', organization, terminals: group && bound[0].folders.length ? 'active' : 'waiting' });
@@ -388,15 +389,19 @@ export function createDemoAdapter(): Adapter {
       }
       if (input.accountIds.some((id) => (current.claude.account_id === id || current.codex.account_id === id) && state.accounts.find((a) => a.id === id)?.pool !== pool)) throw new Error('This account is signed in to the ordinary Claude Code or Codex, which every folder uses. Switch the CLI to another account first, then add this one to the project.');
       for (const other of projects.filter((p) => p.pool !== pool)) for (const f of folders) if (other.folders.some((g) => g !== f && (inside(f, g) || inside(g, f)))) throw new Error('A folder sits inside a folder of another group. Add the repository itself to that group instead.');
-      const organization = input.organization === undefined ? existing?.organization ?? null : input.organization === 'personal' ? null : input.organization;
-      if (organization && !(state.organizations ?? []).some((o) => o.id === organization)) throw new Error('Organization not found.');
-      for (const account of state.accounts.filter((a) => input.accountIds.includes(a.id))) if (!groupAdmits(state, organization, account)) throw new Error("An account chosen for this group belongs to another organization. Choose accounts of the group's organization, or change it.");
+      // SB-282: the whole list wins; one choice is a list of one; left out, the group keeps its own.
+      const organizations = input.organizations !== undefined ? input.organizations.filter((o) => o && o !== 'personal') : input.organization === undefined ? groupOrganizations(existing) : input.organization === 'personal' ? [] : [input.organization];
+      if (organizations.some((id) => !(state.organizations ?? []).some((o) => o.id === id))) throw new Error('Organization not found.');
+      for (const account of state.accounts.filter((a) => input.accountIds.includes(a.id))) if (!groupAdmits(state, organizations, account)) throw new Error("An account chosen for this group belongs to another organization. Choose accounts of the group's organization, or change it.");
+      // SB-282: an account at home in another group is shared, not moved.
+      const groupPools = new Set(projects.map((p) => p.pool));
+      const shared = input.accountIds.filter((id) => { const a = state.accounts.find((x) => x.id === id); return !!a && a.pool !== pool && groupPools.has(a.pool); });
       for (const account of state.accounts) {
-        const target = input.accountIds.includes(account.id) ? pool : account.pool === pool ? 'default' : account.pool;
+        const target = input.accountIds.includes(account.id) && !shared.includes(account.id) ? pool : account.pool === pool && !input.accountIds.includes(account.id) ? 'default' : account.pool;
         if (target !== account.pool) { const old = `${account.provider}:${account.pool}`; if (state.routes[old] === account.id) delete state.routes[old]; account.pool = target; }
       }
       for (const policy of state.policies ?? []) if (policy.pool === pool && policy.target === 'claude_cli') policy.enabled = false;
-      const project = { pool, name, folders, created_at: existing?.created_at ?? now(), organization };
+      const project = { pool, name, folders, created_at: existing?.created_at ?? now(), organization: organizations.length === 1 ? organizations[0] : null, organizations: organizations.length > 1 ? organizations : undefined, shared_accounts: shared.length ? shared : undefined };
       if (existing) Object.assign(existing, project); else projects.push(project);
       projects.sort((a, b) => a.name.localeCompare(b.name));
       log('project', '', existing ? 'updated' : 'created');
@@ -452,7 +457,8 @@ export function createDemoAdapter(): Adapter {
       await pause();
       state.organizations = (state.organizations ?? []).filter((o) => o.id !== id);
       for (const [account, choice] of Object.entries(state.memberships ?? {})) if (choice === id) delete state.memberships![account];
-      for (const p of state.projects ?? []) if (p.organization === id) p.organization = null;
+      for (const p of state.projects ?? []) { const left = groupOrganizations(p).filter((o) => o !== id); p.organization = left.length === 1 ? left[0] : null; p.organizations = left.length > 1 ? left : undefined; }
+      for (const [account, list] of Object.entries(state.also_organizations ?? {})) { const left = list.filter((o) => o !== id); if (left.length) state.also_organizations![account] = left; else delete state.also_organizations![account]; }
       log('organization', '', 'removed');
     },
     async passioncode(action) {
@@ -472,9 +478,14 @@ export function createDemoAdapter(): Adapter {
       } else if (action === 'read') throw new Error('PassionCode.ai is not connected.');
       return structuredClone(passioncode);
     },
-    async organizationAssign(accountId, choice) {
+    async organizationAssign(accountId, choiceIn, organizations) {
       await pause();
       const account = state.accounts.find((a) => a.id === accountId); if (!account) throw new Error('Account not found');
+      // SB-282: every context in order: the first as `choice`, the rest it also works for.
+      const choice = organizations ? (organizations[0] && organizations[0] !== 'auto' ? organizations[0] : null) : choiceIn;
+      const also = organizations ? [...new Set(organizations.slice(1).filter((o) => o !== 'personal' && o !== choice))] : null;
+      if (also?.some((id) => !(state.organizations ?? []).some((o) => o.id === id))) throw new Error('Organization not found.');
+      if (also !== null || choice === null) { const all = (state.also_organizations ??= {}); if (also?.length) all[accountId] = also; else delete all[accountId]; }
       const memberships = (state.memberships ??= {});
       const key = providerOrganization(account);
       if (choice === null) delete memberships[accountId];

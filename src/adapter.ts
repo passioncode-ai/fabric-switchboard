@@ -55,7 +55,7 @@ export const nativeAdapter: Adapter = {
   backupNow: () => invoke('backup_now'),
   restoreBackup: (file) => invoke('restore_backup', { file }),
   linkCli: () => invoke('link_cli'),
-  saveProject: (input) => invoke('save_project', { pool: input.pool ?? null, name: input.name, folders: input.folders, accountIds: input.accountIds, baseFolders: input.baseFolders ?? null, organization: input.organization ?? null }),
+  saveProject: (input) => invoke('save_project', { pool: input.pool ?? null, name: input.name, folders: input.folders, accountIds: input.accountIds, baseFolders: input.baseFolders ?? null, organization: input.organization ?? null, organizations: input.organizations ?? null }),
   removeProject: (pool) => invoke('remove_project', { pool }),
   projectRoots: () => invoke('project_roots'),
   moveRoot: (folder, pool, also, from) => invoke('move_root', { folder, pool, also: also ?? false, from: from ?? null }),
@@ -70,7 +70,7 @@ export const nativeAdapter: Adapter = {
   projectSources: (pool, sources) => invoke('project_sources', { pool, sources }),
   organizationEdit: (id, name, domains) => invoke('organization_edit', { id, name, domains }),
   organizationRemove: (id) => invoke('organization_remove', { id }),
-  organizationAssign: (account, choice) => invoke('organization_assign', { account, choice }),
+  organizationAssign: (account, choice, organizations) => invoke('organization_assign', { account, choice, organizations: organizations ?? null }),
   passioncode: (action) => invoke('passioncode', { action }),
   projectSuggestions: () => readWithDeadline(invoke('project_suggestions')),
   acceptProjectSuggestion: (folder) => invoke('accept_project_suggestion', { folder }),
@@ -124,6 +124,7 @@ export const nativeAdapter: Adapter = {
 // Only exact, fixed backend vocabulary is surfaced. Unknown failures never print
 // raw provider output, credentials, filesystem paths, or serialized error objects.
 const safeErrors = new Set([
+  'A group can belong to at most 16 organizations.',
   // The CLI node's new backend sentences (N2 of 0.6.82), shown as they are; the older ones are mapped below.
   'No OpenRouter key is saved. Add one on the API keys page, or run switchboard agents openrouter set.',
   'That group id names no group. Choose a group, or none for the key every folder uses.',

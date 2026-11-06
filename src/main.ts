@@ -7,7 +7,7 @@ import { platformLabel } from './platform';
 import { LOCALE_KEY, dateLocale, locale, parseLocaleChoice, plural, saveLocaleChoice, t, type LocaleChoice } from './i18n';
 import { demo, native, nativeAdapter, onProjectSuggestions, onShellHook, onSpendChanged, safeError, reportFrontendReady, reportLanguage, type Operation } from './adapter';
 import type { CardState } from './ui-logic';
-import { statAlert, ceilingQuestion, ceilingWarning, ceilingLine, keyLimitLine, dollars, POOL_PATTERN, poolChoices, poolName, inGroup, tourPlacement, usableWhileBusy, APPEARANCE_KEY, attribution, groupAdmits, groupSeatsElsewhere, passioncodeLine, seatEndedText, groupSeatsEndedText, organizationReleasedAt, inOrganizationFilter, domainList, type AttributedBy, sortStatRows, nextStatSort, type StatRow, type StatSort, statCacheShare, statTokensPerRequest, chartSeries, niceMax, groupProjectRows, type ChartMetric, groupProjects, compactCount, statTokens, statTrouble, statTroubleText, statAgentName, type Statistics, EXPIRY_CHOICES, folderName, folderRows, withoutFolder, type ProjectRoot, moveTargets, mapRows, rootTargets, storedMapFolders, MAP_FOLDERS_KEY, type MapFilter, type MapRow, type RepositoryMap, sortAgents, defaultAgentChoices, backgroundReads, clockedRead, chainScopeKey, afterRead, ceilingRemovalNote, modelMeta, ordinaryKimiNote, kimiLimitUntil, limitReasonText, limitTitle, agentSetupFacts, sessionHow, sessionAgentName, sessionStateLabel, kimiWindowsLine, kimiWindowsLines, openrouterCreditLine, eventAction, eventDetail, MutationClock, activeRules, autoSwitchPool, launchChoice, withFolders, githubDefaultSelection, githubPlan, githubSource, replaceFolder, storedFolder, LAST_FOLDER_KEY, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, groupAccounts, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, signInNotice, signInMove, organizationMoveNote, dismissTermsNotice, termsNoticeDismissed, termsNoticeOn, termsNoticeText, tourWaits, orgSetups, releasedOrganizations, releasedSummary, orgSetupAction, orgSetupShown, orgSetupCaveat, orgSetupLeads, orgSetupPrimary, accountsOrgActionLeads, firstPrimary, orgSetupUnread, orgSetupStateLabel, orgSetupTitle, hiddenOrgSetups, ORG_SETUP_HIDDEN_KEY, accountsEmptyKey, type OrgSetup, usageAnswerText, usageNotice, usageFreshness, windowReset, type Appearance, shellHookView, shellHookToggleNotice, shellHookNoticeText, codexHookLine, moveStep, accountsForStep, chainSummary, stepReasonText, handoverOutcomeText, handoverSkipped, shortWorkflow, TAKEOVER_ORDER } from './ui-logic';
+import { statAlert, ceilingQuestion, ceilingWarning, ceilingLine, keyLimitLine, dollars, POOL_PATTERN, poolChoices, poolName, inGroup, tourPlacement, usableWhileBusy, APPEARANCE_KEY, attribution, groupAdmits, groupSeatsElsewhere, passioncodeLine, seatEndedText, groupSeatsEndedText, organizationReleasedAt, inOrganizationFilter, domainList, type AttributedBy, sortStatRows, nextStatSort, type StatRow, type StatSort, statCacheShare, statTokensPerRequest, chartSeries, niceMax, groupProjectRows, type ChartMetric, groupProjects, compactCount, statTokens, statTrouble, statTroubleText, statAgentName, type Statistics, EXPIRY_CHOICES, folderName, folderRows, withoutFolder, type ProjectRoot, moveTargets, mapRows, rootTargets, storedMapFolders, MAP_FOLDERS_KEY, type MapFilter, type MapRow, type RepositoryMap, sortAgents, defaultAgentChoices, backgroundReads, clockedRead, chainScopeKey, afterRead, ceilingRemovalNote, modelMeta, ordinaryKimiNote, kimiLimitUntil, limitReasonText, limitTitle, agentSetupFacts, sessionHow, sessionAgentName, sessionStateLabel, kimiWindowsLine, kimiWindowsLines, openrouterCreditLine, eventAction, eventDetail, MutationClock, activeRules, autoSwitchPool, launchChoice, withFolders, githubDefaultSelection, githubPlan, githubSource, replaceFolder, storedFolder, LAST_FOLDER_KEY, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, groupAccounts, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, signInNotice, signInMove, organizationMoveNote, dismissTermsNotice, termsNoticeDismissed, termsNoticeOn, termsNoticeText, tourWaits, orgSetups, releasedOrganizations, releasedSummary, orgSetupAction, orgSetupShown, orgSetupCaveat, orgSetupLeads, orgSetupPrimary, accountsOrgActionLeads, firstPrimary, orgSetupUnread, orgSetupStateLabel, orgSetupTitle, hiddenOrgSetups, ORG_SETUP_HIDDEN_KEY, accountsEmptyKey, type OrgSetup, usageAnswerText, usageNotice, usageFreshness, windowReset, type Appearance, shellHookView, shellHookToggleNotice, shellHookNoticeText, codexHookLine, moveStep, accountsForStep, chainSummary, stepReasonText, handoverOutcomeText, handoverSkipped, shortWorkflow, TAKEOVER_ORDER, groupOrganizations, servesPool, sharedGroups, holdsContext, accountOrganizations } from './ui-logic';
 import agentCatalog from '../catalog/agents.json';
 import type { AnalyticsStatus, Ceilings, CeilingView, CeilingQuestionView, OpenrouterCredit, BackupInfo, PassioncodeStatus, Account, Adapter, AgentConnection, AgentInfo, AgentRow, AgentsOverview, OpenrouterModels, HermesModel, KimiAccounts, KimiRegion, KimiStatus, OpenrouterStatus, OpenrouterKeys, CodexRoute, ShellHookStatus, AgentSetup, AuthKind, BackupStatus, KimiAccount, CurrentAccounts, LoginItem, Project, Restored, ExternalIdentity, MonitorStatus, ProjectRule, Provider, RotationPolicy, RuntimeStatus, SessionInfo, Snapshot, UpdateStatus, Onboarding, Chains, ChainExecutor, ChainScope, ChainStepView, GithubRepository } from './types';
 
@@ -493,7 +493,7 @@ function codexRouteSection() {
 /** SB-183 (node A-7): whether terminals follow organization folders (SCN-075), beside *Codex in group folders*. */
 let shellHookState: ShellHookStatus | null = null; let shellHookLoading = false; let shellHookError = ''; let shellHookKey = '';
 /** What the section's answer depends on: the groups, their organizations and folders. */
-const shellHookInputs = () => JSON.stringify((snapshot?.projects ?? []).map((p) => [p.pool, p.organization ?? null, p.folders.length]));
+const shellHookInputs = () => JSON.stringify((snapshot?.projects ?? []).map((p) => [p.pool, groupOrganizations(p), p.folders.length]));
 function loadShellHook() {
   if (shellHookLoading) return;
   shellHookLoading = true; const key = shellHookInputs(); const stamp = clock.stamp();
@@ -677,22 +677,26 @@ function projectsSection() {
   }
   const list = el('div', 'account-list'); list.setAttribute('aria-label', t('Groups'));
   for (const project of projects) {
-    const accounts = snapshot!.accounts.filter((a) => a.pool === project.pool);
+    // SB-282: its own accounts and those another group shares with it.
+    const accounts = snapshot!.accounts.filter((a) => servesPool(snapshot!, a, project.pool));
     const card = el('article', 'account-card project-card'); card.setAttribute('aria-label', `${project.name}, ${plural(accounts.length, { one: '{n} account', other: '{n} accounts' })}`);
     const details = el('div', 'account-details'); const title = el('div', 'account-title');
     const name = el('h2', ''); name.append(groupHint(project.name, project.pool));
     title.append(name, el('span', 'badge muted', `${plural(accounts.length, { one: '{n} account', other: '{n} accounts' })}`));
-    // SB-109: the organization the group runs on; a personal group carries no badge.
-    const groupOrg = project.organization ? snapshot!.organizations?.find((o) => o.id === project.organization) : undefined;
-    if (groupOrg) { const badge = el('span', 'badge org-badge', groupOrg.name); badge.title = t('Runs only on accounts of {name}.', { name: groupOrg.name }); title.append(badge); }
+    // SB-109, SB-282: the organizations the group runs on; a personal group carries no badge.
+    const groupOrgIds = groupOrganizations(project);
+    const groupOrgs = groupOrgIds.map((id) => snapshot!.organizations?.find((o) => o.id === id)).filter((o): o is NonNullable<typeof o> => !!o);
+    const groupOrg = groupOrgs[0];
+    for (const org of groupOrgs) { const badge = el('span', 'badge org-badge', org.name); badge.title = groupOrgs.length > 1 ? t('Runs only on accounts of {names}.', { names: groupOrgs.map((o) => o.name).join(', ') }) : t('Runs only on accounts of {name}.', { name: org.name }); title.append(badge); }
     const folders = projectFolderList(project);
-    const chips = el('p', 'account-meta', accounts.length ? accounts.map((a) => `${a.label} · ${providerName(a.provider)}`).join(', ') : t('No accounts yet, so sessions in these folders use your other accounts until you add one.'));
+    const sharedFrom = (a: Account) => a.pool !== project.pool ? ` · ${t('shared from {name}', { name: projectOf(a.pool)?.name ?? a.pool })}` : '';
+    const chips = el('p', 'account-meta', accounts.length ? accounts.map((a) => `${a.label} · ${providerName(a.provider)}${sharedFrom(a)}`).join(', ') : t('No accounts yet, so sessions in these folders use your other accounts until you add one.'));
     details.append(title, folders, chips);
     // C-3 (SCN-081): which chain the group's tasks fall back along; the editor is on Agents.
     const fallback = groupChainLine(project.pool);
     if (fallback) { const line = el('p', 'account-meta chain-line'); line.append(button(fallback, () => goTo('agents', `chain-edit-project-${project.pool}`), 'text-button chain-link', `chain-link-${project.pool}`)); details.append(line); }
     // SB-170: every account of the group belongs elsewhere now, so its folders are refused.
-    if (groupOrg && groupSeatsElsewhere(snapshot!, groupOrg.id, accounts)) details.append(el('p', 'surface-note seats-elsewhere', t('None of these accounts belongs to {name} any more, so sessions in this group\'s folders are refused. Add an account of {name}, or change the group\'s organization.', { name: groupOrg.name })));
+    if (groupOrg && groupSeatsElsewhere(snapshot!, groupOrgIds, accounts)) details.append(el('p', 'surface-note seats-elsewhere', t('None of these accounts belongs to {name} any more, so sessions in this group\'s folders are refused. Add an account of {name}, or change the group\'s organization.', { name: groupOrgs.map((o) => o.name).join(', ') })));
     else { const ended = groupOrg ? groupSeatsEndedText(snapshot!, project, accounts, monitor?.sign_in_required) : null; if (ended) details.append(el('p', 'surface-note seats-ended', ended)); }
     const actions = el('div', 'management-actions');
     actions.append(button(t('Edit'), () => projectDialog(project), 'text-button', `edit-project-${project.pool}`), button(t('Delete'), () => deleteProjectDialog(project), 'text-button danger-text', `delete-project-${project.pool}`));
@@ -744,48 +748,60 @@ function projectFolderList(project: Project) {
   return wrap;
 }
 function projectDialog(existing?: Project, organization?: string) {
-  const context = openDialog(existing ? t('Edit {name}', { name: existing.name }) : t('New group'), t('Add the group\'s repositories (folders) and choose the accounts that belong to it. An account belongs to one group at a time; a repository may be in several groups.'));
+  const context = openDialog(existing ? t('Edit {name}', { name: existing.name }) : t('New group'), t('Add the group\'s repositories (folders) and choose the accounts that serve it. An account may serve several groups, and a repository may be in several groups.'));
   const name = input(existing?.name ?? ''); name.maxLength = 80; name.placeholder = t('e.g. Client Alpha');
   const folders = foldersPicker(context, existing?.folders ?? [], 'project-folders', existing ? projectRoots?.[existing.pool] ?? null : null);
   const picker = el('fieldset', 'project-accounts'); picker.append(el('legend', 'field-label', t('Accounts')));
   const usable = snapshot!.accounts;
-  // SB-109 (SCN-070): with organizations, the group runs on one organization's accounts or on personal ones.
+  // SB-109, SB-282 (SCN-070): with organizations, the group runs on the accounts of the organizations checked, or on personal ones when none is.
   const organizations = snapshot!.organizations ?? [];
-  const orgPicker = organizations.length ? select([['personal', t('Personal accounts')], ...organizations.map((o): [string, string] => [o.id, o.name])]) : null;
-  if (orgPicker) orgPicker.value = existing?.organization && organizations.some((o) => o.id === existing.organization) ? existing.organization : organization && organizations.some((o) => o.id === organization) ? organization : 'personal';
+  const startOrgs = existing ? groupOrganizations(existing).filter((id) => organizations.some((o) => o.id === id)) : organization && organizations.some((o) => o.id === organization) ? [organization] : [];
+  const orgPicker = organizations.length ? el('fieldset', 'project-organizations') : null;
+  const orgBoxes: HTMLInputElement[] = [];
+  if (orgPicker) {
+    orgPicker.append(el('legend', 'field-label', t('Organizations')));
+    for (const o of organizations) {
+      const option = el('label', 'appearance-option login-option'); const box = el('input'); box.type = 'checkbox'; box.value = o.id; box.checked = startOrgs.includes(o.id);
+      option.append(box, el('span', '', o.name)); orgPicker.append(option); orgBoxes.push(box);
+    }
+    orgPicker.append(el('p', 'form-note', t('Sessions in this group\'s folders run only on accounts of the organizations you check, or only on personal accounts when you check none.')));
+  }
   // SB-202 (B-8): + Group for {organization} starts with its name and its seats already here.
   if (!existing && organization) name.value = organizations.find((o) => o.id === organization)?.name ?? '';
-  const chosenOrg = () => (orgPicker && orgPicker.value !== 'personal' ? orgPicker.value : null);
+  // In the order the person checked them stays the store's order; a new check goes last.
+  let chosen = [...startOrgs];
+  const chosenOrgs = () => { const on = orgBoxes.filter((b) => b.checked).map((b) => b.value); chosen = [...chosen.filter((id) => on.includes(id)), ...on.filter((id) => !chosen.includes(id))]; return chosen; };
   if (!usable.length) picker.append(el('p', 'form-note', t('No accounts yet. Add accounts first, or save the group now and add them later.')));
   const rows: { account: Account; box: HTMLInputElement; why: HTMLElement; text: string }[] = [];
   for (const account of usable) {
     const owner = projectOf(account.pool);
-    const option = el('label', 'appearance-option login-option'); const box = el('input'); box.type = 'checkbox'; box.value = account.id; box.checked = existing ? account.pool === existing.pool : !!organization && attribution(snapshot!, account).organization === organization && !inCli(account);
-    const note = owner && owner.pool !== existing?.pool ? t(' · in {name}, moves here', { name: owner.name }) : '';
+    const option = el('label', 'appearance-option login-option'); const box = el('input'); box.type = 'checkbox'; box.value = account.id; box.checked = existing ? servesPool(snapshot!, account, existing.pool) : !!organization && groupAdmits(snapshot!, organization, account) && !inCli(account);
+    const note = owner && owner.pool !== existing?.pool ? t(' · in {name}, also serves this group', { name: owner.name }) : '';
     const why = el('span', '', `${account.label} · ${providerName(account.provider)}${note}`);
     option.append(box, why); picker.append(option);
     rows.push({ account, box, why, text: why.textContent ?? '' });
   }
   const syncAccounts = () => {
-    const org = chosenOrg();
+    const orgs = chosenOrgs();
     for (const { account, box, why, text } of rows) {
-      const fits = groupAdmits(snapshot!, org, account);
+      const fits = groupAdmits(snapshot!, orgs, account);
       box.disabled = !fits; if (!fits) box.checked = false;
-      const own = attribution(snapshot!, account).organization;
-      why.textContent = fits ? text : `${text} · ${own ? t('Belongs to {name}.', { name: organizations.find((o) => o.id === own)?.name ?? '' }) : t('Personal account.')}`;
+      const own = accountOrganizations(attribution(snapshot!, account)).map((id) => organizations.find((o) => o.id === id)?.name ?? '').filter(Boolean);
+      why.textContent = fits ? text : `${text} · ${own.length ? t('Belongs to {name}.', { name: own.join(', ') }) : t('Personal account.')}`;
     }
   };
-  orgPicker?.addEventListener('change', syncAccounts); syncAccounts();
+  for (const box of orgBoxes) box.addEventListener('change', syncAccounts);
+  syncAccounts();
   const grid = el('div', 'form-grid'); grid.append(field(t('Group name'), name), groupField(t('Folders'), folders.node, t('The repositories and folders of this group; subfolders are included. Worktrees and clones of its repositories join it by themselves, and folders deleted from disk leave it. Add any other repository here, or from Repositories on disk.')));
-  if (orgPicker) grid.append(field(t('Organization'), orgPicker, t('Sessions in this group\'s folders run only on this organization\'s accounts, or only on personal ones when you choose Personal accounts.')));
-  context.body.append(grid, picker, el('p', 'form-note', t('Accounts you leave out move back to the default group.')));
+  if (orgPicker) grid.append(orgPicker);
+  context.body.append(grid, picker, el('p', 'form-note', t('Accounts of this group you leave out move back to the default group. An account another group holds only stops serving this one.')));
   context.actions.append(submit(existing ? t('Save group') : t('Create group')));
   name.focus();
   context.form.addEventListener('submit', (event) => {
     event.preventDefault();
     const accountIds = [...picker.querySelectorAll<HTMLInputElement>('input[type=checkbox]:checked')].map((box) => box.value);
     const list = folders.require(); if (!list) return;
-    void dialogSave(context, () => adapter.saveProject({ pool: existing?.pool, name: name.value, folders: list, accountIds, baseFolders: existing?.folders, organization: orgPicker ? orgPicker.value : undefined }), existing ? t('Group “{name}” saved.', { name: name.value.trim() }) : t('Group “{name}” created. Launch its accounts from its folders.', { name: name.value.trim() }));
+    void dialogSave(context, () => adapter.saveProject({ pool: existing?.pool, name: name.value, folders: list, accountIds, baseFolders: existing?.folders, organizations: orgPicker ? chosenOrgs() : undefined }), existing ? t('Group “{name}” saved.', { name: name.value.trim() }) : t('Group “{name}” created. Launch its accounts from its folders.', { name: name.value.trim() }));
   });
 }
 function rulesSection() {
@@ -1873,6 +1889,9 @@ function accountRow(account: Account) {
   else if (!account.enabled) title.append(el('span', 'badge muted', t('Disabled')));
   const org = organizationOf(account);
   if (org) { const badge = el('span', 'badge org-badge', org.name); badge.title = org.why; title.append(badge); }
+  for (const name of alsoOrganizationsOf(account)) { const badge = el('span', 'badge org-badge', name); badge.title = t('You said it also works for {name}.', { name }); title.append(badge); }
+  // SB-282: the groups that share it, beside its own.
+  for (const group of sharedGroups(snapshot!, account)) { const badge = el('span', 'badge muted', group.name); badge.title = t('Also serves {name}.', { name: group.name }); title.append(badge); }
   const email = account.external_identity?.email;
   const subText = [email && email !== account.label ? email : '', account.kind === 'oauth' ? '' : kindName(account.kind)].filter(Boolean).join(' · ') || (account.kind === 'oauth' ? t('OAuth') : '');
   const sub = el('span', 'row-sub', subText); sub.title = subText; name.append(title, sub);
@@ -2662,6 +2681,10 @@ function organizationOf(account: Account): { name: string; why: string } | null 
   if (!org) return null;
   return { name: org.name, why: byText(at.by, org.name) };
 }
+/** SB-282: the organizations the person said the account also works for, for their badges. */
+function alsoOrganizationsOf(account: Account): string[] {
+  return attribution(snapshot!, account).also.map((id) => snapshot!.organizations?.find((o) => o.id === id)?.name ?? '').filter(Boolean);
+}
 function byShort(by: AttributedBy | null) {
   return by === 'person' ? t('placed by you') : by === 'provider' ? t('by its team') : t('by its domain');
 }
@@ -2744,7 +2767,7 @@ function renderOrganizations(main: HTMLElement) {
   main.append(el('p', 'surface-note org-rules', t('An account belongs to an organization when you place it there, when its team at the provider is the organization’s, or when its address is on one of the organization’s domains. Placing one seat of a Claude Team or ChatGPT workspace brings the team’s other seats along.')));
   const list = el('div', 'org-cards');
   for (const o of organizations) {
-    const members = snapshot!.accounts.filter((a) => attribution(snapshot!, a).organization === o.id);
+    const members = snapshot!.accounts.filter((a) => holdsContext(attribution(snapshot!, a), o.id));
     const card = el('section', 'org-card'); card.setAttribute('aria-label', o.name);
     const head = el('div', 'org-card-head');
     const titles = el('div', 'org-card-title'); const heading = el('h2', '', o.name);
@@ -2921,10 +2944,25 @@ function assignDialog(account: Account) {
   const picker = select([['auto', autoName ? t('Automatic: {name}', { name: autoName }) : t('Automatic: personal accounts')], ...(snapshot!.organizations ?? []).map((o): [string, string] => [o.id, o.name]), ['personal', t('Personal accounts')]]);
   picker.value = choice;
   context.body.append(field(t('Belongs to'), picker));
+  // SB-282: an account may work for several organizations; groups of each take it.
+  const also = new Set(snapshot!.also_organizations?.[account.id] ?? []);
+  const others = el('fieldset', 'project-organizations'); others.append(el('legend', 'field-label', t('Also works for')));
+  const boxes: HTMLInputElement[] = [];
+  for (const o of snapshot!.organizations ?? []) {
+    const option = el('label', 'appearance-option login-option'); const box = el('input'); box.type = 'checkbox'; box.value = o.id; box.checked = also.has(o.id);
+    option.append(box, el('span', '', o.name)); others.append(option); boxes.push(box);
+  }
+  others.append(el('p', 'form-note', t('Groups of these organizations take this account too.')));
+  const syncOthers = () => { for (const box of boxes) { const first = box.value === picker.value || (picker.value === 'auto' && box.value === automatic.organization); box.disabled = first; if (first) box.checked = false; } };
+  picker.addEventListener('change', syncOthers); syncOthers();
+  if (boxes.length > 1) context.body.append(others);
   context.actions.append(submit(t('Save')));
   context.form.addEventListener('submit', (event) => {
     event.preventDefault();
-    void dialogSave(context, () => adapter.organizationAssign(account.id, picker.value === 'auto' ? null : picker.value), t('Saved for {label}.', { label: account.label }));
+    const extra = boxes.filter((b) => b.checked && !b.disabled).map((b) => b.value);
+    // `auto` first leaves the first context to the rules and keeps the extras.
+    const save = () => extra.length || also.size ? adapter.organizationAssign(account.id, null, picker.value === 'auto' && !extra.length ? [] : [picker.value, ...extra]) : adapter.organizationAssign(account.id, picker.value === 'auto' ? null : picker.value);
+    void dialogSave(context, save, t('Saved for {label}.', { label: account.label }));
   });
   picker.focus();
 }
