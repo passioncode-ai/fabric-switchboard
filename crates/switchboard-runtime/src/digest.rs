@@ -345,6 +345,10 @@ pub(crate) fn fold_hour(hour: i64, counts: &Hour, previous: Option<&Hourly>) -> 
 /// OD-5: the day's hourly lines, each hour folded once (the first line of an hour wins).
 pub(crate) fn fold_day(day: i64, hourly: &[Hourly]) -> Option<Daily> {
     let date = crate::errors::date(day);
+    // A day out of range names no date, and every line starts with the empty one.
+    if date.is_empty() {
+        return None;
+    }
     let mut seen = std::collections::BTreeSet::new();
     let mut ops: BTreeMap<String, Counts> = BTreeMap::new();
     let mut rose: BTreeMap<String, (u64, u64)> = BTreeMap::new();
@@ -1059,7 +1063,7 @@ mod tests {
                 .collect();
             fold_hour(DAY0 + h * HOUR, &counts, None)
         };
-        let day = fold_day(DAY0, &[hour(1, 0, 3000), hour(2, 3000, 6000)]).unwrap();
+        let day = fold_day(DAY0 / DAY, &[hour(1, 0, 3000), hour(2, 3000, 6000)]).unwrap();
         assert_eq!(day.ops.len(), MAX_OPS);
         assert!(day
             .ops
@@ -1153,5 +1157,67 @@ mod tests {
             left,
             ["daily-2024-07.jsonl", "hourly-2024-09.jsonl", "notes.txt"]
         );
+    }
+}
+
+/// SB-276: the contract's own vectors for `foldHour` and `foldDay` (DEC-0153), vendored from
+/// passioncode-ai/fabric-agent-contract tag `v0.1.0+2026-11-06.1`,
+/// `fixtures/vectors/ops-digest.json` (sha256 `ed027cec…89bb52`), never edited here. Times are
+/// compared as hours: the vectors write `toISOString`'s fraction, Switchboard writes none, and
+/// the schema takes both.
+#[cfg(test)]
+mod contract_vectors {
+    use super::*;
+    use serde_json::{json, Value};
+
+    const VECTORS: &str = include_str!("vectors/ops-digest.json");
+
+    /// A digest as JSON with each `from` and `to` replaced by the hour it names.
+    fn hours_of(mut v: Value) -> Value {
+        for key in ["from", "to"] {
+            if let Some(s) = v.get(key).and_then(Value::as_str) {
+                v[key] = json!(hour_from_stamp(s));
+            }
+        }
+        v
+    }
+
+    #[test]
+    fn the_contracts_hour_and_day_vectors_fold_the_same() {
+        let vectors: Value = serde_json::from_str(VECTORS).unwrap();
+        let hours = vectors["hour"].as_array().unwrap();
+        assert_eq!(hours.len(), 11);
+        for v in hours {
+            let name = v["name"].as_str().unwrap();
+            let input = &v["input"];
+            let hour = hour_from_stamp(input["from"].as_str().unwrap()).unwrap();
+            let mut counts = Hour::new();
+            for c in input["counts"].as_array().unwrap() {
+                let op: &'static str =
+                    Box::leak(c["op"].as_str().unwrap().to_owned().into_boxed_str());
+                counts.entry(op).or_default().add(Counts {
+                    ok: c["ok"].as_u64().unwrap(),
+                    failed: c["failed"].as_u64().unwrap(),
+                    unknown: c["unknown"].as_u64().unwrap(),
+                });
+            }
+            let previous: Option<Hourly> =
+                serde_json::from_value(input["previous"].clone()).unwrap();
+            // As the writer does: only the hour just before is a baseline (OD-4).
+            let previous = previous.filter(|p| hour_from_stamp(&p.from) == Some(hour - HOUR));
+            let got = serde_json::to_value(fold_hour(hour, &counts, previous.as_ref())).unwrap();
+            assert_eq!(hours_of(got), hours_of(v["expected"].clone()), "{name}");
+        }
+        let days = vectors["day"].as_array().unwrap();
+        assert_eq!(days.len(), 4);
+        for v in days {
+            let name = v["name"].as_str().unwrap();
+            let input = &v["input"];
+            let day = input["day"].as_str().unwrap();
+            let start = hour_from_stamp(&format!("{day}T00:00:00Z")).unwrap();
+            let hourly: Vec<Hourly> = serde_json::from_value(input["hourly"].clone()).unwrap();
+            let got = serde_json::to_value(fold_day(start / DAY, &hourly)).unwrap();
+            assert_eq!(got, v["expected"], "{name}");
+        }
     }
 }

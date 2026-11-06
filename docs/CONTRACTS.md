@@ -2465,7 +2465,7 @@ Switchboard reads its own operations log as fabric-agent-contract DEC-0153
   first pass an owner takes the last hourly line already written as the hour before, so the hour
   right after a restart compares with it. A UTC day names at most 4095 operations across its
   hourly lines and in its daily line, the rest counted as `other_operations` (OD-3, SB-275;
-  `a_day_names_at_most_four_thousand_and_ninety_five_operations`)
+  `a_day_names_at_most_four_thousand_and_ninety_five_operations`); the contract's own vectors for both folds, vendored from fabric-agent-contract tag `v0.1.0+2026-11-06.1` into `crates/switchboard-runtime/src/vectors/ops-digest.json`, fold the same (`the_contracts_hour_and_day_vectors_fold_the_same`, SB-276)
   (`hours_the_computer_slept_through_are_never_written`,
   `the_hour_an_owner_stops_in_is_written_by_the_next_one_once`,
   `a_restart_inside_the_hour_goes_on_counting_it_and_writes_it_once`,
