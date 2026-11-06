@@ -2463,8 +2463,9 @@ Switchboard reads its own operations log as fabric-agent-contract DEC-0153
   `6eb61183`; `the_stopping_hour_is_written_before_its_day_folds`); a crash leaves no file and no
   partial line. At its
   first pass an owner takes the last hourly line already written as the hour before, so the hour
-  right after a restart compares with it. A line counts at most 4096 operations, the rest as
-  `other_operations`
+  right after a restart compares with it. A UTC day names at most 4095 operations across its
+  hourly lines and in its daily line, the rest counted as `other_operations` (OD-3, SB-275;
+  `a_day_names_at_most_four_thousand_and_ninety_five_operations`)
   (`hours_the_computer_slept_through_are_never_written`,
   `the_hour_an_owner_stops_in_is_written_by_the_next_one_once`,
   `a_restart_inside_the_hour_goes_on_counting_it_and_writes_it_once`,
@@ -2532,8 +2533,10 @@ data folder, Keychain items, log and login item are that user's own.
   macOS reads `net.inet.tcp.pcblist64` (no privileges needed, the list `netstat` reads), Linux
   `/proc/net/tcp` and `/proc/net/tcp6`; on those two an owner that cannot be read (a peer that has
   already closed, a list that could not be read) is refused too, as the norm asks
-  (`only_a_peer_read_as_this_account_is_served`). Windows reads no owner yet (SB-274): there the
-  capability alone decides. Closed
+  (`only_a_peer_read_as_this_account_is_served`). Windows (SB-274): `GetExtendedTcpTable` names the
+  peer socket's process and its token user is compared by SID with the owner's; a process the owner
+  may not open counts as another user's (`a_windows_tcp_row_names_the_peers_pid`,
+  `a_connection_from_this_user_is_this_users`, run by the Windows nightly). Closed
   connections are counted and logged by the next statistics pass as
   `proxy_refused_foreign_user` with `count`
   (`the_listener_serves_this_account_and_closes_a_peer_of_another`; the record layout is read back

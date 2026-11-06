@@ -26,7 +26,9 @@ const RISE_FACTOR: u64 = 2;
 const KEEP_MONTHS: i64 = 3;
 /// SB-257, DEC-0153 OD-1: the hour an owner stops in, kept for the next owner to write.
 const OPEN: &str = "open.json";
-/// A line counts at most this many operations; the rest count under `OTHER` (DEC-0153).
+/// A line counts at most this many operations; the rest count under `OTHER` (DEC-0153). OD-3
+/// bounds the UTC day, not only the line: at most `MAX_OPS - 1` names a day, in its hourly lines
+/// and in its daily one (SB-275).
 const MAX_OPS: usize = 4096;
 const OTHER: &str = "other_operations";
 /// Codes that say the outcome is not known.
@@ -124,6 +126,9 @@ struct State {
     /// SB-257, OD-1: the hours this owner saw itself running in (a pass or a counted line); an
     /// hour the computer slept through is never written as an empty one.
     seen: std::collections::BTreeSet<i64>,
+    /// SB-275, OD-3: the UTC day `day_ops` belongs to, and the operations named in it so far.
+    day: Option<i64>,
+    day_ops: std::collections::BTreeSet<&'static str>,
 }
 
 #[cfg(not(test))]
@@ -187,10 +192,17 @@ fn count_at(op: &'static str, outcome: &str, at: i64) {
                 s.hour = Some(hour);
             }
         }
-        let op = if s.counts.len() >= MAX_OPS - 1 && !s.counts.contains_key(op) {
-            OTHER
-        } else {
+        let day = at.div_euclid(DAY) * DAY;
+        if s.day != Some(day) {
+            s.day = Some(day);
+            s.day_ops.clear();
+        }
+        // A name the day already counts stays named; a new one only while the day has room.
+        let op = if s.day_ops.contains(op) || s.day_ops.len() < MAX_OPS - 1 {
+            s.day_ops.insert(op);
             op
+        } else {
+            OTHER
         };
         let c = s.counts.entry(op).or_default();
         match outcome {
@@ -355,6 +367,24 @@ pub(crate) fn fold_day(day: i64, hourly: &[Hourly]) -> Option<Daily> {
     }
     if seen.is_empty() {
         return None;
+    }
+    // SB-275, OD-3: the day names at most `MAX_OPS - 1` operations even when its hourly lines came
+    // from owners that each counted their own; the rest fold into `OTHER`.
+    let named = ops.keys().filter(|op| op.as_str() != OTHER).count();
+    if named > MAX_OPS - 1 {
+        let extra: Vec<String> = ops
+            .keys()
+            .filter(|op| op.as_str() != OTHER)
+            .skip(MAX_OPS - 1)
+            .cloned()
+            .collect();
+        let mut folded = Counts::default();
+        for op in extra {
+            if let Some(c) = ops.remove(&op) {
+                folded.add(c);
+            }
+        }
+        ops.entry(OTHER.to_owned()).or_default().add(folded);
     }
     let mut total = Counts::default();
     let ops = ops
@@ -982,6 +1012,60 @@ mod tests {
         restart();
         assert_eq!(len, MAX_OPS);
         assert_eq!(other, Some(11));
+    }
+
+    #[test]
+    fn a_day_names_at_most_four_thousand_and_ninety_five_operations() {
+        // SB-275, OD-3: the bound is the UTC day's, across its hours, and the next day starts over.
+        COUNTING.with(|c| c.set(true));
+        restart();
+        let name = |i: usize| -> &'static str { Box::leak(format!("op_{i}").into_boxed_str()) };
+        for i in 0..3000 {
+            count_at(name(i), "ok", DAY0 + 10 * HOUR);
+        }
+        for i in 3000..5000 {
+            count_at(name(i), "ok", DAY0 + 11 * HOUR);
+        }
+        // A name the day already counts stays named in a later hour.
+        count_at(name(7), "ok", DAY0 + 11 * HOUR);
+        let (named, other) = with_state(|s| {
+            (
+                s.counts.keys().filter(|op| **op != OTHER).count(),
+                s.counts.get(OTHER).map(|c| c.ok),
+            )
+        });
+        assert_eq!(
+            (named, other),
+            (MAX_OPS - 1 - 3000 + 1, Some(5000 - (MAX_OPS - 1) as u64))
+        );
+        count_at(name(4500), "ok", DAY0 + DAY);
+        let next = with_state(|s| s.counts.contains_key(name(4500)));
+        COUNTING.with(|c| c.set(false));
+        restart();
+        assert!(next, "the next day names its operations again");
+
+        // Hourly lines that together name more than the day may (two owners, say) fold too.
+        let hour = |h: i64, from: usize, to: usize| {
+            let counts: Hour = (from..to)
+                .map(|i| {
+                    (
+                        name(i),
+                        Counts {
+                            ok: 1,
+                            ..Counts::default()
+                        },
+                    )
+                })
+                .collect();
+            fold_hour(DAY0 + h * HOUR, &counts, None)
+        };
+        let day = fold_day(DAY0, &[hour(1, 0, 3000), hour(2, 3000, 6000)]).unwrap();
+        assert_eq!(day.ops.len(), MAX_OPS);
+        assert!(day
+            .ops
+            .iter()
+            .any(|o| o.op == OTHER && o.ok == (6000 - (MAX_OPS - 1)) as u64));
+        assert_eq!(day.total.ok, 6000);
     }
 
     #[test]
