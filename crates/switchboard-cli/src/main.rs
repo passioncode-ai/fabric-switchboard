@@ -3999,7 +3999,11 @@ mod moving_commands {
             assert!(found.len() >= 15, "{guide}: {}", found.len());
             for command in found {
                 if let Err(error) = Cli::try_parse_from(words(&command)) {
-                    panic!("{guide}: `{command}` does not parse: {error}");
+                    // `--version` and `--help` print and stop: clap answers them as an "error".
+                    use clap::error::ErrorKind::{DisplayHelp, DisplayVersion};
+                    if !matches!(error.kind(), DisplayVersion | DisplayHelp) {
+                        panic!("{guide}: `{command}` does not parse: {error}");
+                    }
                 }
             }
         }
