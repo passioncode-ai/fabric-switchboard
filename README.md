@@ -82,10 +82,10 @@ Moving to another Mac, or adding another macOS user: [docs/MOVING.md](docs/MOVIN
    `switchboard accounts add … --secret-stdin`; secrets come from your own Claude or Codex
    sign-in and go to the OS vault, never into an environment variable or an argument.
    `--data-dir <absolute dir>` points the CLI at a separate, disposable app-data directory.
-3. **MCP:** put the `switchboard` CLI on `PATH` by linking the one inside the app, so it updates
-   with the app: `ln -sf "/Applications/Fabric Switchboard.app/Contents/MacOS/switchboard"
-   ~/.local/bin/switchboard` (or Agents → *Link switchboard into ~/.local/bin*;
-   [INSTALL.md](docs/INSTALL.md)), then either `claude plugin marketplace add passioncode-ai/fabric-switchboard`
+3. **MCP:** put the `switchboard` CLI on `PATH` by linking the one inside your copy of the app,
+   so it updates with the app: Agents → *Link switchboard into ~/.local/bin* links the copy that
+   is running, or by hand the copy in your own `~/Applications` when there is one, else the one in
+   `/Applications` ([INSTALL.md](docs/INSTALL.md)), then either `claude plugin marketplace add passioncode-ai/fabric-switchboard`
    and `claude plugin install switchboard@switchboard` (server plus the `switching-accounts`
    skill), or `claude mcp add --scope user switchboard -- switchboard mcp`. `claude mcp list`
    then shows `switchboard … ✔ Connected`; a first call is the read-only
