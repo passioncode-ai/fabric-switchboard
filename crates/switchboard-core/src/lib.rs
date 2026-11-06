@@ -293,6 +293,10 @@ pub struct Snapshot {
     /// Such an account is disabled here: never renewed, rotated to or switched to.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub elsewhere: BTreeMap<String, i64>,
+    /// SB-284: where an account marked `elsewhere` works, in the person's words (a machine and
+    /// its user, a colleague's name), at most 80 characters. Only for marked accounts.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub locations: BTreeMap<String, String>,
 }
 
 /// A process-lifetime exclusive owner of one private metadata directory.
@@ -537,6 +541,13 @@ pub(crate) fn validate_snapshot(s: &Snapshot) -> Result<(), String> {
     chains::validate_chains(s)?;
     agent_keys::validate_agent_keys(s)?;
     kimi_accounts::validate_kimi_accounts(s)?;
+    if s.locations.len() > MAX_ACCOUNTS
+        || s.locations
+            .iter()
+            .any(|(id, l)| !s.elsewhere.contains_key(id) || !location_valid(l))
+    {
+        return Err("Invalid account metadata".into());
+    }
     for (key, id) in &s.routes {
         if !s.accounts.iter().any(|a| {
             a.id == *id
@@ -558,6 +569,14 @@ pub(crate) fn validate_snapshot(s: &Snapshot) -> Result<(), String> {
     }
     Ok(())
 }
+
+/// SB-284: where an account works, as a person writes it: 1 to 80 characters, no control
+/// character, no surrounding space.
+fn location_valid(l: &str) -> bool {
+    !l.is_empty() && l.chars().count() <= 80 && l.trim() == l && !l.chars().any(char::is_control)
+}
+/// Refusal: a location that is empty after trimming is fine (it clears); this is the rest.
+pub const LOCATION_INVALID: &str = "Say where it works in at most 80 characters, on one line.";
 
 // Refusals of a usage observation, coded for the log by `Store::usage_refusal_code` (PRD-17).
 const OBSERVATION_INVALID: &str = "Invalid usage observation";
@@ -1846,6 +1865,7 @@ impl Store {
         } else {
             // Enabling an account here says it is used here (SB-175).
             candidate.elsewhere.remove(id);
+            candidate.locations.remove(id);
         }
         append_event(&mut candidate, "account_updated", Some(id), "success");
         self.publish(&mut state, candidate)?;
@@ -1857,6 +1877,21 @@ impl Store {
     /// rotates to or switches to it and the other machine's sign-in is never spent from here;
     /// clearing the mark enables it again.
     pub fn mark_elsewhere(&self, id: &str, on: bool, now: i64) -> Result<(), String> {
+        self.mark_elsewhere_at(id, on, now, None)
+    }
+    /// [`Store::mark_elsewhere`] that also says where the account works (SB-284): `Some` sets
+    /// it (blank clears it), `None` keeps what was said. Clearing the mark clears it too.
+    pub fn mark_elsewhere_at(
+        &self,
+        id: &str,
+        on: bool,
+        now: i64,
+        location: Option<&str>,
+    ) -> Result<(), String> {
+        let location = location.map(str::trim);
+        if location.is_some_and(|l| !location_valid(l) && !l.is_empty()) {
+            return Err(LOCATION_INVALID.into());
+        }
         let mut state = self.lock()?;
         let mut candidate = state.clone();
         let a = candidate
@@ -1866,10 +1901,21 @@ impl Store {
             .ok_or("Account not found")?;
         a.enabled = !on;
         if on {
-            candidate.elsewhere.insert(id.to_owned(), now);
+            // A mark already there keeps its time: saying where does not move it.
+            candidate.elsewhere.entry(id.to_owned()).or_insert(now);
             candidate.routes.retain(|_, value| value != id);
+            match location {
+                Some("") => {
+                    candidate.locations.remove(id);
+                }
+                Some(l) => {
+                    candidate.locations.insert(id.to_owned(), l.to_owned());
+                }
+                None => {}
+            }
         } else {
             candidate.elsewhere.remove(id);
+            candidate.locations.remove(id);
         }
         append_event(&mut candidate, "account_updated", Some(id), "success");
         self.publish(&mut state, candidate)?;
@@ -1902,6 +1948,7 @@ impl Store {
             p.shared_accounts.retain(|s| s != id);
         }
         candidate.elsewhere.remove(id);
+        candidate.locations.remove(id);
         chains::prune(&mut candidate);
         append_event(&mut candidate, "account_removed", Some(id), "success");
         self.publish(&mut state, candidate)?;

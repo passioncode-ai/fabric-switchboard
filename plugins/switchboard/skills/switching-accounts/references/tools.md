@@ -49,11 +49,13 @@ Annotations: `readOnlyHint: true`.
 | `rotation[]` | automatic switching per group: `provider`, `pool`, `target`, `enabled`, `threshold_percent`, `last_decision` |
 | `limited[]` | accounts held after a provider limit error: `account_id`, `until` (when it may be tried again, Unix seconds), `resets_at` (the provider's own reset, or null when `until` is an estimated hold; a reset more than seven days out is held seven days, so `until` can be earlier), `kind` (`quota` when Claude Code named a subscription window (see `limit_type`), else `unknown`), `limit_type`, `confidence` (`attributed` for a managed request, `inferred` for a Claude Code transcript), `reason` (why the provider would not let the account go on, from Claude Code's own report: `org_spend_cap_reached`, `group_zero_credit_limit`, `org_level_disabled`…; null when not said), `hidden` (true when the provider refused while its usage figures from the last ten minutes still showed room: a spend or credit cap those figures do not report), `scope` (`unknown`: a shared organisation budget is not ruled out), `source`, `observed_at`, `event_id`. A hold is not a reset; never present `until` as one when `resets_at` is null |
 
-### `switchboard_accounts`: `provider?: "claude" | "codex"`
+### `switchboard_accounts`: `provider?: "claude" | "codex"`, `machine?: "here" | "elsewhere"`
 
 `accounts[]`: `id`, `label`, `provider`, `kind` (`oauth`, `api_key`, `setup_token`), `pool` (the group id),
-`enabled`, `selected_for_next_request`, `signed_in_cli`, `lowest_remaining_percent`,
-`usage_fresh`.
+`groups` (every group it serves, its own first), `enabled`, `selected_for_next_request`,
+`signed_in_cli`, `lowest_remaining_percent`, `usage_fresh`, `organization`, `elsewhere` (used on
+another machine) and `location` (where, when said). `machine` lists only this machine's accounts
+or only those used elsewhere.
 
 ### `switchboard_usage`: `account_id?`, `refresh?: bool` (default false)
 
@@ -323,10 +325,13 @@ Result: `{path, session, results[]}`, one entry per provider this session can us
 | any × isolated | `other_session` |
 | rule's account removed, or the change refused | `failed` |
 
-### `switchboard_project_edit`: `pool`, `name?`, `organization?`, `add_accounts?`, `remove_accounts?`, `add_folders?`, `remove_folders?`
+### `switchboard_project_edit`: `pool`, `name?`, `organization?`, `organizations?`, `add_accounts?`, `remove_accounts?`, `add_folders?`, `remove_folders?`, `move_accounts?`
 
 Only when the operator asks. Changes a group by delta; anything not named stays. A name the
-group does not hold is refused; `organization` is an id, a name or `personal`. Result:
+group does not hold is refused; `organization` is an id, a name or `personal`; `organizations` is
+the whole list (none, one or several, the first the group's own context) and wins. An account of
+another group in `add_accounts` keeps its own group and serves this one too; `move_accounts`
+moves it here instead; `remove_accounts` of a shared account only stops it serving here. Result:
 `{project, message}` ("Group saved. It is visible in the Switchboard app under Groups.").
 
 ### `switchboard_project_move_root`: `folder`, `pool`, `also?`, `from?`
@@ -369,23 +374,26 @@ out for good. `folder` as `switchboard_project_suggestions` lists it.
 The repository owners (`github.com/example`) whose new repositories join the group by
 themselves. Without `add` or `remove`, reads them; changing them only when the operator asks.
 
-### `switchboard_account_update`: `account_id`, `label?`, `enabled?`, `elsewhere?`
+### `switchboard_account_update`: `account_id`, `label?`, `enabled?`, `elsewhere?`, `location?`
 
 Only when the operator asks. Renames, enables or disables an account; `elsewhere: true`
-disables it here because another machine uses it. At least one field ("Name a label, enabled
-or elsewhere to change.").
+disables it here because another machine uses it; `location` says where it works (a machine and
+its user, or a colleague, at most 80 characters) and marks it so; an empty one clears it. At
+least one field ("Name a label, enabled, elsewhere or location to change.").
 
 ### `switchboard_account_move`: `account_id`, `pool`
 
 Only when the operator asks. Moves an account into the group `pool`, or back with `default`;
-the account the ordinary Claude Code or Codex uses cannot join a group.
+the account the ordinary Claude Code or Codex uses cannot join a group. To let an account serve
+one more group and keep its own, add it with `switchboard_project_edit` instead.
 
 ### `switchboard_organization_set`: `action`, `id?`, `name?`, `domains?`, `account_id?`, `organization?`
 
 Only when the operator asks. `action` is `add` (name, domains), `edit` (id; name and/or domains,
 which replace the list), `remove` (id), `assign` (account_id, organization: an id, `personal` or
-`auto`) or `passioncode_read` (read the PassionCode.ai organizations again; connecting is the
-person's).
+`auto`; or `organizations`: every context of an account that works for several, the first its
+own, the rest it also works for, empty to let the rules decide) or `passioncode_read` (read the
+PassionCode.ai organizations again; connecting is the person's).
 
 ### `switchboard_rotation_set`: `provider`, `pool?`, `target?`, `enabled?`, `threshold_percent?`, `hysteresis_percent?`, `cooldown_seconds?`, `max_age_seconds?`
 

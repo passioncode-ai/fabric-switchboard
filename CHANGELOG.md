@@ -8,6 +8,8 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- When you mark an account as used on another machine, you can say where it works: a machine and its user, or a colleague. The card shows it, and *Accounts* filters by *On this computer* and *On other machines* (SB-284). The CLI (`accounts update --location`) and MCP (`location`, `machine`) do the same.
+
 ## 0.7.21
 
 - Organizations and groups now link many to many (SB-282): an organization may have several groups, and a group may belong to several organizations or to none. An account may serve several groups with one sign-in and one quota, and may work for several organizations. In the group dialog the organizations are check boxes; an account of another group is shared rather than moved, and *Move to another pool…* still moves it. A file with such links is schema 9, which 0.7.20 and older do not open.

@@ -699,6 +699,10 @@ enum Accounts {
         /// switches to it, automatically or not (disabled here); `false`: it is used here again.
         #[arg(long, action = clap::ArgAction::Set)]
         elsewhere: Option<bool>,
+        /// Where it works, in your words (a machine and its user, a colleague), at most 80
+        /// characters; marks it as used on another machine. An empty value clears it.
+        #[arg(long)]
+        location: Option<String>,
     },
     /// Move an account into a group, or back to the default group. Joining or leaving a group
     /// is that group's change (`project edit`); the account the ordinary Claude Code or Codex is
@@ -1378,11 +1382,13 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                 label,
                 enabled,
                 elsewhere,
+                location,
             } => Operation::Update {
                 id: id.clone(),
                 label: label.clone(),
                 enabled: *enabled,
                 elsewhere: *elsewhere,
+                location: location.clone(),
             },
             Accounts::Move { id, pool } => Operation::MoveAccount {
                 id: id.clone(),

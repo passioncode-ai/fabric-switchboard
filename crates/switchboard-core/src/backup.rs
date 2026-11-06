@@ -153,6 +153,9 @@ struct Payload {
     /// SB-175: accounts marked as used on another machine (old account id → when).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     elsewhere: BTreeMap<String, i64>,
+    /// SB-284: where each of those works (old account id → the person's words).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    locations: BTreeMap<String, String>,
 }
 /// One agent key inside the sealed payload. Never Debug: it carries the value.
 #[derive(Serialize, Deserialize)]
@@ -328,6 +331,7 @@ pub fn write(
             })
             .collect(),
         elsewhere: snapshot.elsewhere.clone(),
+        locations: snapshot.locations.clone(),
         memberships: snapshot.memberships.into_iter().collect(),
     })
     .map_err(|_| UNAVAILABLE)?;
@@ -664,7 +668,8 @@ pub fn restore(
     // SB-175: a restore on this machine keeps what the person marked as used elsewhere.
     for (old, at) in &payload.elsewhere {
         if let Some(id) = ids.get(old) {
-            let _ = store.mark_elsewhere(id, true, *at);
+            let location = payload.locations.get(old).map(String::as_str);
+            let _ = store.mark_elsewhere_at(id, true, *at, location);
         }
     }
     for (old, choice) in &payload.memberships {
@@ -958,6 +963,7 @@ mod tests {
             project_shared_accounts: BTreeMap::new(),
             also_organizations: BTreeMap::new(),
             elsewhere: BTreeMap::new(),
+            locations: BTreeMap::new(),
         };
         let json = serde_json::to_vec(&payload).unwrap();
         let old: OldPayload = serde_json::from_slice(&json).expect("an older build reads it");
@@ -1036,7 +1042,9 @@ mod tests {
             .assign_organization(&b.id, Some(PERSONAL_WORD))
             .unwrap();
         // SB-175: b is also marked as used on another machine.
-        original.mark_elsewhere(&b.id, true, 900).unwrap();
+        original
+            .mark_elsewhere_at(&b.id, true, 900, Some("Mac Studio"))
+            .unwrap();
         let repo = temp.path().join("repo");
         std::fs::create_dir_all(&repo).unwrap();
         original
@@ -1072,6 +1080,11 @@ mod tests {
             Some(PERSONAL_WORD)
         );
         assert_eq!(snap.elsewhere.get(&b2.id), Some(&900));
+        // SB-284: and where it works.
+        assert_eq!(
+            snap.locations.get(&b2.id).map(String::as_str),
+            Some("Mac Studio")
+        );
         assert!(!b2.enabled);
         // A second restore adds nothing twice.
         let again = restore(&fresh, &backups, &info.file, &keys).unwrap();

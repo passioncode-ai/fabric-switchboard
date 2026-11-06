@@ -36,7 +36,7 @@ export const nativeAdapter: Adapter = {
   runtime: () => readWithDeadline(invoke('runtime_status')),
   add: (input) => invoke('add_account', { ...input }),
   update: (id, label, enabled) => invoke('update_account', { id, label, enabled }),
-  markElsewhere: (id, on) => invoke('mark_elsewhere', { id, on }),
+  markElsewhere: (id, on, location) => invoke('mark_elsewhere', { id, on, location: location ?? null }),
   remove: (id) => invoke('remove_account', { id }),
   select: ({ id, provider, pool }) => invoke('select_account', { id, provider, pool }),
   launch: (id, mode, workingDirectory) => invoke('launch_account', { id, mode, workingDirectory }),
@@ -124,6 +124,7 @@ export const nativeAdapter: Adapter = {
 // Only exact, fixed backend vocabulary is surfaced. Unknown failures never print
 // raw provider output, credentials, filesystem paths, or serialized error objects.
 const safeErrors = new Set([
+  'Say where it works in at most 80 characters, on one line.',
   'A group can belong to at most 16 organizations.',
   // The CLI node's new backend sentences (N2 of 0.6.82), shown as they are; the older ones are mapped below.
   'No OpenRouter key is saved. Add one on the API keys page, or run switchboard agents openrouter set.',

@@ -48,13 +48,13 @@ the launch injected it with the session and data folder set explicitly.
 | `switchboard_onboarding` | no | setup steps: what is done, what to run, what is the person's (`switchboard onboard` is the guide) |
 | `switchboard_project_context` | no | show a folder's rule without changing anything |
 | `switchboard_projects` | no | every group: its id (pool), folders, sources, reserved accounts, and the folder rules |
-| `switchboard_project_edit` | yes | change a project by delta (accounts and folders in or out, rename, its organization: an id, a name or `personal`), only when the operator asks; with an organization defined, a group runs only on its organization's accounts (personal ones when it has none) and refuses others |
+| `switchboard_project_edit` | yes | change a project by delta (accounts and folders in or out, rename, its organizations: none, one or several by id or name), only when the operator asks; an account of another group added here keeps its own group and serves this one too (`move_accounts` moves it); with an organization defined, a group runs only on its organizations' accounts (personal ones when it has none) and refuses others |
 | `switchboard_codex_route` | yes | whether Codex sessions in project folders use the projects' Codex accounts; turn it on or off only when the operator asks |
 | `switchboard_project_move_root` | yes | move a repository with its worktrees and clones to another project, or put a loose one in a project, only when the operator asks |
 | `switchboard_repository_map` | no | the Git repositories under given folders (default `~/DATA`), each with its project or none |
 | `switchboard_statistics` | no | requests and the provider's token counts of the last 1-90 days by group, project, account, coding agent and day |
 | `switchboard_events` | no | recent activity as fixed codes |
-| `switchboard_account_update` | yes | rename, enable or disable an account, only when the operator asks |
+| `switchboard_account_update` | yes | rename, enable or disable an account, or mark it as used on another machine and say where (`location`), only when the operator asks |
 | `switchboard_account_move` | yes | move an account into a project's pool or back to `default`, only when the operator asks |
 | `switchboard_organizations` | no | the organizations and which account belongs to which, with why (person, provider team, domain), and `passioncode`: whether PassionCode.ai is connected and when it was read (connecting is the person's, in the browser: `switchboard org connect`) |
 | `switchboard_organization_set` | yes | add, edit or remove an organization, or place an account (an organization, personal, auto), only when the operator asks |

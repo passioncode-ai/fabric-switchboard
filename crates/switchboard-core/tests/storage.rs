@@ -1967,6 +1967,63 @@ fn an_account_used_on_another_machine_is_never_chosen_here() {
     assert!(store.mark_elsewhere("missing", true, 1).is_err());
 }
 
+#[test]
+fn an_account_used_elsewhere_says_where() {
+    // SB-284: where a marked account works travels with the mark, as schema version 10; it goes
+    // when the mark goes, and saying where keeps the mark's time.
+    let (root, vault, store) = setup();
+    let a = add(&store, "synthetic-secret-alpha");
+    store
+        .mark_elsewhere_at(&a.id, true, 1_000, Some("  Mac Studio, sshlg "))
+        .unwrap();
+    store.mark_elsewhere_at(&a.id, true, 5_000, None).unwrap();
+    let snap = store.snapshot().unwrap();
+    assert_eq!(
+        snap.elsewhere.get(&a.id),
+        Some(&1_000),
+        "the mark keeps its time"
+    );
+    assert_eq!(
+        snap.locations.get(&a.id).map(String::as_str),
+        Some("Mac Studio, sshlg")
+    );
+    drop(store);
+    let disk: serde_json::Value =
+        serde_json::from_slice(&fs::read(root.path().join("accounts.json")).unwrap()).unwrap();
+    assert_eq!(disk["schema_version"], 10);
+    let store = reopen(root.path(), vault);
+    assert_eq!(
+        store
+            .snapshot()
+            .unwrap()
+            .locations
+            .get(&a.id)
+            .map(String::as_str),
+        Some("Mac Studio, sshlg")
+    );
+    // Too long, or on two lines: refused, nothing changes.
+    let long = "x".repeat(81);
+    for bad in [long.as_str(), "Mac\nStudio"] {
+        assert_eq!(
+            store
+                .mark_elsewhere_at(&a.id, true, 1, Some(bad))
+                .unwrap_err(),
+            switchboard_core::LOCATION_INVALID
+        );
+    }
+    // A blank one clears what was said; the mark stays.
+    store.mark_elsewhere_at(&a.id, true, 1, Some(" ")).unwrap();
+    let snap = store.snapshot().unwrap();
+    assert!(snap.locations.is_empty() && snap.elsewhere.contains_key(&a.id));
+    // Using it here again clears both.
+    store
+        .mark_elsewhere_at(&a.id, true, 1, Some("Anna's MacBook"))
+        .unwrap();
+    store.update_fields(&a.id, None, Some(true)).unwrap();
+    let snap = store.snapshot().unwrap();
+    assert!(snap.locations.is_empty() && snap.elsewhere.is_empty());
+}
+
 /// A vault whose reads wait until released, like a Keychain read held by `/usr/bin/security`.
 struct HeldVault {
     inner: MemoryVault,

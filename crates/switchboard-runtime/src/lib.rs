@@ -121,6 +121,10 @@ pub enum Operation {
         /// clears the mark (enabled again).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         elsewhere: Option<bool>,
+        /// SB-284: where the account works (a machine and its user, a colleague), which also
+        /// marks it as used elsewhere; blank clears what was said.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        location: Option<String>,
     },
     Remove {
         id: String,
@@ -3992,12 +3996,17 @@ async fn execute(
             label,
             enabled,
             elsewhere,
+            location,
         } => {
-            if label.is_some() || enabled.is_some() || elsewhere.is_none() {
+            if label.is_some() || enabled.is_some() || (elsewhere.is_none() && location.is_none()) {
                 store.update_fields(&id, label, enabled)?;
             }
-            if let Some(on) = elsewhere {
-                store.mark_elsewhere(&id, on, monitor::now())?;
+            match (elsewhere, location) {
+                (Some(false), _) => store.mark_elsewhere(&id, false, monitor::now())?,
+                (Some(true), location) | (None, location @ Some(_)) => {
+                    store.mark_elsewhere_at(&id, true, monitor::now(), location.as_deref())?
+                }
+                (None, None) => {}
             }
             Ok(Value::Null)
         }
@@ -10665,6 +10674,7 @@ mod usage_gate_tests {
         tokio::time::timeout(
             std::time::Duration::from_secs(2),
             runtime.execute(Operation::Update {
+                location: None,
                 id: a.id.clone(),
                 label: Some("renamed".into()),
                 enabled: Some(true),
@@ -10678,6 +10688,36 @@ mod usage_gate_tests {
         assert_eq!(first.await.unwrap().unwrap()["used_percent"], 42.0);
         assert_eq!(second.await.unwrap().unwrap()["used_percent"], 42.0);
         assert_eq!(up.calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn an_update_can_say_where_an_account_works() {
+        // SB-284: `location` marks the account as used elsewhere and says where; `elsewhere:
+        // false` clears both.
+        let root = tempfile::tempdir().unwrap();
+        let runtime = fixtures::runtime(root.path(), signed_out, activates).await;
+        let id = fixtures::save(&runtime.store, "synthetic-where", "default").id;
+        let update = |elsewhere: Option<bool>, location: Option<&str>| Operation::Update {
+            id: id.clone(),
+            label: None,
+            enabled: None,
+            elsewhere,
+            location: location.map(str::to_owned),
+        };
+        runtime
+            .execute(update(None, Some("Mac Studio, user alex")))
+            .await
+            .unwrap();
+        let snapshot = runtime.store.snapshot().unwrap();
+        assert!(snapshot.elsewhere.contains_key(&id));
+        assert_eq!(
+            snapshot.locations.get(&id).map(String::as_str),
+            Some("Mac Studio, user alex")
+        );
+        assert!(!snapshot.accounts[0].enabled);
+        runtime.execute(update(Some(false), None)).await.unwrap();
+        let snapshot = runtime.store.snapshot().unwrap();
+        assert!(snapshot.elsewhere.is_empty() && snapshot.locations.is_empty());
     }
 
     #[tokio::test]

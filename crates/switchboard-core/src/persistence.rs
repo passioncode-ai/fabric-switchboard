@@ -31,7 +31,10 @@ fn schema_version(snapshot: &Snapshot) -> u32 {
     // Version 9 only while a link is many (SB-282): a group of several organizations, an account
     // a group shares from another, or an account of several organizations. A 0.7.20 or older
     // reader would refuse the unknown fields.
-    if snapshot
+    // Version 10 only while an account carries where it works (SB-284).
+    if !snapshot.locations.is_empty() {
+        10
+    } else if snapshot
         .projects
         .iter()
         .any(|p| p.organizations.len() > 1 || !p.shared_accounts.is_empty())
@@ -140,7 +143,7 @@ pub(crate) fn open(root: &Path) -> Result<(File, Snapshot), String> {
             }
             let disk: Disk = serde_json::from_slice(&bytes)
                 .map_err(|_| "Account metadata is corrupt; restore a known-good backup")?;
-            if !matches!(disk.schema_version, 1..=9) {
+            if !matches!(disk.schema_version, 1..=10) {
                 return Err("Unsupported account metadata version".into());
             }
             validate_snapshot(&disk.snapshot)?;
@@ -222,7 +225,7 @@ pub(crate) fn open(root: &Path) -> Result<(File, Snapshot), String> {
         let bytes = read_private(&path, MAX_FILE)?;
         let disk: Disk = serde_json::from_slice(&bytes)
             .map_err(|_| "Account metadata is corrupt; restore a known-good backup")?;
-        if !matches!(disk.schema_version, 1..=9) {
+        if !matches!(disk.schema_version, 1..=10) {
             return Err("Unsupported account metadata version".into());
         }
         validate_snapshot(&disk.snapshot)?;
