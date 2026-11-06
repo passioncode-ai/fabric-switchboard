@@ -37,6 +37,17 @@ pub struct Bundle {
     /// SB-270: spending ceilings of the computer and of its groups.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub ceilings: Vec<Ceiling>,
+    /// SB-272: an administrator's signature over the rest of the file.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signature: Option<crate::settings_signing::Signature>,
+}
+
+/// SB-272: the bytes a signature covers: the bundle as Switchboard writes it, without its
+/// signature.
+pub fn signed_message(bundle: &Bundle) -> Vec<u8> {
+    let mut unsigned = bundle.clone();
+    unsigned.signature = None;
+    serde_json::to_vec(&unsigned).unwrap_or_default()
 }
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -165,6 +176,7 @@ pub fn export(root: &Path, snapshot: &Snapshot, now: i64) -> Bundle {
                     .collect()
             })
             .unwrap_or_default(),
+        signature: None,
     }
 }
 
@@ -780,6 +792,7 @@ mod tests {
             inbox: None,
             shell_hook: None,
             ceilings: vec![],
+            signature: None,
         };
         let root = tempfile::tempdir().unwrap();
         let store = open_store(root.path());
@@ -838,6 +851,7 @@ mod tests {
             inbox: None,
             shell_hook: None,
             ceilings: vec![],
+            signature: None,
         };
         let root = tempfile::tempdir().unwrap();
         let into = tempfile::tempdir().unwrap();
@@ -1092,6 +1106,39 @@ mod tests {
         assert_eq!(
             crate::shell::map::choice(new_root.path()),
             crate::shell::map::Choice::Off
+        );
+    }
+
+    #[test]
+    fn a_signed_file_reads_as_signed_after_the_trip_and_a_changed_one_does_not() {
+        // SB-272: what `settings export --sign` writes and `settings import` reads back.
+        let root = tempfile::tempdir().unwrap();
+        let store = open_store(root.path());
+        store
+            .add_organization("Acme", &["acme.example".into()])
+            .unwrap();
+        let mut bundle = export(root.path(), &store.snapshot().unwrap(), 7);
+        let message = signed_message(&bundle);
+        bundle.signature =
+            Some(crate::settings_signing::sign(root.path(), &store, &message).unwrap());
+        let key = bundle.signature.as_ref().unwrap().key.clone();
+        // The file as the person carries it: JSON, read back by another computer.
+        let text = serde_json::to_vec_pretty(&bundle).unwrap();
+        let read = parse(&text).unwrap();
+        let check = |b: &Bundle, signer: Option<&str>| {
+            crate::settings_signing::verify(&signed_message(b), b.signature.as_ref(), signer)
+        };
+        let verdict = check(&read, Some(&key));
+        assert_eq!((verdict.state, verdict.expected), ("signed", Some(true)));
+        let mut changed = read.clone();
+        changed.organizations[0].domains = vec!["evil.example".into()];
+        assert_eq!(check(&changed, None).state, "invalid");
+        let mut unsigned = read;
+        unsigned.signature = None;
+        assert_eq!(check(&unsigned, None).state, "unsigned");
+        assert_eq!(
+            crate::settings_signing::refusal(&check(&unsigned, Some(&key))),
+            Some(crate::settings_signing::NOT_SIGNED_BY)
         );
     }
 }

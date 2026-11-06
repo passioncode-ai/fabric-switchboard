@@ -534,7 +534,15 @@ fn folder(path: &Option<PathBuf>) -> Result<PathBuf, String> {
 enum SettingsCmd {
     /// Print this machine's settings as a `switchboard-settings/1` file
     /// (`switchboard settings export > settings.json`).
-    Export,
+    Export {
+        /// Sign the file with this computer's settings signing key, so members can check it came
+        /// from you (`settings signer` prints the key to publish).
+        #[arg(long)]
+        sign: bool,
+    },
+    /// The public key this computer signs settings files with (made on first use). Publish it
+    /// for your organization's members; its private half stays in this computer's vault.
+    Signer,
     /// Show what importing a settings file would do here, then do it with `--apply`.
     Import {
         /// The file `settings export` wrote.
@@ -552,6 +560,10 @@ enum SettingsCmd {
         /// are made from them.
         #[arg(long)]
         clone: bool,
+        /// The key your organization published (`settings signer` printed it): the file must
+        /// be signed by it, or nothing is applied.
+        #[arg(long)]
+        signer: Option<String>,
     },
 }
 #[derive(Subcommand)]
@@ -1381,12 +1393,14 @@ async fn run(cli: &Cli) -> Result<Value, String> {
         Command::Status => Operation::Status,
         Command::Stats { days } => Operation::Statistics { days: Some(*days) },
         Command::Settings { command } => match command {
-            SettingsCmd::Export => Operation::SettingsExport,
+            SettingsCmd::Export { sign } => Operation::SettingsExport { sign: *sign },
+            SettingsCmd::Signer => Operation::SettingsSigner,
             SettingsCmd::Import {
                 file,
                 under,
                 apply,
                 clone,
+                signer,
             } => {
                 let meta = std::fs::metadata(file).map_err(|_| "Settings file unavailable.")?;
                 if meta.len() > switchboard_runtime::settings_bundle::MAX_BYTES as u64 {
@@ -1407,6 +1421,7 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                     under: under.clone(),
                     apply: *apply,
                     clone: *clone,
+                    signer: signer.clone(),
                 }
             }
         },
@@ -3584,6 +3599,10 @@ mod mcp_parity {
         (
             "settings import",
             Not("SB-176: reads a file the person brought from another machine and adds groups and policies; the person runs it once per move"),
+        ),
+        (
+            "settings signer",
+            Not("SB-272: the administrator publishes this key to the organization's members; an agent has no members to publish it to"),
         ),
         ("status", Tool("switchboard_status")),
         // `sessions` itself (and its `--all`, `--history`) answers through the same tool.

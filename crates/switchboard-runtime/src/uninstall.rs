@@ -45,6 +45,8 @@ const OWNED: &[&str] = &[
     "vesta.json",
     // The Fabric Inbox key's file (SB-256); its secret's vault item is deleted below.
     "inbox.json",
+    // The settings signing key's file (SB-272); its private key's vault item is deleted below.
+    "settings-signing.json",
     // Folders taken out of their group lately (SB-172).
     "released-folders.json",
     // The terminal hook's choice and the installer's record (SB-183); the start-file blocks
@@ -300,6 +302,11 @@ pub fn uninstall_with(
     if let Some(item) = crate::inbox::vault_item(root) {
         if let Err(error) = vault.delete(&item) {
             failures.push(json!({"item": "fabric_inbox_key", "error": error}));
+        }
+    }
+    if let Some(item) = crate::settings_signing::vault_item(root) {
+        if let Err(error) = vault.delete(&item) {
+            failures.push(json!({"item": "settings_signing_key", "error": error}));
         }
     }
     if let Err(error) = (places.remove_orphan_key)() {

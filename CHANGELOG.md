@@ -8,6 +8,8 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- An administrator can now sign the settings file with `switchboard settings export --sign` and publish the key `switchboard settings signer` prints. Members import with `--signer` and the key: a file that key did not sign, or one changed after signing, is refused (SB-272).
+
 ## 0.7.18
 
 - When Switchboard finds that another program took the port its proxy used, it now starts with a new key for its sessions, so nothing the other program may have received still works. Sessions started before have to be started again (SB-269).

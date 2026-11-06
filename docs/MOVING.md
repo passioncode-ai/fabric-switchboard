@@ -110,6 +110,25 @@ fallback chains (they name accounts of the old computer), and the history and st
 
    Every step reads `done` or `optional` when the new computer is ready.
 
+## A settings file from your organization's administrator
+
+An administrator can sign the settings file, so each member's computer can check that the file is
+the one the administrator wrote. On the administrator's computer, print the key once and publish
+it to the members, then sign each file:
+
+```sh
+switchboard settings signer
+switchboard settings export --sign > switchboard-settings.json
+```
+
+The private half of the key stays in that computer's vault. A member imports with the published
+key; a file that key did not sign, or one changed after signing, is refused and nothing is
+applied:
+
+```sh
+switchboard settings import switchboard-settings.json --signer <published key> --apply
+```
+
 ## Another macOS user on the same Mac
 
 Each macOS user runs their own Switchboard: its app, data folder, Keychain items, log and login

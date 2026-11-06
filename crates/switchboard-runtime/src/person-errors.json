@@ -207,6 +207,10 @@
     "Inbox key invalid": "That is not a Fabric Inbox key. Give the Client Id and Client Secret Fabric Inbox showed when you made the key, without spaces.",
     "No inbox key saved": "No Fabric Inbox key is saved. Save one with switchboard inbox set.",
     "Inbox key unreadable": "The saved Fabric Inbox key could not be read. Remove it with switchboard inbox remove, then save it again.",
-    "A sign-in without Terminal is available for Claude on macOS and Linux only.": "Signing in without Terminal works for Claude on macOS and Linux. Use the ordinary sign-in."
+    "A sign-in without Terminal is available for Claude on macOS and Linux only.": "Signing in without Terminal works for Claude on macOS and Linux. Use the ordinary sign-in.",
+    "Settings signing key unreadable": "The key that signs settings files could not be read. Check that your keychain is open, then try again.",
+    "Settings signer invalid": "That is not a signing key. Give the public key your organization published, as switchboard settings signer printed it.",
+    "Settings file not signed by that key": "This settings file is not signed by the key you named. Ask your administrator for the file they signed.",
+    "Settings file signature invalid": "This settings file was changed after it was signed. Ask your administrator for the file again."
   }
 }
