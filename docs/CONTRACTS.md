@@ -2526,6 +2526,18 @@ data folder, Keychain items, log and login item are that user's own.
   takes only its own session token, pool capabilities and folder capabilities, all derived from
   its own random session token
   (`two_users_owners_on_one_computer_never_share_a_port_or_a_token`).
+- **Connections from another user (SB-273).** A capability alone is not enough: the proxy looks up
+  the uid that owns the other end of each loopback connection it accepts and closes one whose
+  process belongs to another user before reading any of it (the studio-spaces port norm, point 2 b).
+  macOS reads `net.inet.tcp.pcblist64` (no privileges needed, the list `netstat` reads), Linux
+  `/proc/net/tcp` and `/proc/net/tcp6`; on those two an owner that cannot be read (a peer that has
+  already closed, a list that could not be read) is refused too, as the norm asks
+  (`only_a_peer_read_as_this_account_is_served`). Windows reads no owner yet (SB-274): there the
+  capability alone decides. Closed
+  connections are counted and logged by the next statistics pass as
+  `proxy_refused_foreign_user` with `count`
+  (`the_listener_serves_this_account_and_closes_a_peer_of_another`; the record layout is read back
+  from a live connection by `a_connection_from_this_account_reads_back_as_this_account`).
 - **A folder both users work in.** Claude Code reads one `.claude/settings.local.json` for every
   session in a folder, so it can carry one user's route only. The user who owns the folder, its
   `.claude` folder or the settings file keeps it: another user's owner neither reads nor writes
