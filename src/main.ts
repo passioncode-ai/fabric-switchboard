@@ -711,7 +711,7 @@ function wantRoots() {
   rootsLoading = true;
   void adapter.projectRoots().then((roots) => { projectRoots = roots; rootsKey = key; }, () => { rootsKey = key; }).finally(() => { rootsLoading = false; render(); });
 }
-const derivedText = (kind: 'worktree' | 'clone' | 'module' | null, branch: string | null) => [kind === 'clone' ? t('clone') : kind === 'worktree' ? t('worktree') : kind === 'module' ? t('module') : '', branch ?? ''].filter(Boolean).join(' · ');
+const derivedText = (kind: 'worktree' | 'clone' | 'module' | 'data' | null, branch: string | null) => [kind === 'clone' ? t('clone') : kind === 'worktree' ? t('worktree') : kind === 'module' ? t('module') : kind === 'data' ? t('agent data') : '', branch ?? ''].filter(Boolean).join(' · ');
 function projectFolderList(project: Project) {
   wantRoots();
   const wrap = el('div', 'project-folder-block');

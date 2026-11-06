@@ -818,6 +818,7 @@ export const RU: Record<string, string> = {
   "clone": "клон",
   "worktree": "рабочая копия",
   "module": "подмодуль",
+  "agent data": "данные агента",
   "Remove {folder} with its {n} worktrees and clones": "Убрать {folder} вместе с его рабочими копиями и клонами ({n})",
   "{n} rules": "{n} правило|{n} правила|{n} правил",
   "settings": "настройки",
