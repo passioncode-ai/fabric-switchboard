@@ -36,7 +36,14 @@ The app and CLI are Developer ID signed with hardened runtime and **notarized by
 
 ### Connect a coding agent (MCP)
 
-1. Put the CLI on your `PATH` as a **link** to the one inside the app, so it updates with the app: Agents → *Link switchboard into ~/.local/bin*, or `mkdir -p ~/.local/bin && ln -sf "/Applications/Fabric Switchboard.app/Contents/MacOS/switchboard" ~/.local/bin/switchboard` (with `~/.local/bin` on `PATH`). A copied CLI stays at the version it was copied from.
+1. Put the CLI on your `PATH` as a **link** to the one inside your copy of the app, so it updates with the app: Agents → *Link switchboard into ~/.local/bin* links the copy that is running. By hand, link your own copy in `~/Applications` when there is one (the PassionCode launcher installs there for a second macOS user), else the one in `/Applications`, with `~/.local/bin` on `PATH`:
+
+   ```sh
+   app="$HOME/Applications/Fabric Switchboard.app"; [ -d "$app" ] || app="/Applications/Fabric Switchboard.app"
+   mkdir -p ~/.local/bin && ln -sf "$app/Contents/MacOS/switchboard" ~/.local/bin/switchboard
+   ```
+
+   A copied CLI stays at the version it was copied from.
 2. Either install the plugin (the MCP server plus the `switching-accounts` skill): `claude plugin marketplace add passioncode-ai/fabric-switchboard`, then `claude plugin install switchboard@switchboard`; or register the server alone: `claude mcp add --scope user switchboard -- switchboard mcp` (Codex: `codex mcp add switchboard -- switchboard mcp`).
 3. `claude mcp list` shows `switchboard … ✔ Connected`. A safe first call is the read-only `switchboard_accounts` tool; an empty vault answers `{"accounts":[]}`. Switching the ordinary Claude Code login needs an explicit `global: true`. Tools and rules: [CLI — For agents](CLI.md#for-agents).
 
