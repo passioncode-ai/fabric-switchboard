@@ -2318,6 +2318,8 @@ mod tests {
             .unwrap();
         runtime
             .execute(crate::Operation::SaveProject {
+                organizations: None,
+                move_accounts: false,
                 pool: None,
                 name: "Acme".into(),
                 folders: vec![acme.clone()],

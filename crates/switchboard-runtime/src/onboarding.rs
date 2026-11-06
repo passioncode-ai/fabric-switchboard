@@ -398,41 +398,28 @@ fn organization_steps(probe: &Probe, cli: &str) -> Vec<Value> {
             s["organization"] = named.clone();
             steps.push(s);
         };
-        let group = snapshot.organization_group(&organization.id);
-        let bound: Vec<&str> = snapshot
-            .projects
-            .iter()
-            .filter(|p| p.organization.as_deref() == Some(organization.id.as_str()))
-            .map(|p| p.name.as_str())
-            .collect();
+        // SB-282: an organization may have several groups; the first (by name) is the one the
+        // checklist's sign-in and launch steps name.
+        let groups = snapshot.organization_groups(&organization.id);
+        let group = groups.first().copied();
+        let bound: Vec<&str> = groups.iter().map(|p| p.name.as_str()).collect();
         push(match group {
             Some(group) => {
                 let mut s = step(
                     "org_group",
                     "done",
-                    format!("{name}'s group is “{}”.", group.name),
+                    if bound.len() > 1 {
+                        format!("{name}'s groups are {}.", quoted(&bound))
+                    } else {
+                        format!("{name}'s group is “{}”.", group.name)
+                    },
                     Value::Null,
                 );
                 s["group"] = json!({"pool": group.pool, "name": group.name});
-                s
-            }
-            // Which group stays the organization's is the person's choice; the command is what
-            // the agent runs on the others once the person said.
-            None if bound.len() > 1 => {
-                let mut s = step(
-                    "org_group",
-                    "needs_person",
-                    format!(
-                        "Keep one group for {name} on this computer: {}.",
-                        bound.join(", ")
-                    ),
-                    json!({
-                        "person": format!("Say which of these groups stays {name}'s on this computer."),
-                        "command": format!("{cli} project edit --pool <group> --organization personal"),
-                    }),
-                );
-                // B-8: the window names them in its own language, never by parsing the summary.
-                s["groups"] = json!(bound);
+                if bound.len() > 1 {
+                    // B-8: the window names them in its own language, never by parsing the summary.
+                    s["groups"] = json!(bound);
+                }
                 s
             }
             // Whether a settings file exists, and which folders, is the person's to say.
@@ -571,6 +558,15 @@ fn organization_steps(probe: &Probe, cli: &str) -> Vec<Value> {
         });
     }
     steps
+}
+
+/// Names in curly quotes, joined with commas (SB-282).
+fn quoted(names: &[&str]) -> String {
+    names
+        .iter()
+        .map(|n| format!("“{n}”"))
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 /// A step with one more field the window reads (B-8), so it never parses a summary.
@@ -908,12 +904,13 @@ mod tests {
                 vesta_id: None,
             });
         snapshot.projects.push(switchboard_core::Project {
+            shared_accounts: Vec::new(),
             pool: "acme-work".into(),
             name: "Acme work".into(),
             folders: vec!["/work/acme".into()],
             created_at: 1,
             sources: vec![],
-            organization: Some("o-acme".into()),
+            organizations: vec!["o-acme".into()],
         });
         snapshot
             .accounts
@@ -938,7 +935,7 @@ mod tests {
         let mut probe = acme();
         let snapshot = probe.snapshot.as_mut().unwrap();
         snapshot.organizations.clear();
-        snapshot.projects[0].organization = None;
+        snapshot.projects[0].organizations = Vec::new();
         let answer = steps(&probe);
         assert_eq!(
             ids(&answer),
@@ -1188,7 +1185,7 @@ mod tests {
 
         // No group for the organization: to do, with the commands that make one.
         let mut probe = acme();
-        probe.snapshot.as_mut().unwrap().projects[0].organization = None;
+        probe.snapshot.as_mut().unwrap().projects[0].organizations = Vec::new();
         let answer = steps(&probe);
         let group = by_id(&answer, "org_group");
         assert_eq!(group["state"], "needs_person", "the person chooses how");
@@ -1201,7 +1198,8 @@ mod tests {
         assert!(by_id(&answer, "seat")["next"]["command"].is_null());
         assert_eq!(answer["complete"], false);
 
-        // Two groups bound to Acme: named, and none is chosen.
+        // Two groups bound to Acme (SB-282): both are its groups, nothing to choose; the first
+        // is the one the sign-in step names.
         let mut probe = acme();
         let snapshot = probe.snapshot.as_mut().unwrap();
         let mut second = snapshot.projects[0].clone();
@@ -1211,20 +1209,13 @@ mod tests {
         snapshot.projects.push(second);
         let answer = steps(&probe);
         let group = by_id(&answer, "org_group");
-        assert_eq!(group["state"], "needs_person");
+        assert_eq!(group["state"], "done");
         assert_eq!(
             group["summary"],
-            "Keep one group for Acme on this computer: Acme work, Acme two."
+            "Acme's groups are “Acme work”, “Acme two”."
         );
-        assert_eq!(
-            group["next"]["person"],
-            "Say which of these groups stays Acme's on this computer."
-        );
-        assert_eq!(
-            group["next"]["command"],
-            "switchboard project edit --pool <group> --organization personal"
-        );
-        assert_eq!(answer["complete"], false);
+        assert_eq!(group["groups"], json!(["Acme work", "Acme two"]));
+        assert_eq!(group["group"]["pool"], "acme-work");
     }
 
     #[test]

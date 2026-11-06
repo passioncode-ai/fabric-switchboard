@@ -1051,6 +1051,8 @@ async fn a_project_is_listed_and_changed_by_delta_over_mcp() {
     owner
         .runtime
         .execute(Operation::SaveProject {
+            organizations: None,
+            move_accounts: false,
             pool: None,
             name: "Agents".into(),
             folders: vec![a.clone()],

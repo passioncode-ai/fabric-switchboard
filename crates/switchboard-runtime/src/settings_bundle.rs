@@ -71,6 +71,10 @@ pub struct Group {
     /// The organization's name, when the group runs on one.
     #[serde(default)]
     pub organization: Option<String>,
+    /// SB-282: the names of its further organizations, beyond `organization`. Written only
+    /// when the group has several, which a 0.7.20 importer refuses as an unknown field.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub also_organizations: Vec<String>,
     /// Repository identities (`host/owner/name`) of the group's checkouts.
     #[serde(default)]
     pub repositories: Vec<String>,
@@ -126,7 +130,13 @@ pub fn export(root: &Path, snapshot: &Snapshot, now: i64) -> Bundle {
             Group {
                 name: p.name.clone(),
                 pool: p.pool.clone(),
-                organization: p.organization.as_deref().and_then(org_name),
+                organization: p.primary_organization().and_then(org_name),
+                also_organizations: p
+                    .organizations
+                    .iter()
+                    .skip(1)
+                    .filter_map(|o| org_name(o))
+                    .collect(),
                 repositories,
                 plain_folders,
                 sources: p.sources.clone(),
@@ -208,6 +218,9 @@ pub struct PlannedGroup {
     /// A group with this pool exists here: folders are added to it, nothing else changes.
     pub exists: bool,
     pub organization: Option<String>,
+    /// SB-282: its further organizations, by name.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub also_organizations: Vec<String>,
     /// Folders found here for the group's repositories and plain folders, not yet in it.
     pub folders: Vec<String>,
     /// Repositories and plain folders with no checkout here.
@@ -310,6 +323,7 @@ pub fn plan(root: &Path, snapshot: &Snapshot, bundle: &Bundle, under: &[PathBuf]
                 pool: g.pool.clone(),
                 exists: here.is_some(),
                 organization: g.organization.clone(),
+                also_organizations: g.also_organizations.clone(),
                 folders,
                 missing,
                 clonable,
@@ -505,16 +519,21 @@ pub fn apply_with(
                 let accounts: Vec<String> = snapshot
                     .accounts
                     .iter()
-                    .filter(|a| a.pool == p.pool)
+                    .filter(|a| snapshot.serves(a, &p.pool))
                     .map(|a| a.id.clone())
                     .collect();
                 store.save_project_in(Some(&p.pool), &p.name, &folders, &accounts, None)
             }
             None => {
                 let folders: Vec<PathBuf> = planned.iter().map(PathBuf::from).collect();
-                let org = g.organization.as_deref().and_then(org_id);
+                let orgs: Vec<String> = g
+                    .organization
+                    .iter()
+                    .chain(&g.also_organizations)
+                    .filter_map(|name| org_id(name))
+                    .collect();
                 // A new group takes its pool from its name here (`pool_from_name`).
-                store.save_project_in(None, &g.name, &folders, &[], org.as_deref().map(Some))
+                store.save_project_with(None, &g.name, &folders, &[], Some(orgs), true)
             }
         };
         match result {
@@ -756,7 +775,7 @@ mod tests {
         assert_eq!(done["groups"], 1, "{done}");
         let snap = fresh.snapshot().unwrap();
         assert_eq!(snap.projects[0].name, "Alpha");
-        assert!(snap.projects[0].organization.is_some());
+        assert!(!snap.projects[0].organizations.is_empty());
         assert_eq!(snap.organizations[0].name, "Acme");
     }
 
@@ -792,6 +811,7 @@ mod tests {
             format: FORMAT.into(),
             exported_at: 1,
             groups: vec![Group {
+                also_organizations: Vec::new(),
                 name: "Acme".into(),
                 pool: "acme-old".into(),
                 organization: None,
@@ -843,6 +863,7 @@ mod tests {
             format: FORMAT.into(),
             exported_at: 1,
             groups: vec![Group {
+                also_organizations: Vec::new(),
                 name: "Acme".into(),
                 pool: "acme".into(),
                 organization: Some("Acme".into()),
@@ -910,7 +931,7 @@ mod tests {
             vec![into.join("app").to_string_lossy().into_owned()]
         );
         assert_eq!(made.sources, vec!["github.com/acme"]);
-        assert!(made.organization.is_some());
+        assert!(!made.organizations.is_empty());
     }
 
     #[test]

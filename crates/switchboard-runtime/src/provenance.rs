@@ -75,7 +75,7 @@ pub(crate) fn build(
         snapshot
             .accounts
             .iter()
-            .any(|a| a.id == id && a.provider == provider && a.pool == pool)
+            .any(|a| a.id == id && a.provider == provider && snapshot.serves(a, &pool))
     };
     // The journal is oldest first and bounded: a choice older than it reads as unknown.
     let selections: Vec<(usize, &switchboard_core::Event)> = snapshot

@@ -28,13 +28,15 @@ pub(crate) fn folders(snapshot: &switchboard_core::Snapshot) -> Vec<(String, Str
     // Claude bindings order them (the more private wins).
     let mut projects: Vec<_> = snapshot.projects.iter().collect();
     if !snapshot.organizations.is_empty() {
-        projects.sort_by_key(|p| p.organization.is_some());
+        projects.sort_by_key(|p| !p.organizations.is_empty());
     }
     projects
         .into_iter()
         .filter(|p| {
             snapshot.accounts.iter().any(|a| {
-                a.pool == p.pool && a.enabled && a.provider == switchboard_core::Provider::Codex
+                snapshot.serves(a, &p.pool)
+                    && a.enabled
+                    && a.provider == switchboard_core::Provider::Codex
             })
         })
         .flat_map(|p| p.folders.iter().map(move |f| (f.clone(), p.pool.clone())))
@@ -321,12 +323,13 @@ mod tests {
             .unwrap()
         };
         let project = |pool: &str, folder: &str| Project {
+            shared_accounts: Vec::new(),
             pool: pool.into(),
             name: pool.into(),
             folders: vec![folder.into()],
             created_at: 1,
             sources: vec![],
-            organization: None,
+            organizations: Vec::new(),
         };
         let snapshot = Snapshot {
             projects: vec![project("a", "/w/a"), project("b", "/w/b")],
@@ -354,7 +357,7 @@ mod tests {
             created_at: 1,
             vesta_id: None,
         });
-        shared.projects[0].organization = Some("00000000-0000-4000-8000-000000000001".into());
+        shared.projects[0].organizations = vec!["00000000-0000-4000-8000-000000000001".into()];
         assert_eq!(folders(&shared), [("/w/s".to_owned(), "own".to_owned())]);
     }
 }

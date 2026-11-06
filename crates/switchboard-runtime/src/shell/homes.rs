@@ -70,15 +70,18 @@ pub(crate) struct Outcome {
     pub map_refused: bool,
 }
 
-/// The organization a group is bound to, when that organization exists.
+/// The organization a group's terminals run in, when that organization exists: its first one
+/// that does (SB-282: a group of several runs a terminal in its first; the account that serves
+/// a session decides that session's own context).
 fn organization<'a>(
     snapshot: &'a Snapshot,
     project: &'a switchboard_core::Project,
 ) -> Option<&'a str> {
     project
-        .organization
-        .as_deref()
-        .filter(|id| snapshot.organization(id).is_some())
+        .organizations
+        .iter()
+        .map(String::as_str)
+        .find(|id| snapshot.organization(id).is_some())
 }
 
 /// Whether a group bound to an organization exists on this computer: what the homes' fingerprint
@@ -148,7 +151,7 @@ fn rows_with(
         let codex = snapshot
             .accounts
             .iter()
-            .any(|a| a.pool == pool && a.enabled && a.provider == Provider::Codex);
+            .any(|a| snapshot.serves(a, pool) && a.enabled && a.provider == Provider::Codex);
         out.push(map::Row {
             folder: text.to_owned(),
             pool: pool.to_owned(),
@@ -449,6 +452,7 @@ mod tests {
     }
     fn group(pool: &str, folders: &[&Path], organization: Option<&str>) -> Project {
         Project {
+            shared_accounts: Vec::new(),
             pool: pool.into(),
             name: pool.into(),
             folders: folders
@@ -457,7 +461,7 @@ mod tests {
                 .collect(),
             created_at: 1,
             sources: vec![],
-            organization: organization.map(str::to_owned),
+            organizations: organization.map(str::to_owned).into_iter().collect(),
         }
     }
     fn s(p: &Path) -> String {
@@ -951,7 +955,7 @@ mod tests {
         let home = map::claude_home(&w.root, "acme");
         std::fs::create_dir_all(home.join("projects")).unwrap();
         std::fs::write(home.join("projects").join("history.jsonl"), "kept").unwrap();
-        snapshot.projects[0].organization = None;
+        snapshot.projects[0].organizations = Vec::new();
         let outcome = sync(
             &w.root,
             &snapshot,

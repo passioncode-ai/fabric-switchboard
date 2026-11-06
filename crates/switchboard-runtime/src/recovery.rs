@@ -400,7 +400,7 @@ pub(crate) fn candidates(
             a.enabled
                 && a.kind == AuthKind::OAuth
                 && a.provider == wait.provider
-                && a.pool == pool
+                && snapshot.serves(a, pool)
                 && !limited.contains(&a.id)
                 && !sign_in.contains(&a.id)
                 && !a
@@ -456,7 +456,7 @@ fn probe_accounts(
             a.enabled
                 && a.kind == AuthKind::OAuth
                 && a.provider == wait.provider
-                && a.pool == pool
+                && snapshot.serves(a, pool)
                 && !capped.contains(&a.id)
                 && !sign_in.contains(&a.id)
                 && crate::launch::project_allows(snapshot, a, &wait.directory).is_ok()
@@ -883,12 +883,13 @@ mod tests {
         // The folder becomes reserved after registration. Neither default-pool account
         // may run there even though both have successful, fresh quota observations.
         s.projects.push(switchboard_core::Project {
+            shared_accounts: Vec::new(),
             pool: "reserved".into(),
             name: "Synthetic".into(),
             folders: vec![wait.directory.to_string_lossy().into_owned()],
             created_at: 101,
             sources: vec![],
-            organization: None,
+            organizations: Vec::new(),
         });
         let mut reserved = account("reserved-account");
         reserved.pool = "reserved".into();
@@ -1773,6 +1774,8 @@ mod tests {
         let mine = fixtures::save(&runtime.store, "synthetic-project", "default");
         runtime
             .execute(Operation::SaveProject {
+                organizations: None,
+                move_accounts: false,
                 pool: None,
                 name: "App".into(),
                 folders: vec![folder.clone()],
