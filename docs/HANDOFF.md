@@ -2,6 +2,27 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-11-06 (afternoon): release 0.7.21; estate pause
+
+- **Released.** v0.7.21 published 2026-11-06 15:17:22Z (25 assets, `latest.json` 0.7.21 for seven
+  platforms; release PR #453 `6c2f6a3`, nightly on the tag green 13:43Z): SB-282 (groups,
+  organizations and accounts many to many), SB-286 (MCP structured content is an object), SB-288
+  (the dispatch exit contract's refused-enroll branch). Attempts 1 and 2 of the release run lost
+  the Windows arm64 signing step to the PowerShell Gallery ("Package 'ArtifactSigning' failed to
+  download"); attempt 3 passed. SB-290 (PR #457 `9eb4c3f`) retries signing after 60 s from the
+  next tag.
+- **Merged, not released.** SB-284 (PR #454 `6a9df88`: where an account used elsewhere works, the
+  machine filter, schema 10), SB-289 row, SB-290.
+- **Parked.** SB-283 by the operator's word (relayed `cfe60550`): the first part waits on branch
+  `sb-283-handover` (`61c98a7`), unmerged.
+- **Estate pause.** All PassionCode projects stopped new work for the common reconciliation (board
+  thread `eefa7959`, operator about 12:50 UTC); Switchboard's answer is
+  `docs/reports/2026-11-06-estate-flows/README.md` (PR #455). The machine's OpenRouter key default
+  moved to `moonshotai/kimi-k3.1-pro` by the model map (SB-289); read its spend on 2026-11-07.
+- **Exact next task.** When the pause lifts (the common source of truth in fabric-workspace
+  `docs/plans/2026-11-06-estate-flows/`): SB-289 (recommended models), then release 0.7.22 with
+  SB-284, SB-289 and SB-290. Waiting: SB-278 (DEC-0154 tag), SB-280 (OBS-359).
+
 ## 2026-11-06 (noon): release 0.7.20; SB-282 in progress
 
 - **Released.** v0.7.20 published 2026-11-06 12:22:33Z (25 assets, `latest.json` 0.7.20 for seven
