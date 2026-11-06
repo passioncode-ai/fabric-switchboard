@@ -8,6 +8,8 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- Hand an account over to another machine or a colleague without moving its credential (SB-283): `switchboard accounts hand-over` writes a signed record and marks the account here as used there; `switchboard accounts receive` on the other machine shows whose sign-in it is and, with `--apply`, starts it in the same group. MCP has both.
+
 - When you mark an account as used on another machine, you can say where it works: a machine and its user, or a colleague. The card shows it, and *Accounts* filters by *On this computer* and *On other machines* (SB-284). The CLI (`accounts update --location`) and MCP (`location`, `machine`) do the same.
 
 ## 0.7.21

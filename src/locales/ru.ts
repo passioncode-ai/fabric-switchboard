@@ -1562,4 +1562,7 @@ export const RU: Record<string, string> = {
   "On {location}": "Используется: {location}",
   "Where it works…": "Где работает…",
   "Say where it works in at most 80 characters, on one line.": "Укажите, где он работает, не длиннее 80 знаков и в одну строку.",
+  "Only an account you sign in to can be handed over. Give an API key through your vault.": "Передать можно только аккаунт, в который входят. API-ключ передайте через хранилище.",
+  "This is not a Switchboard hand-over file (switchboard-handover/1).": "Это не файл передачи Switchboard (switchboard-handover/1).",
+  "This hand-over file is not signed by the key you named, or it changed after it was signed.": "Этот файл передачи подписан не указанным ключом или изменён после подписи.",
 };

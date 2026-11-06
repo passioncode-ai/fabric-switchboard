@@ -1,4 +1,5 @@
 //! One store/proxy/control owner shared by the desktop and CLI.
+pub mod account_handover;
 pub mod agent_catalog;
 pub mod agent_keys;
 pub mod agent_settings;
@@ -201,6 +202,23 @@ pub enum Operation {
         pool: String,
         /// SB-256 N1: the owner runs the CLI itself, no Terminal; the status carries the manual
         /// sign-in URL and `SubmitLoginCode` gives it the code.
+        #[serde(default)]
+        headless: bool,
+    },
+    /// SB-283: writes the signed hand-over record of an account (no credential) and marks it as
+    /// used elsewhere, with `to` as where it works.
+    HandOver {
+        id: String,
+        to: String,
+    },
+    /// SB-283: what receiving a hand-over record here would do; with `apply`, starts the
+    /// sign-in for that address in the group of the record's pool (else the default group).
+    ReceiveHandover {
+        record: Value,
+        #[serde(default)]
+        signer: Option<String>,
+        #[serde(default)]
+        apply: bool,
         #[serde(default)]
         headless: bool,
     },
@@ -4887,6 +4905,29 @@ async fn execute(
             pool,
             headless,
         } => needs_owner()?.begin_login(provider, label, pool, headless),
+        Operation::HandOver { id, to } => {
+            account_handover::hand_over(root, &store, &id, &to, monitor::now())
+        }
+        Operation::ReceiveHandover {
+            record,
+            signer,
+            apply,
+            headless,
+        } => {
+            let record = account_handover::parse(&record)?;
+            let mut plan = account_handover::plan(&store.snapshot()?, &record, signer.as_deref())?;
+            if apply {
+                let pool = plan["pool"].as_str().unwrap_or("default").to_owned();
+                let login = needs_owner()?.begin_login(
+                    record.provider,
+                    record.label.clone(),
+                    pool,
+                    headless,
+                )?;
+                plan["login"] = login;
+            }
+            Ok(plan)
+        }
         Operation::SubmitLoginCode { login_id, code } => {
             needs_owner()?.submit_login_code(&login_id, &code)
         }
@@ -10688,6 +10729,44 @@ mod usage_gate_tests {
         assert_eq!(first.await.unwrap().unwrap()["used_percent"], 42.0);
         assert_eq!(second.await.unwrap().unwrap()["used_percent"], 42.0);
         assert_eq!(up.calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn a_hand_over_record_is_received_as_a_plan_of_one_sign_in() {
+        // SB-283: the giver's record (no credential) reaches the receiver, who sees whose
+        // sign-in it is and where it lands; the giver marked it as used elsewhere.
+        let root = tempfile::tempdir().unwrap();
+        let runtime = fixtures::runtime(root.path(), signed_out, activates).await;
+        let id = fixtures::save(&runtime.store, "synthetic-given", "default").id;
+        let given = runtime
+            .execute(Operation::HandOver {
+                id: id.clone(),
+                to: "Mac Studio, user alex".into(),
+            })
+            .await
+            .unwrap();
+        assert_eq!(given["marked_elsewhere"], true);
+        let snapshot = runtime.store.snapshot().unwrap();
+        assert_eq!(
+            snapshot.locations.get(&id).map(String::as_str),
+            Some("Mac Studio, user alex")
+        );
+        let plan = runtime
+            .execute(Operation::ReceiveHandover {
+                record: given.clone(),
+                signer: None,
+                apply: false,
+                headless: false,
+            })
+            .await
+            .unwrap();
+        assert_eq!(plan["signature"], "signed");
+        assert_eq!(plan["pool"], "default");
+        assert_eq!(
+            plan["held"], true,
+            "this machine still holds the same sign-in"
+        );
+        assert!(plan.get("login").is_none(), "nothing starts without apply");
     }
 
     #[tokio::test]

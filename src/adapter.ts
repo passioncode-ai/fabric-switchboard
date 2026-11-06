@@ -124,6 +124,9 @@ export const nativeAdapter: Adapter = {
 // Only exact, fixed backend vocabulary is surfaced. Unknown failures never print
 // raw provider output, credentials, filesystem paths, or serialized error objects.
 const safeErrors = new Set([
+  'Only an account you sign in to can be handed over. Give an API key through your vault.',
+  'This is not a Switchboard hand-over file (switchboard-handover/1).',
+  'This hand-over file is not signed by the key you named, or it changed after it was signed.',
   'Say where it works in at most 80 characters, on one line.',
   'A group can belong to at most 16 organizations.',
   // The CLI node's new backend sentences (N2 of 0.6.82), shown as they are; the older ones are mapped below.

@@ -71,6 +71,8 @@ pub(crate) fn tools() -> Vec<(bool, Value)> {
         (false, json!({"name":"switchboard_events","title":"Activity","description":"Recent activity, newest first: what changed (accounts, switches, groups, automatic switching, sign-ins) and how it ended, as fixed codes. No credential, prompt or provider text.","inputSchema":{"type":"object","properties":{"limit":{"type":"integer","minimum":1,"maximum":500,"default":50}},"additionalProperties":false}})),
         (true, json!({"name":"switchboard_account_update","title":"Rename, enable or disable an account","description":"Rename an account, enable or disable it (a disabled account is never selected or switched to), or mark it as used on another machine (elsewhere: true disables it here, so this machine never renews it or switches to it, automatically or not; false enables it again), saying where it works (location: a machine and its user, or a colleague, which also marks it; empty clears it). Only when the operator asks. What is left out stays as it is.","inputSchema":{"type":"object","properties":{"account_id":account,"label":{"type":"string","minLength":1,"maxLength":80},"enabled":{"type":"boolean"},"elsewhere":{"type":"boolean"},"location":{"type":"string","maxLength":80}},"required":["account_id"],"additionalProperties":false}})),
         (true, json!({"name":"switchboard_account_move","title":"Move an account to another group","description":"Move an account into a group (pool: its group id), or back to the default group (pool: default). Only when the operator asks. Joining or leaving a group is that group's change, with its refusals: the account the ordinary Claude Code or Codex is signed in to cannot join a group, and a second copy of a login already in that group is refused.","inputSchema":{"type":"object","properties":{"account_id":account,"pool":{"type":"string","minLength":1,"description":"A group id from switchboard_projects, or default."}},"required":["account_id","pool"],"additionalProperties":false}})),
+        (true, json!({"name":"switchboard_account_hand_over","title":"Hand an account over","description":"Only when the operator asks. Hand an account over to another machine or a colleague's Switchboard: answers a signed record without its credential and marks the account here as used elsewhere, with to as where it works. The receiver passes the record to switchboard_account_receive and signs in there. Hand a personal subscription only to the operator's own machines unless the operator says otherwise.","inputSchema":{"type":"object","properties":{"account_id":account,"to":{"type":"string","minLength":1,"maxLength":80,"description":"Who receives it: a machine and its user, or a colleague."}},"required":["account_id","to"],"additionalProperties":false}})),
+        (true, json!({"name":"switchboard_account_receive","title":"Receive a handed-over account","description":"Receive an account handed over: answers whose sign-in, into which group (the record's pool when this machine has it, else default), whether the signature holds and whether this machine already holds that sign-in. apply starts the sign-in (the person signs in; headless gives the URL in switchboard_login status and takes the code); nothing travels but the record.","inputSchema":{"type":"object","properties":{"record":{"type":"object"},"signer":{"type":"string","description":"The giver's published key: the record must be signed by it."},"apply":{"type":"boolean"},"headless":{"type":"boolean"}},"required":["record"],"additionalProperties":false}})),
         (false, json!({"name":"switchboard_organizations","title":"Organizations","description":"The organizations accounts belong to: each with its e-mail domains and account count, then every account with its organization (null: personal) and what decided it: person (the operator's word), provider (its Claude Team or ChatGPT workspace is the organization's) or domain (its address). Empty until the operator adds one. Reads only.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}})),
         (true, json!({"name":"switchboard_organization_set","title":"Change organizations","description":"Only when the operator asks. action add (name, domains), edit (id, name and/or domains, which replaces the list), remove (id; its accounts are attributed again by the other rules) or assign (account_id, organization: an organization's id, personal, or auto to let the rules decide; or organizations: every context of an account that works for several, the first its own, the rest it also works for, empty to let the rules decide). Assigning one Claude Team or ChatGPT workspace seat brings that team's other seats along. passioncode_read reads the person's PassionCode.ai organizations again now, when PassionCode.ai is connected (connecting is the person's: switchboard org connect).","inputSchema":{"type":"object","properties":{"action":{"type":"string","enum":["add","edit","remove","assign","passioncode_read"]},"id":{"type":"string","description":"An organization's id from switchboard_organizations."},"name":{"type":"string","minLength":1,"maxLength":80},"domains":{"type":"array","maxItems":16,"items":{"type":"string","minLength":3}},"account_id":account,"organization":{"type":"string","description":"An organization's id, personal, or auto."},"organizations":{"type":"array","maxItems":16,"items":{"type":"string","maxLength":200},"description":"Every context of the account in order: organization ids or names, or personal."}},"required":["action"],"additionalProperties":false}})),
         (false, json!({"name":"switchboard_rotation","title":"Automatic switching","description":"The automatic switching settings per provider, group (pool) and target (enabled, threshold, headroom as hysteresis, cooldown, freshness) and what the background monitor decided last.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}})),
@@ -481,6 +483,30 @@ impl Server {
             enabled,
             elsewhere,
             location,
+        })
+        .await
+    }
+    /// SB-283: the signed hand-over record of an account; it is marked as used elsewhere.
+    async fn account_hand_over(&self, args: &Map<String, Value>) -> Result<Value, String> {
+        self.call(Operation::HandOver {
+            id: required(args, "account_id")?.into(),
+            to: required(args, "to")?.into(),
+        })
+        .await
+    }
+    /// SB-283: what receiving a record would do here; with `apply`, the sign-in starts.
+    async fn account_receive(&self, args: &Map<String, Value>) -> Result<Value, String> {
+        self.call(Operation::ReceiveHandover {
+            record: args.get("record").cloned().unwrap_or(Value::Null),
+            signer: args
+                .get("signer")
+                .and_then(Value::as_str)
+                .map(str::to_owned),
+            apply: args.get("apply").and_then(Value::as_bool).unwrap_or(false),
+            headless: args
+                .get("headless")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
         })
         .await
     }
@@ -944,6 +970,8 @@ impl Server {
             }
             "switchboard_account_update" => self.account_update(args).await,
             "switchboard_account_move" => self.account_move(args).await,
+            "switchboard_account_hand_over" => self.account_hand_over(args).await,
+            "switchboard_account_receive" => self.account_receive(args).await,
             "switchboard_organizations" => self.call(Operation::Organizations).await,
             "switchboard_organization_set" => self.organization_set(args).await,
             "switchboard_project_move_root" => self.project_move_root(args).await,
