@@ -248,7 +248,42 @@ jobs:
           }
           Get-PSRepository -Name PSGallery | Format-List Name, SourceLocation, InstallationPolicy
       - name: Sign the desktop executable and the CLI
+        id: sign_binaries
         if: env.SIGNING == 'true'
+        # SB-290: the action downloads its PowerShell module on every run, and the gallery fails it
+        # now and then on the arm64 runner ("Package 'ArtifactSigning' failed to download", v0.7.20
+        # and v0.7.21). Once more after 60 s, as the organization's windows-signing action does.
+        continue-on-error: true
+        uses: Azure/artifact-signing-action@c7ab2a863ab5f9a846ddb8265964877ef296ee82 # v2.0.0
+        with:
+          # A restored cross-runner module cache skipped installation but left
+          # Invoke-ArtifactSigning unavailable (0.6.27, job 115091847317).
+          cache-dependencies: false
+          endpoint: ${{ vars.AZURE_SIGNING_ENDPOINT }}
+          signing-account-name: ${{ vars.AZURE_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ vars.AZURE_CERTIFICATE_PROFILE }}
+          files: |
+            ${{ github.workspace }}\target\release\fabric-switchboard.exe
+            ${{ github.workspace }}\target\${{ matrix.target }}\release\switchboard.exe
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+          exclude-environment-credential: true
+          exclude-workload-identity-credential: true
+          exclude-managed-identity-credential: true
+          exclude-shared-token-cache-credential: true
+          exclude-visual-studio-credential: true
+          exclude-visual-studio-code-credential: true
+          exclude-azure-cli-credential: false
+          exclude-azure-powershell-credential: true
+          exclude-azure-developer-cli-credential: true
+          exclude-interactive-browser-credential: true
+      - name: Wait before signing the binaries again
+        if: env.SIGNING == 'true' && steps.sign_binaries.outcome == 'failure'
+        shell: pwsh
+        run: Start-Sleep -Seconds 60
+      - name: Sign the desktop executable and the CLI (again)
+        if: env.SIGNING == 'true' && steps.sign_binaries.outcome == 'failure'
         uses: Azure/artifact-signing-action@c7ab2a863ab5f9a846ddb8265964877ef296ee82 # v2.0.0
         with:
           # A restored cross-runner module cache skipped installation but left
@@ -298,7 +333,39 @@ jobs:
 
       # Signing pass 2: the installer itself.
       - name: Sign the installer
+        id: sign_installer
         if: env.SIGNING == 'true'
+        # SB-290: the action downloads its PowerShell module on every run, and the gallery fails it
+        # now and then on the arm64 runner ("Package 'ArtifactSigning' failed to download", v0.7.20
+        # and v0.7.21). Once more after 60 s, as the organization's windows-signing action does.
+        continue-on-error: true
+        uses: Azure/artifact-signing-action@c7ab2a863ab5f9a846ddb8265964877ef296ee82 # v2.0.0
+        with:
+          cache-dependencies: false
+          endpoint: ${{ vars.AZURE_SIGNING_ENDPOINT }}
+          signing-account-name: ${{ vars.AZURE_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ vars.AZURE_CERTIFICATE_PROFILE }}
+          files-folder: ${{ github.workspace }}\target\release\bundle\nsis
+          files-folder-filter: exe
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+          exclude-environment-credential: true
+          exclude-workload-identity-credential: true
+          exclude-managed-identity-credential: true
+          exclude-shared-token-cache-credential: true
+          exclude-visual-studio-credential: true
+          exclude-visual-studio-code-credential: true
+          exclude-azure-cli-credential: false
+          exclude-azure-powershell-credential: true
+          exclude-azure-developer-cli-credential: true
+          exclude-interactive-browser-credential: true
+      - name: Wait before signing the installer again
+        if: env.SIGNING == 'true' && steps.sign_installer.outcome == 'failure'
+        shell: pwsh
+        run: Start-Sleep -Seconds 60
+      - name: Sign the installer (again)
+        if: env.SIGNING == 'true' && steps.sign_installer.outcome == 'failure'
         uses: Azure/artifact-signing-action@c7ab2a863ab5f9a846ddb8265964877ef296ee82 # v2.0.0
         with:
           cache-dependencies: false
