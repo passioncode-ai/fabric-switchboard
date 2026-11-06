@@ -1527,19 +1527,20 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Preconditions:** at least one saved account.
 **Entry point:** *Accounts* → an account's ⋯ → *Used on another machine*; CLI `switchboard accounts update ID --elsewhere true`; MCP `switchboard_account_update` with `elsewhere`.
 **Steps:**
-1. ⋯ → *Used on another machine* → “{label} is marked as used on another machine. This computer no longer renews it or switches to it, by hand or automatically.”; the card shows *On another machine* (its title says why) and *Use here* in place of *Switch*.
+1. ⋯ → *Used on another machine* → the dialog “Where does {label} work?” with the optional field *Where it works* (“A machine and its user, or a colleague. Optional.”, at most 80 characters) → *Mark as used elsewhere* → “{label} is marked as used on another machine. This computer no longer renews it or switches to it, by hand or automatically.”; the card shows *On {location}* (or *On another machine* when nothing was said; its title says why) and *Use here* in place of *Switch* (SB-284).
+1a. While an account is marked, *Accounts* shows the filter *All · n*, *On this computer · n*, *On other machines · n*; a marked account's ⋯ offers *Where it works…* to say or change where (blank clears it). CLI `switchboard accounts update ID --location "Mac Studio, user alex"`, MCP `switchboard_account_update.location` and `switchboard_accounts` with `machine: here|elsewhere` do the same (SB-284).
 2. Rotation skips the account; its selection in any pool is cleared; a switch to it (CLI, MCP, a project rule) is refused with “This account is in use on another machine. Use one of this machine's accounts, or clear the mark if it moved here.”
 3. *Use here* (or enabling the account) → “{label} is used on this computer again.”; the account is enabled and chosen as before.
 **Alt paths:** an encrypted backup restored on this machine keeps the mark; removing the account removes the mark.
 **Expected result:** an account the person uses elsewhere is never renewed or chosen here, and the way back is one action.
-**UI elements:** the ⋯ item, the *On another machine* badge, *Use here*.
-**States covered:** marked; cleared; marked and selected before (selection cleared); restore.
+**UI elements:** the ⋯ item, the *Where does {label} work?* dialog, the *On {location}* / *On another machine* badge, the machine filter, *Use here*.
+**States covered:** marked; marked with where; cleared; marked and selected before (selection cleared); restore (where comes back too); a place over 80 characters or on two lines refused (“Say where it works in at most 80 characters, on one line.”).
 **Errors & recovery:** a refused switch names the way out.
 **Status:** draft
 **Meaning:** SB-175 builds phase 1 of SB-168; marks shared by the machines themselves are SB-177.
 **Coverage:** core `an_account_used_on_another_machine_is_never_chosen_here`, backup `a_reinstall_gets_organizations_their_accounts_and_groups_back`, WebKit demo.
 **Product:** unobserved
-**Traces:** SB-168, SB-175
+**Traces:** SB-168, SB-175, SB-284
 
 ## SCN-073: Read the usage notice on the first start
 

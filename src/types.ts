@@ -41,7 +41,7 @@ export interface ProjectInput { pool?: string; name: string; folders: string[]; 
 export interface Organization { id: string; name: string; domains?: string[]; provider_organizations?: string[]; created_at: number; /** SB-159: its organization on PassionCode.ai. */ vesta_id?: string | null }
 /** SB-159: the PassionCode.ai connection, no token. */
 export interface PassioncodeStatus { connected: boolean; base: string; state?: 'ok' | 'sign_in_again' | 'provider_sign_in' | 'unreachable'; connected_at?: number; read_at?: number | null; checked_at?: number | null; organizations?: number; cancelled?: boolean; disconnected?: boolean; /** SB-160 (B-7): organizations a read stopped listing, by local id, since `at`. */ released?: { organization: string; at: number }[] }
-export interface Snapshot { accounts: Account[]; routes: Record<string, string>; events: Event[]; policies?: RotationPolicy[]; rules?: ProjectRule[]; projects?: Project[]; organizations?: Organization[]; /** account id → organization id or `personal` */ memberships?: Record<string, string>; /** SB-282: account id → organizations it also works for */ also_organizations?: Record<string, string[]>; /** SB-175: account id → when it was marked as used on another machine */ elsewhere?: Record<string, number> }
+export interface Snapshot { accounts: Account[]; routes: Record<string, string>; events: Event[]; policies?: RotationPolicy[]; rules?: ProjectRule[]; projects?: Project[]; organizations?: Organization[]; /** account id → organization id or `personal` */ memberships?: Record<string, string>; /** SB-282: account id → organizations it also works for */ also_organizations?: Record<string, string[]>; /** SB-175: account id → when it was marked as used on another machine */ elsewhere?: Record<string, number>; /** SB-284: account id → where it works, in the person's words */ locations?: Record<string, string> }
 export interface RuntimeStatus { proxy_address: string; platform: string; live_mode: string }
 export interface AddInput { label: string; provider: Provider; kind: AuthKind; pool: string; secret: string }
 export interface LoginInput { provider: Provider; label: string; pool: string }
@@ -58,7 +58,7 @@ export interface Adapter {
   add(input: AddInput): Promise<Account>;
   update(id: string, label: string, enabled: boolean): Promise<void>;
   /** SB-175: mark an account as used on another machine (disabled here), or clear the mark. */
-  markElsewhere(id: string, on: boolean): Promise<void>;
+  /** SB-284: `location` says where it works (blank clears it). */ markElsewhere(id: string, on: boolean, location?: string): Promise<void>;
   remove(id: string): Promise<void>;
   select(account: Account): Promise<void>;
   launch(id: string, mode: 'isolated' | 'managed', workingDirectory: string): Promise<{ message: string; agent_tools?: boolean }>;

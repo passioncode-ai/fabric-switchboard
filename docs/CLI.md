@@ -26,6 +26,7 @@ switchboard accounts add --provider claude --kind api-key --label Work --pool wo
 switchboard accounts select ACCOUNT_UUID --provider claude --pool work
 switchboard accounts update ACCOUNT_UUID --label Work                  # or --enabled false, or both
 switchboard accounts update ACCOUNT_UUID --elsewhere true              # used on another machine: never renewed, rotated to or switched to here (SB-175); false: used here again
+switchboard accounts update ACCOUNT_UUID --location "Mac Studio, user alex"   # SB-284: says where it works (and marks it used elsewhere); "" clears it
 switchboard accounts move ACCOUNT_UUID --pool agents                  # a project's pool, or default (SB-122)
 switchboard accounts remove ACCOUNT_UUID
 switchboard --json events

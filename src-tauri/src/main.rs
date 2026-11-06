@@ -207,12 +207,18 @@ async fn update_account(
             label: Some(label),
             enabled: Some(enabled),
             elsewhere: None,
+            location: None,
         })
         .await
 }
-/// SB-175: mark an account as used on another machine, or clear the mark.
+/// SB-175: mark an account as used on another machine, or clear the mark; SB-284: with where.
 #[tauri::command]
-async fn mark_elsewhere(id: String, on: bool, state: State<'_, Slot>) -> Result<Value, String> {
+async fn mark_elsewhere(
+    id: String,
+    on: bool,
+    location: Option<String>,
+    state: State<'_, Slot>,
+) -> Result<Value, String> {
     state
         .runtime()
         .await?
@@ -221,6 +227,7 @@ async fn mark_elsewhere(id: String, on: bool, state: State<'_, Slot>) -> Result<
             label: None,
             enabled: None,
             elsewhere: Some(on),
+            location,
         })
         .await
 }

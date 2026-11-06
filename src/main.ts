@@ -1497,6 +1497,34 @@ const signInRequired = (account: Account) => !!monitor?.sign_in_required?.includ
 const accountLimit = (account: Account) => monitor?.limited?.find((entry) => entry.account_id === account.id && entry.until > Date.now() / 1000);
 // #region quota-countdown — docs: docs/runs/2026-10-04-quota-review/README.md
 let countdownPaused = false;
+/** SB-284: the Accounts filter by machine: `all`, `here` or `elsewhere`; shown only while an account is marked as used elsewhere. */
+let machineFilter: 'all' | 'here' | 'elsewhere' = 'all';
+const inMachineFilter = (a: Account) => machineFilter === 'all' || (machineFilter === 'elsewhere') === (snapshot?.elsewhere?.[a.id] !== undefined);
+function machinesBar(accounts: Account[]): HTMLElement | null {
+  if (!accounts.some((a) => snapshot?.elsewhere?.[a.id] !== undefined)) { machineFilter = 'all'; return null; }
+  const bar = el('div', 'org-bar');
+  const group = el('div', 'segmented org-filter'); group.setAttribute('role', 'group'); group.setAttribute('aria-label', t('Where accounts are used'));
+  const count = (f: typeof machineFilter) => accounts.filter((a) => f === 'all' || (f === 'elsewhere') === (snapshot?.elsewhere?.[a.id] !== undefined)).length;
+  for (const [value, text] of [['all', t('All')], ['here', t('On this computer')], ['elsewhere', t('On other machines')]] as [typeof machineFilter, string][]) {
+    const chip = button(`${text} · ${count(value)}`, () => { machineFilter = value; render(); restoreFocus(`machine-filter-${value}`); }, `segment ${machineFilter === value ? 'is-on' : ''}`, `machine-filter-${value}`);
+    chip.setAttribute('aria-pressed', String(machineFilter === value)); group.append(chip);
+  }
+  bar.append(group);
+  return bar;
+}
+/** SB-284: mark an account as used on another machine and say where (a machine and its user, a colleague). */
+function elsewhereDialog(account: Account) {
+  const marked = snapshot?.elsewhere?.[account.id] !== undefined;
+  const context = openDialog(t('Where does {label} work?', { label: account.label }), t('This computer stops renewing it and switching to it, by hand or automatically, until you use it here again.'));
+  const where = input(snapshot?.locations?.[account.id] ?? ''); where.maxLength = 80; where.placeholder = t('e.g. Mac Studio, user alex');
+  context.body.append(field(t('Where it works'), where, t('A machine and its user, or a colleague. Optional.')));
+  context.actions.append(submit(marked ? t('Save') : t('Mark as used elsewhere')));
+  context.form.addEventListener('submit', (event) => {
+    event.preventDefault();
+    void dialogSave(context, () => adapter.markElsewhere(account.id, true, where.value.trim()), marked ? t('Saved for {label}.', { label: account.label }) : t('{label} is marked as used on another machine. This computer no longer renews it or switches to it, by hand or automatically.', { label: account.label }));
+  });
+  where.focus();
+}
 /** SB-158: the Accounts filter: `all`, `personal` or an organization's id. */
 let orgFilter = 'all';
 const pausedCountdowns = new Map<string, string>();
@@ -1695,7 +1723,8 @@ function renderAccounts(main: HTMLElement) {
     empty.append(addMenu(cardLeads ? 'button quiet' : 'button primary')); main.append(empty, kimiSection()); return;
   }
   const orgBar = organizationsBar(accounts); if (orgBar) main.append(orgBar);
-  const shown = accounts.filter((a) => inOrganizationFilter(snapshot!, a, orgFilter));
+  const machineBar = machinesBar(accounts); if (machineBar) main.append(machineBar);
+  const shown = accounts.filter((a) => inOrganizationFilter(snapshot!, a, orgFilter) && inMachineFilter(a));
   const sorting = el('div', 'account-sort-note');
   sorting.append(el('span', '', t('Within each group: remaining quota first, then shortest wait. Unknown usage follows.')), button(countdownPaused ? t('Resume countdown') : t('Pause countdown'), () => {
     if (!countdownPaused) { pausedCountdowns.clear(); root.querySelectorAll<HTMLElement>('[data-countdown]').forEach(node => pausedCountdowns.set(countdownKey(node), node.textContent ?? '')); }
@@ -1885,7 +1914,9 @@ function accountRow(account: Account) {
   if (current) title.append(el('span', 'badge current-badge', account.provider === 'claude' ? t('In Claude Code') : t('In Codex CLI')));
   if (signIn) title.append(el('span', 'badge danger-badge', t('Sign in again')));
   const elsewhere = snapshot?.elsewhere?.[account.id] !== undefined;
-  if (elsewhere) { const badge = el('span', 'badge muted', t('On another machine')); badge.title = t('Marked as used on another machine: this computer never renews it or switches to it, by hand or automatically.'); title.append(badge); }
+  // SB-284: where it works, when the person said so.
+  const location = snapshot?.locations?.[account.id];
+  if (elsewhere) { const badge = el('span', 'badge muted', location ? t('On {location}', { location }) : t('On another machine')); badge.title = t('Marked as used on another machine: this computer never renews it or switches to it, by hand or automatically.'); title.append(badge); }
   else if (!account.enabled) title.append(el('span', 'badge muted', t('Disabled')));
   const org = organizationOf(account);
   if (org) { const badge = el('span', 'badge org-badge', org.name); badge.title = org.why; title.append(badge); }
@@ -1926,7 +1957,8 @@ function rowMenu(account: Account, state: { current: boolean; selected: boolean;
   items.push([t('Move to another group…'), () => moveDialog(account, state.current)]);
   if (snapshot?.organizations?.length) items.push([t('Organization…'), () => assignDialog(account)]);
   // SB-175 (SB-168 D-2): an account signed in on another machine too must not be renewed from here.
-  if (snapshot?.elsewhere?.[account.id] === undefined) items.push([t('Used on another machine'), () => void mutate(() => adapter.markElsewhere(account.id, true), t('{label} is marked as used on another machine. This computer no longer renews it or switches to it, by hand or automatically.', { label: account.label }), `menu-${account.id}`)]);
+  // SB-284: marking asks where it works; a marked account can say it later.
+  items.push([snapshot?.elsewhere?.[account.id] === undefined ? t('Used on another machine') : t('Where it works…'), () => elsewhereDialog(account)]);
   items.push([t('Rename or disable…'), () => editDialog(account)], [t('Remove…'), () => removeDialog(account), 'danger-text']);
   return menu(account.id, t('More actions for {label}', { label: account.label }), items);
 }

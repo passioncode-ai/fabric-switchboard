@@ -1164,6 +1164,28 @@ async fn accounts_rotation_activity_and_queues_are_reachable_over_mcp() {
     assert_eq!(personal["label"], "Personal 2", "{accounts}");
     let (error, refused) = agent.tool("switchboard_account_update", json!({"account_id": ids[2]}));
     assert!(error, "nothing to change is refused: {refused}");
+    // SB-284: saying where it works marks it as used elsewhere; the list filters by machine.
+    let (error, placed) = agent.tool(
+        "switchboard_account_update",
+        json!({"account_id": ids[2], "location": "Mac Studio, user alex"}),
+    );
+    assert!(!error, "{placed}");
+    let (_, away) = agent.tool("switchboard_accounts", json!({"machine": "elsewhere"}));
+    let away = away["accounts"].as_array().unwrap();
+    assert_eq!(away.len(), 1, "{away:?}");
+    assert_eq!(away[0]["location"], "Mac Studio, user alex");
+    assert_eq!(away[0]["elsewhere"], true);
+    let (_, here) = agent.tool("switchboard_accounts", json!({"machine": "here"}));
+    assert!(here["accounts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|a| a["id"] != ids[2]));
+    let (error, back) = agent.tool(
+        "switchboard_account_update",
+        json!({"account_id": ids[2], "elsewhere": false}),
+    );
+    assert!(!error, "{back}");
     // SB-122: an account in a pool no project uses goes back to default; elsewhere only a
     // project's pool is accepted.
     let (error, moved) = agent.tool(

@@ -55,7 +55,7 @@ pub(crate) fn tools() -> Vec<(bool, Value)> {
     let account = json!({"type":"string","description":"Account id from switchboard_accounts."});
     vec![
         (false, json!({"name":"switchboard_status","title":"Switchboard status","description":"Who handles this session's requests: runtime state, this session (managed in a group, isolated, or native), the signed-in CLI accounts, the selected account per group, active folder rules and automatic switching. Call this first.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}})),
-        (false, json!({"name":"switchboard_accounts","title":"Switchboard accounts","description":"Stored accounts without credentials: label, provider, group id (pool), whether selected or signed in now, the lowest remaining quota, and the organization each belongs to (null: personal) with what decided it (person, provider or domain).","inputSchema":{"type":"object","properties":{"provider":{"type":"string","enum":["claude","codex"]}},"additionalProperties":false}})),
+        (false, json!({"name":"switchboard_accounts","title":"Switchboard accounts","description":"Stored accounts without credentials: label, provider, group id (pool) and every group it serves (groups), whether selected or signed in now, the lowest remaining quota, the organization each belongs to (null: personal) with what decided it (person, provider or domain), and whether it is used on another machine (elsewhere) with where (location). machine: here or elsewhere lists only those.","inputSchema":{"type":"object","properties":{"provider":{"type":"string","enum":["claude","codex"]},"machine":{"type":"string","enum":["here","elsewhere"]}},"additionalProperties":false}})),
         (false, json!({"name":"switchboard_usage","title":"Remaining usage","description":"Remaining quota per account and window, with reset times and how fresh each observation is. Unknown is not zero. A window with scope feature limits one metered feature only; lowest_remaining_percent covers the account's own windows. refresh asks the provider for one account; within 60 seconds of its last check it returns that observation with a note, and until the time the provider asked for after answering a check with 429 it is refused; for an inactive Claude account it may first renew that account's expired sign-in inside Switchboard. A read-only server never asks and shows the stored observation. No credential is returned.","inputSchema":{"type":"object","properties":{"account_id":account,"refresh":{"type":"boolean","default":false}},"additionalProperties":false}})),
         (true, json!({"name":"switchboard_switch","title":"Switch account","description":"Choose the account for the next request. target session (default) switches this managed session; route selects the account in its own group for every managed session of that group; claude_cli changes the ordinary Claude Code login for every claude session on this machine and requires global: true. A response already streaming keeps its account.","inputSchema":{"type":"object","properties":{"account_id":account,"target":{"type":"string","enum":["session","route","claude_cli"],"default":"session"},"global":{"type":"boolean","default":false}},"required":["account_id"],"additionalProperties":false}})),
         (false, json!({"name":"switchboard_sessions","title":"Sessions","description":"Sessions Switchboard launched: Claude Code, Codex, Kimi Code, Hermes, OpenCode and catalog agents (through an API-key account's proxy or on the OpenRouter key). Each with account_id, label, agent (the catalog id, such as claude-code, codex or goose), provider (the provider the route serves: claude for an agent through the proxy), group id (pool), context (personal or org:<id>) and context_name (the organization's name, or null), mode (managed or isolated), working_directory, in_place, launched_at, started_at, continues (a workflow id or null) and state: starting, running, ended or unknown. Without all, only starting and running ones. With history, every launch of the last 90 days instead, newest first: one record per launch with launch_id, launched_by (surface: window, cli, mcp, fallback, recovery, dashboards or fabric for a run switchboard dispatch started, whose launched_by.dispatch is {id, request, thread, project, workflow}; caller_launch_id, caller_project, caller_program, by, parent), provider_session_id, transcript (its path), turns, last_turn_at, ended (limit; a dispatched run's {kind: exited, stopped or timed_out, exit_code?, at}) and continued_as (where its work went), plus total. With launch_id, that launch with up (who launched it, to the first) and down (what it launched or what took its work over). Reads only; no credential.","inputSchema":{"type":"object","properties":{"all":{"type":"boolean","description":"Also list ended sessions."},"history":{"type":"boolean","description":"Every recorded launch, newest first, instead of the homes' current sessions."},"launch_id":{"type":"string","description":"One launch and its chain."}},"additionalProperties":false}})),
@@ -69,7 +69,7 @@ pub(crate) fn tools() -> Vec<(bool, Value)> {
         (false, json!({"name":"switchboard_repository_map","title":"Repositories on disk","description":"The Git repositories under the folders named (absolute; none: ~/DATA, else the home folder; up to three folders deep, not into a repository, a hidden folder or dependencies), each with its group (pool as its id, name; place folder or inside) or none. Linked worktrees are listed under their root in switchboard_projects, not here. Reads only.","inputSchema":{"type":"object","properties":{"under":{"type":"array","maxItems":16,"items":{"type":"string","minLength":1}}},"additionalProperties":false}})),
         (false, json!({"name":"switchboard_statistics","title":"Statistics","description":"What the local proxy relayed in the last days (1-90, default 30): requests, how they ended (ok, limited, failed) and the token counts the provider itself reported (input, output, cache read and write), by group, project (a repository with its checkouts, placed by the folder the request came from), account, coding agent (from its user-agent) and day, plus each group-project-account-agent combination and each day's split by group. Only managed traffic: a session on its own sign-in outside Switchboard is not counted. Counts only, never a prompt, answer or path. Reads only.","inputSchema":{"type":"object","properties":{"days":{"type":"integer","minimum":1,"maximum":90}},"additionalProperties":false}})),
         (false, json!({"name":"switchboard_events","title":"Activity","description":"Recent activity, newest first: what changed (accounts, switches, groups, automatic switching, sign-ins) and how it ended, as fixed codes. No credential, prompt or provider text.","inputSchema":{"type":"object","properties":{"limit":{"type":"integer","minimum":1,"maximum":500,"default":50}},"additionalProperties":false}})),
-        (true, json!({"name":"switchboard_account_update","title":"Rename, enable or disable an account","description":"Rename an account, enable or disable it (a disabled account is never selected or switched to), or mark it as used on another machine (elsewhere: true disables it here, so this machine never renews it or switches to it, automatically or not; false enables it again). Only when the operator asks. What is left out stays as it is.","inputSchema":{"type":"object","properties":{"account_id":account,"label":{"type":"string","minLength":1,"maxLength":80},"enabled":{"type":"boolean"},"elsewhere":{"type":"boolean"}},"required":["account_id"],"additionalProperties":false}})),
+        (true, json!({"name":"switchboard_account_update","title":"Rename, enable or disable an account","description":"Rename an account, enable or disable it (a disabled account is never selected or switched to), or mark it as used on another machine (elsewhere: true disables it here, so this machine never renews it or switches to it, automatically or not; false enables it again), saying where it works (location: a machine and its user, or a colleague, which also marks it; empty clears it). Only when the operator asks. What is left out stays as it is.","inputSchema":{"type":"object","properties":{"account_id":account,"label":{"type":"string","minLength":1,"maxLength":80},"enabled":{"type":"boolean"},"elsewhere":{"type":"boolean"},"location":{"type":"string","maxLength":80}},"required":["account_id"],"additionalProperties":false}})),
         (true, json!({"name":"switchboard_account_move","title":"Move an account to another group","description":"Move an account into a group (pool: its group id), or back to the default group (pool: default). Only when the operator asks. Joining or leaving a group is that group's change, with its refusals: the account the ordinary Claude Code or Codex is signed in to cannot join a group, and a second copy of a login already in that group is refused.","inputSchema":{"type":"object","properties":{"account_id":account,"pool":{"type":"string","minLength":1,"description":"A group id from switchboard_projects, or default."}},"required":["account_id","pool"],"additionalProperties":false}})),
         (false, json!({"name":"switchboard_organizations","title":"Organizations","description":"The organizations accounts belong to: each with its e-mail domains and account count, then every account with its organization (null: personal) and what decided it: person (the operator's word), provider (its Claude Team or ChatGPT workspace is the organization's) or domain (its address). Empty until the operator adds one. Reads only.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}})),
         (true, json!({"name":"switchboard_organization_set","title":"Change organizations","description":"Only when the operator asks. action add (name, domains), edit (id, name and/or domains, which replaces the list), remove (id; its accounts are attributed again by the other rules) or assign (account_id, organization: an organization's id, personal, or auto to let the rules decide; or organizations: every context of an account that works for several, the first its own, the rest it also works for, empty to let the rules decide). Assigning one Claude Team or ChatGPT workspace seat brings that team's other seats along. passioncode_read reads the person's PassionCode.ai organizations again now, when PassionCode.ai is connected (connecting is the person's: switchboard org connect).","inputSchema":{"type":"object","properties":{"action":{"type":"string","enum":["add","edit","remove","assign","passioncode_read"]},"id":{"type":"string","description":"An organization's id from switchboard_organizations."},"name":{"type":"string","minLength":1,"maxLength":80},"domains":{"type":"array","maxItems":16,"items":{"type":"string","minLength":3}},"account_id":account,"organization":{"type":"string","description":"An organization's id, personal, or auto."},"organizations":{"type":"array","maxItems":16,"items":{"type":"string","maxLength":200},"description":"Every context of the account in order: organization ids or names, or personal."}},"required":["action"],"additionalProperties":false}})),
@@ -249,7 +249,26 @@ impl Server {
     }
     async fn accounts(&self, args: &Map<String, Value>) -> Result<Value, String> {
         let provider = args.get("provider").and_then(Value::as_str);
+        let machine = args.get("machine").and_then(Value::as_str);
         let snapshot = self.call(Operation::Snapshot).await?;
+        // SB-284: used on another machine, and where; SB-282: every group it serves.
+        let marked = |id: &Value| {
+            id.as_str()
+                .is_some_and(|id| snapshot["elsewhere"].get(id).is_some())
+        };
+        let groups_of = |a: &Value| -> Vec<Value> {
+            let mut out = vec![a["pool"].clone()];
+            for p in snapshot["projects"].as_array().into_iter().flatten() {
+                if p["pool"] != a["pool"]
+                    && p["shared_accounts"]
+                        .as_array()
+                        .is_some_and(|ids| ids.contains(&a["id"]))
+                {
+                    out.push(p["pool"].clone());
+                }
+            }
+            out
+        };
         let current = self.call(Operation::CurrentAccounts).await.ok();
         let organizations = self.call(Operation::Organizations).await.ok();
         let organization_of = |id: &Value| {
@@ -269,6 +288,11 @@ impl Server {
             .unwrap_or_default()
             .into_iter()
             .filter(|a| provider.is_none_or(|p| a["provider"] == p))
+            .filter(|a| match machine {
+                Some("here") => !marked(&a["id"]),
+                Some("elsewhere") => marked(&a["id"]),
+                _ => true,
+            })
             .map(|a| {
                 let key = format!("{}:{}", a["provider"].as_str().unwrap_or(""), a["pool"].as_str().unwrap_or(""));
                 let signed_in = current.as_ref().is_some_and(|c| {
@@ -280,7 +304,9 @@ impl Server {
                 json!({"id": a["id"], "label": a["label"], "provider": a["provider"], "kind": a["kind"], "pool": a["pool"], "enabled": a["enabled"],
                     "selected_for_next_request": routes.get(&key) == Some(&a["id"]), "signed_in_cli": signed_in,
                     "lowest_remaining_percent": usage["lowest_remaining_percent"], "usage_fresh": usage["fresh"],
-                    "organization": organization_of(&a["id"])})
+                    "organization": organization_of(&a["id"]), "groups": groups_of(&a),
+                    "elsewhere": marked(&a["id"]),
+                    "location": a["id"].as_str().and_then(|id| snapshot["locations"].get(id)).cloned().unwrap_or(Value::Null)})
             })
             .collect();
         Ok(json!({"accounts": accounts}))
@@ -442,14 +468,19 @@ impl Server {
         let label = args.get("label").and_then(Value::as_str).map(str::to_owned);
         let enabled = args.get("enabled").and_then(Value::as_bool);
         let elsewhere = args.get("elsewhere").and_then(Value::as_bool);
-        if label.is_none() && enabled.is_none() && elsewhere.is_none() {
-            return Err("Name a label, enabled or elsewhere to change.".into());
+        let location = args
+            .get("location")
+            .and_then(Value::as_str)
+            .map(str::to_owned);
+        if label.is_none() && enabled.is_none() && elsewhere.is_none() && location.is_none() {
+            return Err("Name a label, enabled, elsewhere or location to change.".into());
         }
         self.call(Operation::Update {
             id: required(args, "account_id")?.into(),
             label,
             enabled,
             elsewhere,
+            location,
         })
         .await
     }
