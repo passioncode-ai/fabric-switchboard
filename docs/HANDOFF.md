@@ -2,6 +2,33 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-11-06 (night): releases 0.7.15 to 0.7.17; studio-spaces wave merged for 0.7.18
+
+- **Released.** v0.7.15 (2026-11-05 22:16:26Z: SB-260, SB-261), v0.7.16 (23:12:30Z: `switchboard
+  inbox`, SB-262, SB-263, SB-254 part 1 mitigation) and v0.7.17 (2026-11-06 00:12:41Z: the
+  organization wizard with GitHub repositories and several folders at once, SB-264 and SB-265;
+  Windows junctions in launched homes, SB-266), each with 25 assets and `latest.json` for seven
+  platforms; the launcher was told on thread `16ebb95e` each time. SB-254 stays open until a week
+  passes without the Keychain crash.
+- **Merged, not released (0.7.18).** The studio-spaces plan
+  ([report](reports/2026-11-06-studio-spaces/README.md), operator relay on thread `1fe66e6e`):
+  SB-267 and SB-268 (PR #433 `2f77e90`: settings import keeps sources, moves policies, clones what is
+  missing with `--clone`), SB-269 (PR #434 `156b5e9`: a proxy that comes up on another port takes a
+  new token and repoints managed homes), SB-273 (PR #435 `1af4bf6`: the proxy closes a loopback
+  connection from another macOS or Linux user, or one whose owner cannot be read, before reading
+  it; `crates/switchboard-proxy/src/peer.rs`), SB-270 (the settings file carries the Inbox origin and
+  Client Id, provider teams, the terminal hook's choice and the ceilings; import never raises a
+  ceiling) and SB-271 (`docs/MOVING.md`, `docs/MOVING.ru.md`).
+- **Contract.** The port norm DEC is due 2026-11-07 (thread `1fe66e6e`): a recorded port per user,
+  claims in a shared sticky folder, the state `foreign-user`, and the server-side check as a MUST
+  for Switchboard, which SB-273 implements on macOS and Linux; Windows is SB-274.
+- **Found in the logs (operator's).** Three Claude accounts fail their quota checks for four to
+  five days and need the person to sign in again: their e-mails are in `switchboard accounts list`
+  with `usage_health`.
+- **Exact next task.** Release 0.7.18 (SB-267, SB-268, SB-269, SB-270, SB-271, SB-273): version
+  bump, CHANGELOG section, tag, nightly on the tag, release run; tell thread `1fe66e6e`. Then
+  SB-274 (Windows owner check), SB-272 (signed settings files), SB-256 N4 and N5.
+
 ## 2026-11-05 (evening): releases 0.7.13 and 0.7.14; SB-259, SB-260, SB-261 and SB-256 N2, N3 merged
 
 - **Released.** v0.7.13 (SB-256 N1, SB-257, SB-258) and v0.7.14 published 2026-11-05 20:13:04Z
