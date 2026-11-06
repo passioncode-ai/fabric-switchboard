@@ -2,6 +2,18 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-11-06 (morning): release 0.7.19
+
+- **Released.** v0.7.19 published 2026-11-06 07:40:22Z (25 assets, `latest.json` 0.7.19 for seven
+  platforms; release PR #447 `70ecf32`, nightly on the tag green 07:01Z): SB-272 (signed settings
+  files), SB-276 (DEC-0153 digest vectors), SB-277 and SB-279 (docs).
+- **Waiting.** SB-278 for DEC-0154's acceptance and tag (contract thread `1fe66e6e`; the latest
+  contract tag is still `v0.1.0+2026-11-06.1`); SB-280 for Observatory's OBS-359 (thread
+  `e7fbd27d`). SB-251 acceptance and the three Claude accounts failing their quota checks are the
+  operator's.
+- **Exact next task.** When DEC-0154 is tagged: SB-278. Until then the oldest P1 rows that need no
+  person (SB-71, SB-73, SB-96 fallback chains).
+
 ## 2026-11-06 (early morning): release 0.7.18; SB-272, SB-276, SB-277, SB-279 merged for 0.7.19
 
 - **Released.** v0.7.18 published 2026-11-06 02:41:22Z (25 assets, `latest.json` 0.7.18 for seven
