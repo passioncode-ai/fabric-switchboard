@@ -110,6 +110,13 @@ pub fn export(root: &Path, snapshot: &Snapshot, now: i64) -> Bundle {
             let mut repositories = Vec::new();
             let mut plain_folders = Vec::new();
             for root in crate::roots::tree(&p.folders) {
+                // SB-281: an agent's data folder under its project travels as a plain folder.
+                plain_folders.extend(
+                    root.derived
+                        .iter()
+                        .filter(|d| d.kind == "data")
+                        .map(|d| d.folder.clone()),
+                );
                 match root.remote {
                     Some(remote) if !repositories.contains(&remote) => repositories.push(remote),
                     Some(_) => {}
@@ -681,6 +688,9 @@ mod tests {
         .unwrap();
         let notes = work.join("notes");
         std::fs::create_dir_all(&notes).unwrap();
+        // SB-281: the app's data folder sits under it in the tree and still travels.
+        let app_data = work.join("app-data");
+        std::fs::create_dir_all(&app_data).unwrap();
         let store = open_store(root.path());
         let acme = store
             .add_organization("Acme", &["acme.example".into()])
@@ -689,7 +699,7 @@ mod tests {
             .save_project_in(
                 None,
                 "Alpha",
-                &[app.clone(), notes.clone()],
+                &[app.clone(), notes.clone(), app_data.clone()],
                 &[],
                 Some(Some(&acme.id)),
             )
@@ -699,7 +709,10 @@ mod tests {
         assert_eq!(bundle.groups[0].organization.as_deref(), Some("Acme"));
         assert_eq!(
             bundle.groups[0].plain_folders,
-            vec![notes.to_string_lossy().into_owned()]
+            vec![
+                app_data.to_string_lossy().into_owned(),
+                notes.to_string_lossy().into_owned()
+            ]
         );
         let text = serde_json::to_vec(&bundle).unwrap();
         assert_eq!(

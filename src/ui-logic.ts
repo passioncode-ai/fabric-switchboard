@@ -624,9 +624,9 @@ export function moveTargets(currentPool: string, projects: { pool: string; name:
   });
 }
 /** SB-135: a project's folders as Git sees them: each root with its worktrees and clones. */
-export interface DerivedFolder { folder: string; kind: 'worktree' | 'clone' | 'module'; branch: string | null }
+export interface DerivedFolder { folder: string; kind: 'worktree' | 'clone' | 'module' | 'data'; branch: string | null }
 export interface ProjectRoot { folder: string; branch: string | null; derived: DerivedFolder[]; remote?: string | null; name?: string }
-export interface FolderRow { folder: string; depth: 0 | 1; kind: 'worktree' | 'clone' | 'module' | null; branch: string | null; derived: number }
+export interface FolderRow { folder: string; depth: 0 | 1; kind: 'worktree' | 'clone' | 'module' | 'data' | null; branch: string | null; derived: number }
 /** The rows of a folder list: each root, then (when `open`) its derived folders under it; a folder the tree does not know (just added, or the tree not read yet) is a root of its own, in its place. */
 export function folderRows(folders: string[], roots: ProjectRoot[] | null, open = true): FolderRow[] {
   const listed = new Set(folders); const placed = new Set<string>(); const rows: FolderRow[] = [];

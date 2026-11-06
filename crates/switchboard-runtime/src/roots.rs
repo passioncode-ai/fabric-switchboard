@@ -3,14 +3,19 @@
 //! folder is a linked worktree of a root's repository, or a clone with the same `origin`; it
 //! belongs to the root's project and is listed under it, not beside it. The project still stores
 //! a flat folder list; the tree is read from Git when it is asked for. A module checkout (a Git
-//! submodule) goes under the repository that holds it, as `module`.
+//! submodule) goes under the repository that holds it, as `module`. SB-281: of several copies of
+//! one repository the root is the main checkout outside a worktrees folder (`_worktrees`,
+//! `.worktrees`, `worktrees`), whatever the order they were added in; an agent's data folder
+//! (`<name>-data` beside `<name>` or `<name>-agent`) goes under that project as `data`; a copy that
+//! lives in a worktrees folder is named after its repository.
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 
 #[derive(Serialize, Clone, Debug, PartialEq, Eq)]
 pub struct Derived {
     pub folder: String,
-    /// `worktree`, `clone` or `module` (a submodule of the root's repository).
+    /// `worktree`, `clone`, `module` (a submodule of the root's repository) or `data` (SB-281: an
+    /// agent's data folder beside the project).
     pub kind: &'static str,
     pub branch: Option<String>,
 }
@@ -35,6 +40,16 @@ pub struct Root {
 pub(crate) fn project_name(folder: &str, checkout: Option<&Checkout>) -> String {
     let leaf = |p: &Path| p.file_name().map(|n| n.to_string_lossy().into_owned());
     let own = || leaf(Path::new(folder)).unwrap_or_else(|| folder.to_owned());
+    // SB-281: a copy kept in a worktrees folder is named after its repository, not its folder.
+    if in_worktrees(Path::new(folder)) {
+        if let Some(name) = checkout
+            .and_then(|c| c.remote.as_deref())
+            .and_then(|r| r.rsplit('/').next())
+            .filter(|n| !n.is_empty())
+        {
+            return name.to_owned();
+        }
+    }
     match checkout {
         Some(c) if !c.main => {
             if c.common.file_name().is_some_and(|n| n == ".git") {
@@ -48,6 +63,16 @@ pub(crate) fn project_name(folder: &str, checkout: Option<&Checkout>) -> String 
         }
         _ => own(),
     }
+}
+
+/// SB-281: whether a folder sits in a folder that holds worktrees and temporary copies.
+pub(crate) fn in_worktrees(folder: &Path) -> bool {
+    folder.parent().is_some_and(|p| {
+        p.components().any(|c| {
+            let c = c.as_os_str();
+            c == "_worktrees" || c == ".worktrees" || c == "worktrees"
+        })
+    })
 }
 
 /// What Git says about one folder.
@@ -171,10 +196,38 @@ pub(crate) fn group(folders: &[(String, Option<Checkout>)]) -> Vec<Root> {
         kind,
         branch: folders[i].1.as_ref().and_then(|c| c.branch.clone()),
     };
+    // SB-281: of the repositories with one `origin`, the one that leads: a main checkout outside a
+    // worktrees folder first, then one on `main` or `master`, then the first listed. The others go
+    // under it as clones, whichever order they were added in.
+    let rank = |g: &Group| {
+        let folder = Path::new(&folders[g.root].0);
+        let branch = folders[g.root].1.as_ref().and_then(|c| c.branch.as_deref());
+        (
+            !(g.main && !in_worktrees(folder)),
+            in_worktrees(folder),
+            !matches!(branch, Some("main" | "master")),
+        )
+    };
+    let lead: Vec<Option<usize>> = groups
+        .iter()
+        .map(|g| {
+            let remote = g.remote.as_ref()?;
+            groups
+                .iter()
+                .enumerate()
+                .filter(|(_, o)| o.remote.as_ref() == Some(remote))
+                .min_by_key(|(oi, o)| (rank(o), *oi))
+                .map(|(oi, _)| oi)
+        })
+        .collect();
     let mut roots: Vec<(usize, Root)> = Vec::new();
     let mut taken = vec![false; groups.len()];
     for (gi, g) in groups.iter().enumerate() {
         if taken[gi] || module_of[gi].is_some() {
+            continue;
+        }
+        // A copy whose repository has a better lead waits for it, if that lead can hold clones.
+        if lead[gi].is_some_and(|l| l != gi && groups[l].main && module_of[l].is_none()) {
             continue;
         }
         taken[gi] = true;
@@ -187,8 +240,13 @@ pub(crate) fn group(folders: &[(String, Option<Checkout>)]) -> Vec<Root> {
         };
         if let Some(remote) = &g.remote {
             // Clones of the same repository: only under a main checkout, and only once.
-            for (oi, other) in groups.iter().enumerate().skip(gi + 1) {
-                if taken[oi] || other.remote.as_ref() != Some(remote) || !g.main {
+            for (oi, other) in groups.iter().enumerate() {
+                if oi == gi
+                    || taken[oi]
+                    || module_of[oi].is_some()
+                    || other.remote.as_ref() != Some(remote)
+                    || !g.main
+                {
                     continue;
                 }
                 taken[oi] = true;
@@ -204,13 +262,10 @@ pub(crate) fn group(folders: &[(String, Option<Checkout>)]) -> Vec<Root> {
                     .extend(module.members.iter().map(|&m| derived(m, "module")));
             }
         }
-        // A root keeps the place of its repository's first listed folder.
-        let first = g
-            .members
+        // A root keeps the place of its repository's first listed folder, its clones' included.
+        let first = folders
             .iter()
-            .copied()
-            .chain([g.root])
-            .min()
+            .position(|(f, _)| *f == root.folder || root.derived.iter().any(|d| d.folder == *f))
             .unwrap_or(g.root);
         roots.push((first, root));
     }
@@ -225,7 +280,51 @@ pub(crate) fn group(folders: &[(String, Option<Checkout>)]) -> Vec<Root> {
         (i, root)
     }));
     roots.sort_by_key(|(first, _)| *first);
-    roots.into_iter().map(|(_, root)| root).collect()
+    let mut roots: Vec<Root> = roots.into_iter().map(|(_, root)| root).collect();
+    attach_data(&mut roots);
+    roots
+}
+
+/// SB-281: an agent's data folder (`<name>-data`: a plain folder, or the agent's own data
+/// repository) beside a root named `<name>` or `<name>-agent`, goes under that root as `data`.
+fn attach_data(roots: &mut Vec<Root>) {
+    let mut i = 0;
+    while i < roots.len() {
+        let candidate = &roots[i];
+        let path = Path::new(&candidate.folder);
+        let owner = candidate
+            .derived
+            .is_empty()
+            .then(|| {
+                path.file_name()?
+                    .to_str()?
+                    .strip_suffix("-data")
+                    .map(str::to_owned)
+            })
+            .flatten()
+            .filter(|base| !base.is_empty())
+            .and_then(|base| {
+                roots.iter().position(|r| {
+                    let other = Path::new(&r.folder);
+                    other.parent() == path.parent()
+                        && other.file_name().and_then(|n| n.to_str()).is_some_and(|n| {
+                            n == base || n.strip_suffix("-agent") == Some(base.as_str())
+                        })
+                })
+            });
+        match owner {
+            Some(o) if o != i => {
+                let data = roots.remove(i);
+                let o = if o > i { o - 1 } else { o };
+                roots[o].derived.push(Derived {
+                    folder: data.folder,
+                    kind: "data",
+                    branch: data.branch,
+                });
+            }
+            _ => i += 1,
+        }
+    }
 }
 
 /// The folders under `root` in `roots` (derived ones), for taking a root out with its tree.
@@ -489,6 +588,119 @@ mod tests {
         // A group holding only a worktree names it by its main checkout.
         let roots = group(&[("/d/_worktrees/asset-foundry-w3-fix".into(), wt)]);
         assert_eq!(roots[0].name, "asset-foundry");
+    }
+
+    #[test]
+    fn the_main_checkout_leads_even_when_a_copy_in_worktrees_was_added_first() {
+        // SB-281: `_worktrees/ho-seo` (a clone) was listed before `seo-aeo-audit` and led it.
+        let folders = vec![
+            (
+                "/d/_worktrees/ho-seo".to_owned(),
+                co(
+                    "/d/_worktrees/ho-seo/.git",
+                    Some("gh/seo-aeo-audit"),
+                    true,
+                    "fix",
+                ),
+            ),
+            (
+                "/d/seo-aeo-audit".to_owned(),
+                co(
+                    "/d/seo-aeo-audit/.git",
+                    Some("gh/seo-aeo-audit"),
+                    true,
+                    "main",
+                ),
+            ),
+        ];
+        let roots = group(&folders);
+        assert_eq!(roots.len(), 1);
+        assert_eq!(roots[0].folder, "/d/seo-aeo-audit");
+        assert_eq!(roots[0].name, "seo-aeo-audit");
+        assert_eq!(
+            roots[0].derived,
+            [Derived {
+                folder: "/d/_worktrees/ho-seo".into(),
+                kind: "clone",
+                branch: Some("fix".into())
+            }]
+        );
+        // Alone, the copy is named after its repository, not its folder.
+        let alone = group(&folders[..1]);
+        assert_eq!(
+            (alone[0].folder.as_str(), alone[0].name.as_str()),
+            ("/d/_worktrees/ho-seo", "seo-aeo-audit")
+        );
+        // Of two checkouts outside worktrees, the one on main leads.
+        let two = group(&[
+            (
+                "/d/app-feature".to_owned(),
+                co("/d/app-feature/.git", Some("gh/app"), true, "feature"),
+            ),
+            (
+                "/d/app".to_owned(),
+                co("/d/app/.git", Some("gh/app"), true, "main"),
+            ),
+        ]);
+        assert_eq!(two[0].folder, "/d/app");
+        assert_eq!(two[0].derived[0].folder, "/d/app-feature");
+    }
+
+    #[test]
+    fn an_agents_data_folder_goes_under_its_project() {
+        // SB-281: `fabric-data` and `mobile-publisher-data` read as projects of their own.
+        let folders = vec![
+            ("/d/fabric-data".to_owned(), None),
+            (
+                "/d/fabric".to_owned(),
+                co("/d/fabric/.git", Some("gh/fabric"), true, "main"),
+            ),
+            (
+                "/d/mobile-publisher-agent".to_owned(),
+                co(
+                    "/d/mobile-publisher-agent/.git",
+                    Some("gh/mp"),
+                    true,
+                    "main",
+                ),
+            ),
+            // The agent's own data repository goes under it too.
+            (
+                "/d/mobile-publisher-data".to_owned(),
+                co(
+                    "/d/mobile-publisher-data/.git",
+                    Some("gh/mp-data"),
+                    true,
+                    "main",
+                ),
+            ),
+            // No project beside it: it stays a root of its own.
+            ("/d/claude-code-data".to_owned(), None),
+            // A data folder elsewhere is not the project's.
+            ("/e/fabric-data".to_owned(), None),
+        ];
+        let roots = group(&folders);
+        let names: Vec<&str> = roots.iter().map(|r| r.folder.as_str()).collect();
+        assert_eq!(
+            names,
+            [
+                "/d/fabric",
+                "/d/mobile-publisher-agent",
+                "/d/claude-code-data",
+                "/e/fabric-data"
+            ]
+        );
+        assert_eq!(
+            roots[0].derived,
+            [Derived {
+                folder: "/d/fabric-data".into(),
+                kind: "data",
+                branch: None
+            }]
+        );
+        assert_eq!(roots[1].derived[0].folder, "/d/mobile-publisher-data");
+        assert_eq!(roots[1].derived[0].kind, "data");
+        assert_eq!(derived_of(&roots, "/d/fabric").len(), 1);
     }
 
     #[test]
