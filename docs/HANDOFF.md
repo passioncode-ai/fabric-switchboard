@@ -2,6 +2,20 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-11-06 (noon): release 0.7.20; SB-282 in progress
+
+- **Released.** v0.7.20 published 2026-11-06 12:22:33Z (25 assets, `latest.json` 0.7.20 for seven
+  platforms; release PR #450 `4cc0ea8`, nightly on the tag green 11:09Z; the release run's first
+  attempt lost the Windows arm64 job and its rerun passed): SB-281 (a group's main checkouts lead
+  their clones and worktrees, agents' data folders sit under their project).
+- **In progress.** SB-282 (operator 2026-11-06): groups, organizations and accounts many to many,
+  branch `sb-282-multi-org`, spec `docs/runs/2026-11-06-many-to-many/spec.md`. Core and runtime
+  done with tests; the window, docs and the release are left.
+- **Proposed.** SB-283: handing an account over to a colleague's Switchboard, after the Studio move
+  (studio-agent DEC-0020/0021). Asked Workspace, Inbox and Vesta who owns the sign-in code relay
+  (thread `d4c47b44`).
+- **Exact next task.** Finish SB-282 (window, CONTRACTS, release 0.7.21), then SB-283.
+
 ## 2026-11-06 (morning): release 0.7.19
 
 - **Released.** v0.7.19 published 2026-11-06 07:40:22Z (25 assets, `latest.json` 0.7.19 for seven
