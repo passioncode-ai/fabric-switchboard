@@ -8,6 +8,8 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+## 0.7.20
+
 - A group's folder list now shows each repository once, under its main copy, even when a copy kept in a worktrees folder was added first, and names that copy after its repository. An agent's data folder (`fabric-data` beside `fabric`, `mobile-publisher-data` beside `mobile-publisher-agent`) is listed under its project instead of as a project of its own (SB-281).
 
 ## 0.7.19
