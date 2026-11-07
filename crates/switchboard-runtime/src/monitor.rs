@@ -136,6 +136,15 @@ impl Pass {
                 &[("ms", crate::oplog::Field::Number(slowest as i64))],
             );
         }
+        // SB-296: a metadata write (with its fsync) that took a second or more since the last
+        // pass. Readers no longer wait for it; writers still do, so it is named.
+        let slowest_write = runtime.store.take_slowest_write();
+        if slowest_write >= SLOW_VAULT_READ_MS {
+            crate::oplog::event(
+                "metadata_write_slow",
+                &[("ms", crate::oplog::Field::Number(slowest_write as i64))],
+            );
+        }
         // With no saved Claude OAuth account there is nothing of Claude Code's to keep current:
         // no Keychain read and no Claude Swap read. Unassigned work discovery is stop-aware.
         let claude = native_sources && claude_oauth_saved(&runtime.store);

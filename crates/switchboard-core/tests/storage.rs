@@ -3190,9 +3190,13 @@ fn the_lock_observer_is_told_each_take_and_how_long_it_waited() {
     });
     let store = Arc::new(Store::open(root.path().into(), vault).unwrap());
     let account = add(&store, "synthetic-observed");
+    let kept = add(&store, "synthetic-kept");
     store.observe_lock_waits(note_lock_wait);
     let takes = LOCK_TAKES.load(Ordering::SeqCst);
-    store.snapshot().unwrap();
+    // SB-296: a snapshot reads the published state and takes no lock; a write takes it.
+    store
+        .update(&kept.id, "synthetic-kept".into(), true)
+        .unwrap();
     assert!(
         LOCK_TAKES.load(Ordering::SeqCst) > takes,
         "a free take is told"
@@ -3202,7 +3206,15 @@ fn the_lock_observer_is_told_each_take_and_how_long_it_waited() {
         std::thread::spawn(move || store.remove(&account.id))
     };
     std::thread::sleep(std::time::Duration::from_millis(100));
+    let started = std::time::Instant::now();
     store.snapshot().unwrap();
+    assert!(
+        started.elapsed() < std::time::Duration::from_millis(200),
+        "a snapshot does not wait for the removal"
+    );
+    store
+        .update(&kept.id, "synthetic-kept".into(), true)
+        .unwrap();
     removing.join().unwrap().unwrap();
     assert!(
         LONGEST_LOCK_WAIT.load(Ordering::SeqCst) >= 200,

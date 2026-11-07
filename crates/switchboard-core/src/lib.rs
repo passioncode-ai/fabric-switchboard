@@ -305,6 +305,12 @@ pub struct Store {
     _lock: File,
     vault: Arc<CountedVault>,
     state: Mutex<Snapshot>,
+    /// SB-296: the state as last published or held, for readers. A writer swaps it while it
+    /// holds `state`, after its write reached the disk, so a snapshot never waits out a
+    /// metadata write (an `fsync` took minutes while the machine swapped, 2026-11-06/07).
+    published: std::sync::RwLock<Arc<Snapshot>>,
+    /// SB-296: the slowest metadata write since the runtime last took it (ms).
+    slowest_write: std::sync::atomic::AtomicU64,
     /// H-2 (SB-174, SB-206): held by every writer of an account's credential (a save, a sign-in's
     /// rows, a renewal, a restore, a removal) across its Keychain reads and writes, so they never
     /// interleave; the metadata lock (`state`) is taken under it, never the other way round, and
@@ -824,6 +830,8 @@ impl Store {
                 writes: credential_changes.clone(),
                 writing: Default::default(),
             }),
+            published: std::sync::RwLock::new(Arc::new(state.clone())),
+            slowest_write: Default::default(),
             state: Mutex::new(state),
             credential_writes: Mutex::new(()),
             lock_observer: std::sync::OnceLock::new(),
@@ -887,8 +895,15 @@ impl Store {
     }
     fn publish(&self, state: &mut Snapshot, candidate: Snapshot) -> Result<(), String> {
         validate_snapshot(&candidate)?;
-        persistence::write(&self.root, &candidate)?;
+        let started = std::time::Instant::now();
+        let written = persistence::write(&self.root, &candidate);
+        self.slowest_write.fetch_max(
+            started.elapsed().as_millis() as u64,
+            std::sync::atomic::Ordering::Relaxed,
+        );
+        written?;
         *state = candidate;
+        self.republish(state);
         self.writes
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         self.pending_since
@@ -900,6 +915,7 @@ impl Store {
     fn hold(&self, state: &mut Snapshot, candidate: Snapshot) -> Result<(), String> {
         validate_snapshot(&candidate)?;
         *state = candidate;
+        self.republish(state);
         let _ = self.pending_since.compare_exchange(
             0,
             now().max(1),
@@ -1231,8 +1247,28 @@ impl Store {
         }
         self.flush()
     }
+    /// The state as last published or held (SB-296): never waits for a writer, so a read
+    /// during a slow metadata write answers the state before it.
     pub fn snapshot(&self) -> Result<Snapshot, String> {
-        Ok(self.lock()?.clone())
+        let published = self.published()?;
+        Ok(Snapshot::clone(&published))
+    }
+    fn published(&self) -> Result<Arc<Snapshot>, String> {
+        self.published
+            .read()
+            .map(|p| p.clone())
+            .map_err(|_| STORE_UNAVAILABLE.into())
+    }
+    /// Called with `state` held, after it changed: readers see the new state from now on.
+    fn republish(&self, state: &Snapshot) {
+        if let Ok(mut published) = self.published.write() {
+            *published = Arc::new(state.clone());
+        }
+    }
+    /// The slowest metadata write since the last call, in ms, and resets it (SB-296).
+    pub fn take_slowest_write(&self) -> u64 {
+        self.slowest_write
+            .swap(0, std::sync::atomic::Ordering::Relaxed)
     }
     /// A random id kept in this data folder, so backups of different stores in one folder
     /// never prune each other. Created on first use.
@@ -1597,8 +1633,9 @@ impl Store {
     /// 2026-10-23 and 2026-10-24. A write that lands meanwhile is read whole, old or new, as a
     /// reader waiting on the lock would have read it.
     pub fn stored_credential(&self, id: &str) -> Result<Credential, String> {
+        // SB-296: the published state, so a credential read never waits for a metadata write.
         let (provider, kind) = {
-            let state = self.lock()?;
+            let state = self.published()?;
             let a = state
                 .accounts
                 .iter()
@@ -2319,5 +2356,79 @@ mod write_mark_tests {
         drop(marks);
         writer.join().unwrap().unwrap();
         assert!(!vault.is_writing("synthetic-item"));
+    }
+}
+
+#[cfg(test)]
+mod published_tests {
+    use super::*;
+
+    fn store_with_one() -> (tempfile::TempDir, Arc<Store>, String) {
+        let root = tempfile::tempdir().unwrap();
+        let store = Arc::new(
+            Store::open(root.path().to_owned(), Arc::new(MemoryVault::default())).unwrap(),
+        );
+        let credential =
+            Credential::parse(Provider::Claude, AuthKind::ApiKey, "synthetic").unwrap();
+        let id = store
+            .add(
+                "synthetic".into(),
+                Provider::Claude,
+                AuthKind::ApiKey,
+                "default".into(),
+                credential,
+            )
+            .unwrap()
+            .id;
+        (root, store, id)
+    }
+
+    /// SB-296: a writer holds the metadata lock across its write (an `fsync` that took minutes
+    /// while the machine swapped). A snapshot and a credential read must not wait for it: they
+    /// answer at once, with the state before the write.
+    #[test]
+    fn a_snapshot_and_a_credential_read_never_wait_for_a_metadata_write() {
+        let (_root, store, id) = store_with_one();
+        let (held, holding) = std::sync::mpsc::channel();
+        let (release, released) = std::sync::mpsc::channel::<()>();
+        let writer = {
+            let store = store.clone();
+            std::thread::spawn(move || {
+                let _state = store.lock().unwrap();
+                let _ = held.send(());
+                let _ = released.recv_timeout(std::time::Duration::from_secs(3));
+            })
+        };
+        holding
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .expect("the writer holds the lock");
+        let started = std::time::Instant::now();
+        let snapshot = store.snapshot().unwrap();
+        let read = store.stored_credential(&id);
+        let took = started.elapsed();
+        release.send(()).unwrap();
+        writer.join().unwrap();
+        assert!(
+            took < std::time::Duration::from_secs(1),
+            "the reads waited for the writer: {took:?}"
+        );
+        assert_eq!(snapshot.accounts.len(), 1);
+        assert!(read.is_ok(), "the credential read failed");
+    }
+
+    /// SB-296: what a write publishes is what the next snapshot reads, and a held change (a
+    /// timestamp kept in memory) is read too.
+    #[test]
+    fn a_snapshot_reads_every_published_and_held_change() {
+        let (_root, store, id) = store_with_one();
+        store.update(&id, "renamed".into(), false).unwrap();
+        let account = store.snapshot().unwrap().accounts.remove(0);
+        assert_eq!(
+            (account.label.as_str(), account.enabled),
+            ("renamed", false)
+        );
+        store.usage_health(&id, "ok", 100, 200).unwrap();
+        let health = store.snapshot().unwrap().accounts[0].usage_health.clone();
+        assert_eq!(health.map(|h| h.next_check_at), Some(200));
     }
 }

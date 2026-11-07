@@ -32,6 +32,7 @@ const ERROR_EVENTS: &[&str] = &[
     "dispatch_timeout",
     "external_file_refused",
     "hard_exit",
+    "metadata_write_slow",
     "transaction_held",
     "usage_holds_unreadable",
     "usage_holds_unsaved",
