@@ -158,18 +158,19 @@ Select another same-pool account while the managed response streams: the current
 ```sh
 switchboard vault use file     # keep this data folder's sign-ins in 0600 files
 switchboard vault use native   # back to this computer's own store (the default)
+switchboard vault use file --move-from-native   # in a session where the keychain opens: move its sign-ins into files
 ```
 
-A `serve` under a LaunchDaemon on a Mac with no graphical login, or in a Linux VM with no session bus, has no unlocked store for its sign-ins (`Credential storage unavailable`). `vault use file` keeps them as 0600 files in `<data>/vault-files/`, protected as well as the user account is, as Claude Code's own `.credentials.json` is there. It is refused while this computer's own store works, and while Switchboard runs (the store is opened exclusively). The choice is the data folder's (`vault.json`), so the app, `serve` and every command read the same store; each switch moves the sign-ins it can read and names the rest in `not_moved`. `status` shows it as `vault` (SB-287, [design](research/headless-vault-2026-11-07.md)).
+A `serve` under a LaunchDaemon on a Mac with no graphical login, or in a Linux VM with no session bus, has no unlocked store for its sign-ins (`Credential storage unavailable`). `vault use file` keeps them as 0600 files in `<data>/vault-files/`, protected as well as the user account is, as Claude Code's own `.credentials.json` is there. It is refused while this computer's own store works, unless `--move-from-native` says to move from it on purpose (SB-301: a Mac Studio space opens its login keychain only in a session of its own, so the move runs there and the daemon then reads the files; run it again to move what it could not read), and while Switchboard runs (the store is opened exclusively). The choice is the data folder's (`vault.json`), so the app, `serve` and every command read the same store; each switch moves the sign-ins it can read and names the rest in `not_moved`. `status` shows it as `vault` (SB-287, [design](research/headless-vault-2026-11-07.md)).
 
-On a Mac Studio space the owner runs as a LaunchDaemon that Project Observatory's validator installs (`observatory-space-daemons`, OBS-361). Stop any `serve` started by hand, run `switchboard vault use file` once in the space, then put this definition in the space's `~/.local/share/project-observatory/background/LaunchAgents/ai.passioncode.fabric-switchboard.serve.plist` (folder 0700, file 0600, owned by the space's account) and let the validator `plan` and `apply` it (`remove` first when an older one is loaded). The validator writes `UserName`, `GroupName`, `InitGroups` and `HOME` itself and moves the logs to `/Library/Logs/ProjectObservatory/<account>/`, so the definition names neither; `ProgramArguments[0]` is the app's own binary, not the `~/.local/bin` link; `/Users/SPACE` is the space's home.
+On a Mac Studio space the owner runs as a LaunchDaemon that Project Observatory's validator installs (`observatory-space-daemons`, OBS-361). Stop any `serve` started by hand, in a session of the space where its keychain opens run `switchboard vault use file --move-from-native` (its sign-ins move into files; `not_moved` names any it could not read), then put this definition in the space's `~/.local/share/project-observatory/background/LaunchAgents/ai.passioncode.fabric-switchboard.serve.SPACE.plist` (folder 0700, file 0600, owned by the space's account) and let the validator `plan` and `apply` it (`remove` first when an older one is loaded). The validator writes `UserName`, `GroupName`, `InitGroups` and `HOME` itself and moves the logs to `/Library/Logs/ProjectObservatory/<account>/`, so the definition names neither; `ProgramArguments[0]` is the app's own binary, not the `~/.local/bin` link; `SPACE` is the space's account and `/Users/SPACE` its home: a label lives in the system domain, one per machine, so each space's daemon has its own (SB-301).
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <key>Label</key><string>ai.passioncode.fabric-switchboard.serve</string>
+  <key>Label</key><string>ai.passioncode.fabric-switchboard.serve.SPACE</string>
   <key>ProgramArguments</key>
   <array>
     <string>/Applications/Fabric Switchboard.app/Contents/MacOS/switchboard</string>

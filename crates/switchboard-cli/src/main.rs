@@ -361,6 +361,11 @@ enum VaultCommand {
         /// `file` or `native`.
         #[arg(value_enum)]
         kind: VaultKindArg,
+        /// With `file`: move the sign-ins this computer's own store holds into files even though
+        /// it works in this session (a space whose keychain opens only in its own session, the
+        /// daemon then reading the files). Run again to move what it could not read.
+        #[arg(long)]
+        move_from_native: bool,
     },
 }
 #[derive(Clone, Copy, ValueEnum)]
@@ -1417,7 +1422,10 @@ async fn run(cli: &Cli) -> Result<Value, String> {
     }
     // SB-287: offline only. It opens the store itself, so it is refused while Switchboard runs.
     if let Command::Vault {
-        command: VaultCommand::Use { kind },
+        command: VaultCommand::Use {
+            kind,
+            move_from_native,
+        },
     } = cli.command
     {
         let kind = match kind {
@@ -1429,6 +1437,7 @@ async fn run(cli: &Cli) -> Result<Value, String> {
             kind,
             std::sync::Arc::new(switchboard_core::NativeVault::new()),
             switchboard_runtime::vault_choice::native_works,
+            move_from_native,
         );
     }
     if let Command::Uninstall {
