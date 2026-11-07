@@ -534,7 +534,8 @@ installed, enabled agent of those five; disabling it returns the machine to *Aut
 `switchboard continue` without `--account` hands work to the default agent: OpenCode and Hermes on
 the OpenRouter key, Claude Code, Codex and Kimi Code on whichever of their accounts has room now.
 Fallback chains keep their own order. Fabric can read `default` (and `default_ready`) from
-`switchboard --json agents status` unless a project sets its own. The choices are saved in
+`switchboard --json agents status` unless a project sets its own; `dispatch_agent` names the agent
+`switchboard dispatch` would start now (with *Auto*: Claude Code, else Codex, else null). The choices are saved in
 `agents-settings.json` (0600) and carried in encrypted backups.
 `agents models` asks OpenRouter's public model list (no key, 10 s, kept 6 hours); when OpenRouter
 does not answer, the five recommended models and any id you type still work. MCP:

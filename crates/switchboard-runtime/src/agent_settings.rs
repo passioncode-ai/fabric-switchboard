@@ -205,10 +205,15 @@ pub fn overview(root: &Path, model: Option<&str>) -> Result<Value, String> {
         .default
         .as_deref()
         .is_some_and(|id| agents.iter().any(|a| a["id"] == id && a["enabled"] == true));
+    // SB-294: the agent a dispatch would start now (`claude-code`, `codex` or null), from the
+    // same rule `dispatch` follows, so Fabric offers its hand-over to that provider.
+    let dispatch_agent = crate::dispatch::default_agent(root)
+        .ok()
+        .map(|(agent, _)| agent);
     // A cache key for readers such as Fabric: it changes whenever anything in the answer does.
     let revision = {
         let digest = <sha2::Sha256 as sha2::Digest>::digest(
-            json!([&settings.default, default_ready, &agents])
+            json!([&settings.default, default_ready, &dispatch_agent, &agents])
                 .to_string()
                 .as_bytes(),
         );
@@ -229,6 +234,7 @@ pub fn overview(root: &Path, model: Option<&str>) -> Result<Value, String> {
         "updated_at": updated_at,
         "default": settings.default,
         "default_ready": default_ready,
+        "dispatch_agent": dispatch_agent,
         "installed": installed,
         "agents": agents,
         "recommended_models": recommended(),

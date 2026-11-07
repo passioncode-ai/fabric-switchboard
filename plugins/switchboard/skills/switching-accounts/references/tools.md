@@ -250,8 +250,9 @@ ids the app offers. `error` names a Hermes that did not answer.
 
 ### `switchboard_agents`: no arguments
 
-`{schema, revision, updated_at, default, default_ready, installed, agents: [...], recommended_models}`. `default` is the machine's default
-agent, `null` for *Auto*; Fabric uses it unless a group sets its own. Each agent row: `id`,
+`{schema, revision, updated_at, default, default_ready, dispatch_agent, installed, agents: [...], recommended_models}`. `default` is the machine's default
+agent, `null` for *Auto*; Fabric uses it unless a group sets its own. `dispatch_agent` is the agent a
+board dispatch would start now: with *Auto*, Claude Code, else Codex, else `null`. Each agent row: `id`,
 `name`, `maker`, `url`, `install` (its install command), `installed` (found on this computer
 now), `switchable` (Switchboard can hand it a workflow: Claude Code, Codex, Kimi Code, Hermes,
 OpenCode), `enabled` (switchable, installed and not disabled by the operator), `disabled`,
