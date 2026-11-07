@@ -6,17 +6,18 @@ release pull request renames `Unreleased` to the version. While Windows signing 
 that section must say `windows_authenticode: NOT_SIGNED`. Notes of 0.5.3-beta.1 and earlier are
 on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/releases).
 
-## Unreleased
-
-- The model picker recommends the operator's model map: Kimi K3.1 Pro for decisions and code, Claude Sonnet 5.5 for checking work, GLM 5.3 and DeepSeek V4.1 Flash for bulk work, and MiMo V2.6 Pro for users' requests and content; each card says what its model is for (SB-289).
-- The window shows the refusal of an unknown permission mode ("Choose bypass or ask.") as written, in English and Russian, instead of a generic error (SB-298).
-
-## 0.7.23
+## 0.7.24
 
 - The Claude Code and Codex sessions Switchboard starts (launches, continuations, hand-overs, consoles, board dispatches) now skip their permission prompts, since nobody may be there to answer; questions are settled when the task is set (operator, 2026-11-07). `switchboard agents permissions ask` keeps the prompts, and a caller that names its own permission mode keeps it (SB-298).
 - With no default agent chosen (*Auto*), a board request nobody answers now starts Claude Code, or Codex when Claude Code is not here or is kept away from taking over work; before, it waited. `agents status` names that agent as `dispatch_agent`, so Fabric offers the hand-over to the same one (SB-294).
 - On Linux, a connection to the proxy from a client that already closed is now read as of unknown owner and refused for that reason, as the contract's CT-254 (`v0.1.0+2026-11-07.3`) says; before, its row's uid 0 was read as root's.
 - Reading the accounts (the window, `switchboard recovery`, the MCP tools, a credential read for a managed request) no longer waits while Switchboard writes its account file. On a busy computer that write waited for the disk for up to minutes, and `recovery` waited with it (SB-296). A write that takes a second or more is logged as `metadata_write_slow`.
+- The model picker recommends the operator's model map: Kimi K3.1 Pro for decisions and code, Claude Sonnet 5.5 for checking work, GLM 5.3 and DeepSeek V4.1 Flash for bulk work, and MiMo V2.6 Pro for users' requests and content; each card says what its model is for (SB-289).
+- The window shows the refusal of an unknown permission mode ("Choose bypass or ask.") as written, in English and Russian, instead of a generic error (SB-298).
+
+## 0.7.23
+
+- Tagged but not published: the nightly checks failed on the error vocabulary check (SB-298's "Choose bypass or ask." was not registered). Every change of 0.7.23 ships in 0.7.24.
 
 ## 0.7.22
 
