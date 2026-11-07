@@ -6,7 +6,7 @@ release pull request renames `Unreleased` to the version. While Windows signing 
 that section must say `windows_authenticode: NOT_SIGNED`. Notes of 0.5.3-beta.1 and earlier are
 on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/releases).
 
-## Unreleased
+## 0.7.23
 
 - The Claude Code and Codex sessions Switchboard starts (launches, continuations, hand-overs, consoles, board dispatches) now skip their permission prompts, since nobody may be there to answer; questions are settled when the task is set (operator, 2026-11-07). `switchboard agents permissions ask` keeps the prompts, and a caller that names its own permission mode keeps it (SB-298).
 - With no default agent chosen (*Auto*), a board request nobody answers now starts Claude Code, or Codex when Claude Code is not here or is kept away from taking over work; before, it waited. `agents status` names that agent as `dispatch_agent`, so Fabric offers the hand-over to the same one (SB-294).
