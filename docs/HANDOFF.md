@@ -2,6 +2,32 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-11-07 (evening): release 0.7.24; SB-298, SB-289, SB-287, SB-163
+
+- **0.7.23 was tagged, not published.** Its nightly checks failed on `check-error-vocabulary.mjs`:
+  SB-298's `PERMISSIONS_INVALID` ("Choose bypass or ask.") was not in `src/adapter.ts`
+  (nightly `42398124651`, job log `unmapped backend message`). Fixed in #475 `6660baa`; the
+  v0.7.23 runs were cancelled (the release guard had dispatched a second nightly on the tag).
+  Every change of 0.7.23 ships in 0.7.24 (release PR #478 `2a133a5`, nightly `42399897709`
+  green 18:45Z). Lesson: run `./scripts/check.sh` in full before a release, not a hand-picked
+  subset.
+- **Merged for 0.7.24:** SB-296 (#470), CT-254 (#471), SB-294 (#472), SB-298 (#473, sessions
+  Switchboard starts bypass permission prompts unless the caller names a mode or the person chose
+  `ask`; flags of Dashboards and Fabric are recognised, no duplicate), #475, SB-297 (#476), SB-289
+  (#477, the operator's model map in the picker, each card saying what its model is for).
+- **Merged after 0.7.24, for 0.7.25:** SB-287 design (#479) and code (#480, `82c9310`): a file
+  store `<data>/vault-files/` chosen per data folder with `switchboard vault use file`, the
+  LaunchDaemon definition for Observatory's validator in `docs/CLI.md` (board thread `6bb39288`);
+  SB-163 (#481, `56bcb17`): a check that finds nothing due takes no owner transaction (on 0.7.22
+  `usage_renewal` `checks` held it 7 to 47 s).
+- **Board:** the bypass-permissions rule was relayed to every project (thread `eefa7959`,
+  `aa7c14a9`); studio-agent's ask to move an account between machines is SB-283 (thread
+  `f32a24c0`), waiting for the operator to raise its priority.
+- **Exact next task.** Confirm the v0.7.24 release (25 assets, `latest.json` for seven platforms),
+  install it here, close the 0.7.24 rows; then release 0.7.25 (SB-287, SB-163) and name the
+  version to studio-agent in `f32a24c0`. After a day on 0.7.25: read `transaction_held` in
+  `switchboard.log` for SB-163; Dashboards reports SB-296's hand-over reads (`26b81144`).
+
 ## 2026-11-07 (night): release 0.7.22; SB-293
 
 - **Found and fixed.** SB-293: the four seats moved to the Mac Studio (claude2, claude4, claude6,
