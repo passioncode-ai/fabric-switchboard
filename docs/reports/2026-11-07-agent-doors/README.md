@@ -48,7 +48,7 @@ SB-299.
 
 | Action | What is missing |
 |---|---|
-| Create a group with its organizations (`save_project`) | MCP edits an existing group only (`ProjectEdit`); the CLI `project save` creates but takes no organization |
+| Create a group with its organizations (`save_project`) | built: CLI `project save --organization`, MCP `switchboard_project_create` |
 | PassionCode.ai (`passioncode`) | connect and disconnect are CLI only; cancel is nowhere |
 | Delete a group, save or remove an agent key | CLI only, and refused when a ceiling is involved (above) |
 | How one agent connects (`agent_connect`) | MCP only approximates it through `switchboard_onboarding` |

@@ -526,6 +526,14 @@ enum Project {
         /// An account reserved for the group; repeat for each.
         #[arg(long = "account")]
         accounts: Vec<String>,
+        /// An organization of the group, by id or name; repeat for each, the first being the
+        /// group's own context. `personal` alone makes it personal. Left out, a new group is
+        /// personal and a saved one keeps its organizations.
+        #[arg(long = "organization")]
+        organizations: Vec<String>,
+        /// Move each listed account here from its group instead of sharing it.
+        #[arg(long)]
+        move_accounts: bool,
     },
     /// Delete a group. Its accounts keep its group id, no longer reserved.
     Delete {
@@ -2148,9 +2156,11 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                 name,
                 folders,
                 accounts,
+                organizations,
+                move_accounts,
             } => Operation::SaveProject {
-                organizations: None,
-                move_accounts: false,
+                organizations: (!organizations.is_empty()).then(|| organizations.clone()),
+                move_accounts: *move_accounts,
                 pool: pool.clone(),
                 name: name.clone(),
                 folders: folders
@@ -3998,7 +4008,7 @@ mod mcp_parity {
         ("project map", Tool("switchboard_repository_map")),
         ("project rotate-capability", Not(PERSON)),
         ("project codex", Tool("switchboard_codex_route")),
-        ("project save", Tool("switchboard_project_edit")),
+        ("project save", Tool("switchboard_project_create")),
         ("project delete", Not(PERSON)),
         ("project suggest", Not(HOST)),
         (

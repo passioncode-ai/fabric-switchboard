@@ -410,6 +410,7 @@ Folder rules (the `project set|remove|apply` commands) are optional: a folder an
 switchboard project list                      # {projects, rules}: projects with folders, roots (each with its worktrees and clones) and accounts, then rules
 switchboard project save --name "Client Alpha" --folder /work/alpha-web --folder /work/alpha-api --account <id>
 switchboard project save --pool client-alpha --name "Client Alpha" --folder /work/alpha-web   # update; omitted accounts go back to default
+switchboard project save --name "Acme web" --folder /work/acme-web --organization Acme   # SB-299: a new group bound to Acme (repeat --organization for several; --move-accounts moves listed accounts here)
 switchboard project edit --pool client-alpha --add-account <id> --remove-folder /work/old   # SB-134: change by delta; the rest stays
 switchboard project edit --pool client-alpha --organization Acme   # SB-109: the group runs only on Acme's accounts (`personal` for personal ones)
 switchboard project edit --pool shared --organization Acme --organization Beta   # SB-282: a group of two organizations, Acme first
