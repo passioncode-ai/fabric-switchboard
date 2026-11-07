@@ -178,6 +178,10 @@ async fn handshake_lists_tools_and_rejects_malformed_messages() {
             "switchboard_project_edit",
             "switchboard_codex_route",
             "switchboard_project_move_root",
+            "switchboard_link_cli",
+            "switchboard_analytics",
+            "switchboard_github",
+            "switchboard_github_clone",
             "switchboard_repository_map",
             "switchboard_statistics",
             "switchboard_events",
@@ -1129,6 +1133,12 @@ async fn a_project_is_listed_and_changed_by_delta_over_mcp() {
         json!({"folder": "relative/x", "pool": pool}),
     );
     assert!(error, "{refused}");
+    // SB-299: the window's GitHub clone takes an absolute folder only; the read is read-only.
+    let (error, refused) = agent.tool(
+        "switchboard_github_clone",
+        json!({"owner": "example", "name": "repo", "into": "relative/x"}),
+    );
+    assert!(error, "{refused}");
     let mut reader = Agent::start(data.path(), projects.path(), &[], true);
     let names: Vec<String> = reader.request("tools/list", json!({}))["result"]["tools"]
         .as_array()
@@ -1140,6 +1150,8 @@ async fn a_project_is_listed_and_changed_by_delta_over_mcp() {
     assert!(!names.contains(&"switchboard_project_edit".to_owned()));
     assert!(names.contains(&"switchboard_repository_map".to_owned()));
     assert!(!names.contains(&"switchboard_project_move_root".to_owned()));
+    assert!(names.contains(&"switchboard_github".to_owned()));
+    assert!(!names.contains(&"switchboard_github_clone".to_owned()));
 }
 
 #[tokio::test(flavor = "multi_thread")]

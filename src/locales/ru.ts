@@ -4,6 +4,9 @@
  * `node scripts/check-locale.mjs` keeps it complete.
  */
 export const RU: Record<string, string> = {
+  "The sign-in store's choice (vault.json) could not be read. Delete vault.json to use this computer's own store, or choose again with switchboard vault use.": "Не удалось прочитать выбор хранилища входов (vault.json). Удалите vault.json, чтобы пользоваться собственным хранилищем этого компьютера, или выберите снова командой switchboard vault use.",
+  "This computer's own sign-in store works here, so Switchboard keeps sign-ins in it. A file store is only for a machine with no graphical login.": "Собственное хранилище входов этого компьютера здесь работает, поэтому Switchboard хранит входы в нём. Хранилище в файлах нужно только машине без графического входа.",
+  "Choose bypass or ask.": "Выберите bypass или ask.",
   "That group no longer exists. Choose a group, or the default group.": "Этой группы больше нет. Выберите группу или группу по умолчанию.",
   "{n} Claude Swap accounts imported or updated in the default group": "{n} аккаунт Claude Swap импортирован или обновлён в группе по умолчанию|{n} аккаунта Claude Swap импортированы или обновлены в группе по умолчанию|{n} аккаунтов Claude Swap импортированы или обновлены в группе по умолчанию",
   "{label} moved to the default group.": "Аккаунт {label} перенесён в группу по умолчанию.",
@@ -1103,6 +1106,10 @@ export const RU: Record<string, string> = {
   "Disabled": "Выключен",
   "Set default": "Сделать по умолчанию",
   "Recommended models": "Рекомендуемые модели",
+  "Decisions and code": "Решения и код",
+  "Checking work": "Проверка работы",
+  "Bulk work": "Массовая работа",
+  "Users' requests and content": "Запросы и контент пользователей",
   "Agent settings (agents-settings.json) could not be read. Delete agents-settings.json, then restore a backup to get the settings back, or leave it deleted to start over with every agent enabled and no default.": "Не удалось прочитать настройки агентов (agents-settings.json). Удалите agents-settings.json и восстановите резервную копию, чтобы вернуть настройки, или оставьте файл удалённым: тогда все агенты будут включены, а агент по умолчанию не выбран.",
   "This agent is disabled for taking over work. Enable it on the Agents page, then try again.": "Этому агенту запрещено подхватывать работу. Включите его на странице «Агенты» и повторите.",
   "Name the account or agent to continue on (--account), or choose a default agent on the Agents page.": "Укажите аккаунт или агента, на котором продолжить (--account), либо выберите агента по умолчанию на странице «Агенты».",

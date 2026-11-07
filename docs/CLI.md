@@ -55,7 +55,21 @@ switchboard org connect        # SB-159: sign in to PassionCode.ai in the browse
 switchboard org read           # read your PassionCode.ai organizations again now
 switchboard org passioncode    # where the connection stands; no token is shown
 switchboard org disconnect     # delete the token; the organizations stay as local ones
+switchboard org cancel         # stop a connection still waiting for the browser
 ```
+
+`switchboard link` puts this `switchboard` into `~/.local/bin`, as the window's *Link the CLI* does
+(SB-299); run it by its full path, for example
+`"/Applications/Fabric Switchboard.app/Contents/MacOS/switchboard" link`.
+
+`switchboard analytics on|off` sets Switchboard's own usage analytics as About does, and without an
+argument reads the state (SB-299, [ANALYTICS](ANALYTICS.md)).
+
+GitHub through your own `gh`, as the window's GitHub page (SB-299): `switchboard github owners`
+lists you and your organizations, `switchboard github repos OWNER` that owner's repositories with
+where each is on this computer and its group, and `switchboard github clone OWNER NAME --into
+/absolute/folder` clones one into a folder that does not exist yet. MCP: `switchboard_github`,
+`switchboard_github_clone`.
 
 `connect` opens the PassionCode.ai consent page in the default browser and listens on
 `127.0.0.1` for its answer (RFC 8252 loopback, PKCE S256). The organizations you are a member of
@@ -129,9 +143,40 @@ cancel` ends the CLI's process group. The sign-in autopilot (SB-256) drives the 
 
 `continue` hands an [Observatory](CONTRACTS.md#workflow-continuation-sb-52-2026-10-05) workflow whose executor ran out of its limit to another account: of the same provider, or since 0.6.7 of the other one, Claude Code ↔ Codex, with the same checkpoint and constraints (SB-70) (`--mode isolated` by default, or `managed`). Since 0.6.31 `--account` also takes `opencode`: OpenCode on the saved OpenRouter key and its default model, with its own configuration for that session only (`OPENCODE_CONFIG_CONTENT`), the handoff as its first message (`opencode --prompt`) and never a change to your own OpenCode (SB-119); without `--account` the default agent continues (`switchboard agents default`, SB-120). Since 0.6.20 `--account` also takes a saved Kimi Code account's id (SB-99) or `hermes`: Hermes Agent on the saved OpenRouter key, on the model your Hermes is set to when it runs on OpenRouter (`switchboard agents hermes status`), else the key's default model (`switchboard agents openrouter model`); in a home Switchboard owns, its first turn the handoff (`hermes chat --query-file`, SB-107). The answer's `modelFrom` says which (`hermes` or `key`). With `--in-place` (0.6.25, SB-108) the continuing session runs in the calling terminal instead of a new Terminal window (the same session, home and first prompt), for an embedded console such as Fabric Dashboards'; it needs a terminal on stdin and stdout and refuses before anything is offered without one. It reads the workflow, refuses before anything changes when it cannot be continued here (closed, no checkpoint, a handoff already waiting, a declared key not in the vault, a workflow that names no executor, the same account, a folder outside the workflow's checkouts), offers it with reason `limit` and opens the account's session in Terminal. That session accepts the handoff itself, through the Observatory tools Switchboard declares in its config. The engine refuses an offer while the executor wrote a checkpoint less than two minutes ago; Switchboard reports that sentence and launches nothing. Set `SWITCHBOARD_OBSERVATORY_BIN` when `project-observatory` is not in `~/.local/bin`, Homebrew or `PATH`. macOS only for now.
 
-`dispatch` (SB-247, next release) is Fabric's command for a board request nobody answered: Fabric writes the request's workflow and offers it to the default agent's provider, and passes the folder, the workflow, the hand-over and, with `--request`, the board request (without it, the workflow's `board-request:` artifact names it; the flag wins). `--dispatch-id` is Fabric's own id for the dispatch, kept in the launch record. Switchboard chooses the account as `continue` without `--account` does (the default agent, the folder's group, the spending ceilings) and starts the agent with no person and no Terminal: Claude Code as `claude -p`, Codex as `codex exec`, in the account's isolated home, with `FABRIC_DISPATCH_WORKFLOW`, `FABRIC_DISPATCH_HANDOFF`, `FABRIC_DISPATCH_REQUEST` and, with `--dispatch-id`, `FABRIC_DISPATCH_ID` set; the prompt's first line is `fabric-dispatch/1 workflow=… handoff=… request=…`. The session accepts the hand-over itself. `--permissions all` adds `--dangerously-skip-permissions` (Claude Code) or `--dangerously-bypass-approvals-and-sandbox` (Codex); `ask`, the default, keeps the agent's own. The answer is `{launch_id, agent, account_id, state}`: `started`, `running` (a run of the same workflow already runs: its id, nothing new starts) or `refused` with a `reason` code and a `message` (`no_agent`, `not_in_group`, `ceiling_reached`, `spend_unknown`, `agent_not_installed`, `permission_mode`, `handoff_refused`). A refusal is an answer, exit 0; a malformed argument or a missing owner is an error, exit 1. The run writes its output to `launches/logs/<launch_id>.log` in the data folder and is stopped by `dispatch stop --launch-id` (`stopped` or `already_ended`) or after `--timeout-minutes` (default 60) by the running owner; `sessions show <launch_id>` reads its end (`ended`: `{kind: exited | stopped | timed_out, exit_code?, at}`) and `launched_by.dispatch` (`{id, request, thread, project, workflow}`). Only Claude Code and Codex take a dispatch for now; on Windows it answers `handoff_refused` until the Observatory engine is found there. The fields: [CONTRACTS](CONTRACTS.md#dispatch-for-a-board-request-sb-247-2026-11-04).
+`dispatch` (SB-247, next release) is Fabric's command for a board request nobody answered: Fabric writes the request's workflow and offers it to the default agent's provider, and passes the folder, the workflow, the hand-over and, with `--request`, the board request (without it, the workflow's `board-request:` artifact names it; the flag wins). `--dispatch-id` is Fabric's own id for the dispatch, kept in the launch record. Switchboard chooses the account as `continue` without `--account` does (the default agent, the folder's group, the spending ceilings) and starts the agent with no person and no Terminal: Claude Code as `claude -p`, Codex as `codex exec`, in the account's isolated home, with `FABRIC_DISPATCH_WORKFLOW`, `FABRIC_DISPATCH_HANDOFF`, `FABRIC_DISPATCH_REQUEST` and, with `--dispatch-id`, `FABRIC_DISPATCH_ID` set; the prompt's first line is `fabric-dispatch/1 workflow=… handoff=… request=…`. The session accepts the hand-over itself. `--permissions all`, the default since 0.7.24, adds `--dangerously-skip-permissions` (Claude Code) or `--dangerously-bypass-approvals-and-sandbox` (Codex); `ask` keeps the agent's own. The answer is `{launch_id, agent, account_id, state}`: `started`, `running` (a run of the same workflow already runs: its id, nothing new starts) or `refused` with a `reason` code and a `message` (`no_agent`, `not_in_group`, `ceiling_reached`, `spend_unknown`, `agent_not_installed`, `permission_mode`, `handoff_refused`). A refusal is an answer, exit 0; a malformed argument or a missing owner is an error, exit 1. The run writes its output to `launches/logs/<launch_id>.log` in the data folder and is stopped by `dispatch stop --launch-id` (`stopped` or `already_ended`) or after `--timeout-minutes` (default 60) by the running owner; `sessions show <launch_id>` reads its end (`ended`: `{kind: exited | stopped | timed_out, exit_code?, at}`) and `launched_by.dispatch` (`{id, request, thread, project, workflow}`). Only Claude Code and Codex take a dispatch for now; on Windows it answers `handoff_refused` until the Observatory engine is found there. The fields: [CONTRACTS](CONTRACTS.md#dispatch-for-a-board-request-sb-247-2026-11-04).
 
 Select another same-pool account while the managed response streams: the current response keeps its snapshot; the next request sees the new account. `Ctrl-C` or `SIGTERM` in `serve` stops the owner within ten seconds. Since 0.5.4 the proxy keeps its port and token across restarts, so a managed client launched earlier works again once an owner is back. Only one owner may hold a data root.
+
+## A machine with no graphical login
+
+```sh
+switchboard vault use file     # keep this data folder's sign-ins in 0600 files
+switchboard vault use native   # back to this computer's own store (the default)
+```
+
+A `serve` under a LaunchDaemon on a Mac with no graphical login, or in a Linux VM with no session bus, has no unlocked store for its sign-ins (`Credential storage unavailable`). `vault use file` keeps them as 0600 files in `<data>/vault-files/`, protected as well as the user account is, as Claude Code's own `.credentials.json` is there. It is refused while this computer's own store works, and while Switchboard runs (the store is opened exclusively). The choice is the data folder's (`vault.json`), so the app, `serve` and every command read the same store; each switch moves the sign-ins it can read and names the rest in `not_moved`. `status` shows it as `vault` (SB-287, [design](research/headless-vault-2026-11-07.md)).
+
+On a Mac Studio space the owner runs as a LaunchDaemon that Project Observatory's validator installs (`observatory-space-daemons`, OBS-361). Stop any `serve` started by hand, run `switchboard vault use file` once in the space, then put this definition in the space's `~/.local/share/project-observatory/background/LaunchAgents/ai.passioncode.fabric-switchboard.serve.plist` (folder 0700, file 0600, owned by the space's account) and let the validator `plan` and `apply` it (`remove` first when an older one is loaded). The validator writes `UserName`, `GroupName`, `InitGroups` and `HOME` itself and moves the logs to `/Library/Logs/ProjectObservatory/<account>/`, so the definition names neither; `ProgramArguments[0]` is the app's own binary, not the `~/.local/bin` link; `/Users/SPACE` is the space's home.
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>ai.passioncode.fabric-switchboard.serve</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Applications/Fabric Switchboard.app/Contents/MacOS/switchboard</string>
+    <string>serve</string>
+  </array>
+  <key>WorkingDirectory</key><string>/Users/SPACE</string>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>
+</dict>
+</plist>
+```
+
+`serve` stops with status 0 on a signal, so `KeepAlive {SuccessfulExit: false}` starts it again only after a crash.
 
 ## Uninstall
 
@@ -523,6 +568,7 @@ switchboard agents status                 # what is installed, which take over w
 switchboard agents disable kimi-code      # keep an agent out of fallback chains and continue
 switchboard agents enable kimi-code
 switchboard agents default opencode       # the machine's default agent; `auto` clears it
+switchboard agents permissions ask        # sessions Switchboard starts keep their permission prompts; `bypass` is the default
 switchboard agents models                 # the recommended OpenRouter models, then every model that can call tools
 ```
 
@@ -536,7 +582,8 @@ installed, enabled agent of those five; disabling it returns the machine to *Aut
 `switchboard continue` without `--account` hands work to the default agent: OpenCode and Hermes on
 the OpenRouter key, Claude Code, Codex and Kimi Code on whichever of their accounts has room now.
 Fallback chains keep their own order. Fabric can read `default` (and `default_ready`) from
-`switchboard --json agents status` unless a project sets its own. The choices are saved in
+`switchboard --json agents status` unless a project sets its own; `dispatch_agent` names the agent
+`switchboard dispatch` would start now (with *Auto*: Claude Code, else Codex, else null). The choices are saved in
 `agents-settings.json` (0600) and carried in encrypted backups.
 `agents models` asks OpenRouter's public model list (no key, 10 s, kept 6 hours); when OpenRouter
 does not answer, the five recommended models and any id you type still work. MCP:

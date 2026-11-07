@@ -34,6 +34,33 @@ pub struct Settings {
     /// Agents the person keeps work away from.
     #[serde(default)]
     pub disabled: Vec<String>,
+    /// SB-298 (operator 2026-11-07: agents run with permissions bypassed, «никакой человек не
+    /// сможет ничто ответить»): absent means bypass; `ask` keeps the agents' own prompts.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub permissions: Option<String>,
+}
+
+/// SB-298: the two permission modes of the sessions Switchboard starts.
+pub const BYPASS: &str = "bypass";
+pub const ASK: &str = "ask";
+pub const PERMISSIONS_INVALID: &str = "Choose bypass or ask.";
+
+/// SB-298: whether the Claude Code and Codex sessions Switchboard starts skip their permission
+/// prompts. True unless the person chose `ask`; an unreadable settings file reads as the default.
+pub fn bypass(root: &Path) -> bool {
+    read(root).map_or(true, |s| s.permissions.as_deref() != Some(ASK))
+}
+
+/// SB-298: saves the permission mode; `bypass` is stored as the absent default.
+pub fn set_permissions(root: &Path, mode: &str) -> Result<Settings, String> {
+    let mut s = read(root)?;
+    s.permissions = match mode {
+        BYPASS => None,
+        ASK => Some(ASK.to_owned()),
+        _ => return Err(PERMISSIONS_INVALID.into()),
+    };
+    write(root, &s)?;
+    Ok(s)
 }
 
 pub fn read(root: &Path) -> Result<Settings, String> {
@@ -205,10 +232,15 @@ pub fn overview(root: &Path, model: Option<&str>) -> Result<Value, String> {
         .default
         .as_deref()
         .is_some_and(|id| agents.iter().any(|a| a["id"] == id && a["enabled"] == true));
+    // SB-294: the agent a dispatch would start now (`claude-code`, `codex` or null), from the
+    // same rule `dispatch` follows, so Fabric offers its hand-over to that provider.
+    let dispatch_agent = crate::dispatch::default_agent(root)
+        .ok()
+        .map(|(agent, _)| agent);
     // A cache key for readers such as Fabric: it changes whenever anything in the answer does.
     let revision = {
         let digest = <sha2::Sha256 as sha2::Digest>::digest(
-            json!([&settings.default, default_ready, &agents])
+            json!([&settings.default, default_ready, &dispatch_agent, &agents])
                 .to_string()
                 .as_bytes(),
         );
@@ -229,6 +261,8 @@ pub fn overview(root: &Path, model: Option<&str>) -> Result<Value, String> {
         "updated_at": updated_at,
         "default": settings.default,
         "default_ready": default_ready,
+        "permissions": if settings.permissions.as_deref() == Some(ASK) { ASK } else { BYPASS },
+        "dispatch_agent": dispatch_agent,
         "installed": installed,
         "agents": agents,
         "recommended_models": recommended(),
@@ -338,11 +372,11 @@ mod tests {
         assert_eq!(
             ids,
             [
-                "xiaomi/mimo-v2.6-pro",
-                "anthropic/claude-haiku-5.5",
-                "google/gemini-3.8-flash",
-                "qwen/qwen3.8-flash",
-                "deepseek/deepseek-v4.1-flash"
+                "moonshotai/kimi-k3.1-pro",
+                "anthropic/claude-sonnet-5.5",
+                "z-ai/glm-5.3",
+                "deepseek/deepseek-v4.1-flash",
+                "xiaomi/mimo-v2.6-pro"
             ]
         );
         assert!(ids

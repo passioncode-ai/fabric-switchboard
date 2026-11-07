@@ -223,8 +223,11 @@ mod tests {
         path
     }
 
+    /// SB-297: the budget is a ceiling, not a wait: it returns as soon as `what` holds. The fake
+    /// CLI's start took longer than 10 s on a swapping machine (load average 147), so the budget
+    /// matches the other process tests' minute.
     fn until(what: impl Fn() -> bool) -> bool {
-        let deadline = Instant::now() + Duration::from_secs(10);
+        let deadline = Instant::now() + Duration::from_secs(60);
         while Instant::now() < deadline {
             if what() {
                 return true;

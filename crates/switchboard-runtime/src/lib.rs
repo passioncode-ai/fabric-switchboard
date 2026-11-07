@@ -47,6 +47,7 @@ mod statistics;
 pub mod suggest;
 pub mod uninstall;
 mod usage_gate;
+pub mod vault_choice;
 pub mod vesta;
 pub mod walks;
 use serde::{Deserialize, Serialize};
@@ -57,8 +58,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 use switchboard_core::{
-    Account, AuthKind, Credential, ExternalIdentity, NativeVault, Provider, RotationPolicy, Store,
-    Vault,
+    Account, AuthKind, Credential, ExternalIdentity, Provider, RotationPolicy, Store, Vault,
 };
 use switchboard_proxy::ProxyHandle;
 
@@ -361,6 +361,12 @@ pub enum Operation {
         #[serde(default)]
         enabled: Option<bool>,
     },
+    /// SB-299: Switchboard's own usage analytics switch (SB-246), as the window's About sets it.
+    /// `enabled` none: the state only.
+    Analytics {
+        #[serde(default)]
+        enabled: Option<bool>,
+    },
     /// SB-158: the organizations and where each account belongs, with the rule that decided.
     Organizations,
     OrganizationAdd {
@@ -608,6 +614,10 @@ pub enum Operation {
     /// The machine's default agent; none is Auto (SB-120).
     AgentDefault {
         agent: Option<String>,
+    },
+    /// SB-298: whether the sessions Switchboard starts bypass their permission prompts.
+    AgentPermissions {
+        mode: String,
     },
     /// The recommended OpenRouter models and OpenRouter's tool-capable list (SB-119).
     OpenrouterModels,
@@ -1092,6 +1102,8 @@ impl Runtime {
         if matches!(
             operation,
             Operation::Snapshot
+                // SB-299: the analytics client's own state, never the store.
+                | Operation::Analytics { .. }
                 | Operation::AgentCatalog
                 | Operation::AgentConnect { .. }
                 | Operation::AgentKey
@@ -2319,17 +2331,13 @@ impl Runtime {
     /// `{available, enabled, notice_pending}` for the first-run notice and About (SB-246).
     /// Unavailable outside a release desktop build, where no notice is shown.
     pub fn analytics_status(&self) -> Value {
-        self.analytics().map_or_else(
-            || json!({"available": false, "enabled": false, "notice_pending": false}),
-            |a| a.status(),
-        )
+        self.analytics()
+            .map_or_else(analytics_unavailable, |a| a.status())
     }
     /// Switchboard's own usage switch (SB-246): it turns Switchboard off or on only and never
     /// writes the shared installation file. Off drops what waits.
     pub fn set_analytics(&self, enabled: bool) -> Result<Value, String> {
-        let client = self.analytics().ok_or_else(|| {
-            "Usage analytics are available in the installed app only.".to_string()
-        })?;
+        let client = self.analytics().ok_or(ANALYTICS_APP_ONLY)?;
         client.set_enabled(enabled)
     }
     /// The first-run notice was read (*OK*); it is not shown again.
@@ -2763,6 +2771,12 @@ impl Owner {
         let sources = if native_sources { NATIVE } else { UNAVAILABLE };
         // A data folder created by this start: a new install, or one after `switchboard uninstall`.
         let fresh = !root.join("accounts.json").exists();
+        // SB-287: which store this owner keeps sign-ins in, once at start.
+        let kind = match switchboard_core::vault_kind(&root) {
+            Ok(switchboard_core::VaultKind::File) => "file",
+            _ => "native",
+        };
+        oplog::event("vault_kind", &[("kind", oplog::Field::Code(kind))]);
         let runtime = Runtime::open_with(root, vault, sources).await?;
         let control = control::ControlHandle::start(runtime.clone()).await?;
         // Only the real data folder is backed up: a `--data-dir` scratch store must never
@@ -2770,7 +2784,8 @@ impl Owner {
         let default_store = default_root().ok().as_deref() == Some(runtime.root.as_path());
         if native_sources && default_store {
             if let Some(dir) = backup_dir() {
-                runtime.enable_backups(switchboard_core::backup::platform_key(&dir), Some(dir));
+                let key = switchboard_core::backup::key_for(&runtime.root, &dir);
+                runtime.enable_backups(key, Some(dir));
             }
             if fresh {
                 runtime.restore_at_start();
@@ -2888,12 +2903,14 @@ impl Owner {
     }
     /// `switchboard serve`: native sources, and a vault that never shows a Keychain dialog.
     pub async fn native(root: PathBuf) -> Result<Self, String> {
-        Self::start_with_sources(root, Arc::new(NativeVault::new()), true).await
+        let vault = switchboard_core::open_vault(&root, false)?;
+        Self::start_with_sources(root, vault, true).await
     }
     /// The desktop app: as `native`, and the vault may ask once per item saved by an
     /// earlier version while moving it to shared storage (docs/KEYCHAIN.md).
     pub async fn desktop(root: PathBuf) -> Result<Self, String> {
-        Self::start_with_sources(root, Arc::new(NativeVault::desktop()), true).await
+        let vault = switchboard_core::open_vault(&root, true)?;
+        Self::start_with_sources(root, vault, true).await
     }
 }
 
@@ -3555,6 +3572,10 @@ pub(crate) fn from_outside(operation: Operation) -> Operation {
         operation => operation,
     }
 }
+pub const ANALYTICS_APP_ONLY: &str = "Usage analytics are available in the installed app only.";
+fn analytics_unavailable() -> Value {
+    json!({"available": false, "enabled": false, "notice_pending": false})
+}
 pub(crate) fn window_only_refusal(operation: &Operation) -> Option<&'static str> {
     matches!(
         operation,
@@ -3581,7 +3602,10 @@ pub async fn execute_offline(root: PathBuf, operation: Operation) -> Result<Valu
     if let Some(refusal) = window_only_refusal(&operation) {
         return Err(refusal.into());
     }
-    let store = Arc::new(Store::open(root.clone(), Arc::new(NativeVault::new()))?);
+    let store = Arc::new(Store::open(
+        root.clone(),
+        switchboard_core::open_vault(&root, false)?,
+    )?);
     execute(store, &root, None, from_outside(operation)).await
 }
 /// How long a command waits for the store when another process holds it (SB-181): an update
@@ -3879,7 +3903,7 @@ async fn execute(
         // null offline, where no owner answered) and `online` says whether an owner runs,
         // beside the display string `live_mode`.
         Operation::Status => Ok(
-            json!({"proxy_address": runtime.map(|r| r.proxy.address().to_string()), "platform": std::env::consts::OS, "live_mode": if runtime.is_some() { "Next request · HTTP/SSE" } else { "Offline" }, "owner_version": runtime.map(|_| env!("CARGO_PKG_VERSION")), "online": runtime.is_some()}),
+            json!({"proxy_address": runtime.map(|r| r.proxy.address().to_string()), "platform": std::env::consts::OS, "live_mode": if runtime.is_some() { "Next request · HTTP/SSE" } else { "Offline" }, "owner_version": runtime.map(|_| env!("CARGO_PKG_VERSION")), "online": runtime.is_some(), "vault": switchboard_core::vault_kind(root).ok()}),
         ),
         Operation::CurrentAccounts => match runtime {
             Some(runtime) => runtime.current_accounts(),
@@ -5100,6 +5124,10 @@ async fn execute(
             let s = agent_settings::set_default(root, agent.as_deref())?;
             Ok(json!({"default": s.default}))
         }
+        Operation::AgentPermissions { mode } => {
+            agent_settings::set_permissions(root, &mode)?;
+            Ok(json!({"permissions": mode}))
+        }
         Operation::OpenrouterModels => match runtime {
             Some(rt) => Ok(agent_settings::models(&rt.openrouter_models, monitor::now()).await),
             None => {
@@ -5454,6 +5482,12 @@ async fn execute(
             }
             Ok(json!({"id": id, "from": from, "pool": pool, "moved": true}))
         }
+        Operation::Analytics { enabled } => match (runtime, enabled) {
+            (Some(rt), Some(on)) => rt.set_analytics(on),
+            (Some(rt), None) => Ok(rt.analytics_status()),
+            (None, Some(_)) => Err(ANALYTICS_APP_ONLY.into()),
+            (None, None) => Ok(analytics_unavailable()),
+        },
         Operation::CodexRoute { enabled } => {
             let path = runtime.and_then(|r| (r.native.codex_config)());
             if let Some(on) = enabled {
@@ -5800,7 +5834,7 @@ async fn execute(
                 .ok_or(BACKUPS_DEFAULT_FOLDER_ONLY)?;
             let key = runtime
                 .and_then(|r| r.backup_key())
-                .or_else(|| switchboard_core::backup::platform_key(&dir))
+                .or_else(|| switchboard_core::backup::key_for(root, &dir))
                 .ok_or("Backups are not available on this platform.")?;
             let restored = switchboard_core::backup::restore(&store, &dir, &file, key.as_ref())?;
             if let Some(runtime) = runtime {
@@ -10990,5 +11024,35 @@ mod launch_record_tests {
     }
     fn private_fs_dir(path: &Path) {
         switchboard_core::private_fs::private_dir(path).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod analytics_door_tests {
+    use super::*;
+
+    /// SB-299: an agent reads the analytics state and is told why it cannot switch it where no
+    /// installed app runs.
+    #[tokio::test]
+    async fn the_analytics_door_reads_the_state_and_refuses_a_switch_without_the_app() {
+        let root = tempfile::tempdir().unwrap();
+        let state = execute_offline(
+            root.path().to_owned(),
+            Operation::Analytics { enabled: None },
+        )
+        .await
+        .unwrap();
+        assert_eq!(state["available"], false);
+        assert_eq!(
+            execute_offline(
+                root.path().to_owned(),
+                Operation::Analytics {
+                    enabled: Some(false)
+                }
+            )
+            .await
+            .unwrap_err(),
+            ANALYTICS_APP_ONLY
+        );
     }
 }

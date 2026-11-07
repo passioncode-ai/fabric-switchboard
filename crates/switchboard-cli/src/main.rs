@@ -46,6 +46,21 @@ enum Command {
         #[command(subcommand)]
         command: Org,
     },
+    /// Link this `switchboard` into ~/.local/bin, as the window's *Link the CLI* does.
+    Link,
+    /// Switchboard's own usage analytics (counts and kinds only, docs/ANALYTICS.md): `on` or
+    /// `off`; without either, the state. Only the installed app sends them.
+    Analytics {
+        /// `on` or `off`; without it, the state only.
+        #[arg(value_enum)]
+        state: Option<OnOff>,
+    },
+    /// GitHub repositories through your own `gh`: the owners it sees, an owner's repositories
+    /// matched with this computer, and cloning one.
+    Github {
+        #[command(subcommand)]
+        command: Github,
+    },
     /// The Fabric Inbox key the Claude sign-in autopilot reads its sign-in mail with.
     /// Make a read key limited to the sign-in mailbox in Fabric Inbox's Settings, Agent access.
     Inbox {
@@ -220,7 +235,7 @@ enum Command {
         reason: DispatchReason,
         /// `ask`: the agent's own defaults. `all`: Claude Code with
         /// --dangerously-skip-permissions, Codex with --dangerously-bypass-approvals-and-sandbox.
-        #[arg(long, value_enum, default_value = "ask")]
+        #[arg(long, value_enum, default_value = "all")]
         permissions: DispatchPermissions,
         /// Stop the run after this many minutes, 1 to 1440.
         #[arg(long, default_value_t = 60, value_parser = clap::value_parser!(u32).range(1..=1440))]
@@ -325,6 +340,27 @@ enum Command {
         #[arg(long)]
         yes: bool,
     },
+    /// Where this data folder keeps its sign-ins. Quit Switchboard first.
+    Vault {
+        #[command(subcommand)]
+        command: VaultCommand,
+    },
+}
+#[derive(Subcommand)]
+enum VaultCommand {
+    /// `file`: 0600 files in the data folder, only on a machine with no graphical login, where
+    /// this computer's own store is locked (a `serve` under a LaunchDaemon, a Linux VM with no
+    /// session bus). `native`: this computer's own store, the default. Moves every sign-in.
+    Use {
+        /// `file` or `native`.
+        #[arg(value_enum)]
+        kind: VaultKindArg,
+    },
+}
+#[derive(Clone, Copy, ValueEnum)]
+enum VaultKindArg {
+    Native,
+    File,
 }
 #[derive(Clone, Copy, ValueEnum)]
 enum HostArg {
@@ -592,12 +628,34 @@ enum Inbox {
     Remove,
 }
 #[derive(Subcommand)]
+enum Github {
+    /// The owners your `gh` can see: you and your organizations.
+    Owners,
+    /// One owner's repositories, each with where it is on this computer and its group.
+    Repos {
+        /// The owner, as `github owners` lists it.
+        owner: String,
+    },
+    /// Clone one repository into a folder.
+    Clone {
+        /// The owner.
+        owner: String,
+        /// The repository's name.
+        name: String,
+        /// The absolute folder to clone into; it must not exist yet.
+        #[arg(long)]
+        into: std::path::PathBuf,
+    },
+}
+#[derive(Subcommand)]
 enum Org {
     /// The organizations, then every account with the organization it belongs to and why.
     List,
     /// Connect PassionCode.ai: sign in in the browser, then your organizations there arrive
     /// here with their names and domains and are read again every 6 hours.
     Connect,
+    /// Stop a PassionCode.ai connection that waits for the browser.
+    Cancel,
     /// Read your PassionCode.ai organizations again now.
     Read,
     /// Where the PassionCode.ai connection stands (no token is shown).
@@ -965,6 +1023,12 @@ enum AgentsCommand {
         /// An installed, enabled agent that can continue, or `auto`.
         agent: String,
     },
+    /// Whether the Claude Code and Codex sessions Switchboard starts skip their permission
+    /// prompts: `bypass` (the default) or `ask`.
+    Permissions {
+        /// `bypass` or `ask`.
+        mode: String,
+    },
     /// The OpenRouter models agents can launch on: the recommended ones first, then every
     /// OpenRouter model that accepts tools.
     Models,
@@ -1305,6 +1369,26 @@ async fn run(cli: &Cli) -> Result<Value, String> {
         mcp::Server::new(root, read_only).serve().await?;
         return Ok(Value::Null);
     }
+    // SB-299: needs no owner and no store.
+    if let Command::Link = cli.command {
+        return switchboard_runtime::agents::link_this_cli();
+    }
+    // SB-287: offline only. It opens the store itself, so it is refused while Switchboard runs.
+    if let Command::Vault {
+        command: VaultCommand::Use { kind },
+    } = cli.command
+    {
+        let kind = match kind {
+            VaultKindArg::Native => switchboard_core::VaultKind::Native,
+            VaultKindArg::File => switchboard_core::VaultKind::File,
+        };
+        return switchboard_runtime::vault_choice::choose(
+            &root,
+            kind,
+            std::sync::Arc::new(switchboard_core::NativeVault::new()),
+            switchboard_runtime::vault_choice::native_works,
+        );
+    }
     if let Command::Uninstall {
         keep_data,
         purge,
@@ -1313,7 +1397,7 @@ async fn run(cli: &Cli) -> Result<Value, String> {
     {
         return switchboard_runtime::uninstall::uninstall_with(
             &root,
-            std::sync::Arc::new(switchboard_core::NativeVault::new()),
+            switchboard_core::open_vault(&root, false)?,
             keep_data,
             purge,
             yes,
@@ -1494,9 +1578,24 @@ async fn run(cli: &Cli) -> Result<Value, String> {
             Inbox::Status { check } => Operation::InboxStatus { check: *check },
             Inbox::Remove => Operation::InboxRemove,
         },
+        Command::Analytics { state } => Operation::Analytics {
+            enabled: state.map(|s| matches!(s, OnOff::On)),
+        },
+        Command::Github { command } => match command {
+            Github::Owners => Operation::GithubOwners,
+            Github::Repos { owner } => Operation::GithubRepositories {
+                owner: owner.clone(),
+            },
+            Github::Clone { owner, name, into } => Operation::GithubClone {
+                owner: owner.clone(),
+                name: name.clone(),
+                into: folder(&Some(into.clone()))?,
+            },
+        },
         Command::Org { command } => match command {
             Org::List => Operation::Organizations,
             Org::Connect => Operation::VestaConnect,
+            Org::Cancel => Operation::VestaCancel,
             Org::Read => Operation::VestaSync,
             Org::Passioncode => Operation::VestaStatus,
             Org::Disconnect => Operation::VestaDisconnect,
@@ -1808,6 +1907,9 @@ async fn run(cli: &Cli) -> Result<Value, String> {
             AgentsCommand::Default { agent } => Operation::AgentDefault {
                 agent: (agent != "auto").then(|| agent.clone()),
             },
+            AgentsCommand::Permissions { mode } => {
+                Operation::AgentPermissions { mode: mode.clone() }
+            }
             AgentsCommand::Models => Operation::OpenrouterModels,
             AgentsCommand::Connect { agent, pool } => Operation::AgentConnect {
                 agent: agent.clone(),
@@ -2045,6 +2147,8 @@ async fn run(cli: &Cli) -> Result<Value, String> {
         | Command::Mcp { .. }
         | Command::Shell { .. }
         | Command::Uninstall { .. }
+        | Command::Vault { .. }
+        | Command::Link
         | Command::Onboard { .. } => unreachable!(),
     };
     // SB-212: a launch names who asked for it (`agents launch`, `kimi launch`, `continue
@@ -3661,7 +3765,13 @@ mod mcp_parity {
         ("inbox remove", Not(PERSON)),
         ("org read", Tool("switchboard_organization_set")),
         ("org passioncode", Tool("switchboard_organizations")),
-        ("org disconnect", Not(PERSON)),
+        ("org disconnect", Tool("switchboard_organization_set")),
+        ("org cancel", Tool("switchboard_organization_set")),
+        ("analytics", Tool("switchboard_analytics")),
+        ("link", Tool("switchboard_link_cli")),
+        ("github owners", Tool("switchboard_github")),
+        ("github repos", Tool("switchboard_github")),
+        ("github clone", Tool("switchboard_github_clone")),
         ("accounts remove", Not(PERSON)),
         ("accounts select", Tool("switchboard_switch")),
         ("usage", Tool("switchboard_usage")),
@@ -3708,6 +3818,7 @@ mod mcp_parity {
         ("agents enable", Tool("switchboard_agent_set")),
         ("agents disable", Tool("switchboard_agent_set")),
         ("agents default", Tool("switchboard_agent_set")),
+        ("agents permissions", Tool("switchboard_agent_set")),
         ("agents models", Tool("switchboard_openrouter_models")),
         ("agents connect", Tool("switchboard_onboarding")),
         ("agents key", Not(PERSON)),
@@ -3786,6 +3897,10 @@ mod mcp_parity {
             Not("SB-183: prints the hook script for a person's own start file; not an agent action"),
         ),
         ("uninstall", Not(PERSON)),
+        (
+            "vault use",
+            Not("SB-287: chosen once per data folder by whoever sets up a machine with no graphical login, with Switchboard stopped; a running session cannot change it"),
+        ),
     ];
 
     fn leaves(command: &clap::Command, path: &str, out: &mut Vec<String>) {

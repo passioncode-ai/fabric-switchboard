@@ -135,6 +135,11 @@ const safeErrors = new Set([
   'Choose a model for this launch, or set the key\'s default model on the API keys page or with switchboard agents openrouter model.',
   'This account belongs to a group. Launch it from one of the group\'s folders.',
   'This folder belongs to a group. Launch one of the group\'s accounts.',
+  // The permission mode of the sessions Switchboard starts (SB-298).
+  'Choose bypass or ask.',
+  // Where a data folder keeps its sign-ins (SB-287).
+  "The sign-in store's choice (vault.json) could not be read. Delete vault.json to use this computer's own store, or choose again with switchboard vault use.",
+  "This computer's own sign-in store works here, so Switchboard keeps sign-ins in it. A file store is only for a machine with no graphical login.",
   // The terminal hook (SB-183, node A-7).
   'Only the installed app changes terminal settings.',
   'The terminal hook\'s choice could not be saved in Switchboard\'s data folder.',

@@ -9,7 +9,31 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 ## Unreleased
 
 - Hand an account over to another machine or a colleague without moving its credential (SB-283): `switchboard accounts hand-over` writes a signed record and marks the account here as used there; `switchboard accounts receive` on the other machine shows whose sign-in it is and, with `--apply`, starts it in the same group. MCP has both.
+- Agents can do what the window's GitHub page does: `switchboard github owners`, `github repos OWNER` and `github clone OWNER NAME --into FOLDER`, and the MCP tools `switchboard_github` and `switchboard_github_clone`. `switchboard org cancel` stops a PassionCode.ai connection waiting for the browser, and MCP can now cancel and disconnect it too (SB-299).
+- `switchboard analytics on|off` and the MCP tool `switchboard_analytics` set Switchboard's own usage analytics as About does, and read their state (SB-299).
+- `switchboard link` and the MCP tool `switchboard_link_cli` put Switchboard's command on `PATH` as the window's *Link the CLI* does (SB-299).
 
+## 0.7.25
+
+- A quota check or renewal that finds nothing due no longer takes Switchboard's lock to find that out, so a slow sign-in read while the computer swaps (up to 47 seconds on 2026-11-07) no longer makes the window, the CLI and the proxy wait behind it (SB-163).
+- On a machine with no graphical login (a `serve` under a LaunchDaemon on a Mac, a Linux VM with no session bus), `switchboard vault use file` keeps a data folder's sign-ins in 0600 files in that folder, so they can be stored at all; it is refused where this computer's own store works, and `vault use native` moves them back. `status` names the store (SB-287).
+
+## 0.7.24
+
+- The Claude Code and Codex sessions Switchboard starts (launches, continuations, hand-overs, consoles, board dispatches) now skip their permission prompts, since nobody may be there to answer; questions are settled when the task is set (operator, 2026-11-07). `switchboard agents permissions ask` keeps the prompts, and a caller that names its own permission mode keeps it (SB-298).
+- With no default agent chosen (*Auto*), a board request nobody answers now starts Claude Code, or Codex when Claude Code is not here or is kept away from taking over work; before, it waited. `agents status` names that agent as `dispatch_agent`, so Fabric offers the hand-over to the same one (SB-294).
+- On Linux, a connection to the proxy from a client that already closed is now read as of unknown owner and refused for that reason, as the contract's CT-254 (`v0.1.0+2026-11-07.3`) says; before, its row's uid 0 was read as root's.
+- Reading the accounts (the window, `switchboard recovery`, the MCP tools, a credential read for a managed request) no longer waits while Switchboard writes its account file. On a busy computer that write waited for the disk for up to minutes, and `recovery` waited with it (SB-296). A write that takes a second or more is logged as `metadata_write_slow`.
+- The model picker recommends the operator's model map: Kimi K3.1 Pro for decisions and code, Claude Sonnet 5.5 for checking work, GLM 5.3 and DeepSeek V4.1 Flash for bulk work, and MiMo V2.6 Pro for users' requests and content; each card says what its model is for (SB-289).
+- The window shows the refusal of an unknown permission mode ("Choose bypass or ask.") as written, in English and Russian, instead of a generic error (SB-298).
+
+## 0.7.23
+
+- Tagged but not published: the nightly checks failed on the error vocabulary check (SB-298's "Choose bypass or ask." was not registered). Every change of 0.7.23 ships in 0.7.24.
+
+## 0.7.22
+
+- An account marked as used on another machine, or turned off here, is no longer renewed when a quota check is asked for it here. Before, a check from the CLI or MCP could spend its sign-in and sign the other machine out (SB-293).
 - When you mark an account as used on another machine, you can say where it works: a machine and its user, or a colleague. The card shows it, and *Accounts* filters by *On this computer* and *On other machines* (SB-284). The CLI (`accounts update --location`) and MCP (`location`, `machine`) do the same.
 
 ## 0.7.21

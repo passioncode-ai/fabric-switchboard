@@ -2,6 +2,74 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-11-07 (evening): release 0.7.24; SB-298, SB-289, SB-287, SB-163
+
+- **0.7.23 was tagged, not published.** Its nightly checks failed on `check-error-vocabulary.mjs`:
+  SB-298's `PERMISSIONS_INVALID` ("Choose bypass or ask.") was not in `src/adapter.ts`
+  (nightly `42398124651`, job log `unmapped backend message`). Fixed in #475 `6660baa`; the
+  v0.7.23 runs were cancelled (the release guard had dispatched a second nightly on the tag).
+  Every change of 0.7.23 ships in 0.7.24 (release PR #478 `2a133a5`, nightly `42399897709`
+  green 18:45Z). Lesson: run `./scripts/check.sh` in full before a release, not a hand-picked
+  subset.
+- **Merged for 0.7.24:** SB-296 (#470), CT-254 (#471), SB-294 (#472), SB-298 (#473, sessions
+  Switchboard starts bypass permission prompts unless the caller names a mode or the person chose
+  `ask`; flags of Dashboards and Fabric are recognised, no duplicate), #475, SB-297 (#476), SB-289
+  (#477, the operator's model map in the picker, each card saying what its model is for).
+- **Merged after 0.7.24, for 0.7.25:** SB-287 design (#479) and code (#480, `82c9310`): a file
+  store `<data>/vault-files/` chosen per data folder with `switchboard vault use file`, the
+  LaunchDaemon definition for Observatory's validator in `docs/CLI.md` (board thread `6bb39288`);
+  SB-163 (#481, `56bcb17`): a check that finds nothing due takes no owner transaction (on 0.7.22
+  `usage_renewal` `checks` held it 7 to 47 s).
+- **Board:** the bypass-permissions rule was relayed to every project (thread `eefa7959`,
+  `aa7c14a9`); studio-agent's ask to move an account between machines is SB-283 (thread
+  `f32a24c0`), waiting for the operator to raise its priority.
+- **Exact next task.** Confirm the v0.7.24 release (25 assets, `latest.json` for seven platforms),
+  install it here, close the 0.7.24 rows; then release 0.7.25 (SB-287, SB-163) and name the
+  version to studio-agent in `f32a24c0`. After a day on 0.7.25: read `transaction_held` in
+  `switchboard.log` for SB-163; Dashboards reports SB-296's hand-over reads (`26b81144`).
+
+## 2026-11-07 (night): release 0.7.22; SB-293
+
+- **Found and fixed.** SB-293: the four seats moved to the Mac Studio (claude2, claude4, claude6,
+  claude10; marked *used on another machine* 2026-11-06 11:54 to 13:44 UTC) were kept from renewal
+  only by the background pass. A person's quota check (`Operation::Usage`, CLI `usage`, MCP
+  `switchboard_usage` refresh) renewed first through `refresh::reserve_due`, which never looked at
+  `enabled`, so a check could spend a moved seat's refresh token and sign the Studio out. Some caller
+  asked such checks every 30 minutes (`usage_check` `disabled` in switchboard.log). studio-agent
+  confirmed at 00:40 UTC that none of the four lost its sign-in. Fix: PR #461 `fa2a1cc`, test
+  `an_account_used_elsewhere_or_turned_off_is_never_renewed_here`.
+- **Released.** v0.7.22 published 2026-11-07 01:35:20Z (25 assets, `latest.json` 0.7.22 for seven
+  platforms; release PR #462 `1597309`, nightly on the tag green 01:06Z, release run passed on its
+  first attempt): SB-293, SB-284, SB-290.
+- **Seen, not fixed.** The owner holds its transaction 10 to 44 s in `usage_renewal` checks while the
+  machine swaps (load about 100, swap 9 GB), and reads behind it wait (`control_slow` snapshot up to
+  37 s; an MCP `switchboard_accounts` call timed out): SB-163.
+- **SB-287** (serve in a headless Studio space) carries studio-agent's findings and Observatory's
+  OBS-361 daemon route; the store needs a file-backed vault for headless spaces.
+- **Exact next task.** When the estate pause lifts: SB-289 (recommended models), SB-287 design note.
+  Waiting: SB-278 (DEC-0154 tag), SB-280 (OBS-359).
+
+## 2026-11-06 (afternoon): release 0.7.21; estate pause
+
+- **Released.** v0.7.21 published 2026-11-06 15:17:22Z (25 assets, `latest.json` 0.7.21 for seven
+  platforms; release PR #453 `6c2f6a3`, nightly on the tag green 13:43Z): SB-282 (groups,
+  organizations and accounts many to many), SB-286 (MCP structured content is an object), SB-288
+  (the dispatch exit contract's refused-enroll branch). Attempts 1 and 2 of the release run lost
+  the Windows arm64 signing step to the PowerShell Gallery ("Package 'ArtifactSigning' failed to
+  download"); attempt 3 passed. SB-290 (PR #457 `9eb4c3f`) retries signing after 60 s from the
+  next tag.
+- **Merged, not released.** SB-284 (PR #454 `6a9df88`: where an account used elsewhere works, the
+  machine filter, schema 10), SB-289 row, SB-290.
+- **Parked.** SB-283 by the operator's word (relayed `cfe60550`): the first part waits on branch
+  `sb-283-handover` (`61c98a7`), unmerged.
+- **Estate pause.** All PassionCode projects stopped new work for the common reconciliation (board
+  thread `eefa7959`, operator about 12:50 UTC); Switchboard's answer is
+  `docs/reports/2026-11-06-estate-flows/README.md` (PR #455). The machine's OpenRouter key default
+  moved to `moonshotai/kimi-k3.1-pro` by the model map (SB-289); read its spend on 2026-11-07.
+- **Exact next task.** When the pause lifts (the common source of truth in fabric-workspace
+  `docs/plans/2026-11-06-estate-flows/`): SB-289 (recommended models), then release 0.7.22 with
+  SB-284, SB-289 and SB-290. Waiting: SB-278 (DEC-0154 tag), SB-280 (OBS-359).
+
 ## 2026-11-06 (noon): release 0.7.20; SB-282 in progress
 
 - **Released.** v0.7.20 published 2026-11-06 12:22:33Z (25 assets, `latest.json` 0.7.20 for seven

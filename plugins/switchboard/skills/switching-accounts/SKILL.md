@@ -16,7 +16,7 @@ license: AGPL-3.0-only OR LicenseRef-PassionCode-Commercial
 compatibility: Requires Fabric Switchboard 0.4 or later on the same machine and the switchboard CLI on PATH; the plugin starts its MCP server as switchboard mcp over stdio. Without the server, the same reads and writes run through the CLI. Local only; provider calls are an explicit usage refresh and Switchboard's own renewal of inactive Claude sign-ins (never the account Claude Code uses).
 metadata:
   author: PassionCode.ai
-  version: "0.7.21"
+  version: "0.7.25"
   mcp-server: switchboard
   mcp-protocol: "2025-06-18"
 ---
@@ -52,6 +52,10 @@ the launch injected it with the session and data folder set explicitly.
 | `switchboard_codex_route` | yes | whether Codex sessions in project folders use the projects' Codex accounts; turn it on or off only when the operator asks |
 | `switchboard_project_move_root` | yes | move a repository with its worktrees and clones to another project, or put a loose one in a project, only when the operator asks |
 | `switchboard_repository_map` | no | the Git repositories under given folders (default `~/DATA`), each with its project or none |
+| `switchboard_link_cli` | yes | link this `switchboard` into `~/.local/bin`, only when the operator asks |
+| `switchboard_analytics` | yes | read or switch Switchboard's own usage analytics, the switch only when the operator asks |
+| `switchboard_github` | no | GitHub owners `gh` sees, or one owner's repositories matched with this computer |
+| `switchboard_github_clone` | yes | clone a GitHub repository into a new absolute folder, only when the operator asks |
 | `switchboard_statistics` | no | requests and the provider's token counts of the last 1-90 days by group, project, account, coding agent and day |
 | `switchboard_events` | no | recent activity as fixed codes |
 | `switchboard_account_update` | yes | rename, enable or disable an account, or mark it as used on another machine and say where (`location`), only when the operator asks |
@@ -62,7 +66,7 @@ the launch injected it with the session and data folder set explicitly.
 | `switchboard_rotation` / `switchboard_rotation_set` | no / yes | read or change automatic switching, the change only when the operator asks |
 | `switchboard_backups` / `switchboard_backup_now` | no / yes | encrypted backups; restoring stays the person's |
 | `switchboard_recovery` / `switchboard_handovers` | no | stopped sessions, and hand-overs waiting for a console |
-| `switchboard_agent_set` | yes | enable or disable an agent for taking over work, or set the default |
+| `switchboard_agent_set` | yes | enable or disable an agent for taking over work, set the default, or choose bypass or ask for permission prompts |
 | `switchboard_login` | yes | start and follow an official sign-in; the person signs in |
 | `switchboard_project_set` | yes | save a rule, only when the operator asks |
 | `switchboard_project_remove` | yes | remove the rule for exactly one folder and provider |

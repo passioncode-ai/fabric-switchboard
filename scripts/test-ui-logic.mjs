@@ -706,6 +706,13 @@ check(() => {
   assert.equal(logic.tokenCount(1_000_000), '1M');
   assert.equal(logic.tokenCount(200_000), '200K');
   assert.equal(logic.modelMeta({ maker: 'DeepSeek', context: 1_048_576, input_usd_per_million: 0.04 }), 'DeepSeek · 1.05M context · $0.04 per 1M input tokens');
+  // SB-289: every use the catalog names reads as a sentence of the window's, none passes through raw.
+  const catalog = JSON.parse(readFileSync(new URL('../catalog/agents.json', import.meta.url), 'utf8'));
+  const known = ['Decisions and code', 'Checking work', 'Bulk work', "Users' requests and content"];
+  for (const m of catalog.openrouter_recommended) assert.ok(known.includes(m.use), `${m.id}: a use modelUse translates`);
+  for (const use of known) assert.equal(logic.modelUse({ use }), use);
+  assert.equal(logic.modelUse({}), '');
+  assert.equal(logic.modelUse({ use: 'Something new' }), 'Something new');
 });
 // SB-145: Statistics counts as people read them; tokens are every kind the provider reported.
 check(() => {

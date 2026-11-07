@@ -68,6 +68,9 @@ const OWNED: &[&str] = &[
     "updates",
     "logins",
     "vault",
+    // A data folder that keeps its sign-ins in files (SB-287): the choice and the files.
+    "vault.json",
+    "vault-files",
     // Kimi Code homes (SB-81): each holds the only copy of an account's login.
     "kimi",
 ];

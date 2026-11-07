@@ -38,6 +38,11 @@ the two-tier idea of 2026-11-03, which was not built.
   (`disclosed_at`) sees the new notice once
   (`the_notice_waits_until_acknowledged_and_ok_changes_nothing_else`,
   `an_install_that_answered_under_the_old_rule_sees_the_notice_once`).
+- **An agent's door (SB-299).** `switchboard analytics on|off` and the MCP tool `switchboard_analytics`
+  (`enabled`) set the same switch as About on the operator's word; without an argument they read the
+  state. They reach the installed app's owner; anywhere else the switch answers
+  `ANALYTICS_APP_ONLY` and the state reads `available: false`
+  (`the_analytics_door_reads_the_state_and_refuses_a_switch_without_the_app`).
 - **Switchboard's own switch.** The switch is `enabled` in `<data>/analytics-state.json`
   (absent = on), set by About → *Share anonymous usage and error counts* (SCN-044) or the notice's
   *Turn off*. It turns Switchboard off or on only: the shared `PassionCode/installation.json`

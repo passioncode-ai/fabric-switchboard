@@ -681,6 +681,11 @@ pub(crate) async fn ensure_fresh_with(
     lock: Option<&tokio::sync::Mutex<()>>,
     step: &'static str,
 ) -> Outcome {
+    // SB-163: most checks find nothing due, and the read that tells (a Keychain call, held up
+    // to 47 s while the machine swapped on 2026-11-07) needs no transaction.
+    if nothing_due(store, state, id, force) {
+        return Outcome::NotNeeded;
+    }
     // Each span under the transaction is logged when long (`transaction_held`, SB-163).
     let mut guard = match lock {
         Some(lock) => Some(crate::hold_on(lock, step).await),
@@ -788,6 +793,25 @@ enum Step<'a> {
 }
 /// Everything `ensure_fresh` decides before the network: Ok is the reserved grant and the
 /// token it spends, Err the outcome without one.
+/// SB-163: true when `reserve_due` would answer `NotNeeded` whatever happens under the owner
+/// transaction: the stored credential is not due, no successor of it waits to be stored, and its
+/// lineage is not rejected. A credential written meanwhile only moves the expiry later, so the
+/// answer stands; anything else goes to `reserve_due` under the transaction.
+fn nothing_due(store: &Store, state: &RefreshState, id: &str, force: bool) -> bool {
+    if force {
+        return false;
+    }
+    let Ok(credential) = store.stored_credential(id) else {
+        return false;
+    };
+    let waiting = credential
+        .refresh_token
+        .as_ref()
+        .is_some_and(|t| state.stash.lock().map_or(true, |s| s.contains_key(t)));
+    let marked = state.dead.lock().map_or(true, |d| d.contains_key(id))
+        || state.rejected.lock().map_or(true, |r| r.contains_key(id));
+    !waiting && !marked && !due(&credential, now())
+}
 fn reserve_due<'a>(
     store: &Store,
     native: NativeSources,
@@ -804,6 +828,12 @@ fn reserve_due<'a>(
         return Step::Done(Outcome::NotNeeded);
     };
     if account.provider != Provider::Claude || account.kind != AuthKind::OAuth {
+        return Step::Done(Outcome::NotNeeded);
+    }
+    // SB-293: an account turned off here, a seat used on another machine included
+    // (`mark_elsewhere` turns it off), is never renewed here, by the background pass or a
+    // person's check: its refresh token belongs to the machine that uses it.
+    if !account.enabled {
         return Step::Done(Outcome::NotNeeded);
     }
     let Ok(credential) = store.stored_credential(id) else {
@@ -2105,6 +2135,38 @@ mod tests {
         );
         assert_eq!(calls.load(Ordering::SeqCst), 0);
     }
+    /// SB-293: an account marked as used on another machine, or turned off here, is never
+    /// renewed here, even on a person's quota check (`force`): spending its refresh token would
+    /// sign the other machine out.
+    #[tokio::test]
+    async fn an_account_used_elsewhere_or_turned_off_is_never_renewed_here() {
+        let (url, calls) = endpoint((200, json!({"access_token":"x","expires_in":60}))).await;
+        let root = tempfile::tempdir().unwrap();
+        let store = store_with(
+            root.path(),
+            &[("synthetic-b", "default"), ("synthetic-c", "default")],
+        );
+        let state = RefreshState::at(url);
+        let b = id_of(&store, "synthetic-b", "default");
+        let c = id_of(&store, "synthetic-c", "default");
+        store.mark_elsewhere(&b, true, now()).unwrap();
+        store.update(&c, "synthetic-c".into(), false).unwrap();
+        for id in [&b, &c] {
+            for force in [false, true] {
+                assert_eq!(
+                    ensure_fresh(&store, SIGNED_OUT, &state, id, force).await,
+                    Outcome::NotNeeded
+                );
+            }
+        }
+        assert_eq!(calls.load(Ordering::SeqCst), 0, "no grant spent");
+        store.mark_elsewhere(&b, false, now()).unwrap();
+        assert_eq!(
+            ensure_fresh(&store, SIGNED_OUT, &state, &b, false).await,
+            Outcome::Refreshed,
+            "used here again"
+        );
+    }
     #[tokio::test]
     async fn a_rejected_lineage_is_never_handed_to_claude_code() {
         let (url, _) = endpoint((400, json!({"error":"invalid_grant"}))).await;
@@ -2282,6 +2344,9 @@ mod tests {
             .unwrap();
         let id = id_of(&store, "synthetic-a", "default");
         let state = RefreshState::default();
+        // A rejected lineage is decided under the transaction (SB-163 keeps only a check that
+        // finds nothing due outside it).
+        state.reject(&id, &store.stored_credential(&id).unwrap());
         let lock = tokio::sync::Mutex::new(());
         vault.slow.store(true, Ordering::SeqCst);
         ensure_fresh_with(
@@ -2303,6 +2368,66 @@ mod tests {
             checks.is_some_and(|ms| ms >= 50),
             "the checks' time is under `checks`: {phases:?}"
         );
+    }
+    /// SB-163: a check that finds nothing due answers without the owner transaction, even while
+    /// someone else holds it; one that is due still takes it.
+    #[tokio::test]
+    async fn a_check_that_finds_nothing_due_never_waits_for_the_transaction() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::open(
+            root.path().to_owned(),
+            Arc::new(switchboard_core::MemoryVault::default()),
+        )
+        .unwrap();
+        let mut fresh = expired("synthetic-a");
+        fresh.expires_at = Some(now() + 86_400);
+        store
+            .upsert(
+                "synthetic-a".into(),
+                Provider::Claude,
+                AuthKind::OAuth,
+                "default".into(),
+                fresh,
+                Some(identity("synthetic-a")),
+            )
+            .unwrap();
+        let id = id_of(&store, "synthetic-a", "default");
+        let state = RefreshState::default();
+        let lock = tokio::sync::Mutex::new(());
+        let _held = lock.lock().await;
+        let answer = tokio::time::timeout(
+            Duration::from_secs(5),
+            ensure_fresh_with(
+                &store,
+                SIGNED_OUT,
+                &state,
+                &id,
+                false,
+                Some(&lock),
+                "usage_renewal",
+            ),
+        )
+        .await
+        .expect("a check with nothing due does not wait for the transaction");
+        assert_eq!(answer, Outcome::NotNeeded);
+        // Forced, or with its lineage rejected, it is decided under the transaction.
+        assert!(!nothing_due(&store, &state, &id, true));
+        state.reject(&id, &store.stored_credential(&id).unwrap());
+        assert!(!nothing_due(&store, &state, &id, false));
+        let due_now = RefreshState::default();
+        let mut stale = expired("synthetic-a");
+        stale.expires_at = Some(now() + 10);
+        store
+            .upsert(
+                "synthetic-a".into(),
+                Provider::Claude,
+                AuthKind::OAuth,
+                "default".into(),
+                stale,
+                Some(identity("synthetic-a")),
+            )
+            .unwrap();
+        assert!(!nothing_due(&store, &due_now, &id, false));
     }
     struct FailingVault {
         inner: switchboard_core::MemoryVault,

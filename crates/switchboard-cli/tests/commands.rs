@@ -774,7 +774,7 @@ fn agents_are_enabled_disabled_and_made_default_offline() {
     assert_eq!(opencode["enabled"], true);
     assert_eq!(
         status["recommended_models"][0]["id"],
-        "xiaomi/mimo-v2.6-pro"
+        "moonshotai/kimi-k3.1-pro"
     );
     assert_eq!(
         data(&["agents", "default", "opencode"])["default"],
