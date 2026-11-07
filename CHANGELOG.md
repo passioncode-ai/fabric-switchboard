@@ -6,7 +6,7 @@ release pull request renames `Unreleased` to the version. While Windows signing 
 that section must say `windows_authenticode: NOT_SIGNED`. Notes of 0.5.3-beta.1 and earlier are
 on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/releases).
 
-## Unreleased
+## 0.7.27
 
 - `switchboard vault use file --move-from-native` moves a space's sign-ins from its keychain into files in a session where the keychain opens, so a Mac Studio space's daemon can read them after a restart; the LaunchDaemon label in the docs now names the space, one per space (SB-301).
 
