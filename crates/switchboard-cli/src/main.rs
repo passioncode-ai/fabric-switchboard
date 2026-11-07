@@ -46,6 +46,12 @@ enum Command {
         #[command(subcommand)]
         command: Org,
     },
+    /// GitHub repositories through your own `gh`: the owners it sees, an owner's repositories
+    /// matched with this computer, and cloning one.
+    Github {
+        #[command(subcommand)]
+        command: Github,
+    },
     /// The Fabric Inbox key the Claude sign-in autopilot reads its sign-in mail with.
     /// Make a read key limited to the sign-in mailbox in Fabric Inbox's Settings, Agent access.
     Inbox {
@@ -613,12 +619,34 @@ enum Inbox {
     Remove,
 }
 #[derive(Subcommand)]
+enum Github {
+    /// The owners your `gh` can see: you and your organizations.
+    Owners,
+    /// One owner's repositories, each with where it is on this computer and its group.
+    Repos {
+        /// The owner, as `github owners` lists it.
+        owner: String,
+    },
+    /// Clone one repository into a folder.
+    Clone {
+        /// The owner.
+        owner: String,
+        /// The repository's name.
+        name: String,
+        /// The absolute folder to clone into; it must not exist yet.
+        #[arg(long)]
+        into: std::path::PathBuf,
+    },
+}
+#[derive(Subcommand)]
 enum Org {
     /// The organizations, then every account with the organization it belongs to and why.
     List,
     /// Connect PassionCode.ai: sign in in the browser, then your organizations there arrive
     /// here with their names and domains and are read again every 6 hours.
     Connect,
+    /// Stop a PassionCode.ai connection that waits for the browser.
+    Cancel,
     /// Read your PassionCode.ai organizations again now.
     Read,
     /// Where the PassionCode.ai connection stands (no token is shown).
@@ -1490,9 +1518,21 @@ async fn run(cli: &Cli) -> Result<Value, String> {
             Inbox::Status { check } => Operation::InboxStatus { check: *check },
             Inbox::Remove => Operation::InboxRemove,
         },
+        Command::Github { command } => match command {
+            Github::Owners => Operation::GithubOwners,
+            Github::Repos { owner } => Operation::GithubRepositories {
+                owner: owner.clone(),
+            },
+            Github::Clone { owner, name, into } => Operation::GithubClone {
+                owner: owner.clone(),
+                name: name.clone(),
+                into: folder(&Some(into.clone()))?,
+            },
+        },
         Command::Org { command } => match command {
             Org::List => Operation::Organizations,
             Org::Connect => Operation::VestaConnect,
+            Org::Cancel => Operation::VestaCancel,
             Org::Read => Operation::VestaSync,
             Org::Passioncode => Operation::VestaStatus,
             Org::Disconnect => Operation::VestaDisconnect,
@@ -3659,7 +3699,11 @@ mod mcp_parity {
         ("inbox remove", Not(PERSON)),
         ("org read", Tool("switchboard_organization_set")),
         ("org passioncode", Tool("switchboard_organizations")),
-        ("org disconnect", Not(PERSON)),
+        ("org disconnect", Tool("switchboard_organization_set")),
+        ("org cancel", Tool("switchboard_organization_set")),
+        ("github owners", Tool("switchboard_github")),
+        ("github repos", Tool("switchboard_github")),
+        ("github clone", Tool("switchboard_github_clone")),
         ("accounts remove", Not(PERSON)),
         ("accounts select", Tool("switchboard_switch")),
         ("usage", Tool("switchboard_usage")),

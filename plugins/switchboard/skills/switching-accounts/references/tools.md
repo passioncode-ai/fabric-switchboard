@@ -155,6 +155,16 @@ and `organization` / `organization_name`; then every folder rule with its `state
 The Git repositories under those folders (default `~/DATA`, else the home folder; three levels,
 never into a repository, a hidden folder or dependencies), each with its group or none.
 
+### `switchboard_github`: `owner?`
+
+Through the person's own `gh`: without `owner`, the owners it sees (the person and their
+organizations); with `owner`, that owner's repositories, each with where it is on this computer and
+its group. Reads only.
+
+### `switchboard_github_clone`: `owner`, `name`, `into` (an absolute folder that does not exist yet)
+
+Only when the operator asks. Clones one repository with the person's `gh`, as the window does.
+
 ### `switchboard_statistics`: `days?` (1 to 90, default 30)
 
 What the proxy relayed: requests, outcomes (`ok`, `limited`, `failed`) and the provider's token
@@ -393,8 +403,10 @@ one more group and keep its own, add it with `switchboard_project_edit` instead.
 Only when the operator asks. `action` is `add` (name, domains), `edit` (id; name and/or domains,
 which replace the list), `remove` (id), `assign` (account_id, organization: an id, `personal` or
 `auto`; or `organizations`: every context of an account that works for several, the first its
-own, the rest it also works for, empty to let the rules decide) or `passioncode_read` (read the
-PassionCode.ai organizations again; connecting is the person's).
+own, the rest it also works for, empty to let the rules decide), `passioncode_read` (read the
+PassionCode.ai organizations again; connecting is the person's), `passioncode_cancel` (stop a
+connection waiting for the browser) or `passioncode_disconnect` (delete the token; the
+organizations stay as local ones).
 
 ### `switchboard_rotation_set`: `provider`, `pool?`, `target?`, `enabled?`, `threshold_percent?`, `hysteresis_percent?`, `cooldown_seconds?`, `max_age_seconds?`
 
