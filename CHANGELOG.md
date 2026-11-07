@@ -6,7 +6,7 @@ release pull request renames `Unreleased` to the version. While Windows signing 
 that section must say `windows_authenticode: NOT_SIGNED`. Notes of 0.5.3-beta.1 and earlier are
 on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/releases).
 
-## Unreleased
+## 0.7.26
 
 - Move an account to another machine without signing in there: *Move to another machine…* in an account's menu, `switchboard accounts send ID --to user@host` or the MCP tool `switchboard_account_send` move a Claude or Codex subscription sign-in over ssh. This computer stops using it first, the other machine saves it and checks that the provider answers, and any failure leaves it here as it was (SB-283).
 - Hand an account over to another machine or a colleague without moving its credential (SB-283): `switchboard accounts hand-over` writes a signed record and marks the account here as used there; `switchboard accounts receive` on the other machine shows whose sign-in it is and, with `--apply`, starts it in the same group. MCP has both.
