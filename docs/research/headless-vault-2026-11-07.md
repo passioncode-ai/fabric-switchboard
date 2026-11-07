@@ -1,6 +1,6 @@
 # A sign-in store for a machine with no graphical login (SB-287)
 
-Design note, 2026-11-07. Status: decided, not built. Owner: fabric-switchboard. Peers: studio-agent
+Design note, 2026-11-07. Status: built (branch `feat/sb-287-file-vault`); the LaunchDaemon definition is Observatory's to install. Owner: fabric-switchboard. Peers: studio-agent
 (Mac Studio spaces), Project Observatory (OBS-361, the LaunchDaemon route), Linux member VMs (SB-88, SB-292).
 
 ## What is asked
@@ -45,7 +45,7 @@ that works there.
 ## Decision
 
 1. **A `FileVault`** (`crates/switchboard-core/src/vault.rs`) keeps each item as
-   `<data>/vault/<id>` (folder 0700, files 0600, written by `private_fs::private_write`, read with
+   `<data>/vault-files/<id>` (folder 0700, files 0600, written by `private_fs::private_write`, read with
    `read_private_strict` under a size cap; ids are the UUIDs the store already uses, anything else
    refused). It holds the account credentials, the backup key and the settings signing key, so a
    headless space needs no other store.
@@ -58,16 +58,17 @@ that works there.
    store answers a probe (a write and delete of a throwaway item): a person's Mac keeps the
    Keychain. The refusal names the reason. `vault use native` is always allowed.
 4. **Moving between them.** Switching moves every item the store names from the old vault to the
-   new one, then deletes the old copy; an item that cannot be read stays and is listed
+   new one (the folder is `vault-files`, not `vault`: on Windows `vault` holds DPAPI items,
+   `crates/switchboard-core/src/windows.rs:466`), then deletes the old copy; an item that cannot be read stays and is listed
    (`not_moved`). A fresh headless space has nothing to move: its accounts are signed in there
    (SB-256 headless sign-in).
 5. **What a person and an agent see.** `switchboard status` and MCP `switchboard_status` name the
    vault kind; the log writes `vault_kind {kind}` once at start; the window shows nothing new (it
-   never runs headless). `switchboard uninstall` removes `<data>/vault/` and `vault.json`.
-6. **The daemon definition.** Switchboard documents the LaunchDaemon it runs under (label,
-   `UserName`, `HOME`, `ProgramArguments` `switchboard serve --data-dir <space data>`,
-   `KeepAlive {SuccessfulExit: false}`); Observatory's validator installs it (OBS-361). Switchboard
-   installs no daemon itself.
+   never runs headless). `switchboard uninstall` removes `<data>/vault-files/` and `vault.json`.
+6. **The daemon definition** ([CLI → A machine with no graphical login](../CLI.md#a-machine-with-no-graphical-login), fields agreed with Observatory on board thread `6bb39288`). Switchboard documents the LaunchDaemon it runs under (label,
+   `ProgramArguments` the app's own binary and `serve`, `WorkingDirectory`, `RunAtLoad`,
+   `KeepAlive {SuccessfulExit: false}`); Observatory's validator adds `UserName`, `HOME` and the
+   log paths and installs it (OBS-361). Switchboard installs no daemon itself.
 
 ## Threat model
 

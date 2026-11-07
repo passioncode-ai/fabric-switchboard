@@ -4,6 +4,8 @@
  * `node scripts/check-locale.mjs` keeps it complete.
  */
 export const RU: Record<string, string> = {
+  "The sign-in store's choice (vault.json) could not be read. Delete vault.json to use this computer's own store, or choose again with switchboard vault use.": "Не удалось прочитать выбор хранилища входов (vault.json). Удалите vault.json, чтобы пользоваться собственным хранилищем этого компьютера, или выберите снова командой switchboard vault use.",
+  "This computer's own sign-in store works here, so Switchboard keeps sign-ins in it. A file store is only for a machine with no graphical login.": "Собственное хранилище входов этого компьютера здесь работает, поэтому Switchboard хранит входы в нём. Хранилище в файлах нужно только машине без графического входа.",
   "Choose bypass or ask.": "Выберите bypass или ask.",
   "That group no longer exists. Choose a group, or the default group.": "Этой группы больше нет. Выберите группу или группу по умолчанию.",
   "{n} Claude Swap accounts imported or updated in the default group": "{n} аккаунт Claude Swap импортирован или обновлён в группе по умолчанию|{n} аккаунта Claude Swap импортированы или обновлены в группе по умолчанию|{n} аккаунтов Claude Swap импортированы или обновлены в группе по умолчанию",

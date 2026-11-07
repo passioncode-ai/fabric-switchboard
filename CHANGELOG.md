@@ -6,6 +6,10 @@ release pull request renames `Unreleased` to the version. While Windows signing 
 that section must say `windows_authenticode: NOT_SIGNED`. Notes of 0.5.3-beta.1 and earlier are
 on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/releases).
 
+## Unreleased
+
+- On a machine with no graphical login (a `serve` under a LaunchDaemon on a Mac, a Linux VM with no session bus), `switchboard vault use file` keeps a data folder's sign-ins in 0600 files in that folder, so they can be stored at all; it is refused where this computer's own store works, and `vault use native` moves them back. `status` names the store (SB-287).
+
 ## 0.7.24
 
 - The Claude Code and Codex sessions Switchboard starts (launches, continuations, hand-overs, consoles, board dispatches) now skip their permission prompts, since nobody may be there to answer; questions are settled when the task is set (operator, 2026-11-07). `switchboard agents permissions ask` keeps the prompts, and a caller that names its own permission mode keeps it (SB-298).
