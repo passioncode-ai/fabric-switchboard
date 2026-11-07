@@ -41,7 +41,7 @@ SB-287).
 | Seats that survive a reboot (§2, §10, G14) | SB-287 | headless spaces have no writable keychain; Observatory 0.35.0 ships the system-daemon route (OBS-361) | design note: a file-backed store chosen by a `serve` flag, refused in a GUI session, plus the daemon definition for Observatory's validator; then build |
 | One host, several accounts (§11) | SB-278 | DEC-0154 released (`v0.1.0+2026-11-07.1`); the contract's notes in the row | build when CT-228 publishes the claim schema and the port picker vectors and CT-254 is tagged; HA-2 for our clients on the open connection, no cached listener list |
 | Model map (§8) | SB-289 | machine key's default on `moonshotai/kimi-k3.1-pro` since 2026-11-06, spend read 2026-11-07: $0 new, $0.11 total | recommended models in the map's order, mimo kept for people's content, the reasoning traps handled |
-| The measure (§0, G1) | **SB-295** (new), SB-203, SB-212 | launches and statistics recorded locally; nothing reaches the journal | emit launch, hand-over and usage events in OBS-378's schema once it is published (by 2026-11-13) |
+| The measure (§0, G1) | **SB-295** (new), SB-203, SB-212 | launches and statistics recorded locally; nothing reaches the journal | give the activity event (fabric-workspace `knowledge/system/measure.md`) its run and `cost_usd`: the launch or dispatch behind a unit and its relayed usage, `null` for a subscription seat; after the schema (G1-a) |
 | Cross-machine (§6, G5) | SB-177, SB-168 | identity digests wait for the organization hub | build with Fabric's 2026-11-21 slice |
 | Organization boundary and context (§11, G12) | SB-280, SB-124, SB-184 | wait for OBS-359, a per-context profile owner, CT-251 | follow the owners' rows |
 | Linux and cloud (G28) | SB-287 (store), SB-88 (built) | Linux builds ship; a headless Linux box has no Secret Service either | the same file-backed store serves a headless Linux space |
@@ -73,3 +73,11 @@ project owes by 2026-11-13; code starts when the pause lifts.
 
 Priorities and the release queue (G10, G25: Fabric), the security agent (G27: Observatory with the adapter), the
 assessment (G8, G9), pricing records (G18, G24).
+
+## 6. Updates
+
+- 2026-11-07 afternoon: the estate's plan (fabric-workspace `docs/plans/2026-11-07-remaining-to-north-star/README.md`,
+  merged `32111728`) takes this plan as Switchboard's part and found that the common backlog read 113 of this board's
+  296 rows: blank lines inside the table (old lines 121 and 181) ended it. Both removed in the same change as this
+  note. SB-295 now names the activity event of `knowledge/system/measure.md`, of which Switchboard supplies the run and
+  the cost.
