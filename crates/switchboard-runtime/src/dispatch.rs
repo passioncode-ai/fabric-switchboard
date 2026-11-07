@@ -102,21 +102,43 @@ pub(crate) fn agent_kind(agent: Option<&str>) -> &'static str {
     }
 }
 
-/// D-3: the machine's default agent, when it runs headless (Claude Code, Codex); otherwise the
-/// refusal. An unreadable settings file names no agent.
+/// D-3: the agent a dispatch starts, when it runs headless (Claude Code, Codex); otherwise the
+/// refusal. A chosen default keeps its meaning: one that is disabled or runs only with a person
+/// refuses. With no default (*Auto*, SB-294, Fabric's request `0c015bcb`) it is Claude Code when
+/// its program is here and it is not disabled for taking over work, else Codex, else `no_agent`.
+/// An unreadable settings file names no agent. `agents status` names the same agent as
+/// `dispatch_agent`, so Fabric offers the hand-over to the provider this starts.
 pub(crate) fn default_agent(root: &Path) -> Result<(String, Provider), Value> {
+    choose(root, |provider| {
+        crate::launch::dispatch_program(provider).is_ok()
+    })
+}
+
+/// [`default_agent`] with the check whether a headless program is here given.
+pub(crate) fn choose(
+    root: &Path,
+    available: impl Fn(Provider) -> bool,
+) -> Result<(String, Provider), Value> {
     let Ok(settings) = crate::agent_settings::read(root) else {
         return Err(refused(None, NO_AGENT));
     };
+    let disabled = |id: &str| settings.disabled.iter().any(|d| d == id);
     let Some(agent) = settings.default else {
-        return Err(refused(None, NO_AGENT));
+        return [
+            ("claude-code", Provider::Claude),
+            ("codex", Provider::Codex),
+        ]
+        .into_iter()
+        .find(|(id, provider)| !disabled(id) && available(*provider))
+        .map(|(id, provider)| (id.to_owned(), provider))
+        .ok_or_else(|| refused(None, NO_AGENT));
     };
     let provider = match agent.as_str() {
         "claude-code" => Provider::Claude,
         "codex" => Provider::Codex,
         _ => return Err(refused(Some(&agent), PERMISSION_MODE)),
     };
-    if settings.disabled.iter().any(|d| d == &agent) {
+    if disabled(&agent) {
         return Err(refused(Some(&agent), NO_AGENT));
     }
     Ok((agent, provider))
@@ -472,21 +494,54 @@ mod tests {
             )
             .unwrap()
         };
+        let both = |_: Provider| true;
         let reason = |r: Result<(String, Provider), Value>| r.unwrap_err()["reason"].clone();
-        assert_eq!(reason(default_agent(root.path())), NO_AGENT, "no default");
         write(r#"{"default":"hermes"}"#);
-        assert_eq!(reason(default_agent(root.path())), PERMISSION_MODE);
+        assert_eq!(reason(choose(root.path(), both)), PERMISSION_MODE);
         write(r#"{"default":"codex","disabled":["codex"]}"#);
-        assert_eq!(reason(default_agent(root.path())), NO_AGENT);
+        assert_eq!(reason(choose(root.path(), both)), NO_AGENT);
         write(r#"{"default":"codex"}"#);
         assert_eq!(
-            default_agent(root.path()).unwrap(),
+            choose(root.path(), both).unwrap(),
             ("codex".into(), Provider::Codex)
         );
         write(r#"{"default":"claude-code"}"#);
-        assert_eq!(default_agent(root.path()).unwrap().1, Provider::Claude);
+        assert_eq!(choose(root.path(), both).unwrap().1, Provider::Claude);
         write("not json");
-        assert_eq!(reason(default_agent(root.path())), NO_AGENT, "unreadable");
+        assert_eq!(reason(choose(root.path(), both)), NO_AGENT, "unreadable");
+    }
+
+    /// SB-294: with no default (*Auto*) a dispatch takes Claude Code, else Codex, each only when
+    /// its headless program is here and it is not disabled for taking over work.
+    #[test]
+    fn with_no_default_a_dispatch_takes_claude_code_then_codex() {
+        let root = tempfile::tempdir().unwrap();
+        let write = |body: &str| {
+            switchboard_core::private_fs::private_write(
+                &root.path().join(crate::agent_settings::FILE),
+                body.as_bytes(),
+            )
+            .unwrap()
+        };
+        let reason = |r: Result<(String, Provider), Value>| r.unwrap_err()["reason"].clone();
+        let only = |p: Provider| move |q: Provider| q == p;
+        // No settings file at all is Auto.
+        assert_eq!(
+            choose(root.path(), |_| true).unwrap(),
+            ("claude-code".into(), Provider::Claude)
+        );
+        assert_eq!(
+            choose(root.path(), only(Provider::Codex)).unwrap(),
+            ("codex".into(), Provider::Codex)
+        );
+        assert_eq!(reason(choose(root.path(), |_| false)), NO_AGENT);
+        write(r#"{"default":null,"disabled":["claude-code"]}"#);
+        assert_eq!(
+            choose(root.path(), |_| true).unwrap(),
+            ("codex".into(), Provider::Codex)
+        );
+        write(r#"{"default":null,"disabled":["claude-code","codex"]}"#);
+        assert_eq!(reason(choose(root.path(), |_| true)), NO_AGENT);
     }
 
     #[test]
