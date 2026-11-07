@@ -52,6 +52,7 @@ the launch injected it with the session and data folder set explicitly.
 | `switchboard_codex_route` | yes | whether Codex sessions in project folders use the projects' Codex accounts; turn it on or off only when the operator asks |
 | `switchboard_project_move_root` | yes | move a repository with its worktrees and clones to another project, or put a loose one in a project, only when the operator asks |
 | `switchboard_repository_map` | no | the Git repositories under given folders (default `~/DATA`), each with its project or none |
+| `switchboard_link_cli` | yes | link this `switchboard` into `~/.local/bin`, only when the operator asks |
 | `switchboard_analytics` | yes | read or switch Switchboard's own usage analytics, the switch only when the operator asks |
 | `switchboard_github` | no | GitHub owners `gh` sees, or one owner's repositories matched with this computer |
 | `switchboard_github_clone` | yes | clone a GitHub repository into a new absolute folder, only when the operator asks |

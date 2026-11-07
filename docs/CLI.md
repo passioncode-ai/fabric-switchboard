@@ -56,6 +56,10 @@ switchboard org disconnect     # delete the token; the organizations stay as loc
 switchboard org cancel         # stop a connection still waiting for the browser
 ```
 
+`switchboard link` puts this `switchboard` into `~/.local/bin`, as the window's *Link the CLI* does
+(SB-299); run it by its full path, for example
+`"/Applications/Fabric Switchboard.app/Contents/MacOS/switchboard" link`.
+
 `switchboard analytics on|off` sets Switchboard's own usage analytics as About does, and without an
 argument reads the state (SB-299, [ANALYTICS](ANALYTICS.md)).
 
