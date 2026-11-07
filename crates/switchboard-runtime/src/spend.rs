@@ -105,6 +105,9 @@ pub struct SpendFile {
     pub baselines: Vec<Baseline>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_handover: Option<LastHandover>,
+    /// SB-299: loosenings made on the operator's words.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub loosened: Vec<Loosened>,
 }
 fn version() -> u32 {
     VERSION
@@ -126,6 +129,7 @@ impl Default for SpendFile {
             questions: Vec::new(),
             baselines: Vec::new(),
             last_handover: None,
+            loosened: Vec::new(),
         }
     }
 }
@@ -148,13 +152,105 @@ pub enum Answer {
 }
 
 /// Which surface answered. Only the window is a person on this machine; the CLI and MCP are run
-/// by agents too, so they may keep a ceiling but never raise one (C-Q1).
+/// by agents too, so they may keep a ceiling but never raise one (C-Q1), unless they carry the
+/// operator's own words (`Operator`, SB-299).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Surface {
     Window,
     Cli,
     Mcp,
+    /// An agent acting on the operator's words (`Operation::OnOperatorsWord`); set only by the
+    /// runtime after it checked them, never accepted from a request.
+    Operator,
+}
+impl Surface {
+    /// Whether this surface may loosen a ceiling: the window, or an agent with the operator's words.
+    pub fn loosens(self) -> bool {
+        matches!(self, Surface::Window | Surface::Operator)
+    }
+}
+
+/// SB-299: the operator's own words, carried by an agent, that open what only the window did
+/// before (docs/research/ceiling-doors-2026-11-07.md), as DEC-0121's `_meta.decision`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Decision {
+    /// Always `operator`.
+    pub by: String,
+    /// The operator's words, verbatim.
+    pub instruction: String,
+    /// When they were said, RFC 3339.
+    pub at: String,
+    /// Where they were said: a session, a board thread.
+    pub source: String,
+}
+pub const DECISION_INVALID: &str = "Carry the operator's own words: by operator, the instruction as said (at most 500 characters), when it was said (RFC 3339) and where.";
+pub const NOT_A_LOOSENING: &str = "The operator's words open only raising, clearing or doubling a ceiling, deleting a group and replacing or removing a key.";
+impl Decision {
+    pub fn check(&self) -> Result<(), String> {
+        let text = |s: &str, max: usize| {
+            !s.trim().is_empty() && s.chars().count() <= max && !s.chars().any(|c| c == '\0')
+        };
+        let at =
+            time::OffsetDateTime::parse(&self.at, &time::format_description::well_known::Rfc3339);
+        if self.by != "operator"
+            || !text(&self.instruction, 500)
+            || !text(&self.source, 200)
+            || at.is_err()
+        {
+            return Err(DECISION_INVALID.into());
+        }
+        Ok(())
+    }
+}
+
+/// One loosening made on the operator's words, kept beside the ceilings (the newest
+/// `MAX_LOOSENED`), so a person reading the file sees who loosened what and why.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Loosened {
+    pub at: i64,
+    /// `ceiling_set`, `ceiling_answered`, `group_removed`, `key_set`, `key_removed`.
+    pub action: String,
+    pub decision: Decision,
+}
+/// Five at their longest (four-byte characters) keep the file under `MAX_BYTES` with every other
+/// cap full; each one is also logged (`ceiling_loosened`), so older ones stay in the log.
+const MAX_LOOSENED: usize = 5;
+
+/// Records a loosening done on the operator's words.
+pub fn record_loosening(
+    root: &Path,
+    action: &str,
+    decision: &Decision,
+    now: i64,
+) -> Result<(), String> {
+    let _guard = WRITE.lock().unwrap_or_else(|p| p.into_inner());
+    let mut file = read(root)?;
+    file.loosened.push(Loosened {
+        at: now,
+        action: action.to_owned(),
+        decision: decision.clone(),
+    });
+    let excess = file.loosened.len().saturating_sub(MAX_LOOSENED);
+    file.loosened.drain(..excess);
+    write(root, &file)?;
+    crate::oplog::event(
+        "ceiling_loosened",
+        &[("action", crate::oplog::Field::Code(action_code(action)))],
+    );
+    Ok(())
+}
+/// The log takes fixed codes only.
+fn action_code(action: &str) -> &'static str {
+    match action {
+        "ceiling_set" => "ceiling_set",
+        "ceiling_answered" => "ceiling_answered",
+        "group_removed" => "group_removed",
+        "key_set" => "key_set",
+        "key_removed" => "key_removed",
+        _ => "other",
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -431,7 +527,7 @@ pub fn remove_group<T>(
     let scope = ChainScope::Project {
         pool: pool.to_owned(),
     };
-    if by != Surface::Window {
+    if !by.loosens() {
         if file.ceilings.iter().any(|c| c.scope == scope) {
             return Err(GROUP_HOLDS_CEILING.into());
         }
@@ -490,7 +586,7 @@ pub fn guard_group_key<T>(
     change: impl FnOnce() -> Result<T, String>,
 ) -> Result<T, String> {
     let _guard = WRITE.lock().unwrap_or_else(|p| p.into_inner());
-    if by != Surface::Window && replaces() {
+    if !by.loosens() && replaces() {
         let file = read(root)?;
         if let Some(pool) = pool {
             let scope = ChainScope::Project {
@@ -633,7 +729,7 @@ pub fn set_ceiling(
         }
     }
     let set = change(root, Some(snapshot), now, |file| {
-        if by != Surface::Window {
+        if !by.loosens() {
             let current = file.ceilings.iter().find(|c| c.scope == scope);
             let loosens = match (current, value) {
                 (None, _) => false,
@@ -759,7 +855,7 @@ pub fn answer(
     by: Surface,
     now: i64,
 ) -> Result<Value, String> {
-    if answer == Answer::Double && by != Surface::Window {
+    if answer == Answer::Double && !by.loosens() {
         return Err(DOUBLE_IN_WINDOW.into());
     }
     let (scope, ceiling) = change(root, Some(snapshot), now, |file| {
@@ -2033,6 +2129,19 @@ mod tests {
                     })
                     .collect(),
             }),
+            // SB-299: the newest loosenings at their longest (four-byte characters throughout).
+            loosened: (0..MAX_LOOSENED)
+                .map(|_| Loosened {
+                    at: i64::MIN,
+                    action: "ceiling_answered".into(),
+                    decision: Decision {
+                        by: "operator".into(),
+                        instruction: std::iter::repeat_n('𝄞', 500).collect(),
+                        at: "2026-11-07T22:00:00.000000000+00:00".into(),
+                        source: std::iter::repeat_n('𝄞', 200).collect(),
+                    },
+                })
+                .collect(),
         }
     }
 

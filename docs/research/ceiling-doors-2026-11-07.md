@@ -1,6 +1,6 @@
 # Loosening a spending ceiling on the operator's word (SB-299)
 
-Design note, 2026-11-07. Status: decided, not built. Owner: fabric-switchboard.
+Design note, 2026-11-07. Status: built (branch `feat/sb-299-ceiling-doors`); `spend.json` keeps the newest five loosenings, every one is logged. Owner: fabric-switchboard.
 
 ## What is asked
 

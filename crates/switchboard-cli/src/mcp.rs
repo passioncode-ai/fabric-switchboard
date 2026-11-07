@@ -95,8 +95,8 @@ pub(crate) fn tools() -> Vec<(bool, Value)> {
         (false, json!({"name":"switchboard_chain_get","title":"Fallback chains","description":"Which agents continue a workflow, in what order, when its executor's accounts run out: every chain the operator set (per machine, group or workflow), the presets, and the chain that applies: the workflow's own, else its group's, else the machine's. With folder (the workflow's checkout) the group is found as the automatic fallback finds it. None applies until the operator sets one. walks: the newest automatic hand-overs, each candidate passed over with the contract's probe result.","inputSchema":{"type":"object","properties":{"workflow_id":{"type":"string","description":"An Observatory workflow id (wf_ and 16 hex digits)."},"pool":{"type":"string","description":"A group id; with folder, the executor account's group."},"folder":{"type":"string","description":"An absolute folder: the workflow's checkout."}},"additionalProperties":false}})),
         (true, json!({"name":"switchboard_chain_set","title":"Set fallback chain","description":"Set the operator's chain for a scope, first agent tried first; an empty list clears it. Only when the operator asks. Agents are catalog ids, or the contract's runner kinds (cursor-agent), that load MCP servers and take a prompt without a person (claude-code, codex, kimi-code, hermes, …); an agent may pin an account (account_id) or a paid key by its Observatory vault name (key: project/env/NAME), never a key value. Another agent than Claude Code or Codex never runs on a subscription sign-in.","inputSchema":{"type":"object","properties":{"scope":{"type":"string","description":"machine, project:<group id> or workflow:<wf_id>.","default":"machine"},"preset":{"type":"string","enum":["subscriptions-first"]},"executors":{"type":"array","maxItems":8,"items":{"type":"object","properties":{"agent":{"type":"string"},"account_id":account,"key":{"type":"string"}},"required":["agent"],"additionalProperties":false}}},"additionalProperties":false}})),
         (false, json!({"name":"switchboard_ceilings","title":"Spending ceilings","description":"Spending ceilings for paid fallback agents (Hermes and OpenCode on an OpenRouter key, Claude Code or Codex on an API-key account): each ceiling with its scope and dollars (this computer's and a group's per UTC day, a task's since its first paid hand-over), the open questions a reached ceiling asked, the last hand-over and the limits. Reads only.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}})),
-        (true, json!({"name":"switchboard_ceiling_set","title":"Set a spending ceiling","description":"Set a first spending ceiling for a scope, or lower one, in dollars from 0.01 to 1000. Only when the operator asks. Raising or clearing a ceiling is done in the Switchboard window, never here. A group takes one only with its own OpenRouter key.","inputSchema":{"type":"object","properties":{"scope":{"type":"string","description":"machine, project:<group id> or workflow:<wf_id>.","default":"machine"},"usd":{"type":"number","minimum":0.01,"maximum":1000,"description":"Dollars: per UTC day for this computer and a group, since the first paid hand-over for a task."}},"required":["usd"],"additionalProperties":false}})),
-        (true, json!({"name":"switchboard_ceiling_answer","title":"Keep a reached ceiling","description":"Answer the question a reached spending ceiling asked with keep: the ceiling stays as it is. Only when the operator asks. Doubling a ceiling is answered in the Switchboard window, never here.","inputSchema":{"type":"object","properties":{"id":{"type":"string","description":"The question's id from switchboard_ceilings."},"answer":{"type":"string","enum":["keep"],"default":"keep"}},"required":["id"],"additionalProperties":false}})),
+        (true, json!({"name":"switchboard_ceiling_set","title":"Set a spending ceiling","description":"Set a first spending ceiling for a scope, or lower one, in dollars from 0.01 to 1000. Only when the operator asks. Raising it, or clearing it with usd null, takes decision: the operator's own words (by operator, instruction verbatim, at RFC 3339, source), recorded in the ceilings; without them it is the window's. A group takes one only with its own OpenRouter key.","inputSchema":{"type":"object","properties":{"scope":{"type":"string","description":"machine, project:<group id> or workflow:<wf_id>.","default":"machine"},"usd":{"type":["number","null"],"minimum":0.01,"maximum":1000,"description":"Dollars: per UTC day for this computer and a group, since the first paid hand-over for a task; null clears (with decision)."},"decision":{"type":"object","properties":{"by":{"type":"string","enum":["operator"]},"instruction":{"type":"string","minLength":1,"maxLength":500},"at":{"type":"string"},"source":{"type":"string","minLength":1,"maxLength":200}},"required":["by","instruction","at","source"],"additionalProperties":false}},"required":["usd"],"additionalProperties":false}})),
+        (true, json!({"name":"switchboard_ceiling_answer","title":"Answer a reached ceiling","description":"Answer the question a reached spending ceiling asked: keep (the ceiling stays as it is) or double, which takes decision: the operator's own words (by operator, instruction verbatim, at RFC 3339, source), recorded in the ceilings; without them doubling is the window's. Only when the operator asks.","inputSchema":{"type":"object","properties":{"id":{"type":"string","description":"The question's id from switchboard_ceilings."},"answer":{"type":"string","enum":["keep","double"],"default":"keep"},"decision":{"type":"object","properties":{"by":{"type":"string","enum":["operator"]},"instruction":{"type":"string","minLength":1,"maxLength":500},"at":{"type":"string"},"source":{"type":"string","minLength":1,"maxLength":200}},"required":["by","instruction","at","source"],"additionalProperties":false}},"required":["id"],"additionalProperties":false}})),
         (false, json!({"name":"switchboard_openrouter_status","title":"OpenRouter key for agents","description":"Whether the operator saved an OpenRouter key for agents, its default model, and what the key may still spend today and in total (asked of OpenRouter); with pool, that group's own key. Also lists every saved key with the group it is for (keys) and the groups with or without one (projects): an agent starting in a group's folder runs on that group's key, else on the machine's. Never a key itself.","inputSchema":{"type":"object","properties":{"pool":{"type":"string","description":"A group id from switchboard_projects; omit for the machine's key."}},"additionalProperties":false}})),
         (false, json!({"name":"switchboard_hermes_status","title":"Hermes model and provider","description":"The model and provider the operator's ordinary Hermes Agent runs on (hermes config get model): model, provider, endpoint, API mode. Never a key.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}})),
         (true, json!({"name":"switchboard_hermes_set","title":"Change Hermes's model or provider","description":"Change the provider and/or the default model of the operator's ordinary Hermes Agent through Hermes's own hermes config set. Only when the operator asks. Changing the provider makes Hermes drop an endpoint that belonged to the previous one; the new provider needs its own key in Hermes.","inputSchema":{"type":"object","properties":{"provider":{"type":"string","description":"A Hermes provider id, for example openrouter, anthropic, nous, openai-codex, kimi-coding."},"model":{"type":"string","description":"The default model, for example moonshotai/kimi-k2."}},"additionalProperties":false}})),
@@ -126,6 +126,19 @@ pub(crate) fn tools() -> Vec<(bool, Value)> {
     .collect()
 }
 
+/// SB-299: an operation wrapped in the operator's words when the call carries `decision`.
+fn on_operators_word(args: &Map<String, Value>, operation: Operation) -> Result<Operation, String> {
+    let Some(decision) = args.get("decision") else {
+        return Ok(operation);
+    };
+    let decision: switchboard_runtime::spend::Decision =
+        serde_json::from_value(decision.clone())
+            .map_err(|_| switchboard_runtime::spend::DECISION_INVALID.to_string())?;
+    Ok(Operation::OnOperatorsWord {
+        decision,
+        inner: Box::new(operation),
+    })
+}
 /// `scope`: machine (the default), project:<group id> or workflow:<wf_id>.
 fn scope_arg(args: &Map<String, Value>) -> Result<switchboard_core::ChainScope, String> {
     let text = args
@@ -1155,32 +1168,37 @@ impl Server {
     }
 
     async fn ceiling_set(&self, args: &Map<String, Value>) -> Result<Value, String> {
-        let usd = args
-            .get("usd")
-            .and_then(Value::as_f64)
-            .ok_or("usd is a number of dollars from 0.01 to 1000.")?;
-        self.call(Operation::SetCeiling {
+        // SB-299: with the operator's words, `usd: null` clears the ceiling.
+        let usd = match args.get("usd") {
+            Some(Value::Null) if args.contains_key("decision") => None,
+            other => Some(
+                other
+                    .and_then(Value::as_f64)
+                    .ok_or("usd is a number of dollars from 0.01 to 1000.")?,
+            ),
+        };
+        let operation = Operation::SetCeiling {
             scope: scope_arg(args)?,
-            usd: Some(usd),
+            usd,
             by: switchboard_runtime::spend::Surface::Mcp,
-        })
-        .await
+        };
+        self.call(on_operators_word(args, operation)?).await
     }
-    /// `keep` only. `double` goes to the runtime, which refuses it with the window named, the one
-    /// sentence every surface gives.
+    /// `keep`, or `double` with the operator's words (SB-299); without them the runtime refuses
+    /// `double` with the window named, the one sentence every surface gives.
     async fn ceiling_answer(&self, args: &Map<String, Value>) -> Result<Value, String> {
         use switchboard_runtime::spend::{Answer, Surface};
         let answer = match args.get("answer").and_then(Value::as_str) {
             None | Some("keep") => Answer::Keep,
             Some("double") => Answer::Double,
-            Some(_) => return Err("answer is keep.".into()),
+            Some(_) => return Err("answer is keep or double.".into()),
         };
-        self.call(Operation::AnswerCeiling {
+        let operation = Operation::AnswerCeiling {
             id: required(args, "id")?.into(),
             answer,
             by: Surface::Mcp,
-        })
-        .await
+        };
+        self.call(on_operators_word(args, operation)?).await
     }
     async fn chain_set(&self, args: &Map<String, Value>) -> Result<Value, String> {
         let scope = scope_arg(args)?;

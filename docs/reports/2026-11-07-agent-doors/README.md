@@ -80,5 +80,5 @@ operator's words, is the second question for SB-299. The one MCP-only action is 
    `switchboard_link_cli`); update and login-item switches
    over the control socket (built: `AppDoors` handed to the owner by the app, CLI `app`, MCP `switchboard_app`); cancelling a PassionCode.ai connection (built: CLI `org cancel`, MCP
    `switchboard_organization_set` `passioncode_cancel`, and `passioncode_disconnect` with it).
-2. The ceiling question to the operator (above), then the door with the operator's words.
+2. The money doors with the operator's words (built: `Operation::OnOperatorsWord`, CLI `--operator-said`, MCP `decision`; [design](../../research/ceiling-doors-2026-11-07.md)).
 3. MCP tools for the PERSON group behind the operator's words, if the operator wants MCP and not only the CLI.

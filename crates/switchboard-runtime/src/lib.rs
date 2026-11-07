@@ -286,6 +286,14 @@ pub enum Operation {
         by: launches::LaunchedBy,
         inner: Box<Operation>,
     },
+    /// SB-299: one of the five loosenings only the window made before (raise or clear a ceiling,
+    /// double one, delete a group, replace or remove a key a ceiling counts), on the operator's
+    /// own words (docs/research/ceiling-doors-2026-11-07.md). The runtime checks the words, runs
+    /// `inner` as `spend::Surface::Operator` and records them in `spend.json`.
+    OnOperatorsWord {
+        decision: spend::Decision,
+        inner: Box<Operation>,
+    },
     /// SB-212: what a launched session's own hook reports (`SessionStart`, `Stop`, a limit).
     LaunchEvent {
         launch_id: String,
@@ -3612,26 +3620,57 @@ fn analytics_unavailable() -> Value {
     json!({"available": false, "enabled": false, "notice_pending": false})
 }
 pub(crate) fn window_only_refusal(operation: &Operation) -> Option<&'static str> {
+    use spend::Surface::{Operator, Window};
+    // SB-299: the operator's words open only the five, and what they wrap claims no surface.
+    if let Operation::OnOperatorsWord { inner, .. } = operation {
+        return match operator_action(inner) {
+            None => Some(spend::NOT_A_LOOSENING),
+            Some(_) => window_only_refusal(inner),
+        };
+    }
     matches!(
         operation,
         Operation::AnswerCeiling {
-            by: spend::Surface::Window,
+            by: Window | Operator,
             ..
         } | Operation::SetCeiling {
-            by: spend::Surface::Window,
+            by: Window | Operator,
             ..
         } | Operation::RemoveProject {
-            by: spend::Surface::Window,
+            by: Window | Operator,
             ..
         } | Operation::AgentKeySet {
-            by: spend::Surface::Window,
+            by: Window | Operator,
             ..
         } | Operation::AgentKeyRemove {
-            by: spend::Surface::Window,
+            by: Window | Operator,
             ..
         }
     )
     .then_some(spend::WINDOW_ONLY)
+}
+/// SB-299: what `spend.json` calls a loosening `OnOperatorsWord` may wrap; none for anything else.
+fn operator_action(operation: &Operation) -> Option<&'static str> {
+    Some(match operation {
+        Operation::SetCeiling { .. } => "ceiling_set",
+        Operation::AnswerCeiling { .. } => "ceiling_answered",
+        Operation::RemoveProject { .. } => "group_removed",
+        Operation::AgentKeySet { .. } => "key_set",
+        Operation::AgentKeyRemove { .. } => "key_removed",
+        _ => return None,
+    })
+}
+/// SB-299: the wrapped loosening, run as the operator's surface.
+fn as_operator(mut operation: Operation) -> Operation {
+    match &mut operation {
+        Operation::SetCeiling { by, .. }
+        | Operation::AnswerCeiling { by, .. }
+        | Operation::RemoveProject { by, .. }
+        | Operation::AgentKeySet { by, .. }
+        | Operation::AgentKeyRemove { by, .. } => *by = spend::Surface::Operator,
+        _ => {}
+    }
+    operation
 }
 pub async fn execute_offline(root: PathBuf, operation: Operation) -> Result<Value, String> {
     if let Some(refusal) = window_only_refusal(&operation) {
@@ -3918,6 +3957,14 @@ async fn execute(
     runtime: Option<&Runtime>,
     operation: Operation,
 ) -> Result<Value, String> {
+    // SB-299: the operator's words open one loosening, run as their surface and recorded.
+    if let Operation::OnOperatorsWord { decision, inner } = operation {
+        decision.check()?;
+        let action = operator_action(&inner).ok_or(spend::NOT_A_LOOSENING)?;
+        let answer = Box::pin(execute(store, root, runtime, as_operator(*inner))).await?;
+        spend::record_loosening(root, action, &decision, monitor::now())?;
+        return Ok(answer);
+    }
     let native = runtime.map_or(NATIVE, |r| r.native);
     // The offline CLI owns the store for one command; its refresh bookkeeping is its own.
     // It never spends a refresh token: it cannot see Claude Swap's holds or a running owner's
@@ -5901,6 +5948,8 @@ async fn execute(
         }
         // Reached offline (`Runtime::execute` unwraps it before): the same scope around the
         // launch, which then asks for an owner.
+        // Unwrapped at the top of this function.
+        Operation::OnOperatorsWord { .. } => Err(spend::NOT_A_LOOSENING.into()),
         Operation::Launched { by, inner } => {
             if !is_launch(&inner) {
                 return Err(launches::NOT_A_LAUNCH.into());
@@ -9553,9 +9602,16 @@ mod owner_tests {
         )
         .is_err());
         assert!(serde_json::from_value::<Operation>(
-            json!({"operation": "answer_ceiling", "id": id, "answer": "keep", "by": "operator"})
+            json!({"operation": "answer_ceiling", "id": id, "answer": "keep", "by": "someone"})
         )
         .is_err());
+        // SB-299: `operator` is a surface only the runtime sets, after it checked the words; a
+        // request that claims it is refused like one that claims the window.
+        let claimed: Operation = serde_json::from_value(
+            json!({"operation": "answer_ceiling", "id": id, "answer": "keep", "by": "operator"}),
+        )
+        .unwrap();
+        assert_eq!(window_only_refusal(&claimed), Some(spend::WINDOW_ONLY));
         // Nothing of it reached accounts.json: a 0.6.x build still reads the store.
         let stored = serde_json::to_string(&runtime.store.snapshot().unwrap()).unwrap();
         assert!(!stored.contains("ceiling") && !stored.contains("cents"));
@@ -11111,5 +11167,137 @@ mod analytics_door_tests {
             .unwrap_err(),
             ANALYTICS_APP_ONLY
         );
+    }
+}
+
+#[cfg(test)]
+mod operators_word_tests {
+    use super::*;
+    use switchboard_core::ChainScope;
+
+    fn words() -> spend::Decision {
+        spend::Decision {
+            by: "operator".into(),
+            instruction: "подними потолок до 10".into(),
+            at: "2026-11-07T22:00:00Z".into(),
+            source: "session 38adf103".into(),
+        }
+    }
+    fn set(usd: Option<f64>) -> Operation {
+        Operation::SetCeiling {
+            scope: ChainScope::Machine,
+            usd,
+            by: spend::Surface::Cli,
+        }
+    }
+
+    /// SB-299: an agent raises or clears a ceiling only with the operator's words, which stay in
+    /// spend.json beside the ceilings.
+    #[tokio::test]
+    async fn the_operators_words_open_a_loosening_and_are_recorded() {
+        let root = tempfile::tempdir().unwrap();
+        let at = |op| execute_offline(root.path().to_owned(), op);
+        at(set(Some(5.0))).await.unwrap();
+        assert_eq!(
+            at(set(Some(10.0))).await.unwrap_err(),
+            spend::RAISE_IN_WINDOW
+        );
+        at(Operation::OnOperatorsWord {
+            decision: words(),
+            inner: Box::new(set(Some(10.0))),
+        })
+        .await
+        .unwrap();
+        let file = spend::read(root.path()).unwrap();
+        assert_eq!(file.ceilings[0].cents, 1000);
+        assert_eq!(file.loosened.len(), 1);
+        assert_eq!(file.loosened[0].action, "ceiling_set");
+        assert_eq!(
+            file.loosened[0].decision.instruction,
+            "подними потолок до 10"
+        );
+        at(Operation::OnOperatorsWord {
+            decision: words(),
+            inner: Box::new(set(None)),
+        })
+        .await
+        .unwrap();
+        assert!(spend::read(root.path()).unwrap().ceilings.is_empty());
+        // The $1,000 bound holds with the operator's words too.
+        assert_eq!(
+            at(Operation::OnOperatorsWord {
+                decision: words(),
+                inner: Box::new(set(Some(1001.0))),
+            })
+            .await
+            .unwrap_err(),
+            spend::OUT_OF_RANGE
+        );
+    }
+
+    #[tokio::test]
+    async fn words_that_are_not_the_operators_or_wrap_another_operation_are_refused() {
+        let root = tempfile::tempdir().unwrap();
+        let at = |op| execute_offline(root.path().to_owned(), op);
+        for bad in [
+            spend::Decision {
+                by: "agent".into(),
+                ..words()
+            },
+            spend::Decision {
+                instruction: " ".into(),
+                ..words()
+            },
+            spend::Decision {
+                instruction: "x".repeat(501),
+                ..words()
+            },
+            spend::Decision {
+                at: "yesterday".into(),
+                ..words()
+            },
+            spend::Decision {
+                source: String::new(),
+                ..words()
+            },
+        ] {
+            assert_eq!(
+                at(Operation::OnOperatorsWord {
+                    decision: bad,
+                    inner: Box::new(set(None))
+                })
+                .await
+                .unwrap_err(),
+                spend::DECISION_INVALID
+            );
+        }
+        assert_eq!(
+            at(Operation::OnOperatorsWord {
+                decision: words(),
+                inner: Box::new(Operation::Snapshot)
+            })
+            .await
+            .unwrap_err(),
+            spend::NOT_A_LOOSENING
+        );
+        // Nobody claims the operator's surface, or the window's, from outside.
+        for by in [spend::Surface::Operator, spend::Surface::Window] {
+            let claimed = || Operation::SetCeiling {
+                scope: ChainScope::Machine,
+                usd: None,
+                by,
+            };
+            assert_eq!(at(claimed()).await.unwrap_err(), spend::WINDOW_ONLY);
+            assert_eq!(
+                at(Operation::OnOperatorsWord {
+                    decision: words(),
+                    inner: Box::new(claimed())
+                })
+                .await
+                .unwrap_err(),
+                spend::WINDOW_ONLY
+            );
+        }
+        assert!(spend::read(root.path()).unwrap().loosened.is_empty());
     }
 }
