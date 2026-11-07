@@ -232,7 +232,7 @@ export interface KimiStatus { signed_in: boolean; nickname?: string | null; tier
 export interface KimiAccounts { accounts: { account: KimiAccount; status: KimiStatus }[]; current: KimiStatus | null; installed: boolean }
 /** SB-120: one catalog agent as this computer has it. */
 export interface AgentRow { id: string; name: string; maker?: string | null; url: string; install?: string | null; installed: boolean; switchable: boolean; enabled: boolean; disabled: boolean; default: boolean; openrouter: boolean; mcp: boolean; command: string; argv?: string[]; path?: string | null }
-export interface RecommendedModel { id: string; name: string; maker: string; context: number; input_usd_per_million: number; url: string }
+export interface RecommendedModel { id: string; name: string; maker: string; context: number; input_usd_per_million: number; url: string; use?: string }
 export interface AgentsOverview { schema?: number; revision?: string; updated_at?: number | null; default: string | null; default_ready?: boolean; installed: number; agents: AgentRow[]; recommended_models: RecommendedModel[] }
 /** SB-119: OpenRouter's tool-capable models; `available: false` when its list could not be read. */
 export interface OpenrouterModel { id: string; name?: string | null; context?: number | null; prompt?: string | null; completion?: string | null }

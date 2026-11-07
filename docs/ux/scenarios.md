@@ -1272,7 +1272,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Preconditions:** an OpenRouter key saved, or about to be.
 **Entry point:** API keys → *Machine key · OpenRouter* → *Add OpenRouter key* or *Change model*, or a group's key; or Agents → Set up → launch on the OpenRouter key on an agent's row.
 **Steps:**
-1. The picker lists **Recommended models** first: MiMo V2.6 Pro, Claude Haiku 5.5, Gemini 3.8 Flash, Qwen3.8 Flash, DeepSeek V4.1 Flash, each with its maker, context and input price per 1M tokens; pressing one fills the model field.
+1. The picker lists **Recommended models** first, in the order of the operator's model map (SB-289): Kimi K3.1 Pro (*Decisions and code*), Claude Sonnet 5.5 (*Checking work*), GLM 5.3 and DeepSeek V4.1 Flash (*Bulk work*), MiMo V2.6 Pro (*Users' requests and content*), each with what it is for, its maker, context and input price per 1M tokens; pressing one fills the model field.
 2. Typing in the model field suggests every OpenRouter model that can call tools (“N OpenRouter models that can call tools: type to search, or enter any id.”).
 3. Any id can be typed by hand.
 4. Save → “Agents launch on {model}.”

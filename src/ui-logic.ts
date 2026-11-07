@@ -897,6 +897,19 @@ export function modelMeta(m: Pick<RecommendedModel, 'maker' | 'context' | 'input
   return t('{maker} · {context} context · ${price} per 1M input tokens', { maker: m.maker, context: tokenCount(m.context), price: m.input_usd_per_million.toFixed(2) });
 }
 
+/** SB-289: what the operator's model map gives a recommended model to, in the window's language.
+ * The catalog names it in English; a use this window does not know is shown as it came. */
+export function modelUse(m: Pick<RecommendedModel, 'use'>): string {
+  switch (m.use) {
+    case undefined: return '';
+    case 'Decisions and code': return t('Decisions and code');
+    case 'Checking work': return t('Checking work');
+    case 'Bulk work': return t('Bulk work');
+    case "Users' requests and content": return t("Users' requests and content");
+    default: return m.use;
+  }
+}
+
 /** SB-145: one row of the proxy's counts. */
 export interface StatCounts { requests: number; ok: number; limited: number; failed: number; input_tokens: number; output_tokens: number; cache_read_tokens: number; cache_write_tokens: number }
 export interface StatAccount extends StatCounts { account_id: string; label: string | null; provider: string | null; kind: string | null }

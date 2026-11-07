@@ -6,6 +6,11 @@ release pull request renames `Unreleased` to the version. While Windows signing 
 that section must say `windows_authenticode: NOT_SIGNED`. Notes of 0.5.3-beta.1 and earlier are
 on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/releases).
 
+## Unreleased
+
+- The model picker recommends the operator's model map: Kimi K3.1 Pro for decisions and code, Claude Sonnet 5.5 for checking work, GLM 5.3 and DeepSeek V4.1 Flash for bulk work, and MiMo V2.6 Pro for users' requests and content; each card says what its model is for (SB-289).
+- The window shows the refusal of an unknown permission mode ("Choose bypass or ask.") as written, in English and Russian, instead of a generic error (SB-298).
+
 ## 0.7.23
 
 - The Claude Code and Codex sessions Switchboard starts (launches, continuations, hand-overs, consoles, board dispatches) now skip their permission prompts, since nobody may be there to answer; questions are settled when the task is set (operator, 2026-11-07). `switchboard agents permissions ask` keeps the prompts, and a caller that names its own permission mode keeps it (SB-298).

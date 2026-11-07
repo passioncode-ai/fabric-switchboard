@@ -1605,45 +1605,50 @@
   "ranking_source": "https://openrouter.ai/apps (global ranking, read 2026-10-05)",
   "openrouter_recommended": [
     {
-      "id": "xiaomi/mimo-v2.6-pro",
-      "name": "MiMo V2.6 Pro",
-      "maker": "Xiaomi",
-      "context": 1050000,
-      "input_usd_per_million": 0.435,
-      "url": "https://openrouter.ai/xiaomi/mimo-v2.6-pro"
+      "id": "moonshotai/kimi-k3.1-pro",
+      "name": "Kimi K3.1 Pro",
+      "maker": "Moonshot AI",
+      "context": 1048576,
+      "input_usd_per_million": 2.0,
+      "use": "Decisions and code",
+      "url": "https://openrouter.ai/moonshotai/kimi-k3.1-pro"
     },
     {
-      "id": "anthropic/claude-haiku-5.5",
-      "name": "Claude Haiku 5.5",
+      "id": "anthropic/claude-sonnet-5.5",
+      "name": "Claude Sonnet 5.5",
       "maker": "Anthropic",
       "context": 1000000,
-      "input_usd_per_million": 0.1,
-      "url": "https://openrouter.ai/anthropic/claude-haiku-5.5"
+      "input_usd_per_million": 2.0,
+      "use": "Checking work",
+      "url": "https://openrouter.ai/anthropic/claude-sonnet-5.5"
     },
     {
-      "id": "google/gemini-3.8-flash",
-      "name": "Gemini 3.8 Flash",
-      "maker": "Google",
+      "id": "z-ai/glm-5.3",
+      "name": "GLM 5.3",
+      "maker": "Z.ai",
       "context": 1048576,
-      "input_usd_per_million": 0.75,
-      "url": "https://openrouter.ai/google/gemini-3.8-flash"
-    },
-    {
-      "id": "qwen/qwen3.8-flash",
-      "name": "Qwen3.8 Flash",
-      "maker": "Qwen",
-      "context": 1000000,
-      "input_usd_per_million": 0.15,
-      "url": "https://openrouter.ai/qwen/qwen3.8-flash"
+      "input_usd_per_million": 0.0699,
+      "use": "Bulk work",
+      "url": "https://openrouter.ai/z-ai/glm-5.3"
     },
     {
       "id": "deepseek/deepseek-v4.1-flash",
       "name": "DeepSeek V4.1 Flash",
       "maker": "DeepSeek",
       "context": 1048576,
-      "input_usd_per_million": 0.0369,
+      "input_usd_per_million": 0.051,
+      "use": "Bulk work",
       "url": "https://openrouter.ai/deepseek/deepseek-v4.1-flash"
+    },
+    {
+      "id": "xiaomi/mimo-v2.6-pro",
+      "name": "MiMo V2.6 Pro",
+      "maker": "Xiaomi",
+      "context": 1050000,
+      "input_usd_per_million": 0.435,
+      "use": "Users' requests and content",
+      "url": "https://openrouter.ai/xiaomi/mimo-v2.6-pro"
     }
   ],
-  "openrouter_recommended_note": "Operator's choice, 2026-10-14; ids, context and input prices read from https://openrouter.ai/api/v1/models the same day. Agent ranking reference: https://artificialanalysis.ai/agents/coding-agents"
+  "openrouter_recommended_note": "The operator's model map, 2026-11-06 (SB-289): decisions and code on Kimi K3.1 Pro, checking work on Claude Sonnet 5.5, bulk work on GLM 5.3 and DeepSeek V4.1 Flash, users' requests and content on a Chinese open model (MiMo V2.6 Pro); ids, context and input prices read from https://openrouter.ai/api/v1/models on 2026-11-07. Agent ranking reference: https://artificialanalysis.ai/agents/coding-agents"
 }

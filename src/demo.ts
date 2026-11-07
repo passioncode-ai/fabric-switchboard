@@ -50,8 +50,8 @@ export function createDemoAdapter(): Adapter {
   let demoQuestions: CeilingQuestionView[] = [];
   const ceilingView = (scope: ChainScope, cents: number, doubledFrom: number | null = null): CeilingView => ({ scope, cents, usd: cents / 100, set_at: now() - 7200, doubled_from: doubledFrom, active: true, inactive_reason: null });
   if (ceilingsParam === 'set' || ceilingsParam === 'reached') {
-    Object.assign(openrouter, { saved: true, saved_at: now() - 86_400, model: 'xiaomi/mimo-v2.6-pro', credit: { label: 'demo', limit: 10, limit_remaining: 8.8, limit_reset: 'daily', usage: 31.2, usage_daily: 1.2, is_free_tier: false }, credit_error: null });
-    projectKeys.set('alpha-web', { saved_at: now() - 3600, model: 'xiaomi/mimo-v2.6-pro' });
+    Object.assign(openrouter, { saved: true, saved_at: now() - 86_400, model: 'moonshotai/kimi-k3.1-pro', credit: { label: 'demo', limit: 10, limit_remaining: 8.8, limit_reset: 'daily', usage: 31.2, usage_daily: 1.2, is_free_tier: false }, credit_error: null });
+    projectKeys.set('alpha-web', { saved_at: now() - 3600, model: 'moonshotai/kimi-k3.1-pro' });
     demoCeilings = [ceilingView({ kind: 'machine' }, 1000), ceilingView({ kind: 'project', pool: 'alpha-web' }, 300), ceilingView({ kind: 'workflow', id: 'wf_0123456789abcdef' }, 200)];
   }
   if (ceilingsParam === 'reached') demoQuestions = [
