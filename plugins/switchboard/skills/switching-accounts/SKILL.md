@@ -76,8 +76,8 @@ the launch injected it with the session and data folder set explicitly.
 | `switchboard_chain_get` | no | the operator's fallback chains and the one that applies to a workflow or project |
 | `switchboard_chain_set` | yes | set a fallback chain, only when the operator asks |
 | `switchboard_ceilings` | no | spending ceilings for paid fallback agents, the questions a reached one asked, the last hand-over |
-| `switchboard_ceiling_set` | yes | set a first or a lower spending ceiling, only when the operator asks; raising or clearing one is the window's |
-| `switchboard_ceiling_answer` | yes | keep a reached ceiling, only when the operator asks; doubling it is the window's |
+| `switchboard_ceiling_set` | yes | set a first or a lower spending ceiling; raise or clear one with the operator's own words (`decision`) |
+| `switchboard_ceiling_answer` | yes | keep a reached ceiling, or double it with the operator's own words (`decision`) |
 | `switchboard_openrouter_status` | no | the agents' OpenRouter key: saved?, its default model, what it may still spend; never the key |
 | `switchboard_hermes_status` | no | the model, provider and endpoint the ordinary Hermes runs on; never a key |
 | `switchboard_hermes_set` | yes | change Hermes's provider and/or default model, only when the operator asks |

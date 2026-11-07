@@ -29,6 +29,17 @@ struct Cli {
     /// Absolute private app-data directory; defaults to the desktop app's directory.
     #[arg(long, global = true)]
     data_dir: Option<PathBuf>,
+    /// The operator's own words, verbatim, that ask for this: they open raising, clearing or
+    /// doubling a ceiling, deleting a group with one and replacing or removing a key one counts
+    /// (otherwise the window's). Give `--said-at` and `--said-in` with it; it is recorded.
+    #[arg(long, global = true)]
+    operator_said: Option<String>,
+    /// When the operator said it, RFC 3339 (`2026-11-07T19:15:00Z`).
+    #[arg(long, global = true)]
+    said_at: Option<String>,
+    /// Where the operator said it: a session id or a board thread.
+    #[arg(long, global = true)]
+    said_in: Option<String>,
     #[command(subcommand)]
     command: Command,
 }
@@ -1020,6 +1031,18 @@ enum CeilingCommand {
         /// The question's id, `q_` and 16 hex digits (`switchboard ceiling list`).
         id: String,
     },
+    /// Double a reached ceiling: answers its question. Only with the operator's words
+    /// (`--operator-said`, `--said-at`, `--said-in`), otherwise in the window.
+    Double {
+        /// The question's id, `q_` and 16 hex digits (`switchboard ceiling list`).
+        id: String,
+    },
+    /// Clear a scope's ceiling. Only with the operator's words, otherwise in the window.
+    Clear {
+        /// `machine`, `project:<group id>` or `workflow:<wf_id>`.
+        #[arg(long, default_value = "machine")]
+        scope: String,
+    },
 }
 /// `machine`, `project:<pool>` or `workflow:<wf_id>`.
 fn chain_scope(text: &str) -> Result<switchboard_core::ChainScope, String> {
@@ -1967,6 +1990,16 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                 answer: switchboard_runtime::spend::Answer::Keep,
                 by: switchboard_runtime::spend::Surface::Cli,
             },
+            CeilingCommand::Double { id } => Operation::AnswerCeiling {
+                id: id.clone(),
+                answer: switchboard_runtime::spend::Answer::Double,
+                by: switchboard_runtime::spend::Surface::Cli,
+            },
+            CeilingCommand::Clear { scope } => Operation::SetCeiling {
+                scope: chain_scope(scope)?,
+                usd: None,
+                by: switchboard_runtime::spend::Surface::Cli,
+            },
         },
         Command::Agents { command } => match command {
             AgentsCommand::List => Operation::AgentCatalog,
@@ -2225,6 +2258,20 @@ async fn run(cli: &Cli) -> Result<Value, String> {
         | Command::Vault { .. }
         | Command::Link
         | Command::Onboard { .. } => unreachable!(),
+    };
+    // SB-299: the operator's words open a loosening; the runtime checks them and records them.
+    let operation = match (&cli.operator_said, &cli.said_at, &cli.said_in) {
+        (None, None, None) => operation,
+        (Some(instruction), Some(at), Some(source)) => Operation::OnOperatorsWord {
+            decision: switchboard_runtime::spend::Decision {
+                by: "operator".into(),
+                instruction: instruction.clone(),
+                at: at.clone(),
+                source: source.clone(),
+            },
+            inner: Box::new(operation),
+        },
+        _ => return Err(switchboard_runtime::spend::DECISION_INVALID.into()),
     };
     // SB-212: a launch names who asked for it (`agents launch`, `kimi launch`, `continue
     // --to-console`).
@@ -3940,6 +3987,8 @@ mod mcp_parity {
         ("ceiling list", Tool("switchboard_ceilings")),
         ("ceiling set", Tool("switchboard_ceiling_set")),
         ("ceiling keep", Tool("switchboard_ceiling_answer")),
+        ("ceiling double", Tool("switchboard_ceiling_answer")),
+        ("ceiling clear", Tool("switchboard_ceiling_set")),
         ("project list", Tool("switchboard_projects")),
         ("project show", Tool("switchboard_project_context")),
         ("project set", Tool("switchboard_project_set")),

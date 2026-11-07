@@ -496,21 +496,23 @@ and `headless`), else *“… cannot take over a workflow …”*. Claude Code a
 provider's accounts; any other agent on an API-key account or a paid key, never on a
 subscription sign-in. Returns `{chain}` (null when cleared).
 
-### `switchboard_ceiling_set`: `scope?`, `usd`
+### `switchboard_ceiling_set`: `scope?`, `usd`, `decision?`
 
 Only when the operator asks. `scope` is `machine` (default), `project:<group id>` or
 `workflow:<wf_id>`; `usd` is dollars from 0.01 to 1000 (per UTC day for this computer and a
 group, since the first paid hand-over for a task). A first ceiling for a scope or a value no
-higher than the current one is accepted; raising or clearing one is refused (*"Raising or
-clearing a ceiling is done in the Switchboard window. …"*): tell the operator to do it in the
-window. Returns `{ceiling}` (`scope`, `cents`, `set_at`).
+higher than the current one is accepted; raising one, or clearing it with `usd: null`, takes
+`decision`: the operator's own words (`{by: "operator", instruction, at, source}`: the words
+verbatim, when, RFC 3339, and where they were said), recorded in `spend.json` (SB-299). Without
+them it is refused (*"Raising or clearing a ceiling is done in the Switchboard window. …"*).
+Returns `{ceiling}` (`scope`, `cents`, `set_at`).
 
-### `switchboard_ceiling_answer`: `id`, `answer?`
+### `switchboard_ceiling_answer`: `id`, `answer?`, `decision?`
 
 Only when the operator asks. Answers an open question from `switchboard_ceilings` with `keep`
-(the default and the only answer here): the ceiling stays as it is and the question closes.
-`double` is refused (*"Doubling a ceiling is answered in the Switchboard window."*), the
-question staying open for the operator in the window. Returns `{answer, ceiling}`.
+(the default): the ceiling stays as it is and the question closes. `double` takes `decision`,
+the operator's own words as for `switchboard_ceiling_set`; without them it is refused
+(*"Doubling a ceiling is answered in the Switchboard window."*). Returns `{answer, ceiling}`.
 
 ### `switchboard_hermes_set`: `provider?`, `model?`
 

@@ -529,13 +529,20 @@ switchboard ceiling set 5                                    # this computer: $5
 switchboard ceiling set --scope project:alpha-web 2          # a group on its own key
 switchboard ceiling set --scope workflow:wf_0123456789abcdef 1
 switchboard ceiling keep q_0123456789abcdef                  # keep a reached ceiling as it is
+switchboard ceiling set 10 --operator-said "подними до 10" --said-at 2026-11-07T22:00:00Z --said-in "session 38adf103"
+switchboard ceiling double q_0123456789abcdef --operator-said "…" --said-at … --said-in …
+switchboard ceiling clear --scope machine --operator-said "…" --said-at … --said-in …
 switchboard continue wf_0123456789abcdef --account hermes --dir /absolute/checkout --ceiling 1
 ```
 
 From the CLI (and MCP) a first ceiling for a scope or a lower one is accepted; raising, doubling
 or clearing one is done in the Switchboard window (*Raising or clearing a ceiling is done in the
 Switchboard window. From here, set a first ceiling or a lower one.*; *Doubling a ceiling is
-answered in the Switchboard window.*), so an agent never loosens a ceiling. `continue --ceiling`
+answered in the Switchboard window.*), unless the command carries the operator's own words
+(SB-299): `--operator-said` (verbatim, at most 500 characters), `--said-at` (RFC 3339) and
+`--said-in` (the session or board thread) open raising, clearing and doubling a ceiling, deleting
+a group that holds one and replacing or removing a key one counts. The words are recorded in
+`spend.json` (`loosened`, the newest five) and each loosening is logged (`ceiling_loosened`). `continue --ceiling`
 sets the task's ceiling before anything is offered (an amount out of range, or higher than the
 one set, refuses the continue); the continue is then gated by it like a hand-over (C-Q8): every
 paid start through Switchboard (`continue`, also `--to-console` and on the default agent, onto
