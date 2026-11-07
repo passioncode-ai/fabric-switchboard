@@ -6,6 +6,10 @@ release pull request renames `Unreleased` to the version. While Windows signing 
 that section must say `windows_authenticode: NOT_SIGNED`. Notes of 0.5.3-beta.1 and earlier are
 on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/releases).
 
+## Unreleased
+
+- Agents can do what the window's GitHub page does: `switchboard github owners`, `github repos OWNER` and `github clone OWNER NAME --into FOLDER`, and the MCP tools `switchboard_github` and `switchboard_github_clone`. `switchboard org cancel` stops a PassionCode.ai connection waiting for the browser, and MCP can now cancel and disconnect it too (SB-299).
+
 ## 0.7.25
 
 - A quota check or renewal that finds nothing due no longer takes Switchboard's lock to find that out, so a slow sign-in read while the computer swaps (up to 47 seconds on 2026-11-07) no longer makes the window, the CLI and the proxy wait behind it (SB-163).

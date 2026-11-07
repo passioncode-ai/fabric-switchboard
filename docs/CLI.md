@@ -53,7 +53,14 @@ switchboard org connect        # SB-159: sign in to PassionCode.ai in the browse
 switchboard org read           # read your PassionCode.ai organizations again now
 switchboard org passioncode    # where the connection stands; no token is shown
 switchboard org disconnect     # delete the token; the organizations stay as local ones
+switchboard org cancel         # stop a connection still waiting for the browser
 ```
+
+GitHub through your own `gh`, as the window's GitHub page (SB-299): `switchboard github owners`
+lists you and your organizations, `switchboard github repos OWNER` that owner's repositories with
+where each is on this computer and its group, and `switchboard github clone OWNER NAME --into
+/absolute/folder` clones one into a folder that does not exist yet. MCP: `switchboard_github`,
+`switchboard_github_clone`.
 
 `connect` opens the PassionCode.ai consent page in the default browser and listens on
 `127.0.0.1` for its answer (RFC 8252 loopback, PKCE S256). The organizations you are a member of
