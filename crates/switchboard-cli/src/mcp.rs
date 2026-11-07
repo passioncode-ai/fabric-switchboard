@@ -79,7 +79,7 @@ pub(crate) fn tools() -> Vec<(bool, Value)> {
         (true, json!({"name":"switchboard_backup_now","title":"Back up now","description":"Write an encrypted backup now. Restoring stays the person's, in the app or with switchboard backup restore.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}})),
         (false, json!({"name":"switchboard_recovery","title":"Stopped sessions","description":"Sessions that stopped on a limit and the accounts ready for them to continue: each stop's mode and when to try again.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}})),
         (false, json!({"name":"switchboard_handovers","title":"Hand-overs","description":"Whether hand-overs open in Fabric's console, and the hand-overs waiting for a console to take them.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}})),
-        (true, json!({"name":"switchboard_agent_set","title":"Enable or disable an agent, or set the default","description":"Let Switchboard hand work to an agent or keep work away from it (enabled), or set the machine's default agent (default: an agent id, or null for none). Only when the operator asks.","inputSchema":{"type":"object","properties":{"agent":{"type":"string"},"enabled":{"type":"boolean"},"default":{"type":["string","null"]}},"additionalProperties":false}})),
+        (true, json!({"name":"switchboard_agent_set","title":"Enable or disable an agent, or set the default","description":"Let Switchboard hand work to an agent or keep work away from it (enabled), set the machine's default agent (default: an agent id, or null for none), or choose whether the Claude Code and Codex sessions it starts bypass their permission prompts (permissions: bypass, the default, or ask). Only when the operator asks.","inputSchema":{"type":"object","properties":{"agent":{"type":"string"},"enabled":{"type":"boolean"},"default":{"type":["string","null"]},"permissions":{"type":"string","enum":["bypass","ask"]}},"additionalProperties":false}})),
         (true, json!({"name":"switchboard_login","title":"Sign in a new account","description":"Start the official sign-in for a new Claude or Codex account (action begin: provider, label, pool as the group id; it opens Terminal where the person signs in) and follow it (status, finish once the person signed in, cancel). The person signs in; this never takes a password or a key.","inputSchema":{"type":"object","properties":{"action":{"type":"string","enum":["begin","status","finish","cancel"]},"login_id":{"type":"string"},"provider":{"type":"string","enum":["claude","codex"]},"label":{"type":"string","minLength":1,"maxLength":80},"pool":{"type":"string","default":"default"}},"required":["action"],"additionalProperties":false}})),
         (true, json!({"name":"switchboard_project_set","title":"Save folder rule","description":"Save an optional rule: this folder and its subfolders start on this account. Only when the operator asks for it. Rules never stop automatic switching. Prefer an expiry.","inputSchema":{"type":"object","properties":{"path":path,"account_id":account,"target":{"type":"string","enum":["managed","claude_cli"],"default":"managed"},"enabled":{"type":"boolean","default":true},"expires_in_hours":{"type":"integer","minimum":1,"maximum":720}},"required":["account_id"],"additionalProperties":false}})),
         (true, json!({"name":"switchboard_project_remove","title":"Remove folder rule","description":"Remove the rule saved for exactly this folder and provider.","inputSchema":{"type":"object","properties":{"path":path,"provider":{"type":"string","enum":["claude","codex"]}},"required":["provider"],"additionalProperties":false}})),
@@ -679,8 +679,13 @@ impl Server {
             };
             answer = self.call(Operation::AgentDefault { agent }).await?;
         }
+        if let Some(mode) = args.get("permissions").and_then(Value::as_str) {
+            answer = self
+                .call(Operation::AgentPermissions { mode: mode.into() })
+                .await?;
+        }
         if answer == json!({}) {
-            return Err("Name enabled (with agent) or default to change.".into());
+            return Err("Name enabled (with agent), default or permissions to change.".into());
         }
         Ok(answer)
     }

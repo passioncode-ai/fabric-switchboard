@@ -250,7 +250,7 @@ ids the app offers. `error` names a Hermes that did not answer.
 
 ### `switchboard_agents`: no arguments
 
-`{schema, revision, updated_at, default, default_ready, dispatch_agent, installed, agents: [...], recommended_models}`. `default` is the machine's default
+`{schema, revision, updated_at, default, default_ready, dispatch_agent, permissions, installed, agents: [...], recommended_models}`. `permissions` is `bypass` (the default: the Claude Code and Codex sessions Switchboard starts skip their permission prompts) or `ask`. `default` is the machine's default
 agent, `null` for *Auto*; Fabric uses it unless a group sets its own. `dispatch_agent` is the agent a
 board dispatch would start now: with *Auto*, Claude Code, else Codex, else `null`. Each agent row: `id`,
 `name`, `maker`, `url`, `install` (its install command), `installed` (found on this computer
@@ -406,10 +406,12 @@ Only when the operator asks. Changes automatic switching for one provider, group
 Writes an encrypted backup now. Restoring stays the person's (the app, or
 `switchboard backup restore`).
 
-### `switchboard_agent_set`: `agent?`, `enabled?`, `default?`
+### `switchboard_agent_set`: `agent?`, `enabled?`, `default?`, `permissions?`
 
 Only when the operator asks. `enabled` (with `agent`) lets Switchboard hand work to that agent
-or keeps it away; `default` sets the machine's default agent (an id, or null for Auto).
+or keeps it away; `default` sets the machine's default agent (an id, or null for Auto);
+`permissions` (`bypass`, the default, or `ask`) chooses whether the Claude Code and Codex
+sessions Switchboard starts bypass their permission prompts (SB-298).
 
 ### `switchboard_login`: `action`, `login_id?`, `provider?`, `label?`, `pool?`
 
