@@ -4,6 +4,7 @@ pub mod agent_keys;
 pub mod agent_settings;
 pub mod agents;
 pub mod analytics;
+pub mod app_doors;
 pub mod attribution;
 mod bindings;
 mod blocking;
@@ -340,6 +341,12 @@ pub enum Operation {
     /// SB-143: whether Codex sessions in a project's folders use its Codex accounts (one
     /// user-level provider at the proxy). `enabled` none: the state only.
     CodexRoute {
+        #[serde(default)]
+        enabled: Option<bool>,
+    },
+    /// SB-299: an action the app process owns (updates, open at login), as the window does it.
+    App {
+        action: app_doors::AppAction,
         #[serde(default)]
         enabled: Option<bool>,
     },
@@ -878,6 +885,8 @@ pub struct Runtime {
     /// Anonymous usage analytics; only the desktop app of the real data folder, in a release
     /// build, starts it (docs/ANALYTICS.md).
     analytics: Mutex<Option<Arc<analytics::Analytics>>>,
+    /// SB-299: the installed app's own actions, handed over when its owner starts.
+    app_doors: Mutex<Option<Arc<dyn app_doors::AppDoors>>>,
     /// The backup restored automatically when this install started with a new data folder.
     restored_at_start: Mutex<Option<Value>>,
     /// The background search for a project's new folders (SB-117).
@@ -1023,6 +1032,7 @@ impl Runtime {
             backup_folder: Mutex::new(None),
             backup_state: Mutex::new(BackupState::default()),
             analytics: Mutex::new(None),
+            app_doors: Mutex::new(None),
             restored_at_start: Mutex::new(None),
         }))
         .inspect(|rt| rt.codex_route_sync(true))
@@ -1086,6 +1096,8 @@ impl Runtime {
             Operation::Snapshot
                 // SB-299: the analytics client's own state, never the store.
                 | Operation::Analytics { .. }
+                // SB-299: the app's own state, never the store; a restart drains as Quit does.
+                | Operation::App { .. }
                 | Operation::AgentCatalog
                 | Operation::AgentConnect { .. }
                 | Operation::AgentKey
@@ -2306,6 +2318,15 @@ impl Runtime {
             *slot = Some(client.clone());
         }
         tokio::spawn(async move { client.flush().await });
+    }
+    /// SB-299: the app's updates and login item, for the CLI and MCP (`Operation::App`).
+    pub fn set_app_doors(&self, doors: Arc<dyn app_doors::AppDoors>) {
+        if let Ok(mut slot) = self.app_doors.lock() {
+            *slot = Some(doors);
+        }
+    }
+    fn app_doors(&self) -> Option<Arc<dyn app_doors::AppDoors>> {
+        self.app_doors.lock().ok().and_then(|slot| slot.clone())
     }
     pub(crate) fn analytics(&self) -> Option<Arc<analytics::Analytics>> {
         self.analytics.lock().ok().and_then(|slot| slot.clone())
@@ -5440,6 +5461,9 @@ async fn execute(
                 store.return_to_default(&id)?;
             }
             Ok(json!({"id": id, "from": from, "pool": pool, "moved": true}))
+        }
+        Operation::App { action, enabled } => {
+            app_doors::answer(runtime.and_then(|r| r.app_doors()), action, enabled).await
         }
         Operation::Analytics { enabled } => match (runtime, enabled) {
             (Some(rt), Some(on)) => rt.set_analytics(on),

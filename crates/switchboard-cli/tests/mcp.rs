@@ -178,6 +178,7 @@ async fn handshake_lists_tools_and_rejects_malformed_messages() {
             "switchboard_project_edit",
             "switchboard_codex_route",
             "switchboard_project_move_root",
+            "switchboard_app",
             "switchboard_link_cli",
             "switchboard_analytics",
             "switchboard_github",

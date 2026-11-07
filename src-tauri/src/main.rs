@@ -42,6 +42,8 @@ use tauri::{Manager, State};
 /// next one tries again, so Retry recovers without restarting the app.
 struct Slot {
     start: Box<dyn Fn() -> Result<std::path::PathBuf, String> + Send + Sync>,
+    /// SB-299: the app's updates and login item, handed to each owner it starts.
+    doors: Option<Arc<dyn switchboard_runtime::app_doors::AppDoors>>,
     smoke: bool,
     /// How the app was launched, for analytics (`ordinary` or `background`).
     launch: &'static str,
@@ -66,6 +68,9 @@ impl Slot {
             };
             let started = started.inspect(|owner| {
                 // Release builds only (the App Key), the real data folder only (docs/ANALYTICS.md).
+                if let Some(doors) = &self.doors {
+                    owner.runtime.set_app_doors(doors.clone());
+                }
                 if !self.smoke {
                     owner.runtime.enable_analytics(self.launch);
                     // SB-183: only an installed build writes the terminal hook's start files
@@ -1236,6 +1241,42 @@ fn set_login_item(
     }
     residency::set(&app, &default_root()?, enabled)
 }
+/// SB-299: what the window does with updates and the login item, for the CLI and MCP through
+/// the owner (`Operation::App`). Each call reads the app's state when it runs, so it works however
+/// late the updater is set up; an app without one answers as the window's About does.
+struct WindowDoors(tauri::AppHandle);
+impl switchboard_runtime::app_doors::AppDoors for WindowDoors {
+    fn updates(&self) -> Value {
+        match self.0.try_state::<updates::Updates>() {
+            Some(updates) => updates.status(),
+            None => json!({ "available": false, "enabled": false }),
+        }
+    }
+    fn set_auto_update(&self, enabled: bool) -> Result<Value, String> {
+        let updates = self
+            .0
+            .try_state::<updates::Updates>()
+            .ok_or(switchboard_runtime::app_doors::APP_ONLY)?;
+        let pending = updates.has_pending_install();
+        let status = updates.set(enabled)?;
+        if pending && !updates.has_pending_install() {
+            residency::hide_update(&self.0);
+        }
+        Ok(status)
+    }
+    fn check_for_updates(&self) -> switchboard_runtime::app_doors::Answer {
+        Box::pin(updates::check_now(self.0.clone()))
+    }
+    fn restart_to_update(&self) -> switchboard_runtime::app_doors::Answer {
+        Box::pin(updates::restart(self.0.clone()))
+    }
+    fn login_item(&self) -> Value {
+        residency::status(&self.0)
+    }
+    fn set_login_item(&self, enabled: bool) -> Result<Value, String> {
+        residency::set(&self.0, &default_root()?, enabled)
+    }
+}
 /// Automatic updates (SB-55): `{available, reason, enabled, state, current, version, …}`.
 #[tauri::command]
 fn update_status(updates: State<'_, updates::Updates>) -> Value {
@@ -1305,6 +1346,10 @@ fn main() {
                 start: Box::new(move || match &smoke_root {
                     Some(root) => Ok(root.clone()),
                     None => default_root(),
+                }),
+                doors: (!smoke).then(|| {
+                    Arc::new(WindowDoors(app.handle().clone()))
+                        as Arc<dyn switchboard_runtime::app_doors::AppDoors>
                 }),
                 smoke,
                 launch: if background { "background" } else { "ordinary" },
