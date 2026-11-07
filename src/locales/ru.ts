@@ -4,6 +4,7 @@
  * `node scripts/check-locale.mjs` keeps it complete.
  */
 export const RU: Record<string, string> = {
+  "Choose bypass or ask.": "Выберите bypass или ask.",
   "That group no longer exists. Choose a group, or the default group.": "Этой группы больше нет. Выберите группу или группу по умолчанию.",
   "{n} Claude Swap accounts imported or updated in the default group": "{n} аккаунт Claude Swap импортирован или обновлён в группе по умолчанию|{n} аккаунта Claude Swap импортированы или обновлены в группе по умолчанию|{n} аккаунтов Claude Swap импортированы или обновлены в группе по умолчанию",
   "{label} moved to the default group.": "Аккаунт {label} перенесён в группу по умолчанию.",
