@@ -870,7 +870,10 @@ mod runs {
             .unwrap();
         assert_eq!(started["state"], "started", "{started}");
         assert_eq!(started["agent"], "claude-code");
-        let id = started["launch_id"].as_str().unwrap().to_owned();
+        let id = started["launch_id"]
+            .as_str()
+            .unwrap_or_else(|| panic!("no launch was started: {started}"))
+            .to_owned();
         let argv = args(b.tools.path());
         assert!(argv[0].starts_with("--mcp-config="), "{argv:?}");
         assert_eq!(&argv[1..4], ["-p", "--append-system-prompt", EXIT_CONTRACT]);
@@ -989,7 +992,10 @@ mod runs {
         }
         let started = b.run(asked, true, true).await.unwrap();
         assert_eq!(started["state"], "started", "{started}");
-        let id = started["launch_id"].as_str().unwrap().to_owned();
+        let id = started["launch_id"]
+            .as_str()
+            .unwrap_or_else(|| panic!("no launch was started: {started}"))
+            .to_owned();
         let argv = args(b.tools.path());
         assert!(
             !argv.iter().any(|a| a.starts_with("--dangerously")),
@@ -1029,7 +1035,10 @@ mod runs {
             )
             .await
             .unwrap();
-        let id = started["launch_id"].as_str().unwrap().to_owned();
+        let id = started["launch_id"]
+            .as_str()
+            .unwrap_or_else(|| panic!("no launch was started: {started}"))
+            .to_owned();
         for _ in 0..200 {
             if !crate::launches::get(b.root.path(), &id).unwrap()["ended"].is_null() {
                 break;
