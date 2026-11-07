@@ -48,6 +48,12 @@ enum Command {
     },
     /// Link this `switchboard` into ~/.local/bin, as the window's *Link the CLI* does.
     Link,
+    /// What the installed app's About and tray do: automatic updates and opening at login.
+    /// Answered by the running app only.
+    App {
+        #[command(subcommand)]
+        command: AppCmd,
+    },
     /// Switchboard's own usage analytics (counts and kinds only, docs/ANALYTICS.md): `on` or
     /// `off`; without either, the state. Only the installed app sends them.
     Analytics {
@@ -626,6 +632,25 @@ enum Inbox {
     },
     /// Delete the saved key.
     Remove,
+}
+#[derive(Subcommand)]
+enum AppCmd {
+    /// The update state; `on` or `off` sets *Install updates automatically*.
+    Updates {
+        /// `on` or `off`; without it, the state only.
+        #[arg(value_enum)]
+        state: Option<OnOff>,
+    },
+    /// Check for updates now, as About's *Check for updates* does.
+    CheckUpdates,
+    /// Install a downloaded update and restart, as the tray's *Restart to update* does.
+    RestartToUpdate,
+    /// Whether Switchboard opens at login; `on` or `off` sets it.
+    LoginItem {
+        /// `on` or `off`; without it, the state only.
+        #[arg(value_enum)]
+        state: Option<OnOff>,
+    },
 }
 #[derive(Subcommand)]
 enum Github {
@@ -1578,6 +1603,19 @@ async fn run(cli: &Cli) -> Result<Value, String> {
             Inbox::Status { check } => Operation::InboxStatus { check: *check },
             Inbox::Remove => Operation::InboxRemove,
         },
+        Command::App { command } => {
+            use switchboard_runtime::app_doors::AppAction;
+            let (action, state) = match command {
+                AppCmd::Updates { state } => (AppAction::Updates, *state),
+                AppCmd::CheckUpdates => (AppAction::CheckForUpdates, None),
+                AppCmd::RestartToUpdate => (AppAction::RestartToUpdate, None),
+                AppCmd::LoginItem { state } => (AppAction::LoginItem, *state),
+            };
+            Operation::App {
+                action,
+                enabled: state.map(|s| matches!(s, OnOff::On)),
+            }
+        }
         Command::Analytics { state } => Operation::Analytics {
             enabled: state.map(|s| matches!(s, OnOff::On)),
         },
@@ -3769,6 +3807,10 @@ mod mcp_parity {
         ("org cancel", Tool("switchboard_organization_set")),
         ("analytics", Tool("switchboard_analytics")),
         ("link", Tool("switchboard_link_cli")),
+        ("app updates", Tool("switchboard_app")),
+        ("app check-updates", Tool("switchboard_app")),
+        ("app restart-to-update", Tool("switchboard_app")),
+        ("app login-item", Tool("switchboard_app")),
         ("github owners", Tool("switchboard_github")),
         ("github repos", Tool("switchboard_github")),
         ("github clone", Tool("switchboard_github_clone")),

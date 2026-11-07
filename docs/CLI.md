@@ -58,6 +58,11 @@ switchboard org disconnect     # delete the token; the organizations stay as loc
 switchboard org cancel         # stop a connection still waiting for the browser
 ```
 
+What About and the tray do, through the running app (SB-299): `switchboard app updates [on|off]`
+(the update state, or *Install updates automatically*), `app check-updates`, `app restart-to-update`
+(installs a downloaded update and restarts through the drain) and `app login-item [on|off]` (*Open at
+login*). Anywhere the installed app does not run they answer that only it can.
+
 `switchboard link` puts this `switchboard` into `~/.local/bin`, as the window's *Link the CLI* does
 (SB-299); run it by its full path, for example
 `"/Applications/Fabric Switchboard.app/Contents/MacOS/switchboard" link`.
