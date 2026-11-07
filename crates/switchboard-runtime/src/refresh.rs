@@ -806,6 +806,12 @@ fn reserve_due<'a>(
     if account.provider != Provider::Claude || account.kind != AuthKind::OAuth {
         return Step::Done(Outcome::NotNeeded);
     }
+    // SB-293: an account turned off here, a seat used on another machine included
+    // (`mark_elsewhere` turns it off), is never renewed here, by the background pass or a
+    // person's check: its refresh token belongs to the machine that uses it.
+    if !account.enabled {
+        return Step::Done(Outcome::NotNeeded);
+    }
     let Ok(credential) = store.stored_credential(id) else {
         return Step::Done(Outcome::NotNeeded);
     };
@@ -2104,6 +2110,38 @@ mod tests {
             "just switched away from"
         );
         assert_eq!(calls.load(Ordering::SeqCst), 0);
+    }
+    /// SB-293: an account marked as used on another machine, or turned off here, is never
+    /// renewed here, even on a person's quota check (`force`): spending its refresh token would
+    /// sign the other machine out.
+    #[tokio::test]
+    async fn an_account_used_elsewhere_or_turned_off_is_never_renewed_here() {
+        let (url, calls) = endpoint((200, json!({"access_token":"x","expires_in":60}))).await;
+        let root = tempfile::tempdir().unwrap();
+        let store = store_with(
+            root.path(),
+            &[("synthetic-b", "default"), ("synthetic-c", "default")],
+        );
+        let state = RefreshState::at(url);
+        let b = id_of(&store, "synthetic-b", "default");
+        let c = id_of(&store, "synthetic-c", "default");
+        store.mark_elsewhere(&b, true, now()).unwrap();
+        store.update(&c, "synthetic-c".into(), false).unwrap();
+        for id in [&b, &c] {
+            for force in [false, true] {
+                assert_eq!(
+                    ensure_fresh(&store, SIGNED_OUT, &state, id, force).await,
+                    Outcome::NotNeeded
+                );
+            }
+        }
+        assert_eq!(calls.load(Ordering::SeqCst), 0, "no grant spent");
+        store.mark_elsewhere(&b, false, now()).unwrap();
+        assert_eq!(
+            ensure_fresh(&store, SIGNED_OUT, &state, &b, false).await,
+            Outcome::Refreshed,
+            "used here again"
+        );
     }
     #[tokio::test]
     async fn a_rejected_lineage_is_never_handed_to_claude_code() {
