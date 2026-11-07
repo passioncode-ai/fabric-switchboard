@@ -176,21 +176,29 @@ fn owner_in(list: &[u8], local_port: u16, peer_port: u16) -> Option<u32> {
     None
 }
 
-/// One `/proc/net/tcp` table: `sl local rem st tx:rx tr:tm retrnsmt uid ...`, addresses as
-/// `HEXADDR:HEXPORT`.
+/// One `/proc/net/tcp` table: `sl local rem st tx:rx tr:tm retrnsmt uid timeout inode ...`,
+/// addresses as `HEXADDR:HEXPORT`. The client's own row names its uid; a row whose inode is 0
+/// belongs to a client that already closed (its uid then reads 0), so its owner is unknown and
+/// is never taken from anything else (contract CT-254, `v0.1.0+2026-11-07.3`, server side).
 #[cfg(any(target_os = "linux", test))]
 fn owner_in_proc(table: &str, local_port: u16, peer_port: u16) -> Option<u32> {
     let port =
         |field: &str| -> Option<u16> { u16::from_str_radix(field.rsplit_once(':')?.1, 16).ok() };
-    table.lines().skip(1).find_map(|line| {
-        let fields: Vec<&str> = line.split_whitespace().collect();
-        if fields.len() < 8 {
-            return None;
-        }
-        (port(fields[1])? == peer_port && port(fields[2])? == local_port)
-            .then(|| fields[7].parse().ok())
-            .flatten()
-    })
+    table
+        .lines()
+        .skip(1)
+        .find_map(|line| {
+            let fields: Vec<&str> = line.split_whitespace().collect();
+            if fields.len() < 10 {
+                return None;
+            }
+            if port(fields[1])? != peer_port || port(fields[2])? != local_port {
+                return None;
+            }
+            // Found the client's row: an answer either way, never a later row's.
+            Some((fields[9] != "0").then(|| fields[7].parse().ok()).flatten())
+        })
+        .flatten()
 }
 
 /// Only a peer read as this account is served; another account's, or one whose owner could not be
@@ -459,6 +467,15 @@ mod tests {
         assert_eq!(owner_in_proc(table, 5555, 4000), Some(1000));
         assert_eq!(owner_in_proc(table, 4000, 1), None);
         assert_eq!(owner_in_proc("header only\n", 4000, 5555), None);
+    }
+
+    /// CT-254 (server side): a client row with inode 0 is a client that already closed; its
+    /// uid reads 0, and its owner is unknown, never root and never another row's.
+    #[test]
+    fn a_closed_clients_row_names_no_owner() {
+        let table = "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode\n   0: 0100007F:0FA0 0100007F:15B3 01 00000000:00000000 00:00000000 00000000  1000        0 1 1\n   1: 0100007F:15B3 0100007F:0FA0 06 00000000:00000000 00:00000000 00000000     0        0 0 1\n   2: 0100007F:15B3 0100007F:0FA0 01 00000000:00000000 00:00000000 00000000  1001        0 3 1\n";
+        assert_eq!(owner_in_proc(table, 4000, 5555), None);
+        assert!(!admits(0, owner_in_proc(table, 4000, 5555)));
     }
 
     /// On every system the listener checks, a connection this process opens is its own user's.
