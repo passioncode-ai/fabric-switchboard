@@ -216,6 +216,25 @@ async fn update_account(
         })
         .await
 }
+/// SB-283: move an account's sign-in to another machine over ssh (`account_send`).
+#[tauri::command]
+async fn send_account(
+    id: String,
+    to: String,
+    pool: String,
+    state: State<'_, Slot>,
+) -> Result<Value, String> {
+    state
+        .runtime()
+        .await?
+        .execute(Operation::SendAccount {
+            id,
+            to,
+            pool: Some(pool),
+            program: None,
+        })
+        .await
+}
 /// SB-175: mark an account as used on another machine, or clear the mark; SB-284: with where.
 #[tauri::command]
 async fn mark_elsewhere(
@@ -1485,6 +1504,7 @@ fn main() {
             sessions,
             add_account,
             update_account,
+            send_account,
             mark_elsewhere,
             remove_account,
             select_account,

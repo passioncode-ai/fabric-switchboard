@@ -146,6 +146,29 @@ impl Credential {
     }
 }
 
+impl Credential {
+    /// SB-283: the provider's own sign-in as `parse` reads it back (`claudeAiOauth` for Claude,
+    /// `tokens` for Codex), and nothing else: no MCP tokens, no native context.
+    pub fn to_oauth_json(&self, provider: Provider) -> String {
+        let value = match provider {
+            Provider::Claude => serde_json::json!({"claudeAiOauth": {
+                "accessToken": self.access_token,
+                "refreshToken": self.refresh_token,
+                "expiresAt": self.expires_at.map(|t| t * 1000),
+                "accountUuid": self.account_id,
+            }}),
+            Provider::Codex => serde_json::json!({"tokens": {
+                "access_token": self.access_token,
+                "refresh_token": self.refresh_token,
+                "id_token": self.id_token,
+                "expires_at": self.expires_at,
+                "account_id": self.account_id,
+            }}),
+        };
+        value.to_string()
+    }
+}
+
 fn native_context_valid(value: &Value) -> bool {
     let Some(object) = value.as_object() else {
         return false;
@@ -156,4 +179,35 @@ fn native_context_valid(value: &Value) -> bool {
             .get("oauth_account")
             .is_some_and(|v| v.is_object() || v.is_null())
         && serde_json::to_vec(value).is_ok_and(|bytes| bytes.len() <= MAX_INPUT)
+}
+
+#[cfg(test)]
+mod export_tests {
+    use super::*;
+
+    /// SB-283: a sent sign-in reads back as the same sign-in on the other machine, and carries
+    /// nothing but the provider's tokens.
+    #[test]
+    fn an_exported_sign_in_reads_back_the_same_and_carries_nothing_else() {
+        for provider in [Provider::Claude, Provider::Codex] {
+            let credential = Credential {
+                access_token: "synthetic-access".into(),
+                refresh_token: Some("synthetic-refresh".into()),
+                id_token: (provider == Provider::Codex).then(|| "synthetic-id".into()),
+                native_context: Some(
+                    serde_json::json!({"auth": {"mcpOAuth": {"x": 1}}, "oauth_account": null}),
+                ),
+                expires_at: Some(2_000_000_000),
+                account_id: Some("synthetic-account".into()),
+            };
+            let text = credential.to_oauth_json(provider);
+            assert!(!text.contains("mcpOAuth"));
+            let back = Credential::parse(provider, AuthKind::OAuth, &text).unwrap();
+            assert_eq!(back.access_token, credential.access_token);
+            assert_eq!(back.refresh_token, credential.refresh_token);
+            assert_eq!(back.id_token, credential.id_token);
+            assert_eq!(back.expires_at, credential.expires_at);
+            assert_eq!(back.account_id, credential.account_id);
+        }
+    }
 }

@@ -787,6 +787,50 @@ enum Accounts {
         #[arg(long)]
         location: Option<String>,
     },
+    /// Hand an account over to another machine or a colleague: writes a signed record
+    /// without its credential and marks it here as used elsewhere. The receiver runs
+    /// `switchboard accounts receive` with the file and signs in.
+    HandOver {
+        /// The account id (`switchboard accounts list`).
+        id: String,
+        /// Who receives it: a machine and its user, or a colleague (at most 80 characters).
+        /// The record is printed: `switchboard accounts hand-over ID --to NAME > handover.json`.
+        #[arg(long)]
+        to: String,
+    },
+    /// Move an account's sign-in to another machine over ssh, without signing in again there:
+    /// marks it here as used elsewhere first, saves it there with `switchboard accounts add`,
+    /// checks there that the provider answers, and undoes both on any failure. Only a Claude or
+    /// Codex subscription sign-in; ssh must reach the machine without a prompt.
+    Send {
+        /// The account id (`switchboard accounts list`).
+        id: String,
+        /// The other machine as ssh knows it (`user@host`, or a Host from ~/.ssh/config).
+        #[arg(long)]
+        to: String,
+        /// The group it joins there (`default`: the default group).
+        #[arg(long)]
+        pool: Option<String>,
+        /// The other machine's switchboard, an absolute path; by default the macOS app's.
+        #[arg(long)]
+        remote: Option<String>,
+    },
+    /// Receive an account handed over to you: shows whose sign-in and into which group;
+    /// with `--apply`, starts that sign-in. Its credential never travels: you sign in here.
+    Receive {
+        /// The hand-over file.
+        file: PathBuf,
+        /// The giver's published key (`switchboard settings signer`): the file must be signed by it.
+        #[arg(long)]
+        signer: Option<String>,
+        /// Start the sign-in.
+        #[arg(long)]
+        apply: bool,
+        /// With `--apply`: no Terminal; the sign-in URL is in `login status` and the code goes to
+        /// `login code`.
+        #[arg(long)]
+        headless: bool,
+    },
     /// Move an account into a group, or back to the default group. Joining or leaving a group
     /// is that group's change (`project edit`); the account the ordinary Claude Code or Codex is
     /// signed in to stays in the default group.
@@ -1499,6 +1543,37 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                 elsewhere: *elsewhere,
                 location: location.clone(),
             },
+            Accounts::Send {
+                id,
+                to,
+                pool,
+                remote,
+            } => Operation::SendAccount {
+                id: id.clone(),
+                to: to.clone(),
+                pool: pool.clone(),
+                program: remote.clone(),
+            },
+            Accounts::HandOver { id, to } => Operation::HandOver {
+                id: id.clone(),
+                to: to.clone(),
+            },
+            Accounts::Receive {
+                file,
+                signer,
+                apply,
+                headless,
+            } => {
+                let text = std::fs::read(file).map_err(|_| "The hand-over file cannot be read.")?;
+                let record: Value = serde_json::from_slice(&text)
+                    .map_err(|_| switchboard_runtime::account_handover::NOT_A_HANDOVER)?;
+                Operation::ReceiveHandover {
+                    record,
+                    signer: signer.clone(),
+                    apply: *apply,
+                    headless: *headless,
+                }
+            }
             Accounts::Move { id, pool } => Operation::MoveAccount {
                 id: id.clone(),
                 pool: pool.clone(),
@@ -3737,6 +3812,9 @@ mod mcp_parity {
         ("accounts add", Not(PERSON)),
         ("accounts update", Tool("switchboard_account_update")),
         ("accounts move", Tool("switchboard_account_move")),
+        ("accounts hand-over", Tool("switchboard_account_hand_over")),
+        ("accounts send", Tool("switchboard_account_send")),
+        ("accounts receive", Tool("switchboard_account_receive")),
         ("org list", Tool("switchboard_organizations")),
         ("org add", Tool("switchboard_organization_set")),
         ("org edit", Tool("switchboard_organization_set")),

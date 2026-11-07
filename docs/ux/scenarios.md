@@ -1866,3 +1866,23 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Meaning:** operator request 2026-11-05 (SB-264).
 **Product:** unobserved
 **Traces:** SB-264, SCN-085, SCN-070, SCN-064
+
+## SCN-087: Move an account to another machine without signing in there
+**Persona:** P-01
+**Goal:** A person who manages accounts from one Mac moves a subscription's sign-in to another machine (a Mac Studio space, a colleague's Mac) in one step, so nobody signs in again there and only one machine ever holds and renews it.
+**Preconditions:** a Claude or Codex subscription sign-in that is enabled here, not used elsewhere and not selected by any group; the other machine runs Switchboard and is reachable by ssh without a password prompt.
+**Entry point:** *Accounts* → an account's ⋯ → *Move to another machine…*; CLI `switchboard accounts send ID --to user@host [--pool GROUP] [--remote PATH]`; MCP `switchboard_account_send`.
+**Steps:**
+1. ⋯ → *Move to another machine…* → the dialog “Move {label} to another machine” (“Its sign-in moves over ssh: this computer stops using it first, the other machine saves it and checks that it answers. If a step fails, nothing changes.”) with *Machine* (“As ssh knows it, reachable without a password prompt.”) and *Group there* (“Its group on the other machine.”, the account's group by default) → *Move*.
+2. This computer marks the account as used on that machine (it stops renewing it), the other machine saves the sign-in with `switchboard accounts add --secret-stdin` (the tokens on stdin, never in a command line), and a quota check there proves the provider answers it.
+3. → “{label} moved to {machine}. This computer no longer uses it.”; the card shows *On {machine}* and *Use here*, as SCN-072.
+**Alt paths:** the other machine does not save it → “The other machine did not save the sign-in. Nothing changed here; check ssh and its Switchboard.”, the account is used here as before; it saves it but the provider does not answer there → “The other machine saved the sign-in but the provider did not answer it there. It was removed there and stays here.”.
+**Expected result:** the sign-in works on the other machine and this one never renews it; on any failure it stays here as it was.
+**UI elements:** the ⋯ item, the *Move {label} to another machine* dialog, the *On {location}* badge.
+**States covered:** moved; refused before anything ran (a machine name ssh would read as an option, an API key: “Only a Claude or Codex subscription sign-in moves this way. Give an API key through your vault.”, a selected account: “Select another account for its group before moving this one.”); not saved there (undone); saved but not answered there (removed there, undone here).
+**Errors & recovery:** every failure names what happened and leaves the account usable here.
+**Status:** draft
+**Meaning:** SB-283, raised by the operator 2026-11-07 («поднимай», relayed by studio-agent on board thread `f32a24c0`); the single holder keeps D-2 of the two-machines design.
+**Coverage:** runtime `account_send::tests` (moved, not saved, not answered, refused), core `an_exported_sign_in_reads_back_the_same_and_carries_nothing_else`, WebKit demo.
+**Product:** unobserved
+**Traces:** SB-283, SB-284, SCN-072

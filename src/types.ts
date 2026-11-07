@@ -59,6 +59,7 @@ export interface Adapter {
   update(id: string, label: string, enabled: boolean): Promise<void>;
   /** SB-175: mark an account as used on another machine (disabled here), or clear the mark. */
   /** SB-284: `location` says where it works (blank clears it). */ markElsewhere(id: string, on: boolean, location?: string): Promise<void>;
+  /** SB-283: moves a sign-in to another machine over ssh; `pool` is its group there. */ sendAccount(id: string, to: string, pool: string): Promise<void>;
   remove(id: string): Promise<void>;
   select(account: Account): Promise<void>;
   launch(id: string, mode: 'isolated' | 'managed', workingDirectory: string): Promise<{ message: string; agent_tools?: boolean }>;

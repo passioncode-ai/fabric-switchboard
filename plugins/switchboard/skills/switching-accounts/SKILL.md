@@ -61,6 +61,8 @@ the launch injected it with the session and data folder set explicitly.
 | `switchboard_events` | no | recent activity as fixed codes |
 | `switchboard_account_update` | yes | rename, enable or disable an account, or mark it as used on another machine and say where (`location`), only when the operator asks |
 | `switchboard_account_move` | yes | move an account into a project's pool or back to `default`, only when the operator asks |
+| `switchboard_account_send` | yes | move a subscription sign-in to another machine over ssh, one holder, undone on failure; only when the operator asks |
+| `switchboard_account_hand_over` / `switchboard_account_receive` | yes / yes | hand an account over to another machine or a colleague as a signed record without its credential, and receive one (starting its sign-in with `apply`), only when the operator asks |
 | `switchboard_organizations` | no | the organizations and which account belongs to which, with why (person, provider team, domain), and `passioncode`: whether PassionCode.ai is connected and when it was read (connecting is the person's, in the browser: `switchboard org connect`) |
 | `switchboard_organization_set` | yes | add, edit or remove an organization, or place an account (an organization, personal, auto), only when the operator asks |
 | `switchboard_rotation` / `switchboard_rotation_set` | no / yes | read or change automatic switching, the change only when the operator asks |
