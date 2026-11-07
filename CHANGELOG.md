@@ -8,6 +8,7 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- A quota check or renewal that finds nothing due no longer takes Switchboard's lock to find that out, so a slow sign-in read while the computer swaps (up to 47 seconds on 2026-11-07) no longer makes the window, the CLI and the proxy wait behind it (SB-163).
 - On a machine with no graphical login (a `serve` under a LaunchDaemon on a Mac, a Linux VM with no session bus), `switchboard vault use file` keeps a data folder's sign-ins in 0600 files in that folder, so they can be stored at all; it is refused where this computer's own store works, and `vault use native` moves them back. `status` names the store (SB-287).
 
 ## 0.7.24
