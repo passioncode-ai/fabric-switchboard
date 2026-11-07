@@ -220,7 +220,7 @@ enum Command {
         reason: DispatchReason,
         /// `ask`: the agent's own defaults. `all`: Claude Code with
         /// --dangerously-skip-permissions, Codex with --dangerously-bypass-approvals-and-sandbox.
-        #[arg(long, value_enum, default_value = "ask")]
+        #[arg(long, value_enum, default_value = "all")]
         permissions: DispatchPermissions,
         /// Stop the run after this many minutes, 1 to 1440.
         #[arg(long, default_value_t = 60, value_parser = clap::value_parser!(u32).range(1..=1440))]
@@ -937,6 +937,12 @@ enum AgentsCommand {
     Default {
         /// An installed, enabled agent that can continue, or `auto`.
         agent: String,
+    },
+    /// Whether the Claude Code and Codex sessions Switchboard starts skip their permission
+    /// prompts: `bypass` (the default) or `ask`.
+    Permissions {
+        /// `bypass` or `ask`.
+        mode: String,
     },
     /// The OpenRouter models agents can launch on: the recommended ones first, then every
     /// OpenRouter model that accepts tools.
@@ -1761,6 +1767,9 @@ async fn run(cli: &Cli) -> Result<Value, String> {
             AgentsCommand::Default { agent } => Operation::AgentDefault {
                 agent: (agent != "auto").then(|| agent.clone()),
             },
+            AgentsCommand::Permissions { mode } => {
+                Operation::AgentPermissions { mode: mode.clone() }
+            }
             AgentsCommand::Models => Operation::OpenrouterModels,
             AgentsCommand::Connect { agent, pool } => Operation::AgentConnect {
                 agent: agent.clone(),
@@ -3659,6 +3668,7 @@ mod mcp_parity {
         ("agents enable", Tool("switchboard_agent_set")),
         ("agents disable", Tool("switchboard_agent_set")),
         ("agents default", Tool("switchboard_agent_set")),
+        ("agents permissions", Tool("switchboard_agent_set")),
         ("agents models", Tool("switchboard_openrouter_models")),
         ("agents connect", Tool("switchboard_onboarding")),
         ("agents key", Not(PERSON)),

@@ -34,6 +34,33 @@ pub struct Settings {
     /// Agents the person keeps work away from.
     #[serde(default)]
     pub disabled: Vec<String>,
+    /// SB-298 (operator 2026-11-07: agents run with permissions bypassed, «никакой человек не
+    /// сможет ничто ответить»): absent means bypass; `ask` keeps the agents' own prompts.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub permissions: Option<String>,
+}
+
+/// SB-298: the two permission modes of the sessions Switchboard starts.
+pub const BYPASS: &str = "bypass";
+pub const ASK: &str = "ask";
+pub const PERMISSIONS_INVALID: &str = "Choose bypass or ask.";
+
+/// SB-298: whether the Claude Code and Codex sessions Switchboard starts skip their permission
+/// prompts. True unless the person chose `ask`; an unreadable settings file reads as the default.
+pub fn bypass(root: &Path) -> bool {
+    read(root).map_or(true, |s| s.permissions.as_deref() != Some(ASK))
+}
+
+/// SB-298: saves the permission mode; `bypass` is stored as the absent default.
+pub fn set_permissions(root: &Path, mode: &str) -> Result<Settings, String> {
+    let mut s = read(root)?;
+    s.permissions = match mode {
+        BYPASS => None,
+        ASK => Some(ASK.to_owned()),
+        _ => return Err(PERMISSIONS_INVALID.into()),
+    };
+    write(root, &s)?;
+    Ok(s)
 }
 
 pub fn read(root: &Path) -> Result<Settings, String> {
@@ -234,6 +261,7 @@ pub fn overview(root: &Path, model: Option<&str>) -> Result<Value, String> {
         "updated_at": updated_at,
         "default": settings.default,
         "default_ready": default_ready,
+        "permissions": if settings.permissions.as_deref() == Some(ASK) { ASK } else { BYPASS },
         "dispatch_agent": dispatch_agent,
         "installed": installed,
         "agents": agents,

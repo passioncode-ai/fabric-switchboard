@@ -2863,6 +2863,10 @@ fn launch_core(
         ));
     }
     let mut args: Vec<&str> = config.iter().map(String::as_str).collect();
+    // SB-298 (operator 2026-11-07): a session Switchboard starts runs with permissions bypassed,
+    // since nobody may be there to answer; the person's `agents permissions ask` keeps the
+    // prompts, and a caller that names its own permission mode keeps it.
+    args.extend(bypass_args(root, account.provider, extra));
     // Both CLIs start an interactive session with a positional first message.
     if let Some(first) = &first {
         args.push(first.as_str());
@@ -2907,6 +2911,49 @@ pub const DISPATCH_HANDOFF_ENV: &str = "FABRIC_DISPATCH_HANDOFF";
 pub const DISPATCH_REQUEST_ENV: &str = "FABRIC_DISPATCH_REQUEST";
 /// SB-247: Fabric's id for the dispatch (`--dispatch-id`), absent without the flag.
 pub const DISPATCH_ID_ENV: &str = "FABRIC_DISPATCH_ID";
+/// SB-298: the arguments that bypass an interactive session's permission prompts, unless the
+/// person chose `ask` or the caller's own arguments already name a permission mode. Codex takes
+/// them as `-c` overrides, which hold before a subcommand such as `resume` (a caller's console
+/// passes one); Claude Code takes its flag.
+pub(crate) fn bypass_args(root: &Path, provider: Provider, extra: &[String]) -> Vec<&'static str> {
+    let (args, own): (&[&'static str], &[&str]) = match provider {
+        Provider::Claude => (
+            &["--dangerously-skip-permissions"],
+            &[
+                "--dangerously-skip-permissions",
+                "--permission-mode",
+                "--allow-dangerously-skip-permissions",
+            ],
+        ),
+        Provider::Codex => (
+            &[
+                "-c",
+                "approval_policy=\"never\"",
+                "-c",
+                "sandbox_mode=\"danger-full-access\"",
+            ],
+            &[
+                "--dangerously-bypass-approvals-and-sandbox",
+                "--yolo",
+                "--full-auto",
+                "-a",
+                "--ask-for-approval",
+                "-s",
+                "--sandbox",
+                "approval_policy",
+                "sandbox_mode",
+            ],
+        ),
+    };
+    let named = extra.iter().any(|a| {
+        own.iter()
+            .any(|o| a == o || a.starts_with(&format!("{o}=")))
+    });
+    if named || !crate::agent_settings::bypass(root) {
+        return Vec::new();
+    }
+    args.to_vec()
+}
 /// SB-247: how much a dispatched run may do without asking (`--permissions`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -5478,6 +5525,47 @@ mod tests {
             }
         }
     }
+    /// SB-298: a session Switchboard starts bypasses its permission prompts unless the person
+    /// chose `ask` or the caller names its own permission mode.
+    #[test]
+    fn a_started_session_bypasses_permissions_unless_asked_or_named() {
+        let root = tempfile::tempdir().unwrap();
+        let none: Vec<String> = Vec::new();
+        assert_eq!(
+            bypass_args(root.path(), Provider::Claude, &none),
+            ["--dangerously-skip-permissions"]
+        );
+        assert_eq!(
+            bypass_args(root.path(), Provider::Codex, &none),
+            [
+                "-c",
+                "approval_policy=\"never\"",
+                "-c",
+                "sandbox_mode=\"danger-full-access\""
+            ]
+        );
+        let own = |a: &[&str]| a.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        for named in [
+            own(&["--permission-mode", "plan"]),
+            own(&["--permission-mode=plan"]),
+        ] {
+            assert!(bypass_args(root.path(), Provider::Claude, &named).is_empty());
+        }
+        for named in [
+            own(&["-a", "on-request"]),
+            own(&["-c", "approval_policy=\"on-request\""]),
+        ] {
+            assert!(bypass_args(root.path(), Provider::Codex, &named).is_empty());
+        }
+        crate::agent_settings::set_permissions(root.path(), crate::agent_settings::ASK).unwrap();
+        assert!(bypass_args(root.path(), Provider::Claude, &none).is_empty());
+        crate::agent_settings::set_permissions(root.path(), crate::agent_settings::BYPASS).unwrap();
+        assert!(!bypass_args(root.path(), Provider::Claude, &none).is_empty());
+        assert_eq!(
+            crate::agent_settings::set_permissions(root.path(), "never").unwrap_err(),
+            crate::agent_settings::PERMISSIONS_INVALID
+        );
+    }
     #[cfg(not(windows))]
     #[tokio::test]
     async fn a_dashboards_console_launch_reaches_the_agent_as_sent() {
@@ -5533,7 +5621,10 @@ mod tests {
             .join("runtimes")
             .join("claude-default")
             .join("switchboard-mcp.json");
-        let mut expected = vec![format!("--mcp-config={}", ours.to_string_lossy())];
+        let mut expected = vec![
+            format!("--mcp-config={}", ours.to_string_lossy()),
+            "--dangerously-skip-permissions".to_string(),
+        ];
         expected.extend(sent.iter().cloned());
         assert_eq!(args, expected);
         no_value_is_read_as_a_config(&args);
@@ -5569,8 +5660,14 @@ mod tests {
         )
         .unwrap();
         let (args, env) = run_as_the_agent(&script.unwrap(), &context);
+        // SB-298: Codex's bypass as `-c` overrides, which hold before `resume`.
+        let mut expected: Vec<String> = bypass_args(&f.root, Provider::Codex, &[])
+            .into_iter()
+            .map(str::to_owned)
+            .collect();
+        expected.extend(sent.iter().cloned());
         assert_eq!(
-            args, sent,
+            args, expected,
             "Codex gets Switchboard's server from its config.toml"
         );
         assert!(env.contains("FABRIC_DASHBOARDS_TASK=fix\n"));
@@ -5881,12 +5978,14 @@ mod tests {
         // The first prompt follows Switchboard's MCP config: with a separate `--mcp-config` flag
         // Claude would read it as a second config file and never start.
         assert!(!text.contains("'--mcp-config' "), "{text}");
+        // SB-298: the bypass flag sits between them, never a value of `--mcp-config`.
         assert!(text.contains(&format!(
-            "{} {}",
+            "{} {} {}",
             quote(&format!(
                 "--mcp-config={}",
                 home.join("switchboard-mcp.json").to_string_lossy()
             )),
+            quote("--dangerously-skip-permissions"),
             quote(&crate::continuation::prompt(&resumed))
         )));
         let config: serde_json::Value =
@@ -5983,7 +6082,7 @@ mod tests {
         )));
         let project = f.project.canonicalize().unwrap();
         assert!(text.contains(&format!(
-            "cd {} || exit 1\nexec '/opt/Provider Tools/o'\\''cli'\n",
+            "cd {} || exit 1\nexec '/opt/Provider Tools/o'\\''cli' '--dangerously-skip-permissions'\n",
             quote(&project.to_string_lossy())
         )));
         assert!(

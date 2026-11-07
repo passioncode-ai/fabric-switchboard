@@ -61,7 +61,7 @@ the launch injected it with the session and data folder set explicitly.
 | `switchboard_rotation` / `switchboard_rotation_set` | no / yes | read or change automatic switching, the change only when the operator asks |
 | `switchboard_backups` / `switchboard_backup_now` | no / yes | encrypted backups; restoring stays the person's |
 | `switchboard_recovery` / `switchboard_handovers` | no | stopped sessions, and hand-overs waiting for a console |
-| `switchboard_agent_set` | yes | enable or disable an agent for taking over work, or set the default |
+| `switchboard_agent_set` | yes | enable or disable an agent for taking over work, set the default, or choose bypass or ask for permission prompts |
 | `switchboard_login` | yes | start and follow an official sign-in; the person signs in |
 | `switchboard_project_set` | yes | save a rule, only when the operator asks |
 | `switchboard_project_remove` | yes | remove the rule for exactly one folder and provider |

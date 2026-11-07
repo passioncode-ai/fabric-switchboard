@@ -591,6 +591,10 @@ pub enum Operation {
     AgentDefault {
         agent: Option<String>,
     },
+    /// SB-298: whether the sessions Switchboard starts bypass their permission prompts.
+    AgentPermissions {
+        mode: String,
+    },
     /// The recommended OpenRouter models and OpenRouter's tool-capable list (SB-119).
     OpenrouterModels,
     /// Replaces the repository owners whose new repositories a project is offered.
@@ -5058,6 +5062,10 @@ async fn execute(
         Operation::AgentDefault { agent } => {
             let s = agent_settings::set_default(root, agent.as_deref())?;
             Ok(json!({"default": s.default}))
+        }
+        Operation::AgentPermissions { mode } => {
+            agent_settings::set_permissions(root, &mode)?;
+            Ok(json!({"permissions": mode}))
         }
         Operation::OpenrouterModels => match runtime {
             Some(rt) => Ok(agent_settings::models(&rt.openrouter_models, monitor::now()).await),
