@@ -50,6 +50,9 @@ const EXCLUDED_FILES = {
 // Messages that are error literals in the sources above but can never reach the UI.
 // Every entry names why. Keep this list short: a doubtful message gets a mapping instead.
 const ALLOWLIST = {
+  // runtime app_doors.rs (SB-299): the window has the app's doors, so only the CLI and MCP of a
+  // `serve` or an offline call ever get this.
+  'Only the installed app answers this. Open Switchboard, then try again.': 'SB-299 app doors: CLI and MCP only',
   // runtime launches.rs (SB-212): who launched a session is named only by `switchboard launch
   // --by/--parent` and read only by `switchboard sessions --history/show` and MCP
   // switchboard_sessions; the window sends neither `Launched` nor `Launches`.
