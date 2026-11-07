@@ -155,6 +155,12 @@ and `organization` / `organization_name`; then every folder rule with its `state
 The Git repositories under those folders (default `~/DATA`, else the home folder; three levels,
 never into a repository, a hidden folder or dependencies), each with its group or none.
 
+### `switchboard_analytics`: `enabled?`
+
+Switchboard's own usage analytics (counts and kinds only), as About sets it: `enabled` true or false
+turns them on or off, only when the operator asks; without it, the state (`available`, `enabled`,
+`notice_pending`). Only the installed app sends them.
+
 ### `switchboard_github`: `owner?`
 
 Through the person's own `gh`: without `owner`, the owners it sees (the person and their

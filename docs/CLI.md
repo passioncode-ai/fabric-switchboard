@@ -56,6 +56,9 @@ switchboard org disconnect     # delete the token; the organizations stay as loc
 switchboard org cancel         # stop a connection still waiting for the browser
 ```
 
+`switchboard analytics on|off` sets Switchboard's own usage analytics as About does, and without an
+argument reads the state (SB-299, [ANALYTICS](ANALYTICS.md)).
+
 GitHub through your own `gh`, as the window's GitHub page (SB-299): `switchboard github owners`
 lists you and your organizations, `switchboard github repos OWNER` that owner's repositories with
 where each is on this computer and its group, and `switchboard github clone OWNER NAME --into

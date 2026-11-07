@@ -343,6 +343,12 @@ pub enum Operation {
         #[serde(default)]
         enabled: Option<bool>,
     },
+    /// SB-299: Switchboard's own usage analytics switch (SB-246), as the window's About sets it.
+    /// `enabled` none: the state only.
+    Analytics {
+        #[serde(default)]
+        enabled: Option<bool>,
+    },
     /// SB-158: the organizations and where each account belongs, with the rule that decided.
     Organizations,
     OrganizationAdd {
@@ -1078,6 +1084,8 @@ impl Runtime {
         if matches!(
             operation,
             Operation::Snapshot
+                // SB-299: the analytics client's own state, never the store.
+                | Operation::Analytics { .. }
                 | Operation::AgentCatalog
                 | Operation::AgentConnect { .. }
                 | Operation::AgentKey
@@ -2305,17 +2313,13 @@ impl Runtime {
     /// `{available, enabled, notice_pending}` for the first-run notice and About (SB-246).
     /// Unavailable outside a release desktop build, where no notice is shown.
     pub fn analytics_status(&self) -> Value {
-        self.analytics().map_or_else(
-            || json!({"available": false, "enabled": false, "notice_pending": false}),
-            |a| a.status(),
-        )
+        self.analytics()
+            .map_or_else(analytics_unavailable, |a| a.status())
     }
     /// Switchboard's own usage switch (SB-246): it turns Switchboard off or on only and never
     /// writes the shared installation file. Off drops what waits.
     pub fn set_analytics(&self, enabled: bool) -> Result<Value, String> {
-        let client = self.analytics().ok_or_else(|| {
-            "Usage analytics are available in the installed app only.".to_string()
-        })?;
+        let client = self.analytics().ok_or(ANALYTICS_APP_ONLY)?;
         client.set_enabled(enabled)
     }
     /// The first-run notice was read (*OK*); it is not shown again.
@@ -3549,6 +3553,10 @@ pub(crate) fn from_outside(operation: Operation) -> Operation {
         },
         operation => operation,
     }
+}
+pub const ANALYTICS_APP_ONLY: &str = "Usage analytics are available in the installed app only.";
+fn analytics_unavailable() -> Value {
+    json!({"available": false, "enabled": false, "notice_pending": false})
 }
 pub(crate) fn window_only_refusal(operation: &Operation) -> Option<&'static str> {
     matches!(
@@ -5433,6 +5441,12 @@ async fn execute(
             }
             Ok(json!({"id": id, "from": from, "pool": pool, "moved": true}))
         }
+        Operation::Analytics { enabled } => match (runtime, enabled) {
+            (Some(rt), Some(on)) => rt.set_analytics(on),
+            (Some(rt), None) => Ok(rt.analytics_status()),
+            (None, Some(_)) => Err(ANALYTICS_APP_ONLY.into()),
+            (None, None) => Ok(analytics_unavailable()),
+        },
         Operation::CodexRoute { enabled } => {
             let path = runtime.and_then(|r| (r.native.codex_config)());
             if let Some(on) = enabled {
@@ -10931,5 +10945,35 @@ mod launch_record_tests {
     }
     fn private_fs_dir(path: &Path) {
         switchboard_core::private_fs::private_dir(path).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod analytics_door_tests {
+    use super::*;
+
+    /// SB-299: an agent reads the analytics state and is told why it cannot switch it where no
+    /// installed app runs.
+    #[tokio::test]
+    async fn the_analytics_door_reads_the_state_and_refuses_a_switch_without_the_app() {
+        let root = tempfile::tempdir().unwrap();
+        let state = execute_offline(
+            root.path().to_owned(),
+            Operation::Analytics { enabled: None },
+        )
+        .await
+        .unwrap();
+        assert_eq!(state["available"], false);
+        assert_eq!(
+            execute_offline(
+                root.path().to_owned(),
+                Operation::Analytics {
+                    enabled: Some(false)
+                }
+            )
+            .await
+            .unwrap_err(),
+            ANALYTICS_APP_ONLY
+        );
     }
 }
