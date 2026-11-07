@@ -37,6 +37,7 @@ export const nativeAdapter: Adapter = {
   add: (input) => invoke('add_account', { ...input }),
   update: (id, label, enabled) => invoke('update_account', { id, label, enabled }),
   markElsewhere: (id, on, location) => invoke('mark_elsewhere', { id, on, location: location ?? null }),
+  sendAccount: (id, to, pool) => invoke('send_account', { id, to, pool }),
   remove: (id) => invoke('remove_account', { id }),
   select: ({ id, provider, pool }) => invoke('select_account', { id, provider, pool }),
   launch: (id, mode, workingDirectory) => invoke('launch_account', { id, mode, workingDirectory }),
@@ -137,6 +138,14 @@ const safeErrors = new Set([
   'This folder belongs to a group. Launch one of the group\'s accounts.',
   // The permission mode of the sessions Switchboard starts (SB-298).
   'Choose bypass or ask.',
+  // Moving a sign-in to another machine (SB-283).
+  "Name the other machine as ssh knows it: letters, digits, dots, hyphens, @ and : only.",
+  "Give the other machine's switchboard as an absolute path without quotes.",
+  "Only a Claude or Codex subscription sign-in moves this way. Give an API key through your vault.",
+  "This account is already used elsewhere or turned off here.",
+  "Select another account for its group before moving this one.",
+  "The other machine did not save the sign-in. Nothing changed here; check ssh and its Switchboard.",
+  "The other machine saved the sign-in but the provider did not answer it there. It was removed there and stays here.",
   // Where a data folder keeps its sign-ins (SB-287).
   "The sign-in store's choice (vault.json) could not be read. Delete vault.json to use this computer's own store, or choose again with switchboard vault use.",
   "This computer's own sign-in store works here, so Switchboard keeps sign-ins in it. A file store is only for a machine with no graphical login.",

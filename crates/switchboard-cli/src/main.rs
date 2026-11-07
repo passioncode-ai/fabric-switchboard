@@ -798,6 +798,23 @@ enum Accounts {
         #[arg(long)]
         to: String,
     },
+    /// Move an account's sign-in to another machine over ssh, without signing in again there:
+    /// marks it here as used elsewhere first, saves it there with `switchboard accounts add`,
+    /// checks there that the provider answers, and undoes both on any failure. Only a Claude or
+    /// Codex subscription sign-in; ssh must reach the machine without a prompt.
+    Send {
+        /// The account id (`switchboard accounts list`).
+        id: String,
+        /// The other machine as ssh knows it (`user@host`, or a Host from ~/.ssh/config).
+        #[arg(long)]
+        to: String,
+        /// The group it joins there (`default`: the default group).
+        #[arg(long)]
+        pool: Option<String>,
+        /// The other machine's switchboard, an absolute path; by default the macOS app's.
+        #[arg(long)]
+        remote: Option<String>,
+    },
     /// Receive an account handed over to you: shows whose sign-in and into which group;
     /// with `--apply`, starts that sign-in. Its credential never travels: you sign in here.
     Receive {
@@ -1525,6 +1542,17 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                 enabled: *enabled,
                 elsewhere: *elsewhere,
                 location: location.clone(),
+            },
+            Accounts::Send {
+                id,
+                to,
+                pool,
+                remote,
+            } => Operation::SendAccount {
+                id: id.clone(),
+                to: to.clone(),
+                pool: pool.clone(),
+                program: remote.clone(),
             },
             Accounts::HandOver { id, to } => Operation::HandOver {
                 id: id.clone(),
@@ -3785,6 +3813,7 @@ mod mcp_parity {
         ("accounts update", Tool("switchboard_account_update")),
         ("accounts move", Tool("switchboard_account_move")),
         ("accounts hand-over", Tool("switchboard_account_hand_over")),
+        ("accounts send", Tool("switchboard_account_send")),
         ("accounts receive", Tool("switchboard_account_receive")),
         ("org list", Tool("switchboard_organizations")),
         ("org add", Tool("switchboard_organization_set")),

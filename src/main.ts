@@ -1525,6 +1525,20 @@ function elsewhereDialog(account: Account) {
   });
   where.focus();
 }
+/** SB-283: move a sign-in to another machine over ssh; nothing changes when a step fails. */
+function sendDialog(account: Account) {
+  const context = openDialog(t('Move {label} to another machine', { label: account.label }), t('Its sign-in moves over ssh: this computer stops using it first, the other machine saves it and checks that it answers. If a step fails, nothing changes.'));
+  const machine = input(''); machine.maxLength = 255; machine.placeholder = 'user@studio.local'; machine.required = true;
+  const pool = input(account.pool); pool.maxLength = 32;
+  context.body.append(field(t('Machine'), machine, t('As ssh knows it, reachable without a password prompt.')), field(t('Group there'), pool, t('Its group on the other machine.')));
+  context.actions.append(submit(t('Move')));
+  context.form.addEventListener('submit', (event) => {
+    event.preventDefault();
+    const to = machine.value.trim();
+    void dialogSave(context, () => adapter.sendAccount(account.id, to, pool.value.trim() || 'default'), t('{label} moved to {machine}. This computer no longer uses it.', { label: account.label, machine: to }));
+  });
+  machine.focus();
+}
 /** SB-158: the Accounts filter: `all`, `personal` or an organization's id. */
 let orgFilter = 'all';
 const pausedCountdowns = new Map<string, string>();
@@ -1959,6 +1973,8 @@ function rowMenu(account: Account, state: { current: boolean; selected: boolean;
   // SB-175 (SB-168 D-2): an account signed in on another machine too must not be renewed from here.
   // SB-284: marking asks where it works; a marked account can say it later.
   items.push([snapshot?.elsewhere?.[account.id] === undefined ? t('Used on another machine') : t('Where it works…'), () => elsewhereDialog(account)]);
+  // SB-283: a subscription sign-in no group has selected moves over ssh, without a new sign-in there.
+  if (account.kind === 'oauth' && account.enabled && !state.selected && snapshot?.elsewhere?.[account.id] === undefined) items.push([t('Move to another machine…'), () => sendDialog(account)]);
   items.push([t('Rename or disable…'), () => editDialog(account)], [t('Remove…'), () => removeDialog(account), 'danger-text']);
   return menu(account.id, t('More actions for {label}', { label: account.label }), items);
 }

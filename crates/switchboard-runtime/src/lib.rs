@@ -213,6 +213,16 @@ pub enum Operation {
         id: String,
         to: String,
     },
+    /// SB-283: moves an account's sign-in to another machine over ssh (`account_send`): marked
+    /// used elsewhere here first, saved there, checked there, undone on any failure.
+    SendAccount {
+        id: String,
+        to: String,
+        #[serde(default)]
+        pool: Option<String>,
+        #[serde(default)]
+        program: Option<String>,
+    },
     /// SB-283: what receiving a hand-over record here would do; with `apply`, starts the
     /// sign-in for that address in the group of the record's pool (else the default group).
     ReceiveHandover {
@@ -1117,6 +1127,9 @@ impl Runtime {
                 | Operation::Analytics { .. }
                 // SB-299: the app's own state, never the store; a restart drains as Quit does.
                 | Operation::App { .. }
+                // SB-283: ssh to another machine takes minutes; the store is written by its own
+                // calls (mark elsewhere, undo), never under the transaction.
+                | Operation::SendAccount { .. }
                 | Operation::AgentCatalog
                 | Operation::AgentConnect { .. }
                 | Operation::AgentKey
@@ -4951,6 +4964,25 @@ async fn execute(
             pool,
             headless,
         } => needs_owner()?.begin_login(provider, label, pool, headless),
+        Operation::SendAccount {
+            id,
+            to,
+            pool,
+            program,
+        } => {
+            let store = store.clone();
+            blocking::run(move || {
+                account_send::send(
+                    &store,
+                    &id,
+                    &to,
+                    pool.as_deref().unwrap_or("default"),
+                    program.as_deref().unwrap_or(account_send::REMOTE_DEFAULT),
+                    monitor::now(),
+                    &account_send::ssh_runner,
+                )
+            })
+        }
         Operation::HandOver { id, to } => {
             account_handover::hand_over(root, &store, &id, &to, monitor::now())
         }

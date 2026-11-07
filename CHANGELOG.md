@@ -8,6 +8,7 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- Move an account to another machine without signing in there: *Move to another machine…* in an account's menu, `switchboard accounts send ID --to user@host` or the MCP tool `switchboard_account_send` move a Claude or Codex subscription sign-in over ssh. This computer stops using it first, the other machine saves it and checks that the provider answers, and any failure leaves it here as it was (SB-283).
 - Hand an account over to another machine or a colleague without moving its credential (SB-283): `switchboard accounts hand-over` writes a signed record and marks the account here as used there; `switchboard accounts receive` on the other machine shows whose sign-in it is and, with `--apply`, starts it in the same group. MCP has both.
 - Agents can do what the window's GitHub page does: `switchboard github owners`, `github repos OWNER` and `github clone OWNER NAME --into FOLDER`, and the MCP tools `switchboard_github` and `switchboard_github_clone`. `switchboard org cancel` stops a PassionCode.ai connection waiting for the browser, and MCP can now cancel and disconnect it too (SB-299).
 - `switchboard analytics on|off` and the MCP tool `switchboard_analytics` set Switchboard's own usage analytics as About does, and read their state (SB-299).

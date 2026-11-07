@@ -188,6 +188,7 @@ async fn handshake_lists_tools_and_rejects_malformed_messages() {
             "switchboard_events",
             "switchboard_account_update",
             "switchboard_account_move",
+            "switchboard_account_send",
             "switchboard_account_hand_over",
             "switchboard_account_receive",
             "switchboard_organizations",

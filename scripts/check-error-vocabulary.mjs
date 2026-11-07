@@ -50,6 +50,12 @@ const EXCLUDED_FILES = {
 // Messages that are error literals in the sources above but can never reach the UI.
 // Every entry names why. Keep this list short: a doubtful message gets a mapping instead.
 const ALLOWLIST = {
+  // runtime account_send.rs (SB-283): the ssh runner's own errors; `send` answers ADD_FAILED or
+  // NOT_VERIFIED in their place, so none reaches the window.
+  'ssh is not installed here.': 'SB-283 ssh runner: folded into ADD_FAILED',
+  'ssh could not start.': 'SB-283 ssh runner: folded into ADD_FAILED',
+  'ssh failed.': 'SB-283 ssh runner: folded into ADD_FAILED',
+  'ssh timed out.': 'SB-283 ssh runner: folded into ADD_FAILED',
   // runtime app_doors.rs (SB-299): the window has the app's doors, so only the CLI and MCP of a
   // `serve` or an offline call ever get this.
   'Only the installed app answers this. Open Switchboard, then try again.': 'SB-299 app doors: CLI and MCP only',

@@ -411,6 +411,14 @@ disables it here because another machine uses it; `location` says where it works
 its user, or a colleague, at most 80 characters) and marks it so; an empty one clears it. At
 least one field ("Name a label, enabled, elsewhere or location to change.").
 
+### `switchboard_account_send`: `account_id`, `to`, `pool?`, `remote?`
+
+Only when the operator asks. Moves a Claude or Codex subscription sign-in to another machine over
+ssh without a new sign-in there: it is marked here as used elsewhere first, saved there (the tokens
+on stdin), checked there with a quota check, and both are undone on any failure. `to` is the machine
+as ssh knows it, reachable without a prompt; `pool` its group there; `remote` that machine's
+`switchboard` (default the macOS app's).
+
 ### `switchboard_account_hand_over`: `account_id`, `to`
 
 Only when the operator asks. Answers a signed record of the account without its credential and

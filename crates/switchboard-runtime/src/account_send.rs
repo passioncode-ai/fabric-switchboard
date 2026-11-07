@@ -160,7 +160,7 @@ pub fn ssh_runner(args: &[String], stdin: Option<&[u8]>) -> Result<String, Strin
     loop {
         if let Some(status) = child.try_wait().map_err(|_| "ssh failed.".to_string())? {
             let mut out = String::new();
-            if let Some(mut stdout) = child.stdout.take() {
+            if let Some(stdout) = child.stdout.take() {
                 use std::io::Read;
                 let _ = stdout.take(1 << 20).read_to_string(&mut out);
             }

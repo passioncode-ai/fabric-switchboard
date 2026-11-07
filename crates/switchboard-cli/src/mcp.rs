@@ -76,6 +76,7 @@ pub(crate) fn tools() -> Vec<(bool, Value)> {
         (false, json!({"name":"switchboard_events","title":"Activity","description":"Recent activity, newest first: what changed (accounts, switches, groups, automatic switching, sign-ins) and how it ended, as fixed codes. No credential, prompt or provider text.","inputSchema":{"type":"object","properties":{"limit":{"type":"integer","minimum":1,"maximum":500,"default":50}},"additionalProperties":false}})),
         (true, json!({"name":"switchboard_account_update","title":"Rename, enable or disable an account","description":"Rename an account, enable or disable it (a disabled account is never selected or switched to), or mark it as used on another machine (elsewhere: true disables it here, so this machine never renews it or switches to it, automatically or not; false enables it again), saying where it works (location: a machine and its user, or a colleague, which also marks it; empty clears it). Only when the operator asks. What is left out stays as it is.","inputSchema":{"type":"object","properties":{"account_id":account,"label":{"type":"string","minLength":1,"maxLength":80},"enabled":{"type":"boolean"},"elsewhere":{"type":"boolean"},"location":{"type":"string","maxLength":80}},"required":["account_id"],"additionalProperties":false}})),
         (true, json!({"name":"switchboard_account_move","title":"Move an account to another group","description":"Move an account into a group (pool: its group id), or back to the default group (pool: default). Only when the operator asks. Joining or leaving a group is that group's change, with its refusals: the account the ordinary Claude Code or Codex is signed in to cannot join a group, and a second copy of a login already in that group is refused.","inputSchema":{"type":"object","properties":{"account_id":account,"pool":{"type":"string","minLength":1,"description":"A group id from switchboard_projects, or default."}},"required":["account_id","pool"],"additionalProperties":false}})),
+        (true, json!({"name":"switchboard_account_send","title":"Move an account to another machine","description":"Move an account's sign-in to another machine over ssh, without a new sign-in there: it is marked here as used elsewhere first (this machine never renews it again), saved there with switchboard accounts add (the tokens on stdin), checked there with a quota check, and both are undone on any failure. Only a Claude or Codex subscription sign-in that no group has selected. to: the machine as ssh knows it, reachable without a prompt; pool: its group there (default); remote: that machine's switchboard, an absolute path (default the macOS app's). Only when the operator asks.","inputSchema":{"type":"object","properties":{"account_id":{"type":"string"},"to":{"type":"string","minLength":1,"maxLength":255},"pool":{"type":"string"},"remote":{"type":"string"}},"required":["account_id","to"],"additionalProperties":false}})),
         (true, json!({"name":"switchboard_account_hand_over","title":"Hand an account over","description":"Only when the operator asks. Hand an account over to another machine or a colleague's Switchboard: answers a signed record without its credential and marks the account here as used elsewhere, with to as where it works. The receiver passes the record to switchboard_account_receive and signs in there. Hand a personal subscription only to the operator's own machines unless the operator says otherwise.","inputSchema":{"type":"object","properties":{"account_id":account,"to":{"type":"string","minLength":1,"maxLength":80,"description":"Who receives it: a machine and its user, or a colleague."}},"required":["account_id","to"],"additionalProperties":false}})),
         (true, json!({"name":"switchboard_account_receive","title":"Receive a handed-over account","description":"Receive an account handed over: answers whose sign-in, into which group (the record's pool when this machine has it, else default), whether the signature holds and whether this machine already holds that sign-in. apply starts the sign-in (the person signs in; headless gives the URL in switchboard_login status and takes the code); nothing travels but the record.","inputSchema":{"type":"object","properties":{"record":{"type":"object"},"signer":{"type":"string","description":"The giver's published key: the record must be signed by it."},"apply":{"type":"boolean"},"headless":{"type":"boolean"}},"required":["record"],"additionalProperties":false}})),
         (false, json!({"name":"switchboard_organizations","title":"Organizations","description":"The organizations accounts belong to: each with its e-mail domains and account count, then every account with its organization (null: personal) and what decided it: person (the operator's word), provider (its Claude Team or ChatGPT workspace is the organization's) or domain (its address). Empty until the operator adds one. Reads only.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}})),
@@ -488,6 +489,17 @@ impl Server {
             enabled,
             elsewhere,
             location,
+        })
+        .await
+    }
+    /// SB-283: moves an account's sign-in to another machine over ssh.
+    async fn account_send(&self, args: &Map<String, Value>) -> Result<Value, String> {
+        let text = |key: &str| args.get(key).and_then(Value::as_str).map(str::to_owned);
+        self.call(Operation::SendAccount {
+            id: required(args, "account_id")?.into(),
+            to: required(args, "to")?.into(),
+            pool: text("pool"),
+            program: text("remote"),
         })
         .await
     }
@@ -1016,6 +1028,7 @@ impl Server {
             }
             "switchboard_account_update" => self.account_update(args).await,
             "switchboard_account_move" => self.account_move(args).await,
+            "switchboard_account_send" => self.account_send(args).await,
             "switchboard_account_hand_over" => self.account_hand_over(args).await,
             "switchboard_account_receive" => self.account_receive(args).await,
             "switchboard_organizations" => self.call(Operation::Organizations).await,
