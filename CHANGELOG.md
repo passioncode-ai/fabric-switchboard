@@ -6,7 +6,7 @@ release pull request renames `Unreleased` to the version. While Windows signing 
 that section must say `windows_authenticode: NOT_SIGNED`. Notes of 0.5.3-beta.1 and earlier are
 on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/releases).
 
-## Unreleased
+## 0.7.28
 
 - An agent can raise, clear or double a spending ceiling, delete a group that holds one, and replace or remove a key one counts, when it carries the operator's own words (`--operator-said`, `--said-at`, `--said-in`; MCP `decision`); the words are kept in `spend.json` and the $1,000 bound still holds (SB-299).
 ## 0.7.27
