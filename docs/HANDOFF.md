@@ -2,6 +2,27 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-11-07 (night): release 0.7.22; SB-293
+
+- **Found and fixed.** SB-293: the four seats moved to the Mac Studio (claude2, claude4, claude6,
+  claude10; marked *used on another machine* 2026-11-06 11:54 to 13:44 UTC) were kept from renewal
+  only by the background pass. A person's quota check (`Operation::Usage`, CLI `usage`, MCP
+  `switchboard_usage` refresh) renewed first through `refresh::reserve_due`, which never looked at
+  `enabled`, so a check could spend a moved seat's refresh token and sign the Studio out. Some caller
+  asked such checks every 30 minutes (`usage_check` `disabled` in switchboard.log). studio-agent
+  confirmed at 00:40 UTC that none of the four lost its sign-in. Fix: PR #461 `fa2a1cc`, test
+  `an_account_used_elsewhere_or_turned_off_is_never_renewed_here`.
+- **Released.** v0.7.22 published 2026-11-07 01:35:20Z (25 assets, `latest.json` 0.7.22 for seven
+  platforms; release PR #462 `1597309`, nightly on the tag green 01:06Z, release run passed on its
+  first attempt): SB-293, SB-284, SB-290.
+- **Seen, not fixed.** The owner holds its transaction 10 to 44 s in `usage_renewal` checks while the
+  machine swaps (load about 100, swap 9 GB), and reads behind it wait (`control_slow` snapshot up to
+  37 s; an MCP `switchboard_accounts` call timed out): SB-163.
+- **SB-287** (serve in a headless Studio space) carries studio-agent's findings and Observatory's
+  OBS-361 daemon route; the store needs a file-backed vault for headless spaces.
+- **Exact next task.** When the estate pause lifts: SB-289 (recommended models), SB-287 design note.
+  Waiting: SB-278 (DEC-0154 tag), SB-280 (OBS-359).
+
 ## 2026-11-06 (afternoon): release 0.7.21; estate pause
 
 - **Released.** v0.7.21 published 2026-11-06 15:17:22Z (25 assets, `latest.json` 0.7.21 for seven
