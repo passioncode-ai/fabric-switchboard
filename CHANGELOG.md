@@ -9,6 +9,7 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 ## Unreleased
 
 - Agents can do what the window's GitHub page does: `switchboard github owners`, `github repos OWNER` and `github clone OWNER NAME --into FOLDER`, and the MCP tools `switchboard_github` and `switchboard_github_clone`. `switchboard org cancel` stops a PassionCode.ai connection waiting for the browser, and MCP can now cancel and disconnect it too (SB-299).
+- `switchboard analytics on|off` and the MCP tool `switchboard_analytics` set Switchboard's own usage analytics as About does, and read their state (SB-299).
 
 ## 0.7.25
 

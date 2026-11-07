@@ -46,6 +46,13 @@ enum Command {
         #[command(subcommand)]
         command: Org,
     },
+    /// Switchboard's own usage analytics (counts and kinds only, docs/ANALYTICS.md): `on` or
+    /// `off`; without either, the state. Only the installed app sends them.
+    Analytics {
+        /// `on` or `off`; without it, the state only.
+        #[arg(value_enum)]
+        state: Option<OnOff>,
+    },
     /// GitHub repositories through your own `gh`: the owners it sees, an owner's repositories
     /// matched with this computer, and cloning one.
     Github {
@@ -1517,6 +1524,9 @@ async fn run(cli: &Cli) -> Result<Value, String> {
             },
             Inbox::Status { check } => Operation::InboxStatus { check: *check },
             Inbox::Remove => Operation::InboxRemove,
+        },
+        Command::Analytics { state } => Operation::Analytics {
+            enabled: state.map(|s| matches!(s, OnOff::On)),
         },
         Command::Github { command } => match command {
             Github::Owners => Operation::GithubOwners,
@@ -3701,6 +3711,7 @@ mod mcp_parity {
         ("org passioncode", Tool("switchboard_organizations")),
         ("org disconnect", Tool("switchboard_organization_set")),
         ("org cancel", Tool("switchboard_organization_set")),
+        ("analytics", Tool("switchboard_analytics")),
         ("github owners", Tool("switchboard_github")),
         ("github repos", Tool("switchboard_github")),
         ("github clone", Tool("switchboard_github_clone")),
