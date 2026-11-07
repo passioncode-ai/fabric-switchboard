@@ -28,7 +28,10 @@ pub fn native_works() -> bool {
 }
 
 /// Moves the folder's sign-ins into `kind`'s store and records the choice. A file store is
-/// refused while the platform's store works. It opens the store, so it is refused while
+/// refused while the platform's store works, unless `move_from_native` (SB-301): a Mac Studio
+/// space opens its login keychain only in a session of its own, so the move runs there, where the
+/// platform's store answers, and the daemon then reads the files. With `move_from_native` and a
+/// folder already on files, it moves what the platform's store still holds. It opens the store, so it is refused while
 /// Switchboard runs (`STORE_LOCKED`), and holding the store's lock keeps an owner from
 /// starting while items move. An item that cannot be read or written stays where it was and
 /// is named in `not_moved`.
@@ -37,20 +40,23 @@ pub fn choose(
     kind: VaultKind,
     native: Arc<dyn Vault>,
     native_works: impl Fn() -> bool,
+    move_from_native: bool,
 ) -> Result<Value, String> {
     let current = switchboard_core::vault_kind(root)?;
-    if kind == VaultKind::File && current != VaultKind::File && native_works() {
+    if kind == VaultKind::File && current != VaultKind::File && !move_from_native && native_works()
+    {
         return Err(switchboard_core::VAULT_NATIVE_WORKS.into());
     }
     let file: Arc<dyn Vault> = Arc::new(FileVault::new(root));
-    let (from, to) = match current {
-        VaultKind::File => (file.clone(), native),
-        VaultKind::Native => (native, file.clone()),
+    // The direction is the chosen store's: into files from the platform's, or back.
+    let (from, to) = match kind {
+        VaultKind::File => (native, file.clone()),
+        VaultKind::Native => (file.clone(), native),
     };
     let store = Store::open(root.to_path_buf(), from.clone())?;
     let mut moved = 0usize;
     let mut not_moved = Vec::new();
-    if current != kind {
+    if current != kind || (kind == VaultKind::File && move_from_native) {
         let snapshot = store.snapshot()?;
         let mut ids: Vec<String> = snapshot
             .accounts
@@ -61,7 +67,7 @@ pub fn choose(
             .chain(crate::vesta::vault_item(root))
             .chain(crate::inbox::vault_item(root))
             .collect();
-        if current == VaultKind::File {
+        if kind == VaultKind::Native {
             ids.extend(FileVault::new(root).ids());
         }
         ids.sort();
@@ -107,7 +113,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let native: Arc<dyn Vault> = Arc::new(MemoryVault::default());
         assert_eq!(
-            choose(dir.path(), VaultKind::File, native, || true).unwrap_err(),
+            choose(dir.path(), VaultKind::File, native, || true, false).unwrap_err(),
             switchboard_core::VAULT_NATIVE_WORKS
         );
         assert_eq!(
@@ -129,7 +135,14 @@ mod tests {
         let stray = uuid::Uuid::new_v4().to_string();
         native.put(&stray, &credential("stray")).unwrap();
 
-        let answer = choose(dir.path(), VaultKind::File, as_vault.clone(), || false).unwrap();
+        let answer = choose(
+            dir.path(),
+            VaultKind::File,
+            as_vault.clone(),
+            || false,
+            false,
+        )
+        .unwrap();
         assert_eq!(answer["changed"], true);
         assert_eq!(
             switchboard_core::vault_kind(dir.path()).unwrap(),
@@ -141,7 +154,14 @@ mod tests {
 
         let file = FileVault::new(dir.path());
         file.put(&stray, &credential("in-file")).unwrap();
-        let back = choose(dir.path(), VaultKind::Native, as_vault.clone(), || true).unwrap();
+        let back = choose(
+            dir.path(),
+            VaultKind::Native,
+            as_vault.clone(),
+            || true,
+            false,
+        )
+        .unwrap();
         assert_eq!(back["moved"], 1);
         assert_eq!(native.get(&stray).unwrap().access_token, "in-file");
         assert!(file.ids().is_empty());
@@ -149,8 +169,44 @@ mod tests {
             switchboard_core::vault_kind(dir.path()).unwrap(),
             VaultKind::Native
         );
-        let again = choose(dir.path(), VaultKind::Native, as_vault, || true).unwrap();
+        let again = choose(dir.path(), VaultKind::Native, as_vault, || true, false).unwrap();
         assert_eq!(again["changed"], false);
+    }
+
+    /// SB-301: in a session where the platform's store opens, the operator moves its sign-ins
+    /// into files on purpose; a second run picks up what the first could not read.
+    #[test]
+    fn a_working_platform_store_moves_into_files_when_asked() {
+        let dir = tempfile::tempdir().unwrap();
+        let native = Arc::new(MemoryVault::default());
+        let as_vault: Arc<dyn Vault> = native.clone();
+        let id = Store::open(dir.path().to_path_buf(), as_vault.clone())
+            .unwrap()
+            .add(
+                "Space".into(),
+                switchboard_core::Provider::Claude,
+                switchboard_core::AuthKind::OAuth,
+                "default".into(),
+                credential("in-keychain"),
+            )
+            .unwrap()
+            .id;
+        let answer = choose(dir.path(), VaultKind::File, as_vault.clone(), || true, true).unwrap();
+        assert_eq!(answer["moved"], 1);
+        assert_eq!(
+            FileVault::new(dir.path()).get(&id).unwrap().access_token,
+            "in-keychain"
+        );
+        assert!(native.get(&id).is_err());
+        // Already on files: a later run moves what the platform's store still holds.
+        native.put(&id, &credential("late")).unwrap();
+        let again = choose(dir.path(), VaultKind::File, as_vault, || true, true).unwrap();
+        assert_eq!(again["changed"], false);
+        assert_eq!(again["moved"], 1);
+        assert_eq!(
+            FileVault::new(dir.path()).get(&id).unwrap().access_token,
+            "late"
+        );
     }
 
     #[test]
@@ -171,7 +227,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let native: Arc<dyn Vault> = Arc::new(MemoryVault::default());
         let _owner = Store::open(dir.path().to_path_buf(), native.clone()).unwrap();
-        assert!(choose(dir.path(), VaultKind::File, native, || false).is_err());
+        assert!(choose(dir.path(), VaultKind::File, native, || false, false).is_err());
         assert_eq!(
             switchboard_core::vault_kind(dir.path()).unwrap(),
             VaultKind::Native
