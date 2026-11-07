@@ -649,7 +649,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn an_operation_counts_the_time_it_waited_for_the_stores_lock() {
         // H-2: the owner's store tells the request's task each wait for its lock; a request that
-        // never took it reads None.
+        // never took it reads None. A flush takes the lock; a snapshot no longer does (SB-296).
         let tmp = tempfile::tempdir().unwrap();
         let vault = Arc::new(SlowDelete::default());
         let owner = Owner::start(tmp.path().to_owned(), vault.clone())
@@ -658,7 +658,7 @@ mod tests {
         let store = owner.runtime.store.clone();
         let (_, untouched) = measure_lock_waits(async {}).await;
         assert_eq!(untouched, None);
-        let (_, free) = measure_lock_waits(async { store.snapshot().unwrap() }).await;
+        let (_, free) = measure_lock_waits(async { store.flush().unwrap() }).await;
         assert!(free.is_some_and(|ms| ms < 100), "{free:?}");
         let account = store
             .add(
@@ -680,7 +680,7 @@ mod tests {
         };
         vault.wait_started();
         let (_, waited) =
-            measure_lock_waits(async { crate::blocking::run(|| store.snapshot().unwrap()) }).await;
+            measure_lock_waits(async { crate::blocking::run(|| store.flush().unwrap()) }).await;
         removing.join().unwrap().unwrap();
         assert!(waited.is_some_and(|ms| ms >= 200), "{waited:?}");
         owner.shutdown(Duration::from_secs(8)).await;
@@ -718,7 +718,7 @@ mod tests {
         let locking = {
             let store = store.clone();
             tokio::spawn(measure_lock_waits(async move {
-                crate::blocking::run(|| store.snapshot().unwrap());
+                crate::blocking::run(|| store.flush().unwrap());
             }))
         };
         let lockless = tokio::spawn(measure_lock_waits(async {

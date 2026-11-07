@@ -6,6 +6,10 @@ release pull request renames `Unreleased` to the version. While Windows signing 
 that section must say `windows_authenticode: NOT_SIGNED`. Notes of 0.5.3-beta.1 and earlier are
 on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/releases).
 
+## Unreleased
+
+- Reading the accounts (the window, `switchboard recovery`, the MCP tools, a credential read for a managed request) no longer waits while Switchboard writes its account file. On a busy computer that write waited for the disk for up to minutes, and `recovery` waited with it (SB-296). A write that takes a second or more is logged as `metadata_write_slow`.
+
 ## 0.7.22
 
 - An account marked as used on another machine, or turned off here, is no longer renewed when a quota check is asked for it here. Before, a check from the CLI or MCP could spend its sign-in and sign the other machine out (SB-293).
