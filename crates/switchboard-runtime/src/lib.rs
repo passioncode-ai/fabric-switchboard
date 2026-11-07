@@ -1,5 +1,6 @@
 //! One store/proxy/control owner shared by the desktop and CLI.
 pub mod account_handover;
+pub mod account_send;
 pub mod agent_catalog;
 pub mod agent_keys;
 pub mod agent_settings;
