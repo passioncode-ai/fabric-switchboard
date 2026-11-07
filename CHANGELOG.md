@@ -8,6 +8,7 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- On Linux, a connection to the proxy from a client that already closed is now read as of unknown owner and refused for that reason, as the contract's CT-254 (`v0.1.0+2026-11-07.3`) says; before, its row's uid 0 was read as root's.
 - Reading the accounts (the window, `switchboard recovery`, the MCP tools, a credential read for a managed request) no longer waits while Switchboard writes its account file. On a busy computer that write waited for the disk for up to minutes, and `recovery` waited with it (SB-296). A write that takes a second or more is logged as `metadata_write_slow`.
 
 ## 0.7.22
