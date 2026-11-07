@@ -372,11 +372,11 @@ mod tests {
         assert_eq!(
             ids,
             [
-                "xiaomi/mimo-v2.6-pro",
-                "anthropic/claude-haiku-5.5",
-                "google/gemini-3.8-flash",
-                "qwen/qwen3.8-flash",
-                "deepseek/deepseek-v4.1-flash"
+                "moonshotai/kimi-k3.1-pro",
+                "anthropic/claude-sonnet-5.5",
+                "z-ai/glm-5.3",
+                "deepseek/deepseek-v4.1-flash",
+                "xiaomi/mimo-v2.6-pro"
             ]
         );
         assert!(ids
