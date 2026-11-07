@@ -38,7 +38,11 @@ pub use credential::Credential;
 pub use organizations::{Attribution, By, Organization};
 pub use projects::{pool_from_name, Project, ProjectRule, RuleResolution, FOLDER_NESTED};
 pub use rotation::{FailoverTally, Fits, RotationDecision, RotationPolicy};
-pub use vault::{MemoryVault, NativeVault, Vault};
+pub use vault::{
+    open_vault, set_vault_kind, vault_kind, FileVault, MemoryVault, NativeVault, Vault, VaultKind,
+    CHOICE_FILE as VAULT_CHOICE_FILE, CHOICE_UNREADABLE as VAULT_CHOICE_UNREADABLE,
+    FILE_DIR as VAULT_FILE_DIR, NATIVE_WORKS as VAULT_NATIVE_WORKS,
+};
 /// The store's exclusive lock is held by another process: a running, draining or starting
 /// owner, or another offline command.
 pub const STORE_LOCKED: &str = "Another Switchboard instance owns this account storage";

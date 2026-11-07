@@ -325,6 +325,27 @@ enum Command {
         #[arg(long)]
         yes: bool,
     },
+    /// Where this data folder keeps its sign-ins. Quit Switchboard first.
+    Vault {
+        #[command(subcommand)]
+        command: VaultCommand,
+    },
+}
+#[derive(Subcommand)]
+enum VaultCommand {
+    /// `file`: 0600 files in the data folder, only on a machine with no graphical login, where
+    /// this computer's own store is locked (a `serve` under a LaunchDaemon, a Linux VM with no
+    /// session bus). `native`: this computer's own store, the default. Moves every sign-in.
+    Use {
+        /// `file` or `native`.
+        #[arg(value_enum)]
+        kind: VaultKindArg,
+    },
+}
+#[derive(Clone, Copy, ValueEnum)]
+enum VaultKindArg {
+    Native,
+    File,
 }
 #[derive(Clone, Copy, ValueEnum)]
 enum HostArg {
@@ -1284,6 +1305,22 @@ async fn run(cli: &Cli) -> Result<Value, String> {
         mcp::Server::new(root, read_only).serve().await?;
         return Ok(Value::Null);
     }
+    // SB-287: offline only. It opens the store itself, so it is refused while Switchboard runs.
+    if let Command::Vault {
+        command: VaultCommand::Use { kind },
+    } = cli.command
+    {
+        let kind = match kind {
+            VaultKindArg::Native => switchboard_core::VaultKind::Native,
+            VaultKindArg::File => switchboard_core::VaultKind::File,
+        };
+        return switchboard_runtime::vault_choice::choose(
+            &root,
+            kind,
+            std::sync::Arc::new(switchboard_core::NativeVault::new()),
+            switchboard_runtime::vault_choice::native_works,
+        );
+    }
     if let Command::Uninstall {
         keep_data,
         purge,
@@ -1292,7 +1329,7 @@ async fn run(cli: &Cli) -> Result<Value, String> {
     {
         return switchboard_runtime::uninstall::uninstall_with(
             &root,
-            std::sync::Arc::new(switchboard_core::NativeVault::new()),
+            switchboard_core::open_vault(&root, false)?,
             keep_data,
             purge,
             yes,
@@ -2007,6 +2044,7 @@ async fn run(cli: &Cli) -> Result<Value, String> {
         | Command::Mcp { .. }
         | Command::Shell { .. }
         | Command::Uninstall { .. }
+        | Command::Vault { .. }
         | Command::Onboard { .. } => unreachable!(),
     };
     // SB-212: a launch names who asked for it (`agents launch`, `kimi launch`, `continue
@@ -3747,6 +3785,10 @@ mod mcp_parity {
             Not("SB-183: prints the hook script for a person's own start file; not an agent action"),
         ),
         ("uninstall", Not(PERSON)),
+        (
+            "vault use",
+            Not("SB-287: chosen once per data folder by whoever sets up a machine with no graphical login, with Switchboard stopped; a running session cannot change it"),
+        ),
     ];
 
     fn leaves(command: &clap::Command, path: &str, out: &mut Vec<String>) {

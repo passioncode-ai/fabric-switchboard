@@ -835,7 +835,6 @@ impl BackupKey for DpapiKey {
     }
 }
 
-#[cfg(any(target_os = "macos", target_os = "linux", test))]
 fn decode_key(text: &[u8]) -> Option<[u8; 32]> {
     if text.len() != 64 {
         return None;
@@ -845,6 +844,41 @@ fn decode_key(text: &[u8]) -> Option<[u8; 32]> {
         key[index] = u8::from_str_radix(std::str::from_utf8(pair).ok()?, 16).ok()?;
     }
     Some(key)
+}
+
+/// SB-287: the backup key of a data folder that keeps its sign-ins in files
+/// (`<data>/vault-files/backup-key`, 0600, 64 hex characters like the Keychain item). It lives
+/// with the sign-ins, so it protects a backup copied elsewhere, not one on the same disk.
+pub struct FileKey(pub std::path::PathBuf);
+impl BackupKey for FileKey {
+    fn load(&self) -> Result<Option<[u8; 32]>, String> {
+        if std::fs::symlink_metadata(&self.0).is_err() {
+            return Ok(None);
+        }
+        let text = private_fs::read_private_strict(&self.0, 128).map_err(|_| UNAVAILABLE)?;
+        decode_key(&text)
+            .map(Some)
+            .ok_or_else(|| UNAVAILABLE.into())
+    }
+    fn create(&self, key: &[u8; 32]) -> Result<bool, String> {
+        if std::fs::symlink_metadata(&self.0).is_ok() {
+            return Ok(false);
+        }
+        let text: String = key.iter().map(|b| format!("{b:02x}")).collect();
+        private_fs::private_write(&self.0, text.as_bytes()).map_err(|_| UNAVAILABLE)?;
+        Ok(true)
+    }
+}
+
+/// The key for a data folder's backups: beside its sign-ins when it keeps them in files
+/// (SB-287), else the platform's.
+pub fn key_for(root: &Path, dir: &Path) -> Option<std::sync::Arc<dyn BackupKey>> {
+    match crate::vault_kind(root) {
+        Ok(crate::VaultKind::File) => Some(std::sync::Arc::new(FileKey(
+            root.join(crate::VAULT_FILE_DIR).join("backup-key"),
+        ))),
+        _ => platform_key(dir),
+    }
 }
 
 /// The platform's key, when this platform has one. On Windows the DPAPI-sealed key sits in
@@ -902,6 +936,24 @@ mod tests {
     use super::*;
     use crate::{AuthKind, ExternalIdentity, MemoryVault, Provider};
     use std::sync::{Arc, Mutex};
+
+    #[test]
+    fn a_file_store_folder_keeps_its_backup_key_beside_its_sign_ins() {
+        let dir = tempfile::tempdir().unwrap();
+        crate::set_vault_kind(dir.path(), crate::VaultKind::File).unwrap();
+        let key = key_for(dir.path(), &dir.path().join("backups")).unwrap();
+        assert_eq!(key.load().unwrap(), None);
+        assert!(key.create(&[7u8; 32]).unwrap());
+        assert!(!key.create(&[9u8; 32]).unwrap(), "an existing key is kept");
+        assert_eq!(key.load().unwrap(), Some([7u8; 32]));
+        assert!(dir
+            .path()
+            .join(crate::VAULT_FILE_DIR)
+            .join("backup-key")
+            .is_file());
+        // Not an item: the file store lists only its sign-ins.
+        assert!(crate::FileVault::new(dir.path()).ids().is_empty());
+    }
 
     #[test]
     fn a_backup_with_project_sources_still_opens_in_an_older_build() {
