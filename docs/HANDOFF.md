@@ -2,6 +2,43 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-11-07 (late evening): releases 0.7.25 to 0.7.27; SB-299 doors, SB-283 move, SB-301
+
+- **Released 0.7.25** (2026-11-07 20:38:18Z, 25 assets, seven platforms; release PR #484 `9ce15d9`):
+  SB-287 (a file store for sign-ins on a machine with no graphical login, `switchboard vault use
+  file`, the LaunchDaemon definition for Observatory's validator in `docs/CLI.md`) and SB-163 (a
+  check that finds nothing due takes no owner transaction). studio-agent (board `f32a24c0`) and
+  Observatory (`6bb39288`) were told; studio-agent installs the daemon in the Studio spaces.
+- **SB-299, every window action gets an agent door** (operator 2026-11-07, board `a5885efd`):
+  inventory `docs/reports/2026-11-07-agent-doors/README.md` (#485); doors built for GitHub owners,
+  repositories and clone, cancelling and disconnecting PassionCode.ai (#486), usage analytics
+  (#487), `switchboard link` (#488), updates and open at login through `app_doors::AppDoors` the
+  app hands its owner (#489). Left: the money refusals (raise, clear or double a ceiling, delete a
+  group or key a ceiling counts) opened with the operator's quoted words, creating a group over
+  MCP, MCP tools for the PERSON group, reads (pending sign-ins, the Kimi sign-in state in the CLI).
+- **SB-283, raised by the operator** («поднимай», 2026-11-07 about 20:00 UTC, relayed by
+  studio-agent): `switchboard accounts send ID --to user@host`, MCP `switchboard_account_send`, the
+  window's *Move to another machine…* (SCN-087) move a subscription sign-in over ssh with one
+  holder (marked elsewhere first, saved there on stdin, checked there, undone on failure), on top
+  of the signed record and `receive` (#490 `d1dcf91`). Checked in Safari on the demo.
+- **Released 0.7.26** (2026-11-07 22:39:54Z, 25 assets; release PR #491): SB-299's doors and
+  SB-283. **0.7.27** tagged after release PR #495 `53ef60e` (nightly green 23:08Z, release run
+  42421762888): SB-301, a Studio space's keychain sign-ins moved into files on purpose (`vault use
+  file --move-from-native`) and a per-space daemon label (#494), asked for by studio-agent in
+  `f32a24c0`.
+- **SB-299, the money refusals** (design `docs/research/ceiling-doors-2026-11-07.md`, #493): built on
+  branch `feat/sb-299-ceiling-doors`. Raising, clearing or doubling a ceiling, removing a group or a
+  key a ceiling counts open for an agent only with the operator's quoted words (`--operator-said`,
+  `--said-at`, `--said-in`; MCP `decision`), recorded as `spend.json` `loosened` (last 5) and the log
+  event `ceiling_loosened`.
+- **SB-300** (P3): `dispatch::runs::a_run_that_ends_by_itself_is_recorded_exited` failed once under
+  load 170 to 210 and passes alone; #492 names the answer when a dispatch test starts no launch, so
+  the next failure says why.
+- **Exact next task.** Confirm 0.7.27 (assets, `latest.json`) and name it to studio-agent in
+  `f32a24c0`; merge the ceiling doors and release 0.7.28 after a full `./scripts/check.sh`; then
+  SB-299's rest (a group over MCP, MCP tools for the PERSON group, reads), SB-296 point 3 (Dashboards
+  episodes against `transaction_held`), and the design notes due 2026-11-13 (SB-291, SB-292).
+
 ## 2026-11-07 (evening): release 0.7.24; SB-298, SB-289, SB-287, SB-163
 
 - **0.7.23 was tagged, not published.** Its nightly checks failed on `check-error-vocabulary.mjs`:
