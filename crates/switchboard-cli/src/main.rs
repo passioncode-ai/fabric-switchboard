@@ -46,6 +46,8 @@ enum Command {
         #[command(subcommand)]
         command: Org,
     },
+    /// Link this `switchboard` into ~/.local/bin, as the window's *Link the CLI* does.
+    Link,
     /// Switchboard's own usage analytics (counts and kinds only, docs/ANALYTICS.md): `on` or
     /// `off`; without either, the state. Only the installed app sends them.
     Analytics {
@@ -1340,6 +1342,10 @@ async fn run(cli: &Cli) -> Result<Value, String> {
         mcp::Server::new(root, read_only).serve().await?;
         return Ok(Value::Null);
     }
+    // SB-299: needs no owner and no store.
+    if let Command::Link = cli.command {
+        return switchboard_runtime::agents::link_this_cli();
+    }
     // SB-287: offline only. It opens the store itself, so it is refused while Switchboard runs.
     if let Command::Vault {
         command: VaultCommand::Use { kind },
@@ -2095,6 +2101,7 @@ async fn run(cli: &Cli) -> Result<Value, String> {
         | Command::Shell { .. }
         | Command::Uninstall { .. }
         | Command::Vault { .. }
+        | Command::Link
         | Command::Onboard { .. } => unreachable!(),
     };
     // SB-212: a launch names who asked for it (`agents launch`, `kimi launch`, `continue
@@ -3712,6 +3719,7 @@ mod mcp_parity {
         ("org disconnect", Tool("switchboard_organization_set")),
         ("org cancel", Tool("switchboard_organization_set")),
         ("analytics", Tool("switchboard_analytics")),
+        ("link", Tool("switchboard_link_cli")),
         ("github owners", Tool("switchboard_github")),
         ("github repos", Tool("switchboard_github")),
         ("github clone", Tool("switchboard_github_clone")),

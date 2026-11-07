@@ -155,6 +155,11 @@ and `organization` / `organization_name`; then every folder rule with its `state
 The Git repositories under those folders (default `~/DATA`, else the home folder; three levels,
 never into a repository, a hidden folder or dependencies), each with its group or none.
 
+### `switchboard_link_cli`
+
+Only when the operator asks. Links this `switchboard` into `~/.local/bin`, as the window's *Link the
+CLI* does; it never replaces a file that is not Switchboard's.
+
 ### `switchboard_analytics`: `enabled?`
 
 Switchboard's own usage analytics (counts and kinds only), as About sets it: `enabled` true or false

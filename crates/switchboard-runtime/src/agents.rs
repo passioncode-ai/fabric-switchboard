@@ -127,6 +127,18 @@ pub fn link_cli(source: &Path, bin: &Path) -> Result<PathBuf, String> {
 pub fn link_cli(_: &Path, _: &Path) -> Result<PathBuf, String> {
     Err("Keep switchboard.exe from the download folder, or add it to PATH.".into())
 }
+/// SB-299: the window's *Link the CLI*, for an agent: links the running `switchboard` itself, so a
+/// CLI started by its full path (in the app bundle) puts itself on `PATH`.
+pub fn link_this_cli() -> Result<Value, String> {
+    let source = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.canonicalize().ok())
+        .filter(|p| !translocated(p))
+        .ok_or("This build has no bundled command-line tool.")?;
+    let bin = user_bin().ok_or("Home folder unavailable.")?;
+    let link = link_cli(&source, &bin)?;
+    Ok(json!({"linked_cli": link}))
+}
 pub fn link_bundled_cli() -> Result<Value, String> {
     let source = bundled_cli().ok_or("This build has no bundled command-line tool.")?;
     let bin = user_bin().ok_or("Home folder unavailable.")?;

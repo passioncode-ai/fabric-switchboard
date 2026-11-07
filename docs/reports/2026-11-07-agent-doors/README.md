@@ -76,7 +76,8 @@ operator's words, is the second question for SB-299. The one MCP-only action is 
 
 1. Doors for the actions with none, in this order: analytics (built: CLI `analytics on|off`, MCP
    `switchboard_analytics`) and update reads; `github owners|repos|clone`
-   (built: CLI `github`, MCP `switchboard_github` and `switchboard_github_clone`); `link`; update and login-item switches
+   (built: CLI `github`, MCP `switchboard_github` and `switchboard_github_clone`); `link` (built: CLI `link`, MCP
+   `switchboard_link_cli`); update and login-item switches
    over the control socket; cancelling a PassionCode.ai connection (built: CLI `org cancel`, MCP
    `switchboard_organization_set` `passioncode_cancel`, and `passioncode_disconnect` with it).
 2. The ceiling question to the operator (above), then the door with the operator's words.
