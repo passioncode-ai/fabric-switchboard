@@ -8,6 +8,7 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- An account marked as used on another machine, or turned off here, is no longer renewed when a quota check is asked for it here. Before, a check from the CLI or MCP could spend its sign-in and sign the other machine out (SB-293).
 - When you mark an account as used on another machine, you can say where it works: a machine and its user, or a colleague. The card shows it, and *Accounts* filters by *On this computer* and *On other machines* (SB-284). The CLI (`accounts update --location`) and MCP (`location`, `machine`) do the same.
 
 ## 0.7.21
