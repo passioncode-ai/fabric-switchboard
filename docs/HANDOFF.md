@@ -2,6 +2,30 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-11-08 (day): SB-193, SB-195, SB-232 part merged; SB-302 closed; SB-305 waits for disk
+
+- **Merged:** SB-193 (#518): `scripts/check-strings-registry.mjs` in the gate keeps
+  `docs/brand/strings.md` in step with the window's strings (its first run found five drifts).
+  SB-195 (#519): the tour drops an earlier confirmation and outlines the whole setup prompt, «О
+  программе» gets a no-break space, an invalid countdown reads «неизвестно». SB-232 part (#520): a
+  first chains read that failed while an action ran names itself; chain saves re-read like ceiling
+  saves; CONTRACTS names `unmapped` and the missing-`usd` refusal (the Rust parts stay in the row).
+- **SB-302 closed** on the installed app's log: `control_slow` `sessions` 272 on 2026-11-07, 3 in
+  the four hours after 0.7.33.
+- **SB-194 filed** in fabric-workspace as [#777](https://github.com/passioncode-ai/fabric-workspace/pull/777)
+  (ADR-0127 amendment 3), board request `3a77e682`; closes when it merges.
+- **SB-305** (`switchboard update` for a computer that runs only `serve`): branch
+  `feat/sb-305-headless-update` (main merged in, `cargo fmt` clean, every Node and docs check
+  green; the release's own minisign verification passed against 0.7.33). It also carries the store
+  fix (an unreadable sign-in of another row no longer blocks `add`) and `ALREADY_THERE` for
+  `accounts send`. Waits only for the Rust half of `./scripts/check.sh`, which runs here only at
+  12 GB free (10 GB now; a monitor is armed in this session).
+- **Exact next task.** At 12 GB free: announce in board thread `eefa7959`, run
+  `./scripts/check.sh` in `~/DATA/_worktrees/sb-305` (link `node_modules`, remove it and `target`
+  after), open the PR, squash-merge, release 0.7.34 (nine version files, CHANGELOG `Unreleased`),
+  watch the release, then answer on the board thread that asked for it how a `serve`-only
+  computer installs it (`switchboard update`, or `--feed latest.json --archive <package>`).
+
 ## 2026-11-08 (morning): release 0.7.33; SB-302, SB-303, SB-304, SB-296 closed
 
 - **Released 0.7.33** (2026-11-08 06:34:54Z, 25 assets, seven platforms; #514): SB-302 (`sessions`

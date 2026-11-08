@@ -140,6 +140,16 @@ export function createDemoAdapter(): Adapter {
       passioncode.organizations = 2;
     }
   }
+  // SB-192 (UX-27): `?empty=1` is a personal first run: nothing saved yet, Claude Code and Codex
+  // signed in to accounts Switchboard has not added, no backup (`&backup=1` keeps one, for the
+  // restore offer), the usage notice pending, and the tour and terms notice shown whatever this
+  // browser stored (main.ts reads `demoFirstRun`).
+  const firstRun = new URLSearchParams(location.search).get('empty') === '1';
+  if (firstRun) {
+    state.accounts = []; state.projects = []; state.rules = []; state.routes = {}; state.policies = []; state.events = []; state.organizations = [];
+    current.claude = { status: 'available', identity: studio, account_id: null };
+    kimi.accounts = [];
+  }
   // Like the owner's `onboard` (onboarding.rs, organization steps only, the five first steps done).
   const onboardSteps = (): Onboarding => {
     const steps: OnboardStep[] = ['owner', 'accounts', 'project', 'mcp', 'proving_call'].map((id) => ({ id, state: 'done', summary: id }));
@@ -166,7 +176,7 @@ export function createDemoAdapter(): Adapter {
   const update: UpdateStatus = { available: true, reason: null, enabled: true, state: 'idle', current: version, version: null, checked_at: now(), error: null, needs_permission: false, restart_after: null };
   // `?usage=notice` shows the first-run usage notice (SB-246).
   const usage = new URLSearchParams(location.search).get('usage');
-  const analytics = { available: true, enabled: true, notice_pending: usage === 'notice' };
+  const analytics = { available: true, enabled: true, notice_pending: usage === 'notice' || (firstRun && usage === null) };
   // SB-120: the agents a synthetic computer has.
   type CatalogAgent = { id: string; name: string; maker?: string | null; url: string; install?: string | null; binary?: string | null; mcp: { supported: boolean }; openrouter?: unknown };
   const catalogAgents = (agentCatalogData as unknown as { agents: CatalogAgent[] }).agents;
@@ -265,7 +275,7 @@ export function createDemoAdapter(): Adapter {
   const backups: { file: string; created_at: number; accounts: number; own?: boolean; openable?: boolean }[] = [{ file: `switchboard-backup-${now() - 3600}.json`, created_at: now() - 3600, accounts: 11, own: true, openable: true }];
   // A new computer has no backup of its own (SB-202, `?org=setup`).
   // `&backup=1` keeps one, to see the card's action lead beside Restore from backup (SB-228, VIS-21).
-  if (orgSetup && new URLSearchParams(location.search).get('backup') !== '1') backups.length = 0;
+  if ((orgSetup || firstRun) && new URLSearchParams(location.search).get('backup') !== '1') backups.length = 0;
   return {
     async currentAccounts() { return structuredClone(current); },
     async sessions() { return { sessions: [

@@ -24,6 +24,8 @@ export function onSpendChanged(callback: () => void) {
   void import('@tauri-apps/api/event').then(({ listen }) => listen('spend-changed', () => callback())).catch(() => { /* read again with the minute's refresh */ });
 }
 export const demo = !native && new URLSearchParams(location.search).get('demo') === '1';
+/** SB-192 (UX-27): `?demo=1&empty=1` shows a first run: the tour and the terms notice ignore what this browser stored. */
+export const demoFirstRun = demo && new URLSearchParams(location.search).get('empty') === '1';
 export const nativeAdapter: Adapter = {
   snapshot: () => readWithDeadline(invoke('snapshot')),
   currentAccounts: () => readWithDeadline(invoke('current_accounts')),

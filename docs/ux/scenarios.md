@@ -106,7 +106,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Errors & recovery:** Missing vault permission is an error with retry; never show a fabricated account.
 **Status:** validated
 **Meaning:** scenario design validated against the authorized brief; implementation and user-outcome evidence are separate.
-**Coverage:** [verification](../evidence/verification.md); implementation/fixture evidence only; live-provider outcome NOT_RUN.
+**Coverage:** [verification](../evidence/verification.md); implementation/fixture evidence only; live-provider outcome NOT_RUN. The browser demo shows a first run with `?demo=1&empty=1` (SB-192, UX-27).
 **Product:** unobserved
 **Traces:** ST-001, FLW-01
 
@@ -485,7 +485,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Steps:**
 1. With two or more switchable Claude accounts and no native policy on, the Automatic switching bar offers Turn on for Claude Code → one click enables the `claude_cli` policy for the pool holding most of them with the defaults below, and the bar reads “Automatic switching is on” with the latest decision (0.5). Stop turns it off in one click.
 2. For other groups, the ⚙ menu → *New automatic switching…* or *Edit {provider} in {group} ({target})…* → defaults are off, threshold 90%, minimum improvement 10 points, cooldown 1800 seconds, maximum age 300 seconds. Choose provider, group (by name, as in SCN-002) and managed/native Claude target; enable and *Save* → the bar names each setting as “{provider} · {group} · {target}”, a group by its name and the default pool as “Default group”, never a bare pool id (0.6.82, D-1, CPY-07).
-**Alt paths:** Edit a saved policy → its boundary stays fixed and values reload. Stop (*Stop in {group}* when several groups switch) → the saved policy is disabled in one action: “Automatic switching stopped for {provider} in {group}.” Codex cannot select the native Claude target. Claude Swap switches Claude Code itself (`cswap auto`, or its menu bar with automatic switching on) → the bar reads “Claude Swap is switching Claude Code automatically, so Switchboard does not. Turn off automatic switching in one of them; manual switches still work.” and automatic switching of Claude Code holds until Swap stops switching (0.5.3). An account that needs a new sign-in is never chosen; the next eligible one is (0.5.3).
+**Alt paths:** Before two enabled accounts of one provider share a group and while no policy is on, the bar is one line instead: “Automatic switching needs two accounts of one provider in one group. Add another account to turn it on.” (SB-192, UX-16; the tour's step 3 outlines it). While the quota monitor is unavailable the bar says so once. Edit a saved policy → its boundary stays fixed and values reload. Stop (*Stop in {group}* when several groups switch) → the saved policy is disabled in one action: “Automatic switching stopped for {provider} in {group}.” Codex cannot select the native Claude target. Claude Swap switches Claude Code itself (`cswap auto`, or its menu bar with automatic switching on) → the bar reads “Claude Swap is switching Claude Code automatically, so Switchboard does not. Turn off automatic switching in one of them; manual switches still work.” and automatic switching of Claude Code holds until Swap stops switching (0.5.3). An account that needs a new sign-in is never chosen; the next eligible one is (0.5.3).
 **Expected result:** The policy is persisted by native storage; fresh eligible same-pool accounts are required. No eligible account means hold. Managed in-flight responses retain their identity.
 **UI elements:** Automatic switching bar, Turn on / Stop, ⚙ settings menu, policy dialog with numeric fields, enabled checkbox and target selector, latest decision.
 **States covered:** empty policies, disabled, enabled, loading, invalid input, monitor unavailable, hold, success
@@ -545,7 +545,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Steps:**
 1. Open Groups → *Folder rules* → without rules, an empty state explains that selection and automatic switching apply everywhere.
 2. Add rule → folder, account, target (managed sessions, or the Claude Code login for Claude OAuth profiles only), expiry (default 8 hours).
-3. Return to Accounts → the notices block (shared with the provider terms, VIS-13) names each active rule, its account and expiry; navigation shows the count.
+3. Return to Accounts → the notices block (shared with the provider terms, VIS-13) names each active rule, its account and expiry; navigation shows the count beside Groups as a neutral outlined number, never the accent, so it does not read as unread items (SB-192, VIS-20).
 4. Pause, Resume (asks for a new expiry), Edit or Remove a rule on Groups.
 **Alt paths:** An expired or paused rule stays listed with its state and never applies; removing an account removes its rules.
 **Expected result:** A rule applies only when an agent or `switchboard project apply` asks, only to that session, and never turns automatic switching off.
@@ -567,14 +567,14 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 1. Open Agents → *Connect an agent* (below the installed agents and the OpenRouter key) shows what agents can do through the tools, and the CLI location or “not found”.
 2. Link switchboard into ~/.local/bin (macOS, bundled CLI) → the link is created; an existing file or foreign link is never replaced.
 3. Copy the Claude Code, Codex or Claude Code plugin command and run it in a terminal.
-**Alt paths:** Sessions launched from Switchboard get the tools without this step; a launch without a CLI says so in its notice. The app was opened straight from its download (macOS App Translocation) → the panel reads “macOS is running Switchboard from a temporary copy of the download. Move Fabric Switchboard to Applications and open it from there before connecting agents; …”, the link button is not offered and no agent config points into the copy (0.5.3).
+**Alt paths:** Sessions launched from Switchboard get the tools without this step; a launch without a CLI says so in its notice. The app was opened straight from its download (macOS App Translocation) → the panel reads “macOS is running Switchboard from a temporary copy of the download. Move Fabric Switchboard to Applications and open it from there before connecting agents; …”, the link button is not offered and no agent config points into the copy (0.5.3). On Linux the AppImage runs from a mount that exists only while it runs (`$APPDIR`, SB-88) → the panel reads “This Switchboard runs from an AppImage, whose files exist only while it runs. To connect agents, install the .deb package, which puts switchboard on your PATH.”; the link button is not offered (`can_link` false) and no command names a path inside the mount (SB-192, UX-25).
 **Expected result:** The agent's `switchboard_status` names its session; switching a managed session takes effect from the next request; the global Claude Code login needs `global: true`.
 **UI elements:** capability panel, link button, command rows with Copy.
 **States covered:** loading, unavailable, CLI missing, linked.
 **Errors & recovery:** Link failures show fixed messages; Copy falls back to selectable text.
 **Status:** draft
 **Meaning:** operator request for agent self-switching (2026-09-29); live agent sessions not yet observed.
-**Coverage:** `crates/switchboard-cli/tests/mcp.rs`; `crates/switchboard-runtime/src/agents.rs` link test; browser demo `docs/evidence/design-0.4/agents-1280.png`.
+**Coverage:** `crates/switchboard-cli/tests/mcp.rs`; `crates/switchboard-runtime/src/agents.rs` link test, `an_appimage_mount_is_a_copy_that_goes_when_the_app_quits` and `a_translocated_copy_is_never_linked_or_offered`; browser demo `docs/evidence/design-0.4/agents-1280.png`.
 **Product:** unobserved
 **Traces:** PLAN-0.4 REQ-3, REQ-5, REQ-6
 

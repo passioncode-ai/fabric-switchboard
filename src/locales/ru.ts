@@ -662,6 +662,7 @@ export const RU: Record<string, string> = {
   "Reading…": "Загрузка…",
   "Managed route": "Управляемый маршрут",
   "Claude Code account": "Аккаунт Claude Code",
+  "Automatic switching needs two accounts of one provider in one group. Add another account to turn it on.": "Автопереключению нужны два аккаунта одного провайдера в одной группе. Добавьте ещё один, чтобы его включить.",
   "Automatic switching": "Автопереключение",
   "Automatic switching is on": "Автопереключение включено",
   "Automatic switching is off": "Автопереключение выключено",

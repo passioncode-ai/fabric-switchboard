@@ -5,9 +5,9 @@ import switchboardMark from '../brand/passioncode/switchboard-mark.svg';
 import { version } from '../package.json';
 import { platformLabel } from './platform';
 import { LOCALE_KEY, dateLocale, locale, parseLocaleChoice, plural, saveLocaleChoice, t, type LocaleChoice } from './i18n';
-import { demo, native, nativeAdapter, onProjectSuggestions, onShellHook, onSpendChanged, safeError, reportFrontendReady, reportLanguage, type Operation } from './adapter';
+import { demo, demoFirstRun, native, nativeAdapter, onProjectSuggestions, onShellHook, onSpendChanged, safeError, reportFrontendReady, reportLanguage, type Operation } from './adapter';
 import type { CardState } from './ui-logic';
-import { statAlert, ceilingQuestion, ceilingWarning, ceilingLine, keyLimitLine, dollars, POOL_PATTERN, poolChoices, poolName, inGroup, tourPlacement, usableWhileBusy, APPEARANCE_KEY, attribution, groupAdmits, groupSeatsElsewhere, passioncodeLine, seatEndedText, groupSeatsEndedText, organizationReleasedAt, inOrganizationFilter, domainList, type AttributedBy, sortStatRows, nextStatSort, type StatRow, type StatSort, statCacheShare, statTokensPerRequest, chartSeries, niceMax, groupProjectRows, type ChartMetric, groupProjects, compactCount, statTokens, statTrouble, statTroubleText, statAgentName, type Statistics, EXPIRY_CHOICES, folderName, folderRows, withoutFolder, type ProjectRoot, moveTargets, mapRows, rootTargets, storedMapFolders, MAP_FOLDERS_KEY, type MapFilter, type MapRow, type RepositoryMap, sortAgents, defaultAgentChoices, backgroundReads, clockedRead, chainScopeKey, afterRead, ceilingRemovalNote, modelMeta, modelUse, ordinaryKimiNote, kimiLimitUntil, limitReasonText, limitTitle, agentSetupFacts, sessionHow, sessionAgentName, sessionStateLabel, kimiWindowsLine, kimiWindowsLines, openrouterCreditLine, eventAction, eventDetail, MutationClock, activeRules, autoSwitchPool, launchChoice, withFolders, githubDefaultSelection, githubPlan, githubSource, replaceFolder, storedFolder, LAST_FOLDER_KEY, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, groupAccounts, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, signInNotice, signInMove, organizationMoveNote, dismissTermsNotice, termsNoticeDismissed, termsNoticeOn, termsNoticeText, tourWaits, orgSetups, releasedOrganizations, releasedSummary, orgSetupAction, orgSetupShown, orgSetupCaveat, orgSetupLeads, orgSetupPrimary, accountsOrgActionLeads, firstPrimary, orgSetupUnread, orgSetupStateLabel, orgSetupTitle, hiddenOrgSetups, ORG_SETUP_HIDDEN_KEY, accountsEmptyKey, type OrgSetup, usageAnswerText, usageNotice, usageFreshness, windowReset, type Appearance, shellHookView, shellHookToggleNotice, shellHookNoticeText, codexHookLine, moveStep, accountsForStep, chainSummary, stepReasonText, handoverOutcomeText, handoverSkipped, shortWorkflow, TAKEOVER_ORDER, groupOrganizations, servesPool, sharedGroups, holdsContext, accountOrganizations } from './ui-logic';
+import { statAlert, ceilingQuestion, ceilingWarning, ceilingLine, keyLimitLine, dollars, POOL_PATTERN, poolChoices, poolName, inGroup, tourPlacement, usableWhileBusy, APPEARANCE_KEY, attribution, groupAdmits, groupSeatsElsewhere, passioncodeLine, seatEndedText, groupSeatsEndedText, organizationReleasedAt, inOrganizationFilter, domainList, type AttributedBy, sortStatRows, nextStatSort, type StatRow, type StatSort, statCacheShare, statTokensPerRequest, chartSeries, niceMax, groupProjectRows, type ChartMetric, groupProjects, compactCount, statTokens, statTrouble, statTroubleText, statAgentName, type Statistics, EXPIRY_CHOICES, folderName, folderRows, withoutFolder, type ProjectRoot, moveTargets, mapRows, rootTargets, storedMapFolders, MAP_FOLDERS_KEY, type MapFilter, type MapRow, type RepositoryMap, sortAgents, defaultAgentChoices, backgroundReads, clockedRead, chainScopeKey, afterRead, ceilingRemovalNote, modelMeta, modelUse, ordinaryKimiNote, kimiLimitUntil, limitReasonText, limitTitle, agentSetupFacts, sessionHow, sessionAgentName, sessionStateLabel, kimiWindowsLine, kimiWindowsLines, openrouterCreditLine, eventAction, eventDetail, MutationClock, activeRules, autoSwitchPool, autoSwitchPossible, launchChoice, withFolders, githubDefaultSelection, githubPlan, githubSource, replaceFolder, storedFolder, LAST_FOLDER_KEY, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, groupAccounts, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, signInNotice, signInMove, organizationMoveNote, dismissTermsNotice, termsNoticeDismissed, termsNoticeOn, termsNoticeText, tourWaits, orgSetups, releasedOrganizations, releasedSummary, orgSetupAction, orgSetupShown, orgSetupCaveat, orgSetupLeads, orgSetupPrimary, accountsOrgActionLeads, firstPrimary, orgSetupUnread, orgSetupStateLabel, orgSetupTitle, hiddenOrgSetups, ORG_SETUP_HIDDEN_KEY, accountsEmptyKey, type OrgSetup, usageAnswerText, usageNotice, usageFreshness, windowReset, type Appearance, shellHookView, shellHookToggleNotice, shellHookNoticeText, codexHookLine, moveStep, accountsForStep, chainSummary, stepReasonText, handoverOutcomeText, handoverSkipped, shortWorkflow, TAKEOVER_ORDER, groupOrganizations, servesPool, sharedGroups, holdsContext, accountOrganizations } from './ui-logic';
 import agentCatalog from '../catalog/agents.json';
 import type { AnalyticsStatus, Ceilings, CeilingView, CeilingQuestionView, OpenrouterCredit, BackupInfo, PassioncodeStatus, Account, Adapter, AgentConnection, AgentInfo, AgentRow, AgentsOverview, OpenrouterModels, HermesModel, KimiAccounts, KimiRegion, KimiStatus, OpenrouterStatus, OpenrouterKeys, CodexRoute, ShellHookStatus, AgentSetup, AuthKind, BackupStatus, KimiAccount, CurrentAccounts, LoginItem, Project, Restored, ExternalIdentity, MonitorStatus, ProjectRule, Provider, RotationPolicy, RuntimeStatus, SessionInfo, Snapshot, UpdateStatus, Onboarding, Chains, ChainExecutor, ChainScope, ChainStepView, GithubRepository } from './types';
 
@@ -51,7 +51,7 @@ const tour = (): { page: Page; target: string[]; title: string; text: string }[]
   { page: 'agents', target: ['[data-copy-row="copy-onboard"]', '#connect-panel > h2'], title: t('Agents, and it keeps running'), text: trayInArea() ? t('Here, give your coding agent the setup prompt: it registers the tools and sets up the rest, leaving you only the sign-in. Closing the window keeps Switchboard working; open or quit it from its icon in the notification area.') : t('Here, give your coding agent the setup prompt: it registers the tools and sets up the rest, leaving you only the sign-in. Closing the window keeps Switchboard working; open or quit it from the menu-bar icon.') },
 ];
 // Storage refused: the tour shows again next start rather than never (SCN-035).
-let tourStep: number | null = (() => { try { return localStorage.getItem(TOUR_KEY) ? null : 0; } catch { return 0; } })();
+let tourStep: number | null = (() => { if (demoFirstRun) return 0; try { return localStorage.getItem(TOUR_KEY) ? null : 0; } catch { return 0; } })();
 function tourGo(step: number | null) {
   // SB-195: a confirmation shown before the tour (the usage answer) does not ride along its steps; an error stays.
   if (step !== tourStep && notice && !noticeError) { notice = ''; noticeAction = null; }
@@ -102,7 +102,9 @@ function tourCard(step: number) {
   return card;
 }
 /** Provider terms (operator decision 2026-10-08, SCN-049): a banner on Accounts until dismissed, always in About. */
-const noticeStore = () => { try { return localStorage; } catch { return null; } };
+/** SB-192 (UX-27): a first-run demo keeps its dismissals for this page only, so every reload is a first run again. */
+const firstRunStore = new Map<string, string>();
+const noticeStore = () => { if (demoFirstRun) return { getItem: (k: string) => firstRunStore.get(k) ?? null, setItem: (k: string, v: string) => void firstRunStore.set(k, v) }; try { return localStorage; } catch { return null; } };
 /**
  * Usage counts (SB-246, operator decision 2026-11-04; docs/ANALYTICS.md, SCN-073): on by default
  * and sent from the first start. A first-run notice says so once: OK acknowledges it, Turn off
@@ -186,6 +188,8 @@ let hermesError = '';
 let kimi: KimiAccounts | null = null;
 let kimiError = '';
 let openMenu: string | null = null;
+/** SB-192 (VIS-24): the menu that opens in this render only, so a background render never replays its entrance. */
+let menuEntering: string | null = null;
 /** The label and pool a sign-in started with travel with it, so Try again repeats the same sign-in (SB-62). */
 /** SB-104: one Try again at a time — a double click never starts two sign-ins. */
 let retrying = false;
@@ -1578,11 +1582,11 @@ const quotaContext = () => ({ nowSeconds: Date.now() / 1000, policies: snapshot?
 /** A menu is part of the render: `openMenu` names the one that is open. */
 function menu(key: string, label: string, items: ([string, () => void] | [string, () => void, string])[], triggerClass = 'icon-button', text = '⋯') {
   const wrapper = el('div', 'menu-root');
-  const trigger = button(text, () => { openMenu = openMenu === key ? null : key; render(); if (openMenu === key) document.querySelector<HTMLElement>(`[data-menu="${key}"] [role="menuitem"]`)?.focus(); else restoreFocus(`menu-${key}`); }, triggerClass, `menu-${key}`);
+  const trigger = button(text, () => { openMenu = openMenu === key ? null : key; menuEntering = openMenu; render(); menuEntering = null; if (openMenu === key) document.querySelector<HTMLElement>(`[data-menu="${key}"] [role="menuitem"]`)?.focus(); else restoreFocus(`menu-${key}`); }, triggerClass, `menu-${key}`);
   trigger.setAttribute('aria-haspopup', 'menu'); trigger.setAttribute('aria-expanded', String(openMenu === key)); trigger.setAttribute('aria-label', label);
   wrapper.append(trigger);
   if (openMenu === key) {
-    const list = el('div', 'menu'); list.setAttribute('role', 'menu'); list.setAttribute('aria-label', label); list.dataset.menu = key;
+    const list = el('div', menuEntering === key ? 'menu is-entering' : 'menu'); list.setAttribute('role', 'menu'); list.setAttribute('aria-label', label); list.dataset.menu = key;
     items.forEach(([text, action, tone], index) => {
       // VIS-27: a line sets a destructive item apart from the ordinary ones above it.
       if (tone?.includes('danger') && index > 0) { const line = el('div', 'menu-separator'); line.setAttribute('role', 'separator'); list.append(line); }
@@ -2143,6 +2147,8 @@ function renderCurrent(main: HTMLElement, quiet = false) {
 const policyTarget = (target: RotationPolicy['target']) => target === 'managed' ? t('Managed route') : t('Claude Code account');
 function renderPolicies(main: HTMLElement, quiet = false) {
   const policies = snapshot!.policies ?? []; const enabled = policies.filter((policy) => policy.enabled);
+  // SB-192 (UX-16): one line until switching has somewhere to go; the tour outlines it as the bar.
+  if (!autoSwitchPossible(snapshot!.accounts, policies)) { const note = el('p', 'rotation-bar rotation-note usage-caption', t('Automatic switching needs two accounts of one provider in one group. Add another account to turn it on.')); main.append(note); return; }
   const panel = el('section', 'rotation-bar'); panel.setAttribute('aria-label', t('Automatic switching'));
   // SB-104: without the monitor's answer no row can say it is limited or signed out — say so instead of showing them all as available.
   if (!monitor && (native || demo)) panel.append(el('p', 'usage-error', t('Limits and sign-in states are unavailable right now. Refresh to retry.')));
@@ -2151,7 +2157,8 @@ function renderPolicies(main: HTMLElement, quiet = false) {
   if (enabled.length) for (const policy of enabled) {
     const decision = monitor?.decisions?.find((entry) => entry.provider === policy.provider && entry.pool === policy.pool && entry.target === policy.target);
     copy.append(el('span', 'usage-caption', `${providerName(policy.provider)} · ${poolName(policy.pool, snapshot!.projects)} · ${policyTarget(policy.target)} · ${t('at {percent}% used', { percent: policy.threshold_percent })}${decision ? ` · ${decisionText(decision.reason)}` : ''}`));
-  } else copy.append(el('span', 'usage-caption', monitor ? t('When the account in use nears its limit, Switchboard can move to the saved account with the most quota left.') : t('Quota monitor status unavailable. Refresh to retry.')));
+  // UX-16: the line above already says the monitor is unavailable; the caption does not say it again.
+  } else copy.append(el('span', 'usage-caption', monitor || native || demo ? t('When the account in use nears its limit, Switchboard can move to the saved account with the most quota left.') : t('Quota monitor status unavailable. Refresh to retry.')));
   const swapHeld = monitor?.claude_swap_accounts ?? 0;
   if (swapHeld) copy.append(el('span', 'usage-caption', t('Claude Swap is running and renews {n} of these accounts. Switchboard takes their newest sign-ins from it and does not renew them itself.', { n: swapHeld })));
   if (monitor?.renewal_blocked) copy.append(el('span', 'usage-caption', t('Claude is refusing sign-in renewals for every account right now. Saved accounts keep their last sign-in and are not renewed; Switchboard tries again within the hour. If this stays, update Switchboard.')));
