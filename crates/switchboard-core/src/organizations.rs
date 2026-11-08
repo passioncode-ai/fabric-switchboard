@@ -327,7 +327,7 @@ impl Snapshot {
                 let placed = Attribution {
                     organization: Some(organization.id.clone()),
                     by: Some(By::Person),
-                    also: attribution.also,
+                    also: attribution.also.clone(),
                 };
                 let mut serving = self.projects.iter().filter(|p| self.serves(a, &p.pool));
                 if serving.clone().all(|p| p.admits(&placed)) {
