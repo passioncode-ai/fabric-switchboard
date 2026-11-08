@@ -8,6 +8,7 @@
 //! ceilings read, and each question a reached ceiling opened is announced once ("double it or keep
 //! it in Switchboard"; nothing is answered in the notification) and the window reads them again.
 use std::collections::HashSet;
+use switchboard_runtime::spend::money;
 use switchboard_runtime::Operation;
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_notification::NotificationExt;
@@ -171,12 +172,12 @@ pub fn ceiling_text(reached: &Reached, ru: bool) -> (String, String) {
         "Spending ceiling reached"
     };
     let body = match (reached, ru) {
-        (Reached::Machine(usd), false) => format!("Daily ceiling ${usd:.2} for this computer reached. Double it or keep it in Switchboard."),
-        (Reached::Group(usd, name), false) => format!("Daily ceiling ${usd:.2} for {name} reached. Double it or keep it in Switchboard."),
-        (Reached::Task(usd, task), false) => format!("Ceiling ${usd:.2} for task {task} reached. Double it or keep it in Switchboard."),
-        (Reached::Machine(usd), true) => format!("Дневной потолок этого компьютера (${usd:.2}) достигнут. Удвойте его или оставьте прежним в Switchboard."),
-        (Reached::Group(usd, name), true) => format!("Дневной потолок группы «{name}» (${usd:.2}) достигнут. Удвойте его или оставьте прежним в Switchboard."),
-        (Reached::Task(usd, task), true) => format!("Потолок задачи {task} (${usd:.2}) достигнут. Удвойте его или оставьте прежним в Switchboard."),
+        (Reached::Machine(usd), false) => format!("Daily ceiling {} for this computer reached. Double it or keep it in Switchboard.", money(*usd)),
+        (Reached::Group(usd, name), false) => format!("Daily ceiling {} for {name} reached. Double it or keep it in Switchboard.", money(*usd)),
+        (Reached::Task(usd, task), false) => format!("Ceiling {} for task {task} reached. Double it or keep it in Switchboard.", money(*usd)),
+        (Reached::Machine(usd), true) => format!("Дневной потолок этого компьютера ({}) достигнут. Удвойте его или оставьте прежним в Switchboard.", money(*usd)),
+        (Reached::Group(usd, name), true) => format!("Дневной потолок группы «{name}» ({}) достигнут. Удвойте его или оставьте прежним в Switchboard.", money(*usd)),
+        (Reached::Task(usd, task), true) => format!("Потолок задачи {task} ({}) достигнут. Удвойте его или оставьте прежним в Switchboard.", money(*usd)),
     };
     (title.to_owned(), body)
 }
@@ -369,6 +370,11 @@ mod tests {
         for (_, body) in [ceiling_text(&first[0], true), ceiling_text(&first[2], true)] {
             assert!(!body.contains('\u{2014}'), "no dash");
         }
+        // SB-232: thousands are grouped as the window groups them.
+        assert_eq!(
+            ceiling_text(&Reached::Machine(1000.0), false).1,
+            "Daily ceiling $1,000.00 for this computer reached. Double it or keep it in Switchboard."
+        );
         // A group the snapshot no longer names is called by its id.
         let gone = serde_json::json!({"questions": [{"id": "q_0000000000000005", "scope": {"kind": "project", "pool": "beta"}, "usd": 1.0, "reached_at": started}]});
         let only = reached_ceilings(&gone, &mut told, started, names);

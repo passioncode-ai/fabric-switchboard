@@ -9,6 +9,7 @@ use std::{
     process::ExitCode,
 };
 use switchboard_core::{AuthKind, Provider, RotationPolicy};
+use switchboard_runtime::spend::money;
 use switchboard_runtime::{
     arm_hard_exit, control, default_root, launches, onboarding, oplog,
     projects::{detect_session, Session},
@@ -3414,12 +3415,12 @@ fn print_result(value: &Value, cli: &Cli) {
                 );
                 let credit = &value["credit"];
                 if credit.is_object() {
-                    let money = |v: &Value| v.as_f64().map(|n| format!("${n:.2}"));
+                    let amount = |v: &Value| v.as_f64().map(money);
                     println!(
                         "Remaining {} · spent today {} · limit {}",
-                        money(&credit["limit_remaining"]).unwrap_or_else(|| "no limit".into()),
-                        money(&credit["usage_daily"]).unwrap_or_else(|| "unknown".into()),
-                        match (money(&credit["limit"]), credit["limit_reset"].as_str()) {
+                        amount(&credit["limit_remaining"]).unwrap_or_else(|| "no limit".into()),
+                        amount(&credit["usage_daily"]).unwrap_or_else(|| "unknown".into()),
+                        match (amount(&credit["limit"]), credit["limit_reset"].as_str()) {
                             (Some(limit), Some(reset)) => format!("{limit} {reset}"),
                             (Some(limit), None) => limit,
                             _ => "none".into(),
@@ -3487,16 +3488,16 @@ fn print_result(value: &Value, cli: &Cli) {
         Command::Ceiling {
             command: CeilingCommand::Set { .. },
         } => println!(
-            "Ceiling for {}: ${:.2}.",
+            "Ceiling for {}: {}.",
             scope_label(&value["ceiling"]["scope"]),
-            dollars(&value["ceiling"])
+            money(dollars(&value["ceiling"]))
         ),
         Command::Ceiling {
             command: CeilingCommand::Keep { .. },
         } => println!(
-            "Kept: the ceiling for {} stays ${:.2}.",
+            "Kept: the ceiling for {} stays {}.",
             scope_label(&value["ceiling"]["scope"]),
-            dollars(&value["ceiling"])
+            money(dollars(&value["ceiling"]))
         ),
         Command::Chain {
             command: ChainCommand::Set { .. },
@@ -3606,17 +3607,18 @@ fn print_ceilings(value: &Value) {
             ""
         };
         println!(
-            "{:28} ${usd:.2} {measure}{inactive}",
-            scope_label(&c["scope"])
+            "{:28} {} {measure}{inactive}",
+            scope_label(&c["scope"]),
+            money(usd)
         );
     }
     for q in value["questions"].as_array().into_iter().flatten() {
         let id = q["id"].as_str().unwrap_or_default();
         println!(
-            "Reached: {} ${:.2} (${:.2} counted). Keep it: switchboard ceiling keep {id}. Double it in the Switchboard window.",
+            "Reached: {} {} ({} counted). Keep it: switchboard ceiling keep {id}. Double it in the Switchboard window.",
             scope_label(&q["scope"]),
-            q["usd"].as_f64().unwrap_or_default(),
-            q["spent"].as_f64().unwrap_or_default(),
+            money(q["usd"].as_f64().unwrap_or_default()),
+            money(q["spent"].as_f64().unwrap_or_default()),
         );
     }
     let last = &value["last_handover"];
