@@ -60,6 +60,26 @@ enum Command {
     },
     /// Link this `switchboard` into ~/.local/bin, as the window's *Link the CLI* does.
     Link,
+    /// Update a computer that runs only `switchboard serve` (no window, so the app never checks):
+    /// reads the release feed, checks the package's signature and installs a newer version into
+    /// the app. Run it as the account that owns the app, then restart `serve`.
+    Update {
+        /// Only say whether a newer version exists; install nothing.
+        #[arg(long)]
+        check: bool,
+        /// The installed app to replace: its `Fabric Switchboard.app` folder on macOS, its
+        /// AppImage on Linux. Default: the one this command runs from.
+        #[arg(long)]
+        app: Option<PathBuf>,
+        /// The release's `latest.json`, already downloaded (where github.com cannot be reached);
+        /// with `--archive`.
+        #[arg(long, requires = "archive")]
+        feed: Option<PathBuf>,
+        /// The release's package for this computer, already downloaded; with `--feed`. Its
+        /// signature is checked as a downloaded one is.
+        #[arg(long, requires = "feed")]
+        archive: Option<PathBuf>,
+    },
     /// What the installed app's About and tray do: automatic updates and opening at login.
     /// Answered by the running app only.
     App {
@@ -1488,6 +1508,26 @@ async fn run(cli: &Cli) -> Result<Value, String> {
     if let Command::Link = cli.command {
         return switchboard_runtime::agents::link_this_cli();
     }
+    // SB-305: no owner and no store; it replaces the app this binary belongs to.
+    if let Command::Update {
+        check,
+        app,
+        feed,
+        archive,
+    } = &cli.command
+    {
+        let local = feed
+            .clone()
+            .zip(archive.clone())
+            .map(|(feed, archive)| switchboard_runtime::self_update::Local { feed, archive });
+        return switchboard_runtime::self_update::run(
+            app.clone(),
+            *check,
+            env!("CARGO_PKG_VERSION"),
+            local,
+        )
+        .await;
+    }
     // SB-287: offline only. It opens the store itself, so it is refused while Switchboard runs.
     if let Command::Vault {
         command: VaultCommand::Use {
@@ -2332,6 +2372,7 @@ async fn run(cli: &Cli) -> Result<Value, String> {
         | Command::Uninstall { .. }
         | Command::Vault { .. }
         | Command::Link
+        | Command::Update { .. }
         | Command::Onboard { .. } => unreachable!(),
     };
     // SB-299: the operator's words open a loosening; the runtime checks them and records them.
@@ -3973,6 +4014,10 @@ mod mcp_parity {
         ("org cancel", Tool("switchboard_organization_set")),
         ("analytics", Tool("switchboard_analytics")),
         ("link", Tool("switchboard_link_cli")),
+        (
+            "update",
+            Not("SB-305: replaces the installed app; run by the account that owns it on a computer with no window, never by an agent over MCP"),
+        ),
         ("app updates", Tool("switchboard_app")),
         ("app check-updates", Tool("switchboard_app")),
         ("app restart-to-update", Tool("switchboard_app")),

@@ -117,7 +117,7 @@ binaries.
 | [errno](https://crates.io/crates/errno/0.3.14) | 0.3.14 | MIT OR Apache-2.0 | linked | macOS | [53](#text-53) |
 | [fastrand](https://crates.io/crates/fastrand/2.5.0) | 2.5.0 | Apache-2.0 OR MIT | linked | Windows, macOS | [2](#text-2) |
 | [fdeflate](https://crates.io/crates/fdeflate/0.3.7) | 0.3.7 | MIT OR Apache-2.0 | linked | Windows, macOS | [54](#text-54) |
-| [filetime](https://crates.io/crates/filetime/0.2.29) | 0.2.29 | MIT/Apache-2.0 | linked | macOS | [23](#text-23) |
+| [filetime](https://crates.io/crates/filetime/0.2.29) | 0.2.29 | MIT/Apache-2.0 | linked | Windows, macOS | [23](#text-23) |
 | [find-msvc-tools](https://crates.io/crates/find-msvc-tools/0.1.14) | 0.1.14 | MIT OR Apache-2.0 | build-time | Windows, macOS | [23](#text-23) |
 | [flate2](https://crates.io/crates/flate2/1.1.10) | 1.1.10 | MIT OR Apache-2.0 | linked | Windows, macOS | [55](#text-55) |
 | [fnv](https://crates.io/crates/fnv/1.0.7) | 1.0.7 | Apache-2.0 / MIT | linked | Windows, macOS | [56](#text-56) |
@@ -313,7 +313,7 @@ binaries.
 | [system-configuration](https://crates.io/crates/system-configuration/0.7.0) | 0.7.0 | MIT OR Apache-2.0 | linked | macOS | [169](#text-169) |
 | [system-configuration-sys](https://crates.io/crates/system-configuration-sys/0.6.0) | 0.6.0 | MIT OR Apache-2.0 | linked | macOS | [169](#text-169) |
 | [tao](https://crates.io/crates/tao/0.37.1) | 0.37.1 | Apache-2.0 | linked | Windows, macOS | [170](#text-170) |
-| [tar](https://crates.io/crates/tar/0.4.46) | 0.4.46 | MIT OR Apache-2.0 | linked | macOS | [171](#text-171) |
+| [tar](https://crates.io/crates/tar/0.4.46) | 0.4.46 | MIT OR Apache-2.0 | linked | Windows, macOS | [171](#text-171) |
 | [tauri](https://crates.io/crates/tauri/2.12.1) | 2.12.1 | Apache-2.0 OR MIT | linked | Windows, macOS | [172](#text-172) |
 | [tauri-build](https://crates.io/crates/tauri-build/2.7.1) | 2.7.1 | Apache-2.0 OR MIT | build-time | Windows, macOS | [172](#text-172) |
 | [tauri-codegen](https://crates.io/crates/tauri-codegen/2.7.1) | 2.7.1 | Apache-2.0 OR MIT | build-time | Windows, macOS | [172](#text-172) |
