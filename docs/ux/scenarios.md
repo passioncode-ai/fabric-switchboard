@@ -106,7 +106,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Errors & recovery:** Missing vault permission is an error with retry; never show a fabricated account.
 **Status:** validated
 **Meaning:** scenario design validated against the authorized brief; implementation and user-outcome evidence are separate.
-**Coverage:** [verification](../evidence/verification.md); implementation/fixture evidence only; live-provider outcome NOT_RUN.
+**Coverage:** [verification](../evidence/verification.md); implementation/fixture evidence only; live-provider outcome NOT_RUN. The browser demo shows a first run with `?demo=1&empty=1` (SB-192, UX-27).
 **Product:** unobserved
 **Traces:** ST-001, FLW-01
 
