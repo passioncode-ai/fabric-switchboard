@@ -188,6 +188,8 @@ let hermesError = '';
 let kimi: KimiAccounts | null = null;
 let kimiError = '';
 let openMenu: string | null = null;
+/** SB-192 (VIS-24): the menu that opens in this render only, so a background render never replays its entrance. */
+let menuEntering: string | null = null;
 /** The label and pool a sign-in started with travel with it, so Try again repeats the same sign-in (SB-62). */
 /** SB-104: one Try again at a time — a double click never starts two sign-ins. */
 let retrying = false;
@@ -1580,11 +1582,11 @@ const quotaContext = () => ({ nowSeconds: Date.now() / 1000, policies: snapshot?
 /** A menu is part of the render: `openMenu` names the one that is open. */
 function menu(key: string, label: string, items: ([string, () => void] | [string, () => void, string])[], triggerClass = 'icon-button', text = '⋯') {
   const wrapper = el('div', 'menu-root');
-  const trigger = button(text, () => { openMenu = openMenu === key ? null : key; render(); if (openMenu === key) document.querySelector<HTMLElement>(`[data-menu="${key}"] [role="menuitem"]`)?.focus(); else restoreFocus(`menu-${key}`); }, triggerClass, `menu-${key}`);
+  const trigger = button(text, () => { openMenu = openMenu === key ? null : key; menuEntering = openMenu; render(); menuEntering = null; if (openMenu === key) document.querySelector<HTMLElement>(`[data-menu="${key}"] [role="menuitem"]`)?.focus(); else restoreFocus(`menu-${key}`); }, triggerClass, `menu-${key}`);
   trigger.setAttribute('aria-haspopup', 'menu'); trigger.setAttribute('aria-expanded', String(openMenu === key)); trigger.setAttribute('aria-label', label);
   wrapper.append(trigger);
   if (openMenu === key) {
-    const list = el('div', 'menu'); list.setAttribute('role', 'menu'); list.setAttribute('aria-label', label); list.dataset.menu = key;
+    const list = el('div', menuEntering === key ? 'menu is-entering' : 'menu'); list.setAttribute('role', 'menu'); list.setAttribute('aria-label', label); list.dataset.menu = key;
     items.forEach(([text, action, tone], index) => {
       // VIS-27: a line sets a destructive item apart from the ordinary ones above it.
       if (tone?.includes('danger') && index > 0) { const line = el('div', 'menu-separator'); line.setAttribute('role', 'separator'); list.append(line); }
