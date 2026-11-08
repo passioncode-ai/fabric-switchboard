@@ -8,6 +8,8 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- Moving an account to a machine that still holds an old copy of the same sign-in in that group now says so ("The other machine already holds this sign-in in that group...") instead of "did not save the sign-in"; remove the old copy there and move it again (SB-283).
+- `switchboard update --feed latest.json --archive <package>` installs from release files fetched another way (for a network where github.com refuses anonymous downloads), checked the same way (SB-305).
 - A computer that runs only `switchboard serve` (a Mac space with no graphical login, a Linux VM) can update now: `switchboard update --check` says whether a newer version exists, and `switchboard update`, run by the account that owns the app, checks the package's signature and installs it; then restart `serve` (SB-305).
 
 ## 0.7.33

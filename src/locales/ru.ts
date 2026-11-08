@@ -20,6 +20,7 @@ export const RU: Record<string, string> = {
   "This account is already used elsewhere or turned off here.": "Этот аккаунт уже используется в другом месте или выключен здесь.",
   "Select another account for its group before moving this one.": "Выберите для его группы другой аккаунт, прежде чем переносить этот.",
   "The other machine did not save the sign-in. Nothing changed here; check ssh and its Switchboard.": "Другая машина не сохранила вход. Здесь ничего не изменилось; проверьте ssh и Switchboard на ней.",
+  "The other machine already holds this sign-in in that group. Remove its old copy there, then move it again.": "На другой машине этот вход уже есть в той группе. Удалите там старую копию и перенесите снова.",
   "The other machine saved the sign-in but the provider did not answer it there. It was removed there and stays here.": "Другая машина сохранила вход, но провайдер там на него не ответил. Там он удалён, здесь остался.",
   "Choose bypass or ask.": "Выберите bypass или ask.",
   "Group not found.": "Группа не найдена.",

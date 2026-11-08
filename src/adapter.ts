@@ -146,6 +146,7 @@ const safeErrors = new Set([
   "This account is already used elsewhere or turned off here.",
   "Select another account for its group before moving this one.",
   "The other machine did not save the sign-in. Nothing changed here; check ssh and its Switchboard.",
+  "The other machine already holds this sign-in in that group. Remove its old copy there, then move it again.",
   "The other machine saved the sign-in but the provider did not answer it there. It was removed there and stays here.",
   // Where a data folder keeps its sign-ins (SB-287).
   "The sign-in store's choice (vault.json) could not be read. Delete vault.json to use this computer's own store, or choose again with switchboard vault use.",

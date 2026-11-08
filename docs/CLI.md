@@ -196,6 +196,7 @@ from the CLI, then restarts the daemons:
 "/Applications/Fabric Switchboard.app/Contents/MacOS/switchboard" --json update --check   # {current, latest, action: up_to_date|available}
 "/Applications/Fabric Switchboard.app/Contents/MacOS/switchboard" --json update            # installs a newer version; {action: installed, restart_needed: true}
 switchboard update --app /opt/fabric-switchboard/Fabric-Switchboard.AppImage             # Linux: the AppImage to replace (default $APPIMAGE)
+switchboard update --feed latest.json --archive Fabric-Switchboard-X.Y.Z-macos-universal.app.tar.gz   # files fetched with `gh release download` where github.com refuses anonymous downloads; checked the same way
 ```
 
 It reads the release feed the app reads, offers only a newer version, refuses a release that needs a person first

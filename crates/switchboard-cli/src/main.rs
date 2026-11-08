@@ -70,6 +70,14 @@ enum Command {
         /// AppImage on Linux. Default: the one this command runs from.
         #[arg(long)]
         app: Option<PathBuf>,
+        /// The release's `latest.json`, already downloaded (where github.com cannot be reached);
+        /// with `--archive`.
+        #[arg(long, requires = "archive")]
+        feed: Option<PathBuf>,
+        /// The release's package for this computer, already downloaded; with `--feed`. Its
+        /// signature is checked as a downloaded one is.
+        #[arg(long, requires = "feed")]
+        archive: Option<PathBuf>,
     },
     /// What the installed app's About and tray do: automatic updates and opening at login.
     /// Answered by the running app only.
@@ -1500,11 +1508,22 @@ async fn run(cli: &Cli) -> Result<Value, String> {
         return switchboard_runtime::agents::link_this_cli();
     }
     // SB-305: no owner and no store; it replaces the app this binary belongs to.
-    if let Command::Update { check, app } = &cli.command {
+    if let Command::Update {
+        check,
+        app,
+        feed,
+        archive,
+    } = &cli.command
+    {
+        let local = feed
+            .clone()
+            .zip(archive.clone())
+            .map(|(feed, archive)| switchboard_runtime::self_update::Local { feed, archive });
         return switchboard_runtime::self_update::run(
             app.clone(),
             *check,
             env!("CARGO_PKG_VERSION"),
+            local,
         )
         .await;
     }

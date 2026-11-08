@@ -65,6 +65,7 @@ const ALLOWLIST = {
   'The other machine did not give the sign-in back. Nothing changed; check ssh and its Switchboard.': 'SB-292: CLI and MCP only',
   'The sign-in came back but the provider did not answer it here. It went back to the other machine.': 'SB-292: CLI and MCP only',
   // runtime self_update.rs (SB-305): `switchboard update` is CLI only, for a computer with no window.
+  'Could not read the release files given. Name the release\'s latest.json and its package.': 'SB-305: CLI only',
   'Could not read the release feed. Check the network and try again.': 'SB-305: CLI only',
   'The release has no package for this computer.': 'SB-305: CLI only',
   'This version needs a step by a person before it installs; its release notes say what to do. Nothing was changed.': 'SB-305: CLI only',

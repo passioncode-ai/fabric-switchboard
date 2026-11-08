@@ -262,18 +262,35 @@ async fn fetch(
         .map_err(|_| error.to_string())
 }
 
+/// Files fetched by other means (`gh release download` where github.com refuses anonymous
+/// downloads): the release's `latest.json` and its package. They are checked exactly as
+/// downloaded ones are.
+pub struct Local {
+    pub feed: PathBuf,
+    pub archive: PathBuf,
+}
+pub const LOCAL_UNREADABLE: &str = "Could not read the release files given. Name the release's latest.json and its package.";
+
 /// `switchboard update`: what the feed offers this computer and, unless `check`, its install
 /// into `app` (default: the bundle or AppImage this binary runs from).
-pub async fn run(app: Option<PathBuf>, check: bool, current: &str) -> Result<Value, String> {
+pub async fn run(
+    app: Option<PathBuf>,
+    check: bool,
+    current: &str,
+    local: Option<Local>,
+) -> Result<Value, String> {
     let key = platform_key().ok_or(PLATFORM_UNSUPPORTED)?;
     let client = reqwest::Client::builder()
         .user_agent("fabric-switchboard-cli-updater")
         .connect_timeout(std::time::Duration::from_secs(15))
         .build()
         .map_err(|_| FEED_UNREADABLE.to_string())?;
+    let feed_bytes = match &local {
+        Some(local) => std::fs::read(&local.feed).map_err(|_| LOCAL_UNREADABLE.to_string())?,
+        None => fetch(&client, FEED, FEED_WITHIN, FEED_UNREADABLE).await?,
+    };
     let feed: Value =
-        serde_json::from_slice(&fetch(&client, FEED, FEED_WITHIN, FEED_UNREADABLE).await?)
-            .map_err(|_| FEED_UNREADABLE.to_string())?;
+        serde_json::from_slice(&feed_bytes).map_err(|_| FEED_UNREADABLE.to_string())?;
     let Some(offer) = choose(&feed, current, key)? else {
         return Ok(json!({"current": current, "latest": feed["version"], "action": "up_to_date"}));
     };
@@ -297,7 +314,10 @@ pub async fn run(app: Option<PathBuf>, check: bool, current: &str) -> Result<Val
             "app": target.to_string_lossy(),
         }));
     }
-    let archive = fetch(&client, &offer.url, ARCHIVE_WITHIN, DOWNLOAD_FAILED).await?;
+    let archive = match &local {
+        Some(local) => std::fs::read(&local.archive).map_err(|_| LOCAL_UNREADABLE.to_string())?,
+        None => fetch(&client, &offer.url, ARCHIVE_WITHIN, DOWNLOAD_FAILED).await?,
+    };
     verify(&archive, &offer.signature, PUBLIC_KEY, &offer.version)?;
     let place = target.clone();
     let installed = tokio::task::spawn_blocking(move || {
