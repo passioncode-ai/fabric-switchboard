@@ -2,6 +2,29 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-11-08 (night): releases 0.7.27 to 0.7.29; SB-299 doors, SB-292 seats
+
+- **Released 0.7.27** (2026-11-07 23:39:36Z, 25 assets, seven platforms): SB-301; studio-agent
+  told in `f32a24c0` (update, then `vault use file --move-from-native` once per Studio space).
+- **Released 0.7.28** (2026-11-08 00:41:55Z, 25 assets; #497, #498): an agent raises, clears or
+  doubles a ceiling, deletes a capped group or replaces a counted key on the operator's quoted words
+  (`--operator-said`, `--said-at`, `--said-in`; MCP `decision`), recorded in `spend.json` `loosened`.
+- **0.7.29 tagged** (#502 `bfac3b1`): SB-299's last partial doors (#499: `project save
+  --organization`, MCP `switchboard_project_create`, `login pending`, `kimi status`) and SB-292 S-6
+  (#501: `settings export --group POOL`). SB-299 now leaves only MCP tools for the PERSON group,
+  which the CLI already covers.
+- **SB-291 and SB-292 design** (#500, due 2026-11-13): `docs/research/seats-and-levels-2026-11-08.md`.
+  S-2 built after the tag (#503 `b043359`): every move and hand-over is a line in `seats.jsonl`
+  with who ordered it. Next S-3 and S-4 (`accounts surrender` on the member's side, `accounts
+  recall` here, the two-folder acceptance test); SB-291's L-rules wait for the source of truth.
+- **The disk filled once** (a gate died with `No space left on device`): merged worktrees' Cargo
+  `target/` folders hold 3 to 8 GB each; remove a worktree once its branch merges.
+- **The board's `com_*` tools vanished from this session** after a reconnect at about 00:50Z; the
+  watcher (cron `cf714165`, until 2026-11-21) read nothing since. A new session gets them back.
+- **Exact next task.** Confirm 0.7.29 (assets, `latest.json`); then SB-292 S-3 and S-4, with
+  `surrender` refusing to print a sign-in to a terminal (stdout must be a pipe); then SB-296 point 3
+  (Dashboards episodes against `transaction_held`) and SB-300 when it fails again.
+
 ## 2026-11-07 (late evening): releases 0.7.25 to 0.7.27; SB-299 doors, SB-283 move, SB-301
 
 - **Released 0.7.25** (2026-11-07 20:38:18Z, 25 assets, seven platforms; release PR #484 `9ce15d9`):
