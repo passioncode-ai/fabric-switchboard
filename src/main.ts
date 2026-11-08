@@ -48,11 +48,13 @@ const tour = (): { page: Page; target: string[]; title: string; text: string }[]
   { page: 'accounts', target: ['[data-focus="menu-add"]'], title: t('Add your accounts'), text: t('Press + Add account to sign in to another account. To save the account Claude Code already uses, press Add to Switchboard under In use now. Each row then shows how much is used and when it resets.') },
   { page: 'accounts', target: ['.rotation-bar'], title: t('Switch, by hand or automatically'), text: t('Switch moves Claude Code to another account. Turn on automatic switching, and Switchboard moves off an account that nears its limit to the one with the most left.') },
   { page: 'projects', target: ['[data-focus="new-project"]', '[data-focus="empty-new-project"]'], title: t('Give a group its own accounts'), text: t('Press + New group, add the group\'s repositories and choose its accounts. Sessions launched from those folders use only them, and other groups never switch to them.') },
-  { page: 'agents', target: ['[data-focus="copy-onboard"]', '#connect-panel > h2'], title: t('Agents, and it keeps running'), text: trayInArea() ? t('Here, give your coding agent the setup prompt: it registers the tools and sets up the rest, leaving you only the sign-in. Closing the window keeps Switchboard working; open or quit it from its icon in the notification area.') : t('Here, give your coding agent the setup prompt: it registers the tools and sets up the rest, leaving you only the sign-in. Closing the window keeps Switchboard working; open or quit it from the menu-bar icon.') },
+  { page: 'agents', target: ['[data-copy-row="copy-onboard"]', '#connect-panel > h2'], title: t('Agents, and it keeps running'), text: trayInArea() ? t('Here, give your coding agent the setup prompt: it registers the tools and sets up the rest, leaving you only the sign-in. Closing the window keeps Switchboard working; open or quit it from its icon in the notification area.') : t('Here, give your coding agent the setup prompt: it registers the tools and sets up the rest, leaving you only the sign-in. Closing the window keeps Switchboard working; open or quit it from the menu-bar icon.') },
 ];
 // Storage refused: the tour shows again next start rather than never (SCN-035).
 let tourStep: number | null = (() => { try { return localStorage.getItem(TOUR_KEY) ? null : 0; } catch { return 0; } })();
 function tourGo(step: number | null) {
+  // SB-195: a confirmation shown before the tour (the usage answer) does not ride along its steps; an error stays.
+  if (step !== tourStep && notice && !noticeError) { notice = ''; noticeAction = null; }
   tourStep = step;
   if (step === null) { try { localStorage.setItem(TOUR_KEY, '1'); } catch { /* the tour shows again next start */ } render(); restoreFocus('page-title'); return; }
   page = tour()[step].page; if (page === 'agents' && !agentsView) void loadAgents(); render(); restoreFocus('tour-title'); placeTour(true);
@@ -863,7 +865,7 @@ function copyText(control: HTMLButtonElement, text: string, label: string) {
   }, () => announce(t('Copy is unavailable here. Select the command text instead.')));
 }
 function copyable(label: string, command: string, key: string) {
-  const row = el('div', 'policy-row'); const content = el('div');
+  const row = el('div', 'policy-row'); row.dataset.copyRow = key; const content = el('div');
   content.append(el('strong', 'block', label), el('code', 'address', command));
   const copy = button(t('Copy'), () => copyText(copy, command, label), 'text-button', key);
   row.append(content, copy);
