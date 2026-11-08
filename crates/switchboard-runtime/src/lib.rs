@@ -42,6 +42,7 @@ pub mod recovery;
 mod refresh;
 pub mod roots;
 pub mod seats;
+pub mod self_update;
 pub mod settings_bundle;
 pub mod settings_signing;
 pub mod shell;

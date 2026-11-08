@@ -738,7 +738,14 @@ impl SaveRequest<'_> {
         for a in state.accounts.iter().filter(in_pool) {
             let (both_known, identity_match) = identity_of(a);
             let token_match = if !self.upsert || !both_known {
-                read(&a.id)?.access_token == self.credential.access_token
+                match read(&a.id) {
+                    Ok(stored) => stored.access_token == self.credential.access_token,
+                    // A row whose sign-in this store cannot read (left in a keychain a moved
+                    // data folder no longer opens) cannot be the one being added, and a new
+                    // account must not fail on it (Mac Studio, 2026-11-08).
+                    Err(_) if !self.upsert => false,
+                    Err(error) => return Err(error),
+                }
             } else {
                 false
             };

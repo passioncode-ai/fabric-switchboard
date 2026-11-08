@@ -189,6 +189,22 @@ On a Mac Studio space the owner runs as a LaunchDaemon that Project Observatory'
 
 `serve` stops with status 0 on a signal, so `KeepAlive {SuccessfulExit: false}` starts it again only after a crash.
 
+Such a computer never opens the app, so it never checks for updates (SB-305). The account that owns the app updates it
+from the CLI, then restarts the daemons:
+
+```sh
+"/Applications/Fabric Switchboard.app/Contents/MacOS/switchboard" --json update --check   # {current, latest, action: up_to_date|available}
+"/Applications/Fabric Switchboard.app/Contents/MacOS/switchboard" --json update            # installs a newer version; {action: installed, restart_needed: true}
+switchboard update --app /opt/fabric-switchboard/Fabric-Switchboard.AppImage             # Linux: the AppImage to replace (default $APPIMAGE)
+switchboard update --feed latest.json --archive Fabric-Switchboard-X.Y.Z-macos-universal.app.tar.gz   # files fetched with `gh release download` where github.com refuses anonymous downloads; checked the same way
+```
+
+It reads the release feed the app reads, offers only a newer version, refuses a release that needs a person first
+(`needs_migration`), checks the package's minisign signature against the key the app ships and the version signed
+into it, and replaces the app with one rename (the old one is put back if the move fails). A `serve` already running
+keeps the old binary until it is restarted (`launchctl kickstart -k system/<label>` or the validator's `remove` and
+`apply`). Windows is not covered: there the app updates itself.
+
 ## Uninstall
 
 ```sh
