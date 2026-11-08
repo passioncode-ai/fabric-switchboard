@@ -73,11 +73,12 @@ export class MutationClock {
 /** SB-229: a background read under the clock: `applied` with its value, or `failed`, only when no
  * user action began after it was issued; `stale` otherwise (its value, when it answered, may predate
  * the action: it may fill an empty view, never replace one; its failure is not shown). */
-export type ClockedRead<T> = { state: 'applied'; value: T } | { state: 'failed'; error: unknown } | { state: 'stale'; value?: T };
+/** `stale`: an action began while the read ran; it keeps the answer or, for a failed read, its error (SB-232). */
+export type ClockedRead<T> = { state: 'applied'; value: T } | { state: 'failed'; error: unknown } | { state: 'stale'; value?: T; error?: unknown };
 export async function clockedRead<T>(clock: MutationClock, read: () => Promise<T>): Promise<ClockedRead<T>> {
   const stamp = clock.stamp();
   try { const value = await read(); return clock.accepts(stamp) ? { state: 'applied', value } : { state: 'stale', value }; }
-  catch (error) { return clock.accepts(stamp) ? { state: 'failed', error } : { state: 'stale' }; }
+  catch (error) { return clock.accepts(stamp) ? { state: 'failed', error } : { state: 'stale', error }; }
 }
 
 export type RuleState = 'active' | 'paused' | 'expired';
@@ -1380,6 +1381,9 @@ export function afterRead<V>(current: { view: V | null; error: string }, read: C
   if (read.state === 'failed' && !afterSave) return { view: current.view, error: errorText(read.error) };
   // A stale answer fills an empty view only (a later read corrects it), and clears nothing.
   if (read.state === 'stale' && read.value !== undefined && current.view === null) return { view: read.value, error: current.error };
+  // SB-232: a stale failure with nothing on screen and nothing said names itself, or the view would
+  // read as still loading until the person navigates away.
+  if (read.state === 'stale' && read.value === undefined && read.error !== undefined && current.view === null && !current.error && !afterSave) return { view: null, error: errorText(read.error) };
   return current;
 }
 /** One answer to a reached ceiling. There is no `recommended` field and no primary class: the

@@ -1293,7 +1293,7 @@ check(() => {
     let pending = later(); let read = logic.clockedRead(clock, () => pending.promise); clock.begin(); clock.end(); pending.settle.resolve(1);
     assert.deepEqual(await read, { state: 'stale', value: 1 }, 'its value comes back marked stale: it may only fill an empty view');
     pending = later(); read = logic.clockedRead(clock, () => pending.promise); clock.begin(); pending.settle.reject(new Error('x'));
-    assert.deepEqual(await read, { state: 'stale' }, 'a failure during an action is not reported');
+    { const stale = await read; assert.equal(stale.state, 'stale'); assert.equal(stale.value, undefined); assert.equal(stale.error.message, 'x', 'a failure during an action comes back marked stale with its error (SB-232): afterRead decides'); }
     clock.end();
     // Issued during an action: stale too.
     clock.begin(); read = logic.clockedRead(clock, async () => 2); clock.end();
@@ -1435,6 +1435,11 @@ check(() => {
     assert.deepEqual(logic.afterRead(shown, { state: 'failed', error: new Error('x') }, true, text), shown);
     assert.deepEqual(logic.afterRead(shown, { state: 'failed', error: new Error('x') }, false, text), { view: shown.view, error: 'read: x' });
     assert.deepEqual(logic.afterRead(shown, { state: 'stale' }, false, text), shown);
+    // SB-232: a first read that failed while an action ran names itself instead of loading forever.
+    assert.deepEqual(logic.afterRead({ view: null, error: '' }, { state: 'stale', error: new Error('x') }, false, text), { view: null, error: 'read: x' });
+    assert.deepEqual(logic.afterRead(shown, { state: 'stale', error: new Error('x') }, false, text), shown, 'a view on screen stays and says nothing');
+    assert.deepEqual(logic.afterRead({ view: null, error: 'old' }, { state: 'stale', error: new Error('x') }, false, text), { view: null, error: 'old' });
+    assert.deepEqual(logic.afterRead({ view: null, error: '' }, { state: 'stale', error: new Error('x') }, true, text), { view: null, error: '' }, 'right after a save the next read reports');
     // A stale read never replaces what is shown, but fills an empty view (a page opened while an
     // action ran would otherwise read "Reading…" until the next Refresh); a later read corrects it.
     assert.deepEqual(logic.afterRead(shown, { state: 'stale', value: { questions: [] } }, false, text), shown);
