@@ -8,7 +8,7 @@
 //! studio-agent, board thread `f32a24c0`).
 
 use serde_json::{json, Value};
-use switchboard_core::{AuthKind, Provider, Store};
+use switchboard_core::{AuthKind, Credential, Provider, Store};
 
 /// The macOS app's own command, the default program on the other machine.
 pub const REMOTE_DEFAULT: &str = "/Applications/Fabric Switchboard.app/Contents/MacOS/switchboard";
@@ -23,6 +23,16 @@ pub const SELECTED: &str = "Select another account for its group before moving t
 pub const ADD_FAILED: &str =
     "The other machine did not save the sign-in. Nothing changed here; check ssh and its Switchboard.";
 pub const NOT_VERIFIED: &str = "The other machine saved the sign-in but the provider did not answer it there. It was removed there and stays here.";
+
+pub const CLAUDE_ONLY: &str = "Only a Claude sign-in can be called back for now.";
+pub const NOT_AWAY: &str = "This account is used here, not on another machine.";
+pub const NO_REMOTE_ID: &str =
+    "Name the account's id on the other machine; no recorded move names it.";
+pub const SURRENDER_FAILED: &str =
+    "The other machine did not give the sign-in back. Nothing changed; check ssh and its Switchboard.";
+pub const NOT_RETURNED: &str = "The sign-in came back but the provider did not answer it here. It went back to the other machine.";
+pub const SURRENDER_TO_TERMINAL: &str =
+    "This prints a sign-in. Run it only through ssh from the machine that calls the account back.";
 
 /// Runs one command on the other machine: `ssh <target> -- <remote command>`, with `stdin` when
 /// given; answers its standard output, or an error when it failed.
@@ -137,6 +147,173 @@ pub fn send(
         return Err(NOT_VERIFIED.into());
     }
     Ok(json!({"moved": true, "target": target, "remote_id": remote_id, "marked_elsewhere": true}))
+}
+
+/// SB-292 (S-3), on the machine that holds the account: give its sign-in back to the machine that
+/// calls it back. It is marked here as used elsewhere first, so this machine never renews it
+/// again, and its tokens are answered for the caller's ssh pipe (the CLI refuses a terminal).
+/// `undo` clears the mark when the caller could not take it.
+pub fn surrender(store: &Store, id: &str, undo: bool, now: i64) -> Result<Value, String> {
+    if undo {
+        store.mark_elsewhere(id, false, now)?;
+        return Ok(json!({"restored": true}));
+    }
+    let snapshot = store.snapshot()?;
+    let account = snapshot
+        .accounts
+        .iter()
+        .find(|a| a.id == id)
+        .ok_or("Account not found")?;
+    if account.kind != AuthKind::OAuth {
+        return Err(NOT_A_SIGN_IN.into());
+    }
+    if account.provider != Provider::Claude {
+        return Err(CLAUDE_ONLY.into());
+    }
+    if !account.enabled || snapshot.elsewhere.contains_key(id) {
+        return Err(NOT_HERE.into());
+    }
+    if snapshot.routes.values().any(|v| v == id) {
+        return Err(SELECTED.into());
+    }
+    let credential = store.stored_credential(id)?;
+    store.mark_elsewhere_at(id, true, now, Some("called back"))?;
+    let tokens: Value =
+        serde_json::from_str(&credential.to_oauth_json(account.provider)).unwrap_or(Value::Null);
+    Ok(json!({"provider": "claude", "credential": tokens}))
+}
+
+/// What `recall_take` brought back, for `recall_undo` when the provider does not answer it here.
+pub struct Taken {
+    pub remote_id: String,
+}
+
+/// SB-292 (S-3), on this machine: take the sign-in of an account this machine moved away
+/// (`send`) back from `target`. The other machine marks it used elsewhere and hands its tokens
+/// over ssh; they replace the spent ones here (`Store::adopt_refreshed`, identity checked) and
+/// the mark here is cleared. The caller checks the provider answers, then `recall_finish`.
+pub fn recall_take(
+    store: &Store,
+    id: &str,
+    target: &str,
+    remote_id: &str,
+    program: &str,
+    now: i64,
+    run: &Run<'_>,
+) -> Result<Taken, String> {
+    if !target_valid(target) {
+        return Err(TARGET_INVALID.into());
+    }
+    if !program.starts_with('/') || program.contains(['\'', '"', '\n']) {
+        return Err(REMOTE_INVALID.into());
+    }
+    if remote_id.is_empty() || remote_id.len() > 64 {
+        return Err(NO_REMOTE_ID.into());
+    }
+    let snapshot = store.snapshot()?;
+    let account = snapshot
+        .accounts
+        .iter()
+        .find(|a| a.id == id)
+        .ok_or("Account not found")?;
+    if account.kind != AuthKind::OAuth {
+        return Err(NOT_A_SIGN_IN.into());
+    }
+    if account.provider != Provider::Claude {
+        return Err(CLAUDE_ONLY.into());
+    }
+    if !snapshot.elsewhere.contains_key(id) {
+        return Err(NOT_AWAY.into());
+    }
+    let spent = store
+        .stored_credential(id)?
+        .refresh_token
+        .ok_or(NOT_A_SIGN_IN)?;
+    let ssh = |command: String| vec![target.to_owned(), "--".to_owned(), command];
+    let undo_there = || {
+        let _ = run(
+            &ssh(remote(
+                program,
+                &["--json", "accounts", "surrender", remote_id, "--undo"],
+            )),
+            None,
+        );
+    };
+    let given = run(
+        &ssh(remote(
+            program,
+            &["--json", "accounts", "surrender", remote_id],
+        )),
+        None,
+    )
+    .ok()
+    .and_then(|out| data(&out))
+    .ok_or(SURRENDER_FAILED)?;
+    let tokens = given["credential"].to_string();
+    let Ok(credential) = Credential::parse(Provider::Claude, AuthKind::OAuth, &tokens) else {
+        undo_there();
+        return Err(SURRENDER_FAILED.into());
+    };
+    if store
+        .adopt_refreshed(Provider::Claude, &spent, &credential)
+        .is_err()
+    {
+        undo_there();
+        return Err(SURRENDER_FAILED.into());
+    }
+    store.mark_elsewhere(id, false, now)?;
+    Ok(Taken {
+        remote_id: remote_id.to_owned(),
+    })
+}
+
+/// The provider did not answer the sign-in here: it goes back to the other machine, which holds
+/// the same tokens and renews them again, and this machine stops using it.
+pub fn recall_undo(
+    store: &Store,
+    id: &str,
+    target: &str,
+    taken: &Taken,
+    program: &str,
+    now: i64,
+    run: &Run<'_>,
+) -> Result<(), String> {
+    store.mark_elsewhere_at(id, true, now, Some(target))?;
+    let command = remote(
+        program,
+        &[
+            "--json",
+            "accounts",
+            "surrender",
+            &taken.remote_id,
+            "--undo",
+        ],
+    );
+    let _ = run(&[target.to_owned(), "--".to_owned(), command], None);
+    Ok(())
+}
+
+/// SB-292 (S-4): the sign-in works here; remove the other machine's copy and prove it is gone:
+/// its account list no longer names it. Answers `{recalled, removed_there, proved}`.
+pub fn recall_finish(target: &str, taken: &Taken, program: &str, run: &Run<'_>) -> Value {
+    let ssh = |command: String| vec![target.to_owned(), "--".to_owned(), command];
+    let removed = run(
+        &ssh(remote(
+            program,
+            &["--json", "accounts", "remove", &taken.remote_id],
+        )),
+        None,
+    )
+    .ok()
+    .and_then(|out| data(&out))
+    .is_some();
+    let proved = removed
+        && run(&ssh(remote(program, &["--json", "accounts", "list"])), None)
+            .ok()
+            .and_then(|out| data(&out))
+            .and_then(|d| d["accounts"].as_array().cloned())
+            .is_some_and(|accounts| accounts.iter().all(|a| a["id"] != taken.remote_id.as_str()));
+    json!({"recalled": true, "target": target, "removed_there": removed, "proved": proved})
 }
 
 /// The real runner: the system's `ssh` in batch mode (no prompt), 2 minutes at most.
@@ -372,5 +549,217 @@ mod tests {
             REMOTE_INVALID
         );
         assert!(calls.lock().unwrap().is_empty(), "nothing ran");
+    }
+
+    /// The other machine's answers for a call back: `surrender` gives these tokens (or fails),
+    /// `remove` works, and `list` names `still` (the copy was not removed) or nothing.
+    fn member<'a>(
+        calls: &'a Calls,
+        give: Option<&'static str>,
+        still: bool,
+    ) -> impl Fn(&[String], Option<&[u8]>) -> Result<String, String> + 'a {
+        move |args: &[String], _stdin: Option<&[u8]>| {
+            assert_eq!(args[0], "studio.local");
+            let command = args[2].clone();
+            calls.lock().unwrap().push((command.clone(), None));
+            if command.contains("'surrender'") && command.contains("'--undo'") {
+                return Ok(r#"{"ok":true,"data":{"restored":true}}"#.into());
+            }
+            if command.contains("'surrender'") {
+                return give
+                    .map(|tokens| {
+                        format!(
+                            r#"{{"ok":true,"data":{{"provider":"claude","credential":{tokens}}}}}"#
+                        )
+                    })
+                    .ok_or_else(|| "ssh failed.".to_string());
+            }
+            if command.contains("'remove'") {
+                return Ok(r#"{"ok":true,"data":null}"#.into());
+            }
+            if command.contains("'list'") {
+                let accounts = if still {
+                    r#"[{"id":"remote-1"}]"#
+                } else {
+                    "[]"
+                };
+                return Ok(format!(r#"{{"ok":true,"data":{{"accounts":{accounts}}}}}"#));
+            }
+            Err("unexpected call".into())
+        }
+    }
+
+    #[test]
+    fn a_member_gives_a_sign_in_back_once_and_never_to_a_terminal_of_its_own() {
+        // SB-292 (S-3): the giving side marks it used elsewhere before the tokens leave.
+        let (_root, store, id) = store_with(AuthKind::OAuth);
+        let given = surrender(&store, &id, false, 7).unwrap();
+        assert_eq!(given["provider"], "claude");
+        let back = Credential::parse(
+            Provider::Claude,
+            AuthKind::OAuth,
+            &given["credential"].to_string(),
+        )
+        .unwrap();
+        assert_eq!(back.refresh_token.as_deref(), Some("synthetic-refresh"));
+        assert!(store.snapshot().unwrap().elsewhere.contains_key(&id));
+        assert_eq!(surrender(&store, &id, false, 8).unwrap_err(), NOT_HERE);
+        surrender(&store, &id, true, 9).unwrap();
+        assert!(!store.snapshot().unwrap().elsewhere.contains_key(&id));
+        let (_root, keyed, key) = store_with(AuthKind::ApiKey);
+        assert_eq!(
+            surrender(&keyed, &key, false, 7).unwrap_err(),
+            NOT_A_SIGN_IN
+        );
+    }
+
+    const RENEWED: &str = r#"{"claudeAiOauth":{"accessToken":"synthetic-access-2","refreshToken":"synthetic-refresh-2","expiresAt":2000000000000,"accountUuid":"synthetic-account"}}"#;
+
+    #[test]
+    fn a_recalled_sign_in_replaces_the_spent_one_and_its_copy_is_proved_gone() {
+        // SB-292 (S-3, S-4): the tokens the member renewed come back, the mark here clears, the
+        // member's copy is removed and its list read.
+        let (_root, store, id) = store_with(AuthKind::OAuth);
+        let calls = Calls::default();
+        assert_eq!(
+            recall_take(
+                &store,
+                &id,
+                "studio.local",
+                "remote-1",
+                REMOTE_DEFAULT,
+                5,
+                &member(&calls, Some(RENEWED), false)
+            )
+            .err()
+            .unwrap(),
+            NOT_AWAY,
+            "an account used here is not called back"
+        );
+        store
+            .mark_elsewhere_at(&id, true, 5, Some("studio.local"))
+            .unwrap();
+        let taken = recall_take(
+            &store,
+            &id,
+            "studio.local",
+            "remote-1",
+            REMOTE_DEFAULT,
+            6,
+            &member(&calls, Some(RENEWED), false),
+        )
+        .unwrap();
+        let stored = store.stored_credential(&id).unwrap();
+        assert_eq!(stored.refresh_token.as_deref(), Some("synthetic-refresh-2"));
+        assert!(!store.snapshot().unwrap().elsewhere.contains_key(&id));
+        let done = recall_finish(
+            "studio.local",
+            &taken,
+            REMOTE_DEFAULT,
+            &member(&calls, None, false),
+        );
+        assert_eq!(done["removed_there"], true);
+        assert_eq!(done["proved"], true);
+        let kept = recall_finish(
+            "studio.local",
+            &taken,
+            REMOTE_DEFAULT,
+            &member(&calls, None, true),
+        );
+        assert_eq!(
+            kept["proved"], false,
+            "a copy still listed there is not proved gone"
+        );
+    }
+
+    #[test]
+    fn a_failed_call_back_changes_nothing_here_and_a_refused_one_goes_back() {
+        let (_root, store, id) = store_with(AuthKind::OAuth);
+        store
+            .mark_elsewhere_at(&id, true, 5, Some("studio.local"))
+            .unwrap();
+        let calls = Calls::default();
+        assert_eq!(
+            recall_take(
+                &store,
+                &id,
+                "studio.local",
+                "remote-1",
+                REMOTE_DEFAULT,
+                6,
+                &member(&calls, None, false)
+            )
+            .err()
+            .unwrap(),
+            SURRENDER_FAILED
+        );
+        assert_eq!(
+            store
+                .stored_credential(&id)
+                .unwrap()
+                .refresh_token
+                .as_deref(),
+            Some("synthetic-refresh")
+        );
+        assert!(store.snapshot().unwrap().elsewhere.contains_key(&id));
+        // Tokens that are not a sign-in: the member is told to use it again.
+        calls.lock().unwrap().clear();
+        assert!(recall_take(
+            &store,
+            &id,
+            "studio.local",
+            "remote-1",
+            REMOTE_DEFAULT,
+            6,
+            &member(&calls, Some(r#"{"x":1}"#), false)
+        )
+        .is_err());
+        assert!(calls
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|(c, _)| c.contains("'--undo'")));
+        // The provider did not answer it here: it goes back there and is used elsewhere here.
+        let taken = recall_take(
+            &store,
+            &id,
+            "studio.local",
+            "remote-1",
+            REMOTE_DEFAULT,
+            7,
+            &member(&calls, Some(RENEWED), false),
+        )
+        .unwrap();
+        calls.lock().unwrap().clear();
+        recall_undo(
+            &store,
+            &id,
+            "studio.local",
+            &taken,
+            REMOTE_DEFAULT,
+            8,
+            &member(&calls, None, false),
+        )
+        .unwrap();
+        assert!(store.snapshot().unwrap().elsewhere.contains_key(&id));
+        assert!(calls
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|(c, _)| c.contains("'surrender' 'remote-1' '--undo'")));
+        assert_eq!(
+            recall_take(
+                &store,
+                &id,
+                "studio.local",
+                "",
+                REMOTE_DEFAULT,
+                9,
+                &member(&calls, Some(RENEWED), false)
+            )
+            .err()
+            .unwrap(),
+            NO_REMOTE_ID
+        );
     }
 }

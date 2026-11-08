@@ -843,6 +843,31 @@ enum Accounts {
         #[arg(long)]
         remote: Option<String>,
     },
+    /// Take back a sign-in this machine moved to another one: that machine stops using it and
+    /// gives its tokens back over ssh, the provider is checked here, then its copy is removed
+    /// there and its account list read to prove it. Claude sign-ins only for now.
+    Recall {
+        /// The account id here (`switchboard accounts list`).
+        id: String,
+        /// The other machine as ssh knows it, as the move named it.
+        #[arg(long)]
+        from: String,
+        /// The account's id on the other machine; by default the one the recorded move names.
+        #[arg(long)]
+        remote_id: Option<String>,
+        /// The other machine's switchboard, an absolute path; by default the macOS app's.
+        #[arg(long)]
+        remote: Option<String>,
+    },
+    /// On the machine an account was moved to: give its sign-in back to the machine that calls
+    /// it back. Run only by `accounts recall` over ssh; it refuses to print to a terminal.
+    Surrender {
+        /// The account id on this machine.
+        id: String,
+        /// Use the account here again: the calling machine could not take it.
+        #[arg(long)]
+        undo: bool,
+    },
     /// Receive an account handed over to you: shows whose sign-in and into which group;
     /// with `--apply`, starts that sign-in. Its credential never travels: you sign in here.
     Receive {
@@ -1606,6 +1631,27 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                 program: remote.clone(),
                 decision: None,
             },
+            Accounts::Recall {
+                id,
+                from,
+                remote_id,
+                remote,
+            } => Operation::RecallAccount {
+                id: id.clone(),
+                from: from.clone(),
+                remote_id: remote_id.clone(),
+                program: remote.clone(),
+                decision: None,
+            },
+            Accounts::Surrender { id, undo } => {
+                if !undo && io::stdout().is_terminal() {
+                    return Err(switchboard_runtime::account_send::SURRENDER_TO_TERMINAL.into());
+                }
+                Operation::SurrenderAccount {
+                    id: id.clone(),
+                    undo: *undo,
+                }
+            }
             Accounts::HandOver { id, to } => Operation::HandOver {
                 id: id.clone(),
                 to: to.clone(),
@@ -3898,6 +3944,11 @@ mod mcp_parity {
         ("accounts move", Tool("switchboard_account_move")),
         ("accounts hand-over", Tool("switchboard_account_hand_over")),
         ("accounts send", Tool("switchboard_account_send")),
+        ("accounts recall", Tool("switchboard_account_recall")),
+        (
+            "accounts surrender",
+            Not("SB-292: run only by the calling machine's accounts recall over ssh; it prints a sign-in"),
+        ),
         ("accounts receive", Tool("switchboard_account_receive")),
         ("org list", Tool("switchboard_organizations")),
         ("org add", Tool("switchboard_organization_set")),

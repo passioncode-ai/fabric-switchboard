@@ -430,6 +430,14 @@ as ssh knows it, reachable without a prompt; `pool` its group there; `remote` th
 operator's words: `by: operator`, `instruction` verbatim, `at` RFC 3339, `source`) is recorded with it
 as who ordered it.
 
+### `switchboard_account_recall`: `account_id`, `from`, `remote_id?`, `remote?`, `decision?`
+
+Only when the operator asks. Takes back a Claude sign-in this machine moved with
+`switchboard_account_send`: the other machine stops using it and gives its tokens back over ssh, the
+provider is checked here (on failure it goes back there), then the copy there is removed and its
+account list read. Answers `{recalled, removed_there, proved}`; `proved` is false while the list
+there still names it. `remote_id` defaults to the one the recorded move names.
+
 ### `switchboard_account_hand_over`: `account_id`, `to`, `decision?`
 
 Only when the operator asks. Answers a signed record of the account without its credential and
