@@ -4,6 +4,8 @@ Account = one local credential record. Selected = configuration for next request
 
 ## Group, project, automatic switching, API keys (0.6.82, decisions D-1 and D-2)
 
+Recorded as [DEC-0006](../DECISIONS.md#dec-0006-a-person-reads-group-api-keys-and-automatic-switching).
+
 Every sentence a person reads uses these words. Command names, MCP tool names and JSON fields
 keep their identifiers (a stable API); the words below are what a person sees.
 
