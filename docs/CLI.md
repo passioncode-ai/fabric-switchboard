@@ -100,6 +100,7 @@ switchboard settings import switchboard-settings.json --under ~/code --under ~/w
 switchboard settings import switchboard-settings.json --apply --clone   # also clone what is on GitHub but not here (SB-268)
 switchboard settings signer                                      # the public key you sign settings files with, to publish (SB-272)
 switchboard settings export --sign > switchboard-settings.json   # signed with that key
+switchboard settings export --sign --group <pool> > member.json  # a member's machine: only that group, its organizations, ceilings and rotation settings (repeat --group; SB-292)
 switchboard settings import switchboard-settings.json --signer <published key> --apply   # only a file that key signed
 ```
 

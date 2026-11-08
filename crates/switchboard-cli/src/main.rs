@@ -610,6 +610,10 @@ enum SettingsCmd {
         /// from you (`settings signer` prints the key to publish).
         #[arg(long)]
         sign: bool,
+        /// Only this group (its id from `switchboard project list`) and the organizations,
+        /// ceilings and rotation settings it needs; repeat for each. For a member's machine.
+        #[arg(long = "group")]
+        groups: Vec<String>,
     },
     /// The public key this computer signs settings files with (made on first use). Publish it
     /// for your organization's members; its private half stays in this computer's vault.
@@ -1637,7 +1641,10 @@ async fn run(cli: &Cli) -> Result<Value, String> {
         Command::Status => Operation::Status,
         Command::Stats { days } => Operation::Statistics { days: Some(*days) },
         Command::Settings { command } => match command {
-            SettingsCmd::Export { sign } => Operation::SettingsExport { sign: *sign },
+            SettingsCmd::Export { sign, groups } => Operation::SettingsExport {
+                sign: *sign,
+                groups: groups.clone(),
+            },
             SettingsCmd::Signer => Operation::SettingsSigner,
             SettingsCmd::Import {
                 file,

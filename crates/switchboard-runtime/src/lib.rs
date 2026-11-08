@@ -491,6 +491,9 @@ pub enum Operation {
     SettingsExport {
         #[serde(default)]
         sign: bool,
+        /// SB-292: only these groups (pools) and what they need; empty: the whole bundle.
+        #[serde(default)]
+        groups: Vec<String>,
     },
     /// SB-272: the public key this computer signs settings files with, made on first use.
     SettingsSigner,
@@ -5789,8 +5792,11 @@ async fn execute(
                 blocking::run(|| statistics::ProjectIndex::build(&snapshot).with_strays(&folders));
             Ok(stats.report(&snapshot, &index, days, monitor::now()))
         }
-        Operation::SettingsExport { sign } => {
-            let mut bundle = settings_bundle::export(root, &store.snapshot()?, monitor::now());
+        Operation::SettingsExport { sign, groups } => {
+            let mut bundle = settings_bundle::scope(
+                settings_bundle::export(root, &store.snapshot()?, monitor::now()),
+                &groups,
+            )?;
             if sign {
                 let message = settings_bundle::signed_message(&bundle);
                 bundle.signature = Some(settings_signing::sign(root, &store, &message)?);

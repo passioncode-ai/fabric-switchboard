@@ -138,6 +138,7 @@ const safeErrors = new Set([
   'This folder belongs to a group. Launch one of the group\'s accounts.',
   // The permission mode of the sessions Switchboard starts (SB-298).
   'Choose bypass or ask.',
+  'Group not found.',
   // Moving a sign-in to another machine (SB-283).
   "Name the other machine as ssh knows it: letters, digits, dots, hyphens, @ and : only.",
   "Give the other machine's switchboard as an absolute path without quotes.",

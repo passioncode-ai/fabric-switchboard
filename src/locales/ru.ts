@@ -22,6 +22,7 @@ export const RU: Record<string, string> = {
   "The other machine did not save the sign-in. Nothing changed here; check ssh and its Switchboard.": "Другая машина не сохранила вход. Здесь ничего не изменилось; проверьте ssh и Switchboard на ней.",
   "The other machine saved the sign-in but the provider did not answer it there. It was removed there and stays here.": "Другая машина сохранила вход, но провайдер там на него не ответил. Там он удалён, здесь остался.",
   "Choose bypass or ask.": "Выберите bypass или ask.",
+  "Group not found.": "Группа не найдена.",
   "That group no longer exists. Choose a group, or the default group.": "Этой группы больше нет. Выберите группу или группу по умолчанию.",
   "{n} Claude Swap accounts imported or updated in the default group": "{n} аккаунт Claude Swap импортирован или обновлён в группе по умолчанию|{n} аккаунта Claude Swap импортированы или обновлены в группе по умолчанию|{n} аккаунтов Claude Swap импортированы или обновлены в группе по умолчанию",
   "{label} moved to the default group.": "Аккаунт {label} перенесён в группу по умолчанию.",
