@@ -640,6 +640,20 @@ fn offline_list_and_status_are_json_and_launch_requires_owner() {
         .unwrap();
     assert_eq!(output.status.code(), Some(1));
     assert!(String::from_utf8_lossy(&output.stderr).contains("switchboard serve"));
+    // SB-299: the sign-ins waiting, as the window lists them; with no owner, none.
+    let output = binary()
+        .arg("--data-dir")
+        .arg(tmp.path())
+        .args(["--json", "login", "pending"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(json["data"]["logins"], serde_json::json!([]), "{json}");
 }
 /// SB-201: a catalog agent launched through the proxy records the route's provider (`claude`)
 /// and its own id as `agent`; the session list names the agent, whole, not the route.
@@ -840,6 +854,15 @@ fn kimi_accounts_list_offline_and_refuse_unknown_ids_without_touching_the_ordina
     let output = run(&["kimi", "finish", "not-an-id"]);
     assert_eq!(output.status.code(), Some(1));
     assert!(String::from_utf8_lossy(&output.stderr).contains("no longer waiting"));
+    // SB-299: where a Kimi sign-in stands is a CLI read too; an unknown one has ended.
+    let output = run(&["--json", "kimi", "status", "not-an-id"]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(json["data"]["state"], "ended", "{json}");
     let output = run(&["kimi", "remove", "00000000-0000-4000-8000-000000000001"]);
     assert!(output.status.success());
     assert_eq!(

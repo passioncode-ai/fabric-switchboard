@@ -24,7 +24,7 @@ never the window; this is the first reading of the window against both.
 | Install updates automatically, check now, restart to update | `set_auto_update` (`:1245`), `check_for_updates` (`:1265`), `restart_to_update` (`:1260`) | the app's `updates` module, outside the runtime | the app exposes them over the control socket; a restart goes through the lifecycle broker |
 | Cancel a PassionCode.ai connection | `passioncode` action cancel (`:605`) | `VestaCancel` has no CLI or MCP route | `org connect --cancel` and an MCP action |
 
-Reads with no door: `pending_logins`, `analytics_status`, `login_item`, `update_status` (fields in `status`, or `login list`).
+Reads with no door: `pending_logins`, `analytics_status`, `login_item`, `update_status` (fields in `status`, or `login list`). Built: `pending_logins` as CLI `login pending` and MCP `switchboard_login` `pending`; analytics, login item and update status with their doors (`analytics`, `app`).
 
 ## Refused outside the window on purpose (money)
 
@@ -48,7 +48,7 @@ SB-299.
 
 | Action | What is missing |
 |---|---|
-| Create a group with its organizations (`save_project`) | MCP edits an existing group only (`ProjectEdit`); the CLI `project save` creates but takes no organization |
+| Create a group with its organizations (`save_project`) | built: CLI `project save --organization`, MCP `switchboard_project_create` |
 | PassionCode.ai (`passioncode`) | connect and disconnect are CLI only; cancel is nowhere |
 | Delete a group, save or remove an agent key | CLI only, and refused when a ceiling is involved (above) |
 | How one agent connects (`agent_connect`) | MCP only approximates it through `switchboard_onboarding` |
@@ -60,8 +60,8 @@ SB-299.
 restore a backup, remove a Kimi account, save or remove an OpenRouter key, delete a group (reason PERSON), and for
 `launch`, `kimi launch`, `agents launch` (reason LAUNCH, SB-64 and SB-74). An agent in a terminal reaches all of them;
 an agent with MCP alone does not. Whether the CLI counts as the agent's door, or each needs an MCP tool behind the
-operator's words, is the second question for SB-299. The one MCP-only action is the Kimi sign-in state: the CLI has no
-`kimi status`.
+operator's words, is the second question for SB-299. The one MCP-only action was the Kimi sign-in state; the CLI has
+`kimi status` now.
 
 ## Human gates that stay human
 

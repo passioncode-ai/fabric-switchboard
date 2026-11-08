@@ -526,6 +526,14 @@ enum Project {
         /// An account reserved for the group; repeat for each.
         #[arg(long = "account")]
         accounts: Vec<String>,
+        /// An organization of the group, by id or name; repeat for each, the first being the
+        /// group's own context. `personal` alone makes it personal. Left out, a new group is
+        /// personal and a saved one keeps its organizations.
+        #[arg(long = "organization")]
+        organizations: Vec<String>,
+        /// Move each listed account here from its group instead of sharing it.
+        #[arg(long)]
+        move_accounts: bool,
     },
     /// Delete a group. Its accounts keep its group id, no longer reserved.
     Delete {
@@ -1197,6 +1205,11 @@ enum KimiCommand {
         /// The id `switchboard kimi login` printed.
         id: String,
     },
+    /// Where a Kimi sign-in stands: pending, complete (ready to finish) or ended.
+    Status {
+        /// The id `switchboard kimi login` printed.
+        id: String,
+    },
     /// Sign in to a saved account again (when Kimi refused its login).
     Relogin {
         /// The account id (`switchboard kimi list`).
@@ -1301,6 +1314,8 @@ enum Login {
         #[arg(long)]
         login_id: String,
     },
+    /// Every sign-in waiting, oldest first: its id, provider, label, group and state.
+    Pending,
     /// pending, complete (ready to finish) or ended (Terminal exited without signing in).
     Status {
         /// The id `login begin` printed.
@@ -1848,6 +1863,7 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                 login_id: login_id.clone(),
                 code: read_secret()?,
             },
+            Login::Pending => Operation::PendingLogins,
             Login::Status { login_id } => Operation::LoginStatus {
                 login_id: login_id.clone(),
             },
@@ -2109,6 +2125,7 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                 region: region.clone(),
             },
             KimiCommand::Finish { id } => Operation::KimiLoginFinish { id: id.clone() },
+            KimiCommand::Status { id } => Operation::KimiLoginStatus { id: id.clone() },
             KimiCommand::Cancel { id } => Operation::KimiLoginCancel { id: id.clone() },
             KimiCommand::Relogin { id } => Operation::KimiSignInAgain { id: id.clone() },
             KimiCommand::Launch { id, dir } => Operation::KimiLaunch {
@@ -2148,9 +2165,11 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                 name,
                 folders,
                 accounts,
+                organizations,
+                move_accounts,
             } => Operation::SaveProject {
-                organizations: None,
-                move_accounts: false,
+                organizations: (!organizations.is_empty()).then(|| organizations.clone()),
+                move_accounts: *move_accounts,
                 pool: pool.clone(),
                 name: name.clone(),
                 folders: folders
@@ -3925,6 +3944,7 @@ mod mcp_parity {
         ("rotation set", Tool("switchboard_rotation_set")),
         ("login begin", Tool("switchboard_login")),
         ("login status", Tool("switchboard_login")),
+        ("login pending", Tool("switchboard_login")),
         ("login finish", Tool("switchboard_login")),
         ("login cancel", Tool("switchboard_login")),
         (
@@ -3969,6 +3989,7 @@ mod mcp_parity {
         ("kimi list", Tool("switchboard_kimi_accounts")),
         ("kimi login", Tool("switchboard_kimi_login")),
         ("kimi finish", Tool("switchboard_kimi_login")),
+        ("kimi status", Tool("switchboard_kimi_login")),
         ("kimi cancel", Tool("switchboard_kimi_login")),
         ("kimi relogin", Tool("switchboard_kimi_login")),
         ("kimi launch", Not(LAUNCH)),
@@ -3998,7 +4019,7 @@ mod mcp_parity {
         ("project map", Tool("switchboard_repository_map")),
         ("project rotate-capability", Not(PERSON)),
         ("project codex", Tool("switchboard_codex_route")),
-        ("project save", Tool("switchboard_project_edit")),
+        ("project save", Tool("switchboard_project_create")),
         ("project delete", Not(PERSON)),
         ("project suggest", Not(HOST)),
         (

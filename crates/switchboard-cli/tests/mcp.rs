@@ -176,6 +176,7 @@ async fn handshake_lists_tools_and_rejects_malformed_messages() {
             "switchboard_project_context",
             "switchboard_projects",
             "switchboard_project_edit",
+            "switchboard_project_create",
             "switchboard_codex_route",
             "switchboard_project_move_root",
             "switchboard_app",
@@ -1141,6 +1142,28 @@ async fn a_project_is_listed_and_changed_by_delta_over_mcp() {
         json!({"owner": "example", "name": "repo", "into": "relative/x"}),
     );
     assert!(error, "{refused}");
+    // SB-299: the window's New group, with an organization, over MCP.
+    let c = projects.path().join("created");
+    std::fs::create_dir_all(&c).unwrap();
+    let (error, created) = agent.tool(
+        "switchboard_project_create",
+        json!({"name": "Created", "folders": [c.to_string_lossy()], "organizations": ["Acme"]}),
+    );
+    assert!(!error, "{created}");
+    assert_eq!(created["project"]["name"], "Created", "{created}");
+    let (_, listed) = agent.tool("switchboard_projects", json!({}));
+    let made = listed["projects"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|p| p["name"] == "Created")
+        .unwrap_or_else(|| panic!("{listed}"));
+    assert_eq!(made["organization_name"], "Acme", "{listed}");
+    let (error, refused) = agent.tool(
+        "switchboard_project_create",
+        json!({"name": "Empty", "folders": []}),
+    );
+    assert!(error, "{refused}");
     let mut reader = Agent::start(data.path(), projects.path(), &[], true);
     let names: Vec<String> = reader.request("tools/list", json!({}))["result"]["tools"]
         .as_array()
@@ -1150,6 +1173,7 @@ async fn a_project_is_listed_and_changed_by_delta_over_mcp() {
         .collect();
     assert!(names.contains(&"switchboard_projects".to_owned()));
     assert!(!names.contains(&"switchboard_project_edit".to_owned()));
+    assert!(!names.contains(&"switchboard_project_create".to_owned()));
     assert!(names.contains(&"switchboard_repository_map".to_owned()));
     assert!(!names.contains(&"switchboard_project_move_root".to_owned()));
     assert!(names.contains(&"switchboard_github".to_owned()));
@@ -1306,4 +1330,7 @@ async fn accounts_rotation_activity_and_queues_are_reachable_over_mcp() {
     assert!(!error, "{backups}");
     let (error, login) = agent.tool("switchboard_login", json!({"action": "nope"}));
     assert!(error, "{login}");
+    // SB-299: the window's pending sign-ins, read by an agent; none waits here.
+    let (error, pending) = agent.tool("switchboard_login", json!({"action": "pending"}));
+    assert!(!error && pending["logins"] == json!([]), "{pending}");
 }

@@ -364,6 +364,15 @@ another group in `add_accounts` keeps its own group and serves this one too; `mo
 moves it here instead; `remove_accounts` of a shared account only stops it serving here. Result:
 `{project, message}` ("Group saved. It is visible in the Switchboard app under Groups.").
 
+### `switchboard_project_create`: `name`, `folders`, `accounts?`, `organizations?`, `move_accounts?`
+
+Only when the operator asks. Creates a group as the window's *New group* does: at least one
+absolute folder, the accounts reserved for it, and its organizations (by id or name, the first its
+own context; empty or left out: personal). An account at home in another group serves this one
+too unless `move_accounts` moves it here. Refusals are those of a saved group (an account of
+another organization, the ordinary CLI's account). Result: `{project, message}` ("Group created.
+It is visible in the Switchboard app under Groups."); `project.pool` is the new group's id.
+
 ### `switchboard_project_move_root`: `folder`, `pool`, `also?`, `from?`
 
 Only when the operator asks. Moves a repository with its worktrees and clones into the group
@@ -470,7 +479,8 @@ sessions Switchboard starts bypass their permission prompts (SB-298).
 
 Only when the operator asks. `begin` (provider, label, pool as the group id) opens Terminal on
 the official sign-in; the person signs in. `status`, `finish` and `cancel` take the `login_id`
-`begin` returned. No password or key passes through this tool.
+`begin` returned; `pending` lists every sign-in waiting, oldest first (`{logins: [{login_id,
+provider, label, pool, state}]}`). No password or key passes through this tool.
 
 ### `switchboard_kimi_login`: `action`, `id?`, `label?`, `region?`
 

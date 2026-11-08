@@ -64,6 +64,7 @@ pub(crate) fn tools() -> Vec<(bool, Value)> {
         (false, json!({"name":"switchboard_project_context","title":"A folder's group and rule","description":"The group a folder belongs to, as project (its name, group id as pool, folders and reserved accounts, possibly empty; null when none), and the optional folder rule per provider: the rule in force, the nearest rule in any state (paused or expired), and whether it is in effect. A group's accounts serve only sessions launched from its folders; a provider with no enabled account in the group keeps its existing launch fallback.","inputSchema":{"type":"object","properties":{"path":path},"additionalProperties":false}})),
         (false, json!({"name":"switchboard_projects","title":"Groups","description":"Every group: its id (pool), name, folders (repositories), roots (each root folder with its branch and the worktrees and clones of its repository under it), sources and the accounts reserved for it (empty for an automatically created group), then every optional folder rule with its state. Reads only.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}})),
         (true, json!({"name":"switchboard_project_edit","title":"Change a group","description":"Change a group by delta: reserve accounts for it (add_accounts; an account at home in another group keeps that home and serves this group too, unless move_accounts moves it here), give accounts back (remove_accounts: an account it only shares stops serving it, its own goes to the default group), add folders (add_folders) or take folders out (remove_folders; they are not added back by themselves), or rename it, or bind it to organizations (organization: one id or name, or personal; organizations: the whole list, none, one or several, the first being the group's own context; with an organization defined, a group runs only on accounts of its organizations, or on personal ones when it has none). Everything not named stays as it is; naming an account or folder the group does not hold is refused. Only when the operator asks. The account the ordinary Claude Code or Codex is signed in to cannot join a group.","inputSchema":{"type":"object","properties":{"pool":{"type":"string","description":"The group id, from switchboard_projects."},"name":{"type":"string"},"organization":{"type":"string","maxLength":200,"description":"An organization's id or name from switchboard_organizations, or personal."},"organizations":{"type":"array","maxItems":16,"items":{"type":"string","maxLength":200},"description":"Every organization of the group, by id or name, in order; empty makes it personal. Wins over organization."},"move_accounts":{"type":"boolean","description":"Move each account in add_accounts here from its group instead of sharing it."},"add_accounts":{"type":"array","items":account,"maxItems":64},"remove_accounts":{"type":"array","items":account,"maxItems":64},"add_folders":{"type":"array","items":{"type":"string","description":"An absolute folder."},"maxItems":64},"remove_folders":{"type":"array","items":{"type":"string","description":"A folder of the group, as switchboard_projects lists it."},"maxItems":64}},"required":["pool"],"additionalProperties":false}})),
+        (true, json!({"name":"switchboard_project_create","title":"Create a group","description":"Create a group, as the window's New group does: its name, its folders (repositories), the accounts reserved for it and its organizations (none, one or several by id or name, the first being the group's own context; empty or left out makes it personal). An account at home in another group serves this one too, unless move_accounts moves it here. Answers the new group with its id (pool). Only when the operator asks. The account the ordinary Claude Code or Codex is signed in to cannot join a group.","inputSchema":{"type":"object","properties":{"name":{"type":"string","minLength":1},"folders":{"type":"array","minItems":1,"maxItems":64,"items":{"type":"string","description":"An absolute folder."}},"accounts":{"type":"array","items":account,"maxItems":64},"organizations":{"type":"array","maxItems":16,"items":{"type":"string","maxLength":200},"description":"Every organization of the group, by id or name, in order; empty makes it personal."},"move_accounts":{"type":"boolean","description":"Move each listed account here from its group instead of sharing it."}},"required":["name","folders"],"additionalProperties":false}})),
         (true, json!({"name":"switchboard_codex_route","title":"Codex in group folders","description":"Whether Codex sessions in a group's folders use that group's Codex accounts (one provider in Codex's own config.toml that points at Switchboard's local proxy; folders outside groups keep the person's own sign-in). Without enabled, the state only: on, applied, conflict, and the groups with a Codex account. enabled true or false changes it, only when the operator asks. Another model_provider the person chose is never replaced.","inputSchema":{"type":"object","properties":{"enabled":{"type":"boolean"}},"additionalProperties":false}})),
         (true, json!({"name":"switchboard_project_move_root","title":"Move a repository to another group","description":"Move a repository (its root folder) with the worktrees and clones under it into another group in one step, add one that is in no group, or with also add it to one more group and keep it in its others (a repository may be in several groups). Only when the operator asks. A group keeps at least one folder; a repository inside a group folder moves with that folder.","inputSchema":{"type":"object","properties":{"folder":{"type":"string","minLength":1,"description":"The repository's absolute folder, as switchboard_projects or switchboard_repository_map lists it."},"pool":{"type":"string","minLength":1,"description":"The group id from switchboard_projects."},"also":{"type":"boolean","description":"Add it to this group and keep it in its other groups (a repository may be in several)."},"from":{"type":"string","minLength":1,"description":"The group id it leaves, when it is in several."}},"required":["folder","pool"],"additionalProperties":false}})),
         (true, json!({"name":"switchboard_app","title":"Updates and opening at login","description":"What the installed app's About and tray do, answered by the running app only. action updates: the update state, or with enabled turns Install updates automatically on or off; check_for_updates: check now; restart_to_update: install a downloaded update and restart (Switchboard drains as on Quit); login_item: whether Switchboard opens at login, or with enabled sets it. Changing anything only when the operator asks.","inputSchema":{"type":"object","properties":{"action":{"type":"string","enum":["updates","check_for_updates","restart_to_update","login_item"]},"enabled":{"type":"boolean"}},"required":["action"],"additionalProperties":false}})),
@@ -88,7 +89,7 @@ pub(crate) fn tools() -> Vec<(bool, Value)> {
         (false, json!({"name":"switchboard_recovery","title":"Stopped sessions","description":"Sessions that stopped on a limit and the accounts ready for them to continue: each stop's mode and when to try again.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}})),
         (false, json!({"name":"switchboard_handovers","title":"Hand-overs","description":"Whether hand-overs open in Fabric's console, and the hand-overs waiting for a console to take them.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}})),
         (true, json!({"name":"switchboard_agent_set","title":"Enable or disable an agent, or set the default","description":"Let Switchboard hand work to an agent or keep work away from it (enabled), set the machine's default agent (default: an agent id, or null for none), or choose whether the Claude Code and Codex sessions it starts bypass their permission prompts (permissions: bypass, the default, or ask). Only when the operator asks.","inputSchema":{"type":"object","properties":{"agent":{"type":"string"},"enabled":{"type":"boolean"},"default":{"type":["string","null"]},"permissions":{"type":"string","enum":["bypass","ask"]}},"additionalProperties":false}})),
-        (true, json!({"name":"switchboard_login","title":"Sign in a new account","description":"Start the official sign-in for a new Claude or Codex account (action begin: provider, label, pool as the group id; it opens Terminal where the person signs in) and follow it (status, finish once the person signed in, cancel). The person signs in; this never takes a password or a key.","inputSchema":{"type":"object","properties":{"action":{"type":"string","enum":["begin","status","finish","cancel"]},"login_id":{"type":"string"},"provider":{"type":"string","enum":["claude","codex"]},"label":{"type":"string","minLength":1,"maxLength":80},"pool":{"type":"string","default":"default"}},"required":["action"],"additionalProperties":false}})),
+        (true, json!({"name":"switchboard_login","title":"Sign in a new account","description":"Start the official sign-in for a new Claude or Codex account (action begin: provider, label, pool as the group id; it opens Terminal where the person signs in) and follow it (status, finish once the person signed in, cancel); pending lists every sign-in waiting, oldest first, with its login_id, provider, label, group and state. The person signs in; this never takes a password or a key.","inputSchema":{"type":"object","properties":{"action":{"type":"string","enum":["begin","status","pending","finish","cancel"]},"login_id":{"type":"string"},"provider":{"type":"string","enum":["claude","codex"]},"label":{"type":"string","minLength":1,"maxLength":80},"pool":{"type":"string","default":"default"}},"required":["action"],"additionalProperties":false}})),
         (true, json!({"name":"switchboard_project_set","title":"Save folder rule","description":"Save an optional rule: this folder and its subfolders start on this account. Only when the operator asks for it. Rules never stop automatic switching. Prefer an expiry.","inputSchema":{"type":"object","properties":{"path":path,"account_id":account,"target":{"type":"string","enum":["managed","claude_cli"],"default":"managed"},"enabled":{"type":"boolean","default":true},"expires_in_hours":{"type":"integer","minimum":1,"maximum":720}},"required":["account_id"],"additionalProperties":false}})),
         (true, json!({"name":"switchboard_project_remove","title":"Remove folder rule","description":"Remove the rule saved for exactly this folder and provider.","inputSchema":{"type":"object","properties":{"path":path,"provider":{"type":"string","enum":["claude","codex"]}},"required":["provider"],"additionalProperties":false}})),
         (true, json!({"name":"switchboard_project_apply","title":"Apply folder rule","description":"Apply the folder's rule to this session when you start work in a folder. Reports what happened per provider: selected, activated, already_in_effect, no_rule, rule_paused, rule_expired, other_pool, other_session, needs_global or failed. Nothing changes without a rule in force.","inputSchema":{"type":"object","properties":{"path":path,"global":{"type":"boolean","default":false}},"additionalProperties":false}})),
@@ -432,33 +433,8 @@ impl Server {
         }
     }
     async fn project_edit(&self, args: &Map<String, Value>) -> Result<Value, String> {
-        let strings = |key: &str| -> Result<Vec<String>, String> {
-            match args.get(key) {
-                None => Ok(vec![]),
-                Some(Value::Array(items)) => items
-                    .iter()
-                    .map(|v| {
-                        v.as_str()
-                            .map(str::to_owned)
-                            .ok_or(format!("{key} must list strings."))
-                    })
-                    .collect(),
-                Some(_) => Err(format!("{key} must be a list.")),
-            }
-        };
-        let absolute = |key: &str| -> Result<Vec<PathBuf>, String> {
-            strings(key)?
-                .into_iter()
-                .map(|f| {
-                    let p = PathBuf::from(&f);
-                    if p.is_absolute() {
-                        Ok(p)
-                    } else {
-                        Err(format!("{key} takes absolute folders."))
-                    }
-                })
-                .collect()
-        };
+        let strings = |key: &str| string_list(args, key);
+        let absolute = |key: &str| absolute_folders(args, key);
         let project = self
             .call(Operation::ProjectEdit {
                 organizations: match args.get("organizations") {
@@ -483,6 +459,34 @@ impl Server {
             .await?;
         Ok(
             json!({"project": project, "message": "Group saved. It is visible in the Switchboard app under Groups."}),
+        )
+    }
+    /// SB-299: the window's *New group*, with its organizations, as one call.
+    async fn project_create(&self, args: &Map<String, Value>) -> Result<Value, String> {
+        let folders = absolute_folders(args, "folders")?;
+        if folders.is_empty() {
+            return Err("Name at least one folder for the group.".into());
+        }
+        let project = self
+            .call(Operation::SaveProject {
+                pool: None,
+                name: required(args, "name")?.into(),
+                folders,
+                account_ids: string_list(args, "accounts")?,
+                base_folders: None,
+                organization: None,
+                organizations: match args.get("organizations") {
+                    None => None,
+                    Some(_) => Some(string_list(args, "organizations")?),
+                },
+                move_accounts: args
+                    .get("move_accounts")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
+            })
+            .await?;
+        Ok(
+            json!({"project": project, "message": "Group created. It is visible in the Switchboard app under Groups."}),
         )
     }
     async fn account_update(&self, args: &Map<String, Value>) -> Result<Value, String> {
@@ -801,9 +805,10 @@ impl Server {
                 .await
             }
             "status" => self.call(Operation::LoginStatus { login_id: id()? }).await,
+            "pending" => self.call(Operation::PendingLogins).await,
             "finish" => self.call(Operation::FinishLogin { login_id: id()? }).await,
             "cancel" => self.call(Operation::CancelLogin { login_id: id()? }).await,
-            _ => Err("action is begin, status, finish or cancel.".into()),
+            _ => Err("action is begin, status, pending, finish or cancel.".into()),
         }
     }
     async fn kimi_login(&self, args: &Map<String, Value>) -> Result<Value, String> {
@@ -1013,6 +1018,7 @@ impl Server {
                 .await
                 .map(|v| json!({"projects": project_views(&v), "rules": rule_views(&v, now())})),
             "switchboard_project_edit" => self.project_edit(args).await,
+            "switchboard_project_create" => self.project_create(args).await,
             "switchboard_statistics" => match args
                 .get("days")
                 .map(|v| v.as_i64().filter(|d| (1..=90).contains(d)))
@@ -1352,6 +1358,35 @@ fn ok(id: Value, result: Value) -> Value {
 fn error(id: Value, code: i64, message: &str) -> Value {
     json!({"jsonrpc": "2.0", "id": id, "error": {"code": code, "message": message}})
 }
+fn string_list(args: &Map<String, Value>, key: &str) -> Result<Vec<String>, String> {
+    match args.get(key) {
+        None => Ok(vec![]),
+        Some(Value::Array(items)) => items
+            .iter()
+            .map(|v| {
+                v.as_str()
+                    .map(str::to_owned)
+                    .ok_or(format!("{key} must list strings."))
+            })
+            .collect(),
+        Some(_) => Err(format!("{key} must be a list.")),
+    }
+}
+
+fn absolute_folders(args: &Map<String, Value>, key: &str) -> Result<Vec<PathBuf>, String> {
+    string_list(args, key)?
+        .into_iter()
+        .map(|f| {
+            let p = PathBuf::from(&f);
+            if p.is_absolute() {
+                Ok(p)
+            } else {
+                Err(format!("{key} takes absolute folders."))
+            }
+        })
+        .collect()
+}
+
 fn required<'a>(args: &'a Map<String, Value>, key: &str) -> Result<&'a str, String> {
     args.get(key)
         .and_then(Value::as_str)

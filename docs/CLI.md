@@ -122,6 +122,7 @@ switchboard backup now
 switchboard backup restore switchboard-backup-1790000000-<id>.json   # a name from backup list
 switchboard login begin --provider codex --label Work --pool work
 switchboard login status LOGIN_UUID
+switchboard login pending                 # every sign-in waiting, oldest first, as the window lists them (SB-299)
 switchboard login finish LOGIN_UUID
 switchboard accounts select ACCOUNT_UUID --provider codex --pool work
 switchboard launch ACCOUNT_UUID --mode managed --working-directory /absolute/project/path
@@ -410,6 +411,7 @@ Folder rules (the `project set|remove|apply` commands) are optional: a folder an
 switchboard project list                      # {projects, rules}: projects with folders, roots (each with its worktrees and clones) and accounts, then rules
 switchboard project save --name "Client Alpha" --folder /work/alpha-web --folder /work/alpha-api --account <id>
 switchboard project save --pool client-alpha --name "Client Alpha" --folder /work/alpha-web   # update; omitted accounts go back to default
+switchboard project save --name "Acme web" --folder /work/acme-web --organization Acme   # SB-299: a new group bound to Acme (repeat --organization for several; --move-accounts moves listed accounts here)
 switchboard project edit --pool client-alpha --add-account <id> --remove-folder /work/old   # SB-134: change by delta; the rest stays
 switchboard project edit --pool client-alpha --organization Acme   # SB-109: the group runs only on Acme's accounts (`personal` for personal ones)
 switchboard project edit --pool shared --organization Acme --organization Beta   # SB-282: a group of two organizations, Acme first
@@ -619,6 +621,7 @@ Kimi Code subscription accounts, each signed in by the official `kimi` in a fold
 ```sh
 switchboard kimi login [--label Work] [--region mainland-cn|global]   # kimi login in Terminal
 switchboard kimi finish <id>          # once Terminal says you are logged in
+switchboard kimi status <id>          # pending, complete or ended (SB-299)
 switchboard kimi list                 # tier and 5-hour / 7-day / monthly usage, asked of Kimi
 switchboard kimi launch <id> --dir ~/src/app
 switchboard kimi relogin <id>         # when Kimi refused the saved login
