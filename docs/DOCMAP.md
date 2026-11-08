@@ -56,7 +56,7 @@ plan are in [plans/2026-11-08-doc-audit.md](evidence/plans/2026-11-08-doc-audit.
 | A decision that holds | a [DECISIONS.md](DECISIONS.md) entry; every document in its *Consequences / affects* line cites the id | `review`: no check follows the affects lines yet |
 | A string the window shows | `src/locales/ru.ts`, [brand/strings.md](brand/strings.md) when it carries a decision, Copylot report ids in the change | `scripts/check-locale.mjs`, `scripts/check-strings-registry.mjs` |
 | A backend sentence a person can see | `src/adapter.ts` (verbatim or mapped) or the script's allowlist with its reason, `src/locales/ru.ts` | `scripts/check-error-vocabulary.mjs` |
-| What the interface does | [ux/scenarios.md](ux/scenarios.md) in the same change | `scripts/check_docs.py` (coverage line present); the rest `review` until a scenario linter exists (finding F-4) |
+| What the interface does | [ux/scenarios.md](ux/scenarios.md) in the same change (`### SCN-<nnn>: <name>`, an index row) | `docs/ux/lint.py` (super-ux, SB-309; proven by `scripts/test_ux_lint.py`), `scripts/check_docs.py` (coverage line present) |
 | A CLI command or flag | [CLI.md](CLI.md), the MCP tool or its reason, the skill reference | `every_cli_command_has_an_mcp_tool_or_a_reason`, `every_mcp_tool_is_in_the_skill_reference`, `every_command_and_argument_has_help` |
 | An analytics event or prop | [ANALYTICS.md](ANALYTICS.md), the planted-identifier test | `events_carry_counts_and_the_installation_id_never_an_identity` |
 | A process, timer, port or file the app owns | `AGENTS.md` Lifecycle, [CONTRACTS.md](CONTRACTS.md) | `review`: behaviour, not a shape a script can read |

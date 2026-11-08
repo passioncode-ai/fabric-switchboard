@@ -23,7 +23,7 @@ for file in files:
         if not resolved.is_relative_to(root) or not resolved.exists():
             errors.append(f'{file.relative_to(root)}: unresolved/local-only target {target}')
 scenarios = (root / 'docs/ux/scenarios.md').read_text(encoding='utf-8')
-for section in re.split(r'^## SCN-', scenarios, flags=re.M)[1:]:
+for section in re.split(r'^### SCN-', scenarios, flags=re.M)[1:]:
     if '**Coverage:** none yet' in section:
         errors.append(f'SCN-{section[:3]}: coverage must name evidence or explicit NOT_RUN')
 # SB-306: the board keeps its table shape and a status that starts with its state, because

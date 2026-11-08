@@ -23,7 +23,7 @@ class CheckDocs(unittest.TestCase):
         self._tmp = tempfile.TemporaryDirectory()
         self.root = Path(self._tmp.name)
         self.write("README.md", "# Readme\n\nSee [the board](docs/evidence/backlog.md).\n")
-        self.write("docs/ux/scenarios.md", "# Scenarios\n\n## SCN-001 First\n**Coverage:** a test.\n")
+        self.write("docs/ux/scenarios.md", "# Scenarios\n\n### SCN-001: First\n**Coverage:** a test.\n")
         self.board("open")
 
     def tearDown(self):
@@ -56,7 +56,7 @@ class CheckDocs(unittest.TestCase):
         self.assertFails("unresolved/local-only target missing.md")
 
     def test_a_scenario_without_coverage_fails(self):
-        self.write("docs/ux/scenarios.md", "# Scenarios\n\n## SCN-002 Second\n**Coverage:** none yet\n")
+        self.write("docs/ux/scenarios.md", "# Scenarios\n\n### SCN-002: Second\n**Coverage:** none yet\n")
         self.assertFails("SCN-002: coverage must name evidence")
 
     def test_a_pipe_inside_a_cell_fails_unless_escaped(self):

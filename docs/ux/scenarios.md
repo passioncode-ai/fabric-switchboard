@@ -92,7 +92,10 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 | SCN-082 | See whether a chain can take work now | draft |
 | SCN-083 | Cap what paid agents may spend a day | draft |
 | SCN-084 | A ceiling is reached: double it or keep it | draft |
-## SCN-001 — First run
+| SCN-085 | Create an organization with its GitHub repositories and folders in one step | draft |
+| SCN-086 | Choose several folders at once | draft |
+| SCN-087 | Move an account to another machine without signing in there | draft |
+### SCN-001: First run
 **Persona:** P-01
 **Goal:** Deliberately control which account a coding session uses.
 **Preconditions:** macOS app with user-owned authorized accounts; tests use synthetic fixtures.
@@ -110,7 +113,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Product:** unobserved
 **Traces:** ST-001, FLW-01
 
-## SCN-002 — Add a credential
+### SCN-002: Add a credential
 **Persona:** P-01
 **Goal:** Deliberately control which account a coding session uses.
 **Preconditions:** macOS app with user-owned authorized accounts; tests use synthetic fixtures.
@@ -128,7 +131,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Product:** unobserved
 **Traces:** ST-001, FLW-01
 
-## SCN-003 — Official sign-in
+### SCN-003: Official sign-in
 **Persona:** P-01
 **Goal:** Deliberately control which account a coding session uses.
 **Preconditions:** macOS app with user-owned authorized accounts; tests use synthetic fixtures.
@@ -147,7 +150,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Product:** unobserved
 **Traces:** ST-001, FLW-01
 
-## SCN-004 — Choose account
+### SCN-004: Choose account
 **Persona:** P-01
 **Goal:** Deliberately control which account a coding session uses.
 **Preconditions:** macOS app with user-owned authorized accounts; tests use synthetic fixtures.
@@ -165,7 +168,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Product:** unobserved
 **Traces:** ST-001, FLW-01
 
-## SCN-005 — Launch an account in a folder, isolated if needed
+### SCN-005: Launch an account in a folder, isolated if needed
 **Persona:** P-01
 **Goal:** Deliberately control which account a coding session uses.
 **Preconditions:** macOS app with user-owned authorized accounts; tests use synthetic fixtures.
@@ -184,7 +187,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Product:** unobserved
 **Traces:** ST-001, FLW-01
 
-## SCN-006 — Launch managed (the box cleared)
+### SCN-006: Launch managed (the box cleared)
 **Persona:** P-01
 **Goal:** Deliberately control which account a coding session uses.
 **Preconditions:** macOS app with user-owned authorized accounts; tests use synthetic fixtures.
@@ -202,7 +205,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Product:** unobserved
 **Traces:** ST-001, FLW-01
 
-## SCN-007 — Switch during stream
+### SCN-007: Switch during stream
 **Persona:** P-01
 **Goal:** Deliberately control which account a coding session uses.
 **Preconditions:** macOS app with user-owned authorized accounts; tests use synthetic fixtures.
@@ -220,7 +223,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Product:** unobserved
 **Traces:** ST-001, FLW-01
 
-## SCN-008 — Check usage
+### SCN-008: Check usage
 **Persona:** P-01
 **Goal:** Deliberately control which account a coding session uses.
 **Preconditions:** macOS app with user-owned authorized accounts; tests use synthetic fixtures.
@@ -238,7 +241,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Product:** unobserved
 **Traces:** ST-001, FLW-01
 
-## SCN-009 — Edit and disable
+### SCN-009: Edit and disable
 **Persona:** P-01
 **Goal:** Deliberately control which account a coding session uses.
 **Preconditions:** macOS app with user-owned authorized accounts; tests use synthetic fixtures.
@@ -256,7 +259,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Product:** unobserved
 **Traces:** ST-001, FLW-01
 
-## SCN-010 — Remove account
+### SCN-010: Remove account
 **Persona:** P-01
 **Goal:** Deliberately control which account a coding session uses.
 **Preconditions:** macOS app with user-owned authorized accounts; tests use synthetic fixtures.
@@ -274,7 +277,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Product:** unobserved
 **Traces:** ST-001, FLW-01
 
-## SCN-011 — Review activity
+### SCN-011: Review activity
 **Persona:** P-01
 **Goal:** Deliberately control which account a coding session uses.
 **Preconditions:** macOS app with user-owned authorized accounts; tests use synthetic fixtures.
@@ -292,7 +295,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Product:** unobserved
 **Traces:** ST-001, FLW-01
 
-## SCN-012 — Return after restart
+### SCN-012: Return after restart
 **Persona:** P-01
 **Goal:** Deliberately control which account a coding session uses.
 **Preconditions:** macOS app with user-owned authorized accounts; tests use synthetic fixtures.
@@ -310,7 +313,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Product:** unobserved
 **Traces:** ST-001, FLW-01
 
-## SCN-013 — Keyboard and narrow window
+### SCN-013: Keyboard and narrow window
 **Persona:** P-01
 **Goal:** Deliberately control which account a coding session uses.
 **Preconditions:** macOS app with user-owned authorized accounts; tests use synthetic fixtures.
@@ -333,7 +336,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Product:** unobserved
 **Traces:** ST-001, FLW-01
 
-## SCN-014 — Command-line account management
+### SCN-014: Command-line account management
 **Persona:** P-01
 **Goal:** Manage authorized coding accounts from a terminal or native OS build.
 **Preconditions:** User-owned accounts; synthetic fixtures for tests.
@@ -351,7 +354,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Product:** unobserved
 **Traces:** ST-001, FLW-01
 
-## SCN-015 — CLI with a running desktop or server
+### SCN-015: CLI with a running desktop or server
 **Persona:** P-01
 **Goal:** Manage authorized coding accounts from a terminal or native OS build.
 **Preconditions:** User-owned accounts; synthetic fixtures for tests.
@@ -369,7 +372,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Product:** unobserved
 **Traces:** ST-001, FLW-01
 
-## SCN-016 — CLI login and launch
+### SCN-016: CLI login and launch
 **Persona:** P-01
 **Goal:** Manage authorized coding accounts from a terminal or native OS build.
 **Preconditions:** User-owned accounts; synthetic fixtures for tests.
@@ -387,7 +390,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Product:** unobserved
 **Traces:** ST-001, FLW-01
 
-## SCN-017 — Install native builds
+### SCN-017: Install native builds
 **Persona:** P-01
 **Goal:** Manage authorized coding accounts from a terminal or native OS build.
 **Preconditions:** User-owned accounts; synthetic fixtures for tests.
@@ -405,7 +408,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Product:** unobserved
 **Traces:** ST-001, FLW-01
 
-## SCN-018 — Capture the current CLI account
+### SCN-018: Capture the current CLI account
 **Persona:** P-01
 **Goal:** Reuse an account already signed in without another login.
 **Preconditions:** Authorized local accounts; synthetic fixtures for UI checks.
@@ -423,7 +426,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Product:** unobserved
 **Traces:** ST-001, FLW-01
 
-## SCN-019 — Import Claude Swap profiles
+### SCN-019: Import Claude Swap profiles
 **Persona:** P-01
 **Goal:** Reuse saved Claude Swap profiles in an explicit routing pool.
 **Preconditions:** Authorized local accounts; synthetic fixtures for UI checks.
@@ -441,7 +444,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Product:** unobserved
 **Traces:** ST-001, FLW-01
 
-## SCN-020 — Distinguish native identity and managed selection
+### SCN-020: Distinguish native identity and managed selection
 **Persona:** P-01
 **Goal:** Know which account the local CLI has and deliberately activate another Claude account.
 **Preconditions:** Authorized local accounts; synthetic fixtures for UI checks.
@@ -459,7 +462,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Product:** unobserved
 **Traces:** ST-001, FLW-01
 
-## SCN-021 — Inspect quota windows and failed checks
+### SCN-021: Inspect quota windows and failed checks
 **Persona:** P-01
 **Goal:** See measured usage, when it resets and whether it is fresh enough for rotation.
 **Preconditions:** Authorized local accounts; synthetic fixtures for UI checks.
@@ -477,7 +480,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Product:** unobserved
 **Traces:** ST-001, FLW-01
 
-## SCN-022 — Configure and stop automatic switching
+### SCN-022: Configure and stop automatic switching
 **Persona:** P-01
 **Goal:** Persist an explicit quota policy for one provider, pool and target.
 **Preconditions:** Authorized local accounts; synthetic fixtures for UI checks.
@@ -496,7 +499,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Product:** unobserved
 **Traces:** ST-001, FLW-01
 
-## SCN-023 — Recognize Switchboard across desktop surfaces
+### SCN-023: Recognize Switchboard across desktop surfaces
 **Persona:** P-01
 **Goal:** Recognize the PassionCode tool and distinguish current identity from next-request selection.
 **Preconditions:** App or synthetic browser demo; operating-system light/dark preference may vary.
@@ -518,7 +521,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Product:** unobserved
 **Traces:** ST-001, FLW-01
 
-## SCN-024 — Open the app and recover a delayed startup
+### SCN-024: Open the app and recover a delayed startup
 **Persona:** P-01
 **Goal:** Open the account workbench without waiting indefinitely for native identity checks.
 **Preconditions:** Supported macOS/Windows; native startup verification uses a temporary empty store and memory vault.
@@ -537,7 +540,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Product:** unobserved
 **Traces:** ST-001, FLW-01
 
-## SCN-025 — Keep an optional folder rule in sight
+### SCN-025: Keep an optional folder rule in sight
 **Persona:** P-01
 **Goal:** Start one project on a chosen account without forgetting that the rule exists.
 **Preconditions:** At least one enabled account; rules are off unless saved (PLAN-0.4 D-2).
@@ -558,7 +561,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Product:** unobserved
 **Traces:** PLAN-0.4 REQ-1, REQ-6
 
-## SCN-026 — Connect a coding agent to Switchboard
+### SCN-026: Connect a coding agent to Switchboard
 **Persona:** P-01
 **Goal:** Let a coding agent read remaining usage and switch accounts itself.
 **Preconditions:** The switchboard CLI is on PATH or bundled in the macOS app.
@@ -578,7 +581,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Product:** unobserved
 **Traces:** PLAN-0.4 REQ-3, REQ-5, REQ-6
 
-## SCN-027 — Keep saved accounts readable without repeated Keychain dialogs
+### SCN-027: Keep saved accounts readable without repeated Keychain dialogs
 **Persona:** P-01
 **Goal:** Use the app and agents (`switchboard mcp`) on the same accounts without macOS asking for Keychain access again and again.
 **Preconditions:** macOS, the signed app in Applications; accounts saved by this or an earlier version.
@@ -597,7 +600,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Coverage:** `crates/switchboard-core/src/keychain.rs` tests (fake Keychain), `keychain_macos.rs` throwaway-keychain tests, manual signed-bundle acceptance in KEYCHAIN.md; the operator's real items after the next release NOT_RUN.
 **Product:** unobserved
 **Traces:** REQ-004
-## SCN-028 — Switch Claude Code without Keychain confirmations
+### SCN-028: Switch Claude Code without Keychain confirmations
 **Persona:** P-01
 **Goal:** Switch the ordinary Claude Code between saved accounts, sign in to another account and let rotation run without macOS asking about `Claude Code-credentials`.
 **Preconditions:** macOS; Claude Code signed in or signed out; accounts saved in Switchboard.
@@ -615,7 +618,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Product:** unobserved
 **Traces:** PLAN-0.5 REQ-2, REQ-3, REQ-18…REQ-20, REQ-23…REQ-26, REQ-28, REQ-35
 
-## SCN-029 — Keep saved accounts usable for automatic switching
+### SCN-029: Keep saved accounts usable for automatic switching
 **Persona:** P-01
 **Goal:** Saved accounts stay ready to switch to and to measure, hours or days after they were added.
 **Preconditions:** Claude OAuth accounts saved; the desktop app or `switchboard serve` running.
@@ -634,7 +637,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Product:** unobserved
 **Traces:** PLAN-0.5 REQ-4, REQ-5, REQ-6, REQ-21, REQ-22, REQ-27, REQ-30, REQ-31, REQ-33
 
-## SCN-030 — Get accounts back after reinstalling Switchboard
+### SCN-030: Get accounts back after reinstalling Switchboard
 **Persona:** P-01
 **Goal:** Lose no saved account when Switchboard or its data folder is reinstalled on the same Mac.
 **Preconditions:** the desktop app has run with accounts saved; the Keychain of this Mac is intact.
@@ -653,7 +656,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Product:** unobserved
 **Traces:** PLAN-0.5 REQ-14, REQ-15, REQ-17
 
-## SCN-031 — Move off an account that hit a limit the quota does not show
+### SCN-031: Move off an account that hit a limit the quota does not show
 **Persona:** P-01
 **Goal:** Keep working when Claude Code answers “You've hit your individual spend limit” although the quota still shows room.
 **Preconditions:** automatic switching on for Claude Code; another saved account with fresh quota.
@@ -673,7 +676,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Traces:** PLAN-0.5 REQ-16, REQ-17
 
 
-## SCN-032 — Find remaining quota and compare account waits
+### SCN-032: Find remaining quota and compare account waits
 **Persona:** P-01
 **Goal:** Find saved accounts with quota and understand the wait in hours and days.
 **Preconditions:** Account metadata loaded; provider observations may be missing, partial, failed or old.
@@ -694,7 +697,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Product:** unobserved
 **Traces:** ST-001, FLW-01
 
-## SCN-033 — Keep Switchboard working with its window closed
+### SCN-033: Keep Switchboard working with its window closed
 **Persona:** P-01
 **Goal:** Rotation, renewal, quota checks and backups keep running without the window open, and Switchboard ends only when the person quits it.
 **Preconditions:** the installed app (a development build never registers a login item).
@@ -716,7 +719,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Product:** unobserved
 **Traces:** SB-28, LC-09
 
-## SCN-034 — Keep a group on its own accounts
+### SCN-034: Keep a group on its own accounts
 **Persona:** P-01
 **Goal:** Attach accounts to a project — one or more related repositories — so that only sessions from those folders use them, and agents in other projects never switch to them.
 **Preconditions:** saved accounts; the project's folders exist on this computer.
@@ -738,7 +741,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Product:** unobserved
 **Traces:** CONTRACTS → Projects (0.6)
 
-## SCN-035 — Learn the product in five steps on first start
+### SCN-035: Learn the product in five steps on first start
 **Persona:** P-01
 **Goal:** Understand on first start what Switchboard does and where to press.
 **Preconditions:** first start in this app's window storage (the tour shows until finished or skipped).
@@ -760,7 +763,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Product:** unobserved
 **Traces:** SCN-001
 
-## SCN-036 — Run another coding agent on Switchboard
+### SCN-036: Run another coding agent on Switchboard
 **Persona:** P-01
 **Goal:** Use Hermes, Kilo Code, Cline, Goose, OpenCode or another popular agent with Switchboard's tools and accounts, not only Claude Code and Codex.
 **Preconditions:** the agent is installed; for model requests through Switchboard, an API-key account selected in the chosen pool.
@@ -780,7 +783,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Product:** unobserved
 **Traces:** CONTRACTS → Other agents (0.6)
 
-## SCN-037 — Get new versions without doing anything
+### SCN-037: Get new versions without doing anything
 **Persona:** P-01
 **Goal:** Every installed Switchboard moves to each new release on its own, with nothing to download, approve or reinstall, and nothing lost on the way.
 **Preconditions:** the installed app from a release (a development build, the smoke check and a copy macOS runs from a translocated path never check).
@@ -803,7 +806,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Product:** unobserved
 **Traces:** SB-55, LC-01, LC-09, SCN-030, SCN-033
 
-## SCN-038 — Continue a workflow on another account when a limit runs out
+### SCN-038: Continue a workflow on another account when a limit runs out
 **Persona:** P-01
 **Goal:** An agent's long task (an Observatory workflow) stops because its account hit its limit; another account picks it up from the last checkpoint — of the same provider, or of the other one (Claude Code ↔ Codex, 0.6.7, SB-70) — without redoing finished steps and without the person copying context.
 **Preconditions:** Project Observatory installed; the workflow open, its executor silent for two minutes; every key it declares in the Observatory vault; another enabled Claude Code or Codex account; the desktop app or `switchboard serve` running.
@@ -823,7 +826,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Product:** unobserved
 **Traces:** SB-52, CONTRACTS → Workflow continuation
 
-## SCN-039 — Choose which agents take over a task, and in what order
+### SCN-039: Choose which agents take over a task, and in what order
 
 **Persona:** P-01
 **Goal:** The operator decides, on their own machine, which agents continue a task when the accounts of its agent run out — for the whole machine, for one project, or for one task — so the switch, when it comes, follows their order and never hands a subscription to an agent that may not use it.
@@ -844,7 +847,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Product:** unobserved
 **Traces:** SB-71, CONTRACTS → Fallback chains, [XA-01](../packets/cross-agent-continuation.md), SCN-080, SCN-081, SCN-082
 
-## SCN-040 — Work moves on by itself when an agent's accounts run out
+### SCN-040: Work moves on by itself when an agent's accounts run out
 
 **Persona:** P-01
 **Goal:** A long task keeps going when its agent hits its limit and no other account of that provider is ready — the next agent of the operator's chain takes it over from the last checkpoint without the person doing anything.
@@ -865,7 +868,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Product:** unobserved
 **Traces:** SB-73, CONTRACTS → Automatic fallback, [XA-01](../packets/cross-agent-continuation.md), SB-72, SCN-082, SCN-083, SCN-084, FLW-05
 
-## SCN-041 — Use Switchboard in Russian
+### SCN-041: Use Switchboard in Russian
 
 **Persona:** P-01
 **Goal:** Read and operate Switchboard in Russian — or in English on a Russian system — without a setting to find first.
@@ -886,7 +889,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Product:** unobserved
 **Traces:** SB-76, SB-66, RM-25 (fabric-workspace roadmap), L10N-01…06
 
-## SCN-042 — Delete a group or remove a rule only after confirming
+### SCN-042: Delete a group or remove a rule only after confirming
 
 **Persona:** P-01
 **Goal:** Never lose a project or a project rule to a stray click.
@@ -907,7 +910,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Product:** unobserved
 **Traces:** SB-69, SCN-034
 
-## SCN-043 — Recover when a read or a refresh after an action fails
+### SCN-043: Recover when a read or a refresh after an action fails
 
 **Persona:** P-01
 **Goal:** Know what failed and how to retry, without mistaking it for lost accounts.
@@ -930,7 +933,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Product:** unobserved
 **Traces:** SB-69, SB-67, SCN-024
 
-## SCN-044 — Turn usage analytics off or on
+### SCN-044: Turn usage analytics off or on
 
 **Persona:** P-01
 **Goal:** Decide whether Switchboard sends anonymous counts, knowing exactly what they are.
@@ -950,7 +953,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Product:** unobserved
 **Traces:** SB-69, SB-246, SCN-073
 
-## SCN-045 — Save one OpenRouter key for agents
+### SCN-045: Save one OpenRouter key for agents
 
 **Persona:** P-01
 **Goal:** Keep one OpenRouter key that agents launched by Switchboard run on, and see what it may still spend — without the key ever appearing in a file, a command line or a log.
@@ -972,7 +975,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Product:** unobserved
 **Traces:** SB-79, XA-02
 
-## SCN-046 — Launch an agent on the OpenRouter key
+### SCN-046: Launch an agent on the OpenRouter key
 
 **Persona:** P-01
 **Goal:** Start Hermes, Kimi Code, Goose or another agent that runs on OpenRouter in a project folder, on the saved key and a chosen model, without pasting the key into the agent.
@@ -992,7 +995,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Product:** unobserved
 **Traces:** SB-79, XA-02
 
-## SCN-047 — Keep several Kimi Code subscription accounts
+### SCN-047: Keep several Kimi Code subscription accounts
 
 **Persona:** P-01
 **Goal:** Sign in to each Kimi Code membership once, see what each may still use, and start `kimi` on the one with room left — without the logins overwriting each other.
@@ -1015,7 +1018,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Product:** unobserved
 **Traces:** SB-81, XA-02
 
-## SCN-048 — See and change Hermes's model and provider
+### SCN-048: See and change Hermes's model and provider
 
 **Persona:** P-01
 **Goal:** Know which model and provider the ordinary Hermes runs on, and change them without editing its config by hand.
@@ -1035,7 +1038,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Product:** unobserved
 **Traces:** SB-80, XA-02
 
-## SCN-049 — See the provider terms notice
+### SCN-049: See the provider terms notice
 
 **Persona:** P-01
 **Goal:** Know, before and while adding accounts, that Switchboard must be used within the providers' terms and that the person answers for their own accounts.
@@ -1056,7 +1059,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Product:** unobserved
 **Traces:** SCN-001, SCN-035
 
-## SCN-050 — A coding agent sets Switchboard up
+### SCN-050: A coding agent sets Switchboard up
 
 **Persona:** P-01, working with a coding agent (Claude Code or Codex)
 **Goal:** Get Switchboard working by asking the agent, doing only the steps that are the person's.
@@ -1081,7 +1084,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Product:** unobserved
 **Traces:** SCN-035, SCN-001, SCN-076
 
-## SCN-051 — See which sessions Switchboard launched are running
+### SCN-051: See which sessions Switchboard launched are running
 
 **Persona:** P-01
 **Goal:** Know which sessions Switchboard started are still running (Claude Code and Codex, and since 0.7.0 Kimi Code, Hermes Agent, OpenCode, agents launched on the OpenRouter key and agents launched through the proxy), on which account or key, in which folder, and in whose context.
@@ -1102,7 +1105,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Product:** unobserved
 **Traces:** SCN-016, SCN-050, SB-201, SCN-074
 
-## SCN-052 — An agent keeps working when its account hits a limit
+### SCN-052: An agent keeps working when its account hits a limit
 
 **Persona:** P-01, with several accounts in a pool
 **Goal:** Agents go on working when an account reaches a limit, without pauses, as long as another account has room.
@@ -1123,7 +1126,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Product:** unobserved
 **Traces:** SCN-040, SCN-022
 
-## SCN-053 — A stopped session gets a capacity notice once
+### SCN-053: A stopped session gets a capacity notice once
 **Persona:** P-01
 **Goal:** Continue unfinished work when a suitable account becomes available.
 **Preconditions:** A session host registers a stop with its session, event, account and folder; the Switchboard owner runs.
@@ -1143,7 +1146,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Product:** unobserved
 **Traces:** ST-001, FLW-01
 
-## SCN-054 — Take a workflow hand-over in a console
+### SCN-054: Take a workflow hand-over in a console
 **Persona:** P-01
 **Goal:** Let a console take a prepared continuation once.
 **Preconditions:** Automatic fallback configured; Fabric hand-overs explicitly enabled with the CLI.
@@ -1162,7 +1165,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Product:** unobserved
 **Traces:** ST-001, FLW-01
 
-## SCN-055 — Git folders and projects register by themselves
+### SCN-055: Git folders and projects register by themselves
 **Persona:** P-01
 **Goal:** Keep every coding agent's Git repository and every project's folder list registered without hunting for them, assigning accounts by hand, or being asked about any of them (operator 2026-10-14: «не надо у меня ничего спрашивать, просто показывай, что добавлен в проект, и уведомление один раз»; 2026-10-15: «автодобавление всех репозиториев нужных в проект, когда там агент работает … чтобы не показывать подтверждения»; 2026-10-17: an eligible unassigned Git repository must become a project, not only attach to an existing one).
 **Preconditions:** an existing group with at least one folder that is a Git repository (or a Git folder whose parent folder holds a group's repository).
@@ -1184,7 +1187,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Product:** unobserved
 **Traces:** CONTRACTS → Projects (0.6), SB-117 packet, SB-121, SB-131, REQ-002, SB-146
 
-## SCN-061 — A deleted folder leaves its project by itself
+### SCN-061: A deleted folder leaves its project by itself
 **Persona:** P-01
 **Goal:** A project lists only folders that exist: a repository or worktree deleted from disk leaves its project without the person cleaning up (operator 2026-10-15: «следить, чтобы репы, которые в проекте, если они удаляются, то и из свитчера тоже удалять»).
 **Preconditions:** a project with two or more folders; Switchboard (the app or `serve`) running.
@@ -1204,7 +1207,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Product:** unobserved
 **Traces:** CONTRACTS → Projects (0.6), SB-131, SB-152
 
-## SCN-056 — Work in a project's folder on the project's accounts
+### SCN-056: Work in a project's folder on the project's accounts
 **Persona:** P-01
 **Goal:** Every Claude Code session started in a project's folders, by the person or an agent, spends the project's subscriptions and not the ordinary sign-in, with every skill, plugin and setting of the ordinary Claude Code still in force.
 **Preconditions:** a project with at least one enabled Claude account; Switchboard (the app or `serve`) running.
@@ -1224,7 +1227,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Product:** unobserved
 **Traces:** SB-118 packet, SB-183, SCN-074
 
-## SCN-057 — See which coding agents are installed and choose which take over work
+### SCN-057: See which coding agents are installed and choose which take over work
 **Persona:** P-01
 **Goal:** Know at a glance which coding agents this computer has, and decide which of them Switchboard may hand a workflow to when its account runs out.
 **Preconditions:** none.
@@ -1245,7 +1248,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Product:** unobserved
 **Traces:** SB-119/120 packet D-2, D-3, D-6
 
-## SCN-058 — Choose the default agent
+### SCN-058: Choose the default agent
 **Persona:** P-01
 **Goal:** Say which agent takes over a workflow when none is named — for `switchboard continue` and for Fabric.
 **Preconditions:** at least one installed, enabled agent that can take over work.
@@ -1266,7 +1269,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Product:** unobserved
 **Traces:** SB-119/120 packet D-4
 
-## SCN-059 — Pick an OpenRouter model, starting from the recommended ones
+### SCN-059: Pick an OpenRouter model, starting from the recommended ones
 **Persona:** P-01
 **Goal:** Launch OpenRouter agents on a good model without hunting through hundreds of ids.
 **Preconditions:** an OpenRouter key saved, or about to be.
@@ -1287,7 +1290,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Product:** unobserved
 **Traces:** SB-119/120 packet D-1
 
-## SCN-060 — A workflow continues in OpenCode on the OpenRouter key
+### SCN-060: A workflow continues in OpenCode on the OpenRouter key
 **Persona:** P-01
 **Goal:** When subscriptions run out, the work goes on in OpenCode with a chosen model, without touching the person's own OpenCode setup.
 **Preconditions:** OpenCode installed and enabled; an OpenRouter key and model saved; an Observatory workflow; the desktop app or `switchboard serve` running.
@@ -1306,7 +1309,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Product:** unobserved
 **Traces:** SB-119/120 packet D-5
 
-## SCN-062 — Move an account to another group from its card
+### SCN-062: Move an account to another group from its card
 **Persona:** P-01
 **Goal:** Put an account into a project's pool, or back into the default pool, without opening the project and restating its whole account set (operator 2026-10-18: «аккаунты между пулами перемещать через UI, три точки, контекстное меню, добавить в пул, выбор»; CALL-07).
 **Preconditions:** at least one saved account; projects are optional.
@@ -1326,7 +1329,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Product:** unobserved
 **Traces:** CONTRACTS → Projects (0.6), SB-122
 
-## SCN-063 — See a group's repositories with their worktrees under them
+### SCN-063: See a group's repositories with their worktrees under them
 **Persona:** P-01
 **Goal:** A project reads as its repositories: the main checkout once, its worktrees and clones under it, not as peers (operator 2026-10-16 and 2026-10-18: «вместо того чтобы делать так все репы, ты мог сделать главную, а остальные со звёздочкой, все ворктри»).
 **Preconditions:** a project whose folders include a repository's main checkout and one or more of its worktrees (often added by themselves, SCN-055).
@@ -1345,7 +1348,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Product:** unobserved
 **Traces:** CONTRACTS → Projects (0.6), SB-135
 
-## SCN-064 — Find repositories on disk and put each in its group
+### SCN-064: Find repositories on disk and put each in its group
 **Persona:** P-01
 **Goal:** See every repository on disk with its project, and put a loose one in a project or move one with its worktrees to another, without editing folder lists by hand (operator 2026-10-16: «папки на диске должны быть указаны в Switchboard — какая к какому проекту относится, менять это в интерфейсе»).
 **Preconditions:** at least one project exists; repositories sit under a folder such as `~/DATA`.
@@ -1366,7 +1369,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Product:** unobserved
 **Traces:** ST-001, FLW-01
 
-## SCN-065 — Give a group its own API key for agents
+### SCN-065: Give a group its own API key for agents
 **Persona:** P-01
 **Goal:** An agent on an API key spends the key of the project it works for, picked by the folder it starts in, while every other folder keeps the machine's key, and nothing waits on a choice (operator 2026-10-19: «гермес в одном проекте подключался к open-router одного токена, в другом проекте … к другому»; «мы делаем по тому, откуда запустился агент»).
 **Preconditions:** a project; an OpenRouter key for it (`sk-or-`).
@@ -1387,7 +1390,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Product:** unobserved
 **Traces:** SB-144, SB-72, SCN-083
 
-## SCN-066 — Codex in a project's folders uses the project's Codex accounts
+### SCN-066: Codex in a project's folders uses the project's Codex accounts
 **Persona:** P-01
 **Goal:** A Codex session started in a project's folder runs on that project's Codex account, exactly like Claude Code there, while Codex anywhere else keeps the person's own sign-in (operator 2026-10-19: «кодекс не атрибуцирован»).
 **Preconditions:** a project with an enabled Codex account (the account the ordinary Codex CLI is signed in to cannot join a project).
@@ -1408,7 +1411,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Product:** unobserved
 **Traces:** SB-143, SB-183, SCN-074
 
-## SCN-067 — See which accounts and agents work where, and where tokens go
+### SCN-067: See which accounts and agents work where, and where tokens go
 **Persona:** P-01
 **Goal:** See, per project, account and coding agent, how many requests went through Switchboard and how many tokens they took (operator 2026-10-19: «отдельный экран статистики … куда токены уходят»).
 **Preconditions:** sessions or agents sent requests through Switchboard (managed launches, project folders, the agent capability).
@@ -1431,7 +1434,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Product:** unobserved
 **Traces:** SB-145, SB-147, SB-153, SB-156
 
-## SCN-068 — Groups of projects: one repository in several groups, and the projects a group holds on hover
+### SCN-068: Groups of projects: one repository in several groups, and the projects a group holds on hover
 **Persona:** P-01
 **Goal:** Sessions bind to a group of projects with its accounts; a group may hold one project or many, one project may be in several groups, and the person sees at a glance which projects a group holds (operator 2026-10-19: «проекты, определённые в группы … проект может сразу в несколько групп входить … навёл на группу и всплывашка показала мне проекты»).
 **Preconditions:** at least one group.
@@ -1454,7 +1457,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Coverage:** runtime `a_repository_may_be_in_several_groups_and_sessions_take_the_one_with_accounts`, `an_unassigned_git_repository_stays_in_the_default_group_and_no_group_is_made`; CLI `an_unassigned_repository_stays_in_the_default_group_through_the_session_hook`; ui-logic SB-146 case; WebKit demo (tooltip, *Also add…*, “Groups «Alpha Web», «Tools»”).
 **Product:** unobserved
 **Traces:** SB-146, SB-147
-## SCN-069: See which accounts belong to which organization
+### SCN-069: See which accounts belong to which organization
 **Persona:** P-01
 **Goal:** A person who works for one or more companies sees which saved accounts are a company's and which are personal, and keeps a company's seats apart; without organizations nothing changes (operator 2026-10-21: «помечали в свитчборде, какие аккаунты к какой организации относятся … если нет, будет просто стандартный switchboard»; 2026-10-22: «это вообще убери в меню куда-то организацию»).
 **Preconditions:** at least one saved Claude or Codex account.
@@ -1475,7 +1478,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Coverage:** core `organizations::tests::*`, storage `assigning_one_seat_brings_its_team_and_removals_clean_up_assignments`, ui-logic SB-158 case, WebKit demo (empty page, add, badges by domain, filter counts, *Personal* through the menu, cards with members).
 **Product:** unobserved
 **Traces:** SB-158
-## SCN-070: Keep a group's work on its organization's accounts
+### SCN-070: Keep a group's work on its organization's accounts
 **Persona:** P-01
 **Goal:** A person who works for several companies binds a group of projects to one company, so agents in those folders run only on that company's seats, and a group of personal work never spends a company's seat (operator 2026-10-12, RM-28 CX-26, CX-28: «моделируем сейчас, отрабатываем потом»; design `docs/research/organizations-2026-10-21.md` §5).
 **Preconditions:** at least one organization exists (SCN-069); at least one group. With no organization, nothing below is shown and nothing is refused.
@@ -1499,7 +1502,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Coverage:** core `organizations::tests` SB-109 cases, runtime statistics test, `bindings::tests::a_group_whose_seats_all_left_its_organization_stays_bound`, core backup `a_reinstall_gets_organizations_their_accounts_and_groups_back` (by domain, SB-170), ui-logic SB-109 and SB-170 cases, WebKit demo.
 **Product:** unobserved
 **Traces:** SB-109, SB-111, SB-282
-## SCN-071: Keep organizations current from PassionCode.ai
+### SCN-071: Keep organizations current from PassionCode.ai
 **Persona:** P-01
 **Goal:** A person who is a member of organizations on PassionCode.ai (Vesta, `org.passioncode.ai`) gets them in Switchboard with their names and domains, kept current, without typing them; Switchboard keeps working the same without it (operator 2026-10-21: «связь с организацией … если нет, будет просто стандартный switchboard»; decision on board thread `63af7559`: a browser sign-in with a loopback redirect and PKCE, a read-only token for `GET /v1/me/organizations`, kept in the OS vault, read at start and at most every 6 hours).
 **Preconditions:** none; with no connection nothing changes.
@@ -1521,7 +1524,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Product:** unobserved
 **Traces:** SB-159, SB-160, SCN-079
 
-## SCN-072: Keep an account signed in on another machine out of this one
+### SCN-072: Keep an account signed in on another machine out of this one
 **Persona:** P-01
 **Goal:** A person who works on two computers (a MacBook and a Mac Studio) and has one subscription signed in on both keeps this computer from renewing that account's sign-in, which would sign the other computer out, and from switching or rotating to it (SB-168 D-2, operator decision 2026-10-23 in [two-machines-2026-10-23](../research/two-machines-2026-10-23.md)).
 **Preconditions:** at least one saved account.
@@ -1542,7 +1545,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Product:** unobserved
 **Traces:** SB-168, SB-175, SB-284
 
-## SCN-073: Read the usage notice on the first start
+### SCN-073: Read the usage notice on the first start
 
 **Persona:** P-01
 **Goal:** Know that Switchboard sends anonymous usage counts and how to turn them off.
@@ -1563,7 +1566,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Product:** unobserved
 **Traces:** SCN-044, SCN-035, SB-69, SB-246
 
-## SCN-074: Plain `claude` and `codex` in an organization's folders run in its context
+### SCN-074: Plain `claude` and `codex` in an organization's folders run in its context
 
 **Persona:** P-01, as a member of an organization (a person who works for a company on the same computer as their own work)
 **Goal:** A terminal session the person starts themselves, `claude` or `codex` typed in a folder of a group bound to an organization, runs in that organization's context (its home, its history, its accounts, `SWITCHBOARD_CONTEXT=org:<id>`), so the company's work never mixes with the person's own; leaving the folder gives the person's own settings back exactly (operator decision D-3 of 2026-10-25: on by default on a computer holding an organization's group, off by one command; RM-28 CX-26).
@@ -1589,7 +1592,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Product:** unobserved
 **Traces:** SB-183, SB-110, D-3, SCN-056, SCN-066, SCN-070, SCN-075
 
-## SCN-075: Turn the terminal hook off or on
+### SCN-075: Turn the terminal hook off or on
 
 **Persona:** P-01
 **Goal:** See whether Switchboard's shell hook is in the person's terminals and which start files it changed, and take it out (or put it back) in one action, from the window, the CLI or an agent, with every file given back byte for byte.
@@ -1613,7 +1616,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Product:** unobserved
 **Traces:** SB-183, D-3, SCN-074, SCN-066
 
-## SCN-076: Set up an organization's work on a new computer
+### SCN-076: Set up an organization's work on a new computer
 
 **Persona:** P-01, as a member of an organization (a new employee, or a person adding a company to their own computer)
 **Goal:** Get a computer ready for an organization's work by following one checklist that the window, the person's coding agent and the runbook all read the same way: the organization is known, its group exists, the person's own seat is in it and signed in, terminals in its folders work in its context, and one launch proved it (SB-202).
@@ -1639,7 +1642,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Product:** unobserved
 **Traces:** SB-202, SB-125, D-6, SCN-050, SCN-035, SCN-073, SCN-069, SCN-070, SCN-071, SCN-074, FLW-04
 
-## SCN-077: A new seat of an organization lands in its group
+### SCN-077: A new seat of an organization lands in its group
 
 **Persona:** P-01, as a member of an organization
 **Goal:** When the person signs in to a seat of their organization, it ends up in the organization's group, where its folders will use it, and never in the default group where the ordinary Claude Code's automatic switching could spend it; Switchboard never moves an account without the person (SB-160, joining).
@@ -1662,7 +1665,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Product:** unobserved
 **Traces:** SB-160, SB-202, SCN-062, SCN-069, SCN-070, SCN-076, FLW-04
 
-## SCN-078: A seat the organization removed reads as ended
+### SCN-078: A seat the organization removed reads as ended
 
 **Persona:** P-01, as a member of an organization that removed their seat (they left, or the seat was reassigned)
 **Goal:** When an organization takes a seat away at the provider, the person sees in plain words that the seat has ended and whom to ask, and Switchboard stops choosing it, instead of a repeating failed check (SB-160, leaving).
@@ -1685,7 +1688,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Product:** unobserved
 **Traces:** SB-160, SB-170, SCN-070, SCN-052, SCN-082
 
-## SCN-079: An organization the person left on PassionCode.ai stays here, marked
+### SCN-079: An organization the person left on PassionCode.ai stays here, marked
 
 **Persona:** P-01, as a former member of an organization
 **Goal:** When the person leaves an organization on PassionCode.ai, Switchboard says so on its card and keeps everything as it was, so the former employer's folders still refuse the person's own accounts and the person decides what to remove (SB-159 decided "keep on leaving").
@@ -1707,7 +1710,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Product:** unobserved
 **Traces:** SB-160, SB-159, SCN-069, SCN-070, SCN-071
 
-## SCN-080: See and set the fallback chain in the window
+### SCN-080: See and set the fallback chain in the window
 
 **Persona:** P-01
 **Goal:** The operator sees and sets, in the window, which agents take over a task when its accounts run out, and in what order, without the CLI (SB-71; XA-01 "a Fallback section").
@@ -1731,7 +1734,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Product:** unobserved
 **Traces:** SB-71, D-5, SCN-039, SCN-040, SCN-057, SCR-03
 
-## SCN-081: Give a group its own fallback chain
+### SCN-081: Give a group its own fallback chain
 
 **Persona:** P-01
 **Goal:** A group's tasks fall back along the group's own order (its own agents and accounts), while the rest of the computer keeps this computer's chain; tasks worked in a group's folder get the group's chain whoever's account started them.
@@ -1755,7 +1758,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Product:** unobserved
 **Traces:** SB-71, D-5, SCN-039, SCN-040, SCN-068, SCN-080, SCR-03
 
-## SCN-082: See whether a chain can take work now
+### SCN-082: See whether a chain can take work now
 
 **Persona:** P-01
 **Goal:** Before a limit is hit, see whether each step of a chain could take a task right now and why not, and after a hand-over see what happened, so a chain that would silently skip everything is noticed (SB-73 status).
@@ -1777,7 +1780,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Product:** unobserved
 **Traces:** SB-73, SB-71, SCN-040, SCN-080, SCN-081, SCR-03, FLW-05
 
-## SCN-083: Cap what paid agents may spend a day
+### SCN-083: Cap what paid agents may spend a day
 
 **Persona:** P-01
 **Goal:** Put a daily dollar ceiling on what paid fallback agents may start spending, for this computer and for a group, and a ceiling for one task, checked before every paid hand-over, beside the key's own provider limit (SB-72, decision D-5 of 2026-10-25; authority rule: a ceiling is a question, not a wall).
@@ -1802,7 +1805,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Product:** unobserved
 **Traces:** SB-72, D-5, SCN-040, SCN-045, SCN-065, SCN-084, FLW-05
 
-## SCN-084: A ceiling is reached: double it or keep it
+### SCN-084: A ceiling is reached: double it or keep it
 
 **Persona:** P-01, the operator, in their own window
 **Goal:** When a paid step reaches a ceiling, the operator is asked one question, “double it or keep it”, with no option recommended; only the operator in the window may double, anyone may keep, and a doubled ceiling asks again when it is reached (authority rule on ceilings; C-Q1).
@@ -1825,7 +1828,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Product:** unobserved
 **Traces:** SB-72, D-5, SCN-083, SCN-040, FLW-05
 
-## SCN-085: Create an organization with its GitHub repositories and folders in one step
+### SCN-085: Create an organization with its GitHub repositories and folders in one step
 **Persona:** P-01
 **Goal:** A person adds a company to Switchboard and gets its work in place at once: the organization, its group, every repository of its GitHub organization (the ones on this computer and the ones cloned now) and any folder they already keep, without choosing repositories one by one (operator 2026-11-05: «если у организации есть гитхаб, то логично все репозитории … автоматически подтянуть … какие-то репозитории могут ещё у нас не стоять … прицепить её тоже можно при создании организации»; design `docs/research/organization-wizard-2026-11-05.md`).
 **Preconditions:** none for the name and folders; for the GitHub step, the GitHub CLI `gh` installed and signed in.
@@ -1849,7 +1852,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Product:** unobserved
 **Traces:** SB-265, SB-264, SCN-069, SCN-070, SCN-076, SCN-068, SCN-055, FLW-04
 
-## SCN-086: Choose several folders at once
+### SCN-086: Choose several folders at once
 **Persona:** P-01
 **Goal:** A person adding the folders of a group or an organization picks all of them in one system picker instead of one at a time (operator 2026-11-05: «нельзя выбрать сразу много»).
 **Preconditions:** none.
@@ -1867,7 +1870,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Product:** unobserved
 **Traces:** SB-264, SCN-085, SCN-070, SCN-064
 
-## SCN-087: Move an account to another machine without signing in there
+### SCN-087: Move an account to another machine without signing in there
 **Persona:** P-01
 **Goal:** A person who manages accounts from one Mac moves a subscription's sign-in to another machine (a Mac Studio space, a colleague's Mac) in one step, so nobody signs in again there and only one machine ever holds and renews it.
 **Preconditions:** a Claude or Codex subscription sign-in that is enabled here, not used elsewhere and not selected by any group; the other machine runs Switchboard and is reachable by ssh without a password prompt.
