@@ -2,6 +2,30 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-11-09 (night): release 0.7.35; SB-285 domain suggests only, SB-310, rotation bar rows
+
+- **Operator's report** (this session, 2026-11-08 evening): after the PassionCode.ai and NG Business
+  groups were deleted, accounts still could not be moved: "This account belongs to another
+  organization than this group". Cause: at 18:06 UTC the 6-hourly PassionCode.ai read added an
+  organization "PassionCode.ai" with domain `passioncode.ai`, and the domain rule attributed four
+  accounts personal groups held to it, so `context_admits` refused them everywhere.
+- **Done on the operator's Mac (data, through MCP and CLI):** the four accounts assigned personal
+  (`org assign <id> personal`); `investor.relations@appvillis.com` moved to PassionCode,
+  `claude4@sshlg.me` to Agents, `claude5@sshlg.me` (the ordinary Claude Code login) stays the
+  default group's account; Apps & Soft untouched (operator's word).
+- **Built:** SB-285 (PR #542): a domain only suggests; one-time migration at `Store::open`
+  (`domain_rule_retired`, schema 11); a blind seam tier found a restore regression, fixed with
+  `a_restore_keeps_the_backups_word_over_the_domains_suggestion`. Rotation bar rows (PR #540).
+  27 released rows closed (PR #541).
+- **Checks run.** SB-285 full gate on the Mac Studio (`sshlg@100.69.20.19`, Rust 1.99.1 installed
+  there by rustup for this; the MacBook was at load 250 and the coordinator asked for no cargo
+  there): `./scripts/check.sh` exit 0, 1237 tests; its Windows cross-check is skipped there (no
+  cargo-xwin). A gate under `nohup` fails `cancelling_a_waiting_sign_in_ends_its_terminal_session_
+  and_cleans_up` (SIGHUP ignored): restore SIGHUP before running it.
+- **Exact next task.** Tag `v0.7.35` on the release merge commit, watch `release.yml` to
+  `published`, update the operator's installed app, then check on it that the four
+  `@passioncode.ai` accounts are admitted and show the suggestion, and close SB-285 and SB-310.
+
 ## 2026-11-08 (night): Automatic switching bar, one row per setting; groups checked
 
 - **Operator's report** (this session, screenshot of Accounts): with SB-310's six enabled
