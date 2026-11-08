@@ -1208,7 +1208,7 @@ mod tests {
             Some(&here_beta.id),
             "the backup's word, not the domain's"
         );
-        assert!(snap.also_organizations.get(&restored.id).is_none());
+        assert!(!snap.also_organizations.contains_key(&restored.id));
         assert!(snap.context_admits(&pool, restored));
     }
 
