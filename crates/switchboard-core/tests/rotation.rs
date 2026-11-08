@@ -1898,3 +1898,77 @@ fn a_seat_outside_its_groups_organization_is_never_guessed() {
         .unwrap();
     assert_eq!(decision.candidate_id.as_deref(), Some(b.as_str()));
 }
+
+/// SB-310 (operator, 2026-11-08): automatic switching of managed sessions is on by default for
+/// every provider and group that has accounts; a policy the person saved, off included, stands.
+#[test]
+fn every_group_with_accounts_gets_managed_switching_on_and_a_saved_off_stands() {
+    let (_root, _vault, store) = setup();
+    let now = clock();
+    assert_eq!(
+        store.ensure_default_policies().unwrap(),
+        0,
+        "no accounts, nothing added"
+    );
+    account(&store, "org-a", now);
+    store
+        .upsert(
+            "codex".into(),
+            Provider::Codex,
+            AuthKind::ApiKey,
+            "agents".into(),
+            Credential {
+                access_token: "synthetic-codex-key".into(),
+                refresh_token: None,
+                id_token: None,
+                native_context: None,
+                expires_at: None,
+                account_id: None,
+            },
+            None,
+        )
+        .unwrap();
+    // The person switched Claude off in `agents` before any account of it existed there.
+    store
+        .set_policy(RotationPolicy {
+            provider: Provider::Claude,
+            pool: "agents".into(),
+            target: "managed".into(),
+            enabled: false,
+            threshold_percent: 80.0,
+            hysteresis_percent: 10.0,
+            cooldown_seconds: 1800,
+            max_age_seconds: 300,
+            last_switched_at: None,
+        })
+        .unwrap();
+    assert_eq!(store.ensure_default_policies().unwrap(), 2);
+    let policies = store.snapshot().unwrap().policies;
+    let find = |provider: Provider, pool: &str| {
+        policies
+            .iter()
+            .find(|p| p.provider == provider && p.pool == pool && p.target == "managed")
+            .cloned()
+    };
+    let claude = find(Provider::Claude, "default").expect("claude default added");
+    assert!(claude.enabled && claude.threshold_percent == 90.0 && claude.cooldown_seconds == 1800);
+    assert!(find(Provider::Codex, "agents").unwrap().enabled);
+    let off = find(Provider::Claude, "agents").unwrap();
+    assert!(
+        !off.enabled && off.threshold_percent == 80.0,
+        "a saved off stands"
+    );
+    assert!(
+        find(Provider::Codex, "default").is_none(),
+        "no Codex account serves default"
+    );
+    assert!(
+        policies.iter().all(|p| p.target != "claude_cli"),
+        "the ordinary Claude Code is never switched by default"
+    );
+    assert_eq!(
+        store.ensure_default_policies().unwrap(),
+        0,
+        "a second pass writes nothing"
+    );
+}

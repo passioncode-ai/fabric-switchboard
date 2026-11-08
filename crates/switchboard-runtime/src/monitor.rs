@@ -270,6 +270,19 @@ impl Pass {
         }
         {
             let _mutation = runtime.hold("rotate").await;
+            // SB-310: a group with accounts and no saved managed policy gets an enabled one.
+            // Codes and numbers only in the log (LC-12).
+            match runtime.store.ensure_default_policies() {
+                Ok(0) => {}
+                Ok(added) => crate::oplog::event(
+                    "rotation_defaults",
+                    &[("added", crate::oplog::Field::Number(added as i64))],
+                ),
+                Err(_) => crate::oplog::event(
+                    "rotation_defaults",
+                    &[("error", crate::oplog::Field::Code("store"))],
+                ),
+            }
             // A native switch writes Claude Code's files and Keychain item: a blocking section, so
             // the proxy and control tasks on this worker do not wait with it (up to 49 s on a
             // swapping machine, 2026-10-19).
@@ -2338,6 +2351,17 @@ mod tests {
             })
             .await
             .unwrap();
+        // SB-310: the groups' default managed policies are in place, as after the first pass
+        // that ever ran on this store; the idle hour then changes nothing.
+        assert!(runtime.store.ensure_default_policies().unwrap() > 0);
+        let rotating = runtime
+            .store
+            .snapshot()
+            .unwrap()
+            .policies
+            .iter()
+            .filter(|p| p.enabled)
+            .count() as u64;
         runtime.store.flush().unwrap();
         // Every file under the data folder and the group's folder, with its size and time.
         fn files(
@@ -2406,17 +2430,20 @@ mod tests {
             written,
             "no file was written in the data folder or the group's folder"
         );
-        // One per pass for native rotation's current account, one per three-minute source
-        // sync for the signed-in account (before: every account's credential, every 10 s).
+        // At most one per pass for each enabled policy's current account (native rotation's
+        // and, since SB-310, each group's managed one), one per three-minute source sync for
+        // the signed-in account (before: every account's credential, every 10 s).
         let syncs = (3600 / INTERVAL_SECONDS) as u64;
         assert!(
-            gets <= passes as u64 + syncs,
+            gets <= rotating * passes as u64 + syncs,
             "credential reads {gets} per idle hour"
         );
-        // Without rotation, only the source sync reads one.
-        let mut off = policy("claude_cli");
-        off.enabled = false;
-        runtime.store.set_policy(off).unwrap();
+        // Without rotation, only the source sync reads one: every policy switched off, which
+        // the defaults leave as it is (SB-310).
+        for mut off in runtime.store.snapshot().unwrap().policies {
+            off.enabled = false;
+            runtime.store.set_policy(off).unwrap();
+        }
         // The change itself is answered once (schedule, backup); then the idle hour.
         let next = start + (passes + 1) * PASS_SECONDS as i64;
         CLOCK.store(next, Ordering::SeqCst);

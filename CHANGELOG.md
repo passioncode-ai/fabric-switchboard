@@ -6,6 +6,10 @@ release pull request renames `Unreleased` to the version. While Windows signing 
 that section must say `windows_authenticode: NOT_SIGNED`. Notes of 0.5.3-beta.1 and earlier are
 on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/releases).
 
+## Unreleased
+
+- Automatic switching of managed sessions is on by default: every group with accounts, for Claude and for Codex, switches to its next account as one nears its limit, groups made later included. A group where you turned it off stays off. Switching the ordinary Claude Code stays off until you turn it on (SB-310).
+
 ## 0.7.34
 
 - `switchboard sessions` names each session's home folder (`home_dir`, relative to the data folder), so a host tells two sessions of one kind apart (SB-197).

@@ -1929,7 +1929,8 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                 provider,
                 pool: pool.clone(),
                 target: target.into(),
-                enabled: false,
+                // SB-310: a managed policy nobody saved is on by default.
+                enabled: target == "managed",
                 threshold_percent: 90.0,
                 hysteresis_percent: 10.0,
                 cooldown_seconds: 1800,
