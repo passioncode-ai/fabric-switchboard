@@ -207,7 +207,8 @@ a.address { color: var(--link); text-decoration: underline; text-underline-offse
 @media (max-width: 820px) { .current-grid { grid-template-columns: 1fr; } .policy-row { align-items: flex-start; } }
 @media (max-width: 590px) { .policy-row { flex-direction: column; } .policy-actions { flex-direction: row; gap: var(--space-4); } .header-actions .button { white-space: normal; } }
 
-.nav-count { margin-left: auto; min-width: 1.5rem; padding: 0 .4rem; border-radius: 999px; background: var(--accent); color: var(--accent-ink, var(--bg)); font-size: .75rem; font-weight: 700; text-align: center; }
+/* SB-192 (VIS-20): the count of active folder rules is a fact, not unread items: neutral, never the accent. */
+.nav-count { margin-left: auto; min-width: 1.5rem; padding: 0 .4rem; border: 1px solid var(--border-strong); border-radius: var(--r-pill); background: transparent; color: var(--muted); font-size: .75rem; font-weight: 600; text-align: center; }
 .rules-strip { align-items: center; }
 /* SB-117: a folder found for a project stays above every page until it is answered. */
 .suggestion-strip { align-items: center; background: var(--accent-weak); border-color: var(--accent-text); }
