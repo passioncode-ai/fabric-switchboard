@@ -2,6 +2,24 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-11-08 (morning): release 0.7.33; SB-302, SB-303, SB-304, SB-296 closed
+
+- **Released 0.7.33** (2026-11-08 06:34:54Z, 25 assets, seven platforms; #514): SB-302 (`sessions`
+  reads a session's liveness and age in-process instead of starting `kill` and `ps` per session).
+  **0.7.31 and 0.7.32 were tagged, not published**: 0.7.31's nightly Windows jobs failed (SB-302's
+  `ps` fallback compiled there without its Unix-only helper; fixed in #512), 0.7.32's macOS checks
+  failed on a lock-timing test (SB-304, #514: it now waits for the removal to hold the lock).
+- **SB-303** (#513): `check.sh` runs `cargo xwin check` for the runtime and CLI when `cargo-xwin` is
+  installed (about 35 s); a planted 0.7.31 defect fails it. Keep `artifacts/xwin` (its SDK cache).
+- **SB-296 closed** (#509) on the app's log: since the 0.7.24 owner `handovers` never passed 10 s.
+- **Cleanup on the operator's word** (board `ebbf26cd`, 2026-11-08): every remote branch (78) is
+  archived as `refs/archive/2026-11-08/<name>` on origin, SHAs checked; deleting them and the 15 local
+  branches was refused by this session's classifier (Git Destructive) and is left for a session that
+  may delete. Only `main` is checked out; no build caches in it.
+- **Exact next task.** After the installed app takes 0.7.33, read its `control_slow` `sessions`
+  lines to confirm SB-302, then close the row. Open for a person: the live two-machine recall
+  (SB-292), SB-243 on the Windows tester's computer. Waiting on others: SB-291, SB-295.
+
 ## 2026-11-08 (early morning): releases 0.7.29 and 0.7.30; SB-292 recall, SB-237 closed
 
 - **Released 0.7.29** (2026-11-08 02:23:15Z, 25 assets, seven platforms; #502) and **0.7.30**
