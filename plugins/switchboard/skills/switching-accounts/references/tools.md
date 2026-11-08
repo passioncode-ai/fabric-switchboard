@@ -479,7 +479,8 @@ sessions Switchboard starts bypass their permission prompts (SB-298).
 
 Only when the operator asks. `begin` (provider, label, pool as the group id) opens Terminal on
 the official sign-in; the person signs in. `status`, `finish` and `cancel` take the `login_id`
-`begin` returned. No password or key passes through this tool.
+`begin` returned; `pending` lists every sign-in waiting, oldest first (`{logins: [{login_id,
+provider, label, pool, state}]}`). No password or key passes through this tool.
 
 ### `switchboard_kimi_login`: `action`, `id?`, `label?`, `region?`
 

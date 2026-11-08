@@ -1330,4 +1330,7 @@ async fn accounts_rotation_activity_and_queues_are_reachable_over_mcp() {
     assert!(!error, "{backups}");
     let (error, login) = agent.tool("switchboard_login", json!({"action": "nope"}));
     assert!(error, "{login}");
+    // SB-299: the window's pending sign-ins, read by an agent; none waits here.
+    let (error, pending) = agent.tool("switchboard_login", json!({"action": "pending"}));
+    assert!(!error && pending["logins"] == json!([]), "{pending}");
 }

@@ -122,6 +122,7 @@ switchboard backup now
 switchboard backup restore switchboard-backup-1790000000-<id>.json   # a name from backup list
 switchboard login begin --provider codex --label Work --pool work
 switchboard login status LOGIN_UUID
+switchboard login pending                 # every sign-in waiting, oldest first, as the window lists them (SB-299)
 switchboard login finish LOGIN_UUID
 switchboard accounts select ACCOUNT_UUID --provider codex --pool work
 switchboard launch ACCOUNT_UUID --mode managed --working-directory /absolute/project/path
@@ -620,6 +621,7 @@ Kimi Code subscription accounts, each signed in by the official `kimi` in a fold
 ```sh
 switchboard kimi login [--label Work] [--region mainland-cn|global]   # kimi login in Terminal
 switchboard kimi finish <id>          # once Terminal says you are logged in
+switchboard kimi status <id>          # pending, complete or ended (SB-299)
 switchboard kimi list                 # tier and 5-hour / 7-day / monthly usage, asked of Kimi
 switchboard kimi launch <id> --dir ~/src/app
 switchboard kimi relogin <id>         # when Kimi refused the saved login

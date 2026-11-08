@@ -9,6 +9,7 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 ## Unreleased
 
 - Agents can create a group with its organizations as the window's *New group* does: `switchboard project save --organization NAME` (repeat for several) and the MCP tool `switchboard_project_create` (SB-299).
+- `switchboard login pending` and the MCP `switchboard_login` action `pending` list the sign-ins waiting, as the window does; `switchboard kimi status ID` says where a Kimi sign-in stands (SB-299).
 
 ## 0.7.28
 
