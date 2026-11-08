@@ -6,7 +6,7 @@ release pull request renames `Unreleased` to the version. While Windows signing 
 that section must say `windows_authenticode: NOT_SIGNED`. Notes of 0.5.3-beta.1 and earlier are
 on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/releases).
 
-## Unreleased
+## 0.7.30
 
 - `switchboard accounts recall ID --from user@host` and the MCP tool `switchboard_account_recall` take back a Claude sign-in moved to another machine: that machine gives it back over ssh, the provider is checked here, and its copy there is removed and proved gone (SB-292).
 - Every account moved or handed over to another machine is recorded in `seats.jsonl` with who ordered it; `--operator-said`, `--said-at` and `--said-in` (MCP `decision`) record the operator's words with it (SB-292).
