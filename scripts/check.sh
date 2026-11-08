@@ -25,6 +25,7 @@ else
   echo "Windows check skipped: cargo-xwin is not installed (docs/DISTRIBUTION.md)."
 fi
 python3 scripts/check_docs.py
+python3 -m unittest scripts/test_check_docs.py
 python3 scripts/check_plugin.py
 python3 -m unittest scripts/test_check_plugin.py
 python3 -m unittest scripts/test_nightly_clock.py
