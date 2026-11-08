@@ -1525,7 +1525,6 @@ mod tests {
             ..Default::default()
         };
         s.projects[0].shared_accounts = vec![shared.id.clone()];
-        assert!(s.context_admits("acme-pool", &shared), "under the old rule");
         s.organizations[1].provider_organizations = vec!["claude:team-b".into()];
         s.memberships
             .insert(said_personal.id.clone(), PERSONAL.into());
