@@ -8,6 +8,7 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- An empty answer from PassionCode.ai no longer sets its count of organizations to 0 while they stay linked; the count says how many are still linked (SB-232).
 - The ceiling notification and `switchboard ceiling`, `switchboard agents openrouter` write dollars as the window does, with a comma between thousands (`$1,000.00`) (SB-232).
 - Dialogs and menus fade in instead of appearing at once; nothing moves when the system asks for reduced motion (SB-192).
 - The number of active folder rules beside Groups is neutral now; in the accent colour it read as unread items (SB-192).

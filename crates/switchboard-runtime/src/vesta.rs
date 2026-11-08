@@ -483,7 +483,14 @@ async fn read_organizations(
             return Err(error);
         }
     };
+    let mut linked_after = None;
     if let Ok(snap) = store.snapshot() {
+        linked_after = Some(
+            snap.organizations
+                .iter()
+                .filter(|o| o.vesta_id.is_some())
+                .count(),
+        );
         let joined = mark_released(
             &mut link.released,
             &linked_before,
@@ -499,7 +506,12 @@ async fn read_organizations(
     }
     link.state = State::Ok;
     link.read_at = link.checked_at;
-    link.organizations = read.len();
+    // SB-232: an empty answer releases nothing (SB-227), so the count stays what is still linked
+    // rather than reading 0 beside organizations that keep their link.
+    link.organizations = match (read.is_empty(), linked_after) {
+        (true, Some(linked)) => linked,
+        _ => read.len(),
+    };
     write_link(root, link)?;
     Ok(status_of(Some(link), Some(json!(applied))))
 }
@@ -998,6 +1010,9 @@ mod tests {
         assert_eq!(read["state"], "ok", "{read}");
         assert_eq!(read["released"], released);
         assert_eq!(other(&store).as_deref(), Some("v-other"));
+        // SB-232: the count says what is still linked (Other), never 0 beside its link.
+        assert_eq!(read["organizations"], 1, "{read}");
+        assert_eq!(status(root.path()).unwrap()["organizations"], 1);
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
