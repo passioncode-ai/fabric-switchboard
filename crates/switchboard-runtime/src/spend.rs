@@ -369,6 +369,25 @@ pub fn cents(usd: f64) -> Result<u32, String> {
 fn usd(cents: u32) -> f64 {
     f64::from(cents) / 100.0
 }
+/// Dollars as the window writes them (`dollars` in `src/ui-logic.ts`): `$1,000.00`, a comma
+/// between thousands and two decimals, so a notification and the CLI read like the window (SB-232).
+pub fn money(usd: f64) -> String {
+    let cents = (usd * 100.0).round() as i64;
+    let (sign, cents) = if cents < 0 {
+        ("-", -cents)
+    } else {
+        ("", cents)
+    };
+    let whole = (cents / 100).to_string();
+    let mut grouped = String::with_capacity(whole.len() + whole.len() / 3);
+    for (i, digit) in whole.chars().enumerate() {
+        if i > 0 && (whole.len() - i) % 3 == 0 {
+            grouped.push(',');
+        }
+        grouped.push(digit);
+    }
+    format!("{sign}${grouped}.{:02}", cents % 100)
+}
 
 fn scope_valid(scope: &ChainScope) -> bool {
     match scope {
@@ -1152,6 +1171,16 @@ pub fn check(root: &Path, snapshot: &Snapshot, step: &PaidStep, reads: &Reads) -
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn money_reads_like_the_window() {
+        assert_eq!(money(5.0), "$5.00");
+        assert_eq!(money(2.5), "$2.50");
+        assert_eq!(money(1000.0), "$1,000.00");
+        assert_eq!(money(1_234_567.891), "$1,234,567.89");
+        assert_eq!(money(999.999), "$1,000.00");
+        assert_eq!(money(0.0), "$0.00");
+        assert_eq!(money(-12.5), "-$12.50");
+    }
     use std::sync::Mutex;
     use switchboard_core::agent_keys::AgentKey;
     use switchboard_core::Project;

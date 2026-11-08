@@ -8,6 +8,7 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- The ceiling notification and `switchboard ceiling`, `switchboard agents openrouter` write dollars as the window does, with a comma between thousands (`$1,000.00`) (SB-232).
 - Dialogs and menus fade in instead of appearing at once; nothing moves when the system asks for reduced motion (SB-192).
 - The number of active folder rules beside Groups is neutral now; in the accent colour it read as unread items (SB-192).
 - Accounts shows one line instead of the automatic switching bar until switching has somewhere to go (two accounts of one provider in one group), and says the quota monitor is unavailable once instead of twice (SB-192).
