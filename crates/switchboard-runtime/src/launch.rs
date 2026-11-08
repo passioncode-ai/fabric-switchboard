@@ -1283,7 +1283,63 @@ fn parse_elapsed(text: &str) -> Option<Duration> {
 }
 /// How long ago `pid` started; None when `ps` cannot say, which keeps the home busy.
 #[cfg(unix)]
+/// SB-302: how long `pid` has run, read in-process (macOS `proc_pidinfo`, Linux `/proc`); `ps`
+/// only where neither answers. A `sessions` read asks this once per live session, and a process
+/// started per question took seconds each while the machine swapped.
 fn process_age(pid: u32) -> Option<Duration> {
+    process_started(pid)
+        .and_then(|started| SystemTime::now().duration_since(started).ok())
+        .or_else(|| process_age_from_ps(pid))
+}
+#[cfg(target_os = "macos")]
+fn process_started(pid: u32) -> Option<SystemTime> {
+    let pid = libc::c_int::try_from(pid).ok()?;
+    let mut info = std::mem::MaybeUninit::<libc::proc_bsdinfo>::zeroed();
+    let size = libc::c_int::try_from(std::mem::size_of::<libc::proc_bsdinfo>()).ok()?;
+    // SAFETY: the buffer is a zeroed proc_bsdinfo of exactly `size` bytes, which is what
+    // PROC_PIDTBSDINFO writes; nothing else of this process is touched.
+    let written = unsafe {
+        libc::proc_pidinfo(
+            pid,
+            libc::PROC_PIDTBSDINFO,
+            0,
+            info.as_mut_ptr().cast(),
+            size,
+        )
+    };
+    if written != size {
+        return None;
+    }
+    // SAFETY: proc_pidinfo filled the whole struct (checked above).
+    let info = unsafe { info.assume_init() };
+    Some(
+        std::time::UNIX_EPOCH
+            + Duration::from_secs(info.pbi_start_tvsec)
+            + Duration::from_micros(info.pbi_start_tvusec),
+    )
+}
+#[cfg(target_os = "linux")]
+fn process_started(pid: u32) -> Option<SystemTime> {
+    fs::symlink_metadata(format!("/proc/{pid}"))
+        .ok()?
+        .modified()
+        .ok()
+}
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+fn process_started(_pid: u32) -> Option<SystemTime> {
+    None
+}
+/// SB-302: whether `pid` exists and may be signalled by this process, as `kill -0` answers,
+/// without starting `/bin/kill`.
+#[cfg(unix)]
+fn pid_alive(pid: u32) -> bool {
+    let Ok(pid) = libc::pid_t::try_from(pid) else {
+        return false;
+    };
+    // SAFETY: signal 0 only checks that the process exists and may be signalled.
+    unsafe { libc::kill(pid, 0) == 0 }
+}
+fn process_age_from_ps(pid: u32) -> Option<Duration> {
     let output = Command::new("/bin/ps")
         .args(["-o", "etime=", "-p", &pid.to_string()])
         .env("LC_ALL", "C")
@@ -1351,13 +1407,7 @@ pub(crate) fn session_running(home: &Path) -> Result<bool, String> {
             return Err("Session state invalid.".into());
         }
         #[cfg(unix)]
-        if Command::new("/bin/kill")
-            .args(["-0", &pid.to_string()])
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status()
-            .is_ok_and(|s| s.success())
-        {
+        if pid_alive(pid) {
             // A live pid may since belong to another process; only a process at least as
             // old as the marker can be the session that wrote it. Unknown ages stay busy.
             let reused = fs::symlink_metadata(&marker)
@@ -4408,6 +4458,28 @@ mod tests {
         assert_eq!(pick_user(None, || Some("bob".into())).unwrap(), "bob");
         assert!(pick_user(None, || Some(String::new())).is_err());
         assert!(pick_user(Some(String::new()), || None).is_err());
+    }
+    #[cfg(unix)]
+    #[test]
+    fn liveness_and_age_are_read_without_starting_a_process() {
+        // SB-302: `sessions` asks both once per live session.
+        let me = std::process::id();
+        assert!(super::pid_alive(me));
+        let age = super::process_age(me).expect("this process has an age");
+        assert!(age < std::time::Duration::from_secs(24 * 3600), "{age:?}");
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        assert!(
+            super::process_started(me).is_some(),
+            "read in-process, not through ps"
+        );
+        let mut child = std::process::Command::new("/usr/bin/true").spawn().unwrap();
+        let gone = child.id();
+        child.wait().unwrap();
+        assert!(!super::pid_alive(gone), "a reaped child is not alive");
+        assert!(
+            !super::pid_alive(u32::MAX),
+            "a pid out of range is not alive"
+        );
     }
     #[test]
     fn ps_elapsed_time_forms_parse_and_malformed_ones_do_not() {
