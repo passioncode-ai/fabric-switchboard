@@ -222,10 +222,16 @@ a.address { color: var(--link); text-decoration: underline; text-underline-offse
 .current-identity { font-size: var(--t-label); font-weight: 600; overflow-wrap: break-word; }
 .current-state { flex: 0 1 auto; min-width: 0; max-width: 100%; font-size: var(--t-chip); color: var(--info); overflow-wrap: break-word; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
 .muted-text { color: var(--muted); font-weight: 500; }
-.rotation-bar { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); margin-top: var(--space-2); padding: var(--space-2) var(--space-3); border: 1px solid var(--border); border-radius: var(--r-card); background: var(--panel); }
-.rotation-copy { display: grid; gap: 2px; min-width: 0; }
-.rotation-copy strong { font-size: var(--t-label); }
-.rotation-actions { display: flex; align-items: center; gap: var(--space-2); flex-shrink: 0; }
+.rotation-bar { display: grid; gap: var(--space-1); margin-top: var(--space-2); padding: var(--space-2) var(--space-3); border: 1px solid var(--border); border-radius: var(--r-card); background: var(--panel); }
+.rotation-bar > p { margin: 0; }
+.rotation-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); flex-wrap: wrap; }
+.rotation-head strong { font-size: var(--t-label); }
+.rotation-actions { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
+.rotation-list { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
+.rotation-row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); min-width: 0; padding: 2px 0; border-top: 1px solid var(--border); }
+.rotation-row:first-child { border-top: 0; }
+.rotation-row .usage-caption { min-width: 0; overflow-wrap: anywhere; }
+.rotation-row .row-button { flex-shrink: 0; }
 .account-group { margin-top: var(--space-4); }
 .group-heading { display: flex; align-items: baseline; gap: var(--space-3); margin-bottom: var(--space-2); }
 .group-heading h2 { font-size: var(--t-heading); font-weight: 650; letter-spacing: -.01em; }
