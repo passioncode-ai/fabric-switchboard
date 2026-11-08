@@ -6,7 +6,7 @@ release pull request renames `Unreleased` to the version. While Windows signing 
 that section must say `windows_authenticode: NOT_SIGNED`. Notes of 0.5.3-beta.1 and earlier are
 on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/releases).
 
-## Unreleased
+## 0.7.29
 
 - `switchboard settings export --group POOL` writes a settings file with only that group, its organizations, ceilings and rotation settings, for a member's machine; repeat `--group` for several (SB-292).
 - Agents can create a group with its organizations as the window's *New group* does: `switchboard project save --organization NAME` (repeat for several) and the MCP tool `switchboard_project_create` (SB-299).
