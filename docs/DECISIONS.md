@@ -6,7 +6,7 @@ never renumber, never delete. The doc map ([DOCMAP.md](DOCMAP.md)) names this fi
 register. Decisions made before 2026-11-08 live where they were made (plans' `D-<n>`, board rows,
 research notes); the ones still in force that the board cites are seeded below with their source.
 
-**Next free ID:** `DEC-0008`
+**Next free ID:** `DEC-0010`
 
 ## Format
 
@@ -116,3 +116,24 @@ research notes); the ones still in force that the board cites are seeded below w
 - **Source:** operator, 2026-11-08 about 16:45 UTC, frame-agent session `0faeb32f`: «переводи на
   sergeysheleg4 если упрутся и велючи автопереключение по дефолту для все и передай в проекты
   фабрики куда надо», relayed on the board (request `486dd759`); SB-310
+
+### DEC-0009: An e-mail domain suggests an organization; only the person or an administrator places an account
+
+- **Date:** 2026-11-08
+- **Status:** Accepted
+- **Context:** design §10 of [organizations-2026-10-21](research/organizations-2026-10-21.md)
+  placed an account in the organization holding its address's domain. On 2026-11-08 at 18:06 UTC a
+  PassionCode.ai read added an organization with the domain of four accounts that personal groups
+  held; the rule moved them, and every request and move on them was refused with
+  `SEAT_OUTSIDE` until someone noticed. One organization may also use several domains.
+- **Decision:** an account belongs to an organization by the person's word or by its provider
+  team only. A domain suggests the organization; the person or an administrator confirms by
+  assigning the account, signing it in to a group of that organization, moving it there or
+  binding its group. Accounts the rule placed before keep their organization as the person's word
+  where their groups agree, once per store, so nothing running changes.
+- **Consequences / affects:** [CONTRACTS.md](CONTRACTS.md) (Organizations, SB-285),
+  [ux/scenarios.md](ux/scenarios.md) (SCN-069, SCN-070, SCN-071, SCN-076, SCN-077),
+  [ORGANIZATION.md](ORGANIZATION.md), [ORGANIZATION.ru.md](ORGANIZATION.ru.md), [CLI.md](CLI.md),
+  [brand/strings.md](brand/strings.md), [CHANGELOG](../CHANGELOG.md), [evidence/backlog.md](evidence/backlog.md) (SB-285)
+- **Source:** operator, 2026-11-06, studio-agent `d3848fb7` item 4: «не делать никакую привязку
+  по имейлу жесткую»; the incident of 2026-11-08 on the operator's Mac; SB-285

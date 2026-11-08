@@ -156,6 +156,12 @@ struct Payload {
     /// SB-284: where each of those works (old account id → the person's words).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     locations: BTreeMap<String, String>,
+    /// SB-285: written by a version where an address's domain only suggests an organization, so
+    /// `memberships` holds every placement. Absent from an older backup, whose restore records
+    /// the domain's placements for the accounts it adds (`Store::freeze_domain_placements`).
+    /// An older reader ignores it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    domain_rule_retired: bool,
 }
 /// One agent key inside the sealed payload. Never Debug: it carries the value.
 #[derive(Serialize, Deserialize)]
@@ -333,6 +339,7 @@ pub fn write(
         elsewhere: snapshot.elsewhere.clone(),
         locations: snapshot.locations.clone(),
         memberships: snapshot.memberships.into_iter().collect(),
+        domain_rule_retired: true,
     })
     .map_err(|_| UNAVAILABLE)?;
     let (key, key_id) = key(keys, true)?;
@@ -489,6 +496,8 @@ pub fn restore(
     let existing = store.snapshot()?;
     // Backup account id → the id it has here, for rules and selections.
     let mut ids: BTreeMap<String, String> = BTreeMap::new();
+    // SB-285: the accounts this restore added, as they are here.
+    let mut added: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
     for account in payload.accounts {
         let token = payload
             .credentials
@@ -589,6 +598,7 @@ pub fn restore(
                     let _ = store.update(&saved.id, saved.label.clone(), false);
                 }
                 ids.insert(account.id.clone(), saved.id.clone());
+                added.insert(saved.id.clone());
                 result.added += 1;
             }
             Err(_) => result.failed += 1,
@@ -672,6 +682,9 @@ pub fn restore(
             let _ = store.mark_elsewhere_at(id, true, *at, location);
         }
     }
+    // SB-285: the backup's word decides for the accounts this restore added, not the
+    // confirmation their save recorded a moment ago.
+    let _ = store.forget_restored_placements(&added);
     for (old, choice) in &payload.memberships {
         let choice = if choice == crate::organizations::PERSONAL {
             Some(choice.clone())
@@ -695,6 +708,12 @@ pub fn restore(
     for (pool, old) in &payload.project_shared_accounts {
         let list: Vec<String> = old.iter().filter_map(|o| ids.get(o).cloned()).collect();
         let _ = store.restore_shared_accounts(pool, &list);
+    }
+    // SB-285: a backup from before the domain rule was retired names no word for the accounts
+    // the domain placed; they keep that organization where their groups agree, as an install
+    // moving off the rule does.
+    if !payload.domain_rule_retired {
+        let _ = store.freeze_domain_placements(&added);
     }
     let now = crate::now();
     let here = store.snapshot()?;
@@ -1016,6 +1035,7 @@ mod tests {
             also_organizations: BTreeMap::new(),
             elsewhere: BTreeMap::new(),
             locations: BTreeMap::new(),
+            domain_rule_retired: true,
         };
         let json = serde_json::to_vec(&payload).unwrap();
         let old: OldPayload = serde_json::from_slice(&json).expect("an older build reads it");
@@ -1025,6 +1045,171 @@ mod tests {
             back.project_sources["app"],
             vec!["github.com/example".to_string()]
         );
+    }
+
+    /// Opens backup `file`, lets `edit` change its payload, and seals it again in place: a
+    /// backup as an older build would have written it.
+    fn reseal(dir: &Path, file: &str, keys: &Keys, edit: impl FnOnce(&mut serde_json::Value)) {
+        let path = dir.join(file);
+        let mut envelope: Envelope =
+            serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        let nonce: [u8; NONCE_LEN] = STANDARD
+            .decode(&envelope.nonce)
+            .unwrap()
+            .try_into()
+            .unwrap();
+        let aad_bytes = aad(
+            envelope.created_at,
+            &envelope.store,
+            envelope.accounts,
+            envelope.missing,
+        );
+        let mut sealed = STANDARD.decode(&envelope.data).unwrap();
+        let (key, _) = key(keys, false).unwrap();
+        let plain = key
+            .open_in_place(
+                Nonce::assume_unique_for_key(nonce),
+                Aad::from(aad_bytes.clone()),
+                &mut sealed,
+            )
+            .unwrap();
+        let mut payload: serde_json::Value = serde_json::from_slice(plain).unwrap();
+        edit(&mut payload);
+        let mut data = serde_json::to_vec(&payload).unwrap();
+        key.seal_in_place_append_tag(
+            Nonce::assume_unique_for_key(nonce),
+            Aad::from(aad_bytes),
+            &mut data,
+        )
+        .unwrap();
+        envelope.data = STANDARD.encode(&data);
+        std::fs::write(&path, serde_json::to_vec_pretty(&envelope).unwrap()).unwrap();
+    }
+
+    #[test]
+    fn a_backup_from_before_the_domain_rule_retired_keeps_its_placements() {
+        // SB-285: a backup written under the domain rule carries no word for the accounts the
+        // domain placed. Restoring it keeps each where its groups agree; a backup written now
+        // carries every word, and a seat on the domain with no word stays personal.
+        let temp = tempfile::tempdir().unwrap();
+        let backups = temp.path().join("backups");
+        let keys = Keys::default();
+        let original = store(&temp.path().join("one"));
+        let seated = save(&original, "synthetic-a", "token-a-secret");
+        let loose = save(&original, "synthetic-c", "token-c-secret");
+        let held = save(&original, "synthetic-d", "token-d-secret");
+        let acme = original
+            .add_organization("Acme", &["example.invalid".into()])
+            .unwrap();
+        let (alpha, own) = (temp.path().join("alpha"), temp.path().join("own"));
+        std::fs::create_dir_all(&alpha).unwrap();
+        std::fs::create_dir_all(&own).unwrap();
+        original
+            .save_project_in(
+                None,
+                "Alpha",
+                std::slice::from_ref(&alpha),
+                std::slice::from_ref(&seated.id),
+                Some(Some(&acme.id)),
+            )
+            .unwrap();
+        original
+            .save_project(
+                None,
+                "Own",
+                std::slice::from_ref(&own),
+                std::slice::from_ref(&held.id),
+            )
+            .unwrap();
+        let info = write(&original, &backups, &keys, 1_000).unwrap().unwrap();
+        let word = |store: &Store, label: &str| {
+            let snap = store.snapshot().unwrap();
+            let id = &snap.accounts.iter().find(|a| a.label == label).unwrap().id;
+            snap.memberships.get(id).cloned()
+        };
+        // Written now: the word confirmed by the group travels; the loose seat stays personal.
+        let now_restored = store(&temp.path().join("two"));
+        restore(&now_restored, &backups, &info.file, &keys).unwrap();
+        assert_eq!(word(&now_restored, "synthetic-a"), Some(acme.id.clone()));
+        assert_eq!(word(&now_restored, "synthetic-c"), None);
+        assert_eq!(word(&now_restored, "synthetic-d"), None);
+        // Written under the rule: no mark, no word for what the domain placed.
+        reseal(&backups, &info.file, &keys, |payload| {
+            let payload = payload.as_object_mut().unwrap();
+            assert_eq!(payload.remove("domain_rule_retired"), Some(true.into()));
+            payload.remove("memberships");
+        });
+        let old_restored = store(&temp.path().join("three"));
+        restore(&old_restored, &backups, &info.file, &keys).unwrap();
+        assert_eq!(word(&old_restored, "synthetic-a"), Some(acme.id.clone()));
+        assert_eq!(word(&old_restored, "synthetic-c"), Some(acme.id.clone()));
+        assert_eq!(
+            word(&old_restored, "synthetic-d"),
+            None,
+            "its personal group's word stands"
+        );
+        let snap = old_restored.snapshot().unwrap();
+        let a = snap
+            .accounts
+            .iter()
+            .find(|a| a.label == "synthetic-a")
+            .unwrap();
+        assert!(snap.context_admits("alpha", a));
+        let _ = (loose, original);
+    }
+
+    #[test]
+    fn a_restore_keeps_the_backups_word_over_the_domains_suggestion() {
+        // SB-285 (seam review): a restore saves each account before it puts back the person's
+        // word, and a save into a group of the organization the address suggests confirms that
+        // organization. Restored onto an install that already has the group, the backup's word
+        // (Beta, chosen by the person) must win over the domain's suggestion (Acme).
+        let temp = tempfile::tempdir().unwrap();
+        let backups = temp.path().join("backups");
+        let keys = Keys::default();
+        let alpha = temp.path().join("alpha");
+        std::fs::create_dir_all(&alpha).unwrap();
+        let group_of_both = |store: &Store, accounts: &[String]| {
+            let acme = store
+                .add_organization("Acme", &["example.invalid".into()])
+                .unwrap();
+            let beta = store.add_organization("Beta", &[]).unwrap();
+            let pool = store
+                .save_project_in(
+                    None,
+                    "Alpha",
+                    std::slice::from_ref(&alpha),
+                    accounts,
+                    Some(Some(&acme.id)),
+                )
+                .unwrap()
+                .pool;
+            store
+                .set_project_organizations(&pool, vec![acme.id.clone(), beta.id.clone()])
+                .unwrap();
+            (acme, beta, pool)
+        };
+        let original = store(&temp.path().join("one"));
+        let a = save(&original, "synthetic-a", "token-a-secret");
+        let (_, beta, _) = group_of_both(&original, std::slice::from_ref(&a.id));
+        original.assign_organization(&a.id, Some(&beta.id)).unwrap();
+        let info = write(&original, &backups, &keys, 1_000).unwrap().unwrap();
+        let here = store(&temp.path().join("two"));
+        let (_, here_beta, pool) = group_of_both(&here, &[]);
+        restore(&here, &backups, &info.file, &keys).unwrap();
+        let snap = here.snapshot().unwrap();
+        let restored = snap
+            .accounts
+            .iter()
+            .find(|x| x.label == "synthetic-a")
+            .unwrap();
+        assert_eq!(
+            snap.memberships.get(&restored.id),
+            Some(&here_beta.id),
+            "the backup's word, not the domain's"
+        );
+        assert!(!snap.also_organizations.contains_key(&restored.id));
+        assert!(snap.context_admits(&pool, restored));
     }
 
     #[derive(Default, Clone)]
@@ -1089,7 +1274,8 @@ mod tests {
         let acme = original
             .add_organization("Acme", &["example.invalid".into()])
             .unwrap();
-        // b is kept personal by the person's word; a belongs to Acme by its domain.
+        // b is kept personal by the person's word; a's domain suggests Acme, and placing it in
+        // Acme's group below confirms it (SB-285).
         original
             .assign_organization(&b.id, Some(PERSONAL_WORD))
             .unwrap();

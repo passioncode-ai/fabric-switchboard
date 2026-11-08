@@ -32,7 +32,13 @@ fn schema_version(snapshot: &Snapshot) -> u32 {
     // a group shares from another, or an account of several organizations. A 0.7.20 or older
     // reader would refuse the unknown fields.
     // Version 10 only while an account carries where it works (SB-284).
-    if !snapshot.locations.is_empty() {
+    // Version 11 only while the domain rule is retired (SB-285): organizations exist and an
+    // address's domain only suggests one. A 0.7.34 or older reader would place accounts by their
+    // domain again. It refuses the unknown field, but it parses the whole file before the
+    // version, so it reports the file as corrupt rather than naming the version.
+    if snapshot.domain_rule_retired {
+        11
+    } else if !snapshot.locations.is_empty() {
         10
     } else if snapshot
         .projects
@@ -143,7 +149,7 @@ pub(crate) fn open(root: &Path) -> Result<(File, Snapshot), String> {
             }
             let disk: Disk = serde_json::from_slice(&bytes)
                 .map_err(|_| "Account metadata is corrupt; restore a known-good backup")?;
-            if !matches!(disk.schema_version, 1..=10) {
+            if !matches!(disk.schema_version, 1..=11) {
                 return Err("Unsupported account metadata version".into());
             }
             validate_snapshot(&disk.snapshot)?;
@@ -225,7 +231,7 @@ pub(crate) fn open(root: &Path) -> Result<(File, Snapshot), String> {
         let bytes = read_private(&path, MAX_FILE)?;
         let disk: Disk = serde_json::from_slice(&bytes)
             .map_err(|_| "Account metadata is corrupt; restore a known-good backup")?;
-        if !matches!(disk.schema_version, 1..=10) {
+        if !matches!(disk.schema_version, 1..=11) {
             return Err("Unsupported account metadata version".into());
         }
         validate_snapshot(&disk.snapshot)?;

@@ -1,6 +1,6 @@
 import { isAbsoluteProjectPath } from './platform';
 import type { StatCounts, Statistics } from './ui-logic';
-import { attribution, groupAdmits, groupOrganizations, providerOrganization, servesPool } from './ui-logic';
+import { attribution, domainOrganization, domainSuggestion, groupAdmits, groupOrganizations, placementAdmits, providerOrganization, servesPool } from './ui-logic';
 import agentCatalogData from '../catalog/agents.json';
 import { version } from '../package.json';
 import type { PassioncodeStatus, Ceilings, CeilingView, CeilingQuestionView, Account, OrganizationGroupOffer, Adapter, AgentSetup, CurrentAccounts, ExternalIdentity, HermesModel, KimiAccounts, LoginInput, OpenrouterStatus, ProjectSuggestion, Snapshot, UpdateStatus, AgentRow, AgentsOverview, RecommendedModel, Chain, ChainExecutor, ChainScope, ChainStepView, LastHandover, ShellHookFile, ShellHookStatus, Onboarding, OnboardStep } from './types';
@@ -78,13 +78,26 @@ export function createDemoAdapter(): Adapter {
   // organization when it landed outside it; none for a personal account, an organization with no
   // group or several, an account already there, or an identity the group already holds.
   const organizationOffer = (item: Account): OrganizationGroupOffer | undefined => {
-    const organization = attribution(state, item).organization;
+    // SB-285: or the organization its address suggests.
+    const organization = attribution(state, item).organization ?? domainSuggestion(state, item)?.id;
     if (!organization) return undefined;
     const bound = (state.projects ?? []).filter((p) => groupOrganizations(p).includes(organization));
     if (bound.length !== 1 || servesPool(state, item, bound[0].pool)) return undefined;
     const id = item.external_identity;
     const held = !!id?.account_id && state.accounts.some((a) => a.pool === bound[0].pool && a.provider === item.provider && a.external_identity?.account_id === id.account_id && a.external_identity?.organization_id === id.organization_id);
     return held ? undefined : { pool: bound[0].pool, name: bound[0].name };
+  };
+  // SB-285, like the core's `confirm_placement`: placing an account in a group of the organization
+  // its address suggests records the person's word, as its organization, or as one it also works
+  // for when another group it serves would then refuse it.
+  const confirmPlacement = (item: Account, pool: string, organizations: string[]) => {
+    if (groupAdmits(state, organizations, item) || !placementAdmits(state, organizations, item)) return;
+    const organization = domainOrganization(state, item)!.id;
+    const others = (state.projects ?? []).filter((p) => p.pool !== pool && servesPool(state, item, p.pool));
+    const first = { ...state, memberships: { ...(state.memberships ?? {}), [item.id]: organization } };
+    if (others.every((p) => groupAdmits(first, groupOrganizations(p), item))) (state.memberships ??= {})[item.id] = organization;
+    else { const all = (state.also_organizations ??= {}); all[item.id] = [...new Set([...(all[item.id] ?? []), organization])]; }
+    log('organization', item.id, 'assigned');
   };
   let passioncode: PassioncodeStatus = { connected: false, base: 'https://org.passioncode.ai' };
   const rateLimited = new Set<string>();
@@ -119,6 +132,8 @@ export function createDemoAdapter(): Adapter {
     state.organizations = [northwind, contoso];
     for (const [id, provider, email] of [['demo-claude-northwind', 'claude', 'dev@northwind.test'], ['demo-codex-northwind', 'codex', 'ops@northwind.test']] as const) {
       state.accounts.unshift({ id, label: email, provider, kind: 'oauth', pool: 'northwind', enabled: true, created_at: now() - 86_400, identity: null, external_identity: { account_id: `synthetic-${id}`, organization_id: null, email }, usage: null });
+      // SB-285: signing in to Northwind's group placed them there.
+      (state.memberships ??= {})[id] = northwind.id;
       signInRequired.add(id);
     }
     (state.projects ??= []).unshift({ pool: 'northwind', name: 'Northwind web', folders: ['/srv/projects/northwind-web'], created_at: now() - 20 * 86_400, organization: northwind.id });
@@ -363,6 +378,8 @@ export function createDemoAdapter(): Adapter {
       if (existing) { signInRequired.delete(existing.id); existing.usage = null; existing.usage_health = null; log('account_updated', existing.id, 'success'); const offer = organizationOffer(existing); return offer ? { ...structuredClone(existing), organization_group: offer } : structuredClone(existing); }
       const item: Account = { id: crypto.randomUUID(), label: input.label || identity.email!, provider: input.provider, kind: 'oauth', pool: input.pool, enabled: true, created_at: now(), identity: null, external_identity: identity, usage: null };
       state.accounts.push(item); log('account_added', item.id, 'success');
+      const group = (state.projects ?? []).find((p) => p.pool === item.pool);
+      if (group) confirmPlacement(item, item.pool, groupOrganizations(group));
       const offer = organizationOffer(item);
       const receipt = offer ? { ...structuredClone(item), organization_group: offer } : structuredClone(item);
       // Like the owner since SB-42: a saved account with its temporary folder still to remove.
@@ -403,7 +420,7 @@ export function createDemoAdapter(): Adapter {
       // SB-282: the whole list wins; one choice is a list of one; left out, the group keeps its own.
       const organizations = input.organizations !== undefined ? input.organizations.filter((o) => o && o !== 'personal') : input.organization === undefined ? groupOrganizations(existing) : input.organization === 'personal' ? [] : [input.organization];
       if (organizations.some((id) => !(state.organizations ?? []).some((o) => o.id === id))) throw new Error('Organization not found.');
-      for (const account of state.accounts.filter((a) => input.accountIds.includes(a.id))) if (!groupAdmits(state, organizations, account)) throw new Error("An account chosen for this group belongs to another organization. Choose accounts of the group's organization, or change it.");
+      for (const account of state.accounts.filter((a) => input.accountIds.includes(a.id))) if (!placementAdmits(state, organizations, account)) throw new Error("An account chosen for this group belongs to another organization. Choose accounts of the group's organization, or change it.");
       // SB-282: an account at home in another group is shared, not moved.
       const groupPools = new Set(projects.map((p) => p.pool));
       const shared = input.accountIds.filter((id) => { const a = state.accounts.find((x) => x.id === id); return !!a && a.pool !== pool && groupPools.has(a.pool); });
@@ -416,6 +433,7 @@ export function createDemoAdapter(): Adapter {
       if (existing) Object.assign(existing, project); else projects.push(project);
       projects.sort((a, b) => a.name.localeCompare(b.name));
       log('project', '', existing ? 'updated' : 'created');
+      for (const account of state.accounts.filter((a) => input.accountIds.includes(a.id))) confirmPlacement(account, pool, organizations);
       return structuredClone(project);
     },
     async organizationAdd(name, domains) {

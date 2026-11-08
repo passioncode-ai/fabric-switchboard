@@ -677,18 +677,19 @@ impl Store {
             None => current.clone(),
         };
         // SB-109, SB-282: an account joins a group of its own context only; a group whose
-        // organizations change keeps only accounts of the new ones.
-        if !candidate.organizations.is_empty() {
-            let group = Project {
-                organizations: organizations.clone(),
-                ..Default::default()
-            };
-            for a in candidate.accounts.iter().filter(|a| {
-                accounts.contains(&a.id) && (a.pool != pool || organizations != current)
-            }) {
-                if !group.admits(&candidate.attribution(a)) {
-                    return Err(crate::organizations::SEAT_CHOSEN.into());
-                }
+        // organizations change keeps only accounts of the new ones. SB-285: placing an account
+        // whose address suggests one of the group's organizations confirms it (below, once it
+        // has moved).
+        let joining: Vec<String> = candidate
+            .accounts
+            .iter()
+            .filter(|a| accounts.contains(&a.id) && (a.pool != pool || organizations != current))
+            .map(|a| a.id.clone())
+            .collect();
+        for id in &joining {
+            let a = candidate.accounts.iter().find(|a| &a.id == id).unwrap();
+            if !candidate.placement_admits(&organizations, a) {
+                return Err(crate::organizations::SEAT_CHOSEN.into());
             }
         }
         for (id, to) in &moves {
@@ -741,6 +742,9 @@ impl Store {
                 "created"
             },
         );
+        for id in &joining {
+            candidate.confirm_placement(id, &pool, &project.organizations);
+        }
         self.publish(&mut state, candidate)?;
         self.changed();
         Ok(project)
@@ -765,16 +769,23 @@ impl Store {
         let mut state = self.lock()?;
         let mut candidate = state.clone();
         let organizations = organizations_checked(&candidate, organizations)?;
-        let group = Project {
-            organizations: organizations.clone(),
-            ..Default::default()
-        };
         if candidate
             .accounts
             .iter()
-            .any(|a| candidate.serves(a, pool) && !group.admits(&candidate.attribution(a)))
+            .any(|a| candidate.serves(a, pool) && !candidate.placement_admits(&organizations, a))
         {
             return Err(crate::organizations::SEATS_ELSEWHERE.into());
+        }
+        // SB-285: binding the group to the organization its accounts' addresses suggest
+        // confirms it for each of them.
+        let serving: Vec<String> = candidate
+            .accounts
+            .iter()
+            .filter(|a| candidate.serves(a, pool))
+            .map(|a| a.id.clone())
+            .collect();
+        for id in &serving {
+            candidate.confirm_placement(id, pool, &organizations);
         }
         let project = candidate
             .projects

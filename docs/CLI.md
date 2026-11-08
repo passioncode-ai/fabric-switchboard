@@ -41,17 +41,21 @@ switchboard --json events
 
 ```sh
 switchboard org add "Acme" --domain acme.example --domain acme.dev
-switchboard org list                                   # organizations, then each account and why
-switchboard org assign ACCOUNT_UUID ORGANIZATION_ID     # or personal, or auto
+switchboard org list                                   # organizations, then each account, why, and what its address suggests
+switchboard org assign ACCOUNT_UUID ORGANIZATION        # an id or a name, or personal, or auto
 switchboard org assign ACCOUNT_UUID auto Acme Beta      # SB-282: the rules decide its first; it also works for Acme and Beta
 switchboard org edit ORGANIZATION_ID --name "Acme Inc." --domain acme.example
 switchboard org remove ORGANIZATION_ID
 ```
 
-An account belongs to an organization by your word (`assign`), by its team at the provider
+An account belongs to an organization by your word (`assign`) or by its team at the provider
 (assigning one seat of a Claude Team or ChatGPT workspace records the team, so its other seats
-follow), or by its address's domain; otherwise it is personal. Nothing changes until an
-organization exists. `--json` gives `{schema: 1, organizations, accounts, passioncode}`.
+follow); otherwise it is personal. An address on an organization's domain only suggests it
+(SB-285, [DEC-0009](DECISIONS.md#dec-0009-an-e-mail-domain-suggests-an-organization-only-the-person-or-an-administrator-places-an-account)): `org list` shows `(its address suggests Acme)` beside such an account, and `assign`, a
+sign-in into that organization's group, or moving the account into it confirms the suggestion.
+Nothing changes until an organization exists. `--json` gives `{schema: 1, organizations, accounts,
+passioncode}`; each account carries `organization`, `organization_name`, `by` (`person`,
+`provider` or null), `suggested` and `suggested_name` (null when nothing is suggested).
 
 ```sh
 switchboard org connect        # SB-159: sign in to PassionCode.ai in the browser (waits up to 5 minutes)

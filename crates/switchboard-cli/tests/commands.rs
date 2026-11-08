@@ -975,6 +975,70 @@ async fn separate_cli_process_mutates_live_owner_without_touching_native_vault()
     assert_eq!(owner.runtime.store.snapshot().unwrap().accounts.len(), 1);
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn org_list_names_the_organization_an_address_suggests() {
+    // SB-285: an organization holding an account's domain places nothing; `org list` names it
+    // as a suggestion until the person assigns the account.
+    let tmp = tempfile::tempdir().unwrap();
+    let owner = Owner::start(tmp.path().to_owned(), Arc::new(MemoryVault::default()))
+        .await
+        .unwrap();
+    let account = owner
+        .runtime
+        .store
+        .add(
+            "dev@acme.example".into(),
+            switchboard_core::Provider::Claude,
+            switchboard_core::AuthKind::ApiKey,
+            "default".into(),
+            switchboard_core::Credential::parse(
+                switchboard_core::Provider::Claude,
+                switchboard_core::AuthKind::ApiKey,
+                "fixture-org-suggestion",
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    let run = |args: &[&str]| {
+        let output = binary()
+            .arg("--data-dir")
+            .arg(tmp.path())
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{args:?}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8(output.stdout).unwrap()
+    };
+    run(&["org", "add", "Acme", "--domain", "acme.example"]);
+    let text = run(&["org", "list"]);
+    let line = text.lines().find(|l| l.starts_with(&account.id)).unwrap();
+    assert!(line.contains("personal"), "{line}");
+    assert!(
+        line.ends_with("dev@acme.example (its address suggests Acme)"),
+        "{line}"
+    );
+    let json: serde_json::Value = serde_json::from_str(&run(&["--json", "org", "list"])).unwrap();
+    let row = &json["data"]["accounts"][0];
+    assert_eq!(
+        (&row["organization"], &row["by"], &row["suggested_name"]),
+        (
+            &serde_json::Value::Null,
+            &serde_json::Value::Null,
+            &serde_json::json!("Acme")
+        )
+    );
+    // Confirmed by name, as `org list` showed it.
+    run(&["org", "assign", &account.id, "acme"]);
+    let text = run(&["org", "list"]);
+    let line = text.lines().find(|l| l.starts_with(&account.id)).unwrap();
+    assert!(line.ends_with("dev@acme.example (set by you)"), "{line}");
+    assert!(line.contains("Acme"), "{line}");
+}
+
 #[test]
 fn rotation_settings_persist_offline_and_report_stopped_monitor() {
     let tmp = tempfile::tempdir().unwrap();

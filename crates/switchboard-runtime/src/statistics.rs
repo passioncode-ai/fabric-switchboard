@@ -621,6 +621,11 @@ mod tests {
             created_at: 1,
             vesta_id: None,
         });
+        // SB-285: its domain only suggests Acme; the person placed the seat there.
+        let work = snapshot.accounts[0].id.clone();
+        snapshot
+            .memberships
+            .insert(work, "00000000-0000-4000-8000-000000000001".into());
         let report = s.report(&snapshot, &index, 7, now);
         let rows = report["organizations"].as_array().unwrap();
         assert_eq!(rows.len(), 3);

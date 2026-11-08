@@ -204,8 +204,11 @@ fn schema_three_is_written_only_while_rules_exist() {
 }
 
 #[test]
-fn schema_six_is_written_only_while_a_group_has_an_organization() {
-    // SB-109: a 0.6.64 or older reader refuses version 6 by name, not as a corrupt file.
+fn a_groups_organization_is_written_while_it_has_one() {
+    // SB-109: a group's organization survives a reopen and leaves the file when the group is
+    // personal again. SB-285: a store holding an organization is schema 11, which a 0.7.34 or
+    // older reader refuses by name (version 6, a group's organization, is folded into it);
+    // without one it drops back to 4.
     let (root, store) = setup();
     let alpha = project(&root, "alpha");
     let group = store
@@ -213,10 +216,11 @@ fn schema_six_is_written_only_while_a_group_has_an_organization() {
         .unwrap();
     assert_eq!(schema(root.path()), 4);
     let acme = store.add_organization("Acme", &[]).unwrap();
+    assert_eq!(schema(root.path()), 11);
     store
         .set_project_organization(&group.pool, Some(&acme.id))
         .unwrap();
-    assert_eq!(schema(root.path()), 6);
+    assert_eq!(schema(root.path()), 11);
     drop(store);
     let reopened = Store::open(root.path().into(), Arc::new(MemoryVault::default())).unwrap();
     assert_eq!(
@@ -226,13 +230,20 @@ fn schema_six_is_written_only_while_a_group_has_an_organization() {
     reopened
         .set_project_organization(&group.pool, None)
         .unwrap();
+    let disk: serde_json::Value =
+        serde_json::from_slice(&fs::read(root.path().join("accounts.json")).unwrap()).unwrap();
+    assert!(disk["snapshot"]["projects"][0]
+        .get("organization")
+        .is_none());
+    assert_eq!(schema(root.path()), 11);
+    reopened.remove_organization(&acme.id).unwrap();
     assert_eq!(schema(root.path()), 4);
 }
 
 #[test]
-fn a_group_of_several_organizations_is_schema_nine_and_keeps_their_order() {
-    // SB-282: one organization is still `organization` (schema 6, any 0.6.65+ reader), several
-    // are `organizations` (schema 9, which a 0.7.20 reader refuses by name).
+fn a_group_of_several_organizations_keeps_their_order() {
+    // SB-282: one organization is still `organization`, several are `organizations`. SB-285:
+    // with an organization the store is schema 11 (it folds in 6 and 9).
     let (root, store) = setup();
     let alpha = project(&root, "alpha");
     let group = store
@@ -252,7 +263,7 @@ fn a_group_of_several_organizations_is_schema_nine_and_keeps_their_order() {
         )
         .unwrap();
     assert_eq!(saved.organizations, vec![beta.id.clone(), acme.id.clone()]);
-    assert_eq!(schema(root.path()), 9);
+    assert_eq!(schema(root.path()), 11);
     let disk: serde_json::Value =
         serde_json::from_slice(&fs::read(root.path().join("accounts.json")).unwrap()).unwrap();
     let written = &disk["snapshot"]["projects"][0];
@@ -271,13 +282,13 @@ fn a_group_of_several_organizations_is_schema_nine_and_keeps_their_order() {
     assert!(reopened
         .set_project_organizations(&group.pool, vec!["no-such".into()])
         .is_err());
-    // Removing one organization leaves the group in the other: one again, schema 6.
+    // Removing one organization leaves the group in the other: one again, as `organization`.
     reopened.remove_organization(&beta.id).unwrap();
     assert_eq!(
         reopened.snapshot().unwrap().projects[0].organizations,
         vec![acme.id.clone()]
     );
-    assert_eq!(schema(root.path()), 6);
+    assert_eq!(schema(root.path()), 11);
     let disk: serde_json::Value =
         serde_json::from_slice(&fs::read(root.path().join("accounts.json")).unwrap()).unwrap();
     assert_eq!(
@@ -303,7 +314,7 @@ fn two_groups_of_one_organization_both_belong_to_it() {
     }
     let snapshot = store.snapshot().unwrap();
     assert_eq!(snapshot.organization_groups(&acme.id).len(), 2);
-    assert_eq!(schema(root.path()), 6);
+    assert_eq!(schema(root.path()), 11);
 }
 
 #[test]

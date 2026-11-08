@@ -809,12 +809,13 @@ check(() => {
   assert.deepEqual(logic.groupProjectRows(folders, roots).map((p) => p.name), ['project-observatory-open-source', 'research-agent (ssheleg)', 'research-agent (prowl-ai)', 'asset-foundry']);
   assert.deepEqual(logic.groupProjects(folders, roots), ['asset-foundry', 'project-observatory-open-source', 'research-agent (prowl-ai)', 'research-agent (ssheleg)']);
 });
-// SB-158: the same attribution order as Snapshot::attribution: the person's word, the team, the domain.
+// SB-158: the same attribution order as Snapshot::attribution: the person's word, then the team. SB-285: a domain only suggests.
 check(() => {
   const account = (id, provider, email, org) => ({ id, label: email, provider, external_identity: { account_id: org, organization_id: org, email } });
   const snap = { organizations: [{ id: 'o1', name: 'Acme', domains: ['acme.example'] }, { id: 'o2', name: 'Beta', domains: [], provider_organizations: ['claude:team-b'] }], memberships: {} };
   assert.deepEqual(logic.attribution({}, account('a', 'claude', 'me@acme.example', 'x')), { organization: null, by: null, also: [] });
-  assert.deepEqual(logic.attribution(snap, account('a', 'claude', 'dev@acme.example', 'team-x')), { organization: 'o1', by: 'domain', also: [] });
+  assert.deepEqual(logic.attribution(snap, account('a', 'claude', 'dev@acme.example', 'team-x')), { organization: null, by: null, also: [] });
+  assert.equal(logic.domainSuggestion(snap, account('a', 'claude', 'dev@acme.example', 'team-x'))?.id, 'o1');
   assert.deepEqual(logic.attribution(snap, account('b', 'claude', 'dev@acme.example', 'team-b')), { organization: 'o2', by: 'provider', also: [] });
   snap.memberships.b = 'personal';
   assert.deepEqual(logic.attribution(snap, account('b', 'claude', 'dev@acme.example', 'team-b')), { organization: null, by: 'person', also: [] });
@@ -827,20 +828,50 @@ check(() => {
   assert.equal(logic.inOrganizationFilter(snap, account('b', 'claude', 'dev@acme.example', 'team-b'), 'personal'), true);
   assert.deepEqual(logic.domainList(' @Acme.example, beta.example\nacme.example '), ['acme.example', 'beta.example']);
 });
+// SB-285: the same suggestion as Snapshot::domain_suggestion: none when no domain matches, when the
+// person said where the account belongs, or when it already holds that organization.
+check(() => {
+  const account = (id, email, org = null) => ({ id, label: email, provider: 'claude', external_identity: { account_id: id, organization_id: org, email } });
+  const snap = { organizations: [{ id: 'o1', name: 'Acme', domains: ['acme.example'] }, { id: 'o2', name: 'Beta', domains: [], provider_organizations: ['claude:team-b'] }], memberships: {}, also_organizations: {} };
+  const dev = account('d', 'dev@acme.example');
+  assert.equal(logic.domainOrganization(snap, dev)?.id, 'o1');
+  assert.equal(logic.domainSuggestion(snap, dev)?.id, 'o1');
+  assert.equal(logic.domainSuggestion(snap, account('h', 'me@home.example')), null);
+  assert.equal(logic.domainSuggestion({}, dev), null, 'no organization: nothing to suggest');
+  // A team decides; the domain still suggests the other one, and placing in Acme's group is refused.
+  const teamed = account('t', 'ops@acme.example', 'team-b');
+  assert.equal(logic.attribution(snap, teamed).by, 'provider');
+  assert.equal(logic.domainSuggestion(snap, teamed)?.id, 'o1');
+  assert.equal(logic.placementAdmits(snap, ['o1'], teamed), false);
+  snap.also_organizations.d = ['o1'];
+  assert.equal(logic.domainSuggestion(snap, dev), null, 'it already works for Acme');
+  delete snap.also_organizations.d;
+  snap.memberships.d = 'personal';
+  assert.equal(logic.domainSuggestion(snap, dev), null, 'the person answered');
+});
 // SB-109: a group takes accounts of its own organization, or personal ones; no organization, no rule.
 check(() => {
   const account = (id, email) => ({ id, label: email, provider: 'claude', external_identity: { account_id: id, organization_id: null, email } });
   const work = account('w', 'dev@acme.example'); const home = account('h', 'me@home.example');
   assert.equal(logic.groupAdmits({}, null, work), true);
   const snap = { organizations: [{ id: 'o1', name: 'Acme', domains: ['acme.example'] }], memberships: {} };
-  assert.equal(logic.groupAdmits(snap, 'o1', work), true);
-  assert.equal(logic.groupAdmits(snap, null, work), false);
+  // SB-285: its domain suggests Acme without placing it: a personal group keeps it, and placing
+  // it in Acme's group confirms the suggestion.
+  assert.equal(logic.groupAdmits(snap, 'o1', work), false);
+  assert.equal(logic.placementAdmits(snap, 'o1', work), true);
+  assert.equal(logic.groupAdmits(snap, null, work), true);
   assert.equal(logic.groupAdmits(snap, null, home), true);
   assert.equal(logic.groupAdmits(snap, 'o1', home), false);
+  assert.equal(logic.placementAdmits(snap, 'o1', home), false, 'an address on no domain of Acme');
+  snap.memberships.w = 'o1';
+  assert.equal(logic.groupAdmits(snap, 'o1', work), true);
+  assert.equal(logic.groupAdmits(snap, null, work), false);
   snap.memberships.w = 'personal';
   assert.equal(logic.groupAdmits(snap, null, work), true);
+  assert.equal(logic.placementAdmits(snap, 'o1', work), false, 'the person said personal');
   // SB-170: a group of Acme whose only account was placed as personal says so on its card.
   assert.equal(logic.groupSeatsElsewhere(snap, 'o1', [work]), true);
+  snap.memberships.w2 = 'o1';
   assert.equal(logic.groupSeatsElsewhere(snap, 'o1', [work, account('w2', 'ops@acme.example')]), false);
   assert.equal(logic.groupSeatsElsewhere(snap, 'o1', []), false, 'an empty group has its own note');
   assert.equal(logic.groupSeatsElsewhere(snap, null, [work]), false);
@@ -849,7 +880,7 @@ check(() => {
 check(() => {
   const account = (id, email) => ({ id, label: email, provider: 'claude', external_identity: { account_id: id, organization_id: null, email } });
   const work = account('w', 'dev@acme.example'); const home = account('h', 'me@home.example');
-  const snap = { organizations: [{ id: 'o1', name: 'Acme', domains: ['acme.example'] }], memberships: {} };
+  const snap = { organizations: [{ id: 'o1', name: 'Acme', domains: ['acme.example'] }], memberships: { w: 'o1' } };
   assert.equal(logic.seatEndedText(snap, work, ['w']), "dev@acme.example's sign-in has ended. If Acme removed your seat, ask its administrator; to keep using it, sign in again.", 'an ended seat of an organization names it');
   assert.equal(logic.seatEndedText(snap, work, []), null, 'a signed-in seat says nothing');
   assert.equal(logic.seatEndedText(snap, work, undefined), null, 'no monitor read yet: nothing');
@@ -862,7 +893,7 @@ check(() => {
 check(() => {
   const account = (id, email) => ({ id, label: email, provider: 'claude', external_identity: { account_id: id, organization_id: null, email } });
   const a = account('a', 'dev@acme.example'); const b = account('b', 'ops@acme.example'); const home = account('h', 'me@home.example');
-  const snap = { organizations: [{ id: 'o1', name: 'Acme', domains: ['acme.example'] }], memberships: {} };
+  const snap = { organizations: [{ id: 'o1', name: 'Acme', domains: ['acme.example'] }], memberships: { a: 'o1', b: 'o1' } };
   const group = { name: 'Acme web', organization: 'o1' };
   assert.equal(logic.groupSeatsEndedText(snap, group, [a, b], ['a', 'b']), "None of Acme web's accounts is signed in. Sessions in its folders are refused until one is.", 'a group whose seats all ended says so');
   assert.equal(logic.groupSeatsEndedText(snap, group, [a, b], ['a']), null, 'one seat still signed in');
@@ -1153,9 +1184,9 @@ check(() => {
     {
       const orgs = [{ id: 'o-a', name: 'A', domains: ['a.example'], created_at: 1 }, { id: 'o-b', name: 'B', domains: ['b.example'], created_at: 1 }];
       const acct = { id: 'x', label: 'dev@a.example', provider: 'claude', pool: 'one', external_identity: null };
-      const snap = { organizations: orgs, also_organizations: { x: ['o-b', 'o-a', 'o-missing'] }, projects: [{ pool: 'one', organizations: ['o-a', 'o-b'] }, { pool: 'two', organization: 'o-b', shared_accounts: ['x'] }, { pool: 'three' }] };
+      const snap = { organizations: orgs, memberships: { x: 'o-a' }, also_organizations: { x: ['o-b', 'o-a', 'o-missing'] }, projects: [{ pool: 'one', organizations: ['o-a', 'o-b'] }, { pool: 'two', organization: 'o-b', shared_accounts: ['x'] }, { pool: 'three' }] };
       const at = logic.attribution(snap, acct);
-      assert.deepEqual([at.organization, at.also], ['o-a', ['o-b']], 'the first context from the domain, the rest from the person, each once');
+      assert.deepEqual([at.organization, at.also], ['o-a', ['o-b']], 'the first context and the rest from the person, each once');
       assert.equal(logic.groupAdmits(snap, ['o-b'], acct), true);
       assert.equal(logic.groupAdmits(snap, [], acct), false, 'a personal group refuses it');
       assert.deepEqual(logic.groupOrganizations(snap.projects[0]), ['o-a', 'o-b']);

@@ -198,8 +198,11 @@ sign-ins. No credential, prompt or provider text.
 ### `switchboard_organizations`: no arguments
 
 The organizations (domains, account count), every account with its organization (null:
-personal) and `by` (`person`, `provider` or `domain`), and `passioncode`: the PassionCode.ai
-connection's state. Empty until the operator adds one.
+personal), `by` (`person` or `provider`) and `suggested` with `suggested_name`: the organization
+its address's domain suggests (SB-285: a domain places no account; null when none, when the
+operator already placed it, or when it holds that organization; the operator confirms with
+`switchboard_organization_set` `assign`), and `passioncode`: the PassionCode.ai connection's
+state. Empty until the operator adds one.
 
 ### `switchboard_rotation`: no arguments
 

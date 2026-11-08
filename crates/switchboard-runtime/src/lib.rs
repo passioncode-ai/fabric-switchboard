@@ -3469,9 +3469,14 @@ const VANISH_CONFIRM: i64 = 300;
 /// SB-160 (B-4, SCN-077): the one group of the account's organization when the account landed
 /// outside it, `{pool, name}`, for the person to move it there (nothing moves here). None for a
 /// personal account, an organization with no group or several, an account already in it, or one
-/// whose identity the group already holds under another account.
+/// whose identity the group already holds under another account. SB-285: a personal account
+/// whose address suggests an organization is offered that organization's group; moving it
+/// there is the person confirming the suggestion.
 fn organization_offer(snapshot: &switchboard_core::Snapshot, account: &Account) -> Option<Value> {
-    let organization = snapshot.attribution(account).organization?;
+    let organization = snapshot
+        .attribution(account)
+        .organization
+        .or_else(|| snapshot.domain_suggestion(account).map(|o| o.id.clone()))?;
     let group = snapshot.organization_group(&organization)?;
     let held = account.external_identity.as_ref().is_some_and(|identity| {
         snapshot.accounts.iter().any(|a| {
@@ -3536,7 +3541,9 @@ impl Reported {
         })
     }
 }
-/// SB-158: organizations with their account counts, and each account's attribution.
+/// SB-158: organizations with their account counts, and each account's attribution. SB-285:
+/// `suggested` and `suggested_name` name the organization the account's address suggests
+/// (null when none, when the person already placed it, or when it holds that organization).
 pub fn organizations_view(snapshot: &switchboard_core::Snapshot) -> Value {
     let accounts: Vec<Value> = snapshot
         .accounts
@@ -3548,8 +3555,10 @@ pub fn organizations_view(snapshot: &switchboard_core::Snapshot) -> Value {
                 .as_deref()
                 .and_then(|id| snapshot.organization(id))
                 .map(|o| o.name.clone());
+            let suggested = snapshot.domain_suggestion(a);
             json!({"id": a.id, "label": a.label, "provider": a.provider, "pool": a.pool,
-                "organization": at.organization, "organization_name": name, "by": at.by})
+                "organization": at.organization, "organization_name": name, "by": at.by,
+                "suggested": suggested.map(|o| &o.id), "suggested_name": suggested.map(|o| &o.name)})
         })
         .collect();
     let organizations: Vec<Value> = snapshot
@@ -5711,7 +5720,28 @@ async fn execute(
                     }
                     store.assign_organizations(&account, &ids)?
                 }
-                None => store.assign_organization(&account, choice.as_deref())?,
+                // One choice takes an id or a name too, as `org assign` says (SB-285: confirming
+                // a suggestion names the organization `org list` showed).
+                None => {
+                    let choice = match choice.as_deref().map(str::trim) {
+                        Some(named)
+                            if named.eq_ignore_ascii_case(
+                                switchboard_core::organizations::PERSONAL,
+                            ) =>
+                        {
+                            Some(switchboard_core::organizations::PERSONAL.to_owned())
+                        }
+                        Some(named)
+                            if named
+                                .eq_ignore_ascii_case(switchboard_core::organizations::AUTO) =>
+                        {
+                            None
+                        }
+                        Some(named) => Some(organization_id(&store.snapshot()?, named)?),
+                        None => None,
+                    };
+                    store.assign_organization(&account, choice.as_deref())?
+                }
             };
             Ok(
                 json!({"account": account, "organization": attribution.organization, "by": attribution.by, "also": attribution.also}),
@@ -6972,8 +7002,9 @@ mod owner_tests {
     }
     #[tokio::test]
     async fn a_new_seat_of_an_organization_outside_its_only_group_is_offered_it() {
-        // SB-160 (B-4, SCN-077): a seat of an organization that has one group, signed in
-        // elsewhere, comes back with that group in its receipt; nothing moves.
+        // SB-160 (B-4, SCN-077): a seat of an organization that has one group (SB-285: or one
+        // its address suggests for it), signed in elsewhere, comes back with that group in its
+        // receipt; nothing moves.
         let root = tempfile::tempdir().unwrap();
         let runtime = fixtures::runtime(root.path(), signed_in, activates).await;
         let finish = |account: Account| {
@@ -7012,6 +7043,23 @@ mod owner_tests {
             "default",
             "never moved without the person"
         );
+        // SB-285: the seat is personal; its domain suggests Acme, which `Organizations` names.
+        let row = |id: &str| {
+            organizations_view(&runtime.store.snapshot().unwrap())["accounts"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|r| r["id"] == id)
+                .unwrap()
+                .clone()
+        };
+        let seat = row(&a.id);
+        assert_eq!(
+            (&seat["organization"], &seat["by"]),
+            (&Value::Null, &Value::Null)
+        );
+        assert_eq!(seat["suggested"], acme.id.as_str());
+        assert_eq!(seat["suggested_name"], "Acme");
         // The account the ordinary CLI is signed in to cannot join a group: said so.
         let captured = runtime
             .execute(Operation::CaptureCurrent {
@@ -7031,7 +7079,14 @@ mod owner_tests {
             .assign_organization(&a.id, Some(switchboard_core::organizations::PERSONAL))
             .unwrap();
         assert!(finish(a.clone()).get("organization_group").is_none());
+        assert_eq!(row(&a.id)["suggested"], Value::Null, "the person answered");
+        // A new sign-in into Acme's group is the person placing it there (SB-285).
         let b = save(&runtime.store, "synthetic-b", &group.pool);
+        let seat = row(&b.id);
+        assert_eq!(
+            (&seat["organization"], &seat["by"], &seat["suggested"]),
+            (&json!(acme.id), &json!("person"), &Value::Null)
+        );
         assert!(finish(b).get("organization_group").is_none());
         // Two groups for Acme: no offer.
         runtime.store.assign_organization(&a.id, None).unwrap();

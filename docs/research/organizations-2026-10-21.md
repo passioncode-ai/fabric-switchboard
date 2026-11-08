@@ -123,7 +123,10 @@ new (ANALYTICS.md unchanged).
 ## 10. Decisions taken here
 
 - An address on an organization's domain belongs to it whatever the plan (section 3); the
-  person keeps an exception personal from the card menu.
+  person keeps an exception personal from the card menu. **Superseded 2026-11-08 by
+  [DEC-0009](../DECISIONS.md#dec-0009-an-e-mail-domain-suggests-an-organization-only-the-person-or-an-administrator-places-an-account)
+  (SB-285):** a domain only suggests the organization; the person or an administrator places
+  the account.
 - Switchboard never reads a sign-in code from a mailbox (section 6).
 - Organization ids follow RM-28 (`org:<id>`), local ids until a Vesta link replaces them; the
   replacement keeps every attribution.
