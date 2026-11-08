@@ -456,6 +456,20 @@ export function primaryAction(account: Switchable, state: { current: boolean; se
   if (canSwitchNative(account) && !state.project) return state.current ? 'in_use' : 'switch';
   return state.selected ? 'selected' : 'select';
 }
+/** SB-192 (UX-16): the automatic switching bar shows once switching has somewhere to go (two enabled
+ * accounts of one provider in one group) or a policy is on, so it can be stopped; before that the
+ * Accounts page says why in one line. */
+export function autoSwitchPossible(accounts: Pick<Account, 'provider' | 'pool' | 'enabled'>[], policies: Pick<RotationPolicy, 'enabled'>[]): boolean {
+  if (policies.some((policy) => policy.enabled)) return true;
+  const counts = new Map<string, number>();
+  for (const account of accounts) {
+    if (!account.enabled) continue;
+    const key = `${account.provider}:${account.pool}`; const n = (counts.get(key) ?? 0) + 1;
+    if (n >= 2) return true;
+    counts.set(key, n);
+  }
+  return false;
+}
 /** The pool a one-click "turn on automatic switching" uses, or null when it cannot or need not. */
 export function autoSwitchPool(accounts: (Switchable & Pick<Account, 'pool'>)[], policies: Pick<RotationPolicy, 'provider' | 'target' | 'enabled'>[], projectPools: string[] = []): string | null {
   if (policies.some((policy) => policy.provider === 'claude' && policy.target === 'claude_cli' && policy.enabled)) return null;
