@@ -14,6 +14,14 @@ cargo test --workspace --locked
 # Windows run (0.6.60, nightly 39676565992).
 (ulimit -s 1024 && cargo test -p switchboard-cli --test mcp --locked)
 cargo clippy --workspace --all-targets --locked -- -D warnings
+# Code that builds only on Unix reached a release tag and failed the nightly Windows jobs (0.7.31,
+# SB-303). With cargo-xwin installed the runtime and CLI are checked for Windows here; without it
+# the step says it was skipped.
+if command -v cargo-xwin >/dev/null 2>&1; then
+  cargo xwin check -q -p switchboard-runtime -p switchboard-cli --target x86_64-pc-windows-msvc --all-targets --locked
+else
+  echo "Windows check skipped: cargo-xwin is not installed (docs/DISTRIBUTION.md)."
+fi
 python3 scripts/check_docs.py
 python3 scripts/check_plugin.py
 python3 -m unittest scripts/test_check_plugin.py
