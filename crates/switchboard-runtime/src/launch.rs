@@ -3350,6 +3350,13 @@ pub fn sessions(root: &Path, all: bool) -> Vec<serde_json::Value> {
             record["state"] = state.into();
             record["started_at"] = started.into();
             record["home"] = folder.into();
+            // SB-197: the home itself, relative to the data folder, so a host tells two sessions
+            // of one category apart and can open the folder; never a path outside it.
+            record["home_dir"] = entry
+                .file_name()
+                .to_str()
+                .map(|name| format!("{folder}/{name}"))
+                .into();
             crate::launches::add_outcome(root, &mut record);
             found.push(record);
         }
@@ -5151,6 +5158,7 @@ mod tests {
             .find(|r| r["provider"] == "goose")
             .expect("the launch is listed");
         assert_eq!(goose["home"], "runtimes");
+        assert_eq!(goose["home_dir"], "runtimes/agent-goose-openrouter");
         // An agent that picks its model itself has no model to show.
         openrouter_launch(&f, "crush", None).unwrap();
         assert!(recorded(&f.root.join("runtimes/agent-crush-openrouter"))["label"].is_null());
