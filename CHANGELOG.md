@@ -6,7 +6,7 @@ release pull request renames `Unreleased` to the version. While Windows signing 
 that section must say `windows_authenticode: NOT_SIGNED`. Notes of 0.5.3-beta.1 and earlier are
 on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/releases).
 
-## Unreleased
+## 0.7.34
 
 - `switchboard sessions` names each session's home folder (`home_dir`, relative to the data folder), so a host tells two sessions of one kind apart (SB-197).
 - An empty answer from PassionCode.ai no longer sets its count of organizations to 0 while they stay linked; the count says how many are still linked (SB-232).
