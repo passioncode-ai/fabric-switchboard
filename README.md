@@ -197,7 +197,7 @@ stored (`&backup=1` adds a backup to restore from).
 7. **Automatic switching** (**Turn on for Claude Code** on Accounts): when the account in use
    nears its limit, Switchboard moves to the saved account in the same group with the most quota left.
 8. **Language**: the window speaks English or Russian, following the operating system;
-   About → *Language* overrides it ([SCN-041](docs/ux/scenarios.md#scn-041--use-switchboard-in-russian)).
+   About → *Language* overrides it ([SCN-041](docs/ux/scenarios.md#scn-041-use-switchboard-in-russian)).
 
 Use Switchboard in line with the terms of Anthropic and OpenAI. Breaking a provider's terms can
 get your account blocked. You are responsible for how you use your accounts.
