@@ -30,6 +30,7 @@ switchboard accounts update ACCOUNT_UUID --location "Mac Studio, user alex"   # 
 switchboard accounts send ACCOUNT_UUID --to user@studio.local [--pool agents]     # SB-283: move the sign-in over ssh; no new sign-in there, undone on failure
 switchboard accounts hand-over ACCOUNT_UUID --to "Anna, MacBook" > handover.json   # SB-283: signed record, no credential; marks it used elsewhere
 switchboard accounts receive handover.json --signer KEY [--apply] [--headless]    # on the receiving machine: shows the plan; --apply starts the sign-in
+switchboard accounts send ACCOUNT_UUID --to member@vm --pool acme --operator-said "…" --said-at … --said-in …   # SB-292: the grant is recorded in seats.jsonl with the operator's words
 switchboard accounts move ACCOUNT_UUID --pool agents                  # a project's pool, or default (SB-122)
 switchboard accounts remove ACCOUNT_UUID
 switchboard --json events
@@ -545,7 +546,9 @@ answered in the Switchboard window.*), unless the command carries the operator's
 (SB-299): `--operator-said` (verbatim, at most 500 characters), `--said-at` (RFC 3339) and
 `--said-in` (the session or board thread) open raising, clearing and doubling a ceiling, deleting
 a group that holds one and replacing or removing a key one counts. The words are recorded in
-`spend.json` (`loosened`, the newest five) and each loosening is logged (`ceiling_loosened`). `continue --ceiling`
+`spend.json` (`loosened`, the newest five) and each loosening is logged (`ceiling_loosened`). On
+`accounts send` and `accounts hand-over` the same flags record who ordered the seat: every grant is a
+line in `seats.jsonl` (SB-292), with the words when the command carries them. `continue --ceiling`
 sets the task's ceiling before anything is offered (an amount out of range, or higher than the
 one set, refuses the continue); the continue is then gated by it like a hand-over (C-Q8): every
 paid start through Switchboard (`continue`, also `--to-console` and on the default agent, onto

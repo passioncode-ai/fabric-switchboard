@@ -420,20 +420,23 @@ disables it here because another machine uses it; `location` says where it works
 its user, or a colleague, at most 80 characters) and marks it so; an empty one clears it. At
 least one field ("Name a label, enabled, elsewhere or location to change.").
 
-### `switchboard_account_send`: `account_id`, `to`, `pool?`, `remote?`
+### `switchboard_account_send`: `account_id`, `to`, `pool?`, `remote?`, `decision?`
 
 Only when the operator asks. Moves a Claude or Codex subscription sign-in to another machine over
 ssh without a new sign-in there: it is marked here as used elsewhere first, saved there (the tokens
 on stdin), checked there with a quota check, and both are undone on any failure. `to` is the machine
 as ssh knows it, reachable without a prompt; `pool` its group there; `remote` that machine's
-`switchboard` (default the macOS app's).
+`switchboard` (default the macOS app's). Every move is a line in `seats.jsonl`; `decision` (the
+operator's words: `by: operator`, `instruction` verbatim, `at` RFC 3339, `source`) is recorded with it
+as who ordered it.
 
-### `switchboard_account_hand_over`: `account_id`, `to`
+### `switchboard_account_hand_over`: `account_id`, `to`, `decision?`
 
 Only when the operator asks. Answers a signed record of the account without its credential and
 marks it here as used elsewhere, with `to` as where it works. The receiver passes the record to
 `switchboard_account_receive` and signs in there. Hand a personal subscription only to the
-operator's own machines unless the operator says otherwise.
+operator's own machines unless the operator says otherwise. Recorded in `seats.jsonl` like a move,
+with `decision` when given.
 
 ### `switchboard_account_receive`: `record`, `signer?`, `apply?`, `headless?`
 

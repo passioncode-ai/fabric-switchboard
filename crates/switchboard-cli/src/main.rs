@@ -1604,10 +1604,12 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                 to: to.clone(),
                 pool: pool.clone(),
                 program: remote.clone(),
+                decision: None,
             },
             Accounts::HandOver { id, to } => Operation::HandOver {
                 id: id.clone(),
                 to: to.clone(),
+                decision: None,
             },
             Accounts::Receive {
                 file,
