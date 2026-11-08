@@ -1325,7 +1325,7 @@ fn process_started(pid: u32) -> Option<SystemTime> {
         .modified()
         .ok()
 }
-#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+#[cfg(all(unix, not(any(target_os = "macos", target_os = "linux"))))]
 fn process_started(_pid: u32) -> Option<SystemTime> {
     None
 }
@@ -1339,6 +1339,7 @@ fn pid_alive(pid: u32) -> bool {
     // SAFETY: signal 0 only checks that the process exists and may be signalled.
     unsafe { libc::kill(pid, 0) == 0 }
 }
+#[cfg(unix)]
 fn process_age_from_ps(pid: u32) -> Option<Duration> {
     let output = Command::new("/bin/ps")
         .args(["-o", "etime=", "-p", &pid.to_string()])
