@@ -735,11 +735,13 @@ impl Server {
             .map(|p| serde_json::from_value::<switchboard_core::RotationPolicy>(p.clone()))
             .transpose()
             .map_err(|_| "Saved automatic switching settings are unreadable.")?;
+        // SB-310: a managed policy nobody saved is on by default.
+        let managed = target == "managed";
         let mut policy = saved.unwrap_or(switchboard_core::RotationPolicy {
             provider,
             pool,
             target,
-            enabled: false,
+            enabled: managed,
             threshold_percent: 90.0,
             hysteresis_percent: 10.0,
             cooldown_seconds: 1800,

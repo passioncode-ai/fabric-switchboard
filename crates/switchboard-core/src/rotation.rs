@@ -48,7 +48,71 @@ fn hold(reason: &str) -> RotationDecision {
         reason: reason.into(),
     }
 }
+/// The figures a managed policy starts with when nobody saved one (the initial UI/CLI settings).
+pub fn default_managed_policy(provider: Provider, pool: &str) -> RotationPolicy {
+    RotationPolicy {
+        provider,
+        pool: pool.to_owned(),
+        target: "managed".into(),
+        enabled: true,
+        threshold_percent: 90.0,
+        hysteresis_percent: 10.0,
+        cooldown_seconds: 1800,
+        max_age_seconds: 300,
+        last_switched_at: None,
+    }
+}
+/// SB-310 (operator, 2026-11-08): the (provider, group) pairs that have accounts serving them and
+/// no saved managed policy, each once, in a stable order.
+pub(crate) fn missing_managed_policies(s: &crate::Snapshot) -> Vec<(Provider, String)> {
+    let mut out: Vec<(Provider, String)> = Vec::new();
+    let pools: std::collections::BTreeSet<&str> = s
+        .accounts
+        .iter()
+        .map(|a| a.pool.as_str())
+        .chain(s.projects.iter().map(|p| p.pool.as_str()))
+        .collect();
+    for pool in pools {
+        for a in s.pool_accounts(pool) {
+            let saved = s
+                .policies
+                .iter()
+                .any(|p| p.provider == a.provider && p.pool == pool && p.target == "managed");
+            if !saved && !out.iter().any(|(p, q)| *p == a.provider && q == pool) {
+                out.push((a.provider, pool.to_owned()));
+            }
+        }
+    }
+    out
+}
 impl Store {
+    /// SB-310 (operator, 2026-11-08): automatic switching of managed sessions is on by default.
+    /// Every provider and group with accounts and no saved managed policy gets an enabled one
+    /// with the initial settings; a saved policy, switched off included, is never touched, so
+    /// the person's *off* stands. Reads the published state first and writes only when a pair
+    /// is missing. Returns how many were added.
+    pub fn ensure_default_policies(&self) -> Result<usize, String> {
+        if missing_managed_policies(&self.snapshot()?).is_empty() {
+            return Ok(0);
+        }
+        let mut state = self.lock()?;
+        let mut candidate = state.clone();
+        let mut added = 0;
+        for (provider, pool) in missing_managed_policies(&candidate) {
+            if candidate.policies.len() >= crate::MAX_ACCOUNTS {
+                break;
+            }
+            candidate
+                .policies
+                .push(default_managed_policy(provider, &pool));
+            added += 1;
+        }
+        if added > 0 {
+            self.publish(&mut state, candidate)?;
+            self.changed();
+        }
+        Ok(added)
+    }
     pub fn set_policy(&self, mut policy: RotationPolicy) -> Result<(), String> {
         policy.validate()?;
         let mut state = self.lock()?;

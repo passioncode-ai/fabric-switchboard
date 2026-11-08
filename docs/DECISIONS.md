@@ -99,3 +99,20 @@ research notes); the ones still in force that the board cites are seeded below w
   its own; a repository a group's agents create or work in joins that group by itself.
 - **Consequences / affects:** `AGENTS.md` (Lifecycle, background monitor), [brand/terminology.md](brand/terminology.md)
 - **Source:** SB-146, recorded in `fc31426`
+
+### DEC-0008: Automatic switching of managed sessions is on by default
+
+- **Date:** 2026-11-08
+- **Status:** Accepted
+- **Context:** frame-agent's runs in the group `agents` stopped on an account's weekly limit while
+  automatic switching of managed sessions was off there; only the ordinary Claude Code's switching
+  was on. Until now a group had no policy until someone saved one, and no policy meant off.
+- **Decision:** every provider and group that has accounts serving it gets an enabled managed
+  policy with the initial settings (90 % threshold, 10 points of headroom, 1800 s cooldown,
+  300 s freshness), on every computer and for groups made later; a policy someone saved, off
+  included, is never changed. Switching of the ordinary Claude Code (`claude_cli`) stays opt-in:
+  it changes the sign-in every `claude` on the computer uses.
+- **Consequences / affects:** [ACCOUNTS-AND-ROTATION.md](ACCOUNTS-AND-ROTATION.md), [CHANGELOG](../CHANGELOG.md), `AGENTS.md` (Lifecycle, background monitor)
+- **Source:** operator, 2026-11-08 about 16:45 UTC, frame-agent session `0faeb32f`: «переводи на
+  sergeysheleg4 если упрутся и велючи автопереключение по дефолту для все и передай в проекты
+  фабрики куда надо», relayed on the board (request `486dd759`); SB-310

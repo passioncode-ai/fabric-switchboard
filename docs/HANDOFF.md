@@ -2,6 +2,25 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-11-08 (evening): SB-310 automatic switching on by default (board request `486dd759`)
+
+- **Operator's word** (frame-agent session `0faeb32f`, about 16:45 UTC, relayed on the board):
+  «переводи на sergeysheleg4 если упрутся и велючи автопереключение по дефолту для все и передай
+  в проекты фабрики куда надо». Recorded as [DEC-0008](DECISIONS.md#dec-0008-automatic-switching-of-managed-sessions-is-on-by-default).
+- **Built** on `feat/rotation-on-by-default`: `Store::ensure_default_policies` runs on every
+  monitor pass before `rotate` and gives every provider and group with accounts and no saved
+  managed policy an enabled one (90/10/1800/300); a saved off stands; `claude_cli` stays opt-in.
+  `rotation set` (CLI, MCP) starts a managed policy nobody saved from on. Test
+  `every_group_with_accounts_gets_managed_switching_on_and_a_saved_off_stands`.
+- **The request's second point** (`switchboard_rotation_set` answering `structuredContent:
+  null`) is SB-286, fixed in 0.7.21; the frame-agent session talked to a `switchboard mcp`
+  started before that release (long-lived stdio servers on this Mac still run binaries from
+  Oct 29 and Nov 5). Reconnecting the MCP server (`/mcp`) or a new session ends it.
+- **Third point**: a group borrows another group's account with SB-282, `switchboard project
+  edit --pool agents --add-account <id>` (the account stays in `apps-soft`).
+- **Exact next task.** Release SB-310 with the next release, then close it when a computer's
+  `switchboard rotation` shows every group with accounts enabled without anyone saving it.
+
 ## 2026-11-08 (afternoon): release 0.7.34; SB-305, SB-232, SB-197; doc map and decisions
 
 - **Released 0.7.34** (2026-11-08 16:18:35Z, 25 assets, `latest.json` for seven platforms; #536,
