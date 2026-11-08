@@ -244,6 +244,14 @@ check(() => {
 check(() => {
   const acct = (pool, kind = 'oauth') => ({ provider: 'claude', kind, pool, enabled: true, external_identity: { account_id: pool + Math.random(), organization_id: null, email: null } });
   assert.equal(logic.autoSwitchPool([acct('default')], []), null, 'one account cannot rotate');
+  // SB-192 (UX-16): the bar shows once switching has somewhere to go, or a policy is on.
+  const row = (provider, pool, enabled = true) => ({ provider, pool, enabled });
+  assert.equal(logic.autoSwitchPossible([], []), false, 'no account');
+  assert.equal(logic.autoSwitchPossible([row('claude', 'default')], []), false, 'one account');
+  assert.equal(logic.autoSwitchPossible([row('claude', 'default'), row('codex', 'default'), row('claude', 'work')], []), false, 'one per provider and group');
+  assert.equal(logic.autoSwitchPossible([row('claude', 'work'), row('claude', 'work', false)], []), false, 'a disabled one does not count');
+  assert.equal(logic.autoSwitchPossible([row('codex', 'work'), row('codex', 'work')], []), true, 'two of one provider in one group');
+  assert.equal(logic.autoSwitchPossible([row('claude', 'work')], [{ enabled: true }]), true, 'a policy on stays stoppable');
   assert.equal(logic.autoSwitchPool([acct('default'), acct('work'), acct('work')], []), 'work');
   assert.equal(logic.autoSwitchPool([acct('default'), acct('default'), acct('work', 'api_key')], []), 'default');
   assert.equal(logic.autoSwitchPool([acct('default'), acct('default')], [{ provider: 'claude', target: 'claude_cli', enabled: true }]), null, 'already on');

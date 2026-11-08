@@ -8,6 +8,7 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- Accounts shows one line instead of the automatic switching bar until switching has somewhere to go (two accounts of one provider in one group), and says the quota monitor is unavailable once instead of twice (SB-192).
 - The browser demo shows a first run with `?demo=1&empty=1`: nothing saved, the usage notice, the tour and the terms notice (SB-192).
 - Fallback chains on Agents and Groups no longer read “Reading fallback chains…” until you navigate away when their first read failed while another action ran; it says the read failed and offers Retry. Saving a chain no longer shows a failed re-read in place of the saved chain (SB-232).
 - The first-run tour no longer carries a confirmation shown before it through its steps, and its last step outlines the whole setup prompt, so its card never covers the text it asks you to copy; «О программе» no longer breaks after «О» (SB-195).
