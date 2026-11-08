@@ -8,6 +8,8 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- An empty answer from PassionCode.ai no longer sets its count of organizations to 0 while they stay linked; the count says how many are still linked (SB-232).
+- The ceiling notification and `switchboard ceiling`, `switchboard agents openrouter` write dollars as the window does, with a comma between thousands (`$1,000.00`) (SB-232).
 - Adding an account to a group no longer fails because another account of that group has a sign-in this computer cannot read (one left in a keychain when a data folder moved to files); such a stale row cannot be the one being added (found on the Mac Studio, 2026-11-08).
 - Moving an account to a machine that still holds an old copy of the same sign-in in that group now says so ("The other machine already holds this sign-in in that group...") instead of "did not save the sign-in"; remove the old copy there and move it again (SB-283).
 - `switchboard update --feed latest.json --archive <package>` installs from release files fetched another way (for a network where github.com refuses anonymous downloads), checked the same way (SB-305).
