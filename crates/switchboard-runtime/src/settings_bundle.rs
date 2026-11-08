@@ -197,6 +197,40 @@ pub fn export(root: &Path, snapshot: &Snapshot, now: i64) -> Bundle {
     }
 }
 
+/// A pool `scope` names that this machine has no group for.
+pub const GROUP_UNKNOWN: &str = "Group not found.";
+
+/// SB-292 (S-6): the bundle a member's machine gets: only the named groups, the organizations
+/// they run on, their ceilings and rotation policies, and the agents' settings. The computer's own
+/// ceiling, its Fabric Inbox and its terminal-hook choice describe this computer and stay behind.
+/// An empty list keeps the bundle whole.
+pub fn scope(mut bundle: Bundle, pools: &[String]) -> Result<Bundle, String> {
+    if pools.is_empty() {
+        return Ok(bundle);
+    }
+    if pools
+        .iter()
+        .any(|pool| !bundle.groups.iter().any(|g| &g.pool == pool))
+    {
+        return Err(GROUP_UNKNOWN.into());
+    }
+    bundle.groups.retain(|g| pools.contains(&g.pool));
+    let named: Vec<String> = bundle
+        .groups
+        .iter()
+        .flat_map(|g| g.organization.iter().chain(g.also_organizations.iter()))
+        .cloned()
+        .collect();
+    bundle.organizations.retain(|o| named.contains(&o.name));
+    bundle.policies.retain(|p| pools.contains(&p.pool));
+    bundle
+        .ceilings
+        .retain(|c| c.group.as_ref().is_some_and(|g| pools.contains(g)));
+    bundle.inbox = None;
+    bundle.shell_hook = None;
+    Ok(bundle)
+}
+
 /// Reads a bundle the person gives; refuses anything that is not one.
 pub fn parse(bytes: &[u8]) -> Result<Bundle, String> {
     if bytes.len() > MAX_BYTES {
@@ -777,6 +811,86 @@ mod tests {
         assert_eq!(snap.projects[0].name, "Alpha");
         assert!(!snap.projects[0].organizations.is_empty());
         assert_eq!(snap.organizations[0].name, "Acme");
+    }
+
+    #[test]
+    fn a_scoped_bundle_carries_only_its_groups_and_their_organizations() {
+        // SB-292 (S-6): a member's VM gets the groups of that member's projects only.
+        let root = tempfile::tempdir().unwrap();
+        let work = tempfile::tempdir().unwrap();
+        let work = work.path().canonicalize().unwrap();
+        checkout(&work.join("mine"), "https://github.com/acme/mine");
+        checkout(&work.join("theirs"), "https://github.com/beta/theirs");
+        let store = open_store(root.path());
+        let acme = store
+            .add_organization("Acme", &["acme.example".into()])
+            .unwrap();
+        let beta = store
+            .add_organization("Beta", &["beta.example".into()])
+            .unwrap();
+        let mine = store
+            .save_project_in(
+                None,
+                "Mine",
+                &[work.join("mine")],
+                &[],
+                Some(Some(&acme.id)),
+            )
+            .unwrap();
+        store
+            .save_project_in(
+                None,
+                "Theirs",
+                &[work.join("theirs")],
+                &[],
+                Some(Some(&beta.id)),
+            )
+            .unwrap();
+        let mut whole = export(root.path(), &store.snapshot().unwrap(), 5);
+        whole.ceilings = vec![
+            Ceiling {
+                group: None,
+                cents: 500,
+            },
+            Ceiling {
+                group: Some(mine.pool.clone()),
+                cents: 200,
+            },
+            Ceiling {
+                group: Some("other".into()),
+                cents: 300,
+            },
+        ];
+        whole.inbox = Some(Inbox {
+            origin: "https://inbox.example".into(),
+            client_id: "client".into(),
+        });
+        whole.shell_hook = Some("on".into());
+        assert_eq!(
+            serde_json::to_value(scope(whole.clone(), &[]).unwrap()).unwrap(),
+            serde_json::to_value(&whole).unwrap()
+        );
+        let scoped = scope(whole.clone(), std::slice::from_ref(&mine.pool)).unwrap();
+        assert_eq!(scoped.groups.len(), 1);
+        assert_eq!(scoped.groups[0].name, "Mine");
+        let orgs: Vec<&str> = scoped
+            .organizations
+            .iter()
+            .map(|o| o.name.as_str())
+            .collect();
+        assert_eq!(orgs, ["Acme"]);
+        assert_eq!(
+            scoped.ceilings,
+            vec![Ceiling {
+                group: Some(mine.pool.clone()),
+                cents: 200
+            }]
+        );
+        assert!(scoped.inbox.is_none() && scoped.shell_hook.is_none());
+        assert_eq!(
+            scope(whole, &["no-such-group".into()]).unwrap_err(),
+            GROUP_UNKNOWN
+        );
     }
 
     /// A checkout folder as `gh repo clone` leaves it, with its `origin`.

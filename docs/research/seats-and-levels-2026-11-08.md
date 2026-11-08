@@ -79,6 +79,6 @@ A Claude refresh issues a new refresh token and ends the old one, so a sign-in h
 
 ## Next
 
-1. S-6 (`settings export --group`) and S-2 (`seats.jsonl` for send and hand-over): no dependency.
+1. S-6 (`settings export --group`, built on branch `feat/sb-292-export-group`) and S-2 (`seats.jsonl` for send and hand-over): no dependency.
 2. S-3 and S-4 (`surrender`, `recall`, the two-folder acceptance test).
 3. L-1 to L-6 when the source of truth answers a caller's role.
