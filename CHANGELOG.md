@@ -8,6 +8,10 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- Adding an account to a group no longer fails because another account of that group has a sign-in this computer cannot read (one left in a keychain when a data folder moved to files); such a stale row cannot be the one being added (found on the Mac Studio, 2026-11-08).
+- Moving an account to a machine that still holds an old copy of the same sign-in in that group now says so ("The other machine already holds this sign-in in that group...") instead of "did not save the sign-in"; remove the old copy there and move it again (SB-283).
+- `switchboard update --feed latest.json --archive <package>` installs from release files fetched another way (for a network where github.com refuses anonymous downloads), checked the same way (SB-305).
+- A computer that runs only `switchboard serve` (a Mac space with no graphical login, a Linux VM) can update now: `switchboard update --check` says whether a newer version exists, and `switchboard update`, run by the account that owns the app, checks the package's signature and installs it; then restart `serve` (SB-305).
 - Dialogs and menus fade in instead of appearing at once; nothing moves when the system asks for reduced motion (SB-192).
 - The number of active folder rules beside Groups is neutral now; in the accent colour it read as unread items (SB-192).
 - Accounts shows one line instead of the automatic switching bar until switching has somewhere to go (two accounts of one provider in one group), and says the quota monitor is unavailable once instead of twice (SB-192).

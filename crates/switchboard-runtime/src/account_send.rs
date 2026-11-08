@@ -22,6 +22,10 @@ pub const NOT_HERE: &str = "This account is already used elsewhere or turned off
 pub const SELECTED: &str = "Select another account for its group before moving this one.";
 pub const ADD_FAILED: &str =
     "The other machine did not save the sign-in. Nothing changed here; check ssh and its Switchboard.";
+/// The other machine's own answer to `accounts add` when the same sign-in already sits in that
+/// group there (`switchboard_core`, "Account credential already exists in this pool"): a copy
+/// left by an earlier move. Named, because the person can fix it there.
+pub const ALREADY_THERE: &str = "The other machine already holds this sign-in in that group. Remove its old copy there, then move it again.";
 pub const NOT_VERIFIED: &str = "The other machine saved the sign-in but the provider did not answer it there. It was removed there and stays here.";
 
 pub const CLAUDE_ONLY: &str = "Only a Claude sign-in can be called back for now.";
@@ -60,6 +64,14 @@ fn remote(program: &str, args: &[&str]) -> String {
 fn data(output: &str) -> Option<Value> {
     let value: Value = serde_json::from_str(output.lines().last()?.trim()).ok()?;
     (value["ok"] == true).then(|| value["data"].clone())
+}
+/// The other machine's refusal (`{"ok":false,"error":...}`), from its output whether ssh ended
+/// with success or not.
+fn refusal(output: &str) -> Option<String> {
+    let value: Value = serde_json::from_str(output.lines().last()?.trim()).ok()?;
+    (value["ok"] == false)
+        .then(|| value["error"].as_str().map(str::to_owned))
+        .flatten()
 }
 
 pub fn send(
@@ -120,13 +132,14 @@ pub fn send(
             ],
         )),
         Some(credential.to_oauth_json(account.provider).as_bytes()),
-    )
-    .ok()
-    .and_then(|out| data(&out))
-    .and_then(|d| d["id"].as_str().map(str::to_owned));
-    let Some(remote_id) = added else {
+    );
+    let output = match &added {
+        Ok(out) | Err(out) => out.as_str(),
+    };
+    let Some(remote_id) = data(output).and_then(|d| d["id"].as_str().map(str::to_owned)) else {
         undo_here()?;
-        return Err(ADD_FAILED.into());
+        let duplicate = refusal(output).is_some_and(|e| e.contains("already exists in this pool"));
+        return Err(if duplicate { ALREADY_THERE } else { ADD_FAILED }.into());
     };
     let verified = run(
         &ssh(remote(program, &["--json", "usage", &remote_id])),
@@ -341,8 +354,11 @@ pub fn ssh_runner(args: &[String], stdin: Option<&[u8]>) -> Result<String, Strin
                 use std::io::Read;
                 let _ = stdout.take(1 << 20).read_to_string(&mut out);
             }
+            // The other switchboard ends with status 1 on a refusal and prints why: keep that.
             return if status.success() {
                 Ok(out)
+            } else if refusal(&out).is_some() {
+                Err(out)
             } else {
                 Err("ssh failed.".into())
             };
@@ -587,6 +603,56 @@ mod tests {
             }
             Err("unexpected call".into())
         }
+    }
+
+    #[test]
+    fn a_copy_left_there_by_an_earlier_move_is_named_and_nothing_changes_here() {
+        let (_root, store, id) = store_with(AuthKind::OAuth);
+        let refused = |args: &[String], _stdin: Option<&[u8]>| -> Result<String, String> {
+            assert!(
+                args[2].contains("'accounts' 'add'"),
+                "nothing runs after the refusal"
+            );
+            Err(r#"{"error":"Account credential already exists in this pool","ok":false}"#.into())
+        };
+        assert_eq!(
+            send(
+                &store,
+                &id,
+                "studio.local",
+                "agents",
+                REMOTE_DEFAULT,
+                5,
+                &refused
+            )
+            .unwrap_err(),
+            ALREADY_THERE
+        );
+        assert!(
+            !store.snapshot().unwrap().elsewhere.contains_key(&id),
+            "undone here"
+        );
+        let other = |_: &[String], _: Option<&[u8]>| -> Result<String, String> {
+            Err(r#"{"error":"Credential storage unavailable","ok":false}"#.into())
+        };
+        assert_eq!(
+            send(
+                &store,
+                &id,
+                "studio.local",
+                "agents",
+                REMOTE_DEFAULT,
+                6,
+                &other
+            )
+            .unwrap_err(),
+            ADD_FAILED
+        );
+        assert_eq!(
+            refusal("noise\n{\"ok\":false,\"error\":\"x\"}"),
+            Some("x".into())
+        );
+        assert_eq!(refusal("{\"ok\":true,\"data\":{}}"), None);
     }
 
     #[test]

@@ -3155,6 +3155,72 @@ fn a_quota_verdict_read_while_a_renewal_writes_is_refused_as_a_change() {
     assert!(store.snapshot().unwrap().accounts[0].usage_health.is_none());
 }
 
+/// A vault that cannot read one account's sign-in, as a data folder moved to files reads the
+/// sign-ins it could not take out of a keychain.
+struct OneUnreadable {
+    inner: MemoryVault,
+    unreadable: std::sync::Mutex<Option<String>>,
+}
+impl Vault for OneUnreadable {
+    fn get(&self, id: &str) -> Result<Credential, String> {
+        if self.unreadable.lock().unwrap().as_deref() == Some(id) {
+            return Err("Credential storage unavailable".into());
+        }
+        self.inner.get(id)
+    }
+    fn put(&self, id: &str, value: &Credential) -> Result<(), String> {
+        self.inner.put(id, value)
+    }
+    fn delete(&self, id: &str) -> Result<(), String> {
+        self.inner.delete(id)
+    }
+}
+
+#[test]
+fn an_account_whose_sign_in_cannot_be_read_does_not_stop_a_new_one_in_its_group() {
+    // Mac Studio 2026-11-08: `accounts add` into `agents` failed while that group held two
+    // accounts whose sign-ins stayed in a keychain the space no longer opens; `default` took it.
+    let root = TempDir::new().unwrap();
+    let vault = Arc::new(OneUnreadable {
+        inner: MemoryVault::default(),
+        unreadable: std::sync::Mutex::new(None),
+    });
+    let store = Store::open(root.path().into(), vault.clone()).unwrap();
+    let stale = store
+        .add(
+            "stale".into(),
+            Provider::Claude,
+            AuthKind::ApiKey,
+            "agents".into(),
+            token("synthetic-stale"),
+        )
+        .unwrap();
+    *vault.unreadable.lock().unwrap() = Some(stale.id.clone());
+    let added = store
+        .add(
+            "moved".into(),
+            Provider::Claude,
+            AuthKind::ApiKey,
+            "agents".into(),
+            token("synthetic-moved"),
+        )
+        .unwrap();
+    assert_ne!(added.id, stale.id);
+    // A readable copy of the same sign-in is still refused as a duplicate.
+    assert_eq!(
+        store
+            .add(
+                "again".into(),
+                Provider::Claude,
+                AuthKind::ApiKey,
+                "agents".into(),
+                token("synthetic-moved"),
+            )
+            .unwrap_err(),
+        "Account credential already exists in this pool"
+    );
+}
+
 /// A vault whose removals wait `delay`: a removal holds the metadata lock across its deletion.
 struct SlowDelete {
     inner: MemoryVault,
