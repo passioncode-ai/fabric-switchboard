@@ -785,8 +785,9 @@ detailed in the two entries below:
   `switchboard ceiling list|set [--scope] <usd>|keep <id>` and `switchboard continue --ceiling
   <usd>` (the task's ceiling is set before anything is offered, a refusal stopping the continue)
   send `by: cli`; there is no CLI command to raise, double or clear one. MCP
-  `switchboard_ceilings` (read), `switchboard_ceiling_set {scope?, usd}` (`usd` required, never a
-  clear) and `switchboard_ceiling_answer {id, answer?: keep}` (a `double` reaches the runtime and
+  `switchboard_ceilings` (read), `switchboard_ceiling_set {scope?, usd, decision?}` (`usd` required: a missing or
+  non-number `usd` is refused with “usd is a number of dollars from 0.01 to 1000.” before the
+  runtime is asked; `usd: null` clears only with `decision`, SB-299) and `switchboard_ceiling_answer {id, answer?: keep}` (a `double` reaches the runtime and
   is refused with the window named) send `by: mcp`; the read-only server lists only the first
   (`ceiling_answer_double_over_mcp_is_refused_with_the_window_named`,
   `ceilings_are_set_lowered_listed_and_kept_from_the_cli_and_never_raised`,
@@ -2195,7 +2196,12 @@ organization's group, off by one command); A-Q3 assumed (a linked start file is 
   without the terminal's own fields (`terminal`, `here`, `folder`), plus `can_change` (this owner
   holds the installed app's home, `enable_shell_hook`), `organizations` (the names of the
   organizations whose groups the folder map holds, sorted), `codex_organizations` (those of them
-  whose map rows carry a Codex account: the Codex section's line names only these) and `home` (to show start files as `~/...`).
+  whose map rows carry a Codex account: the Codex section's line names only these), `unmapped`
+  (SB-222: each group bound to an organization that the map rule leaves without a row, `{organization,
+  group, reason, held_by}` with `reason` `held` (a folder of it belongs to another group, named in
+  `held_by`), `missing` (no folder of it is on this computer) or `no_folder`; read from the store's
+  snapshot by the same rule the map's rows are written with, so it can differ from the map file
+  until the next bindings pass rewrites the map, SB-232) and `home` (to show start files as `~/...`).
   `Runtime::set_shell_hook(on)` saves the choice and runs the installer at once, as
   `shell on|off` does, then answers the status; an owner without the installed app's home refuses
   with “Only the installed app changes terminal settings.” and changes nothing. Tauri

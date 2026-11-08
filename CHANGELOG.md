@@ -12,6 +12,7 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 - Moving an account to a machine that still holds an old copy of the same sign-in in that group now says so ("The other machine already holds this sign-in in that group...") instead of "did not save the sign-in"; remove the old copy there and move it again (SB-283).
 - `switchboard update --feed latest.json --archive <package>` installs from release files fetched another way (for a network where github.com refuses anonymous downloads), checked the same way (SB-305).
 - A computer that runs only `switchboard serve` (a Mac space with no graphical login, a Linux VM) can update now: `switchboard update --check` says whether a newer version exists, and `switchboard update`, run by the account that owns the app, checks the package's signature and installs it; then restart `serve` (SB-305).
+- Fallback chains on Agents and Groups no longer read “Reading fallback chains…” until you navigate away when their first read failed while another action ran; it says the read failed and offers Retry. Saving a chain no longer shows a failed re-read in place of the saved chain (SB-232).
 - The first-run tour no longer carries a confirmation shown before it through its steps, and its last step outlines the whole setup prompt, so its card never covers the text it asks you to copy; «О программе» no longer breaks after «О» (SB-195).
 
 ## 0.7.33

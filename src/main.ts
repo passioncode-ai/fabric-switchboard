@@ -971,10 +971,11 @@ function availableAgentsPanel(view: AgentsOverview) {
 let chainsView: Chains | null = null;
 let chainsError = '';
 /** SB-229: under the clock, so a read from before a Save never paints over the saved chain (it may
- * only fill an empty panel); a read that answers clears an earlier failure. */
-async function loadChains() {
+ * only fill an empty panel); a read that answers clears an earlier failure. After a save the chain
+ * stands and a failed re-read waits for the next read to report, as ceilings do (SB-232). */
+async function loadChains(afterSave = false) {
   const read = await clockedRead(clock, () => adapter.chains());
-  ({ view: chainsView, error: chainsError } = afterRead({ view: chainsView, error: chainsError }, read, false, (error) => safeError(error, 'read')));
+  ({ view: chainsView, error: chainsError } = afterRead({ view: chainsView, error: chainsError }, read, afterSave, (error) => safeError(error, 'read')));
   backgroundRender();
 }
 const chainAgentName = (id: string) => agentsView?.agents.find((a) => a.id === id)?.name ?? catalogAgent(id)?.name ?? id;
@@ -1028,7 +1029,7 @@ function chainRow(scope: ChainScope, primary: boolean) {
     info.append(steps);
   } else info.append(el('span', 'form-note', scope.kind === 'project' ? (chainFor('machine') ? t('Uses this computer\'s chain') : t('Uses this computer\'s chain, which is not set')) : t('Not set')));
   const actions = el('div', 'management-actions');
-  if (scope.kind === 'machine' && !chain) actions.append(button(t('Use Subscriptions first'), () => void mutate(() => adapter.setChain(scope, [], 'subscriptions-first'), t('This computer\'s chain is set.'), 'chain-edit-machine').then(loadChains), primary ? 'button primary' : 'button', 'chain-preset'));
+  if (scope.kind === 'machine' && !chain) actions.append(button(t('Use Subscriptions first'), () => void mutate(() => adapter.setChain(scope, [], 'subscriptions-first'), t('This computer\'s chain is set.'), 'chain-edit-machine').then(() => loadChains(true)), primary ? 'button primary' : 'button', 'chain-preset'));
   const editKey = `chain-edit-${anchor}`;
   if (chain || scope.kind === 'machine') actions.append(button(t('Edit…'), () => chainDialog(scope, chain?.executors ?? [], editKey), 'button', editKey));
   else actions.append(button(t('Set for this group…'), () => chainDialog(scope, [], editKey), 'button', editKey));
@@ -1111,7 +1112,7 @@ function chainDialog(scope: ChainScope, initial: ChainExecutor[], returnFocus: s
     if (!steps.length) { context.error.textContent = t('Add an agent, or clear the chain instead.'); add.focus(); return; }
     const executors = steps.map((s) => ({ agent: s.agent, ...(s.account_id ? { account_id: s.account_id } : {}), ...(s.key ? { key: s.key } : {}) }));
     // SB-229: the save is the action; the chains are read again after it, and a failed re-read never fails the save.
-    void dialogSave(context, () => adapter.setChain(scope, executors, null), chainSavedText(scope)).then(loadChains);
+    void dialogSave(context, () => adapter.setChain(scope, executors, null), chainSavedText(scope)).then(() => loadChains(true));
   });
 }
 /** Focus goes back to the row's Edit… (this computer's for a task row, which goes when cleared). */
@@ -1121,7 +1122,7 @@ function clearChainDialog(scope: ChainScope, returnFocus: string) {
   const context = openDialog(question, consequence, returnFocus);
   const confirm = submit(t('Clear chain')); confirm.className = 'button danger'; context.actions.append(confirm);
   const cleared = scope.kind === 'machine' ? t('This computer\'s chain is cleared.') : scope.kind === 'project' ? t('The chain of {group} is cleared.', { group: scopeLabel(scope) }) : t('The chain of task {id} is cleared.', { id: shortWorkflow(scope.id) });
-  context.form.addEventListener('submit', (event) => { event.preventDefault(); void dialogSave(context, () => adapter.setChain(scope, [], null), cleared).then(loadChains); });
+  context.form.addEventListener('submit', (event) => { event.preventDefault(); void dialogSave(context, () => adapter.setChain(scope, [], null), cleared).then(() => loadChains(true)); });
   context.actions.querySelector('button')?.focus();
 }
 /** Registering Switchboard's tools with coding agents (SB-93), shown after the agents. */
