@@ -60,7 +60,7 @@ plan are in [plans/2026-11-08-doc-audit.md](evidence/plans/2026-11-08-doc-audit.
 | An analytics event or prop | [ANALYTICS.md](ANALYTICS.md), the planted-identifier test | `events_carry_counts_and_the_installation_id_never_an_identity` |
 | A process, timer, port or file the app owns | `AGENTS.md` Lifecycle, [CONTRACTS.md](CONTRACTS.md) | `review`: behaviour, not a shape a script can read |
 | A release | every version file `scripts/check-brand.mjs` compares, `CHANGELOG.md` | `scripts/check-brand.mjs` (versions agree), the release workflow's preflight |
-| A board row closes | its status starts with `done` or `closed` and names its receipt | `review` (finding F-2) |
+| A board row changes | its status starts with a declared word, `done` or `closed` once its last note closes it, and names its receipt; a `\|` inside a cell is escaped | `scripts/check_docs.py` (SB-306), proven by `scripts/test_check_docs.py` |
 | A plugin or skill file | `plugins/` | `scripts/check_plugin.py` |
 
 ## Gates
