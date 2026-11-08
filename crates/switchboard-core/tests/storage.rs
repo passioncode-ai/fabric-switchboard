@@ -3159,6 +3159,9 @@ fn a_quota_verdict_read_while_a_renewal_writes_is_refused_as_a_change() {
 struct SlowDelete {
     inner: MemoryVault,
     delay: std::time::Duration,
+    /// Set when a removal has entered the vault, so a test starts its clock from there and not
+    /// from a guessed sleep (the 0.7.32 nightly read 198 ms against a 200 ms bound).
+    entered: std::sync::atomic::AtomicBool,
 }
 impl Vault for SlowDelete {
     fn get(&self, id: &str) -> Result<Credential, String> {
@@ -3168,6 +3171,7 @@ impl Vault for SlowDelete {
         self.inner.put(id, value)
     }
     fn delete(&self, id: &str) -> Result<(), String> {
+        self.entered.store(true, Ordering::SeqCst);
         std::thread::sleep(self.delay);
         self.inner.delete(id)
     }
@@ -3187,8 +3191,9 @@ fn the_lock_observer_is_told_each_take_and_how_long_it_waited() {
     let vault = Arc::new(SlowDelete {
         inner: MemoryVault::default(),
         delay: std::time::Duration::from_millis(400),
+        entered: std::sync::atomic::AtomicBool::new(false),
     });
-    let store = Arc::new(Store::open(root.path().into(), vault).unwrap());
+    let store = Arc::new(Store::open(root.path().into(), vault.clone()).unwrap());
     let account = add(&store, "synthetic-observed");
     let kept = add(&store, "synthetic-kept");
     store.observe_lock_waits(note_lock_wait);
@@ -3205,7 +3210,15 @@ fn the_lock_observer_is_told_each_take_and_how_long_it_waited() {
         let store = store.clone();
         std::thread::spawn(move || store.remove(&account.id))
     };
-    std::thread::sleep(std::time::Duration::from_millis(100));
+    // The removal holds the lock from before it enters the vault; wait for that, not a guess.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while !vault.entered.load(Ordering::SeqCst) {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the removal never reached the vault"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
     let started = std::time::Instant::now();
     store.snapshot().unwrap();
     assert!(
