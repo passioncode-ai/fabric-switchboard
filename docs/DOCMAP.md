@@ -29,7 +29,7 @@ plan are in [plans/2026-11-08-doc-audit.md](evidence/plans/2026-11-08-doc-audit.
 | Verification | [evidence/verification.md](evidence/verification.md) | per release | yes | lease |
 | Backlog sources | [backlog-sources.json](backlog-sources.json) | one source | n/a | lease |
 | Scenarios | [ux/scenarios.md](ux/scenarios.md) | `SCN-<nnn>` | ids never reused | no |
-| Decisions | none single: see finding F-1 in the audit | `D-<n>` per plan | n/a | n/a |
+| Decisions | [DECISIONS.md](DECISIONS.md) | `DEC-<nnnn>` | yes: a change is a new entry and a status line | no lease yet |
 
 ## Single source of truth
 
@@ -53,6 +53,7 @@ plan are in [plans/2026-11-08-doc-audit.md](evidence/plans/2026-11-08-doc-audit.
 | Change type | Update these | Checked by |
 |---|---|---|
 | **A new document or rule** | the index a reader opens (`AGENTS.md` *Read first*, [HANDOFF.md](HANDOFF.md)), this map | `review`: no check knows which index should name a new file; `scripts/check_docs.py` only proves links resolve |
+| A decision that holds | a [DECISIONS.md](DECISIONS.md) entry; every document in its *Consequences / affects* line cites the id | `review`: no check follows the affects lines yet |
 | A string the window shows | `src/locales/ru.ts`, [brand/strings.md](brand/strings.md) when it carries a decision, Copylot report ids in the change | `scripts/check-locale.mjs`, `scripts/check-strings-registry.mjs` |
 | A backend sentence a person can see | `src/adapter.ts` (verbatim or mapped) or the script's allowlist with its reason, `src/locales/ru.ts` | `scripts/check-error-vocabulary.mjs` |
 | What the interface does | [ux/scenarios.md](ux/scenarios.md) in the same change | `scripts/check_docs.py` (coverage line present); the rest `review` until a scenario linter exists (finding F-4) |
