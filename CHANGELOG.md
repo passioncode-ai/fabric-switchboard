@@ -6,6 +6,10 @@ release pull request renames `Unreleased` to the version. While Windows signing 
 that section must say `windows_authenticode: NOT_SIGNED`. Notes of 0.5.3-beta.1 and earlier are
 on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/releases).
 
+## Unreleased
+
+- Every account moved or handed over to another machine is recorded in `seats.jsonl` with who ordered it; `--operator-said`, `--said-at` and `--said-in` (MCP `decision`) record the operator's words with it (SB-292).
+
 ## 0.7.29
 
 - `switchboard settings export --group POOL` writes a settings file with only that group, its organizations, ceilings and rotation settings, for a member's machine; repeat `--group` for several (SB-292).

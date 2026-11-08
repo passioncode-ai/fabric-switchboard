@@ -41,6 +41,7 @@ mod provenance;
 pub mod recovery;
 mod refresh;
 pub mod roots;
+pub mod seats;
 pub mod settings_bundle;
 pub mod settings_signing;
 pub mod shell;
@@ -212,6 +213,10 @@ pub enum Operation {
     HandOver {
         id: String,
         to: String,
+        /// SB-292: the operator's words that ordered it, set by `OnOperatorsWord`; recorded in
+        /// `seats.jsonl`.
+        #[serde(default)]
+        decision: Option<spend::Decision>,
     },
     /// SB-283: moves an account's sign-in to another machine over ssh (`account_send`): marked
     /// used elsewhere here first, saved there, checked there, undone on any failure.
@@ -222,6 +227,9 @@ pub enum Operation {
         pool: Option<String>,
         #[serde(default)]
         program: Option<String>,
+        /// SB-292: as in `HandOver`.
+        #[serde(default)]
+        decision: Option<spend::Decision>,
     },
     /// SB-283: what receiving a hand-over record here would do; with `apply`, starts the
     /// sign-in for that address in the group of the record's pool (else the default group).
@@ -3626,9 +3634,9 @@ pub(crate) fn window_only_refusal(operation: &Operation) -> Option<&'static str>
     use spend::Surface::{Operator, Window};
     // SB-299: the operator's words open only the five, and what they wrap claims no surface.
     if let Operation::OnOperatorsWord { inner, .. } = operation {
-        return match operator_action(inner) {
-            None => Some(spend::NOT_A_LOOSENING),
-            Some(_) => window_only_refusal(inner),
+        return match (operator_action(inner), seat_operation(inner)) {
+            (None, false) => Some(spend::NOT_A_LOOSENING),
+            _ => window_only_refusal(inner),
         };
     }
     matches!(
@@ -3662,6 +3670,32 @@ fn operator_action(operation: &Operation) -> Option<&'static str> {
         Operation::AgentKeyRemove { .. } => "key_removed",
         _ => return None,
     })
+}
+/// SB-292: one line in `seats.jsonl`. The grant already happened, so a record that cannot be
+/// written is logged, never undoes it.
+fn record_seat(
+    root: &Path,
+    event: &str,
+    account: &str,
+    machine: &str,
+    pool: &str,
+    decision: Option<&spend::Decision>,
+) {
+    let seat = seats::of(monitor::now(), event, account, machine, pool, decision);
+    if seats::append(root, &seat).is_err() {
+        oplog::event(
+            "seat_record",
+            &[("result", oplog::Field::Code("unwritten"))],
+        );
+    }
+}
+/// SB-292: a seat granted to another machine, which the operator's words order and
+/// `seats.jsonl` records.
+fn seat_operation(operation: &Operation) -> bool {
+    matches!(
+        operation,
+        Operation::SendAccount { .. } | Operation::HandOver { .. }
+    )
 }
 /// SB-299: the wrapped loosening, run as the operator's surface.
 fn as_operator(mut operation: Operation) -> Operation {
@@ -3963,6 +3997,14 @@ async fn execute(
     // SB-299: the operator's words open one loosening, run as their surface and recorded.
     if let Operation::OnOperatorsWord { decision, inner } = operation {
         decision.check()?;
+        let mut inner = *inner;
+        if let Operation::SendAccount { decision: d, .. }
+        | Operation::HandOver { decision: d, .. } = &mut inner
+        {
+            *d = Some(decision);
+            return Box::pin(execute(store, root, runtime, inner)).await;
+        }
+        let inner = Box::new(inner);
         let action = operator_action(&inner).ok_or(spend::NOT_A_LOOSENING)?;
         let answer = Box::pin(execute(store, root, runtime, as_operator(*inner))).await?;
         spend::record_loosening(root, action, &decision, monitor::now())?;
@@ -5019,22 +5061,34 @@ async fn execute(
             to,
             pool,
             program,
+            decision,
         } => {
-            let store = store.clone();
-            blocking::run(move || {
-                account_send::send(
-                    &store,
-                    &id,
-                    &to,
-                    pool.as_deref().unwrap_or("default"),
-                    program.as_deref().unwrap_or(account_send::REMOTE_DEFAULT),
-                    monitor::now(),
-                    &account_send::ssh_runner,
-                )
-            })
+            let pool = pool.unwrap_or_else(|| "default".into());
+            let moved = {
+                let (store, id, to, pool) = (store.clone(), id.clone(), to.clone(), pool.clone());
+                blocking::run(move || {
+                    account_send::send(
+                        &store,
+                        &id,
+                        &to,
+                        &pool,
+                        program.as_deref().unwrap_or(account_send::REMOTE_DEFAULT),
+                        monitor::now(),
+                        &account_send::ssh_runner,
+                    )
+                })
+            }?;
+            record_seat(root, "granted", &id, &to, &pool, decision.as_ref());
+            Ok(moved)
         }
-        Operation::HandOver { id, to } => {
-            account_handover::hand_over(root, &store, &id, &to, monitor::now())
+        Operation::HandOver { id, to, decision } => {
+            let handed = account_handover::hand_over(root, &store, &id, &to, monitor::now())?;
+            let pool = handed["record"]["groups"][0]["pool"]
+                .as_str()
+                .unwrap_or("default")
+                .to_owned();
+            record_seat(root, "handed_over", &id, &to, &pool, decision.as_ref());
+            Ok(handed)
         }
         Operation::ReceiveHandover {
             record,
@@ -10895,6 +10949,7 @@ mod usage_gate_tests {
             .execute(Operation::HandOver {
                 id: id.clone(),
                 to: "Mac Studio, user alex".into(),
+                decision: None,
             })
             .await
             .unwrap();
@@ -10920,6 +10975,44 @@ mod usage_gate_tests {
             "this machine still holds the same sign-in"
         );
         assert!(plan.get("login").is_none(), "nothing starts without apply");
+        // SB-292 (S-2): every grant is one line in seats.jsonl, with who ordered it.
+        let seats = seats::recent(root.path(), 10);
+        assert_eq!(seats.len(), 1, "{seats:?}");
+        assert_eq!(
+            (
+                seats[0].event.as_str(),
+                seats[0].ordered_by.as_str(),
+                seats[0].pool.as_str()
+            ),
+            ("handed_over", "agent", "default")
+        );
+        let other = fixtures::save(&runtime.store, "synthetic-ordered", "default").id;
+        let words = spend::Decision {
+            by: "operator".into(),
+            instruction: "передай аккаунт на студию".into(),
+            at: "2026-11-08T01:00:00Z".into(),
+            source: "session 0000".into(),
+        };
+        runtime
+            .execute(Operation::OnOperatorsWord {
+                decision: words.clone(),
+                inner: Box::new(Operation::HandOver {
+                    id: other.clone(),
+                    to: "Mac Studio, user alex".into(),
+                    decision: None,
+                }),
+            })
+            .await
+            .unwrap();
+        let seats = seats::recent(root.path(), 10);
+        assert_eq!(seats.len(), 2);
+        assert_eq!(seats[1].account, other);
+        assert_eq!(seats[1].ordered_by, "operator");
+        assert_eq!(seats[1].decision.as_ref(), Some(&words));
+        // A loosening's record stays where it was: nothing of a seat goes into spend.json.
+        assert!(spend::read(root.path())
+            .map(|f| f.loosened.is_empty())
+            .unwrap_or(true));
     }
 
     #[tokio::test]

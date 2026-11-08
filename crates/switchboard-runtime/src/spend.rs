@@ -186,7 +186,7 @@ pub struct Decision {
     pub source: String,
 }
 pub const DECISION_INVALID: &str = "Carry the operator's own words: by operator, the instruction as said (at most 500 characters), when it was said (RFC 3339) and where.";
-pub const NOT_A_LOOSENING: &str = "The operator's words open only raising, clearing or doubling a ceiling, deleting a group and replacing or removing a key.";
+pub const NOT_A_LOOSENING: &str = "The operator's words open only raising, clearing or doubling a ceiling, deleting a group, replacing or removing a key, and moving or handing over an account.";
 impl Decision {
     pub fn check(&self) -> Result<(), String> {
         let text = |s: &str, max: usize| {

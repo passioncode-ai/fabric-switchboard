@@ -53,7 +53,7 @@ const ALLOWLIST = {
   // runtime spend.rs (SB-299): the operator's words come from the CLI and MCP only; the window
   // never wraps its own actions.
   "Carry the operator's own words: by operator, the instruction as said (at most 500 characters), when it was said (RFC 3339) and where.": 'SB-299 decision: CLI and MCP only',
-  'The operator\'s words open only raising, clearing or doubling a ceiling, deleting a group and replacing or removing a key.': 'SB-299 decision: CLI and MCP only',
+  'The operator\'s words open only raising, clearing or doubling a ceiling, deleting a group, replacing or removing a key, and moving or handing over an account.': 'SB-299 decision: CLI and MCP only',
   // runtime account_send.rs (SB-283): the ssh runner's own errors; `send` answers ADD_FAILED or
   // NOT_VERIFIED in their place, so none reaches the window.
   'ssh is not installed here.': 'SB-283 ssh runner: folded into ADD_FAILED',
