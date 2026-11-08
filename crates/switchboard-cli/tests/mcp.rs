@@ -1243,8 +1243,8 @@ async fn accounts_rotation_activity_and_queues_are_reachable_over_mcp() {
         json!({"account_id": ids[2], "pool": "nowhere"}),
     );
     assert!(error, "a pool no project uses is refused: {refused}");
-    // SB-158: organizations over MCP; an account on the organization's domain belongs to it,
-    // the operator's word overrides, and a read-only server has no write tool.
+    // SB-158: organizations over MCP; the operator's word places an account, and a read-only
+    // server has no write tool. SB-285: a domain places none; each row names what it suggests.
     let (error, none) = agent.tool("switchboard_organizations", json!({}));
     assert!(!error, "{none}");
     assert_eq!(none["organizations"], json!([]));
@@ -1254,6 +1254,12 @@ async fn accounts_rotation_activity_and_queues_are_reachable_over_mcp() {
     );
     assert!(!error, "{added}");
     let org = added["organization"]["id"].as_str().unwrap().to_owned();
+    let (error, listed) = agent.tool("switchboard_organizations", json!({}));
+    assert!(!error, "{listed}");
+    for row in listed["accounts"].as_array().unwrap() {
+        assert!(row.get("suggested").is_some() && row.get("suggested_name").is_some());
+        assert_ne!(row["by"], "domain", "{row}");
+    }
     let (error, assigned) = agent.tool(
         "switchboard_organization_set",
         json!({"action": "assign", "account_id": ids[2], "organization": org}),

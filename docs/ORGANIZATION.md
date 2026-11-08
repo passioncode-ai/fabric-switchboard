@@ -115,7 +115,9 @@ switchboard login finish <login id>
 
 The provider's official sign-in opens in a terminal window; the sign-in is yours. A Codex seat
 uses `--provider codex` (in the window: *+ Add account* → *Sign in to another Codex account*).
-The account gets your organization's badge, for example by its address's domain.
+Signing in to the organization's group places the account there: it gets your organization's
+badge, recorded as your word. An address on the organization's domain alone only suggests it
+(SB-285, [DEC-0009](DECISIONS.md#dec-0009-an-e-mail-domain-suggests-an-organization-only-the-person-or-an-administrator-places-an-account)): an account signed in elsewhere stays personal until you place it.
 
 If you signed in somewhere else first, the notice offers *Move it to “{group}”*. Switchboard never
 moves an account without you.

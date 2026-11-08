@@ -282,10 +282,11 @@ export interface AccountGroup<T> { provider: Account['provider']; count: number;
 /**
  * SB-158: where an account belongs. Mirrors `Snapshot::attribution` in switchboard-core: the
  * person's word (`memberships`), then the account's provider organization (a Claude Team or a
- * ChatGPT workspace recorded on an organization), then its address's domain. Same cases in
+ * ChatGPT workspace recorded on an organization); else personal. SB-285: its address's domain
+ * only suggests an organization (`domainSuggestion`), which the person confirms. Same cases in
  * `organizations::tests` and `scripts/test-ui-logic.mjs`.
  */
-export type AttributedBy = 'person' | 'provider' | 'domain';
+export type AttributedBy = 'person' | 'provider';
 export interface OrgSnapshot { organizations?: Organization[]; memberships?: Record<string, string>; also_organizations?: Record<string, string[]> }
 /** SB-282: a group's organizations in order, from either form the store writes (`organization`
  * for one, `organizations` for several); empty is personal. */
@@ -338,10 +339,31 @@ function firstAttribution(snapshot: OrgSnapshot, account: Pick<Account, 'id' | '
   const key = providerOrganization(account);
   const team = key ? organizations.find((o) => (o.provider_organizations ?? []).includes(key)) : undefined;
   if (team) return { organization: team.id, by: 'provider' };
-  const domain = accountDomain(account);
-  const owner = domain ? organizations.find((o) => (o.domains ?? []).includes(domain)) : undefined;
-  if (owner) return { organization: owner.id, by: 'domain' };
   return { organization: null, by: null };
+}
+/** SB-285: the organization one of whose domains holds the account's address (`Snapshot::domain_organization`). */
+export function domainOrganization(snapshot: OrgSnapshot, account: Pick<Account, 'label' | 'external_identity'>): Organization | null {
+  const domain = accountDomain(account);
+  return domain ? (snapshot.organizations ?? []).find((o) => (o.domains ?? []).includes(domain)) ?? null : null;
+}
+/** SB-285: the organization the account's address suggests, for the person to confirm; null when
+ * none, when the person already said where it belongs, or when it holds that organization
+ * (`Snapshot::domain_suggestion`). */
+export function domainSuggestion(snapshot: OrgSnapshot, account: Pick<Account, 'id' | 'label' | 'provider' | 'external_identity'>): Organization | null {
+  const organization = domainOrganization(snapshot, account);
+  if (!organization) return null;
+  const at = attribution(snapshot, account);
+  return at.by !== 'person' && !holdsContext(at, organization.id) ? organization : null;
+}
+/** SB-109, SB-285: whether a group of `organizations` takes `account` when the person places it
+ * there (`Snapshot::placement_admits`): it fits already, or placing it confirms what its address
+ * suggests (an account no word and no team decides, on a domain of one of the group's). */
+export function placementAdmits(snapshot: OrgSnapshot, organizations: string | string[] | null, account: Pick<Account, 'id' | 'label' | 'provider' | 'external_identity'>): boolean {
+  if (groupAdmits(snapshot, organizations, account)) return true;
+  const list = organizations === null ? [] : typeof organizations === 'string' ? [organizations] : organizations;
+  const at = attribution(snapshot, account);
+  const suggested = domainOrganization(snapshot, account);
+  return at.by === null && !!suggested && list.includes(suggested.id);
 }
 /** SB-109, SB-282: whether `account` may serve a group bound to `organizations` (one id, a list,
  * or null/empty: personal), as `Snapshot::context_admits`: their contexts meet; always while no
@@ -353,7 +375,7 @@ export function groupAdmits(snapshot: OrgSnapshot, organizations: string | strin
   return list.length ? list.some((o) => holdsContext(at, o)) : holdsContext(at, null);
 }
 /** SB-170: a group bound to an organization whose accounts all belong elsewhere now (their
- * domain or team moved, or the person placed them): its folders keep the group's route and every
+ * team moved, or the person placed them): its folders keep the group's route and every
  * request is refused (fail closed), so its card says why. */
 export function groupSeatsElsewhere(snapshot: OrgSnapshot, organizations: string | string[] | null, accounts: Pick<Account, 'id' | 'label' | 'provider' | 'external_identity'>[]): boolean {
   const list = organizations === null ? [] : typeof organizations === 'string' ? [organizations] : organizations;

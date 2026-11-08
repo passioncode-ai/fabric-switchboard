@@ -65,7 +65,7 @@ the launch injected it with the session and data folder set explicitly.
 | `switchboard_account_send` | yes | move a subscription sign-in to another machine over ssh, one holder, undone on failure; only when the operator asks |
 | `switchboard_account_recall` | yes | take a moved Claude sign-in back from the machine it went to; its copy there is removed and proved gone; only when the operator asks |
 | `switchboard_account_hand_over` / `switchboard_account_receive` | yes / yes | hand an account over to another machine or a colleague as a signed record without its credential, and receive one (starting its sign-in with `apply`), only when the operator asks |
-| `switchboard_organizations` | no | the organizations and which account belongs to which, with why (person, provider team, domain), and `passioncode`: whether PassionCode.ai is connected and when it was read (connecting is the person's, in the browser: `switchboard org connect`) |
+| `switchboard_organizations` | no | the organizations and which account belongs to which, with why (person, provider team), the organization each address's domain suggests (`suggested`: a domain places nothing), and `passioncode`: whether PassionCode.ai is connected and when it was read (connecting is the person's, in the browser: `switchboard org connect`) |
 | `switchboard_organization_set` | yes | add, edit or remove an organization, or place an account (an organization, personal, auto), only when the operator asks |
 | `switchboard_rotation` / `switchboard_rotation_set` | no / yes | read or change automatic switching, the change only when the operator asks |
 | `switchboard_backups` / `switchboard_backup_now` | no / yes | encrypted backups; restoring stays the person's |

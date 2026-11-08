@@ -1,9 +1,12 @@
 //! Organizations (SB-158): which accounts belong to which organization, decided on this machine.
 //!
 //! An organization is a name, its e-mail domains and the provider organizations (a Claude Team,
-//! a ChatGPT workspace) known to be its own. An account belongs to one by the person's word, by
-//! its provider organization, or by the domain of its address, in that order; with no
-//! organization defined nothing of this applies. Nothing here reads the network.
+//! a ChatGPT workspace) known to be its own. An account belongs to one by the person's word or by
+//! its provider organization, in that order; with no organization defined nothing of this
+//! applies. SB-285 (operator 2026-11-06): the domain of an account's address only suggests an
+//! organization, which the person confirms by placing the account there (its *Organization…*
+//! choice, or putting it in a group of that organization); one organization may use several
+//! domains. Nothing here reads the network.
 use crate::{append_event, now, uuid_valid, Account, Provider, Snapshot, Store, MAX_ACCOUNTS};
 use serde::{Deserialize, Serialize};
 
@@ -72,13 +75,13 @@ fn vesta_id_valid(id: &str) -> bool {
     !id.is_empty() && id.len() <= 128 && id.chars().all(|c| c.is_ascii_graphic())
 }
 
-/// Why an account belongs where it does.
+/// Why an account belongs where it does. SB-285: an address's domain is no reason any more; it
+/// only suggests ([`Snapshot::domain_suggestion`]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum By {
     Person,
     Provider,
-    Domain,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -165,7 +168,7 @@ pub fn account_domain(account: &Account) -> Option<String> {
 
 impl Snapshot {
     /// Where the account belongs (SB-158): the person's assignment, then its provider
-    /// organization, then its address's domain.
+    /// organization; else personal. SB-285: its address's domain decides nothing.
     pub fn attribution(&self, account: &Account) -> Attribution {
         let mut attribution = self.first_attribution(account);
         if let Some(list) = self.also_organizations.get(&account.id) {
@@ -206,24 +209,147 @@ impl Snapshot {
                 };
             }
         }
-        if let Some(domain) = account_domain(account) {
-            if let Some(o) = self
-                .organizations
-                .iter()
-                .find(|o| o.domains.contains(&domain))
-            {
-                return Attribution {
-                    organization: Some(o.id.clone()),
-                    by: Some(By::Domain),
-                    also: Vec::new(),
-                };
-            }
-        }
         Attribution {
             organization: None,
             by: None,
             also: Vec::new(),
         }
+    }
+    /// SB-285: the organization one of whose domains holds the account's address. A suggestion
+    /// only: it places nothing by itself.
+    pub fn domain_organization(&self, account: &Account) -> Option<&Organization> {
+        let domain = account_domain(account)?;
+        self.organizations
+            .iter()
+            .find(|o| o.domains.contains(&domain))
+    }
+    /// SB-285: the organization the account's address suggests, for the person to confirm. None
+    /// when no organization holds its domain, when the person already said where it belongs
+    /// (personal included), or when it already holds that organization.
+    pub fn domain_suggestion(&self, account: &Account) -> Option<&Organization> {
+        let organization = self.domain_organization(account)?;
+        let attribution = self.attribution(account);
+        (attribution.by != Some(By::Person) && !attribution.holds(Some(&organization.id)))
+            .then_some(organization)
+    }
+    /// SB-285: the organization the person confirms by placing `account` in a group of
+    /// `organizations`: the one its address suggests, when nothing else decides its context (no
+    /// word from the person, no provider team) and the group would not take it otherwise.
+    fn confirmed_by_placement(
+        &self,
+        account: &Account,
+        organizations: &[String],
+    ) -> Option<String> {
+        let attribution = self.attribution(account);
+        if attribution.by.is_some() || organizations.iter().any(|o| attribution.holds(Some(o))) {
+            return None;
+        }
+        let organization = self.domain_organization(account)?;
+        organizations
+            .contains(&organization.id)
+            .then(|| organization.id.clone())
+    }
+    /// SB-109, SB-285: whether a group of `organizations` (none: personal) takes `account` when
+    /// the person places it there: it fits already, or placing it confirms what its address
+    /// suggests. Always while no organization exists.
+    pub fn placement_admits(&self, organizations: &[String], account: &Account) -> bool {
+        if self.organizations.is_empty() {
+            return true;
+        }
+        let group = crate::Project {
+            organizations: organizations.to_vec(),
+            ..Default::default()
+        };
+        group.admits(&self.attribution(account))
+            || self
+                .confirmed_by_placement(account, organizations)
+                .is_some()
+    }
+    /// SB-285: records, as the person's word, the organization placing `account_id` in the group
+    /// of `pool`, bound to `organizations`, confirms (see [`Snapshot::placement_admits`]): as its
+    /// organization, or, when another group it serves would then refuse it (a personal group it
+    /// stays at home in while a group of the organization shares it), as one it also works for
+    /// (SB-282). True when it recorded one.
+    pub(crate) fn confirm_placement(
+        &mut self,
+        account_id: &str,
+        pool: &str,
+        organizations: &[String],
+    ) -> bool {
+        let Some(account) = self.accounts.iter().find(|a| a.id == account_id) else {
+            return false;
+        };
+        let Some(organization) = self.confirmed_by_placement(account, organizations) else {
+            return false;
+        };
+        let current = self.attribution(account);
+        let first = Attribution {
+            organization: Some(organization.clone()),
+            by: Some(By::Person),
+            also: current.also,
+        };
+        let others_agree = self
+            .projects
+            .iter()
+            .filter(|p| p.pool != pool && self.serves(account, &p.pool))
+            .all(|p| p.admits(&first));
+        if others_agree {
+            self.memberships.insert(account_id.into(), organization);
+        } else {
+            let also = self
+                .also_organizations
+                .entry(account_id.into())
+                .or_default();
+            if !also.contains(&organization) {
+                also.push(organization);
+            }
+        }
+        append_event(self, "organization", Some(account_id), "assigned");
+        true
+    }
+    /// SB-285: the placements the retired domain rule made that the account's groups agree with,
+    /// `(account, organization)`: an account with no word from the person and no provider team,
+    /// whose address is on an organization's domain, and every group it serves takes it as that
+    /// organization's. One a group of another context holds keeps that group's word instead (the
+    /// domain arrived after the person placed it there, as on 2026-11-08).
+    pub(crate) fn domain_placements(&self) -> Vec<(String, String)> {
+        self.accounts
+            .iter()
+            .filter(|a| !self.memberships.contains_key(&a.id))
+            .filter_map(|a| {
+                let attribution = self.attribution(a);
+                if attribution.by.is_some() {
+                    return None;
+                }
+                let organization = self.domain_organization(a)?;
+                let placed = Attribution {
+                    organization: Some(organization.id.clone()),
+                    by: Some(By::Person),
+                    also: attribution.also,
+                };
+                self.projects
+                    .iter()
+                    .filter(|p| self.serves(a, &p.pool))
+                    .all(|p| p.admits(&placed))
+                    .then(|| (a.id.clone(), organization.id.clone()))
+            })
+            .collect()
+    }
+    /// SB-285: once per store, the move off the domain rule: every placement it made that the
+    /// account's groups agree with ([`Snapshot::domain_placements`]) becomes the person's word,
+    /// so nothing running changes, and the store is marked so a later open never freezes a
+    /// placement this version did not make. A store with no organization needs nothing. True
+    /// when it changed the snapshot.
+    pub(crate) fn retire_domain_rule(&mut self) -> bool {
+        if self.domain_rule_retired || self.organizations.is_empty() {
+            return false;
+        }
+        for (account, organization) in self.domain_placements() {
+            self.memberships.insert(account.clone(), organization);
+            append_event(self, "organization", Some(&account), "assigned");
+        }
+        self.domain_rule_retired = true;
+        true
     }
     pub fn organization(&self, id: &str) -> Option<&Organization> {
         self.organizations.iter().find(|o| o.id == id)
@@ -639,6 +765,34 @@ impl Store {
         }
         Ok(applied)
     }
+    /// SB-285: a backup taken before the domain rule was retired carries no word for the
+    /// accounts the domain placed. Restoring one records those placements for the accounts it
+    /// added (`ids`), as the move off the rule did for this install
+    /// ([`Snapshot::domain_placements`]). Answers how many it recorded.
+    pub fn freeze_domain_placements(
+        &self,
+        ids: &std::collections::BTreeSet<String>,
+    ) -> Result<usize, String> {
+        let mut state = self.lock()?;
+        let mut candidate = state.clone();
+        let placements: Vec<(String, String)> = candidate
+            .domain_placements()
+            .into_iter()
+            .filter(|(account, _)| ids.contains(account))
+            .collect();
+        if placements.is_empty() {
+            return Ok(0);
+        }
+        for (account, organization) in &placements {
+            candidate
+                .memberships
+                .insert(account.clone(), organization.clone());
+            append_event(&mut candidate, "organization", Some(account), "assigned");
+        }
+        self.publish(&mut state, candidate)?;
+        self.changed();
+        Ok(placements.len())
+    }
     /// SB-159: forgets every link to PassionCode.ai; the organizations stay as local ones.
     pub fn release_vesta(&self) -> Result<(), String> {
         let mut state = self.lock()?;
@@ -919,6 +1073,9 @@ mod tests {
             group("own-pool", "/work/own", None),
             group("beta-pool", "/work/beta", Some(O2)),
         ];
+        // SB-285: its domain only suggests Acme; the person placed it there.
+        assert_eq!(s.session_context(&acme, None), "personal");
+        s.memberships.insert(A.into(), O1.into());
         let org1 = format!("org:{O1}");
         // No group: the account's own organization, also with no folder (CX-26).
         assert_eq!(s.session_context(&acme, None), org1);
@@ -1025,6 +1182,10 @@ mod tests {
         );
         personal.pool = "acme-pool".into();
         s.accounts = vec![seat, elsewhere, personal];
+        // SB-285: the person placed Acme's seats (their domain only suggests it).
+        for id in [A, B, "00000000-0000-4000-8000-00000000000d"] {
+            s.memberships.insert(id.into(), O1.into());
+        }
         assert_eq!(
             s.organization_group(O1).map(|p| p.pool.as_str()),
             Some("acme-pool")
@@ -1111,6 +1272,13 @@ mod tests {
             None,
         );
         s.accounts = vec![acme.clone(), beta.clone()];
+        // SB-285: each was placed by the person; a domain only suggests.
+        s.memberships.insert(A.into(), O1.into());
+        s.memberships.insert(B.into(), O2.into());
+        s.memberships.insert(
+            "00000000-0000-4000-8000-00000000000c".into(),
+            "00000000-0000-4000-8000-000000000003".into(),
+        );
         assert!(s.context_admits("shared", &acme));
         assert!(s.context_admits("shared", &beta));
         assert!(!s.context_admits("shared", &gamma));
@@ -1147,23 +1315,26 @@ mod tests {
     }
 
     #[test]
-    fn the_persons_word_wins_then_the_provider_organization_then_the_domain() {
+    fn the_persons_word_wins_then_the_provider_organization_and_a_domain_only_suggests() {
+        // SB-285: an address on an organization's domain places nothing; it suggests.
         let mut s = Snapshot {
             organizations: vec![org(O1, "Acme", &["acme.example"]), org(O2, "Beta", &[])],
             ..Default::default()
         };
         s.organizations[1].provider_organizations = vec!["claude:team-b".into()];
-        // Domain.
+        // Domain: personal, with Acme suggested.
         let a = account(A, Provider::Claude, "dev@acme.example", Some("team-x"));
         assert_eq!(
             s.attribution(&a),
             Attribution {
                 also: Vec::new(),
-                organization: Some(O1.into()),
-                by: Some(By::Domain)
+                organization: None,
+                by: None
             }
         );
-        // Provider organization beats the domain.
+        assert_eq!(s.domain_suggestion(&a).map(|o| o.id.as_str()), Some(O1));
+        assert_eq!(s.session_context(&a, None), "personal");
+        // A provider organization decides; the domain still suggests the other one.
         let b = account(B, Provider::Claude, "dev@acme.example", Some("team-b"));
         assert_eq!(
             s.attribution(&b),
@@ -1173,7 +1344,8 @@ mod tests {
                 by: Some(By::Provider)
             }
         );
-        // The person's word beats both, "personal" included.
+        assert_eq!(s.domain_suggestion(&b).map(|o| o.id.as_str()), Some(O1));
+        // The person's word beats both, "personal" included, and silences the suggestion.
         s.memberships.insert(B.into(), PERSONAL.into());
         assert_eq!(
             s.attribution(&b),
@@ -1183,6 +1355,7 @@ mod tests {
                 by: Some(By::Person)
             }
         );
+        assert!(s.domain_suggestion(&b).is_none());
         s.memberships.insert(A.into(), O2.into());
         assert_eq!(
             s.attribution(&a),
@@ -1192,6 +1365,150 @@ mod tests {
                 by: Some(By::Person)
             }
         );
+        assert!(s.domain_suggestion(&a).is_none());
+        // Holding the suggested organization (as an organization it also works for) leaves
+        // nothing to suggest either.
+        s.memberships.remove(A);
+        s.also_organizations.insert(A.into(), vec![O1.into()]);
+        assert!(s.domain_suggestion(&a).is_none());
+        // No domain matches: no suggestion.
+        let c = account(
+            "00000000-0000-4000-8000-00000000000c",
+            Provider::Claude,
+            "me@home.example",
+            None,
+        );
+        assert!(s.domain_organization(&c).is_none() && s.domain_suggestion(&c).is_none());
+    }
+
+    /// SB-285: placing an account in a group of the organization its address suggests is the
+    /// person confirming it; a group of another organization, a provider team or the person's
+    /// word keep refusing.
+    #[test]
+    fn placing_an_account_in_a_group_of_its_domains_organization_confirms_it() {
+        let mut s = Snapshot {
+            organizations: vec![org(O1, "Acme", &["acme.example"]), org(O2, "Beta", &[])],
+            ..Default::default()
+        };
+        s.organizations[1].provider_organizations = vec!["claude:team-b".into()];
+        let dev = account(A, Provider::Claude, "dev@acme.example", None);
+        let teamed = account(B, Provider::Claude, "ops@acme.example", Some("team-b"));
+        s.accounts = vec![dev.clone(), teamed.clone()];
+        let acme = vec![O1.to_string()];
+        let beta = vec![O2.to_string()];
+        assert!(s.placement_admits(&acme, &dev));
+        assert!(!s.placement_admits(&beta, &dev));
+        assert!(s.placement_admits(&[], &dev), "a personal group takes it");
+        // A provider team decides; the domain does not move it into Acme's group.
+        assert!(!s.placement_admits(&acme, &teamed));
+        assert!(!s.confirm_placement(&teamed.id, "acme-pool", &acme));
+        // Confirming records the person's word, once.
+        assert!(!s.confirm_placement(&dev.id, "beta-pool", &beta));
+        assert!(s.confirm_placement(&dev.id, "acme-pool", &acme));
+        assert_eq!(s.memberships.get(A).map(String::as_str), Some(O1));
+        assert_eq!(s.attribution(&dev).by, Some(By::Person));
+        assert!(
+            !s.confirm_placement(&dev.id, "acme-pool", &acme),
+            "already Acme's"
+        );
+        // The person said personal: no group of an organization takes it by its domain.
+        s.memberships.insert(A.into(), PERSONAL.into());
+        assert!(!s.placement_admits(&acme, &dev));
+        // Without organizations nothing is refused.
+        let empty = Snapshot::default();
+        assert!(empty.placement_admits(&acme, &dev));
+        // At home in a personal group and shared into Acme's: it also works for Acme, so both
+        // groups keep taking it.
+        let c = "00000000-0000-4000-8000-00000000000c";
+        let mut shared = account(c, Provider::Claude, "qa@acme.example", None);
+        shared.pool = "own-pool".into();
+        s.accounts.push(shared.clone());
+        s.projects = vec![crate::Project {
+            pool: "own-pool".into(),
+            name: "Own".into(),
+            folders: vec!["/work/own".into()],
+            created_at: 1,
+            ..Default::default()
+        }];
+        assert!(s.confirm_placement(c, "acme-pool", &acme));
+        assert!(!s.memberships.contains_key(c));
+        assert_eq!(s.also_organizations.get(c), Some(&acme));
+        let at = s.attribution(&shared);
+        assert!(at.holds(None) && at.holds(Some(O1)));
+        assert!(s.context_admits("own-pool", &shared));
+    }
+
+    /// SB-285: the move off the domain rule keeps, as the person's word, each placement it made
+    /// that the account's groups agree with, once; one a group of another context holds (the
+    /// 2026-11-08 incident) goes back to that group's word.
+    #[test]
+    fn the_domain_rule_retires_once_keeping_what_the_groups_agree_with() {
+        use crate::Project;
+        let group = |pool: &str, organization: Option<&str>| Project {
+            shared_accounts: Vec::new(),
+            pool: pool.into(),
+            name: pool.into(),
+            folders: vec![format!("/work/{pool}")],
+            created_at: 1,
+            sources: Vec::new(),
+            organizations: organization.map(str::to_owned).into_iter().collect(),
+        };
+        let id = |n: u8| format!("00000000-0000-4000-8000-0000000000{n:02x}");
+        let mut in_default = account(&id(1), Provider::Claude, "a@acme.example", None);
+        in_default.pool = "default".into();
+        let mut in_acme = account(&id(2), Provider::Claude, "b@acme.example", None);
+        in_acme.pool = "acme-pool".into();
+        let mut in_personal = account(&id(3), Provider::Claude, "c@acme.example", None);
+        in_personal.pool = "own-pool".into();
+        let mut said_personal = account(&id(4), Provider::Claude, "d@acme.example", None);
+        said_personal.pool = "default".into();
+        let mut teamed = account(&id(5), Provider::Claude, "e@acme.example", Some("team-b"));
+        teamed.pool = "default".into();
+        let mut home = account(&id(6), Provider::Claude, "me@home.example", None);
+        home.pool = "own-pool".into();
+        let mut s = Snapshot {
+            organizations: vec![org(O1, "Acme", &["acme.example"]), org(O2, "Beta", &[])],
+            projects: vec![group("acme-pool", Some(O1)), group("own-pool", None)],
+            accounts: vec![
+                in_default.clone(),
+                in_acme.clone(),
+                in_personal.clone(),
+                said_personal.clone(),
+                teamed.clone(),
+                home.clone(),
+            ],
+            ..Default::default()
+        };
+        s.organizations[1].provider_organizations = vec!["claude:team-b".into()];
+        s.memberships
+            .insert(said_personal.id.clone(), PERSONAL.into());
+        assert!(s.retire_domain_rule());
+        assert!(s.domain_rule_retired);
+        let word = |s: &Snapshot, a: &Account| s.memberships.get(&a.id).cloned();
+        assert_eq!(word(&s, &in_default).as_deref(), Some(O1));
+        assert_eq!(word(&s, &in_acme).as_deref(), Some(O1));
+        assert_eq!(s.attribution(&in_acme).by, Some(By::Person));
+        assert!(
+            s.context_admits("acme-pool", &in_acme),
+            "nothing running changes"
+        );
+        // The personal group placed it before the domain arrived: its word stands.
+        assert_eq!(word(&s, &in_personal), None);
+        assert!(s.context_admits("own-pool", &in_personal));
+        assert_eq!(
+            s.domain_suggestion(&in_personal).map(|o| o.id.as_str()),
+            Some(O1)
+        );
+        assert_eq!(word(&s, &said_personal).as_deref(), Some(PERSONAL));
+        assert_eq!(word(&s, &teamed), None, "its team decides");
+        assert_eq!(word(&s, &home), None);
+        // Once: a second pass changes nothing, and a store without organizations needs none.
+        let before = s.clone();
+        assert!(!s.retire_domain_rule());
+        assert_eq!(s.memberships, before.memberships);
+        assert_eq!(s.events.len(), before.events.len());
+        let mut empty = Snapshot::default();
+        assert!(!empty.retire_domain_rule() && !empty.domain_rule_retired);
     }
 
     #[test]

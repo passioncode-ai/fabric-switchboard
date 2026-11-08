@@ -2756,6 +2756,8 @@ mod tests {
                 .add_organization("Acme", &["example.invalid".into()])
                 .unwrap();
             let c = codex_seat(&store, "synthetic-c-token", now() + 86_400);
+            // SB-285: its domain suggests Acme; the person placed it there.
+            store.assign_organization(&c, Some(&acme.id)).unwrap();
             let account = store.snapshot().unwrap().accounts.remove(0);
             assert_eq!(
                 store.snapshot().unwrap().attribution(&account).organization,

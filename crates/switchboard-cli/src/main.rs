@@ -723,7 +723,8 @@ enum Github {
 }
 #[derive(Subcommand)]
 enum Org {
-    /// The organizations, then every account with the organization it belongs to and why.
+    /// The organizations, then every account with the organization it belongs to and why, and
+    /// the organization its address suggests, which `org assign` confirms.
     List,
     /// Connect PassionCode.ai: sign in in the browser, then your organizations there arrive
     /// here with their names and domains and are read again every 6 hours.
@@ -736,7 +737,8 @@ enum Org {
     Passioncode,
     /// Delete the PassionCode.ai token; the organizations stay as local ones.
     Disconnect,
-    /// Add an organization with the e-mail domains it owns.
+    /// Add an organization with the e-mail domains it owns. A domain suggests the organization
+    /// for accounts on it; it places none of them.
     Add {
         /// Its name, unique on this machine.
         name: String,
@@ -755,7 +757,7 @@ enum Org {
         #[arg(long = "domain")]
         domains: Option<Vec<String>>,
     },
-    /// Remove it; its accounts are attributed again by the other rules.
+    /// Remove it; its accounts are placed again by their team at the provider, else personal.
     Remove {
         /// Its id (`switchboard org list`).
         id: String,
@@ -3031,20 +3033,25 @@ fn print_result(value: &Value, cli: &Cli) {
             println!();
             for a in value["accounts"].as_array().cloned().unwrap_or_default() {
                 let by = match a["by"].as_str() {
-                    Some("person") => "set by you",
-                    Some("provider") => "its team",
-                    Some("domain") => "its domain",
-                    _ => "",
+                    Some("person") => "set by you".to_owned(),
+                    Some("provider") => "its team".to_owned(),
+                    _ => String::new(),
+                };
+                // SB-285: the domain only suggests; the person confirms with `org assign`.
+                let note = match a["suggested_name"].as_str() {
+                    Some(name) if by.is_empty() => format!("its address suggests {name}"),
+                    Some(name) => format!("{by}; its address suggests {name}"),
+                    None => by,
                 };
                 println!(
                     "{}  {:7}  {:24}  {}",
                     text(&a["id"]),
                     text(&a["provider"]),
                     a["organization_name"].as_str().unwrap_or("personal"),
-                    if by.is_empty() {
+                    if note.is_empty() {
                         text(&a["label"])
                     } else {
-                        format!("{} ({by})", text(&a["label"]))
+                        format!("{} ({note})", text(&a["label"]))
                     }
                 );
             }

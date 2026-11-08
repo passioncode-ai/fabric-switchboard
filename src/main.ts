@@ -7,7 +7,7 @@ import { platformLabel } from './platform';
 import { LOCALE_KEY, dateLocale, locale, parseLocaleChoice, plural, saveLocaleChoice, t, type LocaleChoice } from './i18n';
 import { demo, demoFirstRun, native, nativeAdapter, onProjectSuggestions, onShellHook, onSpendChanged, safeError, reportFrontendReady, reportLanguage, type Operation } from './adapter';
 import type { CardState } from './ui-logic';
-import { statAlert, ceilingQuestion, ceilingWarning, ceilingLine, keyLimitLine, dollars, POOL_PATTERN, poolChoices, poolName, inGroup, tourPlacement, usableWhileBusy, APPEARANCE_KEY, attribution, groupAdmits, groupSeatsElsewhere, passioncodeLine, seatEndedText, groupSeatsEndedText, organizationReleasedAt, inOrganizationFilter, domainList, type AttributedBy, sortStatRows, nextStatSort, type StatRow, type StatSort, statCacheShare, statTokensPerRequest, chartSeries, niceMax, groupProjectRows, type ChartMetric, groupProjects, compactCount, statTokens, statTrouble, statTroubleText, statAgentName, type Statistics, EXPIRY_CHOICES, folderName, folderRows, withoutFolder, type ProjectRoot, moveTargets, mapRows, rootTargets, storedMapFolders, MAP_FOLDERS_KEY, type MapFilter, type MapRow, type RepositoryMap, sortAgents, defaultAgentChoices, backgroundReads, clockedRead, chainScopeKey, afterRead, ceilingRemovalNote, modelMeta, modelUse, ordinaryKimiNote, kimiLimitUntil, limitReasonText, limitTitle, agentSetupFacts, sessionHow, sessionAgentName, sessionStateLabel, kimiWindowsLine, kimiWindowsLines, openrouterCreditLine, eventAction, eventDetail, MutationClock, activeRules, autoSwitchPool, autoSwitchPossible, launchChoice, withFolders, githubDefaultSelection, githubPlan, githubSource, replaceFolder, storedFolder, LAST_FOLDER_KEY, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, groupAccounts, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, signInNotice, signInMove, organizationMoveNote, dismissTermsNotice, termsNoticeDismissed, termsNoticeOn, termsNoticeText, tourWaits, orgSetups, releasedOrganizations, releasedSummary, orgSetupAction, orgSetupShown, orgSetupCaveat, orgSetupLeads, orgSetupPrimary, accountsOrgActionLeads, firstPrimary, orgSetupUnread, orgSetupStateLabel, orgSetupTitle, hiddenOrgSetups, ORG_SETUP_HIDDEN_KEY, accountsEmptyKey, type OrgSetup, usageAnswerText, usageNotice, usageFreshness, windowReset, type Appearance, shellHookView, shellHookToggleNotice, shellHookNoticeText, codexHookLine, moveStep, accountsForStep, chainSummary, stepReasonText, handoverOutcomeText, handoverSkipped, shortWorkflow, TAKEOVER_ORDER, groupOrganizations, servesPool, sharedGroups, holdsContext, accountOrganizations } from './ui-logic';
+import { statAlert, ceilingQuestion, ceilingWarning, ceilingLine, keyLimitLine, dollars, POOL_PATTERN, poolChoices, poolName, inGroup, tourPlacement, usableWhileBusy, APPEARANCE_KEY, attribution, placementAdmits, domainSuggestion, groupSeatsElsewhere, passioncodeLine, seatEndedText, groupSeatsEndedText, organizationReleasedAt, inOrganizationFilter, domainList, type AttributedBy, sortStatRows, nextStatSort, type StatRow, type StatSort, statCacheShare, statTokensPerRequest, chartSeries, niceMax, groupProjectRows, type ChartMetric, groupProjects, compactCount, statTokens, statTrouble, statTroubleText, statAgentName, type Statistics, EXPIRY_CHOICES, folderName, folderRows, withoutFolder, type ProjectRoot, moveTargets, mapRows, rootTargets, storedMapFolders, MAP_FOLDERS_KEY, type MapFilter, type MapRow, type RepositoryMap, sortAgents, defaultAgentChoices, backgroundReads, clockedRead, chainScopeKey, afterRead, ceilingRemovalNote, modelMeta, modelUse, ordinaryKimiNote, kimiLimitUntil, limitReasonText, limitTitle, agentSetupFacts, sessionHow, sessionAgentName, sessionStateLabel, kimiWindowsLine, kimiWindowsLines, openrouterCreditLine, eventAction, eventDetail, MutationClock, activeRules, autoSwitchPool, autoSwitchPossible, launchChoice, withFolders, githubDefaultSelection, githubPlan, githubSource, replaceFolder, storedFolder, LAST_FOLDER_KEY, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, groupAccounts, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, signInNotice, signInMove, organizationMoveNote, dismissTermsNotice, termsNoticeDismissed, termsNoticeOn, termsNoticeText, tourWaits, orgSetups, releasedOrganizations, releasedSummary, orgSetupAction, orgSetupShown, orgSetupCaveat, orgSetupLeads, orgSetupPrimary, accountsOrgActionLeads, firstPrimary, orgSetupUnread, orgSetupStateLabel, orgSetupTitle, hiddenOrgSetups, ORG_SETUP_HIDDEN_KEY, accountsEmptyKey, type OrgSetup, usageAnswerText, usageNotice, usageFreshness, windowReset, type Appearance, shellHookView, shellHookToggleNotice, shellHookNoticeText, codexHookLine, moveStep, accountsForStep, chainSummary, stepReasonText, handoverOutcomeText, handoverSkipped, shortWorkflow, TAKEOVER_ORDER, groupOrganizations, servesPool, sharedGroups, holdsContext, accountOrganizations } from './ui-logic';
 import agentCatalog from '../catalog/agents.json';
 import type { AnalyticsStatus, Ceilings, CeilingView, CeilingQuestionView, OpenrouterCredit, BackupInfo, PassioncodeStatus, Account, Adapter, AgentConnection, AgentInfo, AgentRow, AgentsOverview, OpenrouterModels, HermesModel, KimiAccounts, KimiRegion, KimiStatus, OpenrouterStatus, OpenrouterKeys, CodexRoute, ShellHookStatus, AgentSetup, AuthKind, BackupStatus, KimiAccount, CurrentAccounts, LoginItem, Project, Restored, ExternalIdentity, MonitorStatus, ProjectRule, Provider, RotationPolicy, RuntimeStatus, SessionInfo, Snapshot, UpdateStatus, Onboarding, Chains, ChainExecutor, ChainScope, ChainStepView, GithubRepository } from './types';
 
@@ -386,7 +386,7 @@ function render(options: { background?: boolean } = {}): boolean {
   if (demo) main.append(el('div', 'demo-banner', t('SYNTHETIC DEMO · No real accounts, vault, proxy, or terminal. Changes reset when you reload.')));
   const header = el('header', 'page-header');
   const heading = el('div'); const title = el('h1', '', { accounts: t('Accounts'), tokens: t('API keys'), projects: t('Groups'), orgs: t('Organizations'), agents: t('Agents'), activity: t('Activity'), stats: t('Statistics'), about: t('About Switchboard') }[page]); title.tabIndex = -1; title.dataset.focus = 'page-title';
-  heading.append(el('p', 'eyebrow', t('FABRIC SWITCHBOARD')), title, el('p', 'subtitle', { accounts: t('Switch Claude Code, keep sign-ins fresh and watch quota.'), tokens: t('API keys agents run on: the machine\'s, and one per group.'), projects: t('Groups of repositories with accounts of their own; other groups never switch to them.'), orgs: t('Companies your accounts belong to, by your word, their team at the provider or their address.'), agents: t('Choose which coding agents take over work, and connect them to Switchboard.'), activity: t('Local account and session events.'), stats: t('Which accounts and agents work in which groups, and where tokens go.'), about: t('Deliberate account switching for coding sessions.') }[page]));
+  heading.append(el('p', 'eyebrow', t('FABRIC SWITCHBOARD')), title, el('p', 'subtitle', { accounts: t('Switch Claude Code, keep sign-ins fresh and watch quota.'), tokens: t('API keys agents run on: the machine\'s, and one per group.'), projects: t('Groups of repositories with accounts of their own; other groups never switch to them.'), orgs: t('Companies your accounts belong to, by your word or their team at the provider.'), agents: t('Choose which coding agents take over work, and connect them to Switchboard.'), activity: t('Local account and session events.'), stats: t('Which accounts and agents work in which groups, and where tokens go.'), about: t('Deliberate account switching for coding sessions.') }[page]));
   header.append(heading);
   if (native || demo) {
     const actions = el('div', 'header-actions');
@@ -781,7 +781,7 @@ function projectDialog(existing?: Project, organization?: string) {
   const rows: { account: Account; box: HTMLInputElement; why: HTMLElement; text: string }[] = [];
   for (const account of usable) {
     const owner = projectOf(account.pool);
-    const option = el('label', 'appearance-option login-option'); const box = el('input'); box.type = 'checkbox'; box.value = account.id; box.checked = existing ? servesPool(snapshot!, account, existing.pool) : !!organization && groupAdmits(snapshot!, organization, account) && !inCli(account);
+    const option = el('label', 'appearance-option login-option'); const box = el('input'); box.type = 'checkbox'; box.value = account.id; box.checked = existing ? servesPool(snapshot!, account, existing.pool) : !!organization && placementAdmits(snapshot!, organization, account) && !inCli(account);
     const note = owner && owner.pool !== existing?.pool ? t(' · in {name}, also serves this group', { name: owner.name }) : '';
     const why = el('span', '', `${account.label} · ${providerName(account.provider)}${note}`);
     option.append(box, why); picker.append(option);
@@ -790,7 +790,7 @@ function projectDialog(existing?: Project, organization?: string) {
   const syncAccounts = () => {
     const orgs = chosenOrgs();
     for (const { account, box, why, text } of rows) {
-      const fits = groupAdmits(snapshot!, orgs, account);
+      const fits = placementAdmits(snapshot!, orgs, account);
       box.disabled = !fits; if (!fits) box.checked = false;
       const own = accountOrganizations(attribution(snapshot!, account)).map((id) => organizations.find((o) => o.id === id)?.name ?? '').filter(Boolean);
       why.textContent = fits ? text : `${text} · ${own.length ? t('Belongs to {name}.', { name: own.join(', ') }) : t('Personal account.')}`;
@@ -2754,14 +2754,14 @@ function organizationOf(account: Account): { name: string; why: string } | null 
 function alsoOrganizationsOf(account: Account): string[] {
   return attribution(snapshot!, account).also.map((id) => snapshot!.organizations?.find((o) => o.id === id)?.name ?? '').filter(Boolean);
 }
+/** SB-285: why an account holds an organization: its team, else the person's word (its first
+ * context or one it also works for); a domain is never a reason. */
 function byShort(by: AttributedBy | null) {
-  return by === 'person' ? t('placed by you') : by === 'provider' ? t('by its team') : t('by its domain');
+  return by === 'provider' ? t('by its team') : t('placed by you');
 }
 function byText(by: AttributedBy | null, name: string) {
-  if (by === 'person') return t('You placed it in {name}.', { name });
   if (by === 'provider') return t('Its team at the provider belongs to {name}.', { name });
-  if (by === 'domain') return t('Its address is on a domain of {name}.', { name });
-  return t('Personal');
+  return t('You placed it in {name}.', { name });
 }
 /** SB-158: the filter and the way to organizations, above the accounts; one quiet line while there are none. */
 function organizationsBar(accounts: Account[]): HTMLElement | null {
@@ -2828,12 +2828,12 @@ function renderOrganizations(main: HTMLElement) {
   const organizations = snapshot!.organizations ?? [];
   main.append(passioncodePanel());
   if (!organizations.length) {
-    const empty = emptyState(t('No organizations yet'), t('Add the companies you work for with their e-mail domains. Accounts on those domains get the company’s badge on Accounts, and you can place any account yourself. Without organizations nothing changes.'));
+    const empty = emptyState(t('No organizations yet'), t('Add the companies you work for with their e-mail domains. Accounts on those domains are suggested for the company, and you place each one yourself. Without organizations nothing changes.'));
     empty.append(button(t('+ New organization'), () => organizationDialog(null), 'button primary', 'org-empty-add'));
     main.append(empty);
     return;
   }
-  main.append(el('p', 'surface-note org-rules', t('An account belongs to an organization when you place it there, when its team at the provider is the organization’s, or when its address is on one of the organization’s domains. Placing one seat of a Claude Team or ChatGPT workspace brings the team’s other seats along.')));
+  main.append(el('p', 'surface-note org-rules', t('An account belongs to an organization when you place it there or when its team at the provider is the organization’s. An address on one of its domains only suggests it. Placing one seat of a Claude Team or ChatGPT workspace brings the team’s other seats along.')));
   const list = el('div', 'org-cards');
   for (const o of organizations) {
     const members = snapshot!.accounts.filter((a) => holdsContext(attribution(snapshot!, a), o.id));
@@ -2856,13 +2856,30 @@ function renderOrganizations(main: HTMLElement) {
       const rows = el('ul', 'org-members');
       for (const a of members) {
         const at = attribution(snapshot!, a);
+        // One it also works for is there by the person's word (SB-282).
+        const by = at.organization === o.id ? at.by : 'person';
         const row = el('li', 'org-member');
-        const why = el('span', 'row-sub', `${providerName(a.provider)} · ${byShort(at.by)}`); why.title = byText(at.by, o.name);
+        const why = el('span', 'row-sub', `${providerName(a.provider)} · ${byShort(by)}`); why.title = byText(by, o.name);
         const memberName = el('span', 'org-member-name', a.label); memberName.title = a.label;
         row.append(el('span', `provider-dot ${a.provider}`), memberName, why);
         rows.append(row);
       }
       card.append(el('span', 'eyebrow', plural(members.length, { one: '{n} account', other: '{n} accounts' })), rows);
+    }
+    // SB-285: accounts its domains only suggest; placing one is the person's word.
+    const suggested = snapshot!.accounts.filter((a) => domainSuggestion(snapshot!, a)?.id === o.id);
+    if (suggested.length) {
+      const rows = el('ul', 'org-members org-suggested');
+      for (const a of suggested) {
+        const row = el('li', 'org-member');
+        const key = `org-place-${o.id}-${a.id}`;
+        const why = el('span', 'row-sub', t('Its address is on a domain of {name}.', { name: o.name }));
+        why.append(' ', button(t('Place in {name}', { name: o.name }), () => void mutate(() => adapter.organizationAssign(a.id, o.id), t('Saved for {label}.', { label: a.label }), key), 'text-button', key));
+        const memberName = el('span', 'org-member-name', a.label); memberName.title = a.label;
+        row.append(el('span', `provider-dot ${a.provider}`), memberName, why);
+        rows.append(row);
+      }
+      card.append(el('span', 'eyebrow', t('Suggested by their address')), rows);
     }
     list.append(card);
   }
@@ -2872,7 +2889,7 @@ function renderOrganizations(main: HTMLElement) {
 function organizationDialog(id: string | null) {
   if (!id) { organizationCreateDialog(); return; }
   const current = id ? snapshot!.organizations?.find((o) => o.id === id) : undefined;
-  const context = openDialog(current ? t('Edit {name}', { name: current.name }) : t('Add organization'), t('Accounts with an address on these domains belong to it. You can always place an account yourself.'));
+  const context = openDialog(current ? t('Edit {name}', { name: current.name }) : t('Add organization'), t('Accounts with an address on these domains are suggested for it; you place each one yourself.'));
   const name = input(current?.name ?? ''); name.maxLength = 80; name.placeholder = t('Company name');
   const domains = input((current?.domains ?? []).join(', ')); domains.required = false; domains.placeholder = 'example.com';
   const grid = el('div', 'form-grid'); grid.append(field(t('Name'), name), field(t('Domains'), domains, t('Optional. Separate several with commas.')));
@@ -2906,7 +2923,7 @@ async function reloadAfterChange() {
  * the person adds. The group is bound to the organization and takes that owner's new repositories.
  */
 function organizationCreateDialog() {
-  const context = openDialog(t('Add organization'), t('Accounts with an address on its domains belong to it. Its repositories and folders go into its own group.'));
+  const context = openDialog(t('Add organization'), t('Accounts with an address on its domains are suggested for it. Its repositories and folders go into its own group.'));
   const name = input(''); name.maxLength = 80; name.placeholder = t('Company name');
   const domains = input(''); domains.required = false; domains.placeholder = 'example.com';
   const grid = el('div', 'form-grid'); grid.append(field(t('Name'), name), field(t('Domains'), domains, t('Optional. Separate several with commas.')));
@@ -2999,7 +3016,7 @@ async function runOrgImport(organizationId: string, orgName: string, owner: stri
 }
 function organizationRemoveDialog(id: string) {
   const o = snapshot!.organizations?.find((x) => x.id === id); if (!o) return;
-  const context = openDialog(t('Remove {name}?', { name: o.name }), t('Its accounts stay where they are; they are placed again by their team or domain, or become personal. Nothing at the provider changes.'));
+  const context = openDialog(t('Remove {name}?', { name: o.name }), t('Its accounts stay where they are; they are placed again by their team, or become personal. Nothing at the provider changes.'));
   const confirm = submit(t('Remove')); confirm.className = 'button danger'; context.actions.append(confirm);
   context.form.addEventListener('submit', (event) => { event.preventDefault(); void dialogSave(context, () => adapter.organizationRemove(id), t('{name} removed.', { name: o.name })); });
   confirm.focus();
@@ -3009,10 +3026,13 @@ function assignDialog(account: Account) {
   const choice = snapshot!.memberships?.[account.id] ?? 'auto';
   const automatic = attribution({ organizations: snapshot!.organizations }, account);
   const autoName = automatic.organization ? snapshot!.organizations?.find((o) => o.id === automatic.organization)?.name : null;
-  const context = openDialog(t('Organization of {label}', { label: account.label }), t('Automatic follows its team at the provider, then its address’s domain.'));
+  const context = openDialog(t('Organization of {label}', { label: account.label }), t('Automatic follows its team at the provider; otherwise the account is personal.'));
   const picker = select([['auto', autoName ? t('Automatic: {name}', { name: autoName }) : t('Automatic: personal accounts')], ...(snapshot!.organizations ?? []).map((o): [string, string] => [o.id, o.name]), ['personal', t('Personal accounts')]]);
   picker.value = choice;
   context.body.append(field(t('Belongs to'), picker));
+  // SB-285: what its address suggests, for the person to confirm here.
+  const suggested = domainSuggestion(snapshot!, account);
+  if (suggested) context.body.append(el('p', 'form-note', t('Its address is on a domain of {name}.', { name: suggested.name })));
   // SB-282: an account may work for several organizations; groups of each take it.
   const also = new Set(snapshot!.also_organizations?.[account.id] ?? []);
   const others = el('fieldset', 'project-organizations'); others.append(el('legend', 'field-label', t('Also works for')));

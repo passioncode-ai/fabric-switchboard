@@ -10,6 +10,8 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 - Automatic switching of managed sessions is on by default: every group with accounts, for Claude and for Codex, switches to its next account as one nears its limit, groups made later included. A group where you turned it off stays off. Switching the ordinary Claude Code stays off until you turn it on (SB-310).
 - The Automatic switching bar lists each enabled setting on its own line with its own *Stop*. With a setting in every group (SB-310) the bar no longer squeezes its text into a narrow column with the buttons running past the window's edge, and two settings of one group no longer show buttons with the same label.
+- An e-mail domain no longer places an account in an organization by itself; it only suggests the organization, and you confirm by placing the account (its *Organization…*, *Place in {name}* on the organization's card, `switchboard org assign`, or signing in to or moving it into that organization's group). An organization that arrives with a domain, from PassionCode.ai or typed, no longer makes personal groups refuse their own accounts, as it did on 2026-11-08. On the first start, accounts the domain had placed and whose groups agree keep their organization as your word, so nothing running changes. A data folder with an organization is then written as version 11, which 0.7.34 and older do not open (SB-285, DEC-0009).
+- `switchboard org assign ACCOUNT NAME` takes the organization's name as well as its id, as its help says.
 
 ## 0.7.34
 

@@ -1386,9 +1386,10 @@ fn a_groups_organization_keeps_its_folders_on_its_own_seats() {
     let acme = store
         .add_organization("Acme", &["acme.example".into()])
         .unwrap();
-    // The personal group now holds Acme's seat: run time refuses it, until the group is Acme's.
+    // SB-285: an organization holding its domain changes nothing for the seat the personal group
+    // holds; the domain only suggests Acme.
     let snapshot = store.snapshot().unwrap();
-    assert!(!snapshot.context_admits(
+    assert!(snapshot.context_admits(
         &alpha.pool,
         &snapshot
             .accounts
@@ -1397,11 +1398,16 @@ fn a_groups_organization_keeps_its_folders_on_its_own_seats() {
             .unwrap()
             .clone()
     ));
+    assert_eq!(
+        snapshot.domain_suggestion(&work).map(|o| o.id.clone()),
+        Some(acme.id.clone())
+    );
     assert!(
         snapshot.context_admits("default", &work),
         "default is not a group"
     );
-    // Making it Acme's is accepted; making a personal group take Acme's seat is refused.
+    // Making the group Acme's is accepted and confirms what its seat's address suggested;
+    // making a personal group take Acme's seat is then refused.
     let alpha = store
         .set_project_organization(&alpha.pool, Some(&acme.id))
         .unwrap();
@@ -1465,7 +1471,11 @@ fn a_groups_organization_keeps_its_folders_on_its_own_seats() {
     assert!(store
         .select(Provider::Claude, &alpha.pool, &work.id)
         .is_err());
+    // SB-285: forgetting the word leaves the seat personal (its domain places nothing), so the
+    // group still refuses it until the person places it in Acme again.
     store.assign_organization(&work.id, None).unwrap();
+    assert!(store.route(Provider::Claude, &alpha.pool).is_err());
+    store.assign_organization(&work.id, Some(&acme.id)).unwrap();
     assert!(store.route(Provider::Claude, &alpha.pool).is_ok());
     // Removing the organization turns its groups personal.
     store.remove_organization(&acme.id).unwrap();
@@ -3866,6 +3876,378 @@ fn an_agent_key_whose_metadata_cannot_be_written_puts_the_old_key_back() {
         .is_err());
     fs::remove_dir(root.path().join("accounts.json")).unwrap();
     assert_eq!(vault.get(&first.id).unwrap().access_token, "sk-or-v1-first");
+}
+
+/// SB-285: an OAuth seat with `email`, saved in `pool`.
+fn org_seat(store: &Store, email: &str, refresh: &str, pool: &str) -> Account {
+    use switchboard_core::ExternalIdentity;
+    store
+        .upsert(
+            email.into(),
+            Provider::Claude,
+            AuthKind::OAuth,
+            pool.into(),
+            Credential::parse(
+                Provider::Claude,
+                AuthKind::OAuth,
+                &format!(
+                    r#"{{"claudeAiOauth":{{"accessToken":"a-{refresh}","refreshToken":"{refresh}"}}}}"#
+                ),
+            )
+            .unwrap(),
+            Some(ExternalIdentity {
+                account_id: Some(format!("synthetic-{refresh}")),
+                organization_id: None,
+                email: Some(email.into()),
+            }),
+        )
+        .unwrap()
+}
+fn schema_of(root: &std::path::Path) -> serde_json::Value {
+    serde_json::from_slice(&fs::read(root.join("accounts.json")).unwrap()).unwrap()
+}
+
+#[test]
+fn an_organization_arriving_with_a_domain_changes_no_account_and_only_suggests() {
+    // SB-285, the 2026-11-08 incident: a PassionCode.ai read added an organization holding the
+    // domain of accounts personal groups had placed. Their attribution, admission and the
+    // group's selection stay; the domain only suggests the organization.
+    use switchboard_core::organizations::VestaOrganization;
+    let (root, _vault, store) = setup();
+    let dir = root.path().join("own");
+    fs::create_dir_all(&dir).unwrap();
+    let seat = org_seat(&store, "dev@passioncode.example", "p", "default");
+    let group = store
+        .save_project(
+            None,
+            "PassionCode",
+            std::slice::from_ref(&dir),
+            std::slice::from_ref(&seat.id),
+        )
+        .unwrap();
+    store
+        .select(Provider::Claude, &group.pool, &seat.id)
+        .unwrap();
+    let applied = store
+        .apply_vesta(&[VestaOrganization {
+            id: "v-pc".into(),
+            name: "PassionCode.ai".into(),
+            domains: vec!["passioncode.example".into()],
+        }])
+        .unwrap();
+    assert_eq!(applied.added, 1);
+    let snap = store.snapshot().unwrap();
+    let seat = snap.accounts.iter().find(|a| a.id == seat.id).unwrap();
+    let organization = &snap.organizations[0];
+    let attribution = snap.attribution(seat);
+    assert_eq!((attribution.organization, attribution.by), (None, None));
+    assert!(snap.context_admits(&group.pool, seat));
+    assert_eq!(
+        snap.domain_suggestion(seat).map(|o| o.id.as_str()),
+        Some(organization.id.as_str())
+    );
+    assert!(store.route(Provider::Claude, &group.pool).is_ok());
+    store
+        .select(Provider::Claude, &group.pool, &seat.id)
+        .unwrap();
+    // Saving the group again, and another organization typed by hand, change nothing either.
+    store
+        .save_project(
+            Some(&group.pool),
+            "PassionCode",
+            std::slice::from_ref(&dir),
+            std::slice::from_ref(&seat.id),
+        )
+        .unwrap();
+    store
+        .add_organization("Acme", &["acme.example".into()])
+        .unwrap();
+    assert!(store.route(Provider::Claude, &group.pool).is_ok());
+    // A group of that organization takes it once the person places it there. Shared into it
+    // while it stays at home in the personal group, it also works for the organization, so
+    // both groups keep taking it.
+    let other = root.path().join("org");
+    fs::create_dir_all(&other).unwrap();
+    let org_group = store
+        .save_project_in(
+            None,
+            "PassionCode.ai work",
+            std::slice::from_ref(&other),
+            std::slice::from_ref(&seat.id),
+            Some(Some(&organization.id)),
+        )
+        .unwrap();
+    let snap = store.snapshot().unwrap();
+    let seat = snap.accounts.iter().find(|a| a.id == seat.id).unwrap();
+    assert_eq!(
+        seat.pool, group.pool,
+        "it stays at home; the new group shares it"
+    );
+    assert!(!snap.memberships.contains_key(&seat.id));
+    assert_eq!(
+        snap.also_organizations.get(&seat.id),
+        Some(&vec![organization.id.clone()])
+    );
+    assert!(snap.context_admits(&group.pool, seat));
+    assert!(snap.context_admits(&org_group.pool, seat));
+    assert!(snap.domain_suggestion(seat).is_none());
+    assert!(store.route(Provider::Claude, &group.pool).is_ok());
+    // Moved there instead, a second seat on the domain gets the organization as its own.
+    let mover = org_seat(&store, "ops@passioncode.example", "q", "default");
+    store
+        .save_project_with(
+            Some(&org_group.pool),
+            "PassionCode.ai work",
+            std::slice::from_ref(&other),
+            std::slice::from_ref(&mover.id),
+            None,
+            false,
+        )
+        .unwrap();
+    let snap = store.snapshot().unwrap();
+    let mover = snap.accounts.iter().find(|a| a.id == mover.id).unwrap();
+    assert_eq!(mover.pool, org_group.pool);
+    assert_eq!(snap.memberships.get(&mover.id), Some(&organization.id));
+    // A group of another organization still refuses it.
+    let third = root.path().join("acme");
+    fs::create_dir_all(&third).unwrap();
+    let acme = snap
+        .organizations
+        .iter()
+        .find(|o| o.name == "Acme")
+        .unwrap()
+        .id
+        .clone();
+    let late = org_seat(&store, "late@passioncode.example", "l", "default");
+    let refused = store
+        .save_project_in(
+            None,
+            "Acme work",
+            std::slice::from_ref(&third),
+            std::slice::from_ref(&late.id),
+            Some(Some(&acme)),
+        )
+        .unwrap_err();
+    assert!(
+        refused.contains("belongs to another organization"),
+        "{refused}"
+    );
+}
+
+#[test]
+fn a_store_written_under_the_domain_rule_keeps_its_placements_as_the_persons_word() {
+    // SB-285: a store a 0.7.34 build wrote (no `domain_rule_retired`, no word for accounts the
+    // domain placed) opens with each placement its groups agree with recorded as the person's
+    // word, written once; one a personal group holds is personal again (the incident).
+    let (root, vault, store) = setup();
+    let acme_dir = root.path().join("acme");
+    let own_dir = root.path().join("own");
+    fs::create_dir_all(&acme_dir).unwrap();
+    fs::create_dir_all(&own_dir).unwrap();
+    let loose = org_seat(&store, "a@acme.example", "a", "default");
+    let seated = org_seat(&store, "b@acme.example", "b", "default");
+    let held = org_seat(&store, "c@acme.example", "c", "default");
+    let home = org_seat(&store, "me@home.example", "h", "default");
+    let own = store
+        .save_project(
+            None,
+            "Own",
+            std::slice::from_ref(&own_dir),
+            &[held.id.clone(), home.id.clone()],
+        )
+        .unwrap();
+    let acme = store
+        .add_organization("Acme", &["acme.example".into()])
+        .unwrap();
+    let acme_group = store
+        .save_project_in(
+            None,
+            "Acme work",
+            std::slice::from_ref(&acme_dir),
+            std::slice::from_ref(&seated.id),
+            Some(Some(&acme.id)),
+        )
+        .unwrap();
+    store
+        .select(Provider::Claude, &acme_group.pool, &seated.id)
+        .unwrap();
+    drop(store);
+    // What the old build wrote: no mark, no word for the seats its domain placed.
+    let mut disk = schema_of(root.path());
+    assert_eq!(disk["schema_version"], 11);
+    assert_eq!(disk["snapshot"]["domain_rule_retired"], true);
+    let snapshot = disk["snapshot"].as_object_mut().unwrap();
+    snapshot.remove("domain_rule_retired");
+    snapshot.remove("memberships");
+    disk["schema_version"] = 6.into();
+    fs::write(
+        root.path().join("accounts.json"),
+        serde_json::to_vec(&disk).unwrap(),
+    )
+    .unwrap();
+
+    let store = reopen(root.path(), vault.clone());
+    let snap = store.snapshot().unwrap();
+    assert!(snap.domain_rule_retired);
+    let word = |id: &str| snap.memberships.get(id).cloned();
+    assert_eq!(word(&loose.id), Some(acme.id.clone()));
+    assert_eq!(word(&seated.id), Some(acme.id.clone()));
+    assert_eq!(word(&held.id), None, "its personal group's word stands");
+    assert_eq!(word(&home.id), None);
+    let account = |id: &str| snap.accounts.iter().find(|a| a.id == id).unwrap().clone();
+    assert_eq!(
+        snap.attribution(&account(&seated.id))
+            .organization
+            .as_deref(),
+        Some(acme.id.as_str())
+    );
+    assert!(snap.context_admits(&own.pool, &account(&held.id)));
+    assert!(
+        store.route(Provider::Claude, &acme_group.pool).is_ok(),
+        "nothing running changes"
+    );
+    // Written at once, as version 11.
+    let disk = schema_of(root.path());
+    assert_eq!(disk["schema_version"], 11);
+    assert_eq!(disk["snapshot"]["domain_rule_retired"], true);
+    let events = snap.events.len();
+    drop(store);
+    // A second open changes nothing.
+    let bytes = fs::read(root.path().join("accounts.json")).unwrap();
+    let store = reopen(root.path(), vault);
+    let again = store.snapshot().unwrap();
+    assert_eq!(again.memberships, snap.memberships);
+    assert_eq!(again.events.len(), events);
+    drop(store);
+    assert_eq!(fs::read(root.path().join("accounts.json")).unwrap(), bytes);
+}
+
+#[test]
+fn a_new_account_on_an_organizations_domain_is_personal_with_a_suggestion() {
+    // SB-285: after the move off the domain rule a new sign-in on an organization's domain is
+    // personal and suggests it, also after a reopen; signing in to a group of that organization
+    // is the person placing it there. A provider team still decides by itself.
+    use switchboard_core::{By, ExternalIdentity};
+    let (root, vault, store) = setup();
+    let acme = store
+        .add_organization("Acme", &["acme.example".into()])
+        .unwrap();
+    let fresh = org_seat(&store, "new@acme.example", "n", "default");
+    let snap = store.snapshot().unwrap();
+    assert_eq!(snap.attribution(&fresh).organization, None);
+    assert_eq!(
+        snap.domain_suggestion(&fresh).map(|o| o.id.clone()),
+        Some(acme.id.clone())
+    );
+    drop(store);
+    let store = reopen(root.path(), vault);
+    let snap = store.snapshot().unwrap();
+    assert!(!snap.memberships.contains_key(&fresh.id), "never frozen");
+    assert_eq!(snap.attribution(&fresh).organization, None);
+    // A sign-in into Acme's group confirms its address's suggestion.
+    let dir = root.path().join("acme");
+    fs::create_dir_all(&dir).unwrap();
+    let group = store
+        .save_project_in(
+            None,
+            "Acme work",
+            std::slice::from_ref(&dir),
+            &[],
+            Some(Some(&acme.id)),
+        )
+        .unwrap();
+    let seat = org_seat(&store, "seat@acme.example", "s", &group.pool);
+    let snap = store.snapshot().unwrap();
+    let attribution = snap.attribution(&seat);
+    assert_eq!(attribution.organization.as_deref(), Some(acme.id.as_str()));
+    assert_eq!(attribution.by, Some(By::Person));
+    store
+        .select(Provider::Claude, &group.pool, &seat.id)
+        .unwrap();
+    // An address on no domain of Acme signed in there is still refused at selection.
+    let stranger = org_seat(&store, "me@home.example", "x", &group.pool);
+    assert!(store
+        .select(Provider::Claude, &group.pool, &stranger.id)
+        .is_err());
+    // A provider team recorded on Acme still places a seat by itself.
+    let team = store
+        .upsert(
+            "teammate".into(),
+            Provider::Claude,
+            AuthKind::OAuth,
+            "default".into(),
+            Credential::parse(
+                Provider::Claude,
+                AuthKind::OAuth,
+                r#"{"claudeAiOauth":{"accessToken":"a-t","refreshToken":"t"}}"#,
+            )
+            .unwrap(),
+            Some(ExternalIdentity {
+                account_id: Some("synthetic-t".into()),
+                organization_id: Some("synthetic-team".into()),
+                email: Some("t@gmail.example".into()),
+            }),
+        )
+        .unwrap();
+    let mate = store
+        .upsert(
+            "teammate two".into(),
+            Provider::Claude,
+            AuthKind::OAuth,
+            "default".into(),
+            Credential::parse(
+                Provider::Claude,
+                AuthKind::OAuth,
+                r#"{"claudeAiOauth":{"accessToken":"a-u","refreshToken":"u"}}"#,
+            )
+            .unwrap(),
+            Some(ExternalIdentity {
+                account_id: Some("synthetic-u".into()),
+                organization_id: Some("synthetic-team".into()),
+                email: Some("u@gmail.example".into()),
+            }),
+        )
+        .unwrap();
+    store.assign_organization(&team.id, Some(&acme.id)).unwrap();
+    let snap = store.snapshot().unwrap();
+    assert_eq!(snap.attribution(&mate).by, Some(By::Provider));
+}
+
+#[test]
+fn schema_eleven_is_written_only_while_the_domain_rule_is_retired() {
+    // SB-285: the mark exists exactly while an organization does; a 0.7.34 reader refuses the
+    // file by its version, and a store with no organization stays readable by it.
+    let (root, vault, store) = setup();
+    add(&store, "synthetic-secret-alpha");
+    assert_eq!(schema_of(root.path())["schema_version"], 2);
+    assert!(!store.snapshot().unwrap().domain_rule_retired);
+    let acme = store.add_organization("Acme", &[]).unwrap();
+    assert_eq!(schema_of(root.path())["schema_version"], 11);
+    assert!(store.snapshot().unwrap().domain_rule_retired);
+    store.remove_organization(&acme.id).unwrap();
+    let disk = schema_of(root.path());
+    assert_eq!(disk["schema_version"], 2);
+    assert!(disk["snapshot"].get("domain_rule_retired").is_none());
+    drop(store);
+    // A file of version 11 opens again; a version this build does not know is refused by name.
+    let store = reopen(root.path(), vault);
+    store.add_organization("Beta", &[]).unwrap();
+    drop(store);
+    let mut disk = schema_of(root.path());
+    assert_eq!(disk["schema_version"], 11);
+    disk["schema_version"] = 12.into();
+    fs::write(
+        root.path().join("accounts.json"),
+        serde_json::to_vec(&disk).unwrap(),
+    )
+    .unwrap();
+    let refused = Store::open(
+        root.path().into(),
+        Arc::new(MemoryVault::default()) as Arc<dyn Vault>,
+    )
+    .err()
+    .unwrap();
+    assert!(refused.contains("Unsupported"), "{refused}");
 }
 
 /// A vault whose every Keychain call waits `delay`.

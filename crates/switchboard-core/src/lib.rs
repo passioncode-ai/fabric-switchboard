@@ -301,6 +301,12 @@ pub struct Snapshot {
     /// its user, a colleague's name), at most 80 characters. Only for marked accounts.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub locations: BTreeMap<String, String>,
+    /// SB-285: written by a version where an address's domain only suggests an organization.
+    /// True exactly while organizations exist; a store read without it, holding organizations,
+    /// was written under the domain rule, and opening it records that rule's placements as the
+    /// person's word once (`Snapshot::retire_domain_rule`). Omitted while false.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub domain_rule_retired: bool,
 }
 
 /// A process-lifetime exclusive owner of one private metadata directory.
@@ -813,6 +819,16 @@ impl SaveRequest<'_> {
             Some(&account.id),
             "success",
         );
+        // SB-285: a new sign-in into a group of the organization its address suggests is the
+        // person placing it there (*Sign in with your … address*): recorded as their word.
+        if old.is_none() {
+            if let Some(organizations) = candidate
+                .project_of_pool(self.pool)
+                .map(|p| p.organizations.clone())
+            {
+                candidate.confirm_placement(&account.id, self.pool, &organizations);
+            }
+        }
         validate_snapshot(&candidate)?;
         Ok(SavePlan::Ready {
             account,
@@ -831,7 +847,18 @@ impl Drop for Store {
 
 impl Store {
     pub fn open(root: PathBuf, vault: Arc<dyn Vault>) -> Result<Self, String> {
-        let (lock, state) = persistence::open(&root)?;
+        let (lock, mut state) = persistence::open(&root)?;
+        // SB-285: a store written under the domain rule keeps that rule's placements as the
+        // person's word, written at once; a write that fails here leaves the frozen state in
+        // memory, pending, so the next publication or flush carries it (attribution never
+        // falls back to the old rule in between).
+        let mut migrated = state.clone();
+        let pending = if migrated.retire_domain_rule() && validate_snapshot(&migrated).is_ok() {
+            state = migrated;
+            persistence::write(&root, &state).is_err()
+        } else {
+            false
+        };
         let credential_changes: Arc<std::sync::atomic::AtomicU64> = Default::default();
         Ok(Self {
             root,
@@ -850,7 +877,11 @@ impl Store {
             credential_changes,
             writes: Default::default(),
             slowest_read: Default::default(),
-            pending_since: Default::default(),
+            pending_since: std::sync::atomic::AtomicI64::new(if pending {
+                now().max(1)
+            } else {
+                0
+            }),
             in_use: Default::default(),
             limited: Default::default(),
             refused: Default::default(),
@@ -904,7 +935,11 @@ impl Store {
         }
         .map_err(|_| "Storage failure; credential cleanup requires recovery".into())
     }
-    fn publish(&self, state: &mut Snapshot, candidate: Snapshot) -> Result<(), String> {
+    fn publish(&self, state: &mut Snapshot, mut candidate: Snapshot) -> Result<(), String> {
+        // SB-285: this version never places an account by its domain; the mark follows whether
+        // there is an organization at all (one added, read from PassionCode.ai, imported or
+        // restored sets it; the last one removed clears it).
+        candidate.domain_rule_retired = !candidate.organizations.is_empty();
         validate_snapshot(&candidate)?;
         let started = std::time::Instant::now();
         let written = persistence::write(&self.root, &candidate);
@@ -923,7 +958,8 @@ impl Store {
     }
     /// Takes a candidate that differs from the current state only in timestamps into memory
     /// without writing it; the next publication or flush carries it to disk (LC-08).
-    fn hold(&self, state: &mut Snapshot, candidate: Snapshot) -> Result<(), String> {
+    fn hold(&self, state: &mut Snapshot, mut candidate: Snapshot) -> Result<(), String> {
+        candidate.domain_rule_retired = !candidate.organizations.is_empty();
         validate_snapshot(&candidate)?;
         *state = candidate;
         self.republish(state);

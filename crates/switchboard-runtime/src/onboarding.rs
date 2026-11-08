@@ -915,6 +915,8 @@ mod tests {
         snapshot
             .accounts
             .push(seat("a-1", "acme-work", "me@acme.com"));
+        // SB-285: its domain only suggests Acme; signing in to Acme's group placed it there.
+        snapshot.memberships.insert("a-1".into(), "o-acme".into());
         Probe {
             owner_online: true,
             accounts: vec![("claude".into(), 1)],
@@ -1324,9 +1326,15 @@ mod tests {
             .elsewhere
             .insert("a-1".into(), 1);
         assert_eq!(by_id(&steps(&probe), "seat")["state"], "needs_person");
-        // A personal account in the group (another domain) is no seat of Acme.
+        // A personal account in the group is no seat of Acme, nor is one only its domain
+        // suggests for Acme (SB-285).
         let mut probe = acme();
-        probe.snapshot.as_mut().unwrap().accounts[0].label = "me@example.org".into();
+        let snapshot = probe.snapshot.as_mut().unwrap();
+        snapshot.accounts[0].label = "me@example.org".into();
+        snapshot.memberships.clear();
+        assert_eq!(by_id(&steps(&probe), "seat")["state"], "needs_person");
+        let mut probe = acme();
+        probe.snapshot.as_mut().unwrap().memberships.clear();
         assert_eq!(by_id(&steps(&probe), "seat")["state"], "needs_person");
     }
 
