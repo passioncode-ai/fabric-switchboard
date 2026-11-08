@@ -26,6 +26,8 @@ else
 fi
 python3 scripts/check_docs.py
 python3 -m unittest scripts/test_check_docs.py
+python3 docs/ux/lint.py
+python3 -m unittest scripts/test_ux_lint.py
 python3 scripts/check_plugin.py
 python3 -m unittest scripts/test_check_plugin.py
 python3 -m unittest scripts/test_nightly_clock.py
