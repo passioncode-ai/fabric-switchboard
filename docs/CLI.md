@@ -30,6 +30,7 @@ switchboard accounts update ACCOUNT_UUID --location "Mac Studio, user alex"   # 
 switchboard accounts send ACCOUNT_UUID --to user@studio.local [--pool agents]     # SB-283: move the sign-in over ssh; no new sign-in there, undone on failure
 switchboard accounts hand-over ACCOUNT_UUID --to "Anna, MacBook" > handover.json   # SB-283: signed record, no credential; marks it used elsewhere
 switchboard accounts receive handover.json --signer KEY [--apply] [--headless]    # on the receiving machine: shows the plan; --apply starts the sign-in
+switchboard accounts recall ACCOUNT_UUID --from member@vm   # SB-292: take a moved sign-in back; its copy there is removed and proved gone (Claude only)
 switchboard accounts send ACCOUNT_UUID --to member@vm --pool acme --operator-said "…" --said-at … --said-in …   # SB-292: the grant is recorded in seats.jsonl with the operator's words
 switchboard accounts move ACCOUNT_UUID --pool agents                  # a project's pool, or default (SB-122)
 switchboard accounts remove ACCOUNT_UUID

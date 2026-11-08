@@ -8,6 +8,7 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- `switchboard accounts recall ID --from user@host` and the MCP tool `switchboard_account_recall` take back a Claude sign-in moved to another machine: that machine gives it back over ssh, the provider is checked here, and its copy there is removed and proved gone (SB-292).
 - Every account moved or handed over to another machine is recorded in `seats.jsonl` with who ordered it; `--operator-said`, `--said-at` and `--said-in` (MCP `decision`) record the operator's words with it (SB-292).
 
 ## 0.7.29

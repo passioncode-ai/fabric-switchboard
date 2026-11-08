@@ -218,6 +218,27 @@ pub enum Operation {
         #[serde(default)]
         decision: Option<spend::Decision>,
     },
+    /// SB-292 (S-3), on the machine holding a moved account: mark it used elsewhere and answer its
+    /// tokens for the calling machine's ssh; `undo` clears the mark.
+    SurrenderAccount {
+        id: String,
+        #[serde(default)]
+        undo: bool,
+    },
+    /// SB-292 (S-3, S-4): take a moved account's sign-in back from `from`, check the provider
+    /// answers it here, remove the other machine's copy and prove it gone.
+    RecallAccount {
+        id: String,
+        from: String,
+        /// The account's id there; default: the one the recorded move names.
+        #[serde(default)]
+        remote_id: Option<String>,
+        #[serde(default)]
+        program: Option<String>,
+        /// As in `SendAccount`.
+        #[serde(default)]
+        decision: Option<spend::Decision>,
+    },
     /// SB-283: moves an account's sign-in to another machine over ssh (`account_send`): marked
     /// used elsewhere here first, saved there, checked there, undone on any failure.
     SendAccount {
@@ -1149,6 +1170,9 @@ impl Runtime {
                 // SB-283: ssh to another machine takes minutes; the store is written by its own
                 // calls (mark elsewhere, undo), never under the transaction.
                 | Operation::SendAccount { .. }
+                // SB-292: ssh both ways, as a move.
+                | Operation::SurrenderAccount { .. }
+                | Operation::RecallAccount { .. }
                 | Operation::AgentCatalog
                 | Operation::AgentConnect { .. }
                 | Operation::AgentKey
@@ -3680,8 +3704,10 @@ fn record_seat(
     machine: &str,
     pool: &str,
     decision: Option<&spend::Decision>,
+    remote_account: Option<&str>,
 ) {
-    let seat = seats::of(monitor::now(), event, account, machine, pool, decision);
+    let mut seat = seats::of(monitor::now(), event, account, machine, pool, decision);
+    seat.remote_account = remote_account.map(str::to_owned);
     if seats::append(root, &seat).is_err() {
         oplog::event(
             "seat_record",
@@ -3694,7 +3720,9 @@ fn record_seat(
 fn seat_operation(operation: &Operation) -> bool {
     matches!(
         operation,
-        Operation::SendAccount { .. } | Operation::HandOver { .. }
+        Operation::SendAccount { .. }
+            | Operation::HandOver { .. }
+            | Operation::RecallAccount { .. }
     )
 }
 /// SB-299: the wrapped loosening, run as the operator's surface.
@@ -3999,7 +4027,8 @@ async fn execute(
         decision.check()?;
         let mut inner = *inner;
         if let Operation::SendAccount { decision: d, .. }
-        | Operation::HandOver { decision: d, .. } = &mut inner
+        | Operation::HandOver { decision: d, .. }
+        | Operation::RecallAccount { decision: d, .. } = &mut inner
         {
             *d = Some(decision);
             return Box::pin(execute(store, root, runtime, inner)).await;
@@ -5078,8 +5107,95 @@ async fn execute(
                     )
                 })
             }?;
-            record_seat(root, "granted", &id, &to, &pool, decision.as_ref());
+            record_seat(
+                root,
+                "granted",
+                &id,
+                &to,
+                &pool,
+                decision.as_ref(),
+                moved["remote_id"].as_str(),
+            );
             Ok(moved)
+        }
+        Operation::SurrenderAccount { id, undo } => {
+            account_send::surrender(&store, &id, undo, monitor::now())
+        }
+        Operation::RecallAccount {
+            id,
+            from,
+            remote_id,
+            program,
+            decision,
+        } => {
+            let program = program.unwrap_or_else(|| account_send::REMOTE_DEFAULT.into());
+            let remote_id = remote_id
+                .or_else(|| seats::remote_account(root, &id, &from))
+                .ok_or(account_send::NO_REMOTE_ID)?;
+            let taken = {
+                let (store, id, from, program) =
+                    (store.clone(), id.clone(), from.clone(), program.clone());
+                blocking::run(move || {
+                    account_send::recall_take(
+                        &store,
+                        &id,
+                        &from,
+                        &remote_id,
+                        &program,
+                        monitor::now(),
+                        &account_send::ssh_runner,
+                    )
+                })
+            }?;
+            let answered = Box::pin(execute(
+                store.clone(),
+                root,
+                runtime,
+                Operation::Usage { id: id.clone() },
+            ))
+            .await
+            .is_ok();
+            if !answered {
+                account_send::recall_undo(
+                    &store,
+                    &id,
+                    &from,
+                    &taken,
+                    &program,
+                    monitor::now(),
+                    &account_send::ssh_runner,
+                )?;
+                return Err(account_send::NOT_RETURNED.into());
+            }
+            let pool = store
+                .snapshot()?
+                .accounts
+                .iter()
+                .find(|a| a.id == id)
+                .map(|a| a.pool.clone())
+                .unwrap_or_else(|| "default".into());
+            let finished = {
+                let (from, program, remote) =
+                    (from.clone(), program.clone(), taken.remote_id.clone());
+                blocking::run(move || {
+                    Ok::<_, String>(account_send::recall_finish(
+                        &from,
+                        &account_send::Taken { remote_id: remote },
+                        &program,
+                        &account_send::ssh_runner,
+                    ))
+                })
+            }?;
+            record_seat(
+                root,
+                "recalled",
+                &id,
+                &from,
+                &pool,
+                decision.as_ref(),
+                Some(&taken.remote_id),
+            );
+            Ok(finished)
         }
         Operation::HandOver { id, to, decision } => {
             let handed = account_handover::hand_over(root, &store, &id, &to, monitor::now())?;
@@ -5087,7 +5203,15 @@ async fn execute(
                 .as_str()
                 .unwrap_or("default")
                 .to_owned();
-            record_seat(root, "handed_over", &id, &to, &pool, decision.as_ref());
+            record_seat(
+                root,
+                "handed_over",
+                &id,
+                &to,
+                &pool,
+                decision.as_ref(),
+                None,
+            );
             Ok(handed)
         }
         Operation::ReceiveHandover {

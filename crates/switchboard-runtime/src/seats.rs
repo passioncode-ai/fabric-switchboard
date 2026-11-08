@@ -16,12 +16,16 @@ const MAX_BYTES: u64 = 512 * 1024;
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct Seat {
     pub at: i64,
-    /// `granted` (a sign-in moved there) or `handed_over` (a record for the receiver to sign in).
+    /// `granted` (a sign-in moved there), `handed_over` (a record for the receiver to sign in) or
+    /// `recalled` (the sign-in taken back here).
     pub event: String,
     pub account: String,
     /// The other machine as ssh knows it, or the receiver a hand-over names.
     pub machine: String,
     pub pool: String,
+    /// SB-292 (S-3): the account's id on the other machine, for a later `recall`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remote_account: Option<String>,
     /// `operator` when `decision` carries the operator's words, else `agent`.
     pub ordered_by: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -42,6 +46,7 @@ pub(crate) fn of(
         account: account.into(),
         machine: machine.chars().take(200).collect(),
         pool: pool.into(),
+        remote_account: None,
         ordered_by: if decision.is_some() {
             "operator"
         } else {
@@ -50,6 +55,15 @@ pub(crate) fn of(
         .into(),
         decision: decision.cloned(),
     }
+}
+
+/// SB-292 (S-3): the other machine's id of the account this machine last moved to `machine`.
+pub fn remote_account(root: &Path, account: &str, machine: &str) -> Option<String> {
+    recent(root, KEEP)
+        .into_iter()
+        .rev()
+        .find(|s| s.event == "granted" && s.account == account && s.machine == machine)
+        .and_then(|s| s.remote_account)
 }
 
 /// The newest `n` lines, oldest first; a missing or unreadable file reads as none, and a line

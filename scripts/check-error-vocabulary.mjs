@@ -57,6 +57,13 @@ const ALLOWLIST = {
   // runtime seats.rs (SB-292): a seat line that cannot be written is logged (`seat_record`) and
   // never answered, so it does not reach the window.
   'Seat record unavailable.': 'SB-292: logged only, never answered',
+  // runtime account_send.rs (SB-292): calling a moved account back is CLI and MCP only; the
+  // window has no recall yet, so none of these reaches it.
+  'Only a Claude sign-in can be called back for now.': 'SB-292: CLI and MCP only',
+  "Name the account's id on the other machine; no recorded move names it.": 'SB-292: CLI and MCP only',
+  'This account is used here, not on another machine.': 'SB-292: CLI and MCP only',
+  'The other machine did not give the sign-in back. Nothing changed; check ssh and its Switchboard.': 'SB-292: CLI and MCP only',
+  'The sign-in came back but the provider did not answer it here. It went back to the other machine.': 'SB-292: CLI and MCP only',
   // runtime account_send.rs (SB-283): the ssh runner's own errors; `send` answers ADD_FAILED or
   // NOT_VERIFIED in their place, so none reaches the window.
   'ssh is not installed here.': 'SB-283 ssh runner: folded into ADD_FAILED',

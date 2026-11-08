@@ -80,5 +80,5 @@ A Claude refresh issues a new refresh token and ends the old one, so a sign-in h
 ## Next
 
 1. S-6 (`settings export --group`, built, #501) and S-2 (built on branch `feat/sb-292-seats-log`) (`seats.jsonl` for send and hand-over): no dependency.
-2. S-3 and S-4 (`surrender`, `recall`, the two-folder acceptance test).
+2. S-3 and S-4 (built on branch `feat/sb-292-recall`: `accounts surrender`, `accounts recall`; the proof reads the other machine's account list, and a live two-machine acceptance stays an operator-assisted step).
 3. L-1 to L-6 when the source of truth answers a caller's role.
