@@ -172,6 +172,10 @@ xcrun notarytool store-credentials switchboard-notary --team-id KJ35UYYL22
 
 The script never creates certificates, changes Keychain access policy or exports a signing key. A requested signer that is not installed is an explicit blocker.
 
+### Windows cross-check in the gate (SB-303)
+
+`./scripts/check.sh` runs `cargo xwin check -p switchboard-runtime -p switchboard-cli --target x86_64-pc-windows-msvc --all-targets --locked` when `cargo-xwin` is on PATH (installed as below, about 35 s on an M-series Mac) and prints `Windows check skipped` otherwise. It catches code that builds only on Unix before a tag: with SB-302's `cfg(unix)` taken off `process_age_from_ps` it fails with `error[E0425]: cannot find function parse_elapsed`, as the 0.7.31 nightly did (run 42446427014). It is a compile check, not a Windows run; the nightly Windows jobs still test there.
+
 ### Windows cross-build fallback
 
 The 0.2 to 0.5.3 Windows archives were cross-built on a Mac with the [cross-build script](../scripts/build_windows_cross.py), following Tauri's documented NSIS fallback (measured tools: cargo-xwin 0.23.1, LLVM 23.1.2, NSIS 3.12):
