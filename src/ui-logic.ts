@@ -250,7 +250,7 @@ export function resetCountdown(until: number, nowSeconds: number): string {
 
 /** The compact wait shown on a card's second line: "4d 22h", "2h 5m", "36m", "<1m", or "now" once due. */
 export function compactCountdown(until: number, nowSeconds: number): string {
-  if (!validTime(until) || !Number.isFinite(nowSeconds)) return '—';
+  if (!validTime(until) || !Number.isFinite(nowSeconds)) return t('unknown');
   const remaining = until - nowSeconds;
   if (remaining <= 0) return t('now');
   if (remaining < 60) return t('<1m');

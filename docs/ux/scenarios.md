@@ -748,15 +748,15 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 2. “Add your accounts” — + Add account is outlined.
 3. “Switch, by hand or automatically” — the automatic switching bar is outlined.
 4. “Give a group its own accounts”: Groups opens, + New group is outlined (the empty state's one while there is no group).
-5. “Agents, and it keeps running”: Agents opens with *Copy* beside the prompt for a coding agent outlined (SB-93: the agent sets Switchboard up, SCN-050); the menu-bar icon is named. When the prompt is not on the page yet (setup still reading or failed), the *Connect an agent* panel is outlined instead (0.6.82, UX-30). Start using Switchboard ends it.
+5. “Agents, and it keeps running”: Agents opens with the prompt for a coding agent and its *Copy* outlined as one row, so the card never covers the prompt it asks to copy (SB-93: the agent sets Switchboard up, SCN-050; SB-195); the menu-bar icon is named. When the prompt is not on the page yet (setup still reading or failed), the *Connect an agent* panel is outlined instead (0.6.82, UX-30). Start using Switchboard ends it.
 **Alt paths:** Skip tour or Escape ends it at any step; Back returns. A browser that refuses storage shows the tour again next start rather than never. While the usage notice is open (SCN-073), or its status is still being read, the tour waits and starts once it is acknowledged; Escape does not end a tour that is not on screen (issue #128, SB-246).
-**Expected result:** a person knows the five things the product does and the control for each, in under a minute; the tour never blocks the screen it explains: the card sits below, above or beside its target, never on it, and the target is scrolled into sight first, also when it appears only after its page has read (Agents) or lies off screen, never otherwise on a background refresh; a result line moves aside only while the tour is on screen (0.6.82, VIS-12; checked at 740 and 1100 px).
+**Expected result:** a person knows the five things the product does and the control for each, in under a minute; the tour never blocks the screen it explains: the card sits below, above or beside its target, never on it, and the target is scrolled into sight first, also when it appears only after its page has read (Agents) or lies off screen, never otherwise on a background refresh; a result line moves aside only while the tour is on screen (0.6.82, VIS-12; checked at 740 and 1100 px), and a confirmation shown before a step goes when the tour moves to another step, while an error stays (SB-195).
 **UI elements:** tour card (non-modal), outlined target, step dots.
 **States covered:** first start, each step, skipped, finished, shown again.
 **Errors & recovery:** none; storage failure only means the tour shows again.
 **Status:** draft
 **Meaning:** operator request 2026-10-05.
-**Coverage:** browser demo 2026-10-05: five steps, targets `+ Add account`, `.rotation-bar`, `+ New project`; finish stores `switchboard.tour`; About shows it again; Escape closes.
+**Coverage:** browser demo 2026-10-05: five steps, targets `+ Add account`, `.rotation-bar`, `+ New project`; finish stores `switchboard.tour`; About shows it again; Escape closes. WebKit demo 2026-11-08 (SB-195): step 5's card does not overlap the prompt row at 740 px (en, ru) and 1180 px; a switch confirmation stays through *Next* on 0.7.33 and goes on the fix.
 **Product:** unobserved
 **Traces:** SCN-001
 

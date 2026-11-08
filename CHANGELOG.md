@@ -6,6 +6,10 @@ release pull request renames `Unreleased` to the version. While Windows signing 
 that section must say `windows_authenticode: NOT_SIGNED`. Notes of 0.5.3-beta.1 and earlier are
 on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/releases).
 
+## Unreleased
+
+- The first-run tour no longer carries a confirmation shown before it through its steps, and its last step outlines the whole setup prompt, so its card never covers the text it asks you to copy; «О программе» no longer breaks after «О» (SB-195).
+
 ## 0.7.33
 
 - Listing sessions no longer starts a `kill` and a `ps` process for each running session: whether a session runs and how long its process has run are read in-process, so `switchboard sessions` and the window's Activity answer in a moment while the computer swaps (SB-302).
