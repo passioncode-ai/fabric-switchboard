@@ -2,6 +2,23 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-11-08 (early morning): releases 0.7.29 and 0.7.30; SB-292 recall, SB-237 closed
+
+- **Released 0.7.29** (2026-11-08 02:23:15Z, 25 assets, seven platforms; #502) and **0.7.30**
+  (03:49:20Z, 25 assets; #506): `seats.jsonl` for every move and hand-over (#503), and `accounts
+  recall ID --from TARGET` / MCP `switchboard_account_recall` with the member's `accounts surrender`
+  (refuses a terminal), the copy there removed and proved gone by its account list (#505). Claude
+  only; Codex is refused until measured.
+- **SB-237 closed** (#507): 902 requests found no account left (2026-11-04 to 2026-11-07); per such
+  request about 6 accounts held at their limit, 1 full, 2.2 disabled or with an expired sign-in, none
+  usable and left out. Per-folder routes buy nothing; the pools ran out of quota.
+- **Open for a person:** a live two-machine recall with a spare Claude account (D-6 of
+  two-machines); SB-243 confirmation on the Windows tester's computer.
+- **Exact next task.** SB-292 is done in code except the live acceptance; SB-291 waits for the
+  source of truth. Take SB-296 point 3 (compare Dashboards hand-over episodes with
+  `transaction_held` in the log since 0.7.25), then SB-300 if it fails again; the board watcher
+  (cron `cf714165`, until 2026-11-21) needs a session that has the `com_*` tools.
+
 ## 2026-11-08 (night): releases 0.7.27 to 0.7.29; SB-299 doors, SB-292 seats
 
 - **Released 0.7.27** (2026-11-07 23:39:36Z, 25 assets, seven platforms): SB-301; studio-agent
