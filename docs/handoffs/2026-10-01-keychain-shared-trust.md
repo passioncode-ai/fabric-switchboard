@@ -23,7 +23,7 @@ saved account.
   `Owner::desktop` (used by the app only), and the store now shows the vault's actionable messages
   instead of "Credential storage unavailable".
 - Docs: [OPERATIONS](../OPERATIONS.md#data-locations-and-ownership) storage row and Keychain recovery,
-  [SCN-027](../ux/scenarios.md#scn-027--keep-saved-accounts-readable-without-repeated-keychain-dialogs).
+  [SCN-027](../ux/scenarios.md#scn-027-keep-saved-accounts-readable-without-repeated-keychain-dialogs).
 
 ## Checks actually run
 

@@ -29,7 +29,7 @@ navigation and the main actions, Russian, and the strings that were retired. A s
 here, or a string listed here that `--list` no longer prints, is drift: the registry is resynced
 in the change that adds or retires it.
 
-Vocabulary of 0.6.82 ([terminology](terminology.md)): a sentence says **group** («группа»), never
+Vocabulary of 0.6.82 ([terminology](terminology.md), [DEC-0006](../DECISIONS.md#dec-0006-a-person-reads-group-api-keys-and-automatic-switching)): a sentence says **group** («группа»), never
 pool; the feature is **automatic switching** («автоматическое переключение», short form
 «автопереключение», decision D-6); the page of keys is **API keys** («API-ключи»). A pool shows as
 a group: “Default group”, “Group {id} · no folders” as a label (`poolName`), “in the default group”,

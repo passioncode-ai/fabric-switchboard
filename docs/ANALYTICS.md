@@ -2,7 +2,7 @@
 
 **State:** built 2026-10-05 on the operator's request; sends only from release builds that carry
 an App Key; on by default from the first start, with Switchboard's own switch (SB-246, operator
-decision 2026-11-04, replacing issue #128's "nothing before the answer" of 0.6.82). Source: [`crates/switchboard-runtime/src/analytics.rs`](../crates/switchboard-runtime/src/analytics.rs).
+decision 2026-11-04, replacing issue #128's "nothing before the answer" of 0.6.82) ([DEC-0005](DECISIONS.md#dec-0005-usage-counts-are-on-from-the-first-start)). Source: [`crates/switchboard-runtime/src/analytics.rs`](../crates/switchboard-runtime/src/analytics.rs).
 
 Switchboard counts installs, days of use and connected accounts so PassionCode can see how its
 apps are used, and so one person using several PassionCode.ai tools (Switchboard, Fabric, Fabric

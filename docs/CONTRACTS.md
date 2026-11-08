@@ -324,7 +324,7 @@ and closed here:
   last known usage leaves room (`last_known_usage`: windows all reset since → 0; never measured →
   99, last in line; still full → never). Without a limit nothing is guessed. Test
   `a_limited_account_moves_on_last_known_usage_when_nothing_is_fresh`.
-- **Managed failover** (operator decision 2026-10-11; AGENTS.md rule amended). A Claude Code or
+- **Managed failover** (operator decision 2026-10-11, [DEC-0002](DECISIONS.md#dec-0002-a-refused-claude-code-or-codex-request-moves-once-to-the-groups-next-account); AGENTS.md rule amended). A Claude Code or
   Codex session's request answered 429 is journaled `rate_limited` on its account, its usage
   headers kept, and `Store::failover` holds the account (`limited`, `take_refusals`) and moves
   the pool's route to the next usable account — the managed policy's figures when the pool has
