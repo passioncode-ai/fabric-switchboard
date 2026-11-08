@@ -2,6 +2,29 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-11-08 (afternoon): release 0.7.34; SB-305, SB-232, SB-197; doc map and decisions
+
+- **Released 0.7.34** (2026-11-08 16:18:35Z, 25 assets, `latest.json` for seven platforms; #536,
+  tag `v0.7.34` on `77d5ed6`; nightly on the tag green on every job): `switchboard update` for a
+  computer that runs only `serve` (SB-305, #533), dollars grouped like the window and an empty
+  PassionCode.ai read keeping the linked count (SB-232, #534, closed), `home_dir` on listed
+  sessions (SB-197 part, #535), and the window fixes of SB-192 (closed), SB-195 and SB-232.
+- **Gates.** Each branch passed the full `./scripts/check.sh` (1226 and 1221 Rust tests, 0
+  failed) on one shared `CARGO_TARGET_DIR`, removed after (14 GB). The one red step was a stale
+  `THIRD_PARTY_NOTICES.md`: SB-305's `tar` and `filetime` are linked on Windows too.
+- **Documentation is governed** (`/task-pipeline setup`): [DOCMAP.md](DOCMAP.md), the audit
+  [plan](evidence/plans/2026-11-08-doc-audit.md) and its four findings, all closed:
+  [DECISIONS.md](DECISIONS.md) (DEC-0001 to DEC-0007, SB-308), the board's shape and status
+  words checked by `scripts/check_docs.py` with a planted-defect test (SB-306, SB-307; 43 closed
+  rows had read as open, 11 rows broke the table), and the super-ux scenario linter in the gate
+  (SB-309: the UX layers moved to `### ID: name`; a local patch for its `../` coverage links is
+  reported to super-ux, finding `9f61fa88`).
+- **SB-194 closed**: ADR-0127 amendment 3 is in Fabric's main (`ea14e5dd`).
+- **Exact next task.** When the member computer reports `switchboard update --check` on 0.7.34
+  (it has to reach 0.7.34 the old way once, since 0.7.33 has no `update`), close SB-305. Then
+  replace `docs/ux/lint.py` with super-ux's release once its coverage-path fix ships, and take
+  the next open row by priority (SB-197's Terminal identity, SB-229, SB-230).
+
 ## 2026-11-08 (day): SB-193, SB-195, SB-232 part merged; SB-302 closed; SB-305 waits for disk
 
 - **Merged:** SB-193 (#518): `scripts/check-strings-registry.mjs` in the gate keeps
