@@ -5,7 +5,7 @@ import switchboardMark from '../brand/passioncode/switchboard-mark.svg';
 import { version } from '../package.json';
 import { platformLabel } from './platform';
 import { LOCALE_KEY, dateLocale, locale, parseLocaleChoice, plural, saveLocaleChoice, t, type LocaleChoice } from './i18n';
-import { demo, native, nativeAdapter, onProjectSuggestions, onShellHook, onSpendChanged, safeError, reportFrontendReady, reportLanguage, type Operation } from './adapter';
+import { demo, demoFirstRun, native, nativeAdapter, onProjectSuggestions, onShellHook, onSpendChanged, safeError, reportFrontendReady, reportLanguage, type Operation } from './adapter';
 import type { CardState } from './ui-logic';
 import { statAlert, ceilingQuestion, ceilingWarning, ceilingLine, keyLimitLine, dollars, POOL_PATTERN, poolChoices, poolName, inGroup, tourPlacement, usableWhileBusy, APPEARANCE_KEY, attribution, groupAdmits, groupSeatsElsewhere, passioncodeLine, seatEndedText, groupSeatsEndedText, organizationReleasedAt, inOrganizationFilter, domainList, type AttributedBy, sortStatRows, nextStatSort, type StatRow, type StatSort, statCacheShare, statTokensPerRequest, chartSeries, niceMax, groupProjectRows, type ChartMetric, groupProjects, compactCount, statTokens, statTrouble, statTroubleText, statAgentName, type Statistics, EXPIRY_CHOICES, folderName, folderRows, withoutFolder, type ProjectRoot, moveTargets, mapRows, rootTargets, storedMapFolders, MAP_FOLDERS_KEY, type MapFilter, type MapRow, type RepositoryMap, sortAgents, defaultAgentChoices, backgroundReads, clockedRead, chainScopeKey, afterRead, ceilingRemovalNote, modelMeta, modelUse, ordinaryKimiNote, kimiLimitUntil, limitReasonText, limitTitle, agentSetupFacts, sessionHow, sessionAgentName, sessionStateLabel, kimiWindowsLine, kimiWindowsLines, openrouterCreditLine, eventAction, eventDetail, MutationClock, activeRules, autoSwitchPool, launchChoice, withFolders, githubDefaultSelection, githubPlan, githubSource, replaceFolder, storedFolder, LAST_FOLDER_KEY, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, groupAccounts, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, signInNotice, signInMove, organizationMoveNote, dismissTermsNotice, termsNoticeDismissed, termsNoticeOn, termsNoticeText, tourWaits, orgSetups, releasedOrganizations, releasedSummary, orgSetupAction, orgSetupShown, orgSetupCaveat, orgSetupLeads, orgSetupPrimary, accountsOrgActionLeads, firstPrimary, orgSetupUnread, orgSetupStateLabel, orgSetupTitle, hiddenOrgSetups, ORG_SETUP_HIDDEN_KEY, accountsEmptyKey, type OrgSetup, usageAnswerText, usageNotice, usageFreshness, windowReset, type Appearance, shellHookView, shellHookToggleNotice, shellHookNoticeText, codexHookLine, moveStep, accountsForStep, chainSummary, stepReasonText, handoverOutcomeText, handoverSkipped, shortWorkflow, TAKEOVER_ORDER, groupOrganizations, servesPool, sharedGroups, holdsContext, accountOrganizations } from './ui-logic';
 import agentCatalog from '../catalog/agents.json';
@@ -51,7 +51,7 @@ const tour = (): { page: Page; target: string[]; title: string; text: string }[]
   { page: 'agents', target: ['[data-copy-row="copy-onboard"]', '#connect-panel > h2'], title: t('Agents, and it keeps running'), text: trayInArea() ? t('Here, give your coding agent the setup prompt: it registers the tools and sets up the rest, leaving you only the sign-in. Closing the window keeps Switchboard working; open or quit it from its icon in the notification area.') : t('Here, give your coding agent the setup prompt: it registers the tools and sets up the rest, leaving you only the sign-in. Closing the window keeps Switchboard working; open or quit it from the menu-bar icon.') },
 ];
 // Storage refused: the tour shows again next start rather than never (SCN-035).
-let tourStep: number | null = (() => { try { return localStorage.getItem(TOUR_KEY) ? null : 0; } catch { return 0; } })();
+let tourStep: number | null = (() => { if (demoFirstRun) return 0; try { return localStorage.getItem(TOUR_KEY) ? null : 0; } catch { return 0; } })();
 function tourGo(step: number | null) {
   // SB-195: a confirmation shown before the tour (the usage answer) does not ride along its steps; an error stays.
   if (step !== tourStep && notice && !noticeError) { notice = ''; noticeAction = null; }
@@ -102,7 +102,9 @@ function tourCard(step: number) {
   return card;
 }
 /** Provider terms (operator decision 2026-10-08, SCN-049): a banner on Accounts until dismissed, always in About. */
-const noticeStore = () => { try { return localStorage; } catch { return null; } };
+/** SB-192 (UX-27): a first-run demo keeps its dismissals for this page only, so every reload is a first run again. */
+const firstRunStore = new Map<string, string>();
+const noticeStore = () => { if (demoFirstRun) return { getItem: (k: string) => firstRunStore.get(k) ?? null, setItem: (k: string, v: string) => void firstRunStore.set(k, v) }; try { return localStorage; } catch { return null; } };
 /**
  * Usage counts (SB-246, operator decision 2026-11-04; docs/ANALYTICS.md, SCN-073): on by default
  * and sent from the first start. A first-run notice says so once: OK acknowledges it, Turn off

@@ -166,7 +166,9 @@ lock; login and launch need a running runtime.
 
 To look at the interface with synthetic data: `npm run dev`, then
 `http://127.0.0.1:1420/?demo=1`. A plain web page does not connect to the vault. The browser
-demo has no real accounts, no CLI launch and no network calls to providers.
+demo has no real accounts, no CLI launch and no network calls to providers. Add `&empty=1` for a
+first run: nothing saved, the usage notice, the tour and the terms notice, whatever the browser
+stored (`&backup=1` adds a backup to restore from).
 
 ## Using it
 
