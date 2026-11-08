@@ -6,6 +6,8 @@ npm run build
 node scripts/test-read-deadline.mjs
 node scripts/test-ui-logic.mjs
 node scripts/check-locale.mjs
+node scripts/test-strings-registry.mjs
+node scripts/check-strings-registry.mjs
 node scripts/check-error-vocabulary.mjs
 cargo fmt --all -- --check
 cargo test --workspace --locked
