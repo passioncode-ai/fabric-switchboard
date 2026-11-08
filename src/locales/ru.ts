@@ -76,7 +76,7 @@ export const RU: Record<string, string> = {
   "New automatic switching…": "Новое автопереключение…",
   "Edit {provider} {where} ({target})…": "Изменить: {provider} {where} ({target})…",
   "Automatic switching stopped for {provider} {where}.": "Автопереключение {provider} {where} остановлено.",
-  "Stop {where}": "Остановить {where}",
+  "Stop automatic switching for {provider} {where} ({target})": "Остановить автопереключение: {provider} {where} ({target})",
   "{label} is disabled now but was not removed: {reason}": "Аккаунт {label} теперь отключён, но не удалён: {reason}",
   "e.g. client-a": "например, client-a",
   "Sign in to {label} in Terminal, then refresh.": "Войдите в аккаунт {label} в Терминале, затем обновите список.",

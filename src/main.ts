@@ -2152,23 +2152,34 @@ function renderPolicies(main: HTMLElement, quiet = false) {
   const panel = el('section', 'rotation-bar'); panel.setAttribute('aria-label', t('Automatic switching'));
   // SB-104: without the monitor's answer no row can say it is limited or signed out — say so instead of showing them all as available.
   if (!monitor && (native || demo)) panel.append(el('p', 'usage-error', t('Limits and sign-in states are unavailable right now. Refresh to retry.')));
-  const copy = el('div', 'rotation-copy');
-  copy.append(el('strong', '', enabled.length ? t('Automatic switching is on') : t('Automatic switching is off')));
-  if (enabled.length) for (const policy of enabled) {
-    const decision = monitor?.decisions?.find((entry) => entry.provider === policy.provider && entry.pool === policy.pool && entry.target === policy.target);
-    copy.append(el('span', 'usage-caption', `${providerName(policy.provider)} · ${poolName(policy.pool, snapshot!.projects)} · ${policyTarget(policy.target)} · ${t('at {percent}% used', { percent: policy.threshold_percent })}${decision ? ` · ${decisionText(decision.reason)}` : ''}`));
-  // UX-16: the line above already says the monitor is unavailable; the caption does not say it again.
-  } else copy.append(el('span', 'usage-caption', monitor || native || demo ? t('When the account in use nears its limit, Switchboard can move to the saved account with the most quota left.') : t('Quota monitor status unavailable. Refresh to retry.')));
-  const swapHeld = monitor?.claude_swap_accounts ?? 0;
-  if (swapHeld) copy.append(el('span', 'usage-caption', t('Claude Swap is running and renews {n} of these accounts. Switchboard takes their newest sign-ins from it and does not renew them itself.', { n: swapHeld })));
-  if (monitor?.renewal_blocked) copy.append(el('span', 'usage-caption', t('Claude is refusing sign-in renewals for every account right now. Saved accounts keep their last sign-in and are not renewed; Switchboard tries again within the hour. If this stays, update Switchboard.')));
-  if (demo) copy.append(el('span', 'usage-caption', t('Demo policies are editable fixtures; no switching runs here.')));
+  // The title and the bar's actions share one line; each enabled policy is a row of its own with
+  // its own Stop, so six policies (SB-310 turns one on per group) never squeeze the text into a
+  // column or leave two buttons reading the same “Stop in the default group”.
+  const head = el('div', 'rotation-head');
+  head.append(el('strong', '', enabled.length ? t('Automatic switching is on') : t('Automatic switching is off')));
   const actions = el('div', 'rotation-actions');
   const pool = autoSwitchPool(snapshot!.accounts, policies, (snapshot!.projects ?? []).map((p) => p.pool));
   if (pool) actions.append(button(t('Turn on for Claude Code'), () => { const saved = policies.find((policy) => policy.provider === 'claude' && policy.pool === pool && policy.target === 'claude_cli'); void mutate(() => adapter.setPolicy({ provider: 'claude', pool, target: 'claude_cli', enabled: true, threshold_percent: saved?.threshold_percent ?? 90, hysteresis_percent: saved?.hysteresis_percent ?? 10, cooldown_seconds: saved?.cooldown_seconds ?? 1800, max_age_seconds: saved?.max_age_seconds ?? 300, last_switched_at: saved?.last_switched_at ?? null }), t('Automatic switching is on for Claude Code {where}. It moves at {threshold}% used to an account with at least {headroom} points more headroom.', { where: inGroup(pool, snapshot!.projects), threshold: saved?.threshold_percent ?? 90, headroom: saved?.hysteresis_percent ?? 10 }), 'menu-policies'); }, quiet ? 'button row-button' : 'button primary row-button', 'auto-on'));
-  for (const policy of enabled) actions.append(button(enabled.length > 1 ? t('Stop {where}', { where: inGroup(policy.pool, snapshot!.projects) }) : t('Stop'), () => void mutate(() => adapter.setPolicy({ ...policy, enabled: false }), t('Automatic switching stopped for {provider} {where}.', { provider: providerName(policy.provider), where: inGroup(policy.pool, snapshot!.projects) }), 'menu-policies'), 'button quiet row-button', `stop-${policy.provider}-${policy.pool}-${policy.target}`));
   actions.append(menu('policies', t('Automatic switching settings'), [...policies.map((policy): [string, () => void] => [t('Edit {provider} {where} ({target})…', { provider: providerName(policy.provider), where: inGroup(policy.pool, snapshot!.projects), target: policyTarget(policy.target) }), () => policyDialog(policy)]), [t('New automatic switching…'), () => policyDialog()]], 'icon-button', '⚙'));
-  panel.append(copy, actions); main.append(panel);
+  head.append(actions); panel.append(head);
+  if (enabled.length) {
+    const list = el('ul', 'rotation-list');
+    for (const policy of enabled) {
+      const decision = monitor?.decisions?.find((entry) => entry.provider === policy.provider && entry.pool === policy.pool && entry.target === policy.target);
+      const row = el('li', 'rotation-row');
+      row.append(el('span', 'usage-caption', `${providerName(policy.provider)} · ${poolName(policy.pool, snapshot!.projects)} · ${policyTarget(policy.target)} · ${t('at {percent}% used', { percent: policy.threshold_percent })}${decision ? ` · ${decisionText(decision.reason)}` : ''}`));
+      const stop = button(t('Stop'), () => void mutate(() => adapter.setPolicy({ ...policy, enabled: false }), t('Automatic switching stopped for {provider} {where}.', { provider: providerName(policy.provider), where: inGroup(policy.pool, snapshot!.projects) }), 'menu-policies'), 'button quiet row-button', `stop-${policy.provider}-${policy.pool}-${policy.target}`);
+      stop.setAttribute('aria-label', t('Stop automatic switching for {provider} {where} ({target})', { provider: providerName(policy.provider), where: inGroup(policy.pool, snapshot!.projects), target: policyTarget(policy.target) }));
+      row.append(stop); list.append(row);
+    }
+    panel.append(list);
+  // UX-16: the line above already says the monitor is unavailable; the caption does not say it again.
+  } else panel.append(el('p', 'usage-caption', monitor || native || demo ? t('When the account in use nears its limit, Switchboard can move to the saved account with the most quota left.') : t('Quota monitor status unavailable. Refresh to retry.')));
+  const swapHeld = monitor?.claude_swap_accounts ?? 0;
+  if (swapHeld) panel.append(el('p', 'usage-caption', t('Claude Swap is running and renews {n} of these accounts. Switchboard takes their newest sign-ins from it and does not renew them itself.', { n: swapHeld })));
+  if (monitor?.renewal_blocked) panel.append(el('p', 'usage-caption', t('Claude is refusing sign-in renewals for every account right now. Saved accounts keep their last sign-in and are not renewed; Switchboard tries again within the hour. If this stays, update Switchboard.')));
+  if (demo) panel.append(el('p', 'usage-caption', t('Demo policies are editable fixtures; no switching runs here.')));
+  main.append(panel);
 }
 /** SB-145/SB-147: the proxy's counts for the chosen range (7, 30 or 90 days). */
 let stats: Statistics | null = null;

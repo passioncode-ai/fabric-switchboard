@@ -2,6 +2,27 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-11-08 (night): Automatic switching bar, one row per setting; groups checked
+
+- **Operator's report** (this session, screenshot of Accounts): with SB-310's six enabled
+  settings the bar's text became a narrow column and six *Stop* buttons ran past the window's
+  edge, two of them reading "Stop in the default group" (managed and Claude Code account).
+- **Built** on `fix/rotation-bar-rows`: `renderPolicies` (`src/main.ts`) puts the title and the
+  bar's actions (Turn on, ⚙) on one line and each enabled setting on its own row
+  (`.rotation-list`, `.rotation-row`, `src/style.css`) with its own *Stop*, whose accessible
+  name names provider, group and target. The string "Stop {where}" is retired; the new one is
+  checked by Copylot (`docs/brand/strings.md`). SCN-022 updated.
+- **Checks run.** `./scripts/check.sh` exit 0. WebKit over the demo seeded with six enabled
+  settings at 1200 px and 760 px, English and Russian: no button past the bar's edge, six
+  distinct *Stop* names.
+- **Groups on this Mac** (operator asked to check them; changed through MCP, all reversible):
+  agents' data repositories (`*-data`) joined Agents; passioncode-ai repositories in no group and
+  the folders only the account-less PassionCode.ai group held joined PassionCode; four folders
+  of deleted `s2s-*` worktrees left Apps & Soft (their root-owned StoreKit receipt keeps the
+  husks on disk). Left for the operator: the NG Business and PassionCode.ai groups have no
+  accounts; the Nicegram, eSIM and skills-family repositories stay in the default group.
+- **Exact next task.** Release this with SB-310 in the next release.
+
 ## 2026-11-08 (evening): SB-310 automatic switching on by default (board request `486dd759`)
 
 - **Operator's word** (frame-agent session `0faeb32f`, about 16:45 UTC, relayed on the board):

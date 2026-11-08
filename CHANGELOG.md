@@ -9,6 +9,7 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 ## Unreleased
 
 - Automatic switching of managed sessions is on by default: every group with accounts, for Claude and for Codex, switches to its next account as one nears its limit, groups made later included. A group where you turned it off stays off. Switching the ordinary Claude Code stays off until you turn it on (SB-310).
+- The Automatic switching bar lists each enabled setting on its own line with its own *Stop*. With a setting in every group (SB-310) the bar no longer squeezes its text into a narrow column with the buttons running past the window's edge, and two settings of one group no longer show buttons with the same label.
 
 ## 0.7.34
 
