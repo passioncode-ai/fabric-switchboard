@@ -6,9 +6,13 @@ release pull request renames `Unreleased` to the version. While Windows signing 
 that section must say `windows_authenticode: NOT_SIGNED`. Notes of 0.5.3-beta.1 and earlier are
 on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/releases).
 
-## 0.7.31
+## Unreleased
 
 - Listing sessions no longer starts a `kill` and a `ps` process for each running session: whether a session runs and how long its process has run are read in-process, so `switchboard sessions` and the window's Activity answer in a moment while the computer swaps (SB-302).
+
+## 0.7.31
+
+- Tagged but not published: the nightly checks failed on Windows, where SB-302's `ps` fallback did not compile. Every change of 0.7.31 ships in 0.7.32.
 
 ## 0.7.30
 
