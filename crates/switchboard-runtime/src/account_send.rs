@@ -609,22 +609,49 @@ mod tests {
     fn a_copy_left_there_by_an_earlier_move_is_named_and_nothing_changes_here() {
         let (_root, store, id) = store_with(AuthKind::OAuth);
         let refused = |args: &[String], _stdin: Option<&[u8]>| -> Result<String, String> {
-            assert!(args[2].contains("'accounts' 'add'"), "nothing runs after the refusal");
+            assert!(
+                args[2].contains("'accounts' 'add'"),
+                "nothing runs after the refusal"
+            );
             Err(r#"{"error":"Account credential already exists in this pool","ok":false}"#.into())
         };
         assert_eq!(
-            send(&store, &id, "studio.local", "agents", REMOTE_DEFAULT, 5, &refused).unwrap_err(),
+            send(
+                &store,
+                &id,
+                "studio.local",
+                "agents",
+                REMOTE_DEFAULT,
+                5,
+                &refused
+            )
+            .unwrap_err(),
             ALREADY_THERE
         );
-        assert!(!store.snapshot().unwrap().elsewhere.contains_key(&id), "undone here");
+        assert!(
+            !store.snapshot().unwrap().elsewhere.contains_key(&id),
+            "undone here"
+        );
         let other = |_: &[String], _: Option<&[u8]>| -> Result<String, String> {
             Err(r#"{"error":"Credential storage unavailable","ok":false}"#.into())
         };
         assert_eq!(
-            send(&store, &id, "studio.local", "agents", REMOTE_DEFAULT, 6, &other).unwrap_err(),
+            send(
+                &store,
+                &id,
+                "studio.local",
+                "agents",
+                REMOTE_DEFAULT,
+                6,
+                &other
+            )
+            .unwrap_err(),
             ADD_FAILED
         );
-        assert_eq!(refusal("noise\n{\"ok\":false,\"error\":\"x\"}"), Some("x".into()));
+        assert_eq!(
+            refusal("noise\n{\"ok\":false,\"error\":\"x\"}"),
+            Some("x".into())
+        );
         assert_eq!(refusal("{\"ok\":true,\"data\":{}}"), None);
     }
 

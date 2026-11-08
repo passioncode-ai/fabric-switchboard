@@ -269,7 +269,8 @@ pub struct Local {
     pub feed: PathBuf,
     pub archive: PathBuf,
 }
-pub const LOCAL_UNREADABLE: &str = "Could not read the release files given. Name the release's latest.json and its package.";
+pub const LOCAL_UNREADABLE: &str =
+    "Could not read the release files given. Name the release's latest.json and its package.";
 
 /// `switchboard update`: what the feed offers this computer and, unless `check`, its install
 /// into `app` (default: the bundle or AppImage this binary runs from).
