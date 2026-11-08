@@ -6,6 +6,10 @@ release pull request renames `Unreleased` to the version. While Windows signing 
 that section must say `windows_authenticode: NOT_SIGNED`. Notes of 0.5.3-beta.1 and earlier are
 on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/releases).
 
+## Unreleased
+
+- A computer that runs only `switchboard serve` (a Mac space with no graphical login, a Linux VM) can update now: `switchboard update --check` says whether a newer version exists, and `switchboard update`, run by the account that owns the app, checks the package's signature and installs it; then restart `serve` (SB-305).
+
 ## 0.7.33
 
 - Listing sessions no longer starts a `kill` and a `ps` process for each running session: whether a session runs and how long its process has run are read in-process, so `switchboard sessions` and the window's Activity answer in a moment while the computer swaps (SB-302).

@@ -64,6 +64,15 @@ const ALLOWLIST = {
   'This account is used here, not on another machine.': 'SB-292: CLI and MCP only',
   'The other machine did not give the sign-in back. Nothing changed; check ssh and its Switchboard.': 'SB-292: CLI and MCP only',
   'The sign-in came back but the provider did not answer it here. It went back to the other machine.': 'SB-292: CLI and MCP only',
+  // runtime self_update.rs (SB-305): `switchboard update` is CLI only, for a computer with no window.
+  'Could not read the release feed. Check the network and try again.': 'SB-305: CLI only',
+  'The release has no package for this computer.': 'SB-305: CLI only',
+  'This version needs a step by a person before it installs; its release notes say what to do. Nothing was changed.': 'SB-305: CLI only',
+  'The update\'s signature does not match Switchboard\'s key. Nothing was changed.': 'SB-305: CLI only',
+  'Name the installed app: the Fabric Switchboard.app folder on macOS, the AppImage on Linux.': 'SB-305: CLI only',
+  'This account cannot replace the installed app. Run the update as the account that owns it.': 'SB-305: CLI only',
+  'Could not install the update. The installed app was left as it was.': 'SB-305: CLI only',
+  'Here the app updates itself; this command is for a computer that runs only serve.': 'SB-305: CLI only',
   // runtime account_send.rs (SB-283): the ssh runner's own errors; `send` answers ADD_FAILED or
   // NOT_VERIFIED in their place, so none reaches the window.
   'ssh is not installed here.': 'SB-283 ssh runner: folded into ADD_FAILED',
