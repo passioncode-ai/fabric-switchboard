@@ -567,14 +567,14 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 1. Open Agents → *Connect an agent* (below the installed agents and the OpenRouter key) shows what agents can do through the tools, and the CLI location or “not found”.
 2. Link switchboard into ~/.local/bin (macOS, bundled CLI) → the link is created; an existing file or foreign link is never replaced.
 3. Copy the Claude Code, Codex or Claude Code plugin command and run it in a terminal.
-**Alt paths:** Sessions launched from Switchboard get the tools without this step; a launch without a CLI says so in its notice. The app was opened straight from its download (macOS App Translocation) → the panel reads “macOS is running Switchboard from a temporary copy of the download. Move Fabric Switchboard to Applications and open it from there before connecting agents; …”, the link button is not offered and no agent config points into the copy (0.5.3).
+**Alt paths:** Sessions launched from Switchboard get the tools without this step; a launch without a CLI says so in its notice. The app was opened straight from its download (macOS App Translocation) → the panel reads “macOS is running Switchboard from a temporary copy of the download. Move Fabric Switchboard to Applications and open it from there before connecting agents; …”, the link button is not offered and no agent config points into the copy (0.5.3). On Linux the AppImage runs from a mount that exists only while it runs (`$APPDIR`, SB-88) → the panel reads “This Switchboard runs from an AppImage, whose files exist only while it runs. To connect agents, install the .deb package, which puts switchboard on your PATH.”; the link button is not offered (`can_link` false) and no command names a path inside the mount (SB-192, UX-25).
 **Expected result:** The agent's `switchboard_status` names its session; switching a managed session takes effect from the next request; the global Claude Code login needs `global: true`.
 **UI elements:** capability panel, link button, command rows with Copy.
 **States covered:** loading, unavailable, CLI missing, linked.
 **Errors & recovery:** Link failures show fixed messages; Copy falls back to selectable text.
 **Status:** draft
 **Meaning:** operator request for agent self-switching (2026-09-29); live agent sessions not yet observed.
-**Coverage:** `crates/switchboard-cli/tests/mcp.rs`; `crates/switchboard-runtime/src/agents.rs` link test; browser demo `docs/evidence/design-0.4/agents-1280.png`.
+**Coverage:** `crates/switchboard-cli/tests/mcp.rs`; `crates/switchboard-runtime/src/agents.rs` link test, `an_appimage_mount_is_a_copy_that_goes_when_the_app_quits` and `a_translocated_copy_is_never_linked_or_offered`; browser demo `docs/evidence/design-0.4/agents-1280.png`.
 **Product:** unobserved
 **Traces:** PLAN-0.4 REQ-3, REQ-5, REQ-6
 
