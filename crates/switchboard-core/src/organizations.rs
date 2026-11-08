@@ -307,12 +307,14 @@ impl Snapshot {
         append_event(self, "organization", Some(account_id), "assigned");
         true
     }
-    /// SB-285: the placements the retired domain rule made that the account's groups agree with,
-    /// `(account, organization)`: an account with no word from the person and no provider team,
-    /// whose address is on an organization's domain, and every group it serves takes it as that
-    /// organization's. One a group of another context holds keeps that group's word instead (the
-    /// domain arrived after the person placed it there, as on 2026-11-08).
-    pub(crate) fn domain_placements(&self) -> Vec<(String, String)> {
+    /// SB-285: the placements the retired domain rule made, `(account, organization, also)`: an
+    /// account with no word from the person and no provider team, whose address is on an
+    /// organization's domain. Where every group it serves takes it as that organization's, it
+    /// becomes its own (`also` false). Where a group of another context also holds it (the domain
+    /// arrived after the person placed it there, as on 2026-11-08), that group's word stands, and
+    /// the organization is one it also works for only when one of its groups needs it to (a seat
+    /// shared into the organization's group, SB-282), as [`Snapshot::confirm_placement`] does.
+    pub(crate) fn domain_placements(&self) -> Vec<(String, String, bool)> {
         self.accounts
             .iter()
             .filter(|a| !self.memberships.contains_key(&a.id))
@@ -327,13 +329,27 @@ impl Snapshot {
                     by: Some(By::Person),
                     also: attribution.also,
                 };
-                self.projects
-                    .iter()
-                    .filter(|p| self.serves(a, &p.pool))
-                    .all(|p| p.admits(&placed))
-                    .then(|| (a.id.clone(), organization.id.clone()))
+                let mut serving = self.projects.iter().filter(|p| self.serves(a, &p.pool));
+                if serving.clone().all(|p| p.admits(&placed)) {
+                    return Some((a.id.clone(), organization.id.clone(), false));
+                }
+                serving
+                    .any(|p| !p.admits(&attribution) && p.admits(&placed))
+                    .then(|| (a.id.clone(), organization.id.clone(), true))
             })
             .collect()
+    }
+    /// SB-285: writes one placement [`Snapshot::domain_placements`] found.
+    fn apply_domain_placement(&mut self, account: &str, organization: &str, also: bool) {
+        if also {
+            let list = self.also_organizations.entry(account.into()).or_default();
+            if !list.iter().any(|o| o == organization) {
+                list.push(organization.into());
+            }
+        } else {
+            self.memberships.insert(account.into(), organization.into());
+        }
+        append_event(self, "organization", Some(account), "assigned");
     }
     /// SB-285: once per store, the move off the domain rule: every placement it made that the
     /// account's groups agree with ([`Snapshot::domain_placements`]) becomes the person's word,
@@ -344,9 +360,8 @@ impl Snapshot {
         if self.domain_rule_retired || self.organizations.is_empty() {
             return false;
         }
-        for (account, organization) in self.domain_placements() {
-            self.memberships.insert(account.clone(), organization);
-            append_event(self, "organization", Some(&account), "assigned");
+        for (account, organization, also) in self.domain_placements() {
+            self.apply_domain_placement(&account, &organization, also);
         }
         self.domain_rule_retired = true;
         true
@@ -775,19 +790,16 @@ impl Store {
     ) -> Result<usize, String> {
         let mut state = self.lock()?;
         let mut candidate = state.clone();
-        let placements: Vec<(String, String)> = candidate
+        let placements: Vec<(String, String, bool)> = candidate
             .domain_placements()
             .into_iter()
-            .filter(|(account, _)| ids.contains(account))
+            .filter(|(account, _, _)| ids.contains(account))
             .collect();
         if placements.is_empty() {
             return Ok(0);
         }
-        for (account, organization) in &placements {
-            candidate
-                .memberships
-                .insert(account.clone(), organization.clone());
-            append_event(&mut candidate, "organization", Some(account), "assigned");
+        for (account, organization, also) in &placements {
+            candidate.apply_domain_placement(account, organization, *also);
         }
         self.publish(&mut state, candidate)?;
         self.changed();
@@ -833,6 +845,35 @@ impl Store {
         self.publish(&mut state, candidate)?;
         self.changed();
         Ok(())
+    }
+    /// SB-285: a restore saves its accounts before it puts back the person's word on them, and a
+    /// save into an organization's group confirms the address's suggestion (`SaveRequest::plan`).
+    /// For the accounts the restore itself added, that confirmation is not the person's: it is
+    /// dropped here so the backup's word, or the move off the domain rule for an older backup,
+    /// decides. True when something was dropped.
+    pub fn forget_restored_placements(
+        &self,
+        ids: &std::collections::BTreeSet<String>,
+    ) -> Result<bool, String> {
+        let mut state = self.lock()?;
+        let mut candidate = state.clone();
+        let before = (
+            candidate.memberships.len(),
+            candidate.also_organizations.len(),
+        );
+        candidate.memberships.retain(|k, _| !ids.contains(k));
+        candidate.also_organizations.retain(|k, _| !ids.contains(k));
+        if before
+            == (
+                candidate.memberships.len(),
+                candidate.also_organizations.len(),
+            )
+        {
+            return Ok(false);
+        }
+        self.publish(&mut state, candidate)?;
+        self.changed();
+        Ok(true)
     }
     /// The person's word on one account from a backup, where this install has none.
     pub fn restore_membership(&self, account: &str, choice: &str) -> Result<(), String> {
@@ -1466,6 +1507,9 @@ mod tests {
         teamed.pool = "default".into();
         let mut home = account(&id(6), Provider::Claude, "me@home.example", None);
         home.pool = "own-pool".into();
+        // At home in a personal group and shared into Acme's group (SB-282).
+        let mut shared = account(&id(7), Provider::Claude, "f@acme.example", None);
+        shared.pool = "own-pool".into();
         let mut s = Snapshot {
             organizations: vec![org(O1, "Acme", &["acme.example"]), org(O2, "Beta", &[])],
             projects: vec![group("acme-pool", Some(O1)), group("own-pool", None)],
@@ -1476,9 +1520,12 @@ mod tests {
                 said_personal.clone(),
                 teamed.clone(),
                 home.clone(),
+                shared.clone(),
             ],
             ..Default::default()
         };
+        s.projects[0].shared_accounts = vec![shared.id.clone()];
+        assert!(s.context_admits("acme-pool", &shared), "under the old rule");
         s.organizations[1].provider_organizations = vec!["claude:team-b".into()];
         s.memberships
             .insert(said_personal.id.clone(), PERSONAL.into());
@@ -1502,6 +1549,15 @@ mod tests {
         assert_eq!(word(&s, &said_personal).as_deref(), Some(PERSONAL));
         assert_eq!(word(&s, &teamed), None, "its team decides");
         assert_eq!(word(&s, &home), None);
+        // Shared into Acme's group: its personal group's word stands, and Acme is one it also
+        // works for, so neither group loses it.
+        assert_eq!(word(&s, &shared), None);
+        assert_eq!(
+            s.also_organizations.get(&shared.id),
+            Some(&vec![O1.to_string()])
+        );
+        assert!(s.context_admits("own-pool", &shared));
+        assert!(s.context_admits("acme-pool", &shared));
         // Once: a second pass changes nothing, and a store without organizations needs none.
         let before = s.clone();
         assert!(!s.retire_domain_rule());

@@ -34,7 +34,8 @@ fn schema_version(snapshot: &Snapshot) -> u32 {
     // Version 10 only while an account carries where it works (SB-284).
     // Version 11 only while the domain rule is retired (SB-285): organizations exist and an
     // address's domain only suggests one. A 0.7.34 or older reader would place accounts by their
-    // domain again; it refuses the unknown field, and the version says why.
+    // domain again. It refuses the unknown field, but it parses the whole file before the
+    // version, so it reports the file as corrupt rather than naming the version.
     if snapshot.domain_rule_retired {
         11
     } else if !snapshot.locations.is_empty() {

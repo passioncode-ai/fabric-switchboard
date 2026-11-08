@@ -682,6 +682,9 @@ pub fn restore(
             let _ = store.mark_elsewhere_at(id, true, *at, location);
         }
     }
+    // SB-285: the backup's word decides for the accounts this restore added, not the
+    // confirmation their save recorded a moment ago.
+    let _ = store.forget_restored_placements(&added);
     for (old, choice) in &payload.memberships {
         let choice = if choice == crate::organizations::PERSONAL {
             Some(choice.clone())
@@ -1153,6 +1156,60 @@ mod tests {
             .unwrap();
         assert!(snap.context_admits("alpha", a));
         let _ = (loose, original);
+    }
+
+    #[test]
+    fn a_restore_keeps_the_backups_word_over_the_domains_suggestion() {
+        // SB-285 (seam review): a restore saves each account before it puts back the person's
+        // word, and a save into a group of the organization the address suggests confirms that
+        // organization. Restored onto an install that already has the group, the backup's word
+        // (Beta, chosen by the person) must win over the domain's suggestion (Acme).
+        let temp = tempfile::tempdir().unwrap();
+        let backups = temp.path().join("backups");
+        let keys = Keys::default();
+        let alpha = temp.path().join("alpha");
+        std::fs::create_dir_all(&alpha).unwrap();
+        let group_of_both = |store: &Store, accounts: &[String]| {
+            let acme = store
+                .add_organization("Acme", &["example.invalid".into()])
+                .unwrap();
+            let beta = store.add_organization("Beta", &[]).unwrap();
+            let pool = store
+                .save_project_in(
+                    None,
+                    "Alpha",
+                    std::slice::from_ref(&alpha),
+                    accounts,
+                    Some(Some(&acme.id)),
+                )
+                .unwrap()
+                .pool;
+            store
+                .set_project_organizations(&pool, vec![acme.id.clone(), beta.id.clone()])
+                .unwrap();
+            (acme, beta, pool)
+        };
+        let original = store(&temp.path().join("one"));
+        let a = save(&original, "synthetic-a", "token-a-secret");
+        let (_, beta, _) = group_of_both(&original, std::slice::from_ref(&a.id));
+        original.assign_organization(&a.id, Some(&beta.id)).unwrap();
+        let info = write(&original, &backups, &keys, 1_000).unwrap().unwrap();
+        let here = store(&temp.path().join("two"));
+        let (_, here_beta, pool) = group_of_both(&here, &[]);
+        restore(&here, &backups, &info.file, &keys).unwrap();
+        let snap = here.snapshot().unwrap();
+        let restored = snap
+            .accounts
+            .iter()
+            .find(|x| x.label == "synthetic-a")
+            .unwrap();
+        assert_eq!(
+            snap.memberships.get(&restored.id),
+            Some(&here_beta.id),
+            "the backup's word, not the domain's"
+        );
+        assert!(snap.also_organizations.get(&restored.id).is_none());
+        assert!(snap.context_admits(&pool, restored));
     }
 
     #[derive(Default, Clone)]
