@@ -349,7 +349,7 @@ check(() => {
   assert.equal(logic.compactCountdown(now + 36 * 60, now), '36m');
   assert.equal(logic.compactCountdown(now + 30, now), '<1m');
   assert.equal(logic.compactCountdown(now, now), 'now');
-  assert.equal(logic.compactCountdown(NaN, now), '—');
+  assert.equal(logic.compactCountdown(NaN, now), 'unknown', 'SB-195: an invalid time reads as a word, never a lone dash');
   const base = { id: 'a', label: 'a', provider: 'claude', pool: 'p', enabled: true, kind: 'oauth', created_at: 1 };
   const usage = (used, extra = {}) => ({ used_percent: used, observed_at: now - 10, resets_at: now + 3600, source: 'claude_oauth', windows: [{ name: 'five_hour', used_percent: used, resets_at: now + 3600 }], ...extra });
   const ctx = { nowSeconds: now };
