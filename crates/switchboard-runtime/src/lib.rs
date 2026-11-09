@@ -4156,6 +4156,7 @@ fn dispatch_remote(
         handoff: handoff_id,
         request,
         dispatch_id,
+        timeout_seconds: u64::from(timeout_minutes) * 60,
     };
     let started = blocking::run(|| {
         remote_dispatch::start(&target.machine, &program, &start, &account_send::ssh_runner)

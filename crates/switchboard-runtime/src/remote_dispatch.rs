@@ -76,6 +76,7 @@ pub fn run_script(
     request: &str,
     launch_id: &str,
     dispatch_id: Option<&str>,
+    timeout_seconds: u64,
 ) -> String {
     let mut env = vec![
         ("FABRIC_DISPATCH_WORKFLOW", workflow),
@@ -93,8 +94,11 @@ pub fn run_script(
     format!(
         "#!/bin/sh\n{exports}export FABRIC_DISPATCH_REQUEST_FILE=\"$2/request.json\"\nexport FABRIC_DISPATCH_RESULT=\"$2/result.txt\"\n\
 cd \"$1\" || {{ echo 97 >\"$2/exit\"; exit 97; }}\n\
+( sleep {timeout_seconds}; [ -f \"$2/exit\" ] || {{ touch \"$2/timed_out\"; kill -TERM -- \"-$$\" 2>/dev/null; sleep 5; kill -KILL -- \"-$$\" 2>/dev/null; }} ) &\n\
+timer=$!\n\
 {launch} --provider {provider} --working-directory \"$1\" --headless --by fabric-dispatch -- -p \"$(cat \"$2/prompt.txt\")\" >\"$2/log\" 2>&1\n\
-echo $? >\"$2/exit\"\n",
+echo $? >\"$2/exit\"\n\
+kill \"$timer\" 2>/dev/null\n",
         launch = remote(program, &["launch"]),
         provider = provider.as_str(),
     )
@@ -112,6 +116,8 @@ pub struct Start<'a> {
     pub handoff: &'a str,
     pub request: &'a str,
     pub dispatch_id: Option<&'a str>,
+    /// D-7: the run's time limit; the script there stops its own process group at it.
+    pub timeout_seconds: u64,
 }
 
 /// Starts the run on `target`: finds the repository there (D-3), checks the target's limit
@@ -195,6 +201,7 @@ git -C \"$repo\" worktree add -q --detach {wt} \"$base\"; echo made",
                 s.request,
                 s.launch_id,
                 s.dispatch_id,
+                s.timeout_seconds,
             )
             .into_bytes(),
         ),
@@ -228,13 +235,19 @@ echo $! >\"$d/pid\"; echo started"
 /// written and no process: it was killed or the machine restarted) or `unknown` (ssh did not
 /// answer), and `result`, the result file's text (up to `RESULT_MAX`) or null.
 pub fn status(target: &str, launch_id: &str, run: &Run<'_>) -> Value {
-    let d = dir(launch_id);
+    let (d, wt) = (dir(launch_id), worktree(launch_id));
     let script = format!(
         "d={d}; if [ ! -d \"$d\" ]; then echo state=none; exit 0; fi; \
+ended=1; \
 if [ -f \"$d/stopped\" ]; then echo state=stopped; \
+elif [ -f \"$d/timed_out\" ]; then echo state=timed_out; \
 elif [ -f \"$d/exit\" ]; then echo state=exited; echo \"exit=$(cat \"$d/exit\")\"; \
-elif [ -f \"$d/pid\" ] && kill -0 \"$(cat \"$d/pid\")\" 2>/dev/null; then echo state=running; \
+elif [ -f \"$d/pid\" ] && kill -0 \"$(cat \"$d/pid\")\" 2>/dev/null; then echo state=running; ended=0; \
 else echo state=lost; fi; \
+wt={wt}; if [ $ended = 1 ] && [ -d \"$wt\" ]; then \
+if [ -z \"$(git -C \"$wt\" status --porcelain 2>/dev/null)\" ] && [ -n \"$(git -C \"$wt\" branch -r --contains HEAD 2>/dev/null)\" ]; then \
+common=$(git -C \"$wt\" rev-parse --path-format=absolute --git-common-dir 2>/dev/null) && git --git-dir=\"$common\" worktree remove --force \"$wt\" && echo worktree=removed || echo worktree=kept; \
+else echo worktree=kept; fi; fi; \
 if [ -f \"$d/result.txt\" ]; then echo result:; head -c {RESULT_MAX} \"$d/result.txt\"; fi"
     );
     let Ok(out) = run(&ssh(target, script), None) else {
@@ -250,12 +263,19 @@ if [ -f \"$d/result.txt\" ]; then echo result:; head -c {RESULT_MAX} \"$d/result
             .map(str::trim)
     };
     let state = match field("state") {
-        Some(s @ ("running" | "exited" | "stopped" | "lost")) => s,
+        Some(s @ ("running" | "exited" | "stopped" | "timed_out" | "lost")) => s,
         Some("none") => "none",
         _ => "unknown",
     };
     let exit_code = field("exit").and_then(|c| c.parse::<i32>().ok());
-    json!({"launch_id": launch_id, "target": target, "state": state, "exit_code": exit_code, "result": result})
+    // D-8: after the run ended, its worktree is removed when nothing in it is left unpushed;
+    // otherwise it is kept for a person, named here.
+    let worktree = match field("worktree") {
+        Some("removed") => json!("removed"),
+        Some("kept") => json!(format!("~/DATA/_worktrees/dispatch-{launch_id}")),
+        _ => Value::Null,
+    };
+    json!({"launch_id": launch_id, "target": target, "state": state, "exit_code": exit_code, "result": result, "worktree": worktree})
 }
 
 /// D-7: stops the run there: TERM to its process group, KILL after 5 s; `stopped` is marked
@@ -361,6 +381,7 @@ mod tests {
             format!(
                 "#!/bin/sh\nif [ \"$2\" = project ]; then echo '{projects}'; exit 0; fi\n\
 printf '%s\\n' \"$@\" >\"$(dirname \"$FABRIC_DISPATCH_RESULT\")/args\"\n\
+if [ -f \"$HOME/slow\" ]; then sleep 30; fi\n\
 printf 'fabric-dispatch/1 result workflow=%s handoff=%s request=%s launch=%s\\noutcome=answered\\n\\nDone.\\n' \
 \"$FABRIC_DISPATCH_WORKFLOW\" \"$FABRIC_DISPATCH_HANDOFF\" \"$FABRIC_DISPATCH_REQUEST\" \"$FABRIC_DISPATCH_LAUNCH\" >\"$FABRIC_DISPATCH_RESULT\"\n\
 exit 3\n"
@@ -395,6 +416,7 @@ exit 3\n"
             handoff: H,
             request: REQ,
             dispatch_id: Some("d-1"),
+            timeout_seconds: 600,
         };
         let started = start("studio.local", &program, &s, &run).unwrap();
         assert_eq!(started["state"], "started", "{started}");
@@ -433,6 +455,53 @@ exit 3\n"
         let mode = std::fs::metadata(&dir).unwrap().permissions();
         use std::os::unix::fs::PermissionsExt;
         assert_eq!(mode.mode() & 0o077, 0, "the run's folder is private");
+        // The run pushed nothing and left nothing: its worktree went with the status that read
+        // its end.
+        assert_eq!(answer["worktree"], "removed", "{answer}");
+        assert!(!wt.exists());
+    }
+
+    #[test]
+    fn a_run_past_its_time_limit_stops_itself_and_keeps_its_worktree_with_work_in_it() {
+        let (home, path) = fixture();
+        std::fs::write(home.path().join("slow"), "").unwrap();
+        let run = local(home.path());
+        let program = Program {
+            path: &path,
+            data_dir: None,
+        };
+        let body = json!({});
+        let launch = crate::launches::new_id();
+        let s = Start {
+            launch_id: &launch,
+            provider: Provider::Codex,
+            identity: "github.com/acme/app",
+            request_body: &body,
+            workflow: WF,
+            handoff: H,
+            request: REQ,
+            dispatch_id: None,
+            timeout_seconds: 1,
+        };
+        assert_eq!(start("studio.local", &program, &s, &run).unwrap()["state"], "started");
+        let wt = home.path().join(format!("DATA/_worktrees/dispatch-{launch}"));
+        std::fs::write(wt.join("work.txt"), "not pushed\n").unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+        let answer = loop {
+            let answer = status("studio.local", &launch, &run);
+            if answer["state"] != "running" || std::time::Instant::now() > deadline {
+                break answer;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(200));
+        };
+        assert_eq!(answer["state"], "timed_out", "{answer}");
+        assert_eq!(answer["result"], Value::Null);
+        assert_eq!(
+            answer["worktree"],
+            format!("~/DATA/_worktrees/dispatch-{launch}"),
+            "work not pushed keeps its worktree"
+        );
+        assert!(wt.join("work.txt").is_file());
     }
 
     #[test]
@@ -454,6 +523,7 @@ exit 3\n"
             handoff: H,
             request: REQ,
             dispatch_id: None,
+            timeout_seconds: 600,
         };
         let answer = start("studio.local", &program, &s, &run).unwrap();
         assert_eq!(answer["reason"], NOT_ON_TARGET);

@@ -481,6 +481,9 @@ pub(crate) fn status(
         Some("stopped") => {
             ended(root, id, STOPPED, now, None, analytics);
         }
+        Some("timed_out") => {
+            ended(root, id, TIMED_OUT, now, None, analytics);
+        }
         Some("lost") => {
             ended(root, id, EXITED, now, None, analytics);
         }
