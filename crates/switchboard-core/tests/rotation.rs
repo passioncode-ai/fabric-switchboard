@@ -1315,7 +1315,7 @@ fn a_project_takes_its_accounts_into_its_pool_and_gives_back_the_ones_left_out()
     };
     assert_eq!((pool(&a), pool(&b)), ("default".into(), "alpha-web".into()));
     assert_eq!(snap.projects[0].folders.len(), 1);
-    // Survives a restart, and removing the project keeps the accounts where they are.
+    // Survives a restart, and removing the project sends its accounts back to default (SB-314).
     drop(store);
     let store = Store::open(root.path().into(), vault).unwrap();
     assert_eq!(store.snapshot().unwrap().projects.len(), 1);
@@ -1324,11 +1324,12 @@ fn a_project_takes_its_accounts_into_its_pool_and_gives_back_the_ones_left_out()
     assert!(snap.projects.is_empty());
     assert_eq!(
         snap.accounts.iter().find(|x| x.id == b).unwrap().pool,
-        "alpha-web"
+        "default"
     );
 }
 
-// SB-122: a deleted project's accounts stay in its pool; one can go back to default by itself.
+// SB-122, SB-314: a deleted project's accounts go back to default, except one whose login default
+// already holds: it stays in the pool and goes back by itself once the copy is gone.
 #[test]
 fn an_account_left_in_a_deleted_projects_pool_returns_to_default() {
     let (_root, _vault, store) = setup();
@@ -1349,10 +1350,10 @@ fn an_account_left_in_a_deleted_projects_pool_returns_to_default() {
         .unwrap_err()
         .contains("in a project"));
     store.select(Provider::Claude, "gone", &a).unwrap();
-    store.remove_project("gone").unwrap();
-    // A copy of the same login already in default is refused, and nothing moves.
+    // A copy of the same login already in default keeps it in the pool, and nothing moves.
     let copy = account_in(&store, "org-a", "default", now);
     assert_ne!(copy, a);
+    store.remove_project("gone").unwrap();
     assert!(store
         .return_to_default(&a)
         .unwrap_err()

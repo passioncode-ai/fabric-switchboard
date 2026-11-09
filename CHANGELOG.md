@@ -8,6 +8,8 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- Deleting a group sends its accounts back to the default group; before, they stayed in a pool no folder used and served nothing. One whose sign-in the default group already holds stays where it was (SB-314).
+- An account a group already shares no longer blocks that group's renames and added folders when it stops fitting the group's organization; only an account joining a group is checked (SB-314).
 - Moving an account back to the default group, or deleting its group, also takes it out of every group that shared it. Before, the next save of such a group (a folder the background adds) moved the account into that group by itself and dropped its selection in the default group; data an earlier version left this way is cleaned once at start (SB-313).
 - A group whose shared account is the ordinary Claude Code's login is no longer refused on every later save; only an account joining a group is checked (SB-313).
 - Placing an account in an organization is refused when a teammate of its provider team, which moves with it, would then be refused by a group it serves. A group whose selected account you place outside its organization moves to another account it admits (SB-313).
