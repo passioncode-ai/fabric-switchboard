@@ -28,7 +28,8 @@ pub const HANDOVER_SIGNATURE: &str =
 /// SB-315: starting the sign-in of a record nobody's published key vouches for.
 pub const RECEIVE_SIGNER: &str = "Name the giver's published key (switchboard settings signer on their computer) to start this sign-in.";
 /// SB-315: starting a sign-in this computer already holds.
-pub const RECEIVE_HELD: &str = "This computer already holds this sign-in. There is nothing to receive.";
+pub const RECEIVE_HELD: &str =
+    "This computer already holds this sign-in. There is nothing to receive.";
 
 /// The group the account served on the giving machine.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
