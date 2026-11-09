@@ -1124,6 +1124,22 @@ impl Store {
     }
 }
 
+/// SB-314: what a refusal calls an account: its label when it fits the pattern the window's
+/// formatted errors accept (`src/formatted-errors.ts`: a letter or digit, then up to 39 of
+/// letters, digits, space and `._()+-@`), else its id.
+pub(crate) fn shown_name(account: &Account) -> &str {
+    let label = account.label.as_str();
+    let mut chars = label.chars();
+    let fits = label.chars().count() <= 40
+        && chars.next().is_some_and(|c| c.is_ascii_alphanumeric())
+        && chars.all(|c| c.is_ascii_alphanumeric() || " ._()+-@".contains(c));
+    if fits {
+        label
+    } else {
+        &account.id
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1690,18 +1706,3 @@ mod tests {
     }
 }
 
-/// SB-314: what a refusal calls an account: its label when it fits the pattern the window's
-/// formatted errors accept (`src/formatted-errors.ts`: a letter or digit, then up to 39 of
-/// letters, digits, space and `._()+-@`), else its id.
-pub(crate) fn shown_name(account: &Account) -> &str {
-    let label = account.label.as_str();
-    let mut chars = label.chars();
-    let fits = label.chars().count() <= 40
-        && chars.next().is_some_and(|c| c.is_ascii_alphanumeric())
-        && chars.all(|c| c.is_ascii_alphanumeric() || " ._()+-@".contains(c));
-    if fits {
-        label
-    } else {
-        &account.id
-    }
-}

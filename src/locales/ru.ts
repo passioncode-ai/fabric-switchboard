@@ -16,6 +16,7 @@ export const RU: Record<string, string> = {
   "{label} moved to {machine}. This computer no longer uses it.": "{label} перенесён на {machine}. Этот компьютер им больше не пользуется.",
   "Name the other machine as ssh knows it: letters, digits, dots, hyphens, @ and : only.": "Назовите другую машину так, как её знает ssh: только буквы, цифры, точки, дефисы, знак @ и двоеточие.",
   "Give the other machine's switchboard as an absolute path without quotes.": "Укажите switchboard другой машины абсолютным путём без кавычек.",
+  "Give the other machine's data folder as an absolute path without quotes.": "Укажите папку данных другой машины абсолютным путём без кавычек.",
   "Only a Claude or Codex subscription sign-in moves this way. Give an API key through your vault.": "Так переносится только вход в подписку Claude или Codex. Ключ API передайте через своё хранилище.",
   "This account is already used elsewhere or turned off here.": "Этот аккаунт уже используется в другом месте или выключен здесь.",
   "Select another account for its group before moving this one.": "Выберите для его группы другой аккаунт, прежде чем переносить этот.",

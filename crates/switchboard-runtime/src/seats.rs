@@ -32,6 +32,12 @@ pub struct Seat {
     /// so a call back can tell whether the account was renewed here since. Never the token.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sent: Option<String>,
+    /// SB-315: the other machine's switchboard a move ran, when it was not the macOS app's, and
+    /// that machine's data folder, when one was named; a call back runs the same.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub program: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub data_dir: Option<String>,
     /// `operator` when `decision` carries the operator's words, else `agent`.
     pub ordered_by: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -54,6 +60,8 @@ pub(crate) fn of(
         pool: pool.into(),
         remote_account: None,
         sent: None,
+        program: None,
+        data_dir: None,
         ordered_by: if decision.is_some() {
             "operator"
         } else {

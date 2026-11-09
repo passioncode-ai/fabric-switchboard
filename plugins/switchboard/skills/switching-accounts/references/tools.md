@@ -424,24 +424,25 @@ disables it here because another machine uses it; `location` says where it works
 its user, or a colleague, at most 80 characters) and marks it so; an empty one clears it. At
 least one field ("Name a label, enabled, elsewhere or location to change.").
 
-### `switchboard_account_send`: `account_id`, `to`, `pool?`, `remote?`, `decision?`
+### `switchboard_account_send`: `account_id`, `to`, `pool?`, `remote?`, `remote_data_dir?`, `decision?`
 
 Only when the operator asks. Moves a Claude or Codex subscription sign-in to another machine over
 ssh without a new sign-in there: it is marked here as used elsewhere first, saved there (the tokens
 on stdin), checked there with a quota check, and both are undone on any failure. `to` is the machine
 as ssh knows it, reachable without a prompt; `pool` its group there; `remote` that machine's
-`switchboard` (default the macOS app's). Every move is a line in `seats.jsonl`; `decision` (the
+`switchboard` (default the macOS app's); `remote_data_dir` its data folder when it runs with
+`--data-dir`, given to every command there. Every move is a line in `seats.jsonl`; `decision` (the
 operator's words: `by: operator`, `instruction` verbatim, `at` RFC 3339, `source`) is recorded with it
 as who ordered it.
 
-### `switchboard_account_recall`: `account_id`, `from`, `remote_id?`, `remote?`, `decision?`
+### `switchboard_account_recall`: `account_id`, `from`, `remote_id?`, `remote?`, `remote_data_dir?`, `decision?`
 
 Only when the operator asks. Takes back a Claude or Codex sign-in this machine moved with
 `switchboard_account_send`: the other machine stops using it and gives its tokens back over ssh, the
 provider is checked here (on failure it goes back there), then the copy there is removed and its
 account list read. Answers `{recalled, removed_there, proved}`; `proved` is false while the list
-there still names it. `remote_id` defaults to the one the recorded move names, until a call
-back of it is recorded. Refused when the account was renewed here after it moved (its copy there is
+there still names it. `remote_id`, `remote` and `remote_data_dir` default to the ones the
+recorded move named, until a call back of it is recorded. Refused when the account was renewed here after it moved (its copy there is
 spent then); the other machine's own reason is answered when it refuses, and a group that uses the
 account there moves to another of its accounts first.
 

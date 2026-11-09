@@ -1502,7 +1502,7 @@ mod tests {
             .find(|x| x.label == "synthetic-a")
             .unwrap();
         assert_eq!(kept.pool, "default");
-        assert!(snap.routes.get("claude:alpha").is_none());
+        assert!(!snap.routes.contains_key("claude:alpha"));
         // Restoring again adds nothing and moves nothing.
         let again = restore(&other, &backups, &info.file, &keys).unwrap();
         assert_eq!((again.added, again.returned_to_default), (0, 0));

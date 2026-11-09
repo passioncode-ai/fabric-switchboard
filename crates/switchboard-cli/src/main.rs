@@ -869,6 +869,10 @@ enum Accounts {
         /// The other machine's switchboard, an absolute path; by default the macOS app's.
         #[arg(long)]
         remote: Option<String>,
+        /// The other machine's data folder, an absolute path, when its Switchboard runs with
+        /// `--data-dir`.
+        #[arg(long)]
+        remote_data_dir: Option<String>,
     },
     /// Take back a sign-in this machine moved to another one: that machine stops using it and
     /// gives its tokens back over ssh, the provider is checked here, then its copy is removed
@@ -882,9 +886,12 @@ enum Accounts {
         /// The account's id on the other machine; by default the one the recorded move names.
         #[arg(long)]
         remote_id: Option<String>,
-        /// The other machine's switchboard, an absolute path; by default the macOS app's.
+        /// The other machine's switchboard, an absolute path; by default the one the move ran.
         #[arg(long)]
         remote: Option<String>,
+        /// The other machine's data folder, an absolute path; by default the one the move named.
+        #[arg(long)]
+        remote_data_dir: Option<String>,
     },
     /// Moves, hand-overs and call backs recorded on this machine, newest last: account ids, the
     /// other machine, group, the id there and who ordered it. Reads only.
@@ -1680,11 +1687,13 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                 to,
                 pool,
                 remote,
+                remote_data_dir,
             } => Operation::SendAccount {
                 id: id.clone(),
                 to: to.clone(),
                 pool: pool.clone(),
                 program: remote.clone(),
+                remote_data_dir: remote_data_dir.clone(),
                 decision: None,
             },
             Accounts::Recall {
@@ -1692,11 +1701,13 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                 from,
                 remote_id,
                 remote,
+                remote_data_dir,
             } => Operation::RecallAccount {
                 id: id.clone(),
                 from: from.clone(),
                 remote_id: remote_id.clone(),
                 program: remote.clone(),
+                remote_data_dir: remote_data_dir.clone(),
                 decision: None,
             },
             Accounts::Seats { limit } => Operation::Seats {

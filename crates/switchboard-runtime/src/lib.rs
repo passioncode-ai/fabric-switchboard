@@ -246,6 +246,9 @@ pub enum Operation {
         remote_id: Option<String>,
         #[serde(default)]
         program: Option<String>,
+        /// SB-315: the other machine's data folder, when its Switchboard runs with `--data-dir`.
+        #[serde(default)]
+        remote_data_dir: Option<String>,
         /// As in `SendAccount`.
         #[serde(default)]
         decision: Option<spend::Decision>,
@@ -259,6 +262,9 @@ pub enum Operation {
         pool: Option<String>,
         #[serde(default)]
         program: Option<String>,
+        /// SB-315: the other machine's data folder, when its Switchboard runs with `--data-dir`.
+        #[serde(default)]
+        remote_data_dir: Option<String>,
         /// SB-292: as in `HandOver`.
         #[serde(default)]
         decision: Option<spend::Decision>,
@@ -3728,10 +3734,15 @@ fn record_seat(
     decision: Option<&spend::Decision>,
     remote_account: Option<&str>,
     sent: Option<&str>,
+    remote: Option<&account_send::Program<'_>>,
 ) {
     let mut seat = seats::of(monitor::now(), event, account, machine, pool, decision);
     seat.remote_account = remote_account.map(str::to_owned);
     seat.sent = sent.map(str::to_owned);
+    if let Some(remote) = remote {
+        seat.program = (remote.path != account_send::REMOTE_DEFAULT).then(|| remote.path.into());
+        seat.data_dir = remote.data_dir.map(str::to_owned);
+    }
     if seats::append(root, &seat).is_err() {
         oplog::event(
             "seat_record",
@@ -5122,18 +5133,28 @@ async fn execute(
             to,
             pool,
             program,
+            remote_data_dir,
             decision,
         } => {
             let pool = pool.unwrap_or_else(|| "default".into());
+            let program = program.unwrap_or_else(|| account_send::REMOTE_DEFAULT.into());
+            let remote = account_send::Program {
+                path: &program,
+                data_dir: remote_data_dir.as_deref(),
+            };
             let moved = {
                 let (store, id, to, pool) = (store.clone(), id.clone(), to.clone(), pool.clone());
+                let (program, data_dir) = (program.clone(), remote_data_dir.clone());
                 blocking::run(move || {
                     account_send::send(
                         &store,
                         &id,
                         &to,
                         &pool,
-                        program.as_deref().unwrap_or(account_send::REMOTE_DEFAULT),
+                        &account_send::Program {
+                            path: &program,
+                            data_dir: data_dir.as_deref(),
+                        },
                         monitor::now(),
                         &account_send::ssh_runner,
                         &|token| refresh_state.wait_settled(token),
@@ -5149,6 +5170,7 @@ async fn execute(
                 decision.as_ref(),
                 moved["remote_id"].as_str(),
                 moved["sent"].as_str(),
+                Some(&remote),
             );
             Ok(moved)
         }
@@ -5165,24 +5187,39 @@ async fn execute(
             from,
             remote_id,
             program,
+            remote_data_dir,
             decision,
         } => {
-            let program = program.unwrap_or_else(|| account_send::REMOTE_DEFAULT.into());
             let grant = seats::last_grant(root, &id, &from);
+            // SB-315: by default the same switchboard and data folder the move used there.
+            let program = program
+                .or_else(|| grant.as_ref().and_then(|g| g.program.clone()))
+                .unwrap_or_else(|| account_send::REMOTE_DEFAULT.into());
+            let remote_data_dir =
+                remote_data_dir.or_else(|| grant.as_ref().and_then(|g| g.data_dir.clone()));
+            let remote_program = |program: &str, data_dir: &Option<String>| account_send::Program {
+                path: program,
+                data_dir: data_dir.as_deref(),
+            };
             let sent = grant.as_ref().and_then(|g| g.sent.clone());
             let remote_id = remote_id
                 .or_else(|| grant.and_then(|g| g.remote_account))
                 .ok_or(account_send::NO_REMOTE_ID)?;
             let taken = {
-                let (store, id, from, program) =
-                    (store.clone(), id.clone(), from.clone(), program.clone());
+                let (store, id, from, program, data_dir) = (
+                    store.clone(),
+                    id.clone(),
+                    from.clone(),
+                    program.clone(),
+                    remote_data_dir.clone(),
+                );
                 blocking::run(move || {
                     account_send::recall_take(
                         &store,
                         &id,
                         &from,
                         &remote_id,
-                        &program,
+                        &remote_program(&program, &data_dir),
                         monitor::now(),
                         &account_send::ssh_runner,
                         sent.as_deref(),
@@ -5200,6 +5237,7 @@ async fn execute(
                         &from,
                         "",
                         decision.as_ref(),
+                        None,
                         None,
                         None,
                     );
@@ -5225,7 +5263,7 @@ async fn execute(
                     &id,
                     &from,
                     &taken,
-                    &program,
+                    &remote_program(&program, &remote_data_dir),
                     monitor::now(),
                     &account_send::ssh_runner,
                 )?;
@@ -5239,8 +5277,12 @@ async fn execute(
                 .map(|a| a.pool.clone())
                 .unwrap_or_else(|| "default".into());
             let finished = {
-                let (from, program, remote) =
-                    (from.clone(), program.clone(), taken.remote_id.clone());
+                let (from, program, data_dir, remote) = (
+                    from.clone(),
+                    program.clone(),
+                    remote_data_dir.clone(),
+                    taken.remote_id.clone(),
+                );
                 blocking::run(move || {
                     Ok::<_, String>(account_send::recall_finish(
                         &from,
@@ -5248,7 +5290,7 @@ async fn execute(
                             remote_id: remote,
                             token: None,
                         },
-                        &program,
+                        &remote_program(&program, &data_dir),
                         &account_send::ssh_runner,
                     ))
                 })
@@ -5261,6 +5303,7 @@ async fn execute(
                 &pool,
                 decision.as_ref(),
                 Some(&taken.remote_id),
+                None,
                 None,
             );
             Ok(finished)
@@ -5278,6 +5321,7 @@ async fn execute(
                 &to,
                 &pool,
                 decision.as_ref(),
+                None,
                 None,
                 None,
             );

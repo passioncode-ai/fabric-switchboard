@@ -13,6 +13,7 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 - Restoring a backup puts each account back in its group only once its organization is known again; an account its group here does not take goes to the default group and the restore says how many (SB-314).
 - *Move to another group…* shows groups whose organization does not take the account as unavailable, and says why (SB-314).
 - In the group dialog, unchecking an organization again gives back the accounts you had checked, instead of leaving them out and moving them to the default group on save (SB-314).
+- `accounts send` and `accounts recall` take `--remote-data-dir` for a Switchboard on the other machine that runs with `--data-dir` (MCP `remote_data_dir`); a call back, from the window too, uses the program and data folder the move used (SB-315).
 
 ## 0.7.38
 

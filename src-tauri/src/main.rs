@@ -233,6 +233,7 @@ async fn send_account(
             to,
             pool: Some(pool),
             program: None,
+            remote_data_dir: None,
             decision: None,
         })
         .await
@@ -270,6 +271,7 @@ async fn recall_account(id: String, from: String, state: State<'_, Slot>) -> Res
             from,
             remote_id: None,
             program: None,
+            remote_data_dir: None,
             decision: None,
         })
         .await
