@@ -1234,7 +1234,7 @@ mod tests {
         let renewed = codex("codex-refresh-2").to_oauth_json(Provider::Codex);
         let leaked: &'static str = Box::leak(renewed.into_boxed_str());
         let calls: Calls = Default::default();
-        recall_take(
+        assert!(recall_take(
             &store,
             &id,
             "studio.local",
@@ -1244,8 +1244,7 @@ mod tests {
             &member(&calls, Some(leaked), false),
             None,
         )
-        .ok()
-        .expect("taken back");
+        .is_ok());
         let back = store.stored_credential(&id).unwrap();
         assert_eq!(back.refresh_token.as_deref(), Some("codex-refresh-2"));
         assert!(!store.snapshot().unwrap().elsewhere.contains_key(&id));
