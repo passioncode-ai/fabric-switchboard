@@ -150,6 +150,17 @@ const safeErrors = new Set([
   "The other machine did not save the sign-in. Nothing changed here; check ssh and its Switchboard.",
   "The other machine already holds this sign-in in that group. Remove its old copy there, then move it again.",
   "The other machine saved the sign-in but the provider did not answer it there. It was removed there and stays here.",
+  // Safe moves and call backs between machines (SB-312).
+  "The ordinary Claude Code or Codex here is signed in to this account. Sign it in to another account first.",
+  "This sign-in is also saved in another group here. Remove or move that copy first, so only one machine renews it.",
+  "The other machine's Switchboard did not answer over ssh. Nothing changed; check ssh and that Switchboard runs there.",
+  "The other machine has no group with that id. Name one of its groups, or default.",
+  "This machine renewed the sign-in while it moved, so the copy sent was no longer valid. It was removed there and stays here; move it again.",
+  "The other machine's answer was lost. This machine no longer uses the account; look at the other machine's accounts and call it back or remove its copy there.",
+  "The copy on the other machine could not be removed. This machine no longer uses the account; remove that copy there, then mark the account used here.",
+  "This account was renewed here after it moved, so its copy there is no longer valid. Remove that copy there instead of calling it back.",
+  "This account was not given back by a call back here, so its mark stays. Nothing changed.",
+  "This is the only account its group uses on this machine. Add another account to that group before calling this one back.",
   // Where a data folder keeps its sign-ins (SB-287).
   "The sign-in store's choice (vault.json) could not be read. Delete vault.json to use this computer's own store, or choose again with switchboard vault use.",
   "This computer's own sign-in store works here, so Switchboard keeps sign-ins in it. A file store is only for a machine with no graphical login.",
