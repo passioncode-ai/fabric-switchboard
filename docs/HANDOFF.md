@@ -2,6 +2,21 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-11-09 (late evening): the move audit finished (SB-314, SB-315), `launch --headless` (SB-317); 0.7.38 published by hand, 0.7.39 cut
+
+- **Asked.** The same request as the entry below: audit moving accounts between machines, groups and organizations and build what is missing in waves to the end.
+- **Merged.**
+  - PR #563 (SB-314, SB-315): a placement refusal names the account and its cause (`Snapshot::seat_chosen`); a backup restore saves an account whose group names an organization in `default` first and moves it once its word is back (`Restored.returned_to_default`; #561 alone would have dropped such an account); the move dialog shows a refusing group as unavailable; the group dialog gives back the accounts the person checked; MCP `switchboard_backup_restore`, `switchboard_project_delete`, `switchboard_settings_import`; `--remote-data-dir` for send and recall, recorded in `seats.jsonl` so a call back uses it; `RECEIVED_OTHER` on a receive signed in as another account; `switchboardNativeContext` carries what native activation needs (never MCP sign-ins).
+  - PR #564 (SB-317): `launch --headless` for launchd jobs (no terminal check, stdin from `/dev/null`, `exec`, the agent's exit status). studio-agent was told on the board (thread `6ea1257d`) to drop its `script -q /dev/null` wrapper after 0.7.39.
+- **Checks.** `./scripts/check.sh` on the Mac Studio: `check=0` on 1adb5df (#563 head) and 879f8b6 (#564 code head). Copylot reports for the new strings are listed in PR #563.
+- **0.7.38.** The tag's push run `42666954676` ended with only preflight, guard and Windows x64; GitHub never created the macOS, Linux and Windows arm jobs, and the run "cannot be retried". It was started again with `gh workflow run release.yml --ref v0.7.38 -f publish=true` (run `42676238574`), where every job was created.
+- **Studio.** studio-agent moved seven accounts there by DEC-0048 at 18:30Z; the `sshlg` space logged `identity_learned stored` five times at 18:31Z (they will renew). The `appvillis` space's log belongs to its own user; studio-agent reported its two `ok`. Cleanup: the Studio's `sb-gate` worktree removed and `cargo clean --profile dev` (32 GB to 0); the MacBook's `target` (561 MB) removed.
+- **Merged after the 0.7.39 tag.** PR #566 (SB-318): *Hand over…* and *Receive a hand-over…* in the window (scenario SCN-088), walked through in Safari on the demo. It ships in 0.7.40.
+- **Mistake repeated.** After rebasing this entry's own branch `docs/handoff-2026-11-09-late` on main, I pushed it with `--force-with-lease` again, though the entry below says never to. Nothing was lost (an unmerged branch of one commit), but the rule holds: after a rebase, push a new branch.
+- **Open.** SB-317's other half: the Mac Studio as a `dispatch` target (Fabric, order `11048978`). SB-254: look for new crash reports after 2026-11-12 23:12Z.
+
+**Exact next task.** Once run `42676238574` publishes 0.7.38 (`latest.json` 0.7.38), merge PR #565, tag `v0.7.39` on its merge commit, watch the release to `latest.json` 0.7.39, install it here with `switchboard_app` (`owner_started` with 0.7.39), close SB-314, SB-315 and SB-317's first half with the release receipt, then cut 0.7.40 for SB-318 the same way and close it.
+
 ## 2026-11-09 (evening): moving accounts between machines, groups and organizations audited and fixed; 0.7.36 and 0.7.37
 
 - **Asked.** The operator, in this session: «Аудит системы, как у нас работает перемещение аккаунтов между студией, между девайсами, организациями и так далее. Вот это все, что недоработки, ошибки, что не хватает с точки зрения API, MCP, все давай доделай максимально качественно, чтобы было у нас волнами до конца.»

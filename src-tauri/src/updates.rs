@@ -406,6 +406,11 @@ struct Inner {
     /// A check runs while an update already waits (SB-105): the idle watch does not start the
     /// waiting one under it, so a newer release is not fetched only to be dropped by the restart.
     rechecking: bool,
+    /// SB-319: a check is fetching (and maybe downloading) now. A second check started meanwhile
+    /// (a person's *Check for updates* while the background one downloads) answers the running
+    /// one's phase instead of writing the same `.part` file at once: two writers, one truncating
+    /// and one appending, made a package that failed its signature check (2026-11-09, 0.7.39).
+    fetching: bool,
 }
 
 pub struct Updates {
@@ -451,6 +456,7 @@ impl Updates {
                 stalled: false,
                 watching: false,
                 rechecking: false,
+                fetching: false,
             }),
             wake: tokio::sync::Notify::new(),
             swap: tokio::sync::Mutex::new(()),
@@ -630,9 +636,10 @@ async fn check(app: &AppHandle, manual: bool) -> Phase {
     }
     let waiting = {
         let mut inner = state.lock();
-        if inner.restart.is_some() || inner.stalled || inner.rechecking {
+        if busy(&inner) {
             return inner.phase;
         }
+        inner.fetching = true;
         let waiting = inner
             .ready
             .as_ref()
@@ -648,6 +655,7 @@ async fn check(app: &AppHandle, manual: bool) -> Phase {
     };
     let outcome = fetch(app, &state, waiting).await;
     let mut inner = state.lock();
+    inner.fetching = false;
     inner.checked_at = Some(now());
     if inner.rechecking {
         inner.rechecking = false;
@@ -838,6 +846,12 @@ pub fn needs_migration(feed: &Value) -> bool {
         Some(Value::String(runbook)) => !runbook.trim().is_empty(),
         _ => false,
     }
+}
+
+/// Whether a check must not start now: a restart is under way, a swap stalled, or another check
+/// is already fetching (SB-105, SB-319).
+fn busy(inner: &Inner) -> bool {
+    inner.restart.is_some() || inner.stalled || inner.rechecking || inner.fetching
 }
 
 /// The person's *Check for updates*: works with the switch off; returns the status after.
@@ -2002,6 +2016,20 @@ mod tests {
         let mut report = IdleReport::default();
         assert!(report.due(start));
         assert!(!report.due(start - 10));
+    }
+
+    #[test]
+    fn a_second_check_never_downloads_beside_a_running_one() {
+        // SB-319: the background check was downloading 0.7.39 when *Check for updates* started a
+        // second download into the same file; the package failed its signature check.
+        let updates = Updates::new(Ok(()), None);
+        let mut inner = updates.lock();
+        assert!(!busy(&inner));
+        inner.fetching = true;
+        assert!(busy(&inner), "a check that is fetching keeps the next one out");
+        inner.fetching = false;
+        inner.rechecking = true;
+        assert!(busy(&inner));
     }
 
     #[test]
