@@ -27,6 +27,14 @@ pub const ADD_FAILED: &str =
 /// left by an earlier move. Named, because the person can fix it there.
 pub const ALREADY_THERE: &str = "The other machine already holds this sign-in in that group. Remove its old copy there, then move it again.";
 pub const NOT_VERIFIED: &str = "The other machine saved the sign-in but the provider did not answer it there. It was removed there and stays here.";
+pub const IN_USE_HERE: &str = "The ordinary Claude Code or Codex here is signed in to this account. Sign it in to another account first.";
+pub const NOT_ONLY_COPY: &str = "This sign-in is also saved in another group here. Remove or move that copy first, so only one machine renews it.";
+pub const UNREACHABLE: &str = "The other machine's Switchboard did not answer over ssh. Nothing changed; check ssh and that Switchboard runs there.";
+pub const POOL_MISSING: &str = "The other machine has no group with that id. Name one of its groups, or default.";
+pub const RENEWED_DURING: &str = "This machine renewed the sign-in while it moved, so the copy sent was no longer valid. It was removed there and stays here; move it again.";
+pub const OUTCOME_UNKNOWN: &str = "The other machine's answer was lost. This machine no longer uses the account; look at the other machine's accounts and call it back or remove its copy there.";
+pub const LEFT_THERE: &str = "The copy on the other machine could not be removed. This machine no longer uses the account; remove that copy there, then mark the account used here.";
+pub const USED_HERE_SINCE: &str = "This account was renewed here after it moved, so its copy there is no longer valid. Remove that copy there instead of calling it back.";
 
 pub const CLAUDE_ONLY: &str = "Only a Claude sign-in can be called back for now.";
 pub const NOT_AWAY: &str = "This account is used here, not on another machine.";
@@ -74,6 +82,28 @@ fn refusal(output: &str) -> Option<String> {
         .flatten()
 }
 
+/// SB-312: the other machine's ids for its accounts, or None when it did not answer.
+fn remote_ids(output: &str) -> Option<Vec<String>> {
+    let accounts = data(output)?["accounts"].as_array()?.clone();
+    Some(
+        accounts
+            .iter()
+            .filter_map(|a| a["id"].as_str().map(str::to_owned))
+            .collect(),
+    )
+}
+/// SB-312: a short fingerprint of a refresh token, kept with a move (`seats.jsonl`) so a call back
+/// can tell whether this machine renewed the sign-in after it left. Never the token.
+pub fn token_print(token: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let digest = Sha256::digest(token.as_bytes());
+    digest[..8].iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// Moves one sign-in. `settle` is called with the account's refresh token once it is marked used
+/// elsewhere here: it returns when no renewal of that token is on the network (SB-312), so the
+/// tokens read after it are the ones this machine will never renew again.
+#[allow(clippy::too_many_arguments)]
 pub fn send(
     store: &Store,
     id: &str,
@@ -82,6 +112,7 @@ pub fn send(
     program: &str,
     now: i64,
     run: &Run<'_>,
+    settle: &dyn Fn(&str),
 ) -> Result<Value, String> {
     if !target_valid(target) {
         return Err(TARGET_INVALID.into());
@@ -104,15 +135,88 @@ pub fn send(
     if snapshot.routes.values().any(|v| v == id) {
         return Err(SELECTED.into());
     }
+    // SB-312: the ordinary Claude Code or Codex renews its own sign-in, and another saved copy
+    // of the same sign-in takes every renewal here: either would spend the tokens that left.
+    if store.is_in_use(id) {
+        return Err(IN_USE_HERE.into());
+    }
     let credential = store.stored_credential(id)?;
+    // Two known identities decide alone; a row without one is compared by its refresh token, a
+    // Keychain read each, only for those rows.
+    let same = |a: &switchboard_core::Account| {
+        let known = |x: &switchboard_core::Account| {
+            x.external_identity
+                .as_ref()
+                .filter(|i| i.account_id.is_some())
+                .cloned()
+        };
+        match (known(a), known(account)) {
+            (Some(x), Some(y)) => {
+                x.account_id == y.account_id && x.organization_id == y.organization_id
+            }
+            _ => store
+                .stored_credential(&a.id)
+                .ok()
+                .and_then(|c| c.refresh_token)
+                .is_some_and(|t| credential.refresh_token.as_deref() == Some(t.as_str())),
+        }
+    };
+    if snapshot.accounts.iter().any(|a| {
+        a.id != id
+            && a.provider == account.provider
+            && a.kind == AuthKind::OAuth
+            && a.enabled
+            && !snapshot.elsewhere.contains_key(&a.id)
+            && same(a)
+    }) {
+        return Err(NOT_ONLY_COPY.into());
+    }
     let provider = match account.provider {
         Provider::Claude => "claude",
         Provider::Codex => "codex",
     };
     let ssh = |command: String| vec![target.to_owned(), "--".to_owned(), command];
+    // SB-312: before anything is marked, the other machine answers, has the group, and its
+    // accounts are read, so a lost answer to the save can be settled by looking.
+    let groups = run(&ssh(remote(program, &["--json", "project", "list"])), None)
+        .ok()
+        .and_then(|out| data(&out))
+        .ok_or(UNREACHABLE)?;
+    let known = pool == "default"
+        || groups["projects"]
+            .as_array()
+            .is_some_and(|p| p.iter().any(|g| g["pool"] == pool));
+    if !known {
+        return Err(POOL_MISSING.into());
+    }
+    let before = run(&ssh(remote(program, &["--json", "accounts", "list"])), None)
+        .ok()
+        .and_then(|out| remote_ids(&out))
+        .ok_or(UNREACHABLE)?;
     // From here this machine never renews it: the tokens leave with one holder.
     store.mark_elsewhere_at(id, true, now, Some(target))?;
     let undo_here = || store.mark_elsewhere(id, false, now);
+    if let Some(token) = credential.refresh_token.as_deref() {
+        settle(token);
+    }
+    // Read again: a renewal that was on the network when the mark was set has stored its successor.
+    let credential = match store.stored_credential(id) {
+        Ok(c) => c,
+        Err(e) => {
+            undo_here()?;
+            return Err(e);
+        }
+    };
+    let sent = credential.refresh_token.clone();
+    let remove_there = |remote_id: &str| {
+        run(
+            &ssh(remote(program, &["--json", "accounts", "remove", remote_id])),
+            None,
+        )
+        .ok()
+        .and_then(|out| data(&out))
+        .is_some()
+    };
     let added = run(
         &ssh(remote(
             program,
@@ -136,10 +240,34 @@ pub fn send(
     let output = match &added {
         Ok(out) | Err(out) => out.as_str(),
     };
-    let Some(remote_id) = data(output).and_then(|d| d["id"].as_str().map(str::to_owned)) else {
-        undo_here()?;
-        let duplicate = refusal(output).is_some_and(|e| e.contains("already exists in this pool"));
-        return Err(if duplicate { ALREADY_THERE } else { ADD_FAILED }.into());
+    let remote_id = match data(output).and_then(|d| d["id"].as_str().map(str::to_owned)) {
+        Some(remote_id) => remote_id,
+        None => {
+            if let Some(error) = refusal(output) {
+                undo_here()?;
+                let duplicate = error.contains("already exists in this pool");
+                return Err(if duplicate { ALREADY_THERE } else { ADD_FAILED }.into());
+            }
+            // No answer: look whether the other machine saved it before deciding who holds it.
+            let after = run(&ssh(remote(program, &["--json", "accounts", "list"])), None)
+                .ok()
+                .and_then(|out| remote_ids(&out));
+            return match after {
+                Some(after) => {
+                    let new: Vec<&String> = after.iter().filter(|a| !before.contains(a)).collect();
+                    if new.is_empty() {
+                        undo_here()?;
+                        Err(ADD_FAILED.into())
+                    } else if new.len() == 1 && remove_there(new[0]) {
+                        undo_here()?;
+                        Err(ADD_FAILED.into())
+                    } else {
+                        Err(OUTCOME_UNKNOWN.into())
+                    }
+                }
+                None => Err(OUTCOME_UNKNOWN.into()),
+            };
+        }
     };
     let verified = run(
         &ssh(remote(program, &["--json", "usage", &remote_id])),
@@ -148,18 +276,22 @@ pub fn send(
     .ok()
     .and_then(|out| data(&out))
     .is_some();
-    if !verified {
-        let _ = run(
-            &ssh(remote(
-                program,
-                &["--json", "accounts", "remove", &remote_id],
-            )),
-            None,
-        );
+    // SB-312: the sign-in renewed here while it moved is no longer valid there.
+    let renewed_here = store
+        .stored_credential(id)
+        .ok()
+        .is_some_and(|c| c.refresh_token != sent);
+    if !verified || renewed_here {
+        if !remove_there(&remote_id) {
+            return Err(LEFT_THERE.into());
+        }
         undo_here()?;
-        return Err(NOT_VERIFIED.into());
+        return Err(if renewed_here { RENEWED_DURING } else { NOT_VERIFIED }.into());
     }
-    Ok(json!({"moved": true, "target": target, "remote_id": remote_id, "marked_elsewhere": true}))
+    Ok(json!({
+        "moved": true, "target": target, "remote_id": remote_id, "marked_elsewhere": true,
+        "sent": sent.as_deref().map(token_print),
+    }))
 }
 
 /// SB-292 (S-3), on the machine that holds the account: give its sign-in back to the machine that
