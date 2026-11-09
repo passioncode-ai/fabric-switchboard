@@ -436,7 +436,7 @@ as who ordered it.
 
 ### `switchboard_account_recall`: `account_id`, `from`, `remote_id?`, `remote?`, `decision?`
 
-Only when the operator asks. Takes back a Claude sign-in this machine moved with
+Only when the operator asks. Takes back a Claude or Codex sign-in this machine moved with
 `switchboard_account_send`: the other machine stops using it and gives its tokens back over ssh, the
 provider is checked here (on failure it goes back there), then the copy there is removed and its
 account list read. Answers `{recalled, removed_there, proved}`; `proved` is false while the list

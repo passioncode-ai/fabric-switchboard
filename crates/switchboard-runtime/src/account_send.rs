@@ -44,7 +44,6 @@ pub const NOT_CALLED_BACK: &str =
 pub const ONLY_ONE_HERE: &str = "This is the only account its group uses on this machine. Add another account to that group before calling this one back.";
 pub const USED_HERE_SINCE: &str = "This account was renewed here after it moved, so its copy there is no longer valid. Remove that copy there instead of calling it back.";
 
-pub const CLAUDE_ONLY: &str = "Only a Claude sign-in can be called back for now.";
 pub const NOT_AWAY: &str = "This account is used here, not on another machine.";
 pub const NO_REMOTE_ID: &str =
     "Name the account's id on the other machine; no recorded move names it.";
@@ -341,9 +340,6 @@ pub fn surrender(
     if account.kind != AuthKind::OAuth {
         return Err(NOT_A_SIGN_IN.into());
     }
-    if account.provider != Provider::Claude {
-        return Err(CLAUDE_ONLY.into());
-    }
     if !account.enabled || snapshot.elsewhere.contains_key(id) {
         return Err(NOT_HERE.into());
     }
@@ -383,7 +379,7 @@ pub fn surrender(
     let credential = store.stored_credential(id)?;
     let tokens: Value =
         serde_json::from_str(&credential.to_oauth_json(account.provider)).unwrap_or(Value::Null);
-    Ok(json!({"provider": "claude", "credential": tokens}))
+    Ok(json!({"provider": account.provider.as_str(), "credential": tokens}))
 }
 
 /// What `recall_take` brought back, for `recall_undo` when the provider does not answer it here.
@@ -426,9 +422,9 @@ pub fn recall_take(
     if account.kind != AuthKind::OAuth {
         return Err(NOT_A_SIGN_IN.into());
     }
-    if account.provider != Provider::Claude {
-        return Err(CLAUDE_ONLY.into());
-    }
+    // SB-315: a Codex sign-in comes back as a Claude one does (its tokens round-trip,
+    // `an_exported_sign_in_reads_back_the_same_and_carries_nothing_else`).
+    let provider = account.provider;
     if !snapshot.elsewhere.contains_key(id) {
         return Err(NOT_AWAY.into());
     }
@@ -471,12 +467,12 @@ pub fn recall_take(
         return Err(SURRENDER_FAILED.into());
     };
     let tokens = given["credential"].to_string();
-    let Ok(credential) = Credential::parse(Provider::Claude, AuthKind::OAuth, &tokens) else {
+    let Ok(credential) = Credential::parse(provider, AuthKind::OAuth, &tokens) else {
         undo_there();
         return Err(SURRENDER_FAILED.into());
     };
     if store
-        .adopt_refreshed(Provider::Claude, &spent, &credential)
+        .adopt_refreshed(provider, &spent, &credential)
         .is_err()
     {
         undo_there();
@@ -1201,6 +1197,58 @@ mod tests {
         );
         assert!(calls.lock().unwrap().is_empty(), "nothing asked there");
         assert_eq!(token_print("synthetic-refresh").len(), 16);
+    }
+
+    /// SB-315: a Codex sign-in is called back as a Claude one is: the other machine gives it
+    /// back as `codex` and it replaces the spent copy here.
+    #[test]
+    fn a_codex_sign_in_comes_back_too() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::open(root.path().to_owned(), Arc::new(MemoryVault::default())).unwrap();
+        let codex = |refresh: &str| Credential {
+            access_token: format!("access-{refresh}"),
+            refresh_token: Some(refresh.into()),
+            id_token: Some("synthetic-id".into()),
+            native_context: None,
+            expires_at: Some(2_000_000_000),
+            account_id: Some("synthetic-workspace".into()),
+        };
+        let id = store
+            .add(
+                "Codex seat".into(),
+                Provider::Codex,
+                AuthKind::OAuth,
+                "default".into(),
+                codex("codex-refresh"),
+            )
+            .unwrap()
+            .id;
+        // Its own side: the surrender answers `codex`.
+        let given = surrender(&store, &id, false, 3, &|_| {}).unwrap();
+        assert_eq!(given["provider"], "codex");
+        surrender(&store, &id, true, 4, &|_| {}).unwrap();
+        // The calling side takes back what the other machine renewed meanwhile.
+        store
+            .mark_elsewhere_at(&id, true, 5, Some("studio.local"))
+            .unwrap();
+        let renewed = codex("codex-refresh-2").to_oauth_json(Provider::Codex);
+        let leaked: &'static str = Box::leak(renewed.into_boxed_str());
+        let calls: Calls = Default::default();
+        recall_take(
+            &store,
+            &id,
+            "studio.local",
+            "remote-1",
+            REMOTE_DEFAULT,
+            6,
+            &member(&calls, Some(leaked), false),
+            None,
+        )
+        .ok()
+        .expect("taken back");
+        let back = store.stored_credential(&id).unwrap();
+        assert_eq!(back.refresh_token.as_deref(), Some("codex-refresh-2"));
+        assert!(!store.snapshot().unwrap().elsewhere.contains_key(&id));
     }
 
     #[test]

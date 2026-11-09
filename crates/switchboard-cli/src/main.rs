@@ -872,7 +872,7 @@ enum Accounts {
     },
     /// Take back a sign-in this machine moved to another one: that machine stops using it and
     /// gives its tokens back over ssh, the provider is checked here, then its copy is removed
-    /// there and its account list read to prove it. Claude sign-ins only for now.
+    /// there and its account list read to prove it. Claude and Codex sign-ins.
     Recall {
         /// The account id here (`switchboard accounts list`).
         id: String,
