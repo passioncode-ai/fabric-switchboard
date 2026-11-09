@@ -6,7 +6,7 @@ release pull request renames `Unreleased` to the version. While Windows signing 
 that section must say `windows_authenticode: NOT_SIGNED`. Notes of 0.5.3-beta.1 and earlier are
 on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/releases).
 
-## Unreleased
+## 0.7.39
 
 - `switchboard launch --headless` runs a session from a launchd job or another scheduler with no terminal: nothing on stdin, the output where the job's goes, the agent's exit status (SB-317).
 - A new sign-in or an account added straight into a group whose organization would refuse it is refused with the reason, instead of being saved and then refusing every request in that group (SB-314).
