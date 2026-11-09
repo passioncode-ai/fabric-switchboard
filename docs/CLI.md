@@ -142,6 +142,7 @@ switchboard continue wf_0123456789abcdef --account ACCOUNT_UUID --dir /absolute/
 switchboard --json dispatch --dir /absolute/project --workflow wf_0123456789abcdef --handoff handoff:0123456789abcdef --request REQUEST_UUID --dispatch-id DISPATCH_ID --reason request --permissions all --timeout-minutes 30
 switchboard --json dispatch stop --launch-id LAUNCH_ID
 switchboard --json dispatch --dir /absolute/project --workflow wf_0123456789abcdef --handoff handoff:0123456789abcdef --request REQUEST_UUID --target sshlg@studio   # SB-317: the session runs on that machine in a fresh worktree of the repository there
+switchboard --json dispatch --dir /absolute/project --workflow wf_0123456789abcdef --handoff handoff:0123456789abcdef --target auto --candidates sshlg@studio   # SB-317: here or on the candidate whose accounts have the most room
 switchboard --json dispatch status --launch-id LAUNCH_ID   # SB-317: running, exited (exit_code), stopped, timed_out, lost or unknown; a remote run's result file in `result`
 ```
 

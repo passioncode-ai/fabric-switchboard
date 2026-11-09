@@ -200,6 +200,10 @@ pub enum Operation {
         remote: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         remote_data_dir: Option<String>,
+        /// SB-317 (D-9): with `target` `auto`, the machines to compare with this one by their
+        /// accounts' room; the request runs where there is the most.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        candidates: Vec<String>,
     },
     /// SB-247: stops a dispatched run (`state`: `stopped`, `already_ended`).
     DispatchStop {
@@ -3953,6 +3957,8 @@ struct RemoteTarget {
     machine: String,
     program: Option<String>,
     data_dir: Option<String>,
+    /// With `machine` `auto` (D-9).
+    candidates: Vec<String>,
 }
 #[allow(clippy::too_many_arguments)]
 async fn dispatch_start(
@@ -4006,6 +4012,43 @@ async fn dispatch_start(
         .map(str::to_owned)
         .or_else(|| packet.request.clone())
         .ok_or(dispatch::NO_REQUEST)?;
+    // D-9: `auto` runs where the accounts have the most room: here, or one of the candidates.
+    let target = match target {
+        Some(mut target) if target.machine == "auto" => {
+            let here =
+                remote_dispatch::capacity(&json!(store.snapshot()?.accounts), provider.as_str());
+            let program = account_send::Program {
+                path: target
+                    .program
+                    .as_deref()
+                    .unwrap_or(account_send::REMOTE_DEFAULT),
+                data_dir: target.data_dir.as_deref(),
+            };
+            let rooms: Vec<(String, Option<f64>)> = target
+                .candidates
+                .iter()
+                .map(|m| {
+                    let room = blocking::run(|| {
+                        remote_dispatch::room_there(
+                            m,
+                            &program,
+                            provider.as_str(),
+                            &account_send::ssh_runner,
+                        )
+                    });
+                    (m.clone(), room)
+                })
+                .collect();
+            match remote_dispatch::choose(here, &rooms) {
+                Some(machine) => {
+                    target.machine = machine;
+                    Some(target)
+                }
+                None => None,
+            }
+        }
+        other => other,
+    };
     if let Some(target) = target {
         return dispatch_remote(
             root,
@@ -4156,6 +4199,7 @@ fn dispatch_remote(
         handoff: handoff_id,
         request,
         dispatch_id,
+        timeout_seconds: u64::from(timeout_minutes) * 60,
     };
     let started = blocking::run(|| {
         remote_dispatch::start(&target.machine, &program, &start, &account_send::ssh_runner)
@@ -5012,6 +5056,7 @@ async fn execute(
             target,
             remote,
             remote_data_dir,
+            candidates,
         } => {
             let runtime = needs_owner()?;
             if !(1..=dispatch::MAX_TIMEOUT_MINUTES).contains(&timeout_minutes) {
@@ -5050,6 +5095,7 @@ async fn execute(
                     machine,
                     program: remote,
                     data_dir: remote_data_dir,
+                    candidates,
                 }),
             )
             .await?;
