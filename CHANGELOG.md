@@ -8,18 +8,18 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- Moving an account back to the default group, or deleting its group, also takes it out of every group that shared it. Before, the next save of such a group (a folder the background adds) moved the account into that group by itself and dropped its selection in the default group; data an earlier version left this way is cleaned once at start (SB-313).
+- A group whose shared account is the ordinary Claude Code's login is no longer refused on every later save; only an account joining a group is checked (SB-313).
+- Placing an account in an organization is refused when a teammate of its provider team, which moves with it, would then be refused by a group it serves. A group whose selected account you place outside its organization moves to another account it admits (SB-313).
+- `switchboard_accounts` (MCP) lists the organizations each account also works for (SB-313).
 - Moving an account to another machine checks first that the machine answers and has the group, never sends a sign-in that the ordinary Claude Code or Codex here is signed in to or that another group here also holds, waits for a renewal already on its way, and takes the copy back there when this machine renewed it meanwhile. A lost answer is settled by reading the other machine's accounts instead of guessing (SB-312).
 - The other machine's own reason now reaches you when it refuses a move or a call back (for example that the sign-in is already saved in that group), instead of "check ssh" (SB-312).
 - Calling an account back moves its group on the other machine to another of its accounts instead of refusing, is refused when the account was renewed here after it moved (its copy there is spent), and counts a renewal here as the provider's answer (SB-312).
 - `switchboard accounts seats` and the MCP tool `switchboard_seats` show the moves, hand-overs and call backs recorded here; `switchboard accounts list --json` says for each account whether it is used on another machine and where (SB-312).
 - Moves and call backs may take up to 10 minutes before the CLI gives up waiting (was 30 seconds) (SB-312).
-
-## Unreleased
-
-- Moving an account back to the default group, or deleting its group, also takes it out of every group that shared it. Before, the next save of such a group (a folder the background adds) moved the account into that group by itself and dropped its selection in the default group; data an earlier version left this way is cleaned once at start (SB-313).
-- A group whose shared account is the ordinary Claude Code's login is no longer refused on every later save; only an account joining a group is checked (SB-313).
-- Placing an account in an organization is refused when a teammate of its provider team, which moves with it, would then be refused by a group it serves. A group whose selected account you place outside its organization moves to another account it admits (SB-313).
-- `switchboard_accounts` (MCP) lists the organizations each account also works for (SB-313).
+- An account moved to another machine shows *Call back* in the window: the other machine gives its sign-in back and its copy there is removed. Using a moved account here again by clearing its mark is refused until it is called back (`--force` in the CLI when its copy there is gone), so two machines never renew one sign-in (SB-315).
+- Handing an account over refuses one that is turned off, already used elsewhere or signed in to the ordinary Claude Code or Codex here, as a move does (SB-315).
+- Renewals are logged (`renewal`, codes only), and a call back that the other machine does not answer is recorded in the moves log (SB-315).
 
 ## 0.7.36
 
