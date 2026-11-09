@@ -237,16 +237,34 @@ mod tests {
             }
         };
         let expected = id(Some("acct-1"), Some("org-1"), Some("me@example.invalid"));
-        assert!(same_sign_in(&expected, &id(Some("acct-1"), Some("org-1"), None)));
-        assert!(!same_sign_in(&expected, &id(Some("acct-2"), Some("org-1"), Some("me@example.invalid"))));
-        assert!(!same_sign_in(&expected, &id(Some("acct-1"), Some("org-2"), None)));
+        assert!(same_sign_in(
+            &expected,
+            &id(Some("acct-1"), Some("org-1"), None)
+        ));
+        assert!(!same_sign_in(
+            &expected,
+            &id(Some("acct-2"), Some("org-1"), Some("me@example.invalid"))
+        ));
+        assert!(!same_sign_in(
+            &expected,
+            &id(Some("acct-1"), Some("org-2"), None)
+        ));
         assert!(same_sign_in(&expected, &id(Some("acct-1"), None, None)));
         // Without the provider's ids the address decides, in any case.
         let by_address = id(None, None, Some("Me@Example.invalid"));
-        assert!(same_sign_in(&by_address, &id(Some("x"), None, Some("me@example.invalid"))));
-        assert!(!same_sign_in(&by_address, &id(Some("x"), None, Some("you@example.invalid"))));
+        assert!(same_sign_in(
+            &by_address,
+            &id(Some("x"), None, Some("me@example.invalid"))
+        ));
+        assert!(!same_sign_in(
+            &by_address,
+            &id(Some("x"), None, Some("you@example.invalid"))
+        ));
         // Nothing to compare: it passes.
-        assert!(same_sign_in(&id(None, None, None), &id(Some("x"), None, None)));
+        assert!(same_sign_in(
+            &id(None, None, None),
+            &id(Some("x"), None, None)
+        ));
     }
     use std::sync::Arc;
     use switchboard_core::{Credential, ExternalIdentity, MemoryVault};

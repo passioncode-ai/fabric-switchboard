@@ -263,11 +263,16 @@ mod export_tests {
         assert!(!text.contains("mcpOAuth") && !text.contains("synthetic-mcp"));
         let back = Credential::parse(Provider::Claude, AuthKind::OAuth, &text).unwrap();
         let native = back.native_context.unwrap();
-        assert_eq!(native["oauth_account"]["emailAddress"], "me@example.invalid");
+        assert_eq!(
+            native["oauth_account"]["emailAddress"],
+            "me@example.invalid"
+        );
         assert_eq!(native["auth"]["claudeAiOauth"]["subscriptionType"], "max");
         assert!(native["auth"]["claudeAiOauth"].get("accessToken").is_none());
         // A Codex sign-in carries none, and a context that does not read as one is left out.
-        assert!(!credential.to_oauth_json(Provider::Codex).contains("switchboardNativeContext"));
+        assert!(!credential
+            .to_oauth_json(Provider::Codex)
+            .contains("switchboardNativeContext"));
         let odd = r#"{"claudeAiOauth":{"accessToken":"a"},"switchboardNativeContext":{"auth":1}}"#;
         let back = Credential::parse(Provider::Claude, AuthKind::OAuth, odd).unwrap();
         assert!(back.native_context.is_none());
