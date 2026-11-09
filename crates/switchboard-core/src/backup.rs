@@ -65,6 +65,10 @@ pub struct Restored {
     /// Organizations put back where this install had none of the same id, name or domain.
     #[serde(default)]
     pub organizations: usize,
+    /// SB-314: accounts restored to `default` because their group, as it is here, does not admit
+    /// them by the backup's word (they used to be saved there and refused at every request).
+    #[serde(default)]
+    pub returned_to_default: usize,
 }
 /// Settings Switchboard keeps as small files in its data folder, carried by every backup so a
 /// reinstall gets them back (`login-item`: open at login, SB-28; `auto-update`: the updater;
@@ -492,8 +496,12 @@ pub fn restore(
         settings: 0,
         agent_keys: 0,
         organizations: 0,
+        returned_to_default: 0,
     };
     let existing = store.snapshot()?;
+    // SB-314: an account whose group here would refuse its save is saved in `default` first and
+    // goes to its group once the backup's word is back (below): new id → the backup's pool.
+    let mut deferred: BTreeMap<String, String> = BTreeMap::new();
     // Backup account id → the id it has here, for rules and selections.
     let mut ids: BTreeMap<String, String> = BTreeMap::new();
     // SB-285: the accounts this restore added, as they are here.
@@ -585,15 +593,59 @@ pub fn restore(
                 credential = newest;
             }
         }
+        // SB-314: a group here that names organizations checks placement at save, before the
+        // backup's word for this account is back; such an account starts in `default`.
+        let pool = if existing
+            .project_of_pool(&account.pool)
+            .is_some_and(|p| !p.organizations.is_empty())
+        {
+            let held = account
+                .external_identity
+                .as_ref()
+                .and_then(|identity| {
+                    store
+                        .match_external(account.provider, "default", identity)
+                        .ok()
+                        .flatten()
+                        .map(|a| a.id)
+                })
+                .or_else(|| {
+                    existing
+                        .accounts
+                        .iter()
+                        .find(|a| {
+                            a.provider == account.provider
+                                && a.pool == "default"
+                                && token.is_some_and(|t| {
+                                    store
+                                        .stored_credential(&a.id)
+                                        .is_ok_and(|c| c.access_token == t)
+                                })
+                        })
+                        .map(|a| a.id.clone())
+                });
+            if let Some(same) = held {
+                // `default` already holds it: that copy stays as it is.
+                ids.insert(account.id.clone(), same);
+                result.skipped += 1;
+                continue;
+            }
+            "default".to_string()
+        } else {
+            account.pool.clone()
+        };
         match store.upsert(
             account.label.clone(),
             account.provider,
             account.kind,
-            account.pool.clone(),
+            pool.clone(),
             credential,
             account.external_identity.clone(),
         ) {
             Ok(saved) => {
+                if pool != account.pool {
+                    deferred.insert(saved.id.clone(), account.pool.clone());
+                }
                 if !account.enabled {
                     let _ = store.update(&saved.id, saved.label.clone(), false);
                 }
@@ -714,6 +766,25 @@ pub fn restore(
     // moving off the rule does.
     if !payload.domain_rule_retired {
         let _ = store.freeze_domain_placements(&added);
+    }
+    // SB-314: with the groups and the word back, each account this restore added sits in a group
+    // that admits it: one saved in `default` above goes to its group when that group now admits
+    // it, and one whose group came back refusing it goes to `default`.
+    for (id, pool) in &deferred {
+        if !store.restore_account_pool(id, pool).unwrap_or(false) {
+            result.returned_to_default += 1;
+        }
+    }
+    let here = store.snapshot()?;
+    for account in here.accounts.iter().filter(|a| added.contains(&a.id)) {
+        if !deferred.contains_key(&account.id)
+            && !here.context_admits(&account.pool, account)
+            && store
+                .restore_account_pool(&account.id, "default")
+                .unwrap_or(false)
+        {
+            result.returned_to_default += 1;
+        }
     }
     let now = crate::now();
     let here = store.snapshot()?;
@@ -1353,6 +1424,89 @@ mod tests {
         );
     }
     const PERSONAL_WORD: &str = crate::organizations::PERSONAL;
+
+    #[test]
+    fn a_restore_places_an_account_in_its_group_only_once_its_word_is_back() {
+        // SB-314: a group here that names an organization checks placement when an account is
+        // saved, before the backup's word for it is back; the account starts in `default`, goes
+        // to its group once the word admits it there, and stays in `default` when it does not.
+        let temp = tempfile::tempdir().unwrap();
+        let backups = temp.path().join("backups");
+        let keys = Keys::default();
+        let original = store(&temp.path().join("one"));
+        let a = save(&original, "synthetic-a", "token-a-secret");
+        let acme = original.add_organization("Acme", &[]).unwrap();
+        original.assign_organization(&a.id, Some(&acme.id)).unwrap();
+        let repo = temp.path().join("repo");
+        std::fs::create_dir_all(&repo).unwrap();
+        original
+            .save_project_in(
+                None,
+                "Alpha",
+                std::slice::from_ref(&repo),
+                std::slice::from_ref(&a.id),
+                Some(Some(&acme.id)),
+            )
+            .unwrap();
+        original.select(Provider::Claude, "alpha", &a.id).unwrap();
+        let info = write(&original, &backups, &keys, 1_000).unwrap().unwrap();
+
+        // An install that already has Acme and its group Alpha: the account lands there.
+        let here = store(&temp.path().join("two"));
+        let own = here.add_organization("Acme", &[]).unwrap();
+        let folder = temp.path().join("checkout");
+        std::fs::create_dir_all(&folder).unwrap();
+        here.save_project_in(
+            None,
+            "Alpha",
+            std::slice::from_ref(&folder),
+            &[],
+            Some(Some(&own.id)),
+        )
+        .unwrap();
+        let restored = restore(&here, &backups, &info.file, &keys).unwrap();
+        assert_eq!((restored.added, restored.returned_to_default), (1, 0));
+        let snap = here.snapshot().unwrap();
+        let back = snap
+            .accounts
+            .iter()
+            .find(|x| x.label == "synthetic-a")
+            .unwrap();
+        assert_eq!(back.pool, "alpha");
+        assert_eq!(restored.routes, 1);
+        assert_eq!(
+            snap.routes.get("claude:alpha").map(String::as_str),
+            Some(back.id.as_str())
+        );
+
+        // An install whose group Alpha belongs to another organization: it stays in `default`.
+        let other = store(&temp.path().join("three"));
+        let beta = other.add_organization("Beta", &[]).unwrap();
+        let folder = temp.path().join("checkout-b");
+        std::fs::create_dir_all(&folder).unwrap();
+        other
+            .save_project_in(
+                None,
+                "Alpha",
+                std::slice::from_ref(&folder),
+                &[],
+                Some(Some(&beta.id)),
+            )
+            .unwrap();
+        let restored = restore(&other, &backups, &info.file, &keys).unwrap();
+        assert_eq!((restored.added, restored.returned_to_default), (1, 1));
+        let snap = other.snapshot().unwrap();
+        let kept = snap
+            .accounts
+            .iter()
+            .find(|x| x.label == "synthetic-a")
+            .unwrap();
+        assert_eq!(kept.pool, "default");
+        assert!(!snap.routes.contains_key("claude:alpha"));
+        // Restoring again adds nothing and moves nothing.
+        let again = restore(&other, &backups, &info.file, &keys).unwrap();
+        assert_eq!((again.added, again.returned_to_default), (0, 0));
+    }
 
     #[test]
     fn a_backup_keeps_every_many_link() {

@@ -424,24 +424,25 @@ disables it here because another machine uses it; `location` says where it works
 its user, or a colleague, at most 80 characters) and marks it so; an empty one clears it. At
 least one field ("Name a label, enabled, elsewhere or location to change.").
 
-### `switchboard_account_send`: `account_id`, `to`, `pool?`, `remote?`, `decision?`
+### `switchboard_account_send`: `account_id`, `to`, `pool?`, `remote?`, `remote_data_dir?`, `decision?`
 
 Only when the operator asks. Moves a Claude or Codex subscription sign-in to another machine over
 ssh without a new sign-in there: it is marked here as used elsewhere first, saved there (the tokens
 on stdin), checked there with a quota check, and both are undone on any failure. `to` is the machine
 as ssh knows it, reachable without a prompt; `pool` its group there; `remote` that machine's
-`switchboard` (default the macOS app's). Every move is a line in `seats.jsonl`; `decision` (the
+`switchboard` (default the macOS app's); `remote_data_dir` its data folder when it runs with
+`--data-dir`, given to every command there. Every move is a line in `seats.jsonl`; `decision` (the
 operator's words: `by: operator`, `instruction` verbatim, `at` RFC 3339, `source`) is recorded with it
 as who ordered it.
 
-### `switchboard_account_recall`: `account_id`, `from`, `remote_id?`, `remote?`, `decision?`
+### `switchboard_account_recall`: `account_id`, `from`, `remote_id?`, `remote?`, `remote_data_dir?`, `decision?`
 
 Only when the operator asks. Takes back a Claude or Codex sign-in this machine moved with
 `switchboard_account_send`: the other machine stops using it and gives its tokens back over ssh, the
 provider is checked here (on failure it goes back there), then the copy there is removed and its
 account list read. Answers `{recalled, removed_there, proved}`; `proved` is false while the list
-there still names it. `remote_id` defaults to the one the recorded move names, until a call
-back of it is recorded. Refused when the account was renewed here after it moved (its copy there is
+there still names it. `remote_id`, `remote` and `remote_data_dir` default to the ones the
+recorded move named, until a call back of it is recorded. Refused when the account was renewed here after it moved (its copy there is
 spent then); the other machine's own reason is answered when it refuses, and a group that uses the
 account there moves to another of its accounts first.
 
@@ -491,8 +492,30 @@ Only when the operator asks. Changes automatic switching for one provider, group
 
 ### `switchboard_backup_now`: no arguments
 
-Writes an encrypted backup now. Restoring stays the person's (the app, or
-`switchboard backup restore`).
+Writes an encrypted backup now.
+
+### `switchboard_backup_restore`: `file`
+
+Only when the operator asks. Restores one backup that `switchboard_backups` lists, by its file
+name, as the window's *Restore* does: accounts, groups, rules, the person's words and settings in
+it come back where this computer has none; accounts already here stay as they are and nothing is
+deleted. An account whose group here does not take it goes to the default group
+(`returned_to_default`). Answers the counts.
+
+### `switchboard_project_delete`: `pool`, `decision?`
+
+Only when the operator asks. Deletes a group as the window's *Delete group* does: its folders stop
+routing to its accounts and its own accounts go to the default group (nothing is signed out). A
+group with its own key or spending ceiling needs `decision`, the operator's words.
+
+### `switchboard_settings_import`: `file`, `under?`, `apply?`, `clone?`, `signer?`
+
+Reads a `switchboard-settings/1` file (`switchboard settings export` on another machine; `file`
+is an absolute path here) and answers what it would add: groups found by their repositories under
+`under` (absolute folders), organizations, agents' settings, rotation policies, teams and
+ceilings. With `apply` it adds them, only when the operator asks, and never raises or clears a
+ceiling; `clone` with `apply` first clones the groups' missing GitHub repositories with the
+person's `gh`; `signer` is the organization's published key the file must be signed by.
 
 ### `switchboard_agent_set`: `agent?`, `enabled?`, `default?`, `permissions?`
 

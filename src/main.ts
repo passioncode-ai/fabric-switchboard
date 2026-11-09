@@ -778,20 +778,23 @@ function projectDialog(existing?: Project, organization?: string) {
   let chosen = [...startOrgs];
   const chosenOrgs = () => { const on = orgBoxes.filter((b) => b.checked).map((b) => b.value); chosen = [...chosen.filter((id) => on.includes(id)), ...on.filter((id) => !chosen.includes(id))]; return chosen; };
   if (!usable.length) picker.append(el('p', 'form-note', t('No accounts yet. Add accounts first, or save the group now and add them later.')));
-  const rows: { account: Account; box: HTMLInputElement; why: HTMLElement; text: string }[] = [];
+  // SB-314: `wanted` is the person's own check, kept while an organization change disables the box, so checking that organization again gives it back.
+  const rows: { account: Account; box: HTMLInputElement; why: HTMLElement; text: string; wanted: boolean }[] = [];
   for (const account of usable) {
     const owner = projectOf(account.pool);
     const option = el('label', 'appearance-option login-option'); const box = el('input'); box.type = 'checkbox'; box.value = account.id; box.checked = existing ? servesPool(snapshot!, account, existing.pool) : !!organization && placementAdmits(snapshot!, organization, account) && !inCli(account);
     const note = owner && owner.pool !== existing?.pool ? t(' · in {name}, also serves this group', { name: owner.name }) : '';
     const why = el('span', '', `${account.label} · ${providerName(account.provider)}${note}`);
     option.append(box, why); picker.append(option);
-    rows.push({ account, box, why, text: why.textContent ?? '' });
+    const row = { account, box, why, text: why.textContent ?? '', wanted: box.checked };
+    box.addEventListener('change', () => { row.wanted = box.checked; });
+    rows.push(row);
   }
   const syncAccounts = () => {
     const orgs = chosenOrgs();
-    for (const { account, box, why, text } of rows) {
+    for (const { account, box, why, text, wanted } of rows) {
       const fits = placementAdmits(snapshot!, orgs, account);
-      box.disabled = !fits; if (!fits) box.checked = false;
+      box.disabled = !fits; box.checked = fits && wanted;
       const own = accountOrganizations(attribution(snapshot!, account)).map((id) => organizations.find((o) => o.id === id)?.name ?? '').filter(Boolean);
       why.textContent = fits ? text : `${text} · ${own.length ? t('Belongs to {name}.', { name: own.join(', ') }) : t('Personal account.')}`;
     }
@@ -2539,7 +2542,7 @@ function restoreDialog(backup: BackupInfo) {
 let restoredText = '';
 function showRestored(result: Restored) {
   const extra = [result.projects ? `${plural(result.projects, { one: '{n} group', other: '{n} groups' })}` : '', result.rules ? `${plural(result.rules, { one: '{n} rule', other: '{n} rules' })}` : '', result.settings ? t('settings') : ''].filter(Boolean);
-  restoredText = `${plural(result.added, { one: '{n} account restored', other: '{n} accounts restored' })}${extra.length ? t(', with {what}', { what: extra.join(', ') }) : ''} · ${t('{n} already here', { n: result.skipped })}${result.failed ? ` · ${t('{n} could not be restored', { n: result.failed })}` : ''}.`;
+  restoredText = `${plural(result.added, { one: '{n} account restored', other: '{n} accounts restored' })}${extra.length ? t(', with {what}', { what: extra.join(', ') }) : ''} · ${t('{n} already here', { n: result.skipped })}${result.failed ? ` · ${t('{n} could not be restored', { n: result.failed })}` : ''}${result.returned_to_default ? ` · ${plural(result.returned_to_default, { one: '{n} went to the default group: its group here does not take it', other: '{n} went to the default group: their groups here do not take them' })}` : ''}.`;
 }
 /** Language (L10N-01): the system's by default; a choice here reloads the window in that language. */
 function languagePanel() {
@@ -2726,7 +2729,8 @@ function editDialog(account: Account) {
 function moveDialog(account: Account, inCli: boolean) {
   const context = openDialog(t('Move to another group'), t('Choose where “{label}” is used. A group’s accounts work only in its folders; the default group works in every other folder.', { label: account.label }));
   const group = el('fieldset', 'appearance-options move-options'); group.append(el('legend', 'sr-only', t('Group')));
-  const targets = moveTargets(account.pool, snapshot?.projects ?? [], inCli);
+  const projects = snapshot?.projects ?? [];
+  const targets = moveTargets(account.pool, projects, inCli, (pool) => placementAdmits(snapshot!, groupOrganizations(projects.find((p) => p.pool === pool)), account));
   const radios: HTMLInputElement[] = [];
   for (const target of targets) {
     const option = el('label', 'appearance-option'); const radio = el('input'); radio.type = 'radio'; radio.name = 'move-pool'; radio.value = target.pool; radio.checked = target.current; radio.disabled = target.blocked; radio.required = true;
@@ -2735,6 +2739,7 @@ function moveDialog(account: Account, inCli: boolean) {
     option.append(radio, target.name === null ? el('span', '', label) : groupHint(label, target.pool, false)); group.append(option); radios.push(radio);
   }
   context.body.append(group);
+  if (targets.some((x) => x.refused)) context.body.append(el('p', 'form-note', t('Some groups are unavailable: their organization does not take this account. Change its organization first.')));
   if (inCli) context.body.append(el('p', 'form-note', t('This account is signed in to Claude Code or Codex, which every folder uses, so it cannot join a group. Switch the CLI to another account first.')));
   if (!snapshot?.projects?.length) context.body.append(el('p', 'form-note', t('There are no groups yet. Create one under Groups, then move accounts into it.')));
   const confirm = submit(t('Move')); context.actions.append(confirm);

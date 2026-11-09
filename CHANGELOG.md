@@ -9,6 +9,14 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 ## Unreleased
 
 - A new sign-in or an account added straight into a group whose organization would refuse it is refused with the reason, instead of being saved and then refusing every request in that group (SB-314).
+- A refusal to place an account in a group of an organization names the account and says whether it is another organization's or a personal one (SB-314).
+- Restoring a backup puts each account back in its group only once its organization is known again; an account its group here does not take goes to the default group and the restore says how many (SB-314).
+- *Move to another group…* shows groups whose organization does not take the account as unavailable, and says why (SB-314).
+- In the group dialog, unchecking an organization again gives back the accounts you had checked, instead of leaving them out and moving them to the default group on save (SB-314).
+- `accounts send` and `accounts recall` take `--remote-data-dir` for a Switchboard on the other machine that runs with `--data-dir` (MCP `remote_data_dir`); a call back, from the window too, uses the program and data folder the move used (SB-315).
+- Receiving a hand-over refuses to save a sign-in of another account than the record names (SB-315).
+- A Claude sign-in moved to another machine can be made the ordinary Claude Code sign-in there too: the move carries what that needs, never the MCP sign-ins (SB-315).
+- MCP: `switchboard_backup_restore`, `switchboard_project_delete` and `switchboard_settings_import`, so an agent can do what the window's *Restore* and *Delete group* and the CLI's `settings import` do, when the operator asks (SB-314).
 
 ## 0.7.38
 

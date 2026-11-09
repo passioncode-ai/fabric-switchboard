@@ -12,10 +12,39 @@ use switchboard_core::{AuthKind, Credential, Provider, Store};
 
 /// The macOS app's own command, the default program on the other machine.
 pub const REMOTE_DEFAULT: &str = "/Applications/Fabric Switchboard.app/Contents/MacOS/switchboard";
+/// SB-315: the Switchboard to run on the other machine: its program and, when that machine's
+/// Switchboard keeps its data elsewhere (`serve --data-dir`), that folder, given to every command
+/// there as `--data-dir`.
+#[derive(Clone, Copy, Debug)]
+pub struct Program<'a> {
+    pub path: &'a str,
+    pub data_dir: Option<&'a str>,
+}
+/// The macOS app's own Switchboard with its own data folder.
+pub const DEFAULT_APP: Program<'static> = Program {
+    path: REMOTE_DEFAULT,
+    data_dir: None,
+};
+impl Program<'_> {
+    /// Both are absolute paths without a quote or a line end.
+    fn check(&self) -> Result<(), String> {
+        let plain = |p: &str| p.starts_with('/') && !p.contains(['\'', '"', '\n']);
+        if !plain(self.path) {
+            return Err(REMOTE_INVALID.into());
+        }
+        if !self.data_dir.is_none_or(plain) {
+            return Err(REMOTE_DATA_DIR_INVALID.into());
+        }
+        Ok(())
+    }
+}
 pub const TARGET_INVALID: &str =
     "Name the other machine as ssh knows it: letters, digits, dots, hyphens, @ and : only.";
 pub const REMOTE_INVALID: &str =
     "Give the other machine's switchboard as an absolute path without quotes.";
+/// SB-315: `--remote-data-dir` that is not an absolute path.
+pub const REMOTE_DATA_DIR_INVALID: &str =
+    "Give the other machine's data folder as an absolute path without quotes.";
 pub const NOT_A_SIGN_IN: &str =
     "Only a Claude or Codex subscription sign-in moves this way. Give an API key through your vault.";
 pub const NOT_HERE: &str = "This account is already used elsewhere or turned off here.";
@@ -69,8 +98,14 @@ fn target_valid(target: &str) -> bool {
 fn quoted(word: &str) -> String {
     format!("'{}'", word.replace('\'', "'\\''"))
 }
-fn remote(program: &str, args: &[&str]) -> String {
-    std::iter::once(program)
+fn remote(program: &Program<'_>, args: &[&str]) -> String {
+    let data_dir = program
+        .data_dir
+        .map(|dir| ["--data-dir", dir])
+        .into_iter()
+        .flatten();
+    std::iter::once(program.path)
+        .chain(data_dir)
         .chain(args.iter().copied())
         .map(quoted)
         .collect::<Vec<_>>()
@@ -116,7 +151,7 @@ pub fn send(
     id: &str,
     target: &str,
     pool: &str,
-    program: &str,
+    program: &Program<'_>,
     now: i64,
     run: &Run<'_>,
     settle: &dyn Fn(&str),
@@ -124,9 +159,7 @@ pub fn send(
     if !target_valid(target) {
         return Err(TARGET_INVALID.into());
     }
-    if !program.starts_with('/') || program.contains(['\'', '"', '\n']) {
-        return Err(REMOTE_INVALID.into());
-    }
+    program.check()?;
     let snapshot = store.snapshot()?;
     let account = snapshot
         .accounts
@@ -399,7 +432,7 @@ pub fn recall_take(
     id: &str,
     target: &str,
     remote_id: &str,
-    program: &str,
+    program: &Program<'_>,
     now: i64,
     run: &Run<'_>,
     sent: Option<&str>,
@@ -407,9 +440,7 @@ pub fn recall_take(
     if !target_valid(target) {
         return Err(TARGET_INVALID.into());
     }
-    if !program.starts_with('/') || program.contains(['\'', '"', '\n']) {
-        return Err(REMOTE_INVALID.into());
-    }
+    program.check()?;
     if remote_id.is_empty() || remote_id.len() > 64 {
         return Err(NO_REMOTE_ID.into());
     }
@@ -492,7 +523,7 @@ pub fn recall_undo(
     id: &str,
     target: &str,
     taken: &Taken,
-    program: &str,
+    program: &Program<'_>,
     now: i64,
     run: &Run<'_>,
 ) -> Result<(), String> {
@@ -513,7 +544,7 @@ pub fn recall_undo(
 
 /// SB-292 (S-4): the sign-in works here; remove the other machine's copy and prove it is gone:
 /// its account list no longer names it. Answers `{recalled, removed_there, proved}`.
-pub fn recall_finish(target: &str, taken: &Taken, program: &str, run: &Run<'_>) -> Value {
+pub fn recall_finish(target: &str, taken: &Taken, program: &Program<'_>, run: &Run<'_>) -> Value {
     let ssh = |command: String| vec![target.to_owned(), "--".to_owned(), command];
     let removed = run(
         &ssh(remote(
@@ -685,6 +716,33 @@ mod tests {
     }
 
     #[test]
+    fn a_named_data_folder_goes_to_every_command_there() {
+        // SB-315: a Switchboard on the other machine that runs with --data-dir.
+        let program = Program {
+            path: "/usr/local/bin/switchboard",
+            data_dir: Some("/srv/switch board"),
+        };
+        assert_eq!(
+            remote(&program, &["--json", "accounts", "list"]),
+            "'/usr/local/bin/switchboard' '--data-dir' '/srv/switch board' '--json' 'accounts' 'list'"
+        );
+        assert_eq!(
+            remote(&DEFAULT_APP, &["--json"]),
+            format!("'{REMOTE_DEFAULT}' '--json'")
+        );
+        let relative = Program {
+            data_dir: Some("data"),
+            ..program
+        };
+        assert_eq!(relative.check().unwrap_err(), REMOTE_DATA_DIR_INVALID);
+        let bare = Program {
+            path: "switchboard",
+            data_dir: None,
+        };
+        assert_eq!(bare.check().unwrap_err(), REMOTE_INVALID);
+        assert!(program.check().is_ok());
+    }
+    #[test]
     fn a_sign_in_moves_once_with_its_tokens_on_stdin_and_this_machine_stops_using_it() {
         let (_root, store, id) = store_with(AuthKind::OAuth);
         let calls: Calls = Default::default();
@@ -693,7 +751,7 @@ mod tests {
             &id,
             "studio.local",
             "agents",
-            REMOTE_DEFAULT,
+            &DEFAULT_APP,
             100,
             &fake(&calls, true, true),
             &|_| {},
@@ -730,7 +788,7 @@ mod tests {
                 &id,
                 "studio.local",
                 "default",
-                REMOTE_DEFAULT,
+                &DEFAULT_APP,
                 100,
                 &fake(&calls, false, true),
                 &|_| {}
@@ -753,7 +811,7 @@ mod tests {
                 &id,
                 "studio.local",
                 "default",
-                REMOTE_DEFAULT,
+                &DEFAULT_APP,
                 100,
                 &fake(&calls, true, false),
                 &|_| {}
@@ -779,7 +837,7 @@ mod tests {
                 &key,
                 "studio.local",
                 "default",
-                REMOTE_DEFAULT,
+                &DEFAULT_APP,
                 100,
                 &fake(&calls, true, true),
                 &|_| {}
@@ -795,7 +853,7 @@ mod tests {
                     &id,
                     target,
                     "default",
-                    REMOTE_DEFAULT,
+                    &DEFAULT_APP,
                     100,
                     &fake(&calls, true, true),
                     &|_| {}
@@ -810,7 +868,10 @@ mod tests {
                 &id,
                 "studio.local",
                 "default",
-                "switchboard",
+                &Program {
+                    path: "switchboard",
+                    data_dir: None,
+                },
                 100,
                 &fake(&calls, true, true),
                 &|_| {}
@@ -890,7 +951,7 @@ mod tests {
                 &id,
                 "studio.local",
                 "agents",
-                REMOTE_DEFAULT,
+                &DEFAULT_APP,
                 5,
                 &refused,
                 &|_| {}
@@ -914,7 +975,7 @@ mod tests {
                 &id,
                 "studio.local",
                 "agents",
-                REMOTE_DEFAULT,
+                &DEFAULT_APP,
                 6,
                 &other,
                 &|_| {}
@@ -967,7 +1028,7 @@ mod tests {
                 &id,
                 "studio.local",
                 pool,
-                REMOTE_DEFAULT,
+                &DEFAULT_APP,
                 1,
                 run,
                 &|_| {},
@@ -1010,7 +1071,7 @@ mod tests {
             &id,
             "studio.local",
             "agents",
-            REMOTE_DEFAULT,
+            &DEFAULT_APP,
             1,
             &saved,
             &|_| {},
@@ -1030,7 +1091,7 @@ mod tests {
             &id,
             "studio.local",
             "agents",
-            REMOTE_DEFAULT,
+            &DEFAULT_APP,
             2,
             &unknown,
             &|_| {},
@@ -1067,7 +1128,7 @@ mod tests {
             &id,
             "studio.local",
             "agents",
-            REMOTE_DEFAULT,
+            &DEFAULT_APP,
             1,
             &renewing,
             &|token| {
@@ -1101,7 +1162,7 @@ mod tests {
             &id,
             "studio.local",
             "agents",
-            REMOTE_DEFAULT,
+            &DEFAULT_APP,
             1,
             &ok,
             &|_| {},
@@ -1123,7 +1184,7 @@ mod tests {
             &id,
             "studio.local",
             "agents",
-            REMOTE_DEFAULT,
+            &DEFAULT_APP,
             2,
             &ok,
             &|_| {},
@@ -1187,7 +1248,7 @@ mod tests {
                 &id,
                 "studio.local",
                 "remote-1",
-                REMOTE_DEFAULT,
+                &DEFAULT_APP,
                 2,
                 &member(&calls, None, false),
                 Some(&print),
@@ -1239,7 +1300,7 @@ mod tests {
             &id,
             "studio.local",
             "remote-1",
-            REMOTE_DEFAULT,
+            &DEFAULT_APP,
             6,
             &member(&calls, Some(leaked), false),
             None,
@@ -1291,7 +1352,7 @@ mod tests {
                 &id,
                 "studio.local",
                 "remote-1",
-                REMOTE_DEFAULT,
+                &DEFAULT_APP,
                 5,
                 &member(&calls, Some(RENEWED), false),
                 None
@@ -1309,7 +1370,7 @@ mod tests {
             &id,
             "studio.local",
             "remote-1",
-            REMOTE_DEFAULT,
+            &DEFAULT_APP,
             6,
             &member(&calls, Some(RENEWED), false),
             None,
@@ -1321,7 +1382,7 @@ mod tests {
         let done = recall_finish(
             "studio.local",
             &taken,
-            REMOTE_DEFAULT,
+            &DEFAULT_APP,
             &member(&calls, None, false),
         );
         assert_eq!(done["removed_there"], true);
@@ -1329,7 +1390,7 @@ mod tests {
         let kept = recall_finish(
             "studio.local",
             &taken,
-            REMOTE_DEFAULT,
+            &DEFAULT_APP,
             &member(&calls, None, true),
         );
         assert_eq!(
@@ -1351,7 +1412,7 @@ mod tests {
                 &id,
                 "studio.local",
                 "remote-1",
-                REMOTE_DEFAULT,
+                &DEFAULT_APP,
                 6,
                 &member(&calls, None, false),
                 None
@@ -1376,7 +1437,7 @@ mod tests {
             &id,
             "studio.local",
             "remote-1",
-            REMOTE_DEFAULT,
+            &DEFAULT_APP,
             6,
             &member(&calls, Some(r#"{"x":1}"#), false),
             None
@@ -1393,7 +1454,7 @@ mod tests {
             &id,
             "studio.local",
             "remote-1",
-            REMOTE_DEFAULT,
+            &DEFAULT_APP,
             7,
             &member(&calls, Some(RENEWED), false),
             None,
@@ -1405,7 +1466,7 @@ mod tests {
             &id,
             "studio.local",
             &taken,
-            REMOTE_DEFAULT,
+            &DEFAULT_APP,
             8,
             &member(&calls, None, false),
         )
@@ -1422,7 +1483,7 @@ mod tests {
                 &id,
                 "studio.local",
                 "",
-                REMOTE_DEFAULT,
+                &DEFAULT_APP,
                 9,
                 &member(&calls, Some(RENEWED), false),
                 None

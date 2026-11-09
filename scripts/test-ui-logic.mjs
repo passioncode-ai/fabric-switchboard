@@ -40,6 +40,9 @@ check(() => {
   const inCli = logic.moveTargets('default', projects, true);
   assert.deepEqual(inCli.map((t) => t.blocked), [false, true, true]);
   assert.deepEqual(logic.moveTargets('gone', projects, false).filter((t) => t.current), [], 'a deleted project leaves no current option');
+  // SB-314: a group that does not take the account is unavailable; the default group and the current one never are.
+  const refusing = logic.moveTargets('web', projects, false, (pool) => pool !== 'agents');
+  assert.deepEqual(refusing.map((t) => [t.pool, t.refused, t.blocked]), [['default', false, false], ['agents', true, true], ['web', false, false]]);
 });
 // SB-135: worktrees and clones are listed under their root; taking the root out takes them too.
 check(() => {

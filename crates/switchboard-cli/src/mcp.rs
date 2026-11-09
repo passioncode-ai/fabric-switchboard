@@ -77,8 +77,8 @@ pub(crate) fn tools() -> Vec<(bool, Value)> {
         (false, json!({"name":"switchboard_events","title":"Activity","description":"Recent activity, newest first: what changed (accounts, switches, groups, automatic switching, sign-ins) and how it ended, as fixed codes. No credential, prompt or provider text.","inputSchema":{"type":"object","properties":{"limit":{"type":"integer","minimum":1,"maximum":500,"default":50}},"additionalProperties":false}})),
         (true, json!({"name":"switchboard_account_update","title":"Rename, enable or disable an account","description":"Rename an account, enable or disable it (a disabled account is never selected or switched to), or mark it as used on another machine (elsewhere: true disables it here, so this machine never renews it or switches to it, automatically or not; false enables it again), saying where it works (location: a machine and its user, or a colleague, which also marks it; empty clears it). An account whose sign-in was moved with switchboard_account_send is called back with switchboard_account_recall, not used here again, unless force. Only when the operator asks. What is left out stays as it is.","inputSchema":{"type":"object","properties":{"account_id":account,"label":{"type":"string","minLength":1,"maxLength":80},"enabled":{"type":"boolean"},"elsewhere":{"type":"boolean"},"location":{"type":"string","maxLength":80},"force":{"type":"boolean","description":"With elsewhere false or enabled true: use it here although its sign-in was moved to another machine and not called back."}},"required":["account_id"],"additionalProperties":false}})),
         (true, json!({"name":"switchboard_account_move","title":"Move an account to another group","description":"Move an account into a group (pool: its group id), or back to the default group (pool: default). Only when the operator asks. Joining or leaving a group is that group's change, with its refusals: the account the ordinary Claude Code or Codex is signed in to cannot join a group, and a second copy of a login already in that group is refused.","inputSchema":{"type":"object","properties":{"account_id":account,"pool":{"type":"string","minLength":1,"description":"A group id from switchboard_projects, or default."}},"required":["account_id","pool"],"additionalProperties":false}})),
-        (true, json!({"name":"switchboard_account_send","title":"Move an account to another machine","description":"Move an account's sign-in to another machine over ssh, without a new sign-in there: it is marked here as used elsewhere first (this machine never renews it again), saved there with switchboard accounts add (the tokens on stdin), checked there with a quota check, and both are undone on any failure. Only a Claude or Codex subscription sign-in that no group has selected. to: the machine as ssh knows it, reachable without a prompt; pool: its group there (default); remote: that machine's switchboard, an absolute path (default the macOS app's). Only when the operator asks.","inputSchema":{"type":"object","properties":{"account_id":{"type":"string"},"to":{"type":"string","minLength":1,"maxLength":255},"pool":{"type":"string"},"remote":{"type":"string"},"decision":{"type":"object","properties":{"by":{"type":"string","enum":["operator"]},"instruction":{"type":"string","minLength":1,"maxLength":500},"at":{"type":"string"},"source":{"type":"string","minLength":1,"maxLength":200}},"required":["by","instruction","at","source"],"additionalProperties":false,"description":"The operator's words that ordered it, recorded with the seat in seats.jsonl."}},"required":["account_id","to"],"additionalProperties":false}})),
-        (true, json!({"name":"switchboard_account_recall","title":"Take a moved account back","description":"Take back a Claude or Codex subscription sign-in this machine moved to another one with switchboard_account_send: that machine stops using it and gives its tokens back over ssh, the provider is checked here (on failure it goes back there), then its copy there is removed and its account list read to prove it. Answers recalled, removed_there and proved. Only when the operator asks.","inputSchema":{"type":"object","properties":{"account_id":{"type":"string"},"from":{"type":"string","minLength":1,"maxLength":255,"description":"The other machine as ssh knows it, as the move named it."},"remote_id":{"type":"string","maxLength":64,"description":"The account's id there; by default the one the recorded move names."},"remote":{"type":"string"},"decision":{"type":"object","properties":{"by":{"type":"string","enum":["operator"]},"instruction":{"type":"string","minLength":1,"maxLength":500},"at":{"type":"string"},"source":{"type":"string","minLength":1,"maxLength":200}},"required":["by","instruction","at","source"],"additionalProperties":false,"description":"The operator's words that ordered it, recorded with the seat in seats.jsonl."}},"required":["account_id","from"],"additionalProperties":false}})),
+        (true, json!({"name":"switchboard_account_send","title":"Move an account to another machine","description":"Move an account's sign-in to another machine over ssh, without a new sign-in there: it is marked here as used elsewhere first (this machine never renews it again), saved there with switchboard accounts add (the tokens on stdin), checked there with a quota check, and both are undone on any failure. Only a Claude or Codex subscription sign-in that no group has selected. to: the machine as ssh knows it, reachable without a prompt; pool: its group there (default); remote: that machine's switchboard, an absolute path (default the macOS app's); remote_data_dir: its data folder when it runs with --data-dir. Only when the operator asks.","inputSchema":{"type":"object","properties":{"account_id":{"type":"string"},"to":{"type":"string","minLength":1,"maxLength":255},"pool":{"type":"string"},"remote":{"type":"string"},"remote_data_dir":{"type":"string","description":"The other machine's data folder, an absolute path, when its Switchboard runs with --data-dir."},"decision":{"type":"object","properties":{"by":{"type":"string","enum":["operator"]},"instruction":{"type":"string","minLength":1,"maxLength":500},"at":{"type":"string"},"source":{"type":"string","minLength":1,"maxLength":200}},"required":["by","instruction","at","source"],"additionalProperties":false,"description":"The operator's words that ordered it, recorded with the seat in seats.jsonl."}},"required":["account_id","to"],"additionalProperties":false}})),
+        (true, json!({"name":"switchboard_account_recall","title":"Take a moved account back","description":"Take back a Claude or Codex subscription sign-in this machine moved to another one with switchboard_account_send: that machine stops using it and gives its tokens back over ssh, the provider is checked here (on failure it goes back there), then its copy there is removed and its account list read to prove it. Answers recalled, removed_there and proved. Only when the operator asks.","inputSchema":{"type":"object","properties":{"account_id":{"type":"string"},"from":{"type":"string","minLength":1,"maxLength":255,"description":"The other machine as ssh knows it, as the move named it."},"remote_id":{"type":"string","maxLength":64,"description":"The account's id there; by default the one the recorded move names."},"remote":{"type":"string","description":"That machine's switchboard; by default the one the move ran."},"remote_data_dir":{"type":"string","description":"That machine's data folder; by default the one the move named."},"decision":{"type":"object","properties":{"by":{"type":"string","enum":["operator"]},"instruction":{"type":"string","minLength":1,"maxLength":500},"at":{"type":"string"},"source":{"type":"string","minLength":1,"maxLength":200}},"required":["by","instruction","at","source"],"additionalProperties":false,"description":"The operator's words that ordered it, recorded with the seat in seats.jsonl."}},"required":["account_id","from"],"additionalProperties":false}})),
         (false, json!({"name":"switchboard_seats","title":"Moves between machines","description":"The moves, hand-overs and call backs this machine recorded, newest last: account id here, the other machine as ssh named it, the group, the account's id there, who ordered it (operator with their words, or agent) and when. Use it to find what is on another machine before calling an account back. Never a credential.","inputSchema":{"type":"object","properties":{"limit":{"type":"integer","minimum":1,"maximum":1000}},"additionalProperties":false}})),
         (true, json!({"name":"switchboard_account_hand_over","title":"Hand an account over","description":"Only when the operator asks. Hand an account over to another machine or a colleague's Switchboard: answers a signed record without its credential and marks the account here as used elsewhere, with to as where it works. The receiver passes the record to switchboard_account_receive and signs in there. Hand a personal subscription only to the operator's own machines unless the operator says otherwise.","inputSchema":{"type":"object","properties":{"account_id":account,"to":{"type":"string","minLength":1,"maxLength":80,"description":"Who receives it: a machine and its user, or a colleague."},"decision":{"type":"object","properties":{"by":{"type":"string","enum":["operator"]},"instruction":{"type":"string","minLength":1,"maxLength":500},"at":{"type":"string"},"source":{"type":"string","minLength":1,"maxLength":200}},"required":["by","instruction","at","source"],"additionalProperties":false,"description":"The operator's words that ordered it, recorded with the seat in seats.jsonl."}},"required":["account_id","to"],"additionalProperties":false}})),
         (true, json!({"name":"switchboard_account_receive","title":"Receive a handed-over account","description":"Receive an account handed over: answers whose sign-in, into which group (the record's pool when this machine has it, else default), whether the signature holds and whether this machine already holds that sign-in. apply starts the sign-in (the person signs in; headless gives the URL in switchboard_login status and takes the code), only with signer and never for a sign-in this machine already holds; nothing travels but the record.","inputSchema":{"type":"object","properties":{"record":{"type":"object"},"signer":{"type":"string","description":"The giver's published key: the record must be signed by it. Required with apply."},"apply":{"type":"boolean"},"headless":{"type":"boolean"}},"required":["record"],"additionalProperties":false}})),
@@ -87,7 +87,10 @@ pub(crate) fn tools() -> Vec<(bool, Value)> {
         (false, json!({"name":"switchboard_rotation","title":"Automatic switching","description":"The automatic switching settings per provider, group (pool) and target (enabled, threshold, headroom as hysteresis, cooldown, freshness) and what the background monitor decided last.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}})),
         (true, json!({"name":"switchboard_rotation_set","title":"Set automatic switching","description":"Change automatic switching for one provider, group (pool) and target: switch it on or off, or change its threshold, headroom (hysteresis), cooldown or freshness. What is left out keeps its saved value. Only when the operator asks.","inputSchema":{"type":"object","properties":{"provider":{"type":"string","enum":["claude","codex"]},"pool":{"type":"string","default":"default"},"target":{"type":"string","enum":["managed","claude_cli"],"default":"managed"},"enabled":{"type":"boolean"},"threshold_percent":{"type":"number","minimum":1,"maximum":100},"hysteresis_percent":{"type":"number","minimum":0,"maximum":99},"cooldown_seconds":{"type":"integer","minimum":0},"max_age_seconds":{"type":"integer","minimum":30}},"required":["provider"],"additionalProperties":false}})),
         (false, json!({"name":"switchboard_backups","title":"Backups","description":"Encrypted backups of accounts, groups, rules and settings: the folder, whether they run, the newest backups and the last error. Never their contents.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}})),
-        (true, json!({"name":"switchboard_backup_now","title":"Back up now","description":"Write an encrypted backup now. Restoring stays the person's, in the app or with switchboard backup restore.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}})),
+        (true, json!({"name":"switchboard_backup_now","title":"Back up now","description":"Write an encrypted backup now. Restore one with switchboard_backup_restore.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}})),
+        (true, json!({"name":"switchboard_backup_restore","title":"Restore a backup","description":"Restore one backup of switchboard_backups by its file name, as the window's Restore does: accounts, groups, rules, the person's words and settings in it come back where this computer has none (accounts already here stay as they are; nothing is deleted). An account its group here does not take goes to the default group (returned_to_default). Answers the counts. Only when the operator asks.","inputSchema":{"type":"object","properties":{"file":{"type":"string","minLength":1,"maxLength":200,"description":"A file name from switchboard_backups."}},"required":["file"],"additionalProperties":false}})),
+        (true, json!({"name":"switchboard_project_delete","title":"Delete a group","description":"Delete a group, as the window's Delete group does: its folders stop routing to its accounts and its own accounts go to the default group (nothing is signed out). A group with its own key or spending ceiling needs decision, the operator's words. Only when the operator asks.","inputSchema":{"type":"object","properties":{"pool":{"type":"string","minLength":1,"description":"The group id from switchboard_projects."},"decision":{"type":"object","properties":{"by":{"type":"string","enum":["operator"]},"instruction":{"type":"string","minLength":1,"maxLength":500},"at":{"type":"string"},"source":{"type":"string","minLength":1,"maxLength":200}},"required":["by","instruction","at","source"],"additionalProperties":false,"description":"The operator's words that ordered it."}},"required":["pool"],"additionalProperties":false}})),
+        (true, json!({"name":"switchboard_settings_import","title":"Import settings from another machine","description":"Read a switchboard-settings/1 file (switchboard settings export on another machine) and say what it would add here: groups found by their repositories under the folders named, organizations, agents' settings, rotation policies, teams, ceilings. apply: true adds them (never raising or clearing a ceiling); clone: true with apply clones the groups' missing GitHub repositories first with the person's gh; signer: the organization's published key the file must be signed by. Only when the operator asks to apply.","inputSchema":{"type":"object","properties":{"file":{"type":"string","minLength":1,"description":"The settings file, an absolute path on this computer."},"under":{"type":"array","items":{"type":"string"},"maxItems":16,"description":"Absolute folders to look for the groups' repositories in; default the usual ones."},"apply":{"type":"boolean"},"clone":{"type":"boolean"},"signer":{"type":"string"}},"required":["file"],"additionalProperties":false}})),
         (false, json!({"name":"switchboard_recovery","title":"Stopped sessions","description":"Sessions that stopped on a limit and the accounts ready for them to continue: each stop's mode and when to try again.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}})),
         (false, json!({"name":"switchboard_handovers","title":"Hand-overs","description":"Whether hand-overs open in Fabric's console, and the hand-overs waiting for a console to take them.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}})),
         (true, json!({"name":"switchboard_agent_set","title":"Enable or disable an agent, or set the default","description":"Let Switchboard hand work to an agent or keep work away from it (enabled), set the machine's default agent (default: an agent id, or null for none), or choose whether the Claude Code and Codex sessions it starts bypass their permission prompts (permissions: bypass, the default, or ask). Only when the operator asks.","inputSchema":{"type":"object","properties":{"agent":{"type":"string"},"enabled":{"type":"boolean"},"default":{"type":["string","null"]},"permissions":{"type":"string","enum":["bypass","ask"]}},"additionalProperties":false}})),
@@ -535,6 +538,69 @@ impl Server {
         })
         .await
     }
+    /// SB-314: the window's *Restore*, by the backup's file name.
+    async fn backup_restore(&self, args: &Map<String, Value>) -> Result<Value, String> {
+        self.call(Operation::RestoreBackup {
+            file: required(args, "file")?.into(),
+        })
+        .await
+    }
+    /// SB-314: the window's *Delete group*; the operator's words open a group with its own key
+    /// or ceiling (SB-299).
+    async fn project_delete(&self, args: &Map<String, Value>) -> Result<Value, String> {
+        let delete = Operation::RemoveProject {
+            pool: required(args, "pool")?.into(),
+            by: switchboard_runtime::spend::Surface::Mcp,
+        };
+        self.call(on_operators_word(args, delete)?).await
+    }
+    /// SB-314: `settings import` over MCP: the file is read here, as the CLI reads it.
+    async fn settings_import(&self, args: &Map<String, Value>) -> Result<Value, String> {
+        use switchboard_runtime::settings_bundle::{MAX_BYTES, NOT_A_BUNDLE};
+        let file = std::path::Path::new(required(args, "file")?);
+        if !file.is_absolute() {
+            return Err("Give the settings file as an absolute path.".into());
+        }
+        let meta = std::fs::metadata(file).map_err(|_| "Settings file unavailable.")?;
+        if meta.len() > MAX_BYTES as u64 {
+            return Err(NOT_A_BUNDLE.into());
+        }
+        let bytes = std::fs::read(file).map_err(|_| "Settings file unavailable.")?;
+        let mut bundle: Value = serde_json::from_slice(&bytes).map_err(|_| NOT_A_BUNDLE)?;
+        // A file written with `--json` is wrapped as {ok, data}.
+        if bundle.get("format").is_none() && bundle["data"].get("format").is_some() {
+            bundle = bundle["data"].take();
+        }
+        let flag = |key: &str| args.get(key).and_then(Value::as_bool).unwrap_or(false);
+        let (apply, clone) = (flag("apply"), flag("clone"));
+        if clone && !apply {
+            return Err("Clone with apply: a preview clones nothing.".into());
+        }
+        let under = args
+            .get("under")
+            .and_then(Value::as_array)
+            .map(|list| {
+                list.iter()
+                    .filter_map(Value::as_str)
+                    .map(PathBuf::from)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        if under.iter().any(|p| !p.is_absolute()) {
+            return Err("Give each folder as an absolute path.".into());
+        }
+        self.call(Operation::SettingsImport {
+            bundle,
+            under,
+            apply,
+            clone,
+            signer: args
+                .get("signer")
+                .and_then(Value::as_str)
+                .map(str::to_owned),
+        })
+        .await
+    }
     /// SB-283: moves an account's sign-in to another machine over ssh.
     async fn account_send(&self, args: &Map<String, Value>) -> Result<Value, String> {
         let text = |key: &str| args.get(key).and_then(Value::as_str).map(str::to_owned);
@@ -543,6 +609,7 @@ impl Server {
             to: required(args, "to")?.into(),
             pool: text("pool"),
             program: text("remote"),
+            remote_data_dir: text("remote_data_dir"),
             decision: None,
         };
         self.call(on_operators_word(args, send)?).await
@@ -555,6 +622,7 @@ impl Server {
             from: required(args, "from")?.into(),
             remote_id: text("remote_id"),
             program: text("remote"),
+            remote_data_dir: text("remote_data_dir"),
             decision: None,
         };
         self.call(on_operators_word(args, recall)?).await
@@ -1147,6 +1215,9 @@ impl Server {
             "switchboard_rotation_set" => self.rotation_set(args).await,
             "switchboard_backups" => self.call(Operation::Backups).await,
             "switchboard_backup_now" => self.call(Operation::BackupNow).await,
+            "switchboard_backup_restore" => self.backup_restore(args).await,
+            "switchboard_project_delete" => self.project_delete(args).await,
+            "switchboard_settings_import" => self.settings_import(args).await,
             "switchboard_recovery" => self.call(Operation::Recovery).await,
             "switchboard_handovers" => self.call(Operation::Handovers).await,
             "switchboard_agent_set" => self.agent_set(args).await,

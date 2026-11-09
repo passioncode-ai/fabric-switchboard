@@ -246,6 +246,9 @@ pub enum Operation {
         remote_id: Option<String>,
         #[serde(default)]
         program: Option<String>,
+        /// SB-315: the other machine's data folder, when its Switchboard runs with `--data-dir`.
+        #[serde(default)]
+        remote_data_dir: Option<String>,
         /// As in `SendAccount`.
         #[serde(default)]
         decision: Option<spend::Decision>,
@@ -259,6 +262,9 @@ pub enum Operation {
         pool: Option<String>,
         #[serde(default)]
         program: Option<String>,
+        /// SB-315: the other machine's data folder, when its Switchboard runs with `--data-dir`.
+        #[serde(default)]
+        remote_data_dir: Option<String>,
         /// SB-292: as in `HandOver`.
         #[serde(default)]
         decision: Option<spend::Decision>,
@@ -938,6 +944,9 @@ pub struct Runtime {
     /// `COMPLETED_LOGINS`. A repeated Finish returns the same account without capturing again;
     /// they hold no sign-in slot.
     completed_logins: Mutex<std::collections::VecDeque<(String, Account, bool)>>,
+    /// SB-315: sign-ins started to receive a hand-over: login id → the identity its record
+    /// names; finishing one as another account is refused. Held while this owner runs.
+    expected_logins: Mutex<HashMap<String, switchboard_core::ExternalIdentity>>,
     mutations: tokio::sync::Mutex<()>,
     current_cache: Mutex<CurrentCache>,
     monitor_decisions: Mutex<Vec<Value>>,
@@ -1081,6 +1090,7 @@ impl Runtime {
             logins: Mutex::new(HashMap::new()),
             stale_logins: Mutex::new(Vec::new()),
             completed_logins: Mutex::new(std::collections::VecDeque::new()),
+            expected_logins: Mutex::new(HashMap::new()),
             mutations: tokio::sync::Mutex::new(()),
             current_cache: Mutex::new(CurrentCache::default()),
             monitor_decisions: Mutex::new(Vec::new()),
@@ -2055,6 +2065,14 @@ impl Runtime {
             account.clone()
         } else {
             let captured = launch::capture_login_profile(login)?;
+            let expected = self
+                .expected_logins
+                .lock()
+                .ok()
+                .and_then(|m| m.get(id).cloned());
+            if expected.is_some_and(|e| !account_handover::same_sign_in(&e, &captured.identity)) {
+                return Err(account_handover::RECEIVED_OTHER.into());
+            }
             let (account, again) = file_sign_in(
                 &self.store,
                 login.provider,
@@ -2082,6 +2100,9 @@ impl Runtime {
             }
         }
         drop(logins);
+        if let Ok(mut expected) = self.expected_logins.lock() {
+            expected.remove(id);
+        }
         if let Ok(mut completed) = self.completed_logins.lock() {
             completed.retain(|(done, _, _)| done != id);
             completed.push_back((id.to_owned(), account.clone(), again));
@@ -2183,6 +2204,9 @@ impl Runtime {
             .map_err(|_| "Sign-in state unavailable.")?;
         launch::cancel_login(logins.get(id).ok_or("Sign-in not found. Start again.")?)?;
         logins.remove(id);
+        if let Ok(mut expected) = self.expected_logins.lock() {
+            expected.remove(id);
+        }
         Ok(())
     }
     pub(crate) fn enable_backups(
@@ -3728,10 +3752,15 @@ fn record_seat(
     decision: Option<&spend::Decision>,
     remote_account: Option<&str>,
     sent: Option<&str>,
+    remote: Option<&account_send::Program<'_>>,
 ) {
     let mut seat = seats::of(monitor::now(), event, account, machine, pool, decision);
     seat.remote_account = remote_account.map(str::to_owned);
     seat.sent = sent.map(str::to_owned);
+    if let Some(remote) = remote {
+        seat.program = (remote.path != account_send::REMOTE_DEFAULT).then(|| remote.path.into());
+        seat.data_dir = remote.data_dir.map(str::to_owned);
+    }
     if seats::append(root, &seat).is_err() {
         oplog::event(
             "seat_record",
@@ -5122,18 +5151,28 @@ async fn execute(
             to,
             pool,
             program,
+            remote_data_dir,
             decision,
         } => {
             let pool = pool.unwrap_or_else(|| "default".into());
+            let program = program.unwrap_or_else(|| account_send::REMOTE_DEFAULT.into());
+            let remote = account_send::Program {
+                path: &program,
+                data_dir: remote_data_dir.as_deref(),
+            };
             let moved = {
                 let (store, id, to, pool) = (store.clone(), id.clone(), to.clone(), pool.clone());
+                let (program, data_dir) = (program.clone(), remote_data_dir.clone());
                 blocking::run(move || {
                     account_send::send(
                         &store,
                         &id,
                         &to,
                         &pool,
-                        program.as_deref().unwrap_or(account_send::REMOTE_DEFAULT),
+                        &account_send::Program {
+                            path: &program,
+                            data_dir: data_dir.as_deref(),
+                        },
                         monitor::now(),
                         &account_send::ssh_runner,
                         &|token| refresh_state.wait_settled(token),
@@ -5149,6 +5188,7 @@ async fn execute(
                 decision.as_ref(),
                 moved["remote_id"].as_str(),
                 moved["sent"].as_str(),
+                Some(&remote),
             );
             Ok(moved)
         }
@@ -5165,24 +5205,38 @@ async fn execute(
             from,
             remote_id,
             program,
+            remote_data_dir,
             decision,
         } => {
-            let program = program.unwrap_or_else(|| account_send::REMOTE_DEFAULT.into());
             let grant = seats::last_grant(root, &id, &from);
+            // SB-315: by default the same switchboard and data folder the move used there.
+            let program = program
+                .or_else(|| grant.as_ref().and_then(|g| g.program.clone()))
+                .unwrap_or_else(|| account_send::REMOTE_DEFAULT.into());
+            let remote_data_dir =
+                remote_data_dir.or_else(|| grant.as_ref().and_then(|g| g.data_dir.clone()));
             let sent = grant.as_ref().and_then(|g| g.sent.clone());
             let remote_id = remote_id
                 .or_else(|| grant.and_then(|g| g.remote_account))
                 .ok_or(account_send::NO_REMOTE_ID)?;
             let taken = {
-                let (store, id, from, program) =
-                    (store.clone(), id.clone(), from.clone(), program.clone());
+                let (store, id, from, program, data_dir) = (
+                    store.clone(),
+                    id.clone(),
+                    from.clone(),
+                    program.clone(),
+                    remote_data_dir.clone(),
+                );
                 blocking::run(move || {
                     account_send::recall_take(
                         &store,
                         &id,
                         &from,
                         &remote_id,
-                        &program,
+                        &account_send::Program {
+                            path: &program,
+                            data_dir: data_dir.as_deref(),
+                        },
                         monitor::now(),
                         &account_send::ssh_runner,
                         sent.as_deref(),
@@ -5200,6 +5254,7 @@ async fn execute(
                         &from,
                         "",
                         decision.as_ref(),
+                        None,
                         None,
                         None,
                     );
@@ -5225,7 +5280,10 @@ async fn execute(
                     &id,
                     &from,
                     &taken,
-                    &program,
+                    &account_send::Program {
+                        path: &program,
+                        data_dir: remote_data_dir.as_deref(),
+                    },
                     monitor::now(),
                     &account_send::ssh_runner,
                 )?;
@@ -5239,8 +5297,12 @@ async fn execute(
                 .map(|a| a.pool.clone())
                 .unwrap_or_else(|| "default".into());
             let finished = {
-                let (from, program, remote) =
-                    (from.clone(), program.clone(), taken.remote_id.clone());
+                let (from, program, data_dir, remote) = (
+                    from.clone(),
+                    program.clone(),
+                    remote_data_dir.clone(),
+                    taken.remote_id.clone(),
+                );
                 blocking::run(move || {
                     Ok::<_, String>(account_send::recall_finish(
                         &from,
@@ -5248,7 +5310,10 @@ async fn execute(
                             remote_id: remote,
                             token: None,
                         },
-                        &program,
+                        &account_send::Program {
+                            path: &program,
+                            data_dir: data_dir.as_deref(),
+                        },
                         &account_send::ssh_runner,
                     ))
                 })
@@ -5261,6 +5326,7 @@ async fn execute(
                 &pool,
                 decision.as_ref(),
                 Some(&taken.remote_id),
+                None,
                 None,
             );
             Ok(finished)
@@ -5278,6 +5344,7 @@ async fn execute(
                 &to,
                 &pool,
                 decision.as_ref(),
+                None,
                 None,
                 None,
             );
@@ -5301,12 +5368,17 @@ async fn execute(
                     return Err(account_handover::RECEIVE_HELD.into());
                 }
                 let pool = plan["pool"].as_str().unwrap_or("default").to_owned();
-                let login = needs_owner()?.begin_login(
-                    record.provider,
-                    record.label.clone(),
-                    pool,
-                    headless,
-                )?;
+                let owner = needs_owner()?;
+                let login =
+                    owner.begin_login(record.provider, record.label.clone(), pool, headless)?;
+                if let (Some(login_id), Ok(mut expected)) =
+                    (login["login_id"].as_str(), owner.expected_logins.lock())
+                {
+                    expected.insert(
+                        login_id.to_owned(),
+                        account_handover::expected_identity(&record),
+                    );
+                }
                 plan["login"] = login;
             }
             Ok(plan)

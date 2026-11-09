@@ -601,7 +601,11 @@ fn a_new_account_lands_only_in_a_group_that_admits_it() {
             Credential::parse(Provider::Claude, AuthKind::ApiKey, "synthetic-personal").unwrap(),
         )
         .unwrap_err();
-    assert_eq!(refused, switchboard_core::organizations::SEAT_CHOSEN);
+    // It names the account and says it is personal (SB-314).
+    assert_eq!(
+        refused,
+        "Synthetic personal is a personal account and this group serves an organization. Choose accounts of the group's organization, or change it."
+    );
     assert!(store.snapshot().unwrap().accounts.is_empty());
     // A personal group takes it.
     let mine = project(&root, "mine");
