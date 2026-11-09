@@ -39,6 +39,7 @@ pub mod person_errors;
 pub mod projects;
 mod provenance;
 pub mod recovery;
+pub mod remote_dispatch;
 mod refresh;
 pub mod roots;
 pub mod seats;
