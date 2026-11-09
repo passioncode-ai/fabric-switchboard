@@ -2006,6 +2006,50 @@ impl Store {
         self.changed();
         Ok(())
     }
+    /// SB-311: an OAuth account saved without the provider's identity (a sign-in moved here by
+    /// `accounts send`, whose `accounts add` carries the tokens only) takes the identity the
+    /// provider answered for its access token. Without one it is never renewed here
+    /// (`refresh::reserve_due`), so it died when its access token expired. Only an account still
+    /// without an identity takes one, and not one another account of its provider and pool
+    /// already holds. Answers whether it was stored.
+    pub fn learn_identity(&self, id: &str, identity: &ExternalIdentity) -> Result<bool, String> {
+        if identity.account_id.is_none() || !identity.valid() {
+            return Err("Label, pool or identity is invalid".into());
+        }
+        let mut state = self.lock()?;
+        let mut candidate = state.clone();
+        let account = candidate
+            .accounts
+            .iter()
+            .find(|a| a.id == id)
+            .cloned()
+            .ok_or("Account not found")?;
+        if account.kind != AuthKind::OAuth
+            || account
+                .external_identity
+                .as_ref()
+                .is_some_and(|i| i.account_id.is_some())
+        {
+            return Ok(false);
+        }
+        if candidate.accounts.iter().any(|a| {
+            a.id != id
+                && a.provider == account.provider
+                && a.pool == account.pool
+                && a.external_identity
+                    .as_ref()
+                    .is_some_and(|i| i.matches(identity))
+        }) {
+            return Ok(false);
+        }
+        if let Some(a) = candidate.accounts.iter_mut().find(|a| a.id == id) {
+            a.external_identity = Some(identity.clone());
+        }
+        append_event(&mut candidate, "account_updated", Some(id), "success");
+        self.publish(&mut state, candidate)?;
+        self.changed();
+        Ok(true)
+    }
     /// Vault deletion precedes metadata publication. On disk failure the visible account
     /// remains, but its missing credential prevents use. Retrying removal is safe.
     /// H-2: it takes the credential lock first, so no renewal or save writes the item it

@@ -88,6 +88,8 @@ pub(crate) struct RefreshState {
     owners: Mutex<HashMap<String, ExternalIdentity>>,
     /// The lineage last asked about without an answer, and when: asked again after a minute.
     profile_tried: Mutex<Option<(String, i64)>>,
+    /// SB-311: account id → when its identity was last asked of `/api/oauth/profile`.
+    identity_tried: Mutex<HashMap<String, i64>>,
     /// When the token endpoint last refused the client itself (`invalid_client`).
     client_rejected: Mutex<Option<i64>>,
     /// Claude Swap switches Claude Code by itself; native rotation leaves switching to it.
@@ -205,6 +207,7 @@ impl RefreshState {
             ),
             owners: Mutex::new(HashMap::new()),
             profile_tried: Mutex::new(None),
+            identity_tried: Mutex::new(HashMap::new()),
             client_rejected: Mutex::new(None),
             swap_switching: Default::default(),
             swap_running: Default::default(),
@@ -1787,6 +1790,72 @@ pub(crate) async fn learn_live_owner(store: &Store, native: NativeSources, state
         }
     }
 }
+/// How long an account whose identity the provider did not give is left before it is asked again.
+const IDENTITY_RETRY_SECONDS: i64 = 600;
+/// SB-311: an enabled Claude sign-in saved without the provider's identity (one moved here by
+/// `accounts send`) asks `/api/oauth/profile` for it with its access token while that token is
+/// still valid, outside every lock (5-second timeout), at most every 10 minutes per account.
+/// Without an identity `reserve_due` never renews it, so it died when its access token expired
+/// (claude6 on the Mac Studio, 2026-11-08). Logs `identity_learned` with its outcome.
+pub(crate) async fn learn_identity(store: &Store, state: &RefreshState, id: &str) {
+    let Some(account) = store
+        .snapshot()
+        .ok()
+        .and_then(|s| s.accounts.into_iter().find(|a| a.id == id))
+    else {
+        return;
+    };
+    if account.provider != Provider::Claude
+        || account.kind != AuthKind::OAuth
+        || !account.enabled
+        || account
+            .external_identity
+            .as_ref()
+            .is_some_and(|i| i.account_id.is_some())
+    {
+        return;
+    }
+    let time = now();
+    if let Ok(mut tried) = state.identity_tried.lock() {
+        if tried
+            .get(id)
+            .is_some_and(|at| (0..IDENTITY_RETRY_SECONDS).contains(&(time - at)))
+        {
+            return;
+        }
+        if tried.len() > 256 {
+            tried.clear();
+        }
+        tried.insert(id.to_owned(), time);
+    }
+    let Ok(credential) = store.stored_credential(id) else {
+        return;
+    };
+    if credential.access_token.is_empty() || credential.expires_at.is_some_and(|t| t <= time) {
+        crate::oplog::event(
+            "identity_learned",
+            &[("outcome", crate::oplog::Field::Code("expired"))],
+        );
+        return;
+    }
+    let endpoint = state
+        .profile_endpoint
+        .lock()
+        .map(|e| e.clone())
+        .unwrap_or_default();
+    let outcome = match profile(&endpoint, &credential.access_token).await {
+        None => "unanswered",
+        Some(identity) => match store.learn_identity(id, &identity) {
+            Ok(true) => "stored",
+            Ok(false) => "held",
+            Err(_) => "invalid",
+        },
+    };
+    crate::oplog::event(
+        "identity_learned",
+        &[("outcome", crate::oplog::Field::Code(outcome))],
+    );
+}
 async fn profile(endpoint: &str, access_token: &str) -> Option<ExternalIdentity> {
     let client = reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::none())
@@ -3084,6 +3153,110 @@ mod tests {
             filable(&store, &state, &live.identity, &live.credential).unwrap_err(),
             FOREIGN_LIVE
         );
+    }
+    /// SB-311: a sign-in moved here by `accounts send` is saved by `accounts add` with its tokens
+    /// only. Without the provider's identity it was never renewed here and died when its access
+    /// token expired (claude6 on the Mac Studio, 2026-11-08). It learns the identity from
+    /// `/api/oauth/profile` while its access token is valid, once per 10 minutes, and never one
+    /// another account of its pool already holds.
+    #[tokio::test]
+    async fn a_sign_in_saved_without_its_identity_learns_it_and_can_be_renewed() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let counter = calls.clone();
+        let app = Router::new().route(
+            "/profile",
+            axum::routing::get(move || {
+                counter.fetch_add(1, Ordering::SeqCst);
+                async {
+                    Json(json!({"account":{"uuid":"synthetic-moved","email":"moved@example.invalid"},"organization":{"uuid":"synthetic-org"}}))
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let root = tempfile::tempdir().unwrap();
+        let store = Arc::new(
+            Store::open(
+                root.path().to_owned(),
+                Arc::new(switchboard_core::MemoryVault::default()),
+            )
+            .unwrap(),
+        );
+        let moved = |label: &str, token: &str| {
+            let credential = switchboard_core::Credential {
+                access_token: format!("access-{token}"),
+                refresh_token: Some(format!("refresh-{token}")),
+                id_token: None,
+                native_context: None,
+                expires_at: Some(now() + 3_600),
+                account_id: None,
+            };
+            store
+                .add(
+                    label.into(),
+                    Provider::Claude,
+                    AuthKind::OAuth,
+                    "default".into(),
+                    credential,
+                )
+                .unwrap()
+                .id
+        };
+        let id = moved("moved@example.invalid", "moved");
+        let state = RefreshState::default();
+        state.set_profile_endpoint(format!("http://{address}/profile"));
+        let identity = |id: &str| {
+            store
+                .snapshot()
+                .unwrap()
+                .accounts
+                .into_iter()
+                .find(|a| a.id == id)
+                .unwrap()
+                .external_identity
+        };
+        // Without an identity nothing renews it, not even a forced renewal.
+        assert_eq!(identity(&id), None);
+        assert_eq!(
+            ensure_fresh(&store, SIGNED_OUT, &state, &id, true).await,
+            Outcome::NotNeeded
+        );
+        learn_identity(&store, &state, &id).await;
+        let learned = identity(&id).expect("learned");
+        assert_eq!(learned.account_id.as_deref(), Some("synthetic-moved"));
+        assert_eq!(learned.organization_id.as_deref(), Some("synthetic-org"));
+        // Asked once: a known identity, and a recent question, are not asked again.
+        learn_identity(&store, &state, &id).await;
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        // A second copy of the same login in the same group does not take the identity.
+        let copy = moved("copy@example.invalid", "copy");
+        learn_identity(&store, &state, &copy).await;
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+        assert_eq!(identity(&copy), None);
+        // An expired access token is not sent anywhere.
+        let stale_state = RefreshState::default();
+        stale_state.set_profile_endpoint(format!("http://{address}/profile"));
+        let stale = store
+            .add(
+                "stale@example.invalid".into(),
+                Provider::Claude,
+                AuthKind::OAuth,
+                "default".into(),
+                switchboard_core::Credential {
+                    access_token: "access-stale".into(),
+                    refresh_token: Some("refresh-stale".into()),
+                    id_token: None,
+                    native_context: None,
+                    expires_at: Some(now() - 60),
+                    account_id: None,
+                },
+            )
+            .unwrap()
+            .id;
+        learn_identity(&store, &stale_state, &stale).await;
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+        assert_eq!(identity(&stale), None);
     }
     #[tokio::test]
     async fn an_unanswered_owner_question_waits_a_minute() {
