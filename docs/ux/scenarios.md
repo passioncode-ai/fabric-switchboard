@@ -95,6 +95,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 | SCN-085 | Create an organization with its GitHub repositories and folders in one step | draft |
 | SCN-086 | Choose several folders at once | draft |
 | SCN-087 | Move an account to another machine without signing in there | draft |
+| SCN-088 | Hand an account over to a colleague and receive it | draft |
 ### SCN-001: First run
 **Persona:** P-01
 **Goal:** Deliberately control which account a coding session uses.
@@ -1890,3 +1891,24 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Coverage:** runtime `account_send::tests` (moved, not saved, not answered, refused, call back), `an_update_can_say_where_an_account_works` (a moved account's mark is not cleared without `force`), core `an_exported_sign_in_reads_back_the_same_and_carries_nothing_else`, WebKit demo.
 **Product:** unobserved
 **Traces:** SB-283, SB-284, SCN-072
+
+### SCN-088: Hand an account over to a colleague and receive it
+**Persona:** P-01
+**Goal:** A person gives a Claude or Codex subscription account to a colleague, or to a machine ssh does not reach, so that the receiver signs in to that very account and this computer stops using it (SB-318; the window's half of `accounts hand-over` and `accounts receive`, SB-283).
+**Preconditions:** giver: an enabled subscription sign-in not used elsewhere. Receiver: Switchboard running, the record file and the giver's key received (by any channel).
+**Entry point:** giver: *Accounts* → an account's ⋯ → *Hand over…*. Receiver: *Accounts* → *+ Add account* → *Receive a hand-over…*. CLI `accounts hand-over ID --to NAME`, `accounts receive FILE --signer KEY --apply`; MCP `switchboard_account_hand_over`, `switchboard_account_receive`.
+**Steps:**
+1. Giver: ⋯ → *Hand over…* → “Hand over {label}” (“Save a signed record for a colleague or another of your computers. They sign in to this account there with the record and this computer's key; this computer stops using it now.”), *Who receives it* (“A colleague, or a machine and its user.”), *Save record…*.
+2. The system save picker opens (the window never touches files itself); choosing a place hands the account over: it is marked used by the receiver, the signed record is written there (0600) → “Record for {label} saved. This computer no longer uses it.”, then “Send the record and this key” shows this computer's key with *Copy* (“Copied”) and *Done*.
+3. Receiver: *+ Add account* → *Receive a hand-over…* → the system open picker → “Receive {label}” (“A {provider} sign-in handed over to {to}. You sign in to it here; the giver no longer uses it.”) with where it lands (“It joins group “{name}”.” or “It joins the default group.”) and each organization not on this computer (“Organization “{name}” is not on this computer; the account stays personal until you assign it.”).
+4. *Giver's key* (“The key the giver sent with the file.”) → *Sign in* → the official sign-in opens in Terminal as for a new account (SCN-002); finishing it saves the account; a sign-in as another account is refused (“This is not the sign-in that was handed over. Cancel this sign-in, then sign in with the account the record names.”).
+**Alt paths:** the save picker closed → “Nothing was saved. The account stays on this computer.”, the dialog stays open and nothing changed; the record cannot be written → “The record could not be saved there, so the account stays on this computer.” (the mark is undone); the open picker closed → nothing happens; a file that is not a record → “This file could not be read.” or “This is not a Switchboard hand-over file (switchboard-handover/1).”; a key that is not the giver's → “This hand-over file is not signed by the key you named, or it changed after it was signed.”; this computer already holds the sign-in → “This computer already holds this sign-in. There is nothing to receive.” and *Sign in* is unavailable; a sign-in already in progress → “A sign-in is already in progress. Finish it in Terminal or cancel it first.”.
+**Expected result:** one holder at a time: the giver stops using the account when the record is saved, the receiver holds it once they finish signing in.
+**UI elements:** the ⋯ item, the *Add account* item, the two dialogs, the key dialog, the system pickers.
+**States covered:** handed over; picker closed; not written; received; wrong key; already held; another account signed in.
+**Errors & recovery:** every refusal keeps the account where it was and names the way out.
+**Status:** draft
+**Meaning:** SB-318, the window's half of SB-283's hand-over (audit 2026-11-09).
+**Coverage:** runtime `account_handover::tests` (record, signature, `a_received_sign_in_must_be_the_account_its_record_names`); the window's commands `hand_over_account`, `open_handover`, `receive_handover` (`src-tauri/src/main.rs`); WebKit demo (`?demo=1`: *Hand over…* and *Receive a hand-over…*).
+**Product:** unobserved
+**Traces:** SB-318, SB-283, SB-315, SCN-087

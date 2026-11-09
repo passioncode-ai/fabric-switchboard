@@ -259,6 +259,126 @@ async fn mark_elsewhere(
         })
         .await
 }
+/// SB-318: the file picker could not answer.
+const FILE_PICKER_FAILED: &str = "The file picker could not open. Try again.";
+/// SB-318: the hand-over record could not be written where the person chose.
+const HANDOVER_NOT_SAVED: &str =
+    "The record could not be saved there, so the account stays on this computer.";
+/// SB-318: the chosen file is not one this window reads.
+const HANDOVER_UNREADABLE: &str = "This file could not be read.";
+/// The largest hand-over file the window reads; a record is a few hundred bytes.
+const HANDOVER_MAX: u64 = 64 * 1024;
+/// SB-318: hands an account over from the window. The person chooses where the signed record
+/// is saved first; only then is the account handed over (marked used by `to`), the record
+/// written (0600) and this computer's settings key read, which the receiver needs. Closing the
+/// picker changes nothing (`saved: null`); a record that cannot be written gives the account back.
+#[tauri::command]
+async fn hand_over_account(
+    id: String,
+    to: String,
+    name: String,
+    app: tauri::AppHandle,
+    state: State<'_, Slot>,
+) -> Result<Value, String> {
+    use tauri_plugin_dialog::DialogExt;
+    let window = app.get_webview_window("main").ok_or(FILE_PICKER_FAILED)?;
+    let file: String = name
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .take(40)
+        .collect();
+    let (sender, picked) = tokio::sync::oneshot::channel();
+    app.dialog()
+        .file()
+        .set_parent(&window)
+        .set_file_name(format!("{file}.switchboard-handover.json"))
+        .save_file(move |path| {
+            let _ = sender.send(path);
+        });
+    let Some(path) = picked
+        .await
+        .map_err(|_| FILE_PICKER_FAILED)?
+        .and_then(|p| p.into_path().ok())
+    else {
+        return Ok(json!({"saved": null}));
+    };
+    let runtime = state.runtime().await?;
+    let handed = runtime
+        .execute(Operation::HandOver {
+            id: id.clone(),
+            to,
+            decision: None,
+        })
+        .await?;
+    let bytes = serde_json::to_vec_pretty(&handed["record"]).unwrap_or_default();
+    if switchboard_core::private_fs::private_write(&path, &bytes).is_err() {
+        let _ = runtime
+            .execute(Operation::Update {
+                id,
+                label: None,
+                enabled: None,
+                elsewhere: Some(false),
+                location: None,
+                force: false,
+            })
+            .await;
+        return Err(HANDOVER_NOT_SAVED.into());
+    }
+    let key = runtime.execute(Operation::SettingsSigner).await?;
+    Ok(json!({
+        "saved": path.to_string_lossy(),
+        "location": handed["location"],
+        "public_key": key["public_key"],
+    }))
+}
+/// SB-318: a hand-over record chosen with the system picker, read (at most 64 KiB) and parsed;
+/// `null` when the person closed the picker. The window never reads files itself.
+#[tauri::command]
+async fn open_handover(app: tauri::AppHandle) -> Result<Value, String> {
+    use tauri_plugin_dialog::DialogExt;
+    let window = app.get_webview_window("main").ok_or(FILE_PICKER_FAILED)?;
+    let (sender, picked) = tokio::sync::oneshot::channel();
+    app.dialog()
+        .file()
+        .set_parent(&window)
+        .add_filter("Switchboard hand-over", &["json"])
+        .pick_file(move |path| {
+            let _ = sender.send(path);
+        });
+    let Some(path) = picked
+        .await
+        .map_err(|_| FILE_PICKER_FAILED)?
+        .and_then(|p| p.into_path().ok())
+    else {
+        return Ok(Value::Null);
+    };
+    let meta = std::fs::metadata(&path).map_err(|_| HANDOVER_UNREADABLE)?;
+    if !meta.is_file() || meta.len() > HANDOVER_MAX {
+        return Err(HANDOVER_UNREADABLE.into());
+    }
+    let bytes = std::fs::read(&path).map_err(|_| HANDOVER_UNREADABLE)?;
+    serde_json::from_slice::<Value>(&bytes).map_err(|_| HANDOVER_UNREADABLE.into())
+}
+/// SB-318: what receiving `record` would do (`apply` false), or, with the giver's `signer` key,
+/// the sign-in it starts (`login`).
+#[tauri::command]
+async fn receive_handover(
+    record: Value,
+    signer: Option<String>,
+    apply: bool,
+    state: State<'_, Slot>,
+) -> Result<Value, String> {
+    state
+        .runtime()
+        .await?
+        .execute(Operation::ReceiveHandover {
+            record,
+            signer: signer.filter(|s| !s.trim().is_empty()),
+            apply,
+            headless: false,
+        })
+        .await
+}
 /// SB-315: take a sign-in moved to another machine back (`account_send::recall_take`); `from` is
 /// the machine as the move named it.
 #[tauri::command]
@@ -1527,6 +1647,9 @@ fn main() {
             update_account,
             send_account,
             recall_account,
+            hand_over_account,
+            open_handover,
+            receive_handover,
             mark_elsewhere,
             remove_account,
             select_account,

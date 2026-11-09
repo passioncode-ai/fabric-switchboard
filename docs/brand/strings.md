@@ -91,6 +91,12 @@ Banner on Accounts until dismissed, and About “Provider terms”: “Use Switc
 | Organization… | Организация… |
 | Used on another machine · Use here | Используется на другой машине · Использовать здесь |
 | Call back | Вернуть сюда |
+| Hand over… | Передать… |
+| Receive a hand-over… | Принять передачу… |
+| Save record… | Сохранить запись… |
+| Who receives it | Кто получает |
+| This computer's key | Ключ этого компьютера |
+| Giver's key | Ключ отдавшего |
 | Rename or disable… | Переименовать или отключить… |
 | Remove… | Удалить… |
 

@@ -6,6 +6,10 @@ release pull request renames `Unreleased` to the version. While Windows signing 
 that section must say `windows_authenticode: NOT_SIGNED`. Notes of 0.5.3-beta.1 and earlier are
 on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/releases).
 
+## Unreleased
+
+- The window can hand an account over (⋯ → *Hand over…*: a signed record and this computer's key for the receiver) and receive one (*+ Add account* → *Receive a hand-over…*) (SB-318).
+
 ## 0.7.39
 
 - `switchboard launch --headless` runs a session from a launchd job or another scheduler with no terminal: nothing on stdin, the output where the job's goes, the agent's exit status (SB-317).
