@@ -538,6 +538,22 @@ impl Server {
         })
         .await
     }
+    /// SB-314: the window's *Restore*, by the backup's file name.
+    async fn backup_restore(&self, args: &Map<String, Value>) -> Result<Value, String> {
+        self.call(Operation::RestoreBackup {
+            file: required(args, "file")?.into(),
+        })
+        .await
+    }
+    /// SB-314: the window's *Delete group*; the operator's words open a group with its own key
+    /// or ceiling (SB-299).
+    async fn project_delete(&self, args: &Map<String, Value>) -> Result<Value, String> {
+        let delete = Operation::RemoveProject {
+            pool: required(args, "pool")?.into(),
+            by: switchboard_runtime::spend::Surface::Mcp,
+        };
+        self.call(on_operators_word(args, delete)?).await
+    }
     /// SB-314: `settings import` over MCP: the file is read here, as the CLI reads it.
     async fn settings_import(&self, args: &Map<String, Value>) -> Result<Value, String> {
         use switchboard_runtime::settings_bundle::{MAX_BYTES, NOT_A_BUNDLE};
@@ -1199,19 +1215,8 @@ impl Server {
             "switchboard_rotation_set" => self.rotation_set(args).await,
             "switchboard_backups" => self.call(Operation::Backups).await,
             "switchboard_backup_now" => self.call(Operation::BackupNow).await,
-            "switchboard_backup_restore" => {
-                self.call(Operation::RestoreBackup {
-                    file: required(args, "file")?.into(),
-                })
-                .await
-            }
-            "switchboard_project_delete" => {
-                let delete = Operation::RemoveProject {
-                    pool: required(args, "pool")?.into(),
-                    by: switchboard_runtime::spend::Surface::Mcp,
-                };
-                self.call(on_operators_word(args, delete)?).await
-            }
+            "switchboard_backup_restore" => self.backup_restore(args).await,
+            "switchboard_project_delete" => self.project_delete(args).await,
             "switchboard_settings_import" => self.settings_import(args).await,
             "switchboard_recovery" => self.call(Operation::Recovery).await,
             "switchboard_handovers" => self.call(Operation::Handovers).await,
