@@ -443,8 +443,8 @@ pub(crate) fn stop(
 
 /// SB-317 (D-7): a dispatched run's state for Fabric: `{launch_id, target, state, exit_code,
 /// result}`. A run here answers from its record; a run on another machine is read there over
-/// ssh, and its end, once seen, is recorded here (`exited`, `stopped`; `lost` is recorded as
-/// `exited` without a code).
+/// ssh, and its end, once seen, is recorded here (`exited`, `stopped`, `timed_out`); `lost` (no
+/// exit and no process there) is not an end: Fabric reads it as `unknown` and asks again.
 pub(crate) fn status(
     root: &Path,
     id: &str,
@@ -483,9 +483,6 @@ pub(crate) fn status(
         }
         Some("timed_out") => {
             ended(root, id, TIMED_OUT, now, None, analytics);
-        }
-        Some("lost") => {
-            ended(root, id, EXITED, now, None, analytics);
         }
         _ => {}
     }
