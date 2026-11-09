@@ -44,6 +44,43 @@ pub fn repo_there(projects: &Value, identity: &str) -> Option<String> {
         .map(str::to_owned)
 }
 
+/// D-9: a machine's room for `provider`: the remaining percent (100 less `usage.used_percent`)
+/// summed over its accounts of that provider that are enabled and not used elsewhere, from an
+/// `accounts list` answer; an account whose quota is unknown adds nothing.
+pub fn capacity(accounts: &Value, provider: &str) -> f64 {
+    let list = accounts["accounts"]
+        .as_array()
+        .or_else(|| accounts.as_array())
+        .cloned()
+        .unwrap_or_default();
+    list.iter()
+        .filter(|a| a["provider"].as_str() == Some(provider))
+        .filter(|a| a["enabled"] == true && a["elsewhere"] != true)
+        .filter_map(|a| a["usage"]["used_percent"].as_f64())
+        .map(|used| (100.0 - used).max(0.0))
+        .sum()
+}
+/// D-9: the machine with the most room, of this one (`None`) and the candidates that answered;
+/// a tie stays here.
+pub fn choose(here: f64, candidates: &[(String, Option<f64>)]) -> Option<String> {
+    candidates
+        .iter()
+        .filter_map(|(m, room)| room.map(|r| (m, r)))
+        .filter(|(_, r)| *r > here)
+        .max_by(|a, b| a.1.total_cmp(&b.1))
+        .map(|(m, _)| m.clone())
+}
+/// D-9: a candidate's room over ssh; `None` when it does not answer.
+pub fn room_there(target: &str, program: &Program<'_>, provider: &str, run: &Run<'_>) -> Option<f64> {
+    if !crate::account_send::target_valid(target) || program.check().is_err() {
+        return None;
+    }
+    run(&ssh(target, remote(program, &["--json", "accounts", "list"])), None)
+        .ok()
+        .and_then(|out| data(&out))
+        .map(|d| capacity(&d, provider))
+}
+
 /// D-6: the first line of the result file, exactly.
 pub fn result_header(workflow: &str, handoff: &str, request: &str, launch: &str) -> String {
     format!("fabric-dispatch/1 result workflow={workflow} handoff={handoff} request={request} launch={launch}")
@@ -572,6 +609,28 @@ exit 3\n"
         let _ = child.wait();
         assert_eq!(status("studio.local", &launch, &run)["state"], "stopped");
         assert_eq!(status("studio.local", "none-such", &run)["state"], "none");
+    }
+
+    #[test]
+    fn the_machine_with_the_most_room_runs_the_request() {
+        let accounts = json!({"accounts": [
+            {"provider": "claude", "enabled": true, "usage": {"used_percent": 40.0}},
+            {"provider": "claude", "enabled": true, "usage": {"used_percent": 90.0}},
+            {"provider": "claude", "enabled": true, "elsewhere": true, "usage": {"used_percent": 0.0}},
+            {"provider": "claude", "enabled": false, "usage": {"used_percent": 0.0}},
+            {"provider": "claude", "enabled": true, "usage": null},
+            {"provider": "codex", "enabled": true, "usage": {"used_percent": 0.0}},
+        ]});
+        assert_eq!(capacity(&accounts, "claude"), 70.0);
+        assert_eq!(capacity(&accounts, "codex"), 100.0);
+        let candidates = vec![
+            ("studio".to_owned(), Some(150.0)),
+            ("down".to_owned(), None),
+            ("small".to_owned(), Some(10.0)),
+        ];
+        assert_eq!(choose(70.0, &candidates).as_deref(), Some("studio"));
+        assert_eq!(choose(150.0, &candidates), None, "a tie stays here");
+        assert_eq!(choose(0.0, &[("down".into(), None)]), None);
     }
 
     #[test]

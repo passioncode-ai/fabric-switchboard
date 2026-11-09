@@ -285,7 +285,8 @@ enum Command {
         #[arg(long, default_value_t = 60, value_parser = clap::value_parser!(u32).range(1..=1440))]
         timeout_minutes: u32,
         /// Run the session on another machine, as ssh knows it, in a fresh worktree of this
-        /// folder's repository there; its result comes back through `dispatch status`.
+        /// folder's repository there; its result comes back through `dispatch status`. `auto`:
+        /// this machine or one of --candidates, whichever has the most room.
         #[arg(long)]
         target: Option<String>,
         /// With --target: that machine's switchboard, an absolute path; by default the macOS app's.
@@ -294,6 +295,10 @@ enum Command {
         /// With --target: that machine's data folder, when its Switchboard runs with --data-dir.
         #[arg(long, requires = "target")]
         remote_data_dir: Option<String>,
+        /// With --target auto: the machines to compare with this one, comma-separated; the
+        /// request runs where the agent's accounts have the most room left.
+        #[arg(long, value_delimiter = ',', requires = "target")]
+        candidates: Vec<String>,
     },
     /// Own the vault, inference proxy and private CLI control listener until Ctrl-C or
     /// SIGTERM, then stop within ten seconds.
@@ -1914,6 +1919,7 @@ async fn run(cli: &Cli) -> Result<Value, String> {
             target,
             remote,
             remote_data_dir,
+            candidates,
         } => switchboard_runtime::launched(
             Operation::Dispatch {
                 working_directory: dir.clone().unwrap_or_default(),
@@ -1930,6 +1936,7 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                 target: target.clone(),
                 remote: remote.clone(),
                 remote_data_dir: remote_data_dir.clone(),
+                candidates: candidates.clone(),
             },
             launches::LaunchedBy::from_caller(launches::Surface::Fabric, None, None),
         ),

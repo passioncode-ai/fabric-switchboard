@@ -875,6 +875,7 @@ mod runs {
                 target: None,
                 remote: None,
                 remote_data_dir: None,
+                candidates: Vec::new(),
             },
             LaunchedBy::surface(Surface::Fabric),
         )
@@ -1181,6 +1182,7 @@ mod runs {
                     target: None,
                     remote: None,
                     remote_data_dir: None,
+                candidates: Vec::new(),
                 }
             };
         for (bad, error) in [
