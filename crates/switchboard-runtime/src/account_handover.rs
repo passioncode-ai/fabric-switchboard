@@ -25,6 +25,12 @@ pub const NOT_A_HANDOVER: &str =
 pub const HANDOVER_SIGNATURE: &str =
     "This hand-over file is not signed by the key you named, or it changed after it was signed.";
 
+/// SB-315: starting the sign-in of a record nobody's published key vouches for.
+pub const RECEIVE_SIGNER: &str = "Name the giver's published key (switchboard settings signer on their computer) to start this sign-in.";
+/// SB-315: starting a sign-in this computer already holds.
+pub const RECEIVE_HELD: &str =
+    "This computer already holds this sign-in. There is nothing to receive.";
+
 /// The group the account served on the giving machine.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]

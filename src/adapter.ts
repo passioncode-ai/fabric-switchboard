@@ -151,6 +151,9 @@ const safeErrors = new Set([
   "The other machine did not save the sign-in. Nothing changed here; check ssh and its Switchboard.",
   "The other machine already holds this sign-in in that group. Remove its old copy there, then move it again.",
   "The other machine saved the sign-in but the provider did not answer it there. It was removed there and stays here.",
+  // Receiving a hand-over (SB-315).
+  "Name the giver's published key (switchboard settings signer on their computer) to start this sign-in.",
+  "This computer already holds this sign-in. There is nothing to receive.",
   // Using a moved sign-in here again by a mark (SB-315).
   "This account's sign-in was moved to another machine. Call it back to use it here, so only one machine renews it.",
   // Safe moves and call backs between machines (SB-312).

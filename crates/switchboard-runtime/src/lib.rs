@@ -5292,6 +5292,14 @@ async fn execute(
             let record = account_handover::parse(&record)?;
             let mut plan = account_handover::plan(&store.snapshot()?, &record, signer.as_deref())?;
             if apply {
+                // SB-315: a sign-in starts only for a record the giver's published key vouches
+                // for, and never a second copy of one this computer holds.
+                if signer.is_none() {
+                    return Err(account_handover::RECEIVE_SIGNER.into());
+                }
+                if plan["held"] == true {
+                    return Err(account_handover::RECEIVE_HELD.into());
+                }
                 let pool = plan["pool"].as_str().unwrap_or("default").to_owned();
                 let login = needs_owner()?.begin_login(
                     record.provider,
@@ -11224,6 +11232,25 @@ mod usage_gate_tests {
             "this machine still holds the same sign-in"
         );
         assert!(plan.get("login").is_none(), "nothing starts without apply");
+        // SB-315: apply needs the giver's key, and refuses a sign-in this computer holds.
+        let applied = |signer: Option<String>| Operation::ReceiveHandover {
+            record: given.clone(),
+            signer,
+            apply: true,
+            headless: true,
+        };
+        assert_eq!(
+            runtime.execute(applied(None)).await.unwrap_err(),
+            account_handover::RECEIVE_SIGNER
+        );
+        let key = settings_signing::signer(root.path(), &runtime.store).unwrap()["public_key"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        assert_eq!(
+            runtime.execute(applied(Some(key))).await.unwrap_err(),
+            account_handover::RECEIVE_HELD
+        );
         // SB-292 (S-2): every grant is one line in seats.jsonl, with who ordered it.
         let seats = seats::recent(root.path(), 10);
         assert_eq!(seats.len(), 1, "{seats:?}");
