@@ -4138,11 +4138,19 @@ mod tests {
             ),
         )
         .unwrap();
-        let mut child = Command::new("/bin/sh")
-            .arg(&script)
-            .process_group(0)
-            .spawn()
-            .unwrap();
+        let mut command = Command::new("/bin/sh");
+        command.arg(&script).process_group(0);
+        // SB-221: a Terminal window starts its shell with the hang-up at its default. A test run
+        // under `nohup` (or any runner that ignores SIGHUP) hands the ignore down, a
+        // non-interactive shell cannot undo it, and only the terminate would end the session.
+        // SAFETY: `signal` is async-signal-safe and the closure touches nothing else.
+        unsafe {
+            command.pre_exec(|| {
+                libc::signal(libc::SIGHUP, libc::SIG_DFL);
+                Ok(())
+            });
+        }
+        let mut child = command.spawn().unwrap();
         let (sent, exited) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
             let _ = sent.send(child.wait().unwrap());
