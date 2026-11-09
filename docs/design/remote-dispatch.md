@@ -1,6 +1,6 @@
 # Remote dispatch: a board request run on another machine (SB-317, stage A)
 
-Status: steps 1 and 2 built 2026-11-09 (`remote_dispatch.rs`, `dispatch --target`, `dispatch status`, remote `dispatch stop`, the run's own time limit, the worktree removed once nothing is left unpushed); steps 3 and 4 open. Owner: fabric-switchboard. Consumer: Fabric CO-551 (dispatcher relay).
+Status: steps 1 to 3 built 2026-11-09 (`remote_dispatch.rs`, `dispatch --target`, `dispatch status`, remote `dispatch stop`, the run's own time limit, the worktree removed once nothing is left unpushed, `--target auto`); step 4 (a live run on the Studio) open. Owner: fabric-switchboard. Consumer: Fabric CO-551 (dispatcher relay).
 Board: thread `14d6cb73` (Fabric decision `32e834d4`, our acknowledgement `71c81ff5`), request
 `11048978` (operator's words relayed by studio-agent: «давай агентов разработки может попробуем
 уже перенести на студию чтобы они там ранились»). Deadline 2026-11-16.
