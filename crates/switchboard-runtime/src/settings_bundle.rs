@@ -251,8 +251,8 @@ pub struct PlannedGroup {
     pub pool: String,
     /// A group for it exists here: folders are added to it, nothing else changes.
     pub exists: bool,
-    /// SB-314: the pool of that group here, found by a repository it holds, else by its name,
-    /// else by the file's pool; a group that landed here as `acme-2` is found again.
+    /// SB-314: the pool of that group here, found by a repository it holds, else by its name;
+    /// a group that landed here as `acme-2` is found again.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub here: Option<String>,
     pub organization: Option<String>,
@@ -312,7 +312,7 @@ pub struct PlannedCeiling {
 }
 
 /// SB-314: the group here a file's group lands in: one holding a checkout of one of its
-/// repositories, else one of the same name, else one of the same pool. By pool alone a group that
+/// repositories, else one of the same name. Pools are each machine's own: by pool a group that
 /// landed here under another pool (`acme-2`) was made again on every import, and an unrelated group
 /// holding the pool took the file's folders.
 fn matched<'a>(
@@ -338,7 +338,6 @@ fn matched<'a>(
                 .iter()
                 .find(|p| p.name.trim().eq_ignore_ascii_case(g.name.trim()))
         })
-        .or_else(|| snapshot.projects.iter().find(|p| p.pool == g.pool))
 }
 /// What importing `bundle` would do here, finding checkouts under `under`. Reads Git files, writes
 /// nothing.
