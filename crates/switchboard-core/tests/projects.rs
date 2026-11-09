@@ -608,5 +608,10 @@ fn a_new_account_lands_only_in_a_group_that_admits_it() {
     let personal = store
         .save_project(None, "Mine", std::slice::from_ref(&mine), &[])
         .unwrap();
-    add(&store, Provider::Claude, &personal.pool, "synthetic-personal");
+    add(
+        &store,
+        Provider::Claude,
+        &personal.pool,
+        "synthetic-personal",
+    );
 }

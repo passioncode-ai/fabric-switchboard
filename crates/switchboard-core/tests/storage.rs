@@ -3885,26 +3885,25 @@ fn org_seat(store: &Store, email: &str, refresh: &str, pool: &str) -> Account {
 /// SB-314: as [`org_seat`], answering the store's refusal.
 fn try_org_seat(store: &Store, email: &str, refresh: &str, pool: &str) -> Result<Account, String> {
     use switchboard_core::ExternalIdentity;
-    store
-        .upsert(
-            email.into(),
+    store.upsert(
+        email.into(),
+        Provider::Claude,
+        AuthKind::OAuth,
+        pool.into(),
+        Credential::parse(
             Provider::Claude,
             AuthKind::OAuth,
-            pool.into(),
-            Credential::parse(
-                Provider::Claude,
-                AuthKind::OAuth,
-                &format!(
-                    r#"{{"claudeAiOauth":{{"accessToken":"a-{refresh}","refreshToken":"{refresh}"}}}}"#
-                ),
-            )
-            .unwrap(),
-            Some(ExternalIdentity {
-                account_id: Some(format!("synthetic-{refresh}")),
-                organization_id: None,
-                email: Some(email.into()),
-            }),
+            &format!(
+                r#"{{"claudeAiOauth":{{"accessToken":"a-{refresh}","refreshToken":"{refresh}"}}}}"#
+            ),
         )
+        .unwrap(),
+        Some(ExternalIdentity {
+            account_id: Some(format!("synthetic-{refresh}")),
+            organization_id: None,
+            email: Some(email.into()),
+        }),
+    )
 }
 fn schema_of(root: &std::path::Path) -> serde_json::Value {
     serde_json::from_slice(&fs::read(root.join("accounts.json")).unwrap()).unwrap()
