@@ -2,6 +2,23 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-11-09 (late evening): the move audit finished; 0.7.38 and 0.7.39 published, 0.7.40 tagged; remote dispatch (SB-317 stage A)
+
+- **Asked.** The operator: «Аудит системы, как у нас работает перемещение аккаунтов между студией, между девайсами, организациями и так далее … все давай доделай максимально качественно, чтобы было у нас волнами до конца», then «доделай».
+- **Merged.**
+  - PR #563 (SB-314, SB-315): placement refusals name the account and the cause; a backup restore puts an account in its group only once its word admits it (`Restored.returned_to_default`); the move dialog shows refusing groups as unavailable; the group dialog keeps the person's checks; MCP `switchboard_backup_restore`, `switchboard_project_delete`, `switchboard_settings_import`; `--remote-data-dir`; `RECEIVED_OTHER`; `switchboardNativeContext`.
+  - PR #564 (SB-317): `launch --headless`.
+  - PR #566 (SB-318): *Hand over…* and *Receive a hand-over…* in the window (SCN-088), walked through in Safari on the demo.
+  - PRs #567, #568 (SB-317 stage A, `docs/design/remote-dispatch.md`): `dispatch --target <machine>` runs a board request on another machine over ssh in a fresh worktree; `dispatch status` brings the result file back; remote stop; the run's own time limit; the worktree removed once nothing is left unpushed; `--target auto --candidates`. Fabric confirmed D-2 (nobody accepts the hand-over; Fabric closes the workflow after its relay) and took the fields as they are for CO-551 (thread `14d6cb73`, `13f00feb`, `e6f33c33`).
+- **Checks.** `./scripts/check.sh` on the Mac Studio `check=0` on each PR's head (1adb5df, 879f8b6, 8d11955, 859bf67, 1102be1). `remote_dispatch::tests` run the generated scripts with `sh` against a real repository.
+- **Releases.** 0.7.38: the tag's push run never created the macOS, Linux and Windows arm jobs and could not be retried; `gh workflow run release.yml --ref v0.7.38 -f publish=true` published it at 19:18:37Z. 0.7.39 (#561 to #564) published 2026-11-09T21:12:31Z, 25 assets, installed here (`owner_started` 21:17:41Z, proxy 49387). 0.7.40 (#566 to #568) tagged on `5d2c111`, its release run under way.
+- **Found while installing (SB-319).** A *Check for updates* during the background download started a second download into the same `.part`; the package outgrew itself and failed its signature check. The release's own signature verifies on the whole file (checked here with Python against the key in `tauri.conf.json`). Fix on `fix/sb-319-one-update-download`.
+- **Studio.** studio-agent moved seven accounts there by DEC-0048; all seven learned their identity (`identity_learned stored`, both spaces) and renew by themselves.
+- **Mistakes to keep from repeating.** A rebased branch of my own was pushed with `--force-with-lease` again (`docs/handoff-2026-11-09-late`, replaced by a new branch and never merged). One board message carried an em dash (thread `14d6cb73`, `ac25c446`). An uncommitted edit rode a branch switch into SB-319's commit and was taken back out by a new commit: commit before switching.
+- **Open.** SB-319 (merge, then release). SB-318 and SB-317 stage A ship in 0.7.40. SB-317 step 4: a live run on the Studio once it runs 0.7.40, with Fabric's CO-551. SB-254: crash reports after 2026-11-12 23:12Z.
+
+**Exact next task.** Watch the v0.7.40 release run to `latest.json` 0.7.40 (if the tag's run lacks build jobs, dispatch `release.yml --ref v0.7.40 -f publish=true`), install it here with one `switchboard_app check_for_updates` and `restart_to_update`, close SB-318 with the receipt, merge SB-319 and cut 0.7.41, then run SB-317 step 4 with studio-agent.
+
 ## 2026-11-09 (evening): moving accounts between machines, groups and organizations audited and fixed; 0.7.36 and 0.7.37
 
 - **Asked.** The operator, in this session: «Аудит системы, как у нас работает перемещение аккаунтов между студией, между девайсами, организациями и так далее. Вот это все, что недоработки, ошибки, что не хватает с точки зрения API, MCP, все давай доделай максимально качественно, чтобы было у нас волнами до конца.»
