@@ -978,7 +978,12 @@ impl Store {
             .map(|a| a.id.clone())
             .collect();
         for id in leaving {
-            let account = candidate.accounts.iter().find(|a| a.id == id).unwrap().clone();
+            let account = candidate
+                .accounts
+                .iter()
+                .find(|a| a.id == id)
+                .unwrap()
+                .clone();
             let clash = candidate.accounts.iter().any(|b| {
                 b.id != account.id
                     && b.provider == account.provider

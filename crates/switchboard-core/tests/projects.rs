@@ -561,7 +561,12 @@ fn a_share_that_no_longer_fits_does_not_block_its_group_and_a_deleted_groups_acc
     store.remove_project(&mine.pool).unwrap();
     let snapshot = store.snapshot().unwrap();
     assert_eq!(
-        snapshot.accounts.iter().find(|a| a.id == x.id).unwrap().pool,
+        snapshot
+            .accounts
+            .iter()
+            .find(|a| a.id == x.id)
+            .unwrap()
+            .pool,
         "default"
     );
     assert!(snapshot
