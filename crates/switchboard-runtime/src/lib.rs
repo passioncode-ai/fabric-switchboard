@@ -11303,7 +11303,10 @@ mod usage_gate_tests {
         moved.remote_account = Some("remote-1".into());
         seats::append(root.path(), &moved).unwrap();
         assert_eq!(
-            runtime.execute(update(Some(false), None)).await.unwrap_err(),
+            runtime
+                .execute(update(Some(false), None))
+                .await
+                .unwrap_err(),
             account_send::MOVED_AWAY
         );
         let enable = Operation::Update {
@@ -11318,7 +11321,12 @@ mod usage_gate_tests {
             runtime.execute(enable).await.unwrap_err(),
             account_send::MOVED_AWAY
         );
-        assert!(runtime.store.snapshot().unwrap().elsewhere.contains_key(&id));
+        assert!(runtime
+            .store
+            .snapshot()
+            .unwrap()
+            .elsewhere
+            .contains_key(&id));
         let forced = Operation::Update {
             id: id.clone(),
             label: None,
