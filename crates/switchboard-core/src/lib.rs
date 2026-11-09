@@ -2006,7 +2006,7 @@ impl Store {
         self.changed();
         Ok(())
     }
-    /// SB-312: an OAuth account saved without the provider's identity (a sign-in moved here by
+    /// SB-311: an OAuth account saved without the provider's identity (a sign-in moved here by
     /// `accounts send`, whose `accounts add` carries the tokens only) takes the identity the
     /// provider answered for its access token. Without one it is never renewed here
     /// (`refresh::reserve_due`), so it died when its access token expired. Only an account still

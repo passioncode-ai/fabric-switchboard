@@ -663,7 +663,7 @@ async fn check_as(
     gate: &UsageGate,
     person: bool,
 ) -> Result<Usage, String> {
-    // SB-312: a sign-in moved here without the provider's identity learns it first, so the
+    // SB-311: a sign-in moved here without the provider's identity learns it first, so the
     // renewal below can run before its access token expires. Never under the owner transaction:
     // a caller that holds it passes no `lock`.
     if lock.is_some() {

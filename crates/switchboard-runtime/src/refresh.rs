@@ -88,7 +88,7 @@ pub(crate) struct RefreshState {
     owners: Mutex<HashMap<String, ExternalIdentity>>,
     /// The lineage last asked about without an answer, and when: asked again after a minute.
     profile_tried: Mutex<Option<(String, i64)>>,
-    /// SB-312: account id → when its identity was last asked of `/api/oauth/profile`.
+    /// SB-311: account id → when its identity was last asked of `/api/oauth/profile`.
     identity_tried: Mutex<HashMap<String, i64>>,
     /// When the token endpoint last refused the client itself (`invalid_client`).
     client_rejected: Mutex<Option<i64>>,
@@ -1792,7 +1792,7 @@ pub(crate) async fn learn_live_owner(store: &Store, native: NativeSources, state
 }
 /// How long an account whose identity the provider did not give is left before it is asked again.
 const IDENTITY_RETRY_SECONDS: i64 = 600;
-/// SB-312: an enabled Claude sign-in saved without the provider's identity (one moved here by
+/// SB-311: an enabled Claude sign-in saved without the provider's identity (one moved here by
 /// `accounts send`) asks `/api/oauth/profile` for it with its access token while that token is
 /// still valid, outside every lock (5-second timeout), at most every 10 minutes per account.
 /// Without an identity `reserve_due` never renews it, so it died when its access token expired
@@ -3154,7 +3154,7 @@ mod tests {
             FOREIGN_LIVE
         );
     }
-    /// SB-312: a sign-in moved here by `accounts send` is saved by `accounts add` with its tokens
+    /// SB-311: a sign-in moved here by `accounts send` is saved by `accounts add` with its tokens
     /// only. Without the provider's identity it was never renewed here and died when its access
     /// token expired (claude6 on the Mac Studio, 2026-11-08). It learns the identity from
     /// `/api/oauth/profile` while its access token is valid, once per 10 minutes, and never one
