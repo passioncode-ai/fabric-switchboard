@@ -3714,6 +3714,7 @@ fn operator_action(operation: &Operation) -> Option<&'static str> {
 }
 /// SB-292: one line in `seats.jsonl`. The grant already happened, so a record that cannot be
 /// written is logged, never undoes it.
+#[allow(clippy::too_many_arguments)]
 fn record_seat(
     root: &Path,
     event: &str,

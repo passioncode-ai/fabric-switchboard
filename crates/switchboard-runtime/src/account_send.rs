@@ -266,10 +266,7 @@ pub fn send(
             return match after {
                 Some(after) => {
                     let new: Vec<&String> = after.iter().filter(|a| !before.contains(a)).collect();
-                    if new.is_empty() {
-                        undo_here()?;
-                        Err(ADD_FAILED.into())
-                    } else if new.len() == 1 && remove_there(new[0]) {
+                    if new.is_empty() || (new.len() == 1 && remove_there(new[0])) {
                         undo_here()?;
                         Err(ADD_FAILED.into())
                     } else {
@@ -398,6 +395,7 @@ pub struct Taken {
 /// (`send`) back from `target`. The other machine marks it used elsewhere and hands its tokens
 /// over ssh; they replace the spent ones here (`Store::adopt_refreshed`, identity checked) and
 /// the mark here is cleared. The caller checks the provider answers, then `recall_finish`.
+#[allow(clippy::too_many_arguments)]
 pub fn recall_take(
     store: &Store,
     id: &str,
