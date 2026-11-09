@@ -1430,7 +1430,7 @@ fn a_groups_organization_keeps_its_folders_on_its_own_seats() {
             &[work.id.clone(), home.id.clone()],
         )
         .unwrap_err();
-    assert!(err.contains("belongs to another organization"), "{err}");
+    assert!(err.contains("is a personal account and this group serves an organization"), "{err}");
     let kept = store
         .save_project(
             Some(&alpha.pool),
@@ -1540,7 +1540,7 @@ fn a_group_of_two_organizations_takes_seats_of_both_and_no_others() {
             true,
         )
         .unwrap_err();
-    assert!(err.contains("belongs to another organization"), "{err}");
+    assert!(err.contains("is a personal account and this group serves an organization"), "{err}");
     let shared = store
         .save_project_with(
             None,
@@ -4031,7 +4031,7 @@ fn an_organization_arriving_with_a_domain_changes_no_account_and_only_suggests()
         )
         .unwrap_err();
     assert!(
-        refused.contains("belongs to another organization"),
+        refused.contains("is a personal account and this group serves an organization"),
         "{refused}"
     );
 }

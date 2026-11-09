@@ -859,6 +859,48 @@ impl Store {
         self.changed();
         Ok(())
     }
+    /// SB-314: a restore puts `id` back in `pool` (`default` included) when the group of `pool`
+    /// admits it by its word as it stands now ([`crate::Snapshot::context_admits`]) and that pool
+    /// holds no other copy of its identity; nothing else. True when it moved. Its route in the
+    /// pool it leaves goes, and shares that no longer apply are pruned.
+    pub(crate) fn restore_account_pool(&self, id: &str, pool: &str) -> Result<bool, String> {
+        let mut state = self.lock()?;
+        let mut candidate = state.clone();
+        let Some(account) = candidate.accounts.iter().find(|a| a.id == id).cloned() else {
+            return Ok(false);
+        };
+        if account.pool == pool || !candidate.context_admits(pool, &account) {
+            return Ok(false);
+        }
+        let clash = candidate.accounts.iter().any(|b| {
+            b.id != account.id
+                && b.provider == account.provider
+                && b.pool == pool
+                && b.external_identity
+                    .as_ref()
+                    .zip(account.external_identity.as_ref())
+                    .is_some_and(|(x, y)| x.matches(y))
+        });
+        if clash {
+            return Ok(false);
+        }
+        let old = format!("{}:{}", account.provider.as_str(), account.pool);
+        if candidate.routes.get(&old).map(String::as_str) == Some(id) {
+            candidate.routes.remove(&old);
+        }
+        if let Some(a) = candidate.accounts.iter_mut().find(|a| a.id == id) {
+            a.pool = pool.into();
+        }
+        for p in candidate.projects.iter_mut().filter(|p| p.pool == pool) {
+            p.shared_accounts.retain(|s| s != id);
+        }
+        stale_shares_prune(&mut candidate);
+        shared_routes_prune(&mut candidate);
+        append_event(&mut candidate, "account_updated", Some(id), "success");
+        self.publish(&mut state, candidate)?;
+        self.changed();
+        Ok(true)
+    }
     /// SB-122: moves an account whose pool no project reserves (a deleted project leaves its
     /// accounts there) back to `default`. A project's account leaves through `save_project`.
     pub fn return_to_default(&self, id: &str) -> Result<(), String> {

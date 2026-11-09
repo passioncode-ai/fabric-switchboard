@@ -2539,7 +2539,7 @@ function restoreDialog(backup: BackupInfo) {
 let restoredText = '';
 function showRestored(result: Restored) {
   const extra = [result.projects ? `${plural(result.projects, { one: '{n} group', other: '{n} groups' })}` : '', result.rules ? `${plural(result.rules, { one: '{n} rule', other: '{n} rules' })}` : '', result.settings ? t('settings') : ''].filter(Boolean);
-  restoredText = `${plural(result.added, { one: '{n} account restored', other: '{n} accounts restored' })}${extra.length ? t(', with {what}', { what: extra.join(', ') }) : ''} · ${t('{n} already here', { n: result.skipped })}${result.failed ? ` · ${t('{n} could not be restored', { n: result.failed })}` : ''}.`;
+  restoredText = `${plural(result.added, { one: '{n} account restored', other: '{n} accounts restored' })}${extra.length ? t(', with {what}', { what: extra.join(', ') }) : ''} · ${t('{n} already here', { n: result.skipped })}${result.failed ? ` · ${t('{n} could not be restored', { n: result.failed })}` : ''}${result.returned_to_default ? ` · ${plural(result.returned_to_default, { one: '{n} went to the default group: its group here does not take it', other: '{n} went to the default group: their groups here do not take them' })}` : ''}.`;
 }
 /** Language (L10N-01): the system's by default; a choice here reloads the window in that language. */
 function languagePanel() {
