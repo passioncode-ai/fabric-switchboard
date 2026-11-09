@@ -6,7 +6,7 @@ release pull request renames `Unreleased` to the version. While Windows signing 
 that section must say `windows_authenticode: NOT_SIGNED`. Notes of 0.5.3-beta.1 and earlier are
 on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/releases).
 
-## Unreleased
+## 0.7.36
 
 - An account moved to another machine with `switchboard accounts send` (or *Move to another machine…*) now keeps working there: it learns its provider identity from Claude at its first check, so the other machine renews it. Before, it was never renewed there and signed out when its access token expired, a few hours after the move (SB-311).
 
