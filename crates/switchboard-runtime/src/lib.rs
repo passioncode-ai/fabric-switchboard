@@ -219,6 +219,12 @@ pub enum Operation {
         #[serde(default)]
         decision: Option<spend::Decision>,
     },
+    /// SB-312: the newest lines of `seats.jsonl` (moves, hand-overs and call backs: account ids,
+    /// the other machine, group, who ordered it), newest last. Reads only.
+    Seats {
+        #[serde(default)]
+        limit: Option<usize>,
+    },
     /// SB-292 (S-3), on the machine holding a moved account: mark it used elsewhere and answer its
     /// tokens for the calling machine's ssh; `undo` clears the mark.
     SurrenderAccount {
@@ -1174,6 +1180,7 @@ impl Runtime {
                 // SB-292: ssh both ways, as a move.
                 | Operation::SurrenderAccount { .. }
                 | Operation::RecallAccount { .. }
+                | Operation::Seats { .. }
                 | Operation::AgentCatalog
                 | Operation::AgentConnect { .. }
                 | Operation::AgentKey
@@ -3707,6 +3714,7 @@ fn operator_action(operation: &Operation) -> Option<&'static str> {
 }
 /// SB-292: one line in `seats.jsonl`. The grant already happened, so a record that cannot be
 /// written is logged, never undoes it.
+#[allow(clippy::too_many_arguments)]
 fn record_seat(
     root: &Path,
     event: &str,
@@ -3715,9 +3723,11 @@ fn record_seat(
     pool: &str,
     decision: Option<&spend::Decision>,
     remote_account: Option<&str>,
+    sent: Option<&str>,
 ) {
     let mut seat = seats::of(monitor::now(), event, account, machine, pool, decision);
     seat.remote_account = remote_account.map(str::to_owned);
+    seat.sent = sent.map(str::to_owned);
     if seats::append(root, &seat).is_err() {
         oplog::event(
             "seat_record",
@@ -5114,6 +5124,7 @@ async fn execute(
                         program.as_deref().unwrap_or(account_send::REMOTE_DEFAULT),
                         monitor::now(),
                         &account_send::ssh_runner,
+                        &|token| refresh_state.wait_settled(token),
                     )
                 })
             }?;
@@ -5125,11 +5136,17 @@ async fn execute(
                 &pool,
                 decision.as_ref(),
                 moved["remote_id"].as_str(),
+                moved["sent"].as_str(),
             );
             Ok(moved)
         }
+        Operation::Seats { limit } => Ok(json!({
+            "seats": seats::recent(root, limit.unwrap_or(50).clamp(1, 1000)),
+        })),
         Operation::SurrenderAccount { id, undo } => {
-            account_send::surrender(&store, &id, undo, monitor::now())
+            account_send::surrender(&store, &id, undo, monitor::now(), &|token| {
+                refresh_state.wait_settled(token)
+            })
         }
         Operation::RecallAccount {
             id,
@@ -5139,8 +5156,10 @@ async fn execute(
             decision,
         } => {
             let program = program.unwrap_or_else(|| account_send::REMOTE_DEFAULT.into());
+            let grant = seats::last_grant(root, &id, &from);
+            let sent = grant.as_ref().and_then(|g| g.sent.clone());
             let remote_id = remote_id
-                .or_else(|| seats::remote_account(root, &id, &from))
+                .or_else(|| grant.and_then(|g| g.remote_account))
                 .ok_or(account_send::NO_REMOTE_ID)?;
             let taken = {
                 let (store, id, from, program) =
@@ -5154,6 +5173,7 @@ async fn execute(
                         &program,
                         monitor::now(),
                         &account_send::ssh_runner,
+                        sent.as_deref(),
                     )
                 })
             }?;
@@ -5164,7 +5184,11 @@ async fn execute(
                 Operation::Usage { id: id.clone() },
             ))
             .await
-            .is_ok();
+            .is_ok()
+                // SB-312: a check that renewed the sign-in here and then failed (a 429, a 5xx)
+                // proved it: the copy there is spent now and must not be given back.
+                || store.stored_credential(&id).ok().and_then(|c| c.refresh_token)
+                    != taken.token;
             if !answered {
                 account_send::recall_undo(
                     &store,
@@ -5190,7 +5214,10 @@ async fn execute(
                 blocking::run(move || {
                     Ok::<_, String>(account_send::recall_finish(
                         &from,
-                        &account_send::Taken { remote_id: remote },
+                        &account_send::Taken {
+                            remote_id: remote,
+                            token: None,
+                        },
                         &program,
                         &account_send::ssh_runner,
                     ))
@@ -5204,6 +5231,7 @@ async fn execute(
                 &pool,
                 decision.as_ref(),
                 Some(&taken.remote_id),
+                None,
             );
             Ok(finished)
         }
@@ -5220,6 +5248,7 @@ async fn execute(
                 &to,
                 &pool,
                 decision.as_ref(),
+                None,
                 None,
             );
             Ok(handed)

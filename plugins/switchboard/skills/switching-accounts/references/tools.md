@@ -439,7 +439,18 @@ Only when the operator asks. Takes back a Claude sign-in this machine moved with
 `switchboard_account_send`: the other machine stops using it and gives its tokens back over ssh, the
 provider is checked here (on failure it goes back there), then the copy there is removed and its
 account list read. Answers `{recalled, removed_there, proved}`; `proved` is false while the list
-there still names it. `remote_id` defaults to the one the recorded move names.
+there still names it. `remote_id` defaults to the one the recorded move names, until a call
+back of it is recorded. Refused when the account was renewed here after it moved (its copy there is
+spent then); the other machine's own reason is answered when it refuses, and a group that uses the
+account there moves to another of its accounts first.
+
+### `switchboard_seats`: `limit?`
+
+Reads only. The newest lines of `seats.jsonl` (default 50, at most 1000), newest last: `at`, `event`
+(`granted`, `handed_over`, `recalled`), `account` (the id here), `machine` (as ssh named it),
+`pool`, `remote_account` (the id there), `sent` (a fingerprint of the sign-in sent, never the
+token), `ordered_by` and the operator's `decision`. Read it before `switchboard_account_recall` to
+find what is on another machine.
 
 ### `switchboard_account_hand_over`: `account_id`, `to`, `decision?`
 
