@@ -6,7 +6,7 @@ release pull request renames `Unreleased` to the version. While Windows signing 
 that section must say `windows_authenticode: NOT_SIGNED`. Notes of 0.5.3-beta.1 and earlier are
 on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/releases).
 
-## Unreleased
+## 0.7.38
 
 - Receiving a hand-over with `--apply` needs the giver's published key and is refused when this computer already holds that sign-in (SB-315).
 - A Codex sign-in moved to another machine can be called back too (`switchboard accounts recall`, *Call back*) (SB-315).
