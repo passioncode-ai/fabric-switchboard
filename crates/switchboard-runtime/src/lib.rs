@@ -4205,7 +4205,10 @@ fn dispatch_remote(
     oplog::event(
         "dispatch",
         &[
-            ("agent", oplog::Field::Code(dispatch::agent_kind(Some(agent)))),
+            (
+                "agent",
+                oplog::Field::Code(dispatch::agent_kind(Some(agent))),
+            ),
             ("where", oplog::Field::Code("remote")),
         ],
     );

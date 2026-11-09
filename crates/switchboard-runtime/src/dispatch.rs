@@ -445,7 +445,12 @@ pub(crate) fn stop(
 /// result}`. A run here answers from its record; a run on another machine is read there over
 /// ssh, and its end, once seen, is recorded here (`exited`, `stopped`; `lost` is recorded as
 /// `exited` without a code).
-pub(crate) fn status(root: &Path, id: &str, now: i64, analytics: Option<&Analytics>) -> Result<Value, String> {
+pub(crate) fn status(
+    root: &Path,
+    id: &str,
+    now: i64,
+    analytics: Option<&Analytics>,
+) -> Result<Value, String> {
     let Some(record) = crate::launches::get(root, id) else {
         return Err(crate::launches::LAUNCH_NOT_FOUND.into());
     };
@@ -482,7 +487,9 @@ pub(crate) fn status(root: &Path, id: &str, now: i64, analytics: Option<&Analyti
         _ => {}
     }
     // A run whose stop or time limit this machine recorded reads as that.
-    if let Some(kind) = crate::launches::get(root, id).and_then(|r| r["ended"]["kind"].as_str().map(str::to_owned)) {
+    if let Some(kind) =
+        crate::launches::get(root, id).and_then(|r| r["ended"]["kind"].as_str().map(str::to_owned))
+    {
         if answer["state"] == "running" {
             answer["state"] = kind.into();
         }

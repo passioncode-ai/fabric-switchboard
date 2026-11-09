@@ -8,6 +8,7 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- `switchboard dispatch --target <machine>` runs a board request's session on another machine over ssh, in a fresh worktree of the repository there, and `switchboard dispatch status` brings back its state and result file for Fabric to relay (SB-317, `docs/design/remote-dispatch.md`).
 - The window can hand an account over (⋯ → *Hand over…*: a signed record and this computer's key for the receiver) and receive one (*+ Add account* → *Receive a hand-over…*) (SB-318).
 
 ## 0.7.39
