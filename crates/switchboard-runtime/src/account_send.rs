@@ -30,13 +30,15 @@ pub const NOT_VERIFIED: &str = "The other machine saved the sign-in but the prov
 pub const IN_USE_HERE: &str = "The ordinary Claude Code or Codex here is signed in to this account. Sign it in to another account first.";
 pub const NOT_ONLY_COPY: &str = "This sign-in is also saved in another group here. Remove or move that copy first, so only one machine renews it.";
 pub const UNREACHABLE: &str = "The other machine's Switchboard did not answer over ssh. Nothing changed; check ssh and that Switchboard runs there.";
-pub const POOL_MISSING: &str = "The other machine has no group with that id. Name one of its groups, or default.";
+pub const POOL_MISSING: &str =
+    "The other machine has no group with that id. Name one of its groups, or default.";
 pub const RENEWED_DURING: &str = "This machine renewed the sign-in while it moved, so the copy sent was no longer valid. It was removed there and stays here; move it again.";
 pub const OUTCOME_UNKNOWN: &str = "The other machine's answer was lost. This machine no longer uses the account; look at the other machine's accounts and call it back or remove its copy there.";
 pub const LEFT_THERE: &str = "The copy on the other machine could not be removed. This machine no longer uses the account; remove that copy there, then mark the account used here.";
 /// The location a surrender writes; `--undo` takes back only this mark.
 pub const CALLED_BACK: &str = "called back";
-pub const NOT_CALLED_BACK: &str = "This account was not given back by a call back here, so its mark stays. Nothing changed.";
+pub const NOT_CALLED_BACK: &str =
+    "This account was not given back by a call back here, so its mark stays. Nothing changed.";
 pub const ONLY_ONE_HERE: &str = "This is the only account its group uses on this machine. Add another account to that group before calling this one back.";
 pub const USED_HERE_SINCE: &str = "This account was renewed here after it moved, so its copy there is no longer valid. Remove that copy there instead of calling it back.";
 
@@ -214,7 +216,10 @@ pub fn send(
     let sent = credential.refresh_token.clone();
     let remove_there = |remote_id: &str| {
         run(
-            &ssh(remote(program, &["--json", "accounts", "remove", remote_id])),
+            &ssh(remote(
+                program,
+                &["--json", "accounts", "remove", remote_id],
+            )),
             None,
         )
         .ok()
@@ -292,7 +297,12 @@ pub fn send(
             return Err(LEFT_THERE.into());
         }
         undo_here()?;
-        return Err(if renewed_here { RENEWED_DURING } else { NOT_VERIFIED }.into());
+        return Err(if renewed_here {
+            RENEWED_DURING
+        } else {
+            NOT_VERIFIED
+        }
+        .into());
     }
     Ok(json!({
         "moved": true, "target": target, "remote_id": remote_id, "marked_elsewhere": true,
@@ -556,11 +566,17 @@ pub fn ssh_runner(args: &[String], stdin: Option<&[u8]>) -> Result<String, Strin
         })
     };
     let stdout = reader(
-        child.stdout.take().map(|p| Box::new(p) as Box<dyn Read + Send>),
+        child
+            .stdout
+            .take()
+            .map(|p| Box::new(p) as Box<dyn Read + Send>),
         1 << 20,
     );
     let stderr = reader(
-        child.stderr.take().map(|p| Box::new(p) as Box<dyn Read + Send>),
+        child
+            .stderr
+            .take()
+            .map(|p| Box::new(p) as Box<dyn Read + Send>),
         64 << 10,
     );
     if let Some(mut input) = child.stdin.take() {
@@ -683,7 +699,8 @@ mod tests {
             "agents",
             REMOTE_DEFAULT,
             100,
-            &fake(&calls, true, true), &|_| {}
+            &fake(&calls, true, true),
+            &|_| {},
         )
         .unwrap();
         assert_eq!(answer["remote_id"], "remote-1");
@@ -719,7 +736,8 @@ mod tests {
                 "default",
                 REMOTE_DEFAULT,
                 100,
-                &fake(&calls, false, true), &|_| {}
+                &fake(&calls, false, true),
+                &|_| {}
             )
             .unwrap_err(),
             ADD_FAILED
@@ -741,7 +759,8 @@ mod tests {
                 "default",
                 REMOTE_DEFAULT,
                 100,
-                &fake(&calls, true, false), &|_| {}
+                &fake(&calls, true, false),
+                &|_| {}
             )
             .unwrap_err(),
             NOT_VERIFIED
@@ -766,7 +785,8 @@ mod tests {
                 "default",
                 REMOTE_DEFAULT,
                 100,
-                &fake(&calls, true, true), &|_| {}
+                &fake(&calls, true, true),
+                &|_| {}
             )
             .unwrap_err(),
             NOT_A_SIGN_IN
@@ -781,7 +801,8 @@ mod tests {
                     "default",
                     REMOTE_DEFAULT,
                     100,
-                    &fake(&calls, true, true), &|_| {}
+                    &fake(&calls, true, true),
+                    &|_| {}
                 )
                 .unwrap_err(),
                 TARGET_INVALID
@@ -795,7 +816,8 @@ mod tests {
                 "default",
                 "switchboard",
                 100,
-                &fake(&calls, true, true), &|_| {}
+                &fake(&calls, true, true),
+                &|_| {}
             )
             .unwrap_err(),
             REMOTE_INVALID
@@ -846,7 +868,9 @@ mod tests {
         let (_root, store, id) = store_with(AuthKind::OAuth);
         let preflight = |command: &str| -> Option<Result<String, String>> {
             if command.contains("'project' 'list'") {
-                return Some(Ok(r#"{"ok":true,"data":{"projects":[{"pool":"agents"}]}}"#.into()));
+                return Some(Ok(
+                    r#"{"ok":true,"data":{"projects":[{"pool":"agents"}]}}"#.into()
+                ));
             }
             if command.contains("'accounts' 'list'") {
                 return Some(Ok(r#"{"ok":true,"data":{"accounts":[]}}"#.into()));
@@ -872,7 +896,8 @@ mod tests {
                 "agents",
                 REMOTE_DEFAULT,
                 5,
-                &refused, &|_| {}
+                &refused,
+                &|_| {}
             )
             .unwrap_err(),
             ALREADY_THERE
@@ -895,7 +920,8 @@ mod tests {
                 "agents",
                 REMOTE_DEFAULT,
                 6,
-                &other, &|_| {}
+                &other,
+                &|_| {}
             )
             .unwrap_err(),
             ADD_FAILED
@@ -940,15 +966,30 @@ mod tests {
             Err("ssh failed.".into())
         };
         let send_to = |pool: &str, run: &Run<'_>| {
-            send(&store, &id, "studio.local", pool, REMOTE_DEFAULT, 1, run, &|_| {})
+            send(
+                &store,
+                &id,
+                "studio.local",
+                pool,
+                REMOTE_DEFAULT,
+                1,
+                run,
+                &|_| {},
+            )
         };
         assert_eq!(send_to("agents", &silent).unwrap_err(), UNREACHABLE);
         assert_eq!(
-            send_to("nowhere", &studio(&calls, None, |_| Err("unexpected".into())))
-                .unwrap_err(),
+            send_to(
+                "nowhere",
+                &studio(&calls, None, |_| Err("unexpected".into()))
+            )
+            .unwrap_err(),
             POOL_MISSING
         );
-        assert!(store.snapshot().unwrap().elsewhere.is_empty(), "nothing marked");
+        assert!(
+            store.snapshot().unwrap().elsewhere.is_empty(),
+            "nothing marked"
+        );
     }
 
     #[test]
@@ -968,14 +1009,36 @@ mod tests {
             Some(r#"{"ok":true,"data":{"accounts":[{"id":"old"},{"id":"new-1"}]}}"#),
             lost,
         );
-        let err = send(&store, &id, "studio.local", "agents", REMOTE_DEFAULT, 1, &saved, &|_| {});
+        let err = send(
+            &store,
+            &id,
+            "studio.local",
+            "agents",
+            REMOTE_DEFAULT,
+            1,
+            &saved,
+            &|_| {},
+        );
         assert_eq!(err.unwrap_err(), ADD_FAILED);
-        assert!(calls.lock().unwrap().iter().any(|(c, _)| c.contains("'remove' 'new-1'")));
+        assert!(calls
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|(c, _)| c.contains("'remove' 'new-1'")));
         assert!(!store.snapshot().unwrap().elsewhere.contains_key(&id));
         // Nobody can tell: this machine keeps not using it, so at most one machine holds it.
         let calls: Calls = Default::default();
         let unknown = studio(&calls, None, lost);
-        let err = send(&store, &id, "studio.local", "agents", REMOTE_DEFAULT, 2, &unknown, &|_| {});
+        let err = send(
+            &store,
+            &id,
+            "studio.local",
+            "agents",
+            REMOTE_DEFAULT,
+            2,
+            &unknown,
+            &|_| {},
+        );
         assert_eq!(err.unwrap_err(), OUTCOME_UNKNOWN);
         assert!(store.snapshot().unwrap().elsewhere.contains_key(&id));
     }
@@ -1012,13 +1075,20 @@ mod tests {
             1,
             &renewing,
             &|token| {
-                assert_eq!(token, "synthetic-refresh", "settled on the token being sent");
+                assert_eq!(
+                    token, "synthetic-refresh",
+                    "settled on the token being sent"
+                );
                 settled.store(true, std::sync::atomic::Ordering::SeqCst);
             },
         );
         assert_eq!(err.unwrap_err(), RENEWED_DURING);
         assert!(settled.load(std::sync::atomic::Ordering::SeqCst));
-        assert!(calls.lock().unwrap().iter().any(|(c, _)| c.contains("'remove' 'remote-1'")));
+        assert!(calls
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|(c, _)| c.contains("'remove' 'remote-1'")));
         assert!(!store.snapshot().unwrap().elsewhere.contains_key(&id));
     }
 
@@ -1030,7 +1100,16 @@ mod tests {
         store
             .set_in_use(std::collections::BTreeSet::from([id.clone()]))
             .unwrap();
-        let err = send(&store, &id, "studio.local", "agents", REMOTE_DEFAULT, 1, &ok, &|_| {});
+        let err = send(
+            &store,
+            &id,
+            "studio.local",
+            "agents",
+            REMOTE_DEFAULT,
+            1,
+            &ok,
+            &|_| {},
+        );
         assert_eq!(err.unwrap_err(), IN_USE_HERE);
         store.set_in_use(Default::default()).unwrap();
         // The same sign-in saved in another group here.
@@ -1043,7 +1122,16 @@ mod tests {
                 store.stored_credential(&id).unwrap(),
             )
             .unwrap();
-        let err = send(&store, &id, "studio.local", "agents", REMOTE_DEFAULT, 2, &ok, &|_| {});
+        let err = send(
+            &store,
+            &id,
+            "studio.local",
+            "agents",
+            REMOTE_DEFAULT,
+            2,
+            &ok,
+            &|_| {},
+        );
         assert_eq!(err.unwrap_err(), NOT_ONLY_COPY);
         assert!(calls.lock().unwrap().is_empty(), "nothing ran");
     }
@@ -1078,7 +1166,9 @@ mod tests {
         assert_eq!(snapshot.routes.get("claude:default"), Some(&other.id));
         assert!(snapshot.elsewhere.contains_key(&id));
         // Its undo takes back only the mark a surrender set.
-        store.mark_elsewhere_at(&other.id, true, 9, Some("studio")).unwrap();
+        store
+            .mark_elsewhere_at(&other.id, true, 9, Some("studio"))
+            .unwrap();
         assert_eq!(
             surrender(&store, &other.id, true, 10, &|_| {}).unwrap_err(),
             NOT_CALLED_BACK
@@ -1090,7 +1180,9 @@ mod tests {
     #[test]
     fn a_sign_in_renewed_here_after_it_moved_is_not_called_back() {
         let (_root, store, id) = store_with(AuthKind::OAuth);
-        store.mark_elsewhere_at(&id, true, 1, Some("studio.local")).unwrap();
+        store
+            .mark_elsewhere_at(&id, true, 1, Some("studio.local"))
+            .unwrap();
         let calls: Calls = Default::default();
         let print = token_print("an-older-token");
         assert_eq!(
@@ -1125,7 +1217,10 @@ mod tests {
         .unwrap();
         assert_eq!(back.refresh_token.as_deref(), Some("synthetic-refresh"));
         assert!(store.snapshot().unwrap().elsewhere.contains_key(&id));
-        assert_eq!(surrender(&store, &id, false, 8, &|_| {}).unwrap_err(), NOT_HERE);
+        assert_eq!(
+            surrender(&store, &id, false, 8, &|_| {}).unwrap_err(),
+            NOT_HERE
+        );
         surrender(&store, &id, true, 9, &|_| {}).unwrap();
         assert!(!store.snapshot().unwrap().elsewhere.contains_key(&id));
         let (_root, keyed, key) = store_with(AuthKind::ApiKey);
@@ -1151,7 +1246,8 @@ mod tests {
                 "remote-1",
                 REMOTE_DEFAULT,
                 5,
-                &member(&calls, Some(RENEWED), false), None
+                &member(&calls, Some(RENEWED), false),
+                None
             )
             .err()
             .unwrap(),
@@ -1168,7 +1264,8 @@ mod tests {
             "remote-1",
             REMOTE_DEFAULT,
             6,
-            &member(&calls, Some(RENEWED), false), None
+            &member(&calls, Some(RENEWED), false),
+            None,
         )
         .unwrap();
         let stored = store.stored_credential(&id).unwrap();
@@ -1209,7 +1306,8 @@ mod tests {
                 "remote-1",
                 REMOTE_DEFAULT,
                 6,
-                &member(&calls, None, false), None
+                &member(&calls, None, false),
+                None
             )
             .err()
             .unwrap(),
@@ -1233,7 +1331,8 @@ mod tests {
             "remote-1",
             REMOTE_DEFAULT,
             6,
-            &member(&calls, Some(r#"{"x":1}"#), false), None
+            &member(&calls, Some(r#"{"x":1}"#), false),
+            None
         )
         .is_err());
         assert!(calls
@@ -1249,7 +1348,8 @@ mod tests {
             "remote-1",
             REMOTE_DEFAULT,
             7,
-            &member(&calls, Some(RENEWED), false), None
+            &member(&calls, Some(RENEWED), false),
+            None,
         )
         .unwrap();
         calls.lock().unwrap().clear();
@@ -1277,7 +1377,8 @@ mod tests {
                 "",
                 REMOTE_DEFAULT,
                 9,
-                &member(&calls, Some(RENEWED), false), None
+                &member(&calls, Some(RENEWED), false),
+                None
             )
             .err()
             .unwrap(),

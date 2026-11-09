@@ -1068,7 +1068,10 @@ impl Server {
             "switchboard_account_send" => self.account_send(args).await,
             "switchboard_account_recall" => self.account_recall(args).await,
             "switchboard_seats" => {
-                let limit = args.get("limit").and_then(Value::as_u64).map(|n| n as usize);
+                let limit = args
+                    .get("limit")
+                    .and_then(Value::as_u64)
+                    .map(|n| n as usize);
                 self.call(Operation::Seats { limit }).await
             }
             "switchboard_account_hand_over" => self.account_hand_over(args).await,
