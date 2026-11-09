@@ -2,6 +2,36 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-11-09 (early morning): 0.7.35 published and installed; SB-285, SB-310, SB-299, SB-221 closed
+
+- **Release 0.7.35.** The first `release.yml` attempt (run `42533397756`) was refused by the guard: it
+  started nightly on the tag and waited its 60 minutes while hosted runners were slow to pick the jobs
+  up ("nightly.yml is still pending on 74f489c within the time limit"). Nightly `42534869281` then
+  passed; the release run's second attempt published at 2026-11-09T00:54:55Z with 25 assets, and
+  `latest.json` reads 0.7.35. Lesson: the guard's 60-minute window is shorter than a slow nightly;
+  re-run the release once nightly passes, as the guard says.
+- **Installed.** `switchboard_app` check and restart to update: `owner_started` 00:57:20Z,
+  version 0.7.35, proxy port unchanged (49387).
+- **SB-285 closed** (PR #545): the four `@passioncode.ai` accounts keep their groups, the log has no
+  refusal since the start; no suggestion shows because the person chose personal for them
+  (`crates/switchboard-core/src/organizations.rs:232`). **SB-310 closed** (PR #545):
+  `switchboard rotation status --json` lists every group with accounts enabled.
+- **SB-299 closed** (PR #544): every door is merged and released (v0.7.28, v0.7.29); item 3 decided
+  by the operator's words: Claude Code reaches the CLI, so no MCP tool for the PERSON group
+  ([report, Next](reports/2026-11-07-agent-doors/README.md#next)).
+- **SB-221 closed** (PR #546): `terminal_session` in `crates/switchboard-runtime/src/launch.rs`
+  starts the test's shell with SIGHUP at its default; full gate on the Mac Studio under plain
+  `nohup`: `check=0`, 1237 tests. The `nohup` workaround above is no longer needed.
+- **Open, with their condition.** SB-254 closes after a week without the Keychain crash: no crash
+  report since 2026-11-05 05:20, and every stop since is `drained`; read
+  `~/Library/Logs/DiagnosticReports/` and the log on or after 2026-11-12 23:12Z. The rest of the
+  open rows wait on others (SB-141 CT-57, SB-177 the hub, SB-184 a profile owner, SB-200 CT-124/125,
+  SB-280 OBS-359, SB-291/292 the estate's source of truth, SB-295 OBS-378) or on the operator's
+  hardware (SB-01, SB-02, SB-178, SB-243's tester).
+- **Exact next task.** On or after 2026-11-12 23:12Z close SB-254 if no new
+  `fabric-switchboard-*.ips` appeared; meanwhile take the next unblocked P2/P3 row (SB-163's design
+  note, SB-216/217 "revisit after 0.7.0", SB-231 to SB-241).
+
 ## 2026-11-09 (night): release 0.7.35; SB-285 domain suggests only, SB-310, rotation bar rows
 
 - **Operator's report** (this session, 2026-11-08 evening): after the PassionCode.ai and NG Business
