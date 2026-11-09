@@ -715,7 +715,6 @@ mod tests {
         }
     }
 
-
     #[test]
     fn a_named_data_folder_goes_to_every_command_there() {
         // SB-315: a Switchboard on the other machine that runs with --data-dir.

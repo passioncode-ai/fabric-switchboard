@@ -5263,9 +5263,9 @@ async fn execute(
                     &from,
                     &taken,
                     &account_send::Program {
-                            path: &program,
-                            data_dir: remote_data_dir.as_deref(),
-                        },
+                        path: &program,
+                        data_dir: remote_data_dir.as_deref(),
+                    },
                     monitor::now(),
                     &account_send::ssh_runner,
                 )?;

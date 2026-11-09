@@ -1705,4 +1705,3 @@ mod tests {
         assert!(validate(&s).is_ok());
     }
 }
-
