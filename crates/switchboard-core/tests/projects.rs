@@ -408,42 +408,77 @@ fn an_account_whose_own_group_goes_away_is_no_longer_shared_and_never_moves_by_i
     assert!(group(&shares.pool).shared_accounts.is_empty());
 }
 
-/// SB-313: placing an account in an organization is refused when a group it serves admitted it
-/// before and would refuse it after; an account a group already refused may be placed.
+/// SB-313: placing an account moves its provider team with it. A teammate a group admitted
+/// before and would refuse after keeps the choice from being made; the account itself follows
+/// the person's word, and a group that had it selected moves to another account it admits.
 #[test]
-fn an_organization_that_a_serving_group_would_refuse_is_not_given() {
+fn a_teammate_a_group_would_refuse_keeps_the_word_from_being_given() {
+    use switchboard_core::organizations::{ASSIGN_OUTSIDE, PERSONAL};
+    use switchboard_core::ExternalIdentity;
     let (root, store) = setup();
     let acme = store.add_organization("Acme", &[]).unwrap();
-    let beta = store.add_organization("Beta", &[]).unwrap();
-    let seat = add(&store, Provider::Claude, "default", "synthetic-seat");
-    store.assign_organization(&seat.id, Some(&acme.id)).unwrap();
+    let seat = |label: &str, token: &str| {
+        store
+            .upsert(
+                label.into(),
+                Provider::Claude,
+                AuthKind::OAuth,
+                "default".into(),
+                Credential::parse(
+                    Provider::Claude,
+                    AuthKind::OAuth,
+                    &format!(r#"{{"claudeAiOauth":{{"accessToken":"a-{token}","refreshToken":"r-{token}"}}}}"#),
+                )
+                .unwrap(),
+                Some(ExternalIdentity {
+                    account_id: Some(format!("synthetic-{token}")),
+                    organization_id: Some("synthetic-team".into()),
+                    email: None,
+                }),
+            )
+            .unwrap()
+    };
+    let lead = seat("Lead", "lead");
+    let mate = seat("Mate", "mate");
+    // The lead's word places the team in Acme; the mate follows the team into Acme's group.
+    store.assign_organization(&lead.id, Some(&acme.id)).unwrap();
     let folder = project(&root, "acme");
     store
         .save_project_with(
             None,
             "Acme work",
             std::slice::from_ref(&folder),
-            std::slice::from_ref(&seat.id),
+            std::slice::from_ref(&mate.id),
             Some(vec![acme.id.clone()]),
             true,
         )
         .unwrap();
     assert_eq!(
-        store
-            .assign_organization(&seat.id, Some(&beta.id))
-            .unwrap_err(),
-        switchboard_core::organizations::ASSIGN_OUTSIDE
+        store.assign_organization(&lead.id, Some(PERSONAL)).unwrap_err(),
+        ASSIGN_OUTSIDE
     );
-    assert_eq!(
-        store
-            .assign_organization(&seat.id, Some(switchboard_core::organizations::PERSONAL))
-            .unwrap_err(),
-        switchboard_core::organizations::ASSIGN_OUTSIDE
-    );
-    // Nothing changed: the group still takes it.
+    // The account itself may leave: its group moves to another account it admits.
+    let c = add(&store, Provider::Claude, "default", "synthetic-c");
+    let d = add(&store, Provider::Claude, "default", "synthetic-d");
+    for id in [&c.id, &d.id] {
+        store.assign_organization(id, Some(&acme.id)).unwrap();
+    }
+    let other = project(&root, "acme-two");
+    let group = store
+        .save_project_with(
+            None,
+            "Acme two",
+            std::slice::from_ref(&other),
+            &[c.id.clone(), d.id.clone()],
+            Some(vec![acme.id.clone()]),
+            true,
+        )
+        .unwrap();
+    store.select(Provider::Claude, &group.pool, &c.id).unwrap();
+    store.assign_organization(&c.id, Some(PERSONAL)).unwrap();
     let snapshot = store.snapshot().unwrap();
     assert_eq!(
-        snapshot.memberships.get(&seat.id).map(String::as_str),
-        Some(acme.id.as_str())
+        snapshot.routes.get(&format!("claude:{}", group.pool)),
+        Some(&d.id)
     );
 }

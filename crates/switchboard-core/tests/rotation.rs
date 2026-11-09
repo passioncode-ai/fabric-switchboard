@@ -1870,29 +1870,24 @@ fn a_seat_outside_its_groups_organization_is_never_guessed() {
     let b = account(&store, "org-b", now);
     let c = account(&store, "org-c", now);
     let acme = store.add_organization("Acme", &[]).unwrap();
-    let beta = store.add_organization("Beta", &[]).unwrap();
-    for id in [&a, &b] {
+    for id in [&a, &b, &c] {
         store.assign_organization(id, Some(&acme.id)).unwrap();
     }
-    store.assign_organization(&c, Some(&beta.id)).unwrap();
     let dir = root.path().join("work");
     std::fs::create_dir_all(&dir).unwrap();
     let group = store
-        .save_project_with(
+        .save_project_in(
             None,
             "Work",
             std::slice::from_ref(&dir),
             &[a.clone(), b.clone(), c.clone()],
-            Some(vec![acme.id.clone(), beta.id.clone()]),
-            true,
+            Some(Some(&acme.id)),
         )
         .unwrap();
     observe(&store, &a, 40., now);
     observe(&store, &b, 30., now - 1800);
     observe(&store, &c, 10., now - 1800);
-    // SB-313: placing c elsewhere by hand is refused while the group takes it; removing its
-    // organization leaves it outside the group (Acme only now).
-    store.remove_organization(&beta.id).unwrap();
+    store.assign_organization(&c, Some("personal")).unwrap();
     let p = RotationPolicy {
         pool: group.pool.clone(),
         ..policy()
