@@ -191,6 +191,11 @@ enum Command {
         /// stdin and stdout). The same session, home and tools as a Terminal launch.
         #[arg(long)]
         in_place: bool,
+        /// SB-317: run the session here with no terminal, for a launchd job or a scheduler:
+        /// stdin is empty, its output goes where this command's goes, and the exit status is the
+        /// agent's. The same session, home and tools as --in-place.
+        #[arg(long, conflicts_with = "in_place")]
+        headless: bool,
         /// Who is launching, for the launch record: a runner's own name (up to 64 letters,
         /// digits, dots, hyphens or underscores), such as `voc-learn`.
         #[arg(long, value_name = "NAME")]
@@ -203,7 +208,8 @@ enum Command {
         /// `recovery` for a host resuming a stopped session; default `cli`.
         #[arg(long, value_enum, default_value = "cli")]
         surface: LaunchSurface,
-        /// Arguments for the agent, after `--` (for example `-- --resume <id>`); with --in-place.
+        /// Arguments for the agent, after `--` (for example `-- --resume <id>`, or `-- -p "…"`
+        /// headless); with --in-place or --headless.
         #[arg(last = true)]
         args: Vec<String>,
     },
@@ -2006,6 +2012,7 @@ async fn run(cli: &Cli) -> Result<Value, String> {
             mode,
             working_directory,
             in_place,
+            headless,
             by,
             parent,
             surface,
@@ -2031,7 +2038,13 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                 *provider,
                 *mode,
                 working_directory,
-                *in_place,
+                if *headless {
+                    Here::Headless
+                } else if *in_place {
+                    Here::Terminal
+                } else {
+                    Here::No
+                },
                 args,
                 by,
             )
@@ -2453,6 +2466,14 @@ async fn run(cli: &Cli) -> Result<Value, String> {
 /// `switchboard launch` (SB-75 adds the account for a folder and the in-place run): resolves the
 /// account when only a provider is given, asks the owner to prepare the session, and either
 /// leaves it to the Terminal the owner opened or runs the prepared script in this terminal.
+/// Where `launch` runs the session: in a Terminal the owner opens, in this terminal
+/// (`--in-place`), or here with no terminal (`--headless`, SB-317).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Here {
+    No,
+    Terminal,
+    Headless,
+}
 #[allow(clippy::too_many_arguments)]
 async fn launch(
     root: &std::path::Path,
@@ -2460,16 +2481,22 @@ async fn launch(
     provider: Option<ProviderArg>,
     mode: Mode,
     working_directory: &std::path::Path,
-    in_place: bool,
+    here: Here,
     args: &[String],
     by: launches::LaunchedBy,
 ) -> Result<Value, String> {
     use std::io::IsTerminal;
+    let in_place = here != Here::No;
     if !in_place && !args.is_empty() {
-        return Err("Agent arguments after -- go with --in-place.".into());
+        return Err("Agent arguments after -- go with --in-place or --headless.".into());
     }
-    if in_place && !(std::io::stdin().is_terminal() && std::io::stdout().is_terminal()) {
-        return Err("Launching in place needs a terminal on stdin and stdout.".into());
+    if here == Here::Terminal
+        && !(std::io::stdin().is_terminal() && std::io::stdout().is_terminal())
+    {
+        return Err(
+            "Launching in place needs a terminal on stdin and stdout. Use --headless with no terminal."
+                .into(),
+        );
     }
     let id = match (id, provider) {
         (Some(id), None) => id.clone(),
@@ -2510,6 +2537,9 @@ async fn launch(
     let script = value["script"]
         .as_str()
         .ok_or("The session script is missing.")?;
+    if here == Here::Headless {
+        return run_headless(std::path::Path::new(script));
+    }
     run_in_place(std::path::Path::new(script))
 }
 /// `switchboard handovers run <id>`: takes the hand-over (once) and runs its session here.
@@ -2589,6 +2619,23 @@ fn release_reservation(script: &std::path::Path) {
 #[cfg(not(unix))]
 fn run_in_place(_: &std::path::Path) -> Result<Value, String> {
     Err("Launching in place runs on macOS and Linux for now.".into())
+}
+/// SB-317: replaces this process with the session script with nothing on stdin: a scheduler's
+/// job gets the agent's output on its own stdout and stderr and the agent's exit status, and a
+/// stop it sends reaches the agent itself.
+#[cfg(unix)]
+fn run_headless(script: &std::path::Path) -> Result<Value, String> {
+    use std::os::unix::process::CommandExt;
+    let error = std::process::Command::new(script)
+        .stdin(std::process::Stdio::null())
+        .exec();
+    let _ = error;
+    release_reservation(script);
+    Err("The session could not start.".into())
+}
+#[cfg(not(unix))]
+fn run_headless(_: &std::path::Path) -> Result<Value, String> {
+    Err("Launching headless runs on macOS and Linux for now.".into())
 }
 /// `switchboard onboard --status` (SB-93): reads the owner, the saved accounts, the folder's
 /// project, the agent's MCP registration and the proving call. Writes nothing: without a data

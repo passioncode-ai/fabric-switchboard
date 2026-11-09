@@ -1053,6 +1053,15 @@ fn an_in_place_launch_is_refused_where_it_cannot_run() {
     );
     let (ok, _) = run(&["launch", "some-id", "--provider", "claude"]);
     assert!(!ok, "an id and --provider together are refused");
+    // SB-317: --headless needs no terminal and takes the agent's arguments; it goes on to ask the
+    // owner (none runs here). It cannot go with --in-place.
+    let (ok, error) = run(&["launch", "some-id", "--headless", "--", "-p", "hello"]);
+    assert!(
+        !ok && !error.contains("needs a terminal") && !error.contains("go with"),
+        "{error}"
+    );
+    let (ok, _) = run(&["launch", "some-id", "--headless", "--in-place"]);
+    assert!(!ok, "--headless and --in-place together are refused");
 }
 
 #[tokio::test(flavor = "multi_thread")]
