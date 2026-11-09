@@ -119,7 +119,12 @@ pub struct Start<'a> {
 /// in its own process group, detached (D-5). Answers `{state: started, repository, worktree}`, or
 /// `{state: refused, reason}` when nothing was started; an error is a step that failed after
 /// something was made there, which is taken away again.
-pub fn start(target: &str, program: &Program<'_>, s: &Start<'_>, run: &Run<'_>) -> Result<Value, String> {
+pub fn start(
+    target: &str,
+    program: &Program<'_>,
+    s: &Start<'_>,
+    run: &Run<'_>,
+) -> Result<Value, String> {
     if !crate::account_send::target_valid(target) {
         return Err(crate::account_send::TARGET_INVALID.into());
     }
@@ -127,11 +132,14 @@ pub fn start(target: &str, program: &Program<'_>, s: &Start<'_>, run: &Run<'_>) 
     if !crate::launches::valid_id(s.launch_id) {
         return Err("Launch id invalid.".into());
     }
-    let refused = |reason: &str| Ok(json!({"state": "refused", "reason": reason, "target": target}));
-    let Some(projects) = run(&ssh(target, remote(program, &["--json", "project", "list"])), None)
-        .ok()
-        .and_then(|out| data(&out))
-    else {
+    let refused =
+        |reason: &str| Ok(json!({"state": "refused", "reason": reason, "target": target}));
+    let Some(projects) = run(
+        &ssh(target, remote(program, &["--json", "project", "list"])),
+        None,
+    )
+    .ok()
+    .and_then(|out| data(&out)) else {
         return refused(TARGET_UNREACHABLE);
     };
     let Some(repository) = repo_there(&projects, s.identity) else {
@@ -172,7 +180,10 @@ git -C \"$repo\" worktree add -q --detach {wt} \"$base\"; echo made",
     }
     let header = result_header(s.workflow, s.handoff, s.request, s.launch_id);
     let files: [(&str, Vec<u8>); 3] = [
-        ("request.json", serde_json::to_vec_pretty(s.request_body).unwrap_or_default()),
+        (
+            "request.json",
+            serde_json::to_vec_pretty(s.request_body).unwrap_or_default(),
+        ),
         ("prompt.txt", prompt(&header).into_bytes()),
         (
             "run.sh",
@@ -324,12 +335,20 @@ mod tests {
         std::fs::write(seed.join("README"), "app\n").unwrap();
         git(&seed, &["add", "."]);
         git(&seed, &["commit", "-q", "-m", "seed"]);
-        git(&seed, &["remote", "add", "origin", origin.to_str().unwrap()]);
+        git(
+            &seed,
+            &["remote", "add", "origin", origin.to_str().unwrap()],
+        );
         git(&seed, &["push", "-q", "origin", "main"]);
         let clone = home.path().join("DATA/app");
         std::fs::create_dir_all(clone.parent().unwrap()).unwrap();
         let ok = Command::new("git")
-            .args(["clone", "-q", origin.to_str().unwrap(), clone.to_str().unwrap()])
+            .args([
+                "clone",
+                "-q",
+                origin.to_str().unwrap(),
+                clone.to_str().unwrap(),
+            ])
             .output()
             .unwrap()
             .status
@@ -361,7 +380,10 @@ exit 3\n"
     fn a_run_there_starts_in_a_fresh_worktree_and_its_result_comes_back() {
         let (home, path) = fixture();
         let run = local(home.path());
-        let program = Program { path: &path, data_dir: None };
+        let program = Program {
+            path: &path,
+            data_dir: None,
+        };
         let body = json!({"goal": "Fix the thing", "constraints": ["stay small"]});
         let launch = crate::launches::new_id();
         let s = Start {
@@ -396,8 +418,13 @@ exit 3\n"
         assert!(result.contains("outcome=answered"));
         // The agent ran headless in the worktree from origin, with the request beside it.
         let args = std::fs::read_to_string(dir.join("args")).unwrap();
-        let wt = home.path().join(format!("DATA/_worktrees/dispatch-{launch}"));
-        assert!(args.contains("--headless") && args.contains("--provider\nclaude"), "{args}");
+        let wt = home
+            .path()
+            .join(format!("DATA/_worktrees/dispatch-{launch}"));
+        assert!(
+            args.contains("--headless") && args.contains("--provider\nclaude"),
+            "{args}"
+        );
         assert!(args.contains(&wt.to_string_lossy().into_owned()), "{args}");
         assert!(wt.join("README").is_file());
         let request: Value =
@@ -412,7 +439,10 @@ exit 3\n"
     fn a_repository_the_target_lacks_or_a_full_target_starts_nothing() {
         let (home, path) = fixture();
         let run = local(home.path());
-        let program = Program { path: &path, data_dir: None };
+        let program = Program {
+            path: &path,
+            data_dir: None,
+        };
         let body = json!({});
         let launch = crate::launches::new_id();
         let mut s = Start {
@@ -438,7 +468,9 @@ exit 3\n"
         let answer = start("studio.local", &program, &s, &run).unwrap();
         assert_eq!(answer["reason"], TARGET_BUSY);
         // A target that does not answer.
-        let down = |_: &[String], _: Option<&[u8]>| -> Result<String, String> { Err("ssh: connect".into()) };
+        let down = |_: &[String], _: Option<&[u8]>| -> Result<String, String> {
+            Err("ssh: connect".into())
+        };
         let answer = start("studio.local", &program, &s, &down).unwrap();
         assert_eq!(answer["reason"], TARGET_UNREACHABLE);
         assert_eq!(status("studio.local", &launch, &down)["state"], "unknown");
@@ -471,7 +503,10 @@ exit 3\n"
             {"roots": [{"folder": "/u/DATA/web", "remote": "github.com/acme/web"}]},
             {"roots": [{"folder": "/u/DATA/app", "remote": "github.com/acme/app"}, {"folder": "/u/DATA/x"}]},
         ]});
-        assert_eq!(repo_there(&projects, "github.com/acme/app").as_deref(), Some("/u/DATA/app"));
+        assert_eq!(
+            repo_there(&projects, "github.com/acme/app").as_deref(),
+            Some("/u/DATA/app")
+        );
         assert_eq!(repo_there(&projects, "github.com/acme/none"), None);
         assert!(prompt("H").contains("FABRIC_DISPATCH_RESULT"));
     }
