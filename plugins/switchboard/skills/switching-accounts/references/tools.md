@@ -492,8 +492,30 @@ Only when the operator asks. Changes automatic switching for one provider, group
 
 ### `switchboard_backup_now`: no arguments
 
-Writes an encrypted backup now. Restoring stays the person's (the app, or
-`switchboard backup restore`).
+Writes an encrypted backup now.
+
+### `switchboard_backup_restore`: `file`
+
+Only when the operator asks. Restores one backup that `switchboard_backups` lists, by its file
+name, as the window's *Restore* does: accounts, groups, rules, the person's words and settings in
+it come back where this computer has none; accounts already here stay as they are and nothing is
+deleted. An account whose group here does not take it goes to the default group
+(`returned_to_default`). Answers the counts.
+
+### `switchboard_project_delete`: `pool`, `decision?`
+
+Only when the operator asks. Deletes a group as the window's *Delete group* does: its folders stop
+routing to its accounts and its own accounts go to the default group (nothing is signed out). A
+group with its own key or spending ceiling needs `decision`, the operator's words.
+
+### `switchboard_settings_import`: `file`, `under?`, `apply?`, `clone?`, `signer?`
+
+Reads a `switchboard-settings/1` file (`switchboard settings export` on another machine; `file`
+is an absolute path here) and answers what it would add: groups found by their repositories under
+`under` (absolute folders), organizations, agents' settings, rotation policies, teams and
+ceilings. With `apply` it adds them, only when the operator asks, and never raises or clears a
+ceiling; `clone` with `apply` first clones the groups' missing GitHub repositories with the
+person's `gh`; `signer` is the organization's published key the file must be signed by.
 
 ### `switchboard_agent_set`: `agent?`, `enabled?`, `default?`, `permissions?`
 

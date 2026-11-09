@@ -4079,10 +4079,7 @@ mod mcp_parity {
             "settings export",
             Not("SB-176: a file the person carries to another machine; an agent has no second machine to carry it to"),
         ),
-        (
-            "settings import",
-            Not("SB-176: reads a file the person brought from another machine and adds groups and policies; the person runs it once per move"),
-        ),
+        ("settings import", Tool("switchboard_settings_import")),
         (
             "settings signer",
             Not("SB-272: the administrator publishes this key to the organization's members; an agent has no members to publish it to"),
@@ -4172,7 +4169,7 @@ mod mcp_parity {
         ("project rotate-capability", Not(PERSON)),
         ("project codex", Tool("switchboard_codex_route")),
         ("project save", Tool("switchboard_project_create")),
-        ("project delete", Not(PERSON)),
+        ("project delete", Tool("switchboard_project_delete")),
         ("project suggest", Not(HOST)),
         (
             "project suggestions",
@@ -4185,7 +4182,7 @@ mod mcp_parity {
         ("project apply", Tool("switchboard_project_apply")),
         ("backup list", Tool("switchboard_backups")),
         ("backup now", Tool("switchboard_backup_now")),
-        ("backup restore", Not(PERSON)),
+        ("backup restore", Tool("switchboard_backup_restore")),
         ("onboard", Tool("switchboard_onboarding")),
         ("shell status", Tool("switchboard_shell_hook")),
         (

@@ -87,7 +87,10 @@ pub(crate) fn tools() -> Vec<(bool, Value)> {
         (false, json!({"name":"switchboard_rotation","title":"Automatic switching","description":"The automatic switching settings per provider, group (pool) and target (enabled, threshold, headroom as hysteresis, cooldown, freshness) and what the background monitor decided last.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}})),
         (true, json!({"name":"switchboard_rotation_set","title":"Set automatic switching","description":"Change automatic switching for one provider, group (pool) and target: switch it on or off, or change its threshold, headroom (hysteresis), cooldown or freshness. What is left out keeps its saved value. Only when the operator asks.","inputSchema":{"type":"object","properties":{"provider":{"type":"string","enum":["claude","codex"]},"pool":{"type":"string","default":"default"},"target":{"type":"string","enum":["managed","claude_cli"],"default":"managed"},"enabled":{"type":"boolean"},"threshold_percent":{"type":"number","minimum":1,"maximum":100},"hysteresis_percent":{"type":"number","minimum":0,"maximum":99},"cooldown_seconds":{"type":"integer","minimum":0},"max_age_seconds":{"type":"integer","minimum":30}},"required":["provider"],"additionalProperties":false}})),
         (false, json!({"name":"switchboard_backups","title":"Backups","description":"Encrypted backups of accounts, groups, rules and settings: the folder, whether they run, the newest backups and the last error. Never their contents.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}})),
-        (true, json!({"name":"switchboard_backup_now","title":"Back up now","description":"Write an encrypted backup now. Restoring stays the person's, in the app or with switchboard backup restore.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}})),
+        (true, json!({"name":"switchboard_backup_now","title":"Back up now","description":"Write an encrypted backup now. Restore one with switchboard_backup_restore.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}})),
+        (true, json!({"name":"switchboard_backup_restore","title":"Restore a backup","description":"Restore one backup of switchboard_backups by its file name, as the window's Restore does: accounts, groups, rules, the person's words and settings in it come back where this computer has none (accounts already here stay as they are; nothing is deleted). An account its group here does not take goes to the default group (returned_to_default). Answers the counts. Only when the operator asks.","inputSchema":{"type":"object","properties":{"file":{"type":"string","minLength":1,"maxLength":200,"description":"A file name from switchboard_backups."}},"required":["file"],"additionalProperties":false}})),
+        (true, json!({"name":"switchboard_project_delete","title":"Delete a group","description":"Delete a group, as the window's Delete group does: its folders stop routing to its accounts and its own accounts go to the default group (nothing is signed out). A group with its own key or spending ceiling needs decision, the operator's words. Only when the operator asks.","inputSchema":{"type":"object","properties":{"pool":{"type":"string","minLength":1,"description":"The group id from switchboard_projects."},"decision":{"type":"object","properties":{"by":{"type":"string","enum":["operator"]},"instruction":{"type":"string","minLength":1,"maxLength":500},"at":{"type":"string"},"source":{"type":"string","minLength":1,"maxLength":200}},"required":["by","instruction","at","source"],"additionalProperties":false,"description":"The operator's words that ordered it."}}},"required":["pool"],"additionalProperties":false}})),
+        (true, json!({"name":"switchboard_settings_import","title":"Import settings from another machine","description":"Read a switchboard-settings/1 file (switchboard settings export on another machine) and say what it would add here: groups found by their repositories under the folders named, organizations, agents' settings, rotation policies, teams, ceilings. apply: true adds them (never raising or clearing a ceiling); clone: true with apply clones the groups' missing GitHub repositories first with the person's gh; signer: the organization's published key the file must be signed by. Only when the operator asks to apply.","inputSchema":{"type":"object","properties":{"file":{"type":"string","minLength":1,"description":"The settings file, an absolute path on this computer."},"under":{"type":"array","items":{"type":"string"},"maxItems":16,"description":"Absolute folders to look for the groups' repositories in; default the usual ones."},"apply":{"type":"boolean"},"clone":{"type":"boolean"},"signer":{"type":"string"}},"required":["file"],"additionalProperties":false}})),
         (false, json!({"name":"switchboard_recovery","title":"Stopped sessions","description":"Sessions that stopped on a limit and the accounts ready for them to continue: each stop's mode and when to try again.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}})),
         (false, json!({"name":"switchboard_handovers","title":"Hand-overs","description":"Whether hand-overs open in Fabric's console, and the hand-overs waiting for a console to take them.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}})),
         (true, json!({"name":"switchboard_agent_set","title":"Enable or disable an agent, or set the default","description":"Let Switchboard hand work to an agent or keep work away from it (enabled), set the machine's default agent (default: an agent id, or null for none), or choose whether the Claude Code and Codex sessions it starts bypass their permission prompts (permissions: bypass, the default, or ask). Only when the operator asks.","inputSchema":{"type":"object","properties":{"agent":{"type":"string"},"enabled":{"type":"boolean"},"default":{"type":["string","null"]},"permissions":{"type":"string","enum":["bypass","ask"]}},"additionalProperties":false}})),
@@ -532,6 +535,53 @@ impl Server {
             elsewhere,
             location,
             force: args.get("force").and_then(Value::as_bool).unwrap_or(false),
+        })
+        .await
+    }
+    /// SB-314: `settings import` over MCP: the file is read here, as the CLI reads it.
+    async fn settings_import(&self, args: &Map<String, Value>) -> Result<Value, String> {
+        use switchboard_runtime::settings_bundle::{MAX_BYTES, NOT_A_BUNDLE};
+        let file = std::path::Path::new(required(args, "file")?);
+        if !file.is_absolute() {
+            return Err("Give the settings file as an absolute path.".into());
+        }
+        let meta = std::fs::metadata(file).map_err(|_| "Settings file unavailable.")?;
+        if meta.len() > MAX_BYTES as u64 {
+            return Err(NOT_A_BUNDLE.into());
+        }
+        let bytes = std::fs::read(file).map_err(|_| "Settings file unavailable.")?;
+        let mut bundle: Value = serde_json::from_slice(&bytes).map_err(|_| NOT_A_BUNDLE)?;
+        // A file written with `--json` is wrapped as {ok, data}.
+        if bundle.get("format").is_none() && bundle["data"].get("format").is_some() {
+            bundle = bundle["data"].take();
+        }
+        let flag = |key: &str| args.get(key).and_then(Value::as_bool).unwrap_or(false);
+        let (apply, clone) = (flag("apply"), flag("clone"));
+        if clone && !apply {
+            return Err("Clone with apply: a preview clones nothing.".into());
+        }
+        let under = args
+            .get("under")
+            .and_then(Value::as_array)
+            .map(|list| {
+                list.iter()
+                    .filter_map(Value::as_str)
+                    .map(PathBuf::from)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        if under.iter().any(|p| !p.is_absolute()) {
+            return Err("Give each folder as an absolute path.".into());
+        }
+        self.call(Operation::SettingsImport {
+            bundle,
+            under,
+            apply,
+            clone,
+            signer: args
+                .get("signer")
+                .and_then(Value::as_str)
+                .map(str::to_owned),
         })
         .await
     }
@@ -1149,6 +1199,20 @@ impl Server {
             "switchboard_rotation_set" => self.rotation_set(args).await,
             "switchboard_backups" => self.call(Operation::Backups).await,
             "switchboard_backup_now" => self.call(Operation::BackupNow).await,
+            "switchboard_backup_restore" => {
+                self.call(Operation::RestoreBackup {
+                    file: required(args, "file")?.into(),
+                })
+                .await
+            }
+            "switchboard_project_delete" => {
+                let delete = Operation::RemoveProject {
+                    pool: required(args, "pool")?.into(),
+                    by: switchboard_runtime::spend::Surface::Mcp,
+                };
+                self.call(on_operators_word(args, delete)?).await
+            }
+            "switchboard_settings_import" => self.settings_import(args).await,
             "switchboard_recovery" => self.call(Operation::Recovery).await,
             "switchboard_handovers" => self.call(Operation::Handovers).await,
             "switchboard_agent_set" => self.agent_set(args).await,
