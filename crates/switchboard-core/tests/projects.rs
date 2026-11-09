@@ -369,10 +369,20 @@ fn an_account_whose_own_group_goes_away_is_no_longer_shared_and_never_moves_by_i
     let h = project(&root, "h");
     let k = project(&root, "k");
     let home = store
-        .save_project(None, "Home", std::slice::from_ref(&g), std::slice::from_ref(&x.id))
+        .save_project(
+            None,
+            "Home",
+            std::slice::from_ref(&g),
+            std::slice::from_ref(&x.id),
+        )
         .unwrap();
     let kept = store
-        .save_project(None, "Kept", std::slice::from_ref(&k), std::slice::from_ref(&z.id))
+        .save_project(
+            None,
+            "Kept",
+            std::slice::from_ref(&k),
+            std::slice::from_ref(&z.id),
+        )
         .unwrap();
     let shares = store
         .save_project(
@@ -388,7 +398,14 @@ fn an_account_whose_own_group_goes_away_is_no_longer_shared_and_never_moves_by_i
         .save_project(Some(&home.pool), "Home", std::slice::from_ref(&g), &[])
         .unwrap();
     let snapshot = store.snapshot().unwrap();
-    let group = |pool: &str| snapshot.projects.iter().find(|p| p.pool == pool).unwrap().clone();
+    let group = |pool: &str| {
+        snapshot
+            .projects
+            .iter()
+            .find(|p| p.pool == pool)
+            .unwrap()
+            .clone()
+    };
     assert_eq!(group(&shares.pool).shared_accounts, [z.id.clone()]);
     store.select(Provider::Claude, "default", &x.id).unwrap();
     // The sharing group's next save (a folder the background adds) leaves x where it is.
@@ -404,7 +421,14 @@ fn an_account_whose_own_group_goes_away_is_no_longer_shared_and_never_moves_by_i
     // z's own group is deleted: no group shares it any more.
     store.remove_project(&kept.pool).unwrap();
     let snapshot = store.snapshot().unwrap();
-    let group = |pool: &str| snapshot.projects.iter().find(|p| p.pool == pool).unwrap().clone();
+    let group = |pool: &str| {
+        snapshot
+            .projects
+            .iter()
+            .find(|p| p.pool == pool)
+            .unwrap()
+            .clone()
+    };
     assert!(group(&shares.pool).shared_accounts.is_empty());
 }
 
@@ -454,7 +478,9 @@ fn a_teammate_a_group_would_refuse_keeps_the_word_from_being_given() {
         )
         .unwrap();
     assert_eq!(
-        store.assign_organization(&lead.id, Some(PERSONAL)).unwrap_err(),
+        store
+            .assign_organization(&lead.id, Some(PERSONAL))
+            .unwrap_err(),
         ASSIGN_OUTSIDE
     );
     // The account itself may leave: its group moves to another account it admits.

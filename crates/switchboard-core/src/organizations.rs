@@ -1081,7 +1081,10 @@ impl Store {
             .map(|(key, _)| key.clone())
             .collect();
         for key in routed {
-            let pool = key.split_once(':').map_or(key.as_str(), |(_, p)| p).to_owned();
+            let pool = key
+                .split_once(':')
+                .map_or(key.as_str(), |(_, p)| p)
+                .to_owned();
             if candidate.context_admits(&pool, &a) {
                 continue;
             }

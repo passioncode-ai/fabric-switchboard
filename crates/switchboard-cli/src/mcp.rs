@@ -307,14 +307,20 @@ impl Server {
         // SB-313: the organizations an account also works for (SB-282), which an agent can set
         // with `switchboard_organization_set` and could not read back.
         let also_of = |id: &Value| -> Value {
-            let names = snapshot["organizations"].as_array().cloned().unwrap_or_default();
+            let names = snapshot["organizations"]
+                .as_array()
+                .cloned()
+                .unwrap_or_default();
             id.as_str()
                 .and_then(|id| snapshot["also_organizations"].get(id))
                 .and_then(Value::as_array)
                 .map(|ids| {
                     ids.iter()
                         .map(|o| {
-                            let name = names.iter().find(|n| &n["id"] == o).map(|n| n["name"].clone());
+                            let name = names
+                                .iter()
+                                .find(|n| &n["id"] == o)
+                                .map(|n| n["name"].clone());
                             json!({"id": o, "name": name.unwrap_or(Value::Null)})
                         })
                         .collect::<Vec<_>>()
