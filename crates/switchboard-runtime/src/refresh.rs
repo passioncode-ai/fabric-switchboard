@@ -254,6 +254,17 @@ impl RefreshState {
         *self.endpoint.lock().unwrap() = endpoint;
     }
     #[cfg(test)]
+    /// SB-312: blocks until no renewal of `token` is on the network, at most `IN_FLIGHT_WAIT`.
+    /// A move marks its account first and then waits here, so the tokens it reads afterwards are
+    /// the ones no renewal on this machine will spend.
+    pub(crate) fn wait_settled(&self, token: &str) {
+        let deadline = std::time::Instant::now() + IN_FLIGHT_WAIT;
+        while self.in_flight.lock().is_ok_and(|f| f.contains(token))
+            && std::time::Instant::now() < deadline
+        {
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    }
     pub(crate) fn set_profile_endpoint(&self, endpoint: String) {
         *self.profile_endpoint.lock().unwrap() = endpoint;
     }

@@ -10,8 +10,10 @@ use std::path::Path;
 
 pub const FILE: &str = "seats.jsonl";
 /// The newest lines kept; older ones are dropped on the next write.
-const KEEP: usize = 200;
-const MAX_BYTES: u64 = 512 * 1024;
+const KEEP: usize = 1000;
+const MAX_BYTES: u64 = 2 * 1024 * 1024;
+/// SB-312: one write at a time, so two grants in one process never lose a line.
+static WRITE: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct Seat {
@@ -26,6 +28,10 @@ pub struct Seat {
     /// SB-292 (S-3): the account's id on the other machine, for a later `recall`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub remote_account: Option<String>,
+    /// SB-312: a fingerprint of the refresh token a move sent (`account_send::token_print`),
+    /// so a call back can tell whether the account was renewed here since. Never the token.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sent: Option<String>,
     /// `operator` when `decision` carries the operator's words, else `agent`.
     pub ordered_by: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -47,6 +53,7 @@ pub(crate) fn of(
         machine: machine.chars().take(200).collect(),
         pool: pool.into(),
         remote_account: None,
+        sent: None,
         ordered_by: if decision.is_some() {
             "operator"
         } else {
@@ -58,16 +65,21 @@ pub(crate) fn of(
 }
 
 /// SB-292 (S-3): the other machine's id of the account this machine last moved to `machine`.
-pub fn remote_account(root: &Path, account: &str, machine: &str) -> Option<String> {
+/// The newest move of `account` to `machine` that was not called back since.
+pub fn last_grant(root: &Path, account: &str, machine: &str) -> Option<Seat> {
     recent(root, KEEP)
         .into_iter()
         .rev()
-        .find(|s| s.event == "granted" && s.account == account && s.machine == machine)
-        .and_then(|s| s.remote_account)
+        .find(|s| {
+            s.account == account
+                && s.machine == machine
+                && matches!(s.event.as_str(), "granted" | "recalled")
+        })
+        .filter(|s| s.event == "granted")
 }
-
-/// The newest `n` lines, oldest first; a missing or unreadable file reads as none, and a line
-/// that does not parse is skipped.
+pub fn remote_account(root: &Path, account: &str, machine: &str) -> Option<String> {
+    last_grant(root, account, machine).and_then(|s| s.remote_account)
+}
 pub fn recent(root: &Path, n: usize) -> Vec<Seat> {
     let Ok(bytes) = switchboard_core::private_fs::read_private(&root.join(FILE), MAX_BYTES) else {
         return Vec::new();
@@ -81,6 +93,7 @@ pub fn recent(root: &Path, n: usize) -> Vec<Seat> {
 
 /// Appends one line, keeping the newest `KEEP`; the file is rewritten whole (0600, by rename).
 pub(crate) fn append(root: &Path, seat: &Seat) -> Result<(), String> {
+    let _write = WRITE.lock().unwrap_or_else(|p| p.into_inner());
     let mut seats = recent(root, KEEP - 1);
     seats.push(seat.clone());
     let mut text = String::new();

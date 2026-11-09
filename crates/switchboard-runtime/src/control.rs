@@ -414,10 +414,15 @@ async fn request_once(root: &Path, operation: &Operation) -> Result<Option<Value
     // SB-159: connecting PassionCode.ai waits up to 5 minutes for the person's browser.
     // 300 s for the browser, a read that may hold the turn, the exchange and the read (15 s
     // each), and a margin.
-    let limit = if matches!(operation, Operation::VestaConnect) {
-        420
-    } else {
-        30
+    // SB-312: a move or a call back runs up to four ssh calls of two minutes each.
+    let inner = match &operation {
+        Operation::OnOperatorsWord { inner, .. } => inner.as_ref(),
+        other => other,
+    };
+    let limit = match inner {
+        Operation::VestaConnect => 420,
+        Operation::SendAccount { .. } | Operation::RecallAccount { .. } => 600,
+        _ => 30,
     };
     match tokio::time::timeout(
         Duration::from_secs(limit),
