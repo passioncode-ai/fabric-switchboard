@@ -1878,7 +1878,8 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Steps:**
 1. ⋯ → *Move to another machine…* → the dialog “Move {label} to another machine” (“Its sign-in moves over ssh: this computer stops using it first, the other machine saves it and checks that it answers. If a step fails, nothing changes.”) with *Machine* (“As ssh knows it, reachable without a password prompt.”) and *Group there* (“Its group on the other machine.”, the account's group by default) → *Move*.
 2. This computer marks the account as used on that machine (it stops renewing it), the other machine saves the sign-in with `switchboard accounts add --secret-stdin` (the tokens on stdin, never in a command line), and a quota check there proves the provider answers it.
-3. → “{label} moved to {machine}. This computer no longer uses it.”; the card shows *On {machine}* and *Use here*, as SCN-072.
+3. → “{label} moved to {machine}. This computer no longer uses it.”; the card shows *On {machine}* and *Call back* (SB-315: the move named a machine ssh reaches; a place typed by a person keeps *Use here*, as SCN-072).
+4. *Call back* → the other machine gives the sign-in back over ssh, the provider is checked here and the copy there is removed → “{label} is back on this computer.”. While the move stands, clearing the mark is refused: “This account's sign-in was moved to another machine. Call it back to use it here, so only one machine renews it.” (CLI `accounts update --elsewhere false --force` when the copy there is gone).
 **Alt paths:** the other machine does not save it → “The other machine did not save the sign-in. Nothing changed here; check ssh and its Switchboard.”, the account is used here as before; it saves it but the provider does not answer there → “The other machine saved the sign-in but the provider did not answer it there. It was removed there and stays here.”.
 **Expected result:** the sign-in works on the other machine and this one never renews it; on any failure it stays here as it was.
 **UI elements:** the ⋯ item, the *Move {label} to another machine* dialog, the *On {location}* badge.
@@ -1886,6 +1887,6 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Errors & recovery:** every failure names what happened and leaves the account usable here.
 **Status:** draft
 **Meaning:** SB-283, raised by the operator 2026-11-07 («поднимай», relayed by studio-agent on board thread `f32a24c0`); the single holder keeps D-2 of the two-machines design.
-**Coverage:** runtime `account_send::tests` (moved, not saved, not answered, refused), core `an_exported_sign_in_reads_back_the_same_and_carries_nothing_else`, WebKit demo.
+**Coverage:** runtime `account_send::tests` (moved, not saved, not answered, refused, call back), `an_update_can_say_where_an_account_works` (a moved account's mark is not cleared without `force`), core `an_exported_sign_in_reads_back_the_same_and_carries_nothing_else`, WebKit demo.
 **Product:** unobserved
 **Traces:** SB-283, SB-284, SCN-072

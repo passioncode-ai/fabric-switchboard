@@ -837,6 +837,10 @@ enum Accounts {
         /// characters; marks it as used on another machine. An empty value clears it.
         #[arg(long)]
         location: Option<String>,
+        /// With `--elsewhere false` or `--enabled true`: use it here although its sign-in was
+        /// moved to another machine and not called back (its copy there is gone).
+        #[arg(long)]
+        force: bool,
     },
     /// Hand an account over to another machine or a colleague: writes a signed record
     /// without its credential and marks it here as used elsewhere. The receiver runs
@@ -1662,12 +1666,14 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                 enabled,
                 elsewhere,
                 location,
+                force,
             } => Operation::Update {
                 id: id.clone(),
                 label: label.clone(),
                 enabled: *enabled,
                 elsewhere: *elsewhere,
                 location: location.clone(),
+                force: *force,
             },
             Accounts::Send {
                 id,

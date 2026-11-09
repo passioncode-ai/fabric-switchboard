@@ -85,6 +85,14 @@ pub fn hand_over(
     if account.kind != AuthKind::OAuth {
         return Err(HANDOVER_SIGN_IN_ONLY.into());
     }
+    // SB-315: as a move does, a hand-over takes an account used here only, and never the one the
+    // ordinary CLI is signed in to (it would keep renewing it here).
+    if !account.enabled || snapshot.elsewhere.contains_key(id) {
+        return Err(crate::account_send::NOT_HERE.into());
+    }
+    if store.is_in_use(id) {
+        return Err(crate::account_send::IN_USE_HERE.into());
+    }
     // The location rule (SB-284) checks `to` before anything is signed or marked.
     if to.is_empty() || to.chars().count() > 80 || to.chars().any(char::is_control) {
         return Err(switchboard_core::LOCATION_INVALID.into());

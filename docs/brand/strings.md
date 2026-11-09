@@ -89,6 +89,7 @@ Banner on Accounts until dismissed, and About “Provider terms”: “Use Switc
 | Move to another group… | Перенести в другую группу… |
 | Organization… | Организация… |
 | Used on another machine · Use here | Используется на другой машине · Использовать здесь |
+| Call back (an account a move took to a machine ssh reaches; SB-315, Copylot en-US d550342c, ru-RU e54576c6) | Вернуть сюда |
 | Rename or disable… | Переименовать или отключить… |
 | Remove… | Удалить… |
 
