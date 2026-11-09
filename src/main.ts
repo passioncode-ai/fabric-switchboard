@@ -778,20 +778,23 @@ function projectDialog(existing?: Project, organization?: string) {
   let chosen = [...startOrgs];
   const chosenOrgs = () => { const on = orgBoxes.filter((b) => b.checked).map((b) => b.value); chosen = [...chosen.filter((id) => on.includes(id)), ...on.filter((id) => !chosen.includes(id))]; return chosen; };
   if (!usable.length) picker.append(el('p', 'form-note', t('No accounts yet. Add accounts first, or save the group now and add them later.')));
-  const rows: { account: Account; box: HTMLInputElement; why: HTMLElement; text: string }[] = [];
+  // SB-314: `wanted` is the person's own check, kept while an organization change disables the box, so checking that organization again gives it back.
+  const rows: { account: Account; box: HTMLInputElement; why: HTMLElement; text: string; wanted: boolean }[] = [];
   for (const account of usable) {
     const owner = projectOf(account.pool);
     const option = el('label', 'appearance-option login-option'); const box = el('input'); box.type = 'checkbox'; box.value = account.id; box.checked = existing ? servesPool(snapshot!, account, existing.pool) : !!organization && placementAdmits(snapshot!, organization, account) && !inCli(account);
     const note = owner && owner.pool !== existing?.pool ? t(' · in {name}, also serves this group', { name: owner.name }) : '';
     const why = el('span', '', `${account.label} · ${providerName(account.provider)}${note}`);
     option.append(box, why); picker.append(option);
-    rows.push({ account, box, why, text: why.textContent ?? '' });
+    const row = { account, box, why, text: why.textContent ?? '', wanted: box.checked };
+    box.addEventListener('change', () => { row.wanted = box.checked; });
+    rows.push(row);
   }
   const syncAccounts = () => {
     const orgs = chosenOrgs();
-    for (const { account, box, why, text } of rows) {
+    for (const { account, box, why, text, wanted } of rows) {
       const fits = placementAdmits(snapshot!, orgs, account);
-      box.disabled = !fits; if (!fits) box.checked = false;
+      box.disabled = !fits; box.checked = fits && wanted;
       const own = accountOrganizations(attribution(snapshot!, account)).map((id) => organizations.find((o) => o.id === id)?.name ?? '').filter(Boolean);
       why.textContent = fits ? text : `${text} · ${own.length ? t('Belongs to {name}.', { name: own.join(', ') }) : t('Personal account.')}`;
     }
