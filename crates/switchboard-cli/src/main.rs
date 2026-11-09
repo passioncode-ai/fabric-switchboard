@@ -191,7 +191,7 @@ enum Command {
         /// stdin and stdout). The same session, home and tools as a Terminal launch.
         #[arg(long)]
         in_place: bool,
-        /// SB-317: run the session here with no terminal, for a launchd job or a scheduler:
+        /// Run the session here with no terminal, for a launchd job or a scheduler:
         /// stdin is empty, its output goes where this command's goes, and the exit status is the
         /// agent's. The same session, home and tools as --in-place.
         #[arg(long, conflicts_with = "in_place")]
