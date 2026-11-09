@@ -406,7 +406,7 @@ fn an_account_whose_own_group_goes_away_is_no_longer_shared_and_never_moves_by_i
             .unwrap()
             .clone()
     };
-    assert_eq!(group(&shares.pool).shared_accounts, [z.id.clone()]);
+    assert_eq!(group(&shares.pool).shared_accounts, std::slice::from_ref(&z.id));
     store.select(Provider::Claude, "default", &x.id).unwrap();
     // The sharing group's next save (a folder the background adds) leaves x where it is.
     let more = project(&root, "h-worktree");
