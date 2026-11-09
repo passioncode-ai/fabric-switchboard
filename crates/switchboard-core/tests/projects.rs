@@ -355,3 +355,95 @@ fn a_source_may_be_a_group_path() {
         );
     }
 }
+
+/// SB-313: an account whose own group goes away (it moves to `default`, or the group is deleted)
+/// is no longer shared anywhere. Left in another group's list, that group's next save took it as
+/// a move and dropped its route in `default`.
+#[test]
+fn an_account_whose_own_group_goes_away_is_no_longer_shared_and_never_moves_by_itself() {
+    let (root, store) = setup();
+    let x = add(&store, Provider::Claude, "default", "synthetic-x");
+    let y = add(&store, Provider::Claude, "default", "synthetic-y");
+    let z = add(&store, Provider::Claude, "default", "synthetic-z");
+    let g = project(&root, "g");
+    let h = project(&root, "h");
+    let k = project(&root, "k");
+    let home = store
+        .save_project(None, "Home", std::slice::from_ref(&g), std::slice::from_ref(&x.id))
+        .unwrap();
+    let kept = store
+        .save_project(None, "Kept", std::slice::from_ref(&k), std::slice::from_ref(&z.id))
+        .unwrap();
+    let shares = store
+        .save_project(
+            None,
+            "Shares",
+            std::slice::from_ref(&h),
+            &[y.id.clone(), x.id.clone(), z.id.clone()],
+        )
+        .unwrap();
+    assert_eq!(shares.shared_accounts, [x.id.clone(), z.id.clone()]);
+    // x goes back to default: its own group lets it go, and the share goes with it.
+    store
+        .save_project(Some(&home.pool), "Home", std::slice::from_ref(&g), &[])
+        .unwrap();
+    let snapshot = store.snapshot().unwrap();
+    let group = |pool: &str| snapshot.projects.iter().find(|p| p.pool == pool).unwrap().clone();
+    assert_eq!(group(&shares.pool).shared_accounts, [z.id.clone()]);
+    store.select(Provider::Claude, "default", &x.id).unwrap();
+    // The sharing group's next save (a folder the background adds) leaves x where it is.
+    let more = project(&root, "h-worktree");
+    let listed: Vec<String> = [y.id.clone(), z.id.clone()].into();
+    store
+        .save_project(Some(&shares.pool), "Shares", &[h.clone(), more], &listed)
+        .unwrap();
+    let snapshot = store.snapshot().unwrap();
+    let x_now = snapshot.accounts.iter().find(|a| a.id == x.id).unwrap();
+    assert_eq!(x_now.pool, "default");
+    assert_eq!(snapshot.routes.get("claude:default"), Some(&x.id));
+    // z's own group is deleted: no group shares it any more.
+    store.remove_project(&kept.pool).unwrap();
+    let snapshot = store.snapshot().unwrap();
+    let group = |pool: &str| snapshot.projects.iter().find(|p| p.pool == pool).unwrap().clone();
+    assert!(group(&shares.pool).shared_accounts.is_empty());
+}
+
+/// SB-313: placing an account in an organization is refused when a group it serves admitted it
+/// before and would refuse it after; an account a group already refused may be placed.
+#[test]
+fn an_organization_that_a_serving_group_would_refuse_is_not_given() {
+    let (root, store) = setup();
+    let acme = store.add_organization("Acme", &[]).unwrap();
+    let beta = store.add_organization("Beta", &[]).unwrap();
+    let seat = add(&store, Provider::Claude, "default", "synthetic-seat");
+    store.assign_organization(&seat.id, Some(&acme.id)).unwrap();
+    let folder = project(&root, "acme");
+    store
+        .save_project_with(
+            None,
+            "Acme work",
+            std::slice::from_ref(&folder),
+            std::slice::from_ref(&seat.id),
+            Some(vec![acme.id.clone()]),
+            true,
+        )
+        .unwrap();
+    assert_eq!(
+        store
+            .assign_organization(&seat.id, Some(&beta.id))
+            .unwrap_err(),
+        switchboard_core::organizations::ASSIGN_OUTSIDE
+    );
+    assert_eq!(
+        store
+            .assign_organization(&seat.id, Some(switchboard_core::organizations::PERSONAL))
+            .unwrap_err(),
+        switchboard_core::organizations::ASSIGN_OUTSIDE
+    );
+    // Nothing changed: the group still takes it.
+    let snapshot = store.snapshot().unwrap();
+    assert_eq!(
+        snapshot.memberships.get(&seat.id).map(String::as_str),
+        Some(acme.id.as_str())
+    );
+}

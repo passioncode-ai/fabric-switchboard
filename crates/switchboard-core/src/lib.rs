@@ -853,7 +853,11 @@ impl Store {
         // memory, pending, so the next publication or flush carries it (attribution never
         // falls back to the old rule in between).
         let mut migrated = state.clone();
-        let pending = if migrated.retire_domain_rule() && validate_snapshot(&migrated).is_ok() {
+        // SB-313: shares an earlier version left behind (an account whose own group went away)
+        // are dropped once, with the same write.
+        let pruned = projects::stale_shares_prune(&mut migrated);
+        let retired = migrated.retire_domain_rule();
+        let pending = if (retired || pruned) && validate_snapshot(&migrated).is_ok() {
             state = migrated;
             persistence::write(&root, &state).is_err()
         } else {

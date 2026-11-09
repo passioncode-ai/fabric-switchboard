@@ -26,6 +26,9 @@ pub const ORGANIZATION_NAME_INVALID: &str = "Name the organization in 1 to 80 ch
 /// A request or a selection on a seat that left the group's context after it was placed.
 pub const SEAT_OUTSIDE: &str = "This account belongs to another organization than this group. Move it, or change the group's organization.";
 
+/// SB-313: an organization chosen for an account (and its provider team) that a group it serves
+/// would then refuse.
+pub const ASSIGN_OUTSIDE: &str = "A group this account or its provider team serves would then refuse it. Move it out of that group first, or change the group's organization.";
 /// Saving a group with an account of another context (SB-109).
 pub const SEAT_CHOSEN: &str = "An account chosen for this group belongs to another organization. Choose accounts of the group's organization, or change it.";
 /// Changing a group's organization while it holds an account of another context (SB-109).
@@ -1043,6 +1046,28 @@ impl Store {
                 candidate.also_organizations.remove(account);
             } else {
                 candidate.also_organizations.insert(account.into(), also);
+            }
+        }
+        // SB-313: placing an account moves its provider team with it, and nothing checked the
+        // groups they serve: an account a group admitted before and refuses now was left there,
+        // every request in that group's folders refused. Such a choice is refused instead; an
+        // account a group refused already is not counted (this choice may be its fix).
+        let serving = |s: &crate::Snapshot, x: &crate::Account| -> Vec<Vec<String>> {
+            s.projects
+                .iter()
+                .filter(|p| p.pool == x.pool || p.shared_accounts.contains(&x.id))
+                .map(|p| p.organizations.clone())
+                .collect()
+        };
+        for x in &candidate.accounts {
+            let Some(before) = state.accounts.iter().find(|b| b.id == x.id) else {
+                continue;
+            };
+            if serving(&candidate, x).iter().any(|organizations| {
+                state.placement_admits(organizations, before)
+                    && !candidate.placement_admits(organizations, x)
+            }) {
+                return Err(ASSIGN_OUTSIDE.into());
             }
         }
         append_event(&mut candidate, "organization", Some(account), "assigned");
