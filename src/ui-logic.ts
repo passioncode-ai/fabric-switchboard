@@ -687,12 +687,14 @@ export function replaceFolder(folders: string[], old: string, folder: string): s
   return folders.map((entry) => (entry === old ? folder : entry));
 }
 /** SB-122: where an account can move. The default pool first, then each project by name; `current` marks where it is, `blocked` a project the CLI's own account cannot join. An account left in a deleted project's pool has no current option. */
-export interface MoveTarget { pool: string; name: string | null; current: boolean; blocked: boolean }
-export function moveTargets(currentPool: string, projects: { pool: string; name: string }[], inCli: boolean): MoveTarget[] {
+/** `refused`: SB-314, a group whose organization does not take the account (the move would be refused). */
+export interface MoveTarget { pool: string; name: string | null; current: boolean; blocked: boolean; refused: boolean }
+export function moveTargets(currentPool: string, projects: { pool: string; name: string }[], inCli: boolean, admits: (pool: string) => boolean = () => true): MoveTarget[] {
   const sorted = [...projects].sort((a, b) => a.name.localeCompare(b.name));
   return [{ pool: 'default', name: null }, ...sorted.map((p) => ({ pool: p.pool, name: p.name }))].map((target) => {
     const current = target.pool === currentPool;
-    return { ...target, current, blocked: inCli && target.pool !== 'default' && !current };
+    const refused = target.pool !== 'default' && !current && !admits(target.pool);
+    return { ...target, current, refused, blocked: refused || (inCli && target.pool !== 'default' && !current) };
   });
 }
 /** SB-135: a project's folders as Git sees them: each root with its worktrees and clones. */

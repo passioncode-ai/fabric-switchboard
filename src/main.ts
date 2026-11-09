@@ -2726,7 +2726,8 @@ function editDialog(account: Account) {
 function moveDialog(account: Account, inCli: boolean) {
   const context = openDialog(t('Move to another group'), t('Choose where “{label}” is used. A group’s accounts work only in its folders; the default group works in every other folder.', { label: account.label }));
   const group = el('fieldset', 'appearance-options move-options'); group.append(el('legend', 'sr-only', t('Group')));
-  const targets = moveTargets(account.pool, snapshot?.projects ?? [], inCli);
+  const projects = snapshot?.projects ?? [];
+  const targets = moveTargets(account.pool, projects, inCli, (pool) => placementAdmits(snapshot!, groupOrganizations(projects.find((p) => p.pool === pool)), account));
   const radios: HTMLInputElement[] = [];
   for (const target of targets) {
     const option = el('label', 'appearance-option'); const radio = el('input'); radio.type = 'radio'; radio.name = 'move-pool'; radio.value = target.pool; radio.checked = target.current; radio.disabled = target.blocked; radio.required = true;
@@ -2735,6 +2736,7 @@ function moveDialog(account: Account, inCli: boolean) {
     option.append(radio, target.name === null ? el('span', '', label) : groupHint(label, target.pool, false)); group.append(option); radios.push(radio);
   }
   context.body.append(group);
+  if (targets.some((x) => x.refused)) context.body.append(el('p', 'form-note', t('Some groups are unavailable: their organization does not take this account. Change its organization first.')));
   if (inCli) context.body.append(el('p', 'form-note', t('This account is signed in to Claude Code or Codex, which every folder uses, so it cannot join a group. Switch the CLI to another account first.')));
   if (!snapshot?.projects?.length) context.body.append(el('p', 'form-note', t('There are no groups yet. Create one under Groups, then move accounts into it.')));
   const confirm = submit(t('Move')); context.actions.append(confirm);

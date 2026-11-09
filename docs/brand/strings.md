@@ -87,6 +87,7 @@ Banner on Accounts until dismissed, and About “Provider terms”: “Use Switc
 | Launch… · Isolated session | Запустить… · Изолированная сессия |
 | Sign in again | Войти снова |
 | Move to another group… | Перенести в другую группу… |
+| Some groups are unavailable: their organization does not take this account. Change its organization first. | Некоторые группы недоступны: их организация не принимает этот аккаунт. Сначала смените его организацию. |
 | Organization… | Организация… |
 | Used on another machine · Use here | Используется на другой машине · Использовать здесь |
 | Call back | Вернуть сюда |
