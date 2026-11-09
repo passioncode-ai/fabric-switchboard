@@ -136,6 +136,7 @@ switchboard login finish LOGIN_UUID
 switchboard accounts select ACCOUNT_UUID --provider codex --pool work
 switchboard launch ACCOUNT_UUID --mode managed --working-directory /absolute/project/path
 switchboard launch --provider claude --working-directory /absolute/project/path --in-place -- --resume SESSION_ID
+switchboard launch --provider claude --working-directory /absolute/project/path --headless -- -p "…"   # SB-317: from a launchd job or a scheduler: no terminal, nothing on stdin, the agent's exit status
 switchboard launch ACCOUNT_UUID --working-directory /absolute/project/path --by voc-learn --parent LAUNCH_ID
 switchboard continue wf_0123456789abcdef --account ACCOUNT_UUID --dir /absolute/checkout
 switchboard --json dispatch --dir /absolute/project --workflow wf_0123456789abcdef --handoff handoff:0123456789abcdef --request REQUEST_UUID --dispatch-id DISPATCH_ID --reason request --permissions all --timeout-minutes 30

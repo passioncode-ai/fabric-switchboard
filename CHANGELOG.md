@@ -8,6 +8,7 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- `switchboard launch --headless` runs a session from a launchd job or another scheduler with no terminal: nothing on stdin, the output where the job's goes, the agent's exit status (SB-317).
 - A new sign-in or an account added straight into a group whose organization would refuse it is refused with the reason, instead of being saved and then refusing every request in that group (SB-314).
 - A refusal to place an account in a group of an organization names the account and says whether it is another organization's or a personal one (SB-314).
 - Restoring a backup puts each account back in its group only once its organization is known again; an account its group here does not take goes to the default group and the restore says how many (SB-314).
