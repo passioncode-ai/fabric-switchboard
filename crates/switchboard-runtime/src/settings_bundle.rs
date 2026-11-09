@@ -328,16 +328,12 @@ fn matched<'a>(
                 && p.folders.iter().any(|f| f == &r.folder)
         })
     };
-    snapshot
-        .projects
-        .iter()
-        .find(|p| holds(p))
-        .or_else(|| {
-            snapshot
-                .projects
-                .iter()
-                .find(|p| p.name.trim().eq_ignore_ascii_case(g.name.trim()))
-        })
+    snapshot.projects.iter().find(|p| holds(p)).or_else(|| {
+        snapshot
+            .projects
+            .iter()
+            .find(|p| p.name.trim().eq_ignore_ascii_case(g.name.trim()))
+    })
 }
 /// What importing `bundle` would do here, finding checkouts under `under`. Reads Git files, writes
 /// nothing.
@@ -895,11 +891,16 @@ mod tests {
         let unrelated = work.join("unrelated");
         std::fs::create_dir_all(&unrelated).unwrap();
         let taken = here
-            .save_project_in(None, "Alpha", &[unrelated.clone()], &[], None)
+            .save_project_in(None, "Alpha", std::slice::from_ref(&unrelated), &[], None)
             .unwrap();
         here.save_project_in(Some(&taken.pool), "Unrelated", &[unrelated], &[], None)
             .unwrap();
-        let first = plan(other.path(), &here.snapshot().unwrap(), &bundle, std::slice::from_ref(&work));
+        let first = plan(
+            other.path(),
+            &here.snapshot().unwrap(),
+            &bundle,
+            std::slice::from_ref(&work),
+        );
         assert!(!first.groups[0].exists, "{:?}", first.groups[0]);
         let done = apply(&here, other.path(), &bundle, &first);
         assert_eq!(done["groups"], 1, "{done}");
