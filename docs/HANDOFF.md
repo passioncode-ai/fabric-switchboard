@@ -2,6 +2,25 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-11-09 (evening): moving accounts between machines, groups and organizations audited and fixed; 0.7.36 and 0.7.37
+
+- **Asked.** The operator, in this session: «Аудит системы, как у нас работает перемещение аккаунтов между студией, между девайсами, организациями и так далее. Вот это все, что недоработки, ошибки, что не хватает с точки зрения API, MCP, все давай доделай максимально качественно, чтобы было у нас волнами до конца.»
+- **Found live (SB-311, P1).** Every sign-in moved with `accounts send` landed on the other machine without the provider's identity, and `refresh::reserve_due` never renews such an account: it signed out when its access token expired. claude6 died this way on the Mac Studio (moved 2026-11-08 11:05Z, token ended 16:05Z, `usage_check rejected` since); the 11 sign-ins studio-agent moved on 2026-11-09 13:04 to 14:03Z had no identity there either (Studio `accounts.json`).
+- **Rescue.** The seven ending before 17:00Z were called back to the MacBook with `accounts recall` at 15:08Z, each `proved: true`; the Studio's default group was routed to claude3 first. They stay here: studio-agent moves accounts by the operator's rule DEC-0048 (its repository) after this release. claude4 now sits in Apps & Soft here and is selected there, so it is not sent. claude6 needs a new sign-in (a human step, recorded by studio-agent).
+- **Fixed and merged.**
+  - SB-311 (#548): `refresh::learn_identity` asks `/api/oauth/profile` from `monitor::check_as`; released in 0.7.36 and installed on the Studio by studio-agent at 17:11Z; `identity_learned stored` ×4 at 17:12:14 to 17:12:16Z in both spaces' logs.
+  - SB-312 (#550): `send` preflight, in-flight renewal wait, renewed-during check, settled lost answers; `ssh_runner` reads stderr; `surrender` reroutes; `recall` checks a sent-token fingerprint; `accounts seats` and `switchboard_seats`; 600 s control deadline.
+  - SB-313 (#551): stale shares pruned; CLI-account check only for joining accounts; `ASSIGN_OUTSIDE` for provider teammates; `also_organizations` over MCP.
+  - SB-314 (#554, #556): a deleted group's accounts go to `default`; a group save checks only joining accounts; settings import matches groups by repository then name and maps a domain-held organization.
+  - SB-315 (#552, #557, #558): *Call back* in the window, `MOVED_AWAY` (`--force`), hand-over checks, `renewal` log event, `recall_unreachable` line, `receive --apply` needs a signer and refuses a held sign-in, Codex call back.
+  - SB-316 (#553): the Linux terminal test's 60 s budget (it failed the v0.7.36 nightly on arm; the job was rerun and passed).
+- **Releases.** 0.7.36 (SB-311 only) published 2026-11-09T17:09:01Z, 25 assets, after the nightly's failed arm job was rerun. 0.7.37 (tag on `e91c612`: SB-312, SB-313, SB-314's first part, SB-315's first part, SB-316) published 2026-11-09T17:37:23Z, 25 assets, and installed here: `owner_started` 17:38:06Z, version 0.7.37, proxy port unchanged (49387); `accounts seats` and the `elsewhere`/`location` fields of `accounts list --json` answer on the installed app. studio-agent's request `df257de4` was answered with «можно переносить» (board message `8c704f00`) and asked to put 0.7.37 in the Studio spaces first. #556, #557 and #558 merged after the tag and go out in 0.7.38.
+- **Mistake to keep from repeating.** Rebasing `fix/sb-315-codex-recall` over a conflict, I pushed it with `--force-with-lease`; the rule is never to force-push, a branch of one's own included. Open a new branch instead.
+- **Audit sources.** Two read-only audits in this session (machines; groups and organizations), every finding with `file:line`; the ones not built are SB-314's and SB-315's "left" lists and SB-317.
+- **Open.** SB-314 (sign-in into a group of another organization, restore order, `SEAT_CHOSEN` naming the account, removing one of a group's organizations, the window's group dialog and move targets, MCP delete, restore and import). SB-315 (a remote `--data-dir`, `native_context` travelling, hand-over and receive in the window). SB-317 (`launch --headless`, the Studio as a `dispatch` target; passioncode request `0a07b867`, due 2026-11-16). SB-254 as in the entry below. studio-agent moves accounts by DEC-0048 now that 0.7.37 is out.
+
+**Exact next task.** After 18:15Z confirm on the Studio that claude3, vibecoder2 and marketing@appvillis renewed (a later `expires_at` in `vault-files`, never the token); then cut 0.7.38 with #556 to #558 and take SB-317.
+
 ## 2026-11-09 (early morning): 0.7.35 published and installed; SB-285, SB-310, SB-299, SB-221 closed
 
 - **Release 0.7.35.** The first `release.yml` attempt (run `42533397756`) was refused by the guard: it
