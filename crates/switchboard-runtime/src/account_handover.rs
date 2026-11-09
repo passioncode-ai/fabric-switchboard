@@ -30,6 +30,38 @@ pub const RECEIVE_SIGNER: &str = "Name the giver's published key (switchboard se
 /// SB-315: starting a sign-in this computer already holds.
 pub const RECEIVE_HELD: &str =
     "This computer already holds this sign-in. There is nothing to receive.";
+/// SB-315: the sign-in finished for a received record is another account than the record names.
+pub const RECEIVED_OTHER: &str = "This is not the sign-in that was handed over. Cancel this sign-in, then sign in with the account the record names.";
+
+/// SB-315: what a received record says the sign-in is, to check the one the receiver finishes.
+pub fn expected_identity(record: &Handover) -> switchboard_core::ExternalIdentity {
+    switchboard_core::ExternalIdentity {
+        account_id: record.account_id.clone(),
+        organization_id: record.organization_id.clone(),
+        email: record.email.clone(),
+    }
+}
+/// SB-315: whether a finished sign-in is the one a record names: the provider's account id (and
+/// organization, when both name one) where both are known, else the address where both are, else
+/// it cannot be told and passes.
+pub fn same_sign_in(
+    expected: &switchboard_core::ExternalIdentity,
+    got: &switchboard_core::ExternalIdentity,
+) -> bool {
+    match (&expected.account_id, &got.account_id) {
+        (Some(a), Some(b)) => {
+            a == b
+                && match (&expected.organization_id, &got.organization_id) {
+                    (Some(x), Some(y)) => x == y,
+                    _ => true,
+                }
+        }
+        _ => match (&expected.email, &got.email) {
+            (Some(a), Some(b)) => a.trim().eq_ignore_ascii_case(b.trim()),
+            _ => true,
+        },
+    }
+}
 
 /// The group the account served on the giving machine.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -193,6 +225,29 @@ pub fn plan(snapshot: &Snapshot, record: &Handover, signer: Option<&str>) -> Res
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_received_sign_in_must_be_the_account_its_record_names() {
+        // SB-315: the receiver finishing a sign-in of another account is refused.
+        let id = |account: Option<&str>, org: Option<&str>, email: Option<&str>| {
+            switchboard_core::ExternalIdentity {
+                account_id: account.map(str::to_owned),
+                organization_id: org.map(str::to_owned),
+                email: email.map(str::to_owned),
+            }
+        };
+        let expected = id(Some("acct-1"), Some("org-1"), Some("me@example.invalid"));
+        assert!(same_sign_in(&expected, &id(Some("acct-1"), Some("org-1"), None)));
+        assert!(!same_sign_in(&expected, &id(Some("acct-2"), Some("org-1"), Some("me@example.invalid"))));
+        assert!(!same_sign_in(&expected, &id(Some("acct-1"), Some("org-2"), None)));
+        assert!(same_sign_in(&expected, &id(Some("acct-1"), None, None)));
+        // Without the provider's ids the address decides, in any case.
+        let by_address = id(None, None, Some("Me@Example.invalid"));
+        assert!(same_sign_in(&by_address, &id(Some("x"), None, Some("me@example.invalid"))));
+        assert!(!same_sign_in(&by_address, &id(Some("x"), None, Some("you@example.invalid"))));
+        // Nothing to compare: it passes.
+        assert!(same_sign_in(&id(None, None, None), &id(Some("x"), None, None)));
+    }
     use std::sync::Arc;
     use switchboard_core::{Credential, ExternalIdentity, MemoryVault};
 

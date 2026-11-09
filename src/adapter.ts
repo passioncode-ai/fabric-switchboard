@@ -146,6 +146,7 @@ const safeErrors = new Set([
   "Name the other machine as ssh knows it: letters, digits, dots, hyphens, @ and : only.",
   "Give the other machine's switchboard as an absolute path without quotes.",
   "Give the other machine's data folder as an absolute path without quotes.",
+  "This is not the sign-in that was handed over. Cancel this sign-in, then sign in with the account the record names.",
   "Only a Claude or Codex subscription sign-in moves this way. Give an API key through your vault.",
   "This account is already used elsewhere or turned off here.",
   "Select another account for its group before moving this one.",

@@ -944,6 +944,9 @@ pub struct Runtime {
     /// `COMPLETED_LOGINS`. A repeated Finish returns the same account without capturing again;
     /// they hold no sign-in slot.
     completed_logins: Mutex<std::collections::VecDeque<(String, Account, bool)>>,
+    /// SB-315: sign-ins started to receive a hand-over: login id → the identity its record
+    /// names; finishing one as another account is refused. Held while this owner runs.
+    expected_logins: Mutex<HashMap<String, switchboard_core::ExternalIdentity>>,
     mutations: tokio::sync::Mutex<()>,
     current_cache: Mutex<CurrentCache>,
     monitor_decisions: Mutex<Vec<Value>>,
@@ -1087,6 +1090,7 @@ impl Runtime {
             logins: Mutex::new(HashMap::new()),
             stale_logins: Mutex::new(Vec::new()),
             completed_logins: Mutex::new(std::collections::VecDeque::new()),
+            expected_logins: Mutex::new(HashMap::new()),
             mutations: tokio::sync::Mutex::new(()),
             current_cache: Mutex::new(CurrentCache::default()),
             monitor_decisions: Mutex::new(Vec::new()),
@@ -2061,6 +2065,14 @@ impl Runtime {
             account.clone()
         } else {
             let captured = launch::capture_login_profile(login)?;
+            let expected = self
+                .expected_logins
+                .lock()
+                .ok()
+                .and_then(|m| m.get(id).cloned());
+            if expected.is_some_and(|e| !account_handover::same_sign_in(&e, &captured.identity)) {
+                return Err(account_handover::RECEIVED_OTHER.into());
+            }
             let (account, again) = file_sign_in(
                 &self.store,
                 login.provider,
@@ -2088,6 +2100,9 @@ impl Runtime {
             }
         }
         drop(logins);
+        if let Ok(mut expected) = self.expected_logins.lock() {
+            expected.remove(id);
+        }
         if let Ok(mut completed) = self.completed_logins.lock() {
             completed.retain(|(done, _, _)| done != id);
             completed.push_back((id.to_owned(), account.clone(), again));
@@ -2189,6 +2204,9 @@ impl Runtime {
             .map_err(|_| "Sign-in state unavailable.")?;
         launch::cancel_login(logins.get(id).ok_or("Sign-in not found. Start again.")?)?;
         logins.remove(id);
+        if let Ok(mut expected) = self.expected_logins.lock() {
+            expected.remove(id);
+        }
         Ok(())
     }
     pub(crate) fn enable_backups(
@@ -5350,12 +5368,17 @@ async fn execute(
                     return Err(account_handover::RECEIVE_HELD.into());
                 }
                 let pool = plan["pool"].as_str().unwrap_or("default").to_owned();
-                let login = needs_owner()?.begin_login(
-                    record.provider,
-                    record.label.clone(),
-                    pool,
-                    headless,
-                )?;
+                let owner = needs_owner()?;
+                let login =
+                    owner.begin_login(record.provider, record.label.clone(), pool, headless)?;
+                if let (Some(login_id), Ok(mut expected)) =
+                    (login["login_id"].as_str(), owner.expected_logins.lock())
+                {
+                    expected.insert(
+                        login_id.to_owned(),
+                        account_handover::expected_identity(&record),
+                    );
+                }
                 plan["login"] = login;
             }
             Ok(plan)
