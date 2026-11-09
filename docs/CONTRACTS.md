@@ -991,6 +991,13 @@ Asked for by Fabric Dashboards (an embedded console beside each service, operato
   no credential read.
 - The CLI refuses `--in-place` without a terminal on stdin and stdout, then `exec`s the script, so
   the agent replaces the `switchboard` process and its exit status is the command's.
+- **Headless (SB-317, 2026-11-09).** `launch --headless` (refused with `--in-place`) prepares the
+  same session (`Operation::Launch { in_place: true }`, `launch::launch_here`) for a caller with no
+  terminal, such as a launchd job: no terminal check, then the CLI `exec`s the script with stdin
+  from `/dev/null` (`run_headless`), so the agent's output goes where the job's goes, a stop the job
+  sends reaches the agent, and the exit status is the agent's. Agent arguments after `--` go with
+  `--in-place` or `--headless`. Studio's earlier `script -q /dev/null switchboard launch … --in-place`
+  wrapper is no longer needed. Test `an_in_place_launch_is_refused_where_it_cannot_run`.
 - Tests: `an_in_place_launch_prepares_the_same_session_and_opens_no_terminal`,
   `the_account_for_a_folder_is_the_projects_then_the_rules_then_the_default_selection`,
   `an_in_place_launch_is_refused_where_it_cannot_run`. Not observed live with a real agent yet.
