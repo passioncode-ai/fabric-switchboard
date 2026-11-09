@@ -6,7 +6,7 @@ release pull request renames `Unreleased` to the version. While Windows signing 
 that section must say `windows_authenticode: NOT_SIGNED`. Notes of 0.5.3-beta.1 and earlier are
 on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/releases).
 
-## Unreleased
+## 0.7.37
 
 - Deleting a group sends its accounts back to the default group; before, they stayed in a pool no folder used and served nothing. One whose sign-in the default group already holds stays where it was (SB-314).
 - An account a group already shares no longer blocks that group's renames and added folders when it stops fitting the group's organization; only an account joining a group is checked (SB-314).
