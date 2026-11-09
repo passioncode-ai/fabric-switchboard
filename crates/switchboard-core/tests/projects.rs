@@ -511,3 +511,61 @@ fn a_teammate_a_group_would_refuse_keeps_the_word_from_being_given() {
         Some(&d.id)
     );
 }
+
+/// SB-314: an account a group already shares is not checked again on each save: one that no
+/// longer fits (its organization changed by the person's word) no longer blocks a rename or a
+/// folder added, and a deleted group's accounts go back to `default`.
+#[test]
+fn a_share_that_no_longer_fits_does_not_block_its_group_and_a_deleted_groups_accounts_go_home() {
+    use switchboard_core::organizations::PERSONAL;
+    let (root, store) = setup();
+    let acme = store.add_organization("Acme", &[]).unwrap();
+    let x = add(&store, Provider::Claude, "default", "synthetic-x");
+    store.assign_organization(&x.id, Some(&acme.id)).unwrap();
+    let home = project(&root, "home");
+    let mine = store
+        .save_project_with(
+            None,
+            "Home",
+            std::slice::from_ref(&home),
+            std::slice::from_ref(&x.id),
+            Some(vec![acme.id.clone()]),
+            true,
+        )
+        .unwrap();
+    let work = project(&root, "work");
+    let shares = store
+        .save_project_with(
+            None,
+            "Work",
+            std::slice::from_ref(&work),
+            std::slice::from_ref(&x.id),
+            Some(vec![acme.id.clone()]),
+            true,
+        )
+        .unwrap();
+    assert_eq!(shares.shared_accounts, std::slice::from_ref(&x.id));
+    // The person's word takes x out of Acme: both groups refuse it now.
+    store.assign_organization(&x.id, Some(PERSONAL)).unwrap();
+    // The sharing group can still be renamed and given a folder.
+    let more = project(&root, "work-2");
+    store
+        .save_project(
+            Some(&shares.pool),
+            "Work renamed",
+            &[work.clone(), more],
+            std::slice::from_ref(&x.id),
+        )
+        .unwrap();
+    // Deleting x's own group sends x back to default; no group shares it any more.
+    store.remove_project(&mine.pool).unwrap();
+    let snapshot = store.snapshot().unwrap();
+    assert_eq!(
+        snapshot.accounts.iter().find(|a| a.id == x.id).unwrap().pool,
+        "default"
+    );
+    assert!(snapshot
+        .projects
+        .iter()
+        .all(|p| p.shared_accounts.is_empty()));
+}

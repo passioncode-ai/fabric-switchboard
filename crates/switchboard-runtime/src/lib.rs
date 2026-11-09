@@ -501,8 +501,8 @@ pub enum Operation {
     /// Deletes the saved Fabric Inbox key.
     InboxRemove,
     /// SB-122: moves one account into a project's pool, or back to `default`. Joining or leaving
-    /// a project is that project's save (`ProjectEdit`), with its refusals; an account left in a
-    /// deleted project's pool goes back to `default` by itself.
+    /// a project is that project's save (`ProjectEdit`), with its refusals; deleting a project
+    /// sends its accounts back to `default` (SB-314).
     MoveAccount {
         id: String,
         pool: String,
@@ -8856,7 +8856,7 @@ mod owner_tests {
         );
         runtime.execute(move_to("default")).await.unwrap();
         assert_eq!(pool_of(&runtime), "default");
-        // An account left in a deleted project's pool goes back to default by itself.
+        // SB-314: deleting its project sends the account back to default.
         runtime.execute(move_to("app")).await.unwrap();
         runtime
             .execute(Operation::RemoveProject {
@@ -8865,7 +8865,7 @@ mod owner_tests {
             })
             .await
             .unwrap();
-        assert_eq!(pool_of(&runtime), "app");
+        assert_eq!(pool_of(&runtime), "default");
         runtime.execute(move_to("default")).await.unwrap();
         assert_eq!(pool_of(&runtime), "default");
         assert_eq!(

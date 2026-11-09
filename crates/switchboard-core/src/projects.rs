@@ -703,10 +703,18 @@ impl Store {
         // organizations change keeps only accounts of the new ones. SB-285: placing an account
         // whose address suggests one of the group's organizations confirms it (below, once it
         // has moved).
+        // SB-314: an account the group already shares is not joining; re-checking it on every save
+        // let one misfit share block a rename or the background's folder add.
+        let shared_before: Vec<String> =
+            existing.map_or_else(Vec::new, |i| candidate.projects[i].shared_accounts.clone());
         let joining: Vec<String> = candidate
             .accounts
             .iter()
-            .filter(|a| accounts.contains(&a.id) && (a.pool != pool || organizations != current))
+            .filter(|a| {
+                accounts.contains(&a.id)
+                    && (organizations != current
+                        || (a.pool != pool && !shared_before.contains(&a.id)))
+            })
             .map(|a| a.id.clone())
             .collect();
         for id in &joining {
@@ -948,7 +956,8 @@ impl Store {
         self.changed();
         Ok(project)
     }
-    /// Removes a project. Its accounts stay in the pool, which becomes an ordinary pool.
+    /// Removes a project. Its accounts go back to `default` (SB-314: left in a pool no folder routes
+    /// to, they served nothing); one whose sign-in `default` already holds stays where it was.
     pub fn remove_project(&self, pool: &str) -> Result<Project, String> {
         // H-2: under the credential lock, so no save of this project's key lands between the
         // metadata and the deletions; the deletions run after the metadata lock is released.
@@ -962,6 +971,34 @@ impl Store {
             .ok_or("Project not found.")?;
         let project = candidate.projects.remove(index);
         crate::chains::prune(&mut candidate);
+        let leaving: Vec<String> = candidate
+            .accounts
+            .iter()
+            .filter(|a| a.pool == pool)
+            .map(|a| a.id.clone())
+            .collect();
+        for id in leaving {
+            let account = candidate.accounts.iter().find(|a| a.id == id).unwrap().clone();
+            let clash = candidate.accounts.iter().any(|b| {
+                b.id != account.id
+                    && b.provider == account.provider
+                    && b.pool == "default"
+                    && b.external_identity
+                        .as_ref()
+                        .zip(account.external_identity.as_ref())
+                        .is_some_and(|(x, y)| x.matches(y))
+            });
+            if clash {
+                continue;
+            }
+            let old = format!("{}:{}", account.provider.as_str(), account.pool);
+            if candidate.routes.get(&old) == Some(&id) {
+                candidate.routes.remove(&old);
+            }
+            if let Some(a) = candidate.accounts.iter_mut().find(|a| a.id == id) {
+                a.pool = "default".into();
+            }
+        }
         stale_shares_prune(&mut candidate);
         shared_routes_prune(&mut candidate);
         // SB-144: the project's own agent keys go with it, so a later project of the same pool
