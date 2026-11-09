@@ -869,7 +869,10 @@ mod tests {
                 &id,
                 "studio.local",
                 "default",
-                "switchboard",
+                &Program {
+                    path: "switchboard",
+                    data_dir: None,
+                },
                 100,
                 &fake(&calls, true, true),
                 &|_| {}

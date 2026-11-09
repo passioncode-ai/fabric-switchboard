@@ -5197,10 +5197,6 @@ async fn execute(
                 .unwrap_or_else(|| account_send::REMOTE_DEFAULT.into());
             let remote_data_dir =
                 remote_data_dir.or_else(|| grant.as_ref().and_then(|g| g.data_dir.clone()));
-            let remote_program = |program: &str, data_dir: &Option<String>| account_send::Program {
-                path: program,
-                data_dir: data_dir.as_deref(),
-            };
             let sent = grant.as_ref().and_then(|g| g.sent.clone());
             let remote_id = remote_id
                 .or_else(|| grant.and_then(|g| g.remote_account))
@@ -5219,7 +5215,10 @@ async fn execute(
                         &id,
                         &from,
                         &remote_id,
-                        &remote_program(&program, &data_dir),
+                        &account_send::Program {
+                            path: &program,
+                            data_dir: data_dir.as_deref(),
+                        },
                         monitor::now(),
                         &account_send::ssh_runner,
                         sent.as_deref(),
@@ -5263,7 +5262,10 @@ async fn execute(
                     &id,
                     &from,
                     &taken,
-                    &remote_program(&program, &remote_data_dir),
+                    &account_send::Program {
+                            path: &program,
+                            data_dir: remote_data_dir.as_deref(),
+                        },
                     monitor::now(),
                     &account_send::ssh_runner,
                 )?;
@@ -5290,7 +5292,10 @@ async fn execute(
                             remote_id: remote,
                             token: None,
                         },
-                        &remote_program(&program, &data_dir),
+                        &account_send::Program {
+                            path: &program,
+                            data_dir: data_dir.as_deref(),
+                        },
                         &account_send::ssh_runner,
                     ))
                 })
