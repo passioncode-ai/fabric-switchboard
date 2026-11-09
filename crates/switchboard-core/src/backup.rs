@@ -1436,9 +1436,7 @@ mod tests {
         let original = store(&temp.path().join("one"));
         let a = save(&original, "synthetic-a", "token-a-secret");
         let acme = original.add_organization("Acme", &[]).unwrap();
-        original
-            .assign_organization(&a.id, Some(&acme.id))
-            .unwrap();
+        original.assign_organization(&a.id, Some(&acme.id)).unwrap();
         let repo = temp.path().join("repo");
         std::fs::create_dir_all(&repo).unwrap();
         original
@@ -1469,7 +1467,11 @@ mod tests {
         let restored = restore(&here, &backups, &info.file, &keys).unwrap();
         assert_eq!((restored.added, restored.returned_to_default), (1, 0));
         let snap = here.snapshot().unwrap();
-        let back = snap.accounts.iter().find(|x| x.label == "synthetic-a").unwrap();
+        let back = snap
+            .accounts
+            .iter()
+            .find(|x| x.label == "synthetic-a")
+            .unwrap();
         assert_eq!(back.pool, "alpha");
         assert_eq!(restored.routes, 1);
         assert_eq!(
@@ -1494,7 +1496,11 @@ mod tests {
         let restored = restore(&other, &backups, &info.file, &keys).unwrap();
         assert_eq!((restored.added, restored.returned_to_default), (1, 1));
         let snap = other.snapshot().unwrap();
-        let kept = snap.accounts.iter().find(|x| x.label == "synthetic-a").unwrap();
+        let kept = snap
+            .accounts
+            .iter()
+            .find(|x| x.label == "synthetic-a")
+            .unwrap();
         assert_eq!(kept.pool, "default");
         assert!(snap.routes.get("claude:alpha").is_none());
         // Restoring again adds nothing and moves nothing.
