@@ -30,7 +30,7 @@ pub const SPEND_UNKNOWN: &str = "spend_unknown";
 pub const AGENT_NOT_INSTALLED: &str = "agent_not_installed";
 pub const PERMISSION_MODE: &str = "permission_mode";
 pub const HANDOFF_REFUSED: &str = "handoff_refused";
-pub const REFUSALS: [&str; 7] = [
+pub const REFUSALS: [&str; 10] = [
     NO_AGENT,
     NOT_IN_GROUP,
     CEILING_REACHED,
@@ -38,6 +38,9 @@ pub const REFUSALS: [&str; 7] = [
     AGENT_NOT_INSTALLED,
     PERMISSION_MODE,
     HANDOFF_REFUSED,
+    crate::remote_dispatch::NOT_ON_TARGET,
+    crate::remote_dispatch::TARGET_BUSY,
+    crate::remote_dispatch::TARGET_UNREACHABLE,
 ];
 
 /// How a dispatched run ended, in its record's `ended`.
@@ -76,6 +79,9 @@ pub fn sentence(reason: &str) -> &'static str {
         SPEND_UNKNOWN => "A spending ceiling covers this start and its spend could not be read, so no paid agent starts.",
         AGENT_NOT_INSTALLED => "The default agent is not installed on this computer. Install it, then try again.",
         PERMISSION_MODE => "Only Claude Code and Codex run a request with no person. Choose one of them as the default agent.",
+        crate::remote_dispatch::NOT_ON_TARGET => "The other machine has no checkout of this folder's repository, so no session starts there.",
+        crate::remote_dispatch::TARGET_BUSY => "The other machine already runs two dispatched sessions. Try again when one ends.",
+        crate::remote_dispatch::TARGET_UNREACHABLE => "The other machine did not answer over ssh, so no session starts there.",
         _ => "The workflow's hand-over is not waiting for this session, so nothing started.",
     }
 }
@@ -400,6 +406,15 @@ pub(crate) fn stop(
         live_remove(root, id);
         return Ok(answer("already_ended"));
     }
+    // SB-317: a run on another machine is stopped there, over ssh.
+    if let Some(target) = record["dispatch"]["target"].as_str() {
+        let (target, launch) = (target.to_owned(), id.to_owned());
+        crate::blocking::run(move || {
+            crate::remote_dispatch::stop(&target, &launch, &crate::account_send::ssh_runner)
+        })?;
+        let set = ended(root, id, how, now, None, analytics);
+        return Ok(answer(if set { "stopped" } else { "already_ended" }));
+    }
     let home = crate::launches::own_home(root, &record);
     let running = home
         .as_deref()
@@ -424,6 +439,62 @@ pub(crate) fn stop(
             Err(error)
         }
     }
+}
+
+/// SB-317 (D-7): a dispatched run's state for Fabric: `{launch_id, target, state, exit_code,
+/// result}`. A run here answers from its record; a run on another machine is read there over
+/// ssh, and its end, once seen, is recorded here (`exited`, `stopped`; `lost` is recorded as
+/// `exited` without a code).
+pub(crate) fn status(
+    root: &Path,
+    id: &str,
+    now: i64,
+    analytics: Option<&Analytics>,
+) -> Result<Value, String> {
+    let Some(record) = crate::launches::get(root, id) else {
+        return Err(crate::launches::LAUNCH_NOT_FOUND.into());
+    };
+    if !record["dispatch"].is_object() {
+        return Err(NOT_A_DISPATCH.into());
+    }
+    let Some(target) = record["dispatch"]["target"].as_str() else {
+        let ended = &record["ended"];
+        let state = match ended["kind"].as_str() {
+            Some(kind) => kind,
+            None if record["state"] == "ended" => EXITED,
+            None => "running",
+        };
+        return Ok(json!({
+            "launch_id": id, "target": null, "state": state,
+            "exit_code": ended["exit_code"], "result": null,
+        }));
+    };
+    let (target_owned, launch) = (target.to_owned(), id.to_owned());
+    let mut answer = crate::blocking::run(move || {
+        crate::remote_dispatch::status(&target_owned, &launch, &crate::account_send::ssh_runner)
+    });
+    match answer["state"].as_str() {
+        Some("exited") => {
+            let code = answer["exit_code"].as_i64().map(|c| c as i32);
+            ended(root, id, EXITED, now, code, analytics);
+        }
+        Some("stopped") => {
+            ended(root, id, STOPPED, now, None, analytics);
+        }
+        Some("lost") => {
+            ended(root, id, EXITED, now, None, analytics);
+        }
+        _ => {}
+    }
+    // A run whose stop or time limit this machine recorded reads as that.
+    if let Some(kind) =
+        crate::launches::get(root, id).and_then(|r| r["ended"]["kind"].as_str().map(str::to_owned))
+    {
+        if answer["state"] == "running" {
+            answer["state"] = kind.into();
+        }
+    }
+    Ok(answer)
 }
 
 /// The owner's background pass (every 30 s): a watched run past its deadline is stopped and
@@ -798,6 +869,9 @@ mod runs {
                 timeout_minutes: 1,
                 request_id: None,
                 dispatch_id: Some("d-1".into()),
+                target: None,
+                remote: None,
+                remote_data_dir: None,
             },
             LaunchedBy::surface(Surface::Fabric),
         )
@@ -1101,6 +1175,9 @@ mod runs {
                     timeout_minutes: minutes,
                     request_id: request.map(str::to_owned),
                     dispatch_id: id.map(str::to_owned),
+                    target: None,
+                    remote: None,
+                    remote_data_dir: None,
                 }
             };
         for (bad, error) in [

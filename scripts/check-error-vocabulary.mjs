@@ -46,6 +46,8 @@ const EXCLUDED_FILES = {
   // SB-247: `switchboard dispatch` is Fabric's command; only the CLI sends Operation::Dispatch
   // and DispatchStop, and its refusals are answers with a code, not errors.
   'crates/switchboard-runtime/src/dispatch.rs': 'CLI-only dispatch for Fabric; no renderer request reaches it',
+  // SB-317: a dispatch on another machine; only `dispatch --target`, `dispatch status` and `dispatch stop` reach it.
+  'crates/switchboard-runtime/src/remote_dispatch.rs': 'CLI-only remote dispatch for Fabric; no renderer request reaches it',
 };
 // Messages that are error literals in the sources above but can never reach the UI.
 // Every entry names why. Keep this list short: a doubtful message gets a mapping instead.

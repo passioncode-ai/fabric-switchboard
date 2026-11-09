@@ -27,7 +27,7 @@ pub const DEFAULT_APP: Program<'static> = Program {
 };
 impl Program<'_> {
     /// Both are absolute paths without a quote or a line end.
-    fn check(&self) -> Result<(), String> {
+    pub(crate) fn check(&self) -> Result<(), String> {
         let plain = |p: &str| p.starts_with('/') && !p.contains(['\'', '"', '\n']);
         if !plain(self.path) {
             return Err(REMOTE_INVALID.into());
@@ -86,7 +86,7 @@ pub const SURRENDER_TO_TERMINAL: &str =
 /// given; answers its standard output, or an error when it failed.
 pub type Run<'a> = dyn Fn(&[String], Option<&[u8]>) -> Result<String, String> + 'a;
 
-fn target_valid(target: &str) -> bool {
+pub(crate) fn target_valid(target: &str) -> bool {
     !target.is_empty()
         && target.len() <= 255
         && !target.starts_with('-')
@@ -95,10 +95,10 @@ fn target_valid(target: &str) -> bool {
             .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-' | b'_' | b'@' | b':'))
 }
 /// One word for the remote shell: single-quoted, a quote inside written `'\''`.
-fn quoted(word: &str) -> String {
+pub(crate) fn quoted(word: &str) -> String {
     format!("'{}'", word.replace('\'', "'\\''"))
 }
-fn remote(program: &Program<'_>, args: &[&str]) -> String {
+pub(crate) fn remote(program: &Program<'_>, args: &[&str]) -> String {
     let data_dir = program
         .data_dir
         .map(|dir| ["--data-dir", dir])
@@ -111,7 +111,7 @@ fn remote(program: &Program<'_>, args: &[&str]) -> String {
         .collect::<Vec<_>>()
         .join(" ")
 }
-fn data(output: &str) -> Option<Value> {
+pub(crate) fn data(output: &str) -> Option<Value> {
     let value: Value = serde_json::from_str(output.lines().last()?.trim()).ok()?;
     (value["ok"] == true).then(|| value["data"].clone())
 }
