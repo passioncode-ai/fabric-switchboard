@@ -345,6 +345,29 @@ fn organizations_checked(snapshot: &Snapshot, list: Vec<String>) -> Result<Vec<S
 }
 /// SB-282: a route to an account the pool no longer shares (taken out, or its group removed) is
 /// dropped, as a moved account's route in its old pool is.
+/// SB-313: a group shares only accounts at home in another group. An account whose own group
+/// went away (deleted, or the account moved to `default`) left in another group's list was taken
+/// as a move by that group's next save (its route in `default` went with it), and kept the group's
+/// later saves refused while the ordinary CLI was signed in to it. Answers whether one was removed.
+pub(crate) fn stale_shares_prune(s: &mut Snapshot) -> bool {
+    let homes: std::collections::HashMap<String, String> = s
+        .accounts
+        .iter()
+        .map(|a| (a.id.clone(), a.pool.clone()))
+        .collect();
+    let groups: Vec<String> = s.projects.iter().map(|p| p.pool.clone()).collect();
+    let mut removed = false;
+    for p in s.projects.iter_mut() {
+        let before = p.shared_accounts.len();
+        p.shared_accounts.retain(|id| {
+            homes
+                .get(id)
+                .is_some_and(|home| home != &p.pool && groups.contains(home))
+        });
+        removed |= p.shared_accounts.len() != before;
+    }
+    removed
+}
 fn shared_routes_prune(s: &mut Snapshot) {
     let keep: Vec<String> = s
         .routes
@@ -731,6 +754,7 @@ impl Store {
             None => candidate.projects.push(project.clone()),
         }
         candidate.projects.sort_by(|a, b| a.name.cmp(&b.name));
+        stale_shares_prune(&mut candidate);
         shared_routes_prune(&mut candidate);
         append_event(
             &mut candidate,
@@ -865,6 +889,8 @@ impl Store {
         if let Some(a) = candidate.accounts.iter_mut().find(|a| a.id == id) {
             a.pool = "default".into();
         }
+        stale_shares_prune(&mut candidate);
+        shared_routes_prune(&mut candidate);
         append_event(&mut candidate, "account_updated", Some(id), "success");
         self.publish(&mut state, candidate)?;
         self.changed();
@@ -936,6 +962,7 @@ impl Store {
             .ok_or("Project not found.")?;
         let project = candidate.projects.remove(index);
         crate::chains::prune(&mut candidate);
+        stale_shares_prune(&mut candidate);
         shared_routes_prune(&mut candidate);
         // SB-144: the project's own agent keys go with it, so a later project of the same pool
         // never inherits them; the vault items are deleted after the metadata (a leftover item is

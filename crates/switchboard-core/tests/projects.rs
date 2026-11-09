@@ -355,3 +355,159 @@ fn a_source_may_be_a_group_path() {
         );
     }
 }
+
+/// SB-313: an account whose own group goes away (it moves to `default`, or the group is deleted)
+/// is no longer shared anywhere. Left in another group's list, that group's next save took it as
+/// a move and dropped its route in `default`.
+#[test]
+fn an_account_whose_own_group_goes_away_is_no_longer_shared_and_never_moves_by_itself() {
+    let (root, store) = setup();
+    let x = add(&store, Provider::Claude, "default", "synthetic-x");
+    let y = add(&store, Provider::Claude, "default", "synthetic-y");
+    let z = add(&store, Provider::Claude, "default", "synthetic-z");
+    let g = project(&root, "g");
+    let h = project(&root, "h");
+    let k = project(&root, "k");
+    let home = store
+        .save_project(
+            None,
+            "Home",
+            std::slice::from_ref(&g),
+            std::slice::from_ref(&x.id),
+        )
+        .unwrap();
+    let kept = store
+        .save_project(
+            None,
+            "Kept",
+            std::slice::from_ref(&k),
+            std::slice::from_ref(&z.id),
+        )
+        .unwrap();
+    let shares = store
+        .save_project(
+            None,
+            "Shares",
+            std::slice::from_ref(&h),
+            &[y.id.clone(), x.id.clone(), z.id.clone()],
+        )
+        .unwrap();
+    assert_eq!(shares.shared_accounts, [x.id.clone(), z.id.clone()]);
+    // x goes back to default: its own group lets it go, and the share goes with it.
+    store
+        .save_project(Some(&home.pool), "Home", std::slice::from_ref(&g), &[])
+        .unwrap();
+    let snapshot = store.snapshot().unwrap();
+    let group = |pool: &str| {
+        snapshot
+            .projects
+            .iter()
+            .find(|p| p.pool == pool)
+            .unwrap()
+            .clone()
+    };
+    assert_eq!(
+        group(&shares.pool).shared_accounts,
+        std::slice::from_ref(&z.id)
+    );
+    store.select(Provider::Claude, "default", &x.id).unwrap();
+    // The sharing group's next save (a folder the background adds) leaves x where it is.
+    let more = project(&root, "h-worktree");
+    let listed: Vec<String> = [y.id.clone(), z.id.clone()].into();
+    store
+        .save_project(Some(&shares.pool), "Shares", &[h.clone(), more], &listed)
+        .unwrap();
+    let snapshot = store.snapshot().unwrap();
+    let x_now = snapshot.accounts.iter().find(|a| a.id == x.id).unwrap();
+    assert_eq!(x_now.pool, "default");
+    assert_eq!(snapshot.routes.get("claude:default"), Some(&x.id));
+    // z's own group is deleted: no group shares it any more.
+    store.remove_project(&kept.pool).unwrap();
+    let snapshot = store.snapshot().unwrap();
+    let group = |pool: &str| {
+        snapshot
+            .projects
+            .iter()
+            .find(|p| p.pool == pool)
+            .unwrap()
+            .clone()
+    };
+    assert!(group(&shares.pool).shared_accounts.is_empty());
+}
+
+/// SB-313: placing an account moves its provider team with it. A teammate a group admitted
+/// before and would refuse after keeps the choice from being made; the account itself follows
+/// the person's word, and a group that had it selected moves to another account it admits.
+#[test]
+fn a_teammate_a_group_would_refuse_keeps_the_word_from_being_given() {
+    use switchboard_core::organizations::{ASSIGN_OUTSIDE, PERSONAL};
+    use switchboard_core::ExternalIdentity;
+    let (root, store) = setup();
+    let acme = store.add_organization("Acme", &[]).unwrap();
+    let seat = |label: &str, token: &str| {
+        store
+            .upsert(
+                label.into(),
+                Provider::Claude,
+                AuthKind::OAuth,
+                "default".into(),
+                Credential::parse(
+                    Provider::Claude,
+                    AuthKind::OAuth,
+                    &format!(r#"{{"claudeAiOauth":{{"accessToken":"a-{token}","refreshToken":"r-{token}"}}}}"#),
+                )
+                .unwrap(),
+                Some(ExternalIdentity {
+                    account_id: Some(format!("synthetic-{token}")),
+                    organization_id: Some("synthetic-team".into()),
+                    email: None,
+                }),
+            )
+            .unwrap()
+    };
+    let lead = seat("Lead", "lead");
+    let mate = seat("Mate", "mate");
+    // The lead's word places the team in Acme; the mate follows the team into Acme's group.
+    store.assign_organization(&lead.id, Some(&acme.id)).unwrap();
+    let folder = project(&root, "acme");
+    store
+        .save_project_with(
+            None,
+            "Acme work",
+            std::slice::from_ref(&folder),
+            std::slice::from_ref(&mate.id),
+            Some(vec![acme.id.clone()]),
+            true,
+        )
+        .unwrap();
+    assert_eq!(
+        store
+            .assign_organization(&lead.id, Some(PERSONAL))
+            .unwrap_err(),
+        ASSIGN_OUTSIDE
+    );
+    // The account itself may leave: its group moves to another account it admits.
+    let c = add(&store, Provider::Claude, "default", "synthetic-c");
+    let d = add(&store, Provider::Claude, "default", "synthetic-d");
+    for id in [&c.id, &d.id] {
+        store.assign_organization(id, Some(&acme.id)).unwrap();
+    }
+    let other = project(&root, "acme-two");
+    let group = store
+        .save_project_with(
+            None,
+            "Acme two",
+            std::slice::from_ref(&other),
+            &[c.id.clone(), d.id.clone()],
+            Some(vec![acme.id.clone()]),
+            true,
+        )
+        .unwrap();
+    store.select(Provider::Claude, &group.pool, &c.id).unwrap();
+    store.assign_organization(&c.id, Some(PERSONAL)).unwrap();
+    let snapshot = store.snapshot().unwrap();
+    assert_eq!(
+        snapshot.routes.get(&format!("claude:{}", group.pool)),
+        Some(&d.id)
+    );
+}

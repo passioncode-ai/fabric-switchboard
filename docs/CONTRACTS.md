@@ -2340,6 +2340,8 @@ Language Mode.
   transition under Windows PowerShell 5.1 and PowerShell 7 and the Windows-only tests; a person's
   Windows host has not run any of this (SB-02).
 
+- **Shares and organizations after a move (SB-313, audit 2026-11-09).** `projects::stale_shares_prune` keeps in each group's `shared_accounts` only accounts at home in another group; it runs in `save_project_with`, `remove_project` and `return_to_default`, and once in `Store::open` (written with the SB-285 migration's write). The runtime's check that a group save does not take the ordinary CLI's account (`PROJECT_ACCOUNT_IN_CLI`) skips an account the group already shares. `Store::assign` (`org assign`, MCP `switchboard_organization_set`, the window's *Organization…*) refuses with `ASSIGN_OUTSIDE` ("A group this account or its provider team serves would then refuse it. Move it out of that group first, or change the group's organization.") when another account, a teammate whose provider organization moves with the word, is admitted by a group it serves before and refused after; the account itself follows the word (SB-109), and each route that selected it in a group that would refuse it moves to another enabled, not-elsewhere account of that provider that the group admits (kept when there is none). MCP `switchboard_accounts` adds `also_organizations` (`{id, name}`). Tests `an_account_whose_own_group_goes_away_is_no_longer_shared_and_never_moves_by_itself`, `a_teammate_a_group_would_refuse_keeps_the_word_from_being_given` (`crates/switchboard-core/tests/projects.rs`).
+
 ## The organizations' shell homes (SB-183, node A-4, 2026-10-26)
 
 Code: `switchboard_runtime::shell::homes` (`rows`, `key`, `sync`), called from the owner's

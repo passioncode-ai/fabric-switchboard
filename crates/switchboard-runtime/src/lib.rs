@@ -5369,8 +5369,17 @@ async fn execute(
                 })
             };
             let snapshot = store.snapshot()?;
+            // SB-313: only an account joining the group is checked; one the group already shares
+            // stays, so a save that changes nothing about it (a rename, a folder the background
+            // adds) is never refused for it.
+            let shared_already = |id: &String| {
+                pool.as_deref()
+                    .and_then(|p| snapshot.projects.iter().find(|x| x.pool == p))
+                    .is_some_and(|x| x.shared_accounts.contains(id))
+            };
             if account_ids.iter().any(|id| {
                 in_cli(id)
+                    && !shared_already(id)
                     && snapshot
                         .accounts
                         .iter()

@@ -26,6 +26,9 @@ pub const ORGANIZATION_NAME_INVALID: &str = "Name the organization in 1 to 80 ch
 /// A request or a selection on a seat that left the group's context after it was placed.
 pub const SEAT_OUTSIDE: &str = "This account belongs to another organization than this group. Move it, or change the group's organization.";
 
+/// SB-313: an organization chosen for an account (and its provider team) that a group it serves
+/// would then refuse.
+pub const ASSIGN_OUTSIDE: &str = "A group this account or its provider team serves would then refuse it. Move it out of that group first, or change the group's organization.";
 /// Saving a group with an account of another context (SB-109).
 pub const SEAT_CHOSEN: &str = "An account chosen for this group belongs to another organization. Choose accounts of the group's organization, or change it.";
 /// Changing a group's organization while it holds an account of another context (SB-109).
@@ -1043,6 +1046,62 @@ impl Store {
                 candidate.also_organizations.remove(account);
             } else {
                 candidate.also_organizations.insert(account.into(), also);
+            }
+        }
+        // SB-313: placing an account moves its provider team with it, and nothing checked the
+        // groups the teammates serve: a teammate a group admitted before and refuses now was left
+        // there by a word nobody said about it, every request in that group's folders refused.
+        // Such a choice is refused; the account itself follows the person's word (SB-109), and a
+        // teammate a group refused already is not counted (this choice may be its fix).
+        let serving = |s: &crate::Snapshot, x: &crate::Account| -> Vec<Vec<String>> {
+            s.projects
+                .iter()
+                .filter(|p| p.pool == x.pool || p.shared_accounts.contains(&x.id))
+                .map(|p| p.organizations.clone())
+                .collect()
+        };
+        for x in candidate.accounts.iter().filter(|x| x.id != account) {
+            let Some(before) = state.accounts.iter().find(|b| b.id == x.id) else {
+                continue;
+            };
+            if serving(&candidate, x).iter().any(|organizations| {
+                state.placement_admits(organizations, before)
+                    && !candidate.placement_admits(organizations, x)
+            }) {
+                return Err(ASSIGN_OUTSIDE.into());
+            }
+        }
+        // SB-313: a group whose selected account this word takes out of its context moves to
+        // another of its accounts that it admits, so its sessions keep an account; with none, the
+        // route stays and says why it refuses.
+        let routed: Vec<String> = candidate
+            .routes
+            .iter()
+            .filter(|(_, id)| id.as_str() == account)
+            .map(|(key, _)| key.clone())
+            .collect();
+        for key in routed {
+            let pool = key
+                .split_once(':')
+                .map_or(key.as_str(), |(_, p)| p)
+                .to_owned();
+            if candidate.context_admits(&pool, &a) {
+                continue;
+            }
+            let next = candidate
+                .accounts
+                .iter()
+                .find(|b| {
+                    b.id != account
+                        && b.provider == a.provider
+                        && b.enabled
+                        && !candidate.elsewhere.contains_key(&b.id)
+                        && candidate.pools_of(b).contains(&pool.as_str())
+                        && candidate.context_admits(&pool, b)
+                })
+                .map(|b| b.id.clone());
+            if let Some(next) = next {
+                candidate.routes.insert(key, next);
             }
         }
         append_event(&mut candidate, "organization", Some(account), "assigned");
