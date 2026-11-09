@@ -1179,7 +1179,7 @@ mod runs {
                     target: None,
                     remote: None,
                     remote_data_dir: None,
-                candidates: Vec::new(),
+                    candidates: Vec::new(),
                 }
             };
         for (bad, error) in [

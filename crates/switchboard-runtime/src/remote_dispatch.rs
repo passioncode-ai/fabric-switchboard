@@ -71,14 +71,22 @@ pub fn choose(here: f64, candidates: &[(String, Option<f64>)]) -> Option<String>
         .map(|(m, _)| m.clone())
 }
 /// D-9: a candidate's room over ssh; `None` when it does not answer.
-pub fn room_there(target: &str, program: &Program<'_>, provider: &str, run: &Run<'_>) -> Option<f64> {
+pub fn room_there(
+    target: &str,
+    program: &Program<'_>,
+    provider: &str,
+    run: &Run<'_>,
+) -> Option<f64> {
     if !crate::account_send::target_valid(target) || program.check().is_err() {
         return None;
     }
-    run(&ssh(target, remote(program, &["--json", "accounts", "list"])), None)
-        .ok()
-        .and_then(|out| data(&out))
-        .map(|d| capacity(&d, provider))
+    run(
+        &ssh(target, remote(program, &["--json", "accounts", "list"])),
+        None,
+    )
+    .ok()
+    .and_then(|out| data(&out))
+    .map(|d| capacity(&d, provider))
 }
 
 /// D-6: the first line of the result file, exactly.

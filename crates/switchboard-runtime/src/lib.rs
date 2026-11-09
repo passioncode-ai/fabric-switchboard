@@ -4015,10 +4015,8 @@ async fn dispatch_start(
     // D-9: `auto` runs where the accounts have the most room: here, or one of the candidates.
     let target = match target {
         Some(mut target) if target.machine == "auto" => {
-            let here = remote_dispatch::capacity(
-                &json!(store.snapshot()?.accounts),
-                provider.as_str(),
-            );
+            let here =
+                remote_dispatch::capacity(&json!(store.snapshot()?.accounts), provider.as_str());
             let program = account_send::Program {
                 path: target
                     .program
