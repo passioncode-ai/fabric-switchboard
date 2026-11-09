@@ -15,6 +15,7 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 - In the group dialog, unchecking an organization again gives back the accounts you had checked, instead of leaving them out and moving them to the default group on save (SB-314).
 - `accounts send` and `accounts recall` take `--remote-data-dir` for a Switchboard on the other machine that runs with `--data-dir` (MCP `remote_data_dir`); a call back, from the window too, uses the program and data folder the move used (SB-315).
 - Receiving a hand-over refuses to save a sign-in of another account than the record names (SB-315).
+- A Claude sign-in moved to another machine can be made the ordinary Claude Code sign-in there too: the move carries what that needs, never the MCP sign-ins (SB-315).
 
 ## 0.7.38
 

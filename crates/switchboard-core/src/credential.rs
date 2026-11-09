@@ -127,7 +127,13 @@ impl Credential {
                 } else {
                     None
                 },
-                native_context: None,
+                // SB-315: the native context a move carries; one that does not read as one is
+                // left out, never refused, so the sign-in itself still arrives.
+                native_context: (provider == Provider::Claude)
+                    .then(|| parsed.get("switchboardNativeContext"))
+                    .flatten()
+                    .filter(|v| native_context_valid(v))
+                    .cloned(),
                 expires_at,
                 account_id: string(account)?,
             }
@@ -148,9 +154,11 @@ impl Credential {
 
 impl Credential {
     /// SB-283: the provider's own sign-in as `parse` reads it back (`claudeAiOauth` for Claude,
-    /// `tokens` for Codex), and nothing else: no MCP tokens, no native context.
+    /// `tokens` for Codex), and nothing else: no MCP tokens. SB-315: a Claude sign-in with a
+    /// native context also carries `switchboardNativeContext`, the part native activation needs
+    /// ([`travelling_context`]); a reader before 0.7.39 ignores it.
     pub fn to_oauth_json(&self, provider: Provider) -> String {
-        let value = match provider {
+        let mut value = match provider {
             Provider::Claude => serde_json::json!({"claudeAiOauth": {
                 "accessToken": self.access_token,
                 "refreshToken": self.refresh_token,
@@ -165,8 +173,31 @@ impl Credential {
                 "account_id": self.account_id,
             }}),
         };
+        if provider == Provider::Claude {
+            if let Some(context) = self.native_context.as_ref().and_then(travelling_context) {
+                value["switchboardNativeContext"] = context;
+            }
+        }
         value.to_string()
     }
+}
+
+/// SB-315: what another machine needs to activate a Claude sign-in natively: Claude Code's
+/// `oauthAccount` and its `claudeAiOauth` section without the tokens (activation writes the
+/// current ones). MCP sign-ins and anything else in Claude Code's credential file stay here.
+fn travelling_context(native: &Value) -> Option<Value> {
+    let mut oauth = native
+        .get("auth")?
+        .get("claudeAiOauth")?
+        .as_object()?
+        .clone();
+    oauth.remove("accessToken");
+    oauth.remove("refreshToken");
+    let context = serde_json::json!({
+        "auth": {"claudeAiOauth": oauth},
+        "oauth_account": native.get("oauth_account").cloned().unwrap_or(Value::Null),
+    });
+    native_context_valid(&context).then_some(context)
 }
 
 fn native_context_valid(value: &Value) -> bool {
@@ -209,5 +240,36 @@ mod export_tests {
             assert_eq!(back.expires_at, credential.expires_at);
             assert_eq!(back.account_id, credential.account_id);
         }
+    }
+    #[test]
+    fn a_moved_claude_sign_in_carries_what_native_activation_needs_and_no_mcp_sign_in() {
+        // SB-315: Claude Code's oauthAccount and its claudeAiOauth section travel; the MCP
+        // sign-ins and the tokens inside the section stay out (the tokens travel as the sign-in).
+        let credential = Credential {
+            access_token: "synthetic-access".into(),
+            refresh_token: Some("synthetic-refresh".into()),
+            id_token: None,
+            native_context: Some(serde_json::json!({
+                "auth": {
+                    "claudeAiOauth": {"accessToken": "synthetic-access", "refreshToken": "synthetic-refresh", "scopes": ["user:inference"], "subscriptionType": "max"},
+                    "mcpOAuth": {"server": {"accessToken": "synthetic-mcp"}},
+                },
+                "oauth_account": {"accountUuid": "synthetic-account", "emailAddress": "me@example.invalid"},
+            })),
+            expires_at: Some(2_000_000_000),
+            account_id: Some("synthetic-account".into()),
+        };
+        let text = credential.to_oauth_json(Provider::Claude);
+        assert!(!text.contains("mcpOAuth") && !text.contains("synthetic-mcp"));
+        let back = Credential::parse(Provider::Claude, AuthKind::OAuth, &text).unwrap();
+        let native = back.native_context.unwrap();
+        assert_eq!(native["oauth_account"]["emailAddress"], "me@example.invalid");
+        assert_eq!(native["auth"]["claudeAiOauth"]["subscriptionType"], "max");
+        assert!(native["auth"]["claudeAiOauth"].get("accessToken").is_none());
+        // A Codex sign-in carries none, and a context that does not read as one is left out.
+        assert!(!credential.to_oauth_json(Provider::Codex).contains("switchboardNativeContext"));
+        let odd = r#"{"claudeAiOauth":{"accessToken":"a"},"switchboardNativeContext":{"auth":1}}"#;
+        let back = Credential::parse(Provider::Claude, AuthKind::OAuth, odd).unwrap();
+        assert!(back.native_context.is_none());
     }
 }
