@@ -827,6 +827,11 @@ impl SaveRequest<'_> {
                 .map(|p| p.organizations.clone())
             {
                 candidate.confirm_placement(&account.id, self.pool, &organizations);
+                // SB-314: a group of another organization refuses it here, as a move into it
+                // does, instead of keeping a sign-in every request of that group would refuse.
+                if !candidate.placement_admits(&organizations, &account) {
+                    return Err(crate::organizations::SEAT_CHOSEN.into());
+                }
             }
         }
         validate_snapshot(&candidate)?;

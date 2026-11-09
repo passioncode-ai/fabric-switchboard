@@ -574,3 +574,44 @@ fn a_share_that_no_longer_fits_does_not_block_its_group_and_a_deleted_groups_acc
         .iter()
         .all(|p| p.shared_accounts.is_empty()));
 }
+
+/// SB-314: a new account saved into the pool of a group of another organization is refused, as
+/// a move into that group is; its own organization's group and a personal group take it.
+#[test]
+fn a_new_account_lands_only_in_a_group_that_admits_it() {
+    let (root, store) = setup();
+    let beta = store.add_organization("Beta", &[]).unwrap();
+    let folder = project(&root, "beta");
+    let group = store
+        .save_project_with(
+            None,
+            "Beta work",
+            std::slice::from_ref(&folder),
+            &[],
+            Some(vec![beta.id.clone()]),
+            true,
+        )
+        .unwrap();
+    let refused = store
+        .add(
+            "Synthetic personal".into(),
+            Provider::Claude,
+            AuthKind::ApiKey,
+            group.pool.clone(),
+            Credential::parse(Provider::Claude, AuthKind::ApiKey, "synthetic-personal").unwrap(),
+        )
+        .unwrap_err();
+    assert_eq!(refused, switchboard_core::organizations::SEAT_CHOSEN);
+    assert!(store.snapshot().unwrap().accounts.is_empty());
+    // A personal group takes it.
+    let mine = project(&root, "mine");
+    let personal = store
+        .save_project(None, "Mine", std::slice::from_ref(&mine), &[])
+        .unwrap();
+    add(
+        &store,
+        Provider::Claude,
+        &personal.pool,
+        "synthetic-personal",
+    );
+}

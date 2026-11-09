@@ -3880,28 +3880,30 @@ fn an_agent_key_whose_metadata_cannot_be_written_puts_the_old_key_back() {
 
 /// SB-285: an OAuth seat with `email`, saved in `pool`.
 fn org_seat(store: &Store, email: &str, refresh: &str, pool: &str) -> Account {
+    try_org_seat(store, email, refresh, pool).unwrap()
+}
+/// SB-314: as [`org_seat`], answering the store's refusal.
+fn try_org_seat(store: &Store, email: &str, refresh: &str, pool: &str) -> Result<Account, String> {
     use switchboard_core::ExternalIdentity;
-    store
-        .upsert(
-            email.into(),
+    store.upsert(
+        email.into(),
+        Provider::Claude,
+        AuthKind::OAuth,
+        pool.into(),
+        Credential::parse(
             Provider::Claude,
             AuthKind::OAuth,
-            pool.into(),
-            Credential::parse(
-                Provider::Claude,
-                AuthKind::OAuth,
-                &format!(
-                    r#"{{"claudeAiOauth":{{"accessToken":"a-{refresh}","refreshToken":"{refresh}"}}}}"#
-                ),
-            )
-            .unwrap(),
-            Some(ExternalIdentity {
-                account_id: Some(format!("synthetic-{refresh}")),
-                organization_id: None,
-                email: Some(email.into()),
-            }),
+            &format!(
+                r#"{{"claudeAiOauth":{{"accessToken":"a-{refresh}","refreshToken":"{refresh}"}}}}"#
+            ),
         )
-        .unwrap()
+        .unwrap(),
+        Some(ExternalIdentity {
+            account_id: Some(format!("synthetic-{refresh}")),
+            organization_id: None,
+            email: Some(email.into()),
+        }),
+    )
 }
 fn schema_of(root: &std::path::Path) -> serde_json::Value {
     serde_json::from_slice(&fs::read(root.join("accounts.json")).unwrap()).unwrap()
@@ -4164,11 +4166,12 @@ fn a_new_account_on_an_organizations_domain_is_personal_with_a_suggestion() {
     store
         .select(Provider::Claude, &group.pool, &seat.id)
         .unwrap();
-    // An address on no domain of Acme signed in there is still refused at selection.
-    let stranger = org_seat(&store, "me@home.example", "x", &group.pool);
-    assert!(store
-        .select(Provider::Claude, &group.pool, &stranger.id)
-        .is_err());
+    // SB-314: an address on no domain of Acme is refused when it would land in Acme's group,
+    // before anything is saved (it used to be saved and refused at selection).
+    assert_eq!(
+        try_org_seat(&store, "me@home.example", "x", &group.pool).unwrap_err(),
+        switchboard_core::organizations::SEAT_CHOSEN
+    );
     // A provider team recorded on Acme still places a seat by itself.
     let team = store
         .upsert(
