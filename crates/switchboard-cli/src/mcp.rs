@@ -55,7 +55,7 @@ pub(crate) fn tools() -> Vec<(bool, Value)> {
     let account = json!({"type":"string","description":"Account id from switchboard_accounts."});
     vec![
         (false, json!({"name":"switchboard_status","title":"Switchboard status","description":"Who handles this session's requests: runtime state, this session (managed in a group, isolated, or native), the signed-in CLI accounts, the selected account per group, active folder rules and automatic switching. Call this first.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}})),
-        (false, json!({"name":"switchboard_accounts","title":"Switchboard accounts","description":"Stored accounts without credentials: label, provider, group id (pool) and every group it serves (groups), whether selected or signed in now, the lowest remaining quota, the organization each belongs to (null: personal) with what decided it (person, provider or domain), and whether it is used on another machine (elsewhere) with where (location). machine: here or elsewhere lists only those.","inputSchema":{"type":"object","properties":{"provider":{"type":"string","enum":["claude","codex"]},"machine":{"type":"string","enum":["here","elsewhere"]}},"additionalProperties":false}})),
+        (false, json!({"name":"switchboard_accounts","title":"Switchboard accounts","description":"Stored accounts without credentials: label, provider, group id (pool) and every group it serves (groups), whether selected or signed in now, the lowest remaining quota, the organization each belongs to (null: personal) with what decided it (person or provider), the organizations it also works for, and whether it is used on another machine (elsewhere) with where (location). machine: here or elsewhere lists only those.","inputSchema":{"type":"object","properties":{"provider":{"type":"string","enum":["claude","codex"]},"machine":{"type":"string","enum":["here","elsewhere"]}},"additionalProperties":false}})),
         (false, json!({"name":"switchboard_usage","title":"Remaining usage","description":"Remaining quota per account and window, with reset times and how fresh each observation is. Unknown is not zero. A window with scope feature limits one metered feature only; lowest_remaining_percent covers the account's own windows. refresh asks the provider for one account; within 60 seconds of its last check it returns that observation with a note, and until the time the provider asked for after answering a check with 429 it is refused; for an inactive Claude account it may first renew that account's expired sign-in inside Switchboard. A read-only server never asks and shows the stored observation. No credential is returned.","inputSchema":{"type":"object","properties":{"account_id":account,"refresh":{"type":"boolean","default":false}},"additionalProperties":false}})),
         (true, json!({"name":"switchboard_switch","title":"Switch account","description":"Choose the account for the next request. target session (default) switches this managed session; route selects the account in its own group for every managed session of that group; claude_cli changes the ordinary Claude Code login for every claude session on this machine and requires global: true. A response already streaming keeps its account.","inputSchema":{"type":"object","properties":{"account_id":account,"target":{"type":"string","enum":["session","route","claude_cli"],"default":"session"},"global":{"type":"boolean","default":false}},"required":["account_id"],"additionalProperties":false}})),
         (false, json!({"name":"switchboard_sessions","title":"Sessions","description":"Sessions Switchboard launched: Claude Code, Codex, Kimi Code, Hermes, OpenCode and catalog agents (through an API-key account's proxy or on the OpenRouter key). Each with account_id, label, agent (the catalog id, such as claude-code, codex or goose), provider (the provider the route serves: claude for an agent through the proxy), group id (pool), context (personal or org:<id>) and context_name (the organization's name, or null), mode (managed or isolated), working_directory, in_place, launched_at, started_at, continues (a workflow id or null) and state: starting, running, ended or unknown. Without all, only starting and running ones. With history, every launch of the last 90 days instead, newest first: one record per launch with launch_id, launched_by (surface: window, cli, mcp, fallback, recovery, dashboards or fabric for a run switchboard dispatch started, whose launched_by.dispatch is {id, request, thread, project, workflow}; caller_launch_id, caller_project, caller_program, by, parent), provider_session_id, transcript (its path), turns, last_turn_at, ended (limit; a dispatched run's {kind: exited, stopped or timed_out, exit_code?, at}) and continued_as (where its work went), plus total. With launch_id, that launch with up (who launched it, to the first) and down (what it launched or what took its work over). Reads only; no credential.","inputSchema":{"type":"object","properties":{"all":{"type":"boolean","description":"Also list ended sessions."},"history":{"type":"boolean","description":"Every recorded launch, newest first, instead of the homes' current sessions."},"launch_id":{"type":"string","description":"One launch and its chain."}},"additionalProperties":false}})),
@@ -304,6 +304,23 @@ impl Server {
                 .map(|a| json!({"id": a["organization"], "name": a["organization_name"], "by": a["by"]}))
                 .unwrap_or(Value::Null)
         };
+        // SB-313: the organizations an account also works for (SB-282), which an agent can set
+        // with `switchboard_organization_set` and could not read back.
+        let also_of = |id: &Value| -> Value {
+            let names = snapshot["organizations"].as_array().cloned().unwrap_or_default();
+            id.as_str()
+                .and_then(|id| snapshot["also_organizations"].get(id))
+                .and_then(Value::as_array)
+                .map(|ids| {
+                    ids.iter()
+                        .map(|o| {
+                            let name = names.iter().find(|n| &n["id"] == o).map(|n| n["name"].clone());
+                            json!({"id": o, "name": name.unwrap_or(Value::Null)})
+                        })
+                        .collect::<Vec<_>>()
+                })
+                .map_or(json!([]), Value::Array)
+        };
         let routes = snapshot["routes"].as_object().cloned().unwrap_or_default();
         let time = now();
         let accounts: Vec<Value> = snapshot["accounts"]
@@ -328,7 +345,7 @@ impl Server {
                 json!({"id": a["id"], "label": a["label"], "provider": a["provider"], "kind": a["kind"], "pool": a["pool"], "enabled": a["enabled"],
                     "selected_for_next_request": routes.get(&key) == Some(&a["id"]), "signed_in_cli": signed_in,
                     "lowest_remaining_percent": usage["lowest_remaining_percent"], "usage_fresh": usage["fresh"],
-                    "organization": organization_of(&a["id"]), "groups": groups_of(&a),
+                    "organization": organization_of(&a["id"]), "also_organizations": also_of(&a["id"]), "groups": groups_of(&a),
                     "elsewhere": marked(&a["id"]),
                     "location": a["id"].as_str().and_then(|id| snapshot["locations"].get(id)).cloned().unwrap_or(Value::Null)})
             })

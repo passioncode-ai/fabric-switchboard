@@ -169,6 +169,8 @@ const safeErrors = new Set([
   'The terminal hook\'s choice could not be saved in Switchboard\'s data folder.',
   // Organizations (SB-158).
   'Organization not found.',
+  // Placing an account whose provider team a group would then refuse (SB-313).
+  "A group this account or its provider team serves would then refuse it. Move it out of that group first, or change the group's organization.",
   'Another organization already has this name.',
   'Another organization already has this domain.',
   'A domain is a name such as example.com.',

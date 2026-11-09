@@ -53,7 +53,8 @@ Annotations: `readOnlyHint: true`.
 
 `accounts[]`: `id`, `label`, `provider`, `kind` (`oauth`, `api_key`, `setup_token`), `pool` (the group id),
 `groups` (every group it serves, its own first), `enabled`, `selected_for_next_request`,
-`signed_in_cli`, `lowest_remaining_percent`, `usage_fresh`, `organization`, `elsewhere` (used on
+`signed_in_cli`, `lowest_remaining_percent`, `usage_fresh`, `organization`, `also_organizations`
+(`{id, name}` of each organization it also works for), `elsewhere` (used on
 another machine) and `location` (where, when said). `machine` lists only this machine's accounts
 or only those used elsewhere.
 

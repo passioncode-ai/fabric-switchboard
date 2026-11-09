@@ -14,6 +14,13 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 - `switchboard accounts seats` and the MCP tool `switchboard_seats` show the moves, hand-overs and call backs recorded here; `switchboard accounts list --json` says for each account whether it is used on another machine and where (SB-312).
 - Moves and call backs may take up to 10 minutes before the CLI gives up waiting (was 30 seconds) (SB-312).
 
+## Unreleased
+
+- Moving an account back to the default group, or deleting its group, also takes it out of every group that shared it. Before, the next save of such a group (a folder the background adds) moved the account into that group by itself and dropped its selection in the default group; data an earlier version left this way is cleaned once at start (SB-313).
+- A group whose shared account is the ordinary Claude Code's login is no longer refused on every later save; only an account joining a group is checked (SB-313).
+- Placing an account in an organization is refused when a teammate of its provider team, which moves with it, would then be refused by a group it serves. A group whose selected account you place outside its organization moves to another account it admits (SB-313).
+- `switchboard_accounts` (MCP) lists the organizations each account also works for (SB-313).
+
 ## 0.7.36
 
 - An account moved to another machine with `switchboard accounts send` (or *Move to another machine…*) now keeps working there: it learns its provider identity from Claude at its first check, so the other machine renews it. Before, it was never renewed there and signed out when its access token expired, a few hours after the move (SB-311).
