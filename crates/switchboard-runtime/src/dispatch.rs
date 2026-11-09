@@ -862,6 +862,9 @@ mod runs {
                 timeout_minutes: 1,
                 request_id: None,
                 dispatch_id: Some("d-1".into()),
+                target: None,
+                remote: None,
+                remote_data_dir: None,
             },
             LaunchedBy::surface(Surface::Fabric),
         )
@@ -1165,6 +1168,9 @@ mod runs {
                     timeout_minutes: minutes,
                     request_id: request.map(str::to_owned),
                     dispatch_id: id.map(str::to_owned),
+                    target: None,
+                    remote: None,
+                    remote_data_dir: None,
                 }
             };
         for (bad, error) in [
