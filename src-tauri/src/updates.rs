@@ -2026,7 +2026,10 @@ mod tests {
         let mut inner = updates.lock();
         assert!(!busy(&inner));
         inner.fetching = true;
-        assert!(busy(&inner), "a check that is fetching keeps the next one out");
+        assert!(
+            busy(&inner),
+            "a check that is fetching keeps the next one out"
+        );
         inner.fetching = false;
         inner.rechecking = true;
         assert!(busy(&inner));
