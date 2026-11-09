@@ -6,6 +6,10 @@ release pull request renames `Unreleased` to the version. While Windows signing 
 that section must say `windows_authenticode: NOT_SIGNED`. Notes of 0.5.3-beta.1 and earlier are
 on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/releases).
 
+## Unreleased
+
+- Importing settings on another machine finds each group by a repository it holds there, else by its name, so a second import adds nothing and a group of another name that happens to share the pool id is left alone; a group whose organization is held here under another name by the same domain keeps that organization (SB-314).
+
 ## 0.7.37
 
 - Deleting a group sends its accounts back to the default group; before, they stayed in a pool no folder used and served nothing. One whose sign-in the default group already holds stays where it was (SB-314).

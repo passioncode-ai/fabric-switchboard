@@ -249,8 +249,12 @@ pub const NOT_A_BUNDLE: &str = "This is not a Switchboard settings file (switchb
 pub struct PlannedGroup {
     pub name: String,
     pub pool: String,
-    /// A group with this pool exists here: folders are added to it, nothing else changes.
+    /// A group for it exists here: folders are added to it, nothing else changes.
     pub exists: bool,
+    /// SB-314: the pool of that group here, found by a repository it holds, else by its name;
+    /// a group that landed here as `acme-2` is found again.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub here: Option<String>,
     pub organization: Option<String>,
     /// SB-282: its further organizations, by name.
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -307,6 +311,30 @@ pub struct PlannedCeiling {
     pub action: &'static str,
 }
 
+/// SB-314: the group here a file's group lands in: one holding a checkout of one of its
+/// repositories, else one of the same name. Pools are each machine's own: by pool a group that
+/// landed here under another pool (`acme-2`) was made again on every import, and an unrelated group
+/// holding the pool took the file's folders.
+fn matched<'a>(
+    snapshot: &'a Snapshot,
+    map: &crate::roots::DiskMap,
+    g: &Group,
+) -> Option<&'a switchboard_core::Project> {
+    let holds = |p: &switchboard_core::Project| {
+        map.repositories.iter().any(|r| {
+            r.remote
+                .as_deref()
+                .is_some_and(|remote| g.repositories.iter().any(|i| i == remote))
+                && p.folders.iter().any(|f| f == &r.folder)
+        })
+    };
+    snapshot.projects.iter().find(|p| holds(p)).or_else(|| {
+        snapshot
+            .projects
+            .iter()
+            .find(|p| p.name.trim().eq_ignore_ascii_case(g.name.trim()))
+    })
+}
 /// What importing `bundle` would do here, finding checkouts under `under`. Reads Git files, writes
 /// nothing.
 pub fn plan(root: &Path, snapshot: &Snapshot, bundle: &Bundle, under: &[PathBuf]) -> Plan {
@@ -315,7 +343,7 @@ pub fn plan(root: &Path, snapshot: &Snapshot, bundle: &Bundle, under: &[PathBuf]
         .groups
         .iter()
         .map(|g| {
-            let here = snapshot.projects.iter().find(|p| p.pool == g.pool);
+            let here = matched(snapshot, &map, g);
             let held = |folder: &str| here.is_some_and(|p| p.folders.iter().any(|f| f == folder));
             let mut folders = Vec::new();
             let mut missing = Vec::new();
@@ -356,6 +384,7 @@ pub fn plan(root: &Path, snapshot: &Snapshot, bundle: &Bundle, under: &[PathBuf]
                 name: g.name.clone(),
                 pool: g.pool.clone(),
                 exists: here.is_some(),
+                here: here.map(|p| p.pool.clone()),
                 organization: g.organization.clone(),
                 also_organizations: g.also_organizations.clone(),
                 folders,
@@ -516,11 +545,24 @@ pub fn apply_with(
         Ok(s) => s,
         Err(e) => return json!({"applied": false, "error": e}),
     };
+    // SB-314: an organization refused here because another one holds its domain is that one,
+    // as a backup restore maps it (SB-170); its group no longer lands personal.
     let org_id = |name: &str| {
         snapshot
             .organizations
             .iter()
             .find(|o| o.name.trim().eq_ignore_ascii_case(name.trim()))
+            .or_else(|| {
+                let file = bundle
+                    .organizations
+                    .iter()
+                    .find(|o| o.name.trim().eq_ignore_ascii_case(name.trim()))?;
+                snapshot.organizations.iter().find(|o| {
+                    o.domains
+                        .iter()
+                        .any(|d| file.domains.iter().any(|f| f.eq_ignore_ascii_case(d)))
+                })
+            })
             .map(|o| o.id.clone())
     };
     let mut groups = 0;
@@ -545,7 +587,10 @@ pub fn apply_with(
         if planned.is_empty() {
             continue;
         }
-        let here = snapshot.projects.iter().find(|p| p.pool == g.pool);
+        let here = g
+            .here
+            .as_ref()
+            .and_then(|pool| snapshot.projects.iter().find(|p| &p.pool == pool));
         let result = match here {
             Some(p) => {
                 let mut folders: Vec<PathBuf> = p.folders.iter().map(PathBuf::from).collect();
@@ -811,6 +856,64 @@ mod tests {
         assert_eq!(snap.projects[0].name, "Alpha");
         assert!(!snap.projects[0].organizations.is_empty());
         assert_eq!(snap.organizations[0].name, "Acme");
+    }
+
+    /// SB-314: a group that landed here under another pool (`alpha-2`, the file's `alpha` taken
+    /// by a group of another name) is found again by its repository, so a second import adds
+    /// nothing; an organization refused here for its domain is the one holding that domain.
+    #[test]
+    fn an_import_finds_its_group_by_repository_and_its_organization_by_domain() {
+        let root = tempfile::tempdir().unwrap();
+        let work = tempfile::tempdir().unwrap();
+        let work = work.path().canonicalize().unwrap();
+        checkout(&work.join("app"), "https://github.com/acme/app");
+        let source = open_store(root.path());
+        let acme = source
+            .add_organization("Acme", &["acme.example".into()])
+            .unwrap();
+        source
+            .save_project_in(
+                None,
+                "Alpha",
+                &[work.join("app")],
+                &[],
+                Some(Some(&acme.id)),
+            )
+            .unwrap();
+        let bundle = export(root.path(), &source.snapshot().unwrap(), 5);
+        // Here: an unrelated group already holds the pool `alpha`, and another name owns the
+        // domain.
+        let other = tempfile::tempdir().unwrap();
+        let here = open_store(other.path());
+        let corp = here
+            .add_organization("Acme Corp", &["acme.example".into()])
+            .unwrap();
+        let unrelated = work.join("unrelated");
+        std::fs::create_dir_all(&unrelated).unwrap();
+        let taken = here
+            .save_project_in(None, "Alpha", std::slice::from_ref(&unrelated), &[], None)
+            .unwrap();
+        here.save_project_in(Some(&taken.pool), "Unrelated", &[unrelated], &[], None)
+            .unwrap();
+        let first = plan(
+            other.path(),
+            &here.snapshot().unwrap(),
+            &bundle,
+            std::slice::from_ref(&work),
+        );
+        assert!(!first.groups[0].exists, "{:?}", first.groups[0]);
+        let done = apply(&here, other.path(), &bundle, &first);
+        assert_eq!(done["groups"], 1, "{done}");
+        let snap = here.snapshot().unwrap();
+        let landed = snap.projects.iter().find(|p| p.name == "Alpha").unwrap();
+        assert_ne!(landed.pool, "alpha", "the pool was taken");
+        assert_eq!(landed.organizations, vec![corp.id.clone()]);
+        // The second import finds it by the repository and adds no group.
+        let again = plan(other.path(), &snap, &bundle, std::slice::from_ref(&work));
+        assert!(again.groups[0].exists);
+        assert_eq!(again.groups[0].here.as_deref(), Some(landed.pool.as_str()));
+        apply(&here, other.path(), &bundle, &again);
+        assert_eq!(here.snapshot().unwrap().projects.len(), 2);
     }
 
     #[test]
