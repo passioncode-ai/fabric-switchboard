@@ -466,7 +466,7 @@ with `decision` when given.
 Answers whose sign-in the record names, the group it lands in here (the record's pool when this
 machine has that group, else `default`), whether the signature holds (`signer`: the giver's
 published key) and whether this machine already holds that sign-in. `apply` starts the sign-in;
-the person signs in.
+the person signs in. `apply` needs `signer` and is refused when this machine already holds it.
 
 ### `switchboard_account_move`: `account_id`, `pool`
 
