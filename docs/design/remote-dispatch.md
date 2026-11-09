@@ -19,10 +19,12 @@ dispatcher checks it and posts the answer as a relay (Fabric's four conditions, 
   ssh knows it (the rules of `accounts send`: `account_send::target_valid`, no prompt), with the
   same `--remote` and `--remote-data-dir` as a move (`account_send::Program`). Without `--target`
   nothing changes: the session runs here as today.
-- **D-2. The hand-over is accepted here.** The MacBook reads the hand-over as today
-  (`dispatch::handoff_waiting`), accepts it for the remote executor and writes the checkpoints the
-  local session would; the session there never calls Observatory. Fabric closes the workflow after
-  its relay, as decided.
+- **D-2. Nobody accepts the hand-over.** Switchboard never accepts a hand-over on a session's
+  behalf and never holds a lease token (`continuation.rs`, module doc), and the session there
+  cannot reach this machine's Observatory. So the MacBook only reads the hand-over as today
+  (`dispatch::handoff_waiting`), to check it is waiting for this workflow and to take its
+  checkpoint body (the request) to the target; the offer is left as it is. Fabric, which opened
+  it, withdraws it and closes the workflow after its relay (CO-551). To agree with Fabric.
 - **D-3. The folder there is found by repository.** The request's folder here names a repository
   (its `origin`); the target's `switchboard --json project list` roots carry `remote`, and the root
   with the same identity (DEC-0089 normalisation) is the repository there. None: refused with
