@@ -381,6 +381,7 @@ mod tests {
             format!(
                 "#!/bin/sh\nif [ \"$2\" = project ]; then echo '{projects}'; exit 0; fi\n\
 printf '%s\\n' \"$@\" >\"$(dirname \"$FABRIC_DISPATCH_RESULT\")/args\"\n\
+cat README >>\"$(dirname \"$FABRIC_DISPATCH_RESULT\")/args\" 2>/dev/null\n\
 if [ -f \"$HOME/slow\" ]; then sleep 30; fi\n\
 printf 'fabric-dispatch/1 result workflow=%s handoff=%s request=%s launch=%s\\noutcome=answered\\n\\nDone.\\n' \
 \"$FABRIC_DISPATCH_WORKFLOW\" \"$FABRIC_DISPATCH_HANDOFF\" \"$FABRIC_DISPATCH_REQUEST\" \"$FABRIC_DISPATCH_LAUNCH\" >\"$FABRIC_DISPATCH_RESULT\"\n\
@@ -448,7 +449,8 @@ exit 3\n"
             "{args}"
         );
         assert!(args.contains(&wt.to_string_lossy().into_owned()), "{args}");
-        assert!(wt.join("README").is_file());
+        // It ran in the checkout from origin: the seed's README was there.
+        assert!(args.contains("\napp\n"), "{args}");
         let request: Value =
             serde_json::from_slice(&std::fs::read(dir.join("request.json")).unwrap()).unwrap();
         assert_eq!(request["goal"], "Fix the thing");
