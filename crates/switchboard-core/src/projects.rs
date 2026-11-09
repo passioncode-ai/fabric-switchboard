@@ -720,7 +720,7 @@ impl Store {
         for id in &joining {
             let a = candidate.accounts.iter().find(|a| &a.id == id).unwrap();
             if !candidate.placement_admits(&organizations, a) {
-                return Err(crate::organizations::SEAT_CHOSEN.into());
+                return Err(candidate.seat_chosen(a));
             }
         }
         for (id, to) in &moves {

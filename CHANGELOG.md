@@ -9,6 +9,7 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 ## Unreleased
 
 - A new sign-in or an account added straight into a group whose organization would refuse it is refused with the reason, instead of being saved and then refusing every request in that group (SB-314).
+- A refusal to place an account in a group of an organization names the account and says whether it is another organization's or a personal one (SB-314).
 
 ## 0.7.38
 

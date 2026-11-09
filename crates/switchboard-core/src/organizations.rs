@@ -29,7 +29,8 @@ pub const SEAT_OUTSIDE: &str = "This account belongs to another organization tha
 /// SB-313: an organization chosen for an account (and its provider team) that a group it serves
 /// would then refuse.
 pub const ASSIGN_OUTSIDE: &str = "A group this account or its provider team serves would then refuse it. Move it out of that group first, or change the group's organization.";
-/// Saving a group with an account of another context (SB-109).
+/// Saving a group with an account of another context (SB-109). The answer names the account
+/// and why ([`Snapshot::seat_chosen`], SB-314); this sentence stays for the window's own check.
 pub const SEAT_CHOSEN: &str = "An account chosen for this group belongs to another organization. Choose accounts of the group's organization, or change it.";
 /// Changing a group's organization while it holds an account of another context (SB-109).
 pub const SEATS_ELSEWHERE: &str =
@@ -255,6 +256,17 @@ impl Snapshot {
     /// SB-109, SB-285: whether a group of `organizations` (none: personal) takes `account` when
     /// the person places it there: it fits already, or placing it confirms what its address
     /// suggests. Always while no organization exists.
+    /// SB-314: the refusal of `account` in a group bound to organizations it is not placed in,
+    /// naming it (its label when the window's formatted errors can carry it, else its id) and
+    /// saying whether it is another organization's or personal.
+    pub fn seat_chosen(&self, account: &Account) -> String {
+        let name = shown_name(account);
+        if self.attribution(account).organization.is_none() {
+            format!("{} is a personal account and this group serves an organization. Choose accounts of the group's organization, or change it.", name)
+        } else {
+            format!("{} belongs to another organization than this group. Choose accounts of the group's organization, or change it.", name)
+        }
+    }
     pub fn placement_admits(&self, organizations: &[String], account: &Account) -> bool {
         if self.organizations.is_empty() {
             return true;
@@ -1675,5 +1687,21 @@ mod tests {
         assert!(validate(&s).is_err());
         s.memberships.insert(A.into(), PERSONAL.into());
         assert!(validate(&s).is_ok());
+    }
+}
+
+/// SB-314: what a refusal calls an account: its label when it fits the pattern the window's
+/// formatted errors accept (`src/formatted-errors.ts`: a letter or digit, then up to 39 of
+/// letters, digits, space and `._()+-@`), else its id.
+pub(crate) fn shown_name(account: &Account) -> &str {
+    let label = account.label.as_str();
+    let mut chars = label.chars();
+    let fits = label.chars().count() <= 40
+        && chars.next().is_some_and(|c| c.is_ascii_alphanumeric())
+        && chars.all(|c| c.is_ascii_alphanumeric() || " ._()+-@".contains(c));
+    if fits {
+        label
+    } else {
+        &account.id
     }
 }

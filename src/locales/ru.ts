@@ -925,6 +925,8 @@ export const RU: Record<string, string> = {
   "Synthetic browser demo; it runs without the native app.": "Демо в браузере; работает без настольного приложения.",
   "The native app did not respond. Close and reopen Switchboard, then retry.": "Приложение Switchboard не ответило. Закройте и снова откройте Switchboard, затем повторите.",
   "{name} is not installed. Install it first, then launch it again.": "{name} не установлен. Сначала установите его, затем запустите снова.",
+  "{name} belongs to another organization than this group. Choose accounts of the group's organization, or change it.": "{name} относится к другой организации, чем эта группа. Выберите аккаунты организации группы или смените её.",
+  "{name} is a personal account and this group serves an organization. Choose accounts of the group's organization, or change it.": "{name}: личный аккаунт, а группа работает на организацию. Выберите аккаунты организации группы или смените её.",
   "{name} cannot take over a workflow: an agent in a chain loads MCP servers and takes a prompt without a person (switchboard agents list).": "{name} не может принять задачу: агент в цепочке должен сам загружать MCP-серверы и принимать промпт без участия человека (switchboard agents list).",
   "Resets {date}": "Сброс {date}",
   "Limit resets {date}": "Сброс лимита {date}",

@@ -4170,7 +4170,7 @@ fn a_new_account_on_an_organizations_domain_is_personal_with_a_suggestion() {
     // before anything is saved (it used to be saved and refused at selection).
     assert_eq!(
         try_org_seat(&store, "me@home.example", "x", &group.pool).unwrap_err(),
-        switchboard_core::organizations::SEAT_CHOSEN
+        "me@home.example is a personal account and this group serves an organization. Choose accounts of the group's organization, or change it."
     );
     // A provider team recorded on Acme still places a seat by itself.
     let team = store
