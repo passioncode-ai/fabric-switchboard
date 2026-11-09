@@ -882,6 +882,13 @@ enum Accounts {
         #[arg(long)]
         remote: Option<String>,
     },
+    /// Moves, hand-overs and call backs recorded on this machine, newest last: account ids, the
+    /// other machine, group, the id there and who ordered it. Reads only.
+    Seats {
+        /// How many of the newest lines (1 to 1000).
+        #[arg(long, default_value_t = 50)]
+        limit: usize,
+    },
     /// On the machine an account was moved to: give its sign-in back to the machine that calls
     /// it back. Run only by `accounts recall` over ssh; it refuses to print to a terminal.
     Surrender {
@@ -1686,6 +1693,9 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                 program: remote.clone(),
                 decision: None,
             },
+            Accounts::Seats { limit } => Operation::Seats {
+                limit: Some(*limit),
+            },
             Accounts::Surrender { id, undo } => {
                 if !undo && io::stdout().is_terminal() {
                     return Err(switchboard_runtime::account_send::SURRENDER_TO_TERMINAL.into());
@@ -2400,7 +2410,16 @@ async fn run(cli: &Cli) -> Result<Value, String> {
     );
     let value = call(&root, operation).await?;
     match &cli.command {
-        Command::Accounts { command: Accounts::List } => Ok(json!({"accounts": value["accounts"], "routes": value["routes"]})),
+        // SB-312: each account says whether it is used on another machine and where, as MCP does.
+        Command::Accounts { command: Accounts::List } => {
+            let accounts: Vec<Value> = value["accounts"].as_array().cloned().unwrap_or_default().into_iter().map(|mut a| {
+                let id = a["id"].as_str().unwrap_or_default().to_owned();
+                a["elsewhere"] = json!(value["elsewhere"].get(&id).is_some());
+                a["location"] = value["locations"].get(&id).cloned().unwrap_or(Value::Null);
+                a
+            }).collect();
+            Ok(json!({"accounts": accounts, "routes": value["routes"]}))
+        }
         Command::Events => Ok(value["events"].clone()),
         Command::Project { command: Project::List } => Ok(json!({"projects": mcp::project_views(&value), "rules": mcp::rule_views(&value, mcp::now())})),
         Command::Usage { id: None } => Ok(Value::Array(value["accounts"].as_array().ok_or("Invalid account response.")?.iter().map(|account| json!({"id":account["id"], "label":account["label"], "provider":account["provider"], "usage":account["usage"], "usage_health":account["usage_health"]})).collect())),
@@ -3996,6 +4015,7 @@ mod mcp_parity {
         ("accounts hand-over", Tool("switchboard_account_hand_over")),
         ("accounts send", Tool("switchboard_account_send")),
         ("accounts recall", Tool("switchboard_account_recall")),
+        ("accounts seats", Tool("switchboard_seats")),
         (
             "accounts surrender",
             Not("SB-292: run only by the calling machine's accounts recall over ssh; it prints a sign-in"),

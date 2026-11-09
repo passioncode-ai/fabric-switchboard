@@ -6,6 +6,14 @@ release pull request renames `Unreleased` to the version. While Windows signing 
 that section must say `windows_authenticode: NOT_SIGNED`. Notes of 0.5.3-beta.1 and earlier are
 on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/releases).
 
+## Unreleased
+
+- Moving an account to another machine checks first that the machine answers and has the group, never sends a sign-in that the ordinary Claude Code or Codex here is signed in to or that another group here also holds, waits for a renewal already on its way, and takes the copy back there when this machine renewed it meanwhile. A lost answer is settled by reading the other machine's accounts instead of guessing (SB-312).
+- The other machine's own reason now reaches you when it refuses a move or a call back (for example that the sign-in is already saved in that group), instead of "check ssh" (SB-312).
+- Calling an account back moves its group on the other machine to another of its accounts instead of refusing, is refused when the account was renewed here after it moved (its copy there is spent), and counts a renewal here as the provider's answer (SB-312).
+- `switchboard accounts seats` and the MCP tool `switchboard_seats` show the moves, hand-overs and call backs recorded here; `switchboard accounts list --json` says for each account whether it is used on another machine and where (SB-312).
+- Moves and call backs may take up to 10 minutes before the CLI gives up waiting (was 30 seconds) (SB-312).
+
 ## 0.7.36
 
 - An account moved to another machine with `switchboard accounts send` (or *Move to another machine…*) now keeps working there: it learns its provider identity from Claude at its first check, so the other machine renews it. Before, it was never renewed there and signed out when its access token expired, a few hours after the move (SB-311).

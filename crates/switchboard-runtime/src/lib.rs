@@ -219,6 +219,12 @@ pub enum Operation {
         #[serde(default)]
         decision: Option<spend::Decision>,
     },
+    /// SB-312: the newest lines of `seats.jsonl` (moves, hand-overs and call backs: account ids,
+    /// the other machine, group, who ordered it), newest last. Reads only.
+    Seats {
+        #[serde(default)]
+        limit: Option<usize>,
+    },
     /// SB-292 (S-3), on the machine holding a moved account: mark it used elsewhere and answer its
     /// tokens for the calling machine's ssh; `undo` clears the mark.
     SurrenderAccount {
@@ -1174,6 +1180,7 @@ impl Runtime {
                 // SB-292: ssh both ways, as a move.
                 | Operation::SurrenderAccount { .. }
                 | Operation::RecallAccount { .. }
+                | Operation::Seats { .. }
                 | Operation::AgentCatalog
                 | Operation::AgentConnect { .. }
                 | Operation::AgentKey
@@ -5132,6 +5139,9 @@ async fn execute(
             );
             Ok(moved)
         }
+        Operation::Seats { limit } => Ok(json!({
+            "seats": seats::recent(root, limit.unwrap_or(50).clamp(1, 1000)),
+        })),
         Operation::SurrenderAccount { id, undo } => {
             account_send::surrender(&store, &id, undo, monitor::now(), &|token| {
                 refresh_state.wait_settled(token)
