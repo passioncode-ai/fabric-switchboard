@@ -6,6 +6,10 @@ release pull request renames `Unreleased` to the version. While Windows signing 
 that section must say `windows_authenticode: NOT_SIGNED`. Notes of 0.5.3-beta.1 and earlier are
 on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/releases).
 
+## Unreleased
+
+- A *Check for updates* while the app is already downloading an update no longer starts a second download into the same file, which made the package fail its signature check and wait an hour (SB-319).
+
 ## 0.7.40
 
 - `switchboard dispatch --target <machine>` runs a board request's session on another machine over ssh, in a fresh worktree of the repository there, and `switchboard dispatch status` brings back its state and result file for Fabric to relay; such a run stops itself at its time limit, and its worktree is removed once nothing in it is left unpushed; `--target auto --candidates …` runs it where the agent's accounts have the most room (SB-317, `docs/design/remote-dispatch.md`).
