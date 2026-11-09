@@ -8,6 +8,8 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- Receiving a hand-over with `--apply` needs the giver's published key and is refused when this computer already holds that sign-in (SB-315).
+- A Codex sign-in moved to another machine can be called back too (`switchboard accounts recall`, *Call back*) (SB-315).
 - Importing settings on another machine finds each group by a repository it holds there, else by its name, so a second import adds nothing and a group of another name that happens to share the pool id is left alone; a group whose organization is held here under another name by the same domain keeps that organization (SB-314).
 
 ## 0.7.37
