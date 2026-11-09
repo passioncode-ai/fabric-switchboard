@@ -14,6 +14,10 @@ export interface RotationPolicy {
 /** A provider limit on an account (SB-41). `resets_at` is the provider's own reset; `until` is when the account may be tried again — that reset or an estimated hold. Scope is unknown until a provider states it. */
 export interface AccountLimit { account_id: string; until: number; source: 'managed' | 'claude_code'; kind?: 'quota' | 'unknown'; resets_at?: number | null; confidence?: 'attributed' | 'inferred'; scope?: 'unknown'; observed_at?: number; event_id?: string; reason?: string | null; hidden?: boolean }
 export interface BackupInfo { file: string; created_at: number; accounts: number; missing?: number; own?: boolean; openable?: boolean }
+/** SB-318: a hand-over saved from the window. */
+export interface HandOverResult { saved: string | null; location?: string; public_key?: string }
+/** SB-318: a received hand-over record as this computer reads it (`account_handover::plan`). */
+export interface HandoverPlan { provider: Provider; label: string; email?: string | null; to: string; at: number; signature: 'unsigned' | 'signed' | 'invalid'; signer?: string | null; group: { pool: string; name: string } | null; organizations: { name: string; here: boolean }[]; held: boolean; pool: string; login?: { login_id: string } }
 export interface Restored { added: number; skipped: number; failed: number; projects?: number; rules?: number; routes?: number; settings?: number; /** SB-314: accounts restored to the default group because their group here does not take them. */ returned_to_default?: number }
 export interface BackupStatus { directory: string | null; enabled: boolean; backups: BackupInfo[]; last_error: string | null; last_written_at: number | null; restored_at_start?: { file: string; created_at: number; restored: Restored } | null }
 /** A session Switchboard launched (SB-95): its launch record and its state now. */
@@ -61,6 +65,9 @@ export interface Adapter {
   /** SB-284: `location` says where it works (blank clears it). */ markElsewhere(id: string, on: boolean, location?: string): Promise<void>;
   /** SB-283: moves a sign-in to another machine over ssh; `pool` is its group there. */ sendAccount(id: string, to: string, pool: string): Promise<void>;
   /** SB-315: takes a moved sign-in back from `from`, the machine the move named. */ recallAccount(id: string, from: string): Promise<void>;
+  /** SB-318: hands an account over: a save picker for the signed record, then the account is used by `to`; `saved` null when the picker was closed. */ handOverAccount(id: string, to: string, name: string): Promise<HandOverResult>;
+  /** SB-318: a hand-over record chosen with the open picker; null when the picker was closed. */ openHandover(): Promise<unknown | null>;
+  /** SB-318: what receiving the record would do, or with `apply` and the giver's key, the sign-in it starts. */ receiveHandover(record: unknown, signer: string | null, apply: boolean): Promise<HandoverPlan>;
   remove(id: string): Promise<void>;
   select(account: Account): Promise<void>;
   launch(id: string, mode: 'isolated' | 'managed', workingDirectory: string): Promise<{ message: string; agent_tools?: boolean }>;

@@ -9,7 +9,7 @@ import { demo, demoFirstRun, native, nativeAdapter, onProjectSuggestions, onShel
 import type { CardState } from './ui-logic';
 import { statAlert, ceilingQuestion, ceilingWarning, ceilingLine, keyLimitLine, dollars, POOL_PATTERN, poolChoices, poolName, inGroup, tourPlacement, usableWhileBusy, APPEARANCE_KEY, attribution, placementAdmits, domainSuggestion, groupSeatsElsewhere, passioncodeLine, seatEndedText, groupSeatsEndedText, organizationReleasedAt, inOrganizationFilter, domainList, type AttributedBy, sortStatRows, nextStatSort, type StatRow, type StatSort, statCacheShare, statTokensPerRequest, chartSeries, niceMax, groupProjectRows, type ChartMetric, groupProjects, compactCount, statTokens, statTrouble, statTroubleText, statAgentName, type Statistics, EXPIRY_CHOICES, folderName, folderRows, withoutFolder, type ProjectRoot, moveTargets, mapRows, rootTargets, storedMapFolders, MAP_FOLDERS_KEY, type MapFilter, type MapRow, type RepositoryMap, sortAgents, defaultAgentChoices, backgroundReads, clockedRead, chainScopeKey, afterRead, ceilingRemovalNote, modelMeta, modelUse, ordinaryKimiNote, kimiLimitUntil, limitReasonText, limitTitle, agentSetupFacts, sessionHow, sessionAgentName, sessionStateLabel, kimiWindowsLine, kimiWindowsLines, openrouterCreditLine, eventAction, eventDetail, MutationClock, activeRules, autoSwitchPool, autoSwitchPossible, launchChoice, withFolders, githubDefaultSelection, githubPlan, githubSource, replaceFolder, storedFolder, LAST_FOLDER_KEY, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, groupAccounts, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, signInNotice, signInMove, organizationMoveNote, dismissTermsNotice, termsNoticeDismissed, termsNoticeOn, termsNoticeText, tourWaits, orgSetups, releasedOrganizations, releasedSummary, orgSetupAction, orgSetupShown, orgSetupCaveat, orgSetupLeads, orgSetupPrimary, accountsOrgActionLeads, firstPrimary, orgSetupUnread, orgSetupStateLabel, orgSetupTitle, hiddenOrgSetups, ORG_SETUP_HIDDEN_KEY, accountsEmptyKey, type OrgSetup, usageAnswerText, usageNotice, usageFreshness, windowReset, type Appearance, shellHookView, shellHookToggleNotice, shellHookNoticeText, codexHookLine, moveStep, accountsForStep, chainSummary, stepReasonText, handoverOutcomeText, handoverSkipped, shortWorkflow, TAKEOVER_ORDER, groupOrganizations, servesPool, sharedGroups, holdsContext, accountOrganizations } from './ui-logic';
 import agentCatalog from '../catalog/agents.json';
-import type { AnalyticsStatus, Ceilings, CeilingView, CeilingQuestionView, OpenrouterCredit, BackupInfo, PassioncodeStatus, Account, Adapter, AgentConnection, AgentInfo, AgentRow, AgentsOverview, OpenrouterModels, HermesModel, KimiAccounts, KimiRegion, KimiStatus, OpenrouterStatus, OpenrouterKeys, CodexRoute, ShellHookStatus, AgentSetup, AuthKind, BackupStatus, KimiAccount, CurrentAccounts, LoginItem, Project, Restored, ExternalIdentity, MonitorStatus, ProjectRule, Provider, RotationPolicy, RuntimeStatus, SessionInfo, Snapshot, UpdateStatus, Onboarding, Chains, ChainExecutor, ChainScope, ChainStepView, GithubRepository } from './types';
+import type { AnalyticsStatus, Ceilings, CeilingView, CeilingQuestionView, OpenrouterCredit, BackupInfo, PassioncodeStatus, Account, Adapter, AgentConnection, AgentInfo, AgentRow, AgentsOverview, OpenrouterModels, HermesModel, KimiAccounts, KimiRegion, KimiStatus, OpenrouterStatus, OpenrouterKeys, CodexRoute, ShellHookStatus, AgentSetup, AuthKind, BackupStatus, KimiAccount, CurrentAccounts, LoginItem, Project, Restored, HandoverPlan, ExternalIdentity, MonitorStatus, ProjectRule, Provider, RotationPolicy, RuntimeStatus, SessionInfo, Snapshot, UpdateStatus, Onboarding, Chains, ChainExecutor, ChainScope, ChainStepView, GithubRepository } from './types';
 
 const root = document.querySelector<HTMLDivElement>('#app')!;
 const announcements = document.querySelector<HTMLDivElement>('#announcements')!;
@@ -1549,6 +1549,56 @@ function sendDialog(account: Account) {
   });
   machine.focus();
 }
+/** SB-318: hands an account over to a colleague or a machine ssh does not reach: the person names the receiver and chooses where the signed record is saved; then the record and this computer's key go to them (SCN-091). */
+function handOverDialog(account: Account) {
+  const context = openDialog(t('Hand over {label}', { label: account.label }), t('Save a signed record for a colleague or another of your computers. They sign in to this account there with the record and this computer\'s key; this computer stops using it now.'));
+  const who = input(''); who.maxLength = 80; who.required = true;
+  context.body.append(field(t('Who receives it'), who, t('A colleague, or a machine and its user.')));
+  context.actions.append(submit(t('Save record…')));
+  context.form.addEventListener('submit', (event) => {
+    event.preventDefault();
+    const to = who.value.trim(); if (!to) return;
+    let result: { saved: string | null; public_key?: string } | null = null;
+    void dialogSave(context, async () => { result = await adapter.handOverAccount(account.id, to, account.label); if (!result.saved) throw new Error(t('Nothing was saved. The account stays on this computer.')); }, t('Record for {label} saved. This computer no longer uses it.', { label: account.label })).then(() => { if (result?.saved && result.public_key) handOverKeyDialog(to, result.public_key); });
+  });
+  who.focus();
+}
+/** SB-318: after a hand-over, the key the receiver checks the record with, to copy and send with the file. */
+function handOverKeyDialog(to: string, key: string) {
+  const context = openDialog(t('Send the record and this key'), t('Send the saved file and this computer\'s key to {to}. They open Accounts, + Add account, Receive a hand-over…, and paste the key.', { to }));
+  const value = input(key); value.readOnly = true;
+  context.body.append(field(t('This computer\'s key'), value));
+  const copy = button(t('Copy'), () => {
+    if (!navigator.clipboard) { announce(t('Copy is unavailable here. Select the key instead.')); return; }
+    void navigator.clipboard.writeText(key).then(() => { announce(t('Key copied.')); copy.textContent = t('Copied'); window.setTimeout(() => { copy.textContent = t('Copy'); }, 2000); }, () => announce(t('Copy is unavailable here. Select the key instead.')));
+  }, 'button');
+  context.actions.append(copy, button(t('Done'), () => context.close(), 'button primary'));
+  value.focus(); value.select();
+}
+/** SB-318: receives a hand-over: the person picks the record file, sees whose sign-in it is and where it lands, gives the giver's key and signs in (SCN-091). */
+async function receiveHandover() {
+  if (pendingLogin) { showNotice(t('A sign-in is already in progress. Finish it in Terminal or cancel it first.'), true); render(); return; }
+  let record: unknown; let plan: HandoverPlan;
+  try {
+    record = await adapter.openHandover(); if (record == null) return;
+    plan = await adapter.receiveHandover(record, null, false);
+  } catch (error) { showNotice(safeError(error), true); render(); return; }
+  const context = openDialog(t('Receive {label}', { label: plan.label }), t('A {provider} sign-in handed over to {to}. You sign in to it here; the giver no longer uses it.', { provider: providerName(plan.provider), to: plan.to }));
+  context.body.append(el('p', 'form-note', plan.group ? t('It joins group “{name}”.', { name: plan.group.name }) : t('It joins the default group.')));
+  for (const o of plan.organizations.filter((x) => !x.here)) context.body.append(el('p', 'form-note', t('Organization “{name}” is not on this computer; the account stays personal until you assign it.', { name: o.name })));
+  if (plan.held) context.body.append(el('p', 'form-note', t('This computer already holds this sign-in. There is nothing to receive.')));
+  const key = input(''); key.required = true; key.maxLength = 200;
+  context.body.append(field(t('Giver\'s key'), key, t('The key the giver sent with the file.')));
+  const confirm = submit(t('Sign in')); confirm.disabled = plan.held; context.actions.append(confirm);
+  context.form.addEventListener('submit', (event) => {
+    event.preventDefault();
+    void dialogSave(context, async () => {
+      const started = await adapter.receiveHandover(record, key.value.trim(), true);
+      if (started.login) pendingLogin = { id: started.login.login_id, provider: plan.provider, label: plan.label, pool: plan.pool, state: 'pending', error: '' };
+    }, t('Sign in to {provider} in the Terminal window that opened. Switchboard adds the account when you finish.', { provider: providerName(plan.provider) }));
+  });
+  key.focus();
+}
 /** SB-158: the Accounts filter: `all`, `personal` or an organization's id. */
 let orgFilter = 'all';
 const pausedCountdowns = new Map<string, string>();
@@ -1612,6 +1662,7 @@ function addMenu(className = 'button primary') {
     [t('Sign in to another Codex account'), () => void startLogin('codex')],
     [t('Import from Claude Swap'), () => void importSwap()],
     [t('Add an API key or token…'), () => addDialog()],
+    [t('Receive a hand-over…'), () => void receiveHandover()],
   ], className, t('+ Add account'));
 }
 /** Official sign-in without a form: Terminal opens, completion is detected, the email names the account. */
@@ -1991,6 +2042,8 @@ function rowMenu(account: Account, state: { current: boolean; selected: boolean;
   items.push([snapshot?.elsewhere?.[account.id] === undefined ? t('Used on another machine') : t('Where it works…'), () => elsewhereDialog(account)]);
   // SB-283: a subscription sign-in no group has selected moves over ssh, without a new sign-in there.
   if (account.kind === 'oauth' && account.enabled && !state.selected && snapshot?.elsewhere?.[account.id] === undefined) items.push([t('Move to another machine…'), () => sendDialog(account)]);
+  // SB-318: for a colleague or a machine ssh does not reach: a signed record they sign in with.
+  if (account.kind === 'oauth' && account.enabled && snapshot?.elsewhere?.[account.id] === undefined) items.push([t('Hand over…'), () => handOverDialog(account)]);
   items.push([t('Rename or disable…'), () => editDialog(account)], [t('Remove…'), () => removeDialog(account), 'danger-text']);
   return menu(account.id, t('More actions for {label}', { label: account.label }), items);
 }
