@@ -40,6 +40,7 @@ export const nativeAdapter: Adapter = {
   update: (id, label, enabled) => invoke('update_account', { id, label, enabled }),
   markElsewhere: (id, on, location) => invoke('mark_elsewhere', { id, on, location: location ?? null }),
   sendAccount: (id, to, pool) => invoke('send_account', { id, to, pool }),
+  recallAccount: (id, from) => invoke('recall_account', { id, from }),
   remove: (id) => invoke('remove_account', { id }),
   select: ({ id, provider, pool }) => invoke('select_account', { id, provider, pool }),
   launch: (id, mode, workingDirectory) => invoke('launch_account', { id, mode, workingDirectory }),
@@ -150,6 +151,8 @@ const safeErrors = new Set([
   "The other machine did not save the sign-in. Nothing changed here; check ssh and its Switchboard.",
   "The other machine already holds this sign-in in that group. Remove its old copy there, then move it again.",
   "The other machine saved the sign-in but the provider did not answer it there. It was removed there and stays here.",
+  // Using a moved sign-in here again by a mark (SB-315).
+  "This account's sign-in was moved to another machine. Call it back to use it here, so only one machine renews it.",
   // Safe moves and call backs between machines (SB-312).
   "The ordinary Claude Code or Codex here is signed in to this account. Sign it in to another account first.",
   "This sign-in is also saved in another group here. Remove or move that copy first, so only one machine renews it.",

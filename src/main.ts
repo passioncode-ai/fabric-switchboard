@@ -1956,6 +1956,11 @@ function accountRow(account: Account) {
   if (usageErrors.has(account.id) && !(ended && usageErrors.get(account.id) === "This account's sign-in has ended. Sign in to it again.")) row.append(el('p', 'row-error', t(usageErrors.get(account.id)!)));
   return row;
 }
+/** SB-315: a location a move wrote (`user@host`, an ssh alias) is a machine to call back from;
+ * one a person typed ("Mac Studio, user alex") is not. */
+function sshTarget(location: string | undefined): boolean {
+  return !!location && !location.startsWith('-') && location.length <= 255 && /^[A-Za-z0-9._@:-]+$/.test(location);
+}
 function primaryButton(account: Account, state: { current: boolean; selected: boolean; signIn: boolean; project: boolean }) {
   const slot = el('div', 'row-primary'); const key = `primary-${account.id}`;
   const action = primaryAction(account, state);
@@ -1965,6 +1970,7 @@ function primaryButton(account: Account, state: { current: boolean; selected: bo
   else if (action === 'switch') { const control = button(t('Switch'), () => switchNative(account), 'button row-button', key); control.title = t('Make this the Claude Code account on this computer'); slot.append(control); }
   else if (action === 'select') slot.append(button(t('Select'), () => void mutate(() => adapter.select(account), t('{label} selected for the next managed request {where}.', { label: account.label, where: inGroup(account.pool, snapshot?.projects) }), key), 'button row-button', key));
   else if (action === 'sign_in') slot.append(button(t('Sign in'), () => void startLogin(account.provider, account.label, account.pool), 'button row-button', key));
+  else if (snapshot?.elsewhere?.[account.id] !== undefined && sshTarget(snapshot?.locations?.[account.id])) { const from = snapshot!.locations![account.id]!; slot.append(button(t('Call back'), () => void mutate(() => adapter.recallAccount(account.id, from), t('{label} is back on this computer.', { label: account.label }), key), 'button row-button quiet', key)); }
   else if (snapshot?.elsewhere?.[account.id] !== undefined) slot.append(button(t('Use here'), () => void mutate(() => adapter.markElsewhere(account.id, false), t('{label} is used on this computer again.', { label: account.label }), key), 'button row-button quiet', key));
   else slot.append(button(t('Enable'), () => void mutate(() => adapter.update(account.id, account.label, true), t('{label} enabled.', { label: account.label }), key), 'button row-button quiet', key));
   return slot;

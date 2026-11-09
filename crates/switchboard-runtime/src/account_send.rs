@@ -26,6 +26,8 @@ pub const ADD_FAILED: &str =
 /// group there (`switchboard_core`, "Account credential already exists in this pool"): a copy
 /// left by an earlier move. Named, because the person can fix it there.
 pub const ALREADY_THERE: &str = "The other machine already holds this sign-in in that group. Remove its old copy there, then move it again.";
+/// SB-315: clearing the mark of an account whose sign-in a move took to another machine.
+pub const MOVED_AWAY: &str = "This account's sign-in was moved to another machine. Call it back to use it here, so only one machine renews it.";
 pub const NOT_VERIFIED: &str = "The other machine saved the sign-in but the provider did not answer it there. It was removed there and stays here.";
 pub const IN_USE_HERE: &str = "The ordinary Claude Code or Codex here is signed in to this account. Sign it in to another account first.";
 pub const NOT_ONLY_COPY: &str = "This sign-in is also saved in another group here. Remove or move that copy first, so only one machine renews it.";

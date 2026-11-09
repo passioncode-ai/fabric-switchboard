@@ -767,6 +767,12 @@ fn granted(
                 .is_some_and(|t| {
                     t != refresh_token && Some(&t) != kept.refreshed.refresh_token.as_ref()
                 });
+            // SB-315: a renewal is logged too (codes only), so a sign-in lost on one machine can
+            // be traced to the last place that renewed it; only its end was logged before.
+            crate::oplog::event(
+                "renewal",
+                &[("outcome", crate::oplog::Field::Code("renewed"))],
+            );
             settled_as(store, state, id, refresh_token, &kept, !replaced)
         }
         Err(Failure::Permanent) => {

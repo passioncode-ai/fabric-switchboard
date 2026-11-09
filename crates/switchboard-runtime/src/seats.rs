@@ -77,6 +77,14 @@ pub fn last_grant(root: &Path, account: &str, machine: &str) -> Option<Seat> {
         })
         .filter(|s| s.event == "granted")
 }
+/// SB-315: the newest move of `account` to any machine that was not called back since.
+pub fn outstanding(root: &Path, account: &str) -> Option<Seat> {
+    recent(root, KEEP)
+        .into_iter()
+        .rev()
+        .find(|s| s.account == account && matches!(s.event.as_str(), "granted" | "recalled"))
+        .filter(|s| s.event == "granted")
+}
 pub fn remote_account(root: &Path, account: &str, machine: &str) -> Option<String> {
     last_grant(root, account, machine).and_then(|s| s.remote_account)
 }

@@ -213,6 +213,7 @@ async fn update_account(
             enabled: Some(enabled),
             elsewhere: None,
             location: None,
+            force: false,
         })
         .await
 }
@@ -253,6 +254,23 @@ async fn mark_elsewhere(
             enabled: None,
             elsewhere: Some(on),
             location,
+            force: false,
+        })
+        .await
+}
+/// SB-315: take a sign-in moved to another machine back (`account_send::recall_take`); `from` is
+/// the machine as the move named it.
+#[tauri::command]
+async fn recall_account(id: String, from: String, state: State<'_, Slot>) -> Result<Value, String> {
+    state
+        .runtime()
+        .await?
+        .execute(Operation::RecallAccount {
+            id,
+            from,
+            remote_id: None,
+            program: None,
+            decision: None,
         })
         .await
 }
@@ -1506,6 +1524,7 @@ fn main() {
             add_account,
             update_account,
             send_account,
+            recall_account,
             mark_elsewhere,
             remove_account,
             select_account,

@@ -130,6 +130,10 @@ pub enum Operation {
         /// marks it as used elsewhere; blank clears what was said.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         location: Option<String>,
+        /// SB-315: use an account here again although its sign-in was moved to another machine
+        /// and not called back (its copy there is gone, or the person accepts two holders).
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        force: bool,
     },
     Remove {
         id: String,
@@ -4215,7 +4219,15 @@ async fn execute(
             enabled,
             elsewhere,
             location,
+            force,
         } => {
+            // SB-315: a sign-in moved to another machine and not called back has its holder there;
+            // using it here too would renew it from two places.
+            let clearing = elsewhere == Some(false)
+                || (enabled == Some(true) && store.snapshot()?.elsewhere.contains_key(&id));
+            if clearing && !force && seats::outstanding(root, &id).is_some() {
+                return Err(account_send::MOVED_AWAY.into());
+            }
             if label.is_some() || enabled.is_some() || (elsewhere.is_none() && location.is_none()) {
                 store.update_fields(&id, label, enabled)?;
             }
@@ -5176,7 +5188,25 @@ async fn execute(
                         sent.as_deref(),
                     )
                 })
-            }?;
+            };
+            // SB-315 (S-5 of seats-and-levels): a machine that did not give the sign-in back is
+            // recorded; the account stays used there, and only a new sign-in here ends that.
+            let taken = match taken {
+                Err(error) if error == account_send::SURRENDER_FAILED => {
+                    record_seat(
+                        root,
+                        "recall_unreachable",
+                        &id,
+                        &from,
+                        "",
+                        decision.as_ref(),
+                        None,
+                        None,
+                    );
+                    return Err(error);
+                }
+                other => other?,
+            };
             let answered = Box::pin(execute(
                 store.clone(),
                 root,
@@ -11145,6 +11175,7 @@ mod usage_gate_tests {
                 label: Some("renamed".into()),
                 enabled: Some(true),
                 elsewhere: None,
+                force: false,
             }),
         )
         .await
@@ -11246,6 +11277,7 @@ mod usage_gate_tests {
             enabled: None,
             elsewhere,
             location: location.map(str::to_owned),
+            force: false,
         };
         runtime
             .execute(update(None, Some("Mac Studio, user alex")))
@@ -11261,6 +11293,60 @@ mod usage_gate_tests {
         runtime.execute(update(Some(false), None)).await.unwrap();
         let snapshot = runtime.store.snapshot().unwrap();
         assert!(snapshot.elsewhere.is_empty() && snapshot.locations.is_empty());
+        // SB-315: a sign-in a move took away is called back, not used here again by a mark;
+        // `force` says its copy there is gone. A call back recorded after the move lifts it.
+        runtime
+            .store
+            .mark_elsewhere_at(&id, true, 5, Some("studio.local"))
+            .unwrap();
+        let mut moved = seats::of(5, "granted", &id, "studio.local", "default", None);
+        moved.remote_account = Some("remote-1".into());
+        seats::append(root.path(), &moved).unwrap();
+        assert_eq!(
+            runtime
+                .execute(update(Some(false), None))
+                .await
+                .unwrap_err(),
+            account_send::MOVED_AWAY
+        );
+        let enable = Operation::Update {
+            id: id.clone(),
+            label: None,
+            enabled: Some(true),
+            elsewhere: None,
+            location: None,
+            force: false,
+        };
+        assert_eq!(
+            runtime.execute(enable).await.unwrap_err(),
+            account_send::MOVED_AWAY
+        );
+        assert!(runtime
+            .store
+            .snapshot()
+            .unwrap()
+            .elsewhere
+            .contains_key(&id));
+        let forced = Operation::Update {
+            id: id.clone(),
+            label: None,
+            enabled: None,
+            elsewhere: Some(false),
+            location: None,
+            force: true,
+        };
+        runtime.execute(forced).await.unwrap();
+        assert!(runtime.store.snapshot().unwrap().elsewhere.is_empty());
+        runtime
+            .store
+            .mark_elsewhere_at(&id, true, 6, Some("studio.local"))
+            .unwrap();
+        seats::append(
+            root.path(),
+            &seats::of(6, "recalled", &id, "studio.local", "default", None),
+        )
+        .unwrap();
+        runtime.execute(update(Some(false), None)).await.unwrap();
     }
 
     #[tokio::test]
