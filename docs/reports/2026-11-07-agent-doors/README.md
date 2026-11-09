@@ -82,3 +82,6 @@ operator's words, is the second question for SB-299. The one MCP-only action was
    `switchboard_organization_set` `passioncode_cancel`, and `passioncode_disconnect` with it).
 2. The money doors with the operator's words (built: `Operation::OnOperatorsWord`, CLI `--operator-said`, MCP `decision`; [design](../../research/ceiling-doors-2026-11-07.md)).
 3. MCP tools for the PERSON group behind the operator's words, if the operator wants MCP and not only the CLI.
+   Decided 2026-11-09: no. The operator asked that every window action be doable by Claude Code, which runs the
+   CLI; the PERSON group's CLI doors (with `--operator-said` where a ceiling is involved) are that door. A key
+   travels as `use_secret.py run --vault-only <project> <NAME> -- sh -c 'printf %s "$NAME" | switchboard agents openrouter set --key-stdin'`.
