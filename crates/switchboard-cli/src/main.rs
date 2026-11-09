@@ -284,6 +284,16 @@ enum Command {
         /// Stop the run after this many minutes, 1 to 1440.
         #[arg(long, default_value_t = 60, value_parser = clap::value_parser!(u32).range(1..=1440))]
         timeout_minutes: u32,
+        /// Run the session on another machine, as ssh knows it, in a fresh worktree of this
+        /// folder's repository there; its result comes back through `dispatch status`.
+        #[arg(long)]
+        target: Option<String>,
+        /// With --target: that machine's switchboard, an absolute path; by default the macOS app's.
+        #[arg(long, requires = "target")]
+        remote: Option<String>,
+        /// With --target: that machine's data folder, when its Switchboard runs with --data-dir.
+        #[arg(long, requires = "target")]
+        remote_data_dir: Option<String>,
     },
     /// Own the vault, inference proxy and private CLI control listener until Ctrl-C or
     /// SIGTERM, then stop within ten seconds.
@@ -1417,6 +1427,14 @@ enum DispatchCommand {
         #[arg(long)]
         launch_id: String,
     },
+    /// A dispatched run's state (`running`, `exited` with its exit code, `stopped`, `timed_out`,
+    /// `lost`, `unknown` when its machine does not answer) and, for a run on another machine, the
+    /// text of its result file.
+    Status {
+        /// The run's launch id, as `switchboard dispatch` answered it.
+        #[arg(long)]
+        launch_id: String,
+    },
 }
 /// Why `switchboard dispatch` starts a session.
 #[derive(Clone, Copy, ValueEnum)]
@@ -1878,6 +1896,12 @@ async fn run(cli: &Cli) -> Result<Value, String> {
             launch_id: launch_id.clone(),
         },
         Command::Dispatch {
+            command: Some(DispatchCommand::Status { launch_id }),
+            ..
+        } => Operation::DispatchStatus {
+            launch_id: launch_id.clone(),
+        },
+        Command::Dispatch {
             command: None,
             dir,
             workflow,
@@ -1887,6 +1911,9 @@ async fn run(cli: &Cli) -> Result<Value, String> {
             reason: DispatchReason::Request,
             permissions,
             timeout_minutes,
+            target,
+            remote,
+            remote_data_dir,
         } => switchboard_runtime::launched(
             Operation::Dispatch {
                 working_directory: dir.clone().unwrap_or_default(),
@@ -1900,6 +1927,9 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                 timeout_minutes: *timeout_minutes,
                 request_id: request.clone(),
                 dispatch_id: dispatch_id.clone(),
+                target: target.clone(),
+                remote: remote.clone(),
+                remote_data_dir: remote_data_dir.clone(),
             },
             launches::LaunchedBy::from_caller(launches::Surface::Fabric, None, None),
         ),
@@ -3091,6 +3121,15 @@ fn print_result(value: &Value, cli: &Cli) {
             command: Some(DispatchCommand::Stop { .. }),
             ..
         } => println!("{} {}", text(&value["launch_id"]), text(&value["state"])),
+        Command::Dispatch {
+            command: Some(DispatchCommand::Status { .. }),
+            ..
+        } => {
+            println!("{} {}", text(&value["launch_id"]), text(&value["state"]));
+            if let Some(result) = value["result"].as_str() {
+                println!("{result}");
+            }
+        }
         Command::Org { command: Org::List } => {
             let organizations = value["organizations"]
                 .as_array()
@@ -4153,6 +4192,10 @@ mod mcp_parity {
         (
             "dispatch stop",
             Not("SB-247: Fabric's dispatcher starts and stops these runs with the CLI; an agent reads them with switchboard_sessions"),
+        ),
+        (
+            "dispatch status",
+            Not("SB-317: Fabric's dispatcher reads its runs' results with the CLI to relay them; an agent reads runs with switchboard_sessions"),
         ),
         ("serve", Not(PROCESS)),
         ("mcp", Not(PROCESS)),

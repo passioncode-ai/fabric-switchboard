@@ -192,9 +192,22 @@ pub enum Operation {
         /// Fabric's own id for this dispatch (`--dispatch-id`), for the launch record.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         dispatch_id: Option<String>,
+        /// SB-317: run the session on this machine as ssh knows it (`docs/design/remote-dispatch.md`).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        target: Option<String>,
+        /// With `target`: that machine's switchboard (default the macOS app's) and data folder.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        remote: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        remote_data_dir: Option<String>,
     },
     /// SB-247: stops a dispatched run (`state`: `stopped`, `already_ended`).
     DispatchStop {
+        launch_id: String,
+    },
+    /// SB-317: a dispatched run's state and, for a run on another machine, its result file
+    /// (`dispatch::status`).
+    DispatchStatus {
         launch_id: String,
     },
     /// SB-108, by hand: offer a workflow like `Continue` and leave its prepared session for
@@ -1264,6 +1277,9 @@ impl Runtime {
                 // SB-247: a stop signals a process and waits up to seconds for it to end; its
                 // record is written under the records' own lock.
                 | Operation::DispatchStop { .. }
+                // SB-317: reads a run's files over ssh; its end is written under the records'
+                // own lock.
+                | Operation::DispatchStatus { .. }
         ) {
             return execute(self.store.clone(), &self.root, Some(self), operation).await;
         }
@@ -3932,6 +3948,13 @@ fn continue_checks(
 /// home and the non-interactive run. A refusal is an answer (`state: refused`); a failure past
 /// the refusals is an error.
 #[allow(clippy::too_many_arguments)]
+/// SB-317: where `dispatch --target` runs the session.
+struct RemoteTarget {
+    machine: String,
+    program: Option<String>,
+    data_dir: Option<String>,
+}
+#[allow(clippy::too_many_arguments)]
 async fn dispatch_start(
     store: &Arc<Store>,
     root: &Path,
@@ -3943,6 +3966,7 @@ async fn dispatch_start(
     timeout_minutes: u32,
     request_id: Option<&str>,
     dispatch_id: Option<&str>,
+    target: Option<RemoteTarget>,
 ) -> Result<Value, String> {
     if let Some((id, record)) = crate::blocking::run(|| launches::live_dispatch(root, workflow_id))
     {
@@ -3982,6 +4006,23 @@ async fn dispatch_start(
         .map(str::to_owned)
         .or_else(|| packet.request.clone())
         .ok_or(dispatch::NO_REQUEST)?;
+    if let Some(target) = target {
+        return dispatch_remote(
+            root,
+            &folder,
+            &target,
+            &agent,
+            provider,
+            &shown,
+            workflow_id,
+            handoff_id,
+            &request,
+            dispatch_id,
+            &packet,
+            permissions,
+            timeout_minutes,
+        );
+    }
     let Ok(id) = fallback::account_for_default(
         runtime,
         &agent,
@@ -4067,6 +4108,112 @@ async fn dispatch_start(
         "launch_id": launch_id,
         "agent": agent,
         "account_id": account_id,
+        "state": "started",
+    }))
+}
+/// SB-317 (`docs/design/remote-dispatch.md`): the session runs on `target.machine`, in a fresh
+/// worktree of this folder's repository there; nobody accepts the hand-over (D-2), and the run's
+/// result comes back through `dispatch status`. The launch is recorded here, in its own folder
+/// under `remote-dispatch/`, with `dispatch.target`.
+#[allow(clippy::too_many_arguments)]
+fn dispatch_remote(
+    root: &Path,
+    folder: &Path,
+    target: &RemoteTarget,
+    agent: &str,
+    provider: Provider,
+    shown: &Value,
+    workflow_id: &str,
+    handoff_id: &str,
+    request: &str,
+    dispatch_id: Option<&str>,
+    packet: &dispatch::Packet,
+    permissions: launch::Permissions,
+    timeout_minutes: u32,
+) -> Result<Value, String> {
+    let refuse = |reason| Ok(dispatch::refused(Some(agent), reason));
+    let Some(identity) = blocking::run(|| roots::checkout(folder).and_then(|c| c.remote)) else {
+        return refuse(remote_dispatch::NOT_ON_TARGET);
+    };
+    let launch_id = launches::new_id();
+    let body = shown
+        .pointer("/checkpoint/body")
+        .cloned()
+        .unwrap_or(Value::Null);
+    let program = account_send::Program {
+        path: target
+            .program
+            .as_deref()
+            .unwrap_or(account_send::REMOTE_DEFAULT),
+        data_dir: target.data_dir.as_deref(),
+    };
+    let start = remote_dispatch::Start {
+        launch_id: &launch_id,
+        provider,
+        identity: &identity,
+        request_body: &body,
+        workflow: workflow_id,
+        handoff: handoff_id,
+        request,
+        dispatch_id,
+    };
+    let started = blocking::run(|| {
+        remote_dispatch::start(&target.machine, &program, &start, &account_send::ssh_runner)
+    })?;
+    if started["state"] != "started" {
+        let reason = match started["reason"].as_str() {
+            Some(remote_dispatch::NOT_ON_TARGET) => remote_dispatch::NOT_ON_TARGET,
+            Some(remote_dispatch::TARGET_BUSY) => remote_dispatch::TARGET_BUSY,
+            _ => remote_dispatch::TARGET_UNREACHABLE,
+        };
+        return refuse(reason);
+    }
+    let home = root.join("remote-dispatch").join(&launch_id);
+    launch::private_dir(&home)?;
+    let record = json!({
+        "account_id": null,
+        "provider": provider.as_str(),
+        "pool": null,
+        "mode": "isolated",
+        "working_directory": folder,
+        "in_place": false,
+        "launched_at": monitor::now(),
+        "continues": workflow_id,
+        "dispatch": {
+            "target": target.machine,
+            "program": target.program,
+            "data_dir": target.data_dir,
+            "repository": started["repository"],
+            "worktree": started["worktree"],
+            "permissions": permissions,
+            "timeout_minutes": timeout_minutes,
+        },
+    });
+    launches::record_by(
+        root,
+        &home,
+        record,
+        &launch_id,
+        Some(json!({
+            "id": dispatch_id,
+            "request": request,
+            "thread": packet.thread,
+            "project": packet.project,
+            "workflow": workflow_id,
+        })),
+    )?;
+    oplog::event(
+        "dispatch",
+        &[
+            ("agent", oplog::Field::Code(dispatch::agent_kind(Some(agent)))),
+            ("where", oplog::Field::Code("remote")),
+        ],
+    );
+    Ok(json!({
+        "launch_id": launch_id,
+        "agent": agent,
+        "account_id": null,
+        "target": target.machine,
         "state": "started",
     }))
 }
@@ -4859,6 +5006,9 @@ async fn execute(
             timeout_minutes,
             request_id,
             dispatch_id,
+            target,
+            remote,
+            remote_data_dir,
         } => {
             let runtime = needs_owner()?;
             if !(1..=dispatch::MAX_TIMEOUT_MINUTES).contains(&timeout_minutes) {
@@ -4893,6 +5043,11 @@ async fn execute(
                 timeout_minutes,
                 request_id.as_deref(),
                 dispatch_id.as_deref(),
+                target.map(|machine| RemoteTarget {
+                    machine,
+                    program: remote,
+                    data_dir: remote_data_dir,
+                }),
             )
             .await?;
             if let Some(client) = runtime.analytics() {
@@ -4903,6 +5058,10 @@ async fn execute(
                 );
             }
             Ok(answer)
+        }
+        Operation::DispatchStatus { launch_id } => {
+            let analytics = runtime.and_then(Runtime::analytics);
+            dispatch::status(root, &launch_id, monitor::now(), analytics.as_deref())
         }
         Operation::DispatchStop { launch_id } => {
             let analytics = runtime.and_then(Runtime::analytics);
