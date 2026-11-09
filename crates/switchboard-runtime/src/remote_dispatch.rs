@@ -485,8 +485,13 @@ exit 3\n"
             dispatch_id: None,
             timeout_seconds: 1,
         };
-        assert_eq!(start("studio.local", &program, &s, &run).unwrap()["state"], "started");
-        let wt = home.path().join(format!("DATA/_worktrees/dispatch-{launch}"));
+        assert_eq!(
+            start("studio.local", &program, &s, &run).unwrap()["state"],
+            "started"
+        );
+        let wt = home
+            .path()
+            .join(format!("DATA/_worktrees/dispatch-{launch}"));
         std::fs::write(wt.join("work.txt"), "not pushed\n").unwrap();
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
         let answer = loop {
