@@ -11,9 +11,10 @@
 - **Checks.** `./scripts/check.sh` on the Mac Studio: `check=0` on 1adb5df (#563 head) and 879f8b6 (#564 code head). Copylot reports for the new strings are listed in PR #563.
 - **0.7.38.** The tag's push run `42666954676` ended with only preflight, guard and Windows x64; GitHub never created the macOS, Linux and Windows arm jobs, and the run "cannot be retried". It was started again with `gh workflow run release.yml --ref v0.7.38 -f publish=true` (run `42676238574`), where every job was created.
 - **Studio.** studio-agent moved seven accounts there by DEC-0048 at 18:30Z; the `sshlg` space logged `identity_learned stored` five times at 18:31Z (they will renew). The `appvillis` space's log belongs to its own user; studio-agent reported its two `ok`. Cleanup: the Studio's `sb-gate` worktree removed and `cargo clean --profile dev` (32 GB to 0); the MacBook's `target` (561 MB) removed.
-- **Open.** SB-318 (hand-over and receive in the window). SB-317's other half: the Mac Studio as a `dispatch` target (Fabric, order `11048978`). SB-254: look for new crash reports after 2026-11-12 23:12Z.
+- **Merged after the 0.7.39 tag.** PR #566 (SB-318): *Hand over…* and *Receive a hand-over…* in the window (scenario SCN-088), walked through in Safari on the demo. It ships in 0.7.40.
+- **Open.** SB-317's other half: the Mac Studio as a `dispatch` target (Fabric, order `11048978`). SB-254: look for new crash reports after 2026-11-12 23:12Z.
 
-**Exact next task.** Once run `42676238574` publishes 0.7.38 (`latest.json` 0.7.38), merge PR #565, tag `v0.7.39` on its merge commit, watch the release to `latest.json` 0.7.39, install it here with `switchboard_app` (`owner_started` with 0.7.39), and close SB-314, SB-315 (but SB-318) and SB-317's first half with the release receipt.
+**Exact next task.** Once run `42676238574` publishes 0.7.38 (`latest.json` 0.7.38), merge PR #565, tag `v0.7.39` on its merge commit, watch the release to `latest.json` 0.7.39, install it here with `switchboard_app` (`owner_started` with 0.7.39), close SB-314, SB-315 and SB-317's first half with the release receipt, then cut 0.7.40 for SB-318 the same way and close it.
 
 ## 2026-11-09 (evening): moving accounts between machines, groups and organizations audited and fixed; 0.7.36 and 0.7.37
 
