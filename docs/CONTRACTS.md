@@ -2442,22 +2442,28 @@ the person's, and `~/.claude` or `~/.codex` is used instead (`~/.pi/agent` for P
 `launch::user_scope` and `launch::board_server` (the MCP servers a launch copies), `agents::setup`
 and the CLI's `onboard --status`.
 
-Two readers still follow the process's variables as they are. `projects::detect_session` (which
-session is asking) reads `CODEX_HOME` only to recognise a home Switchboard launched. The native
-sign-in context, `external::context`, reads `CLAUDE_CONFIG_DIR` or `CODEX_HOME` and refuses a
-Switchboard home rather than reading past it: `capture_current` and `capture_current_cached`
-(`accounts capture` and the owner's “in use now” probe; the background probe may answer the source's locked or needs-access state first, and never captures), `activate_claude` and `lock_live` answer
-“This session runs in a Switchboard home or a terminal in an organization's folder. Run this from
-another terminal.” when it lies inside the data folder (Copylot reports 21ec4932 en-US and
-a38bab30 ru-RU; `src/adapter.ts` and `src/locales/ru.ts` carry it). The refusal applies where the
-operation runs: an offline CLI command, or `serve` started in such a terminal; a CLI command
-answered by a running owner uses the owner's own environment. Whether the context's reads should
-go through `person` instead, keeping the refusal for writes, is question A-Q8 (assumed, not done
-in 0.7.0 node A-5). Tests: `person::tests::a_config_dir_inside_switchboards_data_is_never_the_persons_own`,
+`projects::detect_session` (which session is asking) still reads `CODEX_HOME` as the process has
+it, only to recognise a home Switchboard launched. The native sign-in context reads past a
+Switchboard home for reads and refuses it for writes (A-Q8, SB-236, 2026-11-10):
+`external::read_context`, used by `capture_current` and `capture_current_cached` (`accounts
+capture` and the owner's “in use now” probe) and by the quiet probe of the source, treats a
+`CLAUDE_CONFIG_DIR`, `CODEX_HOME` or `CLAUDE_SECURESTORAGE_CONFIG_DIR` inside the data folder as
+unset, as `person` does, so a capture from a hooked terminal reads the person's own sign-in
+(`~/.claude` with `~/.claude.json` and the plain Keychain service, or `~/.codex`); a value of the
+person's own outside the data folder is kept, with the secure-storage check as before.
+`external::context`, used by `activate_claude` and `lock_live` (writes of the live sign-in), still
+reads the variables as they are and answers “This session runs in a Switchboard home or a
+terminal in an organization's folder. Run this from another terminal.” when the home lies inside
+the data folder (Copylot reports 21ec4932 en-US and a38bab30 ru-RU; `src/adapter.ts` and
+`src/locales/ru.ts` carry it); `capture_from` keeps the same refusal as a guard behind
+`read_context`. The context is the one of the process the operation runs in: an offline CLI
+command, or `serve` started in such a terminal; a CLI command answered by a running owner uses
+the owner's own environment. Tests: `person::tests::a_config_dir_inside_switchboards_data_is_never_the_persons_own`,
 `carry::tests::a_launch_from_a_hooked_terminal_links_from_the_persons_folder`,
 `carry::tests::a_pi_launch_from_a_switchboard_home_links_from_the_persons_pi_folder`,
 `codex_route::tests::the_route_is_never_written_into_a_shell_home`,
 `external::tests::a_capture_from_a_switchboard_home_is_refused`,
+`external::tests::a_read_from_a_hooked_terminal_reads_the_persons_own_sign_in`,
 `external::tests::a_home_inside_switchboards_data_folder_is_refused`.
 
 ## Operations digests (SB-250, 2026-11-04)

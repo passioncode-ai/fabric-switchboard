@@ -6,6 +6,10 @@ release pull request renames `Unreleased` to the version. While Windows signing 
 that section must say `windows_authenticode: NOT_SIGNED`. Notes of 0.5.3-beta.1 and earlier are
 on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/releases).
 
+## Unreleased
+
+- `accounts capture` and the "in use now" check, run from a terminal in an organization's folder, read your own Claude Code or Codex sign-in instead of refusing; switching the live sign-in from there is still refused (SB-236).
+
 ## 0.7.46
 
 0.7.45 was tagged but not published: its nightly failed on Linux in the new storage test. Its two changes ship here, the first one corrected for Linux.
