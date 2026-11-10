@@ -20,8 +20,15 @@ pub const RESULT_MAX: usize = 64 * 1024;
 /// The run's own folder on the target, under its home.
 const DIR: &str = ".fabric-dispatch";
 
+/// Every command runs under `/bin/sh` there, whatever the account's login shell: zsh (the
+/// macOS default) stops at a glob that matches nothing, so the count of running sessions failed
+/// on an empty `~/.fabric-dispatch` and the target read as unreachable.
 fn ssh(target: &str, command: String) -> Vec<String> {
-    vec![target.to_owned(), "--".to_owned(), command]
+    vec![
+        target.to_owned(),
+        "--".to_owned(),
+        format!("exec /bin/sh -c {}", quoted(&command)),
+    ]
 }
 /// The run's folder there, for a shell (`launch_id` is checked by the caller: letters, digits
 /// and hyphens only).
@@ -345,11 +352,24 @@ mod tests {
     use std::path::Path;
     use std::process::Command;
 
-    /// A "ssh" that runs the command with `sh` in a temporary home instead of on another machine.
+    #[test]
+    fn every_command_there_runs_under_sh_whatever_the_login_shell() {
+        let args = ssh("sshlg@studio", "echo 'a' b".into());
+        assert_eq!(args[..2], ["sshlg@studio".to_owned(), "--".to_owned()]);
+        assert_eq!(args[2], "exec /bin/sh -c 'echo '\\''a'\\'' b'");
+    }
+
+    /// A "ssh" that runs the command in a temporary home instead of on another machine, under
+    /// zsh where it is installed: like the macOS login shell sshd starts, it stops at a glob that
+    /// matches nothing.
     fn local(home: &Path) -> impl Fn(&[String], Option<&[u8]>) -> Result<String, String> + '_ {
         move |args: &[String], stdin: Option<&[u8]>| {
             use std::io::Write;
-            let mut child = Command::new("sh")
+            let shell = ["/bin/zsh", "/usr/bin/zsh"]
+                .into_iter()
+                .find(|p| Path::new(p).exists())
+                .unwrap_or("sh");
+            let mut child = Command::new(shell)
                 .arg("-c")
                 .arg(&args[2])
                 .env("HOME", home)

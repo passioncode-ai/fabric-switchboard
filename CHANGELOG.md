@@ -6,6 +6,10 @@ release pull request renames `Unreleased` to the version. While Windows signing 
 that section must say `windows_authenticode: NOT_SIGNED`. Notes of 0.5.3-beta.1 and earlier are
 on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/releases).
 
+## Unreleased
+
+- `switchboard dispatch --target` works on a machine whose login shell is zsh (the macOS default): its count of running sessions stopped at an empty folder and every run was refused as `target_unreachable`; each command there now runs under `/bin/sh` (SB-317).
+
 ## 0.7.41
 
 - A *Check for updates* while the app is already downloading an update no longer starts a second download into the same file, which made the package fail its signature check and wait an hour (SB-319).
