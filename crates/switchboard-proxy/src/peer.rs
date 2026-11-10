@@ -5,7 +5,8 @@
 //! point 2 b, board thread `1fe66e6e`).
 //!
 //! macOS: `net.inet.tcp.pcblist64` lists every TCP socket with its owner's uid, readable without
-//! privileges (`netstat` reads the same list). Linux: `/proc/net/tcp` and `/proc/net/tcp6`.
+//! privileges (`netstat` reads the same list); macOS 27 lists only the caller's own, so a peer it
+//! does not name is looked for among this account's processes (`proc_pidfdinfo`, SB-330). Linux: `/proc/net/tcp` and `/proc/net/tcp6`.
 //! Windows (SB-274): `GetExtendedTcpTable` names the peer socket's process, whose token user is
 //! compared by SID with this process's; a process this one may not open counts as another user's.
 //! An owner that cannot be read (the peer closed already, or the table could not be read) is
@@ -23,7 +24,107 @@ pub fn owner(local: SocketAddr, peer: SocketAddr) -> Option<u32> {
 
 #[cfg(target_os = "macos")]
 fn owner_on(local_port: u16, peer_port: u16) -> Option<u32> {
-    owner_in(&pcblist()?, local_port, peer_port)
+    // SB-330: macOS 27 lists only the caller's own sockets in `pcblist64` (read on the Mac Studio,
+    // 27.2: two records, the listener and the accepted socket), so every client read as nobody's
+    // and the proxy closed each one. A peer the list does not name is looked for among this
+    // account's own processes, whose sockets `proc_pidfdinfo` reads; another account's processes
+    // cannot be read without privileges, so they stay nobody's and are refused, as before.
+    owner_in(&pcblist()?, local_port, peer_port).or_else(|| {
+        own_processes_hold(local_port, peer_port)
+            .then(own_uid)
+            .flatten()
+    })
+}
+
+/// SB-330: offsets inside `struct socket_fdinfo` (`sys/proc_info.h`: `proc_fileinfo`, then
+/// `socket_info`), as `PROC_PIDFDSOCKETINFO` answers it: the TCP socket's foreign and local
+/// ports, each in network order at the start of an `int` of `in_sockinfo`. Read on macOS 26.6
+/// and 27.2 (792-byte answers); a live test reads a socket of another process back.
+#[cfg(any(target_os = "macos", test))]
+mod fdinfo {
+    pub const FPORT: usize = 264;
+    pub const LPORT: usize = 268;
+    pub const MIN_LEN: usize = 272;
+    pub const PROC_PIDFDSOCKETINFO: libc::c_int = 3;
+    pub const PROC_UID_ONLY: u32 = 4;
+}
+
+/// SB-330: whether a socket of one of this account's processes has `peer_port` as its local
+/// port and `local_port` as its foreign one (the peer's end of a connection to us).
+#[cfg(target_os = "macos")]
+fn own_processes_hold(local_port: u16, peer_port: u16) -> bool {
+    let Some(uid) = own_uid() else {
+        return false;
+    };
+    let mut pids = vec![0 as libc::pid_t; 8192];
+    let bytes = std::mem::size_of_val(pids.as_slice()) as libc::c_int;
+    // SAFETY: `pids` holds `bytes` writable bytes; the call writes at most that many and answers
+    // how many it wrote.
+    let n =
+        unsafe { libc::proc_listpids(fdinfo::PROC_UID_ONLY, uid, pids.as_mut_ptr().cast(), bytes) };
+    if n <= 0 {
+        return false;
+    }
+    pids.truncate(n as usize / std::mem::size_of::<libc::pid_t>());
+    let me = std::process::id() as libc::pid_t;
+    // The newest processes first: a client usually started just before it connected.
+    pids.sort_unstable_by(|a, b| b.cmp(a));
+    pids.into_iter()
+        .filter(|&pid| pid > 0 && pid != me)
+        .any(|pid| process_holds(pid, local_port, peer_port))
+}
+
+#[cfg(target_os = "macos")]
+fn process_holds(pid: libc::pid_t, local_port: u16, peer_port: u16) -> bool {
+    let size = std::mem::size_of::<libc::proc_fdinfo>();
+    let mut fds = vec![
+        libc::proc_fdinfo {
+            proc_fd: 0,
+            proc_fdtype: 0
+        };
+        4096
+    ];
+    // SAFETY: `fds` holds that many records; the call writes at most its size in bytes.
+    let n = unsafe {
+        libc::proc_pidinfo(
+            pid,
+            libc::PROC_PIDLISTFDS,
+            0,
+            fds.as_mut_ptr().cast(),
+            (fds.len() * size) as libc::c_int,
+        )
+    };
+    if n <= 0 {
+        return false;
+    }
+    fds.truncate(n as usize / size);
+    let mut info = [0u8; 1024];
+    fds.iter()
+        .filter(|f| f.proc_fdtype as libc::c_int == libc::PROX_FDTYPE_SOCKET)
+        .any(|f| {
+            // SAFETY: `info` holds 1024 writable bytes; the call writes at most that many.
+            let got = unsafe {
+                libc::proc_pidfdinfo(
+                    pid,
+                    f.proc_fd,
+                    fdinfo::PROC_PIDFDSOCKETINFO,
+                    info.as_mut_ptr().cast(),
+                    info.len() as libc::c_int,
+                )
+            };
+            got as usize >= fdinfo::MIN_LEN && ports_in(&info, local_port, peer_port)
+        })
+}
+
+/// SB-330: whether one `socket_fdinfo` answer is the peer's end: its local port is `peer_port`
+/// and its foreign one `local_port`. Our accepted socket is the mirror image and never matches.
+#[cfg(any(target_os = "macos", test))]
+fn ports_in(info: &[u8], local_port: u16, peer_port: u16) -> bool {
+    let port = |at: usize| {
+        info.get(at..at + 2)
+            .map(|b| u16::from_be_bytes([b[0], b[1]]))
+    };
+    port(fdinfo::LPORT) == Some(peer_port) && port(fdinfo::FPORT) == Some(local_port)
 }
 
 #[cfg(target_os = "linux")]
@@ -504,6 +605,51 @@ mod tests {
     }
 
     /// The live check of the layout: a connection this process opens is owned by its own uid.
+    #[test]
+    fn a_socket_fdinfo_answer_names_the_peers_end_and_never_ours() {
+        let mut info = vec![0u8; 792];
+        info[fdinfo::FPORT..fdinfo::FPORT + 2].copy_from_slice(&4000u16.to_be_bytes());
+        info[fdinfo::LPORT..fdinfo::LPORT + 2].copy_from_slice(&5555u16.to_be_bytes());
+        assert!(ports_in(&info, 4000, 5555));
+        assert!(
+            !ports_in(&info, 5555, 4000),
+            "our accepted socket is the mirror image"
+        );
+        assert!(!ports_in(&info[..100], 4000, 5555));
+    }
+
+    /// SB-330, the live check: a connection another process of this account opens reads back as
+    /// this account, also where `pcblist64` lists only the caller's sockets (macOS 27).
+    #[cfg(target_os = "macos")]
+    #[tokio::test]
+    async fn a_connection_from_another_process_of_this_account_reads_back_as_this_account() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let mut child = std::process::Command::new("/usr/bin/nc")
+            .args(["127.0.0.1", &address.port().to_string()])
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::null())
+            .spawn()
+            .unwrap();
+        let (server, peer) = listener.accept().await.unwrap();
+        let local = server.local_addr().unwrap();
+        let (found, held) = tokio::task::spawn_blocking(move || {
+            (
+                owner(local, peer),
+                own_processes_hold(local.port(), peer.port()),
+            )
+        })
+        .await
+        .unwrap();
+        let _ = child.kill();
+        let _ = child.wait();
+        assert_eq!(found, own_uid());
+        assert!(
+            held,
+            "the other process's socket is found among this account's processes"
+        );
+    }
+
     #[cfg(any(target_os = "macos", target_os = "linux"))]
     #[tokio::test]
     async fn a_connection_from_this_account_reads_back_as_this_account() {
