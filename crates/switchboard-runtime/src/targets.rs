@@ -27,7 +27,9 @@ pub fn known(root: &Path) -> Vec<Value> {
                         .as_array()
                         .is_some_and(|k| k.iter().any(|x| x == why))
                     {
-                        t["known_by"].as_array_mut().map(|k| k.push(json!(why)));
+                        if let Some(k) = t["known_by"].as_array_mut() {
+                            k.push(json!(why));
+                        }
                     }
                     if t["program"].is_null() && program.is_some() {
                         t["program"] = json!(program);
