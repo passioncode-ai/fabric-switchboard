@@ -462,7 +462,7 @@ mod tests {
                 "#!/bin/sh\nif [ \"$2\" = project ]; then echo '{projects}'; exit 0; fi\n\
 for a in \"$@\"; do [ ${{#a}} -gt 1024 ] && {{ echo '{too_long}'; exit 1; }}; done\n\
 printf '%s\\n' \"$@\" >\"$(dirname \"$FABRIC_DISPATCH_RESULT\")/args\"\n\
-cat \"$FABRIC_DISPATCH_PROMPT_FILE\" >>\"$(dirname \"$FABRIC_DISPATCH_RESULT\")/args\"\n\
+{{ cat \"$FABRIC_DISPATCH_PROMPT_FILE\"; echo; }} >>\"$(dirname \"$FABRIC_DISPATCH_RESULT\")/args\"\n\
 cat README >>\"$(dirname \"$FABRIC_DISPATCH_RESULT\")/args\" 2>/dev/null\n\
 if [ -f \"$HOME/slow\" ]; then sleep 30; fi\n\
 printf 'fabric-dispatch/1 result workflow=%s handoff=%s request=%s launch=%s\\noutcome=answered\\n\\nDone.\\n' \
