@@ -32,6 +32,30 @@ enum Run {
 
 /// Runs `gh` with fixed arguments and a deadline; stdout only, bounded. `PATH` for the child holds
 /// `gh`'s own folder and the usual ones, so the `git` it calls is found from the desktop app too.
+/// Starts `command`, again a few times while the program is busy being written (`ETXTBSY` on
+/// Linux): a `gh` being updated, or in tests a script just written while another thread forked
+/// and held its descriptor (SB-321: the v0.7.44 nightly read "GitHub did not answer").
+fn spawn_settled(command: &mut Command) -> Option<std::process::Child> {
+    for attempt in 0..5 {
+        match command.spawn() {
+            Ok(child) => return Some(child),
+            Err(e) if busy(&e) && attempt < 4 => {
+                std::thread::sleep(Duration::from_millis(50 << attempt));
+            }
+            Err(_) => return None,
+        }
+    }
+    None
+}
+fn busy(error: &std::io::Error) -> bool {
+    #[cfg(unix)]
+    return error.raw_os_error() == Some(libc::ETXTBSY);
+    #[cfg(not(unix))]
+    {
+        let _ = error;
+        false
+    }
+}
 fn run(program: &Path, args: &[&str], timeout: Duration) -> Run {
     let mut path: Vec<PathBuf> = program
         .parent()
@@ -60,7 +84,7 @@ fn run(program: &Path, args: &[&str], timeout: Duration) -> Run {
     }
     #[cfg(unix)]
     std::os::unix::process::CommandExt::process_group(&mut command, 0);
-    let Ok(mut child) = command.spawn() else {
+    let Some(mut child) = spawn_settled(&mut command) else {
         return Run::Failed;
     };
     let stdout = child.stdout.take();
@@ -331,6 +355,17 @@ esac
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
         script
+    }
+
+    #[test]
+    fn a_program_busy_being_written_is_started_again_and_nothing_else_is() {
+        assert!(busy(&std::io::Error::from_raw_os_error(libc::ETXTBSY)));
+        assert!(!busy(&std::io::Error::from_raw_os_error(libc::ENOENT)));
+        // A program that is not there fails at once, without the retries' waits.
+        let started = std::time::Instant::now();
+        let mut command = Command::new("/nonexistent/switchboard-gh");
+        assert!(spawn_settled(&mut command).is_none());
+        assert!(started.elapsed() < Duration::from_millis(50));
     }
 
     #[test]

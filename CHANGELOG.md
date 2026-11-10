@@ -9,6 +9,7 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 ## Unreleased
 
 - Reading a private file (a launch record, a session record) at the moment Switchboard replaced it no longer fails as unsafe: the read opens the new file again. A run's record could read as missing while its end was being written (SB-320).
+- `gh` started while it is being replaced (an update) is started again instead of reading as "GitHub did not answer" (SB-321).
 
 ## 0.7.44
 
