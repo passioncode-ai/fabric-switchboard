@@ -917,7 +917,7 @@ enum Accounts {
         #[arg(long)]
         remote_data_dir: Option<String>,
     },
-    /// SB-327: another machine's Switchboard read over ssh: its accounts (no credential), groups
+    /// Another machine's Switchboard read over ssh: its accounts (no credential), groups
     /// and organizations, and whether it is connected to PassionCode.ai. Reads only.
     Remote {
         /// The other machine as ssh knows it, reachable without a prompt.
@@ -930,7 +930,7 @@ enum Accounts {
         #[arg(long)]
         remote_data_dir: Option<String>,
     },
-    /// SB-327: check another machine against the moves recorded here: a copy gone, turned off or
+    /// Check another machine against the moves recorded here: a copy gone, turned off or
     /// refused there, an account used on both machines, a mark here with no record. Reads only.
     Check {
         /// The other machine as ssh knows it, reachable without a prompt.
@@ -4218,6 +4218,8 @@ mod mcp_parity {
         ("accounts send", Tool("switchboard_account_send")),
         ("accounts recall", Tool("switchboard_account_recall")),
         ("accounts seats", Tool("switchboard_seats")),
+        ("accounts remote", Tool("switchboard_remote")),
+        ("accounts check", Tool("switchboard_remote")),
         (
             "accounts surrender",
             Not("SB-292: run only by the calling machine's accounts recall over ssh; it prints a sign-in"),

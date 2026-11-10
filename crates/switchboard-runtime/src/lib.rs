@@ -1434,6 +1434,13 @@ impl Runtime {
             }
         };
         let reported = Reported::of(&operation, &self.store);
+        // SB-324: a word on the organizations of an account moved to another machine.
+        let moved = match &operation {
+            Operation::OrganizationAssign { account, .. } => {
+                seats::outstanding(&self.root, account)
+            }
+            _ => None,
+        };
         let run = execute(self.store.clone(), &self.root, Some(self), operation);
         // The gate passed above: the operation's own gate is not run again.
         let result = if paid.is_some() {
@@ -1444,7 +1451,60 @@ impl Runtime {
         if let (Ok(_), Some(reported)) = (&result, reported) {
             self.report(&reported);
         }
+        // SB-324: the copy there takes the same word, over ssh after the transaction is let go.
+        let result = match (result, moved) {
+            (Ok(mut answer), Some(seat)) => {
+                drop(_mutation);
+                answer["there"] = self.carry_word(seat).await;
+                Ok(answer)
+            }
+            (result, _) => result,
+        };
         result
+    }
+    /// SB-324: gives the copy of a moved account the person's word on its organizations, as a move
+    /// does (`account_send::carry_organizations`): `{machine, organizations}`, `organizations`
+    /// null when no word stands here; a copy with no recorded id there is not reached.
+    async fn carry_word(&self, seat: seats::Seat) -> Value {
+        let Some(remote_id) = seat.remote_account.clone() else {
+            return json!({"machine": seat.machine, "organizations": null, "reason": account_send::NO_REMOTE_ID});
+        };
+        let Ok(snapshot) = self.store.snapshot() else {
+            return Value::Null;
+        };
+        let machine = seat.machine.clone();
+        let carried = blocking::run(move || -> Result<Value, String> {
+            let program = account_send::Program {
+                path: seat
+                    .program
+                    .as_deref()
+                    .unwrap_or(account_send::REMOTE_DEFAULT),
+                data_dir: seat.data_dir.as_deref(),
+            };
+            program.check()?;
+            let Some(account) = snapshot.accounts.iter().find(|a| a.id == seat.account) else {
+                return Ok(Value::Null);
+            };
+            Ok(account_send::carry_organizations(
+                &snapshot,
+                account,
+                &remote_id,
+                &|args| {
+                    account_send::ssh_runner(
+                        &[
+                            seat.machine.clone(),
+                            "--".to_owned(),
+                            account_send::remote(&program, args),
+                        ],
+                        None,
+                    )
+                },
+            ))
+        });
+        match carried {
+            Ok(organizations) => json!({"machine": machine, "organizations": organizations}),
+            Err(error) => json!({"machine": machine, "organizations": null, "reason": error}),
+        }
     }
     /// Moves when the open project suggestions may have changed (SB-117): the app reads the
     /// list, updates the tray count and notifies only then.
