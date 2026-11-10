@@ -1895,12 +1895,11 @@ fn with_account_of(onto: &[u8], from: &Value) -> Result<Vec<u8>, String> {
 fn refuse_own_home(home: &Path) -> Result<(), String> {
     refuse_home_inside(home, crate::default_root().ok())
 }
+/// Compared as `person::inside` compares: as written and with links resolved through the
+/// nearest existing parent, so a home that does not exist yet is still found inside on Windows,
+/// where a canonical path carries `\\?\` and a plain one does not (the v0.7.47 nightly).
 fn refuse_home_inside(home: &Path, root: Option<PathBuf>) -> Result<(), String> {
-    let inside = root.is_some_and(|root| {
-        let root = root.canonicalize().unwrap_or(root);
-        let home = home.canonicalize().unwrap_or_else(|_| home.to_owned());
-        home.starts_with(root)
-    });
+    let inside = root.is_some_and(|root| crate::person::inside(home, &root));
     if inside {
         return Err("This session runs in a Switchboard home or a terminal in an organization's folder. Run this from another terminal.".into());
     }
@@ -3354,7 +3353,8 @@ mod tests {
         let c = read_context_from(Provider::Codex, &hooked, &user, &f, "u".into(), Some(&root))
             .unwrap();
         assert_eq!(c.home, user.join(".codex"));
-        // A write keeps the process's variables and is refused there.
+        // A write keeps the process's variables and is refused there, also before the shell
+        // home exists (on Windows a canonical root and a plain path differ in their prefix).
         let c = context_from(Provider::Claude, None, &hooked, &user, &f, "u".into()).unwrap();
         assert_eq!(c.home, claude_home);
         assert!(refuse_home_inside(&c.home, Some(root.clone())).is_err());
@@ -3392,6 +3392,14 @@ mod tests {
         std::fs::create_dir_all(&own).unwrap();
         let refused = refuse_home_inside(&own, Some(root.clone())).unwrap_err();
         assert!(refused.contains("Switchboard home"), "{refused}");
+        // A home that does not exist yet is inside too, whatever form the root is given in
+        // (macOS's temporary folder is `/var`, a link to `/private/var`; Windows canonical paths
+        // carry `\\?\`): the v0.7.47 nightly found it refused nothing on Windows.
+        let unborn = root.join("shell").join("claude-new");
+        assert!(refuse_home_inside(&unborn, Some(root.clone())).is_err());
+        if let Ok(canonical) = root.canonicalize() {
+            assert!(refuse_home_inside(&unborn, Some(canonical)).is_err());
+        }
         // A sibling whose name only starts the same, and no data folder at all, are fine.
         let sibling = data.path().join("ai.passioncode.fabric-switchboard-other");
         std::fs::create_dir_all(&sibling).unwrap();
