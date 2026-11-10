@@ -2253,6 +2253,22 @@ mod tests {
             "used here again"
         );
     }
+    /// SB-322: an account given to an agent stays this machine's to renew, so its usage can
+    /// still be read: unlike one used on another machine, it is renewed as before.
+    #[tokio::test]
+    async fn an_account_given_to_an_agent_is_still_renewed_here() {
+        let (url, calls) = endpoint((200, json!({"access_token":"x","expires_in":60}))).await;
+        let root = tempfile::tempdir().unwrap();
+        let store = store_with(root.path(), &[("synthetic-b", "default")]);
+        let state = RefreshState::at(url);
+        let b = id_of(&store, "synthetic-b", "default");
+        store.assign_to_agent(&b, Some("Frame Agent")).unwrap();
+        assert_eq!(
+            ensure_fresh(&store, SIGNED_OUT, &state, &b, false).await,
+            Outcome::Refreshed
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
     #[tokio::test]
     async fn a_rejected_lineage_is_never_handed_to_claude_code() {
         let (url, _) = endpoint((400, json!({"error":"invalid_grant"}))).await;

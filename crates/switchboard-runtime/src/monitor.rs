@@ -1588,6 +1588,48 @@ mod tests {
         );
     }
     #[tokio::test]
+    async fn automatic_switching_never_moves_to_an_account_given_to_an_agent() {
+        // SB-322: neither a group's managed sessions nor the ordinary Claude Code move to it,
+        // yet it stays due for its usage check, so its activity stays visible.
+        use crate::fixtures::*;
+        for (target, native) in [("managed", false), ("claude_cli", true)] {
+            let root = tempfile::tempdir().unwrap();
+            let runtime = crate::fixtures::runtime(
+                root.path(),
+                if native { signed_in } else { signed_out },
+                activates,
+            )
+            .await;
+            let a = save(&runtime.store, "synthetic-a", "default");
+            let b = save(&runtime.store, "synthetic-b", "default");
+            quota(&runtime.store, &a.id, 95.0);
+            quota(&runtime.store, &b.id, 10.0);
+            runtime
+                .store
+                .select(Provider::Claude, "default", &a.id)
+                .unwrap();
+            runtime
+                .store
+                .assign_to_agent(&b.id, Some("Frame Agent"))
+                .unwrap();
+            runtime.store.set_policy(policy(target)).unwrap();
+            rotate(&runtime, native).unwrap();
+            assert_eq!(reason(&runtime), "no_eligible_account", "{target}");
+            assert!(events(&runtime.store, "rotation").is_empty(), "{target}");
+            assert!(events(&runtime.store, "activation").is_empty(), "{target}");
+            let given = runtime
+                .store
+                .snapshot()
+                .unwrap()
+                .accounts
+                .into_iter()
+                .find(|x| x.id == b.id)
+                .unwrap();
+            assert!(given.enabled);
+            assert!(due(&given, now() + switchboard_core::CHECK_IDLE_SECONDS + 1));
+        }
+    }
+    #[tokio::test]
     async fn failed_managed_switch_is_not_reported_as_native_activation() {
         use crate::fixtures::*;
         let root = tempfile::tempdir().unwrap();

@@ -9508,6 +9508,94 @@ mod owner_tests {
         );
     }
     #[tokio::test]
+    async fn an_account_given_to_an_agent_is_switched_to_only_anyway() {
+        // SB-322: neither the ordinary Claude Code nor a group's managed sessions move to an
+        // account given to an agent, unless the person uses it anyway, which is journaled.
+        let root = tempfile::tempdir().unwrap();
+        let runtime = fixtures::runtime(root.path(), signed_out, activates).await;
+        let b = save(&runtime.store, "synthetic-b", "default");
+        let assign = |to: Option<&str>, force: bool| Operation::Assign {
+            id: b.id.clone(),
+            to: to.map(str::to_owned),
+            force,
+        };
+        let select = |force: bool| Operation::Select {
+            provider: Provider::Claude,
+            pool: "default".into(),
+            id: b.id.clone(),
+            force,
+        };
+        runtime
+            .execute(assign(Some("Frame Agent on Studio"), false))
+            .await
+            .unwrap();
+        assert_eq!(
+            runtime
+                .execute(Operation::ActivateNative {
+                    id: b.id.clone(),
+                    force: false
+                })
+                .await
+                .unwrap_err(),
+            switchboard_core::ASSIGNED
+        );
+        assert!(events(&runtime.store, "activation").is_empty());
+        assert_eq!(
+            runtime.execute(select(false)).await.unwrap_err(),
+            switchboard_core::ASSIGNED
+        );
+        runtime
+            .execute(Operation::ActivateNative {
+                id: b.id.clone(),
+                force: true,
+            })
+            .await
+            .unwrap();
+        runtime.execute(select(true)).await.unwrap();
+        assert_eq!(
+            events(&runtime.store, "activation"),
+            [(Some(b.id.clone()), "completed".to_string())]
+        );
+        assert_eq!(
+            events(&runtime.store, "assignment"),
+            [
+                (Some(b.id.clone()), "assigned".to_string()),
+                (Some(b.id.clone()), "override".to_string()),
+                (Some(b.id.clone()), "override".to_string()),
+            ]
+        );
+        let snapshot = runtime.store.snapshot().unwrap();
+        assert!(snapshot.is_assigned(&b.id), "using it anyway keeps it given");
+        assert_eq!(snapshot.routes.get("claude:default"), Some(&b.id));
+        // Taken back: an ordinary account again, its selection kept.
+        runtime.execute(assign(None, false)).await.unwrap();
+        assert!(runtime.store.snapshot().unwrap().assigned_to.is_empty());
+        runtime.execute(select(false)).await.unwrap();
+        // SB-315: giving away a sign-in a move sent elsewhere clears the mark, so it needs
+        // `force` while the move is not called back.
+        runtime
+            .store
+            .mark_elsewhere_at(&b.id, true, 5, Some("studio.local"))
+            .unwrap();
+        let mut moved = seats::of(5, "granted", &b.id, "studio.local", "default", None);
+        moved.remote_account = Some("remote-1".into());
+        seats::append(root.path(), &moved).unwrap();
+        assert_eq!(
+            runtime
+                .execute(assign(Some("Frame Agent"), false))
+                .await
+                .unwrap_err(),
+            account_send::MOVED_AWAY
+        );
+        runtime
+            .execute(assign(Some("Frame Agent"), true))
+            .await
+            .unwrap();
+        let snapshot = runtime.store.snapshot().unwrap();
+        assert!(snapshot.elsewhere.is_empty() && snapshot.is_assigned(&b.id));
+        assert!(snapshot.accounts.iter().any(|a| a.id == b.id && a.enabled));
+    }
+    #[tokio::test]
     async fn failed_or_unreadable_activation_is_journaled_as_failed() {
         let root = tempfile::tempdir().unwrap();
         let runtime = fixtures::runtime(root.path(), signed_in, fails).await;

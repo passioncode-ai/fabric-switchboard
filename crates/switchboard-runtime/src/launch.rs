@@ -6159,6 +6159,24 @@ mod tests {
         assert!(preflight(&f.root, &f.store, &id, "isolated", &f.project).is_err());
         assert_eq!(f.files(), before);
     }
+    #[tokio::test]
+    async fn an_account_given_to_an_agent_launches_only_once_used_anyway() {
+        // SB-322: no launch hands an agent's account a session, until the person used it
+        // anyway, which made it its group's selection.
+        let f = fixture();
+        let id = f.add(Provider::Claude, AuthKind::OAuth, "default", CLAUDE_OAUTH);
+        f.store.assign_to_agent(&id, Some("Frame Agent")).unwrap();
+        for mode in ["isolated", "managed"] {
+            assert_eq!(
+                preflight(&f.root, &f.store, &id, mode, &f.project).unwrap_err(),
+                switchboard_core::ASSIGNED
+            );
+        }
+        f.store
+            .select_anyway(Provider::Claude, "default", &id, 1_000)
+            .unwrap();
+        assert!(preflight(&f.root, &f.store, &id, "isolated", &f.project).is_ok());
+    }
     #[cfg(not(windows))]
     #[tokio::test]
     async fn isolated_launch_script_exports_the_home_and_runs_in_the_project() {
