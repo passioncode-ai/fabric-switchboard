@@ -442,6 +442,10 @@ as ssh knows it, reachable without a prompt; `pool` its group there; `remote` th
 `--data-dir`, given to every command there. Every move is a line in `seats.jsonl`; `decision` (the
 operator's words: `by: operator`, `instruction` verbatim, `at` RFC 3339, `source`) is recorded with it
 as who ordered it.
+The person's word on the account's organizations goes with it: an organization the other machine
+lacks is added there by name and domains, then the copy is placed the same way; `organizations` in
+the answer is null (no word said here), or `{carried, contexts}` with `reason` when a step there
+failed (the move stands; place it there with `switchboard org assign`).
 
 ### `switchboard_account_recall`: `account_id`, `from`, `remote_id?`, `remote?`, `remote_data_dir?`, `decision?`
 
@@ -488,7 +492,9 @@ one more group and keep its own, add it with `switchboard_project_edit` instead.
 Only when the operator asks. `action` is `add` (name, domains), `edit` (id; name and/or domains,
 which replace the list), `remove` (id), `assign` (account_id, organization: an id, `personal` or
 `auto`; or `organizations`: every context of an account that works for several, the first its
-own, the rest it also works for, empty to let the rules decide), `passioncode_read` (read the
+own, the rest it also works for, empty to let the rules decide; `personal` can only be first:
+`["personal", "Acme"]` keeps an account personal and working for Acme too; the answer's
+`refused_by` names the groups that no longer use it), `passioncode_read` (read the
 PassionCode.ai organizations again; connecting is the person's), `passioncode_cancel` (stop a
 connection waiting for the browser) or `passioncode_disconnect` (delete the token; the
 organizations stay as local ones).

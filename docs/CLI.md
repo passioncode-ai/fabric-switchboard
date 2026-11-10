@@ -31,6 +31,7 @@ switchboard accounts assign ACCOUNT_UUID --to "Frame Agent on Studio"   # SB-322
 switchboard accounts unassign ACCOUNT_UUID                          # SB-322: take it back
 switchboard accounts select ACCOUNT_UUID --provider claude --force   # SB-322: use an account given to an agent anyway (journaled); also `accounts activate --force`
 switchboard accounts send ACCOUNT_UUID --to user@studio.local [--pool agents]     # SB-283: move the sign-in over ssh; no new sign-in there, undone on failure
+# SB-323: the person's word on its organizations goes with it (org add by name there when missing, then org assign); answer.organizations says whether it was carried
 switchboard accounts hand-over ACCOUNT_UUID --to "Anna, MacBook" > handover.json   # SB-283: signed record, no credential; marks it used elsewhere
 switchboard accounts receive handover.json --signer KEY [--apply] [--headless]    # on the receiving machine: shows the plan; --apply starts the sign-in
 switchboard accounts recall ACCOUNT_UUID --from member@vm   # SB-292: take a moved sign-in back; its copy there is removed and proved gone (Claude and Codex)
@@ -49,6 +50,7 @@ switchboard org add "Acme" --domain acme.example --domain acme.dev
 switchboard org list                                   # organizations, then each account, why, and what its address suggests
 switchboard org assign ACCOUNT_UUID ORGANIZATION        # an id or a name, or personal, or auto
 switchboard org assign ACCOUNT_UUID auto Acme Beta      # SB-282: the rules decide its first; it also works for Acme and Beta
+switchboard org assign ACCOUNT_UUID personal Acme      # SB-323: personal, and it also works for Acme (personal comes first or is refused); the answer's refused_by names groups that no longer use it
 switchboard org edit ORGANIZATION_ID --name "Acme Inc." --domain acme.example
 switchboard org remove ORGANIZATION_ID
 ```

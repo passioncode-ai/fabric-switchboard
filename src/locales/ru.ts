@@ -1621,6 +1621,7 @@ export const RU: Record<string, string> = {
   "Also serves {name}.": "Обслуживает и группу {name}.",
   "Also works for": "Работает и для",
   "Groups of these organizations take this account too.": "Группы этих организаций тоже принимают этот аккаунт.",
+  "{groups} would no longer use this account: a group takes only accounts of its own organizations. To keep it there, choose Personal accounts and tick the organization under Also works for.": "{groups} больше не будут использовать этот аккаунт: группа берёт только аккаунты своих организаций. Чтобы он остался там, выберите «Личные аккаунты» и отметьте организацию в «Работает и для».",
   "A group can belong to at most 16 organizations.": "Группа может входить не больше чем в 16 организаций.",
   "Where accounts are used": "Где используются аккаунты",
   "On this computer": "На этом компьютере",
