@@ -41,7 +41,7 @@ switchboard accounts send ACCOUNT_UUID --to user@studio.local --remote /usr/loca
 switchboard accounts seats [--limit 50]                     # SB-312: the moves, hand-overs and call backs recorded here, with the id there
 switchboard accounts send ACCOUNT_UUID --to member@vm --pool acme --operator-said "…" --said-at … --said-in …   # SB-292: the grant is recorded in seats.jsonl with the operator's words
 switchboard accounts move ACCOUNT_UUID --pool agents                  # a project's pool, or default (SB-122)
-switchboard accounts remove ACCOUNT_UUID
+switchboard accounts remove ACCOUNT_UUID                # MCP switchboard_account_remove (SB-328); refused while its group has it selected
 switchboard --json events
 ```
 

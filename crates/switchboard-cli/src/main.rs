@@ -2567,12 +2567,17 @@ async fn run(cli: &Cli) -> Result<Value, String> {
     match &cli.command {
         // SB-312: each account says whether it is used on another machine and where, as MCP does.
         Command::Accounts { command: Accounts::List } => {
+            let organizations = call(&root, Operation::Organizations).await.ok();
             let accounts: Vec<Value> = value["accounts"].as_array().cloned().unwrap_or_default().into_iter().map(|mut a| {
                 let id = a["id"].as_str().unwrap_or_default().to_owned();
                 a["elsewhere"] = json!(value["elsewhere"].get(&id).is_some());
                 a["location"] = value["locations"].get(&id).cloned().unwrap_or(Value::Null);
                 // SB-322: the agent it was given to, null when none.
                 a["assigned_to"] = value["assigned_to"].get(&id).cloned().unwrap_or(Value::Null);
+                // SB-328: its organizations, as `switchboard_accounts` gives them.
+                let view = mcp::account_organizations(&value, organizations.as_ref(), &id);
+                a["organization"] = view.0;
+                a["also_organizations"] = view.1;
                 a
             }).collect();
             Ok(json!({"accounts": accounts, "routes": value["routes"]}))
@@ -4257,7 +4262,7 @@ mod mcp_parity {
         ("github owners", Tool("switchboard_github")),
         ("github repos", Tool("switchboard_github")),
         ("github clone", Tool("switchboard_github_clone")),
-        ("accounts remove", Not(PERSON)),
+        ("accounts remove", Tool("switchboard_account_remove")),
         ("accounts select", Tool("switchboard_switch")),
         ("usage", Tool("switchboard_usage")),
         ("events", Tool("switchboard_events")),
