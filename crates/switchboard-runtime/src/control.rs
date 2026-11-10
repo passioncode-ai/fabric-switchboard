@@ -422,6 +422,8 @@ async fn request_once(root: &Path, operation: &Operation) -> Result<Option<Value
     let limit = match inner {
         Operation::VestaConnect => 420,
         Operation::SendAccount { .. } | Operation::RecallAccount { .. } => 600,
+        // SB-327: three ssh reads of two minutes each at most.
+        Operation::RemoteStatus { .. } | Operation::RemoteCheck { .. } => 420,
         _ => 30,
     };
     match tokio::time::timeout(

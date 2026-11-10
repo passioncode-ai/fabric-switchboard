@@ -6,6 +6,10 @@ release pull request renames `Unreleased` to the version. While Windows signing 
 that section must say `windows_authenticode: NOT_SIGNED`. Notes of 0.5.3-beta.1 and earlier are
 on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/releases).
 
+## Unreleased
+
+- `switchboard accounts remote --on MACHINE` reads another machine's Switchboard over ssh (its accounts, groups, organizations and PassionCode.ai connection, never a credential), and `switchboard accounts check --on MACHINE` checks it against the moves recorded here: a moved account gone, turned off or refused there (it needs a sign-in), still used here, used on both machines, or marked as used elsewhere with no record of where. MCP `switchboard_remote` does both (SB-327).
+
 ## 0.7.50
 
 - Moving an account to another machine (`switchboard accounts send`, MCP `switchboard_account_send`, the window's *Move to another machine…*) takes its organizations with it: an organization the other machine does not have yet is added there by name, and the account is placed in the same organizations there. The answer says when that part did not work; the move itself stands (SB-323).

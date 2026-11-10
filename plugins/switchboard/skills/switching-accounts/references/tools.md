@@ -447,6 +447,17 @@ lacks is added there by name and domains, then the copy is placed the same way; 
 the answer is null (no word said here), or `{carried, contexts}` with `reason` when a step there
 failed (the move stands; place it there with `switchboard org assign`).
 
+### `switchboard_remote`: `action`, `on`, `remote?`, `remote_data_dir?`
+
+Reads another machine's Switchboard over ssh (`on`, the machine as ssh knows it). `status`: its
+accounts (label, group, on or off, used elsewhere, used percent, usage check; never a credential),
+groups (accounts and folders each holds, organization), organizations, and whether it is connected
+to PassionCode.ai. `check`: `findings` against the moves recorded here, each with `kind`
+`missing_there`, `off_there`, `refused_there` (needs a sign-in there), `not_marked_here`,
+`held_twice` (the same sign-in used on both machines: call one back or remove it) or `no_record`
+(marked used elsewhere here with no location and no recorded move); an empty list is a clean check.
+`remote` and `remote_data_dir` default to the newest move there. Reads only, on both machines.
+
 ### `switchboard_account_recall`: `account_id`, `from`, `remote_id?`, `remote?`, `remote_data_dir?`, `decision?`
 
 Only when the operator asks. Takes back a Claude or Codex sign-in this machine moved with

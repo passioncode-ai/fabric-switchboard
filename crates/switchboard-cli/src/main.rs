@@ -917,6 +917,32 @@ enum Accounts {
         #[arg(long)]
         remote_data_dir: Option<String>,
     },
+    /// SB-327: another machine's Switchboard read over ssh: its accounts (no credential), groups
+    /// and organizations, and whether it is connected to PassionCode.ai. Reads only.
+    Remote {
+        /// The other machine as ssh knows it, reachable without a prompt.
+        #[arg(long)]
+        on: String,
+        /// Its switchboard, an absolute path; by default the one the newest move there ran.
+        #[arg(long)]
+        remote: Option<String>,
+        /// Its data folder, an absolute path; by default the one the newest move there named.
+        #[arg(long)]
+        remote_data_dir: Option<String>,
+    },
+    /// SB-327: check another machine against the moves recorded here: a copy gone, turned off or
+    /// refused there, an account used on both machines, a mark here with no record. Reads only.
+    Check {
+        /// The other machine as ssh knows it, reachable without a prompt.
+        #[arg(long)]
+        on: String,
+        /// Its switchboard, an absolute path; by default the one the newest move there ran.
+        #[arg(long)]
+        remote: Option<String>,
+        /// Its data folder, an absolute path; by default the one the newest move there named.
+        #[arg(long)]
+        remote_data_dir: Option<String>,
+    },
     /// Moves, hand-overs and call backs recorded on this machine, newest last: account ids, the
     /// other machine, group, the id there and who ordered it. Reads only.
     Seats {
@@ -1769,6 +1795,24 @@ async fn run(cli: &Cli) -> Result<Value, String> {
             },
             Accounts::Seats { limit } => Operation::Seats {
                 limit: Some(*limit),
+            },
+            Accounts::Remote {
+                on,
+                remote,
+                remote_data_dir,
+            } => Operation::RemoteStatus {
+                target: on.clone(),
+                program: remote.clone(),
+                remote_data_dir: remote_data_dir.clone(),
+            },
+            Accounts::Check {
+                on,
+                remote,
+                remote_data_dir,
+            } => Operation::RemoteCheck {
+                target: on.clone(),
+                program: remote.clone(),
+                remote_data_dir: remote_data_dir.clone(),
             },
             Accounts::Surrender { id, undo } => {
                 if !undo && io::stdout().is_terminal() {

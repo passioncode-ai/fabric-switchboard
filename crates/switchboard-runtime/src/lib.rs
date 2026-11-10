@@ -40,6 +40,7 @@ pub mod projects;
 mod provenance;
 pub mod recovery;
 mod refresh;
+pub mod remote_check;
 pub mod remote_dispatch;
 pub mod roots;
 pub mod seats;
@@ -264,6 +265,25 @@ pub enum Operation {
     Seats {
         #[serde(default)]
         limit: Option<usize>,
+    },
+    /// SB-327: read another machine's Switchboard over ssh: its accounts, groups and
+    /// organizations. Reads only, on both machines.
+    RemoteStatus {
+        target: String,
+        #[serde(default)]
+        program: Option<String>,
+        #[serde(default)]
+        remote_data_dir: Option<String>,
+    },
+    /// SB-327: check another machine against `seats.jsonl` here and this machine's accounts:
+    /// moves whose copy is gone, off or refused there, accounts used on both, marks with no
+    /// record. Reads only, on both machines.
+    RemoteCheck {
+        target: String,
+        #[serde(default)]
+        program: Option<String>,
+        #[serde(default)]
+        remote_data_dir: Option<String>,
     },
     /// SB-292 (S-3), on the machine holding a moved account: mark it used elsewhere and answer its
     /// tokens for the calling machine's ssh; `undo` clears the mark.
@@ -1231,6 +1251,9 @@ impl Runtime {
                 | Operation::SurrenderAccount { .. }
                 | Operation::RecallAccount { .. }
                 | Operation::Seats { .. }
+                // SB-327: ssh reads of another machine; the store is only read.
+                | Operation::RemoteStatus { .. }
+                | Operation::RemoteCheck { .. }
                 | Operation::AgentCatalog
                 | Operation::AgentConnect { .. }
                 | Operation::AgentKey
@@ -3247,6 +3270,25 @@ fn stat_folders(snapshot: &switchboard_core::Snapshot) -> Vec<(String, String)> 
     out.sort();
     out.dedup();
     out
+}
+
+/// SB-327: the other machine's switchboard and data folder: the ones named, else those of the
+/// newest move to that machine (SB-315), else the macOS app's with its own data folder.
+fn remote_program(
+    root: &Path,
+    target: &str,
+    program: Option<String>,
+    data_dir: Option<String>,
+) -> (String, Option<String>) {
+    let last = seats::recent(root, 1000)
+        .into_iter()
+        .rev()
+        .find(|s| s.machine == target && s.event == "granted");
+    let program = program
+        .or_else(|| last.as_ref().and_then(|s| s.program.clone()))
+        .unwrap_or_else(|| account_send::REMOTE_DEFAULT.into());
+    let data_dir = data_dir.or_else(|| last.and_then(|s| s.data_dir));
+    (program, data_dir)
 }
 
 /// SB-323: an organization word that left an account out of a group it serves.
@@ -5457,6 +5499,44 @@ async fn execute(
         Operation::Seats { limit } => Ok(json!({
             "seats": seats::recent(root, limit.unwrap_or(50).clamp(1, 1000)),
         })),
+        Operation::RemoteStatus {
+            target,
+            program,
+            remote_data_dir,
+        } => {
+            let (program, data_dir) = remote_program(root, &target, program, remote_data_dir);
+            blocking::run(move || {
+                remote_check::status(
+                    &target,
+                    &account_send::Program {
+                        path: &program,
+                        data_dir: data_dir.as_deref(),
+                    },
+                    &account_send::ssh_runner,
+                )
+            })
+        }
+        Operation::RemoteCheck {
+            target,
+            program,
+            remote_data_dir,
+        } => {
+            let (program, data_dir) = remote_program(root, &target, program, remote_data_dir);
+            let snapshot = store.snapshot()?;
+            let seats = seats::recent(root, 1000);
+            blocking::run(move || {
+                remote_check::check(
+                    &snapshot,
+                    &seats,
+                    &target,
+                    &account_send::Program {
+                        path: &program,
+                        data_dir: data_dir.as_deref(),
+                    },
+                    &account_send::ssh_runner,
+                )
+            })
+        }
         Operation::SurrenderAccount { id, undo } => {
             account_send::surrender(&store, &id, undo, monitor::now(), &|token| {
                 refresh_state.wait_settled(token)
