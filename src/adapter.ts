@@ -190,6 +190,8 @@ const safeErrors = new Set([
   'Organization not found.',
   // Placing an account whose provider team a group would then refuse (SB-313).
   "A group this account or its provider team serves would then refuse it. Move it out of that group first, or change the group's organization.",
+  // SB-323: `personal` named after an organization.
+  "Name personal first, then the organizations it also works for: an account's personal context can only be its first.",
   'Another organization already has this name.',
   'Another organization already has this domain.',
   'A domain is a name such as example.com.',
