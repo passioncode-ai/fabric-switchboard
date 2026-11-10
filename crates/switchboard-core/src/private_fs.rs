@@ -66,23 +66,28 @@ pub fn create_new(path: &Path) -> Result<File, String> {
         .open(path)
         .map_err(err)
 }
-/// How many times an open starts again when the file it reached was replaced in between.
+/// How many times an open for writing starts again when the file it reached was replaced in
+/// between.
 #[cfg(unix)]
 const REPLACED_RETRIES: usize = 8;
 /// Opens `path` and checks the file it reached: a regular file of this user with one link.
-/// A file with no link left was replaced by `private_write`'s rename after this open reached it
-/// (SB-320: a reader polling a launch record while its run ended read "unsafe" and got none), so
-/// the open starts again on the file now there; a second link (a hard link) is still refused.
+/// A file with no link left was replaced by `private_write`'s rename (or removed) after this
+/// open reached it (SB-320: a reader polling a launch record while its run ended read "unsafe"
+/// and got none). It is no hard link, and it holds one whole version (`private_write` writes a
+/// new file, syncs it and renames it over the path), so a read takes it as it is: the version
+/// that was current when the read began. A write would land in a file nobody sees any more, so
+/// it opens the path again. A second link (a hard link) is refused.
 #[cfg(unix)]
 fn open_checked(path: &Path, write: bool) -> Result<(File, fs::Metadata), String> {
     use std::os::unix::fs::MetadataExt;
-    for _ in 0..REPLACED_RETRIES {
+    for attempt in 0..REPLACED_RETRIES {
         let f = options().read(true).write(write).open(path).map_err(err)?;
         let m = f.metadata().map_err(err)?;
-        if m.nlink() == 0 {
+        if m.nlink() == 0 && write {
+            std::thread::sleep(std::time::Duration::from_millis(1 << attempt));
             continue;
         }
-        if !m.is_file() || m.nlink() != 1 || m.uid() != unsafe { libc::geteuid() } {
+        if !m.is_file() || m.nlink() > 1 || m.uid() != unsafe { libc::geteuid() } {
             return Err("Unsafe private storage file".into());
         }
         return Ok((f, m));
