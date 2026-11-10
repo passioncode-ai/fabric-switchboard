@@ -650,6 +650,29 @@ impl Server {
         self.call(on_operators_word(args, send)?).await
     }
     /// SB-292: take a moved account's sign-in back from the machine it went to.
+    /// SB-327: another machine's Switchboard read, or checked against the moves recorded here.
+    async fn remote(&self, args: &Map<String, Value>) -> Result<Value, String> {
+        let text = |key: &str| args.get(key).and_then(Value::as_str).map(str::to_owned);
+        let (target, program, remote_data_dir) = (
+            required(args, "on")?.to_owned(),
+            text("remote"),
+            text("remote_data_dir"),
+        );
+        self.call(match required(args, "action")? {
+            "status" => Operation::RemoteStatus {
+                target,
+                program,
+                remote_data_dir,
+            },
+            "check" => Operation::RemoteCheck {
+                target,
+                program,
+                remote_data_dir,
+            },
+            _ => return Err("action is status or check.".into()),
+        })
+        .await
+    }
     async fn account_recall(&self, args: &Map<String, Value>) -> Result<Value, String> {
         let text = |key: &str| args.get(key).and_then(Value::as_str).map(str::to_owned);
         let recall = Operation::RecallAccount {
@@ -1194,36 +1217,7 @@ impl Server {
             "switchboard_account_move" => self.account_move(args).await,
             "switchboard_account_send" => self.account_send(args).await,
             "switchboard_account_recall" => self.account_recall(args).await,
-            "switchboard_remote" => {
-                let target = required(args, "on")?.to_owned();
-                let program = args
-                    .get("remote")
-                    .and_then(Value::as_str)
-                    .map(str::to_owned);
-                let remote_data_dir = args
-                    .get("remote_data_dir")
-                    .and_then(Value::as_str)
-                    .map(str::to_owned);
-                match required(args, "action")? {
-                    "status" => {
-                        self.call(Operation::RemoteStatus {
-                            target,
-                            program,
-                            remote_data_dir,
-                        })
-                        .await
-                    }
-                    "check" => {
-                        self.call(Operation::RemoteCheck {
-                            target,
-                            program,
-                            remote_data_dir,
-                        })
-                        .await
-                    }
-                    _ => Err("action is status or check.".into()),
-                }
-            }
+            "switchboard_remote" => self.remote(args).await,
             "switchboard_seats" => {
                 let limit = args
                     .get("limit")
