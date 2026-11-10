@@ -134,6 +134,7 @@ enum Command {
     /// there: as ssh names each, the switchboard and data folder used there, and when it was last
     /// used. With --probe, whether each one's Switchboard answers over ssh now and its version.
     Targets {
+        /// Also ask each machine's Switchboard over ssh whether it answers now, and its version.
         #[arg(long)]
         probe: bool,
     },
