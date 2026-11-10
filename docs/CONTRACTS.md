@@ -1596,6 +1596,17 @@ MCP `switchboard_openrouter_status` (read) and `switchboard_openrouter_model` (w
     (`OPENROUTER_MODEL_NEEDED`); Crush picks its model in its own TUI (`model_choice: "agent"`).
   - The session lives in `runtimes/agent-<id>-openrouter/` (0700); `isolate_env` points at its
     own `agent-home/` there, so a login the agent saved itself cannot win over the key.
+  - One home per agent (SB-240): a second launch of the same agent writes its script and
+    `.session.json` there again for the new launch, so the home's `.session.json` names the latest
+    one, while each keeps its own `launches/<launch_id>.json`; a session already running keeps the
+    environment it started with and runs on, and both share `agent-home/` (the agent's own history
+    and settings), as two terminals of the ordinary agent share its home. Hermes and OpenCode
+    hand-overs share `runtimes/<agent>-continue/` the same way, with one folder, script and prompt
+    per workflow.
+  - Its record names the pool `openrouter` (`switchboard_core::KEY_POOL`): the key's, never a
+    group's. A new group never takes it: a group named "OpenRouter" gets `openrouter-2`, as one
+    named "Default" gets `default-2` (`Store::save_project_with`; test
+    `a_group_never_takes_the_pool_the_openrouter_keys_launches_record`).
   - The key never touches disk (XA-02 A-2): the script clears the conflicting variables, exports
     the recipe's plain variables, then runs `<cli> --data-dir <root> agents key --service
     openrouter` and exports its output under `key_env`; a failed or empty answer prints

@@ -2023,7 +2023,7 @@ fn hermes_continuation_session(
         let path = write_launch_script(&session, &content)?;
         // Listed under Sessions like any launch (`sessions`); its label is the model.
         let record = json!({
-            "account_id": crate::hermes::HERMES_TARGET, "provider": "hermes", "pool": "openrouter",
+            "account_id": crate::hermes::HERMES_TARGET, "provider": "hermes", "pool": switchboard_core::KEY_POOL,
             "context": context, "mode": "isolated", "working_directory": working_directory,
             "in_place": false,
             "launched_at": switchboard_proxy::now(), "continues": continuation.workflow_id,
@@ -2166,7 +2166,7 @@ pub(crate) fn opencode_continuation_session(
         );
         let path = write_launch_script(&session, &content)?;
         let record = json!({
-            "account_id": OPENCODE_TARGET, "provider": "opencode", "pool": "openrouter",
+            "account_id": OPENCODE_TARGET, "provider": "opencode", "pool": switchboard_core::KEY_POOL,
             "context": context, "mode": "isolated", "working_directory": working_directory,
             "in_place": false,
             "launched_at": switchboard_proxy::now(), "continues": continuation.workflow_id,
@@ -2389,7 +2389,7 @@ fn openrouter_session(
     // SB-201: listed under Sessions like any launch, labelled with its model (none when the
     // agent picks it itself); ids, folder and times only, never the key.
     let record = json!({
-        "account_id": recipe.id, "provider": recipe.id, "agent": recipe.id, "pool": "openrouter",
+        "account_id": recipe.id, "provider": recipe.id, "agent": recipe.id, "pool": switchboard_core::KEY_POOL,
         "context": context, "mode": "isolated", "working_directory": working_directory,
         "in_place": false, "launched_at": switchboard_proxy::now(), "continues": null,
         "label": if takes_model { model.clone() } else { None },

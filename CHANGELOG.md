@@ -6,6 +6,10 @@ release pull request renames `Unreleased` to the version. While Windows signing 
 that section must say `windows_authenticode: NOT_SIGNED`. Notes of 0.5.3-beta.1 and earlier are
 on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/releases).
 
+## Unreleased
+
+- A new group named "OpenRouter" gets the id `openrouter-2`: `openrouter` names the sessions launched on the OpenRouter key in Sessions and statistics, and a group of that id would have read as theirs (SB-240).
+
 ## 0.7.47
 
 - `accounts capture` and the "in use now" check, run from a terminal in an organization's folder, read your own Claude Code or Codex sign-in instead of refusing; switching the live sign-in from there is still refused (SB-236).
