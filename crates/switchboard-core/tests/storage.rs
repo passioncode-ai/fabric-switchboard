@@ -1773,6 +1773,64 @@ fn one_account_of_two_organizations_serves_the_groups_of_both() {
 }
 
 #[test]
+fn personal_after_an_organization_is_refused_and_a_word_names_the_groups_it_leaves() {
+    // SB-323: `personal` named second was dropped without a word, and an account a person put in
+    // an organization left its personal group's rotation with no sign of it.
+    let (root, _vault, store) = setup();
+    let a = store
+        .upsert(
+            "dev@example.com".into(),
+            Provider::Claude,
+            AuthKind::OAuth,
+            "default".into(),
+            Credential::parse(
+                Provider::Claude,
+                AuthKind::OAuth,
+                r#"{"claudeAiOauth":{"accessToken":"a-z","refreshToken":"z"}}"#,
+            )
+            .unwrap(),
+            None,
+        )
+        .unwrap();
+    let acme = store.add_organization("Acme", &[]).unwrap();
+    let dir = root.path().join("own");
+    std::fs::create_dir_all(&dir).unwrap();
+    let own = store
+        .save_project_with(
+            None,
+            "Own",
+            std::slice::from_ref(&dir),
+            std::slice::from_ref(&a.id),
+            Some(vec![]),
+            true,
+        )
+        .unwrap();
+    assert_eq!(
+        store
+            .assign_organizations(&a.id, &[acme.id.clone(), "personal".to_owned()])
+            .unwrap_err(),
+        switchboard_core::organizations::PERSONAL_NOT_FIRST
+    );
+    store.assign_organization(&a.id, Some(&acme.id)).unwrap();
+    let snapshot = store.snapshot().unwrap();
+    let held = snapshot.accounts.iter().find(|x| x.id == a.id).unwrap();
+    let refusing: Vec<&str> = snapshot
+        .groups_refusing(held)
+        .iter()
+        .map(|p| p.pool.as_str())
+        .collect();
+    assert_eq!(refusing, vec![own.pool.as_str()]);
+    let attribution = store
+        .assign_organizations(&a.id, &["personal".to_owned(), acme.id.clone()])
+        .unwrap();
+    assert_eq!(attribution.organization, None);
+    assert_eq!(attribution.also, vec![acme.id.clone()]);
+    let snapshot = store.snapshot().unwrap();
+    let held = snapshot.accounts.iter().find(|x| x.id == a.id).unwrap();
+    assert!(snapshot.groups_refusing(held).is_empty());
+}
+
+#[test]
 fn a_folder_in_groups_of_two_contexts_runs_in_the_personal_one() {
     // SB-109 (SCN-070, RM-28 CX-26): the more private group wins for a shared folder.
     let (root, _vault, store) = setup();
