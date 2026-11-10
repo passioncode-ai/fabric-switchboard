@@ -306,7 +306,8 @@ else echo state=lost; fi; \
 wt={wt}; if [ $ended = 1 ] && [ -d \"$wt\" ]; then \
 if [ -z \"$(git -C \"$wt\" status --porcelain 2>/dev/null)\" ] && [ -n \"$(git -C \"$wt\" branch -r --contains HEAD 2>/dev/null)\" ]; then \
 common=$(git -C \"$wt\" rev-parse --path-format=absolute --git-common-dir 2>/dev/null) && git --git-dir=\"$common\" worktree remove --force \"$wt\" && echo worktree=removed || echo worktree=kept; \
-else echo worktree=kept; fi; fi; \
+else echo worktree=kept; fi; \
+elif [ $ended = 1 ]; then echo worktree=removed; fi; \
 if [ -f \"$d/result.txt\" ]; then echo result:; head -c {RESULT_MAX} \"$d/result.txt\"; fi"
     );
     let Ok(out) = run(&ssh(target, script), None) else {
@@ -328,7 +329,9 @@ if [ -f \"$d/result.txt\" ]; then echo result:; head -c {RESULT_MAX} \"$d/result
     };
     let exit_code = field("exit").and_then(|c| c.parse::<i32>().ok());
     // D-8: after the run ended, its worktree is removed when nothing in it is left unpushed;
-    // otherwise it is kept for a person, named here.
+    // otherwise it is kept for a person, named here. Every later status of an ended run without
+    // the folder answers `removed` too, so a second reader (Fabric's relay, then its check) gets
+    // the same answer as the first; null is left for a run still going or not read.
     let worktree = match field("worktree") {
         Some("removed") => json!("removed"),
         Some("kept") => json!(format!("~/DATA/_worktrees/dispatch-{launch_id}")),
@@ -548,6 +551,11 @@ exit 3\n",
         // its end.
         assert_eq!(answer["worktree"], "removed", "{answer}");
         assert!(!wt.exists());
+        // A second reader gets the same answer, not a worktree it can no longer find.
+        let again = status("studio.local", &launch, &run);
+        assert_eq!(again["worktree"], "removed", "{again}");
+        assert_eq!(again["state"], "exited", "{again}");
+        assert_eq!(again["result"], answer["result"]);
     }
 
     #[test]
