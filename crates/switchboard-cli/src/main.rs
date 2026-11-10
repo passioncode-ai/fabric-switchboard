@@ -130,6 +130,14 @@ enum Command {
     },
     /// Report online/offline mode and the proxy address, without its capability.
     Status,
+    /// The other machines this Switchboard knows, from accounts moved there and runs started
+    /// there: as ssh names each, the switchboard and data folder used there, and when it was last
+    /// used. With --probe, whether each one's Switchboard answers over ssh now and its version.
+    Targets {
+        /// Also ask each machine's Switchboard over ssh whether it answers now, and its version.
+        #[arg(long)]
+        probe: bool,
+    },
     /// Sessions Switchboard launched that are starting or running: Claude Code, Codex, Kimi Code,
     /// Hermes, OpenCode and catalog agents. Account, agent, provider, group, mode, context, folder
     /// and times. Reads only.
@@ -208,6 +216,19 @@ enum Command {
         /// `recovery` for a host resuming a stopped session; default `cli`.
         #[arg(long, value_enum, default_value = "cli")]
         surface: LaunchSurface,
+        /// Start the session on another machine, as ssh knows it (`switchboard targets`): that
+        /// machine's own `switchboard launch` runs there with these options, with --in-place in
+        /// this terminal over ssh, so its account comes from the folder's group there. The folder
+        /// is that machine's path.
+        #[arg(long, value_name = "SSH_TARGET")]
+        target: Option<String>,
+        /// With --target: the switchboard there, an absolute path; by default the one the newest
+        /// move or run there used, else the macOS app's.
+        #[arg(long, requires = "target")]
+        remote: Option<String>,
+        /// With --target: the data folder there, when its Switchboard runs with --data-dir.
+        #[arg(long, requires = "target")]
+        remote_data_dir: Option<String>,
         /// Arguments for the agent, after `--` (for example `-- --resume <id>`, or `-- -p "…"`
         /// headless); with --in-place or --headless.
         #[arg(last = true)]
@@ -1874,6 +1895,7 @@ async fn run(cli: &Cli) -> Result<Value, String> {
         Command::Usage { id: Some(id) } => Operation::Usage { id: id.clone() },
         Command::Usage { id: None } | Command::Events => Operation::Snapshot,
         Command::Status => Operation::Status,
+        Command::Targets { probe } => Operation::Targets { probe: *probe },
         Command::Stats { days } => Operation::Statistics { days: Some(*days) },
         Command::Settings { command } => match command {
             SettingsCmd::Export { sign, groups } => Operation::SettingsExport {
@@ -2142,6 +2164,43 @@ async fn run(cli: &Cli) -> Result<Value, String> {
             parent,
             surface,
             args,
+            target: Some(target),
+            remote,
+            remote_data_dir,
+        } => {
+            return launch_there(
+                &root,
+                target,
+                remote.clone(),
+                remote_data_dir.clone(),
+                LaunchThere {
+                    id: id.clone(),
+                    provider: *provider,
+                    mode: *mode,
+                    working_directory: working_directory.clone(),
+                    in_place: *in_place,
+                    headless: *headless,
+                    by: by.clone(),
+                    parent: parent.clone(),
+                    surface: *surface,
+                    args: args.clone(),
+                },
+            )
+            .await;
+        }
+        Command::Launch {
+            id,
+            provider,
+            mode,
+            working_directory,
+            in_place,
+            headless,
+            by,
+            parent,
+            surface,
+            args,
+            target: None,
+            ..
         } => {
             // SB-212: checked before anything is asked (the owner checks them again); a clap
             // parser's refusal would print only "Invalid arguments".
@@ -2673,6 +2732,118 @@ async fn launch(
         return run_headless(std::path::Path::new(script));
     }
     run_in_place(std::path::Path::new(script))
+}
+/// SB-332: what `launch --target` passes on to the other machine's `switchboard launch`.
+struct LaunchThere {
+    id: Option<String>,
+    provider: Option<ProviderArg>,
+    mode: Mode,
+    working_directory: std::path::PathBuf,
+    in_place: bool,
+    headless: bool,
+    by: Option<String>,
+    parent: Option<String>,
+    surface: LaunchSurface,
+    args: Vec<String>,
+}
+/// SB-332: replaces this process with `ssh` running the other machine's `switchboard launch`;
+/// with --in-place the session is in this terminal (`ssh -t`), with --headless its output and
+/// exit status are this command's (`ssh -T`). Nothing is asked of this machine's owner.
+async fn launch_there(
+    root: &std::path::Path,
+    target: &str,
+    remote: Option<String>,
+    remote_data_dir: Option<String>,
+    l: LaunchThere,
+) -> Result<Value, String> {
+    use std::io::IsTerminal;
+    if !l.in_place && !l.headless {
+        return Err("A launch on another machine runs with --in-place or --headless.".into());
+    }
+    if l.in_place && !(std::io::stdin().is_terminal() && std::io::stdout().is_terminal()) {
+        return Err(
+            "Launching in place needs a terminal on stdin and stdout. Use --headless with no terminal."
+                .into(),
+        );
+    }
+    let mut words: Vec<String> = Vec::new();
+    match (&l.id, l.provider) {
+        (Some(id), None) => words.push(id.clone()),
+        (None, Some(p)) => words.extend([
+            "--provider".to_owned(),
+            match p {
+                ProviderArg::Claude => "claude",
+                ProviderArg::Codex => "codex",
+            }
+            .to_owned(),
+        ]),
+        _ => return Err("Give an account id or --provider.".into()),
+    }
+    let folder = l
+        .working_directory
+        .to_str()
+        .ok_or("Give the folder as text.")?
+        .to_owned();
+    words.extend([
+        "--mode".to_owned(),
+        match l.mode {
+            Mode::Isolated => "isolated",
+            Mode::Managed => "managed",
+        }
+        .to_owned(),
+        "--working-directory".to_owned(),
+        folder,
+        if l.headless {
+            "--headless"
+        } else {
+            "--in-place"
+        }
+        .to_owned(),
+        "--surface".to_owned(),
+        match l.surface {
+            LaunchSurface::Cli => "cli",
+            LaunchSurface::Dashboards => "dashboards",
+            LaunchSurface::Recovery => "recovery",
+        }
+        .to_owned(),
+    ]);
+    if let Some(by) = &l.by {
+        words.extend(["--by".to_owned(), by.clone()]);
+    }
+    if let Some(parent) = &l.parent {
+        words.extend(["--parent".to_owned(), parent.clone()]);
+    }
+    if !l.args.is_empty() {
+        words.push("--".to_owned());
+        words.extend(l.args.iter().cloned());
+    }
+    let (program, data_dir) =
+        switchboard_runtime::targets::program_for(root, target, remote, remote_data_dir);
+    let ssh_args = switchboard_runtime::targets::launch_ssh(
+        target,
+        &switchboard_runtime::account_send::Program {
+            path: &program,
+            data_dir: data_dir.as_deref(),
+        },
+        &words,
+        l.in_place,
+    )?;
+    exec_ssh(&ssh_args)
+}
+#[cfg(unix)]
+fn exec_ssh(args: &[String]) -> Result<Value, String> {
+    use std::os::unix::process::CommandExt;
+    let error = std::process::Command::new("ssh").args(args).exec();
+    let _ = error;
+    Err("ssh could not start.".into())
+}
+#[cfg(not(unix))]
+fn exec_ssh(args: &[String]) -> Result<Value, String> {
+    let status = std::process::Command::new("ssh")
+        .args(args)
+        .status()
+        .map_err(|_| "ssh could not start.".to_string())?;
+    std::process::exit(status.code().unwrap_or(1));
 }
 /// `switchboard handovers run <id>`: takes the hand-over (once) and runs its session here.
 async fn run_handover(root: &std::path::Path, id: &str) -> Result<Value, String> {
@@ -4277,6 +4448,7 @@ mod mcp_parity {
             Not("SB-272: the administrator publishes this key to the organization's members; an agent has no members to publish it to"),
         ),
         ("status", Tool("switchboard_status")),
+        ("targets", Tool("switchboard_targets")),
         // `sessions` itself (and its `--all`, `--history`) answers through the same tool.
         ("sessions show", Tool("switchboard_sessions")),
         ("provenance", Tool("switchboard_provenance")),

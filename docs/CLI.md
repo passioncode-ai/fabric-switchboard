@@ -31,6 +31,8 @@ switchboard accounts assign ACCOUNT_UUID --to "Frame Agent on Studio"   # SB-322
 switchboard accounts unassign ACCOUNT_UUID                          # SB-322: take it back
 switchboard accounts select ACCOUNT_UUID --provider claude --force   # SB-322: use an account given to an agent anyway (journaled); also `accounts activate --force`
 switchboard accounts send ACCOUNT_UUID --to user@studio.local [--pool agents]     # SB-283: move the sign-in over ssh; no new sign-in there, undone on failure
+switchboard targets [--probe]                            # SB-332: machines known from moves and remote runs; --probe asks each over ssh for its version
+switchboard launch --target user@studio.local --provider claude --working-directory /Users/me/DATA/app --in-place   # SB-332: that machine's own launch, in this terminal over ssh (ssh -t); --headless for no terminal
 switchboard accounts remote --on user@studio.local      # SB-327: that machine's accounts, groups and organizations over ssh (no credential); reads only
 switchboard accounts check --on user@studio.local       # SB-327: findings against the moves recorded here (missing_there, off_there, refused_there, not_marked_here, held_twice, no_record)
 # SB-323: the person's word on its organizations goes with it (org add by name there when missing, then org assign); answer.organizations says whether it was carried
