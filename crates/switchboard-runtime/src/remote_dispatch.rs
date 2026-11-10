@@ -117,6 +117,12 @@ the session."
     )
 }
 
+/// What the session is started with: the instructions themselves stay in `prompt.txt`, because
+/// `switchboard launch` takes no agent argument longer than 1024 characters
+/// (`launch::EXTRA_ARGS_INVALID`) and they are longer.
+pub const LAUNCH_PROMPT: &str = "Read the file named by the environment variable \
+FABRIC_DISPATCH_PROMPT_FILE first and do what it says: it holds this session's instructions.";
+
 /// The session's script there: the Fabric values in its environment, then the target's
 /// Switchboard runs it headless in the worktree; its exit status is written when it ends.
 #[allow(clippy::too_many_arguments)]
@@ -144,15 +150,16 @@ pub fn run_script(
         .map(|(k, v)| format!("export {k}={}\n", quoted(v)))
         .collect();
     format!(
-        "#!/bin/sh\n{exports}export FABRIC_DISPATCH_REQUEST_FILE=\"$2/request.json\"\nexport FABRIC_DISPATCH_RESULT=\"$2/result.txt\"\n\
+        "#!/bin/sh\n{exports}export FABRIC_DISPATCH_REQUEST_FILE=\"$2/request.json\"\nexport FABRIC_DISPATCH_RESULT=\"$2/result.txt\"\nexport FABRIC_DISPATCH_PROMPT_FILE=\"$2/prompt.txt\"\n\
 cd \"$1\" || {{ echo 97 >\"$2/exit\"; exit 97; }}\n\
 ( sleep {timeout_seconds}; [ -f \"$2/exit\" ] || {{ touch \"$2/timed_out\"; kill -TERM -- \"-$$\" 2>/dev/null; sleep 5; kill -KILL -- \"-$$\" 2>/dev/null; }} ) &\n\
 timer=$!\n\
-{launch} --provider {provider} --working-directory \"$1\" --headless --by fabric-dispatch -- -p \"$(cat \"$2/prompt.txt\")\" >\"$2/log\" 2>&1\n\
+{launch} --provider {provider} --working-directory \"$1\" --headless --by fabric-dispatch -- -p {prompt} >\"$2/log\" 2>&1\n\
 echo $? >\"$2/exit\"\n\
 kill \"$timer\" 2>/dev/null\n",
         launch = remote(program, &["launch"]),
         provider = provider.as_str(),
+        prompt = quoted(LAUNCH_PROMPT),
     )
 }
 
@@ -353,6 +360,14 @@ mod tests {
     use std::process::Command;
 
     #[test]
+    fn the_session_starts_with_a_pointer_that_launch_accepts() {
+        // The instructions themselves are longer than one agent argument may be.
+        assert!(prompt(&result_header(WF, H, REQ, "x")).chars().count() > 1024);
+        assert!(LAUNCH_PROMPT.chars().count() <= 1024);
+        assert!(LAUNCH_PROMPT.contains("FABRIC_DISPATCH_PROMPT_FILE"));
+    }
+
+    #[test]
     fn every_command_there_runs_under_sh_whatever_the_login_shell() {
         let args = ssh("sshlg@studio", "echo 'a' b".into());
         assert_eq!(args[..2], ["sshlg@studio".to_owned(), "--".to_owned()]);
@@ -445,12 +460,15 @@ mod tests {
             &program,
             format!(
                 "#!/bin/sh\nif [ \"$2\" = project ]; then echo '{projects}'; exit 0; fi\n\
+for a in \"$@\"; do [ ${{#a}} -gt 1024 ] && {{ echo '{too_long}'; exit 1; }}; done\n\
 printf '%s\\n' \"$@\" >\"$(dirname \"$FABRIC_DISPATCH_RESULT\")/args\"\n\
+{{ cat \"$FABRIC_DISPATCH_PROMPT_FILE\"; echo; }} >>\"$(dirname \"$FABRIC_DISPATCH_RESULT\")/args\"\n\
 cat README >>\"$(dirname \"$FABRIC_DISPATCH_RESULT\")/args\" 2>/dev/null\n\
 if [ -f \"$HOME/slow\" ]; then sleep 30; fi\n\
 printf 'fabric-dispatch/1 result workflow=%s handoff=%s request=%s launch=%s\\noutcome=answered\\n\\nDone.\\n' \
 \"$FABRIC_DISPATCH_WORKFLOW\" \"$FABRIC_DISPATCH_HANDOFF\" \"$FABRIC_DISPATCH_REQUEST\" \"$FABRIC_DISPATCH_LAUNCH\" >\"$FABRIC_DISPATCH_RESULT\"\n\
-exit 3\n"
+exit 3\n",
+                too_long = crate::launch::EXTRA_ARGS_INVALID,
             ),
         )
         .unwrap();
@@ -514,6 +532,10 @@ exit 3\n"
             "{args}"
         );
         assert!(args.contains(&wt.to_string_lossy().into_owned()), "{args}");
+        // It was started with the short pointer (`launch` refuses an argument over 1024
+        // characters), and the instructions it points to were there for it.
+        assert!(args.contains(&format!("-p\n{LAUNCH_PROMPT}\n")), "{args}");
+        assert!(args.contains(&result_header(WF, H, REQ, &launch)), "{args}");
         // It ran in the checkout from origin: the seed's README was there.
         assert!(args.contains("\napp\n"), "{args}");
         let request: Value =

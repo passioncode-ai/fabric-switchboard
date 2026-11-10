@@ -36,10 +36,14 @@ dispatcher checks it and posts the answer as a relay (Fabric's four conditions, 
   `request.json` (the hand-over checkpoint body as the MacBook read it: goal, constraints, plan,
   the board refs), `prompt.txt`, and, written by the run, `pid`, `log`, `exit` and `result.txt`.
   Files go over ssh stdin, never in a command line. The three `FABRIC_DISPATCH_*` values and the
-  `launch_id` are in `prompt.txt` and in the session's environment.
+  `launch_id` are in `prompt.txt` and in the session's environment, with
+  `FABRIC_DISPATCH_REQUEST_FILE`, `FABRIC_DISPATCH_RESULT` and `FABRIC_DISPATCH_PROMPT_FILE`
+  naming the three files.
 - **D-5. The session runs headless and detached.** Over ssh: `nohup switchboard launch --provider
-  <p> --working-directory <worktree> --headless --by fabric-dispatch -- -p
-  "$(cat prompt.txt)"` in its own process group, stdout and stderr to `log`, its pid to `pid`,
+  <p> --working-directory <worktree> --headless --by fabric-dispatch -- -p <pointer>` in its own
+  process group, where the pointer is a short fixed sentence naming `FABRIC_DISPATCH_PROMPT_FILE`
+  (`remote_dispatch::LAUNCH_PROMPT`): `launch` refuses an agent argument over 1024 characters, and
+  `prompt.txt` is longer (the first live run, 2026-11-10, ended with exit 1 on exactly that), stdout and stderr to `log`, its pid to `pid`,
   its exit status to `exit` when it ends. ssh returns at once; the MacBook records the launch
   (`launches::record`, `launched_by.surface = fabric`, `dispatch.target = <machine>`).
 - **D-6. The result file.** The prompt tells the session to end by writing `result.txt`, whose

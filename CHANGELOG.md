@@ -6,6 +6,10 @@ release pull request renames `Unreleased` to the version. While Windows signing 
 that section must say `windows_authenticode: NOT_SIGNED`. Notes of 0.5.3-beta.1 and earlier are
 on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/releases).
 
+## Unreleased
+
+- A session `switchboard dispatch --target` starts on another machine is no longer refused at once by `switchboard launch` there: its instructions, longer than the 1024 characters an agent argument may hold, stay in their file and the session is started with a short sentence pointing to it (SB-317).
+
 ## 0.7.42
 
 - `switchboard dispatch --target` works on a machine whose login shell is zsh (the macOS default): its count of running sessions stopped at an empty folder and every run was refused as `target_unreachable`; each command there now runs under `/bin/sh` (SB-317).
