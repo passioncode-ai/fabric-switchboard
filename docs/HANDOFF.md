@@ -7,10 +7,10 @@
 - **Asked.** The operator (2026-11-10): an account given to an agent (the Claude account whose `claude setup-token` sits in Frame Agent's vault) must leave Switchboard's use without disappearing: its activity stays visible, and it is used only on an explicit switch.
 - **Done.** SB-322 (PR #597): `assigned_to` keeps the account enabled, renewed and observed; every automatic path passes over it; a manual switch, selection or launch needs `--force` / MCP `force` / *Use anyway…*, journaled as `assignment override`. CLI `accounts assign|unassign`, MCP `switchboard_account_update.assigned_to`, window section *Given to agents* (SCN-089), DEC-0010, CONTRACTS, CLI.md, the skill's tools reference.
 - **Checks.** `./scripts/check.sh` exit 0 on the Mac Studio at `5aeb864` (this MacBook's disk was full during the run: 0 bytes free at 18:15 UTC, so builds ran on the Studio); the window checked in WebKit with the demo (give, section, use anyway, take back). Windows is proved only by the tag's nightly.
-- **Release.** 0.7.49: this PR, then the tag; the receipt goes into SB-322.
-- **Open.** After install: convert account `1857d955` on this MacBook with `switchboard accounts assign 1857d955-e472-44e4-b845-c7b736053346 --to "Frame Agent на Studio (frame-agent/prod/CLAUDE_CODE_OAUTH_TOKEN)"` and check `accounts list --json` shows `assigned_to` and fresh usage. SB-300 until 2026-11-17. SB-254, SB-243, SB-287 as below.
+- **Release.** 0.7.49 published 2026-11-10T19:37:40Z (tag on `33107b7`, release run 42876386370, nightly 42876754818 green on every job, 25 assets); installed here through the app's updater (owner 0.7.49). Account `1857d955` converted with `accounts assign` (no move was recorded for it, so no `--force`): given to Frame Agent, `elsewhere` false, enabled, its usage observed again by the monitor four minutes later.
+- **Open.** SB-300 until 2026-11-17. SB-254, SB-243, SB-287 as below.
 
-**Exact next task.** Watch the v0.7.49 release run to `latest.json` 0.7.49, install it here, convert account `1857d955` as above and write the receipt into SB-322. Then the previous entry's next task (SB-234).
+**Exact next task.** The previous entry's next task (SB-234).
 
 ## 2026-11-10 (day): SB-236, SB-235, SB-240, SB-241; SB-238 obsolete; SB-292 accepted live; 0.7.47 not published, 0.7.48 tagged
 
