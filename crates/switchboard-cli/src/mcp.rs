@@ -651,6 +651,13 @@ impl Server {
         self.call(on_operators_word(args, send)?).await
     }
     /// SB-292: take a moved account's sign-in back from the machine it went to.
+    /// SB-328: remove one account, as the window's Remove account does.
+    async fn account_remove(&self, args: &Map<String, Value>) -> Result<Value, String> {
+        self.call(Operation::Remove {
+            id: required(args, "account_id")?.into(),
+        })
+        .await
+    }
     /// SB-327: another machine's Switchboard read, or checked against the moves recorded here.
     async fn remote(&self, args: &Map<String, Value>) -> Result<Value, String> {
         let text = |key: &str| args.get(key).and_then(Value::as_str).map(str::to_owned);
@@ -1217,12 +1224,7 @@ impl Server {
             "switchboard_account_update" => self.account_update(args).await,
             "switchboard_account_move" => self.account_move(args).await,
             // SB-328: the window's Remove account (dashboard parity, operator 2026-10-24).
-            "switchboard_account_remove" => {
-                self.call(Operation::Remove {
-                    id: required(args, "account_id")?.into(),
-                })
-                .await
-            }
+            "switchboard_account_remove" => self.account_remove(args).await,
             "switchboard_account_send" => self.account_send(args).await,
             "switchboard_account_recall" => self.account_recall(args).await,
             "switchboard_remote" => self.remote(args).await,
