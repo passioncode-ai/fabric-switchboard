@@ -2,6 +2,20 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-11-10 (morning): 0.7.44 and 0.7.46 published; SB-320 and SB-321 done; 0.7.45 never published
+
+- **Asked.** The previous entry's next task: install 0.7.44, write its receipt into SB-317, take SB-320.
+- **Done.**
+  - SB-320: `private_fs::open_private` refused a file whose link count was not 1, so a reader that reached a launch record just before `private_write` renamed a new one over it read "unsafe" and `launches::get` answered none. PR #582 opened such a file again; on Linux a writer that replaces without pause outran its eight retries, and the v0.7.45 tag's nightly failed the new test `a_read_racing_a_replace_reads_one_whole_version` on both Linux jobs, so 0.7.45 was never published (its CHANGELOG section says so under 0.7.46). PR #586: a read takes a file with no link left as it is, one whole earlier version; only an open for writing opens the path again, with a growing pause; a hard link is still refused (`a_hard_linked_file_is_still_refused`).
+  - SB-321: `github::spawn_settled` starts `gh` again on `ETXTBSY` (PR #583); it failed the v0.7.44 nightly on `ubuntu-24.04`, whose failed job was rerun green before the release.
+  - The `fallback` timeout test is bounded by 20 s of wall time instead of 5 s (a 30 s read under load).
+- **Checks.** `./scripts/check.sh` on the Mac Studio exit 0 on the heads of #582, #583, #586 and the release PRs. The 0.7.46 tag's nightly (run 42776803705) green on every job, Linux x64 and arm64 included.
+- **Releases.** 0.7.44 published 2026-11-10T06:55:00Z (run 42762277279, 25 assets), installed here 06:55:58Z. 0.7.45 tagged on `c0da15b`, release run 42772181730 stopped by its guard (nightly red), not published. 0.7.46 published 2026-11-10T08:39:43Z (run 42776566391, 25 assets, `latest.json` 0.7.46), installed here with one check (`owner_started` 08:40:49Z, proxy 49387).
+- **Board.** SB-317 carries the 0.7.44 receipt. SB-320 and SB-321 done with the 0.7.46 receipt. SB-300 (the same test failing earlier with no `launch_id` from `dispatch`) stays open with a note: its cause is not shown to be SB-320's.
+- **Open.** SB-300 until 2026-11-17. SB-254: crash reports after 2026-11-12 23:12Z (cron `499b72c0`). SB-243: confirmation on the tester's Windows computer.
+
+**Exact next task.** SB-287: `serve` started by a LaunchDaemon on a Mac with no graphical login has no unlocked login keychain and cannot store a sign-in; design and build the credential store it uses there (the Studio is the case), then release.
+
 ## 2026-11-10 (night): remote dispatch run live on the Studio (SB-317 step 4); 0.7.41 to 0.7.43 published, 0.7.44 tagged
 
 - **Asked.** Continuing the operator's «доделай» on the move audit, and studio-agent's relay of Fabric's two steps on thread `14d6cb73`: answer CO-556 (`fa8657fc`: `claude-code` and `codex`) and a live `dispatch --target sshlg@100.69.20.19` whose `state`, `exit_code`, `result` and `worktree` Fabric's CO-551 check reads for 0.3.19.
