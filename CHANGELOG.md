@@ -6,6 +6,10 @@ release pull request renames `Unreleased` to the version. While Windows signing 
 that section must say `windows_authenticode: NOT_SIGNED`. Notes of 0.5.3-beta.1 and earlier are
 on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/releases).
 
+## Unreleased
+
+- An account can be given to an agent that signs in with it by itself (`switchboard accounts assign ID --to NAME`, MCP `switchboard_account_update` with `assigned_to`, the window's ⋯ → *Give to an agent…*). Switchboard keeps renewing it and checking its usage, so its activity stays visible under *Given to agents*, but never selects it, switches to it or launches on it by itself; a switch to it is refused unless you use it anyway (`--force`, MCP `force`, *Use anyway…*), which the activity records. `accounts unassign` takes it back. `accounts list --json`, `switchboard_accounts` and statistics carry `assigned_to` (null when none) (SB-322).
+
 ## 0.7.48
 
 0.7.47 was tagged but not published: its nightly failed on Windows in the new test of a terminal in an organization's folder. Its two changes ship here, with the check behind them corrected for Windows.
