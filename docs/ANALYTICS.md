@@ -116,6 +116,8 @@ else identifies the machine or the person.
 | `dispatch_ended` | a dispatched run ended, recorded once | `outcome` (`exited`, `stopped`, `timed_out`), `duration` (`under_1m`, `1_5m`, `5_15m`, `15_60m`, `over_60m`) |
 | `app_error` | once a UTC day is over, one event per class and code of the errors this copy hit that day, the largest first, at most 30 a day; a day older than a week goes unsent ([below](#errors-sb-248)) | `class` (the log event, such as `update_check`, `usage_check`, `launch_record`, or `panic`), `code` (its fixed code, such as `check_failed`, `unreachable`, `failed`, or a panic's source file stem, such as `monitor`), `count`, `day` (`YYYY-MM-DD`, UTC); never an error's text, a path, an account or a name |
 
+The notice and About say what is counted in one paragraph (`USAGE_COUNTED`, `src/main.ts`): since SB-241 (2026-11-10) it names every kind of count in this table in plain words, `app_active`'s configuration counts, `account_switched` and the `dispatch` events included.
+
 **Never sent:** account ids, labels, e-mail addresses, organisation ids, pool names, paths,
 tokens, provider responses or error messages, quota figures, and (0.7.0) a chain's or ceiling's scope,
 group id, workflow id, question id, agent, key name or amount. The test

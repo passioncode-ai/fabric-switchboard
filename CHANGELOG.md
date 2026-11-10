@@ -9,6 +9,7 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 ## Unreleased
 
 - A new group named "OpenRouter" gets the id `openrouter-2`: `openrouter` names the sessions launched on the OpenRouter key in Sessions and statistics, and a group of that id would have read as theirs (SB-240).
+- The usage notice and About now say everything Switchboard counts: also how many groups, folders, folder rules, fallback chains and spending ceilings are set, automatic switching, account switches and their cause, and runs started for Fabric (SB-241).
 
 ## 0.7.47
 
