@@ -6,15 +6,15 @@ release pull request renames `Unreleased` to the version. While Windows signing 
 that section must say `windows_authenticode: NOT_SIGNED`. Notes of 0.5.3-beta.1 and earlier are
 on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/releases).
 
-## Unreleased
+## 0.7.48
 
-- A new group named "OpenRouter" gets the id `openrouter-2`: `openrouter` names the sessions launched on the OpenRouter key in Sessions and statistics, and a group of that id would have read as theirs (SB-240).
-- The usage notice and About now say everything Switchboard counts: also how many groups, folders, folder rules, fallback chains and spending ceilings are set, automatic switching, account switches and their cause, and runs started for Fabric (SB-241).
-
-## 0.7.47
+0.7.47 was tagged but not published: its nightly failed on Windows in the new test of a terminal in an organization's folder. Its two changes ship here, with the check behind them corrected for Windows.
 
 - `accounts capture` and the "in use now" check, run from a terminal in an organization's folder, read your own Claude Code or Codex sign-in instead of refusing; switching the live sign-in from there is still refused (SB-236).
 - Codex started in a terminal in an organization's folder is recognised as a session of that group's accounts, so `switchboard_status` names the group and switching its account for the session works there (SB-235).
+- Switching the live sign-in from a terminal in an organization's folder is refused on Windows too, also before the group's terminal home exists: the check compared paths written in different forms there.
+- A new group named "OpenRouter" gets the id `openrouter-2`: `openrouter` names the sessions launched on the OpenRouter key in Sessions and statistics, and a group of that id would have read as theirs (SB-240).
+- The usage notice and About now say everything Switchboard counts: also how many groups, folders, folder rules, fallback chains and spending ceilings are set, automatic switching, account switches and their cause, and runs started for Fabric (SB-241).
 
 ## 0.7.46
 

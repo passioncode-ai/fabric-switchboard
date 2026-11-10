@@ -2,20 +2,24 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
-## 2026-11-10 (day): SB-236 and SB-235, the hooked terminal's reads; SB-292 accepted live; 0.7.47 tagged
+## 2026-11-10 (day): SB-236, SB-235, SB-240, SB-241; SB-238 obsolete; SB-292 accepted live; 0.7.47 not published, 0.7.48 tagged
 
 - **Asked.** Continuing the operator's «доделай» on the move audit: the next board rows after 0.7.46.
 - **Done.**
   - SB-292: its own part (S-1 to S-6) was accepted live on 2026-11-09 (this MacBook's `seats.jsonl`: three grants to the Studio, two proved call backs, studio-agent `d877e414`); recorded on the board (PR #589). L-2 waits for SB-291.
   - SB-236 (A-Q8): a capture or the "in use now" probe from a terminal the organization hook set up reads the person's own sign-in; writes keep the refusal (PR #590).
   - SB-235: Codex in such a terminal (`shell/codex-<pool>`) is `managed:codex:<pool>` for `status` and MCP `target: session` (PR #591).
+  - SB-240: no new group takes the id `openrouter` that launches on the OpenRouter key record; CONTRACTS says what a second launch of the same agent home does (PR #593).
+  - SB-241: the usage notice and About name every count sent; Copylot `1d813c40` (en-US), `eaff390f` (ru-RU) (PR #594). Not looked at in the window: text only.
+  - SB-238 closed as obsolete with `switchboard_recovery`'s numbers (218 of 221 stops resumed by the hook).
+  - The v0.7.47 nightly failed both Windows jobs on SB-236's test: `refuse_home_inside` compared a canonical root with a plain path for a home not yet created and refused nothing there; it now compares as `person::inside` does (PR #595). 0.7.47 was not published (release run 42787302728, guard red, `latest.json` stayed 0.7.46).
   - The previous entry's next task named SB-287, which is merged (PR #480) and waits only for Observatory's LaunchDaemon fields; corrected in PR #589.
-- **Checks.** `./scripts/check.sh` on the Mac Studio exit 0 on `99433a7` (#590) and `403da05` (#591); each new test fails with its fix taken out (checked on the Studio).
-- **Release.** 0.7.47 (SB-235, SB-236): release PR and tag in this change's wake; the run and install receipts go into SB-235's and SB-236's rows.
+- **Checks.** `./scripts/check.sh` on the Mac Studio exit 0 on `99433a7` (#590), `403da05` (#591), `fd65a2c` (#593), `56df20b` (#594), `67e0271` (#595) and the release heads; each new test fails with its fix taken out (checked on the Studio). Windows is proved only by the tag's nightly.
+- **Release.** 0.7.47 (PR #592, tag on `dd50266`) not published. 0.7.48 (SB-235, SB-236 with the Windows fix, SB-240, SB-241): release PR and tag in this change's wake; the run and install receipts go into those rows.
 - **Board.** The unread board (92 messages) read and acknowledged; nothing new addressed to Switchboard.
 - **Open.** SB-300 until 2026-11-17. SB-254: crash reports after 2026-11-12 23:12Z (cron `499b72c0`). SB-243: confirmation on the tester's Windows computer. SB-287: Observatory's fields (thread `6bb39288`).
 
-**Exact next task.** Watch the v0.7.47 release run to `latest.json` 0.7.47, install it here with one `switchboard_app check_for_updates` and `restart_to_update`, write the receipts into SB-235 and SB-236, then take SB-240 (the `openrouter` pool sentinel in launch records and a second launch of the same agent home).
+**Exact next task.** Watch the v0.7.48 release run to `latest.json` 0.7.48 (if the tag's nightly fails, read its log, fix, release again), install it here with one `switchboard_app check_for_updates` and `restart_to_update`, and write the receipts into SB-235, SB-236, SB-240 and SB-241. Then SB-234 when it fails again with output (the zsh hook test under load); SB-216 and SB-217 wait for a decision on paid starts and switches under a spending ceiling (C-N1, C-N2).
 
 ## 2026-11-10 (morning): 0.7.44 and 0.7.46 published; SB-320 and SB-321 done; 0.7.45 never published
 
