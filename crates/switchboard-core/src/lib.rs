@@ -36,7 +36,7 @@ pub mod windows;
 pub use chains::{provider_agent, workflow_id_valid, Chain, ChainScope, Executor, MAX_EXECUTORS};
 pub use credential::Credential;
 pub use organizations::{Attribution, By, Organization};
-pub use projects::{pool_from_name, Project, ProjectRule, RuleResolution, FOLDER_NESTED};
+pub use projects::{pool_from_name, Project, ProjectRule, RuleResolution, FOLDER_NESTED, KEY_POOL};
 pub use rotation::{FailoverTally, Fits, RotationDecision, RotationPolicy};
 pub use vault::{
     open_vault, set_vault_kind, vault_kind, FileVault, MemoryVault, NativeVault, Vault, VaultKind,

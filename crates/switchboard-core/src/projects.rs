@@ -387,6 +387,10 @@ fn shared_routes_prune(s: &mut Snapshot) {
 /// Refusal: more organizations than one group holds (SB-282).
 pub const GROUP_ORGANIZATIONS_TOO_MANY: &str = "A group can belong to at most 16 organizations.";
 
+/// The pool a launch on the OpenRouter key writes in its record (SB-240): it names the key, not a
+/// group, so a new group never takes it (a group named "OpenRouter" becomes `openrouter-2`), as
+/// it never takes `default`.
+pub const KEY_POOL: &str = "openrouter";
 /// A pool name from a project name: lowercase letters, digits and hyphens.
 pub fn pool_from_name(name: &str) -> String {
     let mut pool = String::new();
@@ -581,6 +585,7 @@ impl Store {
                 let base = pool_from_name(name);
                 let taken = |p: &str| {
                     p == "default"
+                        || p == KEY_POOL
                         || candidate.projects.iter().any(|x| x.pool == p)
                         || candidate
                             .accounts

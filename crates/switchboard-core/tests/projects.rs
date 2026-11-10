@@ -619,3 +619,23 @@ fn a_new_account_lands_only_in_a_group_that_admits_it() {
         "synthetic-personal",
     );
 }
+
+#[test]
+fn a_group_never_takes_the_pool_the_openrouter_keys_launches_record() {
+    // SB-240: launches on the OpenRouter key record `pool: openrouter`; a group named so would
+    // read as theirs in Sessions and statistics. It takes the next free name, as for `default`.
+    let (root, store) = setup();
+    assert_eq!(switchboard_core::KEY_POOL, "openrouter");
+    let first = store
+        .save_project(None, "OpenRouter", &[project(&root, "router")], &[])
+        .unwrap();
+    assert_eq!(first.pool, "openrouter-2");
+    let default = store
+        .save_project(None, "Default", &[project(&root, "plain")], &[])
+        .unwrap();
+    assert_eq!(default.pool, "default-2");
+    let other = store
+        .save_project(None, "Open Router", &[project(&root, "spaced")], &[])
+        .unwrap();
+    assert_eq!(other.pool, "open-router");
+}
