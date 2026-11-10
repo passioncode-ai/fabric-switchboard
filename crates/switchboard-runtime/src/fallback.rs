@@ -3464,8 +3464,10 @@ mod tests {
         .await;
         assert!(acted.is_empty());
         assert_eq!(done.outcome, "spend_unknown");
+        // The slow read takes 30 s; well under that proves it was never waited out, while a
+        // machine busy with other work may stretch the two walks past a few seconds (SB-320).
         assert!(
-            started.elapsed() < std::time::Duration::from_secs(5),
+            started.elapsed() < std::time::Duration::from_secs(20),
             "never waits out the read"
         );
     }

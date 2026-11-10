@@ -6,6 +6,10 @@ release pull request renames `Unreleased` to the version. While Windows signing 
 that section must say `windows_authenticode: NOT_SIGNED`. Notes of 0.5.3-beta.1 and earlier are
 on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/releases).
 
+## Unreleased
+
+- Reading a private file (a launch record, a session record) at the moment Switchboard replaced it no longer fails as unsafe: the read opens the new file again. A run's record could read as missing while its end was being written (SB-320).
+
 ## 0.7.44
 
 - `switchboard dispatch status` of a run on another machine answers `worktree: removed` on every call after the run ended and its worktree went, not only on the call that removed it (SB-317).
