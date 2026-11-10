@@ -14,7 +14,7 @@
 - **Board.** SB-317 carries the 0.7.44 receipt. SB-320 and SB-321 done with the 0.7.46 receipt. SB-300 (the same test failing earlier with no `launch_id` from `dispatch`) stays open with a note: its cause is not shown to be SB-320's.
 - **Open.** SB-300 until 2026-11-17. SB-254: crash reports after 2026-11-12 23:12Z (cron `499b72c0`). SB-243: confirmation on the tester's Windows computer.
 
-**Exact next task.** SB-287: `serve` started by a LaunchDaemon on a Mac with no graphical login has no unlocked login keychain and cannot store a sign-in; design and build the credential store it uses there (the Studio is the case), then release.
+**Exact next task.** SB-236: the native sign-in context (`external::context`) reads `CLAUDE_CONFIG_DIR` and `CODEX_HOME` as the process has them and refuses a Switchboard home, so a capture from a terminal the organization hook set up fails; route its reads through `person::` and keep the refusal for writes. (SB-287 is merged, PR #480, and waits only for Observatory's LaunchDaemon fields; SB-292's own part is done and waits for SB-291.)
 
 ## 2026-11-10 (night): remote dispatch run live on the Studio (SB-317 step 4); 0.7.41 to 0.7.43 published, 0.7.44 tagged
 
