@@ -2,6 +2,22 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-11-10 (night): remote dispatch run live on the Studio (SB-317 step 4); 0.7.41 to 0.7.43 published, 0.7.44 tagged
+
+- **Asked.** Continuing the operator's «доделай» on the move audit, and studio-agent's relay of Fabric's two steps on thread `14d6cb73`: answer CO-556 (`fa8657fc`: `claude-code` and `codex`) and a live `dispatch --target sshlg@100.69.20.19` whose `state`, `exit_code`, `result` and `worktree` Fabric's CO-551 check reads for 0.3.19.
+- **The live run found three defects, each fixed, tested and released.**
+  - 0.7.40 refused every remote run as `target_unreachable`: the Studio's login shell is zsh, whose NOMATCH stopped the count of running sessions on an empty `~/.fabric-dispatch`. Every remote command now runs as `exec /bin/sh -c '…'`, and the tests' fake ssh runs under zsh (PR #574, 0.7.42).
+  - 0.7.42 started the session, which ended with exit 1 at once: `launch` refuses an agent argument over 1024 characters (`launch::EXTRA_ARGS_INVALID`) and the instructions (about 1100) went whole in `-p`. The session now gets `remote_dispatch::LAUNCH_PROMPT`, a pointer to `FABRIC_DISPATCH_PROMPT_FILE`, and the fake `switchboard` refuses a long argument as the real one does (PR #577, 0.7.43). Checked live before the release with the same run folder and the fixed script.
+  - On 0.7.43 only the first `dispatch status` after the end answered `worktree: removed`; later ones answered `null`. Every read of an ended run without its folder now answers `removed` (PR #579, 0.7.44). `docs/CONTRACTS.md` caught up with all three.
+- **The run.** 0.7.43, launch `7b114587-df2b-46c9-b88d-317e6b57fc21`, request `c1d4f635-…`: `exited`, `exit_code 0`, result header right, `outcome=answered`, worktree removed, about one minute. Reported on `14d6cb73` (`27531ef8`, `3027fafa`, `39a5d288`). The synthetic workflow `wf_963fafd498d5c472` is closed.
+- **Checks.** `./scripts/check.sh` on the Mac Studio exit 0 on each PR head and each release head; each new test fails without its fix (checked on the Studio).
+- **Releases.** 0.7.41 published (run 42723103161) and installed here (`owner_started` 01:35:57Z); 0.7.42 (run 42737380091) installed 03:23:11Z; 0.7.43 (run 42750201869) installed 05:06:07Z; 0.7.44 tagged on `b90f3f5`, its run under way. The 0.7.40 to 0.7.41 install met SB-319 once more (the old code), the `.part` was removed by hand and one check installed it.
+- **Board.** SB-319 done (PR #576). SB-317 done with step 4. New SB-320: `dispatch::runs::a_run_that_ends_by_itself_is_recorded_exited` failed once under the full gate's load, cause unknown.
+- **Mistake to keep from repeating.** A poll loop of mine used `echo "$o" | python3 -c json.load` in zsh, whose `echo` turns `\n` in a JSON string into real newlines; the parse failed forever and the loop never ended. Use `printf '%s'` or let the program print the field.
+- **Open.** SB-320. SB-254: crash reports after 2026-11-12 23:12Z (cron `499b72c0`). Fabric's CO-551 relay and its D-2 closing of the workflow are Fabric's.
+
+**Exact next task.** Watch the v0.7.44 release run to `latest.json` 0.7.44, install it here with one `switchboard_app check_for_updates` and `restart_to_update`, write its receipt into SB-317's row, then take SB-320.
+
 ## 2026-11-09 (late evening): the move audit finished; 0.7.38 and 0.7.39 published, 0.7.40 tagged; remote dispatch (SB-317 stage A)
 
 - **Asked.** The operator: «Аудит системы, как у нас работает перемещение аккаунтов между студией, между девайсами, организациями и так далее … все давай доделай максимально качественно, чтобы было у нас волнами до конца», then «доделай».
