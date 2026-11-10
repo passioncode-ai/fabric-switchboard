@@ -3339,8 +3339,15 @@ mod tests {
             "CODEX_HOME" => Some(codex_value.clone()),
             _ => None,
         };
-        let c = read_context_from(Provider::Claude, &hooked, &user, &f, "u".into(), Some(&root))
-            .unwrap();
+        let c = read_context_from(
+            Provider::Claude,
+            &hooked,
+            &user,
+            &f,
+            "u".into(),
+            Some(&root),
+        )
+        .unwrap();
         assert_eq!(c.home, user.join(".claude"));
         assert_eq!(c.config, user.join(".claude.json"));
         assert_eq!(c.service, "Claude Code-credentials");
@@ -3360,8 +3367,8 @@ mod tests {
             "CLAUDE_SECURESTORAGE_CONFIG_DIR" => Some(s.clone()),
             _ => None,
         };
-        let c = read_context_from(Provider::Claude, &own, &user, &f, "u".into(), Some(&root))
-            .unwrap();
+        let c =
+            read_context_from(Provider::Claude, &own, &user, &f, "u".into(), Some(&root)).unwrap();
         assert_eq!(c.home, user.join("alt"));
         let b = alt.clone();
         let other = move |name: &str| match name {
