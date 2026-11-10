@@ -8,6 +8,7 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- `switchboard launch --target MACHINE --in-place` starts a coding session on another machine in this terminal over ssh; that machine's Switchboard picks the account from the folder's group there. `switchboard targets` (MCP `switchboard_targets`) lists the machines this Switchboard knows from moves and remote runs, and with `--probe` asks each for its version (SB-332).
 - On macOS 27 the local proxy closed every connection as coming from another user, so no managed session, folder route or launched agent got an account there: macOS 27 no longer tells a process who owns another process's socket in the list Switchboard read. The proxy now finds the connecting process among your own processes; a process of another user is still refused (SB-330).
 - Agents can remove an account the way the window's *Remove account* does (MCP `switchboard_account_remove`, only when you ask), and `switchboard accounts list --json` now names each account's organization and the ones it also works for (SB-328).
 
