@@ -1108,6 +1108,7 @@ impl Store {
                         && b.provider == a.provider
                         && b.enabled
                         && !candidate.elsewhere.contains_key(&b.id)
+                        && !candidate.is_assigned(&b.id)
                         && candidate.pools_of(b).contains(&pool.as_str())
                         && candidate.context_admits(&pool, b)
                 })

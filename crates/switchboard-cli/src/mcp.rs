@@ -55,9 +55,9 @@ pub(crate) fn tools() -> Vec<(bool, Value)> {
     let account = json!({"type":"string","description":"Account id from switchboard_accounts."});
     vec![
         (false, json!({"name":"switchboard_status","title":"Switchboard status","description":"Who handles this session's requests: runtime state, this session (managed in a group, isolated, or native), the signed-in CLI accounts, the selected account per group, active folder rules and automatic switching. Call this first.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}})),
-        (false, json!({"name":"switchboard_accounts","title":"Switchboard accounts","description":"Stored accounts without credentials: label, provider, group id (pool) and every group it serves (groups), whether selected or signed in now, the lowest remaining quota, the organization each belongs to (null: personal) with what decided it (person or provider), the organizations it also works for, and whether it is used on another machine (elsewhere) with where (location). machine: here or elsewhere lists only those.","inputSchema":{"type":"object","properties":{"provider":{"type":"string","enum":["claude","codex"]},"machine":{"type":"string","enum":["here","elsewhere"]}},"additionalProperties":false}})),
+        (false, json!({"name":"switchboard_accounts","title":"Switchboard accounts","description":"Stored accounts without credentials: label, provider, group id (pool) and every group it serves (groups), whether selected or signed in now, the lowest remaining quota, the organization each belongs to (null: personal) with what decided it (person or provider), the organizations it also works for, and whether it is used on another machine (elsewhere) with where (location), and the agent it is given to (assigned_to, null when none: Switchboard keeps observing its usage but never uses it by itself). machine: here or elsewhere lists only those.","inputSchema":{"type":"object","properties":{"provider":{"type":"string","enum":["claude","codex"]},"machine":{"type":"string","enum":["here","elsewhere"]}},"additionalProperties":false}})),
         (false, json!({"name":"switchboard_usage","title":"Remaining usage","description":"Remaining quota per account and window, with reset times and how fresh each observation is. Unknown is not zero. A window with scope feature limits one metered feature only; lowest_remaining_percent covers the account's own windows. refresh asks the provider for one account; within 60 seconds of its last check it returns that observation with a note, and until the time the provider asked for after answering a check with 429 it is refused; for an inactive Claude account it may first renew that account's expired sign-in inside Switchboard. A read-only server never asks and shows the stored observation. No credential is returned.","inputSchema":{"type":"object","properties":{"account_id":account,"refresh":{"type":"boolean","default":false}},"additionalProperties":false}})),
-        (true, json!({"name":"switchboard_switch","title":"Switch account","description":"Choose the account for the next request. target session (default) switches this managed session; route selects the account in its own group for every managed session of that group; claude_cli changes the ordinary Claude Code login for every claude session on this machine and requires global: true. A response already streaming keeps its account.","inputSchema":{"type":"object","properties":{"account_id":account,"target":{"type":"string","enum":["session","route","claude_cli"],"default":"session"},"global":{"type":"boolean","default":false}},"required":["account_id"],"additionalProperties":false}})),
+        (true, json!({"name":"switchboard_switch","title":"Switch account","description":"Choose the account for the next request. target session (default) switches this managed session; route selects the account in its own group for every managed session of that group; claude_cli changes the ordinary Claude Code login for every claude session on this machine and requires global: true. A response already streaming keeps its account. An account given to an agent (assigned_to) is refused unless force: true, only when the operator asks to use it anyway.","inputSchema":{"type":"object","properties":{"account_id":account,"target":{"type":"string","enum":["session","route","claude_cli"],"default":"session"},"global":{"type":"boolean","default":false},"force":{"type":"boolean","default":false,"description":"Use an account given to an agent anyway; the activity records it."}},"required":["account_id"],"additionalProperties":false}})),
         (false, json!({"name":"switchboard_sessions","title":"Sessions","description":"Sessions Switchboard launched: Claude Code, Codex, Kimi Code, Hermes, OpenCode and catalog agents (through an API-key account's proxy or on the OpenRouter key). Each with account_id, label, agent (the catalog id, such as claude-code, codex or goose), provider (the provider the route serves: claude for an agent through the proxy), group id (pool), context (personal or org:<id>) and context_name (the organization's name, or null), mode (managed or isolated), working_directory, in_place, launched_at, started_at, continues (a workflow id or null) and state: starting, running, ended or unknown. Without all, only starting and running ones. With history, every launch of the last 90 days instead, newest first: one record per launch with launch_id, launched_by (surface: window, cli, mcp, fallback, recovery, dashboards or fabric for a run switchboard dispatch started, whose launched_by.dispatch is {id, request, thread, project, workflow}; caller_launch_id, caller_project, caller_program, by, parent), provider_session_id, transcript (its path), turns, last_turn_at, ended (limit; a dispatched run's {kind: exited, stopped or timed_out, exit_code?, at}) and continued_as (where its work went), plus total. With launch_id, that launch with up (who launched it, to the first) and down (what it launched or what took its work over). Reads only; no credential.","inputSchema":{"type":"object","properties":{"all":{"type":"boolean","description":"Also list ended sessions."},"history":{"type":"boolean","description":"Every recorded launch, newest first, instead of the homes' current sessions."},"launch_id":{"type":"string","description":"One launch and its chain."}},"additionalProperties":false}})),
         (false, json!({"name":"switchboard_provenance","title":"Provenance","description":"Which account serves a provider's group, or one launch, since when and why, as Fabric reads it: provider, pool, account_ref (the account's handle, never its id), identity_revision (a hash of the provider's identity, or null), mode (managed for a group, null for a launch), changed_at (Unix seconds, null when the journal no longer holds it), cause (manual, rotation, limit, failover or unknown), replaced ({account_ref, limit: {kind, resets_at, confidence} or null} of the account it replaced, or null) and session ({launch_id, dispatch_id, workflow} for a launch, else null). Give provider (and pool, the default group when left out), or launch_id. Reads only; no credential.","inputSchema":{"type":"object","properties":{"provider":{"type":"string","enum":["claude","codex"]},"pool":{"type":"string","description":"The group id; the default group when left out."},"launch_id":{"type":"string","description":"One launch's account and session."}},"additionalProperties":false}})),
         (false, json!({"name":"switchboard_onboarding","title":"Setup steps","description":"Where setting up Switchboard stands, as steps in order: owner (the app runs), accounts (one is saved; signing in is the person's), project (the folder's group, optional; a repository in no group uses the default group, and next.command puts it in a group), mcp (this server is registered with the agent) and proving_call. Without organizations these five are all, plus one optional organization step when PassionCode.ai is connected and lists none; with organizations, organization follows, then org_group, seat, hook and launch for each, naming it. Each step is done, todo (run next.command), needs_person (tell the person next.person; run next.command or next.alternatives once they agree) or optional. next.turn_on and next.turn_off are the person's: run one only when the person asks. degraded names reads that failed; the step they touch says so. Reads only. The full guide: `switchboard onboard`.","inputSchema":{"type":"object","properties":{"path":path,"host":{"type":"string","enum":["claude","codex"],"description":"The coding agent being set up; default: the one this server runs for, when known."}},"additionalProperties":false}})),
@@ -75,7 +75,7 @@ pub(crate) fn tools() -> Vec<(bool, Value)> {
         (false, json!({"name":"switchboard_repository_map","title":"Repositories on disk","description":"The Git repositories under the folders named (absolute; none: ~/DATA, else the home folder; up to three folders deep, not into a repository, a hidden folder or dependencies), each with its group (pool as its id, name; place folder or inside) or none. Linked worktrees are listed under their root in switchboard_projects, not here. Reads only.","inputSchema":{"type":"object","properties":{"under":{"type":"array","maxItems":16,"items":{"type":"string","minLength":1}}},"additionalProperties":false}})),
         (false, json!({"name":"switchboard_statistics","title":"Statistics","description":"What the local proxy relayed in the last days (1-90, default 30): requests, how they ended (ok, limited, failed) and the token counts the provider itself reported (input, output, cache read and write), by group, project (a repository with its checkouts, placed by the folder the request came from), account, coding agent (from its user-agent) and day, plus each group-project-account-agent combination and each day's split by group. Only managed traffic: a session on its own sign-in outside Switchboard is not counted. Counts only, never a prompt, answer or path. Reads only.","inputSchema":{"type":"object","properties":{"days":{"type":"integer","minimum":1,"maximum":90}},"additionalProperties":false}})),
         (false, json!({"name":"switchboard_events","title":"Activity","description":"Recent activity, newest first: what changed (accounts, switches, groups, automatic switching, sign-ins) and how it ended, as fixed codes. No credential, prompt or provider text.","inputSchema":{"type":"object","properties":{"limit":{"type":"integer","minimum":1,"maximum":500,"default":50}},"additionalProperties":false}})),
-        (true, json!({"name":"switchboard_account_update","title":"Rename, enable or disable an account","description":"Rename an account, enable or disable it (a disabled account is never selected or switched to), or mark it as used on another machine (elsewhere: true disables it here, so this machine never renews it or switches to it, automatically or not; false enables it again), saying where it works (location: a machine and its user, or a colleague, which also marks it; empty clears it). An account whose sign-in was moved with switchboard_account_send is called back with switchboard_account_recall, not used here again, unless force. Only when the operator asks. What is left out stays as it is.","inputSchema":{"type":"object","properties":{"account_id":account,"label":{"type":"string","minLength":1,"maxLength":80},"enabled":{"type":"boolean"},"elsewhere":{"type":"boolean"},"location":{"type":"string","maxLength":80},"force":{"type":"boolean","description":"With elsewhere false or enabled true: use it here although its sign-in was moved to another machine and not called back."}},"required":["account_id"],"additionalProperties":false}})),
+        (true, json!({"name":"switchboard_account_update","title":"Rename, enable or disable an account","description":"Rename an account, enable or disable it (a disabled account is never selected or switched to), or mark it as used on another machine (elsewhere: true disables it here, so this machine never renews it or switches to it, automatically or not; false enables it again), saying where it works (location: a machine and its user, or a colleague, which also marks it; empty clears it). An account whose sign-in was moved with switchboard_account_send is called back with switchboard_account_recall, not used here again, unless force. assigned_to gives the account to an agent or service that holds its sign-in now (its name, at most 120 characters; empty takes it back): Switchboard keeps renewing it and observing its usage but never selects it, switches to it or launches on it by itself, and giving it clears elsewhere. Only when the operator asks. What is left out stays as it is.","inputSchema":{"type":"object","properties":{"account_id":account,"label":{"type":"string","minLength":1,"maxLength":80},"enabled":{"type":"boolean"},"elsewhere":{"type":"boolean"},"location":{"type":"string","maxLength":80},"assigned_to":{"type":"string","maxLength":120,"description":"The agent or service that holds the account now; empty takes it back."},"force":{"type":"boolean","description":"With elsewhere false, enabled true or assigned_to: use it here although its sign-in was moved to another machine and not called back."}},"required":["account_id"],"additionalProperties":false}})),
         (true, json!({"name":"switchboard_account_move","title":"Move an account to another group","description":"Move an account into a group (pool: its group id), or back to the default group (pool: default). Only when the operator asks. Joining or leaving a group is that group's change, with its refusals: the account the ordinary Claude Code or Codex is signed in to cannot join a group, and a second copy of a login already in that group is refused.","inputSchema":{"type":"object","properties":{"account_id":account,"pool":{"type":"string","minLength":1,"description":"A group id from switchboard_projects, or default."}},"required":["account_id","pool"],"additionalProperties":false}})),
         (true, json!({"name":"switchboard_account_send","title":"Move an account to another machine","description":"Move an account's sign-in to another machine over ssh, without a new sign-in there: it is marked here as used elsewhere first (this machine never renews it again), saved there with switchboard accounts add (the tokens on stdin), checked there with a quota check, and both are undone on any failure. Only a Claude or Codex subscription sign-in that no group has selected. to: the machine as ssh knows it, reachable without a prompt; pool: its group there (default); remote: that machine's switchboard, an absolute path (default the macOS app's); remote_data_dir: its data folder when it runs with --data-dir. Only when the operator asks.","inputSchema":{"type":"object","properties":{"account_id":{"type":"string"},"to":{"type":"string","minLength":1,"maxLength":255},"pool":{"type":"string"},"remote":{"type":"string"},"remote_data_dir":{"type":"string","description":"The other machine's data folder, an absolute path, when its Switchboard runs with --data-dir."},"decision":{"type":"object","properties":{"by":{"type":"string","enum":["operator"]},"instruction":{"type":"string","minLength":1,"maxLength":500},"at":{"type":"string"},"source":{"type":"string","minLength":1,"maxLength":200}},"required":["by","instruction","at","source"],"additionalProperties":false,"description":"The operator's words that ordered it, recorded with the seat in seats.jsonl."}},"required":["account_id","to"],"additionalProperties":false}})),
         (true, json!({"name":"switchboard_account_recall","title":"Take a moved account back","description":"Take back a Claude or Codex subscription sign-in this machine moved to another one with switchboard_account_send: that machine stops using it and gives its tokens back over ssh, the provider is checked here (on failure it goes back there), then its copy there is removed and its account list read to prove it. Answers recalled, removed_there and proved. Only when the operator asks.","inputSchema":{"type":"object","properties":{"account_id":{"type":"string"},"from":{"type":"string","minLength":1,"maxLength":255,"description":"The other machine as ssh knows it, as the move named it."},"remote_id":{"type":"string","maxLength":64,"description":"The account's id there; by default the one the recorded move names."},"remote":{"type":"string","description":"That machine's switchboard; by default the one the move ran."},"remote_data_dir":{"type":"string","description":"That machine's data folder; by default the one the move named."},"decision":{"type":"object","properties":{"by":{"type":"string","enum":["operator"]},"instruction":{"type":"string","minLength":1,"maxLength":500},"at":{"type":"string"},"source":{"type":"string","minLength":1,"maxLength":200}},"required":["by","instruction","at","source"],"additionalProperties":false,"description":"The operator's words that ordered it, recorded with the seat in seats.jsonl."}},"required":["account_id","from"],"additionalProperties":false}})),
@@ -356,7 +356,8 @@ impl Server {
                     "lowest_remaining_percent": usage["lowest_remaining_percent"], "usage_fresh": usage["fresh"],
                     "organization": organization_of(&a["id"]), "also_organizations": also_of(&a["id"]), "groups": groups_of(&a),
                     "elsewhere": marked(&a["id"]),
-                    "location": a["id"].as_str().and_then(|id| snapshot["locations"].get(id)).cloned().unwrap_or(Value::Null)})
+                    "location": a["id"].as_str().and_then(|id| snapshot["locations"].get(id)).cloned().unwrap_or(Value::Null),
+                    "assigned_to": a["id"].as_str().and_then(|id| snapshot["assigned_to"].get(id)).cloned().unwrap_or(Value::Null)})
             })
             .collect();
         Ok(json!({"accounts": accounts}))
@@ -415,6 +416,7 @@ impl Server {
             .and_then(Value::as_str)
             .unwrap_or("session");
         let global = args.get("global").and_then(Value::as_bool).unwrap_or(false);
+        let force = args.get("force").and_then(Value::as_bool).unwrap_or(false);
         let snapshot = self.call(Operation::Snapshot).await?;
         let account = find(&snapshot, id)?;
         let provider: Provider = serde_json::from_value(account["provider"].clone())
@@ -426,8 +428,11 @@ impl Server {
                 if !global {
                     return Err("This changes the Claude Code login for every ordinary claude session on this machine. Ask the operator, then call again with global: true.".into());
                 }
-                self.call(Operation::ActivateNative { id: id.into() })
-                    .await?;
+                self.call(Operation::ActivateNative {
+                    id: id.into(),
+                    force,
+                })
+                .await?;
                 Ok(
                     json!({"action":"activated","account":{"id":id,"label":label,"pool":pool},"message":format!("Claude Code now signs in as {label} for every ordinary claude session. Running sessions may keep their account until they reload credentials.")}),
                 )
@@ -451,6 +456,7 @@ impl Server {
                     provider,
                     pool: pool.clone(),
                     id: id.into(),
+                    force,
                 })
                 .await?;
                 Ok(
@@ -525,18 +531,46 @@ impl Server {
             .get("location")
             .and_then(Value::as_str)
             .map(str::to_owned);
-        if label.is_none() && enabled.is_none() && elsewhere.is_none() && location.is_none() {
-            return Err("Name a label, enabled, elsewhere or location to change.".into());
+        let assigned_to = args
+            .get("assigned_to")
+            .and_then(Value::as_str)
+            .map(str::to_owned);
+        if label.is_none()
+            && enabled.is_none()
+            && elsewhere.is_none()
+            && location.is_none()
+            && assigned_to.is_none()
+        {
+            return Err(
+                "Name a label, enabled, elsewhere, location or assigned_to to change.".into(),
+            );
         }
-        self.call(Operation::Update {
-            id: required(args, "account_id")?.into(),
-            label,
-            enabled,
-            elsewhere,
-            location,
-            force: args.get("force").and_then(Value::as_bool).unwrap_or(false),
-        })
-        .await
+        let id: String = required(args, "account_id")?.into();
+        let force = args.get("force").and_then(Value::as_bool).unwrap_or(false);
+        let mut answer = Value::Null;
+        if label.is_some() || enabled.is_some() || elsewhere.is_some() || location.is_some() {
+            answer = self
+                .call(Operation::Update {
+                    id: id.clone(),
+                    label,
+                    enabled,
+                    elsewhere,
+                    location,
+                    force,
+                })
+                .await?;
+        }
+        // SB-322: given to an agent, or taken back with an empty name.
+        if let Some(to) = assigned_to {
+            answer = self
+                .call(Operation::Assign {
+                    id,
+                    to: Some(to),
+                    force,
+                })
+                .await?;
+        }
+        Ok(answer)
     }
     /// SB-314: the window's *Restore*, by the backup's file name.
     async fn backup_restore(&self, args: &Map<String, Value>) -> Result<Value, String> {

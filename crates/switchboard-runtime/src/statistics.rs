@@ -252,6 +252,8 @@ impl Statistics {
             m.insert("label".into(), json!(a.map(|a| a.label.clone())));
             m.insert("provider".into(), json!(a.map(|a| a.provider)));
             m.insert("kind".into(), json!(a.map(|a| a.kind)));
+            // SB-322: the agent the account is given to, null when none.
+            m.insert("assigned_to".into(), json!(snapshot.assigned_to.get(id)));
             m
         };
         let groups = busiest(

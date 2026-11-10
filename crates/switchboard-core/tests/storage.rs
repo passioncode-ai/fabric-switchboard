@@ -4244,7 +4244,8 @@ fn schema_eleven_is_written_only_while_the_domain_rule_is_retired() {
     drop(store);
     let mut disk = schema_of(root.path());
     assert_eq!(disk["schema_version"], 11);
-    disk["schema_version"] = 12.into();
+    // SB-322: 12 is a known version now (an account given to an agent); 13 is not.
+    disk["schema_version"] = 13.into();
     fs::write(
         root.path().join("accounts.json"),
         serde_json::to_vec(&disk).unwrap(),

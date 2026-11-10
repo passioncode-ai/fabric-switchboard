@@ -1535,6 +1535,44 @@ function elsewhereDialog(account: Account) {
   });
   where.focus();
 }
+/** SB-322: the agent an account is given to, or undefined. */
+const givenTo = (account: Account) => snapshot?.assigned_to?.[account.id];
+/** SB-322: give an account to an agent, or rename the agent it is given to (SCN-089). */
+function givenToDialog(account: Account) {
+  const given = givenTo(account);
+  const context = openDialog(t('Give {label} to an agent', { label: account.label }), t('For an account an agent or service signs in with now. Switchboard keeps checking its usage, so you still see its activity, but never selects it or switches to it by itself.'));
+  const who = input(given ?? ''); who.maxLength = 120; who.required = true; who.placeholder = t('e.g. Frame Agent on Studio');
+  context.body.append(field(t('Which agent'), who, t('The agent or service and where it runs.')));
+  context.actions.append(submit(given ? t('Save') : t('Give to agent')));
+  context.form.addEventListener('submit', (event) => {
+    event.preventDefault();
+    const name = who.value.trim(); if (!name) return;
+    void dialogSave(context, () => adapter.assignAccount(account.id, name), given ? t('Saved for {label}.', { label: account.label }) : t('{label} is given to {agent}. Switchboard no longer uses it by itself.', { label: account.label, agent: name }));
+  });
+  who.focus();
+}
+/** SB-322: the person uses an account given to an agent anyway, after a confirmation (SCN-089). */
+function useAnywayDialog(account: Account) {
+  const agent = givenTo(account) ?? '';
+  const native = canSwitchNative(account) && !projectOf(account.pool);
+  const context = openDialog(t('Use {label} anyway?', { label: account.label }), t('It is given to {agent}. Using it here spends the same subscription the agent uses, and the activity records it. Switchboard still never moves to it by itself.', { agent }));
+  context.actions.append(submit(t('Use anyway')));
+  context.form.addEventListener('submit', (event) => {
+    event.preventDefault();
+    void dialogSave(context, () => native ? adapter.activateNative(account.id, true) : adapter.select(account, true), native ? t('Claude Code now uses {label}. New claude sessions start on it; a running session may need a restart.', { label: account.label }) : t('{label} selected for the next managed request {where}.', { label: account.label, where: inGroup(account.pool, snapshot?.projects) }));
+  });
+}
+/** SB-322: accounts given to agents, apart from the groups: their usage stays visible (SCN-089). */
+function givenSection(accounts: Account[]) {
+  const section = el('section', 'account-group'); section.setAttribute('aria-labelledby', 'given-heading');
+  const heading = el('div', 'group-heading'); const title = el('h2', '', t('Given to agents')); title.id = 'given-heading';
+  heading.append(title, el('span', 'count', plural(accounts.length, { one: '{n} account', other: '{n} accounts' })));
+  section.append(heading, el('p', 'group-note', t('Switchboard checks their usage but never selects them or switches to them by itself.')));
+  const list = el('div', 'account-list'); list.setAttribute('role', 'list');
+  accounts.forEach((account) => list.append(accountRow(account)));
+  section.append(list);
+  return section;
+}
 /** SB-283: move a sign-in to another machine over ssh; nothing changes when a step fails. */
 function sendDialog(account: Account) {
   const context = openDialog(t('Move {label} to another machine', { label: account.label }), t('Its sign-in moves over ssh: this computer stops using it first, the other machine saves it and checks that it answers. If a step fails, nothing changes.'));
@@ -1799,14 +1837,17 @@ function renderAccounts(main: HTMLElement) {
   }
   const orgBar = organizationsBar(accounts); if (orgBar) main.append(orgBar);
   const machineBar = machinesBar(accounts); if (machineBar) main.append(machineBar);
-  const shown = accounts.filter((a) => inOrganizationFilter(snapshot!, a, orgFilter) && inMachineFilter(a));
+  const filtered = accounts.filter((a) => inOrganizationFilter(snapshot!, a, orgFilter) && inMachineFilter(a));
+  // SB-322: accounts given to agents are listed in their own section below the groups.
+  const given = filtered.filter((a) => givenTo(a) !== undefined);
+  const shown = filtered.filter((a) => givenTo(a) === undefined);
   const sorting = el('div', 'account-sort-note');
   sorting.append(el('span', '', t('Within each group: remaining quota first, then shortest wait. Unknown usage follows.')), button(countdownPaused ? t('Resume countdown') : t('Pause countdown'), () => {
     if (!countdownPaused) { pausedCountdowns.clear(); root.querySelectorAll<HTMLElement>('[data-countdown]').forEach(node => pausedCountdowns.set(countdownKey(node), node.textContent ?? '')); }
     countdownPaused = !countdownPaused; render(); restoreFocus('countdown-toggle');
   }, 'text-button', 'countdown-toggle'));
   main.append(sorting);
-  if (!shown.length) main.append(el('p', 'form-note', t('No account here yet.')));
+  if (!shown.length && !given.length) main.append(el('p', 'form-note', t('No account here yet.')));
   for (const group of groupAccounts(shown, quotaContext())) {
     const section = el('section', 'account-group'); section.setAttribute('aria-label', t('{provider} accounts', { provider: providerName(group.provider) }));
     const heading = el('div', 'group-heading');
@@ -1834,6 +1875,7 @@ function renderAccounts(main: HTMLElement) {
     }
     main.append(section);
   }
+  if (given.length) main.append(givenSection(given));
   main.append(el('p', 'surface-note', t('Switch changes the account of the ordinary Claude Code on this computer. Select chooses the account for managed sessions launched from Switchboard; a response already in progress keeps its account.')));
   main.append(kimiSection());
 }
@@ -1991,6 +2033,8 @@ function accountRow(account: Account) {
   const elsewhere = snapshot?.elsewhere?.[account.id] !== undefined;
   // SB-284: where it works, when the person said so.
   const location = snapshot?.locations?.[account.id];
+  const agent = givenTo(account);
+  if (agent !== undefined) { const badge = el('span', 'badge muted', t('Given to {agent}', { agent })); badge.title = t('Switchboard checks its usage but never selects it or switches to it by itself.'); title.append(badge); }
   if (elsewhere) { const badge = el('span', 'badge muted', location ? t('On {location}', { location }) : t('On another machine')); badge.title = t('Marked as used on another machine: this computer never renews it or switches to it, by hand or automatically.'); title.append(badge); }
   else if (!account.enabled) title.append(el('span', 'badge muted', t('Disabled')));
   const org = organizationOf(account);
@@ -2019,6 +2063,8 @@ function primaryButton(account: Account, state: { current: boolean; selected: bo
   const slot = el('div', 'row-primary'); const key = `primary-${account.id}`;
   const action = primaryAction(account, state);
   const status = (text: string) => { const label = el('span', 'row-state', text); label.tabIndex = -1; label.dataset.focus = key; return label; };
+  // SB-322: an account given to an agent offers to take it back; using it anyway is in the menu.
+  if (givenTo(account) !== undefined && account.enabled) { slot.append(button(t('Take back'), () => void mutate(() => adapter.assignAccount(account.id, null), t('{label} is back: Switchboard may use it again.', { label: account.label }), key), 'button row-button quiet', key)); return slot; }
   if (action === 'in_use') slot.append(status(t('✓ In use')));
   else if (action === 'selected') slot.append(status(t('✓ Selected')));
   else if (action === 'switch') { const control = button(t('Switch'), () => switchNative(account), 'button row-button', key); control.title = t('Make this the Claude Code account on this computer'); slot.append(control); }
@@ -2031,6 +2077,14 @@ function primaryButton(account: Account, state: { current: boolean; selected: bo
 }
 function rowMenu(account: Account, state: { current: boolean; selected: boolean; signIn: boolean; project: boolean }) {
   const items: ([string, () => void] | [string, () => void, string])[] = [];
+  // SB-322: an account given to an agent: its usage, using it anyway, the agent's name, taking it back.
+  if (givenTo(account) !== undefined) {
+    if (account.enabled && canProbe(account)) items.push([t('Check usage'), () => void mutate(() => adapter.probe(account.id), t('Usage observation updated.'), `menu-${account.id}`, account.id)]);
+    if (account.enabled) items.push([t('Use anyway…'), () => useAnywayDialog(account)]);
+    items.push([t('Which agent…'), () => givenToDialog(account)], [t('Take back'), () => void mutate(() => adapter.assignAccount(account.id, null), t('{label} is back: Switchboard may use it again.', { label: account.label }), `menu-${account.id}`)]);
+    items.push([t('Rename or disable…'), () => editDialog(account)], [t('Remove…'), () => removeDialog(account), 'danger-text']);
+    return menu(account.id, t('More actions for {label}', { label: account.label }), items);
+  }
   if (account.enabled && canSwitchNative(account) && !state.project && !state.selected) items.push([t('Select for managed sessions'), () => void mutate(() => adapter.select(account), t('{label} selected for the next managed request {where}.', { label: account.label, where: inGroup(account.pool, snapshot?.projects) }), `menu-${account.id}`)]);
   if (account.enabled && canProbe(account)) items.push([t('Check usage'), () => void mutate(() => adapter.probe(account.id), t('Usage observation updated.'), `menu-${account.id}`, account.id)]);
   if (account.enabled) items.push([t('Launch…'), () => launchDialog(account)]);
@@ -2040,6 +2094,8 @@ function rowMenu(account: Account, state: { current: boolean; selected: boolean;
   // SB-175 (SB-168 D-2): an account signed in on another machine too must not be renewed from here.
   // SB-284: marking asks where it works; a marked account can say it later.
   items.push([snapshot?.elsewhere?.[account.id] === undefined ? t('Used on another machine') : t('Where it works…'), () => elsewhereDialog(account)]);
+  // SB-322: an agent or service signs in with it now; its usage stays visible here.
+  items.push([t('Give to an agent…'), () => givenToDialog(account)]);
   // SB-283: a subscription sign-in no group has selected moves over ssh, without a new sign-in there.
   if (account.kind === 'oauth' && account.enabled && !state.selected && snapshot?.elsewhere?.[account.id] === undefined) items.push([t('Move to another machine…'), () => sendDialog(account)]);
   // SB-318: for a colleague or a machine ssh does not reach: a signed record they sign in with.

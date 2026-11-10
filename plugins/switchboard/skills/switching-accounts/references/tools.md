@@ -55,8 +55,9 @@ Annotations: `readOnlyHint: true`.
 `groups` (every group it serves, its own first), `enabled`, `selected_for_next_request`,
 `signed_in_cli`, `lowest_remaining_percent`, `usage_fresh`, `organization`, `also_organizations`
 (`{id, name}` of each organization it also works for), `elsewhere` (used on
-another machine) and `location` (where, when said). `machine` lists only this machine's accounts
-or only those used elsewhere.
+another machine) and `location` (where, when said), `assigned_to` (the agent or service it is given
+to, null when none: Switchboard keeps observing its usage but never uses it by itself). `machine`
+lists only this machine's accounts or only those used elsewhere.
 
 ### `switchboard_usage`: `account_id?`, `refresh?: bool` (default false)
 
@@ -319,7 +320,7 @@ Each group folder whose Claude Code sessions are routed to the group's accounts 
 
 Annotations: `readOnlyHint: false`, `destructiveHint: false`, `idempotentHint: true`.
 
-### `switchboard_switch`: `account_id`, `target?`, `global?`
+### `switchboard_switch`: `account_id`, `target?`, `global?`, `force?`
 
 | target | Result `action` | Notes |
 |---|---|---|
@@ -329,6 +330,9 @@ Annotations: `readOnlyHint: false`, `destructiveHint: false`, `idempotentHint: t
 
 Result: `{action, account: {id, label, pool}, message}`. A response already streaming
 keeps its account; a manual choice starts the automatic switching cooldown.
+An account given to an agent (`assigned_to`) is refused ("This account is given to an agent, so
+Switchboard does not use it. Take it back, or use it anyway.") unless `force: true`, which only the
+operator's request to use it anyway justifies; the activity records it as `assignment override`.
 
 ### `switchboard_project_set` (a folder rule): `account_id`, `path?`, `target?`, `enabled?`, `expires_in_hours?`
 
@@ -417,12 +421,16 @@ out for good. `folder` as `switchboard_project_suggestions` lists it.
 The repository owners (`github.com/example`) whose new repositories join the group by
 themselves. Without `add` or `remove`, reads them; changing them only when the operator asks.
 
-### `switchboard_account_update`: `account_id`, `label?`, `enabled?`, `elsewhere?`, `location?`
+### `switchboard_account_update`: `account_id`, `label?`, `enabled?`, `elsewhere?`, `location?`, `assigned_to?`, `force?`
 
 Only when the operator asks. Renames, enables or disables an account; `elsewhere: true`
 disables it here because another machine uses it; `location` says where it works (a machine and
-its user, or a colleague, at most 80 characters) and marks it so; an empty one clears it. At
-least one field ("Name a label, enabled, elsewhere or location to change.").
+its user, or a colleague, at most 80 characters) and marks it so; an empty one clears it.
+`assigned_to` gives the account to an agent or service that signs in with it now (its name, at
+most 120 characters): unlike `elsewhere` it stays enabled, its sign-in is renewed and its usage
+observed, but nothing selects it, switches to it or launches on it by itself; giving it clears
+`elsewhere`; an empty value takes it back. At least one field ("Name a label, enabled, elsewhere,
+location or assigned_to to change.").
 
 ### `switchboard_account_send`: `account_id`, `to`, `pool?`, `remote?`, `remote_data_dir?`, `decision?`
 

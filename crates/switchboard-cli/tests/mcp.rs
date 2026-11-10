@@ -129,6 +129,7 @@ async fn fixture() -> (tempfile::TempDir, tempfile::TempDir, Owner, Vec<String>)
             provider: Provider::Claude,
             pool: "work".into(),
             id: ids[0].clone(),
+            force: false,
         })
         .await
         .unwrap();
@@ -1240,6 +1241,42 @@ async fn accounts_rotation_activity_and_queues_are_reachable_over_mcp() {
         json!({"account_id": ids[2], "elsewhere": false}),
     );
     assert!(!error, "{back}");
+    // SB-322: given to an agent, it says so in the list (null for every other account) and a
+    // switch to it is refused unless forced; an empty name takes it back.
+    let (error, given) = agent.tool(
+        "switchboard_account_update",
+        json!({"account_id": ids[2], "assigned_to": "Frame Agent on Studio"}),
+    );
+    assert!(!error, "{given}");
+    let (_, accounts) = agent.tool("switchboard_accounts", json!({}));
+    for a in accounts["accounts"].as_array().unwrap() {
+        let expected = if a["id"] == ids[2] {
+            json!("Frame Agent on Studio")
+        } else {
+            Value::Null
+        };
+        assert_eq!(a["assigned_to"], expected, "{accounts}");
+    }
+    let (error, refused) = agent.tool(
+        "switchboard_switch",
+        json!({"account_id": ids[2], "target": "route"}),
+    );
+    assert!(error, "{refused}");
+    assert!(
+        refused.to_string().contains("given to an agent"),
+        "{refused}"
+    );
+    let (error, back) = agent.tool(
+        "switchboard_account_update",
+        json!({"account_id": ids[2], "assigned_to": ""}),
+    );
+    assert!(!error, "{back}");
+    let (_, accounts) = agent.tool("switchboard_accounts", json!({}));
+    assert!(accounts["accounts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|a| a["assigned_to"].is_null()));
     // SB-122: an account in a pool no project uses goes back to default; elsewhere only a
     // project's pool is accepted.
     let (error, moved) = agent.tool(
@@ -1353,4 +1390,84 @@ async fn accounts_rotation_activity_and_queues_are_reachable_over_mcp() {
     // SB-299: the window's pending sign-ins, read by an agent; none waits here.
     let (error, pending) = agent.tool("switchboard_login", json!({"action": "pending"}));
     assert!(!error && pending["logins"] == json!([]), "{pending}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_account_is_given_to_an_agent_and_taken_back_from_the_cli() {
+    // SB-322: `accounts assign` and `unassign`; `accounts list --json` carries `assigned_to`
+    // (null when none) beside every field it had; a selection is refused without `--force`.
+    let (data, _projects, _owner, ids) = fixture().await;
+    let id = ids[2].clone();
+    let run = |args: &[&str]| {
+        Command::new(env!("CARGO_BIN_EXE_switchboard"))
+            .arg("--data-dir")
+            .arg(data.path())
+            .args(args)
+            .output()
+            .unwrap()
+    };
+    let row = |run: &dyn Fn(&[&str]) -> std::process::Output| {
+        let out = run(&["--json", "accounts", "list"]);
+        let value: Value = serde_json::from_slice(&out.stdout).unwrap();
+        value["data"]["accounts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|a| a["id"] == id.as_str())
+            .unwrap()
+            .clone()
+    };
+    let before = row(&run);
+    assert!(before["assigned_to"].is_null(), "{before}");
+    assert_eq!(before["elsewhere"], false);
+    let assigned = run(&["accounts", "assign", &id, "--to", "Frame Agent on Studio"]);
+    assert!(
+        assigned.status.success(),
+        "{}",
+        String::from_utf8_lossy(&assigned.stderr)
+    );
+    let given = row(&run);
+    assert_eq!(given["assigned_to"], "Frame Agent on Studio");
+    assert_eq!(given["enabled"], true);
+    let refused = run(&[
+        "accounts",
+        "select",
+        &id,
+        "--provider",
+        "claude",
+        "--pool",
+        "personal",
+    ]);
+    assert!(!refused.status.success());
+    assert!(
+        String::from_utf8_lossy(&refused.stderr).contains("given to an agent"),
+        "{}",
+        String::from_utf8_lossy(&refused.stderr)
+    );
+    let forced = run(&[
+        "accounts",
+        "select",
+        &id,
+        "--provider",
+        "claude",
+        "--pool",
+        "personal",
+        "--force",
+    ]);
+    assert!(
+        forced.status.success(),
+        "{}",
+        String::from_utf8_lossy(&forced.stderr)
+    );
+    assert!(run(&["accounts", "unassign", &id]).status.success());
+    assert!(row(&run)["assigned_to"].is_null());
+    let events: Value = serde_json::from_slice(&run(&["--json", "events"]).stdout).unwrap();
+    let details: Vec<&str> = events["data"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|e| e["action"] == "assignment")
+        .map(|e| e["detail"].as_str().unwrap())
+        .collect();
+    assert_eq!(details, ["assigned", "override", "cleared"]);
 }

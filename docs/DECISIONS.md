@@ -6,7 +6,7 @@ never renumber, never delete. The doc map ([DOCMAP.md](DOCMAP.md)) names this fi
 register. Decisions made before 2026-11-08 live where they were made (plans' `D-<n>`, board rows,
 research notes); the ones still in force that the board cites are seeded below with their source.
 
-**Next free ID:** `DEC-0010`
+**Next free ID:** `DEC-0011`
 
 ## Format
 
@@ -137,3 +137,24 @@ research notes); the ones still in force that the board cites are seeded below w
   [brand/strings.md](brand/strings.md), [CHANGELOG](../CHANGELOG.md), [evidence/backlog.md](evidence/backlog.md) (SB-285)
 - **Source:** operator, 2026-11-06, studio-agent `d3848fb7` item 4: «не делать никакую привязку
   по имейлу жесткую»; the incident of 2026-11-08 on the operator's Mac; SB-285
+
+### DEC-0010: An account given to an agent stays observed and is never chosen by itself
+
+- **Date:** 2026-11-10
+- **Status:** Accepted
+- **Context:** a Claude subscription account was given to Frame Agent: a long-lived token of it
+  sits in that agent's vault. The only way to keep Switchboard off it was `elsewhere` (SB-175),
+  which also turns the account off, stops its renewal and its usage checks, so its activity was no
+  longer visible.
+- **Decision:** a separate state, *given to an agent* (`assigned_to`, the agent's name). The account
+  stays enabled, renewed and observed on the usual schedule; every automatic path (rotation,
+  failover, fallback chains, recovery, folder rules, launches, native activation by rotation)
+  passes over it, and a manual switch or selection is refused unless the person uses it anyway,
+  which is journaled. Giving it clears `elsewhere`; marking it `elsewhere` ends the assignment.
+- **Consequences / affects:** [CONTRACTS.md](CONTRACTS.md) (SB-322),
+  [ACCOUNTS-AND-ROTATION.md](ACCOUNTS-AND-ROTATION.md), [CLI.md](CLI.md),
+  [ux/scenarios.md](ux/scenarios.md) (SCN-089), the skill's `references/tools.md`,
+  [CHANGELOG](../CHANGELOG.md), [evidence/backlog.md](evidence/backlog.md) (SB-322); schema version 12
+- **Source:** operator, 2026-11-10: «если аккаунт переходит на такой режим, чтобы он убирался из
+  свитчборда ... такие аккаунты мы видели, мы трекали их активность ... но мы не могли на них перейти
+  использовать без специального переключения»; SB-322

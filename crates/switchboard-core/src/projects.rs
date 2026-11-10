@@ -456,6 +456,10 @@ pub(crate) fn validate_projects(s: &Snapshot) -> Result<(), String> {
 }
 
 impl Snapshot {
+    /// SB-322: the account is given to an agent, so nothing chooses it on its own.
+    pub fn is_assigned(&self, id: &str) -> bool {
+        self.assigned_to.contains_key(id)
+    }
     /// The group a session in `path` works in (SB-146): of the groups holding the folder, the
     /// first (in creation order) with an enabled account, else the first.
     /// With organizations defined, a personal group comes first: the more private wins (SB-109,

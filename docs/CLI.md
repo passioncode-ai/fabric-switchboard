@@ -27,6 +27,9 @@ switchboard accounts select ACCOUNT_UUID --provider claude --pool work
 switchboard accounts update ACCOUNT_UUID --label Work                  # or --enabled false, or both
 switchboard accounts update ACCOUNT_UUID --elsewhere true              # used on another machine: never renewed, rotated to or switched to here (SB-175); false: used here again
 switchboard accounts update ACCOUNT_UUID --location "Mac Studio, user alex"   # SB-284: says where it works (and marks it used elsewhere); "" clears it
+switchboard accounts assign ACCOUNT_UUID --to "Frame Agent on Studio"   # SB-322: an agent signs in with it now: usage still checked, never selected or switched to by itself; clears --elsewhere
+switchboard accounts unassign ACCOUNT_UUID                          # SB-322: take it back
+switchboard accounts select ACCOUNT_UUID --provider claude --force   # SB-322: use an account given to an agent anyway (journaled); also `accounts activate --force`
 switchboard accounts send ACCOUNT_UUID --to user@studio.local [--pool agents]     # SB-283: move the sign-in over ssh; no new sign-in there, undone on failure
 switchboard accounts hand-over ACCOUNT_UUID --to "Anna, MacBook" > handover.json   # SB-283: signed record, no credential; marks it used elsewhere
 switchboard accounts receive handover.json --signer KEY [--apply] [--headless]    # on the receiving machine: shows the plan; --apply starts the sign-in

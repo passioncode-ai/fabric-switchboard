@@ -160,6 +160,10 @@ struct Payload {
     /// SB-284: where each of those works (old account id → the person's words).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     locations: BTreeMap<String, String>,
+    /// SB-322: accounts given to an agent (old account id → the agent's name). An older reader
+    /// ignores it and restores them as ordinary accounts.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    assigned_to: BTreeMap<String, String>,
     /// SB-285: written by a version where an address's domain only suggests an organization, so
     /// `memberships` holds every placement. Absent from an older backup, whose restore records
     /// the domain's placements for the accounts it adds (`Store::freeze_domain_placements`).
@@ -342,6 +346,7 @@ pub fn write(
             .collect(),
         elsewhere: snapshot.elsewhere.clone(),
         locations: snapshot.locations.clone(),
+        assigned_to: snapshot.assigned_to.clone(),
         memberships: snapshot.memberships.into_iter().collect(),
         domain_rule_retired: true,
     })
@@ -734,6 +739,12 @@ pub fn restore(
             let _ = store.mark_elsewhere_at(id, true, *at, location);
         }
     }
+    // SB-322: and what the person gave to an agent.
+    for (old, to) in &payload.assigned_to {
+        if let Some(id) = ids.get(old) {
+            let _ = store.assign_to_agent(id, Some(to));
+        }
+    }
     // SB-285: the backup's word decides for the accounts this restore added, not the
     // confirmation their save recorded a moment ago.
     let _ = store.forget_restored_placements(&added);
@@ -1106,6 +1117,7 @@ mod tests {
             also_organizations: BTreeMap::new(),
             elsewhere: BTreeMap::new(),
             locations: BTreeMap::new(),
+            assigned_to: BTreeMap::new(),
             domain_rule_retired: true,
         };
         let json = serde_json::to_vec(&payload).unwrap();
@@ -1332,6 +1344,29 @@ mod tests {
             .unwrap()
     }
 
+    #[test]
+    fn a_restore_keeps_what_was_given_to_an_agent() {
+        // SB-322: the agent an account is given to travels in the backup; a restore never
+        // makes such an account a group's selection.
+        let temp = tempfile::tempdir().unwrap();
+        let backups = temp.path().join("backups");
+        let keys = Keys::default();
+        let original = store(&temp.path().join("one"));
+        let a = save(&original, "synthetic-a", "token-a-secret");
+        original
+            .assign_to_agent(&a.id, Some("Frame Agent on Studio"))
+            .unwrap();
+        let info = write(&original, &backups, &keys, 1_000).unwrap().unwrap();
+        let fresh = store(&temp.path().join("two"));
+        restore(&fresh, &backups, &info.file, &keys).unwrap();
+        let snap = fresh.snapshot().unwrap();
+        let a2 = &snap.accounts[0];
+        assert_eq!(
+            snap.assigned_to.get(&a2.id).map(String::as_str),
+            Some("Frame Agent on Studio")
+        );
+        assert!(a2.enabled && snap.routes.is_empty());
+    }
     #[test]
     fn a_reinstall_gets_organizations_their_accounts_and_groups_back() {
         // SB-158/SB-109: organizations, the person's word on an account and a group's

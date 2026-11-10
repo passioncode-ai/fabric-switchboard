@@ -327,12 +327,15 @@ export function createDemoAdapter(): Adapter {
       }
       return { imported, failed: 1, skipped: 1 };
     },
-    async activateNative(id) {
+    async activateNative(id, force) {
       await pause(); const item = enabled(id);
+      const given = state.assigned_to?.[id] !== undefined;
+      if (given && !force) throw new Error('This account is given to an agent, so Switchboard does not use it. Take it back, or use it anyway.');
       if (state.projects?.some((p) => p.pool === item.pool)) throw new Error(PROJECT_NOT_NATIVE);
       if (item.provider !== 'claude' || item.kind !== 'oauth' || !item.external_identity) throw new Error('Native activation requires a Claude OAuth account with an external identity.');
       current.claude = { status: 'available', identity: structuredClone(item.external_identity), account_id: id };
       log('activation', id, 'completed');
+      if (given) log('assignment', id, 'override');
     },
     async setPolicy(policy) {
       await pause();
@@ -363,7 +366,8 @@ export function createDemoAdapter(): Adapter {
     async markElsewhere(id, on, location) { await pause(); const marks = (state.elsewhere ??= {}); const places = (state.locations ??= {}); account(id).enabled = !on; if (on) { marks[id] ??= now(); if (location !== undefined) { if (location.trim()) places[id] = location.trim(); else delete places[id]; } for (const key of Object.keys(state.routes)) if (state.routes[key] === id) delete state.routes[key]; } else { delete marks[id]; delete places[id]; } log('account.updated', id, on ? 'Marked as used on another machine' : 'Used here again'); },
     async update(id, label, active) { await pause(); Object.assign(account(id), { label, enabled: active }); if (active) delete state.elsewhere?.[id]; if (!active) for (const key of Object.keys(state.routes)) if (state.routes[key] === id) delete state.routes[key]; log('account.updated', id, active ? 'Enabled' : 'Disabled; route cleared'); },
     async remove(id) { await pause(); if (Object.values(state.routes).includes(id)) throw new Error('Select another account in this pool, or disable this account, before removing it.'); account(id); state.accounts = state.accounts.filter((item) => item.id !== id); state.rules = state.rules!.filter((rule) => rule.account_id !== id); log('account_removed', id, 'success'); },
-    async select(item) { await pause(); enabled(item.id); state.routes[`${item.provider}:${item.pool}`] = item.id; log('account_selected', item.id, 'success'); },
+    async select(item, force) { await pause(); enabled(item.id); const given = state.assigned_to?.[item.id] !== undefined; if (given && !force) throw new Error('This account is given to an agent, so Switchboard does not use it. Take it back, or use it anyway.'); state.routes[`${item.provider}:${item.pool}`] = item.id; log('account_selected', item.id, 'success'); if (given) log('assignment', item.id, 'override'); },
+    async assignAccount(id, to) { await pause(); const item = account(id); const who = to?.trim(); if (who) { if (state.elsewhere?.[id] !== undefined) { delete state.elsewhere[id]; item.enabled = true; } delete state.locations?.[id]; (state.assigned_to ??= {})[id] = who; for (const key of Object.keys(state.routes)) if (state.routes[key] === id) delete state.routes[key]; log('assignment', id, 'assigned'); } else if (state.assigned_to?.[id] !== undefined) { delete state.assigned_to[id]; log('assignment', id, 'cleared'); } },
     async launch(id, mode, workingDirectory) { await pause(); if (!isAbsoluteProjectPath(workingDirectory)) throw new Error('Choose an existing project directory.'); const item = enabled(id); if (mode === 'managed' && state.routes[`${item.provider}:${item.pool}`] !== id) throw new Error('Managed mode requires a selected account in this pool.'); log('session.launched', id, `Synthetic ${mode} launch`); return { message: 'Synthetic launch recorded; no terminal was opened.' }; },
     // The browser demo has no file system: the picker answers with one synthetic folder.
     async pickFolder() { await pause(); return '/Users/demo/Projects/switchboard-demo'; },

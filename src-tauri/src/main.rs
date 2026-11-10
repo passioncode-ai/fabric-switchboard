@@ -144,11 +144,35 @@ async fn import_claude_swap(pool: String, state: State<'_, Slot>) -> Result<Valu
         .await
 }
 #[tauri::command]
-async fn activate_native(id: String, state: State<'_, Slot>) -> Result<Value, String> {
+async fn activate_native(
+    id: String,
+    force: Option<bool>,
+    state: State<'_, Slot>,
+) -> Result<Value, String> {
     state
         .runtime()
         .await?
-        .execute(Operation::ActivateNative { id })
+        .execute(Operation::ActivateNative {
+            id,
+            force: force.unwrap_or(false),
+        })
+        .await
+}
+/// SB-322: give an account to an agent (`to` names it), or take it back (`to` null or blank).
+#[tauri::command]
+async fn assign_account(
+    id: String,
+    to: Option<String>,
+    state: State<'_, Slot>,
+) -> Result<Value, String> {
+    state
+        .runtime()
+        .await?
+        .execute(Operation::Assign {
+            id,
+            to,
+            force: false,
+        })
         .await
 }
 #[tauri::command]
@@ -409,12 +433,18 @@ async fn select_account(
     provider: Provider,
     pool: String,
     id: String,
+    force: Option<bool>,
     state: State<'_, Slot>,
 ) -> Result<Value, String> {
     state
         .runtime()
         .await?
-        .execute(Operation::Select { provider, pool, id })
+        .execute(Operation::Select {
+            provider,
+            pool,
+            id,
+            force: force.unwrap_or(false),
+        })
         .await
 }
 #[tauri::command]
@@ -1651,6 +1681,7 @@ fn main() {
             open_handover,
             receive_handover,
             mark_elsewhere,
+            assign_account,
             remove_account,
             select_account,
             runtime_status,

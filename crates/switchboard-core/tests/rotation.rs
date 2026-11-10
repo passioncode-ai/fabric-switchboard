@@ -1973,3 +1973,148 @@ fn every_group_with_accounts_gets_managed_switching_on_and_a_saved_off_stands() 
         "a second pass writes nothing"
     );
 }
+
+/// SB-322: an account given to an agent stays enabled and observed, but nothing here moves to
+/// it: no rotation, no failover, no selection by hand unless the person uses it anyway, which
+/// the journal records. Taking it back makes it a candidate again.
+#[test]
+fn an_account_given_to_an_agent_is_never_switched_to_but_still_observed() {
+    let (root, vault, store) = setup();
+    let now = clock();
+    let a = account(&store, "org-a", now);
+    let b = account(&store, "org-b", now);
+    let c = account(&store, "org-c", now);
+    observe(&store, &a, 95., now);
+    observe(&store, &b, 50., now);
+    observe(&store, &c, 5., now);
+    store.select(Provider::Claude, "default", &c).unwrap();
+    // Giving c away takes its selection away and keeps it enabled.
+    store
+        .assign_to_agent(&c, Some("  Frame Agent on Studio "))
+        .unwrap();
+    let snap = store.snapshot().unwrap();
+    assert!(snap.accounts.iter().any(|x| x.id == c && x.enabled));
+    assert_eq!(
+        snap.assigned_to.get(&c).map(String::as_str),
+        Some("Frame Agent on Studio")
+    );
+    assert!(snap.routes.is_empty(), "its selection is cleared");
+    assert!(snap
+        .events
+        .iter()
+        .any(|e| e.action == "assignment" && e.detail == "assigned"));
+    // Rotation passes over it although it has the most room.
+    let p = policy();
+    assert_eq!(
+        store
+            .rotation_decision(&p, Some(&a), now)
+            .unwrap()
+            .candidate_id
+            .as_deref(),
+        Some(b.as_str())
+    );
+    // A selection by hand is refused with its own reason, nothing changes.
+    assert_eq!(
+        store.select(Provider::Claude, "default", &c).unwrap_err(),
+        switchboard_core::ASSIGNED
+    );
+    assert_eq!(
+        store
+            .select_with_cooldown(Provider::Claude, "default", &c, now)
+            .unwrap_err(),
+        switchboard_core::ASSIGNED
+    );
+    // A failover passes over it too.
+    store.select(Provider::Claude, "default", &a).unwrap();
+    let (moved, _) = store
+        .failover(Provider::Claude, "default", &a, OAUTH, now)
+        .unwrap()
+        .unwrap();
+    assert_eq!(moved.id, b);
+    assert!(store
+        .failover(Provider::Claude, "default", &b, OAUTH, now)
+        .unwrap()
+        .is_none());
+    // Its usage is still taken.
+    observe(&store, &c, 7., now + 1);
+    let snap = store.snapshot().unwrap();
+    let observed = snap.accounts.iter().find(|x| x.id == c).unwrap();
+    assert_eq!(observed.usage.as_ref().unwrap().used_percent, 7.);
+    // Used anyway: selected, and the journal says it was an override.
+    store
+        .select_anyway(Provider::Claude, "default", &c, now + 2)
+        .unwrap();
+    assert_eq!(store.route(Provider::Claude, "default").unwrap().0.id, c);
+    let snap = store.snapshot().unwrap();
+    assert!(snap.events.iter().any(|e| e.action == "assignment"
+        && e.detail == "override"
+        && e.account_id.as_deref() == Some(c.as_str())));
+    assert!(
+        snap.assigned_to.contains_key(&c),
+        "still given to the agent"
+    );
+    // The assignment survives a restart, as schema version 12.
+    drop(store);
+    let disk: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(root.path().join("accounts.json")).unwrap()).unwrap();
+    assert_eq!(disk["schema_version"], 12);
+    let store = Store::open(root.path().into(), vault).unwrap();
+    assert!(store.snapshot().unwrap().assigned_to.contains_key(&c));
+    // Taken back: a candidate again, selectable again.
+    store.assign_to_agent(&c, None).unwrap();
+    let snap = store.snapshot().unwrap();
+    assert!(snap.assigned_to.is_empty());
+    assert!(snap
+        .events
+        .iter()
+        .any(|e| e.action == "assignment" && e.detail == "cleared"));
+    store.select(Provider::Claude, "default", &a).unwrap();
+    assert_eq!(
+        store
+            .rotation_decision(&p, Some(&a), now + 1)
+            .unwrap()
+            .candidate_id
+            .as_deref(),
+        Some(c.as_str())
+    );
+}
+
+/// SB-322: assigning names the agent in at most 120 characters on one line; it clears a mark
+/// of "used on another machine" (and enables the account, which that mark had turned off); an
+/// unknown account is refused.
+#[test]
+fn giving_an_account_to_an_agent_validates_and_clears_the_elsewhere_mark() {
+    let (_root, _vault, store) = setup();
+    let now = clock();
+    let a = account(&store, "org-a", now);
+    store
+        .mark_elsewhere_at(&a, true, now, Some("Mac Studio"))
+        .unwrap();
+    let long = "x".repeat(121);
+    for bad in [long.as_str(), "Frame\nAgent"] {
+        assert_eq!(
+            store.assign_to_agent(&a, Some(bad)).unwrap_err(),
+            switchboard_core::ASSIGNEE_INVALID
+        );
+    }
+    assert!(store.assign_to_agent("missing", Some("Agent")).is_err());
+    let name = "Frame Agent на Studio (frame-agent/prod/CLAUDE_CODE_OAUTH_TOKEN)";
+    store.assign_to_agent(&a, Some(name)).unwrap();
+    let snap = store.snapshot().unwrap();
+    assert!(snap.elsewhere.is_empty() && snap.locations.is_empty());
+    assert!(snap.accounts[0].enabled);
+    assert_eq!(snap.assigned_to.get(&a).map(String::as_str), Some(name));
+    // A blank name takes it back, as does None.
+    store.assign_to_agent(&a, Some(" ")).unwrap();
+    assert!(store.snapshot().unwrap().assigned_to.is_empty());
+    // Marking it as used on another machine ends the assignment: one holder at a time.
+    store.assign_to_agent(&a, Some("Agent")).unwrap();
+    store.mark_elsewhere(&a, true, now).unwrap();
+    let snap = store.snapshot().unwrap();
+    assert!(snap.assigned_to.is_empty() && snap.elsewhere.contains_key(&a));
+    // Removing the account removes its assignment.
+    store.mark_elsewhere(&a, false, now).unwrap();
+    store.assign_to_agent(&a, Some("Agent")).unwrap();
+    store.remove(&a).unwrap();
+    assert!(store.snapshot().unwrap().assigned_to.is_empty());
+}

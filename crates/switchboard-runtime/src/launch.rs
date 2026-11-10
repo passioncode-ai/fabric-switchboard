@@ -2554,7 +2554,18 @@ fn validate(
     if !account.enabled {
         return Err("Enable the account before launch.".into());
     }
-    project_allows(&store.snapshot()?, &account, &working_directory)?;
+    let snapshot = store.snapshot()?;
+    // SB-322: an account given to an agent launches only once the person used it anyway, which
+    // made it its group's selection.
+    if snapshot.is_assigned(&account.id)
+        && snapshot
+            .routes
+            .get(&format!("{}:{}", account.provider.as_str(), account.pool))
+            != Some(&account.id)
+    {
+        return Err(switchboard_core::ASSIGNED.into());
+    }
+    project_allows(&snapshot, &account, &working_directory)?;
     Ok((working_directory, account))
 }
 /// At most this many arguments an in-place launch hands to the agent, each this long (SB-75).
@@ -6147,6 +6158,24 @@ mod tests {
         switchboard_core::Vault::delete(&*f.vault, &id).unwrap();
         assert!(preflight(&f.root, &f.store, &id, "isolated", &f.project).is_err());
         assert_eq!(f.files(), before);
+    }
+    #[tokio::test]
+    async fn an_account_given_to_an_agent_launches_only_once_used_anyway() {
+        // SB-322: no launch hands an agent's account a session, until the person used it
+        // anyway, which made it its group's selection.
+        let f = fixture();
+        let id = f.add(Provider::Claude, AuthKind::OAuth, "default", CLAUDE_OAUTH);
+        f.store.assign_to_agent(&id, Some("Frame Agent")).unwrap();
+        for mode in ["isolated", "managed"] {
+            assert_eq!(
+                preflight(&f.root, &f.store, &id, mode, &f.project).unwrap_err(),
+                switchboard_core::ASSIGNED
+            );
+        }
+        f.store
+            .select_anyway(Provider::Claude, "default", &id, 1_000)
+            .unwrap();
+        assert!(preflight(&f.root, &f.store, &id, "isolated", &f.project).is_ok());
     }
     #[cfg(not(windows))]
     #[tokio::test]
