@@ -129,6 +129,7 @@ async fn fixture() -> (tempfile::TempDir, tempfile::TempDir, Owner, Vec<String>)
             provider: Provider::Claude,
             pool: "work".into(),
             id: ids[0].clone(),
+            force: false,
         })
         .await
         .unwrap();

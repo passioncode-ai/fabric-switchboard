@@ -2554,7 +2554,18 @@ fn validate(
     if !account.enabled {
         return Err("Enable the account before launch.".into());
     }
-    project_allows(&store.snapshot()?, &account, &working_directory)?;
+    let snapshot = store.snapshot()?;
+    // SB-322: an account given to an agent launches only once the person used it anyway, which
+    // made it its group's selection.
+    if snapshot.is_assigned(&account.id)
+        && snapshot
+            .routes
+            .get(&format!("{}:{}", account.provider.as_str(), account.pool))
+            != Some(&account.id)
+    {
+        return Err(switchboard_core::ASSIGNED.into());
+    }
+    project_allows(&snapshot, &account, &working_directory)?;
     Ok((working_directory, account))
 }
 /// At most this many arguments an in-place launch hands to the agent, each this long (SB-75).

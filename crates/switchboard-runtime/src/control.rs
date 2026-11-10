@@ -769,6 +769,7 @@ mod tests {
                 provider: Provider::Claude,
                 pool: "work".into(),
                 id: id.into(),
+                force: false,
             },
         )
         .await

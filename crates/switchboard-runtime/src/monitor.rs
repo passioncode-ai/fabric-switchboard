@@ -2552,6 +2552,7 @@ mod tests {
                 provider: Provider::Claude,
                 pool: "default".into(),
                 id: ids[0].clone(),
+                force: false,
             })
             .await
             .unwrap();

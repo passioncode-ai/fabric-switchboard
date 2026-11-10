@@ -225,6 +225,7 @@ impl Store {
                     && a.provider == policy.provider
                     && state.serves(a, &policy.pool)
                     && !limited.contains(&a.id)
+                    && !state.is_assigned(&a.id)
                     && state.context_admits(&policy.pool, a)
             })
             .filter_map(|a| fresh_usage(a, policy, now).map(|used| (a, used)))
@@ -259,6 +260,7 @@ impl Store {
                         && a.provider == policy.provider
                         && state.serves(a, &policy.pool)
                         && !limited.contains(&a.id)
+                        && !state.is_assigned(&a.id)
                         && state.context_admits(&policy.pool, a)
                         && self.rotation_credential_eligible(a, policy, now)
                 })
@@ -354,6 +356,7 @@ impl Store {
                 a.provider == policy.provider
                     && state.serves(a, &policy.pool)
                     && !held.contains(&a.id)
+                    && !state.is_assigned(&a.id)
                     && fits.admits(a)
                     && state.context_admits(&policy.pool, a)
                     && self.rotation_credential_eligible(a, policy, now)
@@ -393,7 +396,8 @@ pub struct FailoverTally {
     pub kind: u64,
     /// Accounts of another organization than the group's.
     pub context: u64,
-    /// Accounts disabled, or whose stored credential is missing, invalid or expired.
+    /// Accounts disabled, given to an agent (SB-322), or whose stored credential is missing,
+    /// invalid or expired.
     pub credential: u64,
     /// Accounts measured or last known full.
     pub full: u64,
@@ -428,7 +432,7 @@ impl Store {
                 &mut tally.kind
             } else if !state.context_admits(&policy.pool, a) {
                 &mut tally.context
-            } else if !self.rotation_credential_eligible(a, policy, now) {
+            } else if state.is_assigned(&a.id) || !self.rotation_credential_eligible(a, policy, now) {
                 &mut tally.credential
             } else {
                 &mut tally.full
@@ -462,6 +466,7 @@ impl Store {
                 a.provider == policy.provider
                     && state.serves(a, &policy.pool)
                     && a.enabled
+                    && !state.is_assigned(&a.id)
                     && a.kind == AuthKind::OAuth
                     && !held.contains(&a.id)
                     && a.usage_health.as_ref().is_some_and(|h| h.status == "ok")

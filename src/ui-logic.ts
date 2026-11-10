@@ -115,6 +115,7 @@ export function eventAction(action: string): string {
     case 'rotation': return t('Automatic switching');
     case 'launch': return t('Launch');
     case 'login': return t('Sign-in');
+    case 'assignment': return t('Given to an agent');
     // UX-26: a word this window does not know yet is framed in the interface language, never shown bare.
     default: return t('Other event ({code})', { code: action.replaceAll('.', ' · ').replaceAll('_', ' ') });
   }
@@ -156,6 +157,8 @@ export function eventDetail(detail: string): string {
     case 'cancelled': return t('cancelled');
     case 'isolated': return t('isolated session');
     case 'managed': return t('managed session');
+    // SB-322: an account given to an agent that the person used anyway.
+    case 'override': return t('used anyway');
     default: return /^[2-5]xx$/.test(detail) ? t('HTTP {status}', { status: detail }) : detail.replaceAll('_', ' ');
   }
 }

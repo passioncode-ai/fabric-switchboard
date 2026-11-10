@@ -301,6 +301,13 @@ pub struct Snapshot {
     /// its user, a colleague's name), at most 80 characters. Only for marked accounts.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub locations: BTreeMap<String, String>,
+    /// SB-322: accounts the person gave to an agent or service, with its name in their words
+    /// (at most 120 characters). Unlike `elsewhere`, such an account stays enabled, so its
+    /// sign-in is renewed and its usage observed as before; but nothing here uses it for
+    /// requests: no selection, switch, rotation, failover, fallback or launch, unless the person
+    /// uses it anyway (`Store::select_anyway`, recorded as `assignment override`).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub assigned_to: BTreeMap<String, String>,
     /// SB-285: written by a version where an address's domain only suggests an organization.
     /// True exactly while organizations exist; a store read without it, holding organizations,
     /// was written under the domain rule, and opening it records that rule's placements as the
@@ -443,6 +450,8 @@ pub const NOTHING_TO_UPDATE: &str = "Give a new label, an enabled state, or both
 /// Fixed vocabulary prevents callers from accidentally persisting upstream error bodies.
 pub(crate) fn event_valid(action: &str, detail: &str) -> bool {
     match action {
+        // SB-322: given to an agent, taken back, or used anyway by the person.
+        "assignment" => matches!(detail, "assigned" | "cleared" | "override"),
         "account_added" | "account_updated" | "account_removed" | "account_selected" => {
             detail == "success"
         }
@@ -564,6 +573,15 @@ pub(crate) fn validate_snapshot(s: &Snapshot) -> Result<(), String> {
     {
         return Err("Invalid account metadata".into());
     }
+    if s.assigned_to.len() > MAX_ACCOUNTS
+        || s.assigned_to.iter().any(|(id, who)| {
+            !assignee_valid(who)
+                || s.elsewhere.contains_key(id)
+                || !s.accounts.iter().any(|a| &a.id == id)
+        })
+    {
+        return Err("Invalid account metadata".into());
+    }
     for (key, id) in &s.routes {
         if !s.accounts.iter().any(|a| {
             a.id == *id
@@ -593,6 +611,18 @@ fn location_valid(l: &str) -> bool {
 }
 /// Refusal: a location that is empty after trimming is fine (it clears); this is the rest.
 pub const LOCATION_INVALID: &str = "Say where it works in at most 80 characters, on one line.";
+/// SB-322: the agent an account is given to, as a person names it: 1 to 120 characters, no
+/// control character, no surrounding space.
+fn assignee_valid(who: &str) -> bool {
+    !who.is_empty()
+        && who.chars().count() <= 120
+        && who.trim() == who
+        && !who.chars().any(char::is_control)
+}
+/// SB-322: refusal of an agent's name that is too long or spans lines.
+pub const ASSIGNEE_INVALID: &str = "Name the agent in at most 120 characters, on one line.";
+/// SB-322: the refusal of a selection, switch or launch of an account given to an agent.
+pub const ASSIGNED: &str = "This account is given to an agent, so Switchboard does not use it. Take it back, or use it anyway.";
 
 // Refusals of a usage observation, coded for the log by `Store::usage_refusal_code` (PRD-17).
 const OBSERVATION_INVALID: &str = "Invalid usage observation";
@@ -1224,7 +1254,7 @@ impl Store {
             return Ok(None);
         };
         // Compare and move: only a route still on `from` changes.
-        if self.select_transaction(provider, pool, &id, Some(now), Some(from))? {
+        if self.select_transaction(provider, pool, &id, Some(now), Some(from), false)? {
             let _ = self.record("rotation", Some(&id), cause);
             if let Ok(mut tally) = self.failover_tally.lock() {
                 tally.moved += 1;
@@ -1997,6 +2027,9 @@ impl Store {
             // A mark already there keeps its time: saying where does not move it.
             candidate.elsewhere.entry(id.to_owned()).or_insert(now);
             candidate.routes.retain(|_, value| value != id);
+            // SB-322: one holder at a time: an account used on another machine is not given to
+            // an agent here.
+            candidate.assigned_to.remove(id);
             match location {
                 Some("") => {
                     candidate.locations.remove(id);
@@ -2086,6 +2119,7 @@ impl Store {
         }
         candidate.elsewhere.remove(id);
         candidate.locations.remove(id);
+        candidate.assigned_to.remove(id);
         chains::prune(&mut candidate);
         append_event(&mut candidate, "account_removed", Some(id), "success");
         self.publish(&mut state, candidate)?;
@@ -2093,7 +2127,7 @@ impl Store {
         Ok(())
     }
     pub fn select(&self, provider: Provider, pool: &str, id: &str) -> Result<(), String> {
-        self.select_transaction(provider, pool, id, None, None)
+        self.select_transaction(provider, pool, id, None, None, false)
             .map(|_| ())
     }
     /// Publishes the managed route and any matching policy's cooldown in one metadata write.
@@ -2107,8 +2141,64 @@ impl Store {
         if now <= 0 {
             return Err("Invalid rotation time".into());
         }
-        self.select_transaction(provider, pool, id, Some(now), None)
+        self.select_transaction(provider, pool, id, Some(now), None, false)
             .map(|_| ())
+    }
+    /// SB-322: the person's selection of an account given to an agent, which every other path
+    /// refuses: as `select_with_cooldown`, and the journal records `assignment override` right
+    /// after the selection. An account given to no one is selected as usual, with no such line.
+    pub fn select_anyway(
+        &self,
+        provider: Provider,
+        pool: &str,
+        id: &str,
+        now: i64,
+    ) -> Result<(), String> {
+        if now <= 0 {
+            return Err("Invalid rotation time".into());
+        }
+        self.select_transaction(provider, pool, id, Some(now), None, true)?;
+        if self.lock()?.assigned_to.contains_key(id) {
+            self.record("assignment", Some(id), "override")?;
+        }
+        Ok(())
+    }
+    /// SB-322: gives an account to an agent (`Some` with its name) or takes it back (`None` or
+    /// a blank name). Giving it clears its selections and a mark of being used on another
+    /// machine, which also turns the account on again: the agent holds it now, and this machine
+    /// keeps renewing and observing it. A plain disabled account stays disabled.
+    pub fn assign_to_agent(&self, id: &str, to: Option<&str>) -> Result<(), String> {
+        let to = to.map(str::trim).filter(|t| !t.is_empty());
+        if to.is_some_and(|t| !assignee_valid(t)) {
+            return Err(ASSIGNEE_INVALID.into());
+        }
+        let mut state = self.lock()?;
+        let mut candidate = state.clone();
+        let a = candidate
+            .accounts
+            .iter_mut()
+            .find(|a| a.id == id)
+            .ok_or(ACCOUNT_NOT_FOUND)?;
+        match to {
+            Some(who) => {
+                if candidate.elsewhere.remove(id).is_some() {
+                    a.enabled = true;
+                }
+                candidate.locations.remove(id);
+                candidate.routes.retain(|_, value| value != id);
+                candidate.assigned_to.insert(id.to_owned(), who.to_owned());
+                append_event(&mut candidate, "assignment", Some(id), "assigned");
+            }
+            None => {
+                if candidate.assigned_to.remove(id).is_none() {
+                    return Ok(());
+                }
+                append_event(&mut candidate, "assignment", Some(id), "cleared");
+            }
+        }
+        self.publish(&mut state, candidate)?;
+        self.changed();
+        Ok(())
     }
     /// Selects `id`. With `expect`, only while the route still names that account (`None`: no
     /// route); Ok(false) when it no longer does, and nothing changes (SB-102).
@@ -2119,6 +2209,7 @@ impl Store {
         id: &str,
         switched_at: Option<i64>,
         expect: Option<Option<&str>>,
+        anyway: bool,
     ) -> Result<bool, String> {
         let mut state = self.lock()?;
         if let Some(expected) = expect {
@@ -2132,6 +2223,9 @@ impl Store {
         }
         if state.elsewhere.contains_key(id) {
             return Err(ELSEWHERE.into());
+        }
+        if !anyway && state.assigned_to.contains_key(id) {
+            return Err(ASSIGNED.into());
         }
         let a = state
             .accounts

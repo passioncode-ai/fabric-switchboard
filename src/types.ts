@@ -45,7 +45,7 @@ export interface ProjectInput { pool?: string; name: string; folders: string[]; 
 export interface Organization { id: string; name: string; domains?: string[]; provider_organizations?: string[]; created_at: number; /** SB-159: its organization on PassionCode.ai. */ vesta_id?: string | null }
 /** SB-159: the PassionCode.ai connection, no token. */
 export interface PassioncodeStatus { connected: boolean; base: string; state?: 'ok' | 'sign_in_again' | 'provider_sign_in' | 'unreachable'; connected_at?: number; read_at?: number | null; checked_at?: number | null; organizations?: number; cancelled?: boolean; disconnected?: boolean; /** SB-160 (B-7): organizations a read stopped listing, by local id, since `at`. */ released?: { organization: string; at: number }[] }
-export interface Snapshot { accounts: Account[]; routes: Record<string, string>; events: Event[]; policies?: RotationPolicy[]; rules?: ProjectRule[]; projects?: Project[]; organizations?: Organization[]; /** account id → organization id or `personal` */ memberships?: Record<string, string>; /** SB-282: account id → organizations it also works for */ also_organizations?: Record<string, string[]>; /** SB-175: account id → when it was marked as used on another machine */ elsewhere?: Record<string, number>; /** SB-284: account id → where it works, in the person's words */ locations?: Record<string, string> }
+export interface Snapshot { accounts: Account[]; routes: Record<string, string>; events: Event[]; policies?: RotationPolicy[]; rules?: ProjectRule[]; projects?: Project[]; organizations?: Organization[]; /** account id → organization id or `personal` */ memberships?: Record<string, string>; /** SB-282: account id → organizations it also works for */ also_organizations?: Record<string, string[]>; /** SB-175: account id → when it was marked as used on another machine */ elsewhere?: Record<string, number>; /** SB-284: account id → where it works, in the person's words */ locations?: Record<string, string>; /** SB-322: account id → the agent it is given to, in the person's words */ assigned_to?: Record<string, string> }
 export interface RuntimeStatus { proxy_address: string; platform: string; live_mode: string }
 export interface AddInput { label: string; provider: Provider; kind: AuthKind; pool: string; secret: string }
 export interface LoginInput { provider: Provider; label: string; pool: string }
@@ -54,7 +54,7 @@ export interface Adapter {
   currentAccounts(): Promise<CurrentAccounts>;
   captureCurrent(input: CaptureInput): Promise<Account & { organization_group?: OrganizationGroupOffer }>;
   importClaudeSwap(pool: string): Promise<ImportResult>;
-  activateNative(id: string): Promise<void>;
+  /** SB-322: `force` uses an account given to an agent anyway. */ activateNative(id: string, force?: boolean): Promise<void>;
   setPolicy(policy: RotationPolicy): Promise<void>;
   monitorStatus(): Promise<MonitorStatus>;
   sessions(): Promise<{ sessions: SessionInfo[] }>;
@@ -63,13 +63,14 @@ export interface Adapter {
   update(id: string, label: string, enabled: boolean): Promise<void>;
   /** SB-175: mark an account as used on another machine (disabled here), or clear the mark. */
   /** SB-284: `location` says where it works (blank clears it). */ markElsewhere(id: string, on: boolean, location?: string): Promise<void>;
+  /** SB-322: gives an account to an agent (`to` names it), or takes it back (`to` null). */ assignAccount(id: string, to: string | null): Promise<void>;
   /** SB-283: moves a sign-in to another machine over ssh; `pool` is its group there. */ sendAccount(id: string, to: string, pool: string): Promise<void>;
   /** SB-315: takes a moved sign-in back from `from`, the machine the move named. */ recallAccount(id: string, from: string): Promise<void>;
   /** SB-318: hands an account over: a save picker for the signed record, then the account is used by `to`; `saved` null when the picker was closed. */ handOverAccount(id: string, to: string, name: string): Promise<HandOverResult>;
   /** SB-318: a hand-over record chosen with the open picker; null when the picker was closed. */ openHandover(): Promise<unknown | null>;
   /** SB-318: what receiving the record would do, or with `apply` and the giver's key, the sign-in it starts. */ receiveHandover(record: unknown, signer: string | null, apply: boolean): Promise<HandoverPlan>;
   remove(id: string): Promise<void>;
-  select(account: Account): Promise<void>;
+  /** SB-322: `force` uses an account given to an agent anyway. */ select(account: Account, force?: boolean): Promise<void>;
   launch(id: string, mode: 'isolated' | 'managed', workingDirectory: string): Promise<{ message: string; agent_tools?: boolean }>;
   /** A folder chosen with the system picker, opened at `start` when that is a folder; null when the person closed it. */
   pickFolder(start?: string): Promise<string | null>;

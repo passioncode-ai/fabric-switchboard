@@ -505,6 +505,8 @@ pub(crate) fn account_for_folder(
         .into_iter()
         .find(|r| r.provider == provider)
         .and_then(|r| r.effective)
+        // SB-322: a rule naming an account given to an agent does not hand it a session.
+        .filter(|r| !snapshot.is_assigned(&r.account_id))
     {
         return Ok(rule.account_id);
     }

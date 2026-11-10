@@ -821,6 +821,9 @@ enum Accounts {
     Activate {
         /// The account id (`switchboard accounts list`).
         id: String,
+        /// Use an account given to an agent anyway (`accounts assign`); the activity records it.
+        #[arg(long)]
+        force: bool,
     },
     /// Save an API key, a Claude setup token or an auth JSON piped on stdin.
     Add {
@@ -971,6 +974,28 @@ enum Accounts {
         /// The group id whose managed sessions follow it (`default`: the default group).
         #[arg(long, default_value = "default")]
         pool: String,
+        /// Use an account given to an agent anyway (`accounts assign`); the activity records it.
+        #[arg(long)]
+        force: bool,
+    },
+    /// Give an account to an agent or service that holds its sign-in now. Switchboard keeps
+    /// renewing it and checking its usage, so its activity stays visible, but never selects it,
+    /// switches to it or launches on it by itself, and refuses a switch to it without `--force`.
+    /// Clears a mark of being used on another machine.
+    Assign {
+        /// The account id (`switchboard accounts list`).
+        id: String,
+        /// Who holds it, in your words (at most 120 characters), such as `Frame Agent on Studio`.
+        #[arg(long)]
+        to: String,
+        /// Clear the mark although its sign-in was moved to another machine and not called back.
+        #[arg(long)]
+        force: bool,
+    },
+    /// Take an account back from the agent it was given to: Switchboard may use it again.
+    Unassign {
+        /// The account id (`switchboard accounts list`).
+        id: String,
     },
 }
 #[derive(Subcommand)]
@@ -1682,7 +1707,10 @@ async fn run(cli: &Cli) -> Result<Value, String> {
             Accounts::ImportClaudeSwap { pool } => {
                 Operation::ImportClaudeSwap { pool: pool.clone() }
             }
-            Accounts::Activate { id } => Operation::ActivateNative { id: id.clone() },
+            Accounts::Activate { id, force } => Operation::ActivateNative {
+                id: id.clone(),
+                force: *force,
+            },
             Accounts::Add {
                 provider,
                 kind,
@@ -1777,10 +1805,26 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                 pool: pool.clone(),
             },
             Accounts::Remove { id } => Operation::Remove { id: id.clone() },
-            Accounts::Select { id, provider, pool } => Operation::Select {
+            Accounts::Select {
+                id,
+                provider,
+                pool,
+                force,
+            } => Operation::Select {
                 id: id.clone(),
                 provider: (*provider).into(),
                 pool: pool.clone(),
+                force: *force,
+            },
+            Accounts::Assign { id, to, force } => Operation::Assign {
+                id: id.clone(),
+                to: Some(to.clone()),
+                force: *force,
+            },
+            Accounts::Unassign { id } => Operation::Assign {
+                id: id.clone(),
+                to: None,
+                force: false,
             },
         },
         Command::Usage { id: Some(id) } => Operation::Usage { id: id.clone() },
@@ -2483,6 +2527,8 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                 let id = a["id"].as_str().unwrap_or_default().to_owned();
                 a["elsewhere"] = json!(value["elsewhere"].get(&id).is_some());
                 a["location"] = value["locations"].get(&id).cloned().unwrap_or(Value::Null);
+                // SB-322: the agent it was given to, null when none.
+                a["assigned_to"] = value["assigned_to"].get(&id).cloned().unwrap_or(Value::Null);
                 a
             }).collect();
             Ok(json!({"accounts": accounts, "routes": value["routes"]}))
@@ -4121,6 +4167,8 @@ mod mcp_parity {
         ("accounts activate", Tool("switchboard_switch")),
         ("accounts add", Not(PERSON)),
         ("accounts update", Tool("switchboard_account_update")),
+        ("accounts assign", Tool("switchboard_account_update")),
+        ("accounts unassign", Tool("switchboard_account_update")),
         ("accounts move", Tool("switchboard_account_move")),
         ("accounts hand-over", Tool("switchboard_account_hand_over")),
         ("accounts send", Tool("switchboard_account_send")),

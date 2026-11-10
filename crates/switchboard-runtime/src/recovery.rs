@@ -398,6 +398,8 @@ pub(crate) fn candidates(
         .iter()
         .filter(|a| {
             a.enabled
+                // SB-322: an account given to an agent never continues a stopped session.
+                && !snapshot.is_assigned(&a.id)
                 && a.kind == AuthKind::OAuth
                 && a.provider == wait.provider
                 && snapshot.serves(a, pool)
@@ -454,6 +456,7 @@ fn probe_accounts(
         .iter()
         .filter(|a| {
             a.enabled
+                && !snapshot.is_assigned(&a.id)
                 && a.kind == AuthKind::OAuth
                 && a.provider == wait.provider
                 && snapshot.serves(a, pool)
