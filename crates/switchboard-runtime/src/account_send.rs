@@ -86,7 +86,7 @@ pub const SURRENDER_TO_TERMINAL: &str =
 /// given; answers its standard output, or an error when it failed.
 pub type Run<'a> = dyn Fn(&[String], Option<&[u8]>) -> Result<String, String> + 'a;
 
-pub(crate) fn target_valid(target: &str) -> bool {
+pub fn target_valid(target: &str) -> bool {
     !target.is_empty()
         && target.len() <= 255
         && !target.starts_with('-')
@@ -95,10 +95,10 @@ pub(crate) fn target_valid(target: &str) -> bool {
             .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-' | b'_' | b'@' | b':'))
 }
 /// One word for the remote shell: single-quoted, a quote inside written `'\''`.
-pub(crate) fn quoted(word: &str) -> String {
+pub fn quoted(word: &str) -> String {
     format!("'{}'", word.replace('\'', "'\\''"))
 }
-pub(crate) fn remote(program: &Program<'_>, args: &[&str]) -> String {
+pub fn remote(program: &Program<'_>, args: &[&str]) -> String {
     let data_dir = program
         .data_dir
         .map(|dir| ["--data-dir", dir])
@@ -111,7 +111,7 @@ pub(crate) fn remote(program: &Program<'_>, args: &[&str]) -> String {
         .collect::<Vec<_>>()
         .join(" ")
 }
-pub(crate) fn data(output: &str) -> Option<Value> {
+pub fn data(output: &str) -> Option<Value> {
     let value: Value = serde_json::from_str(output.lines().last()?.trim()).ok()?;
     (value["ok"] == true).then(|| value["data"].clone())
 }

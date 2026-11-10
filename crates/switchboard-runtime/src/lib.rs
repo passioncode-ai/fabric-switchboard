@@ -51,6 +51,7 @@ pub mod shell;
 pub mod spend;
 mod statistics;
 pub mod suggest;
+pub mod targets;
 pub mod uninstall;
 mod usage_gate;
 pub mod vault_choice;
@@ -274,6 +275,12 @@ pub enum Operation {
         program: Option<String>,
         #[serde(default)]
         remote_data_dir: Option<String>,
+    },
+    /// SB-332: the other machines this Switchboard knows (from moves and remote runs); with
+    /// `probe`, whether each one's Switchboard answers over ssh now and its version.
+    Targets {
+        #[serde(default)]
+        probe: bool,
     },
     /// SB-327: check another machine against `seats.jsonl` here and this machine's accounts:
     /// moves whose copy is gone, off or refused there, accounts used on both, marks with no
@@ -1254,6 +1261,8 @@ impl Runtime {
                 // SB-327: ssh reads of another machine; the store is only read.
                 | Operation::RemoteStatus { .. }
                 | Operation::RemoteCheck { .. }
+                // SB-332: files here, and with `probe` one ssh read per machine.
+                | Operation::Targets { .. }
                 | Operation::AgentCatalog
                 | Operation::AgentConnect { .. }
                 | Operation::AgentKey
@@ -5559,6 +5568,31 @@ async fn execute(
         Operation::Seats { limit } => Ok(json!({
             "seats": seats::recent(root, limit.unwrap_or(50).clamp(1, 1000)),
         })),
+        Operation::Targets { probe } => {
+            let root = root.to_owned();
+            blocking::run(move || -> Result<Value, String> {
+                let mut machines = targets::known(&root);
+                if probe {
+                    for t in &mut machines {
+                        let machine = t["machine"].as_str().unwrap_or_default().to_owned();
+                        let program = t["program"]
+                            .as_str()
+                            .unwrap_or(account_send::REMOTE_DEFAULT)
+                            .to_owned();
+                        let data_dir = t["data_dir"].as_str().map(str::to_owned);
+                        t["probe"] = targets::probe(
+                            &machine,
+                            &account_send::Program {
+                                path: &program,
+                                data_dir: data_dir.as_deref(),
+                            },
+                            &account_send::ssh_runner,
+                        );
+                    }
+                }
+                Ok(json!({"targets": machines}))
+            })
+        }
         Operation::RemoteStatus {
             target,
             program,
