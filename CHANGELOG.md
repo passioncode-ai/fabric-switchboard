@@ -6,7 +6,7 @@ release pull request renames `Unreleased` to the version. While Windows signing 
 that section must say `windows_authenticode: NOT_SIGNED`. Notes of 0.5.3-beta.1 and earlier are
 on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/releases).
 
-## Unreleased
+## 0.7.50
 
 - Moving an account to another machine (`switchboard accounts send`, MCP `switchboard_account_send`, the window's *Move to another machine…*) takes its organizations with it: an organization the other machine does not have yet is added there by name, and the account is placed in the same organizations there. The answer says when that part did not work; the move itself stands (SB-323).
 - Placing an account in an organization tells you which of its groups stop using it (a group takes only accounts of its own organizations). The *Organization…* dialog says so before you save, and now offers *Also works for* with a single organization too, so an account can stay personal and work for the organization. `personal` named after an organization (`org assign ID Acme personal`) is refused with how to say it instead of being dropped (SB-323).
