@@ -208,6 +208,41 @@ fn context(provider: Provider, explicit: Option<&Path>) -> Result<Context, Strin
         username()?,
     )
 }
+/// The context a read of the person's current sign-in uses (A-Q8, SB-236): the capture, the
+/// owner's "in use now" probe and the quiet probe of the source. A `CLAUDE_CONFIG_DIR`,
+/// `CODEX_HOME` or `CLAUDE_SECURESTORAGE_CONFIG_DIR` inside Switchboard's data folder is a shell
+/// home a hooked terminal set or a launched home, never the person's, and reads as unset, as
+/// `person::` reads it; so a capture from such a terminal reads the person's own sign-in. A write
+/// (activation, a live renewal) uses [`context`] and refuses such a home.
+fn read_context(provider: Provider) -> Result<Context, String> {
+    let user_home = dirs::home_dir().ok_or("User home unavailable.")?;
+    read_context_from(
+        provider,
+        &|name| std::env::var(name).ok(),
+        &user_home,
+        &Native,
+        username()?,
+        crate::default_root().ok().as_deref(),
+    )
+}
+fn read_context_from(
+    provider: Provider,
+    env: &dyn Fn(&str) -> Option<String>,
+    user_home: &Path,
+    reader: &dyn Reader,
+    user: String,
+    root: Option<&Path>,
+) -> Result<Context, String> {
+    let own = |name: &str| {
+        env(name).filter(|value| {
+            !matches!(
+                name,
+                "CLAUDE_CONFIG_DIR" | "CODEX_HOME" | "CLAUDE_SECURESTORAGE_CONFIG_DIR"
+            ) || !root.is_some_and(|root| crate::person::inside(Path::new(value), root))
+        })
+    };
+    context_from(provider, None, &own, user_home, reader, user)
+}
 /// Where Claude Code or Codex keeps its sign-in for this environment, resolved the way the CLI
 /// itself resolves it. Inputs are explicit so every branch is testable without the real home.
 fn context_from(
@@ -463,9 +498,8 @@ fn capture(
     Ok(result)
 }
 /// A capture of the sign-in in `c`, refused when `c` is one of Switchboard's own homes under
-/// `root` (SB-183): a terminal with the shell hook, or a session Switchboard launched, sees a
-/// shell home or a launched home as `CLAUDE_CONFIG_DIR` or `CODEX_HOME`, and its sign-in is
-/// never the person's current account.
+/// `root` (SB-183): such a home's sign-in is never the person's current account. Since SB-236
+/// [`read_context`] never resolves to one, so this is the guard behind it.
 fn capture_from(
     reader: &dyn Reader,
     provider: Provider,
@@ -480,7 +514,7 @@ fn capture_from(
 pub fn capture_current(provider: Provider) -> Result<CapturedProfile, String> {
     let before = probe_source(provider);
     let started = unix_now();
-    let result = context(provider, None)
+    let result = read_context(provider)
         .and_then(|c| capture_from(&Native, provider, &c, crate::default_root().ok()));
     WATCH.remember(provider, before, probe_source(provider), started, &result);
     result
@@ -496,7 +530,7 @@ pub fn capture_current_cached(provider: Provider) -> Result<CapturedProfile, Str
         unix_now,
         || probe_source(provider),
         || {
-            context(provider, None)
+            read_context(provider)
                 .and_then(|c| capture_from(&Native, provider, &c, crate::default_root().ok()))
         },
     )
@@ -747,7 +781,7 @@ static WATCH: Watch = Watch::new();
 
 /// The quiet probe of a provider's sign-in source in this environment.
 fn probe_source(provider: Provider) -> Probe {
-    match context(provider, None) {
+    match read_context(provider) {
         Ok(c) => probe_context(provider, &c, &NativeProbe),
         Err(_) => Probe::Unavailable,
     }
@@ -3247,10 +3281,9 @@ mod tests {
     }
     #[test]
     fn a_capture_from_a_switchboard_home_is_refused() {
-        // SB-183, SCN-074: `accounts capture` and the owner's "in use now" probe, run from a
-        // terminal with the shell hook (or a session Switchboard launched), see a shell home
-        // as CLAUDE_CONFIG_DIR or CODEX_HOME. A signed-in shell home is still not the person's
-        // current account: the capture is refused like a native switch, for both providers.
+        // SB-183, SCN-074: a signed-in shell home is never the person's current account. Since
+        // SB-236 a read's context never resolves to one (the test above); a capture that is
+        // handed one anyway is still refused, like a native switch, for both providers.
         let data = tempfile::tempdir().unwrap();
         let root = readable_temp(data.path()).join("ai.passioncode.fabric-switchboard");
         let claude_home = root.join("shell").join("claude-acme");
@@ -3283,6 +3316,66 @@ mod tests {
             // The same files with no data folder known are captured: the home is the cause.
             assert!(capture_from(&f, provider, c, None).is_ok(), "{provider:?}");
         }
+    }
+    #[test]
+    fn a_read_from_a_hooked_terminal_reads_the_persons_own_sign_in() {
+        // SB-236 (A-Q8): a terminal with the shell hook sets CLAUDE_CONFIG_DIR (and Claude's
+        // secure storage) or CODEX_HOME to a shell home inside Switchboard's data folder. A read
+        // of the current sign-in reads past it to the person's own folder, as `person::` does.
+        let data = tempfile::tempdir().unwrap();
+        let root = readable_temp(data.path()).join("ai.passioncode.fabric-switchboard");
+        let shell = root.join("shell");
+        std::fs::create_dir_all(&shell).unwrap();
+        let claude_home = shell.join("claude-acme");
+        let codex_home = shell.join("codex-acme");
+        let user = readable_temp(data.path()).join("user");
+        let f = Fixture::new();
+        let (claude_value, codex_value) = (
+            claude_home.to_string_lossy().into_owned(),
+            codex_home.to_string_lossy().into_owned(),
+        );
+        let hooked = move |name: &str| match name {
+            "CLAUDE_CONFIG_DIR" | "CLAUDE_SECURESTORAGE_CONFIG_DIR" => Some(claude_value.clone()),
+            "CODEX_HOME" => Some(codex_value.clone()),
+            _ => None,
+        };
+        let c = read_context_from(Provider::Claude, &hooked, &user, &f, "u".into(), Some(&root))
+            .unwrap();
+        assert_eq!(c.home, user.join(".claude"));
+        assert_eq!(c.config, user.join(".claude.json"));
+        assert_eq!(c.service, "Claude Code-credentials");
+        let c = read_context_from(Provider::Codex, &hooked, &user, &f, "u".into(), Some(&root))
+            .unwrap();
+        assert_eq!(c.home, user.join(".codex"));
+        // A write keeps the process's variables and is refused there.
+        let c = context_from(Provider::Claude, None, &hooked, &user, &f, "u".into()).unwrap();
+        assert_eq!(c.home, claude_home);
+        assert!(refuse_home_inside(&c.home, Some(root.clone())).is_err());
+        // The person's own CLAUDE_CONFIG_DIR outside the data folder is kept, and secure
+        // storage pointing at another profile is still refused.
+        let alt = user.join("alt").to_string_lossy().into_owned();
+        let (a, s) = (alt.clone(), claude_home.to_string_lossy().into_owned());
+        let own = move |name: &str| match name {
+            "CLAUDE_CONFIG_DIR" => Some(a.clone()),
+            "CLAUDE_SECURESTORAGE_CONFIG_DIR" => Some(s.clone()),
+            _ => None,
+        };
+        let c = read_context_from(Provider::Claude, &own, &user, &f, "u".into(), Some(&root))
+            .unwrap();
+        assert_eq!(c.home, user.join("alt"));
+        let b = alt.clone();
+        let other = move |name: &str| match name {
+            "CLAUDE_CONFIG_DIR" => Some(b.clone()),
+            "CLAUDE_SECURESTORAGE_CONFIG_DIR" => Some("/elsewhere".to_owned()),
+            _ => None,
+        };
+        assert!(
+            read_context_from(Provider::Claude, &other, &user, &f, "u".into(), Some(&root))
+                .is_err()
+        );
+        // With no data folder known nothing is filtered.
+        let c = read_context_from(Provider::Claude, &hooked, &user, &f, "u".into(), None).unwrap();
+        assert_eq!(c.home, claude_home);
     }
     #[test]
     fn a_home_inside_switchboards_data_folder_is_refused() {
