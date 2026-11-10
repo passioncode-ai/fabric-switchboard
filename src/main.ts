@@ -110,7 +110,7 @@ const noticeStore = () => { if (demoFirstRun) return { getItem: (k: string) => f
  * and sent from the first start. A first-run notice says so once: OK acknowledges it, Turn off
  * turns Switchboard's own switch off (and acknowledges it too). About's switch is the same one.
  */
-const USAGE_COUNTED = () => t('Switchboard counts installs, days of use, how many accounts are saved, by provider and type, and the errors it runs into, by a fixed code, to help PassionCode.ai improve its apps. It never sends account names, e-mail addresses, sign-ins, group names, error messages or what you do with your accounts. A random installation number, shared by the PassionCode.ai tools on this computer, lets one person using several of them count once.');
+const USAGE_COUNTED = () => t('Switchboard counts installs, days of use, how many accounts are saved, by provider and type, and the errors it runs into, by a fixed code, to help PassionCode.ai improve its apps. It also counts how many groups, folders, folder rules, fallback chains and spending ceilings you have set, how many groups switch automatically, how often an account switches and why, and how each run it starts for Fabric starts and ends. It never sends account names, e-mail addresses, sign-ins, group names, folder paths, error messages or what your sessions write. A random installation number, shared by the PassionCode.ai tools on this computer, lets one person using several of them count once.');
 /** Switchboard's own switch (SB-246); the notice says what is now true. */
 function setUsage(wanted: boolean, focus: string) {
   void mutate(async () => { analyticsState = await adapter.setAnalytics(wanted); }, () => usageAnswerText(wanted), focus);
