@@ -6,7 +6,7 @@ release pull request renames `Unreleased` to the version. While Windows signing 
 that section must say `windows_authenticode: NOT_SIGNED`. Notes of 0.5.3-beta.1 and earlier are
 on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/releases).
 
-## Unreleased
+## 0.7.52
 
 - `switchboard launch --target MACHINE --in-place` starts a coding session on another machine in this terminal over ssh; that machine's Switchboard picks the account from the folder's group there. `switchboard targets` (MCP `switchboard_targets`) lists the machines this Switchboard knows from moves and remote runs, and with `--probe` asks each for its version (SB-332).
 - On macOS 27 the local proxy closed every connection as coming from another user, so no managed session, folder route or launched agent got an account there: macOS 27 no longer tells a process who owns another process's socket in the list Switchboard read. The proxy now finds the connecting process among your own processes; a process of another user is still refused (SB-330).
