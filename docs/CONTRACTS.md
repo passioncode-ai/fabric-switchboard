@@ -2442,8 +2442,17 @@ the person's, and `~/.claude` or `~/.codex` is used instead (`~/.pi/agent` for P
 `launch::user_scope` and `launch::board_server` (the MCP servers a launch copies), `agents::setup`
 and the CLI's `onboard --status`.
 
-`projects::detect_session` (which session is asking) still reads `CODEX_HOME` as the process has
-it, only to recognise a home Switchboard launched. The native sign-in context reads past a
+`projects::detect_session` (which session is asking, for `status` and MCP's `target: session`)
+still reads `CODEX_HOME` as the process has it, only to recognise one of Switchboard's homes:
+`runtimes/codex-<pool>` (a launched managed session) and, since SB-235 (2026-11-10),
+`shell/codex-<pool>`, the Codex shell home a hooked terminal in an organization's folder exports;
+both answer `managed:codex:<pool>`, because the shell home reaches `/codex/_auto/v1`, which serves
+a request from the group's folders through the group's managed route, so selecting the group's
+account reaches it. A Claude shell home is not a session of its own: `CLAUDE_CONFIG_DIR` is never
+read there, and a plain `claude` in a hooked terminal is recognised, as without the hook, by the
+folder's route (`ANTHROPIC_BASE_URL` of its `.claude/settings.local.json`) as `managed:claude:<pool>`,
+or as native where no route applies (test
+`projects::tests::sessions_are_detected_from_launch_labels_the_live_proxy_and_codex_homes`). The native sign-in context reads past a
 Switchboard home for reads and refuses it for writes (A-Q8, SB-236, 2026-11-10):
 `external::read_context`, used by `capture_current` and `capture_current_cached` (`accounts
 capture` and the owner's “in use now” probe) and by the quiet probe of the source, treats a
