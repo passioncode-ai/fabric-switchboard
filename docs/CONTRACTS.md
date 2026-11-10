@@ -2593,7 +2593,16 @@ data folder, Keychain items, log and login item are that user's own.
   the uid that owns the other end of each loopback connection it accepts and closes one whose
   process belongs to another user before reading any of it (the studio-spaces port norm, point 2 b).
   macOS reads `net.inet.tcp.pcblist64` (no privileges needed, the list `netstat` reads), Linux
-  `/proc/net/tcp` and `/proc/net/tcp6`; on those two an owner that cannot be read (a peer that has
+  `/proc/net/tcp` and `/proc/net/tcp6`. SB-330: macOS 27 lists only the caller's own sockets in
+  `pcblist64` (read on the Mac Studio, 27.2), so every client read as nobody's and was closed
+  (`proxy_refused_foreign_user` each time, no managed request served there); a peer the list does
+  not name is now looked for among this account's processes (`proc_listpids` with
+  `PROC_UID_ONLY`, `PROC_PIDLISTFDS`, `PROC_PIDFDSOCKETINFO`: the socket whose local port is the
+  peer's and whose foreign port is ours, offsets 268 and 264 of `socket_fdinfo`), which an
+  unprivileged process can read for its own account only, so another account's process stays
+  nobody's (`a_connection_from_another_process_of_this_account_reads_back_as_this_account`,
+  `a_socket_fdinfo_answer_names_the_peers_end_and_never_ours`; a full scan took 0.6 ms on the
+  Studio, 45 processes); on those two an owner that cannot be read (a peer that has
   already closed, a list that could not be read) is refused too, as the norm asks
   (`only_a_peer_read_as_this_account_is_served`). Windows (SB-274): `GetExtendedTcpTable` names the
   peer socket's process and its token user is compared by SID with the owner's; a process the owner
