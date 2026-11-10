@@ -85,16 +85,21 @@ pub fn detect_session(
             }
         }
     }
+    // A Codex home Switchboard launched (`runtimes/codex-<pool>`), or the shell home a hooked
+    // terminal in an organization's folder exports (`shell/codex-<pool>`, SB-235): the latter
+    // reaches the proxy's `/codex/_auto/v1`, which serves a request from the group's folders
+    // through the group's managed route, so selecting the group's account reaches it.
     if let Some(home) = var("CODEX_HOME") {
-        let runtimes = root.join("runtimes");
-        if let Some(pool) = Path::new(&home)
-            .strip_prefix(&runtimes)
-            .ok()
-            .and_then(|p| p.to_str())
-            .and_then(|p| p.strip_prefix("codex-"))
-        {
-            if let Some(session) = Session::from_label(&format!("managed:codex:{pool}")) {
-                return session;
+        for dir in [root.join("runtimes"), root.join(crate::shell::map::DIR)] {
+            if let Some(pool) = Path::new(&home)
+                .strip_prefix(&dir)
+                .ok()
+                .and_then(|p| p.to_str())
+                .and_then(|p| p.strip_prefix("codex-"))
+            {
+                if let Some(session) = Session::from_label(&format!("managed:codex:{pool}")) {
+                    return session;
+                }
             }
         }
     }
@@ -744,6 +749,57 @@ mod tests {
         assert_eq!(
             detect_session(
                 env(&[("CODEX_HOME", "/elsewhere/runtimes/codex-work")]),
+                None,
+                root
+            ),
+            Session::Native { provider: None }
+        );
+        // SB-235: a hooked terminal in an organization's folder exports the group's Codex shell
+        // home; Codex there runs on the group's route. Its Claude shell home is not a session
+        // of its own: a plain claude there is recognised by the folder's route, as without
+        // the hook, and the shell home alone says nothing.
+        assert_eq!(
+            detect_session(
+                env(&[("CODEX_HOME", "/data/switchboard/shell/codex-acme")]),
+                None,
+                root
+            ),
+            Session::Managed {
+                provider: Provider::Codex,
+                pool: "acme".into()
+            }
+        );
+        assert_eq!(
+            detect_session(
+                env(&[
+                    ("CLAUDE_CONFIG_DIR", "/data/switchboard/shell/claude-acme"),
+                    ("CLAUDECODE", "1")
+                ]),
+                None,
+                root
+            ),
+            Session::Native {
+                provider: Some(Provider::Claude)
+            }
+        );
+        assert_eq!(
+            detect_session(
+                env(&[
+                    ("CLAUDE_CONFIG_DIR", "/data/switchboard/shell/claude-acme"),
+                    ("ANTHROPIC_BASE_URL", "http://127.0.0.1:4100/claude/acme"),
+                    ("CLAUDECODE", "1")
+                ]),
+                Some("127.0.0.1:4100"),
+                root
+            ),
+            Session::Managed {
+                provider: Provider::Claude,
+                pool: "acme".into()
+            }
+        );
+        assert_eq!(
+            detect_session(
+                env(&[("CODEX_HOME", "/data/switchboard/shell/claude-acme")]),
                 None,
                 root
             ),
