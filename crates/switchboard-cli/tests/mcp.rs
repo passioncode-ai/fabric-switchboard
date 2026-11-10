@@ -193,6 +193,7 @@ async fn handshake_lists_tools_and_rejects_malformed_messages() {
             "switchboard_account_send",
             "switchboard_account_recall",
             "switchboard_seats",
+            "switchboard_remote",
             "switchboard_account_hand_over",
             "switchboard_account_receive",
             "switchboard_organizations",

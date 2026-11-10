@@ -11,7 +11,9 @@
 - **Merged and released.** PR #600 (`067bc37`); release 0.7.50 tagged from the release PR that carries this line.
 - **Open.** SB-324 to SB-329; SB-300 until 2026-11-17; SB-254, SB-243, SB-287 as below.
 
-**Exact next task.** Merge SB-323, release it, install, and write the receipts into SB-323; then SB-327 (`remote status` and `remote check` with MCP tools), which also settles claude10 and claude6; then SB-324 and SB-326.
+- **Then.** SB-327 (`accounts remote|check --on`, MCP `switchboard_remote`) and SB-324 (a word on a moved account's organizations reaches its copy there) on branch `sb-327-remote`, gate exit 0 on the Studio at `ac9f8f3`.
+
+**Exact next task.** Write the 0.7.50 receipts into SB-323 once its run publishes; release SB-327 and SB-324 as 0.7.51, install, then run `switchboard accounts check --on` for `sshlg@100.69.20.19`, `passioncode@100.69.20.19` and `studio-appvillis` and write the findings (claude6, claude10) into SB-327; then SB-326 and SB-325 (decision).
 
 ## 2026-11-10 (evening): SB-322 accounts given to an agent; 0.7.49
 

@@ -354,7 +354,7 @@ pub const ORGANIZATION_NOT_CARRIED: &str = "The account moved, but the other mac
 /// organization the other machine lacks by its name and domains. Organizations match by name, as
 /// a settings import matches them. Answers null when no word was said here (the rules decide
 /// there as they do here), else `{carried, contexts}` and, when not carried, `reason`.
-fn carry_organizations(
+pub(crate) fn carry_organizations(
     snapshot: &switchboard_core::Snapshot,
     account: &switchboard_core::Account,
     remote_id: &str,
