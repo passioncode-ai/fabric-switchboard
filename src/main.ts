@@ -1538,7 +1538,7 @@ function elsewhereDialog(account: Account) {
 /** SB-322: the agent an account is given to, or undefined. */
 const givenTo = (account: Account) => snapshot?.assigned_to?.[account.id];
 /** SB-322: give an account to an agent, or rename the agent it is given to (SCN-089). */
-function agentDialog(account: Account) {
+function givenToDialog(account: Account) {
   const given = givenTo(account);
   const context = openDialog(t('Give {label} to an agent', { label: account.label }), t('For an account an agent or service signs in with now. Switchboard keeps checking its usage, so you still see its activity, but never selects it or switches to it by itself.'));
   const who = input(given ?? ''); who.maxLength = 120; who.required = true; who.placeholder = t('e.g. Frame Agent on Studio');
@@ -2081,7 +2081,7 @@ function rowMenu(account: Account, state: { current: boolean; selected: boolean;
   if (givenTo(account) !== undefined) {
     if (account.enabled && canProbe(account)) items.push([t('Check usage'), () => void mutate(() => adapter.probe(account.id), t('Usage observation updated.'), `menu-${account.id}`, account.id)]);
     if (account.enabled) items.push([t('Use anyway…'), () => useAnywayDialog(account)]);
-    items.push([t('Which agent…'), () => agentDialog(account)], [t('Take back'), () => void mutate(() => adapter.assignAccount(account.id, null), t('{label} is back: Switchboard may use it again.', { label: account.label }), `menu-${account.id}`)]);
+    items.push([t('Which agent…'), () => givenToDialog(account)], [t('Take back'), () => void mutate(() => adapter.assignAccount(account.id, null), t('{label} is back: Switchboard may use it again.', { label: account.label }), `menu-${account.id}`)]);
     items.push([t('Rename or disable…'), () => editDialog(account)], [t('Remove…'), () => removeDialog(account), 'danger-text']);
     return menu(account.id, t('More actions for {label}', { label: account.label }), items);
   }
@@ -2095,7 +2095,7 @@ function rowMenu(account: Account, state: { current: boolean; selected: boolean;
   // SB-284: marking asks where it works; a marked account can say it later.
   items.push([snapshot?.elsewhere?.[account.id] === undefined ? t('Used on another machine') : t('Where it works…'), () => elsewhereDialog(account)]);
   // SB-322: an agent or service signs in with it now; its usage stays visible here.
-  items.push([t('Give to an agent…'), () => agentDialog(account)]);
+  items.push([t('Give to an agent…'), () => givenToDialog(account)]);
   // SB-283: a subscription sign-in no group has selected moves over ssh, without a new sign-in there.
   if (account.kind === 'oauth' && account.enabled && !state.selected && snapshot?.elsewhere?.[account.id] === undefined) items.push([t('Move to another machine…'), () => sendDialog(account)]);
   // SB-318: for a colleague or a machine ssh does not reach: a signed record they sign in with.
