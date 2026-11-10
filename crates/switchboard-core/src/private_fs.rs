@@ -187,7 +187,10 @@ mod tests {
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
         while std::time::Instant::now() < deadline {
             let bytes = read_private(&path, 64).unwrap();
-            assert!(bytes.starts_with(b"version-") && bytes.len() == 12, "{bytes:?}");
+            assert!(
+                bytes.starts_with(b"version-") && bytes.len() == 12,
+                "{bytes:?}"
+            );
             reads += 1;
             read_private_strict(&path, 64).unwrap();
             strict += 1;
