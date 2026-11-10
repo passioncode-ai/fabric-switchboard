@@ -432,6 +432,13 @@ observed, but nothing selects it, switches to it or launches on it by itself; gi
 `elsewhere`; an empty value takes it back. At least one field ("Name a label, enabled, elsewhere,
 location or assigned_to to change.").
 
+### `switchboard_account_remove`: `account_id`
+
+Only when the operator asks. Removes one account from Switchboard and deletes its stored sign-in or
+key here, as the window's *Remove account* does; this cannot be undone. Refused while its group has
+it selected (select another first). Clients signed in elsewhere are not signed out; an account moved
+to another machine is called back or removed there with `switchboard_account_recall`.
+
 ### `switchboard_account_send`: `account_id`, `to`, `pool?`, `remote?`, `remote_data_dir?`, `decision?`
 
 Only when the operator asks. Moves a Claude or Codex subscription sign-in to another machine over

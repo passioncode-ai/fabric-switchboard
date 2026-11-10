@@ -6,6 +6,10 @@ release pull request renames `Unreleased` to the version. While Windows signing 
 that section must say `windows_authenticode: NOT_SIGNED`. Notes of 0.5.3-beta.1 and earlier are
 on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/releases).
 
+## Unreleased
+
+- Agents can remove an account the way the window's *Remove account* does (MCP `switchboard_account_remove`, only when you ask), and `switchboard accounts list --json` now names each account's organization and the ones it also works for (SB-328).
+
 ## 0.7.51
 
 - `switchboard accounts remote --on MACHINE` reads another machine's Switchboard over ssh (its accounts, groups, organizations and PassionCode.ai connection, never a credential), and `switchboard accounts check --on MACHINE` checks it against the moves recorded here: a moved account gone, turned off or refused there (it needs a sign-in), still used here, used on both machines, or marked as used elsewhere with no record of where. MCP `switchboard_remote` does both (SB-327).

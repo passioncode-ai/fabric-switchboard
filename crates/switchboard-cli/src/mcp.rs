@@ -76,6 +76,7 @@ pub(crate) fn tools() -> Vec<(bool, Value)> {
         (false, json!({"name":"switchboard_statistics","title":"Statistics","description":"What the local proxy relayed in the last days (1-90, default 30): requests, how they ended (ok, limited, failed) and the token counts the provider itself reported (input, output, cache read and write), by group, project (a repository with its checkouts, placed by the folder the request came from), account, coding agent (from its user-agent) and day, plus each group-project-account-agent combination and each day's split by group. Only managed traffic: a session on its own sign-in outside Switchboard is not counted. Counts only, never a prompt, answer or path. Reads only.","inputSchema":{"type":"object","properties":{"days":{"type":"integer","minimum":1,"maximum":90}},"additionalProperties":false}})),
         (false, json!({"name":"switchboard_events","title":"Activity","description":"Recent activity, newest first: what changed (accounts, switches, groups, automatic switching, sign-ins) and how it ended, as fixed codes. No credential, prompt or provider text.","inputSchema":{"type":"object","properties":{"limit":{"type":"integer","minimum":1,"maximum":500,"default":50}},"additionalProperties":false}})),
         (true, json!({"name":"switchboard_account_update","title":"Rename, enable or disable an account","description":"Rename an account, enable or disable it (a disabled account is never selected or switched to), or mark it as used on another machine (elsewhere: true disables it here, so this machine never renews it or switches to it, automatically or not; false enables it again), saying where it works (location: a machine and its user, or a colleague, which also marks it; empty clears it). An account whose sign-in was moved with switchboard_account_send is called back with switchboard_account_recall, not used here again, unless force. assigned_to gives the account to an agent or service that holds its sign-in now (its name, at most 120 characters; empty takes it back): Switchboard keeps renewing it and observing its usage but never selects it, switches to it or launches on it by itself, and giving it clears elsewhere. Only when the operator asks. What is left out stays as it is.","inputSchema":{"type":"object","properties":{"account_id":account,"label":{"type":"string","minLength":1,"maxLength":80},"enabled":{"type":"boolean"},"elsewhere":{"type":"boolean"},"location":{"type":"string","maxLength":80},"assigned_to":{"type":"string","maxLength":120,"description":"The agent or service that holds the account now; empty takes it back."},"force":{"type":"boolean","description":"With elsewhere false, enabled true or assigned_to: use it here although its sign-in was moved to another machine and not called back."}},"required":["account_id"],"additionalProperties":false}})),
+        (true, json!({"name":"switchboard_account_remove","title":"Remove an account","description":"Only when the operator asks. Remove one account from Switchboard and delete its stored sign-in or key here, as the window's Remove account does; this cannot be undone. Refused while its group has it selected: select another account first. Clients signed in elsewhere are not signed out. An account moved to another machine is called back or removed there with switchboard_account_recall.","inputSchema":{"type":"object","properties":{"account_id":account},"required":["account_id"],"additionalProperties":false}})),
         (true, json!({"name":"switchboard_account_move","title":"Move an account to another group","description":"Move an account into a group (pool: its group id), or back to the default group (pool: default). Only when the operator asks. Joining or leaving a group is that group's change, with its refusals: the account the ordinary Claude Code or Codex is signed in to cannot join a group, and a second copy of a login already in that group is refused.","inputSchema":{"type":"object","properties":{"account_id":account,"pool":{"type":"string","minLength":1,"description":"A group id from switchboard_projects, or default."}},"required":["account_id","pool"],"additionalProperties":false}})),
         (true, json!({"name":"switchboard_account_send","title":"Move an account to another machine","description":"Move an account's sign-in to another machine over ssh, without a new sign-in there: it is marked here as used elsewhere first (this machine never renews it again), saved there with switchboard accounts add (the tokens on stdin), checked there with a quota check, and both are undone on any failure. Only a Claude or Codex subscription sign-in that no group has selected. to: the machine as ssh knows it, reachable without a prompt; pool: its group there (default); remote: that machine's switchboard, an absolute path (default the macOS app's); remote_data_dir: its data folder when it runs with --data-dir. Only when the operator asks. The person's word on its organizations goes with it (organizations match by name; one the other machine lacks is added there); answer.organizations says whether it was carried.","inputSchema":{"type":"object","properties":{"account_id":{"type":"string"},"to":{"type":"string","minLength":1,"maxLength":255},"pool":{"type":"string"},"remote":{"type":"string"},"remote_data_dir":{"type":"string","description":"The other machine's data folder, an absolute path, when its Switchboard runs with --data-dir."},"decision":{"type":"object","properties":{"by":{"type":"string","enum":["operator"]},"instruction":{"type":"string","minLength":1,"maxLength":500},"at":{"type":"string"},"source":{"type":"string","minLength":1,"maxLength":200}},"required":["by","instruction","at","source"],"additionalProperties":false,"description":"The operator's words that ordered it, recorded with the seat in seats.jsonl."}},"required":["account_id","to"],"additionalProperties":false}})),
         (true, json!({"name":"switchboard_account_recall","title":"Take a moved account back","description":"Take back a Claude or Codex subscription sign-in this machine moved to another one with switchboard_account_send: that machine stops using it and gives its tokens back over ssh, the provider is checked here (on failure it goes back there), then its copy there is removed and its account list read to prove it. Answers recalled, removed_there and proved. Only when the operator asks.","inputSchema":{"type":"object","properties":{"account_id":{"type":"string"},"from":{"type":"string","minLength":1,"maxLength":255,"description":"The other machine as ssh knows it, as the move named it."},"remote_id":{"type":"string","maxLength":64,"description":"The account's id there; by default the one the recorded move names."},"remote":{"type":"string","description":"That machine's switchboard; by default the one the move ran."},"remote_data_dir":{"type":"string","description":"That machine's data folder; by default the one the move named."},"decision":{"type":"object","properties":{"by":{"type":"string","enum":["operator"]},"instruction":{"type":"string","minLength":1,"maxLength":500},"at":{"type":"string"},"source":{"type":"string","minLength":1,"maxLength":200}},"required":["by","instruction","at","source"],"additionalProperties":false,"description":"The operator's words that ordered it, recorded with the seat in seats.jsonl."}},"required":["account_id","from"],"additionalProperties":false}})),
@@ -1215,6 +1216,13 @@ impl Server {
             }
             "switchboard_account_update" => self.account_update(args).await,
             "switchboard_account_move" => self.account_move(args).await,
+            // SB-328: the window's Remove account (dashboard parity, operator 2026-10-24).
+            "switchboard_account_remove" => {
+                self.call(Operation::Remove {
+                    id: required(args, "account_id")?.into(),
+                })
+                .await
+            }
             "switchboard_account_send" => self.account_send(args).await,
             "switchboard_account_recall" => self.account_recall(args).await,
             "switchboard_remote" => self.remote(args).await,
@@ -1663,6 +1671,42 @@ fn usage_view(account: &Value, snapshot: &Value, time: i64) -> Value {
         );
     }
     view
+}
+
+/// SB-328: an account's organizations as `switchboard_accounts` gives them: its first
+/// (`{id, name, by}`, null when personal or decided by no rule) from the organizations answer,
+/// and the ones it also works for (`[{id, name}]`) from the snapshot.
+pub(crate) fn account_organizations(
+    snapshot: &Value,
+    organizations: Option<&Value>,
+    id: &str,
+) -> (Value, Value) {
+    let first = organizations
+        .and_then(|o| o["accounts"].as_array())
+        .and_then(|list| list.iter().find(|a| a["id"] == id))
+        .filter(|a| !a["organization"].is_null())
+        .map(|a| json!({"id": a["organization"], "name": a["organization_name"], "by": a["by"]}))
+        .unwrap_or(Value::Null);
+    let names = snapshot["organizations"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    let also = snapshot["also_organizations"]
+        .get(id)
+        .and_then(Value::as_array)
+        .map(|ids| {
+            ids.iter()
+                .map(|o| {
+                    let name = names
+                        .iter()
+                        .find(|n| &n["id"] == o)
+                        .map(|n| n["name"].clone());
+                    json!({"id": o, "name": name.unwrap_or(Value::Null)})
+                })
+                .collect::<Vec<_>>()
+        })
+        .map_or(json!([]), Value::Array);
+    (first, also)
 }
 
 /// Projects with their accounts (no credential), from a snapshot.
