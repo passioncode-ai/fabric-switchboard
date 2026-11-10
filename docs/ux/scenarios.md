@@ -96,6 +96,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 | SCN-086 | Choose several folders at once | draft |
 | SCN-087 | Move an account to another machine without signing in there | draft |
 | SCN-088 | Hand an account over to a colleague and receive it | draft |
+| SCN-089 | Give an account to an agent and still see its usage | draft |
 ### SCN-001: First run
 **Persona:** P-01
 **Goal:** Deliberately control which account a coding session uses.
@@ -1912,3 +1913,25 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Coverage:** runtime `account_handover::tests` (record, signature, `a_received_sign_in_must_be_the_account_its_record_names`); the window's commands `hand_over_account`, `open_handover`, `receive_handover` (`src-tauri/src/main.rs`); WebKit demo (`?demo=1`: *Hand over…* and *Receive a hand-over…*).
 **Product:** unobserved
 **Traces:** SB-318, SB-283, SB-315, SCN-087
+
+### SCN-089: Give an account to an agent and still see its usage
+**Persona:** P-01
+**Goal:** A person whose subscription account an agent or service now signs in with (for example a long-lived token in that agent's vault) keeps Switchboard from using it, yet still sees its five-hour and weekly use and resets (SB-322).
+**Preconditions:** a saved account, enabled. An account marked as used on another machine may be given too: giving it clears that mark.
+**Entry point:** *Accounts* → an account's ⋯ → *Give to an agent…*. CLI `accounts assign ID --to NAME`, `accounts unassign ID`; MCP `switchboard_account_update.assigned_to`.
+**Steps:**
+1. ⋯ → *Give to an agent…* → “Give {label} to an agent” (“For an account an agent or service signs in with now. Switchboard keeps checking its usage, so you still see its activity, but never selects it or switches to it by itself.”), *Which agent* (“The agent or service and where it runs.”, placeholder “e.g. Frame Agent on Studio”), *Give to agent* → “{label} is given to {agent}. Switchboard no longer uses it by itself.”
+2. The account leaves its group's list for the section *Given to agents* (“Switchboard checks their usage but never selects them or switches to them by itself.”), with its usage cell as before, the badge *Given to {agent}* and the button *Take back*.
+3. *Take back* → “{label} is back: Switchboard may use it again.”; it returns to its group.
+4. To use it while it stays given: ⋯ → *Use anyway…* → “Use {label} anyway?” (“It is given to {agent}. Using it here spends the same subscription the agent uses, and the activity records it. Switchboard still never moves to it by itself.”) → *Use anyway*: a Claude account outside a group becomes Claude Code's (“Claude Code now uses {label}. …”), any other is selected for its group's managed sessions. The activity shows *Given to an agent · used anyway*.
+5. ⋯ → *Which agent…* changes the name (*Save* → “Saved for {label}.”).
+**Alt paths:** a switch, selection or launch of it from anywhere else (CLI, MCP, a folder rule) → “This account is given to an agent, so Switchboard does not use it. Take it back, or use it anyway.”; a name over 120 characters or on two lines → “Name the agent in at most 120 characters, on one line.”; a sign-in a move sent to another machine and not called back → “This account's sign-in was moved to another machine. Call it back to use it here, so only one machine renews it.” until the CLI's `accounts assign --force`.
+**Expected result:** automatic switching, failover, fallback chains, continuing a stopped session, folder rules and launches never choose the account; its usage keeps being checked on the usual schedule and its sign-in renewed.
+**UI elements:** the ⋯ items, the section, the badge, *Take back*, the two dialogs.
+**States covered:** given; taken back; used anyway; refused elsewhere; name invalid.
+**Errors & recovery:** every refusal names *Take back* or *Use anyway*.
+**Status:** draft
+**Meaning:** SB-322, operator 2026-11-10: an account given to an agent stays visible and tracked but is not used without an explicit switch.
+**Coverage:** core `an_account_given_to_an_agent_is_never_switched_to_but_still_observed`, `giving_an_account_to_an_agent_validates_and_clears_the_elsewhere_mark`; runtime `an_account_given_to_an_agent_is_switched_to_only_anyway`, `automatic_switching_never_moves_to_an_account_given_to_an_agent`, `an_account_given_to_an_agent_launches_only_once_used_anyway`, `an_account_given_to_an_agent_is_still_renewed_here`; CLI and MCP `an_account_is_given_to_an_agent_and_taken_back_from_the_cli`, `accounts_rotation_activity_and_queues_are_reachable_over_mcp`; WebKit demo (`?demo=1`: *Give to an agent…*).
+**Product:** unobserved
+**Traces:** SB-322, SB-175, SB-284, SCN-072

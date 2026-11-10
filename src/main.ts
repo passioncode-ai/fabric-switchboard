@@ -1537,7 +1537,7 @@ function elsewhereDialog(account: Account) {
 }
 /** SB-322: the agent an account is given to, or undefined. */
 const givenTo = (account: Account) => snapshot?.assigned_to?.[account.id];
-/** SB-322: give an account to an agent, or rename the agent it is given to (SCN-092). */
+/** SB-322: give an account to an agent, or rename the agent it is given to (SCN-089). */
 function agentDialog(account: Account) {
   const given = givenTo(account);
   const context = openDialog(t('Give {label} to an agent', { label: account.label }), t('For an account an agent or service signs in with now. Switchboard keeps checking its usage, so you still see its activity, but never selects it or switches to it by itself.'));
@@ -1551,7 +1551,7 @@ function agentDialog(account: Account) {
   });
   who.focus();
 }
-/** SB-322: the person uses an account given to an agent anyway, after a confirmation (SCN-092). */
+/** SB-322: the person uses an account given to an agent anyway, after a confirmation (SCN-089). */
 function useAnywayDialog(account: Account) {
   const agent = givenTo(account) ?? '';
   const native = canSwitchNative(account) && !projectOf(account.pool);
@@ -1562,7 +1562,7 @@ function useAnywayDialog(account: Account) {
     void dialogSave(context, () => native ? adapter.activateNative(account.id, true) : adapter.select(account, true), native ? t('Claude Code now uses {label}. New claude sessions start on it; a running session may need a restart.', { label: account.label }) : t('{label} selected for the next managed request {where}.', { label: account.label, where: inGroup(account.pool, snapshot?.projects) }));
   });
 }
-/** SB-322: accounts given to agents, apart from the groups: their usage stays visible (SCN-092). */
+/** SB-322: accounts given to agents, apart from the groups: their usage stays visible (SCN-089). */
 function givenSection(accounts: Account[]) {
   const section = el('section', 'account-group'); section.setAttribute('aria-labelledby', 'given-heading');
   const heading = el('div', 'group-heading'); const title = el('h2', '', t('Given to agents')); title.id = 'given-heading';
