@@ -1626,7 +1626,10 @@ mod tests {
                 .find(|x| x.id == b.id)
                 .unwrap();
             assert!(given.enabled);
-            assert!(due(&given, now() + switchboard_core::CHECK_IDLE_SECONDS + 1));
+            assert!(due(
+                &given,
+                now() + switchboard_core::CHECK_IDLE_SECONDS + 1
+            ));
         }
     }
     #[tokio::test]

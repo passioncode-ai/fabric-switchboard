@@ -1989,7 +1989,9 @@ fn an_account_given_to_an_agent_is_never_switched_to_but_still_observed() {
     observe(&store, &c, 5., now);
     store.select(Provider::Claude, "default", &c).unwrap();
     // Giving c away takes its selection away and keeps it enabled.
-    store.assign_to_agent(&c, Some("  Frame Agent on Studio ")).unwrap();
+    store
+        .assign_to_agent(&c, Some("  Frame Agent on Studio "))
+        .unwrap();
     let snap = store.snapshot().unwrap();
     assert!(snap.accounts.iter().any(|x| x.id == c && x.enabled));
     assert_eq!(
@@ -2047,12 +2049,14 @@ fn an_account_given_to_an_agent_is_never_switched_to_but_still_observed() {
     assert!(snap.events.iter().any(|e| e.action == "assignment"
         && e.detail == "override"
         && e.account_id.as_deref() == Some(c.as_str())));
-    assert!(snap.assigned_to.contains_key(&c), "still given to the agent");
+    assert!(
+        snap.assigned_to.contains_key(&c),
+        "still given to the agent"
+    );
     // The assignment survives a restart, as schema version 12.
     drop(store);
     let disk: serde_json::Value =
-        serde_json::from_slice(&std::fs::read(root.path().join("accounts.json")).unwrap())
-            .unwrap();
+        serde_json::from_slice(&std::fs::read(root.path().join("accounts.json")).unwrap()).unwrap();
     assert_eq!(disk["schema_version"], 12);
     let store = Store::open(root.path().into(), vault).unwrap();
     assert!(store.snapshot().unwrap().assigned_to.contains_key(&c));

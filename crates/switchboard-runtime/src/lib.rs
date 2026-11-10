@@ -7808,7 +7808,10 @@ mod owner_tests {
             .unwrap();
         assert_eq!(
             runtime
-                .execute(Operation::ActivateNative { id: b.id.clone(), force: false })
+                .execute(Operation::ActivateNative {
+                    id: b.id.clone(),
+                    force: false
+                })
                 .await
                 .unwrap_err(),
             switchboard_core::PROJECT_NOT_NATIVE
@@ -9499,7 +9502,10 @@ mod owner_tests {
         let runtime = fixtures::runtime(root.path(), signed_out, activates).await;
         let b = save(&runtime.store, "synthetic-b", "default");
         runtime
-            .execute(Operation::ActivateNative { id: b.id.clone(), force: false })
+            .execute(Operation::ActivateNative {
+                id: b.id.clone(),
+                force: false,
+            })
             .await
             .unwrap();
         assert_eq!(
@@ -9565,7 +9571,10 @@ mod owner_tests {
             ]
         );
         let snapshot = runtime.store.snapshot().unwrap();
-        assert!(snapshot.is_assigned(&b.id), "using it anyway keeps it given");
+        assert!(
+            snapshot.is_assigned(&b.id),
+            "using it anyway keeps it given"
+        );
         assert_eq!(snapshot.routes.get("claude:default"), Some(&b.id));
         // Taken back: an ordinary account again, its selection kept.
         runtime.execute(assign(None, false)).await.unwrap();
@@ -9602,7 +9611,10 @@ mod owner_tests {
         save(&runtime.store, "synthetic-a", "default");
         let b = save(&runtime.store, "synthetic-b", "default");
         assert!(runtime
-            .execute(Operation::ActivateNative { id: b.id.clone(), force: false })
+            .execute(Operation::ActivateNative {
+                id: b.id.clone(),
+                force: false
+            })
             .await
             .is_err());
         assert_eq!(
@@ -9614,7 +9626,10 @@ mod owner_tests {
         let b = save(&runtime.store, "synthetic-b", "default");
         assert_eq!(
             runtime
-                .execute(Operation::ActivateNative { id: b.id.clone(), force: false })
+                .execute(Operation::ActivateNative {
+                    id: b.id.clone(),
+                    force: false
+                })
                 .await
                 .unwrap_err(),
             "External sign-in unavailable or its files are unsafe."
@@ -9665,7 +9680,10 @@ mod owner_tests {
         let b = save(&runtime.store, "synthetic-b", "default");
         assert_eq!(
             runtime
-                .execute(Operation::ActivateNative { id: b.id.clone(), force: false })
+                .execute(Operation::ActivateNative {
+                    id: b.id.clone(),
+                    force: false
+                })
                 .await
                 .unwrap_err(),
             refresh::UNCONFIRMED_LIVE
@@ -9692,7 +9710,10 @@ mod owner_tests {
         let work = stale_copy(&runtime.store, "work");
         let b = save(&runtime.store, "synthetic-b", "default");
         runtime
-            .execute(Operation::ActivateNative { id: b.id.clone(), force: false })
+            .execute(Operation::ActivateNative {
+                id: b.id.clone(),
+                force: false,
+            })
             .await
             .unwrap();
         for copy in [home, work] {
@@ -9731,7 +9752,10 @@ mod owner_tests {
             .unwrap();
         let b = save(&runtime.store, "synthetic-b", "default");
         runtime
-            .execute(Operation::ActivateNative { id: b.id, force: false })
+            .execute(Operation::ActivateNative {
+                id: b.id,
+                force: false,
+            })
             .await
             .unwrap();
         assert_eq!(
@@ -9774,7 +9798,10 @@ mod owner_tests {
             .unwrap();
         // Two email-only identities once compared equal (None == None): a silent no-op.
         assert!(runtime
-            .execute(Operation::ActivateNative { id: target.id, force: false })
+            .execute(Operation::ActivateNative {
+                id: target.id,
+                force: false
+            })
             .await
             .is_err());
     }
@@ -9798,7 +9825,10 @@ mod owner_tests {
             .unwrap();
         // The refresh endpoint is unreachable in tests; Claude Code renews the token itself.
         runtime
-            .execute(Operation::ActivateNative { id: b.id.clone(), force: false })
+            .execute(Operation::ActivateNative {
+                id: b.id.clone(),
+                force: false,
+            })
             .await
             .unwrap();
         // Without a refresh token nothing could renew it: refused.
@@ -9821,7 +9851,10 @@ mod owner_tests {
             .unwrap();
         assert_eq!(
             runtime
-                .execute(Operation::ActivateNative { id: c.id, force: false })
+                .execute(Operation::ActivateNative {
+                    id: c.id,
+                    force: false
+                })
                 .await
                 .unwrap_err(),
             "Credential expired; reauthenticate this account"
@@ -9926,7 +9959,10 @@ mod owner_tests {
             .refresh
             .learn_owner("synthetic-b-refresh", identity("synthetic-b"));
         runtime
-            .execute(Operation::ActivateNative { id: c.id.clone(), force: false })
+            .execute(Operation::ActivateNative {
+                id: c.id.clone(),
+                force: false,
+            })
             .await
             .unwrap();
         assert_eq!(
@@ -10526,7 +10562,10 @@ mod owner_tests {
         let c = save(&runtime.store, "synthetic-c", "default");
         assert_eq!(
             runtime
-                .execute(Operation::ActivateNative { id: c.id.clone(), force: false })
+                .execute(Operation::ActivateNative {
+                    id: c.id.clone(),
+                    force: false
+                })
                 .await
                 .unwrap_err(),
             refresh::UNCONFIRMED_LIVE
@@ -10557,7 +10596,10 @@ mod owner_tests {
         let c = save(&runtime.store, "synthetic-c", "default");
         assert_eq!(
             runtime
-                .execute(Operation::ActivateNative { id: c.id.clone(), force: false })
+                .execute(Operation::ActivateNative {
+                    id: c.id.clone(),
+                    force: false
+                })
                 .await
                 .unwrap_err(),
             refresh::UNCONFIRMED_LIVE
@@ -10700,7 +10742,10 @@ mod owner_tests {
         let b = save(&runtime.store, "synthetic-b", "default");
         assert_eq!(
             runtime
-                .execute(Operation::ActivateNative { id: b.id.clone(), force: false })
+                .execute(Operation::ActivateNative {
+                    id: b.id.clone(),
+                    force: false
+                })
                 .await
                 .unwrap_err(),
             UNSAVED_CURRENT
@@ -10708,7 +10753,10 @@ mod owner_tests {
         // Activating the account Claude Code already uses writes nothing (the fixture would fail).
         let a = save(&runtime.store, "synthetic-a", "work");
         runtime
-            .execute(Operation::ActivateNative { id: a.id, force: false })
+            .execute(Operation::ActivateNative {
+                id: a.id,
+                force: false,
+            })
             .await
             .unwrap();
     }

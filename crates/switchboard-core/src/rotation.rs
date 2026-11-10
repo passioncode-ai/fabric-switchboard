@@ -432,7 +432,8 @@ impl Store {
                 &mut tally.kind
             } else if !state.context_admits(&policy.pool, a) {
                 &mut tally.context
-            } else if state.is_assigned(&a.id) || !self.rotation_credential_eligible(a, policy, now) {
+            } else if state.is_assigned(&a.id) || !self.rotation_credential_eligible(a, policy, now)
+            {
                 &mut tally.credential
             } else {
                 &mut tally.full

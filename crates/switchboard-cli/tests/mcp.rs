@@ -1262,7 +1262,10 @@ async fn accounts_rotation_activity_and_queues_are_reachable_over_mcp() {
         json!({"account_id": ids[2], "target": "route"}),
     );
     assert!(error, "{refused}");
-    assert!(refused.to_string().contains("given to an agent"), "{refused}");
+    assert!(
+        refused.to_string().contains("given to an agent"),
+        "{refused}"
+    );
     let (error, back) = agent.tool(
         "switchboard_account_update",
         json!({"account_id": ids[2], "assigned_to": ""}),
@@ -1426,7 +1429,15 @@ async fn an_account_is_given_to_an_agent_and_taken_back_from_the_cli() {
     let given = row(&run);
     assert_eq!(given["assigned_to"], "Frame Agent on Studio");
     assert_eq!(given["enabled"], true);
-    let refused = run(&["accounts", "select", &id, "--provider", "claude", "--pool", "personal"]);
+    let refused = run(&[
+        "accounts",
+        "select",
+        &id,
+        "--provider",
+        "claude",
+        "--pool",
+        "personal",
+    ]);
     assert!(!refused.status.success());
     assert!(
         String::from_utf8_lossy(&refused.stderr).contains("given to an agent"),
@@ -1434,7 +1445,14 @@ async fn an_account_is_given_to_an_agent_and_taken_back_from_the_cli() {
         String::from_utf8_lossy(&refused.stderr)
     );
     let forced = run(&[
-        "accounts", "select", &id, "--provider", "claude", "--pool", "personal", "--force",
+        "accounts",
+        "select",
+        &id,
+        "--provider",
+        "claude",
+        "--pool",
+        "personal",
+        "--force",
     ]);
     assert!(
         forced.status.success(),

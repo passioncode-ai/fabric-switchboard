@@ -432,7 +432,7 @@ impl Server {
                     id: id.into(),
                     force,
                 })
-                    .await?;
+                .await?;
                 Ok(
                     json!({"action":"activated","account":{"id":id,"label":label,"pool":pool},"message":format!("Claude Code now signs in as {label} for every ordinary claude session. Running sessions may keep their account until they reload credentials.")}),
                 )
