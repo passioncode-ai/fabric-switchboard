@@ -424,6 +424,8 @@ async fn request_once(root: &Path, operation: &Operation) -> Result<Option<Value
         Operation::SendAccount { .. } | Operation::RecallAccount { .. } => 600,
         // SB-327: three ssh reads of two minutes each at most.
         Operation::RemoteStatus { .. } | Operation::RemoteCheck { .. } => 420,
+        // SB-324: a word on a moved account's organizations reaches its copy there over ssh.
+        Operation::OrganizationAssign { .. } => 420,
         _ => 30,
     };
     match tokio::time::timeout(

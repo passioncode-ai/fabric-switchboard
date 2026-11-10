@@ -9,6 +9,7 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 ## Unreleased
 
 - `switchboard accounts remote --on MACHINE` reads another machine's Switchboard over ssh (its accounts, groups, organizations and PassionCode.ai connection, never a credential), and `switchboard accounts check --on MACHINE` checks it against the moves recorded here: a moved account gone, turned off or refused there (it needs a sign-in), still used here, used on both machines, or marked as used elsewhere with no record of where. MCP `switchboard_remote` does both (SB-327).
+- Placing an account that was moved to another machine in an organization (or making it personal) now places its copy there the same way, over ssh; the answer's `there` says whether it reached it (SB-324).
 
 ## 0.7.50
 

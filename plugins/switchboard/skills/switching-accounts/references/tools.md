@@ -505,7 +505,8 @@ which replace the list), `remove` (id), `assign` (account_id, organization: an i
 `auto`; or `organizations`: every context of an account that works for several, the first its
 own, the rest it also works for, empty to let the rules decide; `personal` can only be first:
 `["personal", "Acme"]` keeps an account personal and working for Acme too; the answer's
-`refused_by` names the groups that no longer use it), `passioncode_read` (read the
+`refused_by` names the groups that no longer use it; for an account moved to another machine,
+`there` says whether its copy there took the same word), `passioncode_read` (read the
 PassionCode.ai organizations again; connecting is the person's), `passioncode_cancel` (stop a
 connection waiting for the browser) or `passioncode_disconnect` (delete the token; the
 organizations stay as local ones).
