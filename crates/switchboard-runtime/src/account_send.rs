@@ -335,10 +335,78 @@ pub fn send(
         }
         .into());
     }
+    // SB-323: the person's word on where the account belongs travels with it, so the copy there
+    // serves the same organizations; the move stands whatever this step answers.
+    let organizations = carry_organizations(&snapshot, account, &remote_id, &|args| {
+        run(&ssh(remote(program, args)), None)
+    });
     Ok(json!({
         "moved": true, "target": target, "remote_id": remote_id, "marked_elsewhere": true,
-        "sent": sent.as_deref().map(token_print),
+        "sent": sent.as_deref().map(token_print), "organizations": organizations,
     }))
+}
+
+/// SB-323: an organization the other machine could not take or place the account in.
+pub const ORGANIZATION_NOT_CARRIED: &str = "The account moved, but the other machine did not place it in its organizations. Assign it there with switchboard org assign.";
+
+/// SB-323: gives the copy on the other machine the person's word on this account's contexts
+/// (its first one, `personal` included, then the organizations it also works for), adding an
+/// organization the other machine lacks by its name and domains. Organizations match by name, as
+/// a settings import matches them. Answers null when no word was said here (the rules decide
+/// there as they do here), else `{carried, contexts}` and, when not carried, `reason`.
+fn carry_organizations(
+    snapshot: &switchboard_core::Snapshot,
+    account: &switchboard_core::Account,
+    remote_id: &str,
+    run: &dyn Fn(&[&str]) -> Result<String, String>,
+) -> Value {
+    let attribution = snapshot.attribution(account);
+    if attribution.by != Some(switchboard_core::By::Person) {
+        return Value::Null;
+    }
+    let named: Vec<&switchboard_core::Organization> = attribution
+        .organizations()
+        .into_iter()
+        .filter_map(|id| snapshot.organization(id))
+        .collect();
+    let contexts: Vec<String> = attribution
+        .contexts()
+        .into_iter()
+        .filter_map(|c| match c {
+            None => Some(switchboard_core::organizations::PERSONAL.to_owned()),
+            Some(id) => snapshot.organization(id).map(|o| o.name.clone()),
+        })
+        .collect();
+    let refused = |contexts: &[String]| json!({"carried": false, "contexts": contexts, "reason": ORGANIZATION_NOT_CARRIED});
+    if !named.is_empty() {
+        let Some(there) = run(&["--json", "org", "list"]).ok().and_then(|o| data(&o)) else {
+            return refused(&contexts);
+        };
+        let has = |name: &str| {
+            there["organizations"].as_array().is_some_and(|list| {
+                list.iter().any(|o| {
+                    o["name"]
+                        .as_str()
+                        .is_some_and(|n| n.eq_ignore_ascii_case(name))
+                })
+            })
+        };
+        for o in named.iter().filter(|o| !has(&o.name)) {
+            let mut args = vec!["--json", "org", "add", o.name.as_str()];
+            for d in &o.domains {
+                args.extend(["--domain", d.as_str()]);
+            }
+            if run(&args).ok().and_then(|out| data(&out)).is_none() {
+                return refused(&contexts);
+            }
+        }
+    }
+    let mut args = vec!["--json", "org", "assign", remote_id];
+    args.extend(contexts.iter().map(String::as_str));
+    match run(&args).ok().and_then(|out| data(&out)) {
+        Some(_) => json!({"carried": true, "contexts": contexts}),
+        None => refused(&contexts),
+    }
 }
 
 /// SB-292 (S-3), on the machine that holds the account: give its sign-in back to the machine that
@@ -776,6 +844,79 @@ mod tests {
             snapshot.locations.get(&id).map(String::as_str),
             Some("studio.local")
         );
+    }
+
+    #[test]
+    fn the_persons_word_on_its_organizations_goes_with_the_account() {
+        // SB-323: an account the person placed here (personal, also Acme) arrives there in the
+        // same contexts; an organization the other machine lacks is added by name and domains.
+        let (_root, store, id) = store_with(AuthKind::OAuth);
+        let acme = store
+            .add_organization("Acme", &["acme.test".to_owned()])
+            .unwrap();
+        store
+            .assign_organizations(&id, &["personal".to_owned(), acme.id.clone()])
+            .unwrap();
+        let calls: Calls = Default::default();
+        let answer = send(
+            &store,
+            &id,
+            "studio.local",
+            "agents",
+            &DEFAULT_APP,
+            100,
+            &fake(&calls, true, true),
+            &|_| {},
+        )
+        .unwrap();
+        assert_eq!(answer["organizations"]["carried"], true);
+        assert_eq!(
+            answer["organizations"]["contexts"],
+            json!(["personal", "Acme"])
+        );
+        let calls = calls.lock().unwrap();
+        let commands: Vec<&str> = calls.iter().map(|(c, _)| c.as_str()).collect();
+        assert!(commands[4].ends_with("'--json' 'org' 'list'"));
+        assert!(commands[5].ends_with("'--json' 'org' 'add' 'Acme' '--domain' 'acme.test'"));
+        assert!(commands[6].ends_with("'--json' 'org' 'assign' 'remote-1' 'personal' 'Acme'"));
+    }
+
+    #[test]
+    fn an_organization_the_other_machine_holds_is_not_added_again_and_a_refusal_keeps_the_move() {
+        let (_root, store, id) = store_with(AuthKind::OAuth);
+        let acme = store.add_organization("Acme", &[]).unwrap();
+        store.assign_organization(&id, Some(&acme.id)).unwrap();
+        let calls: Calls = Default::default();
+        let base = fake(&calls, true, true);
+        let refusing = |args: &[String], stdin: Option<&[u8]>| {
+            if args[2].contains("'org' 'list'") {
+                return Ok(r#"{"ok":true,"data":{"organizations":[{"name":"acme"}]}}"#.into());
+            }
+            if args[2].contains("'org' 'assign'") {
+                return Err(r#"{"ok":false,"error":"Account not found"}"#.into());
+            }
+            base(args, stdin)
+        };
+        let answer = send(
+            &store,
+            &id,
+            "studio.local",
+            "agents",
+            &DEFAULT_APP,
+            100,
+            &refusing,
+            &|_| {},
+        )
+        .unwrap();
+        assert_eq!(answer["moved"], true);
+        assert_eq!(answer["organizations"]["carried"], false);
+        assert_eq!(answer["organizations"]["reason"], ORGANIZATION_NOT_CARRIED);
+        assert!(!calls
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|(c, _)| c.contains("'org' 'add'")));
+        assert!(store.snapshot().unwrap().elsewhere.contains_key(&id));
     }
 
     #[test]

@@ -3249,6 +3249,9 @@ fn stat_folders(snapshot: &switchboard_core::Snapshot) -> Vec<(String, String)> 
     out
 }
 
+/// SB-323: an organization word that left an account out of a group it serves.
+pub const GROUPS_REFUSE_NOW: &str = "These groups no longer use this account: each takes only accounts of its own organizations. Name personal first to keep it in a personal group, or bind the group to the organization.";
+
 /// How long a folder added by Switchboard stays in `ProjectSuggestions`' `added`, for the app's
 /// one notification (SB-121).
 const ADDED_SHOWN: i64 = 24 * 3600;
@@ -6150,8 +6153,24 @@ async fn execute(
                     store.assign_organization(&account, choice.as_deref())?
                 }
             };
+            // SB-323: the groups this word left the account out of, so the person learns that
+            // their sessions no longer use it.
+            let snapshot = store.snapshot()?;
+            let refused_by: Vec<Value> = snapshot
+                .accounts
+                .iter()
+                .find(|a| a.id == account)
+                .map(|a| {
+                    snapshot
+                        .groups_refusing(a)
+                        .iter()
+                        .map(|p| json!({"pool": p.pool, "name": p.name}))
+                        .collect()
+                })
+                .unwrap_or_default();
+            let note = (!refused_by.is_empty()).then_some(GROUPS_REFUSE_NOW);
             Ok(
-                json!({"account": account, "organization": attribution.organization, "by": attribution.by, "also": attribution.also}),
+                json!({"account": account, "organization": attribution.organization, "by": attribution.by, "also": attribution.also, "refused_by": refused_by, "note": note}),
             )
         }
         Operation::MoveAccount { id, pool } => {

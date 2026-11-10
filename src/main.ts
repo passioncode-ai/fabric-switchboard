@@ -3162,9 +3162,25 @@ function assignDialog(account: Account) {
     option.append(box, el('span', '', o.name)); others.append(option); boxes.push(box);
   }
   others.append(el('p', 'form-note', t('Groups of these organizations take this account too.')));
-  const syncOthers = () => { for (const box of boxes) { const first = box.value === picker.value || (picker.value === 'auto' && box.value === automatic.organization); box.disabled = first; if (first) box.checked = false; } };
-  picker.addEventListener('change', syncOthers); syncOthers();
-  if (boxes.length > 1) context.body.append(others);
+  // SB-323: a group takes only accounts of its own organizations (personal ones when it has none),
+  // so a choice that leaves the account out of a group it serves is said before saving.
+  const leaving = el('p', 'form-note');
+  const groupsLeft = () => {
+    const first = picker.value === 'auto' ? automatic.organization ?? null : picker.value === 'personal' ? null : picker.value;
+    const contexts = [first, ...boxes.filter((b) => b.checked && !b.disabled).map((b) => b.value)];
+    return (snapshot!.projects ?? []).filter((p) => (p.pool === account.pool || (p.shared_accounts ?? []).includes(account.id)))
+      .filter((p) => { const own = groupOrganizations(p); return own.length ? !contexts.some((c) => c !== null && own.includes(c)) : !contexts.includes(null); });
+  };
+  const syncLeaving = () => {
+    const left = groupsLeft();
+    leaving.hidden = !left.length;
+    leaving.textContent = left.length ? t('{groups} would no longer use this account: a group takes only accounts of its own organizations. To keep it there, choose Personal accounts and tick the organization under Also works for.', { groups: left.map((p) => p.name).join(', ') }) : '';
+  };
+  const syncOthers = () => { for (const box of boxes) { const first = box.value === picker.value || (picker.value === 'auto' && box.value === automatic.organization); box.disabled = first; if (first) box.checked = false; } syncLeaving(); };
+  picker.addEventListener('change', syncOthers); for (const box of boxes) box.addEventListener('change', syncLeaving); syncOthers();
+  // SB-323: with one organization this is how an account stays personal and works for it too.
+  if (boxes.length) context.body.append(others);
+  context.body.append(leaving);
   context.actions.append(submit(t('Save')));
   context.form.addEventListener('submit', (event) => {
     event.preventDefault();

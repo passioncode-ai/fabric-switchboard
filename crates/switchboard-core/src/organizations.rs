@@ -19,6 +19,9 @@ pub const AUTO: &str = "auto";
 pub const PERSONAL: &str = "personal";
 
 pub const ORGANIZATION_NOT_FOUND: &str = "Organization not found.";
+/// SB-323: `personal` named after an organization. An account's personal context can only be its
+/// first, so it is refused rather than dropped without a word.
+pub const PERSONAL_NOT_FIRST: &str = "Name personal first, then the organizations it also works for: an account's personal context can only be its first.";
 pub const ORGANIZATION_NAME_TAKEN: &str = "Another organization already has this name.";
 pub const DOMAIN_TAKEN: &str = "Another organization already has this domain.";
 pub const DOMAIN_INVALID: &str = "A domain is a name such as example.com.";
@@ -460,6 +463,15 @@ impl Snapshot {
         }
         self.project_of_pool(pool)
             .is_none_or(|p| p.admits(&self.attribution(account)))
+    }
+    /// SB-323: the groups `account` serves (its own or one sharing it) whose context does not
+    /// take it: what the person's word on its organizations left it out of.
+    pub fn groups_refusing(&self, account: &Account) -> Vec<&crate::Project> {
+        self.projects
+            .iter()
+            .filter(|p| p.pool == account.pool || p.shared_accounts.contains(&account.id))
+            .filter(|p| !self.context_admits(&p.pool, account))
+            .collect()
     }
     /// SB-202, SB-282: the groups bound to `organization`, in the store's order (by name); an
     /// organization may have several, and a group may be shared with other organizations.
@@ -997,6 +1009,9 @@ impl Store {
         let first = first.trim();
         let mut also: Vec<String> = Vec::new();
         for o in rest.iter().map(|o| o.trim()) {
+            if o == PERSONAL && first != PERSONAL {
+                return Err(PERSONAL_NOT_FIRST.into());
+            }
             if o.is_empty() || o == PERSONAL || o == first || also.iter().any(|x| x == o) {
                 continue;
             }
