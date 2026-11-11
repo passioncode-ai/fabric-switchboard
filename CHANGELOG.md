@@ -8,6 +8,8 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+## 0.7.55
+
 - On a busy computer an update that took longer than five minutes to install was reported as failed ("Quit and reopen Switchboard to try again") although it finished on disk. Switchboard now waits for it, then offers *Restart to update* and restarts into it at a quiet moment as usual (SB-337).
 
 ## 0.7.54
