@@ -8,6 +8,8 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- On a busy computer an update that took longer than five minutes to install was reported as failed ("Quit and reopen Switchboard to try again") although it finished on disk. Switchboard now waits for it, then offers *Restart to update* and restarts into it at a quiet moment as usual (SB-337).
+
 ## 0.7.54
 
 - *Switch* (making an account the one the ordinary Claude Code uses) works for every Claude account: one added by signing in through Switchboard or moved from another machine was refused with "Add this Claude account again …". Switchboard now asks Claude for the account's profile itself and keeps it (SB-334).
