@@ -277,6 +277,20 @@ pub enum Operation {
         #[serde(default)]
         remote_data_dir: Option<String>,
     },
+    /// SB-326: this machine's settings (groups, organizations, agents' settings, rotation
+    /// settings; no account) carried to another machine over ssh and previewed there, or with
+    /// `apply` imported. `groups` keeps only those groups, as `settings export --group`.
+    SettingsSync {
+        target: String,
+        #[serde(default)]
+        groups: Vec<String>,
+        #[serde(default)]
+        apply: bool,
+        #[serde(default)]
+        program: Option<String>,
+        #[serde(default)]
+        remote_data_dir: Option<String>,
+    },
     /// SB-332: the other machines this Switchboard knows (from moves and remote runs); with
     /// `probe`, whether each one's Switchboard answers over ssh now and its version.
     Targets {
@@ -1262,6 +1276,8 @@ impl Runtime {
                 // SB-327: ssh reads of another machine; the store is only read.
                 | Operation::RemoteStatus { .. }
                 | Operation::RemoteCheck { .. }
+                // SB-326: the store is read for the file; the import runs there.
+                | Operation::SettingsSync { .. }
                 // SB-332: files here, and with `probe` one ssh read per machine.
                 | Operation::Targets { .. }
                 | Operation::AgentCatalog
@@ -1554,6 +1570,8 @@ impl Runtime {
                 // SB-183: the organizations' shell homes and the folder map follow the groups'
                 // organizations and Codex accounts too.
                 shell::homes::key(&snapshot, &self.native.shell).hash(&mut h);
+                // SB-331: the placeholder token comes and goes with the ordinary sign-in.
+                external::claude_signed_out().hash(&mut h);
                 key = h.finish();
             }
             key
@@ -1567,7 +1585,14 @@ impl Runtime {
         };
         let salts = read_pool_salts(&self.root);
         let synced = blocking::run(|| {
-            bindings::sync_salted(&self.root, &snapshot, &address, self.proxy.token(), &salts)
+            bindings::sync_salted(
+                &self.root,
+                &snapshot,
+                &address,
+                self.proxy.token(),
+                &salts,
+                external::claude_signed_out(),
+            )
         });
         match synced {
             Ok(report) => {
@@ -5613,6 +5638,37 @@ async fn execute(
                 )
             })
         }
+        Operation::SettingsSync {
+            target,
+            groups,
+            apply,
+            program,
+            remote_data_dir,
+        } => {
+            let (program, data_dir) = remote_program(root, &target, program, remote_data_dir);
+            let mut bundle = settings_bundle::scope(
+                settings_bundle::export(root, &store.snapshot()?, monitor::now()),
+                &groups,
+            )?;
+            let signature =
+                settings_signing::sign(root, &store, &settings_bundle::signed_message(&bundle))?;
+            let signer = signature.key.clone();
+            bundle.signature = Some(signature);
+            let bytes = serde_json::to_vec(&bundle).map_err(|_| settings_bundle::NOT_A_BUNDLE)?;
+            blocking::run(move || {
+                remote_check::sync(
+                    &bytes,
+                    &signer,
+                    apply,
+                    &target,
+                    &account_send::Program {
+                        path: &program,
+                        data_dir: data_dir.as_deref(),
+                    },
+                    &account_send::ssh_runner,
+                )
+            })
+        }
         Operation::RemoteCheck {
             target,
             program,
@@ -6112,8 +6168,14 @@ async fn execute(
             // Written at once, not at the next pass: the old capability is already refused.
             let snapshot = store.snapshot()?;
             let address = rt.proxy.address().to_string();
-            let report =
-                bindings::sync_salted(root, &snapshot, &address, rt.proxy.token(), &salts)?;
+            let report = bindings::sync_salted(
+                root,
+                &snapshot,
+                &address,
+                rt.proxy.token(),
+                &salts,
+                external::claude_signed_out(),
+            )?;
             rt.proxy.set_folder_tokens(report.tokens.clone());
             rt.proxy.set_released_tokens(report.released.clone());
             rt.proxy.set_stat_folders(stat_folders(&snapshot));

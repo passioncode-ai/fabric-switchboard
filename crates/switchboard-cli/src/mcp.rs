@@ -93,6 +93,7 @@ pub(crate) fn tools() -> Vec<(bool, Value)> {
         (true, json!({"name":"switchboard_backup_now","title":"Back up now","description":"Write an encrypted backup now. Restore one with switchboard_backup_restore.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}})),
         (true, json!({"name":"switchboard_backup_restore","title":"Restore a backup","description":"Restore one backup of switchboard_backups by its file name, as the window's Restore does: accounts, groups, rules, the person's words and settings in it come back where this computer has none (accounts already here stay as they are; nothing is deleted). An account its group here does not take goes to the default group (returned_to_default). Answers the counts. Only when the operator asks.","inputSchema":{"type":"object","properties":{"file":{"type":"string","minLength":1,"maxLength":200,"description":"A file name from switchboard_backups."}},"required":["file"],"additionalProperties":false}})),
         (true, json!({"name":"switchboard_project_delete","title":"Delete a group","description":"Delete a group, as the window's Delete group does: its folders stop routing to its accounts and its own accounts go to the default group (nothing is signed out). A group with its own key or spending ceiling needs decision, the operator's words. Only when the operator asks.","inputSchema":{"type":"object","properties":{"pool":{"type":"string","minLength":1,"description":"The group id from switchboard_projects."},"decision":{"type":"object","properties":{"by":{"type":"string","enum":["operator"]},"instruction":{"type":"string","minLength":1,"maxLength":500},"at":{"type":"string"},"source":{"type":"string","minLength":1,"maxLength":200}},"required":["by","instruction","at","source"],"additionalProperties":false,"description":"The operator's words that ordered it."}},"required":["pool"],"additionalProperties":false}})),
+        (true, json!({"name":"switchboard_settings_sync","title":"Carry settings to another machine","description":"Carry this machine's settings (groups found there by their repositories, organizations, agents' settings, rotation settings; never an account or credential) to another machine over ssh, signed with this computer's key, and show what importing them there would do; apply: true imports them there. groups keeps only those groups (ids from switchboard_projects). to is the machine as ssh knows it; remote and remote_data_dir default to the newest move there. Only when the operator asks to apply.","inputSchema":{"type":"object","properties":{"to":{"type":"string","minLength":1,"maxLength":255},"groups":{"type":"array","items":{"type":"string"},"maxItems":64},"apply":{"type":"boolean"},"remote":{"type":"string"},"remote_data_dir":{"type":"string"}},"required":["to"],"additionalProperties":false}})),
         (true, json!({"name":"switchboard_settings_import","title":"Import settings from another machine","description":"Read a switchboard-settings/1 file (switchboard settings export on another machine) and say what it would add here: groups found by their repositories under the folders named, organizations, agents' settings, rotation policies, teams, ceilings. apply: true adds them (never raising or clearing a ceiling); clone: true with apply clones the groups' missing GitHub repositories first with the person's gh; signer: the organization's published key the file must be signed by. Only when the operator asks to apply.","inputSchema":{"type":"object","properties":{"file":{"type":"string","minLength":1,"description":"The settings file, an absolute path on this computer."},"under":{"type":"array","items":{"type":"string"},"maxItems":16,"description":"Absolute folders to look for the groups' repositories in; default the usual ones."},"apply":{"type":"boolean"},"clone":{"type":"boolean"},"signer":{"type":"string"}},"required":["file"],"additionalProperties":false}})),
         (false, json!({"name":"switchboard_recovery","title":"Stopped sessions","description":"Sessions that stopped on a limit and the accounts ready for them to continue: each stop's mode and when to try again.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}})),
         (false, json!({"name":"switchboard_handovers","title":"Hand-overs","description":"Whether hand-overs open in Fabric's console, and the hand-overs waiting for a console to take them.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}})),
@@ -656,6 +657,28 @@ impl Server {
     async fn account_remove(&self, args: &Map<String, Value>) -> Result<Value, String> {
         self.call(Operation::Remove {
             id: required(args, "account_id")?.into(),
+        })
+        .await
+    }
+    /// SB-326: this machine's settings carried to another one and previewed or imported there.
+    async fn settings_sync(&self, args: &Map<String, Value>) -> Result<Value, String> {
+        let text = |key: &str| args.get(key).and_then(Value::as_str).map(str::to_owned);
+        let groups = args
+            .get("groups")
+            .and_then(Value::as_array)
+            .map(|a| {
+                a.iter()
+                    .filter_map(Value::as_str)
+                    .map(str::to_owned)
+                    .collect()
+            })
+            .unwrap_or_default();
+        self.call(Operation::SettingsSync {
+            target: required(args, "to")?.to_owned(),
+            groups,
+            apply: args.get("apply").and_then(Value::as_bool).unwrap_or(false),
+            program: text("remote"),
+            remote_data_dir: text("remote_data_dir"),
         })
         .await
     }
@@ -1294,6 +1317,7 @@ impl Server {
             "switchboard_backup_restore" => self.backup_restore(args).await,
             "switchboard_project_delete" => self.project_delete(args).await,
             "switchboard_settings_import" => self.settings_import(args).await,
+            "switchboard_settings_sync" => self.settings_sync(args).await,
             "switchboard_recovery" => self.call(Operation::Recovery).await,
             "switchboard_handovers" => self.call(Operation::Handovers).await,
             "switchboard_agent_set" => self.agent_set(args).await,

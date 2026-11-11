@@ -559,6 +559,14 @@ ceilings. With `apply` it adds them, only when the operator asks, and never rais
 ceiling; `clone` with `apply` first clones the groups' missing GitHub repositories with the
 person's `gh`; `signer` is the organization's published key the file must be signed by.
 
+### `switchboard_settings_sync`: `to`, `groups?`, `apply?`, `remote?`, `remote_data_dir?`
+
+Carries this machine's settings (groups found there by their repositories, organizations,
+agents' settings, rotation settings; never an account, credential or capability) to the machine
+`to` over ssh, signed with this computer's key, and answers that machine's import preview; with
+`apply` it imports them there, only when the operator asks. `groups` keeps only those groups.
+`remote` and `remote_data_dir` default to the newest move there (SB-326).
+
 ### `switchboard_agent_set`: `agent?`, `enabled?`, `default?`, `permissions?`
 
 Only when the operator asks. `enabled` (with `agent`) lets Switchboard hand work to that agent

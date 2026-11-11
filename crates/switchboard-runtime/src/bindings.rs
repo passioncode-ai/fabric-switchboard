@@ -18,6 +18,11 @@ const SETTINGS_DIR: &str = ".claude";
 const SETTINGS_FILE: &str = "settings.local.json";
 const EXCLUDE_LINE: &str = ".claude/settings.local.json";
 pub(crate) const BASE_URL: &str = "ANTHROPIC_BASE_URL";
+const DEFAULT_POOL: &str = "default";
+/// SB-331: the `ANTHROPIC_AUTH_TOKEN` a folder gets where the ordinary Claude Code holds no
+/// sign-in, so Claude Code sends its requests to the proxy instead of asking for a login. A fixed
+/// word, never a credential: the proxy puts the group's account in its place, as for a shell home.
+pub(crate) const SIGNED_OUT_TOKEN: &str = crate::shell::homes::PLACEHOLDER;
 /// Written by 0.6.37 and earlier; removed where it is still ours (SB-140): Claude Code counts it
 /// as an auth source and turns off the session's claude.ai connectors.
 pub(crate) const AUTH_TOKEN: &str = "ANTHROPIC_AUTH_TOKEN";
@@ -200,19 +205,39 @@ pub(crate) fn desired(snapshot: &Snapshot) -> Vec<(PathBuf, String)> {
     if !snapshot.organizations.is_empty() {
         projects.sort_by_key(|p| !p.organizations.is_empty());
     }
+    let has_claude = |pool: &str| {
+        snapshot
+            .accounts
+            .iter()
+            .any(|a| snapshot.serves(a, pool) && a.provider == Provider::Claude && a.enabled)
+    };
+    // SB-325: a personal group with no Claude account of its own routes its folders to the
+    // default group, as a repository in no group uses it (DEC-0007); its folders come after every
+    // group's own, so a folder two groups hold keeps the group that has an account.
+    let mut fallback: Vec<(PathBuf, String)> = Vec::new();
     for project in projects {
         // A group whose seats left its organization keeps its folders: the proxy refuses the seat
         // (closed), rather than the folder falling back to the ordinary login (open). SB-109.
-        let claude = snapshot.accounts.iter().any(|a| {
-            snapshot.serves(a, &project.pool) && a.provider == Provider::Claude && a.enabled
-        });
-        if !claude {
+        // A group bound to an organization never falls back to the default group either.
+        let route = if has_claude(&project.pool) {
+            project.pool.clone()
+        } else if project.organizations.is_empty()
+            && project.pool != DEFAULT_POOL
+            && has_claude(DEFAULT_POOL)
+        {
+            DEFAULT_POOL.to_owned()
+        } else {
             continue;
-        }
+        };
+        let out = if route == project.pool {
+            &mut out
+        } else {
+            &mut fallback
+        };
         for folder in &project.folders {
             let folder = PathBuf::from(folder);
             if folder.is_dir() {
-                out.push((folder.clone(), project.pool.clone()));
+                out.push((folder.clone(), route.clone()));
             }
             let Some(common) = crate::suggest::repo(&folder).map(|r| r.common) else {
                 continue;
@@ -239,11 +264,12 @@ pub(crate) fn desired(snapshot: &Snapshot) -> Vec<(PathBuf, String)> {
                     .project_for(&worktree)
                     .is_some_and(|p| p.pool == project.pool)
                 {
-                    out.push((worktree, project.pool.clone()));
+                    out.push((worktree, route.clone()));
                 }
             }
         }
     }
+    out.extend(fallback);
     // SB-146: a folder in several groups is written for the first group with a Claude account
     // (creation order), the one `Snapshot::project_for` names.
     let mut seen = std::collections::HashSet::new();
@@ -428,6 +454,7 @@ fn apply(
     token: &str,
     previous: Option<&Binding>,
     known: &std::collections::HashSet<String>,
+    signed_out: bool,
 ) -> Result<Applied, ()> {
     let path = settings_path(folder);
     if another_users(&path) {
@@ -448,7 +475,8 @@ fn apply(
             .is_none_or(|v| is_ours(v, base_url, previous, true) || is_switchboard_route(v));
         let token_ok = env.get(AUTH_TOKEN).is_none_or(|v| {
             is_ours(v, token, previous, false)
-                || v.as_str().is_some_and(|t| known.contains(&sha256(t)))
+                || v.as_str()
+                    .is_some_and(|t| t == SIGNED_OUT_TOKEN || known.contains(&sha256(t)))
         });
         let header_ok = env
             .get(CUSTOM_HEADERS)
@@ -464,15 +492,20 @@ fn apply(
         return Err(());
     };
     let header = header_value(token);
+    let want_token = signed_out.then_some(SIGNED_OUT_TOKEN);
     let same = env.get(BASE_URL).and_then(Value::as_str) == Some(base_url)
         && env.get(CUSTOM_HEADERS).and_then(Value::as_str) == Some(header.as_str())
-        && !env.contains_key(AUTH_TOKEN);
+        && env.get(AUTH_TOKEN).and_then(Value::as_str) == want_token;
     exclude(folder);
     if same {
         return Ok(Applied::Unchanged);
     }
-    // Checked above to be ours: the old auth-token form goes.
+    // Checked above to be ours: the old auth-token form goes; SB-331's placeholder is written
+    // only while the ordinary Claude Code holds no sign-in.
     env.remove(AUTH_TOKEN);
+    if let Some(placeholder) = want_token {
+        env.insert(AUTH_TOKEN.into(), Value::String(placeholder.into()));
+    }
     env.insert(BASE_URL.into(), Value::String(base_url.into()));
     env.insert(CUSTOM_HEADERS.into(), Value::String(header));
     write_settings(&path, &map)?;
@@ -501,7 +534,7 @@ fn unapply(row: &Binding) -> Result<bool, ()> {
     if env
         .get(AUTH_TOKEN)
         .and_then(Value::as_str)
-        .is_some_and(|t| sha256(t) == row.token_sha256)
+        .is_some_and(|t| t == SIGNED_OUT_TOKEN || sha256(t) == row.token_sha256)
     {
         env.remove(AUTH_TOKEN);
         removed = true;
@@ -545,6 +578,7 @@ pub(crate) fn sync(
         address,
         session_token,
         &std::collections::HashMap::new(),
+        false,
     )
 }
 /// SB-133: the capability written into one folder: its pool's, bound to the folder's path, so a
@@ -590,6 +624,7 @@ pub(crate) fn sync_salted(
     address: &str,
     session_token: &str,
     salts: &std::collections::HashMap<String, String>,
+    signed_out: bool,
 ) -> Result<Report, String> {
     let want = desired(snapshot);
     let mut report = Report {
@@ -615,7 +650,7 @@ pub(crate) fn sync_salted(
                 let _ = unapply(old);
             }
         }
-        match apply(folder, &base_url, &token, previous, &known) {
+        match apply(folder, &base_url, &token, previous, &known, signed_out) {
             Ok(result @ (Applied::Written(_) | Applied::Unchanged)) => {
                 let created = match (result, previous) {
                     (Applied::Written(written), Some(old)) => written || old.created,
@@ -748,6 +783,9 @@ pub(crate) fn key(snapshot: &Snapshot, address: &str, repos: &mut RepoCache) -> 
     for p in &snapshot.projects {
         p.pool.hash(&mut h);
         p.folders.hash(&mut h);
+        // SB-325: a personal group falls back to the default group; one bound to an
+        // organization does not.
+        p.organizations.hash(&mut h);
         for f in &p.folders {
             let worktrees = repos.common(Path::new(f)).map(|c| c.join("worktrees"));
             let stamp =
@@ -876,6 +914,87 @@ mod tests {
             !settings_path(&fresh).exists(),
             "a file Switchboard created is removed"
         );
+    }
+
+    #[test]
+    fn a_group_without_its_own_claude_account_routes_to_the_default_group() {
+        // SB-325 (Mac Studio, 2026-11-10): every group there held no account, so a plain `claude`
+        // in a group folder had no route at all. A personal group falls back to the default
+        // group; one bound to an organization never does.
+        let tmp = tempfile::tempdir().unwrap();
+        let data = tmp.path().canonicalize().unwrap();
+        let (agents, org, own) = (data.join("agents"), data.join("org"), data.join("own"));
+        for d in [&agents, &org, &own] {
+            git(d);
+        }
+        let mut bound = project("bound", &[&org]);
+        bound.organizations = vec!["acme".into()];
+        let mut s = Snapshot {
+            projects: vec![
+                project("agents", &[&agents, &own]),
+                bound,
+                project("team", &[&own]),
+            ],
+            accounts: vec![account("default"), account("team")],
+            ..Default::default()
+        };
+        let want = desired(&s);
+        let pool_of = |f: &Path| want.iter().find(|(w, _)| w == f).map(|(_, p)| p.as_str());
+        assert_eq!(pool_of(&agents), Some("default"));
+        assert_eq!(
+            pool_of(&org),
+            None,
+            "an organization's group never falls back"
+        );
+        assert_eq!(
+            pool_of(&own),
+            Some("team"),
+            "a group's own account comes first"
+        );
+        // No default account: nothing to fall back to.
+        s.accounts.retain(|a| a.pool != "default");
+        assert_eq!(desired(&s).iter().find(|(w, _)| *w == agents), None);
+    }
+
+    #[test]
+    fn a_machine_with_no_claude_sign_in_gets_a_placeholder_token_only_while_it_lasts() {
+        // SB-331: with no ordinary sign-in, Claude Code says "Not logged in" before it sends a
+        // request; the placeholder lets it reach the proxy. It goes once a sign-in exists, and the
+        // person's own token is never touched.
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let data = tmp.path().canonicalize().unwrap();
+        let (app, theirs) = (data.join("app"), data.join("theirs"));
+        git(&app);
+        git(&theirs);
+        std::fs::create_dir_all(theirs.join(".claude")).unwrap();
+        std::fs::write(
+            settings_path(&theirs),
+            r#"{"env":{"ANTHROPIC_AUTH_TOKEN":"the-persons"}}"#,
+        )
+        .unwrap();
+        let s = Snapshot {
+            projects: vec![project("pc", &[&app, &theirs])],
+            accounts: vec![account("pc")],
+            ..Default::default()
+        };
+        let none = std::collections::HashMap::new();
+        let at = "127.0.0.1:4000";
+        sync_salted(root.path(), &s, at, "session", &none, true).unwrap();
+        assert_eq!(env(&app).unwrap()[AUTH_TOKEN], SIGNED_OUT_TOKEN);
+        assert_eq!(env(&theirs).unwrap()[AUTH_TOKEN], "the-persons");
+        let again = sync_salted(root.path(), &s, at, "session", &none, true).unwrap();
+        assert_eq!(again.bound, 0, "nothing changed, nothing written");
+        sync_salted(root.path(), &s, at, "session", &none, false).unwrap();
+        assert_eq!(env(&app).unwrap().get(AUTH_TOKEN), None);
+        sync_salted(root.path(), &s, at, "session", &none, true).unwrap();
+        let empty = Snapshot::default();
+        sync_salted(root.path(), &empty, at, "session", &none, true).unwrap();
+        assert!(
+            !settings_path(&app).exists(),
+            "leaving the group takes the placeholder too"
+        );
+        assert_eq!(env(&theirs).unwrap()[AUTH_TOKEN], "the-persons");
     }
 
     #[test]
@@ -1167,7 +1286,8 @@ mod tests {
         let old = read();
         let salts: std::collections::HashMap<String, String> =
             [("pc".to_owned(), "synthetic-salt".to_owned())].into();
-        let report = sync_salted(&root, &snapshot, "127.0.0.1:4000", "session", &salts).unwrap();
+        let report =
+            sync_salted(&root, &snapshot, "127.0.0.1:4000", "session", &salts, false).unwrap();
         assert_eq!(report.bound, 1, "{report:?}");
         let new = read();
         assert_ne!(new, old);
@@ -1214,7 +1334,8 @@ mod tests {
         };
         let salts: std::collections::HashMap<String, String> =
             [("pc".to_owned(), "synthetic-salt".to_owned())].into();
-        let report = sync_salted(&root, &snapshot, "127.0.0.1:4000", "session", &salts).unwrap();
+        let report =
+            sync_salted(&root, &snapshot, "127.0.0.1:4000", "session", &salts, false).unwrap();
         assert_eq!(report.bound, 3, "{report:?}");
         assert!(report.user_values_present.is_empty(), "{report:?}");
         assert!(report.skipped.is_empty(), "{report:?}");
