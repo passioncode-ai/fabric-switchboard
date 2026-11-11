@@ -150,6 +150,7 @@ switchboard launch --provider claude --working-directory /absolute/project/path 
 switchboard launch ACCOUNT_UUID --working-directory /absolute/project/path --by voc-learn --parent LAUNCH_ID
 switchboard continue wf_0123456789abcdef --account ACCOUNT_UUID --dir /absolute/checkout
 switchboard --json dispatch --dir /absolute/project --workflow wf_0123456789abcdef --handoff handoff:0123456789abcdef --request REQUEST_UUID --dispatch-id DISPATCH_ID --reason request --permissions all --timeout-minutes 30
+switchboard --json dispatch --dir /absolute/project --workflow wf_0123456789abcdef --handoff handoff:0123456789abcdef --reason inbox --timeout-minutes 30   # SB-338: the project's unread board messages, settled by read marks; never with --target
 switchboard --json dispatch stop --launch-id LAUNCH_ID
 switchboard --json dispatch --dir /absolute/project --workflow wf_0123456789abcdef --handoff handoff:0123456789abcdef --request REQUEST_UUID --target sshlg@studio   # SB-317: the session runs on that machine in a fresh worktree of the repository there
 switchboard --json dispatch --dir /absolute/project --workflow wf_0123456789abcdef --handoff handoff:0123456789abcdef --target auto --candidates sshlg@studio   # SB-317: here or on the candidate whose accounts have the most room

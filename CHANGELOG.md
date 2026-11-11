@@ -8,6 +8,8 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- `switchboard dispatch --reason inbox` starts a run for a project's unread Fabric board messages: it answers where an answer is owed, marks what it handled read and never claims a request (SB-338, Fabric's request).
+
 ## 0.7.55
 
 - On a busy computer an update that took longer than five minutes to install was reported as failed ("Quit and reopen Switchboard to try again") although it finished on disk. Switchboard now waits for it, then offers *Restart to update* and restarts into it at a quiet moment as usual (SB-337).

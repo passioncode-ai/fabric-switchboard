@@ -4126,6 +4126,7 @@ async fn dispatch_start(
     working_directory: &Path,
     workflow_id: &str,
     handoff_id: &str,
+    reason: dispatch::Reason,
     permissions: launch::Permissions,
     timeout_minutes: u32,
     request_id: Option<&str>,
@@ -4166,9 +4167,11 @@ async fn dispatch_start(
     };
     // The request: the flag wins over the packet; a dispatch with neither is malformed.
     let packet = dispatch::packet(&shown);
+    // SB-338: an inbox run has no request of its own; its records name it `inbox`.
     let request = request_id
         .map(str::to_owned)
         .or_else(|| packet.request.clone())
+        .or_else(|| (reason == dispatch::Reason::Inbox).then(|| "inbox".to_owned()))
         .ok_or(dispatch::NO_REQUEST)?;
     // D-9: `auto` runs where the accounts have the most room: here, or one of the candidates.
     let target = match target {
@@ -4268,8 +4271,8 @@ async fn dispatch_start(
         handoff: handoff_id.to_owned(),
         request: request.clone(),
         header: dispatch::header(workflow_id, handoff_id, &request),
-        prompt: dispatch::prompt(handoff_id, provider, &id),
-        contract: dispatch::EXIT_CONTRACT.to_owned(),
+        prompt: dispatch::prompt(handoff_id, provider, &id, reason),
+        contract: dispatch::contract(reason).to_owned(),
         by: json!({
             "id": dispatch_id,
             "request": request,
@@ -5240,7 +5243,7 @@ async fn execute(
             working_directory,
             workflow_id,
             handoff_id,
-            reason: dispatch::Reason::Request,
+            reason,
             permissions,
             timeout_minutes,
             request_id,
@@ -5272,6 +5275,9 @@ async fn execute(
             {
                 return Err(dispatch::DISPATCH_ID_INVALID.into());
             }
+            if reason == dispatch::Reason::Inbox && target.is_some() {
+                return Err(dispatch::INBOX_REMOTE.into());
+            }
             let answer = dispatch_start(
                 &store,
                 root,
@@ -5279,6 +5285,7 @@ async fn execute(
                 &working_directory,
                 &workflow_id,
                 &handoff_id,
+                reason,
                 permissions,
                 timeout_minutes,
                 request_id.as_deref(),
