@@ -277,6 +277,20 @@ pub enum Operation {
         #[serde(default)]
         remote_data_dir: Option<String>,
     },
+    /// SB-326: this machine's settings (groups, organizations, agents' settings, rotation
+    /// settings; no account) carried to another machine over ssh and previewed there, or with
+    /// `apply` imported. `groups` keeps only those groups, as `settings export --group`.
+    SettingsSync {
+        target: String,
+        #[serde(default)]
+        groups: Vec<String>,
+        #[serde(default)]
+        apply: bool,
+        #[serde(default)]
+        program: Option<String>,
+        #[serde(default)]
+        remote_data_dir: Option<String>,
+    },
     /// SB-332: the other machines this Switchboard knows (from moves and remote runs); with
     /// `probe`, whether each one's Switchboard answers over ssh now and its version.
     Targets {
@@ -1262,6 +1276,8 @@ impl Runtime {
                 // SB-327: ssh reads of another machine; the store is only read.
                 | Operation::RemoteStatus { .. }
                 | Operation::RemoteCheck { .. }
+                // SB-326: the store is read for the file; the import runs there.
+                | Operation::SettingsSync { .. }
                 // SB-332: files here, and with `probe` one ssh read per machine.
                 | Operation::Targets { .. }
                 | Operation::AgentCatalog
@@ -5613,6 +5629,37 @@ async fn execute(
             let (program, data_dir) = remote_program(root, &target, program, remote_data_dir);
             blocking::run(move || {
                 remote_check::status(
+                    &target,
+                    &account_send::Program {
+                        path: &program,
+                        data_dir: data_dir.as_deref(),
+                    },
+                    &account_send::ssh_runner,
+                )
+            })
+        }
+        Operation::SettingsSync {
+            target,
+            groups,
+            apply,
+            program,
+            remote_data_dir,
+        } => {
+            let (program, data_dir) = remote_program(root, &target, program, remote_data_dir);
+            let mut bundle = settings_bundle::scope(
+                settings_bundle::export(root, &store.snapshot()?, monitor::now()),
+                &groups,
+            )?;
+            let signature =
+                settings_signing::sign(root, &store, &settings_bundle::signed_message(&bundle))?;
+            let signer = signature.key.clone();
+            bundle.signature = Some(signature);
+            let bytes = serde_json::to_vec(&bundle).map_err(|_| settings_bundle::NOT_A_BUNDLE)?;
+            blocking::run(move || {
+                remote_check::sync(
+                    &bytes,
+                    &signer,
+                    apply,
                     &target,
                     &account_send::Program {
                         path: &program,

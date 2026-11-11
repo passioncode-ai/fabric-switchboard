@@ -423,7 +423,9 @@ async fn request_once(root: &Path, operation: &Operation) -> Result<Option<Value
         Operation::VestaConnect => 420,
         Operation::SendAccount { .. } | Operation::RecallAccount { .. } => 600,
         // SB-327: three ssh reads of two minutes each at most.
-        Operation::RemoteStatus { .. } | Operation::RemoteCheck { .. } => 420,
+        Operation::RemoteStatus { .. }
+        | Operation::RemoteCheck { .. }
+        | Operation::SettingsSync { .. } => 420,
         // SB-324: a word on a moved account's organizations reaches its copy there over ssh.
         Operation::OrganizationAssign { .. } => 420,
         // SB-332: one ssh read per known machine.

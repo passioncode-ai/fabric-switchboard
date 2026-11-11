@@ -361,4 +361,81 @@ mod tests {
             TARGET_INVALID
         );
     }
+    #[test]
+    fn settings_go_to_the_other_machine_signed_on_its_standard_input() {
+        // SB-326: one ssh call; the file on stdin, the key as the signer, `--apply` only when
+        // asked; the other machine's refusal comes back as it said it.
+        let seen = std::sync::Mutex::new(Vec::new());
+        let program = Program {
+            path: "/Applications/Fabric Switchboard.app/Contents/MacOS/switchboard",
+            data_dir: None,
+        };
+        let ok = |args: &[String], stdin: Option<&[u8]>| -> Result<String, String> {
+            seen.lock()
+                .unwrap()
+                .push((args.to_vec(), stdin.map(<[u8]>::to_vec)));
+            Ok(r#"{"ok":true,"data":{"preview":{"groups":[]},"applied":false}}"#.into())
+        };
+        let answer = sync(b"{\"format\":1}", "KEY", false, "me@studio", &program, &ok).unwrap();
+        assert_eq!(answer["applied"], false);
+        let calls = seen.lock().unwrap().clone();
+        assert_eq!(calls.len(), 1);
+        let (args, stdin) = &calls[0];
+        assert_eq!(args[0], "me@studio");
+        assert!(args[2].ends_with("'settings' 'import' '/dev/stdin' '--signer' 'KEY'"));
+        assert_eq!(stdin.as_deref(), Some(&b"{\"format\":1}"[..]));
+        sync(b"{}", "KEY", true, "me@studio", &program, &ok).unwrap();
+        assert!(seen.lock().unwrap()[1].0[2].ends_with("'--apply'"));
+        let refused = |_: &[String], _: Option<&[u8]>| -> Result<String, String> {
+            Err(r#"{"ok":false,"error":"Settings file signature invalid"}"#.into())
+        };
+        assert_eq!(
+            sync(b"{}", "KEY", true, "me@studio", &program, &refused).unwrap_err(),
+            "Settings file signature invalid"
+        );
+        assert_eq!(
+            sync(b"{}", "KEY", true, "-oProxy=x", &program, &ok).unwrap_err(),
+            TARGET_INVALID
+        );
+    }
+}
+
+/// SB-326: carries this machine's settings to another one: the signed `switchboard-settings/1`
+/// file goes on ssh's standard input to `settings import /dev/stdin --signer <this key>` there
+/// (a preview, or with `apply` the import), so groups, organizations, agents' settings and
+/// rotation settings match without a file copied by hand. The answer is the other machine's
+/// import answer. No account, credential or capability is in the file.
+pub fn sync(
+    bundle: &[u8],
+    signer: &str,
+    apply: bool,
+    target: &str,
+    program: &Program<'_>,
+    run: &Run<'_>,
+) -> Result<Value, String> {
+    if !crate::account_send::target_valid(target) {
+        return Err(TARGET_INVALID.into());
+    }
+    program.check()?;
+    let mut args = vec![
+        "--json",
+        "settings",
+        "import",
+        "/dev/stdin",
+        "--signer",
+        signer,
+    ];
+    if apply {
+        args.push("--apply");
+    }
+    let line = [target.to_owned(), "--".to_owned(), remote(program, &args)];
+    match run(&line, Some(bundle)) {
+        Ok(out) => data(&out).ok_or_else(|| UNREACHABLE.to_owned()),
+        Err(out) => Err(
+            serde_json::from_str::<Value>(out.lines().last().unwrap_or(""))
+                .ok()
+                .and_then(|v| v["error"].as_str().map(str::to_owned))
+                .unwrap_or_else(|| UNREACHABLE.to_owned()),
+        ),
+    }
 }

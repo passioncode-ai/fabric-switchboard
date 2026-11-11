@@ -681,6 +681,27 @@ enum SettingsCmd {
     /// The public key this computer signs settings files with (made on first use). Publish it
     /// for your organization's members; its private half stays in this computer's vault.
     Signer,
+    /// Carry this machine's settings to another machine over ssh: the signed file is imported
+    /// there (`settings import`), so its groups, organizations and agents' settings match these.
+    /// Shows what it would do there; `--apply` does it. No account goes with it.
+    Sync {
+        /// The other machine as ssh knows it (`user@host`), reachable without a prompt.
+        #[arg(long)]
+        to: String,
+        /// Only this group (its id from `switchboard project list`); repeat for each.
+        #[arg(long = "group")]
+        groups: Vec<String>,
+        /// Import it there.
+        #[arg(long)]
+        apply: bool,
+        /// That machine's switchboard, an absolute path (default: the one the newest move
+        /// there used, else the macOS app's).
+        #[arg(long)]
+        remote: Option<String>,
+        /// That machine's data folder, when its Switchboard runs with `--data-dir`.
+        #[arg(long)]
+        remote_data_dir: Option<String>,
+    },
     /// Show what importing a settings file would do here, then do it with `--apply`.
     Import {
         /// The file `settings export` wrote.
@@ -1947,6 +1968,19 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                 groups: groups.clone(),
             },
             SettingsCmd::Signer => Operation::SettingsSigner,
+            SettingsCmd::Sync {
+                to,
+                groups,
+                apply,
+                remote,
+                remote_data_dir,
+            } => Operation::SettingsSync {
+                target: to.clone(),
+                groups: groups.clone(),
+                apply: *apply,
+                program: remote.clone(),
+                remote_data_dir: remote_data_dir.clone(),
+            },
             SettingsCmd::Import {
                 file,
                 under,
@@ -4487,6 +4521,7 @@ mod mcp_parity {
             Not("SB-176: a file the person carries to another machine; an agent has no second machine to carry it to"),
         ),
         ("settings import", Tool("switchboard_settings_import")),
+        ("settings sync", Tool("switchboard_settings_sync")),
         (
             "settings signer",
             Not("SB-272: the administrator publishes this key to the organization's members; an agent has no members to publish it to"),
