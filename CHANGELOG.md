@@ -8,10 +8,10 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## 0.7.53
 
+0.7.52 was tagged but not published: its nightly failed on Linux, where three constants of the macOS 27 fix were unused in the test build. Its changes ship here.
+
+- The `switching-accounts` skill's description is 345 characters instead of 957, so Claude Code no longer drops it to a bare name when many skills are installed; its full list of phrases moved into the skill's body (sshlg-skills board request `f560930a`).
 - A computer that runs only `switchboard serve` (no window) now keeps itself up to date as the app does: it checks every five minutes and installs a new version itself when its account may replace the app. When several accounts share one app and another one updates it, each `serve` restarts onto the new version by itself (SB-333).
-
-## 0.7.52
-
 - `switchboard launch --target MACHINE --in-place` starts a coding session on another machine in this terminal over ssh; that machine's Switchboard picks the account from the folder's group there. `switchboard targets` (MCP `switchboard_targets`) lists the machines this Switchboard knows from moves and remote runs, and with `--probe` asks each for its version (SB-332).
 - On macOS 27 the local proxy closed every connection as coming from another user, so no managed session, folder route or launched agent got an account there: macOS 27 no longer tells a process who owns another process's socket in the list Switchboard read. The proxy now finds the connecting process among your own processes; a process of another user is still refused (SB-330).
 - Agents can remove an account the way the window's *Remove account* does (MCP `switchboard_account_remove`, only when you ask), and `switchboard accounts list --json` now names each account's organization and the ones it also works for (SB-328).
