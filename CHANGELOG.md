@@ -6,6 +6,10 @@ release pull request renames `Unreleased` to the version. While Windows signing 
 that section must say `windows_authenticode: NOT_SIGNED`. Notes of 0.5.3-beta.1 and earlier are
 on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/releases).
 
+## Unreleased
+
+- A computer that runs only `switchboard serve` (no window) now keeps itself up to date as the app does: it checks every five minutes and installs a new version itself when its account may replace the app. When several accounts share one app and another one updates it, each `serve` restarts onto the new version by itself (SB-333).
+
 ## 0.7.52
 
 - `switchboard launch --target MACHINE --in-place` starts a coding session on another machine in this terminal over ssh; that machine's Switchboard picks the account from the folder's group there. `switchboard targets` (MCP `switchboard_targets`) lists the machines this Switchboard knows from moves and remote runs, and with `--probe` asks each for its version (SB-332).
