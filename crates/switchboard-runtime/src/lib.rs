@@ -1554,6 +1554,8 @@ impl Runtime {
                 // SB-183: the organizations' shell homes and the folder map follow the groups'
                 // organizations and Codex accounts too.
                 shell::homes::key(&snapshot, &self.native.shell).hash(&mut h);
+                // SB-331: the placeholder token comes and goes with the ordinary sign-in.
+                external::claude_signed_out().hash(&mut h);
                 key = h.finish();
             }
             key
@@ -1567,7 +1569,14 @@ impl Runtime {
         };
         let salts = read_pool_salts(&self.root);
         let synced = blocking::run(|| {
-            bindings::sync_salted(&self.root, &snapshot, &address, self.proxy.token(), &salts)
+            bindings::sync_salted(
+                &self.root,
+                &snapshot,
+                &address,
+                self.proxy.token(),
+                &salts,
+                external::claude_signed_out(),
+            )
         });
         match synced {
             Ok(report) => {
@@ -6112,8 +6121,14 @@ async fn execute(
             // Written at once, not at the next pass: the old capability is already refused.
             let snapshot = store.snapshot()?;
             let address = rt.proxy.address().to_string();
-            let report =
-                bindings::sync_salted(root, &snapshot, &address, rt.proxy.token(), &salts)?;
+            let report = bindings::sync_salted(
+                root,
+                &snapshot,
+                &address,
+                rt.proxy.token(),
+                &salts,
+                external::claude_signed_out(),
+            )?;
             rt.proxy.set_folder_tokens(report.tokens.clone());
             rt.proxy.set_released_tokens(report.released.clone());
             rt.proxy.set_stat_folders(stat_folders(&snapshot));

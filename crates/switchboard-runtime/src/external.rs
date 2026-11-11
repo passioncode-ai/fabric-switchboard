@@ -753,8 +753,17 @@ fn outcome_code(result: &Result<CapturedProfile, String>) -> &'static str {
         Err(_) => "refused",
     }
 }
+/// SB-331: whether the ordinary Claude Code's sign-in source last read as absent (no sign-in at
+/// all, not one that could not be read), for the folder bindings.
+static CLAUDE_SIGNED_OUT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+pub(crate) fn claude_signed_out() -> bool {
+    CLAUDE_SIGNED_OUT.load(std::sync::atomic::Ordering::Relaxed)
+}
 /// Logs a change of a source's state as codes only (lifecycle LC-12).
 fn report(slot: &mut Slot, provider: Provider, code: &'static str) {
+    if provider == Provider::Claude {
+        CLAUDE_SIGNED_OUT.store(code == "absent", std::sync::atomic::Ordering::Relaxed);
+    }
     if slot.reported != code {
         slot.reported = code;
         crate::oplog::event(
