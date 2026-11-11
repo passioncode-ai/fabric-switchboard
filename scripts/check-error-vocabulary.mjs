@@ -122,7 +122,6 @@ const ALLOWLIST = {
   'Project already here.': 'swallowed by backup restore',
   'Organization already here.': 'swallowed by backup restore (SB-109)',
   'Nothing to restore.': 'swallowed by backup restore (SB-109)',
-  'An inbox run reads this machine\'s board, so it runs here. Leave out --target.': 'only Fabric\'s dispatch on the CLI prints it (SB-338)',
   'Only a Claude sign-in has a Claude Code profile.': 'learn_native_context reads it as the outcome invalid (SB-334)',
   'inbox_unreachable': 'SB-256 N3: a Fabric Inbox client code read by the sign-in autopilot, which turns it into a sentence (N4); nothing shows it yet',
   'inbox_refused': 'SB-256 N3: a Fabric Inbox client code read by the sign-in autopilot, which turns it into a sentence (N4); nothing shows it yet',
