@@ -41,6 +41,7 @@ fn owner_on(local_port: u16, peer_port: u16) -> Option<u32> {
 /// ports, each in network order at the start of an `int` of `in_sockinfo`. Read on macOS 26.6
 /// and 27.2 (792-byte answers); a live test reads a socket of another process back.
 #[cfg(any(target_os = "macos", test))]
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 mod fdinfo {
     pub const FPORT: usize = 264;
     pub const LPORT: usize = 268;

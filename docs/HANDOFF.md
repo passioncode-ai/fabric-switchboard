@@ -2,6 +2,16 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-11-11 (night): updates everywhere (SB-333), the Studio's proxy on macOS 27 (SB-330), remote launch (SB-332); 0.7.51 published, 0.7.52 not published
+
+- **Asked.** The operator (2026-11-11): «давай убедимся, что у нас все публикации доходят ... софт должен обновляться везде. И на студиях ... и у сотрудников»; then «давай делай».
+- **Done.** SB-330 (PR #605): on macOS 27 `pcblist64` lists only the caller's sockets, so the proxy refused every client on the Studio; it now finds the peer among this account's processes. SB-332 (PR #606, Fabric Dashboards' request `0080400f`): `launch --target`, `targets`, MCP `switchboard_targets`. SB-333 (PR #609, DEC-0011): an installed `serve` updates itself every five minutes and restarts onto a replaced program. SB-328 (PR #604). SB-324 and SB-327 released in 0.7.51 and checked live (#608). The `switching-accounts` skill's description shortened to 345 characters (sshlg-skills' request `f560930a`). studio-agent updated the Studio to 0.7.51 and installed `ai.passioncode.studio-agent.switchboard-update` (aiteam1, every 10 minutes); its list of other software that lags on the Studio is its plan row D7 (thread `192b1188`). Frame Agent's group on the Studio (`frame-agent`, claude14 selected) waits for SB-330 there (thread `17079e25`).
+- **Releases.** 0.7.51 published 2026-11-11T00:01:46Z and installed here (00:06:46Z) and on the Studio (00:22:52Z). 0.7.52 (tag on `1b5b152`) not published: its nightly 42928439887 failed both Linux jobs on clippy (`fdinfo` constants unused off macOS); fixed in this change, and 0.7.53 carries everything.
+- **Mistakes to keep from repeating.** A gate run on the Mac Studio does not show Linux clippy: a `cfg(any(target_os = "macos", test))` item needs `allow(dead_code)` off macOS. I force-pushed my own unmerged `release-0.7.52` branch once (only my commit was on it); rebuild such a branch under a new name instead.
+- **Open.** SB-325 (decided, not built), SB-326, SB-331; SB-300 until 2026-11-17; SB-254 after 2026-11-12 23:12Z.
+
+**Exact next task.** Watch the v0.7.53 tag's nightly and release to `latest.json` 0.7.53; install here; confirm the Studio's three `serve`s reach 0.7.53 through studio-agent's updater; then run `claude -p` in `~/Library/Application Support/frame-agent/default` on the Studio with `ANTHROPIC_AUTH_TOKEN` set to a placeholder and tell Frame Agent (thread `17079e25`) and Fabric Dashboards (thread `000ae765`) the route works; write the receipts into SB-330, SB-332 and SB-333.
+
 ## 2026-11-10 (night): audit of accounts across machines and organizations; SB-323
 
 - **Asked.** The operator (2026-11-10): audit accounts, moves to the Studio and back, organizations; are the Studio's copies linked to this one and how they sync; what agents lack in MCP; sessions kept, nothing lost, no extra sign-ins.

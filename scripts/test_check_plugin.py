@@ -119,7 +119,7 @@ class PlantedDefects(Fixture):
         self.assertFlags("must equal the directory name")
 
     def test_description_over_limit(self):
-        self.edit(SKILL, "  Use when a coding agent", "  Use when " + "very " * 220 + "a coding agent")
+        self.edit(SKILL, "  Use when an agent", "  Use when " + "very " * 220 + "an agent")
         self.assertFlags("over 1024")
 
     def test_unknown_tool_named_in_skill(self):
