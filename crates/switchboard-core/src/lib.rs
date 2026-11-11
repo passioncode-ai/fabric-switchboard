@@ -2092,6 +2092,54 @@ impl Store {
         self.changed();
         Ok(true)
     }
+    /// SB-334: gives a Claude sign-in that was saved without Claude Code's own profile (added by
+    /// an official sign-in or a move, never captured from Claude Code) the profile native
+    /// activation writes into Claude Code: `context` is `{auth, oauth_account}` as a capture
+    /// stores it. Only when the stored credential has none, and only for the account the
+    /// profile names. Under the credential lock, so a renewal never loses its successor.
+    pub fn attach_native_context(
+        &self,
+        id: &str,
+        context: serde_json::Value,
+    ) -> Result<bool, String> {
+        let _writes = self.credential_lock()?;
+        let account = {
+            let state = self.lock()?;
+            state
+                .accounts
+                .iter()
+                .find(|a| a.id == id)
+                .cloned()
+                .ok_or("Account not found")?
+        };
+        if account.provider != Provider::Claude || account.kind != AuthKind::OAuth {
+            return Err("Only a Claude sign-in has a Claude Code profile.".into());
+        }
+        let named = context
+            .pointer("/oauth_account/accountUuid")
+            .and_then(serde_json::Value::as_str);
+        let known = account
+            .external_identity
+            .as_ref()
+            .and_then(|i| i.account_id.as_deref());
+        if named.is_none() || known.is_some_and(|k| Some(k) != named) {
+            return Err("Stored Claude identity differs from its native profile.".into());
+        }
+        let mut stored = self
+            .vault
+            .get(id)
+            .map_err(vault::surface("Credential storage unavailable"))?;
+        if stored.native_context.is_some() {
+            return Ok(false);
+        }
+        stored.native_context = Some(context);
+        stored.validate(account.provider, account.kind)?;
+        self.vault
+            .put(id, &stored)
+            .map_err(vault::surface("Credential storage unavailable"))?;
+        self.changed();
+        Ok(true)
+    }
     /// Vault deletion precedes metadata publication. On disk failure the visible account
     /// remains, but its missing credential prevents use. Retrying removal is safe.
     /// H-2: it takes the credential lock first, so no renewal or save writes the item it

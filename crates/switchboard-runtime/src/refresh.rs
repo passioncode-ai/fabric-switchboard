@@ -90,6 +90,9 @@ pub(crate) struct RefreshState {
     profile_tried: Mutex<Option<(String, i64)>>,
     /// SB-311: account id → when its identity was last asked of `/api/oauth/profile`.
     identity_tried: Mutex<HashMap<String, i64>>,
+    /// SB-334: accounts whose stored sign-in already carries Claude Code's profile: the
+    /// background reads such a credential only once.
+    native_known: Mutex<std::collections::HashSet<String>>,
     /// When the token endpoint last refused the client itself (`invalid_client`).
     client_rejected: Mutex<Option<i64>>,
     /// Claude Swap switches Claude Code by itself; native rotation leaves switching to it.
@@ -208,6 +211,7 @@ impl RefreshState {
             owners: Mutex::new(HashMap::new()),
             profile_tried: Mutex::new(None),
             identity_tried: Mutex::new(HashMap::new()),
+            native_known: Default::default(),
             client_rejected: Mutex::new(None),
             swap_switching: Default::default(),
             swap_running: Default::default(),
@@ -1874,6 +1878,177 @@ pub(crate) async fn learn_identity(store: &Store, state: &RefreshState, id: &str
     );
 }
 async fn profile(endpoint: &str, access_token: &str) -> Option<ExternalIdentity> {
+    identity_of(&profile_value(endpoint, access_token).await?)
+}
+/// The provider's identity in a `/api/oauth/profile` answer.
+fn identity_of(value: &Value) -> Option<ExternalIdentity> {
+    let account = value
+        .pointer("/account/uuid")
+        .and_then(Value::as_str)
+        .filter(|s| !s.trim().is_empty())?;
+    Some(ExternalIdentity {
+        account_id: Some(account.trim().to_owned()),
+        organization_id: value
+            .pointer("/organization/uuid")
+            .and_then(Value::as_str)
+            .map(str::to_owned),
+        email: value
+            .pointer("/account/email")
+            .and_then(Value::as_str)
+            .map(str::to_owned),
+    })
+}
+/// SB-334: the scopes Claude Code's own claude.ai sign-in asks for (Claude Code 2.1.x).
+const CLAUDE_CODE_SCOPES: [&str; 5] = [
+    "user:profile",
+    "user:inference",
+    "user:sessions:claude_code",
+    "user:mcp_servers",
+    "user:file_upload",
+];
+/// SB-334: the Claude Code profile of a sign-in, from `/api/oauth/profile`, in the shape a
+/// capture stores (`{auth: {claudeAiOauth}, oauth_account}`), built as Claude Code builds its
+/// own after a sign-in: `subscriptionType` from the organization's type, `rateLimitTier` from its
+/// tier. Only the account's and organization's ids and names go into `oauthAccount`; Claude Code
+/// fetches the rest of its profile itself when fields are missing. Never a token.
+pub(crate) fn native_context_from_profile(value: &Value) -> Option<Value> {
+    let identity = identity_of(value)?;
+    let organization = identity.organization_id.clone()?;
+    let email = identity.email.clone()?;
+    let text = |pointer: &str| value.pointer(pointer).and_then(Value::as_str);
+    let subscription = match text("/organization/organization_type") {
+        Some("claude_max") => Some("max"),
+        Some("claude_pro") => Some("pro"),
+        Some("claude_enterprise") => Some("enterprise"),
+        Some("claude_team") => Some("team"),
+        _ => None,
+    };
+    let mut account = serde_json::Map::new();
+    account.insert("accountUuid".into(), json!(identity.account_id));
+    account.insert("emailAddress".into(), json!(email));
+    account.insert("organizationUuid".into(), json!(organization));
+    for (key, pointer) in [
+        ("displayName", "/account/display_name"),
+        ("organizationName", "/organization/name"),
+        ("organizationType", "/organization/organization_type"),
+        ("organizationRateLimitTier", "/organization/rate_limit_tier"),
+    ] {
+        if let Some(v) = text(pointer).filter(|v| !v.is_empty()) {
+            account.insert(key.into(), json!(v));
+        }
+    }
+    Some(json!({
+        "auth": {"claudeAiOauth": {
+            "scopes": CLAUDE_CODE_SCOPES,
+            "subscriptionType": subscription,
+            "rateLimitTier": text("/organization/rate_limit_tier"),
+        }},
+        "oauth_account": Value::Object(account),
+    }))
+}
+/// SB-334: a Claude sign-in saved without Claude Code's profile (an official sign-in in
+/// Switchboard, a move) could not become the ordinary Claude Code's ("Capture this Claude
+/// profile again before native activation."), by hand or by native rotation. It learns the
+/// profile from the provider with its own live access token and keeps it. `person`: a switch
+/// the person asked for asks at once; the background asks one account at most every ten minutes.
+/// Answers what happened: `present`, `stored`, `expired`, `unanswered`, `invalid`, `skipped`.
+pub(crate) async fn learn_native_context(
+    store: &Store,
+    state: &RefreshState,
+    id: &str,
+    person: bool,
+) -> &'static str {
+    let Some(account) = store
+        .snapshot()
+        .ok()
+        .and_then(|s| s.accounts.into_iter().find(|a| a.id == id))
+    else {
+        return "skipped";
+    };
+    if account.provider != Provider::Claude || account.kind != AuthKind::OAuth || !account.enabled {
+        return "skipped";
+    }
+    let known = |state: &RefreshState| {
+        if let Ok(mut set) = state.native_known.lock() {
+            if set.len() > 512 {
+                set.clear();
+            }
+            set.insert(id.to_owned());
+        }
+    };
+    if !person && state.native_known.lock().is_ok_and(|set| set.contains(id)) {
+        return "present";
+    }
+    let Ok(credential) = store.stored_credential(id) else {
+        return "skipped";
+    };
+    if credential.native_context.is_some() {
+        known(state);
+        return "present";
+    }
+    let time = now();
+    if !person {
+        let key = format!("native:{id}");
+        if let Ok(mut tried) = state.identity_tried.lock() {
+            if tried
+                .get(&key)
+                .is_some_and(|at| (0..IDENTITY_RETRY_SECONDS).contains(&(time - at)))
+            {
+                return "skipped";
+            }
+            if tried.len() > 256 {
+                tried.clear();
+            }
+            tried.insert(key, time);
+        }
+    }
+    let outcome =
+        if credential.access_token.is_empty() || credential.expires_at.is_some_and(|t| t <= time) {
+            "expired"
+        } else {
+            let endpoint = state
+                .profile_endpoint
+                .lock()
+                .map(|e| e.clone())
+                .unwrap_or_default();
+            match profile_value(&endpoint, &credential.access_token).await {
+                None => "unanswered",
+                Some(value) => {
+                    // An account saved without the provider's identity learns it from the same
+                    // answer, so activation can compare the two.
+                    if account
+                        .external_identity
+                        .as_ref()
+                        .and_then(|i| i.account_id.as_ref())
+                        .is_none()
+                    {
+                        if let Some(identity) = identity_of(&value) {
+                            let _ = store.learn_identity(id, &identity);
+                        }
+                    }
+                    match native_context_from_profile(&value)
+                        .map(|context| store.attach_native_context(id, context))
+                    {
+                        Some(Ok(true)) => {
+                            known(state);
+                            "stored"
+                        }
+                        Some(Ok(false)) => {
+                            known(state);
+                            "present"
+                        }
+                        _ => "invalid",
+                    }
+                }
+            }
+        };
+    crate::oplog::event(
+        "native_profile_learned",
+        &[("outcome", crate::oplog::Field::Code(outcome))],
+    );
+    outcome
+}
+async fn profile_value(endpoint: &str, access_token: &str) -> Option<Value> {
     let client = reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::none())
         .no_proxy()
@@ -1897,22 +2072,7 @@ async fn profile(endpoint: &str, access_token: &str) -> Option<ExternalIdentity>
         }
         body.extend_from_slice(&chunk);
     }
-    let value: Value = serde_json::from_slice(&body).ok()?;
-    let account = value
-        .pointer("/account/uuid")
-        .and_then(Value::as_str)
-        .filter(|s| !s.trim().is_empty())?;
-    Some(ExternalIdentity {
-        account_id: Some(account.trim().to_owned()),
-        organization_id: value
-            .pointer("/organization/uuid")
-            .and_then(Value::as_str)
-            .map(str::to_owned),
-        email: value
-            .pointer("/account/email")
-            .and_then(Value::as_str)
-            .map(str::to_owned),
-    })
+    serde_json::from_slice(&body).ok()
 }
 
 #[cfg(test)]
@@ -3192,6 +3352,165 @@ mod tests {
     /// token expired (claude6 on the Mac Studio, 2026-11-08). It learns the identity from
     /// `/api/oauth/profile` while its access token is valid, once per 10 minutes, and never one
     /// another account of its pool already holds.
+    #[test]
+    fn a_profile_answer_builds_claude_codes_profile_as_claude_code_does() {
+        let answer = json!({
+            "account": {"uuid": "acc-1", "email": "dev@example.invalid", "display_name": "Dev"},
+            "organization": {"uuid": "org-1", "name": "Dev's org", "organization_type": "claude_max", "rate_limit_tier": "default_claude_max_20x"}
+        });
+        let context = native_context_from_profile(&answer).unwrap();
+        assert_eq!(context["oauth_account"]["accountUuid"], "acc-1");
+        assert_eq!(
+            context["oauth_account"]["emailAddress"],
+            "dev@example.invalid"
+        );
+        assert_eq!(context["oauth_account"]["organizationUuid"], "org-1");
+        assert_eq!(context["oauth_account"]["displayName"], "Dev");
+        let oauth = &context["auth"]["claudeAiOauth"];
+        assert_eq!(oauth["subscriptionType"], "max");
+        assert_eq!(oauth["rateLimitTier"], "default_claude_max_20x");
+        assert_eq!(oauth["scopes"], json!(CLAUDE_CODE_SCOPES));
+        assert!(oauth.get("accessToken").is_none(), "never a token");
+        for (kind, subscription) in [
+            ("claude_pro", json!("pro")),
+            ("claude_team", json!("team")),
+            ("claude_enterprise", json!("enterprise")),
+            ("something_else", Value::Null),
+        ] {
+            let mut a = answer.clone();
+            a["organization"]["organization_type"] = json!(kind);
+            assert_eq!(
+                native_context_from_profile(&a).unwrap()["auth"]["claudeAiOauth"]
+                    ["subscriptionType"],
+                subscription
+            );
+        }
+        let mut no_org = answer.clone();
+        no_org["organization"] = Value::Null;
+        assert!(
+            native_context_from_profile(&no_org).is_none(),
+            "no organization, no profile"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_sign_in_saved_without_claude_codes_profile_learns_it_once() {
+        // SB-334: "Capture this Claude profile again before native activation." for every
+        // account added by an official sign-in or a move.
+        let calls = Arc::new(AtomicUsize::new(0));
+        let counter = calls.clone();
+        let app = Router::new().route(
+            "/profile",
+            axum::routing::get(move || {
+                counter.fetch_add(1, Ordering::SeqCst);
+                async {
+                    Json(json!({"account":{"uuid":"synthetic-acc","email":"acc@example.invalid"},"organization":{"uuid":"synthetic-org","organization_type":"claude_pro","rate_limit_tier":"default_claude_pro"}}))
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let root = tempfile::tempdir().unwrap();
+        let store = Arc::new(
+            Store::open(
+                root.path().to_owned(),
+                Arc::new(switchboard_core::MemoryVault::default()),
+            )
+            .unwrap(),
+        );
+        let id = store
+            .add(
+                "acc@example.invalid".into(),
+                Provider::Claude,
+                AuthKind::OAuth,
+                "default".into(),
+                switchboard_core::Credential {
+                    access_token: "access-acc".into(),
+                    refresh_token: Some("refresh-acc".into()),
+                    id_token: None,
+                    native_context: None,
+                    expires_at: Some(now() + 3_600),
+                    account_id: None,
+                },
+            )
+            .unwrap()
+            .id;
+        let state = RefreshState::default();
+        state.set_profile_endpoint(format!("http://{address}/profile"));
+        assert_eq!(
+            learn_native_context(&store, &state, &id, false).await,
+            "stored"
+        );
+        let stored = store.stored_credential(&id).unwrap();
+        let context = stored.native_context.expect("profile kept");
+        assert_eq!(context["oauth_account"]["accountUuid"], "synthetic-acc");
+        assert_eq!(context["auth"]["claudeAiOauth"]["subscriptionType"], "pro");
+        assert_eq!(
+            stored.access_token, "access-acc",
+            "the tokens stay as they were"
+        );
+        // It learned the identity from the same answer.
+        let account = store
+            .snapshot()
+            .unwrap()
+            .accounts
+            .into_iter()
+            .find(|a| a.id == id)
+            .unwrap();
+        assert_eq!(
+            account.external_identity.unwrap().account_id.as_deref(),
+            Some("synthetic-acc")
+        );
+        // Asked once: the background never asks again, nor reads the credential again.
+        assert_eq!(
+            learn_native_context(&store, &state, &id, false).await,
+            "present"
+        );
+        assert_eq!(
+            learn_native_context(&store, &state, &id, true).await,
+            "present"
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        // A profile that names another account is refused, never stored.
+        let other = store
+            .add(
+                "other@example.invalid".into(),
+                Provider::Claude,
+                AuthKind::OAuth,
+                "agents".into(),
+                switchboard_core::Credential {
+                    access_token: "access-other".into(),
+                    refresh_token: Some("refresh-other".into()),
+                    id_token: None,
+                    native_context: None,
+                    expires_at: Some(now() + 3_600),
+                    account_id: None,
+                },
+            )
+            .unwrap()
+            .id;
+        store
+            .learn_identity(
+                &other,
+                &switchboard_core::ExternalIdentity {
+                    account_id: Some("someone-else".into()),
+                    organization_id: Some("synthetic-org".into()),
+                    email: Some("other@example.invalid".into()),
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            learn_native_context(&store, &state, &other, true).await,
+            "invalid"
+        );
+        assert!(store
+            .stored_credential(&other)
+            .unwrap()
+            .native_context
+            .is_none());
+    }
+
     #[tokio::test]
     async fn a_sign_in_saved_without_its_identity_learns_it_and_can_be_renewed() {
         let calls = Arc::new(AtomicUsize::new(0));

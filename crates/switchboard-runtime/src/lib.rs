@@ -4537,6 +4537,8 @@ async fn execute(
             {
                 return Err(refresh::SIGN_IN.into());
             }
+            // SB-334: a sign-in saved without Claude Code's profile learns it now.
+            refresh::learn_native_context(&store, refresh_state, &id, true).await;
             activate_native_anyway(&store, &id, None, native, Some(refresh_state), force)?;
             if assigned {
                 let _ = store.record("assignment", Some(&id), "override");
