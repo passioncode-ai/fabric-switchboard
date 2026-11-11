@@ -158,3 +158,26 @@ research notes); the ones still in force that the board cites are seeded below w
 - **Source:** operator, 2026-11-10: «если аккаунт переходит на такой режим, чтобы он убирался из
   свитчборда ... такие аккаунты мы видели, мы трекали их активность ... но мы не могли на них перейти
   использовать без специального переключения»; SB-322
+
+### DEC-0011: `serve` keeps itself current, and follows an app another account replaced
+
+- **Date:** 2026-11-11
+- **Status:** Accepted
+- **Context:** a computer that runs only `switchboard serve` never updated by itself (SB-305 gave
+  it a command, `switchboard update`, that nobody ran on a schedule): the Mac Studio's three
+  accounts stayed on 0.7.49 while 0.7.50 and 0.7.51 shipped, and three `serve`s sharing one app
+  would keep the old program even after it was replaced.
+- **Decision:** `serve` checks the release feed as the app does (90 s after start, then every
+  five minutes, DEC-0004) and installs a newer version itself when its account may replace the
+  app; when it may not, it says so once (`update_waiting not_writable`) and downloads nothing. A
+  `serve` whose program file was replaced (by another account's `switchboard update`, another
+  `serve` or the app) drains and exits with status 75, so its supervisor (`KeepAlive
+  {SuccessfulExit: false}`, systemd `Restart=on-failure`) starts it again on the new program.
+  `<data>/auto-update` `off` installs nothing; a replaced program is still followed. A
+  development build or a test's binary never does either.
+- **Consequences / affects:** `AGENTS.md` (Lifecycle, *Update check*), `docs/CONTRACTS.md`;
+  on a computer whose app another account owns, that account runs `switchboard update` on a
+  schedule (the Mac Studio: studio-agent's `aiteam1`).
+- **Source:** operator 2026-11-11 («мы обновляем весь софт автоматически, софт должен
+  обновляться везде. И на студиях, типа у меня, и у сотрудников»), SB-333
+
