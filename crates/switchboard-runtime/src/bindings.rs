@@ -922,7 +922,6 @@ mod tests {
         // in a group folder had no route at all. A personal group falls back to the default
         // group; one bound to an organization never does.
         let tmp = tempfile::tempdir().unwrap();
-        let root = tempfile::tempdir().unwrap();
         let data = tmp.path().canonicalize().unwrap();
         let (agents, org, own) = (data.join("agents"), data.join("org"), data.join("own"));
         for d in [&agents, &org, &own] {
