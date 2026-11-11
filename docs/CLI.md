@@ -448,7 +448,7 @@ switchboard project source --pool app --add github.com/example   # also adopt ne
 Folder rules (the `project set|remove|apply` commands) are optional: a folder and its subfolders start on a chosen account, rules never stop automatic switching, and the desktop app lists them under Groups, where each can be paused.
 
 ```sh
-switchboard project list                      # {projects, rules}: projects with folders, roots (each with its worktrees and clones) and accounts, then rules
+switchboard project list                      # {projects, rules}: projects with folders, roots (each with its worktrees and clones), accounts (own, then shared from another group, `shared: true`) and organizations, then rules
 switchboard project save --name "Client Alpha" --folder /work/alpha-web --folder /work/alpha-api --account <id>
 switchboard project save --pool client-alpha --name "Client Alpha" --folder /work/alpha-web   # update; omitted accounts go back to default
 switchboard project save --name "Acme web" --folder /work/acme-web --organization Acme   # SB-299: a new group bound to Acme (repeat --organization for several; --move-accounts moves listed accounts here)

@@ -8,6 +8,8 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- `switchboard project list` and the `switchboard_projects` tool now show the accounts a group shares from another group (marked shared, with their home group), so a share made with `project edit --add-account` no longer looks as if it did nothing; a group bound to several organizations shows its first one instead of none (SB-339, studio-agent's request).
+
 ## 0.7.56
 
 - `switchboard dispatch --reason inbox` starts a run for a project's unread Fabric board messages: it answers where an answer is owed, marks what it handled read and never claims a request (SB-338, Fabric's request).

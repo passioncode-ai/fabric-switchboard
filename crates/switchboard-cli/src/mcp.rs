@@ -62,7 +62,7 @@ pub(crate) fn tools() -> Vec<(bool, Value)> {
         (false, json!({"name":"switchboard_provenance","title":"Provenance","description":"Which account serves a provider's group, or one launch, since when and why, as Fabric reads it: provider, pool, account_ref (the account's handle, never its id), identity_revision (a hash of the provider's identity, or null), mode (managed for a group, null for a launch), changed_at (Unix seconds, null when the journal no longer holds it), cause (manual, rotation, limit, failover or unknown), replaced ({account_ref, limit: {kind, resets_at, confidence} or null} of the account it replaced, or null) and session ({launch_id, dispatch_id, workflow} for a launch, else null). Give provider (and pool, the default group when left out), or launch_id. Reads only; no credential.","inputSchema":{"type":"object","properties":{"provider":{"type":"string","enum":["claude","codex"]},"pool":{"type":"string","description":"The group id; the default group when left out."},"launch_id":{"type":"string","description":"One launch's account and session."}},"additionalProperties":false}})),
         (false, json!({"name":"switchboard_onboarding","title":"Setup steps","description":"Where setting up Switchboard stands, as steps in order: owner (the app runs), accounts (one is saved; signing in is the person's), project (the folder's group, optional; a repository in no group uses the default group, and next.command puts it in a group), mcp (this server is registered with the agent) and proving_call. Without organizations these five are all, plus one optional organization step when PassionCode.ai is connected and lists none; with organizations, organization follows, then org_group, seat, hook and launch for each, naming it. Each step is done, todo (run next.command), needs_person (tell the person next.person; run next.command or next.alternatives once they agree) or optional. next.turn_on and next.turn_off are the person's: run one only when the person asks. degraded names reads that failed; the step they touch says so. Reads only. The full guide: `switchboard onboard`.","inputSchema":{"type":"object","properties":{"path":path,"host":{"type":"string","enum":["claude","codex"],"description":"The coding agent being set up; default: the one this server runs for, when known."}},"additionalProperties":false}})),
         (false, json!({"name":"switchboard_project_context","title":"A folder's group and rule","description":"The group a folder belongs to, as project (its name, group id as pool, folders and reserved accounts, possibly empty; null when none), and the optional folder rule per provider: the rule in force, the nearest rule in any state (paused or expired), and whether it is in effect. A group's accounts serve only sessions launched from its folders; a provider with no enabled account in the group keeps its existing launch fallback.","inputSchema":{"type":"object","properties":{"path":path},"additionalProperties":false}})),
-        (false, json!({"name":"switchboard_projects","title":"Groups","description":"Every group: its id (pool), name, folders (repositories), roots (each root folder with its branch and the worktrees and clones of its repository under it), sources and the accounts reserved for it (empty for an automatically created group), then every optional folder rule with its state. Reads only.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}})),
+        (false, json!({"name":"switchboard_projects","title":"Groups","description":"Every group: its id (pool), name, folders (repositories), roots (each root folder with its branch and the worktrees and clones of its repository under it), sources, the accounts that serve it (its own, then those it shares from another group, marked shared; empty for an automatically created group) and its organizations, then every optional folder rule with its state. Reads only.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}})),
         (true, json!({"name":"switchboard_project_edit","title":"Change a group","description":"Change a group by delta: reserve accounts for it (add_accounts; an account at home in another group keeps that home and serves this group too, unless move_accounts moves it here), give accounts back (remove_accounts: an account it only shares stops serving it, its own goes to the default group), add folders (add_folders) or take folders out (remove_folders; they are not added back by themselves), or rename it, or bind it to organizations (organization: one id or name, or personal; organizations: the whole list, none, one or several, the first being the group's own context; with an organization defined, a group runs only on accounts of its organizations, or on personal ones when it has none). Everything not named stays as it is; naming an account or folder the group does not hold is refused. Only when the operator asks. The account the ordinary Claude Code or Codex is signed in to cannot join a group.","inputSchema":{"type":"object","properties":{"pool":{"type":"string","description":"The group id, from switchboard_projects."},"name":{"type":"string"},"organization":{"type":"string","maxLength":200,"description":"An organization's id or name from switchboard_organizations, or personal."},"organizations":{"type":"array","maxItems":16,"items":{"type":"string","maxLength":200},"description":"Every organization of the group, by id or name, in order; empty makes it personal. Wins over organization."},"move_accounts":{"type":"boolean","description":"Move each account in add_accounts here from its group instead of sharing it."},"add_accounts":{"type":"array","items":account,"maxItems":64},"remove_accounts":{"type":"array","items":account,"maxItems":64},"add_folders":{"type":"array","items":{"type":"string","description":"An absolute folder."},"maxItems":64},"remove_folders":{"type":"array","items":{"type":"string","description":"A folder of the group, as switchboard_projects lists it."},"maxItems":64}},"required":["pool"],"additionalProperties":false}})),
         (true, json!({"name":"switchboard_project_create","title":"Create a group","description":"Create a group, as the window's New group does: its name, its folders (repositories), the accounts reserved for it and its organizations (none, one or several by id or name, the first being the group's own context; empty or left out makes it personal). An account at home in another group serves this one too, unless move_accounts moves it here. Answers the new group with its id (pool). Only when the operator asks. The account the ordinary Claude Code or Codex is signed in to cannot join a group.","inputSchema":{"type":"object","properties":{"name":{"type":"string","minLength":1},"folders":{"type":"array","minItems":1,"maxItems":64,"items":{"type":"string","description":"An absolute folder."}},"accounts":{"type":"array","items":account,"maxItems":64},"organizations":{"type":"array","maxItems":16,"items":{"type":"string","maxLength":200},"description":"Every organization of the group, by id or name, in order; empty makes it personal."},"move_accounts":{"type":"boolean","description":"Move each listed account here from its group instead of sharing it."}},"required":["name","folders"],"additionalProperties":false}})),
         (true, json!({"name":"switchboard_codex_route","title":"Codex in group folders","description":"Whether Codex sessions in a group's folders use that group's Codex accounts (one provider in Codex's own config.toml that points at Switchboard's local proxy; folders outside groups keep the person's own sign-in). Without enabled, the state only: on, applied, conflict, and the groups with a Codex account. enabled true or false changes it, only when the operator asks. Another model_provider the person chose is never replaced.","inputSchema":{"type":"object","properties":{"enabled":{"type":"boolean"}},"additionalProperties":false}})),
@@ -1742,19 +1742,28 @@ pub(crate) fn account_organizations(
     (first, also)
 }
 
-/// Projects with their accounts (no credential), from a snapshot.
+/// Projects with their accounts (no credential), from a snapshot: its own, then those it shares
+/// from another group in the person's order, marked `shared` (SB-339).
 pub(crate) fn project_views(snapshot: &Value) -> Vec<Value> {
     let accounts = snapshot["accounts"].as_array().cloned().unwrap_or_default();
+    let view = |a: &Value, shared: bool| json!({"id": a["id"], "label": a["label"], "provider": a["provider"], "enabled": a["enabled"], "pool": a["pool"], "shared": shared});
     snapshot["projects"]
         .as_array()
         .into_iter()
         .flatten()
         .map(|p| {
-            let own: Vec<Value> = accounts
+            let shared_ids: Vec<Value> = p["shared_accounts"].as_array().cloned().unwrap_or_default();
+            let mut own: Vec<Value> = accounts
                 .iter()
                 .filter(|a| a["pool"] == p["pool"])
-                .map(|a| json!({"id": a["id"], "label": a["label"], "provider": a["provider"], "enabled": a["enabled"]}))
+                .map(|a| view(a, false))
                 .collect();
+            own.extend(
+                shared_ids
+                    .iter()
+                    .filter_map(|id| accounts.iter().find(|a| &a["id"] == id))
+                    .map(|a| view(a, true)),
+            );
             // SB-135: the folders as roots with their worktrees and clones under them.
             let folders: Vec<String> = p["folders"]
                 .as_array()
@@ -1763,17 +1772,29 @@ pub(crate) fn project_views(snapshot: &Value) -> Vec<Value> {
                 .filter_map(|f| f.as_str().map(str::to_owned))
                 .collect();
             let roots = switchboard_runtime::roots::tree(&folders);
-            // SB-109: the organization the group runs on, by id and name; none is personal.
-            let organization = p["organization"].as_str();
-            let organization_name = organization.and_then(|id| {
+            // SB-109, SB-282: the organizations the group runs on, by id and name, the first its
+            // own; none is personal. The store writes one as `organization`, several as
+            // `organizations` (SB-339: a group of several read as personal here before).
+            let mut organizations: Vec<&str> = p["organization"].as_str().into_iter().collect();
+            for o in p["organizations"].as_array().into_iter().flatten().filter_map(Value::as_str) {
+                if !organizations.contains(&o) {
+                    organizations.push(o);
+                }
+            }
+            let name_of = |id: &str| {
                 snapshot["organizations"]
                     .as_array()
                     .into_iter()
                     .flatten()
                     .find(|o| o["id"] == id)
                     .and_then(|o| o["name"].as_str())
-            });
-            json!({"pool": p["pool"], "name": p["name"], "folders": p["folders"], "roots": roots, "sources": p["sources"].as_array().cloned().unwrap_or_default(), "accounts": own, "organization": organization, "organization_name": organization_name})
+                    .map(str::to_owned)
+            };
+            let organization = organizations.first().copied();
+            let organization_name = organization.and_then(name_of);
+            let organization_names: Vec<Value> =
+                organizations.iter().map(|o| name_of(o).map_or(Value::Null, Value::from)).collect();
+            json!({"pool": p["pool"], "name": p["name"], "folders": p["folders"], "roots": roots, "sources": p["sources"].as_array().cloned().unwrap_or_default(), "accounts": own, "shared_accounts": shared_ids, "organization": organization, "organization_name": organization_name, "organizations": organizations, "organization_names": organization_names})
         })
         .collect()
 }
@@ -1833,5 +1854,47 @@ mod usage_view_tests {
             only["lowest_remaining_percent"].is_null(),
             "unknown, not zero"
         );
+    }
+}
+
+#[cfg(test)]
+mod views {
+    use super::*;
+
+    /// SB-339: a group lists the accounts it shares from another group after its own, and a group
+    /// of several organizations names its first, not personal.
+    #[test]
+    fn a_group_lists_its_shared_accounts_and_its_organizations() {
+        let snapshot = json!({
+            "accounts": [
+                {"id": "a1", "label": "one", "provider": "claude", "enabled": true, "pool": "g1"},
+                {"id": "a2", "label": "two", "provider": "claude", "enabled": true, "pool": "g2"},
+                {"id": "a3", "label": "three", "provider": "claude", "enabled": true, "pool": "default"},
+            ],
+            "organizations": [{"id": "o1", "name": "Acme"}, {"id": "o2", "name": "Beta"}],
+            "projects": [
+                {"pool": "g1", "name": "One", "folders": [], "organization": "o1"},
+                {"pool": "g2", "name": "Two", "folders": [], "organizations": ["o1", "o2"], "shared_accounts": ["a1"]},
+            ],
+        });
+        let views = project_views(&snapshot);
+        let one = &views[0];
+        assert_eq!(one["accounts"].as_array().unwrap().len(), 1);
+        assert_eq!(one["accounts"][0]["shared"], false);
+        assert_eq!(one["organization_name"], "Acme");
+        assert_eq!(one["organizations"], json!(["o1"]));
+        let two = &views[1];
+        let ids: Vec<&str> = two["accounts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|a| a["id"].as_str().unwrap())
+            .collect();
+        assert_eq!(ids, ["a2", "a1"]);
+        assert_eq!(two["accounts"][1]["shared"], true);
+        assert_eq!(two["accounts"][1]["pool"], "g1");
+        assert_eq!(two["shared_accounts"], json!(["a1"]));
+        assert_eq!(two["organization"], "o1");
+        assert_eq!(two["organization_names"], json!(["Acme", "Beta"]));
     }
 }
