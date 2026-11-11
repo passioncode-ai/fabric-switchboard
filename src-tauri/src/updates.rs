@@ -1228,6 +1228,61 @@ async fn serve_once(body: Vec<u8>) -> std::io::Result<(tauri::Url, tokio::task::
     Ok((url, task))
 }
 
+/// SB-337: a bundle swap that outlived INSTALL_TIMEOUT keeps running on its thread; when it
+/// finishes, the update waits as one installed in time (*Restart to update*, the idle restart),
+/// instead of the app answering "Quit and reopen" with the new bundle already on disk (the
+/// operator's MacBook, 2026-11-11 03:16Z: 0.7.54 installed after the deadline under a load
+/// average of 150). A swap that failed or panicked leaves the app stalled as before.
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+fn finish_late<E: Send + 'static>(
+    app: AppHandle,
+    swap: tauri::async_runtime::JoinHandle<Result<(), E>>,
+    update: Update,
+) {
+    tauri::async_runtime::spawn(async move {
+        let installed = matches!(swap.await, Ok(Ok(())));
+        event(
+            "update_install",
+            &[(
+                "outcome",
+                Field::Code(if installed {
+                    "installed_late"
+                } else {
+                    "failed_late"
+                }),
+            )],
+        );
+        let state = app.state::<Updates>();
+        let version = update.version.clone();
+        let mut inner = state.lock();
+        if !installed_late(&mut inner, installed, &version) {
+            return;
+        }
+        inner.ready = Some(Ready {
+            update,
+            bytes: None,
+        });
+        drop(inner);
+        crate::residency::show_update(&app, &version);
+        watch_for_idle(&app);
+    });
+}
+
+/// SB-337: what a swap that finished after its deadline does to the state: only a success
+/// clears the stall and makes the update wait, and never over a restart already under way or
+/// another update already waiting. True when the caller stores the update and announces it.
+#[cfg_attr(windows, allow(dead_code))]
+fn installed_late(inner: &mut Inner, installed: bool, version: &str) -> bool {
+    if !installed || inner.restart.is_some() || inner.ready.is_some() {
+        return false;
+    }
+    inner.stalled = false;
+    inner.phase = Phase::Ready;
+    inner.version = Some(version.to_owned());
+    inner.error = None;
+    true
+}
+
 async fn fetch(
     app: &AppHandle,
     state: &Updates,
@@ -1287,13 +1342,14 @@ async fn fetch(
                 return Ok(None);
             }
             let installing = update.clone();
-            let swap = tauri::async_runtime::spawn_blocking(move || installing.install(&bytes));
-            let outcome = match tokio::time::timeout(INSTALL_TIMEOUT, swap).await {
+            let mut swap = tauri::async_runtime::spawn_blocking(move || installing.install(&bytes));
+            let outcome = match tokio::time::timeout(INSTALL_TIMEOUT, &mut swap).await {
                 Ok(Ok(Ok(()))) => "installed",
                 Ok(Ok(Err(_))) => "failed",
                 Ok(Err(_)) => "panicked",
                 Err(_) => {
                     state.lock().stalled = true;
+                    finish_late(app.clone(), swap, update.clone());
                     "timeout"
                 }
             };
@@ -1318,13 +1374,14 @@ async fn fetch(
             return Ok(None);
         }
         let installing = update.clone();
-        let swap = tauri::async_runtime::spawn_blocking(move || installing.install(&bytes));
-        let outcome = match tokio::time::timeout(INSTALL_TIMEOUT, swap).await {
+        let mut swap = tauri::async_runtime::spawn_blocking(move || installing.install(&bytes));
+        let outcome = match tokio::time::timeout(INSTALL_TIMEOUT, &mut swap).await {
             Ok(Ok(Ok(()))) => "installed",
             Ok(Ok(Err(_))) => "failed",
             Ok(Err(_)) => "panicked",
             Err(_) => {
                 state.lock().stalled = true;
+                finish_late(app.clone(), swap, update.clone());
                 "timeout"
             }
         };
@@ -2223,5 +2280,25 @@ mod tests {
         assert!(!replaceable_without_password(Path::new(
             "/System/Applications/Calculator.app"
         )));
+    }
+    #[test]
+    fn a_swap_that_finishes_after_its_deadline_makes_the_update_wait() {
+        // SB-337: 0.7.54 was installed after the five-minute deadline and the app still said
+        // "Quit and reopen Switchboard to try again".
+        let state = Updates::new(Ok(()), None);
+        let mut inner = state.lock();
+        inner.stalled = true;
+        inner.phase = Phase::Failed;
+        inner.error = Some(INSTALL_STALLED);
+        assert!(
+            !installed_late(&mut inner, false, "0.7.54"),
+            "a failed swap stays stalled"
+        );
+        assert!(inner.stalled);
+        assert!(installed_late(&mut inner, true, "0.7.54"));
+        assert!(!inner.stalled);
+        assert_eq!(inner.phase, Phase::Ready);
+        assert_eq!(inner.version.as_deref(), Some("0.7.54"));
+        assert_eq!(inner.error, None);
     }
 }
