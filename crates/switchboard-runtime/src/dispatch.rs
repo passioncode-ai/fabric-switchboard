@@ -62,13 +62,20 @@ const MAX_LIVE_BYTES: u64 = 64 * 1024;
 /// What `Reservation::new` answers when the account's home already runs a session.
 const HOME_BUSY: &str = "Close the existing session before changing its home.";
 
-/// Why Fabric asks; one reason in wave 1.
+/// Why Fabric asks.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Reason {
     /// A board request nobody answered.
     Request,
+    /// SB-338 (Fabric's request `b37b398f`, CO-559): a project's unread board messages, with no
+    /// request of their own. The run settles by read marks, not by completing a request.
+    Inbox,
 }
+
+/// SB-338: an inbox run reads this machine's board, which another machine does not have.
+pub const INBOX_REMOTE: &str =
+    "An inbox run reads this machine's board, so it runs here. Leave out --target.";
 
 /// The sentence a person reads for a refusal code.
 pub fn sentence(reason: &str) -> &'static str {
@@ -205,12 +212,21 @@ pub(crate) fn header(workflow: &str, handoff: &str, request: &str) -> String {
 
 /// The text after the header. It names ids only; the request itself comes from the acceptance
 /// answer's checkpoint.
-pub(crate) fn prompt(handoff: &str, provider: Provider, account_id: &str) -> String {
+pub(crate) fn prompt(
+    handoff: &str,
+    provider: Provider,
+    account_id: &str,
+    reason: Reason,
+) -> String {
+    let what = match reason {
+        Reason::Request => "one board request",
+        Reason::Inbox => "this project's unread board messages",
+    };
     format!(
-        "Fabric started this session for one board request; no person is watching it. \
+        "Fabric started this session for {what}; no person is watching it. \
 First call observatory_handoff_accept with owner agent:{provider}, idempotencyKey accept-{handoff} (the same one \
 if you call it again), handoffId {handoff}, this session's own sessionId (the same one if you call it again) and \
-executor {{\"provider\": \"{provider}\", \"accountRef\": \"{account}\"}}. The checkpoint in that answer is the request: \
+executor {{\"provider\": \"{provider}\", \"accountRef\": \"{account}\"}}. The checkpoint in that answer is the task: \
 obey its constraints first and write observatory_checkpoint_write after every step with the leaseId the answer \
 returns, each time carrying that answer's checkpoint.body whole and unchanged except for your own progress (or \
 observatory_checkpoint_latest's when you lost it): a checkpoint replaces the body whole, and the pack's own fields are \
@@ -270,6 +286,17 @@ pub const DISPATCH_ID_INVALID: &str =
 /// The exit contract (spec §3.4, §6): Claude Code's appended system prompt; for Codex, after the
 /// header.
 pub const EXIT_CONTRACT: &str = "You run with no person, for one Fabric board request. Do the request, answer it in its board thread, complete it (completed, or failed_known with the reason when an error stops you), then end the session. If com.enroll is refused, follow Fabric's board.read-at-start: reply only at an absent slot of generation 0, and always ask the operator. Close the workflow with the final checkpoint only once the request is settled: the board accepted your complete or reconcile, or com.get reads it answered, finished or outcome_unknown. A run that leaves it queued, claimed, accepted or in progress writes its checkpoint without closing, so Fabric can take the workflow back. Never wait for a person: money, deletion and publication go through fabric_effect_request.";
+
+/// SB-338: the contract of an inbox run (Fabric's request `b37b398f`): it settles by read marks.
+pub const INBOX_CONTRACT: &str = "You run with no person, for this project's unread Fabric board messages; there is no board request of its own. Read every unread message addressed to the project (com.list with unread true), do what is the project's own, answer in its thread where an answer is owed, and mark each message you handled read with com.read_ack. Never claim, accept or complete a request in this run. Write observatory_checkpoint_write at least every 10 minutes. Close the workflow with the final checkpoint once com.list reads nothing unread, then end the session. Never wait for a person: money, deletion and publication go through fabric_effect_request.";
+
+/// The exit contract a run is started with.
+pub fn contract(reason: Reason) -> &'static str {
+    match reason {
+        Reason::Request => EXIT_CONTRACT,
+        Reason::Inbox => INBOX_CONTRACT,
+    }
+}
 
 /// A run the owner watches for its time limit.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -690,18 +717,51 @@ mod tests {
     #[test]
     fn the_prompt_names_ids_and_the_account_by_its_handle_only() {
         let account = "6f1e2b8a-1111-4222-8333-944455556666";
-        let text = prompt("handoff:0123456789abcdef", Provider::Claude, account);
+        let text = prompt(
+            "handoff:0123456789abcdef",
+            Provider::Claude,
+            account,
+            Reason::Request,
+        );
         assert!(text.starts_with("Fabric started this session for one board request"));
         assert!(text.contains("handoffId handoff:0123456789abcdef"));
         // Every field Observatory's accept requires (fabric-agent-adapter, board 1b522784).
         assert!(text.contains("owner agent:claude-code"));
         assert!(text.contains("idempotencyKey accept-handoff:0123456789abcdef"));
-        assert!(prompt("handoff:0123456789abcdef", Provider::Codex, account)
-            .contains("owner agent:codex"));
+        assert!(prompt(
+            "handoff:0123456789abcdef",
+            Provider::Codex,
+            account,
+            Reason::Request
+        )
+        .contains("owner agent:codex"));
         assert!(text.contains("\"provider\": \"claude-code\""));
         assert!(text.contains(&crate::continuation::account_ref(account)));
         assert!(!text.contains(account), "a UUID never goes to the engine");
         assert!(!text.contains('\u{2014}'));
+    }
+
+    #[test]
+    fn an_inbox_run_settles_by_read_marks_not_by_a_request() {
+        // SB-338 (Fabric's request b37b398f): the run has no request to complete.
+        assert_eq!(contract(Reason::Request), EXIT_CONTRACT);
+        let inbox = contract(Reason::Inbox);
+        assert!(inbox.contains("com.read_ack"));
+        assert!(inbox.contains("Never claim, accept or complete a request"));
+        assert!(inbox.contains("at least every 10 minutes"));
+        assert!(!inbox.contains('\u{2014}'));
+        let text = prompt(
+            "handoff:0123456789abcdef",
+            Provider::Claude,
+            "a",
+            Reason::Inbox,
+        );
+        assert!(text
+            .starts_with("Fabric started this session for this project's unread board messages"));
+        assert_eq!(
+            serde_json::to_value(Reason::Inbox).unwrap(),
+            serde_json::json!("inbox")
+        );
     }
 
     #[test]

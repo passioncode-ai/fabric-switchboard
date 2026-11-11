@@ -295,7 +295,8 @@ enum Command {
         /// Fabric's own id for this dispatch, kept in the launch record (`launched_by.dispatch.id`).
         #[arg(long)]
         dispatch_id: Option<String>,
-        /// Why the session starts: `request`, a board request nobody answered.
+        /// Why the session starts: `request`, a board request nobody answered; `inbox`, the project's
+        /// unread board messages (it settles by read marks, never with `--target`).
         #[arg(long, value_enum, default_value = "request")]
         reason: DispatchReason,
         /// `ask`: the agent's own defaults. `all`: Claude Code with
@@ -1539,6 +1540,8 @@ enum DispatchCommand {
 enum DispatchReason {
     /// A board request nobody answered.
     Request,
+    /// The project's unread board messages; the run settles by read marks (no `--target`).
+    Inbox,
 }
 /// How much a dispatched run may do without asking.
 #[derive(Clone, Copy, ValueEnum)]
@@ -2101,7 +2104,7 @@ async fn run(cli: &Cli) -> Result<Value, String> {
             handoff,
             request,
             dispatch_id,
-            reason: DispatchReason::Request,
+            reason,
             permissions,
             timeout_minutes,
             target,
@@ -2113,7 +2116,10 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                 working_directory: dir.clone().unwrap_or_default(),
                 workflow_id: workflow.clone().unwrap_or_default(),
                 handoff_id: handoff.clone().unwrap_or_default(),
-                reason: switchboard_runtime::dispatch::Reason::Request,
+                reason: match reason {
+                    DispatchReason::Request => switchboard_runtime::dispatch::Reason::Request,
+                    DispatchReason::Inbox => switchboard_runtime::dispatch::Reason::Inbox,
+                },
                 permissions: match permissions {
                     DispatchPermissions::Ask => switchboard_runtime::launch::Permissions::Ask,
                     DispatchPermissions::All => switchboard_runtime::launch::Permissions::All,
