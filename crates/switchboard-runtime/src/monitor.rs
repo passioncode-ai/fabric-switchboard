@@ -668,6 +668,8 @@ async fn check_as(
     // a caller that holds it passes no `lock`.
     if lock.is_some() {
         crate::refresh::learn_identity(store, refresh, id).await;
+        // SB-334: and Claude Code's profile, so native rotation and a switch can use it.
+        crate::refresh::learn_native_context(store, refresh, id, false).await;
     }
     // SB-179: the owner transaction is held for the checks and the store, not for the grant.
     let refreshed = |force: bool| async move {
