@@ -1694,6 +1694,13 @@ account moved to another group after the stop keeps the stop ready or probed amo
 accounts. A waiting stop that is not ready carries `reason`: `billing`, `account_removed`,
 `no_account` (none may be probed) or `backoff` (with `probe_at`). Evidence:
 `a_stop_follows_its_account_into_another_group_and_says_why_it_waits`.
+SB-335 (2026-11-11): a folder that joined a group after the stop, a group the stopped account
+does not serve, is continued by that group's accounts (`recovery::may_continue`: the account must
+pass `launch::project_allows` for the folder and serve the stopped account's group, unless the
+stopped account itself can no longer start there). Before, such a stop read `no_account` until the
+hosts' horizon: `studio-agent` moved into Agents while its session `ffa10a7e` waited. The default
+group's accounts still never run in a folder another group reserves. Evidence:
+`changed_project_permissions_and_duplicate_identity_refuse_capacity`.
 
 **A renewal is stored without holding the account list (H-1, 0.6.83).** `adopt_refreshed_for`
 reads the saved OAuth accounts' items without the store's lock (a Keychain read has no deadline

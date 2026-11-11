@@ -386,7 +386,6 @@ pub(crate) fn candidates(
     let Some(stopped) = bound(wait, snapshot) else {
         return vec![];
     };
-    let pool = stopped.pool.as_str();
     let held_identities: HashSet<_> = snapshot
         .accounts
         .iter()
@@ -402,14 +401,13 @@ pub(crate) fn candidates(
                 && !snapshot.is_assigned(&a.id)
                 && a.kind == AuthKind::OAuth
                 && a.provider == wait.provider
-                && snapshot.serves(a, pool)
                 && !limited.contains(&a.id)
                 && !sign_in.contains(&a.id)
                 && !a
                     .identity
                     .as_ref()
                     .is_some_and(|i| held_identities.contains(&(a.provider, i)))
-                && crate::launch::project_allows(snapshot, a, &wait.directory).is_ok()
+                && may_continue(snapshot, stopped, a, &wait.directory)
                 && a.usage_health.as_ref().is_some_and(|h| {
                     h.status == "ok" && h.checked_at <= now && now - h.checked_at <= MAX_AGE
                 })
@@ -430,6 +428,17 @@ pub(crate) fn candidates(
     eligible.into_iter().map(|a| a.id.clone()).collect()
 }
 
+/// Whether `account` may continue a stop in `folder`: a folder only runs accounts its groups take
+/// (`launch::project_allows`), and of those the stopped account's group. SB-335: when the folder
+/// has since joined a group the stopped account does not serve, that account cannot start there
+/// any more, so the folder's group continues it (before, the stop waited `no_account` until a day
+/// passed: `studio-agent` moved into Agents on 2026-11-11 while its session waited).
+fn may_continue(snapshot: &Snapshot, stopped: &Account, account: &Account, folder: &Path) -> bool {
+    crate::launch::project_allows(snapshot, account, folder).is_ok()
+        && (snapshot.serves(account, &stopped.pool)
+            || crate::launch::project_allows(snapshot, stopped, folder).is_err())
+}
+
 /// SB-205: the stopped account as the store has it now. A stop follows its account into another
 /// group (before 0.6.83 a moved account left the stop neither ready nor probed, and a host
 /// showed "no other account has capacity"); only a removed account leaves it unbound.
@@ -445,7 +454,7 @@ fn bound<'a>(wait: &Wait, snapshot: &'a Snapshot) -> Option<&'a Account> {
 /// account; accounts without an active hold come first.
 fn probe_accounts(
     wait: &Wait,
-    pool: &str,
+    stopped: &Account,
     snapshot: &Snapshot,
     limited: &HashSet<String>,
     capped: &HashSet<String>,
@@ -459,10 +468,9 @@ fn probe_accounts(
                 && !snapshot.is_assigned(&a.id)
                 && a.kind == AuthKind::OAuth
                 && a.provider == wait.provider
-                && snapshot.serves(a, pool)
                 && !capped.contains(&a.id)
                 && !sign_in.contains(&a.id)
-                && crate::launch::project_allows(snapshot, a, &wait.directory).is_ok()
+                && may_continue(snapshot, stopped, a, &wait.directory)
         })
         .map(|a| (limited.contains(&a.id), a.id.clone()))
         .collect();
@@ -514,7 +522,7 @@ pub(crate) fn readiness(
     let Some(stopped) = bound(wait, snapshot) else {
         return not_ready("account_removed");
     };
-    let accounts = probe_accounts(wait, &stopped.pool, snapshot, limited, capped, sign_in);
+    let accounts = probe_accounts(wait, stopped, snapshot, limited, capped, sign_in);
     if accounts.is_empty() {
         return not_ready("no_account");
     }
@@ -897,9 +905,16 @@ mod tests {
         let mut reserved = account("reserved-account");
         reserved.pool = "reserved".into();
         s.accounts.push(reserved);
-        assert!(candidates(wait, &s, &held, &none, 102).is_empty());
+        // SB-335: the folder's own group continues it; the default group's accounts never do.
+        assert_eq!(
+            candidates(wait, &s, &held, &none, 102),
+            vec!["reserved-account"]
+        );
         assert!(claim(root.path(), "limit:1", "new", &s, &held, &none, &none, 102).is_err());
         assert_eq!(read(root.path()).unwrap()[0].state, State::Waiting);
+        // A group with no Claude account of its own reserves nothing, as a launch reads it.
+        s.accounts.retain(|a| a.id != "reserved-account");
+        assert_eq!(candidates(wait, &s, &held, &none, 102), vec!["new"]);
     }
 
     #[tokio::test]

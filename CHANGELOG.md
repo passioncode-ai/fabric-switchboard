@@ -9,6 +9,7 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 ## Unreleased
 
 - *Switch* (making an account the one the ordinary Claude Code uses) works for every Claude account: one added by signing in through Switchboard or moved from another machine was refused with "Add this Claude account again …". Switchboard now asks Claude for the account's profile itself and keeps it (SB-334).
+- A session stopped on a limit in a folder that was then moved into another group can continue on that group's accounts; before, it waited for a day with no account offered (SB-335).
 
 ## 0.7.53
 
