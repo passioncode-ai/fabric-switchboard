@@ -149,8 +149,10 @@ in. Pass `path` whenever the work moved to another folder.
 ### `switchboard_projects`: no arguments
 
 `{projects[], rules[]}`: every group with its id (`pool`), `name`, `folders`, `roots` (each root
-folder with its branch and the worktrees and clones under it), `sources`, reserved `accounts`
-and `organization` / `organization_name`; then every folder rule with its `state`.
+folder with its branch and the worktrees and clones under it), `sources`, `accounts` (its own,
+then those it shares from another group with `shared: true` and their home `pool`),
+`shared_accounts`, `organization` / `organization_name` (its first) and `organizations` /
+`organization_names` (all, in order); then every folder rule with its `state`.
 
 ### `switchboard_repository_map`: `under?` (absolute folders, at most 16)
 

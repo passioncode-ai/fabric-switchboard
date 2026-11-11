@@ -3772,7 +3772,18 @@ fn print_result(value: &Value, cli: &Cli) {
                     .as_array()
                     .into_iter()
                     .flatten()
-                    .map(|a| format!("{} ({})", text(&a["label"]), text(&a["provider"])))
+                    .map(|a| {
+                        if a["shared"] == true {
+                            format!(
+                                "{} ({}, shared from {})",
+                                text(&a["label"]),
+                                text(&a["provider"]),
+                                text(&a["pool"])
+                            )
+                        } else {
+                            format!("{} ({})", text(&a["label"]), text(&a["provider"]))
+                        }
+                    })
                     .collect();
                 println!(
                     "{}  group id {}  {}",
