@@ -1,17 +1,11 @@
 ---
 name: switching-accounts
 description: >-
-  Use when a coding agent on a machine running Fabric Switchboard must know or change which
-  Claude Code or Codex account serves its requests - «переключи аккаунт», «сколько осталось
-  лимита», «какой аккаунт у проекта», «лимит кончился», «примени правило проекта», «на каком
-  аккаунте эта сессия», "switch account", "how much quota is left", "which account is this
-  session on", "apply the folder rule", "we hit the rate limit, move to another account".
-  Reads status and remaining usage honestly (unknown or stale is never zero), switches a
-  managed session from its next request, applies an optional folder rule on entering a
-  folder and tells the operator which rule applied, and changes the ordinary Claude Code
-  login only on the operator's explicit OK. Uses the switchboard MCP server, else the
-  switchboard CLI. NOT for installing Switchboard itself, provider billing or plan
-  questions, or editing Claude or Codex configuration by hand.
+  Use when an agent must know or change which Claude Code or Codex account
+  Switchboard serves it: quota left, the session's account, a rate limit, a folder rule.
+  Triggers: "switch account", "how much quota is left", «переключи аккаунт», «лимит
+  кончился». NOT for installing Switchboard, provider billing, or editing Claude or Codex
+  config by hand.
 license: AGPL-3.0-only OR LicenseRef-PassionCode-Commercial
 compatibility: Requires Fabric Switchboard 0.4 or later on the same machine and the switchboard CLI on PATH; the plugin starts its MCP server as switchboard mcp over stdio. Without the server, the same reads and writes run through the CLI. Local only; provider calls are an explicit usage refresh and Switchboard's own renewal of inactive Claude sign-ins (never the account Claude Code uses).
 metadata:
@@ -22,6 +16,16 @@ metadata:
 ---
 
 # Switching accounts with Switchboard
+
+**When this applies.** The operator asks which account serves this session or a project
+(«на каком аккаунте эта сессия», «какой аккаунт у проекта», "which account is this session
+on"), how much is left («сколько осталось лимита», "how much quota is left"), to switch
+(«переключи аккаунт», "switch account", "we hit the rate limit, move to another account",
+«лимит кончился»), or to apply a folder's rule («примени правило проекта», "apply the folder
+rule"). Status and remaining usage are reported honestly (unknown or stale is never zero); a
+managed session switches from its next request; a folder rule is applied on entering a folder
+and named to the operator; the ordinary Claude Code login changes only on the operator's
+explicit OK. The switchboard MCP server first, else the switchboard CLI.
 
 Fabric Switchboard keeps several Claude Code and Codex accounts on the operator's
 machine, routes managed sessions through a local proxy, and rotates off an exhausted

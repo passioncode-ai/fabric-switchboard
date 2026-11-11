@@ -6,6 +6,10 @@ release pull request renames `Unreleased` to the version. While Windows signing 
 that section must say `windows_authenticode: NOT_SIGNED`. Notes of 0.5.3-beta.1 and earlier are
 on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/releases).
 
+## Unreleased
+
+- The `switching-accounts` skill's description is 345 characters instead of 957, so Claude Code no longer drops it to a bare name when many skills are installed; its full list of phrases moved into the skill's body (sshlg-skills board request `f560930a`).
+
 ## 0.7.53
 
 - A computer that runs only `switchboard serve` (no window) now keeps itself up to date as the app does: it checks every five minutes and installs a new version itself when its account may replace the app. When several accounts share one app and another one updates it, each `serve` restarts onto the new version by itself (SB-333).
