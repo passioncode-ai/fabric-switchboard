@@ -6,6 +6,10 @@ release pull request renames `Unreleased` to the version. While Windows signing 
 that section must say `windows_authenticode: NOT_SIGNED`. Notes of 0.5.3-beta.1 and earlier are
 on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/releases).
 
+## Unreleased
+
+- *Switch* (making an account the one the ordinary Claude Code uses) works for every Claude account: one added by signing in through Switchboard or moved from another machine was refused with "Add this Claude account again …". Switchboard now asks Claude for the account's profile itself and keeps it (SB-334).
+
 ## 0.7.53
 
 0.7.52 was tagged but not published: its nightly failed on Linux, where three constants of the macOS 27 fix were unused in the test build. Its changes ship here.
