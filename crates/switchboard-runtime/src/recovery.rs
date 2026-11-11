@@ -912,10 +912,9 @@ mod tests {
         );
         assert!(claim(root.path(), "limit:1", "new", &s, &held, &none, &none, 102).is_err());
         assert_eq!(read(root.path()).unwrap()[0].state, State::Waiting);
+        // A group with no Claude account of its own reserves nothing, as a launch reads it.
         s.accounts.retain(|a| a.id != "reserved-account");
-        assert!(candidates(wait, &s, &held, &none, 102).is_empty());
-        let probe = readiness(wait, &s, &held, &none, &none, 220);
-        assert!(probe.accounts.is_empty(), "nobody of the default group is probed there");
+        assert_eq!(candidates(wait, &s, &held, &none, 102), vec!["new"]);
     }
 
     #[tokio::test]
