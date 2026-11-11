@@ -45,6 +45,7 @@ pub mod remote_dispatch;
 pub mod roots;
 pub mod seats;
 pub mod self_update;
+pub mod serve_update;
 pub mod settings_bundle;
 pub mod settings_signing;
 pub mod shell;

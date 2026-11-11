@@ -1710,13 +1710,57 @@ async fn run(cli: &Cli) -> Result<Value, String> {
         // deadline; the backstop ends the process if it overruns (lifecycle LC-01). Caught
         // before the owner publishes `control.json`, so a stop during start-up drains too.
         let signals = StopSignals::listen()?;
+        let data = root.clone();
         let owner = Owner::native(root).await?;
         let status = owner.runtime.execute(Operation::Status).await?;
         print_value(&json!({"state":"serving", "runtime":status}), cli.json);
-        let signal = signals.requested().await?;
-        arm_hard_exit(HARD_EXIT_AFTER);
-        oplog::event("stop_requested", &[("signal", oplog::Field::Code(signal))]);
+        // SB-333: `serve` keeps itself current as the app does, and follows a program another
+        // account replaced; a restart asks its supervisor to start it again on the new binary.
+        let updates = async {
+            use switchboard_runtime::serve_update as su;
+            let Some(program) = su::program() else {
+                return std::future::pending::<&'static str>().await;
+            };
+            let Some(at_start) = su::stamp(&program) else {
+                return std::future::pending::<&'static str>().await;
+            };
+            let mut told = None;
+            tokio::time::sleep(su::FIRST_AFTER).await;
+            loop {
+                if let su::Pass::Restart(why) = su::pass(
+                    &data,
+                    &program,
+                    &at_start,
+                    env!("CARGO_PKG_VERSION"),
+                    &mut told,
+                )
+                .await
+                {
+                    return why;
+                }
+                tokio::time::sleep(su::EVERY).await;
+            }
+        };
+        let restart = tokio::select! {
+            signal = signals.requested() => {
+                let signal = signal?;
+                arm_hard_exit(HARD_EXIT_AFTER);
+                oplog::event("stop_requested", &[("signal", oplog::Field::Code(signal))]);
+                None
+            }
+            why = updates => {
+                arm_hard_exit(HARD_EXIT_AFTER);
+                Some(why)
+            }
+        };
         let stopped = owner.shutdown(DRAIN_DEADLINE).await;
+        if let Some(why) = restart {
+            print_value(
+                &json!({"state":"restarting", "reason": why, "drained": stopped.drained}),
+                cli.json,
+            );
+            std::process::exit(switchboard_runtime::serve_update::RESTART_STATUS);
+        }
         return Ok(json!({"state":"stopped", "drained": stopped.drained}));
     }
     // `continue --ceiling`: the task's ceiling first, so a refusal (out of range, higher than
