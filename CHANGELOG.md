@@ -8,6 +8,8 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+## 0.7.56
+
 - `switchboard dispatch --reason inbox` starts a run for a project's unread Fabric board messages: it answers where an answer is owed, marks what it handled read and never claims a request (SB-338, Fabric's request).
 
 ## 0.7.55
