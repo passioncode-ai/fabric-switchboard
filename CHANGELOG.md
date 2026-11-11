@@ -10,6 +10,7 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 - *Switch* (making an account the one the ordinary Claude Code uses) works for every Claude account: one added by signing in through Switchboard or moved from another machine was refused with "Add this Claude account again …". Switchboard now asks Claude for the account's profile itself and keeps it (SB-334).
 - A session stopped on a limit in a folder that was then moved into another group can continue on that group's accounts; before, it waited for a day with no account offered (SB-335).
+- A group with no Claude account of its own now uses the default group's accounts in its folders, as a repository in no group does; a group bound to an organization still never does. On a computer where Claude Code is signed in to no account (the Mac Studio's users), a plain `claude` in a group folder no longer asks for a sign-in: the folder's settings carry a placeholder token that only Switchboard's proxy reads (SB-325, SB-331).
 
 ## 0.7.53
 
