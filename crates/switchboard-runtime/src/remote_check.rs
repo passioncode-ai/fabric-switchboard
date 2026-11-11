@@ -214,6 +214,46 @@ pub fn check(
     }))
 }
 
+/// SB-326: carries this machine's settings to another one: the signed `switchboard-settings/1`
+/// file goes on ssh's standard input to `settings import /dev/stdin --signer <this key>` there
+/// (a preview, or with `apply` the import), so groups, organizations, agents' settings and
+/// rotation settings match without a file copied by hand. The answer is the other machine's
+/// import answer. No account, credential or capability is in the file.
+pub fn sync(
+    bundle: &[u8],
+    signer: &str,
+    apply: bool,
+    target: &str,
+    program: &Program<'_>,
+    run: &Run<'_>,
+) -> Result<Value, String> {
+    if !crate::account_send::target_valid(target) {
+        return Err(TARGET_INVALID.into());
+    }
+    program.check()?;
+    let mut args = vec![
+        "--json",
+        "settings",
+        "import",
+        "/dev/stdin",
+        "--signer",
+        signer,
+    ];
+    if apply {
+        args.push("--apply");
+    }
+    let line = [target.to_owned(), "--".to_owned(), remote(program, &args)];
+    match run(&line, Some(bundle)) {
+        Ok(out) => data(&out).ok_or_else(|| UNREACHABLE.to_owned()),
+        Err(out) => Err(
+            serde_json::from_str::<Value>(out.lines().last().unwrap_or(""))
+                .ok()
+                .and_then(|v| v["error"].as_str().map(str::to_owned))
+                .unwrap_or_else(|| UNREACHABLE.to_owned()),
+        ),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -397,45 +437,5 @@ mod tests {
             sync(b"{}", "KEY", true, "-oProxy=x", &program, &ok).unwrap_err(),
             TARGET_INVALID
         );
-    }
-}
-
-/// SB-326: carries this machine's settings to another one: the signed `switchboard-settings/1`
-/// file goes on ssh's standard input to `settings import /dev/stdin --signer <this key>` there
-/// (a preview, or with `apply` the import), so groups, organizations, agents' settings and
-/// rotation settings match without a file copied by hand. The answer is the other machine's
-/// import answer. No account, credential or capability is in the file.
-pub fn sync(
-    bundle: &[u8],
-    signer: &str,
-    apply: bool,
-    target: &str,
-    program: &Program<'_>,
-    run: &Run<'_>,
-) -> Result<Value, String> {
-    if !crate::account_send::target_valid(target) {
-        return Err(TARGET_INVALID.into());
-    }
-    program.check()?;
-    let mut args = vec![
-        "--json",
-        "settings",
-        "import",
-        "/dev/stdin",
-        "--signer",
-        signer,
-    ];
-    if apply {
-        args.push("--apply");
-    }
-    let line = [target.to_owned(), "--".to_owned(), remote(program, &args)];
-    match run(&line, Some(bundle)) {
-        Ok(out) => data(&out).ok_or_else(|| UNREACHABLE.to_owned()),
-        Err(out) => Err(
-            serde_json::from_str::<Value>(out.lines().last().unwrap_or(""))
-                .ok()
-                .and_then(|v| v["error"].as_str().map(str::to_owned))
-                .unwrap_or_else(|| UNREACHABLE.to_owned()),
-        ),
     }
 }

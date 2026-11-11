@@ -206,6 +206,7 @@ async fn handshake_lists_tools_and_rejects_malformed_messages() {
             "switchboard_backup_now",
             "switchboard_backup_restore",
             "switchboard_project_delete",
+            "switchboard_settings_sync",
             "switchboard_settings_import",
             "switchboard_recovery",
             "switchboard_handovers",
