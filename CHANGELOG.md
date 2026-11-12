@@ -8,6 +8,8 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+## 0.7.68
+
 - `switchboard sessions` and `sessions --all` say which sessions a host holds (`attachable`, `viewers`) and where an ended one's output is, as the history already did; Fabric Dashboards reads them there every 15 seconds (SB-346).
 
 ## 0.7.67
