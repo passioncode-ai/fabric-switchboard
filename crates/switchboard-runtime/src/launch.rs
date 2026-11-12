@@ -669,6 +669,44 @@ pub(crate) fn write_launch_script(home: &Path, content: &str) -> Result<PathBuf,
     private_write(&path, content.as_bytes(), true)?;
     Ok(path)
 }
+/// SB-342 H-1b: `attach.command` beside the launch script `script`: it starts the session in a
+/// session host and attaches this window to it (`switchboard session-open`). None when the
+/// script names no launch, its data folder cannot be found, or no switchboard CLI is installed.
+#[cfg(unix)]
+fn hosted_wrapper(script: &Path) -> Option<PathBuf> {
+    let text = std::fs::read_to_string(script).ok()?;
+    let id = text
+        .lines()
+        .find_map(|l| {
+            l.strip_prefix("export SWITCHBOARD_LAUNCH_ID='")?
+                .strip_suffix('\'')
+        })
+        .filter(|id| crate::launches::valid_id(id))?;
+    let root = script
+        .ancestors()
+        .skip(1)
+        .take(4)
+        .find(|dir| dir.join("accounts.json").is_file())?;
+    let cli = agent_cli()?;
+    let wrapper = script.with_file_name("attach.command");
+    private_write(
+        &wrapper,
+        attach_wrapper(&cli, root, id, script).as_bytes(),
+        true,
+    )
+    .ok()?;
+    Some(wrapper)
+}
+#[cfg(unix)]
+fn attach_wrapper(cli: &Path, root: &Path, launch_id: &str, script: &Path) -> String {
+    format!(
+        "#!/bin/sh\nexec {} --data-dir {} session-open --launch-id {} --program {}\n",
+        quote(&cli.to_string_lossy()),
+        quote(&root.to_string_lossy()),
+        quote(launch_id),
+        quote(&script.to_string_lossy()),
+    )
+}
 /// SB-342 H-0: Terminal window settings (`.terminal`) that run `script` as the window's process
 /// and close the window when it exits with status 0, so the windows Switchboard opens do not pile
 /// up; the person's own Terminal profiles are left as they are. Terminal runs `CommandString` as
@@ -707,6 +745,13 @@ fn terminal_window_settings_in(dir: &Path, script: &Path) -> Option<PathBuf> {
     Some(window)
 }
 pub(crate) fn start_terminal(path: &Path) -> Result<(), String> {
+    // SB-342 H-1b: the window runs the session through a session host and shows it attached, so
+    // closing the window leaves it running and any app can open it; the plain script where no
+    // host can be prepared.
+    #[cfg(unix)]
+    let hosted = hosted_wrapper(path);
+    #[cfg(unix)]
+    let path = hosted.as_deref().unwrap_or(path);
     #[cfg(target_os = "macos")]
     {
         // SB-342 H-0: a window that closes when the session exits cleanly (one that failed stays,
@@ -3968,6 +4013,31 @@ mod tests {
         fs::create_dir(&metadata).unwrap();
         let (): () = journal_launch(&store, &id, "isolated");
         assert_eq!(store.snapshot().unwrap().events.len(), 1);
+    }
+    #[cfg(unix)]
+    #[test]
+    fn a_terminal_window_runs_its_session_through_a_host_when_one_can_be_prepared() {
+        // SB-342 H-1b: the window's command starts the session in a host and attaches to it.
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("data with 'quote");
+        let home = root.join("runtimes").join("claude-default");
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::write(root.join("accounts.json"), b"{}").unwrap();
+        let id = crate::launches::new_id();
+        let script = home.join("launch.command");
+        std::fs::write(
+            &script,
+            format!("#!/bin/zsh\nexport SWITCHBOARD_LAUNCH_ID='{id}'\nexec true\n"),
+        )
+        .unwrap();
+        let body = attach_wrapper(Path::new("/opt/sb/switchboard"), &root, &id, &script);
+        assert!(body.starts_with("#!/bin/sh\nexec '/opt/sb/switchboard' --data-dir '"));
+        assert!(body.contains("'\\''quote"));
+        assert!(body.contains(&format!("session-open --launch-id '{id}' --program '")));
+        // A script that names no launch gets no host: the plain script opens.
+        let plain = home.join("plain.command");
+        std::fs::write(&plain, b"#!/bin/zsh\nexec true\n").unwrap();
+        assert!(hosted_wrapper(&plain).is_none());
     }
     /// SB-342 H-0: the window settings run the script through a link without spaces and close
     /// the window on a clean exit; a folder whose path holds a space gives none.

@@ -248,6 +248,17 @@ enum Command {
         /// The launch id.
         launch_id: String,
     },
+    /// Starts one session in a session host and shows it in this terminal: the command a Terminal
+    /// window Switchboard opens runs.
+    #[command(hide = true)]
+    SessionOpen {
+        /// The launch id of the session.
+        #[arg(long)]
+        launch_id: String,
+        /// The session's launch script.
+        #[arg(long)]
+        program: PathBuf,
+    },
     /// Runs one session on a terminal of its own and serves it to viewers (started by
     /// `launch --hosted`).
     #[command(hide = true)]
@@ -2385,6 +2396,18 @@ async fn run(cli: &Cli) -> Result<Value, String> {
             )
             .await?;
             return Ok(Value::Null);
+        }
+        #[cfg(unix)]
+        Command::SessionOpen { launch_id, program } => {
+            // No host could start: the session still runs, in this window, as before H-1b.
+            if hosted::spawn(&root, launch_id, program).is_err() {
+                return run_in_place(program);
+            }
+            return finish_attach(launch_id, hosted::attach(&root, launch_id)?);
+        }
+        #[cfg(not(unix))]
+        Command::SessionOpen { .. } => {
+            return Err("A session host runs on macOS and Linux for now.".into());
         }
         #[cfg(not(unix))]
         Command::SessionHost { .. } => {
@@ -4675,6 +4698,10 @@ mod mcp_parity {
         (
             "attach",
             Not("SB-342 H-1: shows a session in a person's terminal; an app attaches to the session host's socket itself"),
+        ),
+        (
+            "session-open",
+            Not("SB-342 H-1b: the command a Terminal window Switchboard opens runs, never called by hand"),
         ),
         (
             "session-host",

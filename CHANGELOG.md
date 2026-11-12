@@ -8,6 +8,8 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- On macOS and Linux a Terminal window Switchboard opens now shows its session through a session host: closing the window no longer ends the session, `switchboard attach <launch_id>` (or another app) opens it again, and the window still closes by itself when the session ends without an error (SB-342).
+
 - `switchboard attach` (and any app that attaches) now shows a hosted session's screen as it is, full-screen programs included, instead of replaying its raw output. A hosted session nobody watches and that does nothing for 30 minutes is closed, and an ended session's last output stays readable for a day (`switchboard sessions` gives its path) (SB-342).
 
 ## 0.7.63
