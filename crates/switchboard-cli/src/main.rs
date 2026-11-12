@@ -4305,16 +4305,22 @@ async fn start() -> ExitCode {
             // SB-189: the sentence the window shows, which says what to do; `--json` keeps the
             // backend's own text in `raw` for a script that matches it.
             let sentence = switchboard_runtime::person_errors::for_person(&error);
+            // SB-343: no account for the folder is told apart by its code and status 3, which
+            // `launch --target` carries back through ssh.
+            let no_route = switchboard_runtime::projects::is_no_route(&error);
             if cli.json {
                 let mut body = json!({"ok":false,"error":sentence});
                 if sentence != error {
                     body["raw"] = json!(error);
                 }
+                if no_route {
+                    body["code"] = json!("no-route");
+                }
                 eprintln!("{body}");
             } else {
                 eprintln!("{sentence}");
             }
-            ExitCode::from(1)
+            ExitCode::from(if no_route { 3 } else { 1 })
         }
     }
 }

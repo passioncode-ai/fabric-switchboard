@@ -475,6 +475,12 @@ pub(crate) const NO_PROJECT_SELECTION: &str =
 pub(crate) const NO_SELECTION: &str =
     "Select an account for this provider first (switchboard accounts select).";
 
+/// SB-343: whether `error` says a folder has no account to start a session on, so the CLI can
+/// answer it with the code `no-route` and exit status 3, which a caller reads without the text.
+pub fn is_no_route(error: &str) -> bool {
+    error == NO_PROJECT_SELECTION || error == NO_SELECTION
+}
+
 /// The account Switchboard would use for a session of `provider` in `folder` (SB-75): the
 /// selected account of the folder's project pool; else the account of the folder's rule in force;
 /// else the selected account of the default pool. Reads metadata only, never a credential.
@@ -498,7 +504,18 @@ pub(crate) fn account_for_folder(
             .cloned()
     };
     if let Some(project) = snapshot.project_for(folder) {
-        return route(&project.pool).ok_or_else(|| NO_PROJECT_SELECTION.into());
+        // SB-343: a personal group with no enabled account of this provider uses the default
+        // group's, as its folders' Claude Code settings already do (SB-325, DEC-0007); a group
+        // bound to an organization never falls back (SB-109), and one with an account of its own
+        // but none selected still asks for the selection.
+        let own = snapshot
+            .accounts
+            .iter()
+            .any(|a| a.enabled && a.provider == provider && snapshot.serves(a, &project.pool));
+        if own || !project.organizations.is_empty() || project.pool == "default" {
+            return route(&project.pool).ok_or_else(|| NO_PROJECT_SELECTION.into());
+        }
+        return route("default").ok_or_else(|| NO_SELECTION.into());
     }
     if let Some(rule) = store
         .resolve_rules(folder, now)?
@@ -584,15 +601,24 @@ mod tests {
             account_for_folder(&store, Provider::Claude, &ruled.join("src"), now).unwrap(),
             other.id
         );
-        // A project's folder uses the project's selected account, never the default pool's.
+        // SB-343: a personal group with no account of its own uses the default group's, as its
+        // folders' Claude Code settings do (SB-325).
         let project = store
             .save_project(None, "Web", std::slice::from_ref(&web), &[])
             .unwrap();
         assert_eq!(
-            account_for_folder(&store, Provider::Claude, &web, now).unwrap_err(),
-            NO_PROJECT_SELECTION
+            account_for_folder(&store, Provider::Claude, &web, now).unwrap(),
+            default.id
         );
+        // One whose only account is turned off does too.
         let own = add(&store, &project.pool, "synthetic-project-key");
+        store.update(&own.id, own.label.clone(), false).unwrap();
+        assert_eq!(
+            account_for_folder(&store, Provider::Claude, &web, now).unwrap(),
+            default.id
+        );
+        // With an enabled account of its own, the group's selection decides, never the default's.
+        store.update(&own.id, own.label.clone(), true).unwrap();
         store
             .select(Provider::Claude, &project.pool, &own.id)
             .unwrap();
@@ -605,6 +631,9 @@ mod tests {
             account_for_folder(&store, Provider::Codex, &plain, now).unwrap_err(),
             NO_SELECTION
         );
+        // SB-343: both refusals are `no-route` for the CLI's code and exit status.
+        assert!(is_no_route(NO_SELECTION) && is_no_route(NO_PROJECT_SELECTION));
+        assert!(!is_no_route("Unknown account"));
     }
     fn add(store: &Store, pool: &str, secret: &str) -> Account {
         store

@@ -8,6 +8,8 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- `switchboard launch --provider` in a folder of a group whose Claude accounts are all turned off, or that has none, now starts on the default group's account, as a plain `claude` there already did; a group of an organization still needs its own. When no account can start the session, the CLI exits with status 3 and, with `--json`, `code: "no-route"`, so Fabric Dashboards can say why a launch on another machine was refused (SB-343, Fabric Dashboards' request).
+
 ## 0.7.60
 
 - 0.7.59 was tagged but not published: its checks failed on Linux and Windows over the Terminal change below, which is now built on macOS only. 0.7.60 carries everything 0.7.59 announced.
