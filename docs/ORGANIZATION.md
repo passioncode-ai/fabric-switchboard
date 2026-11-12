@@ -39,6 +39,11 @@ install it with the other PassionCode.ai tools:
 npx --yes @passioncode-ai/passioncode@latest setup --yes --json
 ```
 
+From the launcher release after 0.2.76 (PassionCode.ai PC-178), the same command also installs the
+agents' wiki memory: Obsidian, obsidian-wiki with its skills, a new vault in `~/Documents/Wiki` when
+you have none, and a session-start recap hook for Claude Code. Add `--without memory` to leave all
+of it out.
+
 Open the app once. It asks whether it may share anonymous usage counts (you can change the answer
 later in About), then shows a short tour. From then on it opens at login
 and keeps running when you close its window.
