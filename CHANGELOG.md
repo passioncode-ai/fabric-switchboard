@@ -8,6 +8,8 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- `switchboard sessions` and `sessions --all` say which sessions a host holds (`attachable`, `viewers`) and where an ended one's output is, as the history already did; Fabric Dashboards reads them there every 15 seconds (SB-346).
+
 ## 0.7.67
 
 - An update check that never ended no longer stops every later one: on the operator's MacBook a check stayed `downloading` for seven hours after its download and the app kept 0.7.61, *Check for updates* included. One check now ends within 25 minutes (`update_check stalled`, naming the step), and waiting for another swap is limited to 2 minutes (`update_install swap_busy`) (SB-344).
