@@ -1174,7 +1174,9 @@ impl Server {
                         switchboard_runtime::session_host::end(&root, &id)
                     })
                     .await
-                    .unwrap_or_else(|_| Err(switchboard_runtime::session_host::END_UNCONFIRMED.into()))
+                    .unwrap_or_else(|_| {
+                        Err(switchboard_runtime::session_host::END_UNCONFIRMED.into())
+                    })
                 }
                 #[cfg(not(unix))]
                 {

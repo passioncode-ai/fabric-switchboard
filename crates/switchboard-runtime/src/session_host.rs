@@ -714,7 +714,8 @@ pub fn end(root: &Path, launch_id: &str) -> Result<Value, String> {
         }
     }
 }
-pub const END_UNCONFIRMED: &str = "The session was asked to end, and its end was not seen within 15 seconds.";
+pub const END_UNCONFIRMED: &str =
+    "The session was asked to end, and its end was not seen within 15 seconds.";
 
 fn connect(root: &Path, launch_id: &str, size: Option<(u16, u16)>) -> Result<Attached, String> {
     if !crate::launches::valid_id(launch_id) {
@@ -928,7 +929,10 @@ mod tests {
         until(&mut viewer.stream, "up");
         let ended = end(&root, &id).unwrap();
         assert_eq!(ended["reason"], "ended");
-        assert_eq!(until(&mut viewer.stream, "").1, Some(ended["exit_code"].as_i64().unwrap() as i32));
+        assert_eq!(
+            until(&mut viewer.stream, "").1,
+            Some(ended["exit_code"].as_i64().unwrap() as i32)
+        );
         assert_eq!(host.join().unwrap().unwrap().reason, "ended");
         assert_eq!(end(&root, &id).unwrap_err(), NOT_FOUND);
     }
