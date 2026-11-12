@@ -1198,14 +1198,24 @@ mod tests {
         std::fs::create_dir_all(transcript.parent().unwrap()).unwrap();
         std::fs::write(&transcript, b"{}").unwrap();
         let launch = crate::launches::new_id();
-        switchboard_core::private_fs::private_dir(&root.path().join(crate::launches::DIR))
-            .unwrap();
+        switchboard_core::private_fs::private_dir(&root.path().join(crate::launches::DIR)).unwrap();
         for (id, at, path) in [
-            (crate::launches::new_id(), 50, "/nonexistent/older.jsonl".to_owned()),
-            (launch.clone(), 90, transcript.to_string_lossy().into_owned()),
+            (
+                crate::launches::new_id(),
+                50,
+                "/nonexistent/older.jsonl".to_owned(),
+            ),
+            (
+                launch.clone(),
+                90,
+                transcript.to_string_lossy().into_owned(),
+            ),
         ] {
             switchboard_core::private_fs::private_write(
-                &root.path().join(crate::launches::DIR).join(format!("{id}.json")),
+                &root
+                    .path()
+                    .join(crate::launches::DIR)
+                    .join(format!("{id}.json")),
                 serde_json::json!({"launch_id": id, "launched_at": at,
                     "provider_session_id": "session-1", "transcript": path})
                 .to_string()

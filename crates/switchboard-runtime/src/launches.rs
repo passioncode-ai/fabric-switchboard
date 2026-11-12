@@ -432,7 +432,10 @@ pub(crate) fn by_session(
     let mut found: std::collections::HashMap<String, (i64, String, Option<String>)> =
         std::collections::HashMap::new();
     if sessions.is_empty() {
-        return found.into_iter().map(|(k, (_, l, t))| (k, (l, t))).collect();
+        return found
+            .into_iter()
+            .map(|(k, (_, l, t))| (k, (l, t)))
+            .collect();
     }
     for (id, record) in all(root) {
         let Some(session) = record["provider_session_id"].as_str() else {
@@ -451,7 +454,10 @@ pub(crate) fn by_session(
             .map(str::to_owned);
         found.insert(session.to_owned(), (at, id, transcript));
     }
-    found.into_iter().map(|(k, (_, l, t))| (k, (l, t))).collect()
+    found
+        .into_iter()
+        .map(|(k, (_, l, t))| (k, (l, t)))
+        .collect()
 }
 
 /// SB-219: the launches that continued each workflow, `launches/by-workflow/<workflow>.json` (a
