@@ -1706,6 +1706,15 @@ hosts' horizon: `studio-agent` moved into Agents while its session `ffa10a7e` wa
 group's accounts still never run in a folder another group reserves. Evidence:
 `changed_project_permissions_and_duplicate_identity_refuse_capacity`.
 
+**A stop names its launch and transcript (SB-348, 0.7.69).** Each waiting or claimed stop in
+`switchboard recovery` carries `launch_id` and `transcript`: the newest launch record whose
+`provider_session_id` is the stop's session, and the transcript its own hook reported, when that
+file is still there (`launches::by_session`, one scan of the records, none when no stop is open).
+A session Switchboard launched keeps its transcript in its managed home
+(`homes/<account>/projects/...`), where a host looking in `~/.claude/projects` finds nothing:
+Fabric Dashboards read twelve such stops as `no-transcript` on 2026-11-12. Evidence:
+`an_open_stop_names_its_launch_and_its_transcript_in_a_managed_home`.
+
 **Capacity has the room automatic switching wants (SB-345, 0.7.66).** An account is capacity for a
 stop only when its fresh account usage (`Usage::account_used_percent`, the fullest of its account
 windows) is under the stopped group's managed policy threshold less its hysteresis

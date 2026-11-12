@@ -8,6 +8,8 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- `switchboard recovery` names, for each session waiting after a limit, the launch that ran it and its transcript, which for a session Switchboard launched lives in Switchboard's own folders; a host that resumes such sessions no longer reads them as having no transcript (SB-348).
+
 ## 0.7.68
 
 - `switchboard sessions` and `sessions --all` say which sessions a host holds (`attachable`, `viewers`) and where an ended one's output is, as the history already did; Fabric Dashboards reads them there every 15 seconds (SB-346).

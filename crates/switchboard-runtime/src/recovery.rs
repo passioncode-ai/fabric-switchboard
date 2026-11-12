@@ -666,12 +666,24 @@ pub(crate) fn status(
     let (rows, _) = current(root, now)?;
     let waiting = rows.iter().filter(|r| r.state == State::Waiting).count();
     let claimed = rows.iter().filter(|r| r.state == State::Claimed).count();
+    // SB-348: the launch and transcript of each stop still open, for a host that resumes it.
+    let open: HashSet<&str> = rows
+        .iter()
+        .filter(|r| matches!(r.state, State::Waiting | State::Claimed))
+        .map(|r| r.session.as_str())
+        .collect();
+    let launched = crate::launches::by_session(root, &open);
     let sessions: Vec<_> = rows
         .iter()
         .map(|r| {
             let ready = readiness(r, snapshot, limited, capped, sign_in, now);
+            let (launch_id, transcript) = launched
+                .get(&r.session)
+                .cloned()
+                .map_or((None, None), |(l, t)| (Some(l), t));
             serde_json::json!({"stop": r, "ready": ready.mode.is_some(), "mode": ready.mode,
-                "candidates": ready.accounts, "probe_at": ready.probe_at, "reason": ready.reason})
+                "candidates": ready.accounts, "probe_at": ready.probe_at, "reason": ready.reason,
+                "launch_id": launch_id, "transcript": transcript})
         })
         .collect();
     let ready = sessions.iter().filter(|r| r["ready"] == true).count();
@@ -1163,6 +1175,52 @@ mod tests {
             100_000,
         );
         assert_eq!(one_capped.accounts, vec!["new"]);
+    }
+
+    #[test]
+    fn an_open_stop_names_its_launch_and_its_transcript_in_a_managed_home() {
+        // SB-348: Fabric Dashboards found no transcript for stops whose session ran in a
+        // managed home, and left them `no-transcript`.
+        let root = tempfile::tempdir().unwrap();
+        let s = snapshot();
+        let none = HashSet::new();
+        register(
+            root.path(),
+            &s,
+            "limit:1",
+            "session-1",
+            "old",
+            root.path(),
+            100,
+        )
+        .unwrap();
+        let transcript = root.path().join("homes/old/projects/x/session-1.jsonl");
+        std::fs::create_dir_all(transcript.parent().unwrap()).unwrap();
+        std::fs::write(&transcript, b"{}").unwrap();
+        let launch = crate::launches::new_id();
+        switchboard_core::private_fs::private_dir(&root.path().join(crate::launches::DIR))
+            .unwrap();
+        for (id, at, path) in [
+            (crate::launches::new_id(), 50, "/nonexistent/older.jsonl".to_owned()),
+            (launch.clone(), 90, transcript.to_string_lossy().into_owned()),
+        ] {
+            switchboard_core::private_fs::private_write(
+                &root.path().join(crate::launches::DIR).join(format!("{id}.json")),
+                serde_json::json!({"launch_id": id, "launched_at": at,
+                    "provider_session_id": "session-1", "transcript": path})
+                .to_string()
+                .as_bytes(),
+            )
+            .unwrap();
+        }
+        let answer = status(root.path(), &s, &none, &none, &none, 102).unwrap();
+        let row = &answer["sessions"][0];
+        assert_eq!(row["launch_id"], launch.as_str());
+        assert_eq!(row["transcript"], transcript.to_string_lossy().as_ref());
+        // A settled stop needs no transcript and costs no scan.
+        finish(root.path(), "limit:1", true, 1000).unwrap();
+        let settled = status(root.path(), &s, &none, &none, &none, 1001).unwrap();
+        assert!(settled["sessions"][0]["transcript"].is_null());
     }
 
     #[test]
