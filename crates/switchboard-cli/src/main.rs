@@ -1605,6 +1605,12 @@ enum SessionsCommand {
         /// The launch id (`switchboard sessions --history`).
         launch_id: String,
     },
+    /// End a session a session host holds (marked `attachable`): its process gets a hangup, a
+    /// SIGTERM 5 s later if it still runs, and every viewer is told it ended. macOS and Linux.
+    End {
+        /// The launch id.
+        launch_id: String,
+    },
 }
 /// Where `switchboard launch` is run from, for the launch record.
 #[derive(Clone, Copy, ValueEnum)]
@@ -2180,6 +2186,20 @@ async fn run(cli: &Cli) -> Result<Value, String> {
             },
             launches::LaunchedBy::from_caller(launches::Surface::Fabric, None, None),
         ),
+        #[cfg(unix)]
+        Command::Sessions {
+            command: Some(SessionsCommand::End { launch_id }),
+            ..
+        } => {
+            return switchboard_runtime::session_host::end(&root, launch_id);
+        }
+        #[cfg(not(unix))]
+        Command::Sessions {
+            command: Some(SessionsCommand::End { .. }),
+            ..
+        } => {
+            return Err("A session host runs on macOS and Linux for now.".into());
+        }
         Command::Sessions {
             command: Some(SessionsCommand::Show { launch_id }),
             ..
@@ -2290,6 +2310,7 @@ async fn run(cli: &Cli) -> Result<Value, String> {
             working_directory,
             in_place,
             headless,
+            hosted,
             by,
             parent,
             surface,
@@ -2311,6 +2332,7 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                     working_directory: working_directory.clone(),
                     in_place: *in_place,
                     headless: *headless,
+                    hosted: *hosted,
                     by: by.clone(),
                     parent: parent.clone(),
                     surface: *surface,
@@ -2953,6 +2975,8 @@ struct LaunchThere {
     working_directory: std::path::PathBuf,
     in_place: bool,
     headless: bool,
+    /// SB-342 H-1d: the session runs in a session host there, so it outlives this ssh link.
+    hosted: bool,
     by: Option<String>,
     parent: Option<String>,
     surface: LaunchSurface,
@@ -3011,6 +3035,11 @@ async fn launch_there(
             "--in-place"
         }
         .to_owned(),
+    ]);
+    if l.hosted {
+        words.push("--hosted".to_owned());
+    }
+    words.extend([
         "--surface".to_owned(),
         match l.surface {
             LaunchSurface::Cli => "cli",
@@ -4681,6 +4710,7 @@ mod mcp_parity {
         ("targets", Tool("switchboard_targets")),
         // `sessions` itself (and its `--all`, `--history`) answers through the same tool.
         ("sessions show", Tool("switchboard_sessions")),
+        ("sessions end", Tool("switchboard_session_end")),
         ("provenance", Tool("switchboard_provenance")),
         ("current", Tool("switchboard_status")),
         ("rotation status", Tool("switchboard_rotation")),

@@ -8,6 +8,8 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- `switchboard sessions end <launch_id>` (and the agent tool `switchboard_session_end`) ends a hosted session for every app showing it; closing a window only leaves it. `switchboard launch --target ... --hosted` runs the session on the other machine in a session host, so it survives a dropped ssh link (SB-342, Fabric Dashboards' request).
+
 ## 0.7.64
 
 - On macOS and Linux a Terminal window Switchboard opens now shows its session through a session host: closing the window no longer ends the session, `switchboard attach <launch_id>` (or another app) opens it again, and the window still closes by itself when the session ends without an error (SB-342).
