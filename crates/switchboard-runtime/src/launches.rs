@@ -421,6 +421,45 @@ fn all(root: &Path) -> BTreeMap<String, Value> {
     found
 }
 
+/// SB-348: for each provider session in `sessions`, the newest launch that ran it and its
+/// transcript as the session's own hook reported it, so a host resumes a stop whose transcript
+/// lives in a managed home (`homes/<account>/projects/...`), not in `~/.claude/projects`. One scan,
+/// and none when `sessions` is empty. A transcript no longer on disk is left out.
+pub(crate) fn by_session(
+    root: &Path,
+    sessions: &std::collections::HashSet<&str>,
+) -> std::collections::HashMap<String, (String, Option<String>)> {
+    let mut found: std::collections::HashMap<String, (i64, String, Option<String>)> =
+        std::collections::HashMap::new();
+    if sessions.is_empty() {
+        return found
+            .into_iter()
+            .map(|(k, (_, l, t))| (k, (l, t)))
+            .collect();
+    }
+    for (id, record) in all(root) {
+        let Some(session) = record["provider_session_id"].as_str() else {
+            continue;
+        };
+        if !sessions.contains(session) {
+            continue;
+        }
+        let at = record["launched_at"].as_i64().unwrap_or(0);
+        if found.get(session).is_some_and(|(seen, _, _)| *seen >= at) {
+            continue;
+        }
+        let transcript = record["transcript"]
+            .as_str()
+            .filter(|t| fs::symlink_metadata(t).is_ok_and(|m| m.is_file()))
+            .map(str::to_owned);
+        found.insert(session.to_owned(), (at, id, transcript));
+    }
+    found
+        .into_iter()
+        .map(|(k, (_, l, t))| (k, (l, t)))
+        .collect()
+}
+
 /// SB-219: the launches that continued each workflow, `launches/by-workflow/<workflow>.json` (a
 /// list of launch ids, oldest first, at most `WORKFLOW_INDEX_MAX`), so linking a continuation
 /// reads those records instead of every record. A workflow with no index (records from before
