@@ -5606,7 +5606,7 @@ async fn execute(
         Operation::Targets { probe } => {
             let root = root.to_owned();
             blocking::run(move || -> Result<Value, String> {
-                let mut machines = targets::known(&root);
+                let mut machines = targets::collapse(targets::known(&root), &targets::ssh_identity);
                 if probe {
                     for t in &mut machines {
                         let machine = t["machine"].as_str().unwrap_or_default().to_owned();
