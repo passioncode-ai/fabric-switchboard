@@ -1706,6 +1706,14 @@ hosts' horizon: `studio-agent` moved into Agents while its session `ffa10a7e` wa
 group's accounts still never run in a folder another group reserves. Evidence:
 `changed_project_permissions_and_duplicate_identity_refuse_capacity`.
 
+**Capacity has the room automatic switching wants (SB-345, 0.7.66).** An account is capacity for a
+stop only when its fresh account usage (`Usage::account_used_percent`, the fullest of its account
+windows) is under the stopped group's managed policy threshold less its hysteresis
+(`recovery::headroom_percent`; the initial policy's 90 less 10 = 80 % when none is saved), the
+same room `rotation_decision` requires of a candidate. Before, anything under 100 % counted: on
+2026-11-12 sixteen stops read ready on `claude2` with 99 % of its week used. Evidence:
+`an_account_near_its_limit_is_not_capacity_for_a_stopped_session`.
+
 **A renewal is stored without holding the account list (H-1, 0.6.83).** `adopt_refreshed_for`
 reads the saved OAuth accounts' items without the store's lock (a Keychain read has no deadline
 and every read in the process waits behind one module lock), then, per account still holding

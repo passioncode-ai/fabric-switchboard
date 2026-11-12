@@ -392,6 +392,11 @@ pub(crate) fn candidates(
         .filter(|a| limited.contains(&a.id))
         .filter_map(|a| a.identity.as_ref().map(|i| (a.provider, i)))
         .collect();
+    // SB-345: a stopped session continues only where the group's automatic switching would move
+    // it (used below its threshold less hysteresis, 80 % by default). Before, any account under
+    // 100 % was capacity: on 2026-11-12 sixteen sessions waited "ready" on one account with 1 %
+    // of its week left, which would have stopped every one of them again within minutes.
+    let headroom = headroom_percent(snapshot, wait.provider, &stopped.pool);
     let mut eligible: Vec<_> = snapshot
         .accounts
         .iter()
@@ -416,7 +421,7 @@ pub(crate) fn candidates(
                         && u.observed_at <= now
                         && now - u.observed_at <= MAX_AGE
                         && u.account_used_percent()
-                            .is_some_and(|n| n.is_finite() && (0.0..100.0).contains(&n))
+                            .is_some_and(|n| n.is_finite() && (0.0..headroom).contains(&n))
                         && u.resets_at.is_none_or(|t| t > now)
                         && u.windows
                             .iter()
@@ -426,6 +431,19 @@ pub(crate) fn candidates(
         .collect();
     eligible.sort_by(|a, b| a.id.cmp(&b.id));
     eligible.into_iter().map(|a| a.id.clone()).collect()
+}
+
+/// The used share below which an account may take a stopped session of `pool` (SB-345): the
+/// group's managed switching policy, threshold less hysteresis, or the initial policy's figures
+/// when none is saved. A policy switched off still says how much room the operator wants.
+fn headroom_percent(snapshot: &Snapshot, provider: Provider, pool: &str) -> f64 {
+    let policy = snapshot
+        .policies
+        .iter()
+        .find(|p| p.provider == provider && p.pool == pool && p.target == "managed")
+        .cloned()
+        .unwrap_or_else(|| switchboard_core::default_managed_policy(provider, pool));
+    (policy.threshold_percent - policy.hysteresis_percent).clamp(1.0, 100.0)
 }
 
 /// Whether `account` may continue a stop in `folder`: a folder only runs accounts its groups take
@@ -790,6 +808,39 @@ mod tests {
         finish(root.path(), "limit:1", false, 1000).unwrap();
         assert_eq!(read(root.path()).unwrap()[0].state, State::Resumed);
         assert!(claim(root.path(), "limit:1", "new", &s, &none, &none, &none, 102).is_err());
+    }
+    #[test]
+    fn an_account_near_its_limit_is_not_capacity_for_a_stopped_session() {
+        let root = tempfile::tempdir().unwrap();
+        let mut s = snapshot();
+        let none = HashSet::new();
+        let held = HashSet::from(["old".into()]);
+        register(
+            root.path(),
+            &s,
+            "limit:1",
+            "session-1",
+            "old",
+            root.path(),
+            100,
+        )
+        .unwrap();
+        let wait = &read(root.path()).unwrap()[0];
+        // SB-345: the week nearly spent (99 %) leaves no room, whatever the five hours say.
+        s.accounts[1].usage.as_mut().unwrap().used_percent = 99.0;
+        assert!(candidates(wait, &s, &held, &none, 102).is_empty());
+        // The initial policy's room: under 80 % used continues, 80 % does not.
+        s.accounts[1].usage.as_mut().unwrap().used_percent = 79.0;
+        assert_eq!(candidates(wait, &s, &held, &none, 102), vec!["new"]);
+        s.accounts[1].usage.as_mut().unwrap().used_percent = 80.0;
+        assert!(candidates(wait, &s, &held, &none, 102).is_empty());
+        // The group's saved policy decides: 99 less 0 lets a 98 % account continue.
+        let mut policy = switchboard_core::default_managed_policy(Provider::Claude, "default");
+        policy.threshold_percent = 99.0;
+        policy.hysteresis_percent = 0.0;
+        s.policies.push(policy);
+        s.accounts[1].usage.as_mut().unwrap().used_percent = 98.0;
+        assert_eq!(candidates(wait, &s, &held, &none, 102), vec!["new"]);
     }
     #[test]
     fn restrictions_hidden_holds_and_stale_observations_win_over_percentages() {

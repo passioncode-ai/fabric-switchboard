@@ -8,6 +8,8 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- A session stopped on a limit is called ready to continue only on an account with the room automatic switching wants (under 80 % used by default, or the group's own threshold less hysteresis). Before, an account with 1 % of its week left counted, and continuing on it stopped the session again (SB-345).
+
 ## 0.7.65
 
 - `switchboard sessions end <launch_id>` (and the agent tool `switchboard_session_end`) ends a hosted session for every app showing it; closing a window only leaves it. `switchboard launch --target ... --hosted` runs the session on the other machine in a session host, so it survives a dropped ssh link (SB-342, Fabric Dashboards' request).
