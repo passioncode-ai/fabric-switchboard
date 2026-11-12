@@ -8,6 +8,8 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- A run Fabric started for a board request names its log file in `switchboard sessions --history` (`log`), so Fabric Dashboards can link to what the run printed (SB-341).
+
 - `switchboard targets` lists one machine once when it is known by an ssh alias and by `user@host`; the other names are in `aliases` (SB-340, Fabric Dashboards' request).
 
 ## 0.7.58

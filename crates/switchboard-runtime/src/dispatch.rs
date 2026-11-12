@@ -1049,6 +1049,19 @@ mod runs {
         assert_eq!(record["dispatch"]["permissions"], "all");
         assert_eq!(record["dispatch"]["timeout_minutes"], 1);
         assert_eq!(record["state"], "running");
+        // SB-341: the history names the run's log, the only place its output goes.
+        let (history, _) = crate::launches::history(b.root.path());
+        let listed = history
+            .iter()
+            .find(|r| r["launch_id"] == id.as_str())
+            .unwrap();
+        let log = b
+            .root
+            .path()
+            .join(crate::launches::DIR)
+            .join(crate::launches::LOGS)
+            .join(format!("{id}.log"));
+        assert_eq!(listed["log"], log.to_string_lossy().as_ref());
         assert!(b
             .root
             .path()
