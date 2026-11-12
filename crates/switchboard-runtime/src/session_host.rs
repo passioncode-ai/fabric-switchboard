@@ -41,6 +41,15 @@ pub const RESIZE: u8 = 4;
 pub const EXIT: u8 = 5;
 pub const ERROR: u8 = 6;
 pub const DETACH: u8 = 7;
+/// H-1c: a viewer asks for the raw output kept (up to 1 MiB) beyond the screen it was shown;
+/// the host answers with the same kind.
+pub const HISTORY: u8 = 8;
+
+/// H-1c: a session nobody watches and that neither wrote nor read for this long is closed
+/// (`reason: idle`), as Fabric Dashboards' consoles do (LC-18).
+pub const DEFAULT_IDLE: Duration = Duration::from_secs(30 * 60);
+/// H-1c: how long an ended session's output stays readable on disk.
+const OUTPUT_KEPT: Duration = Duration::from_secs(24 * 3600);
 
 /// The output a viewer that attaches late is shown first, as Fabric Dashboards' console keeps.
 pub const SCROLLBACK: usize = 1 << 20;
@@ -123,6 +132,42 @@ fn descriptor_path(root: &Path, launch_id: &str) -> PathBuf {
     root.join("sessions").join(format!("{launch_id}.json"))
 }
 
+fn output_path(root: &Path, launch_id: &str) -> PathBuf {
+    root.join("sessions").join(format!("{launch_id}.output"))
+}
+
+/// H-1c: where an ended hosted session's last output is kept (a day), while it is.
+pub fn ended_output(root: &Path, launch_id: &str) -> Option<PathBuf> {
+    if !crate::launches::valid_id(launch_id) {
+        return None;
+    }
+    let path = output_path(root, launch_id);
+    std::fs::symlink_metadata(&path)
+        .is_ok_and(|m| m.file_type().is_file())
+        .then_some(path)
+}
+
+/// Removes ended sessions' output older than a day.
+fn prune_outputs(root: &Path) {
+    let Ok(entries) = std::fs::read_dir(root.join("sessions")) else {
+        return;
+    };
+    for entry in entries.flatten().take(4096) {
+        let path = entry.path();
+        if path.extension().is_some_and(|e| e == "output")
+            && entry.metadata().is_ok_and(|m| {
+                m.is_file()
+                    && m.modified()
+                        .ok()
+                        .and_then(|t| t.elapsed().ok())
+                        .is_some_and(|age| age > OUTPUT_KEPT)
+            })
+        {
+            let _ = std::fs::remove_file(path);
+        }
+    }
+}
+
 fn write_descriptor(root: &Path, launch_id: &str, socket: &Path, viewers: usize) {
     let dir = root.join("sessions");
     if switchboard_core::private_fs::private_dir(&dir).is_err() {
@@ -164,9 +209,19 @@ pub fn attachable(root: &Path, launch_id: &str) -> Option<Value> {
 
 struct Inner {
     scrollback: VecDeque<u8>,
+    /// H-1c: the screen as a terminal shows it now, so a viewer that attaches gets the screen
+    /// (the alternate one included), not a replay of raw output.
+    screen: vt100::Parser,
     viewers: Vec<(u64, UnixStream)>,
     next: u64,
     exit: Option<i32>,
+    last_activity: std::time::Instant,
+    /// Set when the host itself ended the session (`idle`).
+    reason: Option<&'static str>,
+}
+
+fn nonzero(n: u16) -> std::num::NonZeroU16 {
+    std::num::NonZeroU16::new(n).unwrap_or(std::num::NonZeroU16::MIN)
 }
 
 struct Session {
@@ -183,6 +238,8 @@ impl Session {
     }
     fn output(&self, bytes: &[u8]) {
         let mut inner = self.lock();
+        inner.screen.process(bytes);
+        inner.last_activity = std::time::Instant::now();
         inner.scrollback.extend(bytes);
         let excess = inner.scrollback.len().saturating_sub(SCROLLBACK);
         inner.scrollback.drain(..excess);
@@ -199,15 +256,37 @@ impl Session {
             );
         }
     }
-    fn resize(&self, rows: u16, cols: u16) {
+    /// The size of the last viewer that sent one; the others are told it (`RESIZE`).
+    fn resize(&self, rows: u16, cols: u16, from: Option<u64>) {
         let size = libc::winsize {
             ws_row: rows,
             ws_col: cols,
             ws_xpixel: 0,
             ws_ypixel: 0,
         };
-        let master = self.master.lock().unwrap_or_else(|p| p.into_inner());
-        unsafe { libc::ioctl(master.as_raw_fd(), libc::TIOCSWINSZ as _, &size) };
+        {
+            let master = self.master.lock().unwrap_or_else(|p| p.into_inner());
+            unsafe { libc::ioctl(master.as_raw_fd(), libc::TIOCSWINSZ as _, &size) };
+        }
+        let mut inner = self.lock();
+        inner.screen.set_size(nonzero(rows), nonzero(cols));
+        let mut frame = Vec::with_capacity(4);
+        frame.extend(rows.to_be_bytes());
+        frame.extend(cols.to_be_bytes());
+        inner.viewers.retain_mut(|(id, stream)| {
+            Some(*id) == from || write_frame(stream, RESIZE, &frame).is_ok()
+        });
+    }
+    /// What a viewer that attaches is shown first: the screen, entering the alternate screen
+    /// when the session is on it.
+    fn snapshot(inner: &Inner) -> Vec<u8> {
+        let screen = inner.screen.screen();
+        let mut out = Vec::new();
+        if screen.alternate_screen() {
+            out.extend(b"\x1b[?1049h");
+        }
+        out.extend(screen.state_formatted().into_bytes());
+        out
     }
 }
 
@@ -246,12 +325,23 @@ pub struct Start<'a> {
     pub program: &'a Path,
     pub rows: u16,
     pub cols: u16,
+    /// Close the session after this long with no viewer, no input and no output; None never.
+    pub idle: Option<Duration>,
+}
+
+/// How a hosted session ended.
+#[derive(Debug, PartialEq, Eq)]
+pub struct Ended {
+    /// Its exit status, 128 + the signal for one a signal ended.
+    pub exit_code: i32,
+    /// `exited`, `signal`, or `idle` when the host closed it.
+    pub reason: &'static str,
 }
 
 /// Runs a session on a PTY of its own and serves its socket until the session's process exits;
 /// returns its exit status (128 + the signal for one a signal ended). `ready` runs once the
 /// socket listens, so whoever started the host can attach.
-pub fn serve(start: Start<'_>, ready: impl FnOnce()) -> Result<i32, String> {
+pub fn serve(start: Start<'_>, ready: impl FnOnce()) -> Result<Ended, String> {
     if !crate::launches::valid_id(start.launch_id) {
         return Err(NOT_FOUND.into());
     }
@@ -315,12 +405,41 @@ pub fn serve(start: Start<'_>, ready: impl FnOnce()) -> Result<i32, String> {
         master: Mutex::new(File::from(master)),
         inner: Mutex::new(Inner {
             scrollback: VecDeque::new(),
+            screen: vt100::Parser::new(nonzero(start.rows), nonzero(start.cols), 0),
             viewers: Vec::new(),
             next: 0,
             exit: None,
+            last_activity: std::time::Instant::now(),
+            reason: None,
         }),
     });
     write_descriptor(start.root, start.launch_id, &socket, 0);
+    prune_outputs(start.root);
+    if let Some(idle) = start.idle {
+        // The child leads its own process group (setsid): a hangup reaches all of it.
+        let pid = child.id() as i32;
+        let session = session.clone();
+        std::thread::spawn(move || {
+            let check = (idle / 4).clamp(Duration::from_millis(100), Duration::from_secs(30));
+            loop {
+                std::thread::sleep(check);
+                let mut inner = session.lock();
+                if inner.exit.is_some() {
+                    return;
+                }
+                if inner.viewers.is_empty() && inner.last_activity.elapsed() >= idle {
+                    inner.reason = Some("idle");
+                    drop(inner);
+                    unsafe { libc::kill(-pid, libc::SIGHUP) };
+                    std::thread::sleep(Duration::from_secs(5));
+                    if session.lock().exit.is_none() {
+                        unsafe { libc::kill(-pid, libc::SIGTERM) };
+                    }
+                    return;
+                }
+            }
+        });
+    }
 
     let (drained_tx, drained_rx) = std::sync::mpsc::channel::<()>();
     {
@@ -359,22 +478,38 @@ pub fn serve(start: Start<'_>, ready: impl FnOnce()) -> Result<i32, String> {
         .code()
         .or_else(|| status.signal().map(|s| 128 + s))
         .unwrap_or(1);
+    let signal = status.signal();
     // The output the process wrote just before it ended reaches the viewers before its exit;
     // a child it left holding the terminal does not hold the end up past a second.
     let _ = drained_rx.recv_timeout(Duration::from_secs(1));
-    let viewers = {
+    let (viewers, reason, kept) = {
         let mut inner = session.lock();
         inner.exit = Some(code);
-        std::mem::take(&mut inner.viewers)
+        let reason = inner
+            .reason
+            .unwrap_or(if signal.is_some() { "signal" } else { "exited" });
+        let kept: Vec<u8> = inner.scrollback.iter().copied().collect();
+        (std::mem::take(&mut inner.viewers), reason, kept)
     };
-    let exit = json!({"exit_code": code}).to_string();
+    let mut exit = json!({"exit_code": code, "reason": reason});
+    if let Some(signal) = signal {
+        exit["signal"] = signal.into();
+    }
+    let exit = exit.to_string();
     for (_, mut stream) in viewers {
         let _ = write_frame(&mut stream, EXIT, exit.as_bytes());
         let _ = stream.shutdown(std::net::Shutdown::Both);
     }
     let _ = std::fs::remove_file(&socket);
     let _ = std::fs::remove_file(descriptor_path(start.root, start.launch_id));
-    Ok(code)
+    let _ = switchboard_core::private_fs::private_write(
+        &output_path(start.root, start.launch_id),
+        &kept,
+    );
+    Ok(Ended {
+        exit_code: code,
+        reason,
+    })
 }
 
 fn refuse(stream: &mut UnixStream, error: &str) {
@@ -451,8 +586,7 @@ fn viewer(session: &Session, mut stream: UnixStream) {
             "launch_id": session.launch_id,
             "viewers": inner.viewers.len() + 1,
         });
-        let (a, b) = inner.scrollback.as_slices();
-        let replay: Vec<u8> = [a, b].concat();
+        let replay = Session::snapshot(&inner);
         if write_frame(&mut stream, HELLO, ack.to_string().as_bytes()).is_err()
             || write_frame(&mut stream, OUTPUT, &replay).is_err()
         {
@@ -470,12 +604,17 @@ fn viewer(session: &Session, mut stream: UnixStream) {
         id
     };
     if let (Some(rows), Some(cols)) = (hello["rows"].as_u64(), hello["cols"].as_u64()) {
-        session.resize(rows.clamp(1, 1000) as u16, cols.clamp(1, 1000) as u16);
+        session.resize(
+            rows.clamp(1, 1000) as u16,
+            cols.clamp(1, 1000) as u16,
+            Some(id),
+        );
     }
     let _ = stream.set_read_timeout(None);
     loop {
         match read_frame(&mut stream) {
             Ok((INPUT, bytes)) => {
+                session.lock().last_activity = std::time::Instant::now();
                 let mut master = session.master.lock().unwrap_or_else(|p| p.into_inner());
                 if master.write_all(&bytes).is_err() {
                     break;
@@ -485,7 +624,21 @@ fn viewer(session: &Session, mut stream: UnixStream) {
                 let rows = u16::from_be_bytes([size[0], size[1]]);
                 let cols = u16::from_be_bytes([size[2], size[3]]);
                 if rows > 0 && cols > 0 {
-                    session.resize(rows, cols);
+                    session.resize(rows, cols, Some(id));
+                }
+            }
+            Ok((HISTORY, _)) => {
+                let kept = {
+                    let inner = session.lock();
+                    let (a, b) = inner.scrollback.as_slices();
+                    [a, b].concat()
+                };
+                // The viewer's own stream is written by the output thread too: take its lock.
+                let mut inner = session.lock();
+                if let Some((_, w)) = inner.viewers.iter_mut().find(|(v, _)| *v == id) {
+                    if write_frame(w, HISTORY, &kept).is_err() {
+                        break;
+                    }
                 }
             }
             Ok((DETACH, _)) | Err(_) => break,
@@ -598,23 +751,7 @@ mod tests {
             "echo ready; read line; echo \"got $line\"; read line; exit 7",
         );
         let id = crate::launches::new_id();
-        let (tx, rx) = std::sync::mpsc::channel();
-        let host = {
-            let (root, id, program) = (root.clone(), id.clone(), program.clone());
-            std::thread::spawn(move || {
-                serve(
-                    Start {
-                        root: &root,
-                        launch_id: &id,
-                        program: &program,
-                        rows: 24,
-                        cols: 80,
-                    },
-                    move || tx.send(()).unwrap(),
-                )
-            })
-        };
-        rx.recv_timeout(Duration::from_secs(10)).unwrap();
+        let host = start_host(&root, &id, &program, None);
         assert_eq!(attachable(&root, &id).unwrap()["viewers"], 0);
 
         let mut first = attach(&root, &id, 24, 80).unwrap();
@@ -634,12 +771,122 @@ mod tests {
         write_frame(&mut third.stream, INPUT, b"two\n").unwrap();
         assert_eq!(until(&mut second.stream, "").1, Some(7));
         assert_eq!(until(&mut third.stream, "").1, Some(7));
-        assert_eq!(host.join().unwrap().unwrap(), 7);
+        assert_eq!(
+            host.join().unwrap().unwrap(),
+            Ended {
+                exit_code: 7,
+                reason: "exited"
+            }
+        );
 
         // Ended: nothing to attach, no socket and no descriptor left behind.
         assert!(attachable(&root, &id).is_none());
         assert!(attach(&root, &id, 24, 80).is_err());
         assert!(!socket_path(&root, &id).unwrap().exists());
+        // H-1c: its last output stays readable for a day.
+        let kept = std::fs::read(ended_output(&root, &id).unwrap()).unwrap();
+        assert!(String::from_utf8_lossy(&kept).contains("got one"));
+    }
+
+    fn start_host(
+        root: &Path,
+        id: &str,
+        program: &Path,
+        idle: Option<Duration>,
+    ) -> std::thread::JoinHandle<Result<Ended, String>> {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let (root, id, program) = (root.to_owned(), id.to_owned(), program.to_owned());
+        let host = std::thread::spawn(move || {
+            serve(
+                Start {
+                    root: &root,
+                    launch_id: &id,
+                    program: &program,
+                    rows: 24,
+                    cols: 80,
+                    idle,
+                },
+                move || tx.send(()).unwrap(),
+            )
+        });
+        rx.recv_timeout(Duration::from_secs(10)).unwrap();
+        host
+    }
+
+    #[test]
+    fn a_late_viewer_gets_the_screen_on_the_alternate_screen_and_a_resize_reaches_the_others() {
+        // H-1c (Fabric Dashboards, `7972274c`): a full-screen program is shown as its screen,
+        // not as a replay of its raw output; the size of the last viewer that sent one wins and
+        // the other viewers are told it.
+        let data = tempfile::tempdir().unwrap();
+        let root = data.path().canonicalize().unwrap();
+        let program = script(
+            &root,
+            "printf '\\033[?1049h\\033[2J\\033[HFULLSCREEN'; read line; exit 0",
+        );
+        let id = crate::launches::new_id();
+        let host = start_host(&root, &id, &program, None);
+        let mut first = attach(&root, &id, 24, 80).unwrap();
+        until(&mut first.stream, "FULLSCREEN");
+        let mut second = attach(&root, &id, 24, 80).unwrap();
+        let Ok((OUTPUT, screen)) = read_frame(&mut second.stream) else {
+            panic!("no screen");
+        };
+        assert!(screen.starts_with(b"\x1b[?1049h"));
+        assert!(String::from_utf8_lossy(&screen).contains("FULLSCREEN"));
+        let mut size = Vec::new();
+        size.extend(40u16.to_be_bytes());
+        size.extend(120u16.to_be_bytes());
+        write_frame(&mut second.stream, RESIZE, &size).unwrap();
+        loop {
+            match read_frame(&mut first.stream).unwrap() {
+                // The second viewer's hello sent its own size first.
+                (RESIZE, told) if told == size => break,
+                _ => continue,
+            }
+        }
+        write_frame(&mut first.stream, INPUT, b"x\n").unwrap();
+        assert_eq!(host.join().unwrap().unwrap().reason, "exited");
+    }
+
+    #[test]
+    fn a_session_nobody_watches_and_nothing_moves_in_is_closed_as_idle() {
+        let data = tempfile::tempdir().unwrap();
+        let root = data.path().canonicalize().unwrap();
+        let program = script(&root, "sleep 60");
+        let id = crate::launches::new_id();
+        let started = std::time::Instant::now();
+        let host = start_host(&root, &id, &program, Some(Duration::from_millis(300)));
+        let ended = host.join().unwrap().unwrap();
+        assert_eq!(ended.reason, "idle");
+        assert!(started.elapsed() < Duration::from_secs(20));
+        assert!(attachable(&root, &id).is_none());
+    }
+
+    #[test]
+    fn history_answers_the_raw_output_beyond_the_screen() {
+        let data = tempfile::tempdir().unwrap();
+        let root = data.path().canonicalize().unwrap();
+        let program = script(
+            &root,
+            "for i in $(seq 1 60); do echo line$i; done; read line",
+        );
+        let id = crate::launches::new_id();
+        let host = start_host(&root, &id, &program, None);
+        let mut viewer = attach(&root, &id, 24, 80).unwrap();
+        until(&mut viewer.stream, "line60");
+        write_frame(&mut viewer.stream, HISTORY, b"").unwrap();
+        loop {
+            match read_frame(&mut viewer.stream).unwrap() {
+                (HISTORY, kept) => {
+                    assert!(String::from_utf8_lossy(&kept).contains("line1\r\n"));
+                    break;
+                }
+                _ => continue,
+            }
+        }
+        write_frame(&mut viewer.stream, INPUT, b"x\n").unwrap();
+        host.join().unwrap().unwrap();
     }
 
     #[test]

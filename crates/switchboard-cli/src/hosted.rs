@@ -199,7 +199,8 @@ pub fn run(
     program: &Path,
     rows: u16,
     cols: u16,
-) -> Result<i32, String> {
+    idle_minutes: u64,
+) -> Result<host::Ended, String> {
     host::serve(
         Start {
             root,
@@ -207,6 +208,7 @@ pub fn run(
             program,
             rows,
             cols,
+            idle: (idle_minutes > 0).then(|| Duration::from_secs(idle_minutes * 60)),
         },
         || {},
     )

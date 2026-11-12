@@ -8,6 +8,8 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- `switchboard attach` (and any app that attaches) now shows a hosted session's screen as it is, full-screen programs included, instead of replaying its raw output. A hosted session nobody watches and that does nothing for 30 minutes is closed, and an ended session's last output stays readable for a day (`switchboard sessions` gives its path) (SB-342).
+
 ## 0.7.62
 
 - A session can now outlive the terminal that started it and be opened from another one: `switchboard launch --in-place --hosted` runs it in a session host of its own, `switchboard attach <launch_id>` opens it in any terminal (Ctrl-] leaves it running), and `switchboard sessions` marks it `attachable` with how many viewers it has. An update or a restart of Switchboard no longer ends such a session. macOS and Linux; Terminal windows and Fabric Dashboards move to it next (SB-342).
