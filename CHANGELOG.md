@@ -8,6 +8,8 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+## 0.7.66
+
 - A session stopped on a limit is called ready to continue only on an account with the room automatic switching wants (under 80 % used by default, or the group's own threshold less hysteresis). Before, an account with 1 % of its week left counted, and continuing on it stopped the session again (SB-345).
 
 ## 0.7.65
