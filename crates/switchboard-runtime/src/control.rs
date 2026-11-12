@@ -378,6 +378,39 @@ pub async fn request(root: &Path, operation: &Operation) -> Result<Option<Value>
         answer => answer,
     }
 }
+/// How long the client waits for the owner's answer to `operation`, in seconds.
+fn limit_secs(operation: &Operation) -> u64 {
+    let inner = match operation {
+        Operation::OnOperatorsWord { inner, .. } => inner.as_ref(),
+        other => other,
+    };
+    match inner {
+        // SB-159: connecting PassionCode.ai waits up to 5 minutes for the person's browser.
+        // 300 s for the browser, a read that may hold the turn, the exchange and the read (15 s
+        // each), and a margin.
+        Operation::VestaConnect => 420,
+        // SB-312: a move or a call back runs up to four ssh calls of two minutes each.
+        Operation::SendAccount { .. } | Operation::RecallAccount { .. } => 600,
+        // SB-327: three ssh reads of two minutes each at most.
+        Operation::RemoteStatus { .. }
+        | Operation::RemoteCheck { .. }
+        | Operation::SettingsSync { .. } => 420,
+        // SB-324: a word on a moved account's organizations reaches its copy there over ssh.
+        Operation::OrganizationAssign { .. } => 420,
+        // SB-332: one ssh read per known machine.
+        Operation::Targets { probe: true } => 420,
+        // SB-336: a group change reads its repositories' Git files and rewrites their folder
+        // bindings; on a starved machine `move_root` took 44 s (2026-11-11), so a 30 s client
+        // gave up on a change that went on and finished.
+        Operation::SaveProject { .. }
+        | Operation::ProjectEdit { .. }
+        | Operation::RemoveProject { .. }
+        | Operation::MoveRoot { .. }
+        | Operation::MoveAccount { .. }
+        | Operation::RepositoryMap { .. } => 180,
+        _ => 30,
+    }
+}
 async fn request_once(root: &Path, operation: &Operation) -> Result<Option<Value>, String> {
     let path = root.join(FILE);
     match std::fs::symlink_metadata(&path) {
@@ -411,27 +444,7 @@ async fn request_once(root: &Path, operation: &Operation) -> Result<Option<Value
         Ok(Err(error)) if error.kind() == std::io::ErrorKind::ConnectionRefused => return Ok(None),
         _ => return Err("Control connection did not complete. No operation was attempted.".into()),
     };
-    // SB-159: connecting PassionCode.ai waits up to 5 minutes for the person's browser.
-    // 300 s for the browser, a read that may hold the turn, the exchange and the read (15 s
-    // each), and a margin.
-    // SB-312: a move or a call back runs up to four ssh calls of two minutes each.
-    let inner = match &operation {
-        Operation::OnOperatorsWord { inner, .. } => inner.as_ref(),
-        other => other,
-    };
-    let limit = match inner {
-        Operation::VestaConnect => 420,
-        Operation::SendAccount { .. } | Operation::RecallAccount { .. } => 600,
-        // SB-327: three ssh reads of two minutes each at most.
-        Operation::RemoteStatus { .. }
-        | Operation::RemoteCheck { .. }
-        | Operation::SettingsSync { .. } => 420,
-        // SB-324: a word on a moved account's organizations reaches its copy there over ssh.
-        Operation::OrganizationAssign { .. } => 420,
-        // SB-332: one ssh read per known machine.
-        Operation::Targets { probe: true } => 420,
-        _ => 30,
-    };
+    let limit = limit_secs(operation);
     match tokio::time::timeout(
         Duration::from_secs(limit),
         request_on_connection(stream, descriptor, operation),
@@ -570,6 +583,25 @@ async fn request_on_connection(
 
 #[cfg(test)]
 mod tests {
+
+    /// SB-336: a group change gets the longer limit; an ordinary read keeps 30 s.
+    #[test]
+    fn a_group_change_waits_longer_than_a_read() {
+        let edit = Operation::ProjectEdit {
+            pool: "agents".into(),
+            name: None,
+            add_accounts: vec![],
+            remove_accounts: vec![],
+            add_folders: vec![],
+            remove_folders: vec![],
+            organization: None,
+            organizations: None,
+            move_accounts: false,
+        };
+        assert_eq!(limit_secs(&edit), 180);
+        assert_eq!(limit_secs(&Operation::Snapshot), 30);
+        assert_eq!(limit_secs(&Operation::VestaConnect), 420);
+    }
     #[test]
     fn an_operation_kind_is_its_tag_and_never_its_arguments() {
         assert_eq!(operation_kind(&Operation::Handovers), "handovers");
