@@ -793,6 +793,16 @@ fn with_state(root: &Path, mut record: Value) -> Value {
     if record["started_at"].is_null() {
         record["started_at"] = started.into();
     }
+    // SB-341 (Fabric Dashboards FD-207): a dispatched run has no window; its output is its log.
+    if let Some(id) = id
+        .as_deref()
+        .filter(|_| !record["launched_by"]["dispatch"].is_null())
+    {
+        let log = root.join(DIR).join(LOGS).join(format!("{id}.log"));
+        if log.is_file() {
+            record["log"] = log.to_string_lossy().into_owned().into();
+        }
+    }
     record
 }
 /// Every launch record, newest first, with its state now; at most `HISTORY_LIMIT`.
