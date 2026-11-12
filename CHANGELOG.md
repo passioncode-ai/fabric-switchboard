@@ -8,6 +8,8 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+## 0.7.59
+
 - On macOS a Terminal window Switchboard opens for a session closes by itself when the session ends without an error, so windows no longer pile up; one that ended with an error stays open so its message can be read. Your own Terminal profiles are not changed (SB-342 H-0).
 
 - A run Fabric started for a board request names its log file in `switchboard sessions --history` (`log`), so Fabric Dashboards can link to what the run printed (SB-341).
