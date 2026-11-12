@@ -65,6 +65,14 @@ const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 /// minutes is stuck (a hung volume), and the loop must not wait on it.
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 const INSTALL_TIMEOUT: Duration = Duration::from_secs(5 * 60);
+/// SB-344: the longest a swap waits for another one (or a restart) to let go of the bundle.
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+const SWAP_WAIT: Duration = Duration::from_secs(2 * 60);
+/// SB-344: one whole check, past which it answers `stalled`: the feed, the download and the swap
+/// with their own deadlines, and room to spare. Before, a check that never returned left
+/// `fetching` set, and `busy` turned away every later check, the person's included (the
+/// operator's MacBook, 2026-11-12 14:03Z: `downloading` for seven hours on 0.7.61).
+const FETCH_DEADLINE: Duration = Duration::from_secs(25 * 60);
 /// The release ships one universal app; `latest.json` names it under this key.
 #[cfg(target_os = "macos")]
 pub const MACOS_TARGET: &str = "darwin-universal";
@@ -653,7 +661,7 @@ async fn check(app: &AppHandle, manual: bool) -> Phase {
         }
         waiting
     };
-    let outcome = fetch(app, &state, waiting).await;
+    let outcome = bounded(FETCH_DEADLINE, fetch(app, &state, waiting)).await;
     let mut inner = state.lock();
     inner.fetching = false;
     inner.checked_at = Some(now());
@@ -1008,6 +1016,37 @@ fn classify(error: tauri_plugin_updater::Error) -> &'static str {
     }
 }
 
+/// SB-344: the step a check was on, named in its `stalled` line.
+static FETCH_STEP: Mutex<&'static str> = Mutex::new("check");
+fn step(name: &'static str) {
+    if let Ok(mut current) = FETCH_STEP.lock() {
+        *current = name;
+    }
+}
+
+/// SB-344: `work`, or `INSTALL_STALLED` once `deadline` passed, logged as `update_check stalled`
+/// with the step it stopped on. Whatever it left running (a swap on its thread) goes on.
+async fn bounded<T>(
+    deadline: Duration,
+    work: impl std::future::Future<Output = Result<T, &'static str>>,
+) -> Result<T, &'static str> {
+    step("check");
+    match tokio::time::timeout(deadline, work).await {
+        Ok(outcome) => outcome,
+        Err(_) => {
+            let at = FETCH_STEP.lock().map(|s| *s).unwrap_or("unknown");
+            event(
+                "update_check",
+                &[
+                    ("outcome", Field::Code("stalled")),
+                    ("step", Field::Code(at)),
+                ],
+            );
+            Err(INSTALL_STALLED)
+        }
+    }
+}
+
 /// SB-162: where a package being downloaded is kept between attempts, under the data folder.
 pub const UPDATES_DIR: &str = "updates";
 
@@ -1313,6 +1352,7 @@ async fn fetch(
         }
     }
     update.timeout = Some(DOWNLOAD_TIMEOUT);
+    step("download");
     let bytes = match state.root.as_ref() {
         Some(root) => resumable_download(&update, &root.join(UPDATES_DIR)).await?,
         None => {
@@ -1335,7 +1375,12 @@ async fn fetch(
             );
         }
         if bundle.as_deref().is_some_and(replaceable_without_password) {
-            let _swap = state.swap.lock().await;
+            step("swap_wait");
+            let Ok(_swap) = tokio::time::timeout(SWAP_WAIT, state.swap.lock()).await else {
+                event("update_install", &[("outcome", Field::Code("swap_busy"))]);
+                return Err(INSTALL_STALLED);
+            };
+            step("install");
             if state.lock().restart.is_some() {
                 // A restart into the waiting update is under way; this release waits for the
                 // next start's check.
@@ -1369,7 +1414,12 @@ async fn fetch(
     // keeps its mounted copy until the restart starts the new one (SB-88).
     #[cfg(target_os = "linux")]
     {
-        let _swap = state.swap.lock().await;
+        step("swap_wait");
+        let Ok(_swap) = tokio::time::timeout(SWAP_WAIT, state.swap.lock()).await else {
+            event("update_install", &[("outcome", Field::Code("swap_busy"))]);
+            return Err(INSTALL_STALLED);
+        };
+        step("install");
         if state.lock().restart.is_some() {
             return Ok(None);
         }
@@ -1729,6 +1779,18 @@ mod tests {
             }
         });
         format!("http://{address}/package.tar.gz")
+    }
+
+    #[tokio::test]
+    async fn a_check_that_never_answers_ends_as_stalled() {
+        // SB-344: the loop and the person's check are not turned away forever by one that hung.
+        let never = std::future::pending::<Result<(), &'static str>>();
+        assert_eq!(
+            bounded(Duration::from_millis(20), never).await,
+            Err(INSTALL_STALLED)
+        );
+        let quick = async { Ok::<_, &'static str>(7) };
+        assert_eq!(bounded(Duration::from_secs(5), quick).await, Ok(7));
     }
 
     #[tokio::test]

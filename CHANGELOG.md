@@ -8,6 +8,8 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- An update check that never ended no longer stops every later one: on the operator's MacBook a check stayed `downloading` for seven hours after its download and the app kept 0.7.61, *Check for updates* included. One check now ends within 25 minutes (`update_check stalled`, naming the step), and waiting for another swap is limited to 2 minutes (`update_install swap_busy`) (SB-344).
+
 ## 0.7.66
 
 - A session stopped on a limit is called ready to continue only on an account with the room automatic switching wants (under 80 % used by default, or the group's own threshold less hysteresis). Before, an account with 1 % of its week left counted, and continuing on it stopped the session again (SB-345).

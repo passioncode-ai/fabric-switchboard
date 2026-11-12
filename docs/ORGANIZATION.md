@@ -40,7 +40,7 @@ npx --yes @passioncode-ai/passioncode@latest setup --yes --json
 ```
 
 From the launcher release after 0.2.76 (PassionCode.ai PC-178), the same command also installs the
-agents' wiki memory: Obsidian, obsidian-wiki with its skills, a new vault in `~/Documents/Wiki` when
+agents' wiki memory: Obsidian, obsidian-wiki with its skills, a new vault in `~/.wiki` (a hidden folder in the home folder, which `uninstall` leaves) when
 you have none, and a session-start recap hook for Claude Code. Add `--without memory` to leave all
 of it out.
 
