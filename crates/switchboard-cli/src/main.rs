@@ -1,4 +1,6 @@
 //! Headless account operations; credentials are accepted only from bounded stdin.
+#[cfg(unix)]
+mod hosted;
 mod mcp;
 mod shell;
 use clap::{Parser, Subcommand, ValueEnum};
@@ -204,6 +206,11 @@ enum Command {
         /// agent's. The same session, home and tools as --in-place.
         #[arg(long, conflicts_with = "in_place")]
         headless: bool,
+        /// With --in-place: run the session in a session host of its own, so it outlives
+        /// this terminal and any app can open it with `switchboard attach <launch_id>`; Ctrl-]
+        /// leaves it running. macOS and Linux.
+        #[arg(long, requires = "in_place")]
+        hosted: bool,
         /// Who is launching, for the launch record: a runner's own name (up to 64 letters,
         /// digits, dots, hyphens or underscores), such as `voc-learn`.
         #[arg(long, value_name = "NAME")]
@@ -233,6 +240,30 @@ enum Command {
         /// headless); with --in-place or --headless.
         #[arg(last = true)]
         args: Vec<String>,
+    },
+    /// Open a session a session host holds in this terminal, by its launch id (`switchboard
+    /// sessions` marks it `attachable`): the same session another app shows. Ctrl-] detaches and
+    /// leaves it running; its end ends this command with its exit status. macOS and Linux.
+    Attach {
+        /// The launch id.
+        launch_id: String,
+    },
+    /// Runs one session on a terminal of its own and serves it to viewers (started by
+    /// `launch --hosted`).
+    #[command(hide = true)]
+    SessionHost {
+        /// The launch id of the session.
+        #[arg(long)]
+        launch_id: String,
+        /// The session's launch script.
+        #[arg(long)]
+        program: PathBuf,
+        /// The terminal's height in rows.
+        #[arg(long, default_value_t = 24)]
+        rows: u16,
+        /// The terminal's width in columns.
+        #[arg(long, default_value_t = 80)]
+        cols: u16,
     },
     /// Continue an Observatory workflow whose executor ran out of its limit on another account:
     /// of the same provider, or of another agent (Claude Code, Codex, a saved Kimi Code account,
@@ -2251,6 +2282,7 @@ async fn run(cli: &Cli) -> Result<Value, String> {
             target: Some(target),
             remote,
             remote_data_dir,
+            ..
         } => {
             return launch_there(
                 &root,
@@ -2279,6 +2311,7 @@ async fn run(cli: &Cli) -> Result<Value, String> {
             working_directory,
             in_place,
             headless,
+            hosted,
             by,
             parent,
             surface,
@@ -2308,6 +2341,8 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                 working_directory,
                 if *headless {
                     Here::Headless
+                } else if *hosted {
+                    Here::Hosted
                 } else if *in_place {
                     Here::Terminal
                 } else {
@@ -2317,6 +2352,37 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                 by,
             )
             .await;
+        }
+        #[cfg(unix)]
+        Command::Attach { launch_id } => {
+            return finish_attach(launch_id, hosted::attach(&root, launch_id)?);
+        }
+        #[cfg(not(unix))]
+        Command::Attach { .. } => {
+            return Err("A session host runs on macOS and Linux for now.".into());
+        }
+        #[cfg(unix)]
+        Command::SessionHost {
+            launch_id,
+            program,
+            rows,
+            cols,
+        } => {
+            let code = hosted::run(&root, launch_id, program, *rows, *cols)?;
+            // Recorded by the owner when it runs (the records' writer), else here.
+            call(
+                &root,
+                Operation::SessionEnded {
+                    launch_id: launch_id.clone(),
+                    exit_code: code,
+                },
+            )
+            .await?;
+            return Ok(Value::Null);
+        }
+        #[cfg(not(unix))]
+        Command::SessionHost { .. } => {
+            return Err("A session host runs on macOS and Linux for now.".into());
         }
         Command::Continue {
             workflow_id,
@@ -2748,6 +2814,8 @@ enum Here {
     No,
     Terminal,
     Headless,
+    /// SB-342 H-1: in this terminal, through a session host of its own.
+    Hosted,
 }
 #[allow(clippy::too_many_arguments)]
 async fn launch(
@@ -2765,7 +2833,7 @@ async fn launch(
     if !in_place && !args.is_empty() {
         return Err("Agent arguments after -- go with --in-place or --headless.".into());
     }
-    if here == Here::Terminal
+    if matches!(here, Here::Terminal | Here::Hosted)
         && !(std::io::stdin().is_terminal() && std::io::stdout().is_terminal())
     {
         return Err(
@@ -2815,7 +2883,38 @@ async fn launch(
     if here == Here::Headless {
         return run_headless(std::path::Path::new(script));
     }
+    if here == Here::Hosted {
+        let launch_id = value["launch_id"]
+            .as_str()
+            .ok_or("The session's launch id is missing.")?;
+        return run_hosted(root, launch_id, std::path::Path::new(script));
+    }
     run_in_place(std::path::Path::new(script))
+}
+/// SB-342 H-1: starts the session's host and shows the session here; this command ends with
+/// the session's exit status, or 0 when the person detaches.
+#[cfg(unix)]
+fn run_hosted(
+    root: &std::path::Path,
+    launch_id: &str,
+    script: &std::path::Path,
+) -> Result<Value, String> {
+    if let Err(error) = hosted::spawn(root, launch_id, script) {
+        release_reservation(script);
+        return Err(error);
+    }
+    finish_attach(launch_id, hosted::attach(root, launch_id)?)
+}
+#[cfg(unix)]
+fn finish_attach(launch_id: &str, ended: hosted::Ended) -> Result<Value, String> {
+    match ended {
+        hosted::Ended::Exited(code) => std::process::exit(code),
+        hosted::Ended::Detached => Ok(hosted::answer(launch_id, &ended)),
+    }
+}
+#[cfg(not(unix))]
+fn run_hosted(_: &std::path::Path, _: &str, _: &std::path::Path) -> Result<Value, String> {
+    Err("A session host runs on macOS and Linux for now.".into())
 }
 /// SB-332: what `launch --target` passes on to the other machine's `switchboard launch`.
 struct LaunchThere {
@@ -4567,6 +4666,14 @@ mod mcp_parity {
             Not("SB-256 N1: the sign-in autopilot gives the code on the owner's side; a person types it into the CLI, and a code never travels in an agent's tool call"),
         ),
         ("launch", Not(LAUNCH)),
+        (
+            "attach",
+            Not("SB-342 H-1: shows a session in a person's terminal; an app attaches to the session host's socket itself"),
+        ),
+        (
+            "session-host",
+            Not("SB-342 H-1: the process `launch --hosted` starts for one session, never called by hand"),
+        ),
         ("continue", Not(LAUNCH)),
         // `dispatch` itself starts a run as `sessions` lists them: one decision for both.
         (

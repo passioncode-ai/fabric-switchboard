@@ -1,6 +1,6 @@
 # SB-342: one session host, so a session opens in any of our apps and ends cleanly
 
-**State:** proposal, 2026-11-12. Row: [SB-342](../evidence/backlog.md). Source: the operator, 2026-11-12 about 03:10 UTC,
+**State:** proposal, 2026-11-12; H-0 released in 0.7.60; H-1 built (see the decision below). Row: [SB-342](../evidence/backlog.md). Source: the operator, 2026-11-12 about 03:10 UTC,
 this repository's session `59745113`: «я не могу нормально подключаться к сессиям, которые открыты например в свитчборде,
 и не могу и открыть в дашборде, и вообще проблема с открытием сессий в разные приложения наши, медленно глючит или не
 открывает вообще, а после завершения не закрывает и копит, а должен быть lifecycle manager для сессий и чтобы можно было
@@ -50,6 +50,17 @@ starts. Every app is a viewer that attaches to it by launch id; closing a viewer
    same process.
 
 Dispatch runs stay headless (`claude -p` reads no input) but get the same lifecycle and a read-only attach of their log.
+
+## Decision in H-1: a host process per session, not a thread of the owner
+
+The proposal put the host inside the resident owner. Building it showed why not: the installed
+app restarts itself into every update (LC-16) and on a quit, and a PTY the owner holds would end
+every session with it. Each hosted session therefore gets a small host process of its own
+(`switchboard session-host`, in its own process session), as tmux and dtach do; the owner only
+records the end it reports. The socket moved out of the data folder to `/tmp/switchboard-<uid>/`
+(0700) because the data folder's path is too long for a Unix socket address on macOS; the data
+folder keeps the descriptor (`sessions/<launch_id>.json`). The contract is in
+[CONTRACTS](../CONTRACTS.md) (SB-342 H-1).
 
 ## Order of work
 

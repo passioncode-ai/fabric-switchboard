@@ -1234,7 +1234,7 @@ dependencies = [
 
 [[package]]
 name = "fabric-switchboard"
-version = "0.7.61"
+version = "0.7.62"
 dependencies = [
  "reqwest 0.12.28",
  "semver",
@@ -4336,9 +4336,10 @@ dependencies = [
 
 [[package]]
 name = "switchboard-cli"
-version = "0.7.61"
+version = "0.7.62"
 dependencies = [
  "clap",
+ "libc",
  "serde_json",
  "switchboard-core",
  "switchboard-runtime",
@@ -4368,7 +4369,7 @@ dependencies = [
 
 [[package]]
 name = "switchboard-proxy"
-version = "0.7.61"
+version = "0.7.62"
 dependencies = [
  "axum",
  "chrono",
@@ -4388,7 +4389,7 @@ dependencies = [
 
 [[package]]
 name = "switchboard-runtime"
-version = "0.7.61"
+version = "0.7.62"
 dependencies = [
  "axum",
  "base64 0.22.1",
