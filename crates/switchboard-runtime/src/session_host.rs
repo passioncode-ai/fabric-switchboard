@@ -447,7 +447,7 @@ pub fn serve(start: Start<'_>, ready: impl FnOnce()) -> Result<Ended, String> {
             let check = (idle / 4).clamp(Duration::from_millis(100), Duration::from_secs(30));
             loop {
                 std::thread::sleep(check);
-                let mut inner = session.lock();
+                let inner = session.lock();
                 if inner.exit.is_some() {
                     return;
                 }
