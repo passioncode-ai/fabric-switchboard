@@ -40,7 +40,7 @@ npx --yes @passioncode-ai/passioncode@latest setup --yes --json
 ```
 
 Начиная с выпуска лаунчера после 0.2.76 (PassionCode.ai PC-178), та же команда ставит и вики-память
-агентов: Obsidian, obsidian-wiki с его скилами, новое хранилище в `~/Documents/Wiki`, если его ещё нет,
+агентов: Obsidian, obsidian-wiki с его скилами, новое хранилище в `~/.wiki` (скрытая папка в домашней, `uninstall` её не трогает), если его ещё нет,
 и хук для Claude Code с напоминанием о прошлой работе при старте сессии. Чтобы всё это не ставить,
 добавьте `--without memory`.
 
