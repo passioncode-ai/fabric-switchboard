@@ -46,6 +46,8 @@ pub mod roots;
 pub mod seats;
 pub mod self_update;
 pub mod serve_update;
+#[cfg(unix)]
+pub mod session_host;
 pub mod settings_bundle;
 pub mod settings_signing;
 pub mod shell;
@@ -229,6 +231,12 @@ pub enum Operation {
     /// SB-247: stops a dispatched run (`state`: `stopped`, `already_ended`).
     DispatchStop {
         launch_id: String,
+    },
+    /// SB-342 H-1: a session host's process exited; records the launch's end (`exited` with its
+    /// exit status) when nothing recorded it yet (`recorded`).
+    SessionEnded {
+        launch_id: String,
+        exit_code: i32,
     },
     /// SB-317: a dispatched run's state and, for a run on another machine, its result file
     /// (`dispatch::status`).
@@ -1348,6 +1356,8 @@ impl Runtime {
                 // SB-247: a stop signals a process and waits up to seconds for it to end; its
                 // record is written under the records' own lock.
                 | Operation::DispatchStop { .. }
+                // SB-342 H-1: one record written under the records' own lock.
+                | Operation::SessionEnded { .. }
                 // SB-317: reads a run's files over ssh; its end is written under the records'
                 // own lock.
                 | Operation::DispatchStatus { .. }
@@ -5310,6 +5320,22 @@ async fn execute(
         Operation::DispatchStatus { launch_id } => {
             let analytics = runtime.and_then(Runtime::analytics);
             dispatch::status(root, &launch_id, monitor::now(), analytics.as_deref())
+        }
+        Operation::SessionEnded {
+            launch_id,
+            exit_code,
+        } => {
+            if !launches::valid_id(&launch_id) {
+                return Err(launches::PARENT_INVALID.into());
+            }
+            let recorded = launches::end_once(
+                root,
+                &launch_id,
+                dispatch::EXITED,
+                monitor::now(),
+                Some(exit_code),
+            );
+            Ok(json!({"launch_id": launch_id, "recorded": recorded}))
         }
         Operation::DispatchStop { launch_id } => {
             let analytics = runtime.and_then(Runtime::analytics);

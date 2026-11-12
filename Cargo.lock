@@ -4339,6 +4339,7 @@ name = "switchboard-cli"
 version = "0.7.61"
 dependencies = [
  "clap",
+ "libc",
  "serde_json",
  "switchboard-core",
  "switchboard-runtime",

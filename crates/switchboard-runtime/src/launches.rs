@@ -793,6 +793,15 @@ fn with_state(root: &Path, mut record: Value) -> Value {
     if record["started_at"].is_null() {
         record["started_at"] = started.into();
     }
+    // SB-342 H-1: a session a host holds can be opened in any app by its launch id.
+    #[cfg(unix)]
+    if let Some(host) = id
+        .as_deref()
+        .and_then(|id| crate::session_host::attachable(root, id))
+    {
+        record["attachable"] = true.into();
+        record["viewers"] = host["viewers"].clone();
+    }
     // SB-341 (Fabric Dashboards FD-207): a dispatched run has no window; its output is its log.
     if let Some(id) = id
         .as_deref()

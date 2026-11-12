@@ -8,6 +8,8 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- A session can now outlive the terminal that started it and be opened from another one: `switchboard launch --in-place --hosted` runs it in a session host of its own, `switchboard attach <launch_id>` opens it in any terminal (Ctrl-] leaves it running), and `switchboard sessions` marks it `attachable` with how many viewers it has. An update or a restart of Switchboard no longer ends such a session. macOS and Linux; Terminal windows and Fabric Dashboards move to it next (SB-342).
+
 ## 0.7.61
 
 - `switchboard launch --provider` in a folder of a group whose Claude accounts are all turned off, or that has none, now starts on the default group's account, as a plain `claude` there already did; a group of an organization still needs its own. When no account can start the session, the CLI exits with status 3 and, with `--json`, `code: "no-route"`, so Fabric Dashboards can say why a launch on another machine was refused (SB-343, Fabric Dashboards' request).
