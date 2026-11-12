@@ -8,6 +8,10 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+## 0.7.70
+
+- 0.7.69 was not published: its nightly checks ran past the job's 30 minutes while building the app. The job now has 60, and 0.7.70 carries 0.7.68 and 0.7.69.
+
 ## 0.7.69
 
 - `switchboard recovery` names, for each session waiting after a limit, the launch that ran it and its transcript, which for a session Switchboard launched lives in Switchboard's own folders; a host that resumes such sessions no longer reads them as having no transcript (SB-348).
