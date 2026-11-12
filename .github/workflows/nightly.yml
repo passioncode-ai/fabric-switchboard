@@ -35,7 +35,9 @@ jobs:
     needs: clock
     if: needs.clock.outputs.run == 'true'
     runs-on: macos-15
-    timeout-minutes: 30
+    # 30 was spent on 2026-11-12: the v0.7.69 run's app build was cut at minute 30 (v0.7.67's whole
+    # job took 23); the gate and the build together need room on a busy runner.
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
