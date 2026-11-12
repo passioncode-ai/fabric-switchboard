@@ -44,6 +44,9 @@ pub const DETACH: u8 = 7;
 /// H-1c: a viewer asks for the raw output kept (up to 1 MiB) beyond the screen it was shown;
 /// the host answers with the same kind.
 pub const HISTORY: u8 = 8;
+/// H-1d (Fabric Dashboards, `e3e2819c`): a viewer asks the host to end the session, as its idle
+/// close does (`reason: ended`); detaching never ends it.
+pub const END: u8 = 9;
 
 /// H-1c: a session nobody watches and that neither wrote nor read for this long is closed
 /// (`reason: idle`), as Fabric Dashboards' consoles do (LC-18).
@@ -225,6 +228,8 @@ fn nonzero(n: u16) -> std::num::NonZeroU16 {
 }
 
 struct Session {
+    /// The session's process group: its process leads it (setsid).
+    pid: i32,
     root: PathBuf,
     launch_id: String,
     socket: PathBuf,
@@ -275,6 +280,25 @@ impl Session {
         frame.extend(cols.to_be_bytes());
         inner.viewers.retain_mut(|(id, stream)| {
             Some(*id) == from || write_frame(stream, RESIZE, &frame).is_ok()
+        });
+    }
+    /// Ends the session as `reason`: a hangup to its process group, a `SIGTERM` 5 s later if it
+    /// is still running. Its exit then reaches every viewer as usual.
+    fn end(self: &Arc<Self>, reason: &'static str) {
+        {
+            let mut inner = self.lock();
+            if inner.exit.is_some() {
+                return;
+            }
+            inner.reason.get_or_insert(reason);
+        }
+        unsafe { libc::kill(-self.pid, libc::SIGHUP) };
+        let session = self.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_secs(5));
+            if session.lock().exit.is_none() {
+                unsafe { libc::kill(-session.pid, libc::SIGTERM) };
+            }
         });
     }
     /// What a viewer that attaches is shown first: the screen, entering the alternate screen
@@ -400,6 +424,7 @@ pub fn serve(start: Start<'_>, ready: impl FnOnce()) -> Result<Ended, String> {
             .map_err(|_| "No terminal could be opened.")?,
     );
     let session = Arc::new(Session {
+        pid: child.id() as i32,
         root: start.root.to_owned(),
         launch_id: start.launch_id.to_owned(),
         socket: socket.clone(),
@@ -417,8 +442,6 @@ pub fn serve(start: Start<'_>, ready: impl FnOnce()) -> Result<Ended, String> {
     write_descriptor(start.root, start.launch_id, &socket, 0);
     prune_outputs(start.root);
     if let Some(idle) = start.idle {
-        // The child leads its own process group (setsid): a hangup reaches all of it.
-        let pid = child.id() as i32;
         let session = session.clone();
         std::thread::spawn(move || {
             let check = (idle / 4).clamp(Duration::from_millis(100), Duration::from_secs(30));
@@ -429,13 +452,8 @@ pub fn serve(start: Start<'_>, ready: impl FnOnce()) -> Result<Ended, String> {
                     return;
                 }
                 if inner.viewers.is_empty() && inner.last_activity.elapsed() >= idle {
-                    inner.reason = Some("idle");
                     drop(inner);
-                    unsafe { libc::kill(-pid, libc::SIGHUP) };
-                    std::thread::sleep(Duration::from_secs(5));
-                    if session.lock().exit.is_none() {
-                        unsafe { libc::kill(-pid, libc::SIGTERM) };
-                    }
+                    session.end("idle");
                     return;
                 }
             }
@@ -552,7 +570,7 @@ fn peer_uid(stream: &UnixStream) -> Option<u32> {
     }
 }
 
-fn viewer(session: &Session, mut stream: UnixStream) {
+fn viewer(session: &Arc<Session>, mut stream: UnixStream) {
     if peer_uid(&stream) != Some(unsafe { libc::getuid() }) {
         return;
     }
@@ -642,6 +660,7 @@ fn viewer(session: &Session, mut stream: UnixStream) {
                     }
                 }
             }
+            Ok((END, _)) => session.end("ended"),
             Ok((DETACH, _)) | Err(_) => break,
             Ok(_) => {}
         }
@@ -669,12 +688,45 @@ pub struct Attached {
 /// Attaches to the session of `launch_id`: connects, says hello with the viewer's size and
 /// reads the answer. The scrollback follows as the first `OUTPUT`.
 pub fn attach(root: &Path, launch_id: &str, rows: u16, cols: u16) -> Result<Attached, String> {
+    connect(root, launch_id, Some((rows, cols)))
+}
+
+/// H-1d: ends the hosted session of `launch_id` and waits (up to 15 s) for its exit:
+/// `{launch_id, exit_code, reason}`. Connects as a viewer with no size, so the session's size
+/// stays the one its viewers set.
+pub fn end(root: &Path, launch_id: &str) -> Result<Value, String> {
+    let attached = connect(root, launch_id, None)?;
+    let mut stream = attached.stream;
+    let _ = stream.set_read_timeout(Some(Duration::from_secs(15)));
+    write_frame(&mut stream, END, b"").map_err(|_| NOT_FOUND.to_string())?;
+    loop {
+        match read_frame(&mut stream) {
+            Ok((EXIT, body)) => {
+                let exit: Value = serde_json::from_slice(&body).unwrap_or(Value::Null);
+                return Ok(json!({
+                    "launch_id": launch_id,
+                    "exit_code": exit["exit_code"],
+                    "reason": exit["reason"],
+                }));
+            }
+            Ok(_) => continue,
+            Err(_) => return Err(END_UNCONFIRMED.into()),
+        }
+    }
+}
+pub const END_UNCONFIRMED: &str = "The session was asked to end, and its end was not seen within 15 seconds.";
+
+fn connect(root: &Path, launch_id: &str, size: Option<(u16, u16)>) -> Result<Attached, String> {
     if !crate::launches::valid_id(launch_id) {
         return Err(NOT_FOUND.into());
     }
     let mut stream =
         UnixStream::connect(socket_path(root, launch_id)?).map_err(|_| NOT_FOUND.to_string())?;
-    let hello = json!({"protocol": PROTOCOL, "launch_id": launch_id, "rows": rows, "cols": cols});
+    let mut hello = json!({"protocol": PROTOCOL, "launch_id": launch_id});
+    if let Some((rows, cols)) = size {
+        hello["rows"] = rows.into();
+        hello["cols"] = cols.into();
+    }
     write_frame(&mut stream, HELLO, hello.to_string().as_bytes())
         .map_err(|_| NOT_FOUND.to_string())?;
     match read_frame(&mut stream) {
@@ -862,6 +914,23 @@ mod tests {
         assert_eq!(ended.reason, "idle");
         assert!(started.elapsed() < Duration::from_secs(20));
         assert!(attachable(&root, &id).is_none());
+    }
+
+    #[test]
+    fn end_closes_the_session_for_every_viewer_as_ended() {
+        // H-1d: a viewer's END ends the session (detaching never does); every viewer gets its exit.
+        let data = tempfile::tempdir().unwrap();
+        let root = data.path().canonicalize().unwrap();
+        let program = script(&root, "echo up; sleep 60");
+        let id = crate::launches::new_id();
+        let host = start_host(&root, &id, &program, None);
+        let mut viewer = attach(&root, &id, 24, 80).unwrap();
+        until(&mut viewer.stream, "up");
+        let ended = end(&root, &id).unwrap();
+        assert_eq!(ended["reason"], "ended");
+        assert_eq!(until(&mut viewer.stream, "").1, Some(ended["exit_code"].as_i64().unwrap() as i32));
+        assert_eq!(host.join().unwrap().unwrap().reason, "ended");
+        assert_eq!(end(&root, &id).unwrap_err(), NOT_FOUND);
     }
 
     #[test]

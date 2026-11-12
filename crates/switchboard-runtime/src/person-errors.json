@@ -221,6 +221,7 @@
     "The session could not start.": "The session could not start. Check the session's folder and account, then retry.",
     "The session could not be watched.": "The session started but could not be followed. Check switchboard sessions for its state.",
     "The session has ended.": "This session has ended. Start a new one, or continue it with --resume.",
-    "No session with this launch id is open here.": "No session with this launch id is open on this computer. Check switchboard sessions for one marked attachable."
+    "No session with this launch id is open here.": "No session with this launch id is open on this computer. Check switchboard sessions for one marked attachable.",
+    "The session was asked to end, and its end was not seen within 15 seconds.": "The session was asked to end, but its end was not seen within 15 seconds. Check switchboard sessions for its state."
   }
 }

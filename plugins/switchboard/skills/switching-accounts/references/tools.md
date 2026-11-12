@@ -84,6 +84,14 @@ lists only this machine's accounts or only those used elsewhere.
   never asks the provider: it answers with the stored observation and `note` = "This server is
   read-only: showing the stored observation without asking the provider."
 
+### `switchboard_session_end`: `launch_id` (string)
+
+Ends a session a session host holds (`switchboard_sessions` marks it `attachable`), as
+`switchboard sessions end` does (SB-342): its process gets a hangup, a `SIGTERM` 5 s later if it
+still runs, and every viewer is told it ended. Answers `{launch_id, exit_code, reason: "ended"}`.
+Closing a viewer only detaches; this ends the session. A write: not on a read-only server.
+macOS and Linux.
+
 ### `switchboard_sessions`: `all?` (boolean), `history?` (boolean), `launch_id?` (string)
 
 `{sessions[]}`: the sessions Switchboard launched (Claude Code, Codex, Kimi Code, Hermes,

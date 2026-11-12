@@ -389,6 +389,7 @@ export const RU: Record<string, string> = {
   "The session started but could not be followed. Check switchboard sessions for its state.": "Сессия запустилась, но следить за ней не удалось. Её состояние покажет switchboard sessions.",
   "This session has ended. Start a new one, or continue it with --resume.": "Эта сессия завершена. Начните новую или продолжите её с --resume.",
   "No session with this launch id is open on this computer. Check switchboard sessions for one marked attachable.": "На этом компьютере нет открытой сессии с этим launch id. Найдите в switchboard sessions сессию с отметкой attachable.",
+  "The session was asked to end, but its end was not seen within 15 seconds. Check switchboard sessions for its state.": "Сессию попросили завершиться, но её конца за 15 секунд не видно. Её состояние покажет switchboard sessions.",
   "The account limit has been reached. Remove an unused account before adding another.": "Достигнуто предельное число аккаунтов. Удалите ненужный аккаунт, прежде чем добавлять новый.",
   "This credential has expired. Sign in to this account again.": "Срок действия этих учётных данных истёк. Войдите в этот аккаунт снова.",
   "The stored credential is unavailable. Check native credential storage access or sign in again.": "Сохранённые учётные данные недоступны. Проверьте доступ к системному хранилищу учётных данных или войдите снова.",
