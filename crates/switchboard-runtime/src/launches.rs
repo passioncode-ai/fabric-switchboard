@@ -769,6 +769,25 @@ fn home_of(root: &Path, record: &Value) -> Option<PathBuf> {
     }
     Some(root.join(relative))
 }
+/// SB-342 H-1: a session a host holds can be opened in any app by its launch id (`attachable`,
+/// `viewers`); an ended hosted session names its last output, kept a day (H-1c). SB-346: every
+/// list carries it, `sessions` and `sessions --all` as well as the history.
+pub(crate) fn add_host(root: &Path, record: &mut Value) {
+    #[cfg(unix)]
+    {
+        let Some(id) = record["launch_id"].as_str().map(str::to_owned) else {
+            return;
+        };
+        if let Some(host) = crate::session_host::attachable(root, &id) {
+            record["attachable"] = true.into();
+            record["viewers"] = host["viewers"].clone();
+        } else if let Some(path) = crate::session_host::ended_output(root, &id) {
+            record["output"] = path.to_string_lossy().into_owned().into();
+        }
+    }
+    #[cfg(not(unix))]
+    let _ = (root, record);
+}
 /// The record with its state now: its home's own state while the home still holds this launch,
 /// else `ended` (a later launch of the same home replaced it, which only happens after it ended).
 fn with_state(root: &Path, mut record: Value) -> Value {
@@ -793,21 +812,7 @@ fn with_state(root: &Path, mut record: Value) -> Value {
     if record["started_at"].is_null() {
         record["started_at"] = started.into();
     }
-    // SB-342 H-1: a session a host holds can be opened in any app by its launch id.
-    #[cfg(unix)]
-    if let Some(host) = id
-        .as_deref()
-        .and_then(|id| crate::session_host::attachable(root, id))
-    {
-        record["attachable"] = true.into();
-        record["viewers"] = host["viewers"].clone();
-    } else if let Some(path) = id
-        .as_deref()
-        .and_then(|id| crate::session_host::ended_output(root, id))
-    {
-        // H-1c: an ended hosted session's last output, kept a day.
-        record["output"] = path.to_string_lossy().into_owned().into();
-    }
+    add_host(root, &mut record);
     // SB-341 (Fabric Dashboards FD-207): a dispatched run has no window; its output is its log.
     if let Some(id) = id
         .as_deref()

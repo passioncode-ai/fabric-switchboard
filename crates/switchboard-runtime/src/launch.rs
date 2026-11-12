@@ -3454,6 +3454,7 @@ pub fn sessions(root: &Path, all: bool) -> Vec<serde_json::Value> {
                 .map(|name| format!("{folder}/{name}"))
                 .into();
             crate::launches::add_outcome(root, &mut record);
+            crate::launches::add_host(root, &mut record);
             found.push(record);
         }
     }

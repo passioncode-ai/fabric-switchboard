@@ -964,6 +964,35 @@ mod tests {
     }
 
     #[test]
+    fn the_running_session_list_says_a_hosted_session_is_attachable() {
+        // SB-346 (Fabric Dashboards): `sessions` and `sessions --all`, not only the history.
+        let data = tempfile::tempdir().unwrap();
+        let root = data.path();
+        let id = crate::launches::new_id();
+        let home = root.join("homes").join("acct");
+        std::fs::create_dir_all(&home).unwrap();
+        switchboard_core::private_fs::private_write(
+            &home.join(crate::launch::SESSION_RECORD),
+            serde_json::json!({"launch_id": id, "provider": "claude"})
+                .to_string()
+                .as_bytes(),
+        )
+        .unwrap();
+        switchboard_core::private_fs::private_dir(&root.join("sessions")).unwrap();
+        switchboard_core::private_fs::private_write(
+            &descriptor_path(root, &id),
+            serde_json::json!({"pid": std::process::id(), "viewers": 2})
+                .to_string()
+                .as_bytes(),
+        )
+        .unwrap();
+        let rows = crate::launch::sessions(root, true);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0]["attachable"], true);
+        assert_eq!(rows[0]["viewers"], 2);
+    }
+
+    #[test]
     fn an_unknown_launch_id_or_a_bad_one_has_nothing_to_attach() {
         let data = tempfile::tempdir().unwrap();
         assert_eq!(
