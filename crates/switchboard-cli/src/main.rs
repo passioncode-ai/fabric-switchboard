@@ -206,7 +206,7 @@ enum Command {
         /// agent's. The same session, home and tools as --in-place.
         #[arg(long, conflicts_with = "in_place")]
         headless: bool,
-        /// With --in-place: run the session in a session host of its own (SB-342), so it outlives
+        /// With --in-place: run the session in a session host of its own, so it outlives
         /// this terminal and any app can open it with `switchboard attach <launch_id>`; Ctrl-]
         /// leaves it running. macOS and Linux.
         #[arg(long, requires = "in_place")]
@@ -252,12 +252,16 @@ enum Command {
     /// `launch --hosted`).
     #[command(hide = true)]
     SessionHost {
+        /// The launch id of the session.
         #[arg(long)]
         launch_id: String,
+        /// The session's launch script.
         #[arg(long)]
         program: PathBuf,
+        /// The terminal's height in rows.
         #[arg(long, default_value_t = 24)]
         rows: u16,
+        /// The terminal's width in columns.
         #[arg(long, default_value_t = 80)]
         cols: u16,
     },
@@ -4662,6 +4666,14 @@ mod mcp_parity {
             Not("SB-256 N1: the sign-in autopilot gives the code on the owner's side; a person types it into the CLI, and a code never travels in an agent's tool call"),
         ),
         ("launch", Not(LAUNCH)),
+        (
+            "attach",
+            Not("SB-342 H-1: shows a session in a person's terminal; an app attaches to the session host's socket itself"),
+        ),
+        (
+            "session-host",
+            Not("SB-342 H-1: the process `launch --hosted` starts for one session, never called by hand"),
+        ),
         ("continue", Not(LAUNCH)),
         // `dispatch` itself starts a run as `sessions` lists them: one decision for both.
         (

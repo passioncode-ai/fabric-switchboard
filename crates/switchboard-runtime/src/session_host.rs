@@ -50,6 +50,9 @@ const MAX_VIEWERS: usize = 8;
 const VIEWER_WRITE: Duration = Duration::from_secs(2);
 const MAX_DESCRIPTOR: u64 = 4096;
 
+/// The frame protocol's version, in both `HELLO`s: a viewer refuses a host that speaks another.
+pub const PROTOCOL: u64 = 1;
+
 pub const NOT_FOUND: &str = "No session with this launch id is open here.";
 pub const TOO_MANY_VIEWERS: &str = "This session already has eight viewers.";
 
@@ -382,7 +385,41 @@ fn refuse(stream: &mut UnixStream, error: &str) {
     );
 }
 
+/// The user at the other end of `stream`: the socket folder already keeps everyone else out, and
+/// this is checked anyway (Fabric Dashboards' ask on `22ccd485`).
+fn peer_uid(stream: &UnixStream) -> Option<u32> {
+    let fd = stream.as_raw_fd();
+    #[cfg(target_os = "linux")]
+    {
+        let mut cred = libc::ucred {
+            pid: 0,
+            uid: 0,
+            gid: 0,
+        };
+        let mut len = std::mem::size_of::<libc::ucred>() as libc::socklen_t;
+        let r = unsafe {
+            libc::getsockopt(
+                fd,
+                libc::SOL_SOCKET,
+                libc::SO_PEERCRED,
+                (&mut cred as *mut libc::ucred).cast(),
+                &mut len,
+            )
+        };
+        (r == 0).then_some(cred.uid)
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let mut uid: libc::uid_t = 0;
+        let mut gid: libc::gid_t = 0;
+        (unsafe { libc::getpeereid(fd, &mut uid, &mut gid) } == 0).then_some(uid)
+    }
+}
+
 fn viewer(session: &Session, mut stream: UnixStream) {
+    if peer_uid(&stream) != Some(unsafe { libc::getuid() }) {
+        return;
+    }
     let _ = stream.set_read_timeout(Some(Duration::from_secs(10)));
     let _ = stream.set_write_timeout(Some(VIEWER_WRITE));
     let Ok((HELLO, hello)) = read_frame(&mut stream) else {
@@ -409,7 +446,11 @@ fn viewer(session: &Session, mut stream: UnixStream) {
             drop(inner);
             return refuse(&mut stream, TOO_MANY_VIEWERS);
         }
-        let ack = json!({"launch_id": session.launch_id, "viewers": inner.viewers.len() + 1});
+        let ack = json!({
+            "protocol": PROTOCOL,
+            "launch_id": session.launch_id,
+            "viewers": inner.viewers.len() + 1,
+        });
         let (a, b) = inner.scrollback.as_slices();
         let replay: Vec<u8> = [a, b].concat();
         if write_frame(&mut stream, HELLO, ack.to_string().as_bytes()).is_err()
@@ -479,12 +520,15 @@ pub fn attach(root: &Path, launch_id: &str, rows: u16, cols: u16) -> Result<Atta
     }
     let mut stream =
         UnixStream::connect(socket_path(root, launch_id)?).map_err(|_| NOT_FOUND.to_string())?;
-    let hello = json!({"launch_id": launch_id, "rows": rows, "cols": cols});
+    let hello = json!({"protocol": PROTOCOL, "launch_id": launch_id, "rows": rows, "cols": cols});
     write_frame(&mut stream, HELLO, hello.to_string().as_bytes())
         .map_err(|_| NOT_FOUND.to_string())?;
     match read_frame(&mut stream) {
         Ok((HELLO, ack)) => {
             let ack: Value = serde_json::from_slice(&ack).unwrap_or(Value::Null);
+            if ack["protocol"].as_u64() != Some(PROTOCOL) {
+                return Err(NOT_FOUND.into());
+            }
             Ok(Attached {
                 stream,
                 viewers: ack["viewers"].as_u64().unwrap_or(1),
