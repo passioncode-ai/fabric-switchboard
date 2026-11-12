@@ -8,6 +8,8 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+## 0.7.65
+
 - `switchboard sessions end <launch_id>` (and the agent tool `switchboard_session_end`) ends a hosted session for every app showing it; closing a window only leaves it. `switchboard launch --target ... --hosted` runs the session on the other machine in a session host, so it survives a dropped ssh link (SB-342, Fabric Dashboards' request).
 
 ## 0.7.64
