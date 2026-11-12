@@ -8,6 +8,8 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+## 0.7.67
+
 - An update check that never ended no longer stops every later one: on the operator's MacBook a check stayed `downloading` for seven hours after its download and the app kept 0.7.61, *Check for updates* included. One check now ends within 25 minutes (`update_check stalled`, naming the step), and waiting for another swap is limited to 2 minutes (`update_install swap_busy`) (SB-344).
 
 ## 0.7.66
