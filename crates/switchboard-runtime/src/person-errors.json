@@ -211,6 +211,16 @@
     "Settings signing key unreadable": "The key that signs settings files could not be read. Check that your keychain is open, then try again.",
     "Settings signer invalid": "That is not a signing key. Give the public key your organization published, as switchboard settings signer printed it.",
     "Settings file not signed by that key": "This settings file is not signed by the key you named. Ask your administrator for the file they signed.",
-    "Settings file signature invalid": "This settings file was changed after it was signed. Ask your administrator for the file again."
+    "Settings file signature invalid": "This settings file was changed after it was signed. Ask your administrator for the file again.",
+    "The session folder in /tmp could not be made.": "The folder Switchboard keeps session connections in could not be made in /tmp. Check that /tmp is writable, then retry.",
+    "The session folder in /tmp could not be read.": "The folder Switchboard keeps session connections in could not be read. Check /tmp, then retry.",
+    "The session folder in /tmp is not this user's own.": "The folder /tmp/switchboard-<uid> belongs to someone else or is open to others. Remove it, then retry.",
+    "A session with this launch id is already open.": "A session with this launch id is already open. Attach to it with switchboard attach.",
+    "The session socket could not be made.": "The session's connection could not be made. Check that /tmp is writable, then retry.",
+    "No terminal could be opened.": "No terminal could be opened for the session. Close some terminals, then retry.",
+    "The session could not start.": "The session could not start. Check the session's folder and account, then retry.",
+    "The session could not be watched.": "The session started but could not be followed. Check switchboard sessions for its state.",
+    "The session has ended.": "This session has ended. Start a new one, or continue it with --resume.",
+    "No session with this launch id is open here.": "No session with this launch id is open on this computer. Check switchboard sessions for one marked attachable."
   }
 }
