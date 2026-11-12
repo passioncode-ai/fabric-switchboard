@@ -8,6 +8,8 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- On a busy computer, changing a group (adding or taking out a folder or an account, moving a repository) no longer reports "Control request timed out" for a change that went on and finished: the CLI and the agent tools wait up to three minutes for it (SB-336).
+
 ## 0.7.57
 
 - `switchboard project list` and the `switchboard_projects` tool now show the accounts a group shares from another group (marked shared, with their home group), so a share made with `project edit --add-account` no longer looks as if it did nothing; a group bound to several organizations shows its first one instead of none (SB-339, studio-agent's request).
