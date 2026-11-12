@@ -674,7 +674,7 @@ pub(crate) fn write_launch_script(home: &Path, content: &str) -> Result<PathBuf,
 /// up; the person's own Terminal profiles are left as they are. Terminal runs `CommandString` as
 /// words split on whitespace with no quoting, so the script is reached through a link in a folder
 /// without spaces (Caches); None when that path would still hold whitespace or cannot be made.
-#[cfg(any(target_os = "macos", test))]
+#[cfg(target_os = "macos")]
 fn terminal_window_settings(script: &Path) -> Option<PathBuf> {
     let home = std::env::var_os("HOME")?;
     terminal_window_settings_in(
@@ -682,7 +682,7 @@ fn terminal_window_settings(script: &Path) -> Option<PathBuf> {
         script,
     )
 }
-#[cfg(any(target_os = "macos", test))]
+#[cfg(any(target_os = "macos", all(unix, test)))]
 fn terminal_window_settings_in(dir: &Path, script: &Path) -> Option<PathBuf> {
     let name =
         format!("{:x}", Sha256::digest(script.to_string_lossy().as_bytes()))[..16].to_owned();
@@ -3971,6 +3971,7 @@ mod tests {
     }
     /// SB-342 H-0: the window settings run the script through a link without spaces and close
     /// the window on a clean exit; a folder whose path holds a space gives none.
+    #[cfg(unix)]
     #[test]
     fn a_terminal_window_closes_on_a_clean_exit_and_its_command_has_no_space() {
         let temp = tempfile::tempdir().unwrap();
