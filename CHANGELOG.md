@@ -8,6 +8,8 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+## 0.7.69
+
 - `switchboard recovery` names, for each session waiting after a limit, the launch that ran it and its transcript, which for a session Switchboard launched lives in Switchboard's own folders; a host that resumes such sessions no longer reads them as having no transcript (SB-348).
 
 ## 0.7.68
