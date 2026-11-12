@@ -669,12 +669,52 @@ pub(crate) fn write_launch_script(home: &Path, content: &str) -> Result<PathBuf,
     private_write(&path, content.as_bytes(), true)?;
     Ok(path)
 }
+/// SB-342 H-0: Terminal window settings (`.terminal`) that run `script` as the window's process
+/// and close the window when it exits with status 0, so the windows Switchboard opens do not pile
+/// up; the person's own Terminal profiles are left as they are. Terminal runs `CommandString` as
+/// words split on whitespace with no quoting, so the script is reached through a link in a folder
+/// without spaces (Caches); None when that path would still hold whitespace or cannot be made.
+#[cfg(any(target_os = "macos", test))]
+fn terminal_window_settings(script: &Path) -> Option<PathBuf> {
+    let home = std::env::var_os("HOME")?;
+    terminal_window_settings_in(
+        &PathBuf::from(home).join("Library/Caches/ai.passioncode.fabric-switchboard/terminal"),
+        script,
+    )
+}
+#[cfg(any(target_os = "macos", test))]
+fn terminal_window_settings_in(dir: &Path, script: &Path) -> Option<PathBuf> {
+    let name =
+        format!("{:x}", Sha256::digest(script.to_string_lossy().as_bytes()))[..16].to_owned();
+    let link = dir.join(format!("{name}.command"));
+    let text = link.to_string_lossy().into_owned();
+    if text.chars().any(char::is_whitespace) || !text.is_ascii() {
+        return None;
+    }
+    switchboard_core::private_fs::private_dir(dir).ok()?;
+    let _ = fs::remove_file(&link);
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(script, &link).ok()?;
+    let escaped = text
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;");
+    let settings = format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n<plist version=\"1.0\">\n<dict>\n\t<key>CommandString</key>\n\t<string>{escaped}</string>\n\t<key>ProfileCurrentVersion</key>\n\t<real>2.07</real>\n\t<key>RunCommandAsShell</key>\n\t<true/>\n\t<key>name</key>\n\t<string>Switchboard session</string>\n\t<key>shellExitAction</key>\n\t<integer>1</integer>\n\t<key>type</key>\n\t<string>Window Settings</string>\n\t<key>warnOnShellCloseAction</key>\n\t<integer>0</integer>\n</dict>\n</plist>\n"
+    );
+    let window = dir.join(format!("{name}.terminal"));
+    private_write(&window, settings.as_bytes(), false).ok()?;
+    Some(window)
+}
 pub(crate) fn start_terminal(path: &Path) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
+        // SB-342 H-0: a window that closes when the session exits cleanly (one that failed stays,
+        // so its message can be read); the plain script where the window settings cannot be made.
+        let opened = terminal_window_settings(path).unwrap_or_else(|| path.to_owned());
         let status = Command::new("/usr/bin/open")
             .args(["-a", "Terminal"])
-            .arg(path)
+            .arg(&opened)
             .status()
             .map_err(|_| "Terminal could not open.")?;
         if !status.success() {
@@ -3928,6 +3968,35 @@ mod tests {
         fs::create_dir(&metadata).unwrap();
         let (): () = journal_launch(&store, &id, "isolated");
         assert_eq!(store.snapshot().unwrap().events.len(), 1);
+    }
+    /// SB-342 H-0: the window settings run the script through a link without spaces and close
+    /// the window on a clean exit; a folder whose path holds a space gives none.
+    #[test]
+    fn a_terminal_window_closes_on_a_clean_exit_and_its_command_has_no_space() {
+        let temp = tempfile::tempdir().unwrap();
+        let script = temp
+            .path()
+            .join("Application Support")
+            .join("launch.command");
+        fs::create_dir_all(script.parent().unwrap()).unwrap();
+        fs::write(&script, "#!/bin/sh\nexit 0\n").unwrap();
+        let dir = temp.path().join("terminal");
+        let window = terminal_window_settings_in(&dir, &script).unwrap();
+        let text = fs::read_to_string(&window).unwrap();
+        assert!(text.contains("<key>shellExitAction</key>\n\t<integer>1</integer>"));
+        assert!(text.contains("<key>RunCommandAsShell</key>\n\t<true/>"));
+        let command = text
+            .split("<key>CommandString</key>\n\t<string>")
+            .nth(1)
+            .unwrap()
+            .split("</string>")
+            .next()
+            .unwrap();
+        assert!(!command.contains(' '), "{command}");
+        assert_eq!(fs::read_link(command).unwrap(), script);
+        // The same script gets the same link, so links never pile up.
+        assert_eq!(terminal_window_settings_in(&dir, &script).unwrap(), window);
+        assert!(terminal_window_settings_in(&temp.path().join("with space"), &script).is_none());
     }
     #[test]
     fn login_state_reads_completion_and_an_exited_terminal() {
