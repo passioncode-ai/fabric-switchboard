@@ -237,6 +237,9 @@ pub enum Operation {
     SessionEnded {
         launch_id: String,
         exit_code: i32,
+        /// H-1c: `idle` when the host closed the session; absent or anything else is `exited`.
+        #[serde(default)]
+        reason: Option<String>,
     },
     /// SB-317: a dispatched run's state and, for a run on another machine, its result file
     /// (`dispatch::status`).
@@ -5324,17 +5327,17 @@ async fn execute(
         Operation::SessionEnded {
             launch_id,
             exit_code,
+            reason,
         } => {
             if !launches::valid_id(&launch_id) {
                 return Err(launches::PARENT_INVALID.into());
             }
-            let recorded = launches::end_once(
-                root,
-                &launch_id,
-                dispatch::EXITED,
-                monitor::now(),
-                Some(exit_code),
-            );
+            let kind = match reason.as_deref() {
+                Some("idle") => "idle",
+                _ => dispatch::EXITED,
+            };
+            let recorded =
+                launches::end_once(root, &launch_id, kind, monitor::now(), Some(exit_code));
             Ok(json!({"launch_id": launch_id, "recorded": recorded}))
         }
         Operation::DispatchStop { launch_id } => {

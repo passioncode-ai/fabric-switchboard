@@ -8,6 +8,8 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- `switchboard attach` (and any app that attaches) now shows a hosted session's screen as it is, full-screen programs included, instead of replaying its raw output. A hosted session nobody watches and that does nothing for 30 minutes is closed, and an ended session's last output stays readable for a day (`switchboard sessions` gives its path) (SB-342).
+
 ## 0.7.63
 
 - 0.7.62 was tagged but not published: its Linux checks refused one line of the session host. 0.7.63 carries everything 0.7.62 announced.

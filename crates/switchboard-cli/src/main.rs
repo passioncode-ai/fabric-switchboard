@@ -264,6 +264,10 @@ enum Command {
         /// The terminal's width in columns.
         #[arg(long, default_value_t = 80)]
         cols: u16,
+        /// Close the session after this many minutes with no viewer, no input and no output;
+        /// 0 never.
+        #[arg(long, default_value_t = 30)]
+        idle_minutes: u64,
     },
     /// Continue an Observatory workflow whose executor ran out of its limit on another account:
     /// of the same provider, or of another agent (Claude Code, Codex, a saved Kimi Code account,
@@ -2367,14 +2371,16 @@ async fn run(cli: &Cli) -> Result<Value, String> {
             program,
             rows,
             cols,
+            idle_minutes,
         } => {
-            let code = hosted::run(&root, launch_id, program, *rows, *cols)?;
+            let ended = hosted::run(&root, launch_id, program, *rows, *cols, *idle_minutes)?;
             // Recorded by the owner when it runs (the records' writer), else here.
             call(
                 &root,
                 Operation::SessionEnded {
                     launch_id: launch_id.clone(),
-                    exit_code: code,
+                    exit_code: ended.exit_code,
+                    reason: Some(ended.reason.to_owned()),
                 },
             )
             .await?;

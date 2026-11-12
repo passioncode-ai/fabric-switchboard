@@ -801,6 +801,12 @@ fn with_state(root: &Path, mut record: Value) -> Value {
     {
         record["attachable"] = true.into();
         record["viewers"] = host["viewers"].clone();
+    } else if let Some(path) = id
+        .as_deref()
+        .and_then(|id| crate::session_host::ended_output(root, id))
+    {
+        // H-1c: an ended hosted session's last output, kept a day.
+        record["output"] = path.to_string_lossy().into_owned().into();
     }
     // SB-341 (Fabric Dashboards FD-207): a dispatched run has no window; its output is its log.
     if let Some(id) = id
