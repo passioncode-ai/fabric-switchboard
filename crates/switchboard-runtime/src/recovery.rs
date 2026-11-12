@@ -1218,7 +1218,7 @@ mod tests {
         assert_eq!(row["launch_id"], launch.as_str());
         assert_eq!(row["transcript"], transcript.to_string_lossy().as_ref());
         // A settled stop needs no transcript and costs no scan.
-        finish(root.path(), "limit:1", true, 1000).unwrap();
+        finish(root.path(), "limit:1", false, 1000).unwrap();
         let settled = status(root.path(), &s, &none, &none, &none, 1001).unwrap();
         assert!(settled["sessions"][0]["transcript"].is_null());
     }
