@@ -81,6 +81,87 @@ pub fn known(root: &Path) -> Vec<Value> {
     out
 }
 
+/// SB-340 (Fabric Dashboards, thread `000ae765`): one ssh account named two ways (an alias from a
+/// move and `user@host` from a run) is one machine. Entries whose `resolve` (user, host and port
+/// as `ssh -G` reads them) agree are merged into the newest one's name, the other names kept in
+/// `aliases`; an entry `resolve` cannot read stays as it is.
+pub fn collapse(list: Vec<Value>, resolve: &dyn Fn(&str) -> Option<String>) -> Vec<Value> {
+    let mut out: Vec<(Option<String>, Value)> = Vec::new();
+    for mut t in list {
+        let machine = t["machine"].as_str().unwrap_or_default().to_owned();
+        let key = resolve(&machine);
+        match key
+            .as_ref()
+            .and_then(|k| out.iter_mut().find(|(o, _)| o.as_ref() == Some(k)))
+        {
+            Some((_, kept)) => {
+                // `list` is newest first, so `kept` is the newer name.
+                if let Some(aliases) = kept["aliases"].as_array_mut() {
+                    aliases.push(json!(machine));
+                }
+                for why in t["known_by"].as_array().cloned().unwrap_or_default() {
+                    if let Some(k) = kept["known_by"].as_array_mut() {
+                        if !k.contains(&why) {
+                            k.push(why);
+                        }
+                    }
+                }
+                for field in ["program", "data_dir"] {
+                    if kept[field].is_null() && !t[field].is_null() {
+                        kept[field] = t[field].take();
+                    }
+                }
+            }
+            None => {
+                t["aliases"] = json!([]);
+                out.push((key, t));
+            }
+        }
+    }
+    out.into_iter().map(|(_, t)| t).collect()
+}
+
+/// `user@host:port` as `ssh -G` resolves `target` from the person's ssh configuration (no
+/// connection is made), or None when ssh cannot read it within five seconds.
+pub fn ssh_identity(target: &str) -> Option<String> {
+    if !target_valid(target) {
+        return None;
+    }
+    let mut child = std::process::Command::new("ssh")
+        .args(["-G", "--", target])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .ok()?;
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) if status.success() => break,
+            Ok(Some(_)) | Err(_) => return None,
+            Ok(None) if std::time::Instant::now() > deadline => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return None;
+            }
+            Ok(None) => std::thread::sleep(std::time::Duration::from_millis(20)),
+        }
+    }
+    let mut text = String::new();
+    std::io::Read::read_to_string(&mut child.stdout.take()?, &mut text).ok()?;
+    let field = |name: &str| {
+        text.lines()
+            .find_map(|l| l.strip_prefix(name).and_then(|v| v.strip_prefix(' ')))
+            .map(str::to_owned)
+    };
+    Some(format!(
+        "{}@{}:{}",
+        field("user")?,
+        field("hostname")?.to_lowercase(),
+        field("port")?
+    ))
+}
+
 /// Whether the machine's Switchboard answers over ssh now, and its version.
 pub fn probe(target: &str, program: &Program<'_>, run: &Run<'_>) -> Value {
     let answer = run(
@@ -194,6 +275,28 @@ mod tests {
         );
     }
 
+    /// SB-340: an alias and `user@host` of one ssh account are listed once.
+    #[test]
+    fn one_account_named_two_ways_is_one_machine() {
+        let list = vec![
+            json!({"machine": "studio-sshlg", "last_at": 30, "known_by": ["dispatch"], "program": null, "data_dir": null}),
+            json!({"machine": "other@vm", "last_at": 20, "known_by": ["moves"], "program": null, "data_dir": null}),
+            json!({"machine": "sshlg@100.69.20.19", "last_at": 10, "known_by": ["moves"], "program": "/x/switchboard", "data_dir": null}),
+            json!({"machine": "unreadable", "last_at": 5, "known_by": ["moves"], "program": null, "data_dir": null}),
+        ];
+        let resolve = |m: &str| match m {
+            "studio-sshlg" | "sshlg@100.69.20.19" => Some("sshlg@100.69.20.19:22".to_owned()),
+            "other@vm" => Some("other@vm:22".to_owned()),
+            _ => None,
+        };
+        let out = collapse(list, &resolve);
+        let names: Vec<&str> = out.iter().map(|t| t["machine"].as_str().unwrap()).collect();
+        assert_eq!(names, ["studio-sshlg", "other@vm", "unreadable"]);
+        assert_eq!(out[0]["aliases"], json!(["sshlg@100.69.20.19"]));
+        assert_eq!(out[0]["known_by"], json!(["dispatch", "moves"]));
+        assert_eq!(out[0]["program"], "/x/switchboard");
+        assert_eq!(out[1]["aliases"], json!([]));
+    }
     #[test]
     fn a_remote_launch_is_one_quoted_command_and_a_bad_target_is_refused() {
         let args: Vec<String> = [

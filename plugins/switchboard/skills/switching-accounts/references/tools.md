@@ -460,7 +460,8 @@ failed (the move stands; place it there with `switchboard org assign`).
 
 The other machines this Switchboard knows, from accounts moved there and runs started there:
 `machine` (as ssh names it), `program` and `data_dir` used there, `last_at`, `known_by`
-(`moves`, `dispatch`). `probe: true` asks each one's Switchboard over ssh whether it answers now
+(`moves`, `dispatch`), `aliases` (other ssh names of the same account, as `ssh -G` reads them;
+it is listed once). `probe: true` asks each one's Switchboard over ssh whether it answers now
 and its version. A person's session on one starts in a terminal with
 `switchboard launch --target MACHINE --provider claude --working-directory FOLDER --in-place`
 (the folder is that machine's; its account comes from the folder's group there). Reads only.

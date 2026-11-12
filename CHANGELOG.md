@@ -8,6 +8,8 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- `switchboard targets` lists one machine once when it is known by an ssh alias and by `user@host`; the other names are in `aliases` (SB-340, Fabric Dashboards' request).
+
 ## 0.7.58
 
 - On a busy computer, changing a group (adding or taking out a folder or an account, moving a repository) no longer reports "Control request timed out" for a change that went on and finished: the CLI and the agent tools wait up to three minutes for it (SB-336).
