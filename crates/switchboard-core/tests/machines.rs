@@ -121,7 +121,7 @@ fn an_account_on_another_machine_leaves_every_group_here() {
         Some(&group.pool),
         "Agents",
         std::slice::from_ref(&folder),
-        &[moving.clone()],
+        std::slice::from_ref(&moving),
     );
     assert_eq!(refused.unwrap_err(), machines::ON_ANOTHER_MACHINE);
     assert_eq!(
@@ -185,7 +185,7 @@ fn coming_home_goes_to_the_group_named_else_the_one_it_left_else_default() {
             None,
             "PC",
             std::slice::from_ref(&other_folder),
-            &[c.clone()],
+            std::slice::from_ref(&c),
         )
         .unwrap();
     for id in [&a, &b, &c] {
