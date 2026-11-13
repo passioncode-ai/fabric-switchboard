@@ -399,7 +399,7 @@ impl Pass {
         // longer holds control writes behind it. Under the transaction the same calls answer
         // from the watch, or read again only if a source changed in between.
         let current = runtime.native.current;
-        crate::blocking::run(|| prime_live_sources(current, claude));
+        let primed = crate::blocking::run(|| prime_live_sources(current, claude));
         // Claude Code left its token expired: renew it under Claude Code's locks so managed
         // sessions and quota checks on that account keep working. SB-163: the grant runs
         // outside the owner transaction, taken only to store its result (`live_renewal`);
@@ -415,10 +415,39 @@ impl Pass {
                 .await,
                 crate::refresh::Outcome::NotNeeded
             );
+        // SB-347: what the sync would write, decided from those reads before the transaction:
+        // under it, only an account the plan names is read again (its stored credential and
+        // lineage) before it is written. Before, the sync probed both sign-ins and read the
+        // stored copies under the transaction each time (`transaction_held source_sync`, 8.5 s
+        // on 2026-11-13), and every control change waited behind it. After a renewal that may
+        // have written Claude Code's sign-in, the sources are read afresh under it, as before.
+        let planned = (!renewed).then(|| {
+            crate::blocking::run(|| {
+                sync_live_sources_with(
+                    &runtime.store,
+                    &|p| primed_or_read(&primed, p, current),
+                    &runtime.refresh,
+                    SyncMode::Plan,
+                )
+            })
+        });
         let mut mutation = runtime.hold("source_sync").await;
         crate::refresh::follow_claude_swap(&runtime.store, &runtime.refresh, swap);
         mutation.phase("swap");
-        sync_live_sources(&runtime.store, runtime.native.current, &runtime.refresh);
+        match &planned {
+            Some(planned) => sync_live_sources_with(
+                &runtime.store,
+                &|p| primed_or_read(&primed, p, current),
+                &runtime.refresh,
+                SyncMode::Write(Some(planned)),
+            ),
+            None => sync_live_sources_with(
+                &runtime.store,
+                &runtime.native.current,
+                &runtime.refresh,
+                SyncMode::Write(None),
+            ),
+        };
         mutation.phase("sync");
         // SB-163: the sign-in sources are read afresh only after a renewal may have written
         // Claude Code's sign-in; otherwise their watch stands (LC-04) and the next sync probes.
@@ -432,16 +461,35 @@ impl Pass {
     }
 }
 
+/// The sign-ins as read before the owner transaction: Claude Code's (None when this owner does
+/// not look at it) and Codex's.
+type Primed = [Option<Result<external::CapturedProfile, String>>; 2];
 /// SB-163: reads the sign-ins `sync_sources` uses through `current` (cached: a probe while
-/// nothing changed), before the owner transaction is taken.
+/// nothing changed), before the owner transaction is taken. SB-347: and keeps what it read, so
+/// the sync under the transaction uses it instead of probing the Keychain again.
 fn prime_live_sources(
     current: fn(Provider) -> Result<external::CapturedProfile, String>,
     claude: bool,
-) {
-    if claude {
-        let _ = current(Provider::Claude);
+) -> Primed {
+    [
+        claude.then(|| current(Provider::Claude)),
+        Some(current(Provider::Codex)),
+    ]
+}
+/// SB-347: `provider`'s sign-in as primed, or read now when it was not.
+fn primed_or_read(
+    primed: &Primed,
+    provider: Provider,
+    current: fn(Provider) -> Result<external::CapturedProfile, String>,
+) -> Result<external::CapturedProfile, String> {
+    let index = match provider {
+        Provider::Claude => 0,
+        Provider::Codex => 1,
+    };
+    match &primed[index] {
+        Some(read) => read.clone(),
+        None => current(provider),
     }
-    let _ = current(Provider::Codex);
 }
 
 /// A schedule stamped ahead of a clock that was set back would otherwise stall probes.
@@ -878,13 +926,38 @@ fn native_rotation_on(store: &Store) -> bool {
             .any(|p| p.enabled && p.target == "claude_cli")
     })
 }
+/// SB-347: what a sync does: `Plan` decides, without writing anything, which accounts it would
+/// write; `Write(Some(planned))` writes, reading again only the accounts the plan named;
+/// `Write(None)` considers every account (every caller before SB-347).
+#[derive(Clone, Copy)]
+enum SyncMode<'a> {
+    Plan,
+    Write(Option<&'a std::collections::HashSet<String>>),
+}
+#[cfg(test)]
 fn sync_live_sources(
     store: &Store,
     current: fn(Provider) -> Result<external::CapturedProfile, String>,
     refresh: &crate::refresh::RefreshState,
 ) {
+    sync_live_sources_with(store, &current, refresh, SyncMode::Write(None));
+}
+/// Files the ordinary CLIs' sign-ins under the saved accounts they belong to. Answers the
+/// accounts it wrote, or with `SyncMode::Plan` would write.
+fn sync_live_sources_with(
+    store: &Store,
+    current: &dyn Fn(Provider) -> Result<external::CapturedProfile, String>,
+    refresh: &crate::refresh::RefreshState,
+    mode: SyncMode<'_>,
+) -> std::collections::HashSet<String> {
+    let mut chosen = std::collections::HashSet::new();
     let Ok(snapshot) = store.snapshot() else {
-        return;
+        return chosen;
+    };
+    let plan = matches!(mode, SyncMode::Plan);
+    let only = match mode {
+        SyncMode::Write(only) => only,
+        SyncMode::Plan => None,
     };
     // Which saved accounts the ordinary CLIs are signed in to: those are checked on the active
     // cadence (SB-48). Learned from the same cached read, before any lineage decision.
@@ -913,8 +986,17 @@ fn sync_live_sources(
                 in_use.insert(account.id.clone());
             }
         }
+        // SB-347: under the transaction, nothing more for a provider the plan wrote nothing for.
+        if only.is_some_and(|only| !accounts.iter().any(|a| only.contains(&a.id))) {
+            if provider == Provider::Claude {
+                refresh.note_active(&profile.identity);
+            }
+            continue;
+        }
         if provider == Provider::Claude {
-            refresh.note_active(&profile.identity);
+            if !plan {
+                refresh.note_active(&profile.identity);
+            }
             // Only a lineage proven to be this identity's is filed under it: after an
             // interrupted switch or a half-finished `/login` the config can name account A
             // while the Keychain holds account B's token (PLAN-0.5.1, report §P1-3).
@@ -925,6 +1007,9 @@ fn sync_live_sources(
             }
         }
         for account in accounts {
+            if only.is_some_and(|only| !only.contains(&account.id)) {
+                continue;
+            }
             if store
                 .match_external(provider, &account.pool, &profile.identity)
                 .ok()
@@ -951,6 +1036,10 @@ fn sync_live_sources(
             {
                 continue;
             }
+            chosen.insert(account.id.clone());
+            if plan {
+                continue;
+            }
             let _ = store.upsert(
                 account.label.clone(),
                 provider,
@@ -961,7 +1050,10 @@ fn sync_live_sources(
             );
         }
     }
-    let _ = store.set_in_use(in_use);
+    if !plan {
+        let _ = store.set_in_use(in_use);
+    }
+    chosen
 }
 
 /// Collects limit errors: the proxy's own events always; Claude Code's transcript markers only
@@ -2075,6 +2167,76 @@ mod tests {
         assert_eq!(
             store.stored_credential(&a.id).unwrap().access_token,
             "rotated-access"
+        );
+    }
+    /// SB-347: the sync decides before the owner transaction what it would write; under the
+    /// transaction it reads no stored credential while that plan is empty, and files a newer
+    /// generation the plan named after reading it again.
+    #[test]
+    fn a_planned_sync_reads_no_credential_under_the_transaction_while_nothing_changed() {
+        use crate::fixtures::*;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        #[derive(Default)]
+        struct Counting {
+            inner: MemoryVault,
+            gets: AtomicUsize,
+        }
+        impl switchboard_core::Vault for Counting {
+            fn get(&self, id: &str) -> Result<switchboard_core::Credential, String> {
+                self.gets.fetch_add(1, Ordering::SeqCst);
+                self.inner.get(id)
+            }
+            fn put(&self, id: &str, value: &switchboard_core::Credential) -> Result<(), String> {
+                self.inner.put(id, value)
+            }
+            fn delete(&self, id: &str) -> Result<(), String> {
+                self.inner.delete(id)
+            }
+        }
+        let root = tempfile::tempdir().unwrap();
+        let vault = Arc::new(Counting::default());
+        let store = Store::open(root.path().to_owned(), vault.clone()).unwrap();
+        let a = save(&store, "synthetic-a", "default");
+        let state = crate::refresh::RefreshState::default();
+        let planned = sync_live_sources_with(&store, &signed_in, &state, SyncMode::Plan);
+        assert!(planned.is_empty(), "the stored copy is Claude Code's");
+        let before = vault.gets.load(Ordering::SeqCst);
+        let written =
+            sync_live_sources_with(&store, &signed_in, &state, SyncMode::Write(Some(&planned)));
+        assert!(written.is_empty());
+        assert_eq!(
+            vault.gets.load(Ordering::SeqCst),
+            before,
+            "no Keychain read under the transaction"
+        );
+        fn a_refreshed(_: Provider) -> Result<external::CapturedProfile, String> {
+            let mut c = credential("synthetic-a");
+            c.access_token = "synthetic-a-newer".into();
+            Ok(external::CapturedProfile {
+                provider: Provider::Claude,
+                kind: AuthKind::OAuth,
+                credential: c,
+                identity: identity("synthetic-a"),
+                label: "synthetic-a".into(),
+            })
+        }
+        let planned = sync_live_sources_with(&store, &a_refreshed, &state, SyncMode::Plan);
+        assert_eq!(planned, std::collections::HashSet::from([a.id.clone()]));
+        assert_eq!(
+            store.stored_credential(&a.id).unwrap().access_token,
+            "synthetic-a-token",
+            "a plan writes nothing"
+        );
+        let written = sync_live_sources_with(
+            &store,
+            &a_refreshed,
+            &state,
+            SyncMode::Write(Some(&planned)),
+        );
+        assert_eq!(written, planned);
+        assert_eq!(
+            store.stored_credential(&a.id).unwrap().access_token,
+            "synthetic-a-newer"
         );
     }
     #[test]

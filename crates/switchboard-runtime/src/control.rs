@@ -268,12 +268,12 @@ async fn handle(State(state): State<Control>, request: Request<Body>) -> Respons
     }
     let kind = operation_kind(&operation);
     let started = std::time::Instant::now();
-    let (reply, lock_ms) = measure_lock_waits(state.runtime.execute(operation)).await;
+    let (reply, waits) = measure_waits(state.runtime.execute(operation)).await;
     let reply = match reply {
         Ok(value) => Reply::Ok { value },
         Err(message) => Reply::Error { message },
     };
-    slow_request(kind, started.elapsed(), lock_ms);
+    slow_request(kind, started.elapsed(), waits);
     Json(reply).into_response()
 }
 tokio::task_local! {
@@ -281,10 +281,21 @@ tokio::task_local! {
     static LOCK_WAITS: Arc<LockWaits>;
 }
 /// H-2: whether a request took the store's lock, and how long its takes waited in all.
+/// SB-347: and how many credentials it read and how long those reads took in all.
 #[derive(Default)]
 struct LockWaits {
     took: std::sync::atomic::AtomicBool,
     micros: std::sync::atomic::AtomicU64,
+    vault_reads: std::sync::atomic::AtomicU64,
+    vault_micros: std::sync::atomic::AtomicU64,
+}
+/// What a request waited for (H-2, SB-347): the store's lock (None: never taken) and the vault
+/// (reads and their milliseconds in all; zero reads: never read).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct Waits {
+    lock_ms: Option<u64>,
+    vault_reads: u64,
+    vault_ms: u64,
 }
 /// The store's lock observer (`Store::observe_lock_waits`): adds each wait to the request this
 /// task answers. On any other task (the monitor, the proxy) it does nothing. Waits on tasks the
@@ -299,32 +310,63 @@ pub(crate) fn lock_waited(waited: Duration) {
         );
     });
 }
+/// SB-347: the store's vault observer (`Store::observe_vault_reads`): adds each credential read
+/// to the request this task answers; on any other task it does nothing.
+pub(crate) fn vault_read(took: Duration) {
+    let _ = LOCK_WAITS.try_with(|waits| {
+        waits
+            .vault_reads
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        waits.vault_micros.fetch_add(
+            took.as_micros().min(u64::MAX as u128) as u64,
+            std::sync::atomic::Ordering::Relaxed,
+        );
+    });
+}
 /// Runs `work` and answers, with its result, the milliseconds it waited for the store's lock
 /// in all: None when it never took it.
+#[cfg(test)]
 async fn measure_lock_waits<T>(work: impl std::future::Future<Output = T>) -> (T, Option<u64>) {
+    let (result, waits) = measure_waits(work).await;
+    (result, waits.lock_ms)
+}
+/// Runs `work` and answers, with its result, what it waited for (`Waits`).
+async fn measure_waits<T>(work: impl std::future::Future<Output = T>) -> (T, Waits) {
+    use std::sync::atomic::Ordering::Relaxed;
     let waits = Arc::new(LockWaits::default());
     let result = LOCK_WAITS.scope(waits.clone(), work).await;
     let lock_ms = waits
         .took
-        .load(std::sync::atomic::Ordering::Relaxed)
-        .then(|| waits.micros.load(std::sync::atomic::Ordering::Relaxed) / 1000);
-    (result, lock_ms)
+        .load(Relaxed)
+        .then(|| waits.micros.load(Relaxed) / 1000);
+    (
+        result,
+        Waits {
+            lock_ms,
+            vault_reads: waits.vault_reads.load(Relaxed),
+            vault_ms: waits.vault_micros.load(Relaxed) / 1000,
+        },
+    )
 }
 /// SB-174: a request the owner took longer than this to answer is logged, so a client's stall
 /// can be told apart from one on the way to the owner.
 const SLOW_REQUEST: Duration = Duration::from_secs(5);
 /// H-2: `lock_ms`, the time it waited for the store's lock, is named when it took that lock.
-fn slow_request(kind: &'static str, took: Duration, lock_ms: Option<u64>) {
+/// SB-347: `vault_reads` and `vault_ms`, the credentials it read and how long those reads took
+/// in all, when it read one: a slow request that read none waited for neither.
+fn slow_request(kind: &'static str, took: Duration, waits: Waits) {
     if took >= SLOW_REQUEST {
+        let number = |n: u64| oplog::Field::Number(n.min(i64::MAX as u64) as i64);
         let mut fields = vec![
             ("operation", oplog::Field::Code(kind)),
             ("ms", oplog::Field::Number(took.as_millis() as i64)),
         ];
-        if let Some(lock_ms) = lock_ms {
-            fields.push((
-                "lock_ms",
-                oplog::Field::Number(lock_ms.min(i64::MAX as u64) as i64),
-            ));
+        if let Some(lock_ms) = waits.lock_ms {
+            fields.push(("lock_ms", number(lock_ms)));
+        }
+        if waits.vault_reads > 0 {
+            fields.push(("vault_reads", number(waits.vault_reads)));
+            fields.push(("vault_ms", number(waits.vault_ms)));
         }
         oplog::event("control_slow", &fields);
     }
@@ -629,15 +671,39 @@ mod tests {
     }
     use super::*;
     use crate::Owner;
+    use serde_json::json;
     use switchboard_core::{AuthKind, MemoryVault, Provider, Store};
     #[test]
     fn a_slow_request_names_how_long_it_waited_for_the_stores_lock() {
         // H-2 (SB-174): `control_slow` carries `lock_ms` when the operation took the store's
         // lock, and leaves it out when it never did; codes and numbers only.
         let ((), events) = crate::oplog::capture_fields(|| {
-            slow_request("sessions", Duration::from_millis(6_400), Some(6_350));
-            slow_request("handovers", Duration::from_millis(5_100), None);
-            slow_request("usage", Duration::from_millis(40), Some(30));
+            slow_request(
+                "sessions",
+                Duration::from_millis(6_400),
+                Waits {
+                    lock_ms: Some(6_350),
+                    ..Waits::default()
+                },
+            );
+            slow_request("handovers", Duration::from_millis(5_100), Waits::default());
+            slow_request(
+                "usage",
+                Duration::from_millis(40),
+                Waits {
+                    lock_ms: Some(30),
+                    ..Waits::default()
+                },
+            );
+            slow_request(
+                "recovery",
+                Duration::from_millis(20_500),
+                Waits {
+                    lock_ms: None,
+                    vault_reads: 2,
+                    vault_ms: 18_900,
+                },
+            );
         });
         assert_eq!(
             events,
@@ -655,6 +721,15 @@ mod tests {
                     vec![
                         ("operation", oplog::Field::Code("handovers")),
                         ("ms", oplog::Field::Number(5_100)),
+                    ]
+                ),
+                (
+                    "control_slow",
+                    vec![
+                        ("operation", oplog::Field::Code("recovery")),
+                        ("ms", oplog::Field::Number(20_500)),
+                        ("vault_reads", oplog::Field::Number(2)),
+                        ("vault_ms", oplog::Field::Number(18_900)),
                     ]
                 ),
             ]
@@ -728,6 +803,181 @@ mod tests {
             measure_lock_waits(async { crate::blocking::run(|| store.flush().unwrap()) }).await;
         removing.join().unwrap().unwrap();
         assert!(waited.is_some_and(|ms| ms >= 200), "{waited:?}");
+        owner.shutdown(Duration::from_secs(8)).await;
+    }
+    /// SB-347: a vault standing in for macOS's Keychain on a swapping machine: one process-wide
+    /// lock that a slow read holds. While `closed`, every read waits until it opens; reads of
+    /// `failing` fail (a `security` timeout), so `sign_in_required` can cache nothing.
+    #[derive(Default)]
+    struct HeldKeychain {
+        inner: MemoryVault,
+        failing: std::sync::Mutex<Option<String>>,
+        closed: std::sync::Mutex<bool>,
+        opened: std::sync::Condvar,
+        waiting: std::sync::atomic::AtomicUsize,
+    }
+    impl HeldKeychain {
+        fn close(&self) {
+            *self.closed.lock().unwrap() = true;
+        }
+        fn open(&self) {
+            *self.closed.lock().unwrap() = false;
+            self.opened.notify_all();
+        }
+    }
+    impl switchboard_core::Vault for HeldKeychain {
+        fn get(&self, id: &str) -> Result<switchboard_core::Credential, String> {
+            let mut closed = self.closed.lock().unwrap();
+            if *closed {
+                self.waiting
+                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                while *closed {
+                    closed = self.opened.wait(closed).unwrap();
+                }
+            }
+            drop(closed);
+            if self.failing.lock().unwrap().as_deref() == Some(id) {
+                return Err("Credential storage unavailable".into());
+            }
+            self.inner.get(id)
+        }
+        fn put(&self, id: &str, value: &switchboard_core::Credential) -> Result<(), String> {
+            self.inner.put(id, value)
+        }
+        fn delete(&self, id: &str) -> Result<(), String> {
+            self.inner.delete(id)
+        }
+    }
+    /// Opens the keychain when the test ends, passed or not, so no read stays parked.
+    struct OpenOnDrop(Arc<HeldKeychain>);
+    impl Drop for OpenOnDrop {
+        fn drop(&mut self) {
+            self.0.open();
+        }
+    }
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_request_counts_the_credentials_it_read() {
+        // SB-347: `control_slow` names the credential reads a request made and their time, so a
+        // request slowed by the Keychain is told from one slowed by anything else.
+        let tmp = tempfile::tempdir().unwrap();
+        let owner = Owner::start(tmp.path().to_owned(), Arc::new(MemoryVault::default()))
+            .await
+            .unwrap();
+        let store = owner.runtime.store.clone();
+        let account = store
+            .add(
+                "Synthetic".into(),
+                Provider::Claude,
+                AuthKind::ApiKey,
+                "default".into(),
+                switchboard_core::Credential::parse(
+                    Provider::Claude,
+                    AuthKind::ApiKey,
+                    "synthetic",
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        let (_, none) = measure_waits(async { store.snapshot().unwrap() }).await;
+        assert_eq!(none.vault_reads, 0);
+        let (_, read) = measure_waits(async {
+            crate::blocking::run(|| store.stored_credential(&account.id).unwrap())
+        })
+        .await;
+        assert_eq!(read.vault_reads, 1);
+        owner.shutdown(Duration::from_secs(8)).await;
+    }
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn read_only_requests_answer_while_a_slow_keychain_read_holds_the_keychain() {
+        // SB-347 (2026-11-13): `recovery` read every ended account's credential on each call,
+        // behind the process-wide Keychain lock a slow read held (up to 9 s a read on a swapping
+        // machine), and an uncertain read cached nothing: the median call took 20.5 s. Read-only
+        // requests now answer from what the background pass knows and never wait for the
+        // Keychain.
+        let tmp = tempfile::tempdir().unwrap();
+        let vault = Arc::new(HeldKeychain::default());
+        let _open = OpenOnDrop(vault.clone());
+        let owner = Owner::start(tmp.path().to_owned(), vault.clone())
+            .await
+            .unwrap();
+        let runtime = owner.runtime.clone();
+        let credential =
+            switchboard_core::Credential::parse(Provider::Claude, AuthKind::ApiKey, "synthetic")
+                .unwrap();
+        let account = runtime
+            .store
+            .add(
+                "Synthetic".into(),
+                Provider::Claude,
+                AuthKind::ApiKey,
+                "default".into(),
+                credential.clone(),
+            )
+            .unwrap();
+        // The provider ended the seat; its credential cannot be read (the Keychain times out).
+        runtime.refresh.reject(&account.id, &credential);
+        *vault.failing.lock().unwrap() = Some(account.id.clone());
+        let first = runtime.execute(Operation::Recovery).await.unwrap();
+        assert_eq!(first["sessions"], json!([]));
+        let home = tmp.path().join("runtimes").join("claude-default");
+        switchboard_core::private_fs::private_dir(&home).unwrap();
+        let launch = crate::launches::new_id();
+        crate::launches::record(
+            tmp.path(),
+            &home,
+            json!({"account_id": account.id, "provider": "claude", "launched_at": 100}),
+            &launch,
+        )
+        .unwrap();
+        // A slow read holds the Keychain.
+        vault.close();
+        let holder = {
+            let store = runtime.store.clone();
+            let id = account.id.clone();
+            std::thread::spawn(move || store.stored_credential(&id).is_err())
+        };
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        while vault.waiting.load(std::sync::atomic::Ordering::SeqCst) == 0 {
+            assert!(std::time::Instant::now() < deadline, "the read never began");
+            tokio::time::sleep(Duration::from_millis(1)).await;
+        }
+        for operation in [
+            Operation::Recovery,
+            Operation::Sessions { all: true },
+            Operation::Launches { launch_id: None },
+            Operation::MonitorStatus,
+        ] {
+            let kind = operation_kind(&operation);
+            let started = std::time::Instant::now();
+            let request = {
+                let runtime = runtime.clone();
+                tokio::spawn(async move { runtime.execute(operation).await })
+            };
+            let answer = tokio::time::timeout(Duration::from_secs(5), request)
+                .await
+                .unwrap_or_else(|_| panic!("{kind} waited for the held Keychain"))
+                .unwrap();
+            assert!(answer.is_ok(), "{kind}: {answer:?}");
+            assert!(
+                started.elapsed() < Duration::from_secs(2),
+                "{kind} took {:?}",
+                started.elapsed()
+            );
+        }
+        let recovery = runtime.execute(Operation::Recovery).await.unwrap();
+        assert_eq!(recovery["sessions"], json!([]));
+        let launches = runtime
+            .execute(Operation::Launches { launch_id: None })
+            .await
+            .unwrap();
+        assert_eq!(launches["total"], 1);
+        let status = runtime.execute(Operation::MonitorStatus).await.unwrap();
+        assert_eq!(status["sign_in_required"], json!([account.id]));
+        vault.open();
+        assert!(
+            holder.join().unwrap(),
+            "the held read failed as the vault said"
+        );
         owner.shutdown(Duration::from_secs(8)).await;
     }
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

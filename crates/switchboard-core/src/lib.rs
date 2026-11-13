@@ -654,6 +654,9 @@ struct CountedVault {
     inner: Arc<dyn Vault>,
     writes: Arc<std::sync::atomic::AtomicU64>,
     writing: Mutex<std::collections::HashMap<String, usize>>,
+    /// SB-347: told, on the reading thread, how long each credential read took (`control_slow`'s
+    /// `vault_ms`), the wait for the Keychain's process-wide lock included.
+    read_observer: std::sync::OnceLock<fn(std::time::Duration)>,
 }
 impl CountedVault {
     fn written(&self, id: &str, write: impl FnOnce() -> Result<(), String>) -> Result<(), String> {
@@ -696,7 +699,12 @@ impl Drop for WriteMark<'_> {
 }
 impl Vault for CountedVault {
     fn get(&self, id: &str) -> Result<Credential, String> {
-        self.inner.get(id)
+        let started = std::time::Instant::now();
+        let read = self.inner.get(id);
+        if let Some(observer) = self.read_observer.get() {
+            observer(started.elapsed());
+        }
+        read
     }
     fn put(&self, id: &str, value: &Credential) -> Result<(), String> {
         self.written(id, || self.inner.put(id, value))
@@ -918,6 +926,7 @@ impl Store {
                 inner: vault,
                 writes: credential_changes.clone(),
                 writing: Default::default(),
+                read_observer: Default::default(),
             }),
             published: std::sync::RwLock::new(Arc::new(state.clone())),
             slowest_write: Default::default(),
@@ -970,6 +979,11 @@ impl Store {
     /// lock waited (zero when it was free). Set once; a second observer is ignored.
     pub fn observe_lock_waits(&self, observer: fn(std::time::Duration)) {
         let _ = self.lock_observer.set(observer);
+    }
+    /// SB-347: `observer` is told, on the reading thread, how long each credential read took.
+    /// Set once; a second observer is ignored.
+    pub fn observe_vault_reads(&self, observer: fn(std::time::Duration)) {
+        let _ = self.vault.read_observer.set(observer);
     }
     /// H-2: the lock every credential writer holds across its Keychain calls (see
     /// `credential_writes`). Taken before the metadata lock, never while holding it.
@@ -2577,6 +2591,7 @@ mod write_mark_tests {
             inner: Arc::new(MemoryVault::default()),
             writes: Default::default(),
             writing: Default::default(),
+            read_observer: Default::default(),
         });
         let (in_write, wrote) = std::sync::mpsc::channel();
         let (finish, finished) = std::sync::mpsc::channel::<()>();

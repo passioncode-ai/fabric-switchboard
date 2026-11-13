@@ -285,13 +285,113 @@ fn read(root: &Path, id: &str) -> Option<Value> {
     if !valid_id(id) {
         return None;
     }
+    let path = path(root, id);
+    // SB-347: a record unchanged since it was last read is answered from memory, its file
+    // only looked at (`lstat`). Each private read opens the file and narrows its mode (a
+    // metadata write), and the history, the recovery list and each session row read every
+    // record they name: 575 records on a swapping machine took 10 to 20 s a call, measured on
+    // the owner (`control_slow`, 2026-11-13), while the same files read offline took 0.11 s.
+    let stamp = fs::symlink_metadata(&path)
+        .ok()
+        .filter(|meta| meta.file_type().is_file())
+        .map(|meta| RecordStamp::of(&meta));
+    if let Some(stamp) = &stamp {
+        if let Some(record) = RECORDS.get(&path, stamp) {
+            return Some(record);
+        }
+    }
+    #[cfg(test)]
+    RECORD_READS.with(|n| n.set(n.get() + 1));
     // Not `read_private_strict`, which is for capabilities: a record holds none, and a strict
     // read drops one whose access list was widened (a copied folder, a Windows file that
     // inherited its folder's list) from the history; this read narrows it again.
-    switchboard_core::private_fs::read_private(&path(root, id), MAX_RECORD)
+    let record = switchboard_core::private_fs::read_private(&path, MAX_RECORD)
         .ok()
         .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
-        .filter(Value::is_object)
+        .filter(Value::is_object);
+    match (&record, stamp) {
+        (Some(record), Some(stamp)) => RECORDS.put(path, stamp, record.clone()),
+        _ => RECORDS.forget(&path),
+    }
+    record
+}
+/// SB-347: what identifies one version of a record file without opening it. Every write
+/// replaces the file by rename (`private_write`), so a new version is a new inode; its length
+/// and modification time catch a file rewritten in place, and its mode one whose access was
+/// widened, which the read narrows again. Not its change time: that narrowing moves it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct RecordStamp {
+    file: (u64, u64),
+    len: u64,
+    modified: Option<std::time::SystemTime>,
+    mode: u32,
+}
+impl RecordStamp {
+    fn of(meta: &fs::Metadata) -> Self {
+        #[cfg(unix)]
+        let file = {
+            use std::os::unix::fs::MetadataExt;
+            (meta.dev(), meta.ino())
+        };
+        #[cfg(not(unix))]
+        let file = (
+            0,
+            meta.created()
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map_or(0, |d| d.as_nanos() as u64),
+        );
+        #[cfg(unix)]
+        let mode = {
+            use std::os::unix::fs::PermissionsExt;
+            meta.permissions().mode()
+        };
+        #[cfg(not(unix))]
+        let mode = u32::from(meta.permissions().readonly());
+        Self {
+            file,
+            len: meta.len(),
+            modified: meta.modified().ok(),
+            mode,
+        }
+    }
+}
+/// SB-347: the records as last read, by path, each with the stamp it was read at. Bounded: past
+/// `RECORDS_KEPT` entries it starts again (the owner keeps one data folder's records; tests make
+/// many folders). The lock is held only to look up or to keep, never across a read.
+struct RecordCache(Mutex<std::collections::HashMap<PathBuf, (RecordStamp, Value)>>);
+const RECORDS_KEPT: usize = 8_192;
+static RECORDS: std::sync::LazyLock<RecordCache> =
+    std::sync::LazyLock::new(|| RecordCache(Mutex::new(std::collections::HashMap::new())));
+impl RecordCache {
+    fn get(&self, path: &Path, stamp: &RecordStamp) -> Option<Value> {
+        let kept = self.0.lock().ok()?;
+        kept.get(path)
+            .filter(|(at, _)| at == stamp)
+            .map(|(_, record)| record.clone())
+    }
+    fn put(&self, path: PathBuf, stamp: RecordStamp, record: Value) {
+        if let Ok(mut kept) = self.0.lock() {
+            if kept.len() >= RECORDS_KEPT && !kept.contains_key(&path) {
+                kept.clear();
+            }
+            kept.insert(path, (stamp, record));
+        }
+    }
+    fn forget(&self, path: &Path) {
+        if let Ok(mut kept) = self.0.lock() {
+            kept.remove(path);
+        }
+    }
+}
+#[cfg(test)]
+thread_local! {
+    /// SB-347: how many record files this thread opened (a cached answer opens none).
+    static RECORD_READS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+#[cfg(test)]
+fn record_reads() -> usize {
+    RECORD_READS.with(std::cell::Cell::get)
 }
 fn write(root: &Path, id: &str, record: &Value) -> Result<(), String> {
     switchboard_core::private_fs::private_dir(&root.join(DIR))?;
@@ -829,23 +929,42 @@ pub(crate) fn add_host(root: &Path, record: &mut Value) {
 }
 /// The record with its state now: its home's own state while the home still holds this launch,
 /// else `ended` (a later launch of the same home replaced it, which only happens after it ended).
-fn with_state(root: &Path, mut record: Value) -> Value {
+fn with_state(root: &Path, record: Value) -> Value {
+    with_state_in(root, record, &mut Homes::default())
+}
+/// SB-347: what one answer learned about each home: the launch its `.session.json` names and
+/// the home's state. A history lists up to 500 records of a few dozen homes; each home is read
+/// once per answer instead of once per record.
+#[derive(Default)]
+struct Homes(std::collections::HashMap<PathBuf, (Option<Option<String>>, Option<HomeState>)>);
+type HomeState = (&'static str, Option<i64>);
+fn with_state_in(root: &Path, mut record: Value, homes: &mut Homes) -> Value {
     let id = record["launch_id"].as_str().map(str::to_owned);
     let home = home_of(root, &record);
-    let current = home.as_ref().and_then(|home| {
-        // Read as the session list reads it (`launch::read_regular`), so the two never differ.
-        switchboard_core::private_fs::read_private(
-            &home.join(crate::launch::SESSION_RECORD),
-            MAX_RECORD,
-        )
-        .ok()
-        .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
-    });
-    let (state, started) = match (&home, current) {
-        (Some(home), Some(current)) if current["launch_id"].as_str() == id.as_deref() => {
-            crate::launch::home_state(home)
+    let (state, started) = match &home {
+        Some(home) => {
+            let (current, state) = homes.0.entry(home.clone()).or_insert_with(|| {
+                // Read as the session list reads it (`launch::read_regular`), so the two
+                // never differ.
+                let current = switchboard_core::private_fs::read_private(
+                    &home.join(crate::launch::SESSION_RECORD),
+                    MAX_RECORD,
+                )
+                .ok()
+                .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
+                .map(|current| current["launch_id"].as_str().map(str::to_owned));
+                (current, None)
+            });
+            if current
+                .as_ref()
+                .is_some_and(|current| current.as_deref() == id.as_deref())
+            {
+                *state.get_or_insert_with(|| crate::launch::home_state(home))
+            } else {
+                ("ended", None)
+            }
         }
-        _ => ("ended", None),
+        None => ("ended", None),
     };
     record["state"] = state.into();
     if record["started_at"].is_null() {
@@ -894,10 +1013,11 @@ pub fn history(root: &Path) -> (Vec<Value>, usize) {
     let mut records: Vec<Value> = all(root).into_values().collect();
     records.sort_by_key(|r| std::cmp::Reverse(r["launched_at"].as_i64().unwrap_or(0)));
     let total = records.len();
+    let mut homes = Homes::default();
     let listed = records
         .into_iter()
         .take(HISTORY_LIMIT)
-        .map(|r| with_state(root, r))
+        .map(|r| with_state_in(root, r, &mut homes))
         .collect();
     (listed, total)
 }
@@ -1112,6 +1232,60 @@ mod tests {
         }
     }
 
+    /// SB-347: a history answer reads no record file that did not change since the last one
+    /// (575 records took 10 to 20 s a call through a swapping owner); a record written since,
+    /// by rename or in place, is read again, and only it.
+    #[test]
+    fn an_unchanged_record_is_answered_from_memory_and_a_changed_one_is_read_again() {
+        let (_temp, root, id) = fixture();
+        let home = root.join("runtimes").join("claude-default");
+        let other = new_id();
+        record(
+            &root,
+            &home,
+            json!({"account_id": "b", "provider": "claude", "launched_at": 90}),
+            &other,
+        )
+        .unwrap();
+        let (first, total) = history(&root);
+        assert_eq!(total, 2);
+        let reads = record_reads();
+        let (again, _) = history(&root);
+        assert_eq!(
+            record_reads(),
+            reads,
+            "nothing changed: no record file opened"
+        );
+        assert_eq!(again, first);
+        event(&root, &id, Event::Turn, None, None, 210);
+        let (after, _) = history(&root);
+        assert_eq!(
+            record_reads(),
+            reads + 1,
+            "only the record the turn rewrote"
+        );
+        assert_eq!(after[0]["turns"], 1);
+        // A file changed in place (not by Switchboard's rename) is seen too.
+        let path = path(&root, &other);
+        let mut changed: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        changed["label"] = "edited in place".into();
+        fs::write(&path, changed.to_string()).unwrap();
+        let (after, _) = history(&root);
+        assert_eq!(after[1]["label"], "edited in place");
+        // One whose access was widened is read again, and narrowed.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
+            history(&root);
+            let mode = fs::metadata(&path).unwrap().permissions().mode();
+            assert_eq!(mode & 0o077, 0, "narrowed again");
+        }
+        // A record removed is gone from the answer.
+        fs::remove_file(&path).unwrap();
+        assert_eq!(history(&root).1, 1);
+        assert!(get(&root, &other).is_none());
+    }
     #[test]
     fn the_start_and_stop_hooks_record_the_session_its_transcript_and_its_turns() {
         let (_temp, root, id) = fixture();
