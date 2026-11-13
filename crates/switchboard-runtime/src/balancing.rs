@@ -583,7 +583,7 @@ pub fn apply(
         } else if !lend && outcome != "failed" {
             settings
                 .lent
-                .retain(|l| !(l.account == a.account && l.to == a.to));
+                .retain(|l| l.account != a.account || l.to != a.to);
         }
         if a.edit {
             settings.moved.insert(a.account.clone(), now);
