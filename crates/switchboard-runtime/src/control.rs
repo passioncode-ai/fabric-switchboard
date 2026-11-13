@@ -441,6 +441,11 @@ fn limit_secs(operation: &Operation) -> u64 {
         Operation::OrganizationAssign { .. } => 420,
         // SB-332: one ssh read per known machine.
         Operation::Targets { probe: true } => 420,
+        // SB-355: every machine read at once, three ssh calls of 20 s each at most; `ssh -G`
+        // per known machine.
+        Operation::Machines { live: true }
+        | Operation::MachinesAdopt { .. }
+        | Operation::MachinePlace { .. } => 120,
         // SB-336: a group change reads its repositories' Git files and rewrites their folder
         // bindings; on a starved machine `move_root` took 44 s (2026-11-11), so a 30 s client
         // gave up on a change that went on and finished.

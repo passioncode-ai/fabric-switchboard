@@ -638,6 +638,14 @@ pub fn recall_finish(target: &str, taken: &Taken, program: &Program<'_>, run: &R
 /// stalled it until the deadline), at most 1 MiB and 64 KiB; on a failure both are returned,
 /// since the other switchboard prints its refusal (`{"ok":false,...}`) on standard error.
 pub fn ssh_runner(args: &[String], stdin: Option<&[u8]>) -> Result<String, String> {
+    ssh_runner_for(args, stdin, std::time::Duration::from_secs(120))
+}
+/// [`ssh_runner`] given up after `limit` (SB-355: a live read of a machine group waits 20 s).
+pub fn ssh_runner_for(
+    args: &[String],
+    stdin: Option<&[u8]>,
+    limit: std::time::Duration,
+) -> Result<String, String> {
     use std::io::{Read, Write};
     let program = crate::launch::find_program("ssh").ok_or("ssh is not installed here.")?;
     let mut child = std::process::Command::new(program)
@@ -679,7 +687,7 @@ pub fn ssh_runner(args: &[String], stdin: Option<&[u8]>) -> Result<String, Strin
             let _ = input.write_all(bytes);
         }
     }
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
+    let deadline = std::time::Instant::now() + limit;
     let status = loop {
         if let Some(status) = child.try_wait().map_err(|_| "ssh failed.".to_string())? {
             break status;

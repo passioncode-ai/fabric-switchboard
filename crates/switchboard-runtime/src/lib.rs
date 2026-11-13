@@ -33,6 +33,7 @@ pub mod launch;
 pub mod launches;
 mod limits;
 pub mod machine_sessions;
+pub mod machines;
 mod monitor;
 pub mod onboarding;
 pub mod oplog;
@@ -331,7 +332,12 @@ pub enum Operation {
     /// answers it here, remove the other machine's copy and prove it gone.
     RecallAccount {
         id: String,
-        from: String,
+        /// SB-355: absent, the machine the account's move recorded, else its machine group's name.
+        #[serde(default)]
+        from: Option<String>,
+        /// SB-355: the group here it comes back to; absent, the one it left, else the default.
+        #[serde(default)]
+        pool: Option<String>,
         /// The account's id there; default: the one the recorded move names.
         #[serde(default)]
         remote_id: Option<String>,
@@ -344,6 +350,23 @@ pub enum Operation {
         #[serde(default)]
         decision: Option<spend::Decision>,
     },
+    /// SB-355 (DEC-0013): the machine groups with their accounts, and the accounts marked used
+    /// elsewhere that no machine group holds; with `live`, each machine read over ssh as well.
+    Machines {
+        #[serde(default)]
+        live: bool,
+    },
+    /// SB-355: place the accounts already marked used elsewhere in their machines' groups (by the
+    /// recorded move, else their location); without `apply`, only what it would do.
+    MachinesAdopt {
+        #[serde(default)]
+        apply: bool,
+    },
+    /// SB-355: record that account `id` lives on machine `on` (an ssh name), without ssh: it
+    /// joins that machine's group and leaves every group here.
+    MachinePlace { id: String, on: String },
+    /// SB-355: remove a machine group that holds no account any more.
+    MachineForget { machine: String },
     /// SB-283: moves an account's sign-in to another machine over ssh (`account_send`): marked
     /// used elsewhere here first, saved there, checked there, undone on any failure.
     SendAccount {
@@ -1314,6 +1337,12 @@ impl Runtime {
                 | Operation::SurrenderAccount { .. }
                 | Operation::RecallAccount { .. }
                 | Operation::Seats { .. }
+                // SB-355: `ssh -G` and the live reads run outside the store; its writes are
+                // their own short calls.
+                | Operation::Machines { .. }
+                | Operation::MachinesAdopt { .. }
+                | Operation::MachinePlace { .. }
+                | Operation::MachineForget { .. }
                 // SB-327: ssh reads of another machine; the store is only read.
                 | Operation::RemoteStatus { .. }
                 | Operation::RemoteCheck { .. }
@@ -3220,6 +3249,20 @@ impl Owner {
             let root = runtime.root.clone();
             let store = runtime.store.clone();
             tokio::task::spawn_blocking(move || {
+                // SB-355 (DEC-0013): the accounts already used elsewhere join their machines'
+                // groups, once (`machine-groups.json` records it); `ssh -G` runs here, off the
+                // start path and never under the store's lock.
+                if let Some((placed, left)) =
+                    machines::adopt_once(&root, &store, monitor::now(), &targets::ssh_identity)
+                {
+                    oplog::event(
+                        "machine_groups",
+                        &[
+                            ("placed", oplog::Field::Number(placed as i64)),
+                            ("unplaced", oplog::Field::Number(left as i64)),
+                        ],
+                    );
+                }
                 // SB-99: Kimi sign-ins that ended without signing in, the same way.
                 let kimi = kimi::sweep_logins(&root, &store);
                 if kimi > 0 {
@@ -5722,6 +5765,33 @@ async fn execute(
             remote_data_dir,
             decision,
         } => {
+            // SB-355: from one machine to another is a call back, then the move.
+            let mut recalled = Value::Null;
+            if let Some(machine) = store.snapshot()?.machine_of(&id).cloned() {
+                let same = machine.named(&to)
+                    || machine.identity.is_some() && {
+                        let to = to.clone();
+                        blocking::run(move || targets::ssh_identity(&to)) == machine.identity
+                    };
+                if same {
+                    return Err(machines::ALREADY_THERE.into());
+                }
+                recalled = Box::pin(execute(
+                    store.clone(),
+                    root,
+                    runtime,
+                    Operation::RecallAccount {
+                        id: id.clone(),
+                        from: None,
+                        pool: None,
+                        remote_id: None,
+                        program: None,
+                        remote_data_dir: None,
+                        decision: decision.clone(),
+                    },
+                ))
+                .await?;
+            }
             let pool = pool.unwrap_or_else(|| "default".into());
             let program = program.unwrap_or_else(|| account_send::REMOTE_DEFAULT.into());
             let remote = account_send::Program {
@@ -5758,7 +5828,68 @@ async fn execute(
                 moved["sent"].as_str(),
                 Some(&remote),
             );
+            let mut moved = moved;
+            // SB-355 (DEC-0013): it lives on that machine now, in its group and no group here.
+            // The move stands whatever this answers.
+            let joined = {
+                let (store, root, id, to) = (store.clone(), root.to_owned(), id.clone(), to.clone());
+                blocking::run(move || {
+                    let at = machines::reference(&root, &store.snapshot()?, &to, &targets::ssh_identity);
+                    store.join_machine(&id, &at, monitor::now())
+                })
+            };
+            match joined {
+                Ok(m) => moved["machine_group"] = json!({"pool": m.pool, "name": m.name}),
+                Err(error) => moved["machine_group_error"] = json!(error),
+            }
+            if !recalled.is_null() {
+                moved["recalled"] = recalled;
+            }
             Ok(moved)
+        }
+        Operation::Machines { live } => {
+            let snapshot = store.snapshot()?;
+            if !live {
+                return Ok(machines::list(root, &snapshot));
+            }
+            let root = root.to_owned();
+            Ok(blocking::run(move || {
+                machines::live(&root, &snapshot, &machines::live_status)
+            }))
+        }
+        Operation::MachinesAdopt { apply } => {
+            let (store, root) = (store.clone(), root.to_owned());
+            blocking::run(move || {
+                machines::adopt(&root, &store, apply, monitor::now(), &targets::ssh_identity)
+            })
+        }
+        Operation::MachinePlace { id, on } => {
+            if !account_send::target_valid(&on) {
+                return Err(switchboard_core::machines::MACHINE_NAME_INVALID.into());
+            }
+            let seat = seats::outstanding(root, &id);
+            let (store, root) = (store.clone(), root.to_owned());
+            let machine = blocking::run(move || {
+                let at = machines::reference(&root, &store.snapshot()?, &on, &targets::ssh_identity);
+                // SB-315: a sign-in moved to a machine and not called back is that machine's;
+                // placing it on another would lose the way back.
+                if let Some(seat) = seat {
+                    let same = std::iter::once(&at.target)
+                        .chain(&at.aliases)
+                        .any(|n| n.eq_ignore_ascii_case(&seat.machine))
+                        || at.identity.is_some()
+                            && targets::ssh_identity(&seat.machine) == at.identity;
+                    if !same {
+                        return Err(account_send::MOVED_AWAY.to_owned());
+                    }
+                }
+                store.join_machine(&id, &at, monitor::now())
+            })?;
+            Ok(json!({"pool": machine.pool, "name": machine.name, "aliases": machine.aliases}))
+        }
+        Operation::MachineForget { machine } => {
+            let gone = store.forget_machine(&machine)?;
+            Ok(json!({"forgotten": gone.pool, "name": gone.name}))
         }
         Operation::Seats { limit } => Ok(json!({
             "seats": seats::recent(root, limit.unwrap_or(50).clamp(1, 1000)),
@@ -5865,11 +5996,25 @@ async fn execute(
         Operation::RecallAccount {
             id,
             from,
+            pool: home,
             remote_id,
             program,
             remote_data_dir,
             decision,
         } => {
+            // SB-355: by default the machine the move named, else its machine group's name.
+            let snapshot = store.snapshot()?;
+            let from = from
+                .or_else(|| seats::outstanding(root, &id).map(|s| s.machine))
+                .or_else(|| snapshot.machine_of(&id).map(|m| m.name.clone()))
+                .ok_or(account_send::NOT_AWAY)?;
+            if let Some(home) = &home {
+                if snapshot.machine_of(&id).is_some() {
+                    store.set_return(&id, home)?;
+                } else if home != "default" && snapshot.project_of_pool(home).is_none() {
+                    return Err("Project not found.".into());
+                }
+            }
             let grant = seats::last_grant(root, &id, &from);
             // SB-315: by default the same switchboard and data folder the move used there.
             let program = program
@@ -5949,6 +6094,18 @@ async fn execute(
                     monitor::now(),
                     &account_send::ssh_runner,
                 )?;
+                // SB-355: it went back to that machine, so back to its group too.
+                let (store, root, id, from) =
+                    (store.clone(), root.to_owned(), id.clone(), from.clone());
+                let _ = blocking::run(move || {
+                    let at = machines::reference(
+                        &root,
+                        &store.snapshot()?,
+                        &from,
+                        &targets::ssh_identity,
+                    );
+                    store.join_machine(&id, &at, monitor::now())
+                });
                 return Err(account_send::NOT_RETURNED.into());
             }
             let pool = store
@@ -5991,6 +6148,27 @@ async fn execute(
                 None,
                 None,
             );
+            let mut finished = finished;
+            // SB-355: an account that was in a group here before machine groups goes where it was
+            // asked to; one that was on a machine came home there already.
+            let mut pool = pool;
+            if let Some(home) = home.filter(|h| h != &pool) {
+                match Box::pin(execute(
+                    store.clone(),
+                    root,
+                    runtime,
+                    Operation::MoveAccount {
+                        id: id.clone(),
+                        pool: home.clone(),
+                    },
+                ))
+                .await
+                {
+                    Ok(_) => pool = home,
+                    Err(error) => finished["placed_error"] = json!(error),
+                }
+            }
+            finished["pool"] = json!(pool);
             Ok(finished)
         }
         Operation::HandOver { id, to, decision } => {
