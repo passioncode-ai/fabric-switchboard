@@ -208,6 +208,17 @@ pub(crate) fn merge(
     carried
 }
 
+/// The Keychain service of the credential item of the Claude home at `folder`.
+fn service_of(folder: &Path) -> String {
+    crate::external::service(&folder.to_string_lossy())
+}
+
+/// Per server URL: the homes signed in, and the server's names.
+type ByUrl = BTreeMap<String, (Vec<String>, Vec<String>)>;
+/// Runs a target's read and write under its credential locks.
+pub(crate) type Locked<'a> =
+    &'a dyn Fn(&dyn Fn() -> Result<usize, String>) -> Result<usize, String>;
+
 /// The Claude homes on this machine: the ordinary one first (when known), then those Switchboard
 /// made under `root`, by kind and id. `claude_accounts`, when given, keeps only the account homes
 /// of those ids (a Codex account's home holds no Claude item).
@@ -239,7 +250,7 @@ pub(crate) fn homes(
             .collect();
         found.sort();
         for (id, folder) in found {
-            let service = crate::launch::keychain_service(&folder);
+            let service = service_of(&folder);
             out.push(Home {
                 kind,
                 id: Some(id),
@@ -274,8 +285,8 @@ fn label(home: &Home) -> String {
 /// in others whose item was read; `same_url`, two names for one URL in one home.
 pub(crate) fn report(homes: &[Home], items: &dyn Items) -> Value {
     let mut rows = vec![];
-    // url -> (homes signed in, homes read without it, names)
-    let mut by_url: BTreeMap<String, (Vec<String>, Vec<String>, Vec<String>)> = BTreeMap::new();
+    // url -> (homes signed in, names)
+    let mut by_url: ByUrl = BTreeMap::new();
     let mut read_homes = vec![];
     let mut findings = vec![];
     for home in homes {
@@ -297,8 +308,8 @@ pub(crate) fn report(homes: &[Home], items: &dyn Items) -> Value {
                 names.push(&e.name);
             }
             let row = by_url.entry(e.url.clone()).or_default();
-            if !row.2.contains(&e.name) {
-                row.2.push(e.name.clone());
+            if !row.1.contains(&e.name) {
+                row.1.push(e.name.clone());
             }
             if e.signed_in && !row.0.contains(&label(home)) {
                 row.0.push(label(home));
@@ -335,7 +346,7 @@ pub(crate) fn report(homes: &[Home], items: &dyn Items) -> Value {
         }));
     }
     let mut servers = vec![];
-    for (url, (signed, _, names)) in &mut by_url {
+    for (url, (signed, names)) in &mut by_url {
         let missing: Vec<&String> = read_homes.iter().filter(|h| !signed.contains(h)).collect();
         if !signed.is_empty() && !missing.is_empty() {
             findings.push(json!({
@@ -372,7 +383,7 @@ pub(crate) fn carry(
     items: &dyn Items,
     cache: &Cache,
     now_ms: i64,
-    locked: &dyn Fn(&dyn Fn() -> Result<usize, String>) -> Result<usize, String>,
+    locked: Locked,
 ) -> Result<usize, String> {
     let mut lent = vec![];
     for home in sources.iter().filter(|h| h.service != target.service) {
@@ -516,7 +527,7 @@ impl Items for Native {
 pub(crate) fn ordinary() -> Option<(PathBuf, String)> {
     if let Some(dir) = std::env::var_os("CLAUDE_CONFIG_DIR").filter(|v| !v.is_empty()) {
         let dir = PathBuf::from(dir);
-        let service = crate::launch::keychain_service(&dir);
+        let service = service_of(&dir);
         return Some((dir, service));
     }
     crate::carry::claude_user_dir().map(|dir| (dir, "Claude Code-credentials".to_owned()))
@@ -535,7 +546,7 @@ static CACHE: std::sync::OnceLock<Cache> = std::sync::OnceLock::new();
 /// launch.
 pub(crate) fn carry_into(root: &Path, folder: &Path) {
     let all = homes(root, ordinary(), None);
-    let service = crate::launch::keychain_service(folder);
+    let service = service_of(folder);
     let target = Home {
         kind: "launch",
         id: None,
@@ -793,7 +804,7 @@ mod tests {
         );
         assert_eq!(
             found[1].service,
-            crate::launch::keychain_service(&root.path().join("homes/acc-2"))
+            service_of(&root.path().join("homes/acc-2"))
         );
     }
 }

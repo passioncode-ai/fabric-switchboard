@@ -198,6 +198,7 @@ async fn handshake_lists_tools_and_rejects_malformed_messages() {
             "switchboard_remote",
             "switchboard_machines",
             "switchboard_machine_set",
+            "switchboard_mcp_homes",
             "switchboard_targets",
             "switchboard_account_hand_over",
             "switchboard_account_receive",

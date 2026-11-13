@@ -164,7 +164,9 @@ struct Context {
     user: String,
     mac: bool,
 }
-fn service(raw: &str) -> String {
+/// Claude Code's Keychain service for a config folder named `raw` (SB-358 reads it on every
+/// platform: it names the item, nothing is read).
+pub(crate) fn service(raw: &str) -> String {
     let normalized: String = raw.nfc().collect();
     format!(
         "Claude Code-credentials-{}",
