@@ -364,9 +364,14 @@ pub enum Operation {
     },
     /// SB-355: record that account `id` lives on machine `on` (an ssh name), without ssh: it
     /// joins that machine's group and leaves every group here.
-    MachinePlace { id: String, on: String },
+    MachinePlace {
+        id: String,
+        on: String,
+    },
     /// SB-355: remove a machine group that holds no account any more.
-    MachineForget { machine: String },
+    MachineForget {
+        machine: String,
+    },
     /// SB-283: moves an account's sign-in to another machine over ssh (`account_send`): marked
     /// used elsewhere here first, saved there, checked there, undone on any failure.
     SendAccount {
@@ -5832,9 +5837,11 @@ async fn execute(
             // SB-355 (DEC-0013): it lives on that machine now, in its group and no group here.
             // The move stands whatever this answers.
             let joined = {
-                let (store, root, id, to) = (store.clone(), root.to_owned(), id.clone(), to.clone());
+                let (store, root, id, to) =
+                    (store.clone(), root.to_owned(), id.clone(), to.clone());
                 blocking::run(move || {
-                    let at = machines::reference(&root, &store.snapshot()?, &to, &targets::ssh_identity);
+                    let at =
+                        machines::reference(&root, &store.snapshot()?, &to, &targets::ssh_identity);
                     store.join_machine(&id, &at, monitor::now())
                 })
             };
@@ -5870,7 +5877,8 @@ async fn execute(
             let seat = seats::outstanding(root, &id);
             let (store, root) = (store.clone(), root.to_owned());
             let machine = blocking::run(move || {
-                let at = machines::reference(&root, &store.snapshot()?, &on, &targets::ssh_identity);
+                let at =
+                    machines::reference(&root, &store.snapshot()?, &on, &targets::ssh_identity);
                 // SB-315: a sign-in moved to a machine and not called back is that machine's;
                 // placing it on another would lose the way back.
                 if let Some(seat) = seat {

@@ -285,7 +285,10 @@ pub fn write(
         .filter(|a| credentials.contains_key(&a.id))
         .map(|mut a| {
             if crate::is_machine_pool(&a.pool) {
-                a.pool = returns_to.get(&a.id).cloned().unwrap_or_else(|| "default".into());
+                a.pool = returns_to
+                    .get(&a.id)
+                    .cloned()
+                    .unwrap_or_else(|| "default".into());
             }
             a
         })
@@ -1428,7 +1431,12 @@ mod tests {
         let snap = fresh.snapshot().unwrap();
         assert_eq!(snap.accounts[0].pool, machine.pool);
         assert!(!snap.accounts[0].enabled);
-        assert_eq!(snap.returns_to.get(&snap.accounts[0].id).map(String::as_str), Some("default"));
+        assert_eq!(
+            snap.returns_to
+                .get(&snap.accounts[0].id)
+                .map(String::as_str),
+            Some("default")
+        );
         assert_eq!(snap.machines, [machine]);
     }
     #[test]

@@ -57,7 +57,8 @@ pub struct Machine {
 impl Machine {
     /// Whether `name` is this machine's name or one of its aliases (case does not matter).
     pub fn named(&self, name: &str) -> bool {
-        self.name.eq_ignore_ascii_case(name) || self.aliases.iter().any(|a| a.eq_ignore_ascii_case(name))
+        self.name.eq_ignore_ascii_case(name)
+            || self.aliases.iter().any(|a| a.eq_ignore_ascii_case(name))
     }
     /// Its names, its own first.
     pub fn names(&self) -> Vec<&str> {
@@ -91,7 +92,9 @@ pub fn machine_name_valid(name: &str) -> bool {
 fn identity_valid(identity: &str) -> bool {
     !identity.is_empty()
         && identity.len() <= 300
-        && !identity.chars().any(|c| c.is_control() || c.is_whitespace())
+        && !identity
+            .chars()
+            .any(|c| c.is_control() || c.is_whitespace())
 }
 
 pub(crate) fn validate_machines(s: &Snapshot) -> Result<(), String> {
@@ -247,8 +250,7 @@ pub(crate) fn machine_for(s: &mut Snapshot, at: &MachineRef, now: i64) -> Result
             }
         }
     }
-    s.machines
-        .sort_by_key(|m| m.name.to_ascii_lowercase());
+    s.machines.sort_by_key(|m| m.name.to_ascii_lowercase());
     Ok(pool)
 }
 
@@ -431,7 +433,10 @@ mod tests {
                 target: bad.into(),
                 ..Default::default()
             };
-            assert_eq!(machine_for(&mut s, &at, 1), Err(MACHINE_NAME_INVALID.into()));
+            assert_eq!(
+                machine_for(&mut s, &at, 1),
+                Err(MACHINE_NAME_INVALID.into())
+            );
         }
         assert!(s.machines.is_empty());
     }

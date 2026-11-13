@@ -43,7 +43,11 @@ impl Known {
 
 /// Every machine known here: the machine groups, then the machines moves and remote runs named
 /// (`targets`), merged by `ssh -G` identity (`resolve`).
-pub fn known(root: &Path, snapshot: &Snapshot, resolve: &dyn Fn(&str) -> Option<String>) -> Vec<Known> {
+pub fn known(
+    root: &Path,
+    snapshot: &Snapshot,
+    resolve: &dyn Fn(&str) -> Option<String>,
+) -> Vec<Known> {
     let mut out: Vec<Known> = snapshot
         .machines
         .iter()
@@ -152,7 +156,11 @@ pub fn plan(root: &Path, snapshot: &Snapshot, resolve: &dyn Fn(&str) -> Option<S
         let seat = crate::seats::outstanding(root, &a.id)
             .map(|s| s.machine)
             .filter(|m| target_valid(m));
-        let location = snapshot.locations.get(&a.id).map(String::as_str).unwrap_or("");
+        let location = snapshot
+            .locations
+            .get(&a.id)
+            .map(String::as_str)
+            .unwrap_or("");
         let found = if let Some(machine) = seat {
             let k = find(&machine);
             Some((
@@ -241,7 +249,8 @@ pub fn adopt(
             "failed": failed.iter().map(|p| p["account"].clone()).collect::<Vec<_>>(),
             "unplaced": plan.unplaced,
         });
-        let bytes = serde_json::to_vec(&record).map_err(|_| "Machine groups record unavailable.")?;
+        let bytes =
+            serde_json::to_vec(&record).map_err(|_| "Machine groups record unavailable.")?;
         switchboard_core::private_fs::private_write(&root.join(ADOPT_FILE), &bytes)?;
     }
     Ok(json!({"applied": apply, "placed": placed, "failed": failed, "unplaced": unplaced}))
@@ -314,7 +323,11 @@ pub fn list(root: &Path, snapshot: &Snapshot) -> Value {
 /// `list`, each machine with its live state read over ssh (`remote_check::status`): all
 /// machines at once, each ssh call given up after `LIVE_SECONDS`. An unreachable machine reads
 /// `{"reachable": false}`; its accounts are still listed from the record here.
-pub fn live(root: &Path, snapshot: &Snapshot, run: &(dyn Fn(&str, &Program<'_>) -> Result<Value, String> + Sync)) -> Value {
+pub fn live(
+    root: &Path,
+    snapshot: &Snapshot,
+    run: &(dyn Fn(&str, &Program<'_>) -> Result<Value, String> + Sync),
+) -> Value {
     let mut view = list(root, snapshot);
     let Some(machines) = view["machines"].as_array_mut() else {
         return view;
@@ -324,7 +337,10 @@ pub fn live(root: &Path, snapshot: &Snapshot, run: &(dyn Fn(&str, &Program<'_>) 
             .iter()
             .map(|m| {
                 let name = m["name"].as_str().unwrap_or_default().to_owned();
-                let program = m["program"].as_str().unwrap_or(crate::account_send::REMOTE_DEFAULT).to_owned();
+                let program = m["program"]
+                    .as_str()
+                    .unwrap_or(crate::account_send::REMOTE_DEFAULT)
+                    .to_owned();
                 let data_dir = m["data_dir"].as_str().map(str::to_owned);
                 scope.spawn(move || {
                     run(
@@ -349,7 +365,9 @@ pub fn live(root: &Path, snapshot: &Snapshot, run: &(dyn Fn(&str, &Program<'_>) 
                 if let Some(accounts) = m["accounts"].as_array_mut() {
                     for a in accounts {
                         let copy = there["accounts"].as_array().and_then(|list| {
-                            list.iter().find(|t| t["label"] == a["label"] && t["provider"] == a["provider"])
+                            list.iter().find(|t| {
+                                t["label"] == a["label"] && t["provider"] == a["provider"]
+                            })
                         });
                         a["there"] = copy.map_or(Value::Null, |t| {
                             json!({
@@ -446,13 +464,29 @@ mod tests {
         .unwrap();
         crate::seats::append(
             root.path(),
-            &crate::seats::of(11, "granted", "other", "passioncode@100.69.20.19", "default", None),
+            &crate::seats::of(
+                11,
+                "granted",
+                "other",
+                "passioncode@100.69.20.19",
+                "default",
+                None,
+            ),
         )
         .unwrap();
-        store.mark_elsewhere_at(&ids[0], true, 10, Some("studio-sshlg")).unwrap();
-        store.mark_elsewhere_at(&ids[1], true, 10, Some("sshlg@100.69.20.19")).unwrap();
         store
-            .mark_elsewhere_at(&ids[2], true, 10, Some("Studio sshlg, группа agents: выключен"))
+            .mark_elsewhere_at(&ids[0], true, 10, Some("studio-sshlg"))
+            .unwrap();
+        store
+            .mark_elsewhere_at(&ids[1], true, 10, Some("sshlg@100.69.20.19"))
+            .unwrap();
+        store
+            .mark_elsewhere_at(
+                &ids[2],
+                true,
+                10,
+                Some("Studio sshlg, группа agents: выключен"),
+            )
             .unwrap();
         store
             .mark_elsewhere_at(&ids[3], true, 10, Some("нигде: нет записи переноса"))
@@ -467,17 +501,26 @@ mod tests {
             .collect();
         assert_eq!(by, ["move", "location", "location_words"]);
         assert_eq!(dry["unplaced"][0]["account"], ids[3].as_str());
-        assert!(store.snapshot().unwrap().machines.is_empty(), "a dry run writes nothing");
+        assert!(
+            store.snapshot().unwrap().machines.is_empty(),
+            "a dry run writes nothing"
+        );
         assert!(!root.path().join(ADOPT_FILE).exists());
 
         assert_eq!(adopt_once(root.path(), &store, 20, &resolve), Some((3, 1)));
         let s = store.snapshot().unwrap();
         assert_eq!(s.machines.len(), 1, "three spellings, one machine");
         let m = &s.machines[0];
-        assert_eq!((m.name.as_str(), m.pool.as_str()), ("studio-sshlg", "machine_studio-sshlg"));
+        assert_eq!(
+            (m.name.as_str(), m.pool.as_str()),
+            ("studio-sshlg", "machine_studio-sshlg")
+        );
         assert!(m.named("sshlg@100.69.20.19"));
         for id in &ids[..3] {
-            assert_eq!(s.machine_of(id).map(|m| m.pool.as_str()), Some("machine_studio-sshlg"));
+            assert_eq!(
+                s.machine_of(id).map(|m| m.pool.as_str()),
+                Some("machine_studio-sshlg")
+            );
         }
         assert!(s.machine_of(&ids[3]).is_none() && s.machine_of(&ids[4]).is_none());
         // Once: the record stands, so a second start does nothing.
@@ -485,7 +528,10 @@ mod tests {
         let record: Value =
             serde_json::from_slice(&std::fs::read(root.path().join(ADOPT_FILE)).unwrap()).unwrap();
         assert_eq!(record["unplaced"][0], ids[3].as_str());
-        assert!(!String::from_utf8_lossy(&std::fs::read(root.path().join(ADOPT_FILE)).unwrap()).contains("нигде"));
+        assert!(
+            !String::from_utf8_lossy(&std::fs::read(root.path().join(ADOPT_FILE)).unwrap())
+                .contains("нигде")
+        );
         // Run by hand again it places nothing twice.
         let again = adopt(root.path(), &store, true, 40, &resolve).unwrap();
         assert!(again["placed"].as_array().unwrap().is_empty());
@@ -505,10 +551,26 @@ mod tests {
         let a = save(&store, "a");
         let b = save(&store, "b");
         store
-            .join_machine(&a, &MachineRef { target: "studio-sshlg".into(), identity: None, aliases: vec![] }, 5)
+            .join_machine(
+                &a,
+                &MachineRef {
+                    target: "studio-sshlg".into(),
+                    identity: None,
+                    aliases: vec![],
+                },
+                5,
+            )
             .unwrap();
         store
-            .join_machine(&b, &MachineRef { target: "passioncode@100.69.20.19".into(), identity: None, aliases: vec![] }, 5)
+            .join_machine(
+                &b,
+                &MachineRef {
+                    target: "passioncode@100.69.20.19".into(),
+                    identity: None,
+                    aliases: vec![],
+                },
+                5,
+            )
             .unwrap();
         let s = store.snapshot().unwrap();
         let view = list(root.path(), &s);
@@ -516,7 +578,9 @@ mod tests {
         let started = std::time::Instant::now();
         let view = live(root.path(), &s, &|target, _program| {
             if target == "studio-sshlg" {
-                Ok(json!({"accounts": [{"label": "a", "provider": "claude", "pool": "agents", "enabled": true, "used_percent": 12.0}], "groups": []}))
+                Ok(
+                    json!({"accounts": [{"label": "a", "provider": "claude", "pool": "agents", "enabled": true, "used_percent": 12.0}], "groups": []}),
+                )
             } else {
                 std::thread::sleep(std::time::Duration::from_millis(200));
                 Err(crate::account_send::UNREACHABLE.into())
@@ -524,11 +588,20 @@ mod tests {
         });
         assert!(started.elapsed() < std::time::Duration::from_secs(2));
         let machines = view["machines"].as_array().unwrap();
-        let studio = machines.iter().find(|m| m["name"] == "studio-sshlg").unwrap();
+        let studio = machines
+            .iter()
+            .find(|m| m["name"] == "studio-sshlg")
+            .unwrap();
         assert_eq!(studio["live"]["reachable"], true);
         assert_eq!(studio["accounts"][0]["there"]["pool"], "agents");
-        let other = machines.iter().find(|m| m["name"] == "passioncode@100.69.20.19").unwrap();
+        let other = machines
+            .iter()
+            .find(|m| m["name"] == "passioncode@100.69.20.19")
+            .unwrap();
         assert_eq!(other["live"]["reachable"], false);
-        assert_eq!(other["accounts"][0]["label"], "b", "still listed from the record here");
+        assert_eq!(
+            other["accounts"][0]["label"], "b",
+            "still listed from the record here"
+        );
     }
 }
