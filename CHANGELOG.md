@@ -8,6 +8,8 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+## 0.7.74
+
 - Balancing has a switch on the Groups page: turn each group on or off, choose whether groups made later take part, and see which accounts are lent now and which came back. The default group now lends and borrows too (it borrows only a personal account while organizations exist), and every loan and return shows in Activity (SB-352).
 
 ## 0.7.73
