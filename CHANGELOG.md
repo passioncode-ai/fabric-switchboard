@@ -8,6 +8,8 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+## 0.7.72
+
 - `switchboard sessions --machine` (and `machine: true` on the agent tool `switchboard_sessions`) lists every Claude Code and Codex session running for you, Switchboard's or not: its folder, age, the launch it belongs to, and how long its transcripts have been quiet. The first step of the plan for one view of every agent session (SB-353).
 
 ## 0.7.71
