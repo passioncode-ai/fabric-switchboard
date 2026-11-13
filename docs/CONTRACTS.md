@@ -2912,3 +2912,87 @@ the idle budget `monitor::tests::an_idle_hour_on_a_fake_clock_stays_inside_the_b
 balancing off a pass reads no file and writes none); MCP
 `crates/switchboard-cli/tests/mcp.rs` (`switchboard_balance` reads off, refuses an unknown group,
 chooses and takes out `default`).
+
+## Machine groups (SB-355)
+
+Decided in [DEC-0013](DECISIONS.md#dec-0013-an-account-on-another-machine-belongs-to-that-machines-group-and-to-no-group-here);
+design [machine groups](research/machine-groups-2026-11-13.md). Every other machine an account
+lives on is a group of its own here. `accounts.json` holds them in `machines` (core
+`machines::Machine`: `pool` `machine_<name>`, `name`, `identity` (`user@host:port` as `ssh -G`
+resolved a name of it, when it could), `aliases`, `created_at`) and the group each of their
+accounts left in `returns_to` (account id → pool). A machine group has no folders and is never in
+`projects`, so no binding, route, terminal hook, settings sync or balancing reads it.
+
+- **The rule.** An account whose `pool` is a machine pool is marked `elsewhere` (turned off) and its
+  machine exists; `validate_machines` refuses a store that breaks either, a group or a rotation
+  policy on a machine pool, and a `returns_to` entry of an account on no machine or naming a machine
+  pool. `missing_managed_policies` skips machine pools and `set_policy` refuses one
+  (`MACHINE_NOT_ROTATED`), so a machine group never rotates, fails over or is lent here
+  (`set_shared` lends only an account at home in a group or `default`). `upsert` and `add` refuse a
+  machine pool (`MACHINE_POOL_REFUSED`); `save_project_with` and `return_to_default` refuse an
+  account on a machine (`ON_ANOTHER_MACHINE`).
+- **Joining.** `Store::join_machine(id, MachineRef { target, identity, aliases }, now)`: the machine
+  is the one any of the names or the identity matches, else a new one named by its first name that
+  is not `user@host`; a name it was not known by becomes an alias. The account is marked elsewhere
+  (location: the target, when none was said), its selections and agent assignment end, its old
+  home goes to `returns_to` and its home becomes the machine pool, which ends every share and loan
+  of it (`prune_after_home_change`). Journaled `machine joined`. Runtime `SendAccount` joins after a
+  move whose copy there answered (`machine_group` in the answer; a failure to join is
+  `machine_group_error` and the move stands); `machines::reference` resolves the target with
+  `targets::ssh_identity` and the names `targets` and existing machine groups know for it, under
+  `blocking::run`, never under the store's lock. A move of an account already on another machine
+  runs `RecallAccount` first (`recalled` in the answer); to the machine it is on, it is refused
+  (`machines::ALREADY_THERE`).
+- **Coming home.** `machines::come_home` runs wherever the elsewhere mark ends: `mark_elsewhere`
+  false (*Use here*, a call back's `recall_take`), `update_fields` enabling it, `assign_to_agent`.
+  The account goes to the group named (`Store::set_return`, which `RecallAccount { pool }` sets
+  before the call back), else `returns_to`, else `default`; a group that is gone, does not take it
+  by its organizations (`context_admits`) or holds another copy of its sign-in sends it to
+  `default`. Journaled `machine left`. A recall whose provider check fails goes back there
+  (`recall_undo`) and rejoins the machine group. `RecallAccount.from` defaults to the outstanding
+  move's machine (`seats::outstanding`), else the machine group's name; for an account marked
+  elsewhere before machine groups, `pool` moves it after the call back (`MoveAccount`;
+  `placed_error` when refused). The answer's `pool` is where it landed.
+- **The one pass.** `machines::plan` places each account marked elsewhere and on no machine by
+  the outstanding move in `seats.jsonl`, else its location naming a known machine (a name, an
+  alias, or `ssh -G` resolving to a known identity), else its location's first words
+  (`location_words`: up to `,` `:` `;` `(` `[`, spaces as hyphens, lowercase); known machines are
+  the machine groups and `targets::known`, merged by identity. Anything else is `unplaced`, never
+  guessed. `machines adopt` (`MachinesAdopt`, dry run without `--apply`) and the owner's first
+  start with machine groups (`adopt_once`, on the start's blocking thread with the other sweeps)
+  run it; the start writes `machine-groups.json` (0600: `ran_at`, account ids with machine names
+  and how each was placed, ids it failed or could not place; no label, no location text) and logs
+  `machine_groups` with `placed` and `unplaced`, and skips once the file exists.
+- **Reading.** `Machines { live: false }` (CLI `machines list`, MCP `switchboard_machines`) answers
+  each machine with its accounts (`since`, `location`, `returns_to`) and `unplaced`, from the store
+  and `targets::program_for`, with no ssh. `live: true` reads every machine at once
+  (`std::thread::scope`, one thread each) with `remote_check::status` over
+  `account_send::ssh_runner_for` given up after `LIVE_SECONDS` (20) per call, under
+  `blocking::run`; each machine gets `live.reachable` and each account `there` (its copy there,
+  matched by label and provider: `pool`, `enabled`, `used_percent`, `usage_status`; null when not
+  listed). The control client waits 120 s for it, and for `MachinesAdopt` and `MachinePlace`.
+  `MachinePlace` (`machines place`) joins an account to a machine without ssh, refused with
+  `MOVED_AWAY` when an outstanding move names another machine; `MachineForget` (`machines forget`)
+  removes an empty machine group (`MACHINE_NOT_EMPTY` otherwise).
+- **Schema and backups.** `accounts.json` is version 14 while `machines`, `returns_to` or a
+  `machine` journal entry exists; a 0.7.75 or older reader refuses it ("Unsupported account
+  metadata version"). A backup writes each account on a machine in the group it left, with
+  `machines` and `machine_members` beside it: an older reader restores those accounts marked
+  elsewhere in that group, this one puts them back in their machine groups.
+- **Window.** Groups → *Other machines* (SCN-092): a card per machine with its accounts, *Read
+  their state* (the Tauri command `machines` with `live: true`), *Bring here…* (`recall_account`
+  with `from: null` and the chosen `pool`), *Move to another machine…*, *Move an account here…*
+  (`send_account` to the machine's name); Accounts heads a machine's accounts “On {machine}”, its
+  *Call back* and ⋯ *Bring here…* open the same dialog, and the group editor never lists them.
+
+Tests: core `tests/machines.rs` (`an_account_on_another_machine_leaves_every_group_here`,
+`coming_home_goes_to_the_group_named_else_the_one_it_left_else_default`,
+`a_store_that_breaks_the_rule_is_refused`), `machines::tests::a_new_machine_takes_its_alias_as_name_and_a_pool_no_group_takes`,
+`a_name_ssh_would_not_take_is_refused`, `backup::tests::a_restore_puts_an_account_on_another_machine_back_in_its_machines_group`,
+`tests/storage.rs` `schema_eleven_is_written_only_while_the_domain_rule_is_retired` (15 is
+unknown); runtime `machines::tests::location_words_read_a_typed_location_as_an_ssh_name`,
+`the_accounts_already_elsewhere_are_placed_by_move_then_location_and_never_guessed`,
+`the_list_shows_each_machine_and_a_live_read_never_blocks_on_one_that_does_not_answer`; ui-logic
+`the_machine_groups_read_every_state`; MCP `handshake_lists_tools_and_rejects_malformed_messages`
+(tool list), CLI `mcp_parity::every_cli_command_has_an_mcp_tool_or_a_reason`.
+

@@ -8,6 +8,8 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- Every other machine your accounts live on is now a group of its own. An account moved there leaves every group on this computer, so it no longer sits turned off among the accounts that work here, and the Groups page shows each machine with its accounts, read live over ssh on request. *Bring here…* calls an account back into the group you choose (the one it left by default), *Move an account here…* moves one there, and an account moves from one machine to another in one step. Accounts already marked as used elsewhere join their machine once, by the recorded move or their location; one whose machine cannot be told stays where it is and is named. New: `switchboard machines list [--live]`, `machines adopt [--apply]`, `machines place`, `machines forget`, `accounts recall --pool`; MCP `switchboard_machines`, `switchboard_machine_set`. The account file moves to version 14: an older version refuses it, so going back to 0.7.75 or older means restoring a backup (SB-355).
+
 ## 0.7.75
 
 - `switchboard recovery`, `switchboard sessions` and `sessions --history` answer in well under a second again on a busy machine. They no longer read the Keychain on every call or reopen every launch record: a record is read again only after it changed, and the accounts that need a sign-in come from the background check. Background syncs of the ordinary Claude Code and Codex sign-ins no longer read the Keychain while every other change waits. Before, on a machine short of memory, these calls took 10 to 20 s and `recovery` often timed out. Slow requests in the log now also say how many saved sign-ins they read and how long that took (SB-347).

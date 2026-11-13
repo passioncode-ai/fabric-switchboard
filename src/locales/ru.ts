@@ -1708,7 +1708,7 @@ export const RU: Record<string, string> = {
   "Other machines": "Другие машины",
   "Each machine your accounts live on is a group of its own. An account there is in no group on this computer: Switchboard never renews it, switches to it or lends it here. Bring one here to use it in a group of this computer.": "Каждая машина, где работают ваши аккаунты, это отдельная группа. Аккаунт оттуда не входит ни в одну группу этого компьютера: Switchboard здесь его не обновляет, не переключается на него и не одалживает. Чтобы работать с ним в группе этого компьютера, верните его сюда.",
   "No account lives on another machine. Move one there with Move to another machine… on Accounts.": "Ни один аккаунт не работает на другой машине. Перенести аккаунт можно через «Перенести на другую машину…» на странице «Аккаунты».",
-  "Reading the other machines…": "Читаю другие машины…",
+  "Reading the other machines…": "Чтение других машин…",
   "Read again": "Прочитать снова",
   "Read their state": "Прочитать их состояние",
   "No account lives there now.": "Сейчас там нет ни одного аккаунта.",

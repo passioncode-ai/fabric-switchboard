@@ -64,6 +64,91 @@ Switchboard переносит настройки одним файлом, в к
 Дальше выполните шаги 4–6 раздела «На новом компьютере» (ключи, PassionCode.ai, проверка) на новом
 компьютере.
 
+## Группы машин
+
+Каждая другая машина, на которой работают ваши аккаунты, здесь отдельная группа, одна на каждое
+назначение ssh ([DEC-0013](DECISIONS.md#dec-0013-an-account-on-another-machine-belongs-to-that-machines-group-and-to-no-group-here)).
+Когда `switchboard accounts send` переносит аккаунт и его копия там отвечает, аккаунт входит в
+группу этой машины и выходит из всех групп этого компьютера: здесь его не выбирают, не
+переключаются на него, не одалживают и не обновляют. На странице «Группы» в разделе «Другие
+машины» видна каждая машина со своими аккаунтами; «Прочитать их состояние» читает Switchboard
+каждой машины по ssh.
+
+```sh
+switchboard machines list
+switchboard machines list --live
+switchboard accounts send <account id> --to studio-sshlg --pool agents
+switchboard accounts recall <account id> --pool agents
+switchboard accounts send <account id> --to passioncode@100.69.20.19
+```
+
+Первые две команды показывают машины и их аккаунты (`--live` читает каждую машину, все сразу, не
+дольше 20 секунд на один вызов ssh). `send` переносит аккаунт туда; `recall` возвращает его в
+названную группу здесь (по умолчанию в группу, из которой он ушёл, иначе в группу по умолчанию;
+`--from` по умолчанию берёт машину из записи о переносе). `send` аккаунта, который работает на
+другой машине, сначала возвращает его, затем переносит, так что он переходит с одной машины на
+другую за один шаг; если перенос не удался, он остаётся здесь. Аккаунты, отмеченные как
+используемые в другом месте до этой версии, переходят в группу своей машины один раз, при первом
+запуске (или вручную: `switchboard machines adopt`, затем `switchboard machines adopt --apply`),
+по переносу из `seats.jsonl`, иначе по месту, которое называет известную машину; аккаунт, чью
+машину определить нельзя, остаётся на месте и называется в списке. Записать, где работает
+аккаунт, без ssh, и удалить пустую группу машины:
+
+```sh
+switchboard machines place <account id> --on studio-sshlg
+switchboard machines forget studio-sshlg
+```
+
+### Как связаны машины и что о них знает Switchboard
+
+- **Единственная связь: ssh.** Любой шаг на другой машине это `ssh <name> -- <its switchboard>
+  --json …` с `BatchMode=yes` и `ConnectTimeout=15`, поэтому машина, которая спросила бы пароль,
+  не используется ([account_send.rs:652](../crates/switchboard-runtime/src/account_send.rs#L652),
+  [account_send.rs:101](../crates/switchboard-runtime/src/account_send.rs#L101)). Имя значит то,
+  что из него делают ваш `~/.ssh/config` и ключи: псевдоним вроде `studio-sshlg` или `user@host`;
+  на машинах оператора хост это адрес Tailscale (100.64.0.0/10), до которого ssh доходит как до
+  любого другого. Switchboard ничего не знает о Tailscale и ключах: он передаёт имя ssh и
+  отказывает только имени, которое ssh прочитал бы как параметр
+  ([account_send.rs:89](../crates/switchboard-runtime/src/account_send.rs#L89)).
+- **Одна машина, несколько имён.** Два имени это одна машина, когда `ssh -G` сводит их к одному
+  пользователю, хосту и порту ([targets.rs:126](../crates/switchboard-runtime/src/targets.rs#L126)),
+  поэтому `studio-sshlg` и `sshlg@100.69.20.19` это одна группа. Два пользователя macOS на одном
+  Mac Studio это две машины: два Switchboard, две папки данных, две группы.
+- **Switchboard не доказывает, что машина ваша.** Он доверяет любой машине, до которой ssh доходит
+  без запроса, и ответам её `switchboard`
+  ([remote_check.rs:54](../crates/switchboard-runtime/src/remote_check.rs#L54)). Что машина ваша,
+  говорят только ваши ключи ssh и ваша сеть Tailscale. Файл настроек, который он отправляет,
+  подписан ключом этого компьютера ([settings_signing.rs:112](../crates/switchboard-runtime/src/settings_signing.rs#L112)),
+  но ключ другой машины не проверяется. Доказать могло бы вот что: при первом переносе запомнить
+  ключ настроек другой машины (`switchboard settings signer` там) и отказывать вызову ssh, который
+  отвечает другим ключом (строка доски SB-356).
+- **Больше никто этого не видит.** Группы машин, переносы (`seats.jsonl`) и запись единственного
+  прохода (`machine-groups.json`) лежат только в папке данных этого пользователя и доступны только
+  ему: папка 0700, каждый файл 0600
+  ([persistence.rs:97](../crates/switchboard-core/src/persistence.rs#L97),
+  [persistence.rs:128](../crates/switchboard-core/src/persistence.rs#L128),
+  [seats.rs:111](../crates/switchboard-runtime/src/seats.rs#L111)). На сервер ничего не уходит:
+  у PassionCode.ai запрашиваются только ваши организации, токеном с единственной областью
+  `me.organizations` ([vesta.rs:22](../crates/switchboard-runtime/src/vesta.rs#L22),
+  [vesta.rs:420](../crates/switchboard-runtime/src/vesta.rs#L420)), а аналитика использования
+  передаёт только счётчики и виды событий ([ANALYTICS.md](ANALYTICS.md)). На другой машине аккаунт
+  это обычный аккаунт Switchboard того пользователя macOS, и его видит тот, кто входит туда этим
+  пользователем.
+- **Делегирование это записанный перенос.** `accounts send` отмечает аккаунт здесь как
+  используемый на той машине, прежде чем что-то уйдёт, сохраняет его там через
+  `accounts add --secret-stdin` (токены через stdin, никогда в командной строке), проверяет там
+  чтением квоты и отменяет оба шага при любой ошибке
+  ([account_send.rs:149](../crates/switchboard-runtime/src/account_send.rs#L149),
+  [account_send.rs:237](../crates/switchboard-runtime/src/account_send.rs#L237)); `accounts recall`
+  просит ту машину отдать вход по ssh, проверяет его здесь и удаляет копию там
+  ([account_send.rs:498](../crates/switchboard-runtime/src/account_send.rs#L498)). Каждый перенос и
+  возврат это строка в `seats.jsonl` с тем, кто его заказал: `operator` с его словами дословно,
+  иначе `agent` ([seats.rs:19](../crates/switchboard-runtime/src/seats.rs#L19),
+  [seats.rs:42](../crates/switchboard-runtime/src/seats.rs#L42)). Отдать аккаунт агенту на этом
+  компьютере (`switchboard accounts assign <account id> --to 'Frame Agent'`) это другой вид
+  делегирования: аккаунт остаётся здесь, его обновляют и наблюдают, но ничто здесь не выбирает его
+  само ([lib.rs:2267](../crates/switchboard-core/src/lib.rs#L2267)).
+
 ## На старом компьютере
 
 1. Запишите файл настроек:
