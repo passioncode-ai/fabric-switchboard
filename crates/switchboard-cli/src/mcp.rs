@@ -1187,7 +1187,7 @@ impl Server {
             "switchboard_sessions" => {
                 // SB-353: the machine's agent processes, read here without the owner.
                 if args.get("machine").and_then(Value::as_bool) == Some(true) {
-                    return Ok(switchboard_runtime::machine_sessions::scan(&self.root));
+                    return Some(Ok(switchboard_runtime::machine_sessions::scan(&self.root)));
                 }
                 let history = args
                     .get("history")
