@@ -71,6 +71,9 @@ pub(crate) struct RefreshState {
     /// SB-182: the last `sign_in_required` answer, with the store's credential write count
     /// (PRD-01) and the rejected lineages it was computed from.
     sign_in_cache: Mutex<SignInCache>,
+    /// SB-347: the last `sign_in_required` answer, certain or not, with the verdict generation
+    /// it was computed at: what a read-only control request answers (`sign_in_known`).
+    sign_in_last: Mutex<Option<(u64, Vec<String>)>>,
     /// Account id → (next attempt, current delay) after a transient failure.
     backoff: Mutex<HashMap<String, (i64, i64)>>,
     /// Identity (`account_id`) → last time it was seen signed in to the ordinary Claude Code.
@@ -198,6 +201,7 @@ impl RefreshState {
             first_rejection: Mutex::new(HashMap::new()),
             verdicts: std::sync::atomic::AtomicU64::new(0),
             sign_in_cache: Mutex::new(None),
+            sign_in_last: Mutex::new(None),
             backoff: Mutex::new(HashMap::new()),
             seen_active: Mutex::new(HashMap::new()),
             profile_endpoint: Mutex::new(
@@ -519,7 +523,33 @@ impl RefreshState {
     /// nor the rejected lineages changed. `recovery`, which Fabric Dashboards reads every 15 s,
     /// read every rejected account's credential from the vault each time, and took up to 18 s
     /// on 2026-10-23 with six of them.
+    /// SB-347: the accounts that need a sign-in as last computed, for a read-only control
+    /// request (`recovery`, `monitor status`, `chains`): never a Keychain read while an answer
+    /// computed since the last verdict exists. The background pass recomputes it every 30 s
+    /// (`sign_in_required`, cached while nothing moved), so a credential written since is seen
+    /// within a pass. Before, each `recovery` call read every ended account's credential: on a
+    /// swapping machine a read took up to 9 s behind the process-wide Keychain lock, and an
+    /// uncertain read cached nothing, so every call read again (median 20.5 s, 2026-11-13).
+    pub(crate) fn sign_in_known(&self, store: &Store) -> Vec<String> {
+        let generation = self.verdict_generation();
+        if let Ok(last) = self.sign_in_last.lock() {
+            if let Some((at, ids)) = last.as_ref() {
+                if *at == generation {
+                    return ids.clone();
+                }
+            }
+        }
+        self.sign_in_required(store)
+    }
     pub(crate) fn sign_in_required(&self, store: &Store) -> Vec<String> {
+        let generation = self.verdict_generation();
+        let ids = self.sign_in_computed(store);
+        if let Ok(mut last) = self.sign_in_last.lock() {
+            *last = Some((generation, ids.clone()));
+        }
+        ids
+    }
+    fn sign_in_computed(&self, store: &Store) -> Vec<String> {
         let mut dead: Vec<(String, String)> = match self.dead.lock() {
             Ok(dead) => dead.iter().map(|(i, h)| (i.clone(), h.clone())).collect(),
             Err(_) => return vec![],

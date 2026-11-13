@@ -2905,7 +2905,12 @@ impl Runtime {
         // The window shows what is signed in now: the watched read probes the sources and
         // reads again only when one changed (lifecycle LC-04), so a refresh timer never
         // spawns a Keychain read and never shows a dialog.
-        let value = observe_current(&self.store, self.native.current);
+        //
+        // SB-347: the watch holds its lock across a Keychain probe or read, and each Keychain
+        // call waits for the process-wide Keychain lock: seconds on a swapping machine. Off the
+        // async worker, so a stop hook or a window refresh waiting here never parks the thread
+        // other requests run on (2026-11-13: 9 of 14 workers parked on these two locks).
+        let value = blocking::run(|| observe_current(&self.store, self.native.current));
         let mut cache = self
             .current_cache
             .lock()
@@ -4604,7 +4609,7 @@ async fn execute(
         ),
         Operation::CurrentAccounts => match runtime {
             Some(runtime) => runtime.current_accounts(),
-            None => Ok(observe_current(&store, native.current)),
+            None => Ok(blocking::run(|| observe_current(&store, native.current))),
         },
         Operation::CaptureCurrent {
             provider,
@@ -4725,7 +4730,7 @@ async fn execute(
         Operation::MonitorStatus => Ok(json!({
             "running": runtime.is_some(), "interval_seconds": monitor::INTERVAL_SECONDS, "idle_interval_seconds": switchboard_core::CHECK_IDLE_SECONDS,
             "decisions": runtime.and_then(|r| r.monitor_decisions.lock().ok().map(|v| v.clone())).unwrap_or_default(),
-            "sign_in_required": refresh_state.sign_in_required(&store),
+            "sign_in_required": refresh_state.sign_in_known(&store),
             "limited": runtime.map(|r| r.limits.report(monitor::now())).unwrap_or_default(),
             "claude_swap_accounts": refresh::swap_held(refresh_state),
             "renewal_blocked": refresh_state.renewal_blocked(),
@@ -4827,11 +4832,16 @@ async fn execute(
             let rt = needs_owner()?;
             let time = monitor::now();
             let limited = rt.limits.limited_ids(time);
-            let sign_in = rt.refresh.sign_in_required(&store).into_iter().collect();
+            // SB-347: the answer the background pass keeps, never a Keychain read per call.
+            let sign_in = rt.refresh.sign_in_known(&store).into_iter().collect();
             let snapshot = store.snapshot()?;
             let blocked = rt.limits.recovery_blocked(&snapshot, time);
             let capped = rt.limits.capped_ids(time);
-            let mut status = recovery::status(root, &snapshot, &blocked, &capped, &sign_in, time)?;
+            // SB-347: the stops file and the launch records it names are files: read off the
+            // async worker, so a slow disk never holds the tasks sharing its thread.
+            let mut status = crate::blocking::run(|| {
+                recovery::status(root, &snapshot, &blocked, &capped, &sign_in, time)
+            })?;
             status["limited_accounts"] = json!(limited.len());
             status["awaiting_post_limit_probe_accounts"] =
                 json!(blocked.difference(&limited).count());
@@ -5020,7 +5030,7 @@ async fn execute(
                     limited.extend(r.kimi_watch.limited(now));
                 }
                 let sign_in: HashSet<String> =
-                    refresh_state.sign_in_required(&store).into_iter().collect();
+                    refresh_state.sign_in_known(&store).into_iter().collect();
                 let settings = agent_settings::read(root);
                 let settings_readable = settings.is_ok();
                 let disabled: HashSet<String> = settings
