@@ -817,6 +817,26 @@ async fn codex_route(enabled: Option<bool>, state: State<'_, Slot>) -> Result<Va
         .execute(Operation::CodexRoute { enabled })
         .await
 }
+/// SB-352 wave 2: the groups that take part in balancing. With nothing to add or remove and no
+/// `all_new`, the state (`balance status`); otherwise the change (`balance groups`).
+#[tauri::command]
+async fn balance(
+    add: Vec<String>,
+    remove: Vec<String>,
+    all_new: Option<bool>,
+    state: State<'_, Slot>,
+) -> Result<Value, String> {
+    let operation = if add.is_empty() && remove.is_empty() && all_new.is_none() {
+        Operation::BalanceStatus
+    } else {
+        Operation::Balance {
+            groups_add: add,
+            groups_remove: remove,
+            all_new,
+        }
+    };
+    state.runtime().await?.execute(operation).await
+}
 /// SB-135: a repository with its worktrees and clones into another project, in one step.
 #[tauri::command]
 async fn move_root(
@@ -1725,6 +1745,7 @@ fn main() {
             project_roots,
             move_root,
             codex_route,
+            balance,
             repository_map,
             statistics,
             move_account,

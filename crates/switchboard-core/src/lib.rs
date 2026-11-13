@@ -308,6 +308,16 @@ pub struct Snapshot {
     /// uses it anyway (`Store::select_anyway`, recorded as `assignment override`).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub assigned_to: BTreeMap<String, String>,
+    /// SB-352 wave 2 (DEC-0012): accounts at home in a group a person made that balancing lent to
+    /// the default group, which has no group record to hold them; they serve `default` too, as
+    /// a group's `shared_accounts` serve it (SB-282).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub default_shared: Vec<String>,
+    /// SB-352 wave 2: accounts at home in `default` that balancing lent to a group. A group's
+    /// share of an account at home in `default` stands only while the account is listed here;
+    /// any other is stale and pruned (SB-313).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub default_lent: Vec<String>,
     /// SB-285: written by a version where an address's domain only suggests an organization.
     /// True exactly while organizations exist; a store read without it, holding organizations,
     /// was written under the domain rule, and opening it records that rule's placements as the
@@ -452,6 +462,8 @@ pub(crate) fn event_valid(action: &str, detail: &str) -> bool {
     match action {
         // SB-322: given to an agent, taken back, or used anyway by the person.
         "assignment" => matches!(detail, "assigned" | "cleared" | "override"),
+        // SB-352 wave 2: balancing lent an account to another group, or took it back.
+        "balancing" => matches!(detail, "lent" | "returned"),
         "account_added" | "account_updated" | "account_removed" | "account_selected" => {
             detail == "success"
         }
@@ -2165,6 +2177,8 @@ impl Store {
         for p in &mut candidate.projects {
             p.shared_accounts.retain(|s| s != id);
         }
+        candidate.default_shared.retain(|s| s != id);
+        candidate.default_lent.retain(|s| s != id);
         candidate.elsewhere.remove(id);
         candidate.locations.remove(id);
         candidate.assigned_to.remove(id);

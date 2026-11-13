@@ -297,9 +297,12 @@ impl Store {
         policy: &RotationPolicy,
         now: i64,
     ) -> bool {
+        // SB-352 wave 2: native rotation of the ordinary Claude Code takes only an account at
+        // home in its pool, never one a group lent to `default`.
         if !account.enabled
             || (policy.target == "claude_cli"
                 && (account.provider != Provider::Claude
+                    || account.pool != policy.pool
                     || account.kind != AuthKind::OAuth
                     || account
                         .external_identity

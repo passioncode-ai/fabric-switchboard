@@ -283,7 +283,10 @@ async fn handshake_lists_tools_and_rejects_malformed_messages() {
         (on["on"].clone(), on["all_new"].clone()),
         (json!(true), json!(true))
     );
-    assert!(on["note"].is_string(), "default lends nothing: {on}");
+    // SB-352 wave 2: `default` lends and borrows like any group; every group is offered.
+    assert!(on.get("note").is_none(), "{on}");
+    assert_eq!(on["available"][0]["pool"], "default", "{on}");
+    assert_eq!(on["available"][0]["chosen"], true, "{on}");
     let (error, off) = agent.tool("switchboard_balance", json!({"remove": ["default"]}));
     assert!(!error && off["on"] == false, "{off}");
     // SB-120: the agents overview reads; the default is Auto until the operator picks one.

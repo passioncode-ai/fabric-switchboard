@@ -45,7 +45,7 @@ export interface ProjectInput { pool?: string; name: string; folders: string[]; 
 export interface Organization { id: string; name: string; domains?: string[]; provider_organizations?: string[]; created_at: number; /** SB-159: its organization on PassionCode.ai. */ vesta_id?: string | null }
 /** SB-159: the PassionCode.ai connection, no token. */
 export interface PassioncodeStatus { connected: boolean; base: string; state?: 'ok' | 'sign_in_again' | 'provider_sign_in' | 'unreachable'; connected_at?: number; read_at?: number | null; checked_at?: number | null; organizations?: number; cancelled?: boolean; disconnected?: boolean; /** SB-160 (B-7): organizations a read stopped listing, by local id, since `at`. */ released?: { organization: string; at: number }[] }
-export interface Snapshot { accounts: Account[]; routes: Record<string, string>; events: Event[]; policies?: RotationPolicy[]; rules?: ProjectRule[]; projects?: Project[]; organizations?: Organization[]; /** account id → organization id or `personal` */ memberships?: Record<string, string>; /** SB-282: account id → organizations it also works for */ also_organizations?: Record<string, string[]>; /** SB-175: account id → when it was marked as used on another machine */ elsewhere?: Record<string, number>; /** SB-284: account id → where it works, in the person's words */ locations?: Record<string, string>; /** SB-322: account id → the agent it is given to, in the person's words */ assigned_to?: Record<string, string> }
+export interface Snapshot { accounts: Account[]; routes: Record<string, string>; events: Event[]; policies?: RotationPolicy[]; rules?: ProjectRule[]; projects?: Project[]; organizations?: Organization[]; /** account id → organization id or `personal` */ memberships?: Record<string, string>; /** SB-282: account id → organizations it also works for */ also_organizations?: Record<string, string[]>; /** SB-175: account id → when it was marked as used on another machine */ elsewhere?: Record<string, number>; /** SB-284: account id → where it works, in the person's words */ locations?: Record<string, string>; /** SB-322: account id → the agent it is given to, in the person's words */ assigned_to?: Record<string, string>; /** SB-352 wave 2: accounts a group lent to the default group */ default_shared?: string[]; /** SB-352 wave 2: accounts of the default group lent to a group */ default_lent?: string[] }
 export interface RuntimeStatus { proxy_address: string; platform: string; live_mode: string }
 export interface AddInput { label: string; provider: Provider; kind: AuthKind; pool: string; secret: string }
 export interface LoginInput { provider: Provider; label: string; pool: string }
@@ -116,6 +116,8 @@ export interface Adapter {
   moveRoot(folder: string, pool: string, also?: boolean, from?: string | null): Promise<unknown>;
   /** SB-143: Codex in project folders. */
   codexRoute(enabled?: boolean | null): Promise<CodexRoute>;
+  /** SB-352: the groups that take part in balancing; with no change, the state. */
+  balance(change?: BalanceChange | null): Promise<BalanceStatus>;
   repositoryMap(under: string[]): Promise<import('./ui-logic').RepositoryMap>;
   /** SB-145: what the proxy relayed in the last `days` days. */
   statistics(days: number): Promise<import('./ui-logic').Statistics>;
@@ -248,6 +250,14 @@ export interface AgentsOverview { schema?: number; revision?: string; updated_at
 export interface OpenrouterModel { id: string; name?: string | null; context?: number | null; prompt?: string | null; completion?: string | null }
 export interface OpenrouterModels { recommended: RecommendedModel[]; models: OpenrouterModel[]; available: boolean }
 /** SB-143: whether Codex sessions in project folders use the projects' Codex accounts. */
+/** SB-352: a change of the groups that take part in balancing (pool ids, `default` included). */
+export interface BalanceChange { add?: string[]; remove?: string[]; all_new?: boolean | null }
+/** SB-352: one loan in `balance status`. */
+export interface BalanceLoan { account_id: string; label: string | null; provider: Provider; from: string; from_name: string; to: string; to_name: string; at: number }
+/** SB-352: one journal line (`balancing.jsonl`): codes and ids only. */
+export interface BalanceEntry { at: number; account: string; provider: Provider; from: string; to: string; action: 'lend' | 'return'; reason: string; outcome: string }
+/** SB-352: `balance status`, as `switchboard balance status --json` answers it. */
+export interface BalanceStatus { on: boolean; groups: { pool: string; name: string }[]; available: { pool: string; name: string; chosen: boolean }[]; all_new: boolean; pass_minutes: number; lent: BalanceLoan[]; recent: BalanceEntry[]; changed?: boolean }
 export interface CodexRoute { on: boolean; applied: boolean; config: string | null; conflict: string | null; projects: string[] }
 /** SB-144: saved OpenRouter keys by project (`pool: null` is the machine's key). */
 export interface OpenrouterKeys { service: 'openrouter'; keys: { pool: string | null; project: string | null; saved_at: number; model: string | null }[]; projects: { pool: string; name: string; own: boolean }[] }

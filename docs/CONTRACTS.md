@@ -2814,12 +2814,13 @@ held by a limit or waiting for a sign-in (`balancing::room`, the room of SB-345)
   takes the account with the most room (lowest used share, then the latest reset, then id) of a
   chosen group that does not need room itself and keeps at least two own accounts with room after
   the loan (one when it had no request for 6 hours);
-- never: a group not chosen, an account crossing an organization's boundary (`context_admits`),
-  the ordinary Claude Code's or Codex's account, an account given to an agent, used elsewhere,
-  disabled, an API key, waiting for a sign-in, held by a limit, on stale figures, already lent or
-  within its hour of cooldown. `default` holds no group a person made, so it may be chosen and is
-  read, but it neither lends nor borrows (a share is only of an account at home in such a group,
-  SB-313); `balance status` says so in `note`.
+- never: a group not chosen, an account crossing an organization's boundary
+  (`Snapshot::loan_admits`: the group's `context_admits`; the default group, no organization's,
+  takes only an account that is personal while organizations exist), the ordinary Claude Code's
+  or Codex's account, an account given to an agent, used elsewhere, disabled, an API key, waiting
+  for a sign-in, held by a limit, on stale figures, already lent or within its hour of cooldown.
+  Since wave 2 `default` lends and borrows like any chosen group (below); in wave 1 it was read
+  but neither lent nor borrowed.
 
 The moves run under the owner transaction (`hold("balance")`), and only when the settings did not
 change since the pass read them. A refused move still starts the account's cooldown; a failed
@@ -2828,15 +2829,38 @@ return keeps its loan for the next pass. Each move logs `balancing {action, reas
 **Operations.** `Balance { groups_add, groups_remove, all_new }` checks every named pool exists
 (`default` or a group; `NO_SUCH_GROUP`), saves the change, takes every group known now as seen,
 and returns at once each loan whose groups are no longer chosen (turning balancing off returns
-every lent account). `BalanceStatus` (no owner transaction) answers `{on, groups: [{pool, name,
-shares}], all_new, pass_minutes, lent: [{account_id, label, provider, from, from_name, to,
-to_name, at}], last_pass, recent, note?}`, `last_pass` being the owner's last pass (`at`, each
+every lent account). `BalanceStatus` (no owner transaction) answers `{on, groups: [{pool, name}],
+available: [{pool, name, chosen}], all_new, pass_minutes, lent: [{account_id, label, provider, from, from_name, to,
+to_name, at}], last_pass, recent}`, `last_pass` being the owner's last pass (`at`, each
 chosen group's figures, rooms and need per provider, the actions) and `recent` the newest 20
 journal lines. Refusals: `UNREADABLE` (the settings file), `NO_SUCH_GROUP`, `NOT_SAVED`, each already a sentence for a person (`src/adapter.ts` `safeErrors`). CLI
 `switchboard balance status` and `switchboard balance groups [--add ID]... [--remove ID]...
-[--all-new true|false]`; MCP `switchboard_balance` (write; without arguments it reads). Not in
-wave 1: the Groups page switch and its states (wave 2), and an activity entry of its own (a loan
-is journaled as a group change, `project updated`, with the account's id).
+[--all-new true|false]`; MCP `switchboard_balance` (write; without arguments it reads).
+`available` lists every group there is, `default` first, each with whether it is chosen.
+
+**Wave 2 (2026-11-13): the default group, the activity entry, the window.** The default group has
+no group record to hold a share, so the store keeps its loans in two lists of `accounts.json`
+(`Snapshot`, schema version 13 while either is non-empty, so a 0.7.73 or older reader refuses the
+file rather than drop a loan's route): `default_shared`, the accounts at home in a group a person
+made that serve `default` too, and `default_lent`, the accounts at home in `default` that a group
+shares on loan. `Snapshot::serves`, `pool_accounts` and `pools_of` read `default_shared` for the
+default pool, so routing, managed rotation and failover there take a lent account as a group
+takes its shares (SB-282). `Store::set_shared` takes `default` as the borrower and an account at
+home in `default` as the lender (`loan_admits`, no other copy of its sign-in in the borrower).
+`stale_shares_prune` keeps a group's share of an account at home in `default` only while
+`default_lent` lists it (SB-313: an account a person moved to `default` leaves the groups that
+shared it), keeps `default_shared` only for accounts at home in a group, and forgets a
+`default_lent` entry whose account left `default` or that no group holds; a save of a group with
+its loan from `default` listed keeps it a loan, never a move. Native rotation of the ordinary
+Claude Code (`claude_cli`) takes only an account at home in its pool, never one lent to `default`.
+`balancing::forced_return` also returns a loan whose account the person moved to another home
+since (`not_lendable`). Each loan and return is one activity entry, `balancing` with `lent` or
+`returned` and the account's id (`event_valid`; before wave 2 a loan was journaled as `project
+updated`); `switchboard_events` and the window's Activity show it. The window's Groups page has
+*Balancing between groups* (SCN-090): one switch per group (`Balance` with one group added or
+removed), *Groups made later take part too* (`all_new`), the loans now and the three newest
+returns; the Tauri command `balance` answers `BalanceStatus` with no change and `Balance`
+otherwise. Nothing of it reaches the usage analytics.
 
 Tests: `balancing::tests::a_group_with_no_room_takes_the_lender_account_with_the_most_room`,
 `one_account_with_room_is_enough_without_refusals_and_short_with_them`,
@@ -2844,12 +2868,16 @@ Tests: `balancing::tests::a_group_with_no_room_takes_the_lender_account_with_the
 `a_group_not_chosen_is_never_read_or_touched`,
 `one_account_moves_per_pass_to_the_neediest_group`,
 `accounts_that_must_never_be_lent_stay_home`, `no_account_crosses_an_organizations_boundary`,
-`the_default_group_neither_lends_nor_borrows`,
+`the_default_group_lends_like_any_chosen_group`, `the_default_group_borrows_only_personal_accounts`,
+`a_loan_to_default_is_read_and_one_moved_home_goes_back` (wave 2),
 `a_lent_account_returns_when_the_borrower_is_quiet_or_its_home_needs_it`,
 `turning_balancing_off_returns_every_lent_account`, `a_group_made_later_joins_only_with_all_new`,
 `settings_and_journal_are_private_and_the_journal_keeps_its_newest_lines`,
 `signals_sum_each_groups_counts_by_provider`,
-`a_pass_lends_to_a_group_out_of_room_and_turning_off_returns_it`;
+`a_pass_lends_to_a_group_out_of_room_and_turning_off_returns_it`; core
+`tests/storage.rs` `the_default_group_lends_and_borrows`, `tests/rotation.rs`
+`native_rotation_never_takes_an_account_lent_to_default` (wave 2); ui-logic
+`the_balancing_section_reads_every_state` (wave 2);
 `statistics::tests::a_window_reads_the_last_hours_and_a_fresh_start_reads_the_day_as_well`;
 the idle budget `monitor::tests::an_idle_hour_on_a_fake_clock_stays_inside_the_budget` (with
 balancing off a pass reads no file and writes none); MCP

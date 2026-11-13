@@ -1493,4 +1493,43 @@ check(() => {
     assert.equal(logic.keyLimitLine({ limit: null, limit_reset: null }), "Key's own limit: none");
   });
 }
+// SB-352 wave 2 (SCN-090), the_balancing_section_reads_every_state: reading, failed, off, on
+// with the default group named, the accounts lent now, the latest returns (an account lent again
+// is not shown as back), the notices, the activity entry and the default group's loans.
+check(() => {
+  i18nForShell.setLocale('en');
+  assert.equal(logic.balancingView(null).state, 'reading');
+  const failed = logic.balancingView(null, 'Switchboard could not read its own state.');
+  assert.equal(failed.state, 'failed'); assert.ok(failed.retry); assert.equal(failed.error, 'Switchboard could not read its own state.');
+  const available = [{ pool: 'default', name: 'default', chosen: false }, { pool: 'agents', name: 'Agents', chosen: false }, { pool: 'apps', name: 'Apps', chosen: false }];
+  const off = logic.balancingView({ on: false, groups: [], available, all_new: false, pass_minutes: 15, lent: [], recent: [] });
+  assert.equal(off.line, 'Off: no group takes part.');
+  assert.deepEqual(off.groups.map((g) => g.label), ['Default group', 'Agents', 'Apps']);
+  const chosen = available.map((g) => ({ ...g, chosen: g.pool !== 'apps' }));
+  const lent = [{ account_id: 'a1', label: 'Work', provider: 'claude', from: 'default', from_name: 'default', to: 'agents', to_name: 'Agents', at: 1 }];
+  const recent = [
+    { at: 3, account: 'a1', provider: 'claude', from: 'default', to: 'agents', action: 'lend', reason: 'need', outcome: 'done' },
+    { at: 2, account: 'a2', provider: 'claude', from: 'agents', to: 'default', action: 'return', reason: 'quiet', outcome: 'done' },
+    { at: 1, account: 'a1', provider: 'claude', from: 'default', to: 'agents', action: 'return', reason: 'quiet', outcome: 'done' },
+    { at: 0, account: 'gone', provider: 'claude', from: 'agents', to: 'default', action: 'return', reason: 'quiet', outcome: 'failed' },
+  ];
+  const on = logic.balancingView({ on: true, groups: [{ pool: 'default', name: 'default' }, { pool: 'agents', name: 'Agents' }], available: chosen, all_new: true, pass_minutes: 15, lent, recent }, null, [{ id: 'a2', label: 'Spare' }]);
+  assert.equal(on.state, 'on'); assert.equal(on.line, 'On: 2 groups take part.'); assert.ok(on.allNew);
+  assert.deepEqual(on.loans, ['Work is lent from Default group to Agents.']);
+  assert.deepEqual(on.returns, ['Spare is back in Agents.'], 'a1 is lent again; a failed return is not shown');
+  assert.equal(logic.balancingNotice({ group: 'Agents', on: true }), 'Agents takes part in balancing.');
+  assert.match(logic.balancingNotice({ group: 'Agents', on: false }), /back in their own groups/);
+  assert.equal(logic.balancingNotice({ on: true, allNew: true }), 'Groups made later take part in balancing.');
+  assert.equal(logic.eventAction('balancing'), 'Balancing');
+  assert.equal(logic.eventDetail('lent'), 'lent to another group');
+  assert.equal(logic.eventDetail('returned'), 'back in its own group');
+  // The default group's loans serve it, as a group's shares serve that group.
+  const snap = { projects: [{ pool: 'agents', shared_accounts: [] }], default_shared: ['a3'] };
+  assert.ok(logic.servesPool(snap, { id: 'a3', pool: 'agents' }, 'default'));
+  assert.ok(!logic.servesPool(snap, { id: 'a4', pool: 'agents' }, 'default'));
+  i18nForShell.setLocale('ru');
+  assert.equal(logic.balancingView({ on: true, groups: [], available: chosen, all_new: false, pass_minutes: 15, lent: [], recent: [] }).line, 'Включено: участвуют 2 группы.');
+  assert.equal(logic.balancingView({ on: true, groups: [], available: chosen.map((g) => ({ ...g, chosen: g.pool === 'agents' })), all_new: false, pass_minutes: 15, lent: [], recent: [] }).line, 'Включено: участвует 1 группа.');
+  i18nForShell.setLocale('en');
+});
 console.log(`${cases} ui-logic cases passed, including quota priority and wall-clock countdowns.`);

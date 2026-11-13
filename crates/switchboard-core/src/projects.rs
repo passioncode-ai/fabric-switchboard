@@ -349,6 +349,10 @@ fn organizations_checked(snapshot: &Snapshot, list: Vec<String>) -> Result<Vec<S
 /// went away (deleted, or the account moved to `default`) left in another group's list was taken
 /// as a move by that group's next save (its route in `default` went with it), and kept the group's
 /// later saves refused while the ordinary CLI was signed in to it. Answers whether one was removed.
+/// SB-352 wave 2: the one share of an account at home in `default` that stands is a loan
+/// balancing made (`default_lent`); the default group's own loans (`default_shared`) stand while
+/// their account is at home in a group a person made. A loan from `default` whose account left
+/// `default`, or that no group holds any more, is forgotten.
 pub(crate) fn stale_shares_prune(s: &mut Snapshot) -> bool {
     let homes: std::collections::HashMap<String, String> = s
         .accounts
@@ -356,18 +360,31 @@ pub(crate) fn stale_shares_prune(s: &mut Snapshot) -> bool {
         .map(|a| (a.id.clone(), a.pool.clone()))
         .collect();
     let groups: Vec<String> = s.projects.iter().map(|p| p.pool.clone()).collect();
+    let lent = s.default_lent.clone();
     let mut removed = false;
     for p in s.projects.iter_mut() {
         let before = p.shared_accounts.len();
         p.shared_accounts.retain(|id| {
-            homes
-                .get(id)
-                .is_some_and(|home| home != &p.pool && groups.contains(home))
+            homes.get(id).is_some_and(|home| {
+                home != &p.pool
+                    && (groups.contains(home) || (home == DEFAULT_POOL && lent.contains(id)))
+            })
         });
         removed |= p.shared_accounts.len() != before;
     }
+    let before = s.default_shared.len();
+    s.default_shared
+        .retain(|id| homes.get(id).is_some_and(|home| groups.contains(home)));
+    removed |= s.default_shared.len() != before;
+    let projects = &s.projects;
+    s.default_lent.retain(|id| {
+        homes.get(id).is_some_and(|home| home == DEFAULT_POOL)
+            && projects.iter().any(|p| p.shared_accounts.contains(id))
+    });
     removed
 }
+/// The pool of the accounts in no group a person made.
+pub const DEFAULT_POOL: &str = "default";
 fn shared_routes_prune(s: &mut Snapshot) {
     let keep: Vec<String> = s
         .routes
@@ -444,6 +461,19 @@ pub(crate) fn validate_projects(s: &Snapshot) -> Result<(), String> {
     if all.len() > MAX_ALL_FOLDERS {
         return Err("Invalid project metadata".into());
     }
+    // SB-352 wave 2: the default group's loans, each once, of a saved account at home elsewhere;
+    // a loan from `default`, each once, of a saved account at home there.
+    let listed = |list: &[String], home: fn(&str) -> bool| {
+        list.len() > crate::MAX_ACCOUNTS
+            || list.iter().enumerate().any(|(i, id)| {
+                list[..i].contains(id) || !s.accounts.iter().any(|a| &a.id == id && home(&a.pool))
+            })
+    };
+    if listed(&s.default_shared, |pool| pool != DEFAULT_POOL)
+        || listed(&s.default_lent, |pool| pool == DEFAULT_POOL)
+    {
+        return Err("Invalid project metadata".into());
+    }
     // SB-146: a folder may be in several groups as itself, never inside another group's folder.
     for (i, (pool_a, a)) in all.iter().enumerate() {
         for (pool_b, b) in &all[i + 1..] {
@@ -485,27 +515,34 @@ impl Snapshot {
     pub fn project_of_pool(&self, pool: &str) -> Option<&Project> {
         self.projects.iter().find(|p| p.pool == pool)
     }
-    /// Whether `account` serves `pool` (SB-282): its home pool, or a group that shares it.
+    /// The accounts shared with `pool` from another home (SB-282), the default group's loans
+    /// included (SB-352 wave 2).
+    fn shared_with(&self, pool: &str) -> &[String] {
+        if pool == DEFAULT_POOL {
+            &self.default_shared
+        } else {
+            self.project_of_pool(pool)
+                .map_or(&[], |p| p.shared_accounts.as_slice())
+        }
+    }
+    /// Whether `account` serves `pool` (SB-282): its home pool, or a group that shares it
+    /// (the default group by a loan, SB-352 wave 2).
     pub fn serves(&self, account: &crate::Account, pool: &str) -> bool {
-        account.pool == pool
-            || self
-                .project_of_pool(pool)
-                .is_some_and(|p| p.shared_accounts.iter().any(|id| id == &account.id))
+        account.pool == pool || self.shared_with(pool).iter().any(|id| id == &account.id)
     }
     /// The accounts that serve `pool`: its own, then those other groups share with it.
     pub fn pool_accounts(&self, pool: &str) -> Vec<&crate::Account> {
         let mut out: Vec<&crate::Account> =
             self.accounts.iter().filter(|a| a.pool == pool).collect();
-        if let Some(p) = self.project_of_pool(pool) {
-            for id in &p.shared_accounts {
-                if let Some(a) = self.accounts.iter().find(|a| &a.id == id && a.pool != pool) {
-                    out.push(a);
-                }
+        for id in self.shared_with(pool) {
+            if let Some(a) = self.accounts.iter().find(|a| &a.id == id && a.pool != pool) {
+                out.push(a);
             }
         }
         out
     }
-    /// The pools an account serves: its home, then each group sharing it (SB-282).
+    /// The pools an account serves: its home, then each group sharing it (SB-282), then
+    /// `default` when it is lent there (SB-352 wave 2).
     pub fn pools_of<'a>(&'a self, account: &'a crate::Account) -> Vec<&'a str> {
         std::iter::once(account.pool.as_str())
             .chain(
@@ -514,7 +551,21 @@ impl Snapshot {
                     .filter(|p| p.pool != account.pool && p.shared_accounts.contains(&account.id))
                     .map(|p| p.pool.as_str()),
             )
+            .chain(
+                (account.pool != DEFAULT_POOL && self.default_shared.contains(&account.id))
+                    .then_some(DEFAULT_POOL),
+            )
             .collect()
+    }
+    /// SB-352 (DEC-0012): whether balancing may lend `account` to `pool` by its organizations as
+    /// they stand now: the group of `pool` takes it (`context_admits`); the default group, which
+    /// is no organization's, takes only an account that is personal while organizations exist,
+    /// so a loan never carries an organization's account outside its groups (SB-109).
+    pub fn loan_admits(&self, pool: &str, account: &crate::Account) -> bool {
+        if pool != DEFAULT_POOL {
+            return self.context_admits(pool, account);
+        }
+        self.organizations.is_empty() || self.attribution(account).holds(None)
     }
 }
 
@@ -633,6 +684,16 @@ impl Store {
             }
         }
         // SB-282: listed accounts at home in another group are shared, in the person's order.
+        // SB-352 wave 2: an account at home in `default` that balancing lent to this group stays
+        // a loan when the group is saved with it, never taken as a move here.
+        let lent_here: Vec<String> = existing.map_or_else(Vec::new, |i| {
+            candidate.projects[i]
+                .shared_accounts
+                .iter()
+                .filter(|id| candidate.default_lent.contains(id))
+                .cloned()
+                .collect()
+        });
         let shared: Vec<String> = accounts
             .iter()
             .filter(|id| {
@@ -640,7 +701,8 @@ impl Store {
                     && candidate.accounts.iter().any(|a| {
                         &&a.id == id
                             && a.pool != pool
-                            && candidate.projects.iter().any(|p| p.pool == a.pool)
+                            && (candidate.projects.iter().any(|p| p.pool == a.pool)
+                                || (a.pool == DEFAULT_POOL && lent_here.contains(&a.id)))
                     })
             })
             .cloned()
@@ -843,11 +905,13 @@ impl Store {
     /// SB-352 (DEC-0012): lends account `id` to the group of `pool` as a shared account
     /// (`share`), or takes it back. The account keeps its home group; only the group's
     /// `shared_accounts` changes, as `save_project_with` shares one (SB-282). A share is admitted
-    /// only when the account is at home in another group a person made, the group of `pool`
-    /// takes it by its organizations as they stand now (`context_admits`: never a new word on
-    /// its organizations, unlike a person's placement) and holds no other copy of its sign-in.
-    /// Answers whether the group changed; a share that is not admitted, or already as asked,
-    /// changes nothing.
+    /// only when the account is at home in another group (a group a person made, or `default`),
+    /// the group of `pool` takes it by its organizations as they stand now (`loan_admits`: never
+    /// a new word on its organizations, unlike a person's placement) and holds no other copy of
+    /// its sign-in. Wave 2: `pool` may be `default`, whose loans are `default_shared`, and an
+    /// account at home in `default` may be lent to a group, recorded in `default_lent`. Each loan
+    /// and return is one `balancing` activity entry (`lent`, `returned`). Answers whether the
+    /// group changed; a share that is not admitted, or already as asked, changes nothing.
     pub fn set_shared(&self, pool: &str, id: &str, share: bool) -> Result<bool, String> {
         let mut state = self.lock()?;
         let mut candidate = state.clone();
@@ -857,14 +921,20 @@ impl Store {
             .find(|a| a.id == id)
             .cloned()
             .ok_or("Account not found")?;
-        let index = candidate
-            .projects
-            .iter()
-            .position(|p| p.pool == pool)
-            .ok_or("Project not found.")?;
-        let held = candidate.projects[index]
-            .shared_accounts
-            .contains(&account.id);
+        let index = if pool == DEFAULT_POOL {
+            None
+        } else {
+            Some(
+                candidate
+                    .projects
+                    .iter()
+                    .position(|p| p.pool == pool)
+                    .ok_or("Project not found.")?,
+            )
+        };
+        let held = candidate.shared_with(pool).contains(&account.id);
+        let home_lends =
+            account.pool == DEFAULT_POOL || candidate.project_of_pool(&account.pool).is_some();
         if share {
             let clash = candidate.accounts.iter().any(|b| {
                 b.id != account.id
@@ -877,26 +947,40 @@ impl Store {
             });
             if held
                 || account.pool == pool
-                || candidate.project_of_pool(&account.pool).is_none()
-                || !candidate.context_admits(pool, &account)
+                || !home_lends
+                || !candidate.loan_admits(pool, &account)
                 || clash
             {
                 return Ok(false);
             }
-            candidate.projects[index]
-                .shared_accounts
-                .push(account.id.clone());
+            match index {
+                Some(i) => candidate.projects[i]
+                    .shared_accounts
+                    .push(account.id.clone()),
+                None => candidate.default_shared.push(account.id.clone()),
+            }
+            if account.pool == DEFAULT_POOL && !candidate.default_lent.contains(&account.id) {
+                candidate.default_lent.push(account.id.clone());
+            }
         } else {
             if !held {
                 return Ok(false);
             }
-            candidate.projects[index]
-                .shared_accounts
-                .retain(|s| s != &account.id);
+            match index {
+                Some(i) => candidate.projects[i]
+                    .shared_accounts
+                    .retain(|s| s != &account.id),
+                None => candidate.default_shared.retain(|s| s != &account.id),
+            }
         }
         stale_shares_prune(&mut candidate);
         shared_routes_prune(&mut candidate);
-        append_event(&mut candidate, "project", Some(id), "updated");
+        append_event(
+            &mut candidate,
+            "balancing",
+            Some(id),
+            if share { "lent" } else { "returned" },
+        );
         self.publish(&mut state, candidate)?;
         self.changed();
         Ok(true)

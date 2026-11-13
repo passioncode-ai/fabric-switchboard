@@ -1,6 +1,6 @@
 // Pure interface rules, kept free of DOM access so scripts/test-ui-logic.mjs can
 // exercise them directly. main.ts owns rendering; these functions own decisions.
-import type { ShellHookNotice, ShellHookStatus, Onboarding, OnboardStep, ChainExecutor, ChainScope, ChainStepView } from './types';
+import type { BalanceStatus, ShellHookNotice, ShellHookStatus, Onboarding, OnboardStep, ChainExecutor, ChainScope, ChainStepView } from './types';
 import type { Account, AccountLimit, Organization, OrganizationGroupOffer, Project, AgentRow, AgentSetup, OpenrouterCredit, RecommendedModel, SessionInfo, ProjectRule, RotationPolicy, UpdateStatus, Usage, UsageWindow } from './types';
 import { t, plural } from './i18n';
 
@@ -116,6 +116,8 @@ export function eventAction(action: string): string {
     case 'launch': return t('Launch');
     case 'login': return t('Sign-in');
     case 'assignment': return t('Given to an agent');
+    // SB-352 wave 2: balancing lent an account to another group, or took it back.
+    case 'balancing': return t('Balancing');
     // UX-26: a word this window does not know yet is framed in the interface language, never shown bare.
     default: return t('Other event ({code})', { code: action.replaceAll('.', ' · ').replaceAll('_', ' ') });
   }
@@ -159,6 +161,8 @@ export function eventDetail(detail: string): string {
     case 'managed': return t('managed session');
     // SB-322: an account given to an agent that the person used anyway.
     case 'override': return t('used anyway');
+    case 'lent': return t('lent to another group');
+    case 'returned': return t('back in its own group');
     default: return /^[2-5]xx$/.test(detail) ? t('HTTP {status}', { status: detail }) : detail.replaceAll('_', ' ');
   }
 }
@@ -298,9 +302,11 @@ export function groupOrganizations(group: Pick<Project, 'organization' | 'organi
   if (group.organizations?.length) return group.organizations;
   return group.organization ? [group.organization] : [];
 }
-/** SB-282: whether `account` serves `pool`: its own pool, or a group that shares it. */
-export function servesPool(snapshot: { projects?: Pick<Project, 'pool' | 'shared_accounts'>[] }, account: Pick<Account, 'id' | 'pool'>, pool: string): boolean {
-  return account.pool === pool || !!(snapshot.projects ?? []).find((p) => p.pool === pool)?.shared_accounts?.includes(account.id);
+/** SB-282: whether `account` serves `pool`: its own pool, or a group that shares it (the default group by a loan, SB-352 wave 2). */
+export function servesPool(snapshot: { projects?: Pick<Project, 'pool' | 'shared_accounts'>[]; default_shared?: string[] }, account: Pick<Account, 'id' | 'pool'>, pool: string): boolean {
+  if (account.pool === pool) return true;
+  if (pool === 'default') return !!snapshot.default_shared?.includes(account.id);
+  return !!(snapshot.projects ?? []).find((p) => p.pool === pool)?.shared_accounts?.includes(account.id);
 }
 /** SB-282: the groups an account serves besides its own pool (shares). */
 export function sharedGroups<P extends Pick<Project, 'pool' | 'shared_accounts'>>(snapshot: { projects?: P[] }, account: Pick<Account, 'id' | 'pool'>): P[] {
@@ -1496,4 +1502,42 @@ export function githubPlan(repos: GithubPick[], selected: ReadonlySet<string>): 
 /** SB-265: the source a group of a GitHub owner takes new repositories by. */
 export function githubSource(owner: string): string {
   return `github.com/${owner.toLowerCase()}`;
+}
+
+/** SB-352 wave 2 (SCN-090): the Groups page's *Balancing between groups*: its state line, one switch per group, the switch for new groups, the accounts lent now and the latest returns. */
+export interface BalancingView {
+  state: 'reading' | 'failed' | 'off' | 'on';
+  line: string;
+  groups: { pool: string; label: string; chosen: boolean }[];
+  allNew: boolean;
+  loans: string[];
+  returns: string[];
+  error: string | null;
+  retry: boolean;
+}
+export function balancingView(status: BalanceStatus | null, error: string | null = null, accounts: Pick<Account, 'id' | 'label'>[] = []): BalancingView {
+  const none = { groups: [], allNew: false, loans: [], returns: [] };
+  if (!status) {
+    if (error) return { ...none, state: 'failed', line: t('Balancing could not be read.'), error, retry: true };
+    return { ...none, state: 'reading', line: t('Reading balancing…'), error: null, retry: false };
+  }
+  const label = (pool: string, name: string) => pool === 'default' ? t('Default group') : name;
+  const names = new Map(status.available.map((g) => [g.pool, label(g.pool, g.name)]));
+  const group = (pool: string) => names.get(pool) ?? poolName(pool);
+  const groups = status.available.map((g) => ({ pool: g.pool, label: label(g.pool, g.name), chosen: g.chosen }));
+  const chosen = groups.filter((g) => g.chosen).length;
+  const line = status.on ? plural(chosen, { one: 'On: {n} group takes part.', other: 'On: {n} groups take part.' }) : t('Off: no group takes part.');
+  const accountLabel = (id: string, known: string | null = null) => known ?? accounts.find((a) => a.id === id)?.label ?? t('An account no longer saved');
+  const loans = status.lent.map((l) => t('{account} is lent from {from} to {to}.', { account: accountLabel(l.account_id, l.label), from: group(l.from), to: group(l.to) }));
+  const lentNow = new Set(status.lent.map((l) => l.account_id));
+  const returns = status.recent
+    .filter((e) => e.action === 'return' && e.outcome === 'done' && !lentNow.has(e.account))
+    .slice(0, 3)
+    .map((e) => t('{account} is back in {group}.', { account: accountLabel(e.account), group: group(e.from) }));
+  return { state: status.on ? 'on' : 'off', line, groups, allNew: status.all_new, loans, returns, error, retry: false };
+}
+/** The notice after one switch (SCN-090 steps 2 to 4). */
+export function balancingNotice(change: { group?: string; on: boolean; allNew?: boolean }): string {
+  if (change.allNew !== undefined) return change.allNew ? t('Groups made later take part in balancing.') : t('Groups made later stay out of balancing until you turn them on.');
+  return change.on ? t('{group} takes part in balancing.', { group: change.group ?? '' }) : t('{group} no longer takes part. Accounts it lent or borrowed are back in their own groups.', { group: change.group ?? '' });
 }

@@ -8,6 +8,8 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- Balancing has a switch on the Groups page: turn each group on or off, choose whether groups made later take part, and see which accounts are lent now and which came back. The default group now lends and borrows too (it borrows only a personal account while organizations exist), and every loan and return shows in Activity (SB-352).
+
 ## 0.7.73
 
 - Accounts can be lent between the groups you choose: every 15 minutes a chosen group out of room borrows an account with room from another chosen group, which keeps it as its own, and gets it back when the need passes. Off until you choose groups with `switchboard balance groups --add`; `switchboard balance status` shows the loans and the figures behind each, and MCP `switchboard_balance` does both. The Groups page switch comes next (SB-352).
