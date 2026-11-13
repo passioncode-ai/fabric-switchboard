@@ -231,9 +231,12 @@ fn agent_processes() -> Vec<Proc> {
         };
         let folder = (got == vsize).then(|| {
             let vnode = unsafe { vnode.assume_init() };
-            let raw = &vnode.pvi_cdir.vip_path;
-            let bytes: Vec<u8> = raw
+            // `vip_path` is MAXPATHLEN bytes, which libc spells as 32 rows of 32.
+            let bytes: Vec<u8> = vnode
+                .pvi_cdir
+                .vip_path
                 .iter()
+                .flatten()
                 .take_while(|c| **c != 0)
                 .map(|c| *c as u8)
                 .collect();
