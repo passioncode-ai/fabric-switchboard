@@ -8,6 +8,8 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- *Check for updates* and *Restart to update* asked from the CLI or an agent (`app check-updates`, `app restart-to-update`, MCP `switchboard_app`) no longer stop half way when the caller stops waiting: the check and the restart run to their end on their own, and a check that ends any other way never leaves later checks turned away. Before, a timed-out request left the app showing *downloading* until it was restarted (SB-351).
+
 ## 0.7.70
 
 - 0.7.69 was not published: its nightly checks ran past the job's 30 minutes while building the app. The job now has 60, and 0.7.70 carries 0.7.68 and 0.7.69.

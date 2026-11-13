@@ -661,6 +661,7 @@ async fn check(app: &AppHandle, manual: bool) -> Phase {
         }
         waiting
     };
+    let _fetching = Fetching(&state);
     let outcome = bounded(FETCH_DEADLINE, fetch(app, &state, waiting)).await;
     let mut inner = state.lock();
     inner.fetching = false;
@@ -858,6 +859,27 @@ pub fn needs_migration(feed: &Value) -> bool {
 
 /// Whether a check must not start now: a restart is under way, a swap stalled, or another check
 /// is already fetching (SB-105, SB-319).
+/// SB-351: clears `fetching` when a check ends by any way, its future dropped included. A check
+/// started by a control request (`app check-updates`, MCP `switchboard_app`) was dropped with the
+/// request when its client gave up; `fetching` stayed set and `busy` turned every later check
+/// away (the operator's MacBook, 2026-11-13 00:55Z: `downloading` with the `.part` file still).
+struct Fetching<'a>(&'a Updates);
+impl Drop for Fetching<'_> {
+    fn drop(&mut self) {
+        let mut inner = self.0.lock();
+        if inner.fetching {
+            inner.fetching = false;
+            inner.rechecking = false;
+            if inner.ready.is_none() && matches!(inner.phase, Phase::Checking | Phase::Downloading)
+            {
+                inner.phase = Phase::Failed;
+                inner.version = None;
+                inner.error = Some(CHECK_FAILED);
+            }
+        }
+    }
+}
+
 fn busy(inner: &Inner) -> bool {
     inner.restart.is_some() || inner.stalled || inner.rechecking || inner.fetching
 }
@@ -866,8 +888,22 @@ fn busy(inner: &Inner) -> bool {
 pub async fn check_now(app: AppHandle) -> Result<Value, String> {
     let state = app.state::<Updates>();
     state.available.map_err(str::to_string)?;
-    check(&app, true).await;
+    // SB-351: the check runs on a task of its own, so a caller that stops waiting (a control
+    // request whose client timed out) leaves the download and the install to finish.
+    let checking = app.clone();
+    let _ = detached(async move {
+        check(&checking, true).await;
+    })
+    .await;
     Ok(app.state::<Updates>().status())
+}
+
+/// SB-351: runs `work` on a task of its own and waits for it; dropping the wait leaves the task
+/// running to its end.
+async fn detached<T: Send + 'static>(
+    work: impl std::future::Future<Output = T> + Send + 'static,
+) -> Option<T> {
+    tauri::async_runtime::spawn(work).await.ok()
 }
 
 /// Starts the idle-moment watch for a ready update (one at a time). It ends when the update
@@ -1533,7 +1569,10 @@ fn window_hidden(app: &AppHandle) -> bool {
 pub async fn restart(app: AppHandle) -> Result<Value, String> {
     // The person asked: the window comes back as they left it, shown or hidden.
     let background = !window_visible(&app);
-    restart_as(app, background).await
+    // SB-351: a swap or an exit under way is never cut by a caller that stopped waiting.
+    detached(restart_as(app, background))
+        .await
+        .unwrap_or_else(|| Err(INSTALL_FAILED.into()))
 }
 
 /// The restart itself; `background` relaunches with the window hidden.
@@ -1779,6 +1818,28 @@ mod tests {
             }
         });
         format!("http://{address}/package.tar.gz")
+    }
+
+    #[test]
+    fn a_dropped_check_never_leaves_fetching_set() {
+        // SB-351: a check's future dropped mid-download (its control request gave up).
+        let updates = Updates::new(Ok(()), None);
+        {
+            let mut inner = updates.lock();
+            inner.fetching = true;
+            inner.phase = Phase::Downloading;
+            inner.version = Some("9.9.9".into());
+        }
+        drop(Fetching(&updates));
+        let inner = updates.lock();
+        assert!(!inner.fetching && !busy(&inner));
+        assert_eq!(inner.phase, Phase::Failed);
+        assert_eq!(inner.error, Some(CHECK_FAILED));
+        drop(inner);
+        // A check that ended normally cleared it first: the guard changes nothing then.
+        updates.lock().phase = Phase::Idle;
+        drop(Fetching(&updates));
+        assert_eq!(updates.lock().phase, Phase::Idle);
     }
 
     #[tokio::test]
