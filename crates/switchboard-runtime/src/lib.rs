@@ -30,6 +30,7 @@ mod inbox;
 pub mod kimi;
 pub mod launch;
 pub mod launches;
+pub mod machine_sessions;
 mod limits;
 mod monitor;
 pub mod onboarding;

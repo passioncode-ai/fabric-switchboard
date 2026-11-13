@@ -151,6 +151,11 @@ enum Command {
         /// it did: one record per launch, also when a later launch reused its home.
         #[arg(long)]
         history: bool,
+        /// Every Claude Code and Codex process running for this user, Switchboard's or not: its
+        /// folder, age, the launch it belongs to (or none) and how long its folder's transcripts
+        /// have been quiet. Read from the process table here, without the owner.
+        #[arg(long, conflicts_with_all = ["history", "all"])]
+        machine: bool,
         #[command(subcommand)]
         command: Option<SessionsCommand>,
     },
@@ -2200,6 +2205,9 @@ async fn run(cli: &Cli) -> Result<Value, String> {
         } => {
             return Err("A session host runs on macOS and Linux for now.".into());
         }
+        Command::Sessions { machine: true, .. } => {
+            return Ok(switchboard_runtime::machine_sessions::scan(&root));
+        }
         Command::Sessions {
             command: Some(SessionsCommand::Show { launch_id }),
             ..
@@ -3696,6 +3704,31 @@ fn print_result(value: &Value, cli: &Cli) {
             command: Some(SessionsCommand::Show { .. }),
             ..
         } => print_launch(value),
+        Command::Sessions { machine: true, .. } => {
+            let rows = value["sessions"].as_array().cloned().unwrap_or_default();
+            for s in &rows {
+                let quiet = match s["quiet_minutes"].as_i64() {
+                    Some(m) => format!("quiet {m} min"),
+                    None => "no transcript".into(),
+                };
+                println!(
+                    "{:<7} {:<11} {:<9} {} · {}",
+                    s["pid"].to_string(),
+                    text(&s["agent"]),
+                    if s["managed"] == true { "managed" } else { "unmanaged" },
+                    text(&s["folder"]),
+                    quiet
+                );
+            }
+            println!(
+                "{} sessions: {} managed, {} unmanaged, {} quiet for {} minutes or more.",
+                value["total"],
+                value["managed"],
+                value["unmanaged"],
+                value["quiet"],
+                value["quiet_after_minutes"]
+            );
+        }
         Command::Sessions { history: true, .. } => {
             let launches = value["launches"].as_array().cloned().unwrap_or_default();
             if launches.is_empty() {
