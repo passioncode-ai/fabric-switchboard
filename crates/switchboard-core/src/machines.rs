@@ -69,7 +69,7 @@ impl Machine {
 
 /// Where an account goes: the ssh name used for the machine, its `ssh -G` identity when known,
 /// and other names known to be the same machine.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct MachineRef {
     pub target: String,
     pub identity: Option<String>,
