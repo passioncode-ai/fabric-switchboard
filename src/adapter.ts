@@ -68,6 +68,7 @@ export const nativeAdapter: Adapter = {
   projectRoots: () => invoke('project_roots'),
   moveRoot: (folder, pool, also, from) => invoke('move_root', { folder, pool, also: also ?? false, from: from ?? null }),
   codexRoute: (enabled) => invoke('codex_route', { enabled: enabled ?? null }),
+  balance: (change) => invoke('balance', { add: change?.add ?? [], remove: change?.remove ?? [], allNew: change?.all_new ?? null }),
   repositoryMap: (under) => readWithDeadline(invoke('repository_map', { under }), 60_000),
   statistics: (days) => invoke('statistics', { days }),
   moveAccount: (id, pool) => invoke('move_account', { id, pool }),

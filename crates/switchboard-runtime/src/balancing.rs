@@ -365,18 +365,19 @@ fn forced_return(view: &View<'_>, lend: &Lend) -> Option<(&'static str, bool)> {
     let Some(account) = snapshot.accounts.iter().find(|a| a.id == lend.account) else {
         return Some(("account_gone", false));
     };
-    if !snapshot
-        .project_of_pool(&lend.to)
-        .is_some_and(|p| p.shared_accounts.contains(&account.id))
-    {
+    // The borrower serves it only as a share (its home is elsewhere): the default group by its
+    // loans (`default_shared`), any other group by its `shared_accounts` (SB-282).
+    if account.pool == lend.to || !snapshot.serves(account, &lend.to) {
         return Some(("share_gone", false));
     }
     if !view.settings.chosen(&lend.from) || !view.settings.chosen(&lend.to) {
         return Some(("not_chosen", true));
     }
-    if !usable(snapshot, account)
+    // Wave 2: an account the person moved to another home since is no loan of `from` any more.
+    if account.pool != lend.from
+        || !usable(snapshot, account)
         || view.held.in_cli.contains(&account.id)
-        || !snapshot.context_admits(&lend.to, account)
+        || !snapshot.loan_admits(&lend.to, account)
     {
         return Some(("not_lendable", true));
     }
@@ -427,10 +428,11 @@ pub fn returns_owed(
 /// room, most refusals first, then most demand, each take in turn the lender account with the
 /// most room (lowest used share, then the latest reset) from a chosen group that keeps at least
 /// two accounts with room after it (one when it had no request for 6 hours). A group not chosen
-/// is never read or touched; an account never crosses an organization's boundary, and the
-/// ordinary CLI's account, one given to an agent, used elsewhere, disabled, waiting for a sign-in
-/// or on stale figures is never lent. `default` holds no group a person made, so it neither lends
-/// nor borrows (a share is only of an account at home in such a group, SB-313).
+/// is never read or touched; an account never crosses an organization's boundary (the default
+/// group, no organization's, takes only a personal account), and the ordinary CLI's account, one
+/// given to an agent, used elsewhere, disabled, waiting for a sign-in or on stale figures is
+/// never lent. Since wave 2 `default` lends and borrows like any chosen group: its loans are kept
+/// in the store's `default_shared` and `default_lent` (SB-352 wave 2).
 pub fn plan(
     snapshot: &Snapshot,
     signals: &Signals,
@@ -477,12 +479,12 @@ pub fn plan(
     if !settings.on() {
         return out;
     }
-    // Only a group a person made can take a shared account.
+    // A chosen group that still exists: `default` always does (wave 2).
     let groups: Vec<&str> = settings
         .groups
         .iter()
         .map(String::as_str)
-        .filter(|g| snapshot.project_of_pool(g).is_some())
+        .filter(|g| *g == DEFAULT_POOL || snapshot.project_of_pool(g).is_some())
         .collect();
     let mut needy: Vec<(&str, Provider, Signal)> = Vec::new();
     for g in &groups {
@@ -520,7 +522,7 @@ pub fn plan(
                     && settings.cooled(&a.id, now)
                     && !moving.contains(&a.id)
                     && !snapshot.serves(a, borrower)
-                    && snapshot.context_admits(borrower, a)
+                    && snapshot.loan_admits(borrower, a)
             }) {
                 let Some(used) = room(snapshot, a, lender, held, now) else {
                     continue;
@@ -710,7 +712,7 @@ pub fn status(
     let groups: Vec<Value> = settings
         .groups
         .iter()
-        .map(|g| json!({"pool": g, "name": name(g), "shares": g != DEFAULT_POOL}))
+        .map(|g| json!({"pool": g, "name": name(g)}))
         .collect();
     let lent: Vec<Value> = settings
         .lent
@@ -728,13 +730,15 @@ pub fn status(
         .take(20)
         .filter_map(|l| serde_json::from_str(l).ok())
         .collect();
-    let mut out = json!({"on": settings.on(), "groups": groups, "all_new": settings.all_new,
+    // Every group there is, `default` first, for a window or an agent that offers the choice.
+    let available: Vec<Value> = pools(snapshot)
+        .iter()
+        .map(|g| json!({"pool": g, "name": name(g), "chosen": settings.chosen(g)}))
+        .collect();
+    json!({"on": settings.on(), "groups": groups, "available": available,
+        "all_new": settings.all_new,
         "pass_minutes": PASS_SECONDS / 60, "lent": lent, "recent": recent,
-        "last_pass": last.cloned().unwrap_or(Value::Null)});
-    if settings.chosen(DEFAULT_POOL) {
-        out["note"] = json!("The default group is read but neither lends nor borrows: only a group you made shares accounts.");
-    }
-    out
+        "last_pass": last.cloned().unwrap_or(Value::Null)})
 }
 
 /// What a pass last saw, for `balance status`: each chosen group's figures and the actions.
@@ -1094,21 +1098,107 @@ mod tests {
         );
     }
 
+    /// Wave 2: Apps's three accounts with room live in `default`, which lends one to Agents.
     #[test]
-    fn the_default_group_neither_lends_nor_borrows() {
+    fn the_default_group_lends_like_any_chosen_group() {
         let mut s = estate();
         for a in s.accounts.iter_mut().filter(|a| a.pool == "apps") {
             a.pool = DEFAULT_POOL.into();
         }
         s.projects.retain(|p| p.pool != "apps");
-        assert!(plan(
+        let actions = plan(
             &s,
             &sig_map(&[busy("agents", 40, 3)]),
             &Held::default(),
             &chosen(&["agents", "default"]),
+            NOW,
+        );
+        assert_eq!(actions.len(), 1, "{actions:?}");
+        assert_eq!(
+            (
+                actions[0].action,
+                actions[0].from.as_str(),
+                actions[0].to.as_str()
+            ),
+            ("lend", "default", "agents")
+        );
+        // Not chosen, `default` lends nothing.
+        assert!(plan(
+            &s,
+            &sig_map(&[busy("agents", 40, 3)]),
+            &Held::default(),
+            &chosen(&["agents"]),
             NOW
         )
         .is_empty());
+    }
+
+    /// Wave 2: `default`, out of room, borrows from a chosen group; while organizations exist
+    /// it takes only a personal account, never an organization's.
+    #[test]
+    fn the_default_group_borrows_only_personal_accounts() {
+        let mut s = estate();
+        s.accounts[0].pool = DEFAULT_POOL.into();
+        s.projects.retain(|p| p.pool != "agents");
+        let sig = sig_map(&[busy("default", 40, 3)]);
+        let actions = plan(
+            &s,
+            &sig,
+            &Held::default(),
+            &chosen(&["default", "apps"]),
+            NOW,
+        );
+        assert_eq!(
+            actions
+                .iter()
+                .map(|a| (a.action, a.account.as_str(), a.to.as_str()))
+                .collect::<Vec<_>>(),
+            [("lend", "apps-1", "default")]
+        );
+        s.organizations.push(
+            serde_json::from_value(json!({"id": "acme", "name": "Acme", "created_at": 1})).unwrap(),
+        );
+        s.projects[0].organizations = vec!["acme".into()];
+        for a in s.accounts.iter().filter(|a| a.pool == "apps") {
+            s.memberships.insert(a.id.clone(), "acme".into());
+        }
+        assert!(
+            plan(
+                &s,
+                &sig,
+                &Held::default(),
+                &chosen(&["default", "apps"]),
+                NOW
+            )
+            .is_empty(),
+            "an organization's account never serves the default group"
+        );
+    }
+
+    /// Wave 2: a loan to `default` reads from the store's `default_shared`, and an account the
+    /// person moved to another home since it was lent goes back.
+    #[test]
+    fn a_loan_to_default_is_read_and_one_moved_home_goes_back() {
+        let mut s = estate();
+        s.accounts[0].pool = DEFAULT_POOL.into();
+        s.projects.retain(|p| p.pool != "agents");
+        s.default_shared.push("apps-1".into());
+        let mut settings = chosen(&["default", "apps"]);
+        settings
+            .lent
+            .push(lent("apps-1", "apps", DEFAULT_POOL, NOW - 60));
+        settings.moved.insert("apps-1".into(), NOW - 60);
+        assert!(
+            returns_owed(&s, &Held::default(), &settings, NOW).is_empty(),
+            "the loan stands"
+        );
+        s.projects.push(group("tools"));
+        s.accounts[1].pool = "tools".into();
+        let owed = returns_owed(&s, &Held::default(), &settings, NOW);
+        assert_eq!((owed[0].reason, owed[0].edit), ("not_lendable", true));
+        s.default_shared.clear();
+        let gone = returns_owed(&s, &Held::default(), &settings, NOW);
+        assert_eq!((gone[0].reason, gone[0].edit), ("share_gone", false));
     }
 
     #[test]

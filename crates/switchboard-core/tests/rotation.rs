@@ -2118,3 +2118,32 @@ fn giving_an_account_to_an_agent_validates_and_clears_the_elsewhere_mark() {
     store.remove(&a).unwrap();
     assert!(store.snapshot().unwrap().assigned_to.is_empty());
 }
+
+/// SB-352 wave 2: an account a group lent to `default` serves its managed sessions, but native
+/// rotation of the ordinary Claude Code never switches to it.
+#[test]
+fn native_rotation_never_takes_an_account_lent_to_default() {
+    let (_root, _vault, store) = setup();
+    let now = clock();
+    let a = account(&store, "org-a", now);
+    let lent = account(&store, "org-lent", now);
+    let dir = tempfile::tempdir().unwrap();
+    let group = store
+        .save_project(
+            None,
+            "Lender",
+            &[dir.path().join("repo")],
+            std::slice::from_ref(&lent),
+        )
+        .unwrap();
+    assert!(store.set_shared("default", &lent, true).unwrap());
+    observe(&store, &a, 95., now);
+    observe(&store, &lent, 5., now);
+    let managed = store.rotation_decision(&policy(), Some(&a), now).unwrap();
+    assert_eq!(managed.candidate_id.as_deref(), Some(lent.as_str()));
+    let mut native = policy();
+    native.target = "claude_cli".into();
+    let decision = store.rotation_decision(&native, Some(&a), now).unwrap();
+    assert!(decision.candidate_id.is_none(), "{decision:?}");
+    assert_ne!(group.pool, "default");
+}

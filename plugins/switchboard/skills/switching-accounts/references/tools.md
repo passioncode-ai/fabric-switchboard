@@ -590,10 +590,13 @@ sessions Switchboard starts bypass their permission prompts (SB-298).
 ### `switchboard_balance`: `add?`, `remove?`, `all_new?`
 
 Accounts lent between the groups the operator chose (SB-352, DEC-0012). Without arguments it
-reads: `{on, groups: [{pool, name, shares}], all_new, pass_minutes, lent: [{account_id, label,
-provider, from, from_name, to, to_name, at}], last_pass, recent, note?}`, where `recent` is the
-newest lends and returns with their reason, outcome and figures. `add` and `remove` change the
-chosen groups by pool id (`default` may be chosen but neither lends nor borrows); an empty set is
+reads: `{on, groups: [{pool, name}], available: [{pool, name, chosen}], all_new, pass_minutes,
+lent: [{account_id, label, provider, from, from_name, to, to_name, at}], last_pass, recent}`, where
+`recent` is the newest lends and returns with their reason, outcome and figures and `available`
+every group with whether it is chosen. `add` and `remove` change the chosen groups by pool id
+(`default` lends and borrows like any group; it borrows only a personal account while
+organizations exist); each loan and return is also a `balancing` entry of
+`switchboard_events` (`lent`, `returned`); an empty set is
 off and returns every lent account at once; `all_new` decides whether a group made later joins.
 Change it only when the operator asks. Every 15 minutes a chosen group out of room borrows one
 account from a chosen group that keeps two with room (one when idle for 6 hours); the account

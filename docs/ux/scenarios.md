@@ -97,6 +97,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 | SCN-087 | Move an account to another machine without signing in there | draft |
 | SCN-088 | Hand an account over to a colleague and receive it | draft |
 | SCN-089 | Give an account to an agent and still see its usage | draft |
+| SCN-090 | Choose the groups that lend accounts to each other | draft |
 ### SCN-001: First run
 **Persona:** P-01
 **Goal:** Deliberately control which account a coding session uses.
@@ -1935,3 +1936,27 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Coverage:** core `an_account_given_to_an_agent_is_never_switched_to_but_still_observed`, `giving_an_account_to_an_agent_validates_and_clears_the_elsewhere_mark`; runtime `an_account_given_to_an_agent_is_switched_to_only_anyway`, `automatic_switching_never_moves_to_an_account_given_to_an_agent`, `an_account_given_to_an_agent_launches_only_once_used_anyway`, `an_account_given_to_an_agent_is_still_renewed_here`; CLI and MCP `an_account_is_given_to_an_agent_and_taken_back_from_the_cli`, `accounts_rotation_activity_and_queues_are_reachable_over_mcp`; WebKit demo (`?demo=1`: *Give to an agent…*).
 **Product:** unobserved
 **Traces:** SB-322, SB-175, SB-284, SCN-072
+
+### SCN-090: Choose the groups that lend accounts to each other
+**Persona:** P-01
+**Goal:** A person whose groups run out of room at different times picks the groups that may lend each other an account, the default group and groups made later included, and sees what is lent now and what came back (SB-352, DEC-0012).
+**Preconditions:** at least one saved account. Balancing is off until a group is turned on; nothing is lent while fewer than two groups take part.
+**Entry point:** Groups → *Balancing between groups* (under the groups, above *Codex in group folders*). CLI `switchboard balance status`, `switchboard balance groups --add|--remove|--all-new`; MCP `switchboard_balance`.
+**Steps:**
+1. Open Groups → the section says “Switchboard lends an account from a quiet group to a group that runs out of room, judging by the last hours and days of work, and takes it back once the borrower is quiet or its own group needs it. The account keeps its own group. A group that does not take part is never touched.”, the state (“Off: no group takes part.” or “On: {n} groups take part.”), one switch per group (*Default group* first, then each group by name) and *Groups made later take part too*.
+2. Turn a group's switch on → “{group} takes part in balancing.”; the state line counts it. The default group may take part: it lends its accounts and borrows like any other group (wave 2).
+3. Turn *Groups made later take part too* on → “Groups made later take part in balancing.”; a group made afterwards takes part by itself at the next pass. Off → “Groups made later stay out of balancing until you turn them on.”
+4. A chosen group runs out of room → within 15 minutes one account of another chosen group serves it too; the section reads “{account} is lent from {from} to {to}.” and Activity records *Balancing · lent to another group* for that account.
+5. The borrower is quiet for 2 hours, or the account's own group needs it → it goes back; the section reads “{account} is back in {group}.” (the three newest returns) and Activity records *Balancing · back in its own group*.
+6. Turn a group's switch off → “{group} no longer takes part. Accounts it lent or borrowed are back in their own groups.”; its loans end at once.
+**Alt paths:** the default group borrows only a personal account while organizations exist, so an organization's account never serves sessions outside its groups; an account the person moved to another group since it was lent goes back at the next pass; the ordinary Claude Code's native rotation never switches to an account lent to the default group; a share someone removed by hand is forgotten, with no change to the groups; an account that is no longer saved reads “An account no longer saved”.
+**Expected result:** only the groups the person turned on lend or borrow; each loan and return is visible in the section and in Activity; turning a group off returns its loans at once.
+**UI elements:** the section's note and state line, one checkbox per group, *Groups made later take part too*, the loan and return lines, the notices; Activity's *Balancing* entries.
+**States covered:** reading, failed (with *Retry*), off, on, lent, returned, groups made later.
+**Errors & recovery:** the state could not be read → “Balancing could not be read.” with the reason and *Retry*; a change refused (an unknown group, settings not saved) shows the backend's sentence and nothing changes.
+**Status:** draft
+**Meaning:** SB-352 wave 2 (operator 2026-11-13: «адаптивная система … сделать такой выбор групп которые участвуют»; groups chosen «Agents, PassionCode, Apps & Soft, default, и все новые»). Wave 1 shipped the decision, the CLI and MCP; wave 2 the window, the activity entry and the default group's loans.
+**Copy:** checked with Copylot, register ui; report ids in [strings](../brand/strings.md#balancing-between-groups-scn-090-sb-352-wave-2).
+**Coverage:** ui-logic `the_balancing_section_reads_every_state` (`scripts/test-ui-logic.mjs`); runtime `balancing::tests::the_default_group_lends_like_any_chosen_group`, `the_default_group_borrows_only_personal_accounts`, `a_loan_to_default_is_read_and_one_moved_home_goes_back`, `a_pass_lends_to_a_group_out_of_room_and_turning_off_returns_it`; core `the_default_group_lends_and_borrows` (`tests/storage.rs`), `native_rotation_never_takes_an_account_lent_to_default` (`tests/rotation.rs`). No walk in the installed app yet.
+**Product:** unobserved
+**Traces:** SB-352, DEC-0012, SB-282, SB-313, SB-109

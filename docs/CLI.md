@@ -415,9 +415,11 @@ between moves. A group not chosen is never touched, no account crosses an organi
 boundary, and the ordinary Claude Code's or Codex's account, an account given to an agent, used
 on another machine, disabled or waiting for a sign-in is never lent. Taking a group out, or the
 last one, returns every account lent from or to it at once. `--all-new true` lets a group made
-later join by itself. `default` may be chosen but neither lends nor borrows: only a group you made
-shares accounts. The choice and the loans are in `balancing.json` (0600), each lend and return
-with its figures in `balancing.jsonl` (0600). MCP: `switchboard_balance`.
+later join by itself. `default` lends and borrows like any group you choose (since wave 2), but it
+borrows only a personal account while organizations exist. The choice and the loans are in `balancing.json` (0600), each lend and return
+with its figures in `balancing.jsonl` (0600); each is also an activity entry, `balancing lent` or
+`balancing returned` (`switchboard events`). The window has the same choice on the Groups page.
+MCP: `switchboard_balance`.
 
 ### A project's folders follow its work and the disk (SB-117, SB-121, SB-131)
 

@@ -2,6 +2,15 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-11-13: balancing between groups, wave 2 (SB-352): the default group, activity, the Groups page
+
+- **Asked.** The operator (2026-11-13): accounts lent between chosen groups («Agents, PassionCode, Apps & Soft, default, и все новые»); wave 2 of [DEC-0012](DECISIONS.md#dec-0012-accounts-are-lent-between-the-groups-the-person-chose-by-their-last-hours-and-days).
+- **Done.** On branch `sb-352-balancing-w2`: the default group lends and borrows (`Snapshot.default_shared`, `default_lent`, schema version 13; `serves`, `pool_accounts`, `pools_of` read its loans; `loan_admits` keeps an organization's account out of `default`; `stale_shares_prune` keeps only loans balancing made; native rotation never takes a loan); `balancing lent` / `balancing returned` activity entries; the Groups page section *Balancing between groups* (SCN-090) with the Tauri command `balance`; `balance status` gains `available` and drops `note` and `shares`. Docs: CONTRACTS, CLI.md, the skill's tool reference, CHANGELOG, strings registry with the Copylot report ids, the SB-352 row.
+- **Checks.** Core tests on this MacBook (`cargo test -p switchboard-core`, all green); ui-logic, locale, strings registry, error vocabulary, `npm run build`, `docs/ux/lint.py` (0 errors); the full gate on the Mac Studio (see the SB-352 row for the head it passed on).
+- **Open.** Wave 3 (the SB-352 row): a loan to `default` shown under it on the Accounts page, a walk in the installed app with the operator's groups, the default group's loans in backups. Schema version 13 is written only while a loan to or from `default` stands: a 0.7.73 or older copy refuses that file, so update the Studio's copies before turning `default` on there.
+
+**Exact next task.** Open the PR for `sb-352-balancing-w2`, merge it once its checks are green, release it, then turn on the operator's groups (`switchboard balance groups --add agents --add passioncode --add <apps & soft pool> --add default --all-new true`) on this MacBook and read `balance status` after two passes.
+
 ## 2026-11-12: sessions that survive their window (SB-342 H-0 to H-1d), targets (SB-340, SB-341), personal groups route to default (SB-343), recovery room (SB-345); 0.7.60 to 0.7.66
 
 - **Asked.** The operator (2026-11-11 and 12): check every ten minutes, push agents stopped on a limit back to work, release and deploy until nothing is broken; «я не могу нормально подключаться к сессиям ... должен быть lifecycle manager для сессий и чтобы можно было и открывать между приложениями».

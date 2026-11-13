@@ -38,7 +38,11 @@ fn schema_version(snapshot: &Snapshot) -> u32 {
     // version, so it reports the file as corrupt rather than naming the version.
     // Version 12 only while an account is given to an agent (SB-322): a 0.7.48 or older reader
     // refuses the unknown field, so it never switches to an account an agent holds.
-    if !snapshot.assigned_to.is_empty() {
+    // Version 13 only while balancing lends to or from the default group (SB-352 wave 2): a
+    // 0.7.73 or older reader refuses the unknown field rather than drop the loan's route.
+    if !snapshot.default_shared.is_empty() || !snapshot.default_lent.is_empty() {
+        13
+    } else if !snapshot.assigned_to.is_empty() {
         12
     } else if snapshot.domain_rule_retired {
         11
@@ -153,7 +157,7 @@ pub(crate) fn open(root: &Path) -> Result<(File, Snapshot), String> {
             }
             let disk: Disk = serde_json::from_slice(&bytes)
                 .map_err(|_| "Account metadata is corrupt; restore a known-good backup")?;
-            if !matches!(disk.schema_version, 1..=12) {
+            if !matches!(disk.schema_version, 1..=13) {
                 return Err("Unsupported account metadata version".into());
             }
             validate_snapshot(&disk.snapshot)?;
@@ -235,7 +239,7 @@ pub(crate) fn open(root: &Path) -> Result<(File, Snapshot), String> {
         let bytes = read_private(&path, MAX_FILE)?;
         let disk: Disk = serde_json::from_slice(&bytes)
             .map_err(|_| "Account metadata is corrupt; restore a known-good backup")?;
-        if !matches!(disk.schema_version, 1..=12) {
+        if !matches!(disk.schema_version, 1..=13) {
             return Err("Unsupported account metadata version".into());
         }
         validate_snapshot(&disk.snapshot)?;

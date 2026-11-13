@@ -4302,8 +4302,9 @@ fn schema_eleven_is_written_only_while_the_domain_rule_is_retired() {
     drop(store);
     let mut disk = schema_of(root.path());
     assert_eq!(disk["schema_version"], 11);
-    // SB-322: 12 is a known version now (an account given to an agent); 13 is not.
-    disk["schema_version"] = 13.into();
+    // SB-322: 12 is a known version now (an account given to an agent), and SB-352 wave 2 made
+    // 13 one (a loan to or from the default group); 14 is not.
+    disk["schema_version"] = 14.into();
     fs::write(
         root.path().join("accounts.json"),
         serde_json::to_vec(&disk).unwrap(),
@@ -4336,4 +4337,113 @@ impl Vault for SlowAgentVault {
         std::thread::sleep(self.delay);
         self.inner.delete(id)
     }
+}
+
+/// SB-352 wave 2: balancing lends an account of `default` to a group and an account of a group to
+/// `default`. Each loan serves its borrower, survives a restart and a save of the group, is one
+/// `balancing` activity entry, and a loan the person's later move made stale is pruned (SB-313).
+#[test]
+fn the_default_group_lends_and_borrows() {
+    let (root, vault, store) = setup();
+    let oauth = |refresh: &str| {
+        Credential::parse(
+            Provider::Claude,
+            AuthKind::OAuth,
+            &format!(
+                r#"{{"claudeAiOauth":{{"accessToken":"a-{refresh}","refreshToken":"{refresh}"}}}}"#
+            ),
+        )
+        .unwrap()
+    };
+    let save = |label: &str| {
+        store
+            .upsert(
+                format!("{label}@example.com"),
+                Provider::Claude,
+                AuthKind::OAuth,
+                "default".into(),
+                oauth(label),
+                None,
+            )
+            .unwrap()
+    };
+    let (home, group_own) = (save("home"), save("group"));
+    let folder = root.path().join("group");
+    std::fs::create_dir_all(&folder).unwrap();
+    let group = store
+        .save_project(
+            None,
+            "Group",
+            std::slice::from_ref(&folder),
+            std::slice::from_ref(&group_own.id),
+        )
+        .unwrap();
+    // `default` lends `home` to the group.
+    assert!(store.set_shared(&group.pool, &home.id, true).unwrap());
+    assert!(
+        !store.set_shared(&group.pool, &home.id, true).unwrap(),
+        "already lent"
+    );
+    // The group lends `group_own` to `default`.
+    assert!(store.set_shared("default", &group_own.id, true).unwrap());
+    let snapshot = store.snapshot().unwrap();
+    let held = |id: &str| snapshot.accounts.iter().find(|a| a.id == id).unwrap();
+    assert_eq!(held(&home.id).pool, "default", "its home stays");
+    assert!(snapshot.serves(held(&home.id), &group.pool));
+    assert!(snapshot.serves(held(&group_own.id), "default"));
+    assert_eq!(
+        snapshot.pools_of(held(&group_own.id)),
+        vec![group.pool.as_str(), "default"]
+    );
+    assert_eq!(snapshot.pool_accounts("default").len(), 2);
+    store
+        .select(Provider::Claude, "default", &group_own.id)
+        .unwrap();
+    let entries: Vec<(&str, &str)> = snapshot
+        .events
+        .iter()
+        .filter(|e| e.action == "balancing")
+        .map(|e| (e.action.as_str(), e.detail.as_str()))
+        .collect();
+    assert_eq!(entries, [("balancing", "lent"), ("balancing", "lent")]);
+    // A restart reads both loans, as schema version 13.
+    drop(store);
+    let disk: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(root.path().join("accounts.json")).unwrap()).unwrap();
+    assert_eq!(disk["schema_version"], 13);
+    let store = reopen(root.path(), vault);
+    let snapshot = store.snapshot().unwrap();
+    assert_eq!(snapshot.default_shared, vec![group_own.id.clone()]);
+    assert_eq!(snapshot.default_lent, vec![home.id.clone()]);
+    // A save of the group with the loan listed keeps it a loan, never a move.
+    store
+        .save_project(
+            Some(&group.pool),
+            "Group renamed",
+            std::slice::from_ref(&folder),
+            &[group_own.id.clone(), home.id.clone()],
+        )
+        .unwrap();
+    let snapshot = store.snapshot().unwrap();
+    let held = |id: &str| snapshot.accounts.iter().find(|a| a.id == id).unwrap();
+    assert_eq!(held(&home.id).pool, "default");
+    assert!(snapshot.serves(held(&home.id), &group.pool));
+    // Returned: the route in `default` goes with the loan.
+    assert!(store.set_shared("default", &group_own.id, false).unwrap());
+    assert!(store.route(Provider::Claude, "default").is_err());
+    let snapshot = store.snapshot().unwrap();
+    assert!(snapshot.default_shared.is_empty());
+    assert_eq!(snapshot.events.last().unwrap().detail, "returned");
+    assert!(store.set_shared(&group.pool, &home.id, false).unwrap());
+    assert!(store.snapshot().unwrap().default_lent.is_empty());
+    // A share of an account the person moved to `default` is stale (SB-313): it is pruned, and
+    // only a loan balancing made stands.
+    assert!(store.set_shared("default", &group_own.id, true).unwrap());
+    store.remove_project(&group.pool).unwrap();
+    let snapshot = store.snapshot().unwrap();
+    assert!(
+        snapshot.default_shared.is_empty(),
+        "its home is default now"
+    );
+    assert!(snapshot.default_lent.is_empty());
 }
