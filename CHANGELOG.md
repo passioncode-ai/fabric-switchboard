@@ -8,6 +8,8 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+## 0.7.76
+
 - Every other machine your accounts live on is now a group of its own. An account moved there leaves every group on this computer, so it no longer sits turned off among the accounts that work here, and the Groups page shows each machine with its accounts, read live over ssh on request. *Bring here…* calls an account back into the group you choose (the one it left by default), *Move an account here…* moves one there, and an account moves from one machine to another in one step. Accounts already marked as used elsewhere join their machine once, by the recorded move or their location; one whose machine cannot be told stays where it is and is named. New: `switchboard machines list [--live]`, `machines adopt [--apply]`, `machines place`, `machines forget`, `accounts recall --pool`; MCP `switchboard_machines`, `switchboard_machine_set`. The account file moves to version 14: an older version refuses it, so going back to 0.7.75 or older means restoring a backup (SB-355).
 
 ## 0.7.75
