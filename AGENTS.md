@@ -11,6 +11,12 @@
    the [North Star](https://github.com/passioncode-ai/fabric-workspace/blob/main/knowledge/north-star.md) metric and
    gaps, and the [one plan in waves](https://github.com/passioncode-ai/fabric-workspace/blob/main/docs/plans/2026-11-11-unified/README.md).
    Name the track, plan row or gap the change serves; work that serves none goes to the board first.
+   Switchboard serves North Star §3 (a person's Claude seat), §4 (accounts and seats per group and
+   organization, fallback chains, ceilings), §6 (work continues on the next account or agent), §10
+   (seats at boot) and gaps G1 (SB-295), G2 (SB-291), G4 (SB-292), G14 (SB-301); a change of state
+   against them goes to fabric-workspace as a board message the same day. The agents database's
+   architect: `audit.py scan` on 2026-11-13 matched no template (best similarity 0.34); its judged
+   audit is due by 2026-11-15, and no release ships past a blocking gap it names.
 2. The PassionCode.ai knowledge base — `fabric-workspace/knowledge/` in your clone (org-index
    `scripts/clone_all.sh` makes it) or https://wiki.passioncode.ai/knowledge — at least its
    [README](https://github.com/passioncode-ai/fabric-workspace/blob/main/knowledge/README.md),
