@@ -248,7 +248,8 @@ pub fn adopt(
 }
 
 /// The owner's one pass at the first start of a version with machine groups: skipped once
-/// `machine-groups.json` exists. Answers how many it placed and left, or None when skipped.
+/// `machine-groups.json` exists, or while no account marked elsewhere is outside a machine group.
+/// Answers how many it placed and left, or None when skipped.
 pub fn adopt_once(
     root: &Path,
     store: &Store,
@@ -256,6 +257,16 @@ pub fn adopt_once(
     resolve: &dyn Fn(&str) -> Option<String>,
 ) -> Option<(usize, usize)> {
     if root.join(ADOPT_FILE).exists() {
+        return None;
+    }
+    // Nothing marked elsewhere outside a machine group: nothing to place and nothing written, so
+    // a new install or a machine that never moved an account keeps its data folder as it was.
+    let snapshot = store.snapshot().ok()?;
+    if !snapshot
+        .accounts
+        .iter()
+        .any(|a| snapshot.elsewhere.contains_key(&a.id) && !is_machine_pool(&a.pool))
+    {
         return None;
     }
     let answer = adopt(root, store, true, now, resolve).ok()?;
@@ -478,6 +489,14 @@ mod tests {
         // Run by hand again it places nothing twice.
         let again = adopt(root.path(), &store, true, 40, &resolve).unwrap();
         assert!(again["placed"].as_array().unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_store_with_nothing_elsewhere_is_left_as_it_was() {
+        let (root, store) = store();
+        save(&store, "here");
+        assert_eq!(adopt_once(root.path(), &store, 5, &resolve), None);
+        assert!(!root.path().join(ADOPT_FILE).exists());
     }
 
     #[test]

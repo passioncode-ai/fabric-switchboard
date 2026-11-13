@@ -69,7 +69,7 @@ on the new computer.
 
 Every other machine your accounts live on is a group of its own here, one per ssh destination
 ([DEC-0013](DECISIONS.md#dec-0013-an-account-on-another-machine-belongs-to-that-machines-group-and-to-no-group-here)).
-When `switchboard accounts send` moves an account and its copy there answers, the account joins
+When `accounts send` moves an account and its copy there answers, the account joins
 that machine's group and leaves every group on this computer: it is never selected, switched to,
 lent or renewed here. The Groups page lists each machine under *Other machines* with its accounts;
 *Read their state* reads each machine's Switchboard over ssh.
