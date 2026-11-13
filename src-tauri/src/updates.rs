@@ -870,7 +870,8 @@ impl Drop for Fetching<'_> {
         if inner.fetching {
             inner.fetching = false;
             inner.rechecking = false;
-            if inner.ready.is_none() && matches!(inner.phase, Phase::Checking | Phase::Downloading) {
+            if inner.ready.is_none() && matches!(inner.phase, Phase::Checking | Phase::Downloading)
+            {
                 inner.phase = Phase::Failed;
                 inner.version = None;
                 inner.error = Some(CHECK_FAILED);
