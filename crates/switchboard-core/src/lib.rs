@@ -20,6 +20,7 @@ pub mod external_keychain {
 }
 mod chains;
 pub mod language;
+pub mod machines;
 pub mod organizations;
 mod persistence;
 pub mod private_fs;
@@ -35,6 +36,7 @@ pub mod windows;
 
 pub use chains::{provider_agent, workflow_id_valid, Chain, ChainScope, Executor, MAX_EXECUTORS};
 pub use credential::Credential;
+pub use machines::{is_machine_pool, Machine, MachineRef};
 pub use organizations::{Attribution, By, Organization};
 pub use projects::{pool_from_name, Project, ProjectRule, RuleResolution, FOLDER_NESTED, KEY_POOL};
 pub use rotation::{default_managed_policy, FailoverTally, Fits, RotationDecision, RotationPolicy};
@@ -318,6 +320,13 @@ pub struct Snapshot {
     /// any other is stale and pruned (SB-313).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub default_lent: Vec<String>,
+    /// SB-355 (DEC-0013): the other machines accounts live on, one group each (no folders).
+    /// An account on one has the machine's pool as its home and is marked `elsewhere`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub machines: Vec<machines::Machine>,
+    /// SB-355: the group each account on another machine left, to come back to.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub returns_to: BTreeMap<String, String>,
     /// SB-285: written by a version where an address's domain only suggests an organization.
     /// True exactly while organizations exist; a store read without it, holding organizations,
     /// was written under the domain rule, and opening it records that rule's placements as the
@@ -464,6 +473,8 @@ pub(crate) fn event_valid(action: &str, detail: &str) -> bool {
         "assignment" => matches!(detail, "assigned" | "cleared" | "override"),
         // SB-352 wave 2: balancing lent an account to another group, or took it back.
         "balancing" => matches!(detail, "lent" | "returned"),
+        // SB-355: an account joined its machine's group, or came home from it.
+        "machine" => matches!(detail, "joined" | "left"),
         "account_added" | "account_updated" | "account_removed" | "account_selected" => {
             detail == "success"
         }
@@ -578,6 +589,7 @@ pub(crate) fn validate_snapshot(s: &Snapshot) -> Result<(), String> {
     chains::validate_chains(s)?;
     agent_keys::validate_agent_keys(s)?;
     kimi_accounts::validate_kimi_accounts(s)?;
+    machines::validate_machines(s)?;
     if s.locations.len() > MAX_ACCOUNTS
         || s.locations
             .iter()
@@ -1478,6 +1490,10 @@ impl Store {
         {
             return Err("Label, pool or identity is invalid".into());
         }
+        // SB-355: an account reaches a machine group only by a move to that machine.
+        if machines::is_machine_pool(&pool) {
+            return Err(machines::MACHINE_POOL_REFUSED.into());
+        }
         credential.validate(provider, kind)?;
         if credential
             .account_id
@@ -2012,9 +2028,11 @@ impl Store {
         if !enabled {
             candidate.routes.retain(|_, value| value != id);
         } else {
-            // Enabling an account here says it is used here (SB-175).
+            // Enabling an account here says it is used here (SB-175), so it comes home from its
+            // machine's group (SB-355).
             candidate.elsewhere.remove(id);
             candidate.locations.remove(id);
+            machines::come_home(&mut candidate, id, None);
         }
         append_event(&mut candidate, "account_updated", Some(id), "success");
         self.publish(&mut state, candidate)?;
@@ -2068,6 +2086,8 @@ impl Store {
         } else {
             candidate.elsewhere.remove(id);
             candidate.locations.remove(id);
+            // SB-355: used here again, it comes home from its machine's group.
+            machines::come_home(&mut candidate, id, None);
         }
         append_event(&mut candidate, "account_updated", Some(id), "success");
         self.publish(&mut state, candidate)?;
@@ -2196,6 +2216,7 @@ impl Store {
         candidate.elsewhere.remove(id);
         candidate.locations.remove(id);
         candidate.assigned_to.remove(id);
+        candidate.returns_to.remove(id);
         chains::prune(&mut candidate);
         append_event(&mut candidate, "account_removed", Some(id), "success");
         self.publish(&mut state, candidate)?;
@@ -2263,6 +2284,8 @@ impl Store {
                 candidate.locations.remove(id);
                 candidate.routes.retain(|_, value| value != id);
                 candidate.assigned_to.insert(id.to_owned(), who.to_owned());
+                // SB-355: an agent here holds it now, so it comes home from its machine's group.
+                machines::come_home(&mut candidate, id, None);
                 append_event(&mut candidate, "assignment", Some(id), "assigned");
             }
             None => {
