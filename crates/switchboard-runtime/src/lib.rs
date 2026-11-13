@@ -34,6 +34,7 @@ pub mod launches;
 mod limits;
 pub mod machine_sessions;
 pub mod machines;
+mod mcp_homes;
 mod monitor;
 pub mod onboarding;
 pub mod oplog;
@@ -356,6 +357,9 @@ pub enum Operation {
         #[serde(default)]
         live: bool,
     },
+    /// SB-359: which of the person's Claude homes is signed in to which MCP server (names, URLs,
+    /// booleans and expiry times, never a token).
+    McpHomes,
     /// SB-355: place the accounts already marked used elsewhere in their machines' groups (by the
     /// recorded move, else their location); without `apply`, only what it would do.
     MachinesAdopt {
@@ -1345,6 +1349,8 @@ impl Runtime {
                 // SB-355: `ssh -G` and the live reads run outside the store; its writes are
                 // their own short calls.
                 | Operation::Machines { .. }
+                // SB-359: Keychain reads of Claude Code's items; the store is only read.
+                | Operation::McpHomes
                 | Operation::MachinesAdopt { .. }
                 | Operation::MachinePlace { .. }
                 | Operation::MachineForget { .. }
@@ -5863,6 +5869,17 @@ async fn execute(
             Ok(blocking::run(move || {
                 machines::live(&root, &snapshot, &machines::live_status)
             }))
+        }
+        Operation::McpHomes => {
+            let claude: Vec<String> = store
+                .snapshot()?
+                .accounts
+                .into_iter()
+                .filter(|a| a.provider == Provider::Claude)
+                .map(|a| a.id)
+                .collect();
+            let root = root.to_owned();
+            Ok(blocking::run(move || mcp_homes::report_now(&root, &claude)))
         }
         Operation::MachinesAdopt { apply } => {
             let (store, root) = (store.clone(), root.to_owned());

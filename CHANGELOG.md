@@ -8,6 +8,10 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- A session Switchboard starts now has your MCP sign-ins. When you have signed in to an MCP server such as Figma or Sentry in one Claude home, a launch copies that sign-in into the home it starts, so the session no longer says "Needs authentication" there. Only the access token is copied, never the refresh token or client secret, so only the home you signed in from ever renews it, and a home's own sign-in is never replaced (SB-358).
+- New: `switchboard mcp-homes` and the agent tool `switchboard_mcp_homes` show which of your Claude homes is signed in to which MCP server, and name a server signed in in some homes and not others, or one whose sign-in sits under an older configuration of the server. Names and URLs only, never a token (SB-359).
+- Checking the usage of a turned-off account, or one used on another machine, now answers "Account is disabled" at once. Before, each such check read the account's saved sign-in twice from the Keychain and marked the account as failing; a tool that refreshed every account did that for each one every half hour (SB-360).
+
 ## 0.7.76
 
 - Every other machine your accounts live on is now a group of its own. An account moved there leaves every group on this computer, so it no longer sits turned off among the accounts that work here, and the Groups page shows each machine with its accounts, read live over ssh on request. *Bring here…* calls an account back into the group you choose (the one it left by default), *Move an account here…* moves one there, and an account moves from one machine to another in one step. Accounts already marked as used elsewhere join their machine once, by the recorded move or their location; one whose machine cannot be told stays where it is and is named. New: `switchboard machines list [--live]`, `machines adopt [--apply]`, `machines place`, `machines forget`, `accounts recall --pool`; MCP `switchboard_machines`, `switchboard_machine_set`. The account file moves to version 14: an older version refuses it, so going back to 0.7.75 or older means restoring a backup (SB-355).

@@ -71,21 +71,25 @@ and `hook.terminals` (`active`, `pending`, `off`, `waiting` or `unread`); test
   it is the ordinary CLI's account, which joins a group only after the CLI switches.
 - Changing the ordinary Claude Code login affects every `claude` session on the computer. Never
   do it during setup.
-- With more than one account, MCP sign-ins are kept per Claude home (SB-358). Claude Code
-  stores every MCP server's OAuth sign-in (Figma, Cloudflare, Stripe and the like) in the
-  credential item of the home it runs in: `Claude Code-credentials` for the ordinary home,
+- With more than one account, MCP sign-ins are kept per Claude home. Claude Code stores every
+  MCP server's OAuth sign-in (Figma, Sentry, Cloudflare and the like) in the credential item of the
+  home it runs in: `Claude Code-credentials` for the ordinary home,
   `Claude Code-credentials-<8 hex>` for each home Switchboard launches an account in
-  (`homes/<account>`, `runtimes/<provider>-<pool>`). A server signed in in one home reads
-  "Needs authentication" in every other until it is signed in there too. So:
+  (`homes/<account>`, `runtimes/<provider>-<pool>`). Since 0.7.77 a launch copies the person's
+  own sign-ins from their other homes into the home it starts, as an access token only (SB-358),
+  so a server signed in once works in every session Switchboard starts until that token expires.
+  `switchboard mcp-homes` (MCP `switchboard_mcp_homes`) shows which home is signed in to what
+  (SB-359). So:
   - Add each MCP server once, under one name: the plugin's (`plugin:figma:figma`) where the
-    plugin is enabled, else the claude.ai connector. A second local copy of the same URL under
-    another name (`figma`) is another sign-in and starts signed out.
-  - Before telling the person a server "needs authentication", call `switchboard_status` and
-    read `session.mode` (`managed`, `isolated` or `native`; for `isolated`, `session.account_id`
-    names the home): the sign-in is missing in that home, not on the computer. Ask the person to
-    sign in there once.
-  - Never copy a token between credential items by hand: each home registered its own OAuth
-    client, so a copied token may be refused, and a hand copy is a credential leak path.
+    plugin is enabled, else the claude.ai connector. A second copy of the same URL under another
+    name (`figma`) is another entry; Switchboard fills it too, but a plugin or connector update
+    can leave the old sign-in under a key the new configuration no longer reads.
+  - Before telling the person a server "needs authentication", call `switchboard_mcp_homes`: a
+    `partial` finding names the homes signed in, a `stale_key` finding a home whose sign-in was
+    filed under the server's old configuration. Then ask the person to sign in once in a session
+    of the ordinary home (`/mcp`); the next launch carries it to the others.
+  - Never copy a token between credential items by hand. Switchboard copies only the access
+    token, never the refresh token or client secret, so only one home ever renews a grant.
 - A server you register during a session is loaded by the next session. If `switchboard_accounts`
   is not among your tools after registering, ask the person to start a new session, and finish
   the proving call there.

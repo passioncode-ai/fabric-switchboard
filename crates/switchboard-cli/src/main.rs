@@ -130,6 +130,11 @@ enum Command {
         #[arg(long, default_value_t = 30, value_parser = clap::value_parser!(i64).range(1..=90))]
         days: i64,
     },
+    /// Which of your Claude homes (the ordinary one and each Switchboard made) is signed in to
+    /// which MCP server: names, URLs and true or false, never a token. Findings name a server
+    /// signed in in some homes and not in others, and two names for one URL in one home. A home
+    /// whose credential item would ask for access reads `unknown`. Reads only.
+    McpHomes,
     /// Report online/offline mode and the proxy address, without its capability.
     Status,
     /// The other machines this Switchboard knows, from accounts moved there and runs started
@@ -2095,6 +2100,7 @@ async fn run(cli: &Cli) -> Result<Value, String> {
         Command::Usage { id: None } | Command::Events => Operation::Snapshot,
         Command::Status => Operation::Status,
         Command::Targets { probe } => Operation::Targets { probe: *probe },
+        Command::McpHomes => Operation::McpHomes,
         Command::Machines { command } => match command {
             MachinesCmd::List { live } => Operation::Machines { live: *live },
             MachinesCmd::Adopt { apply } => Operation::MachinesAdopt { apply: *apply },
@@ -4843,6 +4849,7 @@ mod mcp_parity {
         ("status", Tool("switchboard_status")),
         ("targets", Tool("switchboard_targets")),
         ("machines list", Tool("switchboard_machines")),
+        ("mcp-homes", Tool("switchboard_mcp_homes")),
         ("machines adopt", Tool("switchboard_machine_set")),
         ("machines place", Tool("switchboard_machine_set")),
         ("machines forget", Tool("switchboard_machine_set")),

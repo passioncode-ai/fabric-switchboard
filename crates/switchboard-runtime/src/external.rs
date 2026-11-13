@@ -1584,6 +1584,23 @@ impl Locks {
         Ok(())
     }
 }
+/// SB-358: runs `write` holding Claude Code's two credential locks of `home`, a Claude home
+/// Switchboard made, as Claude Code's own writers of that home's item do.
+pub(crate) fn with_credential_locks<T>(
+    home: &Path,
+    write: impl FnOnce() -> Result<T, String>,
+) -> Result<T, String> {
+    let c = Context {
+        home: home.to_owned(),
+        config: home.join(".claude.json"),
+        service: service(&home.to_string_lossy()),
+        user: username()?,
+        mac: cfg!(target_os = "macos"),
+    };
+    let locks = Locks::acquire_with(&c, false)?;
+    locks.ensure()?;
+    write()
+}
 /// How long a live holder is waited for; tests do not sit out the full nine seconds.
 const LOCK_WAIT: Duration = if cfg!(test) {
     Duration::from_millis(300)

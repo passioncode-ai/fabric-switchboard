@@ -2996,3 +2996,48 @@ unknown); runtime `machines::tests::location_words_read_a_typed_location_as_an_s
 `the_machine_groups_read_every_state`; MCP `handshake_lists_tools_and_rejects_malformed_messages`
 (tool list), CLI `mcp_parity::every_cli_command_has_an_mcp_tool_or_a_reason`.
 
+
+## MCP sign-ins across Claude homes (SB-358, SB-359, 2026-11-14)
+
+Claude Code keeps each MCP server's OAuth sign-in in its credential item, keyed
+`<server name>|<first 16 hex of sha256 of {type, url, headers}>`, one item per config folder:
+`Claude Code-credentials` for the ordinary home and `Claude Code-credentials-<8 hex>` for each
+home Switchboard made (`launch::keychain_service`); on Linux and Windows the folder's
+`.credentials.json`. Measurements: [mcp-sign-ins-2026-11-14](research/mcp-sign-ins-2026-11-14.md).
+Code: [mcp_homes.rs](../crates/switchboard-runtime/src/mcp_homes.rs).
+
+- **Homes.** The ordinary one (`CLAUDE_CONFIG_DIR` when set, else the person's Claude folder and
+  the fixed service), then `homes/<account>` (Claude accounts only in the report), then
+  `runtimes/claude-<pool>`, then `shell/claude-<pool>` (`mcp_homes::homes`).
+- **Reading an item.** On macOS only after `probe_external` finds the item's access list trusts
+  `/usr/bin/security` (no dialog); an item that would ask, a locked keychain or a body that is not
+  JSON reads `unknown` and is never written. Elsewhere the home's `.credentials.json`.
+- **Report (SB-359).** `Operation::McpHomes`, CLI `mcp-homes`, MCP `switchboard_mcp_homes`; no owner
+  transaction, never on a timer. Per home `kind`, `id`, `folder`, `item` and each server's `name`,
+  `url`, `signed_in` (a non-empty access or refresh token), `own` (a refresh token), `expires_at`;
+  `servers` by URL; `findings`: `partial`, `stale_key`, `same_url`; `read` and `unknown` counts. No
+  token, client id or secret is ever in the answer
+  (`the_report_names_partial_sign_ins_and_two_names_for_one_url_without_tokens`).
+- **Carry at a launch (SB-358).** `launch` calls `Host::mcp_sign_ins` (`mcp_homes::carry_into`) for
+  every Claude home it starts, after `claude_state`. Sources are the other homes' **own** sign-ins
+  (a non-empty access token and refresh token, unexpired by more than 5 minutes), the newest
+  expiry per server URL winning (`lendable`). The copy is a mirror: `serverName`, `serverUrl`,
+  `accessToken`, `expiresAt`, `scope`, `issuer`, `clientId`, `redirectUri`, `discoveryState`;
+  never `refreshToken` or `clientSecret`, and `mcpOAuthClientConfig` is not touched
+  (`a_mirror_carries_the_access_token_and_never_the_refresh_token_or_secret`). In the target, by
+  server URL: each entry for that URL that is a stub, expired or an older mirror is replaced under
+  its own key and name; an entry with a refresh token (the home's own sign-in) is never touched;
+  with no entry for the URL, the mirror goes under the source's key (`merge`,
+  `a_mirror_fills_the_targets_own_key_for_the_same_url`,
+  `a_homes_own_sign_in_is_never_overwritten_and_the_newest_source_wins`). Matching by URL, not by
+  key: a plugin update changes the key, and Claude Code looks the sign-in up by the current one.
+- **Under Claude Code's locks.** The target's read and write run holding its two credential locks
+  (`<home>/.oauth_refresh.lock`, `<home>.lock`; `external::with_credential_locks`), off the async
+  worker (`blocking::run`). A source item is read again only when its Keychain stamp (creation
+  and modification time) changed (`Cache`); the cache holds only own sign-ins, in memory. A target
+  that reads `unknown` is skipped (`a_launch_carries_into_a_stub_and_skips_a_home_that_would_ask`).
+- **Log.** `mcp_sign_ins` with `carried` (a count) when something was written, or `error: write`;
+  never a name, URL or token. A failure never stops the launch.
+- **Not done.** The ordinary home is only a source, never written: its item is the person's own
+  login (AGENTS.md). Shell homes are written only when a launch starts one. A mirror lives until
+  its `expiresAt`; the next launch after the source renews carries the new token.
