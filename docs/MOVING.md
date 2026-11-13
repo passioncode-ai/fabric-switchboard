@@ -119,7 +119,7 @@ switchboard machines forget studio-sshlg
   signed with this computer's key ([settings_signing.rs:112](../crates/switchboard-runtime/src/settings_signing.rs#L112)),
   but the other machine's own key is not checked. What would prove it: pin the other machine's
   settings key (`switchboard settings signer` there) at the first move and refuse a later ssh call
-  that answers with another key (board row SB-356).
+  that answers with another key (board row SB-357).
 - **Nobody else sees it.** Machine groups, the moves (`seats.jsonl`) and the record of the one
   pass (`machine-groups.json`) live only in this user's data folder, readable by this user alone:
   the folder is 0700 and every file 0600

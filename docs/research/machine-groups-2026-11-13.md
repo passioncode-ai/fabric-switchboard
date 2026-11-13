@@ -62,7 +62,7 @@ colleagues see it, and how delegation works: answered in [MOVING](../MOVING.md#m
 ## What it does not do
 
 - It proves nothing about who owns a machine: Switchboard trusts whatever ssh reaches without a
-  prompt. Proposed follow-up (SB-356): pin the other machine's settings signing key
+  prompt. Proposed follow-up (SB-357): pin the other machine's settings signing key
   (`settings signer`, SB-272) at the first move and compare it on every later ssh call, so a
   machine that changed hands or a hijacked alias is refused instead of trusted.
 - A machine group is local to this data folder; nothing is published to PassionCode.ai or another
