@@ -870,8 +870,12 @@ mod tests {
                 Provider::Claude,
                 AuthKind::ApiKey,
                 "default".into(),
-                switchboard_core::Credential::parse(Provider::Claude, AuthKind::ApiKey, "synthetic")
-                    .unwrap(),
+                switchboard_core::Credential::parse(
+                    Provider::Claude,
+                    AuthKind::ApiKey,
+                    "synthetic",
+                )
+                .unwrap(),
             )
             .unwrap();
         let (_, none) = measure_waits(async { store.snapshot().unwrap() }).await;

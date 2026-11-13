@@ -2,6 +2,16 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-11-13: control requests answered in tens of seconds on a swapping machine (SB-347)
+
+- **Asked.** Diagnose and fix SB-347: on this MacBook (installed 0.7.71) `recovery`, `sessions`, `launches` and `dispatch` answered in 10 to 195 s, and `switchboard recovery --json` timed out; fix the cause, not a timeout; no PR, merge, tag or release in this run.
+- **Found.** Not the owner transaction for the read-only calls (they logged no `lock_ms`). (1) `recovery` read every ended account's credential per call behind the process-wide Keychain lock, which slow reads held up to 9 s, and stop hooks waited on the sign-in watch's lock held across a Keychain probe, on async workers (9 of 14 parked in a 5 s `sample`). (2) Every history, `recovery` and session row reopened each of 575 launch records with a mode-narrowing `fchmod`. (3) The source sync read the Keychain under the owner transaction (8.5 s), and changes such as `dispatch` waited behind it. Details and evidence: the SB-347 row in [the board](evidence/backlog.md).
+- **Done.** Branch `sb-347-owner-lock`: `RefreshState::sign_in_known` for `recovery`, `MonitorStatus` and `chains`; `current_accounts`, `recovery`'s file work and `agents_overview` off the async worker; launch records kept in memory by file stamp, each home read once per history; the source sync planned before the transaction (`SyncMode::Plan`); `control_slow` names `vault_reads` and `vault_ms`. [CONTRACTS](CONTRACTS.md) (sign-ins, launch records, `control_slow`), AGENTS.md (the monitor row) and the CHANGELOG under Unreleased updated.
+- **Checks.** On the Mac Studio: `cargo test -p switchboard-runtime --lib` (950 passed) and `-p switchboard-core` green; the new Keychain test fails without the fix (`recovery waited for the held Keychain`); `./scripts/check.sh` on the pushed head (see the final report of this run for the exit code).
+- **Open.** Measure after the release on this MacBook: `control_slow` for `recovery`, `sessions` and `launches` should stop; a slow one now says `vault_reads`. The Keychain writes of `usage_renewal` and `rotate` still hold the transaction (9 to 18 s here) by design.
+
+**Exact next task.** Open the PR for `sb-347-owner-lock`, merge it once its checks are green, release it with the next version, and after the installed app restarts on it read the last 400 `control_slow` lines of this MacBook's log: none for `recovery`, `sessions` or `launches` closes SB-347.
+
 ## 2026-11-13: balancing between groups, wave 2 (SB-352): the default group, activity, the Groups page
 
 - **Asked.** The operator (2026-11-13): accounts lent between chosen groups («Agents, PassionCode, Apps & Soft, default, и все новые»); wave 2 of [DEC-0012](DECISIONS.md#dec-0012-accounts-are-lent-between-the-groups-the-person-chose-by-their-last-hours-and-days).
