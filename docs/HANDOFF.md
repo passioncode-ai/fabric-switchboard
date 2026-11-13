@@ -2,6 +2,16 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-11-13: MCP sign-ins are per Claude home (board request from riffly, SB-358, SB-359)
+
+- **Asked.** Board request `2c5b1279` from riffly, carrying the operator's words (2026-11-13, riffly session `5a5bc2ae`): fix the Figma MCP rule globally so multi-account setups stop hitting «Needs authentication», and put the rule where Switchboard is deployed. Three asks: (1) one MCP sign-in for all homes, (2) a line in the deployment guide and `switchboard_onboarding`, (3) a `doctor` check.
+- **Done.** Branch `docs/sb-358-mcp-sign-in-per-home`: ask (2) in [AGENT-ONBOARDING.md](AGENT-ONBOARDING.md) → Rules (the guide `switchboard onboard` prints and `switchboard_onboarding` points to, compiled in through `onboarding::GUIDE`): one name per server, read `switchboard_status` `session.mode` before saying «needs authentication», never copy tokens by hand. Ask (1) filed as [SB-358](evidence/backlog.md) with its done-when (newest sign-in carried into the homes Switchboard launches, under Claude Code's locks, synthetic Keychain fixtures only); ask (3) split as [SB-359](evidence/backlog.md) (a read-only per-home report the launcher reads) plus a board request to the `passioncode` project for the `doctor` check itself.
+- **Decided.** Ask (1) is not built in an unattended board run: it writes into other homes' credential items, and `AGENTS.md` keeps credential changes to a planned, tested change (task-pipeline), not an incidental fix.
+- **Checks.** `python3 scripts/check_docs.py`, `python3 -m unittest scripts/test_check_docs.py` and `git diff --check` on this branch: 145 Markdown files, 1251 relative links, 0 errors; unittest OK; diff check clean. The cargo gate was not run: no Rust changed; the guide is compiled in with `include_str!`, and `commands.rs` compares the printed guide with the same file.
+- **Open.** SB-358 design and build; SB-359; the launcher's answer on the board.
+
+**Exact next task.** Design SB-358 through task-pipeline: first measure, with synthetic homes, whether an MCP OAuth entry copied with its `mcpOAuthClientConfig` into another home's item is accepted by Claude Code, then write the merge under Claude Code's locks.
+
 ## 2026-11-13: machine groups (SB-355): each other machine is a group of its own
 
 - **Asked.** The operator (2026-11-13, session `59745113`): accounts that went to other machines leave the groups here and sit in one group per machine; move accounts between those groups and the groups here both ways; see every machine and its accounts; and explain how machines are linked, how Switchboard knows a machine is his, whether colleagues see it and how delegation works.
