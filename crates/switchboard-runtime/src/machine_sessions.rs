@@ -204,7 +204,13 @@ fn agent_processes() -> Vec<Proc> {
         let mut info = std::mem::MaybeUninit::<libc::proc_bsdinfo>::zeroed();
         let size = std::mem::size_of::<libc::proc_bsdinfo>() as i32;
         let got = unsafe {
-            libc::proc_pidinfo(pid, libc::PROC_PIDTBSDINFO, 0, info.as_mut_ptr().cast(), size)
+            libc::proc_pidinfo(
+                pid,
+                libc::PROC_PIDTBSDINFO,
+                0,
+                info.as_mut_ptr().cast(),
+                size,
+            )
         };
         let (ppid, started_at) = if got == size {
             let info = unsafe { info.assume_init() };
@@ -253,7 +259,11 @@ fn agent_processes() -> Vec<Proc> {
     let uid = unsafe { libc::geteuid() };
     let mut found = Vec::new();
     for entry in entries.flatten() {
-        let Some(pid) = entry.file_name().to_str().and_then(|n| n.parse::<u32>().ok()) else {
+        let Some(pid) = entry
+            .file_name()
+            .to_str()
+            .and_then(|n| n.parse::<u32>().ok())
+        else {
             continue;
         };
         let dir = entry.path();
@@ -309,7 +319,10 @@ mod tests {
         assert_eq!(agent_of("/opt/homebrew/bin/claude"), Some("claude-code"));
         assert_eq!(agent_of("/usr/local/bin/codex"), Some("codex"));
         assert_eq!(agent_of("/usr/bin/zsh"), None);
-        assert_eq!(agent_of("/Applications/Claude.app/Contents/MacOS/Claude"), None);
+        assert_eq!(
+            agent_of("/Applications/Claude.app/Contents/MacOS/Claude"),
+            None
+        );
     }
 
     #[test]

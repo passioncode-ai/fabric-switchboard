@@ -3715,7 +3715,11 @@ fn print_result(value: &Value, cli: &Cli) {
                     "{:<7} {:<11} {:<9} {} · {}",
                     s["pid"].to_string(),
                     text(&s["agent"]),
-                    if s["managed"] == true { "managed" } else { "unmanaged" },
+                    if s["managed"] == true {
+                        "managed"
+                    } else {
+                        "unmanaged"
+                    },
                     text(&s["folder"]),
                     quiet
                 );
