@@ -32,6 +32,7 @@ pub mod kimi;
 pub mod launch;
 pub mod launches;
 mod limits;
+pub mod machine_sessions;
 mod monitor;
 pub mod onboarding;
 pub mod oplog;
