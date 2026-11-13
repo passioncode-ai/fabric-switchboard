@@ -148,6 +148,10 @@ const safeErrors = new Set([
   'This folder belongs to a group. Launch one of the group\'s accounts.',
   // The permission mode of the sessions Switchboard starts (SB-298).
   'Choose bypass or ask.',
+  // SB-352: balancing's own refusals, already sentences for a person.
+  'Balancing settings (balancing.json) could not be read. Delete balancing.json to turn balancing off and start over.',
+  'No group has that id. Run switchboard project list to see the groups, or name default.',
+  'Balancing settings could not be saved. Check that the data folder is writable, then try again.',
   'Group not found.',
   // Moving a sign-in to another machine (SB-283).
   "Name the other machine as ssh knows it: letters, digits, dots, hyphens, @ and : only.",

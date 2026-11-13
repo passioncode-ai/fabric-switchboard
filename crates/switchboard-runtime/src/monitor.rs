@@ -288,6 +288,9 @@ impl Pass {
             // swapping machine, 2026-10-19).
             let _ = crate::blocking::run(|| rotate(runtime, native_sources));
         }
+        // SB-352 (DEC-0012): accounts lent between the chosen groups, every 15 minutes and only
+        // while groups are chosen or an account is still lent; off, nothing is read.
+        runtime.balance_pass(time).await;
         // A workflow whose executor hit its limit goes to the next agent of its chain (SB-73);
         // nothing happens without a chain. Outside the lock: the hand-over takes it itself.
         // SB-99: saved Kimi accounts, seen only while a chain is set (every 10 min, at most 4).

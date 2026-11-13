@@ -8,6 +8,7 @@ pub mod agents;
 pub mod analytics;
 pub mod app_doors;
 pub mod attribution;
+pub(crate) mod balancing;
 mod bindings;
 mod blocking;
 mod carry;
@@ -784,6 +785,20 @@ pub enum Operation {
     AgentPermissions {
         mode: String,
     },
+    /// SB-352 (DEC-0012): the groups that lend accounts to each other. A group added or taken
+    /// out by its pool id (`default` included); `all_new` decides whether a group made later
+    /// joins them. Taking a group out, or the last one, returns its lent accounts at once.
+    Balance {
+        #[serde(default)]
+        groups_add: Vec<String>,
+        #[serde(default)]
+        groups_remove: Vec<String>,
+        #[serde(default)]
+        all_new: Option<bool>,
+    },
+    /// SB-352: the chosen groups, the accounts lent now, the last pass and the newest lends and
+    /// returns.
+    BalanceStatus,
     /// The recommended OpenRouter models and OpenRouter's tool-capable list (SB-119).
     OpenrouterModels,
     /// Replaces the repository owners whose new repositories a project is offered.
@@ -1102,6 +1117,17 @@ pub struct Runtime {
     bindings_lock: tokio::sync::Mutex<()>,
     /// The project folders' resolved repositories, re-read only when a `.git` stamp moves.
     bindings_repos: Mutex<bindings::RepoCache>,
+    /// SB-352: the balancing settings as last read or saved, and the last pass.
+    balancing: Mutex<BalanceWatch>,
+}
+/// SB-352: what the owner keeps of balancing between passes. The settings are read once, then
+/// kept here and written through by `Operation::Balance`, so a pass with balancing off reads no
+/// file.
+#[derive(Default)]
+pub(crate) struct BalanceWatch {
+    settings: Option<balancing::Settings>,
+    last_pass: i64,
+    last: Option<Value>,
 }
 #[derive(Default)]
 pub(crate) struct BackupState {
@@ -1205,6 +1231,7 @@ impl Runtime {
             bindings_lock: tokio::sync::Mutex::new(()),
             openrouter_models: Mutex::new(agent_settings::ModelCache::default()),
             bindings_repos: Mutex::new(bindings::RepoCache::default()),
+            balancing: Mutex::new(BalanceWatch::default()),
             usage_gate,
             shell_hook: Mutex::new(None),
             shell_present: Mutex::new(None),
@@ -1339,6 +1366,8 @@ impl Runtime {
                 | Operation::InboxRemove
                 | Operation::AgentsOverview
                 | Operation::OpenrouterModels
+                // SB-352: balancing.json and its journal, and the owner's memory of the last pass.
+                | Operation::BalanceStatus
                 // Hand-overs are files: listing reads them, and taking one is claimed by an
                 // exclusive create (`handovers::take`). Behind the owner transaction a console's
                 // read waited out renewals and syncs for up to 366 s (Fabric Dashboards FD-71).
@@ -2768,6 +2797,95 @@ impl Runtime {
         if let Ok(mut cache) = self.current_cache.lock() {
             cache.generation = cache.generation.wrapping_add(1);
             cache.entry = None;
+        }
+    }
+    /// SB-352: the balancing settings, read from `balancing.json` once and then kept.
+    fn balance_settings(&self) -> Result<balancing::Settings, String> {
+        let mut watch = self.balancing.lock().map_err(|_| balancing::UNREADABLE)?;
+        if let Some(settings) = &watch.settings {
+            return Ok(settings.clone());
+        }
+        let settings = balancing::read(&self.root)?;
+        watch.settings = Some(settings.clone());
+        Ok(settings)
+    }
+    /// SB-352 (DEC-0012): one balancing pass, at most every 15 minutes, and only while groups
+    /// are chosen or an account is still lent. With balancing off it reads nothing after the
+    /// first look. The decision is `balancing::plan`; the moves run under the owner transaction,
+    /// and only when the settings did not change since the pass read them.
+    pub(crate) async fn balance_pass(&self, time: i64) {
+        {
+            let Ok(mut watch) = self.balancing.lock() else {
+                return;
+            };
+            if watch.last_pass != 0
+                && time >= watch.last_pass
+                && time - watch.last_pass < balancing::PASS_SECONDS
+            {
+                return;
+            }
+            watch.last_pass = time;
+        }
+        let settings = match self.balance_settings() {
+            Ok(s) => s,
+            Err(_) => {
+                oplog::event(
+                    "balancing",
+                    &[("settings", oplog::Field::Code("unreadable"))],
+                );
+                return;
+            }
+        };
+        if !settings.on() && settings.lent.is_empty() {
+            return;
+        }
+        let Ok(snapshot) = self.store.snapshot() else {
+            return;
+        };
+        let mut planned = settings.clone();
+        let resolved = balancing::resolve(&mut planned, &snapshot);
+        self.absorb_statistics();
+        let six = self.statistics.window(balancing::RECENT_SECONDS, time);
+        let two = self.statistics.window(balancing::QUIET_SECONDS, time);
+        let week = self.statistics.days_before(balancing::AVERAGE_DAYS, time);
+        let signals = balancing::signals(&snapshot, &six, &two, &week);
+        let current = self.current_accounts().unwrap_or(Value::Null);
+        let in_cli: HashSet<String> = ["claude", "codex"]
+            .iter()
+            .flat_map(|p| {
+                current[*p]["account_ids"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|v| v.as_str().map(str::to_owned))
+            })
+            .collect();
+        let held = balancing::Held {
+            in_cli,
+            sign_in: self
+                .refresh
+                .sign_in_required(&self.store)
+                .into_iter()
+                .collect(),
+            limited: self.store.limited(),
+        };
+        let actions = balancing::plan(&snapshot, &signals, &held, &planned, time);
+        let summary = balancing::summary(&snapshot, &signals, &held, &planned, &actions, time);
+        let _mutation = self.hold("balance").await;
+        // The person changed the groups meanwhile: the next pass decides on what they chose.
+        if self.balance_settings().ok().as_ref() != Some(&settings) {
+            return;
+        }
+        let changed = balancing::apply(&self.store, &self.root, &mut planned, &actions, time);
+        if (resolved || changed) && balancing::write(&self.root, &planned).is_err() {
+            oplog::event(
+                "balancing",
+                &[("settings", oplog::Field::Code("unwritten"))],
+            );
+        }
+        if let Ok(mut watch) = self.balancing.lock() {
+            watch.settings = Some(planned);
+            watch.last = Some(summary);
         }
     }
     pub(crate) fn current_accounts(&self) -> Result<Value, String> {
@@ -6095,6 +6213,54 @@ async fn execute(
         Operation::AgentDefault { agent } => {
             let s = agent_settings::set_default(root, agent.as_deref())?;
             Ok(json!({"default": s.default}))
+        }
+        Operation::Balance {
+            groups_add,
+            groups_remove,
+            all_new,
+        } => {
+            let snapshot = store.snapshot()?;
+            let mut settings = match runtime {
+                Some(rt) => rt.balance_settings()?,
+                None => balancing::read(root)?,
+            };
+            let changed = balancing::change(
+                &mut settings,
+                &snapshot,
+                &groups_add,
+                &groups_remove,
+                all_new,
+            )?;
+            if changed {
+                // A group taken out, or balancing turned off, gets its lent accounts back now.
+                let held = balancing::Held::default();
+                let now = monitor::now();
+                let owed = balancing::returns_owed(&snapshot, &held, &settings, now);
+                balancing::apply(&store, root, &mut settings, &owed, now);
+                balancing::write(root, &settings)?;
+                if let Some(rt) = runtime {
+                    if let Ok(mut watch) = rt.balancing.lock() {
+                        watch.settings = Some(settings.clone());
+                    }
+                }
+            }
+            let last = runtime.and_then(|rt| rt.balancing.lock().ok().and_then(|w| w.last.clone()));
+            let mut view = balancing::status(root, &store.snapshot()?, &settings, last.as_ref());
+            view["changed"] = json!(changed);
+            Ok(view)
+        }
+        Operation::BalanceStatus => {
+            let settings = match runtime {
+                Some(rt) => rt.balance_settings()?,
+                None => balancing::read(root)?,
+            };
+            let last = runtime.and_then(|rt| rt.balancing.lock().ok().and_then(|w| w.last.clone()));
+            Ok(balancing::status(
+                root,
+                &store.snapshot()?,
+                &settings,
+                last.as_ref(),
+            ))
         }
         Operation::AgentPermissions { mode } => {
             agent_settings::set_permissions(root, &mode)?;

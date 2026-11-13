@@ -840,6 +840,67 @@ impl Store {
         self.changed();
         Ok(project)
     }
+    /// SB-352 (DEC-0012): lends account `id` to the group of `pool` as a shared account
+    /// (`share`), or takes it back. The account keeps its home group; only the group's
+    /// `shared_accounts` changes, as `save_project_with` shares one (SB-282). A share is admitted
+    /// only when the account is at home in another group a person made, the group of `pool`
+    /// takes it by its organizations as they stand now (`context_admits`: never a new word on
+    /// its organizations, unlike a person's placement) and holds no other copy of its sign-in.
+    /// Answers whether the group changed; a share that is not admitted, or already as asked,
+    /// changes nothing.
+    pub fn set_shared(&self, pool: &str, id: &str, share: bool) -> Result<bool, String> {
+        let mut state = self.lock()?;
+        let mut candidate = state.clone();
+        let account = candidate
+            .accounts
+            .iter()
+            .find(|a| a.id == id)
+            .cloned()
+            .ok_or("Account not found")?;
+        let index = candidate
+            .projects
+            .iter()
+            .position(|p| p.pool == pool)
+            .ok_or("Project not found.")?;
+        let held = candidate.projects[index]
+            .shared_accounts
+            .contains(&account.id);
+        if share {
+            let clash = candidate.accounts.iter().any(|b| {
+                b.id != account.id
+                    && b.provider == account.provider
+                    && b.pool == pool
+                    && b.external_identity
+                        .as_ref()
+                        .zip(account.external_identity.as_ref())
+                        .is_some_and(|(x, y)| x.matches(y))
+            });
+            if held
+                || account.pool == pool
+                || candidate.project_of_pool(&account.pool).is_none()
+                || !candidate.context_admits(pool, &account)
+                || clash
+            {
+                return Ok(false);
+            }
+            candidate.projects[index]
+                .shared_accounts
+                .push(account.id.clone());
+        } else {
+            if !held {
+                return Ok(false);
+            }
+            candidate.projects[index]
+                .shared_accounts
+                .retain(|s| s != &account.id);
+        }
+        stale_shares_prune(&mut candidate);
+        shared_routes_prune(&mut candidate);
+        append_event(&mut candidate, "project", Some(id), "updated");
+        self.publish(&mut state, candidate)?;
+        self.changed();
+        Ok(true)
+    }
     /// SB-282: shares these accounts with the group of `pool` from a backup, where the group
     /// holds no share yet; an account at home there, or unknown, is left out.
     pub fn restore_shared_accounts(&self, pool: &str, ids: &[String]) -> Result<(), String> {

@@ -382,6 +382,13 @@ enum Command {
         #[command(subcommand)]
         command: AgentsCommand,
     },
+    /// Accounts lent between the groups you choose: every 15 minutes, a chosen group out of room
+    /// borrows an account with room from another chosen group, which keeps it as its own; the
+    /// account goes back when the need passes. Off until you choose groups.
+    Balance {
+        #[command(subcommand)]
+        command: BalanceCommand,
+    },
     /// Kimi Code subscription accounts: sign in with the official `kimi login`, see each plan's
     /// usage, and launch `kimi` on an account. Each login stays in its own folder.
     Kimi {
@@ -1314,6 +1321,25 @@ fn chain_executor(text: &str) -> switchboard_core::Executor {
         account_id,
         key,
     }
+}
+#[derive(Subcommand)]
+enum BalanceCommand {
+    /// The chosen groups, the accounts lent now and why, the last pass's figures and the
+    /// newest lends and returns.
+    Status,
+    /// Choose the groups that lend accounts to each other. Taking a group out, or the last
+    /// one, returns its lent accounts at once.
+    Groups {
+        /// A group's id (`switchboard project list`) or `default` to add; repeat for more.
+        #[arg(long = "add", value_name = "ID")]
+        add: Vec<String>,
+        /// A chosen group's id to take out; repeat for more.
+        #[arg(long = "remove", value_name = "ID")]
+        remove: Vec<String>,
+        /// Whether a group made later joins the chosen ones by itself: true or false.
+        #[arg(long, value_name = "BOOL")]
+        all_new: Option<bool>,
+    },
 }
 #[derive(Subcommand)]
 enum AgentsCommand {
@@ -2547,6 +2573,18 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                 scope: chain_scope(scope)?,
                 usd: None,
                 by: switchboard_runtime::spend::Surface::Cli,
+            },
+        },
+        Command::Balance { command } => match command {
+            BalanceCommand::Status => Operation::BalanceStatus,
+            BalanceCommand::Groups {
+                add,
+                remove,
+                all_new,
+            } => Operation::Balance {
+                groups_add: add.clone(),
+                groups_remove: remove.clone(),
+                all_new: *all_new,
             },
         },
         Command::Agents { command } => match command {
@@ -4786,6 +4824,8 @@ mod mcp_parity {
         ),
         ("serve", Not(PROCESS)),
         ("mcp", Not(PROCESS)),
+        ("balance status", Tool("switchboard_balance")),
+        ("balance groups", Tool("switchboard_balance")),
         ("agents list", Tool("switchboard_agents")),
         ("agents status", Tool("switchboard_agents")),
         ("agents enable", Tool("switchboard_agent_set")),

@@ -395,6 +395,30 @@ scope a launch copies its MCP servers from all fall back to `~/.claude` and `~/.
 offline switch of the ordinary Claude Code from such a terminal is refused: “This session runs in a
 Switchboard home or a terminal in an organization's folder. Run this from another terminal.”
 
+### Accounts lent between chosen groups (SB-352)
+
+```sh
+switchboard balance status                                  # chosen groups, accounts lent now, the last pass, the newest lends and returns
+switchboard balance groups --add agents --add apps-soft --all-new true
+switchboard balance groups --remove apps-soft               # its lent accounts go back at once
+```
+
+Off until you choose groups ([DEC-0012](DECISIONS.md#dec-0012-accounts-are-lent-between-the-groups-the-person-chose-by-their-last-hours-and-days)).
+Every 15 minutes a chosen group that had requests in the last 6 hours and has no account with
+room (or one, while the provider refused it for a limit in those hours) borrows one account from
+another chosen group: the account with the most room of a group that keeps at least two with room
+after it (one when it had no request for 6 hours). Room is the group's switching threshold less
+its hysteresis (80 % by default) on fresh figures. The account keeps its home group and serves
+the borrower as a shared account (`project list` shows it under both); it goes back after 2 hours
+without a limit refusal in the borrower, or when its home group needs it, and waits an hour
+between moves. A group not chosen is never touched, no account crosses an organization's
+boundary, and the ordinary Claude Code's or Codex's account, an account given to an agent, used
+on another machine, disabled or waiting for a sign-in is never lent. Taking a group out, or the
+last one, returns every account lent from or to it at once. `--all-new true` lets a group made
+later join by itself. `default` may be chosen but neither lends nor borrows: only a group you made
+shares accounts. The choice and the loans are in `balancing.json` (0600), each lend and return
+with its figures in `balancing.jsonl` (0600). MCP: `switchboard_balance`.
+
 ### A project's folders follow its work and the disk (SB-117, SB-121, SB-131)
 
 Switchboard keeps a project's folder list by itself and never asks (SB-121, SB-131; operator
