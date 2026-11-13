@@ -222,6 +222,9 @@
     "The session could not be watched.": "The session started but could not be followed. Check switchboard sessions for its state.",
     "The session has ended.": "This session has ended. Start a new one, or continue it with --resume.",
     "No session with this launch id is open here.": "No session with this launch id is open on this computer. Check switchboard sessions for one marked attachable.",
-    "The session was asked to end, and its end was not seen within 15 seconds.": "The session was asked to end, but its end was not seen within 15 seconds. Check switchboard sessions for its state."
+    "The session was asked to end, and its end was not seen within 15 seconds.": "The session was asked to end, but its end was not seen within 15 seconds. Check switchboard sessions for its state.",
+    "Balancing settings (balancing.json) could not be read. Delete balancing.json to turn balancing off and start over.": "Balancing settings (balancing.json) could not be read. Delete balancing.json to turn balancing off and start over.",
+    "No group has that id. Run switchboard project list to see the groups, or name default.": "No group has that id. Run switchboard project list to see the groups, or name default.",
+    "Balancing settings could not be saved. Check that the data folder is writable, then try again.": "Balancing settings could not be saved. Check that the data folder is writable, then try again."
   }
 }

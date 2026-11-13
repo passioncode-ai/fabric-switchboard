@@ -236,7 +236,8 @@ async fn handshake_lists_tools_and_rejects_malformed_messages() {
             "switchboard_project_sources",
             "switchboard_openrouter_model",
             "switchboard_shell_hook",
-            "switchboard_shell_hook_set"
+            "switchboard_shell_hook_set",
+            "switchboard_balance"
         ]
     );
     // SB-183 (node A-7): the terminal hook reads over MCP like `shell status`; setting it from
@@ -264,6 +265,21 @@ async fn handshake_lists_tools_and_rejects_malformed_messages() {
     assert!(error, "on is required: {refused}");
     let (error, refused) = agent.tool("switchboard_shell_hook", json!({"path": "relative"}));
     assert!(error, "a relative folder is refused: {refused}");
+    // SB-352: balancing is off until groups are chosen; an unknown group is refused and
+    // nothing is saved; default can be chosen and taken out again.
+    let (error, balance) = agent.tool("switchboard_balance", json!({}));
+    assert!(!error, "{balance}");
+    assert_eq!(balance["on"], false);
+    assert_eq!(balance["lent"], json!([]));
+    let (error, refused) = agent.tool("switchboard_balance", json!({"add": ["no-such-group"]}));
+    assert!(error, "{refused}");
+    assert!(!data.path().join("balancing.json").exists());
+    let (error, on) = agent.tool("switchboard_balance", json!({"add": ["default"], "all_new": true}));
+    assert!(!error, "{on}");
+    assert_eq!((on["on"].clone(), on["all_new"].clone()), (json!(true), json!(true)));
+    assert!(on["note"].is_string(), "default lends nothing: {on}");
+    let (error, off) = agent.tool("switchboard_balance", json!({"remove": ["default"]}));
+    assert!(!error && off["on"] == false, "{off}");
     // SB-120: the agents overview reads; the default is Auto until the operator picks one.
     let (error, agents) = agent.tool("switchboard_agents", json!({}));
     assert!(!error, "{agents}");

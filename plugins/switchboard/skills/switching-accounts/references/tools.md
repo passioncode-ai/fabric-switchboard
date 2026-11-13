@@ -585,6 +585,21 @@ or keeps it away; `default` sets the machine's default agent (an id, or null for
 `permissions` (`bypass`, the default, or `ask`) chooses whether the Claude Code and Codex
 sessions Switchboard starts bypass their permission prompts (SB-298).
 
+### `switchboard_balance`: `add?`, `remove?`, `all_new?`
+
+Accounts lent between the groups the operator chose (SB-352, DEC-0012). Without arguments it
+reads: `{on, groups: [{pool, name, shares}], all_new, pass_minutes, lent: [{account_id, label,
+provider, from, from_name, to, to_name, at}], last_pass, recent, note?}`, where `recent` is the
+newest lends and returns with their reason, outcome and figures. `add` and `remove` change the
+chosen groups by pool id (`default` may be chosen but neither lends nor borrows); an empty set is
+off and returns every lent account at once; `all_new` decides whether a group made later joins.
+Change it only when the operator asks. Every 15 minutes a chosen group out of room borrows one
+account from a chosen group that keeps two with room (one when idle for 6 hours); the account
+keeps its home group and goes back after 2 hours without limit refusals, or when its home needs
+it. A group not chosen is never touched; no account crosses an organization's boundary; the
+ordinary CLI's account, an account given to an agent, used elsewhere, disabled or waiting for a
+sign-in is never lent.
+
 ### `switchboard_login`: `action`, `login_id?`, `provider?`, `label?`, `pool?`
 
 Only when the operator asks. `begin` (provider, label, pool as the group id) opens Terminal on

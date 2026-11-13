@@ -2766,3 +2766,92 @@ session Switchboard launched, or a terminal its hook moved into a group's home, 
   folder, read plugins and skills from the home (they are links there on macOS and Linux; on Windows, directory junctions since SB-266, none before it). Unset: the session is not
   in a Switchboard home.
 
+
+## Accounts lent between chosen groups (SB-352, wave 1, 2026-11-13)
+
+[DEC-0012](DECISIONS.md#dec-0012-accounts-are-lent-between-the-groups-the-person-chose-by-their-last-hours-and-days);
+design [adaptive balancing](research/adaptive-balancing-2026-11-13.md). Off by default. The
+setting is `<data>/balancing.json` (0600, `balancing::Settings`): `groups` (the chosen pool ids;
+empty is off), `all_new` (a group made later joins them while balancing is on), `seen` (the groups
+known when the person last chose or a pass last looked: a group not in it is new), `lent` (each
+loan: account, provider, home `from`, borrower `to`, when) and `moved` (when each account was last
+lent or returned, for the cooldown). Every lend and return is one JSON line of
+`<data>/balancing.jsonl` (0600, the newest 1000 kept): `at`, `account`, `provider`, `from`, `to`,
+`action` (`lend`, `return`), `reason`, `outcome` (`done`, `unchanged`, `failed`, `forgotten`) and
+`figures` (the borrower's `requests_6h`, `refusals_6h`, `refusals_2h`, `hourly_7d` and accounts
+with room; for a lend the lender's figures and accounts with room and the account's used share).
+Ids and counts only; both files are removed by `switchboard uninstall` and not carried in backups.
+
+**Lending, not moving.** A loan adds the account to the borrower's `shared_accounts` and a return
+takes it out (`Store::set_shared`, the share `ProjectEdit add_accounts` makes, SB-282); its home
+group never changes. `set_shared` admits a share only of an account at home in another group a
+person made, into a group that takes it by `context_admits` as the person's word stands (never a
+new placement word) and holds no other copy of its sign-in; otherwise it changes nothing.
+
+**The pass.** `Runtime::balance_pass`, called by the background monitor after rotation, decides at
+most every 15 minutes and only while groups are chosen or an account is still lent; with
+balancing off it reads `balancing.json` once and nothing after (`BalanceWatch` keeps the settings,
+which `Operation::Balance` writes through). It reads the proxy's counts per group and account:
+the last 6 and 2 hours from the quarter-hour counts the owner absorbed (`Statistics::window`; a
+stretch reaching before the owner started also reads the day counts of the UTC days it touches,
+an upper bound, so a fresh start never reads a group as quieter than it was), and the 7 whole
+days before today (`Statistics::days_before`). Room is fresh account usage
+(`Usage::account_used_percent`) under the group's managed policy threshold less its hysteresis,
+on figures no older than the policy's `max_age_seconds` and before any reset, the account not
+held by a limit or waiting for a sign-in (`balancing::room`, the room of SB-345). The decision is
+`balancing::plan`, pure:
+
+- a chosen group *needs* room for a provider when it had requests in the last 6 hours and no
+  account serving it has room, or one while it had limit refusals in those hours;
+- returns first: a loan whose home or borrower is not chosen any more, whose account cannot be
+  lent now (disabled, used elsewhere, given to an agent, the ordinary CLI's, or no longer admitted
+  by the borrower's organizations) goes back at once; a loan ended outside balancing is
+  forgotten without a change (`account_gone`, `share_gone`); after the account's hour of cooldown,
+  a loan goes back when its home group needs it (`home_needs`) or when it was lent at least
+  2 hours ago and the borrower had no limit refusal in the last 2 hours (`quiet`);
+- then at most one lend per pass: the needy chosen groups, most refusals in 6 hours first, then
+  most demand (the last 6 hours' requests per hour against the 7-day average), each in turn
+  takes the account with the most room (lowest used share, then the latest reset, then id) of a
+  chosen group that does not need room itself and keeps at least two own accounts with room after
+  the loan (one when it had no request for 6 hours);
+- never: a group not chosen, an account crossing an organization's boundary (`context_admits`),
+  the ordinary Claude Code's or Codex's account, an account given to an agent, used elsewhere,
+  disabled, an API key, waiting for a sign-in, held by a limit, on stale figures, already lent or
+  within its hour of cooldown. `default` holds no group a person made, so it may be chosen and is
+  read, but it neither lends nor borrows (a share is only of an account at home in such a group,
+  SB-313); `balance status` says so in `note`.
+
+The moves run under the owner transaction (`hold("balance")`), and only when the settings did not
+change since the pass read them. A refused move still starts the account's cooldown; a failed
+return keeps its loan for the next pass. Each move logs `balancing {action, reason, outcome}`.
+
+**Operations.** `Balance { groups_add, groups_remove, all_new }` checks every named pool exists
+(`default` or a group; `NO_SUCH_GROUP`), saves the change, takes every group known now as seen,
+and returns at once each loan whose groups are no longer chosen (turning balancing off returns
+every lent account). `BalanceStatus` (no owner transaction) answers `{on, groups: [{pool, name,
+shares}], all_new, pass_minutes, lent: [{account_id, label, provider, from, from_name, to,
+to_name, at}], last_pass, recent, note?}`, `last_pass` being the owner's last pass (`at`, each
+chosen group's figures, rooms and need per provider, the actions) and `recent` the newest 20
+journal lines. Refusals: `UNREADABLE` (the settings file), `NO_SUCH_GROUP`, `NOT_SAVED`. CLI
+`switchboard balance status` and `switchboard balance groups [--add ID]... [--remove ID]...
+[--all-new true|false]`; MCP `switchboard_balance` (write; without arguments it reads). Not in
+wave 1: the Groups page switch and its states (wave 2), and an activity entry of its own (a loan
+is journaled as a group change, `project updated`, with the account's id).
+
+Tests: `balancing::tests::a_group_with_no_room_takes_the_lender_account_with_the_most_room`,
+`one_account_with_room_is_enough_without_refusals_and_short_with_them`,
+`a_lender_keeps_two_accounts_with_room_or_one_when_idle`,
+`a_group_not_chosen_is_never_read_or_touched`,
+`one_account_moves_per_pass_to_the_neediest_group`,
+`accounts_that_must_never_be_lent_stay_home`, `no_account_crosses_an_organizations_boundary`,
+`the_default_group_neither_lends_nor_borrows`,
+`a_lent_account_returns_when_the_borrower_is_quiet_or_its_home_needs_it`,
+`turning_balancing_off_returns_every_lent_account`, `a_group_made_later_joins_only_with_all_new`,
+`settings_and_journal_are_private_and_the_journal_keeps_its_newest_lines`,
+`signals_sum_each_groups_counts_by_provider`,
+`a_pass_lends_to_a_group_out_of_room_and_turning_off_returns_it`;
+`statistics::tests::a_window_reads_the_last_hours_and_a_fresh_start_reads_the_day_as_well`;
+the idle budget `monitor::tests::an_idle_hour_on_a_fake_clock_stays_inside_the_budget` (with
+balancing off a pass reads no file and writes none); MCP
+`crates/switchboard-cli/tests/mcp.rs` (`switchboard_balance` reads off, refuses an unknown group,
+chooses and takes out `default`).

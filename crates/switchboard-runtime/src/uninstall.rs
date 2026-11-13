@@ -33,6 +33,9 @@ const OWNED: &[&str] = &[
     "agents-settings.json",
     // Spending ceilings and their questions (SB-72); they travel in backups.
     "spend.json",
+    // The groups that lend accounts to each other and their lends and returns (SB-352).
+    "balancing.json",
+    "balancing.jsonl",
     "statistics.json",
     // Usage analytics' own state, Switchboard's switch and the notice's acknowledgement included
     // (SB-246): uninstalling forgets both, and the notice returns at the next first start.

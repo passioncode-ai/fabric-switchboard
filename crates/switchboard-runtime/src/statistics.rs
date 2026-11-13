@@ -39,7 +39,18 @@ struct State {
     names: BTreeMap<String, String>,
     dirty: bool,
     saved_at: i64,
+    /// SB-352: what this owner absorbed in the last hours, by quarter of an hour, group and
+    /// account: `(quarter start, pool, account)` → (requests, limit refusals). Memory only.
+    recent: BTreeMap<(i64, String, String), (u64, u64)>,
+    /// SB-352: when this owner started counting; a window reaching before it is read with the
+    /// day counts it touches as well (`window`).
+    since: i64,
 }
+/// SB-352: how long the quarter-hour counts are kept (the longest window read is 6 hours).
+const RECENT_KEEP: i64 = 7 * 3600;
+const QUARTER: i64 = 15 * 60;
+/// SB-352: requests and limit refusals per (group, account) over a stretch of time.
+pub(crate) type Window = BTreeMap<(String, String), (u64, u64)>;
 
 impl Statistics {
     /// What a previous run kept; an unreadable file starts empty and is replaced at the next
@@ -60,19 +71,107 @@ impl Statistics {
                 names: saved.names,
                 dirty: false,
                 saved_at: 0,
+                recent: BTreeMap::new(),
+                since: crate::monitor::now(),
             }),
         }
     }
     /// Adds the proxy's new counts.
     pub(crate) fn absorb(&self, new: Tallies) {
+        self.absorb_at(new, crate::monitor::now());
+    }
+    /// `absorb`, with the counts' recent part (SB-352) filed under `now`.
+    pub(crate) fn absorb_at(&self, new: Tallies, now: i64) {
         if new.is_empty() {
             return;
         }
         if let Ok(mut s) = self.inner.lock() {
+            let quarter = now - now.rem_euclid(QUARTER);
             for (k, t) in new {
+                if let Some(p) = stats::parts(&k) {
+                    let cell = s
+                        .recent
+                        .entry((quarter, p.pool.to_owned(), p.account.to_owned()))
+                        .or_default();
+                    cell.0 += t.requests;
+                    cell.1 += t.limited;
+                }
                 s.tallies.entry(k).or_default().add(&t);
             }
+            s.recent.retain(|(q, _, _), _| *q + RECENT_KEEP >= now);
             s.dirty = true;
+        }
+    }
+    /// SB-352: requests and limit refusals per group and account in the last `seconds`, by
+    /// quarter of an hour (a quarter that overlaps the start counts whole). A stretch reaching
+    /// before this owner started counting takes, for each group and account, the larger of what
+    /// it absorbed and the day counts of the UTC days the stretch touches: an upper bound, so a
+    /// fresh start never reads a group as quieter than it was.
+    pub(crate) fn window(&self, seconds: i64, now: i64) -> Window {
+        let from = now - seconds;
+        let Ok(s) = self.inner.lock() else {
+            return Window::new();
+        };
+        let mut out = Window::new();
+        for ((q, pool, account), (requests, limited)) in &s.recent {
+            if q + QUARTER > from && *q <= now {
+                let cell = out.entry((pool.clone(), account.clone())).or_default();
+                cell.0 += requests;
+                cell.1 += limited;
+            }
+        }
+        if s.since > from {
+            let first = stats::day_of(from);
+            let last = stats::day_of(now);
+            let mut days = Window::new();
+            for (key, t) in &s.tallies {
+                let Some(p) = stats::parts(key) else {
+                    continue;
+                };
+                if p.day < first.as_str() || p.day > last.as_str() {
+                    continue;
+                }
+                let cell = days
+                    .entry((p.pool.to_owned(), p.account.to_owned()))
+                    .or_default();
+                cell.0 += t.requests;
+                cell.1 += t.limited;
+            }
+            for (k, (requests, limited)) in days {
+                let cell = out.entry(k).or_default();
+                cell.0 = cell.0.max(requests);
+                cell.1 = cell.1.max(limited);
+            }
+        }
+        out
+    }
+    /// SB-352: requests per group and account over the `days` whole UTC days before today.
+    pub(crate) fn days_before(&self, days: i64, now: i64) -> Window {
+        let first = stats::day_of(now - days * 86_400);
+        let last = stats::day_of(now - 86_400);
+        let Ok(s) = self.inner.lock() else {
+            return Window::new();
+        };
+        let mut out = Window::new();
+        for (key, t) in &s.tallies {
+            let Some(p) = stats::parts(key) else {
+                continue;
+            };
+            if p.day < first.as_str() || p.day > last.as_str() {
+                continue;
+            }
+            let cell = out
+                .entry((p.pool.to_owned(), p.account.to_owned()))
+                .or_default();
+            cell.0 += t.requests;
+            cell.1 += t.limited;
+        }
+        out
+    }
+    #[cfg(test)]
+    pub(crate) fn started_at(&self, since: i64) {
+        if let Ok(mut s) = self.inner.lock() {
+            s.since = since;
         }
     }
     /// SB-156: adds the proxy's new counts with each folder replaced by its project's key (the
@@ -521,6 +620,48 @@ mod tests {
             input_tokens: input,
             ..Tally::default()
         }
+    }
+
+    /// SB-352: the last hours come from the quarter-hour counts this owner absorbed; a stretch
+    /// reaching before it started also reads the day counts it touches, as an upper bound.
+    #[test]
+    fn a_window_reads_the_last_hours_and_a_fresh_start_reads_the_day_as_well() {
+        let now = 1_792_400_000 + 12 * 3600;
+        let today = stats::day_of(now);
+        let limited = |requests: u64, limited: u64| Tally {
+            requests,
+            limited,
+            ..Tally::default()
+        };
+        let s = Statistics::default();
+        s.started_at(now - 10 * 3600);
+        s.absorb_at(
+            Tallies::from([(stats::key(&today, "a", "agents", "claude-code", ""), limited(5, 2))]),
+            now - 3 * 3600,
+        );
+        s.absorb_at(
+            Tallies::from([(stats::key(&today, "a", "agents", "claude-code", ""), limited(4, 0))]),
+            now - 8 * 3600,
+        );
+        s.absorb_at(
+            Tallies::from([(stats::key(&today, "b", "apps", "claude-code", ""), limited(1, 1))]),
+            now - 60,
+        );
+        let six = s.window(6 * 3600, now);
+        assert_eq!(six[&("agents".into(), "a".into())], (5, 2), "only the last 6 hours");
+        assert_eq!(s.window(2 * 3600, now)[&("apps".into(), "b".into())], (1, 1));
+        assert!(!s.window(2 * 3600, now).contains_key(&("agents".into(), "a".into())));
+        // An owner that started an hour ago cannot tell when today's counts came: it reads the
+        // day's whole count, never less.
+        s.started_at(now - 3600);
+        assert_eq!(s.window(2 * 3600, now)[&("agents".into(), "a".into())], (9, 2));
+        // The 7 days before today: today's counts are not among them.
+        let yesterday = stats::day_of(now - 86_400);
+        s.absorb_at(
+            Tallies::from([(stats::key(&yesterday, "a", "agents", "claude-code", ""), limited(70, 0))]),
+            now - 86_400,
+        );
+        assert_eq!(s.days_before(7, now)[&("agents".into(), "a".into())], (70, 0));
     }
 
     #[test]

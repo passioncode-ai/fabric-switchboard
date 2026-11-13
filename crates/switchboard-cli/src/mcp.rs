@@ -124,6 +124,7 @@ pub(crate) fn tools() -> Vec<(bool, Value)> {
         (true, json!({"name":"switchboard_openrouter_model","title":"Set the agents' OpenRouter model","description":"Change the OpenRouter model agents launched on the operator's key start on, for example moonshotai/kimi-k2 or anthropic/claude-sonnet-4.5. Only when the operator asks. The key itself is saved by the operator in the app or with switchboard agents openrouter set, never through this server.","inputSchema":{"type":"object","properties":{"model":{"type":"string","description":"An OpenRouter model id: vendor/model."},"pool":{"type":"string","description":"A group id for its own key; omit for the machine's key."}},"required":["model"],"additionalProperties":false}})),
         (false, json!({"name":"switchboard_shell_hook","title":"Terminals in organization folders","description":"Whether terminals on this computer follow organization folders (the terminal hook): its state (on, off, default_on: on because the folder map holds a folder of a group bound to an organization, default_off), the choice, whether the folder map reads, and each start file Switchboard changed with its state (written, removed_by_person, skipped_symlink, skipped_owner, skipped_zdotdir_unknown, unreadable, policy_blocked: a PowerShell profile on Windows whose execution policy, Restricted or AllSigned, keeps it from loading; Switchboard never changes the policy; constrained_language: PowerShell on Windows runs in Constrained Language Mode, where the hook cannot act); with path, the group, context and homes a terminal there gets. Reads files only.","inputSchema":{"type":"object","properties":{"path":path},"additionalProperties":false}})),
         (true, json!({"name":"switchboard_shell_hook_set","title":"Turn the terminal hook on or off","description":"Turn the terminal hook on or off for this computer's terminals, as switchboard shell on|off does. Only when the operator asks. off takes Switchboard's block out of every start file byte for byte and keeps it out; on writes it for every shell present, with or without an organization's group. Only Switchboard's own data folder changes start files. Answers the state switchboard_shell_hook reads.","inputSchema":{"type":"object","properties":{"on":{"type":"boolean"}},"required":["on"],"additionalProperties":false}})),
+        (true, json!({"name":"switchboard_balance","title":"Accounts lent between chosen groups","description":"Accounts lent between the groups the operator chose. Every 15 minutes a chosen group out of room (no account with room, or one while the provider refused it for a limit in the last 6 hours) borrows the account with the most room from another chosen group that keeps two with room; the account keeps its home group and goes back after 2 hours without refusals, or when its home needs it. A group not chosen is never touched, no account crosses an organization's boundary, and the ordinary CLI's account or one given to an agent is never lent. Without arguments, the state: chosen groups, accounts lent now, the last pass's figures and the newest lends and returns. add and remove change the chosen groups by pool id (default included; an empty list is off and returns every lent account); all_new decides whether a group made later joins them. Changing them only when the operator asks.","inputSchema":{"type":"object","properties":{"add":{"type":"array","maxItems":64,"items":{"type":"string","minLength":1},"description":"Pool ids from switchboard_projects, or default."},"remove":{"type":"array","maxItems":64,"items":{"type":"string","minLength":1}},"all_new":{"type":"boolean"}},"additionalProperties":false}})),
     ]
     .into_iter()
     .map(|(write, mut tool)| {
@@ -1345,6 +1346,29 @@ impl Server {
             "switchboard_recovery" => self.call(Operation::Recovery).await,
             "switchboard_handovers" => self.call(Operation::Handovers).await,
             "switchboard_agent_set" => self.agent_set(args).await,
+            "switchboard_balance" => {
+                let list = |key: &str| -> Vec<String> {
+                    args.get(key)
+                        .and_then(Value::as_array)
+                        .into_iter()
+                        .flatten()
+                        .filter_map(Value::as_str)
+                        .map(str::to_owned)
+                        .collect()
+                };
+                let (add, remove) = (list("add"), list("remove"));
+                let all_new = args.get("all_new").and_then(Value::as_bool);
+                if add.is_empty() && remove.is_empty() && all_new.is_none() {
+                    self.call(Operation::BalanceStatus).await
+                } else {
+                    self.call(Operation::Balance {
+                        groups_add: add,
+                        groups_remove: remove,
+                        all_new,
+                    })
+                    .await
+                }
+            }
             "switchboard_login" => self.login(args).await,
             "switchboard_project_set" => self.project_set(args).await,
             "switchboard_project_remove" => self.project_remove(args).await,
