@@ -61,8 +61,9 @@ between groups by itself.
 
 ## Open before building
 
-1. A DEC (DEC-0012) recording the rule above, once the operator confirms the defaults (15-minute
-   pass, 6-hour window, two accounts kept, 2-hour return, 1-hour cooldown).
+1. Decided: [DEC-0012](../DECISIONS.md#dec-0012-accounts-are-lent-between-the-groups-the-person-chose-by-their-last-hours-and-days)
+   (the operator confirmed lending and every default above; on his MacBook Agents, PassionCode,
+   Apps & Soft, default and every new group take part).
 2. The super-ux scenario for the switch on the Groups page and its states (on, lent, returned),
    with its Russian copy through Copylot.
 3. Whether a lent account's managed sessions in the borrower follow automatic switching at once

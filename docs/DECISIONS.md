@@ -6,7 +6,7 @@ never renumber, never delete. The doc map ([DOCMAP.md](DOCMAP.md)) names this fi
 register. Decisions made before 2026-11-08 live where they were made (plans' `D-<n>`, board rows,
 research notes); the ones still in force that the board cites are seeded below with their source.
 
-**Next free ID:** `DEC-0012`
+**Next free ID:** `DEC-0013`
 
 ## Format
 
@@ -181,3 +181,31 @@ research notes); the ones still in force that the board cites are seeded below w
 - **Source:** operator 2026-11-11 («мы обновляем весь софт автоматически, софт должен
   обновляться везде. И на студиях, типа у меня, и у сотрудников»), SB-333
 
+### DEC-0012: Accounts are lent between the groups the person chose, by their last hours and days
+
+- **Date:** 2026-11-13
+- **Status:** Accepted (not built yet: SB-352)
+- **Context:** automatic switching and the one move of a refused request stay inside one group
+  (DEC-0002, DEC-0008). On 2026-11-12 22:55Z twelve agents of one group stopped on their limit
+  while another group held an account with room, and an agent shared it by hand.
+- **Decision:** off by default; the person chooses the groups that take part. Among them
+  Switchboard lends accounts, never moves them: a lent account keeps its home group and serves the
+  borrower as a shared account until the need passes. A pass every 15 minutes reads the last
+  6 hours against the 7-day average (requests, limit refusals) and each account's fresh room; the
+  neediest chosen group takes one account per pass from a chosen group that keeps at least two
+  accounts with room; a lent account returns after 2 hours with no pressure in the borrower, or
+  when its home group needs it; an account waits 1 hour between moves. A group not chosen is never
+  read or touched; no account crosses an organization's boundary (SB-109); the ordinary CLI's
+  account, an account given to an agent (DEC-0010), one used elsewhere, disabled or waiting for a
+  sign-in is never lent. Every lend and return is recorded with its figures; turning balancing
+  off returns every lent account. On the operator's MacBook the first groups are Agents,
+  PassionCode, Apps & Soft and default, and every group made after it is turned on joins it.
+- **Consequences / affects:** a setting `balancing.groups`, the Groups page, CLI `balance`, MCP
+  `switchboard_balance`, `balancing.jsonl`; design
+  [adaptive balancing](research/adaptive-balancing-2026-11-13.md).
+- **Source:** operator 2026-11-13 in session `59745113` («адаптивная система на основе данных за
+  прошлые часы и дни работы … перемешивать аккаунты между выбранными группами … но если группу не
+  выбрали не трогаем, сделать такой выбор групп которые участвуют»), and his answers the same
+  night: lend rather than move; the 15-minute pass, 6 hours and 7 days, two accounts kept, return
+  after 2 hours, 1 hour between moves; on this MacBook Agents, PassionCode, Apps & Soft, default
+  «и все новые».
