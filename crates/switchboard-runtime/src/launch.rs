@@ -4157,9 +4157,17 @@ mod tests {
         let home = temp.path().join("login home");
         private_dir(&home).unwrap();
         let terminal = temp.path().join("stand-in-term");
+        // SB-354: a file this test just wrote can be "text file busy" (ETXTBSY, exit 126) while
+        // another test's fork still holds its write descriptor, so the stand-in runs the script
+        // again on 126 and leaves the last status where a failure can name it.
+        let status = temp.path().join("terminal-status");
         private_write(
             &terminal,
-            b"#!/bin/sh\n[ \"$1\" = -e ] || exit 9\nshift\nexec \"$@\"\n",
+            format!(
+                "#!/bin/sh\n[ \"$1\" = -e ] || exit 9\nshift\ntries=0\nwhile :; do\n  \"$@\"\n  result=$?\n  printf '%s %s' \"$result\" \"$tries\" > '{}'\n  [ \"$result\" -eq 126 ] && [ \"$tries\" -lt 50 ] || exit \"$result\"\n  tries=$((tries + 1))\n  sleep 0.1\ndone\n",
+                status.display()
+            )
+            .as_bytes(),
             true,
         )
         .unwrap();
@@ -4187,7 +4195,8 @@ mod tests {
         while !home.join(".completed").exists() {
             assert!(
                 std::time::Instant::now() < deadline,
-                "the script did not complete"
+                "the script did not complete; the stand-in terminal's last status and retries: {:?}",
+                fs::read_to_string(&status).ok()
             );
             std::thread::sleep(Duration::from_millis(20));
         }
