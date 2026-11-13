@@ -274,9 +274,15 @@ async fn handshake_lists_tools_and_rejects_malformed_messages() {
     let (error, refused) = agent.tool("switchboard_balance", json!({"add": ["no-such-group"]}));
     assert!(error, "{refused}");
     assert!(!data.path().join("balancing.json").exists());
-    let (error, on) = agent.tool("switchboard_balance", json!({"add": ["default"], "all_new": true}));
+    let (error, on) = agent.tool(
+        "switchboard_balance",
+        json!({"add": ["default"], "all_new": true}),
+    );
     assert!(!error, "{on}");
-    assert_eq!((on["on"].clone(), on["all_new"].clone()), (json!(true), json!(true)));
+    assert_eq!(
+        (on["on"].clone(), on["all_new"].clone()),
+        (json!(true), json!(true))
+    );
     assert!(on["note"].is_string(), "default lends nothing: {on}");
     let (error, off) = agent.tool("switchboard_balance", json!({"remove": ["default"]}));
     assert!(!error && off["on"] == false, "{off}");

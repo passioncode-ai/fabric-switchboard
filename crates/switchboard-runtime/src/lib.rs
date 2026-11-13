@@ -2800,10 +2800,7 @@ impl Runtime {
     }
     /// SB-352: the balancing settings, read from `balancing.json` once and then kept.
     fn balance_settings(&self) -> Result<balancing::Settings, String> {
-        let mut watch = self
-            .balancing
-            .lock()
-            .map_err(|_| balancing::UNREADABLE)?;
+        let mut watch = self.balancing.lock().map_err(|_| balancing::UNREADABLE)?;
         if let Some(settings) = &watch.settings {
             return Ok(settings.clone());
         }
@@ -2820,7 +2817,10 @@ impl Runtime {
             let Ok(mut watch) = self.balancing.lock() else {
                 return;
             };
-            if watch.last_pass != 0 && time >= watch.last_pass && time - watch.last_pass < balancing::PASS_SECONDS {
+            if watch.last_pass != 0
+                && time >= watch.last_pass
+                && time - watch.last_pass < balancing::PASS_SECONDS
+            {
                 return;
             }
             watch.last_pass = time;
@@ -2828,7 +2828,10 @@ impl Runtime {
         let settings = match self.balance_settings() {
             Ok(s) => s,
             Err(_) => {
-                oplog::event("balancing", &[("settings", oplog::Field::Code("unreadable"))]);
+                oplog::event(
+                    "balancing",
+                    &[("settings", oplog::Field::Code("unreadable"))],
+                );
                 return;
             }
         };
@@ -2874,7 +2877,10 @@ impl Runtime {
         }
         let changed = balancing::apply(&self.store, &self.root, &mut planned, &actions, time);
         if (resolved || changed) && balancing::write(&self.root, &planned).is_err() {
-            oplog::event("balancing", &[("settings", oplog::Field::Code("unwritten"))]);
+            oplog::event(
+                "balancing",
+                &[("settings", oplog::Field::Code("unwritten"))],
+            );
         }
         if let Ok(mut watch) = self.balancing.lock() {
             watch.settings = Some(planned);

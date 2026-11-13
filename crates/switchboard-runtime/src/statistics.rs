@@ -636,32 +636,59 @@ mod tests {
         let s = Statistics::default();
         s.started_at(now - 10 * 3600);
         s.absorb_at(
-            Tallies::from([(stats::key(&today, "a", "agents", "claude-code", ""), limited(5, 2))]),
+            Tallies::from([(
+                stats::key(&today, "a", "agents", "claude-code", ""),
+                limited(5, 2),
+            )]),
             now - 3 * 3600,
         );
         s.absorb_at(
-            Tallies::from([(stats::key(&today, "a", "agents", "claude-code", ""), limited(4, 0))]),
+            Tallies::from([(
+                stats::key(&today, "a", "agents", "claude-code", ""),
+                limited(4, 0),
+            )]),
             now - 8 * 3600,
         );
         s.absorb_at(
-            Tallies::from([(stats::key(&today, "b", "apps", "claude-code", ""), limited(1, 1))]),
+            Tallies::from([(
+                stats::key(&today, "b", "apps", "claude-code", ""),
+                limited(1, 1),
+            )]),
             now - 60,
         );
         let six = s.window(6 * 3600, now);
-        assert_eq!(six[&("agents".into(), "a".into())], (5, 2), "only the last 6 hours");
-        assert_eq!(s.window(2 * 3600, now)[&("apps".into(), "b".into())], (1, 1));
-        assert!(!s.window(2 * 3600, now).contains_key(&("agents".into(), "a".into())));
+        assert_eq!(
+            six[&("agents".into(), "a".into())],
+            (5, 2),
+            "only the last 6 hours"
+        );
+        assert_eq!(
+            s.window(2 * 3600, now)[&("apps".into(), "b".into())],
+            (1, 1)
+        );
+        assert!(!s
+            .window(2 * 3600, now)
+            .contains_key(&("agents".into(), "a".into())));
         // An owner that started an hour ago cannot tell when today's counts came: it reads the
         // day's whole count, never less.
         s.started_at(now - 3600);
-        assert_eq!(s.window(2 * 3600, now)[&("agents".into(), "a".into())], (9, 2));
+        assert_eq!(
+            s.window(2 * 3600, now)[&("agents".into(), "a".into())],
+            (9, 2)
+        );
         // The 7 days before today: today's counts are not among them.
         let yesterday = stats::day_of(now - 86_400);
         s.absorb_at(
-            Tallies::from([(stats::key(&yesterday, "a", "agents", "claude-code", ""), limited(70, 0))]),
+            Tallies::from([(
+                stats::key(&yesterday, "a", "agents", "claude-code", ""),
+                limited(70, 0),
+            )]),
             now - 86_400,
         );
-        assert_eq!(s.days_before(7, now)[&("agents".into(), "a".into())], (70, 0));
+        assert_eq!(
+            s.days_before(7, now)[&("agents".into(), "a".into())],
+            (70, 0)
+        );
     }
 
     #[test]

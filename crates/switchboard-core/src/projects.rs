@@ -862,7 +862,9 @@ impl Store {
             .iter()
             .position(|p| p.pool == pool)
             .ok_or("Project not found.")?;
-        let held = candidate.projects[index].shared_accounts.contains(&account.id);
+        let held = candidate.projects[index]
+            .shared_accounts
+            .contains(&account.id);
         if share {
             let clash = candidate.accounts.iter().any(|b| {
                 b.id != account.id

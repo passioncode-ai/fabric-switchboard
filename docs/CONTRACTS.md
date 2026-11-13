@@ -2832,7 +2832,7 @@ every lent account). `BalanceStatus` (no owner transaction) answers `{on, groups
 shares}], all_new, pass_minutes, lent: [{account_id, label, provider, from, from_name, to,
 to_name, at}], last_pass, recent, note?}`, `last_pass` being the owner's last pass (`at`, each
 chosen group's figures, rooms and need per provider, the actions) and `recent` the newest 20
-journal lines. Refusals: `UNREADABLE` (the settings file), `NO_SUCH_GROUP`, `NOT_SAVED`. CLI
+journal lines. Refusals: `UNREADABLE` (the settings file), `NO_SUCH_GROUP`, `NOT_SAVED`, each already a sentence for a person (`src/adapter.ts` `safeErrors`). CLI
 `switchboard balance status` and `switchboard balance groups [--add ID]... [--remove ID]...
 [--all-new true|false]`; MCP `switchboard_balance` (write; without arguments it reads). Not in
 wave 1: the Groups page switch and its states (wave 2), and an activity entry of its own (a loan

@@ -101,7 +101,8 @@ pub fn read(root: &Path) -> Result<Settings, String> {
 }
 pub fn write(root: &Path, settings: &Settings) -> Result<(), String> {
     let bytes = serde_json::to_vec(settings).map_err(|_| NOT_SAVED)?;
-    switchboard_core::private_fs::private_write(&root.join(FILE), &bytes).map_err(|_| NOT_SAVED.into())
+    switchboard_core::private_fs::private_write(&root.join(FILE), &bytes)
+        .map_err(|_| NOT_SAVED.into())
 }
 
 /// Every group balancing can name: `default`, then each group a person made.
@@ -258,7 +259,13 @@ fn limits(snapshot: &Snapshot, provider: Provider, pool: &str) -> (f64, i64) {
 }
 /// The account's used share when it has room in `pool` on fresh figures; none when its figures
 /// are stale, unknown, failed, or past a reset, or when a limit or a sign-in holds it.
-pub fn room(snapshot: &Snapshot, account: &Account, pool: &str, held: &Held, now: i64) -> Option<f64> {
+pub fn room(
+    snapshot: &Snapshot,
+    account: &Account,
+    pool: &str,
+    held: &Held,
+    now: i64,
+) -> Option<f64> {
     if held.limited.contains(&account.id) || held.sign_in.contains(&account.id) {
         return None;
     }
@@ -390,7 +397,12 @@ fn returning(lend: &Lend, reason: &'static str, edit: bool, figures: Figures) ->
 
 /// Only the returns a change of the chosen groups owes at once (turning balancing off returns
 /// every lent account), with no figures read.
-pub fn returns_owed(snapshot: &Snapshot, held: &Held, settings: &Settings, now: i64) -> Vec<Action> {
+pub fn returns_owed(
+    snapshot: &Snapshot,
+    held: &Held,
+    settings: &Settings,
+    now: i64,
+) -> Vec<Action> {
     let signals = Signals::new();
     let view = View {
         snapshot,
@@ -596,9 +608,11 @@ pub fn apply(
                 ("outcome", crate::oplog::Field::Code(outcome)),
             ],
         );
-        lines.push(json!({"at": now, "account": a.account, "provider": a.provider,
+        lines.push(
+            json!({"at": now, "account": a.account, "provider": a.provider,
             "from": a.from, "to": a.to, "action": a.action, "reason": a.reason,
-            "outcome": outcome, "figures": a.figures}));
+            "outcome": outcome, "figures": a.figures}),
+        );
     }
     settings
         .moved
@@ -674,7 +688,12 @@ pub fn change(
 
 /// What `balance status` answers: the chosen groups with their names, the loans, the last pass
 /// (when an owner runs) and the newest journal lines.
-pub fn status(root: &Path, snapshot: &Snapshot, settings: &Settings, last: Option<&Value>) -> Value {
+pub fn status(
+    root: &Path,
+    snapshot: &Snapshot,
+    settings: &Settings,
+    last: Option<&Value>,
+) -> Value {
     let name = |pool: &str| {
         snapshot
             .project_of_pool(pool)
@@ -740,7 +759,14 @@ pub fn summary(
         for p in PROVIDERS {
             let s = view.signal(g, p);
             let rooms = view.rooms(g, p);
-            if s == Signal::default() && rooms == 0 && view.snapshot.pool_accounts(g).iter().all(|a| a.provider != p) {
+            if s == Signal::default()
+                && rooms == 0
+                && view
+                    .snapshot
+                    .pool_accounts(g)
+                    .iter()
+                    .all(|a| a.provider != p)
+            {
                 continue;
             }
             groups.push(json!({"pool": g, "provider": p, "rooms": rooms,
@@ -855,7 +881,10 @@ mod tests {
         );
         assert_eq!(actions.len(), 1, "{actions:?}");
         let a = &actions[0];
-        assert_eq!((a.action, a.account.as_str(), a.from.as_str(), a.to.as_str()), ("lend", "apps-1", "apps", "agents"));
+        assert_eq!(
+            (a.action, a.account.as_str(), a.from.as_str(), a.to.as_str()),
+            ("lend", "apps-1", "apps", "agents")
+        );
         assert_eq!(a.figures.lender_room, Some(3));
         assert_eq!(a.figures.borrower.refusals_6h, 3);
         assert_eq!(a.figures.used_percent, Some(10.0));
@@ -865,34 +894,84 @@ mod tests {
     fn one_account_with_room_is_enough_without_refusals_and_short_with_them() {
         let mut s = estate();
         s.accounts[0] = account("agents-1", "agents", Some(40.0));
-        let quiet = plan(&s, &sig_map(&[busy("agents", 40, 0)]), &Held::default(), &chosen(&["agents", "apps"]), NOW);
+        let quiet = plan(
+            &s,
+            &sig_map(&[busy("agents", 40, 0)]),
+            &Held::default(),
+            &chosen(&["agents", "apps"]),
+            NOW,
+        );
         assert!(quiet.is_empty(), "{quiet:?}");
-        let refused = plan(&s, &sig_map(&[busy("agents", 40, 2)]), &Held::default(), &chosen(&["agents", "apps"]), NOW);
+        let refused = plan(
+            &s,
+            &sig_map(&[busy("agents", 40, 2)]),
+            &Held::default(),
+            &chosen(&["agents", "apps"]),
+            NOW,
+        );
         assert_eq!(refused.len(), 1);
         // A group with no request in 6 hours needs nothing, whatever its room.
         s.accounts[0] = account("agents-1", "agents", Some(99.0));
-        assert!(plan(&s, &Signals::new(), &Held::default(), &chosen(&["agents", "apps"]), NOW).is_empty());
+        assert!(plan(
+            &s,
+            &Signals::new(),
+            &Held::default(),
+            &chosen(&["agents", "apps"]),
+            NOW
+        )
+        .is_empty());
     }
 
     #[test]
     fn a_lender_keeps_two_accounts_with_room_or_one_when_idle() {
         let mut s = estate();
         s.accounts.retain(|a| a.id != "apps-3");
-        let busy_lender = plan(&s, &sig_map(&[busy("agents", 40, 3), busy("apps", 5, 0)]), &Held::default(), &chosen(&["agents", "apps"]), NOW);
-        assert!(busy_lender.is_empty(), "two with room and busy: keeps both {busy_lender:?}");
-        let idle_lender = plan(&s, &sig_map(&[busy("agents", 40, 3)]), &Held::default(), &chosen(&["agents", "apps"]), NOW);
+        let busy_lender = plan(
+            &s,
+            &sig_map(&[busy("agents", 40, 3), busy("apps", 5, 0)]),
+            &Held::default(),
+            &chosen(&["agents", "apps"]),
+            NOW,
+        );
+        assert!(
+            busy_lender.is_empty(),
+            "two with room and busy: keeps both {busy_lender:?}"
+        );
+        let idle_lender = plan(
+            &s,
+            &sig_map(&[busy("agents", 40, 3)]),
+            &Held::default(),
+            &chosen(&["agents", "apps"]),
+            NOW,
+        );
         assert_eq!(idle_lender.len(), 1, "idle for 6 hours: keeps one");
         s.accounts.retain(|a| a.id != "apps-2");
-        assert!(plan(&s, &sig_map(&[busy("agents", 40, 3)]), &Held::default(), &chosen(&["agents", "apps"]), NOW).is_empty());
+        assert!(plan(
+            &s,
+            &sig_map(&[busy("agents", 40, 3)]),
+            &Held::default(),
+            &chosen(&["agents", "apps"]),
+            NOW
+        )
+        .is_empty());
     }
 
     #[test]
     fn a_group_not_chosen_is_never_read_or_touched() {
         let s = estate();
         let sig = sig_map(&[busy("agents", 40, 3)]);
-        assert!(plan(&s, &sig, &Held::default(), &chosen(&["agents"]), NOW).is_empty(), "Apps lends nothing");
-        assert!(plan(&s, &sig, &Held::default(), &chosen(&["apps"]), NOW).is_empty(), "Agents borrows nothing");
-        assert!(plan(&s, &sig, &Held::default(), &Settings::default(), NOW).is_empty(), "off");
+        assert!(
+            plan(&s, &sig, &Held::default(), &chosen(&["agents"]), NOW).is_empty(),
+            "Apps lends nothing"
+        );
+        assert!(
+            plan(&s, &sig, &Held::default(), &chosen(&["apps"]), NOW).is_empty(),
+            "Agents borrows nothing"
+        );
+        assert!(
+            plan(&s, &sig, &Held::default(), &Settings::default(), NOW).is_empty(),
+            "off"
+        );
     }
 
     #[test]
@@ -902,7 +981,11 @@ mod tests {
         s.projects.push(group("tools"));
         let actions = plan(
             &s,
-            &sig_map(&[busy("agents", 40, 1), busy("tools", 10, 5), busy("apps", 1, 0)]),
+            &sig_map(&[
+                busy("agents", 40, 1),
+                busy("tools", 10, 5),
+                busy("apps", 1, 0),
+            ]),
             &Held::default(),
             &chosen(&["agents", "apps", "tools"]),
             NOW,
@@ -912,7 +995,13 @@ mod tests {
         // Equal refusals: the most demand against its usual week.
         let mut a = busy("agents", 60, 2);
         a.1.hourly_7d = 1.0;
-        let actions = plan(&s, &sig_map(&[a, busy("tools", 60, 2)]), &Held::default(), &chosen(&["agents", "apps", "tools"]), NOW);
+        let actions = plan(
+            &s,
+            &sig_map(&[a, busy("tools", 60, 2)]),
+            &Held::default(),
+            &chosen(&["agents", "apps", "tools"]),
+            NOW,
+        );
         assert_eq!(actions[0].to, "agents");
     }
 
@@ -921,18 +1010,31 @@ mod tests {
         let sig = sig_map(&[busy("agents", 40, 3)]);
         let settings = chosen(&["agents", "apps"]);
         // Each case leaves Apps with the other two accounts with room, so only apps-1 is judged.
-        let only = |s: &Snapshot, held: &Held| plan(s, &sig, held, &settings, NOW).iter().any(|a| a.account == "apps-1");
+        let only = |s: &Snapshot, held: &Held| {
+            plan(s, &sig, held, &settings, NOW)
+                .iter()
+                .any(|a| a.account == "apps-1")
+        };
         let mut s = estate();
         s.accounts[2] = account("apps-2", "apps", Some(85.0));
         s.accounts[3] = account("apps-3", "apps", Some(85.0));
         s.accounts.push(account("apps-4", "apps", Some(40.0)));
         s.accounts.push(account("apps-5", "apps", Some(50.0)));
         assert!(only(&s, &Held::default()), "the baseline lends apps-1");
-        let cli = Held { in_cli: HashSet::from(["apps-1".to_owned()]), ..Held::default() };
+        let cli = Held {
+            in_cli: HashSet::from(["apps-1".to_owned()]),
+            ..Held::default()
+        };
         assert!(!only(&s, &cli), "the ordinary CLI's account");
-        let sign_in = Held { sign_in: HashSet::from(["apps-1".to_owned()]), ..Held::default() };
+        let sign_in = Held {
+            sign_in: HashSet::from(["apps-1".to_owned()]),
+            ..Held::default()
+        };
         assert!(!only(&s, &sign_in), "waiting for a sign-in");
-        let limited = Held { limited: HashSet::from(["apps-1".to_owned()]), ..Held::default() };
+        let limited = Held {
+            limited: HashSet::from(["apps-1".to_owned()]),
+            ..Held::default()
+        };
         assert!(!only(&s, &limited), "held by a limit");
         let mut given = s.clone();
         given.assigned_to.insert("apps-1".into(), "an agent".into());
@@ -952,20 +1054,44 @@ mod tests {
         assert!(!only(&stale, &Held::default()), "stale figures");
         let mut cooling = settings.clone();
         cooling.moved.insert("apps-1".into(), NOW - 600);
-        assert!(!plan(&s, &sig, &Held::default(), &cooling, NOW).iter().any(|a| a.account == "apps-1"), "moved 10 minutes ago");
+        assert!(
+            !plan(&s, &sig, &Held::default(), &cooling, NOW)
+                .iter()
+                .any(|a| a.account == "apps-1"),
+            "moved 10 minutes ago"
+        );
     }
 
     #[test]
     fn no_account_crosses_an_organizations_boundary() {
         let mut s = estate();
-        s.organizations.push(serde_json::from_value(json!({"id": "acme", "name": "Acme", "created_at": 1})).unwrap());
+        s.organizations.push(
+            serde_json::from_value(json!({"id": "acme", "name": "Acme", "created_at": 1})).unwrap(),
+        );
         s.projects[0].organizations = vec!["acme".into()];
         // Apps's accounts are personal: the organization's group Agents cannot take them.
-        assert!(plan(&s, &sig_map(&[busy("agents", 40, 3)]), &Held::default(), &chosen(&["agents", "apps"]), NOW).is_empty());
+        assert!(plan(
+            &s,
+            &sig_map(&[busy("agents", 40, 3)]),
+            &Held::default(),
+            &chosen(&["agents", "apps"]),
+            NOW
+        )
+        .is_empty());
         for a in s.accounts.iter().filter(|a| a.pool == "apps") {
             s.memberships.insert(a.id.clone(), "acme".into());
         }
-        assert_eq!(plan(&s, &sig_map(&[busy("agents", 40, 3)]), &Held::default(), &chosen(&["agents", "apps"]), NOW).len(), 1);
+        assert_eq!(
+            plan(
+                &s,
+                &sig_map(&[busy("agents", 40, 3)]),
+                &Held::default(),
+                &chosen(&["agents", "apps"]),
+                NOW
+            )
+            .len(),
+            1
+        );
     }
 
     #[test]
@@ -975,58 +1101,127 @@ mod tests {
             a.pool = DEFAULT_POOL.into();
         }
         s.projects.retain(|p| p.pool != "apps");
-        assert!(plan(&s, &sig_map(&[busy("agents", 40, 3)]), &Held::default(), &chosen(&["agents", "default"]), NOW).is_empty());
+        assert!(plan(
+            &s,
+            &sig_map(&[busy("agents", 40, 3)]),
+            &Held::default(),
+            &chosen(&["agents", "default"]),
+            NOW
+        )
+        .is_empty());
     }
 
     #[test]
     fn a_lent_account_returns_when_the_borrower_is_quiet_or_its_home_needs_it() {
         let s = on_loan();
         let mut settings = chosen(&["agents", "apps"]);
-        settings.lent.push(lent("apps-1", "apps", "agents", NOW - 3 * 3600));
+        settings
+            .lent
+            .push(lent("apps-1", "apps", "agents", NOW - 3 * 3600));
         settings.moved.insert("apps-1".into(), NOW - 3 * 3600);
-        let quiet = plan(&s, &sig_map(&[busy("agents", 40, 0)]), &Held::default(), &settings, NOW);
-        assert_eq!(quiet.iter().map(|a| (a.action, a.reason)).collect::<Vec<_>>(), [("return", "quiet")]);
+        let quiet = plan(
+            &s,
+            &sig_map(&[busy("agents", 40, 0)]),
+            &Held::default(),
+            &settings,
+            NOW,
+        );
+        assert_eq!(
+            quiet
+                .iter()
+                .map(|a| (a.action, a.reason))
+                .collect::<Vec<_>>(),
+            [("return", "quiet")]
+        );
         // Refusals in the last 2 hours keep it there.
-        let pressed = plan(&s, &sig_map(&[busy("agents", 40, 2)]), &Held::default(), &settings, NOW);
+        let pressed = plan(
+            &s,
+            &sig_map(&[busy("agents", 40, 2)]),
+            &Held::default(),
+            &settings,
+            NOW,
+        );
         assert!(pressed.iter().all(|a| a.action != "return"), "{pressed:?}");
         // Lent an hour ago: not quiet long enough.
         let mut young = settings.clone();
         young.lent[0].at = NOW - 3600;
-        assert!(plan(&s, &sig_map(&[busy("agents", 40, 0)]), &Held::default(), &young, NOW).is_empty());
+        assert!(plan(
+            &s,
+            &sig_map(&[busy("agents", 40, 0)]),
+            &Held::default(),
+            &young,
+            NOW
+        )
+        .is_empty());
         // Its home group runs out of room: it goes home.
         let mut home = s.clone();
         home.accounts[2] = account("apps-2", "apps", Some(99.0));
         home.accounts[3] = account("apps-3", "apps", Some(99.0));
         home.accounts[1] = account("apps-1", "apps", Some(99.0));
-        let back = plan(&home, &sig_map(&[busy("agents", 40, 2), busy("apps", 20, 4)]), &Held::default(), &settings, NOW);
+        let back = plan(
+            &home,
+            &sig_map(&[busy("agents", 40, 2), busy("apps", 20, 4)]),
+            &Held::default(),
+            &settings,
+            NOW,
+        );
         assert_eq!(back[0].reason, "home_needs");
         // The cooldown holds a return the figures ask for.
         let mut cooling = settings.clone();
         cooling.moved.insert("apps-1".into(), NOW - 600);
-        assert!(plan(&s, &sig_map(&[busy("agents", 40, 0)]), &Held::default(), &cooling, NOW).is_empty());
+        assert!(plan(
+            &s,
+            &sig_map(&[busy("agents", 40, 0)]),
+            &Held::default(),
+            &cooling,
+            NOW
+        )
+        .is_empty());
     }
 
     #[test]
     fn turning_balancing_off_returns_every_lent_account() {
         let s = on_loan();
         let mut settings = chosen(&["agents", "apps"]);
-        settings.lent.push(lent("apps-1", "apps", "agents", NOW - 60));
+        settings
+            .lent
+            .push(lent("apps-1", "apps", "agents", NOW - 60));
         settings.moved.insert("apps-1".into(), NOW - 60);
         settings.groups.clear();
         let owed = returns_owed(&s, &Held::default(), &settings, NOW);
         assert_eq!(owed.len(), 1);
-        assert_eq!((owed[0].action, owed[0].reason, owed[0].edit), ("return", "not_chosen", true));
+        assert_eq!(
+            (owed[0].action, owed[0].reason, owed[0].edit),
+            ("return", "not_chosen", true)
+        );
         // So does taking one of its two groups out, at once and in spite of the cooldown.
         let mut one = chosen(&["agents"]);
         one.lent = settings.lent.clone();
         one.moved = settings.moved.clone();
-        assert_eq!(plan(&s, &Signals::new(), &Held::default(), &one, NOW)[0].reason, "not_chosen");
+        assert_eq!(
+            plan(&s, &Signals::new(), &Held::default(), &one, NOW)[0].reason,
+            "not_chosen"
+        );
         // An account given to an agent since it was lent goes home at once too.
         let mut given = s.clone();
         given.assigned_to.insert("apps-1".into(), "an agent".into());
-        assert_eq!(returns_owed(&given, &Held::default(), &chosen(&["agents", "apps"]).with_lent(&one), NOW)[0].reason, "not_lendable");
+        assert_eq!(
+            returns_owed(
+                &given,
+                &Held::default(),
+                &chosen(&["agents", "apps"]).with_lent(&one),
+                NOW
+            )[0]
+            .reason,
+            "not_lendable"
+        );
         // A share someone took away by hand is forgotten, with no change to the groups.
-        let gone = returns_owed(&estate(), &Held::default(), &chosen(&["agents", "apps"]).with_lent(&one), NOW);
+        let gone = returns_owed(
+            &estate(),
+            &Held::default(),
+            &chosen(&["agents", "apps"]).with_lent(&one),
+            NOW,
+        );
         assert_eq!((gone[0].reason, gone[0].edit), ("share_gone", false));
     }
     impl Settings {
@@ -1041,7 +1236,14 @@ mod tests {
     fn a_group_made_later_joins_only_with_all_new() {
         let mut s = estate();
         let mut settings = Settings::default();
-        assert!(change(&mut settings, &s, &["agents".into(), "apps".into()], &[], None).unwrap());
+        assert!(change(
+            &mut settings,
+            &s,
+            &["agents".into(), "apps".into()],
+            &[],
+            None
+        )
+        .unwrap());
         assert_eq!(settings.seen, ["default", "agents", "apps"]);
         s.projects.push(group("new"));
         let mut without = settings.clone();
@@ -1058,9 +1260,15 @@ mod tests {
         s.projects.retain(|p| p.pool != "apps");
         assert!(resolve(&mut settings, &s));
         assert_eq!(settings.groups, ["agents"]);
-        assert_eq!(change(&mut settings, &s, &["nope".into()], &[], None), Err(NO_SUCH_GROUP.into()));
+        assert_eq!(
+            change(&mut settings, &s, &["nope".into()], &[], None),
+            Err(NO_SUCH_GROUP.into())
+        );
         // Off, a new group joins nothing.
-        let mut off = Settings { all_new: true, ..Settings::default() };
+        let mut off = Settings {
+            all_new: true,
+            ..Settings::default()
+        };
         s.projects.push(group("later"));
         assert!(!resolve(&mut off, &s));
         assert!(off.groups.is_empty());
@@ -1083,7 +1291,10 @@ mod tests {
         #[cfg(unix)]
         for file in [FILE, JOURNAL] {
             use std::os::unix::fs::PermissionsExt;
-            let mode = std::fs::metadata(root.path().join(file)).unwrap().permissions().mode();
+            let mode = std::fs::metadata(root.path().join(file))
+                .unwrap()
+                .permissions()
+                .mode();
             assert_eq!(mode & 0o777, 0o600, "{file}");
         }
         std::fs::write(root.path().join(FILE), b"{not json").unwrap();
@@ -1125,7 +1336,10 @@ mod tests {
                         },
                     )
                     .unwrap();
-                runtime.store.usage_health(&a.id, "ok", now, now + 150).unwrap();
+                runtime
+                    .store
+                    .usage_health(&a.id, "ok", now, now + 150)
+                    .unwrap();
                 ids.push(a.id);
             }
             let view = runtime
@@ -1149,7 +1363,13 @@ mod tests {
         runtime.statistics.started_at(now - 8 * 3600);
         runtime.statistics.absorb_at(
             Tallies::from([(
-                stats::key(&stats::day_of(now), &agent_ids[0], &agents, "claude-code", ""),
+                stats::key(
+                    &stats::day_of(now),
+                    &agent_ids[0],
+                    &agents,
+                    "claude-code",
+                    "",
+                ),
                 Tally {
                     requests: 40,
                     limited: 3,
@@ -1169,20 +1389,43 @@ mod tests {
         assert_eq!(on["on"], true, "{on}");
         runtime.balance_pass(now).await;
         let shared = || {
-            runtime.store.snapshot().unwrap().projects.iter().find(|p| p.pool == agents).unwrap().shared_accounts.clone()
+            runtime
+                .store
+                .snapshot()
+                .unwrap()
+                .projects
+                .iter()
+                .find(|p| p.pool == agents)
+                .unwrap()
+                .shared_accounts
+                .clone()
         };
-        assert_eq!(shared(), [app_ids[0].clone()], "the account with the most room");
+        assert_eq!(
+            shared(),
+            [app_ids[0].clone()],
+            "the account with the most room"
+        );
         let status = runtime.execute(Operation::BalanceStatus).await.unwrap();
-        assert_eq!(status["lent"][0]["account_id"], app_ids[0].as_str(), "{status}");
+        assert_eq!(
+            status["lent"][0]["account_id"],
+            app_ids[0].as_str(),
+            "{status}"
+        );
         assert_eq!(status["recent"][0]["action"], "lend");
         assert_eq!(status["recent"][0]["outcome"], "done");
         assert_eq!(status["recent"][0]["figures"]["borrower"]["refusals_6h"], 3);
         assert!(status["last_pass"]["groups"].is_array(), "{status}");
         // Within 15 minutes nothing is decided again.
-        runtime.store.set_shared(&agents, &app_ids[0], false).unwrap();
+        runtime
+            .store
+            .set_shared(&agents, &app_ids[0], false)
+            .unwrap();
         runtime.balance_pass(now + 60).await;
         assert!(shared().is_empty());
-        runtime.store.set_shared(&agents, &app_ids[0], true).unwrap();
+        runtime
+            .store
+            .set_shared(&agents, &app_ids[0], true)
+            .unwrap();
         // Taking both groups out returns the lent account at once.
         let off = runtime
             .execute(Operation::Balance {
@@ -1218,8 +1461,10 @@ mod tests {
             (("agents".into(), "apps-1".into()), (6, 0)),
             (("agents".into(), "gone".into()), (99, 99)),
         ]);
-        let two = crate::statistics::Window::from([(("agents".into(), "agents-1".into()), (10, 1))]);
-        let week = crate::statistics::Window::from([(("agents".into(), "agents-1".into()), (168, 0))]);
+        let two =
+            crate::statistics::Window::from([(("agents".into(), "agents-1".into()), (10, 1))]);
+        let week =
+            crate::statistics::Window::from([(("agents".into(), "agents-1".into()), (168, 0))]);
         let sig = signals(&s, &six, &two, &week);
         let a = sig[&("agents".to_owned(), "claude")];
         assert_eq!((a.requests_6h, a.refusals_6h, a.refusals_2h), (36, 4, 1));
