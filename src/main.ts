@@ -7,9 +7,9 @@ import { platformLabel } from './platform';
 import { LOCALE_KEY, dateLocale, locale, parseLocaleChoice, plural, saveLocaleChoice, t, type LocaleChoice } from './i18n';
 import { demo, demoFirstRun, native, nativeAdapter, onProjectSuggestions, onShellHook, onSpendChanged, safeError, reportFrontendReady, reportLanguage, type Operation } from './adapter';
 import type { CardState } from './ui-logic';
-import { statAlert, ceilingQuestion, ceilingWarning, ceilingLine, keyLimitLine, dollars, POOL_PATTERN, poolChoices, poolName, inGroup, tourPlacement, usableWhileBusy, APPEARANCE_KEY, attribution, placementAdmits, domainSuggestion, groupSeatsElsewhere, passioncodeLine, seatEndedText, groupSeatsEndedText, organizationReleasedAt, inOrganizationFilter, domainList, type AttributedBy, sortStatRows, nextStatSort, type StatRow, type StatSort, statCacheShare, statTokensPerRequest, chartSeries, niceMax, groupProjectRows, type ChartMetric, groupProjects, compactCount, statTokens, statTrouble, statTroubleText, statAgentName, type Statistics, EXPIRY_CHOICES, folderName, folderRows, withoutFolder, type ProjectRoot, moveTargets, mapRows, rootTargets, storedMapFolders, MAP_FOLDERS_KEY, type MapFilter, type MapRow, type RepositoryMap, sortAgents, defaultAgentChoices, backgroundReads, clockedRead, chainScopeKey, afterRead, ceilingRemovalNote, modelMeta, modelUse, ordinaryKimiNote, kimiLimitUntil, limitReasonText, limitTitle, agentSetupFacts, sessionHow, sessionAgentName, sessionStateLabel, kimiWindowsLine, kimiWindowsLines, openrouterCreditLine, eventAction, eventDetail, MutationClock, activeRules, autoSwitchPool, autoSwitchPossible, launchChoice, withFolders, githubDefaultSelection, githubPlan, githubSource, replaceFolder, storedFolder, LAST_FOLDER_KEY, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, groupAccounts, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, signInNotice, signInMove, organizationMoveNote, dismissTermsNotice, termsNoticeDismissed, termsNoticeOn, termsNoticeText, tourWaits, orgSetups, releasedOrganizations, releasedSummary, orgSetupAction, orgSetupShown, orgSetupCaveat, orgSetupLeads, orgSetupPrimary, accountsOrgActionLeads, firstPrimary, orgSetupUnread, orgSetupStateLabel, orgSetupTitle, hiddenOrgSetups, ORG_SETUP_HIDDEN_KEY, accountsEmptyKey, type OrgSetup, usageAnswerText, usageNotice, usageFreshness, windowReset, type Appearance, shellHookView, balancingView, balancingNotice, shellHookToggleNotice, shellHookNoticeText, codexHookLine, moveStep, accountsForStep, chainSummary, stepReasonText, handoverOutcomeText, handoverSkipped, shortWorkflow, TAKEOVER_ORDER, groupOrganizations, servesPool, sharedGroups, holdsContext, accountOrganizations } from './ui-logic';
+import { statAlert, ceilingQuestion, ceilingWarning, ceilingLine, keyLimitLine, dollars, POOL_PATTERN, poolChoices, poolName, inGroup, tourPlacement, usableWhileBusy, APPEARANCE_KEY, attribution, placementAdmits, domainSuggestion, groupSeatsElsewhere, passioncodeLine, seatEndedText, groupSeatsEndedText, organizationReleasedAt, inOrganizationFilter, domainList, type AttributedBy, sortStatRows, nextStatSort, type StatRow, type StatSort, statCacheShare, statTokensPerRequest, chartSeries, niceMax, groupProjectRows, type ChartMetric, groupProjects, compactCount, statTokens, statTrouble, statTroubleText, statAgentName, type Statistics, EXPIRY_CHOICES, folderName, folderRows, withoutFolder, type ProjectRoot, moveTargets, mapRows, rootTargets, storedMapFolders, MAP_FOLDERS_KEY, type MapFilter, type MapRow, type RepositoryMap, sortAgents, defaultAgentChoices, backgroundReads, clockedRead, chainScopeKey, afterRead, ceilingRemovalNote, modelMeta, modelUse, ordinaryKimiNote, kimiLimitUntil, limitReasonText, limitTitle, agentSetupFacts, sessionHow, sessionAgentName, sessionStateLabel, kimiWindowsLine, kimiWindowsLines, openrouterCreditLine, eventAction, eventDetail, MutationClock, activeRules, autoSwitchPool, autoSwitchPossible, launchChoice, withFolders, githubDefaultSelection, githubPlan, githubSource, replaceFolder, storedFolder, LAST_FOLDER_KEY, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, groupAccounts, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, signInNotice, signInMove, organizationMoveNote, dismissTermsNotice, termsNoticeDismissed, termsNoticeOn, termsNoticeText, tourWaits, orgSetups, releasedOrganizations, releasedSummary, orgSetupAction, orgSetupShown, orgSetupCaveat, orgSetupLeads, orgSetupPrimary, accountsOrgActionLeads, firstPrimary, orgSetupUnread, orgSetupStateLabel, orgSetupTitle, hiddenOrgSetups, ORG_SETUP_HIDDEN_KEY, accountsEmptyKey, type OrgSetup, usageAnswerText, usageNotice, usageFreshness, windowReset, type Appearance, shellHookView, balancingView, balancingNotice, shellHookToggleNotice, shellHookNoticeText, codexHookLine, moveStep, accountsForStep, chainSummary, stepReasonText, handoverOutcomeText, handoverSkipped, shortWorkflow, TAKEOVER_ORDER, groupOrganizations, servesPool, sharedGroups, holdsContext, accountOrganizations, machineOf, unplacedAccounts, machineAliasesLine, machineLiveLine, machineCopyLine } from './ui-logic';
 import agentCatalog from '../catalog/agents.json';
-import type { AnalyticsStatus, Ceilings, CeilingView, CeilingQuestionView, OpenrouterCredit, BackupInfo, PassioncodeStatus, Account, Adapter, AgentConnection, AgentInfo, AgentRow, AgentsOverview, OpenrouterModels, HermesModel, KimiAccounts, KimiRegion, KimiStatus, OpenrouterStatus, OpenrouterKeys, CodexRoute, BalanceStatus, ShellHookStatus, AgentSetup, AuthKind, BackupStatus, KimiAccount, CurrentAccounts, LoginItem, Project, Restored, HandoverPlan, ExternalIdentity, MonitorStatus, ProjectRule, Provider, RotationPolicy, RuntimeStatus, SessionInfo, Snapshot, UpdateStatus, Onboarding, Chains, ChainExecutor, ChainScope, ChainStepView, GithubRepository } from './types';
+import type { AnalyticsStatus, Ceilings, CeilingView, CeilingQuestionView, OpenrouterCredit, BackupInfo, PassioncodeStatus, Account, Adapter, AgentConnection, AgentInfo, AgentRow, AgentsOverview, OpenrouterModels, HermesModel, KimiAccounts, KimiRegion, KimiStatus, OpenrouterStatus, OpenrouterKeys, CodexRoute, BalanceStatus, ShellHookStatus, AgentSetup, AuthKind, BackupStatus, KimiAccount, CurrentAccounts, LoginItem, Project, Restored, HandoverPlan, ExternalIdentity, MonitorStatus, ProjectRule, Provider, RotationPolicy, RuntimeStatus, SessionInfo, Snapshot, UpdateStatus, Onboarding, Chains, ChainExecutor, ChainScope, ChainStepView, GithubRepository, Machine, MachinesLive } from './types';
 
 const root = document.querySelector<HTMLDivElement>('#app')!;
 const announcements = document.querySelector<HTMLDivElement>('#announcements')!;
@@ -464,7 +464,89 @@ function rulesStrip(main: HTMLElement) {
   main.append(strip);
 }
 function renderProjects(main: HTMLElement) {
-  main.append(projectsSection(), balancingSection(), codexRouteSection(), shellHookSection(), diskMapSection(), rulesSection());
+  main.append(projectsSection(), machinesSection(), balancingSection(), codexRouteSection(), shellHookSection(), diskMapSection(), rulesSection());
+}
+/** SB-355 (SCN-092, DEC-0013): every other machine accounts live on is a group of its own; a live read over ssh only when asked. */
+const machinePoolName = (pool: string) => snapshot?.machines?.find((m) => m.pool === pool)?.name;
+let machinesLive: MachinesLive | null = null; let machinesReading = false; let machinesError = '';
+function readMachines() {
+  if (machinesReading) return;
+  machinesReading = true; machinesError = ''; render();
+  void adapter.machinesLive().then((v) => { machinesLive = v; }, (e) => { machinesError = t(safeError(e, 'read')); }).finally(() => { machinesReading = false; render(); });
+}
+function machinesSection() {
+  const section = el('section', 'project-section'); section.setAttribute('aria-labelledby', 'machines-heading');
+  const heading = el('h2', 'section-heading', t('Other machines')); heading.id = 'machines-heading';
+  section.append(heading, el('p', 'surface-note', t('Each machine your accounts live on is a group of its own. An account there is in no group on this computer: Switchboard never renews it, switches to it or lends it here. Bring one here to use it in a group of this computer.')));
+  const machines = snapshot!.machines ?? [];
+  const unplaced = unplacedAccounts(snapshot!);
+  if (!machines.length) section.append(el('p', 'form-note', t('No account lives on another machine. Move one there with Move to another machine… on Accounts.')));
+  else {
+    const read = button(machinesReading ? t('Reading the other machines…') : machinesLive ? t('Read again') : t('Read their state'), () => readMachines(), 'button', 'machines-read');
+    read.disabled = machinesReading; section.append(read);
+    if (machinesError) section.append(el('p', 'form-error', machinesError));
+  }
+  const list = el('div', 'account-list'); list.setAttribute('aria-label', t('Other machines'));
+  for (const machine of machines) {
+    const accounts = snapshot!.accounts.filter((a) => a.pool === machine.pool);
+    const live = machinesLive?.machines.find((m) => m.pool === machine.pool);
+    const card = el('article', 'account-card project-card'); card.setAttribute('aria-label', `${machine.name}, ${plural(accounts.length, { one: '{n} account', other: '{n} accounts' })}`);
+    const details = el('div', 'account-details'); const title = el('div', 'account-title');
+    title.append(el('h2', '', machine.name), el('span', 'badge muted', plural(accounts.length, { one: '{n} account', other: '{n} accounts' })));
+    details.append(title);
+    const aliases = machineAliasesLine(machine); if (aliases) details.append(el('p', 'account-meta', aliases));
+    const state = machineLiveLine(live?.live); if (state) details.append(el('p', live?.live?.reachable ? 'form-note' : 'form-error', state));
+    if (!accounts.length) details.append(el('p', 'account-meta', t('No account lives there now.')));
+    const rows = el('ul', 'group-projects'); rows.setAttribute('aria-label', t('Accounts on {machine}', { machine: machine.name }));
+    for (const account of accounts) {
+      const row = el('li', 'group-project'); const line = el('div', 'group-project-title');
+      line.append(el('span', 'group-project-name', `${account.label} · ${providerName(account.provider)}`));
+      const copy = machineCopyLine(live?.accounts.find((a) => a.id === account.id)?.there, live?.live?.reachable);
+      if (copy) line.append(el('span', 'folder-note', ` · ${copy}`));
+      const key = `bring-${account.id}`;
+      row.append(line, button(t('Bring here…'), () => bringHereDialog(account, machine), 'text-button', key));
+      if (account.kind === 'oauth') row.append(button(t('Move to another machine…'), () => sendDialog(account), 'text-button', `send-${account.id}`));
+      rows.append(row);
+    }
+    details.append(rows);
+    const actions = el('div', 'management-actions');
+    actions.append(button(t('Move an account here…'), () => moveHereDialog(machine), 'text-button', `move-here-${machine.pool}`));
+    card.append(details, actions); list.append(card);
+  }
+  if (machines.length) section.append(list);
+  if (unplaced.length) section.append(el('p', 'form-note', t('Marked as used elsewhere, machine not known, so they stay in their groups here: {labels}.', { labels: unplaced.map((a) => a.label).join(', ') })));
+  return section;
+}
+/** SB-355 (SCN-092): an account comes back from its machine into a group of this computer, over ssh. */
+function bringHereDialog(account: Account, machine: Machine) {
+  const context = openDialog(t('Bring {label} back to this computer', { label: account.label }), t('Its sign-in comes back from {machine} over ssh: that machine stops using it, the provider is checked here, then its copy there is removed. If a step fails, it stays on {machine}.', { machine: machine.name }));
+  const left = snapshot?.returns_to?.[account.id];
+  const choices: [string, string][] = [['default', t('Default group')], ...(snapshot?.projects ?? []).map((p): [string, string] => [p.pool, p.name])];
+  const group = select(choices); group.value = choices.some(([v]) => v === left) ? left! : 'default';
+  context.body.append(field(t('Group here'), group, t('The group it left is chosen first.')));
+  context.actions.append(submit(t('Bring here')));
+  context.form.addEventListener('submit', (event) => {
+    event.preventDefault();
+    const name = choices.find(([v]) => v === group.value)?.[1] ?? group.value;
+    void dialogSave(context, () => adapter.recallAccount(account.id, null, group.value), t('{label} is back on this computer, in {group}.', { label: account.label, group: name }));
+  });
+  group.focus();
+}
+/** SB-355 (SCN-092): a sign-in of this computer moves to a machine group's machine over ssh. */
+function moveHereDialog(machine: Machine) {
+  const context = openDialog(t('Move an account to {machine}', { machine: machine.name }), t('Its sign-in moves over ssh: this computer stops using it first, the other machine saves it and checks that it answers. If a step fails, nothing changes.'));
+  const movable = snapshot!.accounts.filter((a) => a.kind === 'oauth' && a.enabled && snapshot?.elsewhere?.[a.id] === undefined && !Object.values(snapshot!.routes).includes(a.id));
+  if (!movable.length) { context.body.append(el('p', 'form-note', t('No account here can move now: only a subscription sign-in that is on and that no group has selected moves.'))); context.actions.append(button(t('Done'), () => context.close(), 'button primary')); return; }
+  const which = select(movable.map((a): [string, string] => [a.id, `${a.label} · ${providerName(a.provider)}`]));
+  const pool = input('default'); pool.maxLength = 32;
+  context.body.append(field(t('Account'), which), field(t('Group there'), pool, t('Its group on the other machine.')));
+  context.actions.append(submit(t('Move')));
+  context.form.addEventListener('submit', (event) => {
+    event.preventDefault();
+    const account = movable.find((a) => a.id === which.value); if (!account) return;
+    void dialogSave(context, () => adapter.sendAccount(account.id, machine.name, pool.value.trim() || 'default'), t('{label} moved to {machine}. This computer no longer uses it.', { label: account.label, machine: machine.name }));
+  });
+  which.focus();
 }
 /** SB-352 wave 2 (SCN-090): which groups lend accounts to each other, one switch per group. */
 let balancingState: BalanceStatus | null = null; let balancingLoading = false; let balancingError = ''; let balancingKey = '';
@@ -792,7 +874,8 @@ function projectDialog(existing?: Project, organization?: string) {
   const name = input(existing?.name ?? ''); name.maxLength = 80; name.placeholder = t('e.g. Client Alpha');
   const folders = foldersPicker(context, existing?.folders ?? [], 'project-folders', existing ? projectRoots?.[existing.pool] ?? null : null);
   const picker = el('fieldset', 'project-accounts'); picker.append(el('legend', 'field-label', t('Accounts')));
-  const usable = snapshot!.accounts;
+  // SB-355: an account on another machine comes back by Bring here, never by a group's save.
+  const usable = snapshot!.accounts.filter((a) => !machineOf(snapshot!, a));
   // SB-109, SB-282 (SCN-070): with organizations, the group runs on the accounts of the organizations checked, or on personal ones when none is.
   const organizations = snapshot!.organizations ?? [];
   const startOrgs = existing ? groupOrganizations(existing).filter((id) => organizations.some((o) => o.id === id)) : organization && organizations.some((o) => o.id === organization) ? [organization] : [];
@@ -1609,8 +1692,12 @@ function givenSection(accounts: Account[]) {
 }
 /** SB-283: move a sign-in to another machine over ssh; nothing changes when a step fails. */
 function sendDialog(account: Account) {
-  const context = openDialog(t('Move {label} to another machine', { label: account.label }), t('Its sign-in moves over ssh: this computer stops using it first, the other machine saves it and checks that it answers. If a step fails, nothing changes.'));
+  // SB-355: from one machine to another it comes back here first, then moves.
+  const from = machineOf(snapshot!, account);
+  const context = openDialog(t('Move {label} to another machine', { label: account.label }), from ? t('It comes back from {machine} first, then its sign-in moves over ssh. If the move fails, it stays on this computer.', { machine: from.name }) : t('Its sign-in moves over ssh: this computer stops using it first, the other machine saves it and checks that it answers. If a step fails, nothing changes.'));
   const machine = input(''); machine.maxLength = 255; machine.placeholder = 'user@studio.local'; machine.required = true;
+  const known = (snapshot?.machines ?? []).filter((m) => m.pool !== from?.pool);
+  if (known.length) { const names = el('datalist'); names.id = 'machine-names'; for (const m of known) { const option = el('option'); option.value = m.name; names.append(option); } machine.setAttribute('list', 'machine-names'); context.body.append(names); }
   const pool = input(account.pool); pool.maxLength = 32;
   context.body.append(field(t('Machine'), machine, t('As ssh knows it, reachable without a password prompt.')), field(t('Group there'), pool, t('Its group on the other machine.')));
   context.actions.append(submit(t('Move')));
@@ -1895,7 +1982,7 @@ function renderAccounts(main: HTMLElement) {
       const owner = projectOf(pool.pool);
       if (group.pools.length > 1 || owner || anyProject) {
         const poolHead = el('div', 'pool-heading');
-        const poolTitle = el('h3', ''); poolTitle.append(owner ? groupHint(t('Group · {name}', { name: owner.name }), owner.pool) : el('span', '', pool.pool === 'default' ? t('Default group') : t('Group {id} · no folders', { id: pool.pool })));
+        const poolTitle = el('h3', ''); poolTitle.append(owner ? groupHint(t('Group · {name}', { name: owner.name }), owner.pool) : el('span', '', pool.pool === 'default' ? t('Default group') : machinePoolName(pool.pool) ? t('On {location}', { location: machinePoolName(pool.pool)! }) : t('Group {id} · no folders', { id: pool.pool })));
         poolHead.append(poolTitle);
         // SB-142: which account this pool's sessions use, so every pool reads the same way.
         const routed = snapshot!.routes[`${group.provider}:${pool.pool}`];
@@ -2069,7 +2156,8 @@ function accountRow(account: Account) {
   const location = snapshot?.locations?.[account.id];
   const agent = givenTo(account);
   if (agent !== undefined) { const badge = el('span', 'badge muted', t('Given to {agent}', { agent })); badge.title = t('Switchboard checks its usage but never selects it or switches to it by itself.'); title.append(badge); }
-  if (elsewhere) { const badge = el('span', 'badge muted', location ? t('On {location}', { location }) : t('On another machine')); badge.title = t('Marked as used on another machine: this computer never renews it or switches to it, by hand or automatically.'); title.append(badge); }
+  const onMachine = machineOf(snapshot!, account);
+  if (elsewhere) { const badge = el('span', 'badge muted', onMachine ? t('On {location}', { location: onMachine.name }) : location ? t('On {location}', { location }) : t('On another machine')); badge.title = t('Marked as used on another machine: this computer never renews it or switches to it, by hand or automatically.'); title.append(badge); }
   else if (!account.enabled) title.append(el('span', 'badge muted', t('Disabled')));
   const org = organizationOf(account);
   if (org) { const badge = el('span', 'badge org-badge', org.name); badge.title = org.why; title.append(badge); }
@@ -2104,6 +2192,7 @@ function primaryButton(account: Account, state: { current: boolean; selected: bo
   else if (action === 'switch') { const control = button(t('Switch'), () => switchNative(account), 'button row-button', key); control.title = t('Make this the Claude Code account on this computer'); slot.append(control); }
   else if (action === 'select') slot.append(button(t('Select'), () => void mutate(() => adapter.select(account), t('{label} selected for the next managed request {where}.', { label: account.label, where: inGroup(account.pool, snapshot?.projects) }), key), 'button row-button', key));
   else if (action === 'sign_in') slot.append(button(t('Sign in'), () => void startLogin(account.provider, account.label, account.pool), 'button row-button', key));
+  else if (machineOf(snapshot!, account)) { const machine = machineOf(snapshot!, account)!; slot.append(button(t('Call back'), () => bringHereDialog(account, machine), 'button row-button quiet', key)); }
   else if (snapshot?.elsewhere?.[account.id] !== undefined && sshTarget(snapshot?.locations?.[account.id])) { const from = snapshot!.locations![account.id]!; slot.append(button(t('Call back'), () => void mutate(() => adapter.recallAccount(account.id, from), t('{label} is back on this computer.', { label: account.label }), key), 'button row-button quiet', key)); }
   else if (snapshot?.elsewhere?.[account.id] !== undefined) slot.append(button(t('Use here'), () => void mutate(() => adapter.markElsewhere(account.id, false), t('{label} is used on this computer again.', { label: account.label }), key), 'button row-button quiet', key));
   else slot.append(button(t('Enable'), () => void mutate(() => adapter.update(account.id, account.label, true), t('{label} enabled.', { label: account.label }), key), 'button row-button quiet', key));
@@ -2122,8 +2211,12 @@ function rowMenu(account: Account, state: { current: boolean; selected: boolean;
   if (account.enabled && canSwitchNative(account) && !state.project && !state.selected) items.push([t('Select for managed sessions'), () => void mutate(() => adapter.select(account), t('{label} selected for the next managed request {where}.', { label: account.label, where: inGroup(account.pool, snapshot?.projects) }), `menu-${account.id}`)]);
   if (account.enabled && canProbe(account)) items.push([t('Check usage'), () => void mutate(() => adapter.probe(account.id), t('Usage observation updated.'), `menu-${account.id}`, account.id)]);
   if (account.enabled) items.push([t('Launch…'), () => launchDialog(account)]);
-  if (account.kind === 'oauth' && !state.signIn) items.push([t('Sign in again'), () => void startLogin(account.provider, account.label, account.pool)]);
-  items.push([t('Move to another group…'), () => moveDialog(account, state.current)]);
+  // SB-355: an account on another machine signs in there, never into its machine's group here.
+  const machine = machineOf(snapshot!, account);
+  if (account.kind === 'oauth' && !state.signIn && !machine) items.push([t('Sign in again'), () => void startLogin(account.provider, account.label, account.pool)]);
+  // SB-355: an account on another machine comes back into a group here; it joins none by a move.
+  if (machine) items.push([t('Bring here…'), () => bringHereDialog(account, machine)]);
+  else items.push([t('Move to another group…'), () => moveDialog(account, state.current)]);
   if (snapshot?.organizations?.length) items.push([t('Organization…'), () => assignDialog(account)]);
   // SB-175 (SB-168 D-2): an account signed in on another machine too must not be renewed from here.
   // SB-284: marking asks where it works; a marked account can say it later.
@@ -2131,7 +2224,7 @@ function rowMenu(account: Account, state: { current: boolean; selected: boolean;
   // SB-322: an agent or service signs in with it now; its usage stays visible here.
   items.push([t('Give to an agent…'), () => givenToDialog(account)]);
   // SB-283: a subscription sign-in no group has selected moves over ssh, without a new sign-in there.
-  if (account.kind === 'oauth' && account.enabled && !state.selected && snapshot?.elsewhere?.[account.id] === undefined) items.push([t('Move to another machine…'), () => sendDialog(account)]);
+  if (account.kind === 'oauth' && (machine || (account.enabled && !state.selected && snapshot?.elsewhere?.[account.id] === undefined))) items.push([t('Move to another machine…'), () => sendDialog(account)]);
   // SB-318: for a colleague or a machine ssh does not reach: a signed record they sign in with.
   if (account.kind === 'oauth' && account.enabled && snapshot?.elsewhere?.[account.id] === undefined) items.push([t('Hand over…'), () => handOverDialog(account)]);
   items.push([t('Rename or disable…'), () => editDialog(account)], [t('Remove…'), () => removeDialog(account), 'danger-text']);

@@ -59,6 +59,9 @@ const ALLOWLIST = {
   // runtime seats.rs (SB-292): a seat line that cannot be written is logged (`seat_record`) and
   // never answered, so it does not reach the window.
   'Seat record unavailable.': 'SB-292: logged only, never answered',
+  // runtime machines.rs (SB-355): the pass that places accounts already used elsewhere runs from
+  // the CLI, MCP and the owner's start (which logs it); the window never runs it.
+  'Machine groups record unavailable.': 'SB-355 adopt: CLI, MCP and the owner start pass only',
   // runtime account_send.rs (SB-292): calling a moved account back is CLI and MCP only; the
   // window has no recall yet, so none of these reaches it.
   "Name the account's id on the other machine; no recorded move names it.": 'SB-292: CLI and MCP only',

@@ -1,6 +1,7 @@
 // Pure interface rules, kept free of DOM access so scripts/test-ui-logic.mjs can
 // exercise them directly. main.ts owns rendering; these functions own decisions.
 import type { BalanceStatus, ShellHookNotice, ShellHookStatus, Onboarding, OnboardStep, ChainExecutor, ChainScope, ChainStepView } from './types';
+import type { Machine, MachineCopy } from './types';
 import type { Account, AccountLimit, Organization, OrganizationGroupOffer, Project, AgentRow, AgentSetup, OpenrouterCredit, RecommendedModel, SessionInfo, ProjectRule, RotationPolicy, UpdateStatus, Usage, UsageWindow } from './types';
 import { t, plural } from './i18n';
 
@@ -118,6 +119,8 @@ export function eventAction(action: string): string {
     case 'assignment': return t('Given to an agent');
     // SB-352 wave 2: balancing lent an account to another group, or took it back.
     case 'balancing': return t('Balancing');
+    // SB-355: an account joined its machine's group, or came back from it.
+    case 'machine': return t('Machine group');
     // UX-26: a word this window does not know yet is framed in the interface language, never shown bare.
     default: return t('Other event ({code})', { code: action.replaceAll('.', ' · ').replaceAll('_', ' ') });
   }
@@ -163,6 +166,8 @@ export function eventDetail(detail: string): string {
     case 'override': return t('used anyway');
     case 'lent': return t('lent to another group');
     case 'returned': return t('back in its own group');
+    case 'joined': return t('moved to its machine\'s group');
+    case 'left': return t('back on this computer');
     default: return /^[2-5]xx$/.test(detail) ? t('HTTP {status}', { status: detail }) : detail.replaceAll('_', ' ');
   }
 }
@@ -1131,7 +1136,7 @@ export interface PoolChoice { pool: string; name: string; group: boolean }
 export function poolChoices(accounts: Pick<Account, 'pool'>[], projects: { pool: string; name: string }[], current?: string): PoolChoice[] {
   const groups = [...projects].sort((a, b) => a.name.localeCompare(b.name)).map((p) => ({ pool: p.pool, name: p.name, group: true }));
   const known = new Set(['default', ...groups.map((g) => g.pool)]);
-  const others = [...new Set([...accounts.map((a) => a.pool), ...(current ? [current] : [])])].filter((pool) => !known.has(pool)).sort().map((pool) => ({ pool, name: pool, group: false }));
+  const others = [...new Set([...accounts.map((a) => a.pool), ...(current ? [current] : [])])].filter((pool) => !known.has(pool) && !pool.startsWith(MACHINE_POOL_PREFIX)).sort().map((pool) => ({ pool, name: pool, group: false }));
   return [{ pool: 'default', name: t('Default group'), group: false }, ...groups, ...others];
 }
 export interface Rect { left: number; top: number; width: number; height: number }
@@ -1540,4 +1545,34 @@ export function balancingView(status: BalanceStatus | null, error: string | null
 export function balancingNotice(change: { group?: string; on: boolean; allNew?: boolean }): string {
   if (change.allNew !== undefined) return change.allNew ? t('Groups made later take part in balancing.') : t('Groups made later stay out of balancing until you turn them on.');
   return change.on ? t('{group} takes part in balancing.', { group: change.group ?? '' }) : t('{group} no longer takes part. Accounts it lent or borrowed are back in their own groups.', { group: change.group ?? '' });
+}
+
+/** SB-355 (DEC-0013): a machine group's pool; a group of folders never takes this prefix. */
+export const MACHINE_POOL_PREFIX = 'machine_';
+/** SB-355: the machine group an account lives in, if any. */
+export function machineOf(snapshot: { machines?: Machine[] }, account: Pick<Account, 'pool'>): Machine | undefined {
+  return account.pool.startsWith(MACHINE_POOL_PREFIX) ? snapshot.machines?.find((m) => m.pool === account.pool) : undefined;
+}
+/** SB-355: accounts marked as used elsewhere whose machine is not known, so they stay in their groups here. */
+export function unplacedAccounts<A extends Pick<Account, 'id' | 'pool'>>(snapshot: { accounts: A[]; elsewhere?: Record<string, number> }): A[] {
+  return snapshot.accounts.filter((a) => snapshot.elsewhere?.[a.id] !== undefined && !a.pool.startsWith(MACHINE_POOL_PREFIX));
+}
+/** SB-355: a machine group's other names, as one line; empty when it has none. */
+export function machineAliasesLine(machine: Pick<Machine, 'aliases'>): string {
+  const names = machine.aliases ?? [];
+  return names.length ? t('Also reached as {names}.', { names: names.join(', ') }) : '';
+}
+/** SB-355: what a live read found for one machine; empty before a read. */
+export function machineLiveLine(live: { reachable: boolean } | undefined): string {
+  if (!live) return '';
+  return live.reachable ? t('Read just now over ssh.') : t('Did not answer over ssh. Its accounts are listed as this computer recorded them.');
+}
+/** SB-355: one account's copy on its machine, as a live read found it; empty when not read or the machine did not answer. */
+export function machineCopyLine(copy: MachineCopy | null | undefined, reachable: boolean | undefined): string {
+  if (!reachable || copy === undefined) return '';
+  if (copy === null) return t('Not on that machine any more.');
+  const group = !copy.pool || copy.pool === 'default' ? t('Default group') : copy.pool;
+  if (copy.enabled === false) return t('Turned off there ({group}).', { group });
+  if (typeof copy.used_percent === 'number') return t('There: {group}, {percent}% used.', { group, percent: Math.round(copy.used_percent) });
+  return t('There: {group}.', { group });
 }

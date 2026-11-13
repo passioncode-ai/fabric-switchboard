@@ -16,8 +16,6 @@ pub const ADOPT_FILE: &str = "machine-groups.json";
 pub const LIVE_SECONDS: u64 = 20;
 /// Refusal: a move to the machine the account already lives on.
 pub const ALREADY_THERE: &str = "This account already lives on that machine.";
-/// No account to place.
-pub const NOTHING_TO_PLACE: &str = "No account marked as used elsewhere is outside a machine group.";
 
 /// One machine as this computer knows it: its names (the newest first) and `ssh -G` identity.
 #[derive(Clone, Debug, Default, PartialEq)]

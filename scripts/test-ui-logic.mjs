@@ -1532,4 +1532,38 @@ check(() => {
   assert.equal(logic.balancingView({ on: true, groups: [], available: chosen.map((g) => ({ ...g, chosen: g.pool === 'agents' })), all_new: false, pass_minutes: 15, lent: [], recent: [] }).line, 'Включено: участвует 1 группа.');
   i18nForShell.setLocale('en');
 });
+// SB-355 (SCN-092, DEC-0013), the_machine_groups_read_every_state: an account on another machine is
+// in its machine's group, the accounts whose machine is not known are named, a machine pool is never
+// offered as a group here, and a live read says what each copy there is.
+check(() => {
+  i18nForShell.setLocale('en');
+  const machines = [{ pool: 'machine_studio-sshlg', name: 'studio-sshlg', aliases: ['sshlg@100.69.20.19'], created_at: 1 }];
+  const accounts = [
+    { id: 'a', pool: 'machine_studio-sshlg', label: 'claude9' },
+    { id: 'b', pool: 'agents', label: 'claude10' },
+    { id: 'c', pool: 'default', label: 'here' },
+  ];
+  const snap = { machines, accounts, elsewhere: { a: 1, b: 2 } };
+  assert.equal(logic.machineOf(snap, accounts[0])?.name, 'studio-sshlg');
+  assert.equal(logic.machineOf(snap, accounts[1]), undefined);
+  assert.deepEqual(logic.unplacedAccounts(snap).map((a) => a.label), ['claude10']);
+  assert.equal(logic.machineAliasesLine(machines[0]), 'Also reached as sshlg@100.69.20.19.');
+  assert.equal(logic.machineAliasesLine({ aliases: [] }), '');
+  assert.deepEqual(logic.poolChoices(accounts, [{ pool: 'agents', name: 'Agents' }]).map((c) => c.pool), ['default', 'agents'], 'a machine pool is never a group here');
+  assert.equal(logic.machineLiveLine(undefined), '');
+  assert.equal(logic.machineLiveLine({ reachable: true }), 'Read just now over ssh.');
+  assert.match(logic.machineLiveLine({ reachable: false }), /Did not answer over ssh/);
+  assert.equal(logic.machineCopyLine(undefined, true), '');
+  assert.equal(logic.machineCopyLine({ pool: 'agents', enabled: true, used_percent: 41.6, usage_status: 'ok' }, false), '', 'not answered: nothing claimed');
+  assert.equal(logic.machineCopyLine(null, true), 'Not on that machine any more.');
+  assert.equal(logic.machineCopyLine({ pool: 'agents', enabled: true, used_percent: 41.6, usage_status: 'ok' }, true), 'There: agents, 42% used.');
+  assert.equal(logic.machineCopyLine({ pool: 'default', enabled: true, used_percent: null, usage_status: null }, true), 'There: Default group.');
+  assert.equal(logic.machineCopyLine({ pool: 'agents', enabled: false, used_percent: 3, usage_status: 'ok' }, true), 'Turned off there (agents).');
+  assert.equal(logic.eventAction('machine'), 'Machine group');
+  assert.equal(logic.eventDetail('joined'), "moved to its machine's group");
+  assert.equal(logic.eventDetail('left'), 'back on this computer');
+  i18nForShell.setLocale('ru');
+  assert.equal(logic.machineCopyLine({ pool: 'agents', enabled: true, used_percent: 41.6, usage_status: 'ok' }, true), 'Там: agents, использовано 42%.');
+  i18nForShell.setLocale('en');
+});
 console.log(`${cases} ui-logic cases passed, including quota priority and wall-clock countdowns.`);

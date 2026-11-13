@@ -82,6 +82,7 @@
     "Invalid organization metadata": "Account storage failed validation. Restore a known-good backup or check the app’s storage permissions before retrying.",
     "Invalid private storage path": "A private Switchboard file or folder failed its safety check. Make sure the app’s data folder belongs to you and is not shared, then retry.",
     "Invalid project metadata": "Account storage failed validation. Restore a known-good backup or check the app’s storage permissions before retrying.",
+    "Invalid machine metadata": "Account storage failed validation. Restore a known-good backup or check the app’s storage permissions before retrying.",
     "Invalid project rule metadata": "Account storage failed validation. Restore a known-good backup or check the app’s storage permissions before retrying.",
     "Invalid rotation policy": "Check the automatic switching settings. Headroom must be less than the threshold; cooldown must be at most 604800 seconds and usage age from 1 to 86400 seconds.",
     "Invalid rotation time": "The system clock reads an invalid time. Check the date and time settings, then retry.",
