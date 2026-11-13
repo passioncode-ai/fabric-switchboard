@@ -317,13 +317,14 @@ fn read(root: &Path, id: &str) -> Option<Value> {
 }
 /// SB-347: what identifies one version of a record file without opening it. Every write
 /// replaces the file by rename (`private_write`), so a new version is a new inode; its length
-/// and modification time catch a file rewritten in place. Not its change time: the read that
-/// narrows a record's mode moves it.
+/// and modification time catch a file rewritten in place, and its mode one whose access was
+/// widened, which the read narrows again. Not its change time: that narrowing moves it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct RecordStamp {
     file: (u64, u64),
     len: u64,
     modified: Option<std::time::SystemTime>,
+    mode: u32,
 }
 impl RecordStamp {
     fn of(meta: &fs::Metadata) -> Self {
@@ -340,10 +341,18 @@ impl RecordStamp {
                 .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
                 .map_or(0, |d| d.as_nanos() as u64),
         );
+        #[cfg(unix)]
+        let mode = {
+            use std::os::unix::fs::PermissionsExt;
+            meta.permissions().mode()
+        };
+        #[cfg(not(unix))]
+        let mode = u32::from(meta.permissions().readonly());
         Self {
             file,
             len: meta.len(),
             modified: meta.modified().ok(),
+            mode,
         }
     }
 }
@@ -1242,11 +1251,19 @@ mod tests {
         assert_eq!(total, 2);
         let reads = record_reads();
         let (again, _) = history(&root);
-        assert_eq!(record_reads(), reads, "nothing changed: no record file opened");
+        assert_eq!(
+            record_reads(),
+            reads,
+            "nothing changed: no record file opened"
+        );
         assert_eq!(again, first);
         event(&root, &id, Event::Turn, None, None, 210);
         let (after, _) = history(&root);
-        assert_eq!(record_reads(), reads + 1, "only the record the turn rewrote");
+        assert_eq!(
+            record_reads(),
+            reads + 1,
+            "only the record the turn rewrote"
+        );
         assert_eq!(after[0]["turns"], 1);
         // A file changed in place (not by Switchboard's rename) is seen too.
         let path = path(&root, &other);
@@ -1255,6 +1272,15 @@ mod tests {
         fs::write(&path, changed.to_string()).unwrap();
         let (after, _) = history(&root);
         assert_eq!(after[1]["label"], "edited in place");
+        // One whose access was widened is read again, and narrowed.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
+            history(&root);
+            let mode = fs::metadata(&path).unwrap().permissions().mode();
+            assert_eq!(mode & 0o077, 0, "narrowed again");
+        }
         // A record removed is gone from the answer.
         fs::remove_file(&path).unwrap();
         assert_eq!(history(&root).1, 1);

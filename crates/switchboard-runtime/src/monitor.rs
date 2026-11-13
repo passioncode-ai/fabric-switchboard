@@ -471,7 +471,10 @@ fn prime_live_sources(
     current: fn(Provider) -> Result<external::CapturedProfile, String>,
     claude: bool,
 ) -> Primed {
-    [claude.then(|| current(Provider::Claude)), Some(current(Provider::Codex))]
+    [
+        claude.then(|| current(Provider::Claude)),
+        Some(current(Provider::Codex)),
+    ]
 }
 /// SB-347: `provider`'s sign-in as primed, or read now when it was not.
 fn primed_or_read(
@@ -2224,8 +2227,12 @@ mod tests {
             "synthetic-a-token",
             "a plan writes nothing"
         );
-        let written =
-            sync_live_sources_with(&store, &a_refreshed, &state, SyncMode::Write(Some(&planned)));
+        let written = sync_live_sources_with(
+            &store,
+            &a_refreshed,
+            &state,
+            SyncMode::Write(Some(&planned)),
+        );
         assert_eq!(written, planned);
         assert_eq!(
             store.stored_credential(&a.id).unwrap().access_token,

@@ -1192,6 +1192,8 @@ impl Runtime {
         let store = Arc::new(Store::open(root.clone(), vault)?);
         // H-2: `control_slow` names the time a request waited for the store's lock.
         store.observe_lock_waits(control::lock_waited);
+        // SB-347: and the credentials it read, with how long the reads took.
+        store.observe_vault_reads(control::vault_read);
         let proxy = start_proxy(&root, store.clone()).await?;
         let refresh = refresh::RefreshState::default();
         refresh.remember_in(root.join("renewal-state.json"));
@@ -6214,7 +6216,8 @@ async fn execute(
                 .ok()
                 .flatten()
                 .and_then(|k| k.model);
-            agent_settings::overview(root, model.as_deref())
+            // SB-347: file checks for each agent's program: off the async worker.
+            blocking::run(|| agent_settings::overview(root, model.as_deref()))
         }
         Operation::AgentEnable { agent, enabled } => {
             let s = agent_settings::set_enabled(root, &agent, enabled)?;

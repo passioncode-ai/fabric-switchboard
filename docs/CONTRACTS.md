@@ -1145,6 +1145,14 @@ through `project suggest --from-hook` and `recovery hook`, MCP `switchboard_sess
   (`launches::tests::a_record_whose_permissions_were_widened_stays_in_the_history`; in nightly
   run 40564415348 of 2026-10-27 the strict read gave both Windows runners an empty history from
   records planted with an inherited access list).
+  SB-347: the owner keeps each record as last read, with its file's identity, length,
+  modification time and mode (`launches::RecordStamp`); a record whose file still has them is
+  answered from memory, only looked at (`lstat`), so a history, `recovery` or a session list opens
+  only records written, edited or widened since. Each private read opens the file and narrows its
+  mode, a metadata write: 575 records took 10 to 20 s a call through an owner on a swapping
+  machine (2026-11-13), 0.11 s offline. A history also reads each home's `.session.json` and state
+  once per answer, not once per record. Evidence:
+  `an_unchanged_record_is_answered_from_memory_and_a_changed_one_is_read_again`.
   The session's script exports `SWITCHBOARD_LAUNCH_ID=<launch_id>`; the variable is in the
   scrubbed list, so one inherited from a caller never reaches a session that has its own.
 - **`launched_by`**, every key present, null when unknown: `surface` (`window`, `cli`, `mcp`,
@@ -1709,7 +1717,8 @@ group's accounts still never run in a folder another group reserves. Evidence:
 **A stop names its launch and transcript (SB-348, 0.7.69).** Each waiting or claimed stop in
 `switchboard recovery` carries `launch_id` and `transcript`: the newest launch record whose
 `provider_session_id` is the stop's session, and the transcript its own hook reported, when that
-file is still there (`launches::by_session`, one scan of the records, none when no stop is open).
+file is still there (`launches::by_session`, one scan of the records, none when no stop is open;
+SB-347: a record unchanged since its last read is not opened again).
 A session Switchboard launched keeps its transcript in its managed home
 (`homes/<account>/projects/...`), where a host looking in `~/.claude/projects` finds nothing:
 Fabric Dashboards read twelve such stops as `no-transcript` on 2026-11-12. Evidence:
@@ -1800,9 +1809,14 @@ and every read wait on is taken under it, never the other way round, and only fo
   selection and the rotation's candidate check, which validate the credential they select (a
   write in flight lands before or after such a read: the account's old or new credential).
 - `lock_ms` counts the request's own waits for the metadata lock only, never another
-  request's (`a_requests_lock_ms_counts_only_its_own_waits`).
+  request's (`a_requests_lock_ms_counts_only_its_own_waits`). SB-347: `control_slow` also names
+  `vault_reads` and `vault_ms`, the credentials the request read and how long those reads took in
+  all (the wait for the Keychain's process-wide lock included), when it read one; codes and
+  numbers only (`a_slow_request_names_how_long_it_waited_for_the_stores_lock`,
+  `a_request_counts_the_credentials_it_read`).
 
-**Sign-ins needed (SB-182, PRD-01).** `recovery`, `RecoveryClaim` and `MonitorStatus` read the
+**Sign-ins needed (SB-182, PRD-01).** The background pass, `RecoveryClaim` and the usage and
+renewal paths read the
 accounts whose rejected lineage nothing replaced (`RefreshState::sign_in_required`): each such
 account's stored credential, from the vault, off the async worker (`blocking::run`), never under
 the store's metadata lock (SB-185). The answer is cached until a credential is written to or
@@ -1835,6 +1849,21 @@ under it, read again only if a credential was written meanwhile. Evidence:
 `only_credential_writes_move_the_credential_count`,
 `a_quota_checks_generation_read_does_not_hold_the_metadata`,
 `a_credential_written_after_the_generation_read_is_still_seen`.
+
+**Read-only requests never read the Keychain for it (SB-347, 2026-11-13).** `recovery`,
+`MonitorStatus` and `chains` answer the last computed answer (`RefreshState::sign_in_known`),
+which the background pass recomputes every 30 s (cached while nothing moved, as above); they read
+the vault only when no answer was computed since the last verdict (a lineage rejected, a usage
+verdict given or taken back). A credential written since is therefore seen within one pass. Before,
+each `recovery` call read every ended account's credential, behind the process-wide Keychain lock
+(`keychain_macos::KEYCHAIN`) that a slow read held for up to 9 s on a swapping machine, and a read
+that failed cached nothing: the owner logged 167 `control_slow` `recovery` calls in its last 400,
+median 20.5 s, and a 5 s `sample` found 9 of 14 async workers parked on that lock and on the
+sign-in watch's lock. `recovery`'s file work (the stops file and the launch records it names) and
+`agents_overview`'s file checks run off the async worker (`blocking::run`), as do the current
+sign-in reads of `current_accounts` (the watch holds its lock across a Keychain probe or read).
+Evidence: `read_only_requests_answer_while_a_slow_keychain_read_holds_the_keychain` (it fails
+with `recovery waited for the held Keychain` when `recovery` reads the vault).
 
 **A seat the provider ended (SB-160 leaving, iteration 0.7.0 node B-5).** `sign_in_required` and
 `RefreshState::is_dead` also name an account whose stored credential a quota check found rejected:
