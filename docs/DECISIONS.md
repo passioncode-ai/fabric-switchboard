@@ -6,7 +6,7 @@ never renumber, never delete. The doc map ([DOCMAP.md](DOCMAP.md)) names this fi
 register. Decisions made before 2026-11-08 live where they were made (plans' `D-<n>`, board rows,
 research notes); the ones still in force that the board cites are seeded below with their source.
 
-**Next free ID:** `DEC-0013`
+**Next free ID:** `DEC-0014`
 
 ## Format
 
@@ -209,3 +209,32 @@ research notes); the ones still in force that the board cites are seeded below w
   night: lend rather than move; the 15-minute pass, 6 hours and 7 days, two accounts kept, return
   after 2 hours, 1 hour between moves; on this MacBook Agents, PassionCode, Apps & Soft, default
   «и все новые».
+
+### DEC-0013: An account on another machine belongs to that machine's group, and to no group here
+
+- **Date:** 2026-11-13
+- **Status:** Accepted (built in `sb-355-machine-groups`: SB-355)
+- **Context:** an account moved to another machine (`accounts send`, SB-283) stayed in its old
+  group here, turned off, with its machine in free text (`locations`, SB-284). On the operator's
+  MacBook 17 accounts were used elsewhere, under five spellings of three machines, mixed into the
+  groups that work here.
+- **Decision:** every other machine an account lives on is a group of its own here, a *machine
+  group*: one per ssh destination (the user, host and port `ssh -G` resolves; every name used for
+  it is an alias, so `studio-sshlg` and `sshlg@100.69.20.19` are one machine, and two macOS users
+  on one Mac are two machines). It has no folders and holds exactly the accounts that live there.
+  An account joins it when a move to that machine succeeds and leaves every group here in the same
+  change (its home becomes the machine group; shares, loans and selections go; the group it left
+  is kept to come back to). It comes back with `accounts recall`, into the group named, else the
+  group it left, else the default group; from one machine to another is a call back, then a move.
+  A machine group never routes a request, rotates, fails over, lends or borrows here, and is
+  never carried to another machine. Accounts already marked elsewhere join their machine once, by
+  the move recorded in `seats.jsonl`, else by their location matched to a known machine; one whose
+  machine cannot be told stays where it is and is reported, never guessed.
+- **Consequences / affects:** `accounts.json` gains `machines` and `returns_to` (schema version 14),
+  the CLI `machines` and `accounts recall --pool`, MCP `switchboard_machines`, the Groups page's
+  *Other machines* (SCN-092), [MOVING](MOVING.md#machine-groups), [CONTRACTS](CONTRACTS.md#machine-groups-sb-355),
+  design [machine groups](research/machine-groups-2026-11-13.md).
+- **Source:** operator 2026-11-13 in session `59745113` («вынести аккаунты, которые уходят на
+  какие-то удаленные машины, в отдельные группы этих удаленных машин … Каждая удаленная машина -
+  это новая своя группа … перекидывать аккаунты между группами … так я буду видеть все свои
+  удаленные машины и какие там на них стоят аккаунты»).
