@@ -8,6 +8,8 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+## 0.7.75
+
 - `switchboard recovery`, `switchboard sessions` and `sessions --history` answer in well under a second again on a busy machine. They no longer read the Keychain on every call or reopen every launch record: a record is read again only after it changed, and the accounts that need a sign-in come from the background check. Background syncs of the ordinary Claude Code and Codex sign-ins no longer read the Keychain while every other change waits. Before, on a machine short of memory, these calls took 10 to 20 s and `recovery` often timed out. Slow requests in the log now also say how many saved sign-ins they read and how long that took (SB-347).
 
 ## 0.7.74
