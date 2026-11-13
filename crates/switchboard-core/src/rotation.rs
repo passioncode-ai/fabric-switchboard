@@ -71,6 +71,8 @@ pub(crate) fn missing_managed_policies(s: &crate::Snapshot) -> Vec<(Provider, St
         .iter()
         .map(|a| a.pool.as_str())
         .chain(s.projects.iter().map(|p| p.pool.as_str()))
+        // SB-355: a machine group never switches accounts here.
+        .filter(|pool| !crate::machines::is_machine_pool(pool))
         .collect();
     for pool in pools {
         for a in s.pool_accounts(pool) {
@@ -115,6 +117,9 @@ impl Store {
     }
     pub fn set_policy(&self, mut policy: RotationPolicy) -> Result<(), String> {
         policy.validate()?;
+        if crate::machines::is_machine_pool(&policy.pool) {
+            return Err(crate::machines::MACHINE_NOT_ROTATED.into());
+        }
         let mut state = self.lock()?;
         let mut candidate = state.clone();
         // The ordinary Claude Code serves every folder; a project's accounts serve only its own.

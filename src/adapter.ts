@@ -41,7 +41,8 @@ export const nativeAdapter: Adapter = {
   markElsewhere: (id, on, location) => invoke('mark_elsewhere', { id, on, location: location ?? null }),
   assignAccount: (id, to) => invoke('assign_account', { id, to }),
   sendAccount: (id, to, pool) => invoke('send_account', { id, to, pool }),
-  recallAccount: (id, from) => invoke('recall_account', { id, from }),
+  recallAccount: (id, from, pool) => invoke('recall_account', { id, from, pool: pool ?? null }),
+  machinesLive: () => invoke('machines', { live: true }),
   handOverAccount: (id, to, name) => invoke('hand_over_account', { id, to, name }),
   openHandover: () => invoke('open_handover'),
   receiveHandover: (record, signer, apply) => invoke('receive_handover', { record, signer, apply }),
@@ -133,6 +134,16 @@ export const nativeAdapter: Adapter = {
 // Only exact, fixed backend vocabulary is surfaced. Unknown failures never print
 // raw provider output, credentials, filesystem paths, or serialized error objects.
 const safeErrors = new Set([
+  // SB-355: machine groups.
+  'This account works on another machine. Call it back to use it in a group here.',
+  'A machine group takes accounts only by a move to that machine.',
+  'There is no machine group by that name.',
+  'This machine group still holds accounts. Call them back or remove them first.',
+  'Name the machine as ssh knows it: user@host or a Host from ~/.ssh/config.',
+  'Switchboard keeps at most 64 machine groups.',
+  'This account is in no machine group.',
+  "A machine group's accounts are never switched here.",
+  'This account already lives on that machine.',
   'Only an account you sign in to can be handed over. Give an API key through your vault.',
   'This is not a Switchboard hand-over file (switchboard-handover/1).',
   'This hand-over file is not signed by the key you named, or it changed after it was signed.',

@@ -36,6 +36,8 @@ const OWNED: &[&str] = &[
     // The groups that lend accounts to each other and their lends and returns (SB-352).
     "balancing.json",
     "balancing.jsonl",
+    // The record of the one pass that placed accounts used elsewhere in machine groups (SB-355).
+    "machine-groups.json",
     "statistics.json",
     // Usage analytics' own state, Switchboard's switch and the notice's acknowledgement included
     // (SB-246): uninstalling forgets both, and the notice returns at the next first start.

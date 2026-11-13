@@ -140,6 +140,13 @@ enum Command {
         #[arg(long)]
         probe: bool,
     },
+    /// Machine groups: every other machine this computer's accounts live on is a group of its
+    /// own, holding exactly the accounts there; an account on a machine is in no group here.
+    /// `accounts send` moves one there, `accounts recall --pool GROUP` brings it back.
+    Machines {
+        #[command(subcommand)]
+        command: MachinesCmd,
+    },
     /// Sessions Switchboard launched that are starting or running: Claude Code, Codex, Kimi Code,
     /// Hermes, OpenCode and catalog agents. Account, agent, provider, group, mode, context, folder
     /// and times. Reads only.
@@ -897,6 +904,40 @@ enum Org {
 }
 
 #[derive(Subcommand)]
+enum MachinesCmd {
+    /// Each machine group with its accounts, and the accounts marked used elsewhere that no
+    /// machine group holds. Reads only.
+    List {
+        /// Also read each machine's Switchboard over ssh, all at once, 20 seconds per call at
+        /// most: whether it answers and each account's copy there.
+        #[arg(long)]
+        live: bool,
+    },
+    /// Place the accounts marked used elsewhere into their machines' groups: by the move recorded
+    /// here, else their location naming a known machine. Without --apply, only what it would do;
+    /// an account whose machine cannot be told stays where it is.
+    Adopt {
+        /// Make the change.
+        #[arg(long)]
+        apply: bool,
+    },
+    /// Record that an account lives on a machine, without ssh: it joins that machine's group and
+    /// leaves every group here.
+    Place {
+        /// The account id (`switchboard accounts list`).
+        id: String,
+        /// The machine as ssh knows it (`user@host`, or a Host from ~/.ssh/config).
+        #[arg(long)]
+        on: String,
+    },
+    /// Remove a machine group that holds no account any more.
+    Forget {
+        /// The machine group: its id, its name or another name of it.
+        machine: String,
+    },
+}
+
+#[derive(Subcommand)]
 enum Accounts {
     /// Saved accounts with their provider, kind, group, state and usage. No credentials.
     List,
@@ -1005,9 +1046,14 @@ enum Accounts {
     Recall {
         /// The account id here (`switchboard accounts list`).
         id: String,
-        /// The other machine as ssh knows it, as the move named it.
+        /// The other machine as ssh knows it, as the move named it; by default the machine the
+        /// recorded move named, else the account's machine group.
         #[arg(long)]
-        from: String,
+        from: Option<String>,
+        /// The group here it comes back to (a group id, or `default`); by default the group it
+        /// left, else the default group.
+        #[arg(long)]
+        pool: Option<String>,
         /// The account's id on the other machine; by default the one the recorded move names.
         #[arg(long)]
         remote_id: Option<String>,
@@ -1954,12 +2000,14 @@ async fn run(cli: &Cli) -> Result<Value, String> {
             Accounts::Recall {
                 id,
                 from,
+                pool,
                 remote_id,
                 remote,
                 remote_data_dir,
             } => Operation::RecallAccount {
                 id: id.clone(),
                 from: from.clone(),
+                pool: pool.clone(),
                 remote_id: remote_id.clone(),
                 program: remote.clone(),
                 remote_data_dir: remote_data_dir.clone(),
@@ -2047,6 +2095,17 @@ async fn run(cli: &Cli) -> Result<Value, String> {
         Command::Usage { id: None } | Command::Events => Operation::Snapshot,
         Command::Status => Operation::Status,
         Command::Targets { probe } => Operation::Targets { probe: *probe },
+        Command::Machines { command } => match command {
+            MachinesCmd::List { live } => Operation::Machines { live: *live },
+            MachinesCmd::Adopt { apply } => Operation::MachinesAdopt { apply: *apply },
+            MachinesCmd::Place { id, on } => Operation::MachinePlace {
+                id: id.clone(),
+                on: on.clone(),
+            },
+            MachinesCmd::Forget { machine } => Operation::MachineForget {
+                machine: machine.clone(),
+            },
+        },
         Command::Stats { days } => Operation::Statistics { days: Some(*days) },
         Command::Settings { command } => match command {
             SettingsCmd::Export { sign, groups } => Operation::SettingsExport {
@@ -4783,6 +4842,10 @@ mod mcp_parity {
         ),
         ("status", Tool("switchboard_status")),
         ("targets", Tool("switchboard_targets")),
+        ("machines list", Tool("switchboard_machines")),
+        ("machines adopt", Tool("switchboard_machine_set")),
+        ("machines place", Tool("switchboard_machine_set")),
+        ("machines forget", Tool("switchboard_machine_set")),
         // `sessions` itself (and its `--all`, `--history`) answers through the same tool.
         ("sessions show", Tool("switchboard_sessions")),
         ("sessions end", Tool("switchboard_session_end")),

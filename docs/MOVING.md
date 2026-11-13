@@ -65,6 +65,86 @@ no password prompt):
 Then continue with steps 4 to 6 of "On the new computer" (keys, PassionCode.ai, the check), run
 on the new computer.
 
+## Machine groups
+
+Every other machine your accounts live on is a group of its own here, one per ssh destination
+([DEC-0013](DECISIONS.md#dec-0013-an-account-on-another-machine-belongs-to-that-machines-group-and-to-no-group-here)).
+When `accounts send` moves an account and its copy there answers, the account joins
+that machine's group and leaves every group on this computer: it is never selected, switched to,
+lent or renewed here. The Groups page lists each machine under *Other machines* with its accounts;
+*Read their state* reads each machine's Switchboard over ssh.
+
+```sh
+switchboard machines list
+switchboard machines list --live
+switchboard accounts send <account id> --to studio-sshlg --pool agents
+switchboard accounts recall <account id> --pool agents
+switchboard accounts send <account id> --to passioncode@100.69.20.19
+```
+
+The first two list the machines and their accounts (`--live` reads each one, 20 seconds per ssh
+call at most, all at once). `send` moves an account there; `recall` brings it back into the group
+named here (by default the group it left, else the default group; `--from` defaults to the
+machine the move named). A `send` of an account that lives on another machine calls it back
+first, then moves it, so it goes from one machine to the other in one step; if the move fails it
+stays here. Accounts marked as used elsewhere before this version join their machine once, at the
+first start (or by hand: `switchboard machines adopt`, then `switchboard machines adopt --apply`),
+by the move recorded in `seats.jsonl`, else by their location naming a known machine; one whose
+machine cannot be told stays where it is and is named. To record where an account lives
+without ssh, and to remove an empty machine group:
+
+```sh
+switchboard machines place <account id> --on studio-sshlg
+switchboard machines forget studio-sshlg
+```
+
+### How the machines are linked, and what Switchboard knows about them
+
+- **ssh is the only link.** Every step on another machine is `ssh <name> -- <its switchboard>
+  --json …`, run with `BatchMode=yes` and `ConnectTimeout=15`, so a machine that would ask for a
+  password is never used ([account_send.rs:652](../crates/switchboard-runtime/src/account_send.rs#L652),
+  [account_send.rs:101](../crates/switchboard-runtime/src/account_send.rs#L101)). The name is what
+  your `~/.ssh/config` and keys make of it: an alias such as `studio-sshlg`, or `user@host`; on the
+  operator's machines the host is a Tailscale address (100.64.0.0/10), which ssh reaches like any
+  other. Switchboard knows nothing of Tailscale or keys: it passes the name to ssh, refusing only a
+  name ssh would read as an option ([account_send.rs:89](../crates/switchboard-runtime/src/account_send.rs#L89)).
+- **One machine, several names.** Two names are one machine when `ssh -G` resolves them to the same
+  user, host and port ([targets.rs:126](../crates/switchboard-runtime/src/targets.rs#L126)), so
+  `studio-sshlg` and `sshlg@100.69.20.19` are one group. Two macOS users on one Mac Studio are two
+  machines: two Switchboards, two data folders, two groups.
+- **Switchboard does not prove a machine is yours.** It trusts whatever ssh reaches without a
+  prompt and the answers that machine's `switchboard` prints
+  ([remote_check.rs:54](../crates/switchboard-runtime/src/remote_check.rs#L54)). That you own it is
+  what your ssh keys and your Tailscale network say, nothing more. A settings file it sends is
+  signed with this computer's key ([settings_signing.rs:112](../crates/switchboard-runtime/src/settings_signing.rs#L112)),
+  but the other machine's own key is not checked. What would prove it: pin the other machine's
+  settings key (`switchboard settings signer` there) at the first move and refuse a later ssh call
+  that answers with another key (board row SB-357).
+- **Nobody else sees it.** Machine groups, the moves (`seats.jsonl`) and the record of the one
+  pass (`machine-groups.json`) live only in this user's data folder, readable by this user alone:
+  the folder is 0700 and every file 0600
+  ([persistence.rs:97](../crates/switchboard-core/src/persistence.rs#L97),
+  [persistence.rs:128](../crates/switchboard-core/src/persistence.rs#L128),
+  [seats.rs:111](../crates/switchboard-runtime/src/seats.rs#L111)). Nothing is sent to a server:
+  PassionCode.ai is asked only for your organizations, with a token whose one scope is
+  `me.organizations` ([vesta.rs:22](../crates/switchboard-runtime/src/vesta.rs#L22),
+  [vesta.rs:420](../crates/switchboard-runtime/src/vesta.rs#L420)), and the usage analytics carry
+  counts and kinds only ([ANALYTICS.md](ANALYTICS.md)). On the other machine the account is an
+  ordinary account of that macOS user's Switchboard, seen by whoever signs in as that user there.
+- **Delegation is a move, recorded.** `accounts send` marks the account here as used on that
+  machine before anything leaves, saves it there with `accounts add --secret-stdin` (the tokens on
+  stdin, never in a command line), checks it there with a quota read and undoes both on any failure
+  ([account_send.rs:149](../crates/switchboard-runtime/src/account_send.rs#L149),
+  [account_send.rs:237](../crates/switchboard-runtime/src/account_send.rs#L237)); `accounts recall`
+  has that machine give the sign-in back over ssh, checks it here and removes the copy there
+  ([account_send.rs:498](../crates/switchboard-runtime/src/account_send.rs#L498)). Each move and
+  call back is a line in `seats.jsonl` with who ordered it: `operator` with their words verbatim,
+  else `agent` ([seats.rs:19](../crates/switchboard-runtime/src/seats.rs#L19),
+  [seats.rs:42](../crates/switchboard-runtime/src/seats.rs#L42)). Giving an account to an agent on
+  this machine (`switchboard accounts assign <account id> --to 'Frame Agent'`) is the other kind of
+  delegation: the account stays here, renewed and observed, and nothing here chooses it by itself
+  ([lib.rs:2267](../crates/switchboard-core/src/lib.rs#L2267)).
+
 ## On the old computer
 
 1. Write the settings file:

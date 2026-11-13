@@ -460,11 +460,37 @@ as ssh knows it, reachable without a prompt; `pool` its group there; `remote` th
 `switchboard` (default the macOS app's); `remote_data_dir` its data folder when it runs with
 `--data-dir`, given to every command there. Every move is a line in `seats.jsonl`; `decision` (the
 operator's words: `by: operator`, `instruction` verbatim, `at` RFC 3339, `source`) is recorded with it
-as who ordered it.
+as who ordered it. Once the copy there answers, the account joins that machine's group here and
+leaves every group of this machine (`machine_group` in the answer). An account already on another
+machine is called back first, then moved (`recalled` in the answer).
 The person's word on the account's organizations goes with it: an organization the other machine
 lacks is added there by name and domains, then the copy is placed the same way; `organizations` in
 the answer is null (no word said here), or `{carried, contexts}` with `reason` when a step there
 failed (the move stands; place it there with `switchboard org assign`).
+
+### `switchboard_machines`: `live?`
+
+Every other machine this Switchboard's accounts live on, one group each: `pool` (its id,
+`machine_<name>`), `name` (as ssh knows it), `aliases`, `identity` (`user@host:port` as `ssh -G`
+read it), and its `accounts` (`id`, `label`, `provider`, `since`, `location`, `returns_to`: the
+group here it comes back to). An account on a machine is in that machine's group and in no group
+here: it is never selected, switched to, lent or renewed here. `unplaced` lists the accounts
+marked used elsewhere that no machine group holds (their machine could not be told). `live: true`
+also reads each machine's Switchboard over ssh, all at once, 20 seconds per call at most:
+`live.reachable`, and each account's copy there (`there.pool`, `enabled`, `used_percent`,
+`usage_status`; null when the machine no longer lists it). Move one here with
+`switchboard_account_recall` (`pool`: the group here), there with `switchboard_account_send`.
+Reads only.
+
+### `switchboard_machine_set`: `action`, `apply?`, `account_id?`, `on?`, `machine?`
+
+Only when the operator asks. `adopt`: places each account marked used elsewhere and in no machine
+group into its machine's group, by the move recorded in `seats.jsonl` (not called back), else its
+location naming a known machine, else its location's first words; without `apply` it only answers
+what it would do (`placed`, `unplaced`). An account whose machine cannot be told is never guessed.
+`place`: `account_id` lives on machine `on` (as ssh knows it), without ssh; it joins that
+machine's group and leaves every group here. `forget`: removes the machine group `machine` (its
+pool, name or an alias) once it holds no account.
 
 ### `switchboard_targets`: `probe?`
 
@@ -487,7 +513,7 @@ to PassionCode.ai. `check`: `findings` against the moves recorded here, each wit
 (marked used elsewhere here with no location and no recorded move); an empty list is a clean check.
 `remote` and `remote_data_dir` default to the newest move there. Reads only, on both machines.
 
-### `switchboard_account_recall`: `account_id`, `from`, `remote_id?`, `remote?`, `remote_data_dir?`, `decision?`
+### `switchboard_account_recall`: `account_id`, `from?`, `pool?`, `remote_id?`, `remote?`, `remote_data_dir?`, `decision?`
 
 Only when the operator asks. Takes back a Claude or Codex sign-in this machine moved with
 `switchboard_account_send`: the other machine stops using it and gives its tokens back over ssh, the
@@ -497,6 +523,10 @@ there still names it. `remote_id`, `remote` and `remote_data_dir` default to the
 recorded move named, until a call back of it is recorded. Refused when the account was renewed here after it moved (its copy there is
 spent then); the other machine's own reason is answered when it refuses, and a group that uses the
 account there moves to another of its accounts first.
+`from` defaults to the machine the recorded move named, else the account's machine group; the
+account leaves its machine group into `pool` (a group here, or `default`), by default the group it
+left, else the default group (a group that no longer takes it by its organizations sends it to the
+default group). The answer's `pool` says where it landed.
 
 ### `switchboard_seats`: `limit?`
 

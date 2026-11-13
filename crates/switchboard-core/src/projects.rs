@@ -383,6 +383,12 @@ pub(crate) fn stale_shares_prune(s: &mut Snapshot) -> bool {
     });
     removed
 }
+/// SB-355: after an account's home changed outside a group's save (it joined a machine group),
+/// the shares, loans and routes that no longer stand are dropped.
+pub(crate) fn prune_after_home_change(s: &mut Snapshot) {
+    stale_shares_prune(s);
+    shared_routes_prune(s);
+}
 /// The pool of the accounts in no group a person made.
 pub const DEFAULT_POOL: &str = "default";
 fn shared_routes_prune(s: &mut Snapshot) {
@@ -679,8 +685,12 @@ impl Store {
             }
         }
         for id in accounts {
-            if !candidate.accounts.iter().any(|a| &a.id == id) {
+            let Some(a) = candidate.accounts.iter().find(|a| &a.id == id) else {
                 return Err("Account not found".into());
+            };
+            // SB-355: an account on another machine comes back by a call back, never by a save.
+            if crate::machines::is_machine_pool(&a.pool) {
+                return Err(crate::machines::ON_ANOTHER_MACHINE.into());
             }
         }
         // SB-282: listed accounts at home in another group are shared, in the person's order.
@@ -1068,6 +1078,9 @@ impl Store {
             .clone();
         if account.pool == "default" {
             return Ok(());
+        }
+        if crate::machines::is_machine_pool(&account.pool) {
+            return Err(crate::machines::ON_ANOTHER_MACHINE.into());
         }
         if candidate.project_of_pool(&account.pool).is_some() {
             return Err("This account is in a project. Take it out of the project instead.".into());

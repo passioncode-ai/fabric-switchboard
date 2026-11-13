@@ -170,6 +170,13 @@ struct Payload {
     /// An older reader ignores it.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     domain_rule_retired: bool,
+    /// SB-355: the machine groups, and which of them each account lives in (old account id →
+    /// machine pool). The accounts themselves are written in the group they left, so a reader
+    /// without these fields restores them as accounts marked elsewhere in that group.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    machines: Vec<crate::Machine>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    machine_members: BTreeMap<String, String>,
 }
 /// One agent key inside the sealed payload. Never Debug: it carries the value.
 #[derive(Serialize, Deserialize)]
@@ -264,10 +271,27 @@ pub fn write(
     }
     let missing = snapshot.accounts.len() - credentials.len();
     let store_id = store.backup_id()?;
+    // SB-355: an account on another machine is written in the group it left.
+    let machine_members: BTreeMap<String, String> = snapshot
+        .accounts
+        .iter()
+        .filter(|a| crate::is_machine_pool(&a.pool) && credentials.contains_key(&a.id))
+        .map(|a| (a.id.clone(), a.pool.clone()))
+        .collect();
+    let returns_to = snapshot.returns_to.clone();
     let accounts: Vec<Account> = snapshot
         .accounts
         .into_iter()
         .filter(|a| credentials.contains_key(&a.id))
+        .map(|mut a| {
+            if crate::is_machine_pool(&a.pool) {
+                a.pool = returns_to
+                    .get(&a.id)
+                    .cloned()
+                    .unwrap_or_else(|| "default".into());
+            }
+            a
+        })
         .collect();
     let count = accounts.len();
     let settings = SETTING_FILES
@@ -349,6 +373,8 @@ pub fn write(
         assigned_to: snapshot.assigned_to.clone(),
         memberships: snapshot.memberships.into_iter().collect(),
         domain_rule_retired: true,
+        machines: snapshot.machines,
+        machine_members,
     })
     .map_err(|_| UNAVAILABLE)?;
     let (key, key_id) = key(keys, true)?;
@@ -739,6 +765,21 @@ pub fn restore(
             let _ = store.mark_elsewhere_at(id, true, *at, location);
         }
     }
+    // SB-355: and the machine each of those lives on, in its machine's group.
+    for (old, pool) in &payload.machine_members {
+        let (Some(id), Some(machine)) = (
+            ids.get(old),
+            payload.machines.iter().find(|m| &m.pool == pool),
+        ) else {
+            continue;
+        };
+        let at = crate::MachineRef {
+            target: machine.name.clone(),
+            identity: machine.identity.clone(),
+            aliases: machine.aliases.clone(),
+        };
+        let _ = store.join_machine(id, &at, machine.created_at);
+    }
     // SB-322: and what the person gave to an agent.
     for (old, to) in &payload.assigned_to {
         if let Some(id) = ids.get(old) {
@@ -1119,6 +1160,8 @@ mod tests {
             locations: BTreeMap::new(),
             assigned_to: BTreeMap::new(),
             domain_rule_retired: true,
+            machines: vec![],
+            machine_members: BTreeMap::new(),
         };
         let json = serde_json::to_vec(&payload).unwrap();
         let old: OldPayload = serde_json::from_slice(&json).expect("an older build reads it");
@@ -1366,6 +1409,35 @@ mod tests {
             Some("Frame Agent on Studio")
         );
         assert!(a2.enabled && snap.routes.is_empty());
+    }
+    #[test]
+    fn a_restore_puts_an_account_on_another_machine_back_in_its_machines_group() {
+        // SB-355: the payload keeps it in the group it left, so an older reader restores it
+        // there, marked elsewhere; this reader puts it back in its machine's group.
+        let temp = tempfile::tempdir().unwrap();
+        let backups = temp.path().join("backups");
+        let keys = Keys::default();
+        let original = store(&temp.path().join("one"));
+        let a = save(&original, "synthetic-a", "token-a-secret");
+        let at = crate::MachineRef {
+            target: "me@studio.local".into(),
+            identity: Some("me@studio.local:22".into()),
+            aliases: vec!["studio".into()],
+        };
+        let machine = original.join_machine(&a.id, &at, 900).unwrap();
+        let info = write(&original, &backups, &keys, 1_000).unwrap().unwrap();
+        let fresh = store(&temp.path().join("two"));
+        restore(&fresh, &backups, &info.file, &keys).unwrap();
+        let snap = fresh.snapshot().unwrap();
+        assert_eq!(snap.accounts[0].pool, machine.pool);
+        assert!(!snap.accounts[0].enabled);
+        assert_eq!(
+            snap.returns_to
+                .get(&snap.accounts[0].id)
+                .map(String::as_str),
+            Some("default")
+        );
+        assert_eq!(snap.machines, [machine]);
     }
     #[test]
     fn a_reinstall_gets_organizations_their_accounts_and_groups_back() {

@@ -370,8 +370,17 @@ export function createDemoAdapter(): Adapter {
       const item: Account = { id: crypto.randomUUID(), label: input.label, provider: input.provider, kind: input.kind, pool: input.pool, enabled: true, created_at: now(), identity: null, usage: null };
       state.accounts.push(item); log('account_added', item.id, 'success'); return structuredClone(item);
     },
-    async sendAccount(id, to) { await pause(); (state.elsewhere ??= {})[id] = now(); (state.locations ??= {})[id] = to; account(id).enabled = false; for (const key of Object.keys(state.routes)) if (state.routes[key] === id) delete state.routes[key]; log('account.updated', id, 'Moved to another machine'); },
-    async recallAccount(id) { await pause(); delete state.elsewhere?.[id]; delete state.locations?.[id]; account(id).enabled = true; log('account.updated', id, 'Called back from another machine'); },
+    // SB-355: a move puts the account in the machine's group, a call back into a group here.
+    async sendAccount(id, to) {
+      await pause(); const item = account(id); (state.elsewhere ??= {})[id] ??= now(); (state.locations ??= {})[id] = to; item.enabled = false;
+      for (const key of Object.keys(state.routes)) if (state.routes[key] === id) delete state.routes[key];
+      const machines = (state.machines ??= []); let machine = machines.find((m) => m.name === to || (m.aliases ?? []).includes(to));
+      if (!machine) { machine = { pool: `machine_${to.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 21)}`, name: to, aliases: [], created_at: now() }; machines.push(machine); }
+      if (!item.pool.startsWith('machine_')) (state.returns_to ??= {})[id] = item.pool;
+      item.pool = machine.pool; log('machine', id, 'joined');
+    },
+    async recallAccount(id, _from, pool) { await pause(); const item = account(id); delete state.elsewhere?.[id]; delete state.locations?.[id]; item.enabled = true; if (item.pool.startsWith('machine_')) { item.pool = pool ?? state.returns_to?.[id] ?? 'default'; delete state.returns_to?.[id]; log('machine', id, 'left'); } else log('account.updated', id, 'Called back from another machine'); },
+    async machinesLive() { await pause(); return { machines: (state.machines ?? []).map((m) => ({ pool: m.pool, name: m.name, live: { reachable: true }, accounts: state.accounts.filter((a) => a.pool === m.pool).map((a) => ({ id: a.id, there: { pool: 'default', enabled: true, used_percent: 23, usage_status: 'ok' } })) })) }; },
     async handOverAccount(id, to) { await pause(); (state.elsewhere ??= {})[id] = now(); (state.locations ??= {})[id] = to; account(id).enabled = false; log('account.updated', id, 'Handed over'); return { saved: '/Users/demo/Desktop/handover.switchboard-handover.json', location: to, public_key: 'MCowBQYDK2VwAyEAdemoDemoDemoDemoDemoDemoDemoDemoDemoDemoDemo=' }; },
     async openHandover() { await pause(); return { record: { format: 'switchboard-handover/1', provider: 'claude', label: 'colleague@example.com', email: 'colleague@example.com', to: 'This Mac', at: now() } }; },
     async receiveHandover(_record, signer, apply) { await pause(); if (apply && !signer) throw new Error("Name the giver's published key (switchboard settings signer on their computer) to start this sign-in."); return { provider: 'claude', label: 'colleague@example.com', email: 'colleague@example.com', to: 'This Mac', at: now(), signature: 'signed', signer: signer ?? null, group: null, organizations: [], held: false, pool: 'default', ...(apply ? { login: (() => { const login_id = crypto.randomUUID(); logins.set(login_id, { provider: 'claude', label: 'colleague@example.com', pool: 'default', started: Date.now() }); return { login_id }; })() } : {}) }; },

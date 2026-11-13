@@ -406,18 +406,33 @@ async fn receive_handover(
 /// SB-315: take a sign-in moved to another machine back (`account_send::recall_take`); `from` is
 /// the machine as the move named it.
 #[tauri::command]
-async fn recall_account(id: String, from: String, state: State<'_, Slot>) -> Result<Value, String> {
+async fn recall_account(
+    id: String,
+    from: Option<String>,
+    pool: Option<String>,
+    state: State<'_, Slot>,
+) -> Result<Value, String> {
     state
         .runtime()
         .await?
         .execute(Operation::RecallAccount {
             id,
-            from,
+            from: from.filter(|f| !f.trim().is_empty()),
+            pool: pool.filter(|p| !p.trim().is_empty()),
             remote_id: None,
             program: None,
             remote_data_dir: None,
             decision: None,
         })
+        .await
+}
+/// SB-355: the machine groups with their accounts; with `live`, each machine read over ssh.
+#[tauri::command]
+async fn machines(live: bool, state: State<'_, Slot>) -> Result<Value, String> {
+    state
+        .runtime()
+        .await?
+        .execute(Operation::Machines { live })
         .await
 }
 #[tauri::command]
@@ -1697,6 +1712,7 @@ fn main() {
             update_account,
             send_account,
             recall_account,
+            machines,
             hand_over_account,
             open_handover,
             receive_handover,

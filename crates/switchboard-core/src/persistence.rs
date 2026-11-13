@@ -40,7 +40,15 @@ fn schema_version(snapshot: &Snapshot) -> u32 {
     // refuses the unknown field, so it never switches to an account an agent holds.
     // Version 13 only while balancing lends to or from the default group (SB-352 wave 2): a
     // 0.7.73 or older reader refuses the unknown field rather than drop the loan's route.
-    if !snapshot.default_shared.is_empty() || !snapshot.default_lent.is_empty() {
+    // Version 14 only while a machine group, a group to come back to, or a journal entry of
+    // either exists (SB-355, DEC-0013): a 0.7.75 or older reader refuses the unknown fields and
+    // the unknown activity, rather than put an account on another machine back in a group here.
+    if !snapshot.machines.is_empty()
+        || !snapshot.returns_to.is_empty()
+        || snapshot.events.iter().any(|e| e.action == "machine")
+    {
+        14
+    } else if !snapshot.default_shared.is_empty() || !snapshot.default_lent.is_empty() {
         13
     } else if !snapshot.assigned_to.is_empty() {
         12
@@ -157,7 +165,7 @@ pub(crate) fn open(root: &Path) -> Result<(File, Snapshot), String> {
             }
             let disk: Disk = serde_json::from_slice(&bytes)
                 .map_err(|_| "Account metadata is corrupt; restore a known-good backup")?;
-            if !matches!(disk.schema_version, 1..=13) {
+            if !matches!(disk.schema_version, 1..=14) {
                 return Err("Unsupported account metadata version".into());
             }
             validate_snapshot(&disk.snapshot)?;
@@ -239,7 +247,7 @@ pub(crate) fn open(root: &Path) -> Result<(File, Snapshot), String> {
         let bytes = read_private(&path, MAX_FILE)?;
         let disk: Disk = serde_json::from_slice(&bytes)
             .map_err(|_| "Account metadata is corrupt; restore a known-good backup")?;
-        if !matches!(disk.schema_version, 1..=13) {
+        if !matches!(disk.schema_version, 1..=14) {
             return Err("Unsupported account metadata version".into());
         }
         validate_snapshot(&disk.snapshot)?;
