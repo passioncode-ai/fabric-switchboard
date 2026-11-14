@@ -107,6 +107,10 @@ What needs a person, one item per account or question:
 A view: every account listed stays in its group with its selection, and nothing moves; once
 fixed it leaves the list on the next background pass. Read-only, also on a read-only server.
 
+
+Since 0.7.84 (SB-366) `refused_there` also appears: an account on another machine whose copy the
+provider refused there at the last background read (`since` is that read's time); fix it with a
+sign-in on that machine, or call the account back with `switchboard_account_recall`.
 ### `switchboard_session_end`: `launch_id` (string)
 
 Ends a session a session host holds (`switchboard_sessions` marks it `attachable`), as
@@ -524,6 +528,12 @@ also reads each machine's Switchboard over ssh, all at once, 20 seconds per call
 `switchboard_account_recall` (`pool`: the group here), there with `switchboard_account_send`.
 Reads only.
 
+
+Without `live` (SB-366, DEC-0017) each machine carries `read`: `{as_of, tried_at, reason, failures}`
+of the owner's last background read (every 15 minutes while the owner runs, one hour after three
+failures in a row; `reason` is `unreachable`, `refused` or `unreadable`), and each account `there`:
+`{used_percent, usage_status, enabled, as_of, tried_at, reason}` of its copy on that machine, or
+null before a first read. The numbers are shown, never used to switch or route here.
 ### `switchboard_machine_set`: `action`, `apply?`, `account_id?`, `on?`, `machine?`
 
 Only when the operator asks. `adopt`: places each account marked used elsewhere and in no machine

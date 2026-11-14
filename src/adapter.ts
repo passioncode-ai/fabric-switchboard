@@ -44,6 +44,7 @@ export const nativeAdapter: Adapter = {
   sendAccount: (id, to, pool) => invoke('send_account', { id, to, pool }),
   recallAccount: (id, from, pool) => invoke('recall_account', { id, from, pool: pool ?? null }),
   machinesLive: () => invoke('machines', { live: true }),
+  machinesList: () => invoke('machines', { live: false }),
   // WF-3 (SB-365): an owner without the command yet, or a read that fails, is an empty list: the page never breaks on it.
   attention: () => readWithDeadline(invoke('attention')).then(attentionView, () => attentionView(null)),
   handOverAccount: (id, to, name) => invoke('hand_over_account', { id, to, name }),

@@ -24,6 +24,8 @@ pub const USAGE_FAILING: &str =
     "Usage checks for this account have failed for over an hour. Check it again.";
 pub const MOVE_UNKNOWN: &str =
     "A move to another machine lost its answer. Look at that machine, then call the account back or remove its copy there.";
+pub const REFUSED_THERE: &str =
+    "The provider refused this account on the machine it lives on. Sign in to it there, or call it back.";
 pub const CEILING_MACHINE: &str =
     "This computer's daily spending ceiling was reached. Keep it or double it.";
 pub const CEILING_GROUP: &str =
@@ -41,6 +43,8 @@ pub struct Inputs<'a> {
     pub seats: &'a [Seat],
     /// `spend.json`'s questions, pruned as its readers prune them.
     pub questions: &'a [Question],
+    /// SB-366: the last background read of the accounts on other machines.
+    pub remote: &'a crate::remote_usage::State,
     pub now: i64,
 }
 
@@ -113,7 +117,32 @@ pub fn build(inputs: &Inputs) -> Value {
                     ),
                 );
             }
-            // Used on another machine: never checked here, so its usage cannot be failing here.
+            // SB-366 (WF-3, `refused_there`): the last read of its copy there says the provider
+            // refused it; never checked here, so its usage cannot be failing here.
+            let machine = snapshot.machines.iter().find(|m| m.pool == account.pool);
+            let copy = machine
+                .and_then(|m| inputs.remote.machines.get(&m.name))
+                .and_then(|r| {
+                    r.accounts
+                        .iter()
+                        .find(|a| &a.id == id)
+                        .map(|a| (a, r.as_of))
+                });
+            if let Some((_, as_of)) =
+                copy.filter(|(c, _)| c.usage_status.as_deref() == Some("rejected"))
+            {
+                push(
+                    "refused_there",
+                    account.label.clone(),
+                    item(
+                        "refused_there",
+                        REFUSED_THERE,
+                        as_of,
+                        "switchboard_remote",
+                        "open_machines",
+                    ),
+                );
+            }
             continue;
         }
         if !account.enabled {
@@ -219,6 +248,7 @@ mod tests {
             renewal_refused: &refused,
             seats,
             questions,
+            remote: &crate::remote_usage::State::default(),
             now: 10_000,
         })
     }
@@ -325,6 +355,59 @@ mod tests {
             reasons(&run(&failing("failed", 6_000, true), &["a"], &[], &[], &[])),
             ["sign_in"]
         );
+    }
+
+    #[test]
+    fn a_copy_the_provider_refused_on_its_machine_is_listed_from_the_last_read() {
+        // SB-366 (WF-3's `refused_there`): read in the background, never checked here.
+        use crate::remote_usage::{AccountRead, MachineRead, State};
+        let mut snapshot = Snapshot {
+            accounts: vec![
+                account("a", "A", "machine_studio"),
+                account("b", "B", "machine_studio"),
+            ],
+            machines: vec![switchboard_core::Machine {
+                pool: "machine_studio".into(),
+                name: "studio".into(),
+                identity: None,
+                aliases: vec![],
+                created_at: 1,
+            }],
+            ..Default::default()
+        };
+        snapshot.elsewhere.insert("a".into(), 7_000);
+        snapshot.elsewhere.insert("b".into(), 7_000);
+        let copy = |id: &str, status: &str| AccountRead {
+            id: id.into(),
+            used_percent: None,
+            usage_status: Some(status.into()),
+            enabled: Some(true),
+        };
+        let mut remote = State::default();
+        remote.machines.insert(
+            "studio".into(),
+            MachineRead {
+                tried_at: 9_000,
+                as_of: Some(9_000),
+                reason: None,
+                failures: 0,
+                accounts: vec![copy("a", "rejected"), copy("b", "ok")],
+            },
+        );
+        let answer = build(&Inputs {
+            snapshot: &snapshot,
+            sign_in: &[],
+            renewal_refused: &[],
+            seats: &[],
+            questions: &[],
+            remote: &remote,
+            now: 10_000,
+        });
+        assert_eq!(reasons(&answer), ["refused_there"]);
+        assert_eq!(answer["items"][0]["account_id"], "a");
+        assert_eq!(answer["items"][0]["since"], 9_000);
+        assert_eq!(answer["items"][0]["detail"], REFUSED_THERE);
+        assert_eq!(answer["items"][0]["action"]["window"], "open_machines");
     }
 
     #[test]

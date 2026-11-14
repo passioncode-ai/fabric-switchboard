@@ -1493,6 +1493,24 @@ check(() => {
     assert.equal(logic.keyLimitLine({ limit: null, limit_reset: null }), "Key's own limit: none");
   });
 }
+// SB-366 (DEC-0017), an_account_on_another_machine_reads_its_copy_there: the last background
+// read, never "disabled"; a failed read keeps its numbers' age and says the machine did not answer.
+check(() => {
+  i18nForShell.setLocale('en');
+  const now = 100_000;
+  const read = (over) => ({ used_percent: 42, usage_status: 'ok', enabled: true, as_of: now - 12 * 60, tried_at: now - 12 * 60, reason: null, ...over });
+  assert.equal(logic.remoteUsageLine(read({}), 'studio', now), 'Used 42% on studio, 12 min ago');
+  assert.equal(logic.remoteUsageLine(read({ as_of: now - 30 }), 'studio', now), 'Used 42% on studio, just now');
+  assert.equal(logic.remoteUsageLine(read({ as_of: now - 3 * 3600 }), 'studio', now), 'Used 42% on studio, 3 h ago');
+  assert.equal(logic.remoteUsageLine(read({ reason: 'unreachable', as_of: now - 3 * 86400 }), 'studio', now), 'Not read: studio did not answer, last read 3 d ago');
+  assert.equal(logic.remoteUsageLine(read({ reason: 'unreachable', as_of: null }), 'studio', now), 'Not read yet: studio did not answer');
+  assert.equal(logic.remoteUsageLine(read({ usage_status: 'rejected' }), 'studio', now), 'Needs a sign-in on studio');
+  assert.equal(logic.remoteUsageLine(read({ enabled: false }), 'studio', now), 'Turned off on studio');
+  assert.equal(logic.remoteUsageLine(null, 'studio', now), 'Not read on studio yet');
+  i18nForShell.setLocale('ru');
+  assert.equal(logic.remoteUsageLine(read({}), 'studio', now), 'Использовано 42% на машине studio, 12 мин назад');
+  i18nForShell.setLocale('en');
+});
 // WF-6 (DEC-0016), a_backup_group_is_offered_marked_and_counted: a group that takes part may be
 // marked backup (never the default group), and each backup group says how many accounts it lent.
 check(() => {

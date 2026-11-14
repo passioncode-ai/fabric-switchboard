@@ -1,7 +1,7 @@
 // Pure interface rules, kept free of DOM access so scripts/test-ui-logic.mjs can
 // exercise them directly. main.ts owns rendering; these functions own decisions.
 import type { BalanceStatus, ShellHookNotice, ShellHookStatus, Onboarding, OnboardStep, ChainExecutor, ChainScope, ChainStepView } from './types';
-import type { Machine, MachineCopy, Attention, AttentionItem, AttentionReason, AttentionWindow, Event, EventsPage, GivenAccount } from './types';
+import type { Machine, MachineCopy, RemoteRead, Attention, AttentionItem, AttentionReason, AttentionWindow, Event, EventsPage, GivenAccount } from './types';
 import type { Account, AccountLimit, Organization, OrganizationGroupOffer, Project, AgentRow, AgentSetup, OpenrouterCredit, RecommendedModel, SessionInfo, ProjectRule, RotationPolicy, UpdateStatus, Usage, UsageWindow } from './types';
 import { t, plural } from './i18n';
 
@@ -1829,6 +1829,29 @@ export function unplacedAccounts<A extends Pick<Account, 'id' | 'pool'>>(snapsho
 export function machineAliasesLine(machine: Pick<Machine, 'aliases'>): string {
   const names = machine.aliases ?? [];
   return names.length ? t('Also reached as {names}.', { names: names.join(', ') }) : '';
+}
+/** SB-366: an age in the row's short form: minutes, hours or days. */
+export function shortAge(seconds: number): string {
+  const minutes = Math.max(0, Math.floor(seconds / 60));
+  if (minutes < 60) return t('{n} min', { n: minutes });
+  const hours = Math.floor(minutes / 60);
+  if (hours < 48) return t('{n} h', { n: hours });
+  return t('{n} d', { n: Math.floor(hours / 24) });
+}
+/** SB-366 (DEC-0017): the usage line of an account on another machine, from the last background
+ *  read of its copy there; never "disabled". */
+export function remoteUsageLine(there: RemoteRead | null | undefined, machine: string, nowSeconds: number): string {
+  if (!there) return t('Not read on {machine} yet', { machine });
+  if (there.reason) {
+    return there.as_of !== null ? t('Not read: {machine} did not answer, last read {age} ago', { machine, age: shortAge(nowSeconds - there.as_of) }) : t('Not read yet: {machine} did not answer', { machine });
+  }
+  if (there.usage_status === 'rejected') return t('Needs a sign-in on {machine}', { machine });
+  if (there.enabled === false) return t('Turned off on {machine}', { machine });
+  if (typeof there.used_percent === 'number' && there.as_of !== null) {
+    const age = nowSeconds - there.as_of;
+    return age < 60 ? t('Used {percent}% on {machine}, just now', { percent: Math.round(there.used_percent), machine }) : t('Used {percent}% on {machine}, {age} ago', { percent: Math.round(there.used_percent), machine, age: shortAge(age) });
+  }
+  return t('Not read on {machine} yet', { machine });
 }
 /** SB-355: what a live read found for one machine; empty before a read. */
 export function machineLiveLine(live: { reachable: boolean } | undefined): string {
