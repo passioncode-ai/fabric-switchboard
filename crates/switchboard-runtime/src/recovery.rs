@@ -81,7 +81,7 @@ pub struct Wait {
     pub mode: Option<Mode>,
 }
 
-fn identifier(s: &str) -> bool {
+pub(crate) fn identifier(s: &str) -> bool {
     !s.is_empty()
         && s.len() <= 160
         && s.bytes()
@@ -331,7 +331,14 @@ pub(crate) fn register_stop(
     if !identifier(session) {
         return Err(INVALID.into());
     }
-    let directory = directory.canonicalize().map_err(|_| INVALID)?;
+    // WF-5.2c (C6): a folder gone since the stop (a removed worktree) still records the stop, by
+    // the path as the session stated it, so it shows and waits rather than vanishing; before,
+    // 440 stops in 30 days were refused this way and never resumed.
+    let directory = match directory.canonicalize() {
+        Ok(found) => found,
+        Err(_) if directory.is_absolute() => directory.to_path_buf(),
+        Err(_) => return Err(INVALID.into()),
+    };
     let _writing = writing();
     let (mut rows, dropped) = current(root, now)?;
     if let Some(live) = rows
@@ -1156,6 +1163,37 @@ mod tests {
         }
     }
 
+    #[test]
+    fn a_stop_in_a_folder_deleted_since_is_still_registered() {
+        // WF-5.2c (C6): the worktree went before the hook ran; the stop is kept by its path.
+        let root = tempfile::tempdir().unwrap();
+        let s = snapshot();
+        let gone = root.path().join("removed-worktree");
+        let stopped = register_stop(
+            root.path(),
+            &s,
+            "session-gone",
+            "old",
+            &gone,
+            StopKind::Limit,
+            100,
+        );
+        assert!(matches!(stopped, Ok(Stopped::New(_))), "{stopped:?}");
+        let waits = read(root.path()).unwrap();
+        assert_eq!(waits.len(), 1);
+        assert_eq!(waits[0].directory, gone);
+        // A relative folder still says nothing about where the session ran.
+        assert!(register_stop(
+            root.path(),
+            &s,
+            "session-rel",
+            "old",
+            std::path::Path::new("relative/folder"),
+            StopKind::Limit,
+            100,
+        )
+        .is_err());
+    }
     #[test]
     fn a_billing_stop_is_never_probed() {
         let root = tempfile::tempdir().unwrap();

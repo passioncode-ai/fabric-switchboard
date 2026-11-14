@@ -5091,9 +5091,20 @@ async fn execute(
                     Ok(json!({"registered": true, "event": event, "result": result}))
                 }
                 Err(e) => {
+                    // WF-5.2c: why, as a code, so the share of refusals can be read by cause.
+                    let reason = if !recovery::identifier(&session) {
+                        "invalid_session"
+                    } else if !directory.is_absolute() {
+                        "relative_folder"
+                    } else {
+                        "conflict"
+                    };
                     oplog::event(
                         "recovery_hook",
-                        &[("result", oplog::Field::Code("refused"))],
+                        &[
+                            ("result", oplog::Field::Code("refused")),
+                            ("reason", oplog::Field::Code(reason)),
+                        ],
                     );
                     Err(e)
                 }
