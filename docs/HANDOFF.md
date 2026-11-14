@@ -2,6 +2,16 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-11-14: a cap on live coding sessions (SB-378); 0.7.85
+
+- **Asked.** Fabric's board request `52f5a962` (thread `ebc84cbb`), the operator's words relayed verbatim: one pool of sessions per machine (example 20), new sessions from the board wait in a queue until one ends, the queue checked every minute, to keep the machine's load down. At the time this MacBook read load averages of 256 to 590, 42 live sessions and free disk down to 125 MB.
+- **Done (PR #698, `c4823117`).** `<data>/capacity.json` (0600), `switchboard capacity [set N|clear]`, MCP `switchboard_capacity`. `used` counts live Claude Code and Codex processes (managed or not) whose folder was written in the last 30 minutes; quiet ones do not count (decision in CONTRACTS, Dispatch, Session pool: counting all 42 would have started nothing). `dispatch` answers the refusal `at_capacity` with `used` and `cap`; `launch --hosted` fails with "At capacity: …" before asking the owner; an unread process table admits. `uninstall` now also removes `remote-usage.json` (missed in #695) and `capacity.json`. Board reply `69fe4c00`.
+- **Also.** 6.3 GB of this worktree's own `target` removed (the disk had 882 MB free); builds run on the Mac Studio.
+- **Checks.** `./scripts/check.sh` on the Mac Studio exit 0 at `26c6f43` (two earlier runs stopped on rustfmt, then on a missing help line and a backlog id in MCP wording); Linux clippy exit 0.
+- **Open.** A Settings field for the cap in the window; Fabric's queue (CO-588) and Dashboards reading the same cap.
+
+**Exact next task.** After 0.7.85 is published and installed here, run `switchboard capacity set 20`, read `switchboard --json capacity` and post `used` and `free` on thread `ebc84cbb`; then the live call back from the Studio (SB-377) and WF-5.2e.
+
 ## 2026-11-14: accounts move both ways without extra steps (SB-377), WF-4 (SB-366); 0.7.84
 
 - **Asked.** The operator, with Switchboard's dialog "This account was renewed here after it moved, so its copy there is no longer valid. Remove that copy there instead of calling it back.": «ни один аккаунт не могу передвинуть со студии сюда»; move the account a group uses, its group switching to the next account first; when no account has room, switch to the one free first; remove every bug in moving accounts between machines.
