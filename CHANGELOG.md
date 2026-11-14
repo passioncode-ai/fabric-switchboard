@@ -8,6 +8,8 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- A long-running `switchboard mcp` no longer answers with the code it started with after an update: once the program file is replaced, each tool list and call goes to a fresh process of the new file (SB-375).
+
 - Activity can be read one kind at a time: switches, sign-ins, groups, moves to other machines, errors, or the rest, and for one account. `switchboard events` takes `--kind`, `--account`, `--before` and `--limit`, and the agent tool `switchboard_events` takes the same, with a page that says where the next older one starts (SB-373).
 - The window can now set whether the sessions Switchboard starts skip their permission prompts, as `switchboard agents permissions` and the agent tool do (SB-372).
 - For each account given to an agent, the window and the agent tool `switchboard_accounts` now show the machine it runs on, the group and folder of its latest launch and when it was last active (SB-364).
