@@ -8,6 +8,8 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+## 0.7.83
+
 - A group can be marked as a backup group (Settings → Balancing between groups, *Backup: lends only*; `switchboard balance groups --backup-add`; MCP `switchboard_balance` `backup_add`). A group out of room takes a backup group's account first, and the account goes home once the group has room of its own again, or at once when the backup group's own folders need it. A backup group never borrows (SB-368, DEC-0016).
 
 - Automatic switching writes each outcome to the log (switched, switched on a limit, switch failed, no account to move to), so the share that failed can be measured; "no account to move to" is written once while it lasts (SB-367, WF-5.2a).
