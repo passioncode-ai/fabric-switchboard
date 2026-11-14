@@ -1427,7 +1427,7 @@ async fn accounts_rotation_activity_and_queues_are_reachable_over_mcp() {
     assert!(error, "{stats}");
     let (error, events) = agent.tool("switchboard_events", json!({"limit": 5}));
     assert!(!error && events["events"].as_array().is_some(), "{events}");
-    // SB-373 (WF-11.1): filters and paging. The account updates above are this account's
+    // SB-373 (WF-11.1): filters and paging. The account's updates above are among its
     // `other` events; a page of one names the second to continue before.
     let (error, mine) = agent.tool(
         "switchboard_events",
@@ -1436,9 +1436,11 @@ async fn accounts_rotation_activity_and_queues_are_reachable_over_mcp() {
     assert!(!error, "{mine}");
     let page = mine["events"].as_array().unwrap();
     assert!(!page.is_empty(), "{mine}");
-    assert!(page
-        .iter()
-        .all(|e| e["account_id"] == ids[2] && e["action"] == "account_updated"));
+    assert!(
+        page.iter().all(|e| e["account_id"] == ids[2]
+            && switchboard_core::activity::class_of(e["action"].as_str().unwrap()) == "other"),
+        "{mine}"
+    );
     assert!(
         mine["kinds"].as_array().unwrap().contains(&json!("other")),
         "{mine}"
