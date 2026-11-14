@@ -911,6 +911,8 @@ async fn balance(
             groups_add: add,
             groups_remove: remove,
             all_new,
+            backup_add: Vec::new(),
+            backup_remove: Vec::new(),
         }
     };
     state.runtime().await?.execute(operation).await

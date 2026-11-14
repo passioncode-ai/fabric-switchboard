@@ -1410,6 +1410,13 @@ enum BalanceCommand {
         /// Whether a group made later joins the chosen ones by itself: true or false.
         #[arg(long, value_name = "BOOL")]
         all_new: Option<bool>,
+        /// A group with no folders to mark as backup: it only lends, keeps no minimum and is
+        /// asked first (DEC-0016); repeat for more. Marking it also chooses it.
+        #[arg(long = "backup-add", value_name = "ID")]
+        backup_add: Vec<String>,
+        /// A backup group to unmark (it stays chosen); repeat for more.
+        #[arg(long = "backup-remove", value_name = "ID")]
+        backup_remove: Vec<String>,
     },
 }
 #[derive(Subcommand)]
@@ -2667,10 +2674,14 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                 add,
                 remove,
                 all_new,
+                backup_add,
+                backup_remove,
             } => Operation::Balance {
                 groups_add: add.clone(),
                 groups_remove: remove.clone(),
                 all_new: *all_new,
+                backup_add: backup_add.clone(),
+                backup_remove: backup_remove.clone(),
             },
         },
         Command::Agents { command } => match command {
