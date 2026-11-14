@@ -2252,3 +2252,57 @@ fn failover_takes_a_blind_account_only_after_every_healthy_one() {
         .unwrap();
     assert!(moved.id == failed || moved.id == paced, "{}", moved.id);
 }
+
+/// SB-377 (operator 2026-11-14): with no account that has room, a group whose account hit its
+/// limit moves to the account that will be free first, and stays there: the one it left frees
+/// later.
+#[test]
+fn with_no_room_anywhere_a_limited_group_waits_on_the_account_free_first() {
+    use std::collections::HashSet;
+    let (_root, _vault, store) = setup();
+    let now = clock();
+    let full = |id: &str, resets: i64| {
+        store
+            .observe(
+                id,
+                Usage {
+                    used_percent: 100.,
+                    observed_at: now,
+                    resets_at: Some(now + resets),
+                    source: "claude_oauth".into(),
+                    windows: vec![UsageWindow {
+                        name: "five_hour".into(),
+                        used_percent: 100.,
+                        resets_at: Some(now + resets),
+                    }],
+                },
+            )
+            .unwrap();
+    };
+    let a = account(&store, "org-a", now);
+    let b = account(&store, "org-b", now);
+    let c = account(&store, "org-c", now);
+    full(&a, 5000);
+    full(&b, 1000);
+    full(&c, 3000);
+    let p = policy();
+    let limited: HashSet<String> = [a.clone(), b.clone(), c.clone()].into();
+    let decision = store
+        .rotation_decision_with(&p, Some(&a), now, &limited)
+        .unwrap();
+    assert_eq!(decision.reason, "limit_reached");
+    assert_eq!(decision.candidate_id.as_deref(), Some(b.as_str()));
+    // On b nothing frees sooner: the group stays.
+    let decision = store
+        .rotation_decision_with(&p, Some(&b), now, &limited)
+        .unwrap();
+    assert_eq!(decision.reason, "limit_no_eligible_account");
+    assert!(decision.candidate_id.is_none());
+    // An account with room still comes before any wait.
+    observe(&store, &c, 20., now);
+    let only: HashSet<String> = [a.clone(), b.clone()].into();
+    let decision = store
+        .rotation_decision_with(&p, Some(&a), now, &only)
+        .unwrap();
+    assert_eq!(decision.candidate_id.as_deref(), Some(c.as_str()));
+}

@@ -40,7 +40,9 @@ pub use credential::Credential;
 pub use machines::{is_machine_pool, Machine, MachineRef};
 pub use organizations::{Attribution, By, Organization};
 pub use projects::{pool_from_name, Project, ProjectRule, RuleResolution, FOLDER_NESTED, KEY_POOL};
-pub use rotation::{default_managed_policy, FailoverTally, Fits, RotationDecision, RotationPolicy};
+pub use rotation::{
+    default_managed_policy, free_at, FailoverTally, Fits, RotationDecision, RotationPolicy,
+};
 pub use vault::{
     open_vault, set_vault_kind, vault_kind, FileVault, MemoryVault, NativeVault, Vault, VaultKind,
     CHOICE_FILE as VAULT_CHOICE_FILE, CHOICE_UNREADABLE as VAULT_CHOICE_UNREADABLE,

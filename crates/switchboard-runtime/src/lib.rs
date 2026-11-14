@@ -4339,6 +4339,16 @@ fn continue_default(
         None => Err(agent_settings::NAME_AN_ACCOUNT.into()),
     }
 }
+/// SB-377: the provider of a saved account, if it is still saved.
+fn local_provider(store: &Store, id: &str) -> Option<Provider> {
+    store
+        .snapshot()
+        .ok()?
+        .accounts
+        .into_iter()
+        .find(|a| a.id == id)
+        .map(|a| a.provider)
+}
 /// The refusals a `Continue` on `id` meets before its spend gate and offer: an agent the person
 /// disabled for taking over work (SB-120), a malformed workflow id, a folder that does not exist.
 /// Answers the canonical folder.
@@ -6223,6 +6233,30 @@ async fn execute(
                 // proved it: the copy there is spent now and must not be given back.
                 || store.stored_credential(&id).ok().and_then(|c| c.refresh_token)
                     != taken.token;
+            // SB-377: the copy brought back did not answer, but the sign-in this machine held
+            // after the move did change: that one is put back and asked. If it answers, it is the
+            // live one, the account stays here, and the spent copy there is removed below.
+            let mut kept_here = false;
+            let answered = answered
+                || match taken.kept.as_ref() {
+                    Some(local) => {
+                        let provider = local_provider(&store, &id);
+                        let restored = taken.token.as_deref().is_some_and(|t| {
+                            provider.is_some_and(|p| store.adopt_refreshed(p, t, local).is_ok())
+                        });
+                        kept_here = restored
+                            && Box::pin(execute(
+                                store.clone(),
+                                root,
+                                runtime,
+                                Operation::Usage { id: id.clone() },
+                            ))
+                            .await
+                            .is_ok();
+                        kept_here
+                    }
+                    None => false,
+                };
             if !answered {
                 account_send::recall_undo(
                     &store,
@@ -6270,6 +6304,7 @@ async fn execute(
                         &account_send::Taken {
                             remote_id: remote,
                             token: None,
+                            kept: None,
                         },
                         &account_send::Program {
                             path: &program,
@@ -6311,6 +6346,8 @@ async fn execute(
                 }
             }
             finished["pool"] = json!(pool);
+            // SB-377: which sign-in stayed: the copy brought back, or the one this machine held.
+            finished["kept"] = json!(if kept_here { "here" } else { "brought_back" });
             Ok(finished)
         }
         Operation::HandOver { id, to, decision } => {

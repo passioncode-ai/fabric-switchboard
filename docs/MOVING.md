@@ -54,7 +54,9 @@ no password prompt):
 
    The account is marked used elsewhere here first, so this computer never renews it again; it is
    saved there, checked with a quota read, and both steps are undone if anything fails. Only a
-   Claude or Codex subscription sign-in that no group has selected moves this way.
+   Claude or Codex subscription sign-in moves this way. A group that has it selected first moves
+   to its next account here: the one with room and the least used, else the one whose limit
+   resets first (SB-377); a group with no other account here refuses the move.
    `switchboard accounts seats` lists what this computer sent, where and when; the record stays
    on the computer that sent it, so send from the one that holds the account.
 
