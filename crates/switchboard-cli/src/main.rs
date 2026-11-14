@@ -135,6 +135,10 @@ enum Command {
     /// signed in in some homes and not in others, and two names for one URL in one home. A home
     /// whose credential item would ask for access reads `unknown`. Reads only.
     McpHomes,
+    /// What needs a person: accounts to sign in to again, usage checks failing for over an hour,
+    /// moves to another machine whose answer was lost and spending ceilings waiting for an answer,
+    /// each with the action that fixes it. The accounts stay in their groups. Reads only.
+    Attention,
     /// Report online/offline mode and the proxy address, without its capability.
     Status,
     /// The other machines this Switchboard knows, from accounts moved there and runs started
@@ -2101,6 +2105,7 @@ async fn run(cli: &Cli) -> Result<Value, String> {
         Command::Status => Operation::Status,
         Command::Targets { probe } => Operation::Targets { probe: *probe },
         Command::McpHomes => Operation::McpHomes,
+        Command::Attention => Operation::Attention,
         Command::Machines { command } => match command {
             MachinesCmd::List { live } => Operation::Machines { live: *live },
             MachinesCmd::Adopt { apply } => Operation::MachinesAdopt { apply: *apply },
@@ -4358,6 +4363,25 @@ fn print_result(value: &Value, cli: &Cli) {
                 );
             }
         }
+        Command::Attention => {
+            let items = value["items"].as_array().cloned().unwrap_or_default();
+            if items.is_empty() {
+                println!("Nothing needs attention.");
+            }
+            for item in &items {
+                let who = match (item["label"].as_str(), item["pool"].as_str()) {
+                    (Some(label), Some(pool)) => format!("{label} ({pool})"),
+                    (None, Some(pool)) => format!("Group {pool}"),
+                    (Some(label), None) => label.to_owned(),
+                    (None, None) => "Ceiling".to_owned(),
+                };
+                println!(
+                    "{who}: {} Fix: {}",
+                    text(&item["detail"]),
+                    text(&item["action"]["tool"])
+                );
+            }
+        }
         Command::Status => println!(
             "Mode: {}\nPlatform: {}\nProxy: {}",
             text(&value["live_mode"]),
@@ -4850,6 +4874,7 @@ mod mcp_parity {
         ("targets", Tool("switchboard_targets")),
         ("machines list", Tool("switchboard_machines")),
         ("mcp-homes", Tool("switchboard_mcp_homes")),
+        ("attention", Tool("switchboard_attention")),
         ("machines adopt", Tool("switchboard_machine_set")),
         ("machines place", Tool("switchboard_machine_set")),
         ("machines forget", Tool("switchboard_machine_set")),
