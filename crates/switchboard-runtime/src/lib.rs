@@ -1437,7 +1437,15 @@ impl Runtime {
                 // own lock.
                 | Operation::DispatchStatus { .. }
         ) {
-            return execute(self.store.clone(), &self.root, Some(self), operation).await;
+            // On the heap: the inner future holds every operation's state, and inlined here it
+            // overflowed a 1 MiB debug stack on Windows arm (v0.7.78 nightly).
+            return Box::pin(execute(
+                self.store.clone(),
+                &self.root,
+                Some(self),
+                operation,
+            ))
+            .await;
         }
         // SB-186: a session's start hook (`project suggest --from-hook`) gives up after 1.5 s;
         // behind a background step it waited 5 to 22 s (2026-10-23 and 2026-10-24) and its folder
@@ -1552,7 +1560,12 @@ impl Runtime {
             }
             _ => None,
         };
-        let run = execute(self.store.clone(), &self.root, Some(self), operation);
+        let run = Box::pin(execute(
+            self.store.clone(),
+            &self.root,
+            Some(self),
+            operation,
+        ));
         // The gate passed above: the operation's own gate is not run again.
         let result = if paid.is_some() {
             fallback::as_gated(pin, run).await
