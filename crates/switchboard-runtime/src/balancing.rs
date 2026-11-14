@@ -1034,8 +1034,9 @@ mod tests {
             NOW - 2 * COOLDOWN_SECONDS,
         )];
         let signals = sig_map(&[busy("agents", 40, 3)]);
-        // Agents' own account still has no room: the loan stays.
-        assert!(plan(&s, &signals, &Held::default(), &settings, NOW).is_empty());
+        // Agents' own account still has no room: the loan stays (Agents may borrow more).
+        let before = plan(&s, &signals, &Held::default(), &settings, NOW);
+        assert!(before.iter().all(|a| a.action != "return"), "{before:?}");
         // Its own account has room again: the backup account goes home at once, refusals or not.
         s.accounts[0].usage.as_mut().unwrap().used_percent = 10.0;
         let actions = plan(&s, &signals, &Held::default(), &settings, NOW);
