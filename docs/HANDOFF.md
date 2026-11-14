@@ -2,6 +2,17 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-11-14: accounts move both ways without extra steps (SB-377), WF-4 (SB-366); 0.7.84
+
+- **Asked.** The operator, with Switchboard's dialog "This account was renewed here after it moved, so its copy there is no longer valid. Remove that copy there instead of calling it back.": «ни один аккаунт не могу передвинуть со студии сюда»; move the account a group uses, its group switching to the next account first; when no account has room, switch to the one free first; remove every bug in moving accounts between machines.
+- **Cause.** `account_send::recall_take` refused every call back whose refresh token here no longer matched the fingerprint sent (`USED_HERE_SINCE`). The sign-in here changes after a move (a capture, an import, a restore), so in practice nothing came back. `send` refused a selected account (`SELECTED`) and the ordinary Claude Code's own account (`IN_USE_HERE`). The dialog in the request names `investor.relations@appvillis.com`, which is not saved on this MacBook (its record `bfd6bcba` was removed here after its move on 2026-11-09): the dialog came from another Switchboard, and the fix is general.
+- **Done (PR #696, `55490820`).** Call back takes the copy there, keeps the one here aside and keeps whichever the provider answers (`kept: brought_back|here`), then removes the copy there. A selected account moves after each group route naming it moves to `next_in_group` (room, least used; never measured; full, the one free first); `SEND_ONLY_ONE` when its group has no other account here. The ordinary Claude Code's account moves after Claude Code switches to `next_for_cli` through `ActivateNative` (`CLI_ONLY_ONE` when none can); Codex CLI still refuses. Rotation: a limited group with no account with room moves to the account whose known reset comes first (`switchboard_core::free_at`). Removed the two dead refusals; window, MCP text, MOVING.md, CONTRACTS, ACCOUNTS-AND-ROTATION, SCN-092 and the strings (Copylot ids) follow. The CHANGELOG conflict markers that #695 left on main are gone.
+- **WF-4 (PR #695, `96681258`).** Accounts on other machines are read in the background every 15 minutes over ssh and shown, never routed (DEC-0017); `refused_there` in *Needs attention*.
+- **Checks.** `./scripts/check.sh` on the Mac Studio exit 0 at `a43748a`; Linux clippy (rust:1.99 in Docker under colima) exit 0. The new paths are proved by synthetic tests only; no real sign-in was moved.
+- **Open.** A live call back on the operator's machines; WF-5.2e (borrow at once on exhaustion), 5.2f C8, 5.3; waves 4 and 5; Fabric Dashboards to skip `--resume` while `live` is set (thread `97c968e8`).
+
+**Exact next task.** After 0.7.84 is published, update this MacBook and the Mac Studio, call one account back from the Studio with `switchboard accounts recall <id>` and record the answer's `kept`; then WF-5.2e on a new branch.
+
 ## 2026-11-14: `launch --surface fabric` for Fabric's consoles (board request `885bbb81`)
 
 - **Asked.** Fabric, on the board (thread `9b2bbd4a`, its spec `docs/evidence/specs/2026-11-14-consoles-in-switchboard-host.md`, row CO-584): Fabric's own Claude Code and Codex consoles will start through `switchboard launch --mode managed --in-place --hosted`; (1) take `--surface fabric`, (2) confirm the session host gives the agent the launching process's environment.

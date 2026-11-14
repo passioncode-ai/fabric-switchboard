@@ -8,6 +8,8 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+## 0.7.84
+
 - Calling an account back from another machine works even when its sign-in here changed after the move: Switchboard takes the copy there, keeps the one here aside, and keeps whichever the provider answers, then removes the copy there. Before, it refused with "This account was renewed here after it moved" and nothing could come back (SB-377).
 - An account its group uses now can be moved to another machine: its group first switches to its next account, the one with the most room, else the one free first, so the group's sessions go on. Only an account that is the only one its group has here is refused (SB-377).
 - The account Claude Code is signed in to on this computer can move too: Claude Code first switches to another Claude account here with room, the same switch as *Switch* on an account's row. Codex CLI keeps its own sign-in, so an account Codex CLI is signed in to still stays (SB-377).
