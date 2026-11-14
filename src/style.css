@@ -675,3 +675,43 @@ g:hover > .chart-bar { opacity: .82; }
 .attention-row .row-button { flex: none; }
 .settings-moved { align-items: center; margin-top: var(--space-4); }
 @media (max-width: 590px) { .attention-row { flex-direction: column; align-items: stretch; } .fold-state { white-space: normal; } }
+/* WF-8.1 (SB-370): a folding header with controls beside it (organization badges, a ⋯ menu). */
+.fold-head { display: flex; align-items: center; gap: var(--space-2); padding-right: var(--space-2); }
+.fold-head > .fold-heading { flex: 1; min-width: 0; }
+.fold-head > .badge { flex: none; }
+.group-cards { display: grid; gap: var(--space-2); margin-top: var(--space-4); }
+.group-cards > .fold { margin-top: 0; }
+.group-card .fold-state { white-space: normal; text-align: right; }
+.group-card-title { display: inline-flex; min-width: 0; }
+.group-card-warning { margin: 0 var(--space-3) var(--space-2); }
+.group-accounts { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; font-size: var(--t-label); }
+.group-account { overflow-wrap: anywhere; }
+.group-account .badge { margin-left: var(--space-1); }
+/* WF-7.2 (SB-369): one compact row per key: what it is, today's spend against its ceiling, one menu. */
+.key-rows { list-style: none; margin: 0; padding: 0; display: grid; }
+.key-row { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-3); padding: var(--space-2) 0; border-top: 1px solid var(--border); }
+.key-rows > .key-row:first-child, .key-card { border-top: 0; }
+.key-row-info { display: grid; gap: 2px; min-width: 0; flex: 1; }
+.key-row-info > p { margin: 0; }
+.key-row-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 var(--space-2); overflow-wrap: anywhere; }
+.key-spend { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1) var(--space-2); font-size: var(--t-chip); color: var(--muted); }
+.key-spend-text { color: var(--ink); }
+.key-meter { width: 160px; margin-top: 0; }
+.key-rest { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-2) var(--space-3); padding-top: var(--space-2); border-top: 1px solid var(--border); }
+.key-rows + .key-rest { margin-top: var(--space-1); }
+.key-rest > p { margin: 0; }
+/* WF-11.1 (SB-373): the journal by day, under one filter row. */
+.events-panel .activity-filters { margin-top: var(--space-2); }
+.events-count { margin: var(--space-2) 0 0; }
+.events-panel .day-fold { background: transparent; }
+.events-panel .day-fold .event-list { margin: 0; }
+/* WF-11.2: the period, the tiles and the index stay at the top; a table showing every row scrolls in its box under a header that stays. */
+.stat-pinned { position: sticky; top: 0; z-index: 5; display: grid; gap: var(--space-3); padding: var(--space-2) 0 var(--space-3); background: var(--bg); border-bottom: 1px solid var(--border); }
+.stat-page .stat-pinned .stat-bar, .stat-page .stat-pinned .stat-tiles { margin: 0; }
+.stat-index { display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-3); }
+.stat-index-link { border: 0; background: transparent; padding: 0; color: var(--link); font: inherit; font-size: var(--t-chip); text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+.stat-page .fold, .stat-page .stat-chart { scroll-margin-top: 280px; }
+.stat-grid > .fold { margin-top: 0; }
+.stat-scroll.is-all { max-height: min(60vh, 560px); overflow-y: auto; }
+.stat-scroll.is-all .stat-table thead th { position: sticky; top: 0; z-index: 1; background: var(--panel); }
+@media (max-height: 700px) { .stat-pinned { position: static; } }
