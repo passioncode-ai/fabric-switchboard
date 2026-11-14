@@ -124,6 +124,18 @@ export function createDemoAdapter(): Adapter {
     codex.usage!.used_percent = 100;
   }
   const signInRequired = new Set(['demo-claude-meadow']);
+  // WF-3 (SB-365): a usage check failing for over an hour; a check that answers takes it off the list.
+  const failingChecks = new Set(['demo-claude-north']);
+  // WF-2 (SB-364): `?fleet=1` adds another machine with a Claude and a Codex account, and an account given to an agent.
+  if (new URLSearchParams(location.search).get('fleet') === '1') {
+    const pool = 'machine_studio-sshlg';
+    (state.machines ??= []).push({ pool, name: 'studio-sshlg', aliases: ['studio.local'], created_at: now() - 86_400 });
+    for (const [id, label, provider, used] of [['demo-claude-studio-night', 'Night shift', 'claude', 22], ['demo-codex-studio-ops', 'Studio ops', 'codex', 47]] as const) {
+      state.accounts.push({ id, label, provider, kind: 'oauth', pool, enabled: false, created_at: now() - 86_400, identity: null, external_identity: { account_id: `synthetic-${id}`, organization_id: null, email: `${label.toLowerCase().replace(' ', '.')}@example.test` }, usage: { used_percent: used, observed_at: now() - 5400, resets_at: now() + 9000, source: 'Synthetic fixture' } });
+      (state.elsewhere ??= {})[id] = now() - 86_400; (state.returns_to ??= {})[id] = 'work';
+    }
+    (state.assigned_to ??= {})['demo-claude-harbor'] = 'Frame Agent on Studio';
+  }
   // SB-160 (B-6, B-7): `?org=ended` shows the seats of Northwind ended (account cards name it, its
   // group's card says none is signed in) and Contoso left on PassionCode.ai three days ago.
   if (new URLSearchParams(location.search).get('org') === 'ended') {
@@ -310,6 +322,15 @@ export function createDemoAdapter(): Adapter {
       { account_id: 'demo-claude-work', label: 'Studio', provider: 'claude' as const, agent: 'claude-code', pool: 'work', mode: 'managed' as const, working_directory: '/Users/demo/Projects/web-app', in_place: false, launched_at: now() - 2700, started_at: now() - 2690, continues: null, state: 'running' as const, context: state.organizations?.[0] ? `org:${state.organizations[0].id}` : 'personal' },
       { account_id: 'demo-codex-team', label: 'Team Codex', provider: 'codex' as const, agent: 'codex', pool: 'default', mode: 'isolated' as const, working_directory: '/Users/demo/Projects/api', in_place: true, launched_at: now() - 20, started_at: null, continues: null, state: 'starting' as const },
     ] }; },
+    async attention() {
+      const item = (id: string) => state.accounts.find((a) => a.id === id);
+      const items = [
+        ...[...signInRequired].map((id) => item(id)).filter((a): a is Account => !!a).map((a) => ({ account_id: a.id, label: a.label, provider: a.provider, pool: a.pool, reason: 'sign_in' as const, detail: 'Synthetic: the sign-in ended.', since: now() - 3600, action: { tool: 'switchboard_login', window: 'sign_in' as const } })),
+        ...[...failingChecks].map((id) => item(id)).filter((a): a is Account => !!a).map((a) => ({ account_id: a.id, label: a.label, provider: a.provider, pool: a.pool, reason: 'usage_failing' as const, detail: 'Synthetic: the usage check fails.', since: now() - 5400, action: { tool: 'switchboard_usage', window: 'check_usage' as const } })),
+        ...demoQuestions.map(() => ({ account_id: null, label: null, provider: null, pool: null, reason: 'ceiling_question' as const, detail: 'Synthetic: a ceiling was reached.', since: now() - 600, action: { tool: 'switchboard_ceiling_answer', window: 'answer_ceiling' as const } })),
+      ];
+      return { count: items.length, items };
+    },
     async monitorStatus() { return { running: true, interval_seconds: 180, sign_in_required: [...signInRequired], limited: [{ account_id: 'demo-claude-east', until: now() + 5400, source: 'claude_code', kind: 'unknown', resets_at: null, confidence: 'inferred', scope: 'unknown' }, ...(new URLSearchParams(location.search).get('quota-review') === '1' ? [{ account_id: 'demo-claude-summit', until: now() + 10800, source: 'claude_code' as const, kind: 'quota' as const, resets_at: now() + 10800, confidence: 'inferred' as const, scope: 'unknown' as const }] : [])] }; },
     async captureCurrent(input) {
       await pause();
@@ -735,7 +756,7 @@ export function createDemoAdapter(): Adapter {
     async analyticsNoticeSeen() { await pause(); analytics.notice_pending = false; return { ...analytics }; },
     async setLoginItem(enabled) { await pause(); loginItem.enabled = enabled; return { ...loginItem }; },
     async linkCli() { await pause(); setup.linked_cli = '~/.local/bin/switchboard'; setup.cli_path = setup.linked_cli; setup.commands.claude_code = `claude mcp add --scope user switchboard -- '${setup.linked_cli}' mcp`; setup.commands.codex = `codex mcp add switchboard -- '${setup.linked_cli}' mcp`; return { linked_cli: setup.linked_cli }; },
-    async probe(id) { await pause(); const item = enabled(id); if (rateLimited.has(id)) throw new Error('Usage checks are rate limited by the provider. Switchboard waits before the next one.'); if (item.kind !== 'oauth') { item.usage_health = { status: 'unavailable', checked_at: now(), next_check_at: now() + 180 }; throw new Error('Usage unavailable for this credential type.'); } const usage = { used_percent: 42, observed_at: now(), resets_at: now() + 7200, source: 'Synthetic fixture', windows: [{ name: 'Session', used_percent: 42, resets_at: now() + 7200 }, { name: 'Weekly', used_percent: 28, resets_at: now() + 172800 }] }; item.usage = usage; item.usage_health = { status: 'ok', checked_at: now(), next_check_at: now() + 180 }; log('usage', id, 'observed'); return structuredClone(usage); },
+    async probe(id) { await pause(); const item = enabled(id); failingChecks.delete(id); if (rateLimited.has(id)) throw new Error('Usage checks are rate limited by the provider. Switchboard waits before the next one.'); if (item.kind !== 'oauth') { item.usage_health = { status: 'unavailable', checked_at: now(), next_check_at: now() + 180 }; throw new Error('Usage unavailable for this credential type.'); } const usage = { used_percent: 42, observed_at: now(), resets_at: now() + 7200, source: 'Synthetic fixture', windows: [{ name: 'Session', used_percent: 42, resets_at: now() + 7200 }, { name: 'Weekly', used_percent: 28, resets_at: now() + 172800 }] }; item.usage = usage; item.usage_health = { status: 'ok', checked_at: now(), next_check_at: now() + 180 }; log('usage', id, 'observed'); return structuredClone(usage); },
   };
 }
 

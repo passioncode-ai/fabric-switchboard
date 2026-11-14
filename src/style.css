@@ -624,3 +624,54 @@ g:hover > .chart-bar { opacity: .82; }
 .org-import { display: grid; gap: var(--space-1); }
 .org-import ul { margin: 0; padding-left: var(--space-4); }
 .github-repos[hidden], .github-repo-tools[hidden], .github-into[hidden], .project-accounts[hidden] { display: none; }
+
+/* WF-1.2 (SB-363): one folding section. The header is a full-width button: a chevron, the title,
+   and its state on the right in the muted role; the body follows only while open. */
+.fold { margin-top: var(--space-3); border: 1px solid var(--border); border-radius: var(--r-card); background: var(--panel); }
+.fold + .fold { margin-top: var(--space-2); }
+.fold-heading { margin: 0; font-size: var(--t-card); font-weight: 650; }
+.fold-toggle { display: flex; align-items: baseline; gap: var(--space-2); width: 100%; min-height: var(--control-h); padding: var(--space-2) var(--space-3); border: 0; border-radius: var(--r-card); background: transparent; color: var(--ink); font: inherit; text-align: left; cursor: pointer; }
+.fold-toggle:hover { background: var(--panel-2); }
+.fold-mark { flex: none; width: .5em; height: .5em; border-right: 1.5px solid var(--muted); border-bottom: 1.5px solid var(--muted); transform: translateY(-.1em) rotate(-45deg); transition: transform var(--dur-state) var(--motion-ease); }
+.fold-toggle[aria-expanded="true"] .fold-mark { transform: translateY(-.2em) rotate(45deg); }
+.fold-title { min-width: 0; overflow-wrap: anywhere; }
+.fold-state { margin-left: auto; padding-left: var(--space-3); font-size: var(--t-chip); font-weight: 400; color: var(--muted); white-space: nowrap; }
+.fold-body { padding: 0 var(--space-3) var(--space-3); }
+.fold-body > .fold-content > :first-child, .fold-body > .fold-part:first-child > :first-child { margin-top: 0; }
+.fold-content { display: grid; gap: var(--space-2); }
+.fold-content > p, .fold-part > p { margin: 0; }
+.fold-part + .fold-part { margin-top: var(--space-3); padding-top: var(--space-3); border-top: 1px solid var(--border); }
+.fold-part-heading { margin: 0 0 var(--space-2); font-size: var(--t-label); font-weight: 600; }
+@media (prefers-reduced-motion: reduce) { .fold-mark { transition: none; } }
+/* WF-2.1: a machine's section holds provider groups; inside it they sit without the card border twice. */
+.machine-section { background: transparent; }
+.machine-section > .fold-body > .account-group:first-child { margin-top: 0; }
+.machine-section .group-heading h3 { font-size: var(--t-heading); font-weight: 650; letter-spacing: -.01em; }
+.pool-heading h4 { margin: 0; font-size: inherit; font-weight: inherit; }
+/* WF-2.2: one filter row: a search field, an organization select, a toggle. */
+.account-filters { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); margin-top: var(--space-4); }
+.filter-search { flex: 1 1 16rem; min-width: 0; min-height: var(--control-h-compact); padding: var(--space-1) var(--space-3); border: 1px solid var(--border-strong); border-radius: var(--r-control); background: var(--panel); color: var(--ink); font: inherit; font-size: var(--t-label); }
+.filter-search::placeholder { color: var(--muted); opacity: 1; }
+.filter-select { min-height: var(--control-h-compact); max-width: 16rem; padding: var(--space-1) calc(var(--space-3) * 2 + 10px) var(--space-1) var(--space-3); border: 1px solid var(--border-strong); border-radius: var(--r-control); background-color: var(--panel); color: var(--ink); font: inherit; font-size: var(--t-label); -webkit-appearance: none; appearance: none; background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%), linear-gradient(135deg, var(--muted) 50%, transparent 50%); background-position: calc(100% - var(--space-3) - 8px) 50%, calc(100% - var(--space-3) - 3px) 50%; background-size: 5px 5px; background-repeat: no-repeat; cursor: pointer; }
+.filter-toggle { display: inline-flex; align-items: center; gap: var(--space-2); font-size: var(--t-label); color: var(--muted); white-space: nowrap; cursor: pointer; }
+/* WF-2.3: both In use now cards in one layout: identity, the saved line, then how it changes. */
+.current-card { align-items: flex-start; }
+.current-meta { font-size: var(--t-chip); color: var(--info); overflow-wrap: anywhere; }
+.current-how { margin-top: var(--space-1); font-size: var(--t-chip); color: var(--muted); overflow-wrap: anywhere; }
+.current-action { flex: none; align-self: center; }
+/* WF-2.4: the facts of an account given to an agent, under its row. */
+.row-facts { grid-column: 2 / -1; margin: 0; padding-bottom: var(--space-1); font-size: var(--t-chip); color: var(--muted); overflow-wrap: anywhere; }
+.row-facts strong { color: var(--ink); font-weight: 600; }
+/* WF-3.2 (SB-365): Needs attention, above In use now; the danger role marks it, the rows stay calm. */
+.attention-section { margin-top: var(--space-4); padding: var(--space-2) var(--space-3); border: 1px solid color-mix(in srgb, var(--danger) 55%, transparent); border-radius: var(--r-card); background: var(--danger-weak); }
+.attention-section > h2 { margin: 0 0 var(--space-1); font-size: var(--t-heading); font-weight: 650; color: var(--danger); }
+.attention-list { list-style: none; margin: 0; padding: 0; display: grid; }
+.attention-row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding: var(--space-2) 0; border-top: 1px solid color-mix(in srgb, var(--danger) 25%, transparent); }
+.attention-row:first-child { border-top: 0; }
+.attention-copy { display: grid; gap: 2px; min-width: 0; }
+.attention-title { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 var(--space-2); }
+.attention-where, .attention-reason { font-size: var(--t-chip); color: var(--muted); overflow-wrap: anywhere; }
+.attention-reason { color: var(--ink); }
+.attention-row .row-button { flex: none; }
+.settings-moved { align-items: center; margin-top: var(--space-4); }
+@media (max-width: 590px) { .attention-row { flex-direction: column; align-items: stretch; } .fold-state { white-space: normal; } }
