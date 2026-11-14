@@ -1,6 +1,8 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 use serde_json::{json, Value};
 use std::sync::Arc;
+#[cfg(test)]
+mod parity;
 mod residency;
 mod suggestions;
 mod updates;
@@ -434,6 +436,12 @@ async fn machines(live: bool, state: State<'_, Slot>) -> Result<Value, String> {
         .await?
         .execute(Operation::Machines { live })
         .await
+}
+/// SB-365 (WF-3.1): what needs a person, the same answer as `switchboard attention` and the
+/// MCP tool `switchboard_attention`.
+#[tauri::command]
+async fn attention(state: State<'_, Slot>) -> Result<Value, String> {
+    state.runtime().await?.execute(Operation::Attention).await
 }
 #[tauri::command]
 async fn remove_account(id: String, state: State<'_, Slot>) -> Result<Value, String> {
@@ -1713,6 +1721,7 @@ fn main() {
             send_account,
             recall_account,
             machines,
+            attention,
             hand_over_account,
             open_handover,
             receive_handover,
