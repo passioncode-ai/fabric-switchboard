@@ -529,13 +529,16 @@ fn native_target_excludes_api_keys_and_scope_crossings_even_with_better_quota() 
         .unwrap();
     observe(&store, &other_pool.id, 0., now);
     let mut p = policy();
+    // SB-217: managed sessions on a subscription no longer move onto the key either, though it
+    // reads emptier (before the architect's audit they did).
     assert_eq!(
         store
             .rotation_decision(&p, Some(&current), now)
             .unwrap()
             .candidate_id,
-        Some(api.id)
+        None
     );
+    assert_ne!(api.id, current);
     p.target = "claude_cli".into();
     assert_eq!(
         store
@@ -2146,4 +2149,71 @@ fn native_rotation_never_takes_an_account_lent_to_default() {
     let decision = store.rotation_decision(&native, Some(&a), now).unwrap();
     assert!(decision.candidate_id.is_none(), "{decision:?}");
     assert_ne!(group.pool, "default");
+}
+
+/// SB-217 (the architect's judged audit, 2026-11-13): automatic switching never moves a
+/// subscription's managed sessions onto a pay-per-token key, not even when every subscription
+/// account is held on a limit and the key was never measured; a key's own sessions move only to
+/// another key. A failover whose account is gone takes no key unless the request needs one.
+#[test]
+fn automatic_switching_never_moves_a_subscription_onto_a_paid_key() {
+    use std::collections::HashSet;
+    let (_root, _vault, store) = setup();
+    let now = clock();
+    let a = account(&store, "org-a", now);
+    let b = account(&store, "org-b", now);
+    observe(&store, &a, 100., now);
+    let key = store
+        .add(
+            "API".into(),
+            Provider::Claude,
+            AuthKind::ApiKey,
+            "default".into(),
+            Credential::parse(Provider::Claude, AuthKind::ApiKey, "synthetic-api").unwrap(),
+        )
+        .unwrap()
+        .id;
+    let p = policy();
+    let limited: HashSet<String> = [a.clone(), b.clone()].into();
+    let decision = store
+        .rotation_decision_with(&p, Some(&a), now, &limited)
+        .unwrap();
+    assert_eq!(decision.candidate_id, None, "the key is never a guess");
+    assert_eq!(decision.reason, "limit_no_eligible_account");
+    // A subscription with room is still taken.
+    let limited: HashSet<String> = [a.clone()].into();
+    let decision = store
+        .rotation_decision_with(&p, Some(&a), now, &limited)
+        .unwrap();
+    assert_eq!(decision.candidate_id.as_deref(), Some(b.as_str()));
+    // A key's sessions never move onto a subscription either.
+    let limited: HashSet<String> = [key.clone()].into();
+    let decision = store
+        .rotation_decision_with(&p, Some(&key), now, &limited)
+        .unwrap();
+    assert_eq!(decision.candidate_id, None);
+
+    let fits = switchboard_core::Fits {
+        kind: None,
+        api_key_only: false,
+    };
+    let account = |id: &str| {
+        store
+            .snapshot()
+            .unwrap()
+            .accounts
+            .into_iter()
+            .find(|x| x.id == id)
+            .unwrap()
+    };
+    assert!(
+        !fits.admits(&account(&key)),
+        "an unknown kind never lands on a key"
+    );
+    assert!(fits.admits(&account(&b)));
+    let needs_key = switchboard_core::Fits {
+        kind: None,
+        api_key_only: true,
+    };
+    assert!(needs_key.admits(&account(&key)));
 }

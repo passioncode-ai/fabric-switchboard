@@ -710,8 +710,11 @@ detailed in the two entries below:
   doubled, removed) and `spend_gate` (each paid step's verdict, `fallback.rs:1303`). Analytics:
   the counts `chains`, `ceilings` and `ceiling_questions` in `app_active`, no event, no id or
   amount ([ANALYTICS](ANALYTICS.md#chains-and-ceilings-070), C-Q6).
-- **Not covered.** A running managed session moved onto an API-key account without a start
-  (`switchboard_switch`, automatic switching, SB-98's failover) is not gated (C-N2, SB-217); paid
+- **Not covered.** Automatic switching and SB-98's failover never move a running managed session
+  onto an API-key account since 0.7.77: rotation takes only an account of the kind the sessions run
+  on now, and a failover whose account is gone lands on a subscription unless the request needs a
+  key (SB-217, `automatic_switching_never_moves_a_subscription_onto_a_paid_key`). A move onto a key
+  by hand (`switchboard_switch`, the window) is still not gated by a ceiling (C-N2); paid
   starts moved off a capped group's key by moving its folder or disabling its accounts are no longer
   counted by that group's ceiling (C-N1, SB-216); after a downgrade to 0.6.x paid steps run with no
   ceiling. Waiting outside this repository: keyed pins checked against the project's grant (SB-96)

@@ -34,7 +34,14 @@ pub fn agent_of(executable: &str) -> Option<&'static str> {
         .file_name()
         .and_then(|n| n.to_str())
         .unwrap_or("");
-    if name == "claude" || executable.contains("/claude/versions/") {
+    // The npm install's `claude` is a link the kernel resolves to
+    // `…/@anthropic-ai/claude-code/bin/claude.exe` (Fabric Dashboards, board `7e5b6d44`: 0.7.76
+    // saw none of 30 such processes).
+    if name == "claude"
+        || name == "claude.exe"
+        || executable.contains("/claude/versions/")
+        || executable.contains("/@anthropic-ai/claude-code/")
+    {
         Some("claude-code")
     } else if name == "codex" {
         Some("codex")
@@ -320,6 +327,10 @@ mod tests {
             Some("claude-code")
         );
         assert_eq!(agent_of("/opt/homebrew/bin/claude"), Some("claude-code"));
+        assert_eq!(
+            agent_of("/opt/homebrew/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe"),
+            Some("claude-code")
+        );
         assert_eq!(agent_of("/usr/local/bin/codex"), Some("codex"));
         assert_eq!(agent_of("/usr/bin/zsh"), None);
         assert_eq!(

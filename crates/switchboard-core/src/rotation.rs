@@ -232,6 +232,10 @@ impl Store {
                     && !limited.contains(&a.id)
                     && !state.is_assigned(&a.id)
                     && state.context_admits(&policy.pool, a)
+                    // SB-217 (the architect's judged audit): the kind of account the sessions
+                    // run on now, so a subscription never moves onto a pay-per-token key that no
+                    // spending ceiling gates, and a key's caller never onto a subscription.
+                    && a.kind == current.kind
             })
             .filter_map(|a| fresh_usage(a, policy, now).map(|used| (a, used)))
             .filter(|(a, used)| {
@@ -267,6 +271,7 @@ impl Store {
                         && !limited.contains(&a.id)
                         && !state.is_assigned(&a.id)
                         && state.context_admits(&policy.pool, a)
+                        && a.kind == current.kind
                         && self.rotation_credential_eligible(a, policy, now)
                 })
                 .filter_map(|a| {
@@ -329,7 +334,7 @@ impl Store {
     }
 }
 /// What a request moved by a failover can run on (SB-102): the same kind of account as the one
-/// it left — a subscription session never moves onto a pay-per-token key, nor a key's caller
+/// it left, a subscription when that one is gone and the request needs no key (SB-217) — a subscription session never moves onto a pay-per-token key, nor a key's caller
 /// (an agent) onto a subscription — and, for an operation only an API key serves (Chat
 /// Completions), an API key.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -340,8 +345,14 @@ pub struct Fits {
 }
 impl Fits {
     pub fn admits(&self, account: &Account) -> bool {
-        self.kind.is_none_or(|kind| account.kind == kind)
-            && (!self.api_key_only || account.kind == AuthKind::ApiKey)
+        // SB-217: with the account it leaves gone, a request lands on a pay-per-token key only
+        // when it needs one; otherwise a subscription, which no spending ceiling has to gate.
+        let kind = self.kind.unwrap_or(if self.api_key_only {
+            AuthKind::ApiKey
+        } else {
+            AuthKind::OAuth
+        });
+        account.kind == kind && (!self.api_key_only || account.kind == AuthKind::ApiKey)
     }
 }
 impl Store {

@@ -10,6 +10,8 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 - A session Switchboard starts now has your MCP sign-ins. When you have signed in to an MCP server such as Figma or Sentry in one Claude home, a launch copies that sign-in into the home it starts, so the session no longer says "Needs authentication" there. Only the access token is copied, never the refresh token or client secret, so only the home you signed in from ever renews it, and a home's own sign-in is never replaced (SB-358).
 - New: `switchboard mcp-homes` and the agent tool `switchboard_mcp_homes` show which of your Claude homes is signed in to which MCP server, and name a server signed in in some homes and not others, or one whose sign-in sits under an older configuration of the server. Names and URLs only, never a token (SB-359).
+- Automatic switching no longer moves sessions running on a subscription onto a pay-per-token API key in the same group, not even when every subscription account has hit its limit; a key's own sessions move only to another key. Before, such a move spent money that no spending ceiling counted (SB-217, found by the agents database's audit).
+- `switchboard sessions --machine` finds Claude Code installed with npm or Homebrew again: it saw none of them in 0.7.72 to 0.7.76, because the system names its program `claude.exe` (SB-353).
 - Checking the usage of a turned-off account, or one used on another machine, now answers "Account is disabled" at once. Before, each such check read the account's saved sign-in twice from the Keychain and marked the account as failing; a tool that refreshed every account did that for each one every half hour (SB-360).
 
 ## 0.7.76
