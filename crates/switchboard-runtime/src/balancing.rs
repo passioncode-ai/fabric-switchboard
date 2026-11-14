@@ -1038,7 +1038,7 @@ mod tests {
         let before = plan(&s, &signals, &Held::default(), &settings, NOW);
         assert!(before.iter().all(|a| a.action != "return"), "{before:?}");
         // Its own account has room again: the backup account goes home at once, refusals or not.
-        s.accounts[0].usage.as_mut().unwrap().used_percent = 10.0;
+        s.accounts[0] = account("agents-1", "agents", Some(10.0));
         let actions = plan(&s, &signals, &Held::default(), &settings, NOW);
         assert_eq!(actions.len(), 1, "{actions:?}");
         assert_eq!(
