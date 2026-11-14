@@ -1097,6 +1097,9 @@ pub struct Runtime {
     monitor_decisions: Mutex<Vec<Value>>,
     /// Candidates whose automatic switch failed, set aside until the time given (SB-98).
     failed_switches: Mutex<HashMap<String, i64>>,
+    /// WF-5.2a: each policy's last logged rotation outcome, so `no_candidate` is logged once a
+    /// stretch, not every pass.
+    rotation_logged: Mutex<HashMap<String, &'static str>>,
     native: NativeSources,
     refresh: refresh::RefreshState,
     limits: limits::LimitState,
@@ -1253,6 +1256,7 @@ impl Runtime {
             current_cache: Mutex::new(CurrentCache::default()),
             monitor_decisions: Mutex::new(Vec::new()),
             failed_switches: Mutex::new(HashMap::new()),
+            rotation_logged: Mutex::new(HashMap::new()),
             native,
             refresh,
             limits,
