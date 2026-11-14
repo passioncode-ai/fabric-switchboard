@@ -1224,7 +1224,9 @@ const USAGE_RESET_UNSUPPORTED: &str = "Usage reset unsupported.";
 // Refusals before any request (SB-127: logged as `other` until 2026-10-15).
 const USAGE_ACCOUNT_GONE: &str = "Account not found.";
 const USAGE_NOT_OAUTH: &str = "Usage unavailable for this credential type.";
-const USAGE_DISABLED: &str = "Account is disabled";
+/// The answer to a quota check of a turned-off account (SB-360: refused before any credential
+/// read, by `monitor::check` as by the probe).
+pub const USAGE_DISABLED: &str = "Account is disabled";
 
 impl ProbeFailure {
     /// A fixed code for the operations log (LC-12): which way the check failed, never the

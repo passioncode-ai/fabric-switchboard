@@ -468,6 +468,18 @@ lacks is added there by name and domains, then the copy is placed the same way; 
 the answer is null (no word said here), or `{carried, contexts}` with `reason` when a step there
 failed (the move stands; place it there with `switchboard org assign`).
 
+### `switchboard_mcp_homes`
+
+Which of the person's Claude homes is signed in to which MCP server (SB-359): `homes`, the
+ordinary one first, then each one Switchboard made (`kind` `account`, `group` or `shell` with its
+`id`), with `item` (`present`, `absent`, or `unknown` when reading it would ask for access) and each
+server's `name`, `url`, `signed_in`, `own` (it holds its own refresh token) and `expires_at`
+(milliseconds); `findings`: `partial` (a URL signed in in some homes and not in others: `signed_in`
+lists those homes, `not_signed_in` counts the rest), `stale_key` (a home whose sign-in was filed
+under the server's old configuration, so Claude Code there reads "Needs authentication") and
+`same_url` (two names for one URL in one home). A launch copies an own sign-in into the home it
+starts as an access token only (SB-358). Names, URLs and booleans only, never a token. Reads only.
+
 ### `switchboard_machines`: `live?`
 
 Every other machine this Switchboard's accounts live on, one group each: `pool` (its id,

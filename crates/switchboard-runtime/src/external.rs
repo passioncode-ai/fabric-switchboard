@@ -164,7 +164,9 @@ struct Context {
     user: String,
     mac: bool,
 }
-fn service(raw: &str) -> String {
+/// Claude Code's Keychain service for a config folder named `raw` (SB-358 reads it on every
+/// platform: it names the item, nothing is read).
+pub(crate) fn service(raw: &str) -> String {
     let normalized: String = raw.nfc().collect();
     format!(
         "Claude Code-credentials-{}",
@@ -1583,6 +1585,23 @@ impl Locks {
         }
         Ok(())
     }
+}
+/// SB-358: runs `write` holding Claude Code's two credential locks of `home`, a Claude home
+/// Switchboard made, as Claude Code's own writers of that home's item do.
+pub(crate) fn with_credential_locks<T>(
+    home: &Path,
+    write: impl FnOnce() -> Result<T, String>,
+) -> Result<T, String> {
+    let c = Context {
+        home: home.to_owned(),
+        config: home.join(".claude.json"),
+        service: service(&home.to_string_lossy()),
+        user: username()?,
+        mac: cfg!(target_os = "macos"),
+    };
+    let locks = Locks::acquire_with(&c, false)?;
+    locks.ensure()?;
+    write()
 }
 /// How long a live holder is waited for; tests do not sit out the full nine seconds.
 const LOCK_WAIT: Duration = if cfg!(test) {

@@ -592,6 +592,9 @@ struct Host {
     /// The operator's own user folder for the provider (`~/.claude`, `~/.codex`), carried into a
     /// launched home (SB-137); None: nothing is carried.
     user_scope: fn(Provider) -> Option<PathBuf>,
+    /// SB-358: carries the person's MCP sign-ins from their other Claude homes into a Claude home
+    /// about to be launched (`root`, `home`).
+    mcp_sign_ins: fn(&Path, &Path),
 }
 const NATIVE: Host = Host {
     binary,
@@ -599,7 +602,11 @@ const NATIVE: Host = Host {
     board: board_server,
     start_terminal,
     user_scope,
+    mcp_sign_ins: crate::mcp_homes::carry_into,
 };
+/// Tests carry no MCP sign-in: nothing reads or writes a Keychain item.
+#[cfg(test)]
+fn no_mcp_sign_ins(_: &Path, _: &Path) {}
 fn user_scope(provider: Provider) -> Option<PathBuf> {
     match provider {
         Provider::Claude => crate::carry::claude_user_dir(),
@@ -976,7 +983,7 @@ pub(crate) fn fixture_login(home: PathBuf, saved: switchboard_core::Account) -> 
     }
 }
 #[cfg(any(target_os = "macos", test))]
-fn keychain_service(home: &Path) -> String {
+pub(crate) fn keychain_service(home: &Path) -> String {
     let raw: String = home.to_string_lossy().nfc().collect();
     format!(
         "Claude Code-credentials-{}",
@@ -987,7 +994,7 @@ fn keychain_service(home: &Path) -> String {
 /// `crate::external::username()` — `$USER` when set and non-empty, then the passwd entry
 /// of the effective user — or a sign-in is captured under one name and cleaned under another.
 #[cfg(target_os = "macos")]
-fn login_user() -> Result<String, String> {
+pub(crate) fn login_user() -> Result<String, String> {
     pick_user(std::env::var("USER").ok(), passwd_user)
 }
 #[cfg(any(target_os = "macos", test))]
@@ -2818,6 +2825,9 @@ fn launch_core(
     };
     if account.provider == Provider::Claude {
         crate::carry::claude_state(&home, continuation.map(|_| working_directory.as_path()))?;
+        // SB-358: the person's MCP sign-ins (Figma, Sentry...) from their other Claude homes, as
+        // access-token mirrors; never a failure of the launch.
+        (host.mcp_sign_ins)(root, &home);
         let settings_path = home.join("settings.json");
         let settings = crate::carry::claude_settings(user.as_deref(), None);
         // Managed: the account comes through the proxy, so the file holds only the operator's
@@ -3334,6 +3344,7 @@ const SANDBOX: Host = Host {
     board: sandbox_no_board,
     start_terminal: sandbox_terminal,
     user_scope: sandbox_no_scope,
+    mcp_sign_ins: no_mcp_sign_ins,
 };
 fn dispatch_host() -> &'static Host {
     #[cfg(test)]
@@ -4728,6 +4739,7 @@ mod tests {
         board: no_board,
         start_terminal: terminal_opens,
         user_scope: no_user_scope,
+        mcp_sign_ins: no_mcp_sign_ins,
     };
     fn openrouter_key(f: &Fixture, model: Option<&str>) {
         f.store
@@ -5672,6 +5684,7 @@ mod tests {
             board: no_board,
             start_terminal: terminal_must_not_open,
             user_scope: no_user_scope,
+            mcp_sign_ins: no_mcp_sign_ins,
         };
         let extra = vec!["--resume".to_string(), "it's; rm -rf ~".to_string()];
         let (_, script) = launch_full(
@@ -5836,6 +5849,7 @@ mod tests {
             board: no_board,
             start_terminal: terminal_must_not_open,
             user_scope: no_user_scope,
+            mcp_sign_ins: no_mcp_sign_ins,
         };
         let context = [
             (
@@ -6018,6 +6032,7 @@ mod tests {
             board: no_board,
             start_terminal: never,
             user_scope: no_user_scope,
+            mcp_sign_ins: no_mcp_sign_ins,
         };
         let resumed = Continuation {
             workflow_id: "wf_0123456789abcdef".into(),
@@ -6070,6 +6085,7 @@ mod tests {
             board: no_board,
             start_terminal: never,
             user_scope: fixture_scope,
+            mcp_sign_ins: no_mcp_sign_ins,
         };
         let resumed = Continuation {
             workflow_id: "wf_0123456789abcdef".into(),
@@ -6200,6 +6216,7 @@ mod tests {
             board: no_board,
             start_terminal: terminal_opens,
             user_scope: no_user_scope,
+            mcp_sign_ins: no_mcp_sign_ins,
         };
         let resumed = Continuation {
             workflow_id: "wf_0123456789abcdef".into(),

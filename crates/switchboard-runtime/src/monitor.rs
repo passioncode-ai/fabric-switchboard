@@ -714,6 +714,22 @@ async fn check_as(
     gate: &UsageGate,
     person: bool,
 ) -> Result<Usage, String> {
+    // SB-360: a turned-off account (one used on another machine included) is never checked:
+    // refused before any credential read, renewal, identity lookup or health write. Before,
+    // every check of one read its Keychain item twice behind the process-wide Keychain lock and
+    // marked it failed; a caller that refreshed every account did so for each turned-off one.
+    if store
+        .snapshot()?
+        .accounts
+        .iter()
+        .any(|a| a.id == id && !a.enabled)
+    {
+        crate::oplog::event(
+            "usage_check",
+            &[("outcome", crate::oplog::Field::Code("disabled"))],
+        );
+        return Err(switchboard_proxy::USAGE_DISABLED.into());
+    }
     // SB-311: a sign-in moved here without the provider's identity learns it first, so the
     // renewal below can run before its access token expires. Never under the owner transaction:
     // a caller that holds it passes no `lock`.
@@ -3334,6 +3350,56 @@ mod tests {
             assert_eq!(server.probes.load(Ordering::SeqCst), probes + 1);
             assert_eq!(server.grants.load(Ordering::SeqCst), grants, "no renewal");
             assert_eq!(state.sign_in_required(&store), vec![b]);
+        }
+
+        /// SB-360: a turned-off account is refused before anything is read: no credential read,
+        /// no request to the provider, no renewal and no usage health written; a person's check
+        /// and the background's answer the same.
+        #[tokio::test]
+        async fn a_turned_off_account_is_refused_without_reading_its_credential() {
+            static READS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+            fn counted(_: Duration) {
+                READS.fetch_add(1, Ordering::SeqCst);
+            }
+            let server = server(&[200], renewed()).await;
+            let (_root, store) = store();
+            let b = claude_seat(&store);
+            let label = store
+                .snapshot()
+                .unwrap()
+                .accounts
+                .into_iter()
+                .find(|a| a.id == b)
+                .unwrap()
+                .label;
+            store.update(&b, label, false).unwrap();
+            store.observe_vault_reads(counted);
+            let state = RefreshState::at(format!("{}/token", server.base));
+            let gate = gate(&server);
+            let lock = tokio::sync::Mutex::new(());
+            for person in [true, false] {
+                let answer = if person {
+                    check_by_person(&store, NATIVE, &state, &b, Some(&lock), &gate).await
+                } else {
+                    run(&store, &state, &b, &gate).await
+                };
+                assert_eq!(answer.unwrap_err(), switchboard_proxy::USAGE_DISABLED);
+            }
+            assert_eq!(READS.load(Ordering::SeqCst), 0, "no credential read");
+            assert_eq!(
+                server.probes.load(Ordering::SeqCst),
+                0,
+                "no provider request"
+            );
+            assert_eq!(server.grants.load(Ordering::SeqCst), 0, "no renewal");
+            let account = store
+                .snapshot()
+                .unwrap()
+                .accounts
+                .into_iter()
+                .find(|a| a.id == b)
+                .unwrap();
+            assert!(account.usage_health.is_none(), "no health written");
         }
 
         /// B-5 fix cycle 1 (clock skew): a Codex 401 within five minutes of the token's local
