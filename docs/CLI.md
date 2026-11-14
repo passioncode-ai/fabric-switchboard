@@ -52,6 +52,8 @@ switchboard accounts send ACCOUNT_UUID --to member@vm --pool acme --operator-sai
 switchboard accounts move ACCOUNT_UUID --pool agents                  # a project's pool, or default (SB-122)
 switchboard accounts remove ACCOUNT_UUID                # MCP switchboard_account_remove (SB-328); refused while its group has it selected
 switchboard --json events
+switchboard events --kind errors --account ACCOUNT_UUID --limit 50   # SB-373: one kind (switches, sign_ins, groups, moves, errors, other) and one account
+switchboard events --before 1763100000                 # SB-373: older events; a page that leaves older ones prints the next --before on stderr
 ```
 
 ### Organizations (SB-158)
@@ -253,7 +255,7 @@ switchboard --json status
 switchboard --json activity
 ```
 
-Without an ID, usage reads cached observations; an ID requests a provider check, refused without a request while a wait the provider asked for lasts (SB-39; [ACCOUNTS-AND-ROTATION](ACCOUNTS-AND-ROTATION.md)). Human output prints times as RFC 3339 UTC, marks an observation older than 900 seconds as stale (the idle quota cadence plus slack, SB-48; rotation judges by its policy's `--max-age`) and shows the last check's health (`ok`, `failed`, `unavailable` or `not checked`) with the next check time; `events` prints RFC 3339 times too. `--json` output keeps Unix seconds (`human_usage_and_events_print_utc_times_and_health`). Unsupported/unknown quota is an error or unknown state, never zero. The human percentage is the account's own; a Codex feature limit is listed in `--json` and MCP (`scope: feature`) but does not count toward it (SB-40). API billing is not subscription utilization.
+Without an ID, usage reads cached observations; an ID requests a provider check, refused without a request while a wait the provider asked for lasts (SB-39; [ACCOUNTS-AND-ROTATION](ACCOUNTS-AND-ROTATION.md)). Human output prints times as RFC 3339 UTC, marks an observation older than 900 seconds as stale (the idle quota cadence plus slack, SB-48; rotation judges by its policy's `--max-age`) and shows the last check's health (`ok`, `failed`, `unavailable` or `not checked`) with the next check time; `events` prints RFC 3339 times too, oldest first; `--kind`, `--account`, `--before` (Unix seconds, exclusive) and `--limit` (1 to 500; without it every event the journal holds) page it as the window and `switchboard_events` do ([CONTRACTS](CONTRACTS.md#activity-by-kind-and-page-sb-373)). `--json` output keeps Unix seconds (`human_usage_and_events_print_utc_times_and_health`). Unsupported/unknown quota is an error or unknown state, never zero. The human percentage is the account's own; a Codex feature limit is listed in `--json` and MCP (`scope: feature`) but does not count toward it (SB-40). API billing is not subscription utilization.
 
 `--json` writes `{ "ok": true, "data": ... }` to stdout on success and `{ "ok": false, "error": "..." }` to stderr on failure. Exit status is 0 for success, 1 for an operational failure and 2 for invalid arguments. `--help` succeeds without touching the vault. Do not log stdin or treat parser diagnostics as a place to print credentials. Output never includes the control capability, provider token, credential JSON or provider request/response payload. The [CLI implementation and integration fixtures](../crates/switchboard-cli/src/main.rs) define this envelope.
 

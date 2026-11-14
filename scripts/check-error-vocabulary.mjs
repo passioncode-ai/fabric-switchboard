@@ -138,6 +138,11 @@ const ALLOWLIST = {
   // runtime lib.rs call_within(): the CLI's and switchboard mcp's way to the owner (SB-181); the
   // window talks to its own owner in process and never comes through it.
   'Operation unavailable.': 'CLI and MCP only: an operation that cannot be serialized (SB-181)',
+  // core activity.rs and src-tauri events_filter (SB-373): the window's Activity filter row sends
+  // only its own kinds and numbers, so these refuse a caller's typo (CLI, MCP) or a renderer
+  // defect, never something the person chose.
+  'kind is one of switches, sign_ins, groups, moves, errors or other.': 'SB-373: the window sends only its own kinds; CLI and MCP print it',
+  'before is Unix seconds, limit a whole number and account_id an account id.': 'SB-373: the window sends only numbers and ids it read; a renderer defect otherwise',
   'Invalid secret': 'internal: callers pass a vault item they created and a token PassionCode.ai issued (SB-159)',
   'Unknown action': 'the window sends only its own fixed actions (SB-159)',
   'Could not save the new capability.': 'RotatePoolCapability: CLI `project rotate-capability` only; the window has no such action',

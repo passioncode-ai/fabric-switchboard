@@ -1277,8 +1277,8 @@ disabled}`, `Operation::{AgentsOverview, AgentEnable, AgentDefault, OpenrouterMo
   argument vector and `command` the same joined for display: the program and the arguments of an OpenRouter launch with the key's default model, never a key or
   an environment value. `default_ready` says whether the saved default is installed, enabled and
   can take over work; it does not check that the OpenRouter key is saved or that an account has
-  room now: `continue` checks those and refuses by name. `dispatch_agent` (SB-294) is the agent `switchboard dispatch` would start now: the default when it is Claude Code or Codex and enabled; with *Auto*, Claude Code when its headless program is here and it is not disabled, else Codex; else null (`dispatch::default_agent`, the same function `dispatch` calls). `revision` (16 hex digits of a SHA-256 over the default, `default_ready`, `dispatch_agent` and the
-  rows) changes whenever the answer does, so a reader can cache by it; `updated_at` is when the
+  room now: `continue` checks those and refuses by name. `dispatch_agent` (SB-294) is the agent `switchboard dispatch` would start now: the default when it is Claude Code or Codex and enabled; with *Auto*, Claude Code when its headless program is here and it is not disabled, else Codex; else null (`dispatch::default_agent`, the same function `dispatch` calls). `revision` (16 hex digits of a SHA-256 over the default, `default_ready`, `dispatch_agent`, the
+  rows and, since SB-372, `permissions`) changes whenever the answer does, so a reader can cache by it; `updated_at` is when the
   person last changed the settings (Unix seconds, null before the first change). Fabric reads
   this answer; `schema` changes only when a field changes meaning or goes. `id`s are the catalog's
   (`switchboard agents list`). The agent's own version is not read (it would start every agent's
@@ -3109,3 +3109,79 @@ WF-1.3). Code: [parity.rs](../src-tauri/src/parity.rs), a test module of the win
   check honest both ways.
 - **One direction only.** MCP may do more than the window; a tool with no window control needs
   nothing here. A new window command lands with its row in the same change.
+
+## Activity by kind and page (SB-373)
+
+The activity journal (`Snapshot.events`, at most 256, oldest first) read a page at a time
+(WF-11.1). Code: [activity.rs](../crates/switchboard-core/src/activity.rs).
+
+- **One page, three doors.** `switchboard_core::activity::page(events, filter)` cuts the page from
+  the journal of `Operation::Snapshot`, which every owner answers, so an owner older than the
+  client answers the filters too. The window's Tauri command `events`, MCP `switchboard_events`
+  and CLI `switchboard events` call it. Arguments: `kind?` (one of `KINDS`), `account_id?`,
+  `before?` (Unix seconds, exclusive) and `limit?` (default 50, clamped to 1 to 500, never
+  refused). Tauri takes `account_id` and also `accountId`, the window's usual spelling; a wrong
+  type is refused with `EVENTS_ARGUMENTS`. An unknown kind is refused with `KIND_INVALID`.
+- **Answer.** `{"events": [...], "next_before": number|null, "kinds": [string]}`. `events` are
+  the journal's own objects (`{at, action, account_id, detail}`, nothing added), newest first;
+  events of one second keep the journal's order, newest stored first. A page never splits a
+  second: it holds `limit` events and every other matching event of the second it ends in, so
+  `next_before` (that second) loses none; it is null when nothing older matches. `kinds` names
+  every kind present in the whole journal, whatever the filter, in the order of `KINDS`.
+- **Kinds.** Every event has one class from its `action` (`activity::class_of`):
+
+  | Kind | Actions |
+  |---|---|
+  | `switches` | `account_selected`, `rotation`, `activation`, `fallback` |
+  | `sign_ins` | `login`, `account_added`, `kimi_account` |
+  | `groups` | `project`, `project_rule`, `balancing` |
+  | `moves` | `machine`, `assignment` |
+  | `other` | every other action (`account_updated`, `account_removed`, `usage`, `request`, `proxy`, `agent_key`, `organization`, `fallback_chain`, `launch`), and an action added later until it is named |
+
+  `errors` takes any event whose `detail` says it failed (`activity::is_failure`: `failed`,
+  `unavailable`, `unauthorized`, `rate_limited`, `upstream_error`, `network_error`, `aborted`,
+  `connection_failed`, `timeout`, `rejected`, `4xx`, `5xx`), of every class; a failed event
+  stays in its class filter too. A move to another machine journals `account_updated` (the mark)
+  and `machine joined`; a call back `machine left`; so only the `machine` line is a move.
+- **CLI.** `switchboard events [--kind K] [--account ID] [--before N] [--limit N]`: without
+  `--limit` every event the journal holds, as before; printed and `--json` data still a list,
+  oldest first. When older events match, `Older activity: switchboard events --before N` goes to
+  standard error.
+- Tests: `activity::tests::*` (every action of `event_valid` has one class, paging reaches every
+  event once and never splits a second), `events_filter_reads_both_spellings_and_refuses_wrong_types`
+  (window), `accounts_rotation_activity_and_queues_are_reachable_over_mcp`,
+  `human_usage_and_events_print_utc_times_and_health` (CLI).
+
+## Agent permissions in the window (SB-372)
+
+WF-10.1: the window's Tauri command `agents_overview` (`Operation::AgentsOverview`) already
+answers `permissions` (`bypass` or `ask`), as `switchboard_agents` does; the overview's `revision`
+now covers it. The Tauri command `agent_permissions {permissions}` runs
+`Operation::AgentPermissions` exactly as `switchboard_agent_set` with `permissions` does and answers
+`{"permissions": "bypass"|"ask"}`; anything else is refused with `PERMISSIONS_INVALID`. Parity row:
+`agent_permissions` to `switchboard_agent_set`. Test
+`agent_settings::tests::the_overview_names_the_permission_mode_and_its_revision_follows_it`.
+
+## Accounts given to agents (SB-364)
+
+WF-2.4. Code: [given.rs](../crates/switchboard-runtime/src/given.rs).
+
+- **Doors.** `Operation::GivenAccounts` (read-only, outside the owner transaction), the Tauri
+  command `given_accounts`, and MCP `switchboard_accounts`, whose row of an account given to an
+  agent carries the same object as `assigned` (absent on every other row). MCP builds it from
+  the owner's snapshot and the launch records in its own data folder, so an owner older than the
+  client still answers it. Parity row: `given_accounts` to `switchboard_accounts`.
+- **Answer.** `{"accounts": [{"account_id", "agent", "machine", "last_launch", "last_activity"}]}`
+  for every account with `assigned_to`, in the snapshot's order. `agent` is `assigned_to`;
+  `machine` the name of the machine group the account sits in, else its saved `location`, else
+  null; `last_launch` `{"pool", "folder", "at"}` (the record's `pool`, `working_directory` and
+  `launched_at`) of the newest launch record (`launches/`, by `launched_at`, any state, ended
+  included) whose `account_id` is the account, else null; `last_activity` the newest of that
+  record's `launched_at`, `last_turn_at` and `ended_at` and the account's `usage.observed_at`,
+  else null. Unix seconds throughout.
+- **Machine.** An account given to an agent is never marked used elsewhere (giving clears the
+  mark, `Store::assign_to_agent`), and machine groups and `location` belong to marked accounts,
+  so `machine` is null for every account today; the field is there for the window's row.
+- **Cost.** Nothing given: no record read. Otherwise one read of the launch records (each file
+  answered from memory while unchanged, SB-347).
+- Tests: `given::tests::*`, `accounts_rotation_activity_and_queues_are_reachable_over_mcp`.
