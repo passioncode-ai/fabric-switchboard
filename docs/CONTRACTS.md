@@ -1159,9 +1159,10 @@ through `project suggest --from-hook` and `recovery hook`, MCP `switchboard_sess
   The session's script exports `SWITCHBOARD_LAUNCH_ID=<launch_id>`; the variable is in the
   scrubbed list, so one inherited from a caller never reaches a session that has its own.
 - **`launched_by`**, every key present, null when unknown: `surface` (`window`, `cli`, `mcp`,
-  `fallback`, `recovery`, `dashboards`; `mcp` is reserved, since no MCP tool launches a session
-  yet, and `dashboards` and `recovery` are written only when the caller passes `--surface
-  dashboards` or `--surface recovery`), `caller_launch_id` (the `SWITCHBOARD_LAUNCH_ID` of the
+  `fallback`, `recovery`, `dashboards`, `fabric`; `mcp` is reserved, since no MCP tool launches a
+  session yet, `dashboards` and `recovery` are written only when the caller passes `--surface
+  dashboards` or `--surface recovery`, and `fabric` by `switchboard dispatch` (SB-247) or a caller
+  passing `--surface fabric`, Fabric's own consoles since 0.7.84 (Fabric CO-584)), `caller_launch_id` (the `SWITCHBOARD_LAUNCH_ID` of the
   process that ran `switchboard`, when it is a launch id), `caller_project` (the pool of the group
   holding the caller's folder; the folder itself is never stored), `caller_program` (the parent
   process's name from the kernel, the first word without its folder, at most 64 safe characters,
