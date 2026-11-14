@@ -143,7 +143,7 @@ Banner on Accounts until dismissed, and About “Provider terms”: “Use Switc
 
 ### Repositories on disk (SCN-064)
 
-“Repositories on disk”, “Show repositories” / “Hide repositories”, “Every Git repository under the folders you choose, with the groups it is in. Add one to a group, or move it with its worktrees and clones to another.”, “Look under”, “~/DATA, or your home folder”, “Look again”, “Not in a group ({n})”, “All ({n})”, “Every repository here is in a group.”, “No Git repositories here.”, “Add to group…”, “Move…”, “Also add…”, “Choose where “{name}” goes. Its worktrees and clones go with it.”, “{name} added to group “{project}”.”, “{name} moved to group “{project}”.”
+“Repositories on disk”, “Every Git repository under the folders you choose, with the groups it is in. Add one to a group, or move it with its worktrees and clones to another.”, “Look under”, “~/DATA, or your home folder”, “Look again”, “Not in a group ({n})”, “All ({n})”, “Every repository here is in a group.”, “No Git repositories here.”, “Add to group…”, “Move…”, “Also add…”, “Choose where “{name}” goes. Its worktrees and clones go with it.”, “{name} added to group “{project}”.”, “{name} moved to group “{project}”.”
 
 ### Organizations (SCN-069, SCN-070, SCN-071)
 
@@ -177,7 +177,7 @@ and “Only the Switchboard window answers as the window. …” (`crates/switch
 
 ### API keys (SB-144, SCN-045, SCN-065; named Tokens until 0.6.82)
 
-“OpenRouter keys”, “Machine key · OpenRouter”, “Group keys”, “Give a group its own key, for example a client's, and agents started in its folders spend that key; the others keep the machine's.”, “Own key · {model}”, “Uses the machine's key”, “No key: agents here cannot start on OpenRouter”, “Add key…”, “Change model”, “Replace key”, “Remove key”, “Add an OpenRouter key”, “Create a key on openrouter.ai/settings/keys; a spending limit on it caps what agents can spend.”, “Starts with sk-or-. Switchboard never shows it again.”, “Save key”, “Recommended models”, “{n} OpenRouter models that can call tools: type to search, or enter any id.”, “OpenRouter's list is unavailable now; the recommended models and typed ids still work.”, platform notes “The key stays in the Keychain; an agent receives it only when it starts.” (Windows Credential Manager and Secret Service variants); pointer from Agents “The machine's OpenRouter key and each group's own key are under API keys.” and “Open API keys”; the agent launch dialog without a key “Save an OpenRouter key under API keys first; then {agent} launches on it.” with “Open API keys”.
+“OpenRouter keys”, “Group keys”, “Give a group its own key, for example a client's, and agents started in its folders spend that key; the others keep the machine's.”, “Own key · {model}”, “Uses the machine's key”, “No key: agents here cannot start on OpenRouter”, “Add key…”, “Change model”, “Replace key”, “Remove key”, “Add an OpenRouter key”, “Create a key on openrouter.ai/settings/keys; a spending limit on it caps what agents can spend.”, “Starts with sk-or-. Switchboard never shows it again.”, “Save key”, “Recommended models”, “{n} OpenRouter models that can call tools: type to search, or enter any id.”, “OpenRouter's list is unavailable now; the recommended models and typed ids still work.”, platform notes “The key stays in the Keychain; an agent receives it only when it starts.” (Windows Credential Manager and Secret Service variants); pointer from Agents “The machine's OpenRouter key and each group's own key are under API keys.” and “Open API keys”; the agent launch dialog without a key “Save an OpenRouter key under API keys first; then {agent} launches on it.” with “Open API keys”.
 
 ### Statistics (SB-145, SB-147, SB-157, SCN-067)
 
@@ -220,6 +220,7 @@ No longer shown by the window (absent from `node scripts/check-locale.mjs --list
 
 - Projects as the page name (0.6, replaced by Groups, SB-146): “+ New project”, “Give a project its own accounts, and keep other projects off them.”, “Project name”, “Create project”, “Save project”, “No projects yet”.
 - Tour: “Step {n} of 5” (now “Step {step} of {total}”).
+- Wave 2 of the window and fleet plan (SB-369, SB-370, 2026-11-14): “Show repositories” and “Hide repositories” (the disk map is now a folding section); “Machine key · OpenRouter” (the API keys page names its blocks).
 - Sign-in banner: “Signing in to Claude Code” (now “Signing in to {provider}”); “Finish sign-in” (the window finishes on its own); “Finish or close sign-in in Terminal before cancelling.” and its Kimi variant (SB-83).
 - Updates: “Version {current} is the latest. …” (now `{version}`), “Update check finished.”
 - Backups: “{n} accounts restored · {k} already here” (now “{n} accounts restored”, “{n} already here”).
