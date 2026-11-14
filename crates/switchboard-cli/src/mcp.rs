@@ -30,6 +30,81 @@ pub struct Server {
     client: std::sync::Mutex<Option<String>>,
     /// Whether this server already recorded its proving call.
     proved: std::sync::atomic::AtomicBool,
+    /// The program file this server started from (SB-375), to notice an update replacing it.
+    program: Option<Program>,
+}
+
+/// The program file a server started from, how it was started and the file's stamp then.
+///
+/// SB-375 (board finding `d7d80efc`, 2026-11-14): an agent host keeps one `switchboard mcp`
+/// for the whole session, so after an update it went on answering with the old code (on the
+/// operator's MacBook a server started the day before saw 2 of 37 sessions, the CLI 37). Once
+/// the file is replaced, each call goes to a fresh process of the new program instead.
+struct Program {
+    path: PathBuf,
+    args: Vec<std::ffi::OsString>,
+    stamp: Stamp,
+}
+
+/// What tells two program files apart: size and modification time, and the inode on Unix
+/// (an update renames a new file over the old one).
+type Stamp = (u64, Option<std::time::SystemTime>, u64);
+
+fn stamp_of(path: &std::path::Path) -> Option<Stamp> {
+    let meta = std::fs::metadata(path).ok()?;
+    #[cfg(unix)]
+    let inode = std::os::unix::fs::MetadataExt::ino(&meta);
+    #[cfg(not(unix))]
+    let inode = 0;
+    Some((meta.len(), meta.modified().ok(), inode))
+}
+
+impl Program {
+    fn here() -> Option<Self> {
+        let path = std::env::current_exe().ok()?;
+        let stamp = stamp_of(&path)?;
+        Some(Self {
+            path,
+            args: std::env::args_os().skip(1).collect(),
+            stamp,
+        })
+    }
+    /// The file now differs from the one this server started from. A file that cannot be read
+    /// (an uninstalled app) is not a replacement: this server keeps answering.
+    fn replaced(&self) -> bool {
+        stamp_of(&self.path).is_some_and(|now| now != self.stamp)
+    }
+    /// One message answered by a fresh process of the program file as it is now; `None` when
+    /// that process could not run or answered nothing, and this server answers itself.
+    async fn forward(&self, message: &Value) -> Option<Value> {
+        use std::process::Stdio;
+        let mut child = tokio::process::Command::new(&self.path)
+            .args(&self.args)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .kill_on_drop(true)
+            .spawn()
+            .ok()?;
+        let mut line = message.to_string().into_bytes();
+        line.push(b'\n');
+        let mut stdin = child.stdin.take()?;
+        stdin.write_all(&line).await.ok()?;
+        drop(stdin);
+        let mut out = Vec::new();
+        child
+            .stdout
+            .take()?
+            .take(LINE_LIMIT)
+            .read_to_end(&mut out)
+            .await
+            .ok()?;
+        let _ = child.wait().await;
+        out.split(|b| *b == b'\n')
+            .find(|l| !l.iter().all(u8::is_ascii_whitespace))
+            .and_then(|l| serde_json::from_slice::<Value>(l).ok())
+            .filter(Value::is_object)
+    }
 }
 
 pub(crate) fn now() -> i64 {
@@ -180,6 +255,7 @@ impl Server {
             read_only,
             client: std::sync::Mutex::new(None),
             proved: std::sync::atomic::AtomicBool::new(false),
+            program: Program::here(),
         }
     }
     async fn call(&self, operation: Operation) -> Result<Value, String> {
@@ -1565,6 +1641,14 @@ impl Server {
             return id.map(|id| error(id, -32600, "Invalid request."));
         };
         let id = id?; // Notifications (initialized, cancelled) need no answer.
+                      // SB-375: an update replaced the program file; its code answers tools and calls.
+        if matches!(method, "tools/list" | "tools/call") {
+            if let Some(program) = self.program.as_ref().filter(|p| p.replaced()) {
+                if let Some(reply) = program.forward(&message).await {
+                    return Some(reply);
+                }
+            }
+        }
         let params = message.get("params").cloned().unwrap_or(json!({}));
         Some(match method {
             "initialize" => {
