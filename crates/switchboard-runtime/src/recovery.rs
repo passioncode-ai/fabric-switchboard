@@ -702,6 +702,13 @@ pub(crate) fn status(
         .map(|r| r.session.as_str())
         .collect();
     let launched = crate::launches::by_session(root, &open);
+    // SB-376: a stop whose session still runs in a live process says so; a host that would start
+    // it again in another process must not.
+    let live = if open.is_empty() {
+        Default::default()
+    } else {
+        crate::machine_sessions::live_sessions(root)
+    };
     let sessions: Vec<_> = rows
         .iter()
         .map(|r| {
@@ -712,7 +719,9 @@ pub(crate) fn status(
                 .map_or((None, None), |(l, t)| (Some(l), t));
             serde_json::json!({"stop": r, "ready": ready.mode.is_some(), "mode": ready.mode,
                 "candidates": ready.accounts, "probe_at": ready.probe_at, "reason": ready.reason,
-                "launch_id": launch_id, "transcript": transcript})
+                "launch_id": launch_id, "transcript": transcript,
+                "live": open.contains(r.session.as_str()).then(|| live.get(&r.session)).flatten()
+                    .map(|(pid, status)| serde_json::json!({"pid": pid, "status": status}))})
         })
         .collect();
     let ready = sessions.iter().filter(|r| r["ready"] == true).count();
