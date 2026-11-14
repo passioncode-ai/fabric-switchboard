@@ -779,15 +779,15 @@ mod tests {
     #[test]
     fn homes_lists_the_ordinary_one_then_switchboards_claude_homes() {
         let root = tempfile::tempdir().unwrap();
-        for dir in [
-            "homes/acc-1",
-            "homes/acc-2",
-            "runtimes/claude-agents",
-            "runtimes/codex-default",
-            "shell/claude-org",
-            "shell/codex-org",
+        for (parent, dir) in [
+            ("homes", "acc-1"),
+            ("homes", "acc-2"),
+            ("runtimes", "claude-agents"),
+            ("runtimes", "codex-default"),
+            ("shell", "claude-org"),
+            ("shell", "codex-org"),
         ] {
-            std::fs::create_dir_all(root.path().join(dir)).unwrap();
+            std::fs::create_dir_all(root.path().join(parent).join(dir)).unwrap();
         }
         let found = homes(
             root.path(),
@@ -804,7 +804,8 @@ mod tests {
         );
         assert_eq!(
             found[1].service,
-            service_of(&root.path().join("homes/acc-2"))
+            // The path a launch names the home by (`root.join("homes").join(id)`), on every platform.
+            service_of(&root.path().join("homes").join("acc-2"))
         );
     }
 }

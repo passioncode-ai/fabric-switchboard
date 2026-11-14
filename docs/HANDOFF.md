@@ -2,7 +2,7 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
-## 2026-11-14: audit after 0.7.76; the architect's blocking gap (SB-217); MCP sign-ins carried into launched homes (SB-358, SB-359); machine sessions see npm Claude Code (SB-353); usage checks of turned-off accounts (SB-360); 0.7.77
+## 2026-11-14: audit after 0.7.76; the architect's blocking gap (SB-217); MCP sign-ins carried into launched homes (SB-358, SB-359); machine sessions see npm Claude Code (SB-353); usage checks of turned-off accounts (SB-360); 0.7.78
 
 - **Asked.** The operator (2026-11-14): restore the last work, audit it, collect bugs and gaps, and finish autonomously to the last release, checking the board and the North Star.
 - **Audit.** 0.7.76 released and installed here (`switchboard 0.7.76`, owner started 2026-11-13 22:23:43Z). SB-347 confirmed and closed (`recovery` 0.03 s, `sessions` 0.06 s, no `control_slow` since that start). SB-355 confirmed (`machine_groups placed 16 unplaced 1`; then 13 accounts in three machine groups after three recorded agent recalls). Released rows still `in review` closed with receipts (SB-326, SB-328, SB-334, SB-335). The log since the start held no error; 270 of the last 300 `usage_check` lines were `outcome: disabled` (SB-360). The releases 0.7.72 to 0.7.75 failed once each on Apple's expired agreement (notarize 403) or a cancelled nightly; 0.7.76's release and nightly passed.
@@ -13,7 +13,9 @@
 - **Checks.** `cargo test -p switchboard-runtime --lib` here: 962 passed, 0 failed. The new SB-360 test fails without the fix. The full gate on the Mac Studio and Linux clippy in a container: see the release PR.
 - **Open.** The operator's global rule (MCP sign-in per home, measured 2026-11-13) states the stub reading as fact; this entry and the research note hold the correction. SB-352 wave 3, SB-353, SB-342 H-2, SB-357, SB-350 (the architect's judged audit, due 2026-11-15).
 
-**Exact next task.** After the app restarts on 0.7.77, launch one Claude session through Switchboard and read `switchboard mcp-homes`: the launched home's Figma entry `signed_in: true` with `own: false`, and an `mcp_sign_ins carried` line in the log; then take SB-352 wave 3.
+- **Release.** The tag `v0.7.77` (`d8e4762b`) failed its nightly on Windows only: `homes_lists_the_ordinary_one_then_switchboards_claude_homes` joined `homes/acc-2` with a forward slash, so its Keychain service name differed from the one `read_dir` gave. The test now joins each part; the same changes ship as 0.7.78 and 0.7.77 stays unpublished.
+
+**Exact next task.** After the app restarts on 0.7.78, launch one Claude session through Switchboard and read `switchboard mcp-homes`: the launched home's Figma entry `signed_in: true` with `own: false`, and an `mcp_sign_ins carried` line in the log; then take SB-352 wave 3.
 
 ## 2026-11-13: MCP sign-ins are per Claude home (board request from riffly, SB-358, SB-359)
 
