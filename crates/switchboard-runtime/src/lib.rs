@@ -49,6 +49,7 @@ mod refresh;
 pub mod remote_check;
 pub mod remote_dispatch;
 pub mod remote_usage;
+pub mod capacity;
 pub mod roots;
 pub mod seats;
 pub mod self_update;
@@ -359,6 +360,14 @@ pub enum Operation {
     Machines {
         #[serde(default)]
         live: bool,
+    },
+    /// SB-378: this computer's cap on live coding sessions: the cap, what counts and what is
+    /// free; `cap` sets it, `clear` removes it.
+    Capacity {
+        #[serde(default)]
+        cap: Option<u32>,
+        #[serde(default)]
+        clear: bool,
     },
     /// SB-365 (WF-3.1, DEC-0015): what needs a person, each with its reason and the action that
     /// fixes it. A view: nothing moves, the accounts stay in their groups.
@@ -1367,6 +1376,8 @@ impl Runtime {
                 // SB-355: `ssh -G` and the live reads run outside the store; its writes are
                 // their own short calls.
                 | Operation::Machines { .. }
+                // SB-378: the process table and its own small file.
+                | Operation::Capacity { .. }
                 // SB-365: the snapshot, the owner's sign-in verdicts in memory, seats.jsonl and
                 // spend.json; nothing is written.
                 | Operation::Attention
@@ -4506,6 +4517,14 @@ async fn dispatch_start(
             timeout_minutes,
         );
     }
+    // SB-378: a run here waits while this computer's session pool is full; a run on another
+    // machine counts against that machine's pool.
+    if let Some(pool) = blocking::run(|| capacity::full(root)) {
+        let mut refusal = dispatch::refused(Some(&agent), dispatch::AT_CAPACITY);
+        refusal["used"] = pool["used"].clone();
+        refusal["cap"] = pool["cap"].clone();
+        return Ok(refusal);
+    }
     let Ok(id) = fallback::account_for_default(
         runtime,
         &agent,
@@ -6022,6 +6041,16 @@ async fn execute(
                 moved["cli_switched_to"] = cli_switched_to;
             }
             Ok(moved)
+        }
+        Operation::Capacity { cap, clear } => {
+            if clear && cap.is_some() {
+                return Err(capacity::CAP_INVALID.into());
+            }
+            if clear || cap.is_some() {
+                capacity::set(root, cap)?;
+            }
+            let root = root.to_owned();
+            blocking::run(move || capacity::status(&root))
         }
         Operation::Machines { live } => {
             let snapshot = store.snapshot()?;

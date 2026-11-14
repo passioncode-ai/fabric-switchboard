@@ -24,6 +24,8 @@ const EXCLUDED_FILES = {
   // Host/CLI-only operations; no Tauri command exposes these registries.
   'crates/switchboard-runtime/src/recovery.rs': 'CLI-only recovery protocol; no renderer caller',
   'crates/switchboard-runtime/src/handovers.rs': 'CLI-only hand-over queue; no renderer caller',
+  // SB-378: the session pool is read and set by the CLI and MCP only; `launch --hosted` is CLI-only.
+  'crates/switchboard-runtime/src/capacity.rs': 'CLI/MCP-only session pool; no renderer caller',
   // Automatic fallback logs fixed outcome codes and never returns these errors to a renderer.
   'crates/switchboard-runtime/src/fallback.rs': 'background fallback only; errors become outcome codes',
   // SB-82: the fallback's walk record. A write that fails is logged (`fallback` walk unwritten), never returned.

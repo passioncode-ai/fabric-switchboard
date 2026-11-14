@@ -38,6 +38,10 @@ const OWNED: &[&str] = &[
     "balancing.jsonl",
     // The record of the one pass that placed accounts used elsewhere in machine groups (SB-355).
     "machine-groups.json",
+    // The last background read of the machine groups' accounts (SB-366).
+    "remote-usage.json",
+    // This computer's cap on live coding sessions (SB-378).
+    "capacity.json",
     "statistics.json",
     // Usage analytics' own state, Switchboard's switch and the notice's acknowledgement included
     // (SB-246): uninstalling forgets both, and the notice returns at the next first start.

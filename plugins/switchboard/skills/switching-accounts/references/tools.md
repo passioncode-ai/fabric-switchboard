@@ -13,7 +13,7 @@ names and fields call rotation. Say group and automatic switching to the person.
 
 `switchboard mcp --read-only` lists only the 24 tools that read (every tool under
 [Read tools](#read-tools)) and none of the 24 that write. A session Switchboard launches in
-isolated mode gets that set. The server lists 75 tools; each has a section below.
+isolated mode gets that set. The server lists 76 tools; each has a section below.
 
 ## Contents
 
@@ -668,6 +668,18 @@ Only when the operator asks. `enabled` (with `agent`) lets Switchboard hand work
 or keeps it away; `default` sets the machine's default agent (an id, or null for Auto);
 `permissions` (`bypass`, the default, or `ask`) chooses whether the Claude Code and Codex
 sessions Switchboard starts bypass their permission prompts (SB-298).
+
+### `switchboard_capacity`: `cap?`, `clear?`
+
+This computer's cap on live coding sessions (SB-378). Without arguments it reads:
+`{cap, used, free, at_capacity, total, quiet, counted, quiet_after_minutes, observed_at, degraded}`.
+`used` counts the live Claude Code and Codex processes of this user, Switchboard's or not, whose
+folder's transcripts were written in the last 30 minutes; quiet ones are not counted. `cap` (1 to
+500) sets the cap and `clear: true` removes it; change it only when the operator asks. While
+`used` reaches `cap`, `switchboard dispatch` answers `state: refused`, `reason: at_capacity` with
+`used` and `cap`, and `launch --hosted` is refused with "At capacity: …": a wait, not a failed run.
+Ask again when a session ends. A process table that could not be read admits the start and is
+named in `degraded`.
 
 ### `switchboard_balance`: `add?`, `remove?`, `all_new?`, `backup_add?`, `backup_remove?`
 
