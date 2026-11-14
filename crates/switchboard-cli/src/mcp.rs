@@ -55,7 +55,7 @@ pub(crate) fn tools() -> Vec<(bool, Value)> {
     let account = json!({"type":"string","description":"Account id from switchboard_accounts."});
     vec![
         (false, json!({"name":"switchboard_status","title":"Switchboard status","description":"Who handles this session's requests: runtime state, this session (managed in a group, isolated, or native), the signed-in CLI accounts, the selected account per group, active folder rules and automatic switching. Call this first.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}})),
-        (false, json!({"name":"switchboard_accounts","title":"Switchboard accounts","description":"Stored accounts without credentials: label, provider, group id (pool) and every group it serves (groups), whether selected or signed in now, the lowest remaining quota, the organization each belongs to (null: personal) with what decided it (person or provider), the organizations it also works for, and whether it is used on another machine (elsewhere) with where (location), and the agent it is given to (assigned_to, null when none: Switchboard keeps observing its usage but never uses it by itself). machine: here or elsewhere lists only those.","inputSchema":{"type":"object","properties":{"provider":{"type":"string","enum":["claude","codex"]},"machine":{"type":"string","enum":["here","elsewhere"]}},"additionalProperties":false}})),
+        (false, json!({"name":"switchboard_accounts","title":"Switchboard accounts","description":"Stored accounts without credentials: label, provider, group id (pool) and every group it serves (groups), whether selected or signed in now, the lowest remaining quota, the organization each belongs to (null: personal) with what decided it (person or provider), the organizations it also works for, and whether it is used on another machine (elsewhere) with where (location), and the agent it is given to (assigned_to, null when none: Switchboard keeps observing its usage but never uses it by itself), with assigned on such a row: the machine it runs on, the group, folder and time of the newest launch on it, and its last activity. machine: here or elsewhere lists only those.","inputSchema":{"type":"object","properties":{"provider":{"type":"string","enum":["claude","codex"]},"machine":{"type":"string","enum":["here","elsewhere"]}},"additionalProperties":false}})),
         (false, json!({"name":"switchboard_usage","title":"Remaining usage","description":"Remaining quota per account and window, with reset times and how fresh each observation is. Unknown is not zero. A window with scope feature limits one metered feature only; lowest_remaining_percent covers the account's own windows. refresh asks the provider for one account; within 60 seconds of its last check it returns that observation with a note, and until the time the provider asked for after answering a check with 429 it is refused; for an inactive Claude account it may first renew that account's expired sign-in inside Switchboard. A read-only server never asks and shows the stored observation. No credential is returned.","inputSchema":{"type":"object","properties":{"account_id":account,"refresh":{"type":"boolean","default":false}},"additionalProperties":false}})),
         (false, json!({"name":"switchboard_attention","title":"What needs attention","description":"Accounts and questions that need a person, each with its reason and the action that fixes it: reason sign_in, seat_ended (an organization's seat ended) or renewal_refused (fix with switchboard_login), usage_failing (no usage check succeeded for over an hour; switchboard_usage with refresh), move_unknown (a move to another machine lost its answer; switchboard_remote, then switchboard_account_recall) or ceiling_question (a reached spending ceiling waits for keep or double; switchboard_ceiling_answer). Each item names account_id, label, provider and pool (null for a ceiling), since (Unix seconds, or null) and action.tool. A view: every account listed stays in its group, and nothing moves. Reads only.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}})),
         (true, json!({"name":"switchboard_switch","title":"Switch account","description":"Choose the account for the next request. target session (default) switches this managed session; route selects the account in its own group for every managed session of that group; claude_cli changes the ordinary Claude Code login for every claude session on this machine and requires global: true. A response already streaming keeps its account. An account given to an agent (assigned_to) is refused unless force: true, only when the operator asks to use it anyway.","inputSchema":{"type":"object","properties":{"account_id":account,"target":{"type":"string","enum":["session","route","claude_cli"],"default":"session"},"global":{"type":"boolean","default":false},"force":{"type":"boolean","default":false,"description":"Use an account given to an agent anyway; the activity records it."}},"required":["account_id"],"additionalProperties":false}})),
@@ -76,7 +76,7 @@ pub(crate) fn tools() -> Vec<(bool, Value)> {
         (true, json!({"name":"switchboard_github_clone","title":"Clone a GitHub repository","description":"Clone one repository with the person's own gh into an absolute folder that does not exist yet, as the window's GitHub page does. Only when the operator asks.","inputSchema":{"type":"object","properties":{"owner":{"type":"string","minLength":1,"maxLength":100},"name":{"type":"string","minLength":1,"maxLength":100},"into":{"type":"string","minLength":1,"description":"An absolute folder that does not exist yet."}},"required":["owner","name","into"],"additionalProperties":false}})),
         (false, json!({"name":"switchboard_repository_map","title":"Repositories on disk","description":"The Git repositories under the folders named (absolute; none: ~/DATA, else the home folder; up to three folders deep, not into a repository, a hidden folder or dependencies), each with its group (pool as its id, name; place folder or inside) or none. Linked worktrees are listed under their root in switchboard_projects, not here. Reads only.","inputSchema":{"type":"object","properties":{"under":{"type":"array","maxItems":16,"items":{"type":"string","minLength":1}}},"additionalProperties":false}})),
         (false, json!({"name":"switchboard_statistics","title":"Statistics","description":"What the local proxy relayed in the last days (1-90, default 30): requests, how they ended (ok, limited, failed) and the token counts the provider itself reported (input, output, cache read and write), by group, project (a repository with its checkouts, placed by the folder the request came from), account, coding agent (from its user-agent) and day, plus each group-project-account-agent combination and each day's split by group. Only managed traffic: a session on its own sign-in outside Switchboard is not counted. Counts only, never a prompt, answer or path. Reads only.","inputSchema":{"type":"object","properties":{"days":{"type":"integer","minimum":1,"maximum":90}},"additionalProperties":false}})),
-        (false, json!({"name":"switchboard_events","title":"Activity","description":"Recent activity, newest first: what changed (accounts, switches, groups, automatic switching, sign-ins) and how it ended, as fixed codes. No credential, prompt or provider text.","inputSchema":{"type":"object","properties":{"limit":{"type":"integer","minimum":1,"maximum":500,"default":50}},"additionalProperties":false}})),
+        (false, json!({"name":"switchboard_events","title":"Activity","description":"Recent activity, newest first: what changed (accounts, switches, groups, automatic switching, sign-ins) and how it ended, as fixed codes. kind keeps one class: switches, sign_ins, groups, moves, other, or errors (any event that failed, of every class); account_id keeps one account's events. A page holds limit events and every other event of the second it ends in; pass its next_before as before for older ones (null: nothing older). kinds names every kind present in the journal. No credential, prompt or provider text.","inputSchema":{"type":"object","properties":{"limit":{"type":"integer","minimum":1,"maximum":500,"default":50},"kind":{"type":"string","enum":["switches","sign_ins","groups","moves","errors","other"]},"account_id":{"type":"string"},"before":{"type":"integer","description":"Unix seconds, exclusive."}},"additionalProperties":false}})),
         (true, json!({"name":"switchboard_account_update","title":"Rename, enable or disable an account","description":"Rename an account, enable or disable it (a disabled account is never selected or switched to), or mark it as used on another machine (elsewhere: true disables it here, so this machine never renews it or switches to it, automatically or not; false enables it again), saying where it works (location: a machine and its user, or a colleague, which also marks it; empty clears it). An account whose sign-in was moved with switchboard_account_send is called back with switchboard_account_recall, not used here again, unless force. assigned_to gives the account to an agent or service that holds its sign-in now (its name, at most 120 characters; empty takes it back): Switchboard keeps renewing it and observing its usage but never selects it, switches to it or launches on it by itself, and giving it clears elsewhere. Only when the operator asks. What is left out stays as it is.","inputSchema":{"type":"object","properties":{"account_id":account,"label":{"type":"string","minLength":1,"maxLength":80},"enabled":{"type":"boolean"},"elsewhere":{"type":"boolean"},"location":{"type":"string","maxLength":80},"assigned_to":{"type":"string","maxLength":120,"description":"The agent or service that holds the account now; empty takes it back."},"force":{"type":"boolean","description":"With elsewhere false, enabled true or assigned_to: use it here although its sign-in was moved to another machine and not called back."}},"required":["account_id"],"additionalProperties":false}})),
         (true, json!({"name":"switchboard_account_remove","title":"Remove an account","description":"Only when the operator asks. Remove one account from Switchboard and delete its stored sign-in or key here, as the window's Remove account does; this cannot be undone. Refused while its group has it selected: select another account first. Clients signed in elsewhere are not signed out. An account moved to another machine is called back or removed there with switchboard_account_recall.","inputSchema":{"type":"object","properties":{"account_id":account},"required":["account_id"],"additionalProperties":false}})),
         (true, json!({"name":"switchboard_account_move","title":"Move an account to another group","description":"Move an account into a group (pool: its group id), or back to the default group (pool: default). Only when the operator asks. Joining or leaving a group is that group's change, with its refusals: the account the ordinary Claude Code or Codex is signed in to cannot join a group, and a second copy of a login already in that group is refused.","inputSchema":{"type":"object","properties":{"account_id":account,"pool":{"type":"string","minLength":1,"description":"A group id from switchboard_projects, or default."}},"required":["account_id","pool"],"additionalProperties":false}})),
@@ -342,6 +342,22 @@ impl Server {
         };
         let routes = snapshot["routes"].as_object().cloned().unwrap_or_default();
         let time = now();
+        // Launch records are files in the data folder, read here as `switchboard_sessions`
+        // reads a machine's sessions; none is read when no account is given to an agent.
+        let none_given = snapshot["assigned_to"]
+            .as_object()
+            .is_none_or(|given| given.is_empty());
+        let given = if none_given {
+            Map::new()
+        } else {
+            let root = self.root.clone();
+            let snapshot = snapshot.clone();
+            tokio::task::spawn_blocking(move || {
+                switchboard_runtime::given::assigned(&root, &snapshot)
+            })
+            .await
+            .unwrap_or_default()
+        };
         let accounts: Vec<Value> = snapshot["accounts"]
             .as_array()
             .cloned()
@@ -361,13 +377,19 @@ impl Server {
                         || entry["account_ids"].as_array().is_some_and(|ids| ids.contains(&a["id"]))
                 });
                 let usage = usage_view(&a, &snapshot, time);
-                json!({"id": a["id"], "label": a["label"], "provider": a["provider"], "kind": a["kind"], "pool": a["pool"], "enabled": a["enabled"],
+                let mut row = json!({"id": a["id"], "label": a["label"], "provider": a["provider"], "kind": a["kind"], "pool": a["pool"], "enabled": a["enabled"],
                     "selected_for_next_request": routes.get(&key) == Some(&a["id"]), "signed_in_cli": signed_in,
                     "lowest_remaining_percent": usage["lowest_remaining_percent"], "usage_fresh": usage["fresh"],
                     "organization": organization_of(&a["id"]), "also_organizations": also_of(&a["id"]), "groups": groups_of(&a),
                     "elsewhere": marked(&a["id"]),
                     "location": a["id"].as_str().and_then(|id| snapshot["locations"].get(id)).cloned().unwrap_or(Value::Null),
-                    "assigned_to": a["id"].as_str().and_then(|id| snapshot["assigned_to"].get(id)).cloned().unwrap_or(Value::Null)})
+                    "assigned_to": a["id"].as_str().and_then(|id| snapshot["assigned_to"].get(id)).cloned().unwrap_or(Value::Null)});
+                // The window's Given to agents section, from the same records: only on an
+                // account given to an agent.
+                if let Some(assigned) = a["id"].as_str().and_then(|id| given.get(id)) {
+                    row["assigned"] = assigned.clone();
+                }
+                row
             })
             .collect();
         Ok(json!({"accounts": accounts}))
@@ -1285,18 +1307,24 @@ impl Server {
                 }
             },
             "switchboard_events" => {
-                let limit = args
-                    .get("limit")
-                    .and_then(Value::as_u64)
-                    .unwrap_or(50)
-                    .clamp(1, 500) as usize;
-                self.call(Operation::Snapshot).await.map(|v| {
-                    let events: Vec<Value> = v["events"]
-                        .as_array()
-                        .map(|e| e.iter().rev().take(limit).cloned().collect())
-                        .unwrap_or_default();
-                    json!({"events": events})
-                })
+                // The journal is in every owner's snapshot; the page is cut here, so an owner
+                // older than this server answers the filters too.
+                let filter = switchboard_core::activity::Filter {
+                    kind: args.get("kind").and_then(Value::as_str).map(str::to_owned),
+                    account_id: args
+                        .get("account_id")
+                        .and_then(Value::as_str)
+                        .map(str::to_owned),
+                    before: args.get("before").and_then(Value::as_i64),
+                    limit: args
+                        .get("limit")
+                        .and_then(Value::as_u64)
+                        .map(|n| n.min(500) as usize),
+                };
+                match self.call(Operation::Snapshot).await {
+                    Ok(v) => switchboard_core::activity::page(&v["events"], &filter),
+                    Err(e) => Err(e),
+                }
             }
             "switchboard_account_update" => self.account_update(args).await,
             "switchboard_account_move" => self.account_move(args).await,

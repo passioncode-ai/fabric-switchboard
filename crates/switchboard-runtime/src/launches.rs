@@ -502,6 +502,11 @@ thread_local! {
     static SCANS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 /// Every record, by id. Only `<id>.json` regular files are read.
+/// SB-364: every launch record in `root`, in no particular order, as stored (no state added).
+pub fn records(root: &Path) -> Vec<Value> {
+    all(root).into_values().collect()
+}
+
 fn all(root: &Path) -> BTreeMap<String, Value> {
     #[cfg(test)]
     SCANS.with(|n| n.set(n.get() + 1));

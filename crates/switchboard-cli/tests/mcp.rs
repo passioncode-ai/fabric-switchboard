@@ -1282,6 +1282,20 @@ async fn accounts_rotation_activity_and_queues_are_reachable_over_mcp() {
         json!({"account_id": ids[2], "assigned_to": "Frame Agent on Studio"}),
     );
     assert!(!error, "{given}");
+    // SB-364 (WF-2.4): a launch that ran on it (ended) is its last launch; `assigned` sits only
+    // on the given account's row.
+    let launch = "44444444-4444-4444-8444-444444444444";
+    std::fs::create_dir_all(data.path().join("launches")).unwrap();
+    switchboard_core::private_fs::private_write(
+        &data.path().join("launches").join(format!("{launch}.json")),
+        json!({"launch_id": launch, "account_id": ids[2], "pool": "personal",
+               "working_directory": "/work/frame", "launched_at": 1_700_000_100_i64,
+               "last_turn_at": 1_700_000_200_i64, "ended": "exited",
+               "ended_at": 1_700_000_300_i64})
+        .to_string()
+        .as_bytes(),
+    )
+    .unwrap();
     let (_, accounts) = agent.tool("switchboard_accounts", json!({}));
     for a in accounts["accounts"].as_array().unwrap() {
         let expected = if a["id"] == ids[2] {
@@ -1290,6 +1304,18 @@ async fn accounts_rotation_activity_and_queues_are_reachable_over_mcp() {
             Value::Null
         };
         assert_eq!(a["assigned_to"], expected, "{accounts}");
+        if a["id"] == ids[2] {
+            assert_eq!(
+                a["assigned"],
+                json!({"account_id": ids[2], "agent": "Frame Agent on Studio", "machine": null,
+                       "last_launch": {"pool": "personal", "folder": "/work/frame",
+                                       "at": 1_700_000_100_i64},
+                       "last_activity": 1_700_000_300_i64}),
+                "{accounts}"
+            );
+        } else {
+            assert!(a.get("assigned").is_none(), "{accounts}");
+        }
     }
     let (error, refused) = agent.tool(
         "switchboard_switch",
@@ -1401,6 +1427,35 @@ async fn accounts_rotation_activity_and_queues_are_reachable_over_mcp() {
     assert!(error, "{stats}");
     let (error, events) = agent.tool("switchboard_events", json!({"limit": 5}));
     assert!(!error && events["events"].as_array().is_some(), "{events}");
+    // SB-373 (WF-11.1): filters and paging. The account updates above are this account's
+    // `other` events; a page of one names the second to continue before.
+    let (error, mine) = agent.tool(
+        "switchboard_events",
+        json!({"account_id": ids[2], "kind": "other", "limit": 1}),
+    );
+    assert!(!error, "{mine}");
+    let page = mine["events"].as_array().unwrap();
+    assert!(!page.is_empty(), "{mine}");
+    assert!(page
+        .iter()
+        .all(|e| e["account_id"] == ids[2] && e["action"] == "account_updated"));
+    assert!(
+        mine["kinds"].as_array().unwrap().contains(&json!("other")),
+        "{mine}"
+    );
+    let oldest = page.last().unwrap()["at"].as_i64().unwrap();
+    let (error, older) = agent.tool(
+        "switchboard_events",
+        json!({"account_id": ids[2], "kind": "other", "before": oldest}),
+    );
+    assert!(!error, "{older}");
+    assert!(older["events"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|e| e["at"].as_i64().unwrap() < oldest));
+    let (error, refused) = agent.tool("switchboard_events", json!({"kind": "logins"}));
+    assert!(error, "{refused}");
     // SB-134 part 3: the last CLI commands over MCP.
     let (error, found) = agent.tool("switchboard_project_suggestions", json!({}));
     assert!(!error && found["suggestions"].is_array(), "{found}");

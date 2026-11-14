@@ -119,9 +119,25 @@ enum Command {
         /// saved usage of every account.
         id: Option<String>,
     },
-    /// Recent sanitized activity.
+    /// Recent sanitized activity, oldest first. Filters and paging as the window's Activity
+    /// page and `switchboard_events` use them.
     #[command(alias = "activity")]
-    Events,
+    Events {
+        /// Only one kind: switches, sign_ins, groups, moves, errors (any event that failed) or
+        /// other.
+        #[arg(long, value_parser = ["switches", "sign_ins", "groups", "moves", "errors", "other"])]
+        kind: Option<String>,
+        /// Only this account's events (an id from `switchboard accounts list`).
+        #[arg(long = "account")]
+        account: Option<String>,
+        /// Only events before this time, in Unix seconds (exclusive); the line printed after a
+        /// page names the value for the older one.
+        #[arg(long)]
+        before: Option<i64>,
+        /// At most this many events, newest kept (1 to 500; default all the journal holds).
+        #[arg(long, value_parser = clap::value_parser!(u64).range(1..=500))]
+        limit: Option<u64>,
+    },
     /// What the proxy relayed: requests, outcomes and the provider's token counts by group,
     /// folder (repository), account, coding agent and day. Reads only.
     #[command(alias = "statistics")]
@@ -2101,7 +2117,7 @@ async fn run(cli: &Cli) -> Result<Value, String> {
             },
         },
         Command::Usage { id: Some(id) } => Operation::Usage { id: id.clone() },
-        Command::Usage { id: None } | Command::Events => Operation::Snapshot,
+        Command::Usage { id: None } | Command::Events { .. } => Operation::Snapshot,
         Command::Status => Operation::Status,
         Command::Targets { probe } => Operation::Targets { probe: *probe },
         Command::McpHomes => Operation::McpHomes,
@@ -2958,7 +2974,30 @@ async fn run(cli: &Cli) -> Result<Value, String> {
             }).collect();
             Ok(json!({"accounts": accounts, "routes": value["routes"]}))
         }
-        Command::Events => Ok(value["events"].clone()),
+        Command::Events {
+            kind,
+            account,
+            before,
+            limit,
+        } => {
+            // SB-373: the page is cut from the owner's journal here, as MCP cuts it; printed
+            // oldest first, as before.
+            let page = switchboard_core::activity::page(
+                &value["events"],
+                &switchboard_core::activity::Filter {
+                    kind: kind.clone(),
+                    account_id: account.clone(),
+                    before: *before,
+                    limit: Some(limit.map_or(switchboard_core::activity::MAX_LIMIT, |n| n as usize)),
+                },
+            )?;
+            if let (false, Some(older)) = (cli.json, page["next_before"].as_i64()) {
+                eprintln!("Older activity: switchboard events --before {older}");
+            }
+            let mut events = page["events"].as_array().cloned().unwrap_or_default();
+            events.reverse();
+            Ok(Value::Array(events))
+        }
         Command::Project { command: Project::List } => Ok(json!({"projects": mcp::project_views(&value), "rules": mcp::rule_views(&value, mcp::now())})),
         Command::Usage { id: None } => Ok(Value::Array(value["accounts"].as_array().ok_or("Invalid account response.")?.iter().map(|account| json!({"id":account["id"], "label":account["label"], "provider":account["provider"], "usage":account["usage"], "usage_health":account["usage_health"]})).collect())),
         Command::Rotation { command: Rotation::Status } => {
@@ -3985,7 +4024,7 @@ fn print_result(value: &Value, cli: &Cli) {
                 );
             }
         }
-        Command::Events => {
+        Command::Events { .. } => {
             let Some(events) = value.as_array() else {
                 print_value(value, false);
                 return;

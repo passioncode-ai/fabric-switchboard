@@ -237,12 +237,24 @@ pub fn overview(root: &Path, model: Option<&str>) -> Result<Value, String> {
     let dispatch_agent = crate::dispatch::default_agent(root)
         .ok()
         .map(|(agent, _)| agent);
-    // A cache key for readers such as Fabric: it changes whenever anything in the answer does.
+    let permissions = if settings.permissions.as_deref() == Some(ASK) {
+        ASK
+    } else {
+        BYPASS
+    };
+    // A cache key for readers such as Fabric: it changes whenever anything in the answer does,
+    // the permission mode included (SB-372: the window sets it too).
     let revision = {
         let digest = <sha2::Sha256 as sha2::Digest>::digest(
-            json!([&settings.default, default_ready, &dispatch_agent, &agents])
-                .to_string()
-                .as_bytes(),
+            json!([
+                &settings.default,
+                default_ready,
+                &dispatch_agent,
+                &agents,
+                permissions
+            ])
+            .to_string()
+            .as_bytes(),
         );
         digest
             .iter()
@@ -261,7 +273,7 @@ pub fn overview(root: &Path, model: Option<&str>) -> Result<Value, String> {
         "updated_at": updated_at,
         "default": settings.default,
         "default_ready": default_ready,
-        "permissions": if settings.permissions.as_deref() == Some(ASK) { ASK } else { BYPASS },
+        "permissions": permissions,
         "dispatch_agent": dispatch_agent,
         "installed": installed,
         "agents": agents,
@@ -395,6 +407,28 @@ mod tests {
         assert_eq!(models.len(), 1);
         assert_eq!(models[0]["id"], "a/tools");
         assert!(parse_models(b"nope").is_none());
+    }
+
+    /// SB-372 (WF-10.1): the window reads the permission mode from the overview and sets it as
+    /// `switchboard_agent_set` does; the overview's revision follows it.
+    #[test]
+    fn the_overview_names_the_permission_mode_and_its_revision_follows_it() {
+        let root = tempfile::tempdir().unwrap();
+        let before = overview(root.path(), None).unwrap();
+        assert_eq!(before["permissions"], BYPASS);
+        set_permissions(root.path(), ASK).unwrap();
+        let after = overview(root.path(), None).unwrap();
+        assert_eq!(after["permissions"], ASK);
+        assert_ne!(before["revision"], after["revision"]);
+        assert_eq!(
+            set_permissions(root.path(), "never").unwrap_err(),
+            PERMISSIONS_INVALID
+        );
+        set_permissions(root.path(), BYPASS).unwrap();
+        assert_eq!(
+            overview(root.path(), None).unwrap()["revision"],
+            before["revision"]
+        );
     }
 
     #[test]
