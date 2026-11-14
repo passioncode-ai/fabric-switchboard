@@ -4488,14 +4488,11 @@ fn print_result(value: &Value, cli: &Cli) {
         Command::Capacity { .. } => match value["cap"].as_u64() {
             Some(cap) => println!(
                 "Sessions: {} of {cap} working, {} free ({} quiet not counted).",
-                value["used"],
-                value["free"],
-                value["quiet"]
+                value["used"], value["free"], value["quiet"]
             ),
             None => println!(
                 "No session limit: {} working sessions ({} quiet not counted).",
-                value["used"],
-                value["quiet"]
+                value["used"], value["quiet"]
             ),
         },
         _ => print_value(value, false),

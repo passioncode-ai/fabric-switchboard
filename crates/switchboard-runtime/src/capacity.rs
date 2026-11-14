@@ -109,7 +109,9 @@ pub fn admit(root: &Path) -> Result<(), String> {
 pub fn full(root: &Path) -> Option<Value> {
     let cap = cap(root).ok().flatten()?;
     let scan = crate::machine_sessions::scan(root);
-    decide(Some(cap), &scan).err().map(|_| view(Some(cap), &scan))
+    decide(Some(cap), &scan)
+        .err()
+        .map(|_| view(Some(cap), &scan))
 }
 
 #[cfg(test)]
@@ -165,7 +167,10 @@ mod tests {
             assert_eq!(mode & 0o777, 0o600);
         }
         assert_eq!(set(root.path(), Some(0)).unwrap_err(), CAP_INVALID);
-        assert_eq!(set(root.path(), Some(MAX_CAP + 1)).unwrap_err(), CAP_INVALID);
+        assert_eq!(
+            set(root.path(), Some(MAX_CAP + 1)).unwrap_err(),
+            CAP_INVALID
+        );
         assert_eq!(cap(root.path()).unwrap(), Some(20));
         set(root.path(), None).unwrap();
         assert_eq!(cap(root.path()).unwrap(), None);
