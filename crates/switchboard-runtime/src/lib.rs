@@ -5926,6 +5926,39 @@ async fn execute(
                 ))
                 .await?;
             }
+            // SB-377: the account the ordinary Claude Code is signed in to moves too: Claude Code
+            // first takes the next account, through the switch a person's own takes (locks,
+            // identity check, rollback). Codex CLI keeps its own sign-in, so `send` still refuses.
+            let mut cli_switched_to = Value::Null;
+            if store.is_in_use(&id) {
+                let snapshot = store.snapshot()?;
+                let account = snapshot
+                    .accounts
+                    .iter()
+                    .find(|a| a.id == id)
+                    .ok_or("Account not found")?;
+                if account.provider == Provider::Claude
+                    && account.kind == AuthKind::OAuth
+                    && account.enabled
+                    && !snapshot.elsewhere.contains_key(&id)
+                {
+                    let next = account_send::next_for_cli(&snapshot, account, monitor::now())
+                        .map(|a| a.id.clone())
+                        .ok_or(account_send::CLI_ONLY_ONE)?;
+                    Box::pin(execute(
+                        store.clone(),
+                        root,
+                        runtime,
+                        Operation::ActivateNative {
+                            id: next.clone(),
+                            force: false,
+                        },
+                    ))
+                    .await?;
+                    store.not_in_use(&id);
+                    cli_switched_to = json!(next);
+                }
+            }
             let pool = pool.unwrap_or_else(|| "default".into());
             let program = program.unwrap_or_else(|| account_send::REMOTE_DEFAULT.into());
             let remote = account_send::Program {
@@ -5984,6 +6017,9 @@ async fn execute(
             }
             if !recalled.is_null() {
                 moved["recalled"] = recalled;
+            }
+            if !cli_switched_to.is_null() {
+                moved["cli_switched_to"] = cli_switched_to;
             }
             Ok(moved)
         }

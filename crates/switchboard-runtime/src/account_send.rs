@@ -49,6 +49,9 @@ pub const NOT_A_SIGN_IN: &str =
     "Only a Claude or Codex subscription sign-in moves this way. Give an API key through your vault.";
 pub const NOT_HERE: &str = "This account is already used elsewhere or turned off here.";
 /// SB-377: the group a selected account leaves keeps working only with another account here.
+/// SB-377: the account the ordinary Claude Code is signed in to moves only when another can take
+/// its place.
+pub const CLI_ONLY_ONE: &str = "Claude Code here is signed in to this account and no other Claude account here can take its place. Add one, then move this one.";
 pub const SEND_ONLY_ONE: &str = "This is the only account its group uses on this machine. Add another account to that group before moving this one.";
 pub const ADD_FAILED: &str =
     "The other machine did not save the sign-in. Nothing changed here; check ssh and its Switchboard.";
@@ -164,18 +167,41 @@ pub(crate) fn next_in_group<'a>(
                 && !snapshot.elsewhere.contains_key(&a.id)
                 && !snapshot.is_assigned(&a.id)
         })
-        .min_by_key(|a| {
-            let used = a.usage.as_ref().and_then(|u| u.account_used_percent());
-            let free = switchboard_core::free_at(a, now).unwrap_or(i64::MAX);
-            match used {
-                // With room now: the least used first (in tenths of a percent).
-                Some(u) if free <= now => (0, (u * 10.0) as i64, a.created_at),
-                // Never measured: after every account known to have room.
-                None => (1, 0, a.created_at),
-                // Full: the one free first.
-                Some(_) => (2, free, a.created_at),
-            }
+        .min_by_key(|a| next_rank(a, now))
+}
+/// The order an account takes the place of one that leaves: with room now, the least used first
+/// (in tenths of a percent); then never measured; then full ones, the one free first.
+fn next_rank(a: &switchboard_core::Account, now: i64) -> (u8, i64, i64) {
+    let used = a.usage.as_ref().and_then(|u| u.account_used_percent());
+    let free = switchboard_core::free_at(a, now).unwrap_or(i64::MAX);
+    match used {
+        Some(u) if free <= now => (0, (u * 10.0) as i64, a.created_at),
+        None => (1, 0, a.created_at),
+        Some(_) => (2, free, a.created_at),
+    }
+}
+/// SB-377: the account the ordinary Claude Code takes when the one it is signed in to moves away:
+/// a Claude sign-in here that may become Claude Code's (its identity known, in no group with
+/// folders of its own, not given to an agent), in the same order as a group's next account.
+pub(crate) fn next_for_cli<'a>(
+    snapshot: &'a switchboard_core::Snapshot,
+    account: &switchboard_core::Account,
+    now: i64,
+) -> Option<&'a switchboard_core::Account> {
+    snapshot
+        .accounts
+        .iter()
+        .filter(|a| {
+            a.id != account.id
+                && a.provider == Provider::Claude
+                && a.kind == AuthKind::OAuth
+                && a.enabled
+                && a.external_identity.is_some()
+                && snapshot.project_of_pool(&a.pool).is_none()
+                && !snapshot.elsewhere.contains_key(&a.id)
+                && !snapshot.is_assigned(&a.id)
         })
+        .min_by_key(|a| next_rank(a, now))
 }
 
 /// Moves one sign-in. `settle` is called with the account's refresh token once it is marked used
@@ -1108,6 +1134,35 @@ mod tests {
         let me = snapshot.accounts.iter().find(|a| a.id == id).unwrap();
         assert_eq!(
             next_in_group(&snapshot, me, "default", 100).map(|a| a.id.clone()),
+            Some(room)
+        );
+    }
+
+    #[test]
+    fn claude_code_takes_a_sign_in_whose_identity_is_known_and_that_has_room() {
+        // SB-377: before the account Claude Code is signed in to moves, Claude Code takes the
+        // next one; only a sign-in whose identity is known can become Claude Code's.
+        let (_root, store, id) = store_with(AuthKind::OAuth);
+        let blind = another(&store, "blind");
+        observed(&store, &blind, 10.0, 9_000);
+        let snapshot = store.snapshot().unwrap();
+        let me = snapshot.accounts.iter().find(|a| a.id == id).unwrap();
+        assert!(next_for_cli(&snapshot, me, 100).is_none());
+        let identity = |n: &str| switchboard_core::ExternalIdentity {
+            account_id: Some(format!("{n}-uuid")),
+            organization_id: None,
+            email: Some(format!("{n}@example.com")),
+        };
+        let full = another(&store, "full");
+        let room = another(&store, "room");
+        store.learn_identity(&full, &identity("full")).unwrap();
+        store.learn_identity(&room, &identity("room")).unwrap();
+        observed(&store, &full, 100.0, 3_000);
+        observed(&store, &room, 70.0, 9_000);
+        let snapshot = store.snapshot().unwrap();
+        let me = snapshot.accounts.iter().find(|a| a.id == id).unwrap();
+        assert_eq!(
+            next_for_cli(&snapshot, me, 100).map(|a| a.id.clone()),
             Some(room)
         );
     }

@@ -207,6 +207,7 @@ const safeErrors = new Set([
   "The other machine's answer was lost. This machine no longer uses the account; look at the other machine's accounts and call it back or remove its copy there.",
   "The copy on the other machine could not be removed. This machine no longer uses the account; remove that copy there, then mark the account used here.",
   "This is the only account its group uses on this machine. Add another account to that group before moving this one.",
+  "Claude Code here is signed in to this account and no other Claude account here can take its place. Add one, then move this one.",
   "This account was not given back by a call back here, so its mark stays. Nothing changed.",
   "This is the only account its group uses on this machine. Add another account to that group before calling this one back.",
   // Where a data folder keeps its sign-ins (SB-287).

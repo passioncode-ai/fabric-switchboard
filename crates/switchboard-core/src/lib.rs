@@ -1313,6 +1313,15 @@ impl Store {
             .lock()
             .is_ok_and(|set| set.as_ref().is_some_and(|ids| ids.contains(id)))
     }
+    /// SB-377: the ordinary CLI was switched away from `id` just now; the monitor's next look
+    /// learns the rest.
+    pub fn not_in_use(&self, id: &str) {
+        if let Ok(mut set) = self.in_use.lock() {
+            if let Some(ids) = set.as_mut() {
+                ids.remove(id);
+            }
+        }
+    }
     pub fn set_in_use(&self, ids: std::collections::BTreeSet<String>) -> Result<(), String> {
         let added: Vec<String> = {
             let mut set = self
