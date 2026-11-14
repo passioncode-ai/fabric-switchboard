@@ -150,6 +150,9 @@ const ALLOWLIST = {
   "This account is not in the project. List the project's accounts and name one of them.": 'ProjectEdit (SB-134): CLI `project edit` and MCP `switchboard_project_edit` only; the window saves whole projects',
   'store': 'switchboard-proxy ProbeFailure.code: a code for the operations log (SB-127); the person sees the store\'s own message',
   'vault': 'switchboard-proxy ProbeFailure.code: a code for the operations log (SB-127); the person sees the vault\'s own message',
+  'proc_listpids_failed': 'machine_sessions::agent_processes: a code the session list answers in degraded (SB-375), never an error shown to a person',
+  'proc_unreadable': 'machine_sessions::agent_processes: a code the session list answers in degraded (SB-375), never an error shown to a person',
+  'not_read_on_this_platform': 'machine_sessions::agent_processes: a code the session list answers in degraded (SB-375), never an error shown to a person',
   // runtime bindings.rs (SB-118): read by the background pass, uninstall and `project bindings` (CLI) only.
   'Claude Code bindings could not be read. Restore the private file before continuing.': 'background and CLI only',
   // runtime bindings.rs unbind_all(): surfaces under `failures` in `switchboard uninstall`

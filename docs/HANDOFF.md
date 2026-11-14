@@ -2,7 +2,7 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
-## 2026-11-14: the window and the fleet, wave 2 (SB-369, SB-370, SB-372, SB-373, SB-364) and a stale MCP server (SB-375); 0.7.81
+## 2026-11-14: the window and the fleet, wave 2 (SB-369, SB-370, SB-372, SB-373, SB-364) and a stale MCP server (SB-375); 0.7.82
 
 - **Asked.** The same review (operator, 2026-11-14), wave 2 of the [plan](plans/2026-11-14-window-and-fleet/README.md); then «перезапусти что упало и продолжи» after the window agent stopped on a usage limit.
 - **Wave 2 (PR #688, `d310411e`).** WF-7 API keys in three blocks; WF-8 a state line per group card and folding blocks; WF-11 Activity by day with kind and account filters and paging (`crates/switchboard-core/src/activity.rs`; CLI `events --kind --account --before`; MCP `switchboard_events` the same), Statistics top 10 with *Show all*; WF-10.1 the permissions block in Agent settings; WF-2.4 `given_accounts` and `switchboard_accounts` `assigned` (machine group or written place, latest launch, last activity).
@@ -11,7 +11,7 @@
 - **Released before.** v0.7.80 published 2026-11-14 18:23Z (release run 43620589799, every platform green, first attempt). This MacBook: the app restarted into 0.7.80; `switchboard attention` answers 1 item, `renewal_refused`, which needs a person's sign-in.
 - **Open.** The machine an agent runs on when no machine group or place says it (SB-364). The PassionCode group has no organization here (org-index `d851ed4f`); binding it changes which accounts serve it, so it waits for the operator's word. Wave 3 next: WF-4 background remote usage (DEC-0017), WF-5.2 a to f (log rotation outcomes first), WF-6 the backup group (DEC-0016).
 
-**Exact next task.** After 0.7.81 is published and installed here, start wave 3 with WF-5.2a (log each rotation's outcome, as the [switching failures inventory](research/switching-failures-2026-11-14.md) asks), then WF-4 and WF-6.
+**Exact next task.** After 0.7.82 is published and installed here (0.7.81 was tagged, failed its nightly on the error vocabulary check, and stays unpublished; a board status the gate also refused was fixed with it), start wave 3 with WF-5.2a (log each rotation's outcome, as the [switching failures inventory](research/switching-failures-2026-11-14.md) asks), then WF-4 and WF-6.
 
 ## 2026-11-14: the window and the fleet, spec and wave 1 (SB-363 to SB-374); 0.7.80
 
