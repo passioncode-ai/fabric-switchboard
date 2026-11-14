@@ -18,8 +18,9 @@ static WRITE: std::sync::Mutex<()> = std::sync::Mutex::new(());
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct Seat {
     pub at: i64,
-    /// `granted` (a sign-in moved there), `handed_over` (a record for the receiver to sign in) or
-    /// `recalled` (the sign-in taken back here).
+    /// `granted` (a sign-in moved there), `handed_over` (a record for the receiver to sign in),
+    /// `recalled` (the sign-in taken back here) or `unknown` (SB-365: a move whose answer was
+    /// lost, so whether the other machine saved it is not known; Attention lists it).
     pub event: String,
     pub account: String,
     /// The other machine as ssh knows it, or the receiver a hand-over names.

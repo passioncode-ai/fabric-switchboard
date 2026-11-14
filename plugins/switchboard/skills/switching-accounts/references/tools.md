@@ -13,7 +13,7 @@ names and fields call rotation. Say group and automatic switching to the person.
 
 `switchboard mcp --read-only` lists only the 24 tools that read (every tool under
 [Read tools](#read-tools)) and none of the 24 that write. A session Switchboard launches in
-isolated mode gets that set. The server lists 48 tools; each has a section below.
+isolated mode gets that set. The server lists 75 tools; each has a section below.
 
 ## Contents
 
@@ -83,6 +83,24 @@ lists only this machine's accounts or only those used elsewhere.
   minute ago; showing that observation." A read-only server (`switchboard mcp --read-only`)
   never asks the provider: it answers with the stored observation and `note` = "This server is
   read-only: showing the stored observation without asking the provider."
+
+### `switchboard_attention`: no arguments
+
+What needs a person, one item per account or question:
+`{count, items[{account_id, label, provider, pool, reason, detail, since, action{tool, window}}]}`.
+`since` is Unix seconds or null; `detail` is one fixed sentence per reason.
+
+| `reason` | Means | Fix (`action.tool`) |
+|---|---|---|
+| `sign_in` | the account's sign-in ended | `switchboard_login` (the person signs in) |
+| `seat_ended` | an organization ended the account's seat | `switchboard_login`, or a seat from the organization |
+| `renewal_refused` | the provider refused to renew the sign-in | `switchboard_login` |
+| `move_unknown` | a move to another machine lost its answer | `switchboard_remote` `check`, then `switchboard_account_recall` |
+| `usage_failing` | no usage check succeeded for over an hour | `switchboard_usage` with `refresh` |
+| `ceiling_question` | a reached spending ceiling waits for keep or double | `switchboard_ceiling_answer` (`account_id`, `label`, `provider` null; `pool` the group's, or null) |
+
+A view: every account listed stays in its group with its selection, and nothing moves; once
+fixed it leaves the list on the next background pass. Read-only, also on a read-only server.
 
 ### `switchboard_session_end`: `launch_id` (string)
 

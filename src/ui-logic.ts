@@ -1,7 +1,7 @@
 // Pure interface rules, kept free of DOM access so scripts/test-ui-logic.mjs can
 // exercise them directly. main.ts owns rendering; these functions own decisions.
 import type { BalanceStatus, ShellHookNotice, ShellHookStatus, Onboarding, OnboardStep, ChainExecutor, ChainScope, ChainStepView } from './types';
-import type { Machine, MachineCopy } from './types';
+import type { Machine, MachineCopy, Attention, AttentionItem, AttentionReason, AttentionWindow } from './types';
 import type { Account, AccountLimit, Organization, OrganizationGroupOffer, Project, AgentRow, AgentSetup, OpenrouterCredit, RecommendedModel, SessionInfo, ProjectRule, RotationPolicy, UpdateStatus, Usage, UsageWindow } from './types';
 import { t, plural } from './i18n';
 
@@ -477,6 +477,104 @@ export function groupAccounts<T extends Groupable>(accounts: T[], context?: Quot
   return groups;
 }
 // #endregion quota-order
+
+/** WF-1.2 (SB-363): whether a folding section is open: the person's last choice in this window, else its default. */
+export function foldOpen(choices: ReadonlyMap<string, boolean>, key: string, fallback: boolean): boolean {
+  return choices.get(key) ?? fallback;
+}
+/** WF-2.1: a machine's section starts folded once it holds more accounts than this. */
+export const MACHINE_FOLD_LIMIT = 6;
+export interface MachineSection<T> { pool: string; name: string; count: number; groups: AccountGroup<T>[] }
+export interface AccountSections<T> { here: AccountGroup<T>[]; machines: MachineSection<T>[]; given: T[] }
+/**
+ * WF-2.1 (SB-364): the Accounts page by machine. This computer first (Claude, then Codex, each by
+ * group and quota, as `groupAccounts`), then each other machine by name, then the accounts given to
+ * agents. Every account lands in exactly one place: given to an agent wins over its machine; an
+ * account in a machine's pool whose machine is not listed stays with this computer, as before.
+ */
+export function accountSections<T extends Groupable & { id: string }>(accounts: T[], snapshot: { machines?: Machine[]; assigned_to?: Record<string, string> }, context?: QuotaOrderContext): AccountSections<T> {
+  const given = accounts.filter((a) => snapshot.assigned_to?.[a.id] !== undefined);
+  const rest = accounts.filter((a) => snapshot.assigned_to?.[a.id] === undefined);
+  const machineFor = (a: T) => machineOf(snapshot, a);
+  const machines = [...(snapshot.machines ?? [])].sort((a, b) => a.name.localeCompare(b.name) || a.pool.localeCompare(b.pool))
+    .map((machine) => ({ machine, mine: rest.filter((a) => machineFor(a)?.pool === machine.pool) }))
+    .filter(({ mine }) => mine.length)
+    .map(({ machine, mine }) => ({ pool: machine.pool, name: machine.name, count: mine.length, groups: groupAccounts(mine, context) }));
+  return {
+    here: groupAccounts(rest.filter((a) => !machineFor(a)), context),
+    machines,
+    given: groupAccounts(given, context).flatMap((g) => g.pools.flatMap((p) => p.accounts)),
+  };
+}
+/** WF-2.2: the Accounts filter row: words of the label or e-mail, and *Needs attention only*. */
+export function accountMatches(account: Pick<Account, 'id' | 'label' | 'external_identity'>, filter: { query: string; attention?: ReadonlySet<string> | null }): boolean {
+  if (filter.attention && !filter.attention.has(account.id)) return false;
+  const words = filter.query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  if (!words.length) return true;
+  const text = `${account.label} ${account.external_identity?.email ?? ''}`.toLowerCase();
+  return words.every((word) => text.includes(word));
+}
+
+const ATTENTION_REASONS: AttentionReason[] = ['sign_in', 'seat_ended', 'renewal_refused', 'usage_failing', 'move_unknown', 'refused_there', 'ceiling_question'];
+const ATTENTION_WINDOWS: AttentionWindow[] = ['sign_in', 'answer_ceiling', 'check_usage', 'open_machines'];
+/**
+ * WF-3 (SB-365): the answer of the `attention` command, kept to the fields the window knows. An
+ * answer that is not one (an older owner without the command, a malformed item) is an empty list
+ * or loses that item: the page never breaks on it.
+ */
+export function attentionView(raw: unknown): Attention {
+  const items: AttentionItem[] = [];
+  const list = raw && typeof raw === 'object' && Array.isArray((raw as { items?: unknown }).items) ? (raw as { items: unknown[] }).items : [];
+  const text = (v: unknown) => (typeof v === 'string' ? v : null);
+  for (const entry of list) {
+    if (!entry || typeof entry !== 'object') continue;
+    const e = entry as Record<string, unknown>;
+    const action = e.action && typeof e.action === 'object' ? e.action as Record<string, unknown> : null;
+    if (!ATTENTION_REASONS.includes(e.reason as AttentionReason) || !action || !ATTENTION_WINDOWS.includes(action.window as AttentionWindow)) continue;
+    const provider = e.provider === 'claude' || e.provider === 'codex' ? e.provider : null;
+    items.push({ account_id: text(e.account_id), label: text(e.label), provider, pool: text(e.pool), reason: e.reason as AttentionReason, detail: text(e.detail) ?? '', since: typeof e.since === 'number' ? e.since : null, action: { tool: text(action.tool) ?? '', window: action.window as AttentionWindow } });
+  }
+  return { count: items.length, items };
+}
+/** WF-3: the accounts that need a person: those the list names, and those the monitor says must sign in again. */
+export function attentionAccounts(attention: Attention | null, signInRequired: readonly string[] = []): Set<string> {
+  return new Set([...(attention?.items ?? []).map((i) => i.account_id).filter((id): id is string => !!id), ...signInRequired]);
+}
+/** WF-3.2: the reason line of an item, worded by the window from its code (never the backend's English). */
+export function attentionReasonText(reason: AttentionReason): string {
+  switch (reason) {
+    case 'sign_in': return t('Its sign-in ended. Sign in again to use it and see its usage.');
+    case 'seat_ended': return t('Its seat in the organization ended. Sign in again if the seat was given back.');
+    case 'renewal_refused': return t('The provider refused to renew its sign-in. Sign in again.');
+    case 'usage_failing': return t('Its usage check has failed for over an hour.');
+    case 'move_unknown': return t('A move to another machine did not report how it ended. Check it under Other machines.');
+    case 'refused_there': return t('The provider refused its copy on the other machine: it needs a sign-in there.');
+    case 'ceiling_question': return t('A spending ceiling was reached and waits for your answer.');
+  }
+}
+/** WF-3.2: the one action an item offers, by the window flow it opens. */
+export function attentionActionLabel(window: AttentionWindow): string {
+  switch (window) {
+    case 'sign_in': return t('Sign in');
+    case 'answer_ceiling': return t('Answer');
+    case 'check_usage': return t('Check again');
+    case 'open_machines': return t('Open Other machines');
+  }
+}
+/** WF-2.4: the facts line of an account given to an agent; each part is said even when it is not recorded. */
+export function givenFacts(facts: { organization: string | null; machine: string | null; launch: { group: string; folder: string } | null; lastActivity: string | null }): string[] {
+  return [
+    facts.organization ? t('Organization: {name}', { name: facts.organization }) : t('Personal account'),
+    facts.machine ? t('Machine: {name}', { name: facts.machine }) : t('Machine not recorded'),
+    facts.launch ? t('Last launch: {group}, {folder}', facts.launch) : t('No launch recorded'),
+    facts.lastActivity ? t('Last activity {time}', { time: facts.lastActivity }) : t('No activity recorded'),
+  ];
+}
+/** WF-1.1: the one line Accounts keeps about automatic switching; the groups are counted once whatever the provider or target. */
+export function switchingLine(policies: Pick<RotationPolicy, 'enabled' | 'pool'>[]): string {
+  const groups = new Set(policies.filter((p) => p.enabled).map((p) => p.pool)).size;
+  return groups ? plural(groups, { one: 'Automatic switching is on for {n} group.', other: 'Automatic switching is on for {n} groups.' }) : t('Automatic switching is off.');
+}
 
 type Switchable = Pick<Account, 'provider' | 'kind' | 'enabled' | 'external_identity'>;
 /** Native Claude Code activation needs a Claude OAuth profile with its captured identity. */
@@ -1172,7 +1270,7 @@ export function firstRunHint(current: { claude?: { status: string } | null; code
  * toggles, sorting, the tour, and retries of a read. Every other control waits for the action.
  */
 export function usableWhileBusy(key: string): boolean {
-  return /^(nav-|refresh$|dismiss-notice$|countdown-toggle$|org-filter-|quota-|chart-|stats-|stat-[a-z]+-sort-|folders-|disk-map-toggle$|review-rules$|open-api-keys$|tour-|[a-z-]+-retry$)/.test(key);
+  return /^(nav-|fold-|refresh$|dismiss-notice$|countdown-toggle$|org-filter-|quota-|chart-|stats-|stat-[a-z]+-sort-|folders-|disk-map-toggle$|review-rules$|open-api-keys$|tour-|[a-z-]+-retry$)/.test(key);
 }
 
 /** SB-183 (node A-7): one start file's line in *Terminals in organization folders*; `command` is

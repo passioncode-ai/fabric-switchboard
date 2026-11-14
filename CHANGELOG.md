@@ -8,6 +8,10 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- New: `switchboard attention` and the agent tool `switchboard_attention` list what needs you, each with the step that fixes it: an account to sign in to again (its sign-in ended, its organization's seat ended, or the provider refused to renew it), usage checks failing for over an hour, a move to another machine whose answer was lost, and a spending ceiling waiting for your answer. Listed accounts stay in their groups with their selection, and nothing moves; signed in again, an account leaves the list on the next background check (SB-365).
+- A move to another machine whose answer was lost is now written down, so it shows under Attention until you call the account back (SB-365).
+- Every action of the window now has an agent tool, or a written reason it has none, and a test fails when a new window action lands without one (SB-363).
+
 ## 0.7.79
 
 - 0.7.77 and 0.7.78 were tagged but never published: their tests failed on Windows only (a path written with a forward slash, then a test that ran out of stack on Windows on Arm). 0.7.79 carries the same changes, listed below.

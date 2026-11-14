@@ -6,7 +6,7 @@ never renumber, never delete. The doc map ([DOCMAP.md](DOCMAP.md)) names this fi
 register. Decisions made before 2026-11-08 live where they were made (plans' `D-<n>`, board rows,
 research notes); the ones still in force that the board cites are seeded below with their source.
 
-**Next free ID:** `DEC-0014`
+**Next free ID:** `DEC-0021` (`DEC-0016` to `DEC-0018` and `DEC-0020` are held for the window and fleet plan's modules)
 
 ## Format
 
@@ -238,3 +238,61 @@ research notes); the ones still in force that the board cites are seeded below w
   какие-то удаленные машины, в отдельные группы этих удаленных машин … Каждая удаленная машина -
   это новая своя группа … перекидывать аккаунты между группами … так я буду видеть все свои
   удаленные машины и какие там на них стоят аккаунты»).
+
+### DEC-0014: Settings owns standing configuration
+
+- **Date:** 2026-11-14
+- **Status:** Accepted (built in `w1-window`: SB-363, WF-1.1)
+- **Decision:** what stays set until someone changes it lives on one Settings page: automatic
+  switching, balancing between groups, Codex in group folders, terminals in organization folders,
+  running in the background, updates, language and appearance, backups and usage counts. Other pages
+  show the state in one line and link there; Accounts keeps only "Automatic switching is on for N
+  groups" and the warnings about the accounts themselves.
+- **Consequences / affects:** the window's `settings` page (SCN-093), About keeps the product,
+  terms and tour, Groups points to Settings; [the plan](plans/2026-11-14-window-and-fleet/WF-01-foundations.md).
+- **Source:** operator 2026-11-14 («automatic switching, вот этот меню большое, пусть оно будет в
+  настройках, переорганизовать, чтобы оно не показывалось здесь на главном экране»).
+
+### DEC-0015: Attention is a view, not a group
+
+- **Date:** 2026-11-14
+- **Status:** Accepted (built in `w1-backend`: SB-365, WF-3.1 and 3.3)
+- **Context:** accounts that need a person (a sign-in that ended, a seat an organization ended, a
+  renewal the provider refused, usage checks that keep failing, a move whose answer was lost) were
+  only badges on their rows, spread over the groups, and a spending ceiling's open question lived
+  on another page. The operator asked for them at the top, under *Attention*, and for each to come
+  back where it was once fixed.
+- **Decision:** what needs a person is one list built on each read from what the owner already
+  knows (the snapshot, the sign-in verdicts in memory, `seats.jsonl`, `spend.json`); it is never
+  stored and never a group. An account listed there stays in its group with its selection, and
+  nothing moves when it is listed, fixed or leaves the list. Each item names its reason and the one
+  action that fixes it, as an MCP tool and a window control. The window, `switchboard attention`
+  and MCP `switchboard_attention` read the same answer.
+- **Consequences / affects:** [CONTRACTS](CONTRACTS.md#attention-sb-365), [CLI](CLI.md), the
+  skill's tool reference, a lost move's `unknown` line in `seats.jsonl`; the Accounts page's
+  *Needs attention* section (WF-3.2).
+- **Source:** operator 2026-11-14, the window review ([plan](plans/2026-11-14-window-and-fleet/WF-03-attention.md))
+  («Подписки, которые у нас с ошибками, нужно залогиниться, их сразу поднимаем вверх, в отдельную
+  категорию, типа "Attention" … после залогинивания они возвращаются туда же, где были»).
+
+### DEC-0019: Every window action has an MCP tool or a written reason
+
+- **Date:** 2026-11-14
+- **Status:** Accepted (built in `w1-backend`: SB-363, WF-1.3)
+- **Context:** the CLI to MCP gap was closed by a test (SB-134), but the window's commands were
+  not checked: about a hundred Tauri commands and no table. The operator asked that nothing work in
+  the window and not over MCP; the other way round is allowed.
+- **Decision:** every command registered in the window's `tauri::generate_handler![..]` names the
+  MCP tool that does the same, or a written reason it has none: the person's own act (a secret,
+  another tool's sign-ins, a removal that cannot be restored), launching an agent from an agent
+  (SB-64, SB-74), or window plumbing (a system picker, a notice shown once, the window's start
+  signal, the tray's language). The test `every_window_command_has_an_mcp_tool_or_a_reason`
+  (`src-tauri/src/parity.rs`) fails on a command with no row, a row whose command is gone and a row
+  naming a tool the MCP server does not list. A new window command lands with its tool or its
+  reason in the same change. MCP may do more than the window. This adopts the contract's DEC-0121
+  here ahead of SB-200.
+- **Consequences / affects:** [CONTRACTS](CONTRACTS.md#window-to-mcp-parity-sb-363); every later
+  module of the [window and fleet plan](plans/2026-11-14-window-and-fleet/README.md).
+- **Source:** operator 2026-11-14, the window review ([plan](plans/2026-11-14-window-and-fleet/WF-01-foundations.md))
+  («не должно быть никакой функции, которая работает в интерфейсе и не работает в MCP. Могут быть
+  наоборот»).

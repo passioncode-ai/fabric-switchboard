@@ -1526,6 +1526,57 @@ fn project_bindings_are_listed_offline() {
     );
     assert!(json["data"]["bindings"][0].get("token_sha256").is_none());
 }
+/// SB-365: `switchboard attention` answers offline: nothing on an empty folder, and an open
+/// ceiling question with the tool that answers it.
+#[test]
+fn attention_lists_what_needs_a_person_offline() {
+    let tmp = tempfile::tempdir().unwrap();
+    let run = |json: bool| {
+        let mut command = binary();
+        command.arg("--data-dir").arg(tmp.path());
+        if json {
+            command.arg("--json");
+        }
+        let output = command
+            .arg("attention")
+            .stdin(Stdio::null())
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8(output.stdout).unwrap()
+    };
+    let empty: serde_json::Value = serde_json::from_str(&run(true)).unwrap();
+    assert_eq!(empty["data"], serde_json::json!({"count": 0, "items": []}));
+    assert_eq!(run(false).trim(), "Nothing needs attention.");
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64;
+    let spend = serde_json::json!({
+        "version": 1,
+        "ceilings": [{"scope": {"kind": "machine"}, "cents": 500, "set_at": now - 60}],
+        "questions": [{"id": "q_0123456789abcdef", "scope": {"kind": "machine"}, "cents": 500,
+            "spent": 5.25, "reached_at": now - 30}],
+        "baselines": []
+    });
+    switchboard_core::private_fs::private_write(
+        &tmp.path().join("spend.json"),
+        &serde_json::to_vec(&spend).unwrap(),
+    )
+    .unwrap();
+    let listed: serde_json::Value = serde_json::from_str(&run(true)).unwrap();
+    assert_eq!(listed["data"]["count"], 1);
+    let item = &listed["data"]["items"][0];
+    assert_eq!(item["reason"], "ceiling_question");
+    assert_eq!(item["account_id"], serde_json::Value::Null);
+    assert_eq!(item["since"], now - 30);
+    assert_eq!(item["action"]["tool"], "switchboard_ceiling_answer");
+    assert!(run(false).contains("Fix: switchboard_ceiling_answer"));
+}
 /// SB-212: a synthetic launch record, 0600 on Unix as a launch writes it. On Windows it keeps
 /// the access list it inherits, which history still reads (and narrows), as after a copied folder.
 fn plant_launch(root: &std::path::Path, id: &str, extra: serde_json::Value) {
