@@ -56,8 +56,13 @@ Annotations: `readOnlyHint: true`.
 `signed_in_cli`, `lowest_remaining_percent`, `usage_fresh`, `organization`, `also_organizations`
 (`{id, name}` of each organization it also works for), `elsewhere` (used on
 another machine) and `location` (where, when said), `assigned_to` (the agent or service it is given
-to, null when none: Switchboard keeps observing its usage but never uses it by itself). `machine`
-lists only this machine's accounts or only those used elsewhere.
+to, null when none: Switchboard keeps observing its usage but never uses it by itself). A row given
+to an agent also has `assigned`: `{account_id, agent, machine, last_launch, last_activity}`, where
+`machine` is its machine group's name, else its location, else null, `last_launch` is
+`{pool, folder, at}` of the newest launch on it (ended ones included) or null, and
+`last_activity` the newest of that launch's start, last turn or end and the account's last usage
+observation (Unix seconds, null when none). `machine` lists only this machine's accounts or only
+those used elsewhere.
 
 ### `switchboard_usage`: `account_id?`, `refresh?: bool` (default false)
 
@@ -222,10 +227,17 @@ What the proxy relayed: requests, outcomes (`ok`, `limited`, `failed`) and the p
 counts by group, project, account, coding agent and day. Managed traffic only; counts, never a
 prompt or path. Out of range: "Statistics cover 1 to 90 days."
 
-### `switchboard_events`: `limit?` (1 to 500, default 50)
+### `switchboard_events`: `limit?` (1 to 500, default 50), `kind?`, `account_id?`, `before?`
 
-`{events[]}`, newest first: fixed codes for accounts, switches, groups, automatic switching and
-sign-ins. No credential, prompt or provider text.
+`{events[], next_before, kinds[]}`, newest first: fixed codes for accounts, switches, groups,
+automatic switching and sign-ins. `kind` keeps one class: `switches` (selected, rotated, failed
+over, activated, a fallback hand-over), `sign_ins` (a sign-in, an account added, a Kimi Code
+account), `groups` (a group, a folder rule, balancing), `moves` (to or from another machine, given
+to an agent), `other`, or `errors` (any event that failed, of every class). `account_id` keeps one
+account's events. A page holds `limit` events and every other event of the second it ends in;
+pass `next_before` as `before` (Unix seconds, exclusive) for older ones, null when nothing older
+matches. `kinds` names every kind present in the whole journal. An unknown kind: "kind is one of
+switches, sign_ins, groups, moves, errors or other." No credential, prompt or provider text.
 
 ### `switchboard_organizations`: no arguments
 

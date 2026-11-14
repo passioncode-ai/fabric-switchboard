@@ -7,9 +7,9 @@ import { platformLabel } from './platform';
 import { LOCALE_KEY, dateLocale, locale, parseLocaleChoice, plural, saveLocaleChoice, t, type LocaleChoice } from './i18n';
 import { demo, demoFirstRun, native, nativeAdapter, onProjectSuggestions, onShellHook, onSpendChanged, safeError, reportFrontendReady, reportLanguage, type Operation } from './adapter';
 import type { CardState, AccountGroup } from './ui-logic';
-import { statAlert, ceilingQuestion, ceilingWarning, ceilingLine, keyLimitLine, dollars, POOL_PATTERN, poolChoices, poolName, inGroup, tourPlacement, usableWhileBusy, APPEARANCE_KEY, attribution, placementAdmits, domainSuggestion, groupSeatsElsewhere, passioncodeLine, seatEndedText, groupSeatsEndedText, organizationReleasedAt, inOrganizationFilter, domainList, type AttributedBy, sortStatRows, nextStatSort, type StatRow, type StatSort, statCacheShare, statTokensPerRequest, chartSeries, niceMax, groupProjectRows, type ChartMetric, groupProjects, compactCount, statTokens, statTrouble, statTroubleText, statAgentName, type Statistics, EXPIRY_CHOICES, folderName, folderRows, withoutFolder, type ProjectRoot, moveTargets, mapRows, rootTargets, storedMapFolders, MAP_FOLDERS_KEY, type MapFilter, type MapRow, type RepositoryMap, sortAgents, defaultAgentChoices, backgroundReads, clockedRead, chainScopeKey, afterRead, ceilingRemovalNote, modelMeta, modelUse, ordinaryKimiNote, kimiLimitUntil, limitReasonText, limitTitle, agentSetupFacts, sessionHow, sessionAgentName, sessionStateLabel, kimiWindowsLine, kimiWindowsLines, openrouterCreditLine, eventAction, eventDetail, MutationClock, activeRules, autoSwitchPool, autoSwitchPossible, launchChoice, withFolders, githubDefaultSelection, githubPlan, githubSource, replaceFolder, storedFolder, LAST_FOLDER_KEY, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, signInNotice, signInMove, organizationMoveNote, dismissTermsNotice, termsNoticeDismissed, termsNoticeOn, termsNoticeText, tourWaits, orgSetups, releasedOrganizations, releasedSummary, orgSetupAction, orgSetupShown, orgSetupCaveat, orgSetupLeads, orgSetupPrimary, accountsOrgActionLeads, firstPrimary, orgSetupUnread, orgSetupStateLabel, orgSetupTitle, hiddenOrgSetups, ORG_SETUP_HIDDEN_KEY, accountsEmptyKey, type OrgSetup, usageAnswerText, usageNotice, usageFreshness, windowReset, type Appearance, shellHookView, balancingView, balancingNotice, shellHookToggleNotice, shellHookNoticeText, codexHookLine, moveStep, accountsForStep, chainSummary, stepReasonText, handoverOutcomeText, handoverSkipped, shortWorkflow, TAKEOVER_ORDER, groupOrganizations, servesPool, sharedGroups, holdsContext, accountOrganizations, machineOf, unplacedAccounts, machineAliasesLine, machineLiveLine, machineCopyLine, foldOpen, accountSections, accountMatches, attentionAccounts, attentionReasonText, attentionActionLabel, givenFacts, switchingLine, MACHINE_FOLD_LIMIT } from './ui-logic';
+import { statAlert, ceilingQuestion, ceilingWarning, ceilingLine, keyLimitLine, dollars, POOL_PATTERN, poolChoices, poolName, inGroup, tourPlacement, usableWhileBusy, APPEARANCE_KEY, attribution, placementAdmits, domainSuggestion, groupSeatsElsewhere, passioncodeLine, seatEndedText, groupSeatsEndedText, organizationReleasedAt, inOrganizationFilter, domainList, type AttributedBy, sortStatRows, nextStatSort, type StatRow, type StatSort, statCacheShare, statTokensPerRequest, chartSeries, niceMax, groupProjectRows, type ChartMetric, groupProjects, compactCount, statTokens, statTrouble, statTroubleText, statAgentName, type Statistics, EXPIRY_CHOICES, folderName, folderRows, withoutFolder, type ProjectRoot, moveTargets, mapRows, rootTargets, storedMapFolders, MAP_FOLDERS_KEY, type MapFilter, type MapRow, type RepositoryMap, sortAgents, defaultAgentChoices, backgroundReads, clockedRead, chainScopeKey, afterRead, ceilingRemovalNote, modelMeta, modelUse, ordinaryKimiNote, kimiLimitUntil, limitReasonText, limitTitle, agentSetupFacts, sessionHow, sessionAgentName, sessionStateLabel, kimiWindowsLine, kimiWindowsLines, openrouterCreditLine, eventAction, eventDetail, MutationClock, activeRules, autoSwitchPool, autoSwitchPossible, launchChoice, withFolders, githubDefaultSelection, githubPlan, githubSource, replaceFolder, storedFolder, LAST_FOLDER_KEY, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, signInNotice, signInMove, organizationMoveNote, dismissTermsNotice, termsNoticeDismissed, termsNoticeOn, termsNoticeText, tourWaits, orgSetups, releasedOrganizations, releasedSummary, orgSetupAction, orgSetupShown, orgSetupCaveat, orgSetupLeads, orgSetupPrimary, accountsOrgActionLeads, firstPrimary, orgSetupUnread, orgSetupStateLabel, orgSetupTitle, hiddenOrgSetups, ORG_SETUP_HIDDEN_KEY, accountsEmptyKey, type OrgSetup, usageAnswerText, usageNotice, usageFreshness, windowReset, type Appearance, shellHookView, balancingView, balancingNotice, shellHookToggleNotice, shellHookNoticeText, codexHookLine, moveStep, accountsForStep, chainSummary, stepReasonText, handoverOutcomeText, handoverSkipped, shortWorkflow, TAKEOVER_ORDER, groupOrganizations, servesPool, sharedGroups, holdsContext, accountOrganizations, machineOf, unplacedAccounts, machineAliasesLine, machineLiveLine, machineCopyLine, foldOpen, accountSections, accountMatches, attentionAccounts, attentionReasonText, attentionActionLabel, givenFacts, switchingLine, MACHINE_FOLD_LIMIT, EVENT_FILTER_KINDS, eventKindLabel, filterEvents, eventsByDay, relativeDay, EVENTS_PAGE, eventPage, sortSessions, statRowsShown, STAT_TOP, spendShare, groupKeyBlocks, keyTail, groupStateLine, type EventKind, type EventFilter } from './ui-logic';
 import agentCatalog from '../catalog/agents.json';
-import type { AnalyticsStatus, Ceilings, CeilingView, CeilingQuestionView, OpenrouterCredit, BackupInfo, PassioncodeStatus, Account, Adapter, AgentConnection, AgentInfo, AgentRow, AgentsOverview, OpenrouterModels, HermesModel, KimiAccounts, KimiRegion, KimiStatus, OpenrouterStatus, OpenrouterKeys, CodexRoute, BalanceStatus, ShellHookStatus, AgentSetup, AuthKind, BackupStatus, KimiAccount, CurrentAccounts, LoginItem, Project, Restored, HandoverPlan, ExternalIdentity, MonitorStatus, ProjectRule, Provider, RotationPolicy, RuntimeStatus, SessionInfo, Snapshot, UpdateStatus, Onboarding, Chains, ChainExecutor, ChainScope, ChainStepView, GithubRepository, Machine, MachinesLive, Attention, AttentionItem } from './types';
+import type { AnalyticsStatus, Ceilings, CeilingView, CeilingQuestionView, OpenrouterCredit, BackupInfo, PassioncodeStatus, Account, Adapter, AgentConnection, AgentInfo, AgentRow, AgentsOverview, OpenrouterModels, HermesModel, KimiAccounts, KimiRegion, KimiStatus, OpenrouterStatus, OpenrouterKeys, CodexRoute, BalanceStatus, ShellHookStatus, AgentSetup, AuthKind, BackupStatus, KimiAccount, CurrentAccounts, LoginItem, Project, Restored, HandoverPlan, ExternalIdentity, MonitorStatus, ProjectRule, Provider, RotationPolicy, RuntimeStatus, SessionInfo, Snapshot, UpdateStatus, Onboarding, Chains, ChainExecutor, ChainScope, ChainStepView, GithubRepository, Machine, MachinesLive, Attention, AttentionItem, Event, GivenAccount } from './types';
 
 const root = document.querySelector<HTMLDivElement>('#app')!;
 const announcements = document.querySelector<HTMLDivElement>('#announcements')!;
@@ -281,7 +281,7 @@ function showNotice(text: string, error = false) { notice = t(text); noticeError
 /** One way to change page: what each page reads on arrival, then focus on its title or on `focusKey`. */
 function goTo(target: Page, focusKey?: string) {
   page = target; notice = '';
-  if (target === 'activity') void loadSessions(); if (target === 'agents') { void loadAgents(); void loadChains(); void loadCeilings(); } if (target === 'projects') void loadChains(); if (target === 'tokens') { groupKeyStatus = null; void loadOpenrouter(); void loadCeilings(); } if (target === 'stats' && !stats) void loadStats(); if (target === 'orgs') void loadPassioncode();
+  if (target === 'activity') { void loadSessions(); journal = null; void loadJournal(); } if (target === 'agents') { void loadAgents(); void loadChains(); void loadCeilings(); } if (target === 'projects') { void loadChains(); void loadCeilings(); if (!openrouterKeys) void loadOpenrouter(); } if (target === 'tokens') { groupKeyStatus = null; void loadOpenrouter(); void loadCeilings(); } if (target === 'stats' && !stats) void loadStats(); if (target === 'orgs') void loadPassioncode();
   render();
   if (focusKey) { restoreFocus(focusKey); document.querySelector<HTMLElement>(`[data-focus="${focusKey}"]`)?.scrollIntoView({ block: 'start' }); }
   else document.querySelector<HTMLElement>('h1')?.focus();
@@ -293,16 +293,19 @@ const foldChoices = new Map<string, boolean>();
  * "4 accounts"), `aria-expanded` and `aria-controls`; the body is built only while open. The
  * person's choice is kept by `key` across renders and page changes.
  */
-function foldSection(options: { key: string; title: string; state?: string; open?: boolean; level?: 'h2' | 'h3'; className?: string; body: () => Node[] }): HTMLElement {
+function foldSection(options: { key: string; title: string | Node; state?: string; open?: boolean; level?: 'h2' | 'h3'; className?: string; body: () => Node[]; /** WF-8.1: controls beside the header (a ⋯ menu), never inside its button. */ aside?: () => Node[] }): HTMLElement {
   const { key } = options; const open = foldOpen(foldChoices, key, options.open ?? false);
   const section = el('section', `fold ${options.className ?? ''}`.trim()); section.dataset.fold = key;
   const heading = el(options.level ?? 'h2', 'fold-heading'); heading.id = `fold-title-${key}`;
   const toggle = button('', () => { foldChoices.set(key, !open); render(); restoreFocus(`fold-${key}`); }, 'fold-toggle', `fold-${key}`);
   toggle.setAttribute('aria-expanded', String(open)); toggle.setAttribute('aria-controls', `fold-body-${key}`);
   const mark = el('span', 'fold-mark'); mark.setAttribute('aria-hidden', 'true');
-  toggle.append(mark, el('span', 'fold-title', options.title));
+  const title = el('span', 'fold-title'); title.append(options.title);
+  toggle.append(mark, title);
   if (options.state) toggle.append(el('span', 'fold-state', options.state));
-  heading.append(toggle); section.append(heading);
+  heading.append(toggle);
+  if (options.aside) { const head = el('div', 'fold-head'); head.append(heading, ...options.aside()); section.append(head); }
+  else section.append(heading);
   const body = el('div', 'fold-body'); body.id = `fold-body-${key}`; body.setAttribute('role', 'region'); body.setAttribute('aria-labelledby', heading.id);
   if (open) body.append(...options.body()); else body.hidden = true;
   section.append(body);
@@ -327,6 +330,9 @@ async function reload() {
   codexRouteState = null; codexRouteError = '';
   shellHookState = null; shellHookError = '';
   if (page === 'stats') { stats = null; statsError = false; void loadStats(); }
+  // WF-11.1: Refresh reads the journal again from its newest page.
+  if (page === 'activity') journal = null;
+  given = null;
   render();
   void adapter.agentSetup().then((value) => { agentSetup = value; agentSetupError = false; }, () => { agentSetupError = true; }).finally(backgroundRender);
   loadOnboarding();
@@ -340,7 +346,7 @@ async function reload() {
   void loadBackups(readStamp);
   if (page === 'agents') void loadAgents();
   if (page === 'agents' || page === 'projects') void loadChains();
-  if (page === 'agents' || page === 'tokens') { groupKeyStatus = null; void loadCeilings(); }
+  if (page === 'agents' || page === 'tokens' || page === 'projects') { groupKeyStatus = null; void loadCeilings(); }
   if (page === 'orgs') void loadPassioncode();
   void adapter.analytics().then((value) => { if (clock.accepts(readStamp)) { analyticsState = value; analyticsError = false; } }, () => { analyticsError = true; }).finally(backgroundRender);
   void adapter.loginItem().then((value) => { if (clock.accepts(readStamp)) { loginItem = value; loginItemError = false; } }, () => { loginItemError = true; }).finally(backgroundRender);
@@ -488,11 +494,12 @@ function rulesStrip(main: HTMLElement) {
   if (!live.length) return;
   const strip = el('div', 'status-item rules-strip'); strip.setAttribute('role', 'note'); strip.setAttribute('aria-label', t('Active folder rules'));
   const names = live.map((rule) => `${projectName(rule.path)} → ${ruleAccount(rule)?.label ?? t('missing account')}${rule.expires_at ? t(' until {date}', { date: date(rule.expires_at) }) : ''}`);
-  strip.append(el('span', '', plural(live.length, { one: '{n} folder rule is active: {names}. Automatic switching still moves off an exhausted account.', other: '{n} folder rules are active: {names}. Automatic switching still moves off an exhausted account.' }, { names: names.join('; ') })), button(t('Review rules'), () => goTo('projects', 'rules-heading'), 'text-button', 'review-rules'));
+  strip.append(el('span', '', plural(live.length, { one: '{n} folder rule is active: {names}. Automatic switching still moves off an exhausted account.', other: '{n} folder rules are active: {names}. Automatic switching still moves off an exhausted account.' }, { names: names.join('; ') })), button(t('Review rules'), () => { foldChoices.set('folder-rules', true); goTo('projects', 'fold-folder-rules'); }, 'text-button', 'review-rules'));
   main.append(strip);
 }
 function renderProjects(main: HTMLElement) {
   // WF-1.1 (DEC-0014): balancing, the Codex route and the terminal hook are standing configuration, on Settings now.
+  // WF-8.2 (SB-370): the repositories on disk and the folder rules fold; Other machines stays as it is.
   main.append(projectsSection(), machinesSection(), settingsMovedNote(), diskMapSection(), rulesSection());
 }
 /** SB-355 (SCN-092, DEC-0013): every other machine accounts live on is a group of its own; a live read over ssh only when asked. */
@@ -696,7 +703,7 @@ function checkShellHookNotice() {
   }, () => { /* read again at the next look */ }).finally(() => { shellNoticeReading = false; });
 }
 /** SB-135 part 2: the Git repositories under the folders the person chose, each with its project or none; one moves or joins in place. Read only when the section is open. */
-let mapOpen = false; let mapFilter: MapFilter = 'unassigned'; let diskMap: RepositoryMap | null = null; let mapLoading = false; let mapError = '';
+let mapFilter: MapFilter = 'unassigned'; let diskMap: RepositoryMap | null = null; let mapLoading = false; let mapError = '';
 let mapFolders = storedMapFolders(noticeStore());
 function saveMapFolders() { try { noticeStore()?.setItem(MAP_FOLDERS_KEY, JSON.stringify(mapFolders)); } catch { /* kept for this window only */ } }
 function loadMap() {
@@ -704,13 +711,17 @@ function loadMap() {
   mapLoading = true; mapError = ''; render();
   void adapter.repositoryMap(mapFolders).then((map) => { diskMap = map; }, (error) => { mapError = t(safeError(error, 'read')); }).finally(() => { mapLoading = false; render(); });
 }
+/** WF-8.2 (SB-370): the disk map folds on Groups; it is read the first time it opens (a walk of the disk), and again on *Look again*. */
 function diskMapSection() {
-  const section = el('section', 'project-section disk-map'); section.setAttribute('aria-labelledby', 'disk-map-heading');
-  const heading = el('h2', 'section-heading', t('Repositories on disk')); heading.id = 'disk-map-heading';
-  const toggle = button(mapOpen ? t('Hide repositories') : t('Show repositories'), () => { mapOpen = !mapOpen; if (mapOpen && !diskMap) loadMap(); else render(); restoreFocus('disk-map-toggle'); }, 'text-button', 'disk-map-toggle');
-  toggle.setAttribute('aria-expanded', String(mapOpen));
-  section.append(heading, el('p', 'surface-note', t('Every Git repository under the folders you choose, with the groups it is in. Add one to a group, or move it with its worktrees and clones to another.')), toggle);
-  if (!mapOpen) return section;
+  const loose = diskMap && !mapLoading ? mapRows(diskMap, 'all').filter((r) => !r.pool).length : null;
+  return foldSection({ key: 'disk-map', title: t('Repositories on disk'), state: loose === null ? undefined : plural(loose, { one: '{n} not in a group', other: '{n} not in a group' }), className: 'disk-map', body: () => {
+    if (!diskMap && !mapLoading && !mapError) queueMicrotask(loadMap);
+    return [diskMapBody()];
+  } });
+}
+function diskMapBody() {
+  const section = el('div', 'fold-content');
+  section.append(el('p', 'surface-note', t('Every Git repository under the folders you choose, with the groups it is in. Add one to a group, or move it with its worktrees and clones to another.')));
   // The folders looked under: chosen with the system picker, remembered; none means ~/DATA (else home).
   const where = el('div', 'folder-picker-list'); const list = el('ul', 'folder-list');
   const shown = mapFolders.length ? mapFolders : diskMap?.under ?? [];
@@ -823,34 +834,74 @@ function projectsSection() {
     empty.append(button(t('+ New group'), () => projectDialog(), 'button primary', 'empty-new-project'));
     section.append(empty); return section;
   }
-  const list = el('div', 'account-list'); list.setAttribute('aria-label', t('Groups'));
-  for (const project of projects) {
-    // SB-282: its own accounts and those another group shares with it.
-    const accounts = snapshot!.accounts.filter((a) => servesPool(snapshot!, a, project.pool));
-    const card = el('article', 'account-card project-card'); card.setAttribute('aria-label', `${project.name}, ${plural(accounts.length, { one: '{n} account', other: '{n} accounts' })}`);
-    const details = el('div', 'account-details'); const title = el('div', 'account-title');
-    const name = el('h2', ''); name.append(groupHint(project.name, project.pool));
-    title.append(name, el('span', 'badge muted', `${plural(accounts.length, { one: '{n} account', other: '{n} accounts' })}`));
-    // SB-109, SB-282: the organizations the group runs on; a personal group carries no badge.
-    const groupOrgIds = groupOrganizations(project);
-    const groupOrgs = groupOrgIds.map((id) => snapshot!.organizations?.find((o) => o.id === id)).filter((o): o is NonNullable<typeof o> => !!o);
-    const groupOrg = groupOrgs[0];
-    for (const org of groupOrgs) { const badge = el('span', 'badge org-badge', org.name); badge.title = groupOrgs.length > 1 ? t('Runs only on accounts of {names}.', { names: groupOrgs.map((o) => o.name).join(', ') }) : t('Runs only on accounts of {name}.', { name: org.name }); title.append(badge); }
-    const folders = projectFolderList(project);
-    const sharedFrom = (a: Account) => a.pool !== project.pool ? ` · ${t('shared from {name}', { name: projectOf(a.pool)?.name ?? a.pool })}` : '';
-    const chips = el('p', 'account-meta', accounts.length ? accounts.map((a) => `${a.label} · ${providerName(a.provider)}${sharedFrom(a)}`).join(', ') : t('No accounts yet, so sessions in these folders use your other accounts until you add one.'));
-    details.append(title, folders, chips);
-    // C-3 (SCN-081): which chain the group's tasks fall back along; the editor is on Agents.
-    const fallback = groupChainLine(project.pool);
-    if (fallback) { const line = el('p', 'account-meta chain-line'); line.append(button(fallback, () => goTo('agents', `chain-edit-project-${project.pool}`), 'text-button chain-link', `chain-link-${project.pool}`)); details.append(line); }
-    // SB-170: every account of the group belongs elsewhere now, so its folders are refused.
-    if (groupOrg && groupSeatsElsewhere(snapshot!, groupOrgIds, accounts)) details.append(el('p', 'surface-note seats-elsewhere', t('None of these accounts belongs to {name} any more, so sessions in this group\'s folders are refused. Add an account of {name}, or change the group\'s organization.', { name: groupOrgs.map((o) => o.name).join(', ') })));
-    else { const ended = groupOrg ? groupSeatsEndedText(snapshot!, project, accounts, monitor?.sign_in_required) : null; if (ended) details.append(el('p', 'surface-note seats-ended', ended)); }
-    const actions = el('div', 'management-actions');
-    actions.append(button(t('Edit'), () => projectDialog(project), 'text-button', `edit-project-${project.pool}`), button(t('Delete'), () => deleteProjectDialog(project), 'text-button danger-text', `delete-project-${project.pool}`));
-    card.append(details, actions); list.append(card);
-  }
+  // WF-8.1 (SB-370): each group folds to one line of state; open, it reads Accounts, Repositories, Agents and keys.
+  const list = el('div', 'group-cards'); list.setAttribute('aria-label', t('Groups'));
+  for (const project of projects) list.append(groupCard(project, projects.length === 1));
   section.append(list); return section;
+}
+/** WF-8.1: the chain a group's tasks fall back along (its own, else this computer's); null until the chains are read. */
+function groupChainText(pool: string): string | null {
+  if (!chainsView) return null;
+  const chain = chainFor(`project:${pool}`) ?? chainFor('machine');
+  return chain ? chainSummary(chain.executors, chainAgentName, chainAccountLabel) : t('Not set');
+}
+function groupCard(project: Project, only: boolean) {
+  // SB-282: its own accounts and those another group shares with it.
+  const accounts = snapshot!.accounts.filter((a) => servesPool(snapshot!, a, project.pool));
+  const context = quotaContext();
+  const withRoom = accounts.filter((a) => { const state = cardState(a, context); return state === 'available' || state === 'low'; }).length;
+  const repositories = groupProjectRows(project.folders, projectRoots?.[project.pool] ?? null).length;
+  // SB-109, SB-282: the organizations the group runs on; a personal group carries no badge.
+  const groupOrgIds = groupOrganizations(project);
+  const groupOrgs = groupOrgIds.map((id) => snapshot!.organizations?.find((o) => o.id === id)).filter((o): o is NonNullable<typeof o> => !!o);
+  const state = groupStateLine({ accounts: accounts.length, withRoom, repositories, chain: groupChainText(project.pool) });
+  const title = el('span', 'group-card-title'); title.append(groupHint(project.name, project.pool, false));
+  const aside = () => {
+    const parts: Node[] = [];
+    for (const org of groupOrgs) { const badge = el('span', 'badge org-badge', org.name); badge.title = groupOrgs.length > 1 ? t('Runs only on accounts of {names}.', { names: groupOrgs.map((o) => o.name).join(', ') }) : t('Runs only on accounts of {name}.', { name: org.name }); parts.push(badge); }
+    parts.push(menu(`group-${project.pool}`, t('Actions for {name}', { name: project.name }), [[t('Edit'), () => projectDialog(project)], [t('Delete'), () => deleteProjectDialog(project), 'danger-text']]));
+    return parts;
+  };
+  const card = foldSection({ key: `group-${project.pool}`, title, state, open: only, level: 'h2', className: 'group-card', aside, body: () => groupCardBody(project, accounts) });
+  // SB-170, SB-160: a group none of whose accounts can serve it says so on its card, folded or not.
+  const warning = groupSeatWarning(project, accounts, groupOrgIds, groupOrgs);
+  if (warning) card.querySelector('.fold-head')?.after(warning);
+  return card;
+}
+function groupSeatWarning(project: Project, accounts: Account[], groupOrgIds: string[], groupOrgs: { name: string }[]): HTMLElement | null {
+  if (!groupOrgs.length) return null;
+  if (groupSeatsElsewhere(snapshot!, groupOrgIds, accounts)) return el('p', 'surface-note seats-elsewhere group-card-warning', t('None of these accounts belongs to {name} any more, so sessions in this group\'s folders are refused. Add an account of {name}, or change the group\'s organization.', { name: groupOrgs.map((o) => o.name).join(', ') }));
+  const ended = groupSeatsEndedText(snapshot!, project, accounts, monitor?.sign_in_required);
+  return ended ? el('p', 'surface-note seats-ended group-card-warning', ended) : null;
+}
+function groupCardBody(project: Project, accounts: Account[]): Node[] {
+  const context = quotaContext();
+  // Accounts: each with its state; the one the group's sessions use now is marked.
+  const people = el('div', 'fold-part'); people.append(el('h3', 'fold-part-heading', t('Accounts')));
+  if (!accounts.length) people.append(el('p', 'account-meta', t('No accounts yet, so sessions in these folders use your other accounts until you add one.')));
+  else {
+    const rows = el('ul', 'group-accounts'); rows.setAttribute('aria-label', t('Accounts'));
+    for (const a of accounts) {
+      const row = el('li', 'group-account');
+      row.append(el('span', 'group-account-name', `${a.label} · ${providerName(a.provider)}`));
+      if (a.pool !== project.pool) row.append(el('span', 'folder-note', ` · ${t('shared from {name}', { name: projectOf(a.pool)?.name ?? a.pool })}`));
+      row.append(el('span', 'folder-note', ` · ${CARD_STATE[cardState(a, context)]}`));
+      if (snapshot!.routes[`${a.provider}:${project.pool}`] === a.id) row.append(' ', el('span', 'badge current-badge', t('Used now')));
+      rows.append(row);
+    }
+    people.append(rows);
+  }
+  // Repositories: the worktree tree as before (SB-147).
+  const repos = el('div', 'fold-part'); repos.append(el('h3', 'fold-part-heading', t('Repositories')), projectFolderList(project));
+  // Agents and keys: the fallback chain, the API key its agents spend and its daily ceiling.
+  const agents = el('div', 'fold-part'); agents.append(el('h3', 'fold-part-heading', t('Agents and keys')));
+  const fallback = groupChainLine(project.pool);
+  if (fallback) { const line = el('p', 'account-meta chain-line'); line.append(button(fallback, () => goTo('agents', `chain-edit-project-${project.pool}`), 'text-button chain-link', `chain-link-${project.pool}`)); agents.append(line); }
+  const own = openrouterKeys?.keys.find((k) => k.pool === project.pool);
+  const keyText = !openrouterKeys ? t('Reading the OpenRouter key…') : own ? (own.model ? t('Own key · {model}', { model: own.model }) : t('Own key')) : openrouter?.saved ? t('Uses the machine\'s key') : t('No key: agents here cannot start on OpenRouter');
+  const keyLine = el('p', 'account-meta'); keyLine.append(`${keyText} · `, button(t('Open API keys'), () => goTo('tokens'), 'text-button', `group-keys-${project.pool}`)); agents.append(keyLine);
+  if (ceilingsView) agents.append(el('p', 'account-meta', ceilingLine(ceilingOf({ kind: 'project', pool: project.pool }))));
+  return [people, repos, agents];
 }
 /** Folders shown on a project's card before *Show all*: a project an agent works in gathers dozens (SB-131). */
 const FOLDERS_SHOWN = 6;
@@ -956,11 +1007,15 @@ function projectDialog(existing?: Project, organization?: string) {
     void dialogSave(context, () => adapter.saveProject({ pool: existing?.pool, name: name.value, folders: list, accountIds, baseFolders: existing?.folders, organizations: orgPicker ? chosenOrgs() : undefined }), existing ? t('Group “{name}” saved.', { name: name.value.trim() }) : t('Group “{name}” created. Launch its accounts from its folders.', { name: name.value.trim() }));
   });
 }
+/** WF-8.2 (SB-370): folder rules fold on Groups; the header counts the active ones. */
 function rulesSection() {
-  const main = el('section', 'project-section'); main.setAttribute('aria-labelledby', 'rules-heading');
-  const heading = el('div', 'section-heading-row'); const h = el('h2', 'section-heading', t('Folder rules')); h.id = 'rules-heading'; h.tabIndex = -1; h.dataset.focus = 'rules-heading';
-  heading.append(h); if (snapshot!.accounts.length) heading.append(button(t('+ Add rule'), () => ruleDialog(), 'button quiet', 'add-rule'));
-  main.append(heading);
+  const rules = snapshot!.rules ?? [];
+  const live = activeRules(rules, Date.now() / 1000).length;
+  return foldSection({ key: 'folder-rules', title: t('Folder rules'), state: rules.length ? plural(live, { one: '{n} active', other: '{n} active' }) : t('None'), className: 'rules-fold', body: () => [rulesBody()] });
+}
+function rulesBody() {
+  const main = el('div', 'fold-content');
+  if (snapshot!.accounts.length) { const head = el('div', 'management-actions'); head.append(button(t('+ Add rule'), () => ruleDialog(), 'button quiet', 'add-rule')); main.append(head); }
   const rules = snapshot!.rules ?? [];
   main.append(el('p', 'surface-note', t('Folder rules are optional. With none, Switchboard follows your selection and automatic switching in every folder. A rule applies when an agent or switchboard project apply asks for it, only to that session, and never turns automatic switching off.')));
   if (!rules.length) {
@@ -1034,21 +1089,51 @@ function renderAgents(main: HTMLElement) {
   ceilingBanners(main);
   if (agentsError && !agentsView) { const panel = el('section', 'about-panel'); panel.append(el('p', 'usage-error', t(agentsError)), button(t('Retry'), () => void loadAgents(), 'button', 'agents-retry')); main.append(panel); }
   else if (!agentsView) { const panel = el('section', 'about-panel'); panel.append(el('p', 'form-note', t('Looking for coding agents on this computer…'))); main.append(panel); }
-  else main.append(defaultAgentPanel(agentsView), installedAgentsPanel(agentsView), chainsPanel(), availableAgentsPanel(agentsView));
+  else main.append(agentSettingsPanel(agentsView), installedAgentsPanel(agentsView), chainsPanel(), availableAgentsPanel(agentsView));
   if (!agentsView) main.append(chainsPanel());
   main.append(tokensPointer(), connectPanel());
 }
-function defaultAgentPanel(view: AgentsOverview) {
-  const section = el('section', 'about-panel'); section.setAttribute('aria-labelledby', 'default-agent-heading');
-  const heading = el('h2', '', t('Default agent')); heading.id = 'default-agent-heading';
-  section.append(heading, el('p', '', t('The agent that takes over a workflow when none is named: switchboard continue without an account hands it there, and Fabric starts with it unless a project sets its own. Fallback chains keep their own order.')));
+/**
+ * WF-10.1 (SB-372, DEC-0018): the settings every session Switchboard starts on this computer runs
+ * under, in one block at the top of Agents: permissions, the default agent, which agents take over
+ * work and this computer's fallback chain. Each control is also an MCP tool (`switchboard_agent_set`,
+ * `switchboard_chain_set`).
+ */
+function agentSettingsPanel(view: AgentsOverview) {
+  const section = el('section', 'about-panel agent-settings'); section.setAttribute('aria-labelledby', 'agent-settings-heading');
+  const heading = el('h2', '', t('Agent settings')); heading.id = 'agent-settings-heading';
+  section.append(heading);
+  const applies = () => el('p', 'form-note', t('Applies to every session Switchboard starts on this computer.'));
+  // Permissions: bypass the agent's own prompts, or ask (SB-298).
+  const permissions = el('div', 'fold-part'); permissions.append(el('h3', 'fold-part-heading', t('Permissions')));
+  const seg = el('div', 'segmented'); seg.setAttribute('role', 'group'); seg.setAttribute('aria-label', t('Permissions'));
+  for (const [value, label] of [['bypass', t('Bypass permission prompts')], ['ask', t('Ask')]] as const) {
+    const on = view.permissions === value; const key = `permissions-${value}`;
+    const b = button(label, () => { if (!on) void mutate(async () => { await adapter.agentPermissions(value); agentsView = await adapter.agentsOverview(); }, value === 'bypass' ? t('Sessions Switchboard starts now skip permission prompts.') : t('Sessions Switchboard starts now ask for permission.'), key); }, `segment${on ? ' is-on' : ''}`, key);
+    b.setAttribute('aria-pressed', String(on)); seg.append(b);
+  }
+  permissions.append(seg, el('p', '', view.permissions === 'ask' ? t('Claude Code and Codex ask you before they edit files or run commands.') : view.permissions === 'bypass' ? t('Claude Code and Codex edit files and run commands without asking first.') : t('This version does not report the setting yet.')), applies());
+  // The default agent (SB-120).
+  const fallback = el('div', 'fold-part'); fallback.append(el('h3', 'fold-part-heading', t('Default agent')));
+  fallback.append(el('p', '', t('The agent that takes over a workflow when none is named: switchboard continue without an account hands it there, and Fabric starts with it unless a project sets its own. Fallback chains keep their own order.')));
   const chips = el('div', 'choice-chips'); chips.setAttribute('role', 'group'); chips.setAttribute('aria-label', t('Default agent'));
   for (const choice of defaultAgentChoices(view.agents, view.default)) {
     const key = `default-agent-${choice.id ?? 'auto'}`;
     const chip = button(choice.on ? `✓ ${choice.label}` : choice.label, () => { if (!choice.on) void mutate(async () => { await adapter.agentDefault(choice.id); agentsView = await adapter.agentsOverview(); }, choice.id ? t('{agent} is the default agent.', { agent: choice.label }) : t('The default agent is Auto.'), key); }, `choice-chip${choice.on ? ' is-on' : ''}`, key);
     chip.setAttribute('aria-pressed', String(choice.on)); chips.append(chip);
   }
-  section.append(chips, el('p', 'form-note', t('Auto: switchboard continue asks for an account, and Fabric uses its own choice. Claude Code, Codex and Kimi Code continue on whichever of their accounts has room; Hermes and OpenCode on the OpenRouter key.')));
+  fallback.append(chips, el('p', 'form-note', t('Auto: switchboard continue asks for an account, and Fabric uses its own choice. Claude Code, Codex and Kimi Code continue on whichever of their accounts has room; Hermes and OpenCode on the OpenRouter key.')), applies());
+  // Which agents may take over work: the switches are under Installed.
+  const takeover = el('div', 'fold-part'); takeover.append(el('h3', 'fold-part-heading', t('Agents that take over work')));
+  const enabled = sortAgents(view.agents.filter((a) => a.installed && a.switchable && a.enabled)).map((a) => a.name);
+  const line = el('p', ''); line.append(enabled.length ? t('Enabled: {agents}.', { agents: enabled.join(', ') }) : t('No installed agent takes over work.'), ' ', button(t('Choose under Installed'), () => { document.getElementById('installed-agents-heading')?.scrollIntoView({ block: 'start' }); restoreFocus(`agent-on-${view.agents.find((a) => a.installed && a.switchable)?.id ?? ''}`); }, 'text-button', 'settings-takeover'));
+  takeover.append(line, applies());
+  // This computer's fallback chain; the editor is below under Fallback chains.
+  const chain = el('div', 'fold-part'); chain.append(el('h3', 'fold-part-heading', t('This computer\'s fallback chain')));
+  const machine = chainFor('machine');
+  const chainLine = el('p', ''); chainLine.append(chainsView ? chainSummary(machine?.executors, chainAgentName, chainAccountLabel) : t('Reading fallback chains…'), ' ', button(t('Edit under Fallback chains'), () => { document.getElementById('chain-row-machine')?.scrollIntoView({ block: 'start' }); restoreFocus('chain-edit-machine'); }, 'text-button', 'settings-chain'));
+  chain.append(chainLine, applies());
+  section.append(permissions, fallback, takeover, chain);
   return section;
 }
 function installedAgentsPanel(view: AgentsOverview) {
@@ -1321,13 +1406,26 @@ async function loadOpenrouter(stamp?: number) {
   try { const [status, keys] = await Promise.all([adapter.openrouterStatus(), adapter.openrouterKeys()]); if (stamp === undefined || clock.accepts(stamp)) { [openrouter, openrouterKeys] = [status, keys]; openrouterError = ''; groupKeyStatus = null; } } catch (error) { openrouterError = safeError(error, 'read'); }
   backgroundRender();
 }
-/** SB-144: the Tokens page: the key every folder uses, and each project's own. */
+/**
+ * SB-144, WF-7 (SB-369): the API keys page in three folding blocks: this computer's key on one card,
+ * the groups with a key of their own (the rest in one line), and task ceilings when one exists.
+ */
 function renderTokens(main: HTMLElement) {
   if (!openrouter && !openrouterError) void loadOpenrouter();
   if (openrouterKeys && !groupKeyStatus) loadGroupKeys();
   ceilingBanners(main);
-  main.append(el('p', 'surface-note', t('Agents that run on an API key (Hermes, OpenCode, Pi, Kimi Code CLI and others on OpenRouter) take the key of the group whose folder they start in. A folder outside every group, or a group without a key of its own, uses the machine\'s key. Nothing waits: each launch reads its key when it starts.')), openrouterPanel(), projectKeysPanel());
-  const tasks = taskCeilingsPanel(); if (tasks) main.append(tasks);
+  main.append(el('p', 'surface-note', t('Agents that run on an API key (Hermes, OpenCode, Pi, Kimi Code CLI and others on OpenRouter) take the key of the group whose folder they start in. A folder outside every group, or a group without a key of its own, uses the machine\'s key. Nothing waits: each launch reads its key when it starts.')));
+  main.append(foldSection({ key: 'keys-machine', title: t('This computer\'s key'), state: !openrouter ? undefined : openrouter.saved ? keyStateText(openrouter.credit?.label, openrouter.model) : t('No key'), open: true, className: 'keys-fold', body: () => [openrouterPanel()] }));
+  const projects = openrouterKeys?.projects ?? [];
+  const own = projects.filter((p) => openrouterKeys?.keys.some((k) => k.pool === p.pool)).length;
+  main.append(foldSection({ key: 'keys-groups', title: t('Group keys'), state: openrouterKeys ? plural(own, { one: '{n} with its own key', other: '{n} with their own key' }) : undefined, open: true, className: 'keys-fold', body: () => [projectKeysPanel()] }));
+  const tasks = (ceilingsView?.ceilings ?? []).filter((c) => c.scope.kind === 'workflow');
+  if (tasks.length) main.append(foldSection({ key: 'keys-tasks', title: t('Task ceilings'), state: plural(tasks.length, { one: '{n} task', other: '{n} tasks' }), open: true, className: 'keys-fold', body: () => [taskCeilingsPanel(tasks)] }));
+}
+/** WF-7.2: a key in one phrase: its tail when OpenRouter labels it, and its model. */
+function keyStateText(label: string | null | undefined, model: string | null | undefined) {
+  const tail = keyTail(label);
+  return [tail ? t('Key {tail}', { tail }) : t('Key saved'), model ?? ''].filter(Boolean).join(' · ');
 }
 /** On Agents, where the key used to be: one line to the Tokens page. */
 function tokensPointer() {
@@ -1336,30 +1434,67 @@ function tokensPointer() {
   section.append(heading, el('p', '', t('The machine\'s OpenRouter key and each group\'s own key are under API keys.')), button(t('Open API keys'), () => goTo('tokens'), 'button', 'open-api-keys'));
   return section;
 }
-/** SB-144: each project, with its own key or the machine's. */
+/** WF-7.1, WF-7.2: one compact row per group with a key of its own; the groups on this computer's key in one line. */
 function projectKeysPanel() {
-  const section = el('section', 'about-panel'); section.setAttribute('aria-labelledby', 'project-keys-heading');
-  const heading = el('h2', '', t('Group keys')); heading.id = 'project-keys-heading';
-  section.append(heading, el('p', '', t('Give a group its own key, for example a client\'s, and agents started in its folders spend that key; the others keep the machine\'s.')));
-  const projects = openrouterKeys?.projects ?? [];
+  const section = el('div', 'fold-content');
+  section.append(el('p', 'form-note', t('Give a group its own key, for example a client\'s, and agents started in its folders spend that key; the others keep the machine\'s.')));
   if (!openrouterKeys) { section.append(el('p', 'form-note', t('Reading the OpenRouter key…'))); return section; }
+  const projects = openrouterKeys.projects;
   if (!projects.length) { section.append(el('p', 'form-note', t('There are no groups yet. Create one under Groups, then give it a key here.'))); return section; }
-  const list = el('ul', 'repository-map key-list'); list.setAttribute('aria-label', t('Group keys'));
-  for (const project of projects) {
-    const own = openrouterKeys.keys.find((k) => k.pool === project.pool);
-    const item = el('li', 'account-meta repository-row'); const text = el('div', 'repository-text');
-    text.append(el('span', 'repository-name', project.name), el('span', 'folder-note', ` · ${own ? (own.model ? t('Own key · {model}', { model: own.model }) : t('Own key')) : openrouter?.saved ? t('Uses the machine\'s key') : t('No key: agents here cannot start on OpenRouter')}`));
-    item.append(text);
-    const target = { pool: project.pool, name: project.name };
-    const actions = el('div', 'management-actions');
-    if (own) actions.append(button(t('Change model'), () => openrouterModelDialog(target), 'text-button', `key-model-${project.pool}`), button(t('Replace key'), () => openrouterKeyDialog(target), 'text-button', `key-replace-${project.pool}`), button(t('Remove key'), () => openrouterRemoveDialog(target), 'text-button danger-text', `key-remove-${project.pool}`));
-    else actions.append(button(t('Add key…'), () => openrouterKeyDialog(target), 'text-button', `key-add-${project.pool}`));
-    item.append(actions);
-    item.append(groupCeilingLine(project.pool, !!own));
-    list.append(item);
+  const ceilingPools = (ceilingsView?.ceilings ?? []).flatMap((c) => c.scope.kind === 'project' ? [c.scope.pool] : []);
+  const { listed, rest } = groupKeyBlocks(projects, openrouterKeys.keys.map((k) => k.pool), ceilingPools);
+  if (listed.length) {
+    const list = el('ul', 'key-rows'); list.setAttribute('aria-label', t('Group keys'));
+    for (const project of listed) list.append(groupKeyRow(project));
+    section.append(list);
   }
-  section.append(list);
+  if (rest.length) {
+    const line = el('div', 'key-rest');
+    line.append(el('p', 'form-note', openrouter?.saved ? plural(rest.length, { one: '{n} group uses this computer\'s key.', other: '{n} groups use this computer\'s key.' }) : plural(rest.length, { one: '{n} group has no key: agents there cannot start on OpenRouter.', other: '{n} groups have no key: agents there cannot start on OpenRouter.' })),
+      button(t('Give a group its own key…'), () => giveGroupKeyDialog(rest), 'button quiet', 'key-give'));
+    section.append(line);
+  }
   return section;
+}
+/** WF-7.2: a group's key in one row: the group, the key's tail and model, today's spend against its ceiling, and one menu. */
+function groupKeyRow(project: { pool: string; name: string }) {
+  const own = openrouterKeys?.keys.find((k) => k.pool === project.pool);
+  const status = groupKeyStatus?.[project.pool] ?? null; const credit = own ? status?.credit ?? null : null;
+  const scope: ChainScope = { kind: 'project', pool: project.pool }; const ceiling = ceilingOf(scope);
+  const row = el('li', 'key-row'); row.dataset.pool = project.pool;
+  const info = el('div', 'key-row-info');
+  const head = el('div', 'key-row-head'); head.append(el('strong', '', project.name), el('span', 'folder-note', own ? keyStateText(credit?.label, own.model) : t('No own key')));
+  info.append(head);
+  const spent = credit?.usage_daily ?? null; const share = ceiling?.active ? spendShare(spent, ceiling.usd) : null;
+  const spend = el('div', 'key-spend');
+  const words = ceiling?.active ? (spent === null ? t('Daily ceiling {usd} · spent today not read', { usd: dollars(ceiling.usd) }) : t('{spent} of {usd} spent today', { spent: dollars(spent), usd: dollars(ceiling.usd) })) : ceiling ? ceilingLine(ceiling) : spent === null ? t('No daily ceiling') : t('{spent} spent today · no daily ceiling', { spent: dollars(spent) });
+  spend.append(el('span', 'key-spend-text', words));
+  if (share !== null) { const meter = el('progress', `usage-meter key-meter${share >= 100 ? ' is-blocked' : share >= 80 ? ' is-low' : ''}`); meter.max = 100; meter.value = share; meter.setAttribute('aria-label', t('{percent}% of the daily ceiling spent', { percent: share })); spend.append(meter); }
+  info.append(spend);
+  const warning = ceiling?.active ? ceilingWarning(ceiling.usd, credit) : null;
+  if (warning) info.append(el('p', 'ceiling-warning', warning));
+  const target = { pool: project.pool, name: project.name }; const anchor = ceilingAnchor(scope); const key = `key-${project.pool}`;
+  const items: ([string, () => void] | [string, () => void, string])[] = [];
+  if (own) items.push([t('Change model'), () => openrouterModelDialog(target)], [t('Replace key'), () => openrouterKeyDialog(target, `menu-${key}`)], [t('Set ceiling…'), () => ceilingDialog(scope, ceiling, `menu-${key}`)]);
+  else items.push([t('Add key…'), () => openrouterKeyDialog(target, `menu-${key}`)]);
+  if (ceiling) items.push([t('Clear ceiling'), () => clearCeilingDialog(scope, ceiling, `menu-${key}`)]);
+  if (own) items.push([t('Remove key'), () => openrouterRemoveDialog(target), 'danger-text']);
+  row.dataset.anchor = anchor;
+  row.append(info, menu(key, t('Key of {name}', { name: project.name }), items));
+  return row;
+}
+/** WF-7.1: the groups on this computer's key, offered one at a time; the key dialog follows. */
+function giveGroupKeyDialog(groups: { pool: string; name: string }[]) {
+  const context = openDialog(t('Give a group its own key'), t('Agents started in its folders then spend that key; the other groups keep this computer\'s.'));
+  const which = select(groups.map((g) => [g.pool, g.name]));
+  context.body.append(field(t('Group'), which));
+  context.actions.append(submit(t('Continue')));
+  context.form.addEventListener('submit', (event) => {
+    event.preventDefault();
+    const chosen = groups.find((g) => g.pool === which.value); if (!chosen) return;
+    context.close(); openrouterKeyDialog(chosen, 'key-give');
+  });
+  which.focus();
 }
 /* C-7 (SB-72, SCN-083, SCN-084): spending ceilings in the window. The window is the only surface
  * that may raise, clear or double a ceiling (C-Q1); the question has two answers of equal weight. */
@@ -1437,26 +1572,18 @@ function ceilingBlock(scope: ChainScope, credit: OpenrouterCredit | null) {
   block.append(actions);
   return block;
 }
-/** A group key row's ceiling: its line with the key's own limit, or why it has none. */
-function groupCeilingLine(pool: string, own: boolean) {
-  if (own || ceilingOf({ kind: 'project', pool })) return ceilingBlock({ kind: 'project', pool }, own ? groupKeyStatus?.[pool]?.credit ?? null : null);
-  const block = el('div', 'ceiling-block'); block.append(el('p', 'form-note', t('A daily ceiling needs the group\'s own key.'))); return block;
-}
 /** Note 5 of the wave 4 design pass: the command is code, as everywhere else in the window (SB-228). */
 function ceilingCommandNote() { const note = el('p', 'form-note', t('Set from the command line:')); note.append(' ', el('code', 'address', 'switchboard continue --ceiling <usd>')); return note; }
-/** Task ceilings (set from the CLI or MCP): listed read-only, cleared only here. */
-function taskCeilingsPanel() {
-  const tasks = (ceilingsView?.ceilings ?? []).filter((c) => c.scope.kind === 'workflow');
-  if (!tasks.length) return null;
-  const section = el('section', 'about-panel'); section.setAttribute('aria-labelledby', 'task-ceilings-heading');
-  const heading = el('h2', '', t('Task ceilings')); heading.id = 'task-ceilings-heading';
-  section.append(heading, el('p', '', t('Counted on the key since the first paid hand-over; other work on the same key counts too.')), ceilingCommandNote());
-  const list = el('ul', 'repository-map key-list'); list.setAttribute('aria-label', t('Task ceilings'));
+/** Task ceilings (set from the CLI or MCP): listed read-only, cleared only here; WF-7.1 shows the block only while one exists. */
+function taskCeilingsPanel(tasks: CeilingView[]) {
+  const section = el('div', 'fold-content');
+  section.append(el('p', 'form-note', t('Counted on the key since the first paid hand-over; other work on the same key counts too.')), ceilingCommandNote());
+  const list = el('ul', 'key-rows'); list.setAttribute('aria-label', t('Task ceilings'));
   for (const c of tasks) {
-    const item = el('li', 'account-meta repository-row'); const text = el('div', 'repository-text');
-    text.append(el('span', 'repository-name', scopeLabel(c.scope)), el('span', 'folder-note', ` · ${dollars(c.usd)}`));
+    const item = el('li', 'key-row'); const info = el('div', 'key-row-head');
+    info.append(el('strong', '', scopeLabel(c.scope)), el('span', 'folder-note', dollars(c.usd)));
     const anchor = ceilingAnchor(c.scope);
-    item.append(text, button(t('Clear'), () => clearCeilingDialog(c.scope, c, 'page-title'), 'text-button danger-text', `ceiling-clear-${anchor}`));
+    item.append(info, button(t('Clear'), () => clearCeilingDialog(c.scope, c, 'page-title'), 'text-button danger-text', `ceiling-clear-${anchor}`));
     list.append(item);
   }
   section.append(list);
@@ -1487,37 +1614,51 @@ function clearCeilingDialog(scope: ChainScope, ceiling: CeilingView, returnFocus
   context.actions.querySelector('button')?.focus();
 }
 const openrouterAgents = () => (agentCatalog as { agents: AgentInfo[] }).agents.filter((agent) => agent.openrouter);
-/** SB-79: one OpenRouter key that agents launched from Switchboard run on (SCN-045). */
+/** SB-79, WF-7.1: this computer's OpenRouter key on one card: its tail and model, its credit, the daily ceiling and one menu (SCN-045). */
 function openrouterPanel() {
-  const section = el('section', 'about-panel'); section.setAttribute('aria-labelledby', 'openrouter-heading');
-  const heading = el('h2', '', t('Machine key · OpenRouter')); heading.id = 'openrouter-heading';
+  const section = el('div', 'fold-content');
   const names = openrouterAgents().map((agent) => agent.name).join(', ');
-  section.append(heading, el('p', '', t('Save one OpenRouter key, and these agents launch on it with the model you choose: {agents}.', { agents: names }) + ' ' + (onWindows() ? t('The key stays in Windows Credential Manager; an agent receives it only when it starts.') : onLinux() ? t('The key stays in the Secret Service keyring; an agent receives it only when it starts.') : t('The key stays in the Keychain; an agent receives it only when it starts.'))));
+  section.append(el('p', 'form-note', t('Save one OpenRouter key, and these agents launch on it with the model you choose: {agents}.', { agents: names }) + ' ' + (onWindows() ? t('The key stays in Windows Credential Manager; an agent receives it only when it starts.') : onLinux() ? t('The key stays in the Secret Service keyring; an agent receives it only when it starts.') : t('The key stays in the Keychain; an agent receives it only when it starts.'))));
   if (openrouterError && !openrouter) { section.append(el('p', 'usage-error', t(openrouterError)), button(t('Retry'), () => void loadOpenrouter(), 'text-button', 'openrouter-retry')); return section; }
   if (!openrouter) { section.append(el('p', 'form-note', t('Reading the OpenRouter key…'))); return section; }
+  const machine: ChainScope = { kind: 'machine' }; const ceiling = ceilingOf(machine);
   if (!openrouter.saved) {
     section.append(el('p', 'form-note', t('No key is saved.')), button(t('Add OpenRouter key'), () => openrouterKeyDialog(), 'button primary', 'openrouter-add'));
     // This computer's ceiling adds up every saved key, so it is shown while a group's key is saved too.
-    if (openrouterKeys?.keys.length || ceilingOf({ kind: 'machine' })) { const ceiling = ceilingBlock({ kind: 'machine' }, null); ceiling.classList.add('is-machine'); section.append(ceiling); }
+    if (openrouterKeys?.keys.length || ceiling) { const block = ceilingBlock(machine, null); block.classList.add('is-machine'); section.append(block); }
     return section;
   }
-  const facts = el('div', 'openrouter-facts');
-  facts.append(el('p', '', openrouter.model ? t('Default model: {model}', { model: openrouter.model }) : t('No default model: each launch names one.')));
-  if (openrouter.credit) facts.append(el('p', '', openrouterCreditLine(openrouter.credit)));
-  else if (openrouter.credit_error) facts.append(el('p', 'usage-error', t(openrouter.credit_error)));
-  section.append(facts);
-  const actions = el('div', 'management-actions');
-  actions.append(button(t('Change model'), () => openrouterModelDialog(), 'button', 'openrouter-model'), button(t('Replace key'), () => openrouterKeyDialog(), 'button', 'openrouter-replace'), button(t('Remove key'), () => openrouterRemoveDialog(), 'button danger', 'openrouter-remove'));
-  section.append(actions, el('p', 'form-note', t('Launch an agent on the key from Agents: its Set up button under Installed. CLI: switchboard agents launch <agent> --openrouter.')));
-  // C-7: this computer's spending ceiling, set apart from the key's own actions.
-  const ceiling = ceilingBlock({ kind: 'machine' }, openrouter.credit); ceiling.classList.add('is-machine'); section.append(ceiling);
+  const card = el('div', 'key-row key-card'); const info = el('div', 'key-row-info');
+  const head = el('div', 'key-row-head'); head.append(el('strong', '', keyStateText(openrouter.credit?.label, null)), el('span', 'folder-note', openrouter.model ? t('Default model: {model}', { model: openrouter.model }) : t('No default model: each launch names one.')));
+  info.append(head);
+  if (openrouter.credit) info.append(el('p', 'account-meta', openrouterCreditLine(openrouter.credit)));
+  else if (openrouter.credit_error) info.append(el('p', 'usage-error', t(openrouter.credit_error)));
+  // C-7: this computer's ceiling counts every saved key; today's spend is their sum once each is read.
+  const spend = el('div', 'key-spend');
+  if (!ceilingsView) spend.append(el('span', 'key-spend-text', ceilingsError ? t('Daily ceiling: not read') : t('Reading spending ceilings…')));
+  else {
+    spend.append(el('span', 'key-spend-text', ceilingLine(ceiling)));
+    const groups = (openrouterKeys?.keys ?? []).filter((k) => k.pool !== null).map((k) => groupKeyStatus?.[k.pool!]?.credit?.usage_daily);
+    const all = openrouter.credit?.usage_daily;
+    const spent = all !== undefined && all !== null && groups.every((v) => typeof v === 'number') ? all + groups.reduce((sum: number, v) => sum + (v as number), 0) : null;
+    const share = ceiling?.active ? spendShare(spent, ceiling.usd) : null;
+    if (share !== null && spent !== null) { spend.append(el('span', 'folder-note', ` · ${t('{spent} spent today on every key', { spent: dollars(spent) })}`)); const meter = el('progress', `usage-meter key-meter${share >= 100 ? ' is-blocked' : share >= 80 ? ' is-low' : ''}`); meter.max = 100; meter.value = share; meter.setAttribute('aria-label', t('{percent}% of the daily ceiling spent', { percent: share })); spend.append(meter); }
+  }
+  info.append(spend, el('p', 'form-note', t('Counts every OpenRouter key saved in Switchboard, added up per UTC day.')));
+  const warning = ceiling?.active ? ceilingWarning(ceiling.usd, openrouter.credit) : null;
+  if (warning) info.append(el('p', 'ceiling-warning', warning));
+  const items: ([string, () => void] | [string, () => void, string])[] = [[t('Change model'), () => openrouterModelDialog()], [t('Replace key'), () => openrouterKeyDialog(undefined, 'menu-key-machine')], [t('Set ceiling…'), () => ceilingDialog(machine, ceiling, 'menu-key-machine')]];
+  if (ceiling) items.push([t('Clear ceiling'), () => clearCeilingDialog(machine, ceiling, 'menu-key-machine')]);
+  items.push([t('Remove key'), () => openrouterRemoveDialog(), 'danger-text']);
+  card.append(info, menu('key-machine', t('This computer\'s key'), items));
+  section.append(card, el('p', 'form-note', t('Launch an agent on the key from Agents: its Set up button under Installed. CLI: switchboard agents launch <agent> --openrouter.')));
   return section;
 }
 /** Saves (or replaces) the key; it travels to the vault once and is never shown again. */
-function openrouterKeyDialog(target?: { pool: string; name: string }) {
+function openrouterKeyDialog(target?: { pool: string; name: string }, returnFocus?: string) {
   const own = target ? openrouterKeys?.keys.find((k) => k.pool === target.pool) : null;
   const replacing = target ? !!own : !!openrouter?.saved;
-  const context = openDialog(target ? (replacing ? t('Replace the key of “{name}”', { name: target.name }) : t('A key for “{name}”', { name: target.name })) : replacing ? t('Replace the OpenRouter key') : t('Add an OpenRouter key'), t('Create a key on openrouter.ai/settings/keys; a spending limit on it caps what agents can spend.') + (target ? ' ' + t('Agents started in this group\'s folders run on it.') : ''));
+  const context = openDialog(target ? (replacing ? t('Replace the key of “{name}”', { name: target.name }) : t('A key for “{name}”', { name: target.name })) : replacing ? t('Replace the OpenRouter key') : t('Add an OpenRouter key'), t('Create a key on openrouter.ai/settings/keys; a spending limit on it caps what agents can spend.') + (target ? ' ' + t('Agents started in this group\'s folders run on it.') : ''), returnFocus);
   const key = input('', 'password'); key.placeholder = 'sk-or-…';
   const picker = modelPicker((target ? own?.model : openrouter?.model) ?? '', 'key-model'); const model = picker.value;
   const grid = el('div', 'form-grid');
@@ -1698,19 +1839,34 @@ function givenSection(accounts: Account[]) {
   section.append(heading, el('p', 'group-note', t('Switchboard checks their usage but never selects them or switches to them by itself.')));
   const list = el('div', 'account-list'); list.setAttribute('role', 'list');
   // WF-2.4 (SB-364): who has it, its organization, its machine, where it last ran and when it was last active.
+  wantGiven();
   accounts.forEach((account) => { const row = accountRow(account); row.append(givenFactsLine(account)); list.append(row); });
   section.append(list);
   return section;
 }
+/**
+ * WF-2.4 (SB-364): where each account given to an agent runs and last ran, from the owner's seat and
+ * launch records (`given_accounts`); an owner without the command leaves the snapshot and sessions to say it.
+ */
+let given: Map<string, GivenAccount> | 'missing' | null = null; let givenLoading = false;
+function wantGiven() {
+  if (given !== null || givenLoading) return;
+  givenLoading = true;
+  void adapter.givenAccounts().then((rows) => { given = rows === null ? 'missing' : new Map(rows.map((r) => [r.account_id, r])); }, () => { given = 'missing'; }).finally(() => { givenLoading = false; backgroundRender(); });
+}
 /** WF-2.4: the facts the window holds about an account given to an agent; a part not recorded says so. */
 function givenFactsLine(account: Account) {
+  const record = given instanceof Map ? given.get(account.id) : undefined;
   const launches = (sessionList ?? []).filter((s) => s.account_id === account.id).sort((a, b) => b.launched_at - a.launched_at);
   const last = launches[0];
-  const times = [...snapshot!.events.filter((e) => e.account_id === account.id).map((e) => e.at), ...launches.map((s) => s.launched_at)];
-  const machine = machineOf(snapshot!, account)?.name ?? snapshot?.locations?.[account.id] ?? null;
-  const facts = givenFacts({ organization: organizationOf(account)?.name ?? null, machine, launch: last ? { group: poolName(last.pool, snapshot?.projects), folder: projectName(last.working_directory) } : null, lastActivity: times.length ? age(Math.max(...times)) : null });
+  const times = [...snapshot!.events.filter((e) => e.account_id === account.id).map((e) => e.at), ...launches.map((s) => s.launched_at), ...(record?.last_activity ? [record.last_activity] : []), ...(record?.last_launch ? [record.last_launch.at] : [])];
+  const machine = record?.machine ?? machineOf(snapshot!, account)?.name ?? snapshot?.locations?.[account.id] ?? null;
+  const launch = record?.last_launch && (!last || record.last_launch.at >= last.launched_at)
+    ? { group: record.last_launch.pool ? poolName(record.last_launch.pool, snapshot?.projects) : t('No group recorded'), folder: record.last_launch.folder ? projectName(record.last_launch.folder) : t('No folder recorded') }
+    : last ? { group: poolName(last.pool, snapshot?.projects), folder: projectName(last.working_directory) } : null;
+  const facts = givenFacts({ organization: organizationOf(account)?.name ?? null, machine, launch, lastActivity: times.length ? age(Math.max(...times)) : null });
   const line = el('p', 'row-facts given-facts');
-  line.append(el('strong', '', givenTo(account) ?? ''), ...facts.flatMap((fact) => [' · ', fact]));
+  line.append(el('strong', '', givenTo(account) ?? record?.agent ?? ''), ...facts.flatMap((fact) => [' · ', fact]));
   return line;
 }
 /** SB-283: move a sign-in to another machine over ssh; nothing changes when a step fails. */
@@ -2631,41 +2787,54 @@ function statChart(s: Statistics) {
 }
 /** SB-153: each statistics table's sort, by table id; kept while the window is open. */
 const statSorts: Record<string, StatSort> = {};
-/** One table: a name column (or several) and the counts every row has; a click on a column title sorts by it. */
+/** WF-11.2 (SB-373): the tables showing every row, by id; the rest show their top ten. */
+const statAll = new Set<string>();
+/**
+ * One table: a name column (or several) and the counts every row has; a click on a column title
+ * sorts by it. WF-11.2: a folding section showing its top ten rows until *Show all*; then the
+ * table scrolls inside its own box under a header that stays.
+ */
 function statTable(id: string, title: string, names: string[], rows: StatRow[], compact = false) {
-  const section = el('section', 'about-panel stat-panel'); section.setAttribute('aria-labelledby', id);
-  const heading = el('h2', '', title); heading.id = id; section.append(heading);
-  const wrap = el('div', 'stat-scroll'); const table = el('table', 'stat-table');
-  const head = el('tr');
-  const sort = statSorts[id] ?? null;
-  const countNames = compact ? [t('Requests'), t('Tokens'), t('Limits and errors')] : [t('Requests'), t('Sent'), t('From cache'), t('Received'), t('Limits and errors')];
-  [...names, ...countNames].forEach((name, column) => {
-    const isCount = column >= names.length;
-    const th = el('th', isCount ? 'num' : ''); th.setAttribute('scope', 'col');
-    const on = sort?.column === column;
-    th.setAttribute('aria-sort', on ? (sort!.descending ? 'descending' : 'ascending') : 'none');
-    const b = button(`${name}${on ? (sort!.descending ? ' ↓' : ' ↑') : ''}`, () => { statSorts[id] = nextStatSort(sort, column, isCount); render(); restoreFocus(`${id}-sort-${column}`); }, `sort-button${on ? ' is-on' : ''}`, `${id}-sort-${column}`);
-    b.setAttribute('aria-label', t('Sort by {column}', { column: name }));
-    th.append(b); head.append(th);
-  });
-  const thead = el('thead'); thead.append(head); table.append(thead);
-  const body = el('tbody');
-  for (const row of sortStatRows(rows, sort, compact)) {
-    const tr = el('tr');
-    row.cells.forEach((cell, i) => {
-      const td = el(i === 0 ? 'th' : 'td', '', typeof cell === 'string' ? cell : cell[0]);
-      if (typeof cell !== 'string' && cell[1]) td.append(el('span', 'cell-note', cell[1]));
-      tr.append(td);
+  return foldSection({ key: `stat-${id}`, title, state: plural(rows.length, { one: '{n} row', other: '{n} rows' }), open: true, className: 'stat-fold', body: () => {
+    const all = statAll.has(id);
+    const wrap = el('div', `stat-scroll${all ? ' is-all' : ''}`); const table = el('table', 'stat-table');
+    const head = el('tr');
+    const sort = statSorts[id] ?? null;
+    const countNames = compact ? [t('Requests'), t('Tokens'), t('Limits and errors')] : [t('Requests'), t('Sent'), t('From cache'), t('Received'), t('Limits and errors')];
+    [...names, ...countNames].forEach((name, column) => {
+      const isCount = column >= names.length;
+      const th = el('th', isCount ? 'num' : ''); th.setAttribute('scope', 'col');
+      const on = sort?.column === column;
+      th.setAttribute('aria-sort', on ? (sort!.descending ? 'descending' : 'ascending') : 'none');
+      const b = button(`${name}${on ? (sort!.descending ? ' ↓' : ' ↑') : ''}`, () => { statSorts[id] = nextStatSort(sort, column, isCount); render(); restoreFocus(`${id}-sort-${column}`); }, `sort-button${on ? ' is-on' : ''}`, `${id}-sort-${column}`);
+      b.setAttribute('aria-label', t('Sort by {column}', { column: name }));
+      th.append(b); head.append(th);
     });
-    tr.firstElementChild?.setAttribute('scope', 'row');
-    const c = row.counts; const trouble = statTrouble(c);
-    const values = compact ? [compactCount(c.requests), compactCount(statTokens(c))] : [compactCount(c.requests), compactCount(c.input_tokens + c.cache_write_tokens), compactCount(c.cache_read_tokens), compactCount(c.output_tokens)];
-    for (const v of values) tr.append(el('td', 'num', v));
-    tr.append(el('td', `num${c.limited + c.failed ? ' is-trouble' : ''}${statAlert(c) ? ' is-alert' : ''}`, trouble === null ? '–' : `${compactCount(c.limited + c.failed)} · ${statTroubleText(c)}`));
-    body.append(tr);
-  }
-  table.append(body); wrap.append(table); section.append(wrap);
-  return section;
+    const thead = el('thead'); thead.append(head); table.append(thead);
+    const body = el('tbody');
+    const shown = statRowsShown(sortStatRows(rows, sort, compact), all);
+    for (const row of shown.rows) {
+      const tr = el('tr');
+      row.cells.forEach((cell, i) => {
+        const td = el(i === 0 ? 'th' : 'td', '', typeof cell === 'string' ? cell : cell[0]);
+        if (typeof cell !== 'string' && cell[1]) td.append(el('span', 'cell-note', cell[1]));
+        tr.append(td);
+      });
+      tr.firstElementChild?.setAttribute('scope', 'row');
+      const c = row.counts; const trouble = statTrouble(c);
+      const values = compact ? [compactCount(c.requests), compactCount(statTokens(c))] : [compactCount(c.requests), compactCount(c.input_tokens + c.cache_write_tokens), compactCount(c.cache_read_tokens), compactCount(c.output_tokens)];
+      for (const v of values) tr.append(el('td', 'num', v));
+      tr.append(el('td', `num${c.limited + c.failed ? ' is-trouble' : ''}${statAlert(c) ? ' is-alert' : ''}`, trouble === null ? '–' : `${compactCount(c.limited + c.failed)} · ${statTroubleText(c)}`));
+      body.append(tr);
+    }
+    table.append(body); wrap.append(table);
+    const parts: Node[] = [wrap];
+    if (shown.hidden || all) {
+      const toggle = button(all ? t('Show the top {n}', { n: STAT_TOP }) : t('Show all {n}', { n: rows.length }), () => { if (all) statAll.delete(id); else statAll.add(id); render(); restoreFocus(`${id}-all`); }, 'text-button', `${id}-all`);
+      toggle.setAttribute('aria-expanded', String(all)); parts.push(toggle);
+    }
+    return parts;
+  } });
 }
 /** SB-156: what each saved OpenRouter key has spent (the machine's and each group's), as OpenRouter reports it. */
 let keySpend: { name: string; status: OpenrouterStatus | null; error: boolean }[] | null = null; let keySpendLoading = false;
@@ -2684,25 +2853,33 @@ function loadKeySpend() {
   })();
 }
 function statKeysPanel() {
-  const section = el('section', 'about-panel stat-panel'); section.setAttribute('aria-labelledby', 'stat-keys');
-  const heading = el('h2', '', t('API keys')); heading.id = 'stat-keys';
-  section.append(heading, el('p', 'form-note', t('Agents on OpenRouter spend the key of the group whose folder they start in, else the machine’s. OpenRouter reports the spend per key.')));
-  if (!keySpend) { loadKeySpend(); section.append(el('p', 'form-note', t('Reading the keys…'))); return section; }
-  if (!keySpend.length) { section.append(el('p', 'form-note', t('No OpenRouter key is saved. Add one under API keys.'))); return section; }
-  const table = el('table', 'stat-table'); const head = el('tr');
-  for (const [name, cls] of [[t('Key'), ''], [t('Model'), ''], [t('Today'), 'num'], [t('In all'), 'num'], [t('Limit'), 'num']]) { const th = el('th', cls, name); th.setAttribute('scope', 'col'); head.append(th); }
-  const thead = el('thead'); thead.append(head); table.append(thead);
-  const body = el('tbody'); const money = (v: number | null | undefined) => (v === null || v === undefined || !Number.isFinite(v)) ? '–' : `$${v.toFixed(2)}`;
-  for (const k of keySpend) {
-    const tr = el('tr'); const th = el('th', '', k.name); th.setAttribute('scope', 'row'); tr.append(th);
-    const c = k.status?.credit ?? null;
-    tr.append(el('td', '', k.status?.model ?? '–'));
-    if (k.error || (!c && k.status?.credit_error)) { const td = el('td', 'usage-error', k.error ? t('Not read') : t(k.status!.credit_error!)); td.colSpan = 3; tr.append(td); }
-    else tr.append(el('td', 'num', money(c?.usage_daily)), el('td', 'num', money(c?.usage)), el('td', 'num', money(c?.limit)));
-    body.append(tr);
-  }
-  table.append(body); const wrap = el('div', 'stat-scroll'); wrap.append(table); section.append(wrap);
-  return section;
+  return foldSection({ key: 'stat-keys', title: t('API keys'), state: keySpend ? plural(keySpend.length, { one: '{n} key', other: '{n} keys' }) : undefined, open: true, className: 'stat-fold', body: () => {
+    const section = el('div', 'fold-content');
+    section.append(el('p', 'form-note', t('Agents on OpenRouter spend the key of the group whose folder they start in, else the machine’s. OpenRouter reports the spend per key.')));
+    if (!keySpend) { queueMicrotask(loadKeySpend); section.append(el('p', 'form-note', t('Reading the keys…'))); return [section]; }
+    if (!keySpend.length) { section.append(el('p', 'form-note', t('No OpenRouter key is saved. Add one under API keys.'))); return [section]; }
+    const table = el('table', 'stat-table'); const head = el('tr');
+    for (const [name, cls] of [[t('Key'), ''], [t('Model'), ''], [t('Today'), 'num'], [t('In all'), 'num'], [t('Limit'), 'num']]) { const th = el('th', cls, name); th.setAttribute('scope', 'col'); head.append(th); }
+    const thead = el('thead'); thead.append(head); table.append(thead);
+    const body = el('tbody'); const money = (v: number | null | undefined) => (v === null || v === undefined || !Number.isFinite(v)) ? '–' : `$${v.toFixed(2)}`;
+    for (const k of keySpend) {
+      const tr = el('tr'); const th = el('th', '', k.name); th.setAttribute('scope', 'row'); tr.append(th);
+      const c = k.status?.credit ?? null;
+      tr.append(el('td', '', k.status?.model ?? '–'));
+      if (k.error || (!c && k.status?.credit_error)) { const td = el('td', 'usage-error', k.error ? t('Not read') : t(k.status!.credit_error!)); td.colSpan = 3; tr.append(td); }
+      else tr.append(el('td', 'num', money(c?.usage_daily)), el('td', 'num', money(c?.usage)), el('td', 'num', money(c?.limit)));
+      body.append(tr);
+    }
+    table.append(body); const wrap = el('div', 'stat-scroll'); wrap.append(table); section.append(wrap);
+    return [section];
+  } });
+}
+/** WF-11.2: open a Statistics section from the index at the top, then bring it under the pinned bar. */
+function goToStatSection(key: string) {
+  foldChoices.set(key, true); render();
+  const target = document.querySelector<HTMLElement>(`[data-fold="${key}"]`) ?? document.getElementById(key);
+  target?.scrollIntoView({ block: 'start' });
+  restoreFocus(key === 'stat-chart' ? `chart-${chartMetric}` : `fold-${key}`);
 }
 function renderStats(main: HTMLElement) {
   if (!stats && !statsError) void loadStats();
@@ -2712,7 +2889,9 @@ function renderStats(main: HTMLElement) {
     choice.setAttribute('aria-pressed', String(statsDays === days)); range.append(choice);
   }
   const page = el('div', 'stat-page');
-  const bar = el('div', 'stat-bar'); bar.append(range); page.append(bar); main.append(page);
+  // WF-11.2: the period, the tiles and the index of sections stay at the top while the tables scroll.
+  const pinned = el('div', 'stat-pinned');
+  const bar = el('div', 'stat-bar'); bar.append(range); pinned.append(bar); page.append(pinned); main.append(page);
   if (statsError) { page.append(el('p', 'usage-error', t('Statistics are unavailable. Refresh to retry.')), button(t('Retry'), () => { statsError = false; void loadStats(); render(); restoreFocus('stats-retry'); }, 'button', 'stats-retry')); return; }
   if (!stats) { page.append(el('p', 'form-note', t('Reading statistics…'))); return; }
   const s = stats;
@@ -2729,22 +2908,28 @@ function renderStats(main: HTMLElement) {
       statTile(t('Per request'), perRequest === null ? '–' : compactCount(perRequest), t('tokens on average')),
       statTile(t('Limits and errors'), compactCount(s.total.limited + s.total.failed), statTrouble(s.total) === null ? '–' : t('{percent} of requests', { percent: statTroubleText(s.total) })),
     );
-    page.append(tiles, statChart(s));
+    pinned.append(tiles);
     const groupName = (pool: string, name: string | null) => name ?? poolName(pool);
     const projectName = (name: string | null) => name ?? t('No folder recorded');
     const accountName = (label: string | null) => label ?? t('Removed account');
-    const grid = el('div', 'stat-grid');
-    grid.append(
+    const tables = [
       ...(s.organizations?.length ? [statTable('stat-organizations', t('By organization'), [t('Organization')], s.organizations.map((r) => ({ cells: [r.organization === 'personal' ? t('Personal') : r.organization === 'unknown' ? t('Removed account') : r.name ?? t('Removed organization')], counts: r })), true)] : []),
       statTable('stat-groups', t('By group'), [t('Group')], s.groups.map((r) => ({ cells: [groupName(r.pool, r.name)], counts: r })), true),
       statTable('stat-projects', t('By repository'), [t('Repository')], s.projects.map((r) => ({ cells: [[projectName(r.name), r.groups.map((g) => groupName(g.pool, g.name)).join(', ')]], counts: r })), true),
       statTable('stat-accounts', t('By account'), [t('Account')], s.accounts.map((r) => ({ cells: [`${accountName(r.label)}${r.provider ? ` · ${providerName(r.provider as Provider)}` : ''}`], counts: r })), true),
       statTable('stat-agents', t('By agent'), [t('Agent')], s.agents.map((r) => ({ cells: [statAgentName(r.agent)], counts: r })), true),
-    );
-    page.append(grid, statKeysPanel(),
+      statKeysPanel(),
       statTable('stat-routes', t('Who works where'), [t('Repository'), t('Group'), t('Account'), t('Agent')], s.routes.map((r) => ({ cells: [projectName(r.project_name), groupName(r.pool, r.name), accountName(r.label), statAgentName(r.agent)], counts: r }))),
       statTable('stat-days', t('By day'), [t('Day')], s.by_day.map((r) => ({ cells: [r.day], counts: r }))),
-    );
+    ];
+    const chart = statChart(s); chart.id = 'stat-chart';
+    // The index names each section by its title and opens it on the way.
+    const index = el('nav', 'stat-index'); index.setAttribute('aria-label', t('Sections'));
+    const entries: [string, string][] = [['stat-chart', chartMetric === 'tokens' ? t('Tokens per day') : t('Requests per day')], ...tables.map((section): [string, string] => [section.dataset.fold!, section.querySelector('.fold-title')?.textContent ?? ''])];
+    for (const [key, label] of entries) index.append(button(label, () => goToStatSection(key), 'stat-index-link', `index-${key}`));
+    pinned.append(index);
+    const grid = el('div', 'stat-grid'); grid.append(chart, ...tables);
+    page.append(grid);
   }
   page.append(el('p', 'surface-note', t('What is counted where: Claude Code and Codex sessions that go through Switchboard (managed launches, group folders, the Codex switch) and agents on an API-key account through its proxy are counted above, each request placed in the repository of the group folder it came from; “No folder recorded” holds requests counted before 0.6.53, when the folder was not kept, and requests that named no group folder. Agents on OpenRouter (Hermes, OpenCode, Pi and others) go to OpenRouter directly: their spend is under API keys, per key. Kimi Code runs on its own subscription: its usage is on its card under Accounts. A session on its own sign-in outside Switchboard is not counted. Token counts are the ones the provider reports; counts only, never a prompt, an answer or a path; kept for 90 days.') + (s.since ? ` ${t('Counted since {date}.', { date: s.since })}` : '')));
 }
@@ -2754,16 +2939,19 @@ async function loadSessions(stamp?: number) {
   try { const value = (await adapter.sessions()).sessions; if (stamp === undefined || clock.accepts(stamp)) { sessionList = value; sessionsError = false; } } catch { sessionsError = true; }
   backgroundRender();
 }
-/** SB-65: the sessions Switchboard launched that start or run, read from their records (SB-95). */
+/** SB-65, WF-11.1: the sessions Switchboard launched that start or run, running first, read from their records (SB-95). */
 function sessionsPanel() {
-  const panel = el('section', 'about-panel'); panel.setAttribute('aria-labelledby', 'sessions-heading');
-  const heading = el('h2', '', t('Sessions')); heading.id = 'sessions-heading'; panel.append(heading);
+  const running = (sessionList ?? []).filter((s) => s.state === 'running').length;
+  return foldSection({ key: 'sessions', title: t('Sessions'), state: sessionList ? plural(running, { one: '{n} running', other: '{n} running' }) : undefined, open: true, className: 'sessions-fold', body: () => [sessionsBody()] });
+}
+function sessionsBody() {
+  const panel = el('div', 'fold-content');
   if (sessionsError && !sessionList) { panel.append(el('p', 'usage-error', t('Sessions are unavailable. Refresh to retry.'))); return panel; }
   if (sessionsError) panel.append(el('p', 'usage-error', t('The list may be out of date: the last read failed.')));
   if (!sessionList) { panel.append(el('p', 'form-note', t('Reading sessions…'))); return panel; }
   if (!sessionList.length) { panel.append(el('p', 'form-note', t('No session Switchboard launched is running. Sessions started outside Switchboard are not listed.'))); return panel; }
   const list = el('ul', 'session-list');
-  for (const session of sessionList) {
+  for (const session of sortSessions(sessionList)) {
     const row = el('li', 'session-row'); const title = el('div', 'event-title');
     const name = el('span', 'session-name');
     name.append(el('strong', '', `${sessionAgentName(session)} · ${session.label ?? session.account_id}`));
@@ -2777,20 +2965,100 @@ function sessionsPanel() {
   panel.append(list);
   return panel;
 }
+/**
+ * WF-11.1 (SB-373): the journal as the `events` command pages it, filtered by the owner by kind and
+ * account; the search runs on what is loaded. An owner without the command (`source: snapshot`)
+ * leaves the window to filter the snapshot's bounded journal with the same kind mapping.
+ */
+let journal: { events: Event[]; next: number | null; source: 'command' | 'snapshot'; failed: boolean } | null = null;
+let journalLoading = false; let journalKey = '';
+let activityFilter: EventFilter = { kind: 'all', account: 'all', query: '' };
+let activityShown = EVENTS_PAGE;
+const journalQuery = () => ({ kind: activityFilter.kind === 'all' ? undefined : activityFilter.kind, account_id: activityFilter.account === 'all' ? undefined : activityFilter.account });
+async function loadJournal(more = false) {
+  if (journalLoading) return;
+  const query = journalQuery(); const key = JSON.stringify(query);
+  if (more && (!journal || journal.source !== 'command' || journal.next === null || key !== journalKey)) return;
+  journalLoading = true; backgroundRender();
+  try {
+    const page = await adapter.events({ ...query, before: more ? journal!.next! : undefined, limit: 200 });
+    // An answer for a filter the person has left is dropped; the newer read follows.
+    if (JSON.stringify(journalQuery()) === key) {
+      journal = page === null ? { events: [], next: null, source: 'snapshot', failed: false } : { events: more && journal ? [...journal.events, ...page.events] : page.events, next: page.next_before, source: 'command', failed: false };
+      journalKey = key;
+    }
+  } catch {
+    if (!more) { journal = { events: [], next: null, source: 'snapshot', failed: true }; journalKey = key; }
+  } finally { journalLoading = false; backgroundRender(); }
+  if (JSON.stringify(journalQuery()) !== journalKey) void loadJournal();
+}
+function setActivityFilter(change: Partial<EventFilter>, focusKey: string) {
+  const before = JSON.stringify(journalQuery());
+  activityFilter = { ...activityFilter, ...change }; activityShown = EVENTS_PAGE;
+  if (JSON.stringify(journalQuery()) !== before && journal?.source === 'command') void loadJournal();
+  render(); restoreFocus(focusKey);
+}
+const eventWords = (event: Event) => { const account = snapshot?.accounts.find((a) => a.id === event.account_id); return `${eventAction(event.action)} ${eventDetail(event.detail)} ${account?.label ?? ''}`; };
+function activityFilters(accountIds: string[]) {
+  const row = el('div', 'account-filters activity-filters'); row.setAttribute('role', 'search'); row.setAttribute('aria-label', t('Filter events'));
+  const kind = select([['all', eventKindLabel('all')], ...EVENT_FILTER_KINDS.map((k): [string, string] => [k, eventKindLabel(k)])]);
+  kind.value = activityFilter.kind; kind.className = 'filter-select'; kind.dataset.focus = 'activity-kind'; kind.setAttribute('aria-label', t('Kind of event'));
+  kind.addEventListener('change', () => setActivityFilter({ kind: kind.value as EventKind | 'all' }, 'activity-kind'));
+  const accounts = [...new Set([...accountIds, ...(snapshot?.accounts ?? []).map((a) => a.id)])];
+  const label = (id: string) => snapshot?.accounts.find((a) => a.id === id)?.label ?? t('An account no longer saved');
+  const who = select([['all', t('All accounts')], ...accounts.map((id): [string, string] => [id, label(id)])]);
+  who.value = accounts.includes(activityFilter.account) ? activityFilter.account : 'all'; who.className = 'filter-select'; who.dataset.focus = 'activity-account'; who.setAttribute('aria-label', t('Account'));
+  who.addEventListener('change', () => setActivityFilter({ account: who.value }, 'activity-account'));
+  const search = el('input', 'filter-search'); search.type = 'search'; search.value = activityFilter.query; search.setAttribute('value', activityFilter.query);
+  search.placeholder = t('Search events'); search.setAttribute('aria-label', t('Search events')); search.dataset.focus = 'activity-search'; search.autocomplete = 'off'; search.spellcheck = false;
+  search.addEventListener('input', () => {
+    activityFilter = { ...activityFilter, query: search.value }; activityShown = EVENTS_PAGE; const caret = search.selectionStart ?? search.value.length;
+    render(); const next = root.querySelector<HTMLInputElement>('[data-focus="activity-search"]'); if (next) { next.focus(); next.setSelectionRange(caret, caret); }
+  });
+  row.append(kind, who, search);
+  return row;
+}
 function renderActivity(main: HTMLElement) {
   main.append(sessionsPanel());
-  if (!snapshot!.events.length) { main.append(emptyState(t('No activity yet'), t('Adding accounts, changing routes, and launching sessions will appear here. Credentials and prompts are never part of this journal.'))); return; }
-  const panel = el('section', 'about-panel'); panel.setAttribute('aria-labelledby', 'events-heading');
+  if (!journal && !journalLoading) void loadJournal();
+  const fromCommand = journal?.source === 'command';
+  const source = fromCommand ? journal!.events : snapshot!.events;
+  if (!source.length && !journalLoading && activityFilter.kind === 'all' && activityFilter.account === 'all' && !activityFilter.query) { main.append(emptyState(t('No activity yet'), t('Adding accounts, changing routes, and launching sessions will appear here. Credentials and prompts are never part of this journal.'))); return; }
+  const panel = el('section', 'about-panel events-panel'); panel.setAttribute('aria-labelledby', 'events-heading');
   const heading = el('h2', '', t('Events')); heading.id = 'events-heading'; panel.append(heading);
-  const list = el('ol', 'event-list');
-  for (const event of [...snapshot!.events].reverse()) {
-    const row = el('li', 'event-row'); const title = el('div', 'event-title');
-    const account = snapshot!.accounts.find((item) => item.id === event.account_id);
-    title.append(el('strong', '', eventAction(event.action)), el('time', '', date(event.at)));
-    row.append(title, el('p', '', eventDetail(event.detail)));
-    if (event.account_id) row.append(el('span', 'event-id', `${account ? `${account.label} · ` : ''}${event.account_id}`)); list.append(row);
+  panel.append(activityFilters([...new Set(source.map((e) => e.account_id).filter((id): id is string => !!id))]));
+  if (journal?.failed) panel.append(el('p', 'form-note', t('The full journal could not be read, so these are the latest events this window holds. Refresh to retry.')));
+  if (!journal && journalLoading) { panel.append(el('p', 'form-note', t('Reading the journal…'))); main.append(panel); return; }
+  const matching = filterEvents(source, activityFilter, eventWords);
+  const page = eventPage(matching, activityShown, fromCommand ? journal!.next : null);
+  const count = el('p', 'form-note events-count'); count.setAttribute('role', 'status');
+  count.textContent = page.more ? t('Showing the latest {shown}.', { shown: page.items.length }) : plural(matching.length, { one: '{n} event', other: '{n} events' });
+  panel.append(count);
+  if (!matching.length) panel.append(el('p', 'surface-note', fromCommand && journal!.next !== null ? t('None of the events read so far matches. Show more to read older ones.') : t('No event matches these filters.')));
+  const now = Date.now() / 1000; const days = eventsByDay(page.items);
+  const newest = days[0]?.day;
+  for (const { day, events } of days) {
+    const relative = relativeDay(day, now);
+    const title = relative === 'today' ? t('Today') : relative === 'yesterday' ? t('Yesterday') : new Date(events[0].at * 1000).toLocaleDateString(dateLocale(), { weekday: 'long', month: 'long', day: 'numeric' });
+    // Today is open; when nothing happened today, the newest day is.
+    panel.append(foldSection({ key: `day-${day}`, title, state: plural(events.length, { one: '{n} event', other: '{n} events' }), open: day === newest, level: 'h3', className: 'day-fold', body: () => {
+      const list = el('ol', 'event-list');
+      for (const event of events) {
+        const row = el('li', 'event-row'); const line = el('div', 'event-title');
+        const account = snapshot!.accounts.find((item) => item.id === event.account_id);
+        line.append(el('strong', '', eventAction(event.action)), el('time', '', new Date(event.at * 1000).toLocaleTimeString(dateLocale(), { hour: '2-digit', minute: '2-digit' })));
+        row.append(line, el('p', '', eventDetail(event.detail)));
+        if (event.account_id) row.append(el('span', 'event-id', `${account ? `${account.label} · ` : ''}${event.account_id}`));
+        list.append(row);
+      }
+      return [list];
+    } }));
   }
-  panel.append(list, el('p', 'surface-note', t('A bounded local journal. A terminal launch is not proof of a successful provider request.')));
+  if (page.more) {
+    const more = button(journalLoading ? t('Reading older events…') : t('Show more'), () => { activityShown += EVENTS_PAGE; if (page.fetch) void loadJournal(true); render(); restoreFocus('activity-more'); }, 'button quiet', 'activity-more');
+    more.disabled = journalLoading; panel.append(more);
+  }
+  panel.append(el('p', 'surface-note', t('A bounded local journal. A terminal launch is not proof of a successful provider request.')));
   main.append(panel);
 }
 function renderAbout(main: HTMLElement) {

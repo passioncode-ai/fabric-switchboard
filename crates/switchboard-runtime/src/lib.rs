@@ -25,6 +25,7 @@ pub mod external;
 mod external_keychain;
 mod fallback;
 pub mod github;
+pub mod given;
 pub mod handovers;
 mod headless_login;
 pub mod hermes;
@@ -361,6 +362,9 @@ pub enum Operation {
     /// SB-365 (WF-3.1, DEC-0015): what needs a person, each with its reason and the action that
     /// fixes it. A view: nothing moves, the accounts stay in their groups.
     Attention,
+    /// SB-364 (WF-2.4): the accounts given to an agent, each with where it is, the newest launch
+    /// that ran on it and when it was last active. A view: nothing is written.
+    GivenAccounts,
     /// SB-359: which of the person's Claude homes is signed in to which MCP server (names, URLs,
     /// booleans and expiry times, never a token).
     McpHomes,
@@ -1356,6 +1360,8 @@ impl Runtime {
                 // SB-365: the snapshot, the owner's sign-in verdicts in memory, seats.jsonl and
                 // spend.json; nothing is written.
                 | Operation::Attention
+                // SB-364: the snapshot and the launch records, each its own small file.
+                | Operation::GivenAccounts
                 // SB-359: Keychain reads of Claude Code's items; the store is only read.
                 | Operation::McpHomes
                 | Operation::MachinesAdopt { .. }
@@ -4831,6 +4837,12 @@ async fn execute(
         Operation::SetPolicy { policy } => {
             store.set_policy(policy)?;
             Ok(Value::Null)
+        }
+        Operation::GivenAccounts => {
+            let snapshot = serde_json::to_value(store.snapshot()?)
+                .map_err(|_| "Snapshot unavailable.".to_owned())?;
+            // SB-347: the launch records are files: off the async worker.
+            Ok(blocking::run(|| given::accounts(root, &snapshot)))
         }
         Operation::Attention => {
             let snapshot = store.snapshot()?;

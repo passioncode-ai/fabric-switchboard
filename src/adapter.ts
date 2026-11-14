@@ -2,7 +2,7 @@ import { invoke, isTauri } from '@tauri-apps/api/core';
 import type { Adapter } from './types';
 import { readWithDeadline, READ_TIMEOUT } from './read-deadline';
 import { matchFormatted } from './formatted-errors';
-import { attentionView } from './ui-logic';
+import { attentionView, eventsPageView, givenAccountsView, missingCommand } from './ui-logic';
 import personErrors from '../crates/switchboard-runtime/src/person-errors.json';
 export const reportFrontendReady = () => invoke('frontend_ready');
 /** The interface language, for the native menu-bar / notification-area menu (L10N-01). */
@@ -106,6 +106,15 @@ export const nativeAdapter: Adapter = {
   answerCeiling: (id, answer) => invoke('answer_ceiling', { id, answer }),
   agentEnable: (agent, enabled) => invoke('agent_enable', { agent, enabled }),
   agentDefault: (agent) => invoke('agent_default', { agent }),
+  // WF-10.1 (SB-372): the same setting as `switchboard_agent_set permissions`.
+  agentPermissions: (permissions) => invoke('agent_permissions', { permissions }),
+  // WF-11.1 (SB-373): an owner without the `events` command (an older build) answers null, and the
+  // window filters the snapshot's journal itself; any other failure is the read's. The account id
+  // goes under both spellings, so the command reads it whether it takes Tauri's camelCase or not.
+  events: (query) => readWithDeadline(invoke('events', { kind: query.kind ?? null, accountId: query.account_id ?? null, account_id: query.account_id ?? null, before: query.before ?? null, limit: query.limit ?? null }))
+    .then(eventsPageView, (error) => { if (missingCommand(error)) return null; throw error; }),
+  // WF-2.4 (SB-364): without `given_accounts` the window keeps what the snapshot and sessions say.
+  givenAccounts: () => readWithDeadline(invoke('given_accounts')).then(givenAccountsView, (error) => { if (missingCommand(error)) return null; throw error; }),
   openrouterModels: () => readWithDeadline(invoke('openrouter_models'), 20_000),
   hermesSetModel: (provider, model) => invoke('hermes_set_model', { provider, model }),
   // Not under the read deadline: each account asks Kimi itself (8 s timeout in the backend).

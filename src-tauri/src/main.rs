@@ -443,6 +443,61 @@ async fn machines(live: bool, state: State<'_, Slot>) -> Result<Value, String> {
 async fn attention(state: State<'_, Slot>) -> Result<Value, String> {
     state.runtime().await?.execute(Operation::Attention).await
 }
+/// The Activity page's filter, from the window's arguments as they arrive: `kind`, `account_id`
+/// (or `accountId`, the window's usual spelling), `before` (Unix seconds, exclusive) and `limit`.
+/// Absent or null means no filter; a wrong type is refused.
+const EVENTS_ARGUMENTS: &str =
+    "before is Unix seconds, limit a whole number and account_id an account id.";
+fn events_filter(args: &Value) -> Result<switchboard_core::activity::Filter, String> {
+    let field = |names: &[&str]| {
+        names
+            .iter()
+            .map(|n| &args[*n])
+            .find(|v| !v.is_null())
+            .cloned()
+            .unwrap_or(Value::Null)
+    };
+    let text = |v: Value| match v {
+        Value::Null => Ok(None),
+        Value::String(s) => Ok(Some(s)),
+        _ => Err(EVENTS_ARGUMENTS.to_owned()),
+    };
+    let whole = |v: Value| match v {
+        Value::Null => Ok(None),
+        v => v
+            .as_i64()
+            .map(Some)
+            .ok_or_else(|| EVENTS_ARGUMENTS.to_owned()),
+    };
+    Ok(switchboard_core::activity::Filter {
+        kind: text(field(&["kind"]))?,
+        account_id: text(field(&["account_id", "accountId"]))?,
+        before: whole(field(&["before"]))?,
+        limit: whole(field(&["limit"]))?.map(|n| n.clamp(0, 500) as usize),
+    })
+}
+/// SB-373 (WF-11.1): one page of the activity journal, newest first, as `switchboard_events`
+/// pages it: `{events, next_before, kinds}`.
+#[tauri::command]
+async fn events(request: tauri::ipc::Request<'_>, state: State<'_, Slot>) -> Result<Value, String> {
+    let args = match request.body() {
+        tauri::ipc::InvokeBody::Json(args) => args.clone(),
+        tauri::ipc::InvokeBody::Raw(_) => Value::Null,
+    };
+    let filter = events_filter(&args)?;
+    let snapshot = state.runtime().await?.execute(Operation::Snapshot).await?;
+    switchboard_core::activity::page(&snapshot["events"], &filter)
+}
+/// SB-364 (WF-2.4): the accounts given to an agent, with the machine, the newest launch on each
+/// and its last activity; `switchboard_accounts` carries the same as each row's `assigned`.
+#[tauri::command]
+async fn given_accounts(state: State<'_, Slot>) -> Result<Value, String> {
+    state
+        .runtime()
+        .await?
+        .execute(Operation::GivenAccounts)
+        .await
+}
 #[tauri::command]
 async fn remove_account(id: String, state: State<'_, Slot>) -> Result<Value, String> {
     state
@@ -1207,6 +1262,16 @@ async fn agent_default(agent: Option<String>, state: State<'_, Slot>) -> Result<
         .execute(Operation::AgentDefault { agent })
         .await
 }
+/// SB-372 (WF-10.1): whether the sessions Switchboard starts bypass their permission prompts
+/// (`bypass` or `ask`), set as `switchboard_agent_set` with `permissions` sets it.
+#[tauri::command]
+async fn agent_permissions(permissions: String, state: State<'_, Slot>) -> Result<Value, String> {
+    state
+        .runtime()
+        .await?
+        .execute(Operation::AgentPermissions { mode: permissions })
+        .await
+}
 /// SB-119: the recommended OpenRouter models and OpenRouter's tool-capable list.
 #[tauri::command]
 async fn openrouter_models(state: State<'_, Slot>) -> Result<Value, String> {
@@ -1722,6 +1787,8 @@ fn main() {
             recall_account,
             machines,
             attention,
+            given_accounts,
+            events,
             hand_over_account,
             open_handover,
             receive_handover,
@@ -1787,6 +1854,7 @@ fn main() {
             answer_ceiling,
             agent_enable,
             agent_default,
+            agent_permissions,
             openrouter_models,
             project_suggestions,
             accept_project_suggestion,
@@ -1918,6 +1986,44 @@ mod tests {
             .chain(list.iter().copied())
             .map(String::from)
             .collect()
+    }
+
+    /// SB-373: the Activity page's filter takes `account_id` as written and `accountId` as the
+    /// window usually spells it; null is no filter, a wrong type is refused, the limit is
+    /// clamped, and an unknown kind is refused by the page itself.
+    #[test]
+    fn events_filter_reads_both_spellings_and_refuses_wrong_types() {
+        let filter = events_filter(
+            &json!({"kind": "errors", "accountId": "a-1", "before": 99, "limit": 9000}),
+        )
+        .unwrap();
+        assert_eq!(filter.kind.as_deref(), Some("errors"));
+        assert_eq!(filter.account_id.as_deref(), Some("a-1"));
+        assert_eq!(filter.before, Some(99));
+        assert_eq!(filter.limit, Some(500));
+        let snake = events_filter(&json!({"account_id": "a-2", "limit": null})).unwrap();
+        assert_eq!(snake.account_id.as_deref(), Some("a-2"));
+        assert_eq!(snake.limit, None);
+        assert_eq!(
+            events_filter(&Value::Null).unwrap(),
+            switchboard_core::activity::Filter::default()
+        );
+        for refused in [
+            json!({"before": "9"}),
+            json!({"limit": 1.5}),
+            json!({"kind": 3}),
+        ] {
+            assert_eq!(
+                events_filter(&refused).unwrap_err(),
+                EVENTS_ARGUMENTS,
+                "{refused}"
+            );
+        }
+        let unknown = events_filter(&json!({"kind": "logins"})).unwrap();
+        assert_eq!(
+            switchboard_core::activity::page(&json!([]), &unknown).unwrap_err(),
+            switchboard_core::activity::KIND_INVALID
+        );
     }
 
     /// SB-230: `set_ceiling` takes its amount as a JSON value, so a call without `usd` is refused

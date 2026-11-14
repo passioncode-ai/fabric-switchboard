@@ -1,7 +1,7 @@
 // Pure interface rules, kept free of DOM access so scripts/test-ui-logic.mjs can
 // exercise them directly. main.ts owns rendering; these functions own decisions.
 import type { BalanceStatus, ShellHookNotice, ShellHookStatus, Onboarding, OnboardStep, ChainExecutor, ChainScope, ChainStepView } from './types';
-import type { Machine, MachineCopy, Attention, AttentionItem, AttentionReason, AttentionWindow } from './types';
+import type { Machine, MachineCopy, Attention, AttentionItem, AttentionReason, AttentionWindow, Event, EventsPage, GivenAccount } from './types';
 import type { Account, AccountLimit, Organization, OrganizationGroupOffer, Project, AgentRow, AgentSetup, OpenrouterCredit, RecommendedModel, SessionInfo, ProjectRule, RotationPolicy, UpdateStatus, Usage, UsageWindow } from './types';
 import { t, plural } from './i18n';
 
@@ -575,6 +575,171 @@ export function switchingLine(policies: Pick<RotationPolicy, 'enabled' | 'pool'>
   const groups = new Set(policies.filter((p) => p.enabled).map((p) => p.pool)).size;
   return groups ? plural(groups, { one: 'Automatic switching is on for {n} group.', other: 'Automatic switching is on for {n} groups.' }) : t('Automatic switching is off.');
 }
+
+// #region wave-2 (WF-7, WF-8, WF-10.1, WF-11, WF-2.4)
+/**
+ * WF-11.1 (SB-373): the Activity filter's kinds. One event may be of two kinds: its action's kind,
+ * and `errors` when its outcome is a failure. The mapping, which the `events` command's `kind`
+ * filter follows too:
+ * - `switches`: which account or agent serves next (actions `account_selected`, `activation`,
+ *   `rotation` with its causes, `fallback`: a hand-over to the next agent of a chain);
+ * - `sign_ins`: a sign-in made or an account added by one (actions `login`, `account_added`,
+ *   `kimi_account`);
+ * - `groups`: what a group holds (actions `project`, `project_rule`, `balancing`: lent and back);
+ * - `moves`: an account leaving this machine's use (actions `machine`: sent or called back;
+ *   `assignment`: given to an agent);
+ * - `errors`: any action whose outcome is a failure (`failed`, `unauthorized`, `rate_limited`,
+ *   `upstream_error`, `network_error`, `connection_failed`, `timeout`, `rejected`, `aborted`,
+ *   `unavailable`, `4xx`, `5xx`);
+ * - `other`: every action none of the first four names (accounts added or removed, usage checks,
+ *   requests, the proxy, chains, keys, organizations, launches, assignments).
+ */
+export type EventKind = 'switches' | 'sign_ins' | 'groups' | 'moves' | 'errors' | 'other';
+/** WF-11.1: the kinds the filter offers, in its order (`other` is filtered by the command but not offered). */
+export const EVENT_FILTER_KINDS: EventKind[] = ['switches', 'sign_ins', 'groups', 'moves', 'errors'];
+const KIND_ACTIONS: Record<'switches' | 'sign_ins' | 'groups' | 'moves', readonly string[]> = {
+  // The same classes as the owner's `events` command (`switchboard_core::activity::class_of`).
+  switches: ['account_selected', 'activation', 'rotation', 'fallback'],
+  sign_ins: ['login', 'account_added', 'kimi_account'],
+  groups: ['project', 'project_rule', 'balancing'],
+  moves: ['machine', 'assignment'],
+};
+const FAILURE_DETAILS = new Set(['failed', 'unauthorized', 'rate_limited', 'upstream_error', 'network_error', 'connection_failed', 'timeout', 'rejected', 'aborted', 'unavailable', '4xx', '5xx']);
+/** WF-11.1: every kind an event is of; `other` only when no action kind names it. */
+export function eventKinds(event: Pick<Event, 'action' | 'detail'>): EventKind[] {
+  const kinds: EventKind[] = (Object.keys(KIND_ACTIONS) as (keyof typeof KIND_ACTIONS)[]).filter((kind) => KIND_ACTIONS[kind].includes(event.action));
+  if (!kinds.length) kinds.push('other');
+  if (FAILURE_DETAILS.has(event.detail)) kinds.push('errors');
+  return kinds;
+}
+/** WF-11.1: the filter's label for a kind. */
+export function eventKindLabel(kind: EventKind | 'all'): string {
+  switch (kind) {
+    case 'all': return t('All events');
+    case 'switches': return t('Switches');
+    case 'sign_ins': return t('Sign-ins');
+    case 'groups': return t('Groups');
+    case 'moves': return t('Moves');
+    case 'errors': return t('Errors');
+    case 'other': return t('Other');
+  }
+}
+export interface EventFilter { kind: EventKind | 'all'; account: string; query: string }
+/**
+ * WF-11.1: the journal as the filter row reads it, newest first. `describe` gives the words an
+ * event is searched by (its action and outcome as the window names them, its account's label);
+ * every word of the query must be among them. `account` is an account id, or `all`.
+ */
+export function filterEvents<T extends Event>(events: readonly T[], filter: EventFilter, describe: (event: T) => string = (e) => `${e.action} ${e.detail}`): T[] {
+  const words = filter.query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  return events
+    .map((e, index) => ({ e, index }))
+    .filter(({ e }) => filter.kind === 'all' || eventKinds(e).includes(filter.kind))
+    .filter(({ e }) => filter.account === 'all' || e.account_id === filter.account)
+    .filter(({ e }) => { if (!words.length) return true; const text = `${describe(e)} ${e.account_id ?? ''}`.toLowerCase(); return words.every((w) => text.includes(w)); })
+    .sort((a, b) => b.e.at - a.e.at || b.index - a.index)
+    .map(({ e }) => e);
+}
+/** WF-11.1: a moment's local day, `YYYY-MM-DD`. */
+export function dayKey(seconds: number): string {
+  const d = new Date(seconds * 1000);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+/** WF-11.1: events already newest first, cut into local days, newest day first. */
+export function eventsByDay<T extends Pick<Event, 'at'>>(events: readonly T[], key: (seconds: number) => string = dayKey): { day: string; events: T[] }[] {
+  const days: { day: string; events: T[] }[] = [];
+  for (const event of events) {
+    const day = key(event.at); const last = days[days.length - 1];
+    if (last?.day === day) last.events.push(event); else days.push({ day, events: [event] });
+  }
+  return days;
+}
+/** WF-11.1: today or yesterday, by local day; null for an older day (the window writes its date). */
+export function relativeDay(day: string, nowSeconds: number, key: (seconds: number) => string = dayKey): 'today' | 'yesterday' | null {
+  if (day === key(nowSeconds)) return 'today';
+  if (day === key(nowSeconds - 86_400)) return 'yesterday';
+  return null;
+}
+/** WF-11.1: events shown at first and added by each *Show more*. */
+export const EVENTS_PAGE = 50;
+/**
+ * WF-11.1: the first `shown` events; `more` when more can be shown, from what is loaded or from the
+ * owner's next page; `fetch` when showing more needs that next page first.
+ */
+export function eventPage<T>(events: readonly T[], shown: number, nextBefore: number | null): { items: T[]; more: boolean; fetch: boolean } {
+  const items = events.slice(0, Math.max(0, shown));
+  const loadedMore = events.length > items.length;
+  return { items, more: loadedMore || nextBefore !== null, fetch: !loadedMore && nextBefore !== null };
+}
+/** WF-11.1: the `events` command's answer, kept to what the window knows; anything else is an empty page. */
+export function eventsPageView(raw: unknown): EventsPage {
+  const r = raw && typeof raw === 'object' ? raw as Record<string, unknown> : {};
+  const events = (Array.isArray(r.events) ? r.events as unknown[] : [])
+    .filter((e): e is Event => !!e && typeof e === 'object' && typeof (e as Event).at === 'number' && typeof (e as Event).action === 'string' && typeof (e as Event).detail === 'string')
+    .map((e) => ({ at: e.at, action: e.action, account_id: typeof e.account_id === 'string' ? e.account_id : null, detail: e.detail }));
+  return { events, next_before: typeof r.next_before === 'number' ? r.next_before : null, kinds: Array.isArray(r.kinds) ? r.kinds.filter((k): k is string => typeof k === 'string') : [] };
+}
+/** Whether a native call failed only because the owner does not have the command yet (an older build). */
+export function missingCommand(error: unknown): boolean {
+  const text = typeof error === 'string' ? error : error instanceof Error ? error.message : String((error as { message?: unknown } | null)?.message ?? error ?? '');
+  return /command\s+\S+\s+not\s+found/i.test(text) || /unknown command/i.test(text);
+}
+/** WF-11.1: Sessions running first, then starting, then the rest; newest launch first within each. */
+export function sortSessions<T extends Pick<SessionInfo, 'state' | 'launched_at'>>(sessions: readonly T[]): T[] {
+  const rank = (s: T) => ({ running: 0, starting: 1, unknown: 2, ended: 3 } as Record<string, number>)[s.state] ?? 2;
+  return [...sessions].sort((a, b) => rank(a) - rank(b) || b.launched_at - a.launched_at);
+}
+/** WF-11.2: rows a Statistics table shows while it is folded to its top. */
+export const STAT_TOP = 10;
+/** WF-11.2: the rows shown, and how many are left out until *Show all*. */
+export function statRowsShown<T>(rows: readonly T[], all: boolean, top = STAT_TOP): { rows: T[]; hidden: number } {
+  return all || rows.length <= top ? { rows: [...rows], hidden: 0 } : { rows: rows.slice(0, top), hidden: rows.length - top };
+}
+/** WF-7.2 (SB-369): today's spend as a share of a daily ceiling, 0 to 100; null when either is unknown. */
+export function spendShare(spentToday: number | null | undefined, ceilingUsd: number | null | undefined): number | null {
+  if (spentToday === null || spentToday === undefined || !Number.isFinite(spentToday) || !ceilingUsd || !Number.isFinite(ceilingUsd) || ceilingUsd <= 0) return null;
+  return Math.max(0, Math.min(100, Math.round((spentToday / ceilingUsd) * 100)));
+}
+/** WF-7.1: the groups listed open (their own key, or a ceiling left from one) and the rest, which use this computer's key. */
+export function groupKeyBlocks<P extends { pool: string }>(projects: readonly P[], keyPools: readonly (string | null)[], ceilingPools: readonly string[] = []): { listed: P[]; rest: P[] } {
+  const listed = projects.filter((p) => keyPools.includes(p.pool) || ceilingPools.includes(p.pool));
+  return { listed, rest: projects.filter((p) => !listed.includes(p)) };
+}
+/** WF-7.2: a key's tail from OpenRouter's label for it (`sk-or-v1-0e6…96f`): its last characters, or null when the label is not a key's. */
+export function keyTail(label: string | null | undefined): string | null {
+  const text = (label ?? '').trim();
+  if (!text.startsWith('sk-')) return null;
+  const tail = /([A-Za-z0-9]{3,4})$/.exec(text)?.[1];
+  return tail ? `…${tail}` : null;
+}
+/** WF-8.1 (SB-370): a group card's one line of state. */
+export function groupStateLine(facts: { accounts: number; withRoom: number; repositories: number; chain: string | null }): string {
+  const parts = [
+    plural(facts.accounts, { one: '{n} account', other: '{n} accounts' }),
+    plural(facts.withRoom, { one: '{n} with room', other: '{n} with room' }),
+    plural(facts.repositories, { one: '{n} repository', other: '{n} repositories' }),
+  ];
+  if (facts.chain) parts.push(t('chain: {chain}', { chain: facts.chain }));
+  return parts.join(' · ');
+}
+/** WF-2.4: the `given_accounts` answer, kept to what the window knows; a malformed row is left out. */
+export function givenAccountsView(raw: unknown): GivenAccount[] {
+  const list = raw && typeof raw === 'object' && Array.isArray((raw as { accounts?: unknown }).accounts) ? (raw as { accounts: unknown[] }).accounts : [];
+  const out: GivenAccount[] = [];
+  for (const entry of list) {
+    if (!entry || typeof entry !== 'object') continue;
+    const e = entry as Record<string, unknown>;
+    if (typeof e.account_id !== 'string' || typeof e.agent !== 'string') continue;
+    const l = e.last_launch && typeof e.last_launch === 'object' ? e.last_launch as Record<string, unknown> : null;
+    out.push({
+      account_id: e.account_id, agent: e.agent, machine: typeof e.machine === 'string' && e.machine ? e.machine : null,
+      last_launch: l && typeof l.at === 'number' ? { pool: typeof l.pool === 'string' ? l.pool : null, folder: typeof l.folder === 'string' ? l.folder : null, at: l.at } : null,
+      last_activity: typeof e.last_activity === 'number' ? e.last_activity : null,
+    });
+  }
+  return out;
+}
+// #endregion wave-2
 
 type Switchable = Pick<Account, 'provider' | 'kind' | 'enabled' | 'external_identity'>;
 /** Native Claude Code activation needs a Claude OAuth profile with its captured identity. */

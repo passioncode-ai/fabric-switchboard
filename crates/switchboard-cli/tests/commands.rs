@@ -1215,6 +1215,40 @@ fn human_usage_and_events_print_utc_times_and_health() {
     );
     let json: serde_json::Value = serde_json::from_str(&run(&["--json", "events"])).unwrap();
     assert!(json["data"][0]["at"].is_i64());
+    // SB-373: the same filters as `switchboard_events`; the data stays a list, oldest first.
+    let added: serde_json::Value =
+        serde_json::from_str(&run(&["--json", "events", "--kind", "sign_ins"])).unwrap();
+    let added = added["data"].as_array().unwrap();
+    // Every line is of the class; the usage check above may add a renewal (`login`) on a machine
+    // that reaches the network, so the count is not fixed.
+    assert!(
+        added
+            .iter()
+            .all(|e| ["login", "account_added", "kimi_account"]
+                .contains(&e["action"].as_str().unwrap_or_default())),
+        "{added:?}"
+    );
+    assert!(
+        added.iter().any(|e| e["action"] == "account_added"),
+        "{added:?}"
+    );
+    let one: serde_json::Value =
+        serde_json::from_str(&run(&["--json", "events", "--limit", "1"])).unwrap();
+    // A page never splits a second: `--limit 1` holds the newest event and any other of its
+    // second (a fast machine writes two in one).
+    let one = one["data"].as_array().unwrap();
+    assert!(!one.is_empty(), "{one:?}");
+    assert!(one.iter().all(|e| e["at"] == one[0]["at"]), "{one:?}");
+    let none: serde_json::Value =
+        serde_json::from_str(&run(&["--json", "events", "--before", "1"])).unwrap();
+    assert_eq!(none["data"], serde_json::json!([]));
+    let refused = binary()
+        .arg("--data-dir")
+        .arg(tmp.path())
+        .args(["events", "--kind", "logins"])
+        .output()
+        .unwrap();
+    assert!(!refused.status.success());
 }
 #[test]
 fn offline_backup_never_writes_and_a_scratch_folder_restores_nothing() {

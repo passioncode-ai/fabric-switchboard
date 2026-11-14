@@ -1645,4 +1645,57 @@ check(() => {
   assert.equal(logic.switchingLine([{ enabled: true, pool: 'default' }, { enabled: true, pool: 'default' }]), 'Automatic switching is on for 1 group.');
   assert.equal(logic.switchingLine([{ enabled: true, pool: 'default' }, { enabled: true, pool: 'web' }]), 'Automatic switching is on for 2 groups.');
 });
+// WF-11.1 (SB-373): an event's kinds, the filter row, days and pages.
+check(() => {
+  assert.deepEqual(logic.eventKinds({ action: 'rotation', detail: 'switched' }), ['switches']);
+  assert.deepEqual(logic.eventKinds({ action: 'login', detail: 'failed' }), ['sign_ins', 'errors']);
+  assert.deepEqual(logic.eventKinds({ action: 'machine', detail: 'sent' }), ['moves']);
+  assert.deepEqual(logic.eventKinds({ action: 'usage', detail: 'observed' }), ['other']);
+  assert.deepEqual(logic.eventKinds({ action: 'usage', detail: 'rate_limited' }), ['other', 'errors']);
+  const events = [
+    { at: 100, action: 'login', account_id: 'a1', detail: 'failed' },
+    { at: 300, action: 'rotation', account_id: 'a2', detail: 'switched' },
+    { at: 200, action: 'project', account_id: null, detail: 'saved' },
+  ];
+  assert.deepEqual(logic.filterEvents(events, { kind: 'all', account: 'all', query: '' }).map((e) => e.at), [300, 200, 100], 'newest first');
+  assert.deepEqual(logic.filterEvents(events, { kind: 'errors', account: 'all', query: '' }).map((e) => e.at), [100]);
+  assert.deepEqual(logic.filterEvents(events, { kind: 'all', account: 'a2', query: '' }).map((e) => e.at), [300]);
+  assert.deepEqual(logic.filterEvents(events, { kind: 'all', account: 'all', query: 'ROTATION switched' }).map((e) => e.at), [300], 'every word, any case');
+  const key = (s) => (s < 200 ? 'd1' : 'd2');
+  const days = logic.eventsByDay([...events].sort((a, b) => b.at - a.at), key);
+  assert.deepEqual(days.map((d) => [d.day, d.events.length]), [['d2', 2], ['d1', 1]]);
+  const now = Date.UTC(2026, 10, 14, 12) / 1000;
+  assert.equal(logic.relativeDay(logic.dayKey(now), now), 'today');
+  assert.equal(logic.relativeDay(logic.dayKey(now - 86_400), now), 'yesterday');
+  assert.equal(logic.relativeDay(logic.dayKey(now - 3 * 86_400), now), null);
+  const many = Array.from({ length: 120 }, (_, i) => i);
+  assert.deepEqual([logic.eventPage(many, 50, null).items.length, logic.eventPage(many, 50, null).more, logic.eventPage(many, 50, null).fetch], [50, true, false]);
+  assert.deepEqual([logic.eventPage(many, 200, 77).more, logic.eventPage(many, 200, 77).fetch], [true, true], 'the owner has an older page');
+  assert.deepEqual([logic.eventPage(many, 200, null).more], [false]);
+  const page = logic.eventsPageView({ events: [{ at: 5, action: 'login', detail: 'ok', account_id: 'x' }, { at: 'bad' }], next_before: 4, kinds: ['sign_ins', 7] });
+  assert.deepEqual(page, { events: [{ at: 5, action: 'login', account_id: 'x', detail: 'ok' }], next_before: 4, kinds: ['sign_ins'] });
+  assert.deepEqual(logic.eventsPageView(null), { events: [], next_before: null, kinds: [] });
+  assert.ok(logic.missingCommand('command events not found'));
+  assert.ok(!logic.missingCommand('Network error'));
+  assert.deepEqual(logic.sortSessions([{ state: 'ended', launched_at: 9 }, { state: 'running', launched_at: 1 }, { state: 'running', launched_at: 5 }]).map((s) => s.launched_at), [5, 1, 9]);
+});
+// WF-11.2, WF-7 and WF-8: folded Statistics tables, group key blocks, key tails, spend bars.
+check(() => {
+  const rows = Array.from({ length: 25 }, (_, i) => i);
+  assert.deepEqual([logic.statRowsShown(rows, false).rows.length, logic.statRowsShown(rows, false).hidden], [10, 15]);
+  assert.deepEqual([logic.statRowsShown(rows, true).rows.length, logic.statRowsShown(rows, true).hidden], [25, 0]);
+  assert.equal(logic.statRowsShown(rows.slice(0, 4), false).hidden, 0);
+  const projects = [{ pool: 'a' }, { pool: 'b' }, { pool: 'c' }];
+  const blocks = logic.groupKeyBlocks(projects, ['b', null], ['c']);
+  assert.deepEqual([blocks.listed.map((p) => p.pool), blocks.rest.map((p) => p.pool)], [['b', 'c'], ['a']]);
+  assert.equal(logic.keyTail('sk-or-v1-0e6…96f3'), '…96f3');
+  assert.equal(logic.keyTail('Machine key'), null);
+  assert.equal(logic.spendShare(2.5, 10), 25);
+  assert.equal(logic.spendShare(12, 10), 100);
+  assert.equal(logic.spendShare(null, 10), null);
+  assert.equal(logic.spendShare(1, 0), null);
+  const line = logic.groupStateLine({ accounts: 3, withRoom: 2, repositories: 12, chain: 'Claude Code → Codex' });
+  assert.ok(line.includes('3 accounts') && line.includes('12'), line);
+  assert.ok(!line.includes('\u2014'));
+});
 console.log(`${cases} ui-logic cases passed, including quota priority and wall-clock countdowns.`);

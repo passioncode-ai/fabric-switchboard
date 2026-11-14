@@ -33,6 +33,12 @@ export interface Account {
   enabled: boolean; created_at: number; identity: string | null; usage: Usage | null;
 }
 export interface Event { at: number; action: string; account_id: string | null; detail: string }
+/** WF-11.1 (SB-373): one page of the journal from the `events` command, newest first; `next_before` pages on (null at the end); `kinds` are the filter kinds the owner knows. */
+export interface EventsPage { events: Event[]; next_before: number | null; kinds: string[] }
+/** WF-11.1: what the window asks the `events` command for; every field optional. */
+export interface EventsQuery { kind?: string; account_id?: string; before?: number; limit?: number }
+/** WF-2.4 (SB-364): an account given to an agent, as the `given_accounts` command reads it from the seat and launch records. */
+export interface GivenAccount { account_id: string; agent: string; machine: string | null; last_launch: { pool: string | null; folder: string | null; at: number } | null; last_activity: number | null }
 export interface ProjectRule { path: string; provider: Provider; account_id: string; target: 'managed' | 'claude_cli'; enabled: boolean; created_at: number; expires_at: number | null }
 export interface ProjectRuleInput { path: string; accountId: string; target: ProjectRule['target']; enabled: boolean; expiresAt: number | null }
 export interface AgentSetup { cli_path: string | null; bundled_cli: string | null; linked_cli: string | null; can_link: boolean; translocated?: boolean; commands: { claude_code: string; codex: string; claude_plugin: string }; connected?: { claude_code: boolean; codex: boolean }; agent_prompt?: string; proved?: { client: string | null; at: number } | null }
@@ -166,6 +172,12 @@ export interface Adapter {
   answerCeiling(id: string, answer: 'keep' | 'double'): Promise<unknown>;
   agentEnable(agent: string, enabled: boolean): Promise<unknown>;
   agentDefault(agent: string | null): Promise<unknown>;
+  /** WF-10.1 (SB-372): whether the sessions Switchboard starts bypass permission prompts (`bypass`) or ask (`ask`). */
+  agentPermissions(permissions: 'bypass' | 'ask'): Promise<unknown>;
+  /** WF-11.1 (SB-373): a page of the journal, filtered by the owner; null when the owner has no `events` command yet. */
+  events(query: EventsQuery): Promise<EventsPage | null>;
+  /** WF-2.4 (SB-364): where each account given to an agent runs and last ran; null when the owner has no `given_accounts` command yet. */
+  givenAccounts(): Promise<GivenAccount[] | null>;
   openrouterModels(): Promise<OpenrouterModels>;
   hermesSetModel(provider: string | null, model: string | null): Promise<HermesModel>;
   /** Kimi Code subscription accounts (SB-81) with plan usage asked of Kimi, and the ordinary `kimi`. */
@@ -259,7 +271,7 @@ export interface KimiAccounts { accounts: { account: KimiAccount; status: KimiSt
 /** SB-120: one catalog agent as this computer has it. */
 export interface AgentRow { id: string; name: string; maker?: string | null; url: string; install?: string | null; installed: boolean; switchable: boolean; enabled: boolean; disabled: boolean; default: boolean; openrouter: boolean; mcp: boolean; command: string; argv?: string[]; path?: string | null }
 export interface RecommendedModel { id: string; name: string; maker: string; context: number; input_usd_per_million: number; url: string; use?: string }
-export interface AgentsOverview { schema?: number; revision?: string; updated_at?: number | null; default: string | null; default_ready?: boolean; installed: number; agents: AgentRow[]; recommended_models: RecommendedModel[] }
+export interface AgentsOverview { schema?: number; revision?: string; updated_at?: number | null; default: string | null; default_ready?: boolean; /** SB-298, WF-10.1: whether the sessions Switchboard starts bypass permission prompts; absent from an owner that does not report it. */ permissions?: 'bypass' | 'ask'; installed: number; agents: AgentRow[]; recommended_models: RecommendedModel[] }
 /** SB-119: OpenRouter's tool-capable models; `available: false` when its list could not be read. */
 export interface OpenrouterModel { id: string; name?: string | null; context?: number | null; prompt?: string | null; completion?: string | null }
 export interface OpenrouterModels { recommended: RecommendedModel[]; models: OpenrouterModel[]; available: boolean }

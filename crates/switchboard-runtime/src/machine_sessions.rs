@@ -160,7 +160,14 @@ pub fn assemble(
 
 /// Every Claude Code and Codex process of this user, joined to Switchboard's launches.
 pub fn scan(root: &Path) -> Value {
-    let procs = agent_processes();
+    // SB-375: a table that could not be read is said so, never answered as no sessions.
+    let (procs, degraded) = match agent_processes() {
+        Ok(procs) => (procs, vec![]),
+        Err(reason) => (
+            vec![],
+            vec![json!({"source": "process_table", "reason": reason})],
+        ),
+    };
     let markers = launch_markers(root);
     let roots = transcript_roots(root);
     let now = std::time::SystemTime::now()
@@ -176,11 +183,12 @@ pub fn scan(root: &Path) -> Value {
     };
     let mut answer = assemble(&procs, &markers, last_write, now);
     answer["observed_at"] = now.into();
+    answer["degraded"] = degraded.into();
     answer
 }
 
 #[cfg(target_os = "macos")]
-fn agent_processes() -> Vec<Proc> {
+fn agent_processes() -> Result<Vec<Proc>, &'static str> {
     const PROC_UID_ONLY: u32 = 4;
     // SAFETY: plain reads of this user's process table into buffers of the sizes passed.
     let uid = unsafe { libc::geteuid() };
@@ -194,7 +202,7 @@ fn agent_processes() -> Vec<Proc> {
         )
     };
     if bytes <= 0 {
-        return vec![];
+        return Err("proc_listpids_failed");
     }
     pids.truncate(bytes as usize / std::mem::size_of::<i32>());
     let mut found = Vec::new();
@@ -257,13 +265,13 @@ fn agent_processes() -> Vec<Proc> {
             started_at,
         });
     }
-    found
+    Ok(found)
 }
 
 #[cfg(target_os = "linux")]
-fn agent_processes() -> Vec<Proc> {
+fn agent_processes() -> Result<Vec<Proc>, &'static str> {
     let Ok(entries) = std::fs::read_dir("/proc") else {
-        return vec![];
+        return Err("proc_unreadable");
     };
     // SAFETY: reads this process's own effective uid.
     let uid = unsafe { libc::geteuid() };
@@ -308,12 +316,12 @@ fn agent_processes() -> Vec<Proc> {
             started_at: Some(meta.mtime()),
         });
     }
-    found
+    Ok(found)
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "linux")))]
-fn agent_processes() -> Vec<Proc> {
-    vec![]
+fn agent_processes() -> Result<Vec<Proc>, &'static str> {
+    Err("not_read_on_this_platform")
 }
 
 #[cfg(test)]
@@ -413,5 +421,13 @@ mod tests {
             answer["total"].as_u64().unwrap(),
             answer["managed"].as_u64().unwrap() + answer["unmanaged"].as_u64().unwrap()
         );
+        // SB-375: an unread table is named, never answered as an empty machine.
+        let degraded = answer["degraded"].as_array().unwrap();
+        if cfg!(any(target_os = "macos", target_os = "linux")) {
+            assert!(degraded.is_empty(), "{answer}");
+        } else {
+            assert_eq!(degraded[0]["source"], "process_table", "{answer}");
+            assert_eq!(answer["total"], 0);
+        }
     }
 }

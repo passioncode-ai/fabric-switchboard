@@ -1,5 +1,6 @@
 import { isAbsoluteProjectPath } from './platform';
 import type { StatCounts, Statistics } from './ui-logic';
+import { EVENT_FILTER_KINDS, filterEvents, type EventKind } from './ui-logic';
 import { attribution, domainOrganization, domainSuggestion, groupAdmits, groupOrganizations, placementAdmits, providerOrganization, servesPool } from './ui-logic';
 import agentCatalogData from '../catalog/agents.json';
 import { version } from '../package.json';
@@ -136,6 +137,32 @@ export function createDemoAdapter(): Adapter {
     }
     (state.assigned_to ??= {})['demo-claude-harbor'] = 'Frame Agent on Studio';
   }
+  // Window plan wave 2 (WF-7, WF-8, WF-11): `?long=1` is the long case: 12 groups holding about 300
+  // folders, three of them with a key of their own beside the machine's, and 300 journal events
+  // over five days. Synthetic only.
+  const longCase = new URLSearchParams(location.search).get('long') === '1';
+  const longEvents: { at: number; action: string; account_id: string | null; detail: string }[] = [];
+  if (longCase) {
+    const names = ['Alpha Web', 'Tools', 'Beta API', 'Client Northwind', 'Client Contoso', 'Data pipeline', 'Mobile app', 'Docs site', 'Infra', 'Research', 'Design system', 'Agents lab'];
+    state.projects = names.map((name, g) => {
+      const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+      const repos = Array.from({ length: 6 + (g * 5) % 17 }, (_, i) => `/srv/projects/${slug}-${['web', 'api', 'cli', 'docs', 'infra', 'ui', 'bot', 'sdk', 'site', 'jobs', 'auth', 'pay', 'search', 'feed', 'chat', 'maps', 'mail', 'sync', 'edge', 'core', 'lab', 'ops'][i % 22]}${i >= 22 ? `-${i}` : ''}`);
+      const worktrees = Array.from({ length: (g * 3) % 9 }, (_, i) => `/srv/projects/.worktrees/${slug}-web-wt-feature-${i + 1}`);
+      return { pool: slug, name, folders: [...repos, ...worktrees], created_at: now() - 86_400 * (12 - g) };
+    });
+    for (const [id, pool] of [['demo-claude-north', 'alpha-web'], ['demo-claude-south', 'alpha-web'], ['demo-claude-east', 'tools'], ['demo-claude-west', 'client-northwind'], ['demo-codex-lab', 'alpha-web']] as const) state.accounts.find((a) => a.id === id)!.pool = pool;
+    state.routes['claude:alpha-web'] = 'demo-claude-north'; state.routes['claude:tools'] = 'demo-claude-east'; state.routes['claude:client-northwind'] = 'demo-claude-west'; state.routes['codex:alpha-web'] = 'demo-codex-lab';
+    const kinds: [string, string][] = [['usage', 'observed'], ['account_selected', 'success'], ['rotation', 'switched_on_limit'], ['activation', 'completed'], ['login', 'completed'], ['login', 'failed'], ['project', 'updated'], ['project_rule', 'applied'], ['machine', 'joined'], ['fallback', 'offered'], ['balancing', 'lent'], ['request', 'rate_limited'], ['usage', 'failed'], ['launch', 'started'], ['rotation', 'failover'], ['proxy', '5xx']];
+    if (!openrouter.saved) Object.assign(openrouter, { saved: true, saved_at: now() - 86_400, model: 'moonshotai/kimi-k3.1-pro', credit: { label: 'sk-or-v1-0e6…96f', limit: 10, limit_remaining: 8.8, limit_reset: 'daily', usage: 31.2, usage_daily: 1.2, is_free_tier: false }, credit_error: null });
+    for (const pool of ['alpha-web', 'client-northwind', 'client-contoso']) projectKeys.set(pool, { saved_at: now() - 3600, model: pool === 'alpha-web' ? 'moonshotai/kimi-k3.1-pro' : 'z-ai/glm-5.3' });
+    if (!demoCeilings.length) demoCeilings = [ceilingView({ kind: 'machine' }, 1000), ceilingView({ kind: 'project', pool: 'alpha-web' }, 300), ceilingView({ kind: 'project', pool: 'client-northwind' }, 50)];
+    const ids = state.accounts.map((a) => a.id);
+    // Five local days back from now, newest last as the core keeps them; no two at the same second.
+    for (let i = 0; i < 300; i += 1) {
+      const [action, detail] = kinds[(i * 7) % kinds.length];
+      longEvents.push({ at: now() - 4 * 86_400 - 3600 + Math.floor(i * (4 * 86_400 + 3000) / 300), action, account_id: action === 'project' || action === 'project_rule' ? null : ids[(i * 5) % ids.length], detail });
+    }
+  }
   // SB-160 (B-6, B-7): `?org=ended` shows the seats of Northwind ended (account cards name it, its
   // group's card says none is signed in) and Contoso left on PassionCode.ai three days ago.
   if (new URLSearchParams(location.search).get('org') === 'ended') {
@@ -212,6 +239,7 @@ export function createDemoAdapter(): Adapter {
   const demoInstalled = new Set(['claude-code', 'codex', 'opencode', 'hermes', 'kimi-code', 'gemini-cli', 'goose', 'kilo']);
   const agentDisabled = new Set<string>();
   let agentDefault: string | null = 'claude-code';
+  let agentPermissions: 'bypass' | 'ask' = 'bypass';
   // SB-71 (C-2): synthetic fallback chains (this computer, one group, one task) and what each step
   // would do now; Hermes reads skipped while the demo has no OpenRouter key saved.
   const presetAgents = ['claude-code', 'codex', 'kimi-code', 'hermes'];
@@ -266,7 +294,7 @@ export function createDemoAdapter(): Adapter {
       const installed = demoInstalled.has(a.id); const switchable = SWITCHABLE.includes(a.id); const disabled = agentDisabled.has(a.id);
       return { id: a.id, name: a.name, maker: a.maker ?? null, url: a.url, install: a.install ?? null, installed, switchable, enabled: installed && switchable && !disabled, disabled, default: agentDefault === a.id, openrouter: !!a.openrouter, mcp: a.mcp.supported, command: a.id === 'opencode' ? 'opencode -m openrouter/xiaomi/mimo-v2.6-pro' : (a.binary ?? a.id) };
     });
-    return { default: agentDefault, installed: agents.filter((a) => a.installed).length, agents, recommended_models: recommendedModels };
+    return { default: agentDefault, permissions: agentPermissions, installed: agents.filter((a) => a.installed).length, agents, recommended_models: recommendedModels };
   };
   // SB-131: nothing waits for an answer; a folder found for a project is added by itself.
   let codexOn = false;
@@ -656,7 +684,7 @@ export function createDemoAdapter(): Adapter {
     async launchAgent() { await pause(); throw new Error('The browser demo cannot open a terminal.'); },
     // SB-79: a synthetic key; the demo keeps only its metadata, as the app does.
     async openrouterStatus() { return structuredClone(openrouter); },
-    async openrouterKeyStatus(pool) { await pause(); if (!pool) return structuredClone(openrouter); const k = projectKeys.get(pool); return { service: 'openrouter' as const, saved: !!k, saved_at: k?.saved_at ?? null, model: k?.model ?? null, credit: k ? { label: 'demo', limit: 20, limit_remaining: 17.4, limit_reset: 'monthly', usage: 2.6, usage_daily: 0.41, is_free_tier: false } : null, credit_error: null }; },
+    async openrouterKeyStatus(pool) { await pause(); if (!pool) return structuredClone(openrouter); const k = projectKeys.get(pool); return { service: 'openrouter' as const, saved: !!k, saved_at: k?.saved_at ?? null, model: k?.model ?? null, credit: k ? { label: `sk-or-v1-${pool.slice(0, 2)}…${(pool.length * 37).toString(16).padStart(3, '0')}`, limit: 20, limit_remaining: 17.4, limit_reset: 'monthly', usage: 2.6, usage_daily: pool === 'client-northwind' ? 0.46 : 0.41, is_free_tier: false } : null, credit_error: null }; },
     async openrouterSave(key, model, pool) { await pause(); if (!key.startsWith('sk-or-')) throw new Error('That is not an OpenRouter key: it starts with sk-or-.'); if (pool) { if (!(state.projects ?? []).some((p) => p.pool === pool)) throw new Error('That group id names no group. Choose a group, or none for the key every folder uses.'); projectKeys.set(pool, { saved_at: now(), model: model ?? projectKeys.get(pool)?.model ?? null }); log('agent_key', '', 'saved'); return; } Object.assign(openrouter, { saved: true, saved_at: now(), model: model ?? openrouter.model, credit: { label: 'demo', limit: 5, limit_remaining: 5, limit_reset: 'daily', usage: 0, usage_daily: 0, is_free_tier: false }, credit_error: null }); log('agent_key', '', 'saved'); },
     async openrouterModel(model, pool) { await pause(); if (pool) { const own = projectKeys.get(pool); if (!own) throw new Error('No OpenRouter key is saved. Add one on the API keys page, or run switchboard agents openrouter set.'); own.model = model; return; } if (!openrouter.saved) throw new Error('No OpenRouter key is saved. Add one on the API keys page, or run switchboard agents openrouter set.'); openrouter.model = model; },
     async openrouterRemove(pool) { await pause(); if (pool) { projectKeys.delete(pool); log('agent_key', '', 'removed'); return; } Object.assign(openrouter, { saved: false, saved_at: null, model: null, credit: null, credit_error: null }); log('agent_key', '', 'removed'); },
@@ -717,6 +745,24 @@ export function createDemoAdapter(): Adapter {
       return { answer, ceiling: structuredClone(c) };
     },
     async agentEnable(agent, enabled) { await pause(); if (!catalogAgents.some((a) => a.id === agent)) throw new Error('No such agent in the catalog. Run switchboard agents list.'); agentDisabled.delete(agent); if (!enabled) { agentDisabled.add(agent); if (agentDefault === agent) agentDefault = null; } },
+    // WF-10.1 (SB-372): the permissions every session Switchboard starts on this computer uses.
+    async agentPermissions(value) { await pause(); if (value !== 'bypass' && value !== 'ask') throw new Error('Choose bypass or ask.'); agentPermissions = value; },
+    // WF-11.1 (SB-373): the journal filtered and paged as the `events` command does; `?events=missing` is an owner without it.
+    async events(query) {
+      await pause();
+      if (new URLSearchParams(location.search).get('events') === 'missing') return null;
+      const all = longCase ? longEvents : state.events;
+      const kind = query.kind && ([...EVENT_FILTER_KINDS, 'other'] as string[]).includes(query.kind) ? query.kind as EventKind : 'all';
+      const matching = filterEvents(all, { kind, account: query.account_id ?? 'all', query: '' }).filter((e) => query.before === undefined || e.at < query.before);
+      const page = matching.slice(0, query.limit ?? 200);
+      return { events: structuredClone(page), next_before: matching.length > page.length ? page[page.length - 1].at : null, kinds: [...EVENT_FILTER_KINDS, 'other'] };
+    },
+    // WF-2.4 (SB-364): where each account given to an agent runs; `?given=missing` is an owner without the command.
+    async givenAccounts() {
+      await pause();
+      if (new URLSearchParams(location.search).get('given') === 'missing') return null;
+      return Object.entries(state.assigned_to ?? {}).map(([account_id, agent]) => ({ account_id, agent, machine: 'studio-sshlg', last_launch: { pool: 'work', folder: '/Users/demo/Projects/frame-agent', at: now() - 5400 }, last_activity: now() - 600 }));
+    },
     async agentDefault(agent) { await pause(); if (agent && !SWITCHABLE.includes(agent)) throw new Error('Switchboard cannot hand work to this agent yet, so it cannot be the default.'); if (agent && agentDisabled.has(agent)) throw new Error('This agent is disabled for taking over work. Enable it on the Agents page, then try again.'); agentDefault = agent; },
     async openrouterModels() { await pause(); return { recommended: structuredClone(recommendedModels), models: [...recommendedModels.map((m) => ({ id: m.id, name: m.name, context: m.context, prompt: String(m.input_usd_per_million / 1e6) })), { id: 'moonshotai/kimi-k2', name: 'Kimi K2', context: 262144, prompt: '0.0000006' }, { id: 'openai/gpt-5.5-mini', name: 'GPT-5.5 mini', context: 400000, prompt: '0.0000004' }], available: true }; },
     async hermesSetModel(provider, model) { await pause(); if (provider) hermes.provider = provider; if (model) hermes.model = model; return structuredClone(hermes); },
@@ -780,6 +826,11 @@ function demoStatistics(state: Snapshot, days: number): Statistics {
     { pool: 'personal', project: '', account_id: 'demo-codex-lab', agent: 'opencode' },
     { pool: 'tools', project: 'github.com/demo/tools-cli', account_id: 'demo-codex-lab', agent: 'hermes' },
   ];
+  // `?long=1` (WF-11.2): every long group's first repositories worked too, so tables run past ten rows.
+  if ((state.projects ?? []).length > 6) {
+    const accounts = state.accounts.map((a) => a.id); const agents = ['claude-code', 'codex', 'opencode', 'hermes', 'goose'];
+    (state.projects ?? []).forEach((p, g) => p.folders.filter((f) => !f.includes('/.worktrees/')).slice(0, 3).forEach((f, i) => base.push({ pool: p.pool, project: `github.com/demo/${f.split('/').pop()}`, account_id: accounts[(g * 3 + i) % accounts.length], agent: agents[(g + i) % agents.length] })));
+  }
   const perDay = (d: number, i: number) => ((d + i) % 3 !== 2 ? counts(d * 5 + i) : null);
   const routes = base.map((r, i) => {
     const a = state.accounts.find((x) => x.id === r.account_id);

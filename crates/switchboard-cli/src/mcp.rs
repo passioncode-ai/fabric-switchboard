@@ -30,6 +30,81 @@ pub struct Server {
     client: std::sync::Mutex<Option<String>>,
     /// Whether this server already recorded its proving call.
     proved: std::sync::atomic::AtomicBool,
+    /// The program file this server started from (SB-375), to notice an update replacing it.
+    program: Option<Program>,
+}
+
+/// The program file a server started from, how it was started and the file's stamp then.
+///
+/// SB-375 (board finding `d7d80efc`, 2026-11-14): an agent host keeps one `switchboard mcp`
+/// for the whole session, so after an update it went on answering with the old code (on the
+/// operator's MacBook a server started the day before saw 2 of 37 sessions, the CLI 37). Once
+/// the file is replaced, each call goes to a fresh process of the new program instead.
+struct Program {
+    path: PathBuf,
+    args: Vec<std::ffi::OsString>,
+    stamp: Stamp,
+}
+
+/// What tells two program files apart: size and modification time, and the inode on Unix
+/// (an update renames a new file over the old one).
+type Stamp = (u64, Option<std::time::SystemTime>, u64);
+
+fn stamp_of(path: &std::path::Path) -> Option<Stamp> {
+    let meta = std::fs::metadata(path).ok()?;
+    #[cfg(unix)]
+    let inode = std::os::unix::fs::MetadataExt::ino(&meta);
+    #[cfg(not(unix))]
+    let inode = 0;
+    Some((meta.len(), meta.modified().ok(), inode))
+}
+
+impl Program {
+    fn here() -> Option<Self> {
+        let path = std::env::current_exe().ok()?;
+        let stamp = stamp_of(&path)?;
+        Some(Self {
+            path,
+            args: std::env::args_os().skip(1).collect(),
+            stamp,
+        })
+    }
+    /// The file now differs from the one this server started from. A file that cannot be read
+    /// (an uninstalled app) is not a replacement: this server keeps answering.
+    fn replaced(&self) -> bool {
+        stamp_of(&self.path).is_some_and(|now| now != self.stamp)
+    }
+    /// One message answered by a fresh process of the program file as it is now; `None` when
+    /// that process could not run or answered nothing, and this server answers itself.
+    async fn forward(&self, message: &Value) -> Option<Value> {
+        use std::process::Stdio;
+        let mut child = tokio::process::Command::new(&self.path)
+            .args(&self.args)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .kill_on_drop(true)
+            .spawn()
+            .ok()?;
+        let mut line = message.to_string().into_bytes();
+        line.push(b'\n');
+        let mut stdin = child.stdin.take()?;
+        stdin.write_all(&line).await.ok()?;
+        drop(stdin);
+        let mut out = Vec::new();
+        child
+            .stdout
+            .take()?
+            .take(LINE_LIMIT)
+            .read_to_end(&mut out)
+            .await
+            .ok()?;
+        let _ = child.wait().await;
+        out.split(|b| *b == b'\n')
+            .find(|l| !l.iter().all(u8::is_ascii_whitespace))
+            .and_then(|l| serde_json::from_slice::<Value>(l).ok())
+            .filter(Value::is_object)
+    }
 }
 
 pub(crate) fn now() -> i64 {
@@ -55,12 +130,12 @@ pub(crate) fn tools() -> Vec<(bool, Value)> {
     let account = json!({"type":"string","description":"Account id from switchboard_accounts."});
     vec![
         (false, json!({"name":"switchboard_status","title":"Switchboard status","description":"Who handles this session's requests: runtime state, this session (managed in a group, isolated, or native), the signed-in CLI accounts, the selected account per group, active folder rules and automatic switching. Call this first.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}})),
-        (false, json!({"name":"switchboard_accounts","title":"Switchboard accounts","description":"Stored accounts without credentials: label, provider, group id (pool) and every group it serves (groups), whether selected or signed in now, the lowest remaining quota, the organization each belongs to (null: personal) with what decided it (person or provider), the organizations it also works for, and whether it is used on another machine (elsewhere) with where (location), and the agent it is given to (assigned_to, null when none: Switchboard keeps observing its usage but never uses it by itself). machine: here or elsewhere lists only those.","inputSchema":{"type":"object","properties":{"provider":{"type":"string","enum":["claude","codex"]},"machine":{"type":"string","enum":["here","elsewhere"]}},"additionalProperties":false}})),
+        (false, json!({"name":"switchboard_accounts","title":"Switchboard accounts","description":"Stored accounts without credentials: label, provider, group id (pool) and every group it serves (groups), whether selected or signed in now, the lowest remaining quota, the organization each belongs to (null: personal) with what decided it (person or provider), the organizations it also works for, and whether it is used on another machine (elsewhere) with where (location), and the agent it is given to (assigned_to, null when none: Switchboard keeps observing its usage but never uses it by itself), with assigned on such a row: the machine it runs on, the group, folder and time of the newest launch on it, and its last activity. machine: here or elsewhere lists only those.","inputSchema":{"type":"object","properties":{"provider":{"type":"string","enum":["claude","codex"]},"machine":{"type":"string","enum":["here","elsewhere"]}},"additionalProperties":false}})),
         (false, json!({"name":"switchboard_usage","title":"Remaining usage","description":"Remaining quota per account and window, with reset times and how fresh each observation is. Unknown is not zero. A window with scope feature limits one metered feature only; lowest_remaining_percent covers the account's own windows. refresh asks the provider for one account; within 60 seconds of its last check it returns that observation with a note, and until the time the provider asked for after answering a check with 429 it is refused; for an inactive Claude account it may first renew that account's expired sign-in inside Switchboard. A read-only server never asks and shows the stored observation. No credential is returned.","inputSchema":{"type":"object","properties":{"account_id":account,"refresh":{"type":"boolean","default":false}},"additionalProperties":false}})),
         (false, json!({"name":"switchboard_attention","title":"What needs attention","description":"Accounts and questions that need a person, each with its reason and the action that fixes it: reason sign_in, seat_ended (an organization's seat ended) or renewal_refused (fix with switchboard_login), usage_failing (no usage check succeeded for over an hour; switchboard_usage with refresh), move_unknown (a move to another machine lost its answer; switchboard_remote, then switchboard_account_recall) or ceiling_question (a reached spending ceiling waits for keep or double; switchboard_ceiling_answer). Each item names account_id, label, provider and pool (null for a ceiling), since (Unix seconds, or null) and action.tool. A view: every account listed stays in its group, and nothing moves. Reads only.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}})),
         (true, json!({"name":"switchboard_switch","title":"Switch account","description":"Choose the account for the next request. target session (default) switches this managed session; route selects the account in its own group for every managed session of that group; claude_cli changes the ordinary Claude Code login for every claude session on this machine and requires global: true. A response already streaming keeps its account. An account given to an agent (assigned_to) is refused unless force: true, only when the operator asks to use it anyway.","inputSchema":{"type":"object","properties":{"account_id":account,"target":{"type":"string","enum":["session","route","claude_cli"],"default":"session"},"global":{"type":"boolean","default":false},"force":{"type":"boolean","default":false,"description":"Use an account given to an agent anyway; the activity records it."}},"required":["account_id"],"additionalProperties":false}})),
         (true, json!({"name":"switchboard_session_end","title":"End a hosted session","description":"End a session a session host holds (switchboard_sessions marks it attachable), as `switchboard sessions end` does: its process gets a hangup, a SIGTERM 5 s later if it still runs, and every viewer is told it ended. Answers {launch_id, exit_code, reason: ended}. Closing a viewer only detaches; this ends the session. macOS and Linux.","inputSchema":{"type":"object","properties":{"launch_id":{"type":"string","description":"The launch id."}},"required":["launch_id"],"additionalProperties":false}})),
-        (false, json!({"name":"switchboard_sessions","title":"Sessions","description":"Sessions Switchboard launched: Claude Code, Codex, Kimi Code, Hermes, OpenCode and catalog agents (through an API-key account's proxy or on the OpenRouter key). Each with account_id, label, agent (the catalog id, such as claude-code, codex or goose), provider (the provider the route serves: claude for an agent through the proxy), group id (pool), context (personal or org:<id>) and context_name (the organization's name, or null), mode (managed or isolated), working_directory, in_place, launched_at, started_at, continues (a workflow id or null) and state: starting, running, ended or unknown. Without all, only starting and running ones. With history, every launch of the last 90 days instead, newest first: one record per launch with launch_id, launched_by (surface: window, cli, mcp, fallback, recovery, dashboards or fabric for a run switchboard dispatch started, whose launched_by.dispatch is {id, request, thread, project, workflow}; caller_launch_id, caller_project, caller_program, by, parent), provider_session_id, transcript (its path), turns, last_turn_at, ended (limit; a dispatched run's {kind: exited, stopped or timed_out, exit_code?, at}) and continued_as (where its work went), and for a dispatched run log (its log file's absolute path), plus total. With launch_id, that launch with up (who launched it, to the first) and down (what it launched or what took its work over). Reads only; no credential.","inputSchema":{"type":"object","properties":{"all":{"type":"boolean","description":"Also list ended sessions."},"history":{"type":"boolean","description":"Every recorded launch, newest first, instead of the homes' current sessions."},"launch_id":{"type":"string","description":"One launch and its chain."},"machine":{"type":"boolean","description":"Every Claude Code and Codex process of this user instead, Switchboard's or not: pid, agent, folder, started_at, launch_id (null when unmanaged), last_write_at and quiet_minutes of its folder's transcripts, quiet after 30 minutes; with total, managed, unmanaged, quiet."}},"additionalProperties":false}})),
+        (false, json!({"name":"switchboard_sessions","title":"Sessions","description":"Sessions Switchboard launched: Claude Code, Codex, Kimi Code, Hermes, OpenCode and catalog agents (through an API-key account's proxy or on the OpenRouter key). Each with account_id, label, agent (the catalog id, such as claude-code, codex or goose), provider (the provider the route serves: claude for an agent through the proxy), group id (pool), context (personal or org:<id>) and context_name (the organization's name, or null), mode (managed or isolated), working_directory, in_place, launched_at, started_at, continues (a workflow id or null) and state: starting, running, ended or unknown. Without all, only starting and running ones. With history, every launch of the last 90 days instead, newest first: one record per launch with launch_id, launched_by (surface: window, cli, mcp, fallback, recovery, dashboards or fabric for a run switchboard dispatch started, whose launched_by.dispatch is {id, request, thread, project, workflow}; caller_launch_id, caller_project, caller_program, by, parent), provider_session_id, transcript (its path), turns, last_turn_at, ended (limit; a dispatched run's {kind: exited, stopped or timed_out, exit_code?, at}) and continued_as (where its work went), and for a dispatched run log (its log file's absolute path), plus total. With launch_id, that launch with up (who launched it, to the first) and down (what it launched or what took its work over). Reads only; no credential.","inputSchema":{"type":"object","properties":{"all":{"type":"boolean","description":"Also list ended sessions."},"history":{"type":"boolean","description":"Every recorded launch, newest first, instead of the homes' current sessions."},"launch_id":{"type":"string","description":"One launch and its chain."},"machine":{"type":"boolean","description":"Every Claude Code and Codex process of this user instead, Switchboard's or not: pid, agent, folder, started_at, launch_id (null when unmanaged), last_write_at and quiet_minutes of its folder's transcripts, quiet after 30 minutes; with total, managed, unmanaged, quiet, and degraded naming a process table that could not be read (then total 0 is not an empty machine)."}},"additionalProperties":false}})),
         (false, json!({"name":"switchboard_provenance","title":"Provenance","description":"Which account serves a provider's group, or one launch, since when and why, as Fabric reads it: provider, pool, account_ref (the account's handle, never its id), identity_revision (a hash of the provider's identity, or null), mode (managed for a group, null for a launch), changed_at (Unix seconds, null when the journal no longer holds it), cause (manual, rotation, limit, failover or unknown), replaced ({account_ref, limit: {kind, resets_at, confidence} or null} of the account it replaced, or null) and session ({launch_id, dispatch_id, workflow} for a launch, else null). Give provider (and pool, the default group when left out), or launch_id. Reads only; no credential.","inputSchema":{"type":"object","properties":{"provider":{"type":"string","enum":["claude","codex"]},"pool":{"type":"string","description":"The group id; the default group when left out."},"launch_id":{"type":"string","description":"One launch's account and session."}},"additionalProperties":false}})),
         (false, json!({"name":"switchboard_onboarding","title":"Setup steps","description":"Where setting up Switchboard stands, as steps in order: owner (the app runs), accounts (one is saved; signing in is the person's), project (the folder's group, optional; a repository in no group uses the default group, and next.command puts it in a group), mcp (this server is registered with the agent) and proving_call. Without organizations these five are all, plus one optional organization step when PassionCode.ai is connected and lists none; with organizations, organization follows, then org_group, seat, hook and launch for each, naming it. Each step is done, todo (run next.command), needs_person (tell the person next.person; run next.command or next.alternatives once they agree) or optional. next.turn_on and next.turn_off are the person's: run one only when the person asks. degraded names reads that failed; the step they touch says so. Reads only. The full guide: `switchboard onboard`.","inputSchema":{"type":"object","properties":{"path":path,"host":{"type":"string","enum":["claude","codex"],"description":"The coding agent being set up; default: the one this server runs for, when known."}},"additionalProperties":false}})),
         (false, json!({"name":"switchboard_project_context","title":"A folder's group and rule","description":"The group a folder belongs to, as project (its name, group id as pool, folders and reserved accounts, possibly empty; null when none), and the optional folder rule per provider: the rule in force, the nearest rule in any state (paused or expired), and whether it is in effect. A group's accounts serve only sessions launched from its folders; a provider with no enabled account in the group keeps its existing launch fallback.","inputSchema":{"type":"object","properties":{"path":path},"additionalProperties":false}})),
@@ -76,7 +151,7 @@ pub(crate) fn tools() -> Vec<(bool, Value)> {
         (true, json!({"name":"switchboard_github_clone","title":"Clone a GitHub repository","description":"Clone one repository with the person's own gh into an absolute folder that does not exist yet, as the window's GitHub page does. Only when the operator asks.","inputSchema":{"type":"object","properties":{"owner":{"type":"string","minLength":1,"maxLength":100},"name":{"type":"string","minLength":1,"maxLength":100},"into":{"type":"string","minLength":1,"description":"An absolute folder that does not exist yet."}},"required":["owner","name","into"],"additionalProperties":false}})),
         (false, json!({"name":"switchboard_repository_map","title":"Repositories on disk","description":"The Git repositories under the folders named (absolute; none: ~/DATA, else the home folder; up to three folders deep, not into a repository, a hidden folder or dependencies), each with its group (pool as its id, name; place folder or inside) or none. Linked worktrees are listed under their root in switchboard_projects, not here. Reads only.","inputSchema":{"type":"object","properties":{"under":{"type":"array","maxItems":16,"items":{"type":"string","minLength":1}}},"additionalProperties":false}})),
         (false, json!({"name":"switchboard_statistics","title":"Statistics","description":"What the local proxy relayed in the last days (1-90, default 30): requests, how they ended (ok, limited, failed) and the token counts the provider itself reported (input, output, cache read and write), by group, project (a repository with its checkouts, placed by the folder the request came from), account, coding agent (from its user-agent) and day, plus each group-project-account-agent combination and each day's split by group. Only managed traffic: a session on its own sign-in outside Switchboard is not counted. Counts only, never a prompt, answer or path. Reads only.","inputSchema":{"type":"object","properties":{"days":{"type":"integer","minimum":1,"maximum":90}},"additionalProperties":false}})),
-        (false, json!({"name":"switchboard_events","title":"Activity","description":"Recent activity, newest first: what changed (accounts, switches, groups, automatic switching, sign-ins) and how it ended, as fixed codes. No credential, prompt or provider text.","inputSchema":{"type":"object","properties":{"limit":{"type":"integer","minimum":1,"maximum":500,"default":50}},"additionalProperties":false}})),
+        (false, json!({"name":"switchboard_events","title":"Activity","description":"Recent activity, newest first: what changed (accounts, switches, groups, automatic switching, sign-ins) and how it ended, as fixed codes. kind keeps one class: switches, sign_ins, groups, moves, other, or errors (any event that failed, of every class); account_id keeps one account's events. A page holds limit events and every other event of the second it ends in; pass its next_before as before for older ones (null: nothing older). kinds names every kind present in the journal. No credential, prompt or provider text.","inputSchema":{"type":"object","properties":{"limit":{"type":"integer","minimum":1,"maximum":500,"default":50},"kind":{"type":"string","enum":["switches","sign_ins","groups","moves","errors","other"]},"account_id":{"type":"string"},"before":{"type":"integer","description":"Unix seconds, exclusive."}},"additionalProperties":false}})),
         (true, json!({"name":"switchboard_account_update","title":"Rename, enable or disable an account","description":"Rename an account, enable or disable it (a disabled account is never selected or switched to), or mark it as used on another machine (elsewhere: true disables it here, so this machine never renews it or switches to it, automatically or not; false enables it again), saying where it works (location: a machine and its user, or a colleague, which also marks it; empty clears it). An account whose sign-in was moved with switchboard_account_send is called back with switchboard_account_recall, not used here again, unless force. assigned_to gives the account to an agent or service that holds its sign-in now (its name, at most 120 characters; empty takes it back): Switchboard keeps renewing it and observing its usage but never selects it, switches to it or launches on it by itself, and giving it clears elsewhere. Only when the operator asks. What is left out stays as it is.","inputSchema":{"type":"object","properties":{"account_id":account,"label":{"type":"string","minLength":1,"maxLength":80},"enabled":{"type":"boolean"},"elsewhere":{"type":"boolean"},"location":{"type":"string","maxLength":80},"assigned_to":{"type":"string","maxLength":120,"description":"The agent or service that holds the account now; empty takes it back."},"force":{"type":"boolean","description":"With elsewhere false, enabled true or assigned_to: use it here although its sign-in was moved to another machine and not called back."}},"required":["account_id"],"additionalProperties":false}})),
         (true, json!({"name":"switchboard_account_remove","title":"Remove an account","description":"Only when the operator asks. Remove one account from Switchboard and delete its stored sign-in or key here, as the window's Remove account does; this cannot be undone. Refused while its group has it selected: select another account first. Clients signed in elsewhere are not signed out. An account moved to another machine is called back or removed there with switchboard_account_recall.","inputSchema":{"type":"object","properties":{"account_id":account},"required":["account_id"],"additionalProperties":false}})),
         (true, json!({"name":"switchboard_account_move","title":"Move an account to another group","description":"Move an account into a group (pool: its group id), or back to the default group (pool: default). Only when the operator asks. Joining or leaving a group is that group's change, with its refusals: the account the ordinary Claude Code or Codex is signed in to cannot join a group, and a second copy of a login already in that group is refused.","inputSchema":{"type":"object","properties":{"account_id":account,"pool":{"type":"string","minLength":1,"description":"A group id from switchboard_projects, or default."}},"required":["account_id","pool"],"additionalProperties":false}})),
@@ -180,6 +255,7 @@ impl Server {
             read_only,
             client: std::sync::Mutex::new(None),
             proved: std::sync::atomic::AtomicBool::new(false),
+            program: Program::here(),
         }
     }
     async fn call(&self, operation: Operation) -> Result<Value, String> {
@@ -342,6 +418,22 @@ impl Server {
         };
         let routes = snapshot["routes"].as_object().cloned().unwrap_or_default();
         let time = now();
+        // Launch records are files in the data folder, read here as `switchboard_sessions`
+        // reads a machine's sessions; none is read when no account is given to an agent.
+        let none_given = snapshot["assigned_to"]
+            .as_object()
+            .is_none_or(|given| given.is_empty());
+        let given = if none_given {
+            Map::new()
+        } else {
+            let root = self.root.clone();
+            let snapshot = snapshot.clone();
+            tokio::task::spawn_blocking(move || {
+                switchboard_runtime::given::assigned(&root, &snapshot)
+            })
+            .await
+            .unwrap_or_default()
+        };
         let accounts: Vec<Value> = snapshot["accounts"]
             .as_array()
             .cloned()
@@ -361,13 +453,19 @@ impl Server {
                         || entry["account_ids"].as_array().is_some_and(|ids| ids.contains(&a["id"]))
                 });
                 let usage = usage_view(&a, &snapshot, time);
-                json!({"id": a["id"], "label": a["label"], "provider": a["provider"], "kind": a["kind"], "pool": a["pool"], "enabled": a["enabled"],
+                let mut row = json!({"id": a["id"], "label": a["label"], "provider": a["provider"], "kind": a["kind"], "pool": a["pool"], "enabled": a["enabled"],
                     "selected_for_next_request": routes.get(&key) == Some(&a["id"]), "signed_in_cli": signed_in,
                     "lowest_remaining_percent": usage["lowest_remaining_percent"], "usage_fresh": usage["fresh"],
                     "organization": organization_of(&a["id"]), "also_organizations": also_of(&a["id"]), "groups": groups_of(&a),
                     "elsewhere": marked(&a["id"]),
                     "location": a["id"].as_str().and_then(|id| snapshot["locations"].get(id)).cloned().unwrap_or(Value::Null),
-                    "assigned_to": a["id"].as_str().and_then(|id| snapshot["assigned_to"].get(id)).cloned().unwrap_or(Value::Null)})
+                    "assigned_to": a["id"].as_str().and_then(|id| snapshot["assigned_to"].get(id)).cloned().unwrap_or(Value::Null)});
+                // The window's Given to agents section, from the same records: only on an
+                // account given to an agent.
+                if let Some(assigned) = a["id"].as_str().and_then(|id| given.get(id)) {
+                    row["assigned"] = assigned.clone();
+                }
+                row
             })
             .collect();
         Ok(json!({"accounts": accounts}))
@@ -1285,18 +1383,24 @@ impl Server {
                 }
             },
             "switchboard_events" => {
-                let limit = args
-                    .get("limit")
-                    .and_then(Value::as_u64)
-                    .unwrap_or(50)
-                    .clamp(1, 500) as usize;
-                self.call(Operation::Snapshot).await.map(|v| {
-                    let events: Vec<Value> = v["events"]
-                        .as_array()
-                        .map(|e| e.iter().rev().take(limit).cloned().collect())
-                        .unwrap_or_default();
-                    json!({"events": events})
-                })
+                // The journal is in every owner's snapshot; the page is cut here, so an owner
+                // older than this server answers the filters too.
+                let filter = switchboard_core::activity::Filter {
+                    kind: args.get("kind").and_then(Value::as_str).map(str::to_owned),
+                    account_id: args
+                        .get("account_id")
+                        .and_then(Value::as_str)
+                        .map(str::to_owned),
+                    before: args.get("before").and_then(Value::as_i64),
+                    limit: args
+                        .get("limit")
+                        .and_then(Value::as_u64)
+                        .map(|n| n.min(500) as usize),
+                };
+                match self.call(Operation::Snapshot).await {
+                    Ok(v) => switchboard_core::activity::page(&v["events"], &filter),
+                    Err(e) => Err(e),
+                }
             }
             "switchboard_account_update" => self.account_update(args).await,
             "switchboard_account_move" => self.account_move(args).await,
@@ -1537,6 +1641,14 @@ impl Server {
             return id.map(|id| error(id, -32600, "Invalid request."));
         };
         let id = id?; // Notifications (initialized, cancelled) need no answer.
+                      // SB-375: an update replaced the program file; its code answers tools and calls.
+        if matches!(method, "tools/list" | "tools/call") {
+            if let Some(program) = self.program.as_ref().filter(|p| p.replaced()) {
+                if let Some(reply) = program.forward(&message).await {
+                    return Some(reply);
+                }
+            }
+        }
         let params = message.get("params").cloned().unwrap_or(json!({}));
         Some(match method {
             "initialize" => {
