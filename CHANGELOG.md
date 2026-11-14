@@ -8,6 +8,7 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- An account whose copy on the other machine is turned off can be called back: that machine gives it back too, and turns it off again if the call back is undone. Before, the call back was refused with "This account is already used elsewhere or turned off here." The other machine needs this version (SB-377).
 ## 0.7.85
 
 - A cap on the coding sessions this computer runs at once: `switchboard capacity set 20` (MCP `switchboard_capacity`). Working Claude Code and Codex sessions count, Switchboard's or not; a session whose folder was not written for 30 minutes does not. At the cap, `switchboard dispatch` answers `at_capacity` and `launch --hosted` waits, so Fabric's board queues its requests instead of starting more sessions on a loaded machine. `switchboard capacity` shows the cap, how many count and how many are free (SB-378).
