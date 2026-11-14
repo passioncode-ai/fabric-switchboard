@@ -2,6 +2,7 @@ import { invoke, isTauri } from '@tauri-apps/api/core';
 import type { Adapter } from './types';
 import { readWithDeadline, READ_TIMEOUT } from './read-deadline';
 import { matchFormatted } from './formatted-errors';
+import { attentionView } from './ui-logic';
 import personErrors from '../crates/switchboard-runtime/src/person-errors.json';
 export const reportFrontendReady = () => invoke('frontend_ready');
 /** The interface language, for the native menu-bar / notification-area menu (L10N-01). */
@@ -43,6 +44,8 @@ export const nativeAdapter: Adapter = {
   sendAccount: (id, to, pool) => invoke('send_account', { id, to, pool }),
   recallAccount: (id, from, pool) => invoke('recall_account', { id, from, pool: pool ?? null }),
   machinesLive: () => invoke('machines', { live: true }),
+  // WF-3 (SB-365): an owner without the command yet, or a read that fails, is an empty list: the page never breaks on it.
+  attention: () => readWithDeadline(invoke('attention')).then(attentionView, () => attentionView(null)),
   handOverAccount: (id, to, name) => invoke('hand_over_account', { id, to, name }),
   openHandover: () => invoke('open_handover'),
   receiveHandover: (record, signer, apply) => invoke('receive_handover', { record, signer, apply }),

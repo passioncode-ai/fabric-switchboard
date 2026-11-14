@@ -6,10 +6,10 @@ import { version } from '../package.json';
 import { platformLabel } from './platform';
 import { LOCALE_KEY, dateLocale, locale, parseLocaleChoice, plural, saveLocaleChoice, t, type LocaleChoice } from './i18n';
 import { demo, demoFirstRun, native, nativeAdapter, onProjectSuggestions, onShellHook, onSpendChanged, safeError, reportFrontendReady, reportLanguage, type Operation } from './adapter';
-import type { CardState } from './ui-logic';
-import { statAlert, ceilingQuestion, ceilingWarning, ceilingLine, keyLimitLine, dollars, POOL_PATTERN, poolChoices, poolName, inGroup, tourPlacement, usableWhileBusy, APPEARANCE_KEY, attribution, placementAdmits, domainSuggestion, groupSeatsElsewhere, passioncodeLine, seatEndedText, groupSeatsEndedText, organizationReleasedAt, inOrganizationFilter, domainList, type AttributedBy, sortStatRows, nextStatSort, type StatRow, type StatSort, statCacheShare, statTokensPerRequest, chartSeries, niceMax, groupProjectRows, type ChartMetric, groupProjects, compactCount, statTokens, statTrouble, statTroubleText, statAgentName, type Statistics, EXPIRY_CHOICES, folderName, folderRows, withoutFolder, type ProjectRoot, moveTargets, mapRows, rootTargets, storedMapFolders, MAP_FOLDERS_KEY, type MapFilter, type MapRow, type RepositoryMap, sortAgents, defaultAgentChoices, backgroundReads, clockedRead, chainScopeKey, afterRead, ceilingRemovalNote, modelMeta, modelUse, ordinaryKimiNote, kimiLimitUntil, limitReasonText, limitTitle, agentSetupFacts, sessionHow, sessionAgentName, sessionStateLabel, kimiWindowsLine, kimiWindowsLines, openrouterCreditLine, eventAction, eventDetail, MutationClock, activeRules, autoSwitchPool, autoSwitchPossible, launchChoice, withFolders, githubDefaultSelection, githubPlan, githubSource, replaceFolder, storedFolder, LAST_FOLDER_KEY, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, groupAccounts, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, signInNotice, signInMove, organizationMoveNote, dismissTermsNotice, termsNoticeDismissed, termsNoticeOn, termsNoticeText, tourWaits, orgSetups, releasedOrganizations, releasedSummary, orgSetupAction, orgSetupShown, orgSetupCaveat, orgSetupLeads, orgSetupPrimary, accountsOrgActionLeads, firstPrimary, orgSetupUnread, orgSetupStateLabel, orgSetupTitle, hiddenOrgSetups, ORG_SETUP_HIDDEN_KEY, accountsEmptyKey, type OrgSetup, usageAnswerText, usageNotice, usageFreshness, windowReset, type Appearance, shellHookView, balancingView, balancingNotice, shellHookToggleNotice, shellHookNoticeText, codexHookLine, moveStep, accountsForStep, chainSummary, stepReasonText, handoverOutcomeText, handoverSkipped, shortWorkflow, TAKEOVER_ORDER, groupOrganizations, servesPool, sharedGroups, holdsContext, accountOrganizations, machineOf, unplacedAccounts, machineAliasesLine, machineLiveLine, machineCopyLine } from './ui-logic';
+import type { CardState, AccountGroup } from './ui-logic';
+import { statAlert, ceilingQuestion, ceilingWarning, ceilingLine, keyLimitLine, dollars, POOL_PATTERN, poolChoices, poolName, inGroup, tourPlacement, usableWhileBusy, APPEARANCE_KEY, attribution, placementAdmits, domainSuggestion, groupSeatsElsewhere, passioncodeLine, seatEndedText, groupSeatsEndedText, organizationReleasedAt, inOrganizationFilter, domainList, type AttributedBy, sortStatRows, nextStatSort, type StatRow, type StatSort, statCacheShare, statTokensPerRequest, chartSeries, niceMax, groupProjectRows, type ChartMetric, groupProjects, compactCount, statTokens, statTrouble, statTroubleText, statAgentName, type Statistics, EXPIRY_CHOICES, folderName, folderRows, withoutFolder, type ProjectRoot, moveTargets, mapRows, rootTargets, storedMapFolders, MAP_FOLDERS_KEY, type MapFilter, type MapRow, type RepositoryMap, sortAgents, defaultAgentChoices, backgroundReads, clockedRead, chainScopeKey, afterRead, ceilingRemovalNote, modelMeta, modelUse, ordinaryKimiNote, kimiLimitUntil, limitReasonText, limitTitle, agentSetupFacts, sessionHow, sessionAgentName, sessionStateLabel, kimiWindowsLine, kimiWindowsLines, openrouterCreditLine, eventAction, eventDetail, MutationClock, activeRules, autoSwitchPool, autoSwitchPossible, launchChoice, withFolders, githubDefaultSelection, githubPlan, githubSource, replaceFolder, storedFolder, LAST_FOLDER_KEY, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, signInNotice, signInMove, organizationMoveNote, dismissTermsNotice, termsNoticeDismissed, termsNoticeOn, termsNoticeText, tourWaits, orgSetups, releasedOrganizations, releasedSummary, orgSetupAction, orgSetupShown, orgSetupCaveat, orgSetupLeads, orgSetupPrimary, accountsOrgActionLeads, firstPrimary, orgSetupUnread, orgSetupStateLabel, orgSetupTitle, hiddenOrgSetups, ORG_SETUP_HIDDEN_KEY, accountsEmptyKey, type OrgSetup, usageAnswerText, usageNotice, usageFreshness, windowReset, type Appearance, shellHookView, balancingView, balancingNotice, shellHookToggleNotice, shellHookNoticeText, codexHookLine, moveStep, accountsForStep, chainSummary, stepReasonText, handoverOutcomeText, handoverSkipped, shortWorkflow, TAKEOVER_ORDER, groupOrganizations, servesPool, sharedGroups, holdsContext, accountOrganizations, machineOf, unplacedAccounts, machineAliasesLine, machineLiveLine, machineCopyLine, foldOpen, accountSections, accountMatches, attentionAccounts, attentionReasonText, attentionActionLabel, givenFacts, switchingLine, MACHINE_FOLD_LIMIT } from './ui-logic';
 import agentCatalog from '../catalog/agents.json';
-import type { AnalyticsStatus, Ceilings, CeilingView, CeilingQuestionView, OpenrouterCredit, BackupInfo, PassioncodeStatus, Account, Adapter, AgentConnection, AgentInfo, AgentRow, AgentsOverview, OpenrouterModels, HermesModel, KimiAccounts, KimiRegion, KimiStatus, OpenrouterStatus, OpenrouterKeys, CodexRoute, BalanceStatus, ShellHookStatus, AgentSetup, AuthKind, BackupStatus, KimiAccount, CurrentAccounts, LoginItem, Project, Restored, HandoverPlan, ExternalIdentity, MonitorStatus, ProjectRule, Provider, RotationPolicy, RuntimeStatus, SessionInfo, Snapshot, UpdateStatus, Onboarding, Chains, ChainExecutor, ChainScope, ChainStepView, GithubRepository, Machine, MachinesLive } from './types';
+import type { AnalyticsStatus, Ceilings, CeilingView, CeilingQuestionView, OpenrouterCredit, BackupInfo, PassioncodeStatus, Account, Adapter, AgentConnection, AgentInfo, AgentRow, AgentsOverview, OpenrouterModels, HermesModel, KimiAccounts, KimiRegion, KimiStatus, OpenrouterStatus, OpenrouterKeys, CodexRoute, BalanceStatus, ShellHookStatus, AgentSetup, AuthKind, BackupStatus, KimiAccount, CurrentAccounts, LoginItem, Project, Restored, HandoverPlan, ExternalIdentity, MonitorStatus, ProjectRule, Provider, RotationPolicy, RuntimeStatus, SessionInfo, Snapshot, UpdateStatus, Onboarding, Chains, ChainExecutor, ChainScope, ChainStepView, GithubRepository, Machine, MachinesLive, Attention, AttentionItem } from './types';
 
 const root = document.querySelector<HTMLDivElement>('#app')!;
 const announcements = document.querySelector<HTMLDivElement>('#announcements')!;
@@ -35,7 +35,7 @@ let snapshot: Snapshot | null = null;
 let runtime: RuntimeStatus | null = null;
 let currentAccounts: CurrentAccounts | null = null;
 let monitor: MonitorStatus | null = null;
-type Page = 'accounts' | 'tokens' | 'projects' | 'orgs' | 'agents' | 'activity' | 'stats' | 'about';
+type Page = 'accounts' | 'tokens' | 'projects' | 'orgs' | 'agents' | 'activity' | 'stats' | 'settings' | 'about';
 let page: Page = 'accounts';
 /** First-run tour (operator request 2026-10-05): five steps, each on its screen, pointing at what to press. */
 const TOUR_KEY = 'switchboard.tour';
@@ -158,7 +158,7 @@ function usageNoticeCard() {
     button(t('OK'), () => void mutate(async () => { analyticsState = await adapter.analyticsNoticeSeen(); }, '', 'page-title'), 'button primary', 'usage-ok'),
     button(t('Turn off'), () => setUsage(false, 'page-title'), 'button', 'usage-turn-off'),
   );
-  card.append(title, el('p', '', USAGE_COUNTED()), actions, el('p', 'form-note', t('You can turn them off at any time in About. This applies to Switchboard only.')));
+  card.append(title, el('p', '', USAGE_COUNTED()), actions, el('p', 'form-note', t('You can turn them off at any time in Settings. This applies to Switchboard only.')));
   return card;
 }
 let termsDismissed = termsNoticeDismissed(noticeStore());
@@ -236,14 +236,16 @@ const currentMatch = (account: Account) => {
 };
 // The account the ordinary CLI is signed in to cannot join a group (PROJECT_ACCOUNT_IN_CLI): never prefill it.
 const inCli = (account: Account) => currentMatch(account) || !!currentAccounts?.[account.provider]?.account_ids?.includes(account.id);
-interface Context { current: CurrentAccounts | null; currentFailed: boolean; monitor: MonitorStatus | null }
+interface Context { current: CurrentAccounts | null; currentFailed: boolean; monitor: MonitorStatus | null; attention: Attention | null }
+/** WF-3 (SB-365): what needs a person now, read with the CLIs' sign-ins and the monitor. */
+let attention: Attention | null = null;
 /** UX-04: a read of the CLIs' sign-ins that failed (or ran out of time) is kept as failed, so In use now offers Retry instead of reading forever. */
 let currentReadFailed = false;
 async function readContext(): Promise<Context> {
-  const [current, status] = await Promise.allSettled([adapter.currentAccounts(), adapter.monitorStatus()]);
-  return { current: current.status === 'fulfilled' ? current.value : null, currentFailed: current.status === 'rejected', monitor: status.status === 'fulfilled' ? status.value : null };
+  const [current, status, needs] = await Promise.allSettled([adapter.currentAccounts(), adapter.monitorStatus(), adapter.attention()]);
+  return { current: current.status === 'fulfilled' ? current.value : null, currentFailed: current.status === 'rejected', monitor: status.status === 'fulfilled' ? status.value : null, attention: needs.status === 'fulfilled' ? needs.value : null };
 }
-function applyContext(context: Context) { currentAccounts = context.current; currentReadFailed = context.currentFailed; monitor = context.monitor; }
+function applyContext(context: Context) { currentAccounts = context.current; currentReadFailed = context.currentFailed; monitor = context.monitor; attention = context.attention; }
 async function refreshContext() { applyContext(await readContext()); }
 /** F1 (SCN-079): organizations the person left on PassionCode.ai get no setup card. */
 const releasedOrgs = () => releasedOrganizations(passioncodeView, snapshot?.organizations ?? []);
@@ -284,6 +286,30 @@ function goTo(target: Page, focusKey?: string) {
   if (focusKey) { restoreFocus(focusKey); document.querySelector<HTMLElement>(`[data-focus="${focusKey}"]`)?.scrollIntoView({ block: 'start' }); }
   else document.querySelector<HTMLElement>('h1')?.focus();
 }
+/** WF-1.2 (SB-363): the open state of every folding section, by key, kept across render() for this window. */
+const foldChoices = new Map<string, boolean>();
+/**
+ * WF-1.2: one folding section: a header button with the title and its state ("On for 3 groups",
+ * "4 accounts"), `aria-expanded` and `aria-controls`; the body is built only while open. The
+ * person's choice is kept by `key` across renders and page changes.
+ */
+function foldSection(options: { key: string; title: string; state?: string; open?: boolean; level?: 'h2' | 'h3'; className?: string; body: () => Node[] }): HTMLElement {
+  const { key } = options; const open = foldOpen(foldChoices, key, options.open ?? false);
+  const section = el('section', `fold ${options.className ?? ''}`.trim()); section.dataset.fold = key;
+  const heading = el(options.level ?? 'h2', 'fold-heading'); heading.id = `fold-title-${key}`;
+  const toggle = button('', () => { foldChoices.set(key, !open); render(); restoreFocus(`fold-${key}`); }, 'fold-toggle', `fold-${key}`);
+  toggle.setAttribute('aria-expanded', String(open)); toggle.setAttribute('aria-controls', `fold-body-${key}`);
+  const mark = el('span', 'fold-mark'); mark.setAttribute('aria-hidden', 'true');
+  toggle.append(mark, el('span', 'fold-title', options.title));
+  if (options.state) toggle.append(el('span', 'fold-state', options.state));
+  heading.append(toggle); section.append(heading);
+  const body = el('div', 'fold-body'); body.id = `fold-body-${key}`; body.setAttribute('role', 'region'); body.setAttribute('aria-labelledby', heading.id);
+  if (open) body.append(...options.body()); else body.hidden = true;
+  section.append(body);
+  return section;
+}
+/** WF-1.1 (1.1.3): every link into standing configuration opens its Settings section, then focuses `focusKey` (or the section's header). */
+function goToSettings(section: string, focusKey?: string) { foldChoices.set(section, true); goTo('settings', focusKey ?? `fold-${section}`); }
 function restoreFocus(key?: string) { if (key) document.querySelectorAll<HTMLElement>('[data-focus]').forEach((node) => { if (node.dataset.focus === key) node.focus(); }); }
 
 async function reload() {
@@ -371,7 +397,7 @@ function render(options: { background?: boolean } = {}): boolean {
   sidebar.append(brand);
   const nav = el('nav', 'navigation'); nav.setAttribute('aria-label', t('Main navigation'));
   const liveRules = activeRules(snapshot?.rules, Date.now() / 1000).length;
-  for (const [target, label] of [['accounts', t('Accounts')], ['tokens', t('API keys')], ['projects', t('Groups')], ['orgs', t('Organizations')], ['agents', t('Agents')], ['activity', t('Activity')], ['stats', t('Statistics')], ['about', t('About')]] as const) {
+  for (const [target, label] of [['accounts', t('Accounts')], ['tokens', t('API keys')], ['projects', t('Groups')], ['orgs', t('Organizations')], ['agents', t('Agents')], ['activity', t('Activity')], ['stats', t('Statistics')], ['settings', t('Settings')], ['about', t('About')]] as const) {
     const control = button('', () => { if (target === 'stats') { stats = null; statsError = false; } goTo(target); }, `nav-item ${page === target ? 'active' : ''}`, `nav-${target}`);
     const symbol = el('span', 'nav-icon'); symbol.setAttribute('aria-hidden', 'true'); symbol.append(navIcon(target));
     control.append(symbol, el('span', '', label));
@@ -385,8 +411,8 @@ function render(options: { background?: boolean } = {}): boolean {
   const main = el('main', 'main'); main.id = 'main'; main.setAttribute('aria-busy', String(busy || loading));
   if (demo) main.append(el('div', 'demo-banner', t('SYNTHETIC DEMO · No real accounts, vault, proxy, or terminal. Changes reset when you reload.')));
   const header = el('header', 'page-header');
-  const heading = el('div'); const title = el('h1', '', { accounts: t('Accounts'), tokens: t('API keys'), projects: t('Groups'), orgs: t('Organizations'), agents: t('Agents'), activity: t('Activity'), stats: t('Statistics'), about: t('About Switchboard') }[page]); title.tabIndex = -1; title.dataset.focus = 'page-title';
-  heading.append(el('p', 'eyebrow', t('FABRIC SWITCHBOARD')), title, el('p', 'subtitle', { accounts: t('Switch Claude Code, keep sign-ins fresh and watch quota.'), tokens: t('API keys agents run on: the machine\'s, and one per group.'), projects: t('Groups of repositories with accounts of their own; other groups never switch to them.'), orgs: t('Companies your accounts belong to, by your word or their team at the provider.'), agents: t('Choose which coding agents take over work, and connect them to Switchboard.'), activity: t('Local account and session events.'), stats: t('Which accounts and agents work in which groups, and where tokens go.'), about: t('Deliberate account switching for coding sessions.') }[page]));
+  const heading = el('div'); const title = el('h1', '', { accounts: t('Accounts'), tokens: t('API keys'), projects: t('Groups'), orgs: t('Organizations'), agents: t('Agents'), activity: t('Activity'), stats: t('Statistics'), settings: t('Settings'), about: t('About Switchboard') }[page]); title.tabIndex = -1; title.dataset.focus = 'page-title';
+  heading.append(el('p', 'eyebrow', t('FABRIC SWITCHBOARD')), title, el('p', 'subtitle', { accounts: t('Switch Claude Code, keep sign-ins fresh and watch quota.'), tokens: t('API keys agents run on: the machine\'s, and one per group.'), projects: t('Groups of repositories with accounts of their own; other groups never switch to them.'), orgs: t('Companies your accounts belong to, by your word or their team at the provider.'), agents: t('Choose which coding agents take over work, and connect them to Switchboard.'), activity: t('Local account and session events.'), stats: t('Which accounts and agents work in which groups, and where tokens go.'), settings: t('How Switchboard switches, lends, updates and backs up on this computer.'), about: t('Deliberate account switching for coding sessions.') }[page]));
   header.append(heading);
   if (native || demo) {
     const actions = el('div', 'header-actions');
@@ -407,7 +433,7 @@ function render(options: { background?: boolean } = {}): boolean {
   }
   if (notice) { const alert = el('div', `notice toast ${noticeError ? 'error' : 'success'}${tourShown() ? ' beside-tour' : ''}`); alert.append(el('span', '', notice)); if (noticeAction) { const action = noticeAction; alert.append(button(action.label, () => action.run(), 'text-button', 'notice-action')); } alert.append(button(t('Dismiss'), () => { notice = ''; render(); document.querySelector<HTMLElement>('h1')?.focus(); }, 'text-button', 'dismiss-notice')); main.append(alert); }
   loginBanner(main);
-  if (page !== 'about' && usageNotice(analyticsState)) main.append(usageNoticeCard());
+  if (page !== 'settings' && usageNotice(analyticsState)) main.append(usageNoticeCard());
   if (snapshot && (page === 'accounts' || page === 'orgs')) {
     const screen = { page, hidden: orgSetupHidden, usage: analyticsState, usageFailed: analyticsError, tourStep, released: releasedOrgs() };
     const leader = orgSetupPrimary({ ...screen, onboarding });
@@ -420,6 +446,7 @@ function render(options: { background?: boolean } = {}): boolean {
     main.append(...cards);
   }
   if (page === 'about') renderAbout(main);
+  else if (page === 'settings') renderSettings(main);
   else if (page === 'agents') renderAgents(main);
   else if (page === 'tokens') renderTokens(main);
   else if (page === 'stats') renderStats(main);
@@ -446,6 +473,7 @@ const NAV_ICONS: Record<Page, string> = {
   agents: 'M3 4.5h10a1 1 0 0 1 1 1V12a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V5.5a1 1 0 0 1 1-1ZM5 7.5l1.5 1.5L5 10.5M8.5 10.5H11M8 4.5V2',
   activity: 'M1.5 8h3l2-5 3 10 2-5h3',
   stats: 'M2 14h12M4 14V9M7 14V5M10 14V8M13 14V3',
+  settings: 'M2 4.5h7M12 4.5h2M2 11.5h2M7 11.5h7M10.5 3v3M5.5 10v3',
   about: 'M8 14.5a6.5 6.5 0 1 0 0-13 6.5 6.5 0 0 0 0 13ZM8 7.2V11M8 5h.01',
 };
 function navIcon(target: Page) {
@@ -464,7 +492,8 @@ function rulesStrip(main: HTMLElement) {
   main.append(strip);
 }
 function renderProjects(main: HTMLElement) {
-  main.append(projectsSection(), machinesSection(), balancingSection(), codexRouteSection(), shellHookSection(), diskMapSection(), rulesSection());
+  // WF-1.1 (DEC-0014): balancing, the Codex route and the terminal hook are standing configuration, on Settings now.
+  main.append(projectsSection(), machinesSection(), settingsMovedNote(), diskMapSection(), rulesSection());
 }
 /** SB-355 (SCN-092, DEC-0013): every other machine accounts live on is a group of its own; a live read over ssh only when asked. */
 const machinePoolName = (pool: string) => snapshot?.machines?.find((m) => m.pool === pool)?.name;
@@ -476,7 +505,7 @@ function readMachines() {
 }
 function machinesSection() {
   const section = el('section', 'project-section'); section.setAttribute('aria-labelledby', 'machines-heading');
-  const heading = el('h2', 'section-heading', t('Other machines')); heading.id = 'machines-heading';
+  const heading = el('h2', 'section-heading', t('Other machines')); heading.id = 'machines-heading'; heading.tabIndex = -1; heading.dataset.focus = 'machines-heading';
   section.append(heading, el('p', 'surface-note', t('Each machine your accounts live on is a group of its own. An account there is in no group on this computer: Switchboard never renews it, switches to it or lends it here. Bring one here to use it in a group of this computer.')));
   const machines = snapshot!.machines ?? [];
   const unplaced = unplacedAccounts(snapshot!);
@@ -559,9 +588,8 @@ function loadBalancing() {
   void adapter.balance(null).then((s) => { if (clock.accepts(stamp) || !balancingState) { balancingState = s; balancingError = ''; } balancingKey = key; }, (e) => { if (clock.accepts(stamp) || !balancingState) balancingError = t(safeError(e, 'read')); balancingKey = key; }).finally(() => { balancingLoading = false; render(); });
 }
 function balancingSection() {
-  const section = el('section', 'project-section'); section.setAttribute('aria-labelledby', 'balancing-heading');
-  const heading = el('h2', 'section-heading', t('Balancing between groups')); heading.id = 'balancing-heading';
-  section.append(heading, el('p', 'surface-note', t('Switchboard lends an account from a quiet group to a group that runs out of room, judging by the last hours and days of work, and takes it back once the borrower is quiet or its own group needs it. The account keeps its own group. A group that does not take part is never touched.')));
+  const section = el('div', 'fold-content');
+  section.append(el('p', 'surface-note', t('Switchboard lends an account from a quiet group to a group that runs out of room, judging by the last hours and days of work, and takes it back once the borrower is quiet or its own group needs it. The account keeps its own group. A group that does not take part is never touched.')));
   if (balancingState && balancingKey !== balancingInputs()) loadBalancing();
   if (!balancingState && !balancingError) loadBalancing();
   const view = balancingView(balancingState, balancingError || null, snapshot?.accounts ?? []);
@@ -592,9 +620,8 @@ function loadCodexRoute() {
   void adapter.codexRoute(null).then((r) => { codexRouteState = r; codexRouteError = ''; codexRouteKey = key; }, (e) => { codexRouteError = t(safeError(e, 'read')); codexRouteKey = key; }).finally(() => { codexRouteLoading = false; render(); });
 }
 function codexRouteSection() {
-  const section = el('section', 'project-section'); section.setAttribute('aria-labelledby', 'codex-route-heading');
-  const heading = el('h2', 'section-heading', t('Codex in group folders')); heading.id = 'codex-route-heading';
-  section.append(heading, el('p', 'surface-note', t('Codex sessions started in a group\'s folders use that group\'s Codex accounts, like Claude Code sessions do. Switchboard adds one provider to Codex\'s own settings that goes through its local proxy; folders outside groups keep your own Codex sign-in. While Switchboard is not running, Codex uses your own sign-in everywhere.')));
+  const section = el('div', 'fold-content');
+  section.append(el('p', 'surface-note', t('Codex sessions started in a group\'s folders use that group\'s Codex accounts, like Claude Code sessions do. Switchboard adds one provider to Codex\'s own settings that goes through its local proxy; folders outside groups keep your own Codex sign-in. While Switchboard is not running, Codex uses your own sign-in everywhere.')));
   if (codexRouteState && codexRouteKey !== codexRouteInputs()) loadCodexRoute();
   if (!codexRouteState && !codexRouteError) { loadCodexRoute(); section.append(el('p', 'form-note', t('Reading Codex\'s settings…'))); return section; }
   if (codexRouteError) { section.append(el('p', 'form-error', codexRouteError)); if (!codexRouteState) { section.append(button(t('Retry'), () => { codexRouteError = ''; loadCodexRoute(); render(); }, 'button', 'codex-route-retry')); return section; } }
@@ -626,9 +653,8 @@ function setShellHook(on: boolean, focusKey: string) {
   void mutate(async () => { shellHookState = await adapter.setShellHook(on); }, shellHookToggleNotice(on), focusKey);
 }
 function shellHookSection() {
-  const section = el('section', 'project-section'); section.setAttribute('aria-labelledby', 'shell-hook-heading');
-  const heading = el('h2', 'section-heading', t('Terminals in organization folders')); heading.id = 'shell-hook-heading';
-  section.append(heading, el('p', 'surface-note', t('In the folders of a group that belongs to an organization, new terminals run claude and codex in that organization\'s context: its accounts, history and settings. Leaving the folder gives your own settings back. Switchboard adds one marked block to each shell\'s start file and takes it out byte for byte when you turn this off.')));
+  const section = el('div', 'fold-content');
+  section.append(el('p', 'surface-note', t('In the folders of a group that belongs to an organization, new terminals run claude and codex in that organization\'s context: its accounts, history and settings. Leaving the folder gives your own settings back. Switchboard adds one marked block to each shell\'s start file and takes it out byte for byte when you turn this off.')));
   if (shellHookState && shellHookKey !== shellHookInputs()) loadShellHook();
   if (!shellHookState && !shellHookError) loadShellHook();
   const view = shellHookView(shellHookState, shellHookError || null);
@@ -664,7 +690,7 @@ function checkShellHookNotice() {
   void adapter.shellHookNotice().then((found) => {
     if (!found || document.hidden) return;
     const { title, body } = shellHookNoticeText(found);
-    showNotice(`${title}. ${body}`); noticeAction = { label: t('Open Groups'), run: () => { notice = ''; goTo('projects', 'shell-hook-toggle'); } };
+    showNotice(`${title}. ${body}`); noticeAction = { label: t('Open Settings'), run: () => { notice = ''; goToSettings('terminals', 'shell-hook-toggle'); } };
     shellHookState = null; render();
     void adapter.acknowledgeShellHookNotice().catch(() => { /* shown again at the next look */ });
   }, () => { /* read again at the next look */ }).finally(() => { shellNoticeReading = false; });
@@ -1624,21 +1650,6 @@ const signInRequired = (account: Account) => !!monitor?.sign_in_required?.includ
 const accountLimit = (account: Account) => monitor?.limited?.find((entry) => entry.account_id === account.id && entry.until > Date.now() / 1000);
 // #region quota-countdown — docs: docs/runs/2026-10-04-quota-review/README.md
 let countdownPaused = false;
-/** SB-284: the Accounts filter by machine: `all`, `here` or `elsewhere`; shown only while an account is marked as used elsewhere. */
-let machineFilter: 'all' | 'here' | 'elsewhere' = 'all';
-const inMachineFilter = (a: Account) => machineFilter === 'all' || (machineFilter === 'elsewhere') === (snapshot?.elsewhere?.[a.id] !== undefined);
-function machinesBar(accounts: Account[]): HTMLElement | null {
-  if (!accounts.some((a) => snapshot?.elsewhere?.[a.id] !== undefined)) { machineFilter = 'all'; return null; }
-  const bar = el('div', 'org-bar');
-  const group = el('div', 'segmented org-filter'); group.setAttribute('role', 'group'); group.setAttribute('aria-label', t('Where accounts are used'));
-  const count = (f: typeof machineFilter) => accounts.filter((a) => f === 'all' || (f === 'elsewhere') === (snapshot?.elsewhere?.[a.id] !== undefined)).length;
-  for (const [value, text] of [['all', t('All')], ['here', t('On this computer')], ['elsewhere', t('On other machines')]] as [typeof machineFilter, string][]) {
-    const chip = button(`${text} · ${count(value)}`, () => { machineFilter = value; render(); restoreFocus(`machine-filter-${value}`); }, `segment ${machineFilter === value ? 'is-on' : ''}`, `machine-filter-${value}`);
-    chip.setAttribute('aria-pressed', String(machineFilter === value)); group.append(chip);
-  }
-  bar.append(group);
-  return bar;
-}
 /** SB-284: mark an account as used on another machine and say where (a machine and its user, a colleague). */
 function elsewhereDialog(account: Account) {
   const marked = snapshot?.elsewhere?.[account.id] !== undefined;
@@ -1686,9 +1697,21 @@ function givenSection(accounts: Account[]) {
   heading.append(title, el('span', 'count', plural(accounts.length, { one: '{n} account', other: '{n} accounts' })));
   section.append(heading, el('p', 'group-note', t('Switchboard checks their usage but never selects them or switches to them by itself.')));
   const list = el('div', 'account-list'); list.setAttribute('role', 'list');
-  accounts.forEach((account) => list.append(accountRow(account)));
+  // WF-2.4 (SB-364): who has it, its organization, its machine, where it last ran and when it was last active.
+  accounts.forEach((account) => { const row = accountRow(account); row.append(givenFactsLine(account)); list.append(row); });
   section.append(list);
   return section;
+}
+/** WF-2.4: the facts the window holds about an account given to an agent; a part not recorded says so. */
+function givenFactsLine(account: Account) {
+  const launches = (sessionList ?? []).filter((s) => s.account_id === account.id).sort((a, b) => b.launched_at - a.launched_at);
+  const last = launches[0];
+  const times = [...snapshot!.events.filter((e) => e.account_id === account.id).map((e) => e.at), ...launches.map((s) => s.launched_at)];
+  const machine = machineOf(snapshot!, account)?.name ?? snapshot?.locations?.[account.id] ?? null;
+  const facts = givenFacts({ organization: organizationOf(account)?.name ?? null, machine, launch: last ? { group: poolName(last.pool, snapshot?.projects), folder: projectName(last.working_directory) } : null, lastActivity: times.length ? age(Math.max(...times)) : null });
+  const line = el('p', 'row-facts given-facts');
+  line.append(el('strong', '', givenTo(account) ?? ''), ...facts.flatMap((fact) => [' · ', fact]));
+  return line;
 }
 /** SB-283: move a sign-in to another machine over ssh; nothing changes when a step fails. */
 function sendDialog(account: Account) {
@@ -1948,57 +1971,98 @@ function renderAccounts(main: HTMLElement) {
   const lead = accounts.length ? null : accountsEmptyKey({ backup: !!backup, onboarding, current: currentAccounts, released: releasedOrgs() });
   // F2 (SCN-076 step 7): while the organization's action leads, Add to Switchboard and Turn on for Claude Code are bordered.
   const orgLeads = accountsOrgActionLeads({ cardLeads, emptyLead: lead });
+  attentionSection(main);
   renderCurrent(main, orgLeads);
-  renderPolicies(main, orgLeads);
+  switchingStatus(main);
   if (lead) {
     const empty = emptyState(t('Start with one account'), lead.lead === 'org_seat' ? lead.line : backup ? plural(backup.accounts, { one: 'A backup from {date} with {n} account is on this computer. Restore it to get your accounts, groups and settings back, or add an account.', other: 'A backup from {date} with {n} accounts is on this computer. Restore it to get your accounts, groups and settings back, or add an account.' }, { date: date(backup.created_at) }) : lead.lead === 'sign_in' ? t('Neither Claude Code nor Codex CLI is signed in on this computer. Press + Add account to sign in: Terminal opens the official sign-in, and Switchboard adds the account when you finish.') : t('Add the account Claude Code or Codex CLI already uses with Add to Switchboard above, or sign in to another account with + Add account. Nothing opens until you choose.'));
     if (backup) empty.append(button(t('Restore from backup'), () => void mutate(async () => { const result = await adapter.restoreBackup(backup.file); backupStatus = await adapter.backups(); showRestored(result); }, t('Backup restored.'), 'empty-restore'), cardLeads ? 'button quiet' : 'button primary', 'empty-restore'));
     if (lead.lead === 'org_seat') { const pool = lead.pool; empty.append(button(lead.label, () => void startLogin('claude', '', pool), cardLeads ? 'button quiet' : 'button primary', 'empty-org-sign-in'), addMenu('button quiet')); main.append(empty, kimiSection()); return; }
     empty.append(addMenu(cardLeads ? 'button quiet' : 'button primary')); main.append(empty, kimiSection()); return;
   }
-  const orgBar = organizationsBar(accounts); if (orgBar) main.append(orgBar);
-  const machineBar = machinesBar(accounts); if (machineBar) main.append(machineBar);
-  const filtered = accounts.filter((a) => inOrganizationFilter(snapshot!, a, orgFilter) && inMachineFilter(a));
-  // SB-322: accounts given to agents are listed in their own section below the groups.
-  const given = filtered.filter((a) => givenTo(a) !== undefined);
-  const shown = filtered.filter((a) => givenTo(a) === undefined);
+  main.append(accountFilters(accounts));
+  // WF-2.2: one filter row: words, an organization, and Needs attention only.
+  const needing = attentionAccounts(attention, monitor?.sign_in_required);
+  const filtered = accounts.filter((a) => inOrganizationFilter(snapshot!, a, orgFilter) && accountMatches(a, { query: accountQuery, attention: attentionOnly ? needing : null }));
   const sorting = el('div', 'account-sort-note');
   sorting.append(el('span', '', t('Within each group: remaining quota first, then shortest wait. Unknown usage follows.')), button(countdownPaused ? t('Resume countdown') : t('Pause countdown'), () => {
     if (!countdownPaused) { pausedCountdowns.clear(); root.querySelectorAll<HTMLElement>('[data-countdown]').forEach(node => pausedCountdowns.set(countdownKey(node), node.textContent ?? '')); }
     countdownPaused = !countdownPaused; render(); restoreFocus('countdown-toggle');
   }, 'text-button', 'countdown-toggle'));
   main.append(sorting);
-  if (!shown.length && !given.length) main.append(el('p', 'form-note', t('No account here yet.')));
-  for (const group of groupAccounts(shown, quotaContext())) {
-    const section = el('section', 'account-group'); section.setAttribute('aria-label', t('{provider} accounts', { provider: providerName(group.provider) }));
-    const heading = el('div', 'group-heading');
-    heading.append(el('h2', '', providerName(group.provider)), el('span', 'count', `${plural(group.count, { one: '{n} account', other: '{n} accounts' })}`));
-    // SB-142: the ordinary CLI's login is one per machine; it is named here, not as a pool's mark.
-    const inCli = accounts.find((a) => a.provider === group.provider && currentMatch(a));
-    if (inCli) heading.append(el('span', 'group-note', group.provider === 'claude' ? t('Ordinary Claude Code: {label}', { label: inCli.label }) : t('Ordinary Codex CLI: {label}', { label: inCli.label })));
-    section.append(heading);
-    const anyProject = (snapshot!.projects ?? []).length > 0;
-    for (const pool of group.pools) {
-      const owner = projectOf(pool.pool);
-      if (group.pools.length > 1 || owner || anyProject) {
-        const poolHead = el('div', 'pool-heading');
-        const poolTitle = el('h3', ''); poolTitle.append(owner ? groupHint(t('Group · {name}', { name: owner.name }), owner.pool) : el('span', '', pool.pool === 'default' ? t('Default group') : machinePoolName(pool.pool) ? t('On {location}', { location: machinePoolName(pool.pool)! }) : t('Group {id} · no folders', { id: pool.pool })));
-        poolHead.append(poolTitle);
-        // SB-142: which account this pool's sessions use, so every pool reads the same way.
-        const routed = snapshot!.routes[`${group.provider}:${pool.pool}`];
-        const chosen = pool.accounts.find((a) => a.id === routed);
-        poolHead.append(el('span', 'group-note', chosen ? (owner ? t('Sessions in its folders use {label}', { label: chosen.label }) : t('Managed sessions use {label}', { label: chosen.label })) : t('Nothing selected here yet')));
-        section.append(poolHead);
-      }
-      const list = el('div', 'account-list'); list.setAttribute('role', 'list');
-      pool.accounts.forEach((account) => list.append(accountRow(account)));
-      section.append(list);
-    }
-    main.append(section);
+  // WF-2.1 (SB-364): this computer first, then each other machine, then the accounts given to agents; each account once.
+  const sections = accountSections(filtered, snapshot!, quotaContext());
+  if (!filtered.length) main.append(el('p', 'form-note', accounts.length && filtered.length !== accounts.length ? t('No account matches these filters.') : t('No account here yet.')));
+  const otherMachines = sections.machines.length > 0;
+  const hereGroups = () => sections.here.map((group) => providerSection(group, accounts, otherMachines ? 'h3' : 'h2'));
+  if (otherMachines && sections.here.length) {
+    const count = sections.here.reduce((n, g) => n + g.count, 0);
+    main.append(foldSection({ key: 'here', title: t('This computer'), state: plural(count, { one: '{n} account', other: '{n} accounts' }), open: true, className: 'machine-section', body: hereGroups }));
+  } else main.append(...hereGroups());
+  for (const machine of sections.machines) {
+    main.append(foldSection({ key: machine.pool, title: machine.name, state: plural(machine.count, { one: '{n} account', other: '{n} accounts' }), open: machine.count <= MACHINE_FOLD_LIMIT, className: 'machine-section', body: () => machine.groups.map((group) => providerSection(group, accounts, 'h3', true)) }));
   }
-  if (given.length) main.append(givenSection(given));
+  if (sections.given.length) main.append(givenSection(sections.given));
   main.append(el('p', 'surface-note', t('Switch changes the account of the ordinary Claude Code on this computer. Select chooses the account for managed sessions launched from Switchboard; a response already in progress keeps its account.')));
   main.append(kimiSection());
+}
+/** WF-2.1: one provider's accounts, by group; inside a machine's section the group heading is left out (the machine names it). */
+function providerSection(group: AccountGroup<Account>, accounts: Account[], level: 'h2' | 'h3', onMachine = false) {
+  const section = el('section', 'account-group'); section.setAttribute('aria-label', t('{provider} accounts', { provider: providerName(group.provider) }));
+  const heading = el('div', 'group-heading');
+  heading.append(el(level, '', providerName(group.provider)), el('span', 'count', `${plural(group.count, { one: '{n} account', other: '{n} accounts' })}`));
+  // SB-142: the ordinary CLI's login is one per machine; it is named here, not as a pool's mark.
+  const inCli = onMachine ? undefined : accounts.find((a) => a.provider === group.provider && currentMatch(a));
+  if (inCli) heading.append(el('span', 'group-note', group.provider === 'claude' ? t('Ordinary Claude Code: {label}', { label: inCli.label }) : t('Ordinary Codex CLI: {label}', { label: inCli.label })));
+  section.append(heading);
+  const anyProject = (snapshot!.projects ?? []).length > 0;
+  for (const pool of group.pools) {
+    const owner = projectOf(pool.pool);
+    if (!onMachine && (group.pools.length > 1 || owner || anyProject)) {
+      const poolHead = el('div', 'pool-heading');
+      const poolTitle = el(level === 'h2' ? 'h3' : 'h4', ''); poolTitle.append(owner ? groupHint(t('Group · {name}', { name: owner.name }), owner.pool) : el('span', '', pool.pool === 'default' ? t('Default group') : machinePoolName(pool.pool) ? t('On {location}', { location: machinePoolName(pool.pool)! }) : t('Group {id} · no folders', { id: pool.pool })));
+      poolHead.append(poolTitle);
+      // SB-142: which account this pool's sessions use, so every pool reads the same way.
+      const routed = snapshot!.routes[`${group.provider}:${pool.pool}`];
+      const chosen = pool.accounts.find((a) => a.id === routed);
+      poolHead.append(el('span', 'group-note', chosen ? (owner ? t('Sessions in its folders use {label}', { label: chosen.label }) : t('Managed sessions use {label}', { label: chosen.label })) : t('Nothing selected here yet')));
+      section.append(poolHead);
+    }
+    const list = el('div', 'account-list'); list.setAttribute('role', 'list');
+    pool.accounts.forEach((account) => list.append(accountRow(account)));
+    section.append(list);
+  }
+  return section;
+}
+/** WF-2.2 (SB-364): the words typed into the Accounts search, kept while the window is open. */
+let accountQuery = '';
+/** WF-2.2: *Needs attention only*. */
+let attentionOnly = false;
+function accountFilters(accounts: Account[]) {
+  const row = el('div', 'account-filters'); row.setAttribute('role', 'search'); row.setAttribute('aria-label', t('Filter accounts'));
+  const search = el('input', 'filter-search'); search.type = 'search'; search.value = accountQuery; search.setAttribute('value', accountQuery);
+  search.placeholder = t('Find by name or e-mail'); search.setAttribute('aria-label', t('Find by name or e-mail')); search.dataset.focus = 'account-search'; search.autocomplete = 'off'; search.spellcheck = false;
+  search.addEventListener('input', () => {
+    accountQuery = search.value; const caret = search.selectionStart ?? accountQuery.length;
+    render(); const next = root.querySelector<HTMLInputElement>('[data-focus="account-search"]'); if (next) { next.focus(); next.setSelectionRange(caret, caret); }
+  });
+  row.append(search);
+  // SB-158: the organization filter, only while organizations exist.
+  const organizations = snapshot!.organizations ?? [];
+  if (!organizations.length) orgFilter = 'all';
+  else {
+    if (orgFilter !== 'all' && orgFilter !== 'personal' && !organizations.some((o) => o.id === orgFilter)) orgFilter = 'all';
+    const count = (filter: string) => accounts.filter((a) => inOrganizationFilter(snapshot!, a, filter)).length;
+    const choices: [string, string][] = [['all', `${t('All')} · ${count('all')}`], ...organizations.map((o): [string, string] => [o.id, `${o.name} · ${count(o.id)}`]), ['personal', `${t('Personal')} · ${count('personal')}`]];
+    const which = select(choices); which.value = orgFilter; which.dataset.focus = 'org-filter'; which.setAttribute('aria-label', t('Show accounts of')); which.className = 'filter-select';
+    which.addEventListener('change', () => { orgFilter = which.value; render(); restoreFocus('org-filter'); });
+    row.append(which);
+  }
+  const toggle = el('label', 'filter-toggle'); const box = el('input'); box.type = 'checkbox'; box.checked = attentionOnly; box.dataset.focus = 'attention-only';
+  box.addEventListener('change', () => { attentionOnly = box.checked; render(); restoreFocus('attention-only'); });
+  toggle.append(box, el('span', '', t('Needs attention only')));
+  row.append(toggle);
+  return row;
 }
 let kimiLoadedAt = 0;
 async function loadKimi(stamp?: number) {
@@ -2151,6 +2215,9 @@ function accountRow(account: Account) {
   const title = el('div', 'row-title'); title.append(labelNode);
   if (current) title.append(el('span', 'badge current-badge', account.provider === 'claude' ? t('In Claude Code') : t('In Codex CLI')));
   if (signIn) title.append(el('span', 'badge danger-badge', t('Sign in again')));
+  // WF-3 (DEC-0015): an account listed under Needs attention stays here, marked; signing in again already says so.
+  const needs = !signIn ? attention?.items.find((item) => item.account_id === account.id) : undefined;
+  if (needs) { const badge = el('span', 'badge danger-badge', t('Needs attention')); badge.title = attentionReasonText(needs.reason); title.append(badge); row.classList.add('needs-attention'); }
   const elsewhere = snapshot?.elsewhere?.[account.id] !== undefined;
   // SB-284: where it works, when the person said so.
   const location = snapshot?.locations?.[account.id];
@@ -2358,6 +2425,11 @@ function addDialog() {
   });
   provider.focus();
 }
+/**
+ * WF-2.3 (SB-364): Claude Code and Codex CLI in one card layout: the provider, the identity, then
+ * one line with the saved label, its group and its usage, and one line on how it changes. Codex has
+ * no switch here (`canSwitchNative`), and its card says why in the place Claude's says how.
+ */
 function renderCurrent(main: HTMLElement, quiet = false) {
   const section = el('section', 'current-section'); section.setAttribute('aria-label', t('Accounts the CLIs use now'));
   const heading = el('div', 'section-heading');
@@ -2370,31 +2442,77 @@ function renderCurrent(main: HTMLElement, quiet = false) {
   for (const provider of ['claude', 'codex'] as const) {
     const current = currentAccounts?.[provider]; const card = el('div', 'current-card');
     const copy = el('div', 'current-copy'); copy.append(el('span', 'current-provider', providerName(provider)));
+    const action = el('div', 'current-action');
     if (current?.status === 'available') {
       copy.append(el('strong', 'current-identity', identityText(current.identity)));
       const matches = snapshot!.accounts.filter((account) => account.provider === provider && currentMatch(account));
-      card.append(copy);
-      if (matches.length) card.append(el('span', 'current-state', t('✓ Saved as {labels}', { labels: matches.map((account) => account.label).join(', ') })));
-      else card.append(button(t('Add to Switchboard'), () => { let captured: Awaited<ReturnType<typeof adapter.captureCurrent>> | undefined; void mutate(async () => { captured = await adapter.captureCurrent({ provider, pool: 'default' }); }, () => [t('{identity} added to {provider} {where}. Switchboard keeps its sign-in up to date.', { where: inGroup('default'), identity: identityText(current.identity), provider: providerName(provider) }), captured ? organizationMoveNote(captured.label, providerName(provider), captured.organization_group) : ''].filter(Boolean).join(' '), `capture-${provider}`); }, quiet ? 'button row-button' : 'button primary row-button', `capture-${provider}`));
+      if (matches.length) {
+        const saved = matches[0];
+        const used = saved.usage ? accountUsedPercent(saved.usage) : null;
+        const facts = [t('Saved as {labels}', { labels: matches.map((account) => account.label).join(', ') }), poolName(saved.pool, snapshot?.projects), used !== null ? t('{percent}% used', { percent: Math.round(used) }) : t('Usage unknown')];
+        copy.append(el('span', 'current-meta', facts.join(' · ')));
+      } else {
+        copy.append(el('span', 'current-meta', t('Not saved in Switchboard yet')));
+        action.append(button(t('Add to Switchboard'), () => { let captured: Awaited<ReturnType<typeof adapter.captureCurrent>> | undefined; void mutate(async () => { captured = await adapter.captureCurrent({ provider, pool: 'default' }); }, () => [t('{identity} added to {provider} {where}. Switchboard keeps its sign-in up to date.', { where: inGroup('default'), identity: identityText(current.identity), provider: providerName(provider) }), captured ? organizationMoveNote(captured.label, providerName(provider), captured.organization_group) : ''].filter(Boolean).join(' '), `capture-${provider}`); }, quiet ? 'button row-button' : 'button primary row-button', `capture-${provider}`));
+      }
     } else {
       const failed = current?.status === 'unavailable' || (!current && currentReadFailed);
       copy.append(el('strong', 'current-identity muted-text', current?.status === 'missing' ? t('Not signed in') : failed ? t('Could not read the sign-in') : t('Reading…')));
-      card.append(copy);
-      if (failed) card.append(button(t('Retry'), () => {
+      if (failed) action.append(button(t('Retry'), () => {
         currentReadFailed = false; render(); const stamp = clock.stamp();
         void readContext().then((context) => { if (clock.accepts(stamp)) applyContext(context); render(); restoreFocus(currentReadFailed ? `retry-current-${provider}` : 'current-heading'); });
       }, 'button quiet row-button', `retry-current-${provider}`));
     }
+    // The same place on both cards: how the account changes, or why it does not change here.
+    copy.append(el('span', 'current-how', provider === 'claude' ? t('Switch on an account\'s row makes it the account of Claude Code on this computer.') : t('Codex CLI keeps its own sign-in: Switchboard does not switch it. Codex sessions in a group\'s folders use that group\'s accounts.')));
+    card.append(copy);
+    if (action.childElementCount) card.append(action);
     grid.append(card);
   }
   section.append(grid); main.append(section);
 }
+/** WF-3.2 (SB-365, DEC-0015): what needs a person, above *In use now*, only while something does. Each account also stays in its group, with its badge. */
+function attentionSection(main: HTMLElement) {
+  const items = attention?.items ?? []; if (!items.length) return;
+  const section = el('section', 'attention-section'); section.setAttribute('aria-labelledby', 'attention-heading');
+  const title = el('h2', '', t('Needs attention ({n})', { n: items.length })); title.id = 'attention-heading'; title.tabIndex = -1; title.dataset.focus = 'attention-heading';
+  section.append(title);
+  const list = el('ul', 'attention-list');
+  items.forEach((item, index) => {
+    const account = item.account_id ? snapshot!.accounts.find((a) => a.id === item.account_id) : undefined;
+    const row = el('li', 'attention-row'); const copy = el('div', 'attention-copy');
+    const name = item.label ?? account?.label ?? (item.reason === 'ceiling_question' ? t('Spending ceiling') : t('An account no longer saved'));
+    const provider = item.provider ?? account?.provider ?? null; const pool = item.pool ?? account?.pool ?? null;
+    const where = [provider ? providerName(provider) : '', pool ? poolName(pool, snapshot?.projects) : ''].filter(Boolean).join(' · ');
+    const head = el('div', 'attention-title'); head.append(el('strong', '', name)); if (where) head.append(el('span', 'attention-where', where));
+    copy.append(head, el('span', 'attention-reason', attentionReasonText(item.reason)));
+    const key = `attention-${item.account_id ?? `${item.reason}-${index}`}`;
+    const act = button(attentionActionLabel(item.action.window), () => attentionAct(item, account, key), 'button row-button', key);
+    // A sign-in or a check needs the account here; without it the action has nothing to act on.
+    if ((item.action.window === 'sign_in' && !account && !item.provider) || (item.action.window === 'check_usage' && !account)) { act.disabled = true; act.dataset.locked = 'true'; }
+    row.append(copy, act); list.append(row);
+  });
+  section.append(list); main.append(section);
+}
+/** WF-3.2: each item's one action, in the window flow that already does it. */
+function attentionAct(item: AttentionItem, account: Account | undefined, key: string) {
+  switch (item.action.window) {
+    case 'sign_in': {
+      const provider = account?.provider ?? item.provider; if (!provider) return;
+      void startLogin(provider, account?.label ?? item.label ?? '', account?.pool ?? item.pool ?? 'default'); return;
+    }
+    case 'check_usage': if (account) void mutate(() => adapter.probe(account.id), t('Usage observation updated.'), key, account.id); return;
+    case 'answer_ceiling': goTo('agents'); return;
+    case 'open_machines': goTo('projects', 'machines-heading'); return;
+  }
+}
 const policyTarget = (target: RotationPolicy['target']) => target === 'managed' ? t('Managed route') : t('Claude Code account');
-function renderPolicies(main: HTMLElement, quiet = false) {
+/** WF-1.1 (DEC-0014): the automatic switching panel, whole, in Settings → *Automatic switching*. */
+function policiesPanel(quiet = false): HTMLElement {
   const policies = snapshot!.policies ?? []; const enabled = policies.filter((policy) => policy.enabled);
-  // SB-192 (UX-16): one line until switching has somewhere to go; the tour outlines it as the bar.
-  if (!autoSwitchPossible(snapshot!.accounts, policies)) { const note = el('p', 'rotation-bar rotation-note usage-caption', t('Automatic switching needs two accounts of one provider in one group. Add another account to turn it on.')); main.append(note); return; }
-  const panel = el('section', 'rotation-bar'); panel.setAttribute('aria-label', t('Automatic switching'));
+  // SB-192 (UX-16): one line until switching has somewhere to go.
+  if (!autoSwitchPossible(snapshot!.accounts, policies)) return el('p', 'rotation-note usage-caption', t('Automatic switching needs two accounts of one provider in one group. Add another account to turn it on.'));
+  const panel = el('div', 'rotation-panel');
   // SB-104: without the monitor's answer no row can say it is limited or signed out — say so instead of showing them all as available.
   if (!monitor && (native || demo)) panel.append(el('p', 'usage-error', t('Limits and sign-in states are unavailable right now. Refresh to retry.')));
   // The title and the bar's actions share one line; each enabled policy is a row of its own with
@@ -2424,7 +2542,24 @@ function renderPolicies(main: HTMLElement, quiet = false) {
   if (swapHeld) panel.append(el('p', 'usage-caption', t('Claude Swap is running and renews {n} of these accounts. Switchboard takes their newest sign-ins from it and does not renew them itself.', { n: swapHeld })));
   if (monitor?.renewal_blocked) panel.append(el('p', 'usage-caption', t('Claude is refusing sign-in renewals for every account right now. Saved accounts keep their last sign-in and are not renewed; Switchboard tries again within the hour. If this stays, update Switchboard.')));
   if (demo) panel.append(el('p', 'usage-caption', t('Demo policies are editable fixtures; no switching runs here.')));
-  main.append(panel);
+  return panel;
+}
+/**
+ * WF-1.1 (1.1.2): Accounts keeps one line about automatic switching, with the way to Settings, and
+ * the warning when the monitor did not answer (no row could say it is limited or signed out). The
+ * tour's third step outlines this line.
+ */
+function switchingStatus(main: HTMLElement) {
+  const policies = snapshot!.policies ?? [];
+  const bar = el('section', 'rotation-bar switching-status'); bar.setAttribute('aria-label', t('Automatic switching'));
+  if (!monitor && (native || demo)) bar.append(el('p', 'usage-error', t('Limits and sign-in states are unavailable right now. Refresh to retry.')));
+  const line = el('div', 'rotation-head');
+  line.append(el('span', 'usage-caption', autoSwitchPossible(snapshot!.accounts, policies) ? switchingLine(policies) : t('Automatic switching needs two accounts of one provider in one group. Add another account to turn it on.')));
+  line.append(button(t('Open Settings'), () => goToSettings('switching'), 'text-button', 'open-switching-settings'));
+  bar.append(line);
+  // A provider refusing every renewal is a warning about the accounts themselves, so it stays here too.
+  if (monitor?.renewal_blocked) bar.append(el('p', 'usage-caption', t('Claude is refusing sign-in renewals for every account right now. Saved accounts keep their last sign-in and are not renewed; Switchboard tries again within the hour. If this stays, update Switchboard.')));
+  main.append(bar);
 }
 /** SB-145/SB-147: the proxy's counts for the chosen range (7, 30 or 90 days). */
 let stats: Statistics | null = null;
@@ -2674,7 +2809,37 @@ function renderAbout(main: HTMLElement) {
     [t('Automatic switching'), t('Off by default for each provider, group and target. Uses fresh quota observations, a threshold, a minimum improvement and a cooldown. No eligible account means the current account stays selected.')],
   ]) { definitions.append(el('dt', '', term), el('dd', '', description)); }
   section.append(definitions); const tour = el('section', 'about-panel'); tour.append(el('h2', '', t('Tour')), el('p', '', t('Five short steps: what Switchboard does and where to press.')), button(t('Show the tour again'), () => tourGo(0), 'button', 'tour-again'));
-  main.append(section, termsPanel(), tour, residencyPanel(), backupsPanel(), analyticsPanel(), appearancePanel(), languagePanel(), productPanel());
+  // WF-1.1 (DEC-0014): running in the background, updates, backups, usage counts, appearance and language are on Settings now.
+  main.append(section, termsPanel(), tour, productPanel());
+}
+/** WF-1.1 (SB-363, DEC-0014): every standing setting of this computer, one folding section each; none open until the person or a link opens it. */
+function renderSettings(main: HTMLElement) {
+  const onOff = (on: boolean | null | undefined) => on == null ? undefined : on ? t('On') : t('Off');
+  const policies = snapshot?.policies ?? [];
+  const switchingState = snapshot ? (() => { const groups = new Set(policies.filter((p) => p.enabled).map((p) => p.pool)).size; return groups ? plural(groups, { one: 'On for {n} group', other: 'On for {n} groups' }) : t('Off'); })() : undefined;
+  const reading = () => [el('p', 'form-note', t('Reading account metadata from the native app…'))];
+  // The reads behind the headers start with the page, so each header can say its state before it is opened.
+  if (snapshot) { if (!balancingState && !balancingError) loadBalancing(); if (!codexRouteState && !codexRouteError) loadCodexRoute(); if (!shellHookState && !shellHookError) loadShellHook(); }
+  const shell = shellHookView(shellHookState, shellHookError || null).state;
+  const newest = backupStatus?.backups.slice().sort((a, b) => b.created_at - a.created_at)[0];
+  let language: LocaleChoice = 'system'; try { language = parseLocaleChoice(localStorage.getItem(LOCALE_KEY)); } catch { language = 'system'; }
+  main.append(
+    foldSection({ key: 'switching', title: t('Automatic switching'), state: switchingState, body: () => snapshot ? [policiesPanel()] : reading() }),
+    foldSection({ key: 'balancing', title: t('Balancing between groups'), state: onOff(balancingState?.on), body: () => snapshot ? [balancingSection()] : reading() }),
+    foldSection({ key: 'codex-route', title: t('Codex in group folders'), state: onOff(codexRouteState?.on), body: () => snapshot ? [codexRouteSection()] : reading() }),
+    foldSection({ key: 'terminals', title: t('Terminals in organization folders'), state: shell === 'on' || shell === 'default_on' || shell === 'inactive' ? t('On') : shell === 'off' || shell === 'default_off' ? t('Off') : undefined, body: () => snapshot ? [shellHookSection()] : reading() }),
+    foldSection({ key: 'background', title: t('Running in the background'), state: onOff(loginItem?.available ? loginItem.enabled : null), body: () => [residencyPanel()] }),
+    foldSection({ key: 'updates', title: t('Updates'), state: updateState ? (updateState.enabled ? t('Automatic') : t('Off')) : undefined, body: () => [updatesPanel()] }),
+    foldSection({ key: 'language', title: t('Language and appearance'), state: language === 'en' ? 'English' : language === 'ru' ? 'Русский' : t('Same as system'), body: () => [languagePanel(), appearancePanel()] }),
+    foldSection({ key: 'backups', title: t('Backups'), state: newest ? t('Newest {date}', { date: date(newest.created_at) }) : undefined, body: () => [backupsPanel()] }),
+    foldSection({ key: 'usage-counts', title: t('Usage counts'), state: onOff(analyticsState?.enabled), body: () => [analyticsPanel()] }),
+  );
+}
+/** WF-1.1: on Groups, where these settings used to be, the way to them. */
+function settingsMovedNote() {
+  const note = el('div', 'status-item settings-moved'); note.setAttribute('role', 'note');
+  note.append(el('span', '', t('Balancing between groups, Codex in group folders and terminals in organization folders are set in Settings.')), button(t('Open Settings'), () => goToSettings('balancing'), 'text-button', 'groups-open-settings'));
+  return note;
 }
 async function loadBackups(stamp?: number) {
   try { const value = await adapter.backups(); if (stamp === undefined || clock.accepts(stamp)) { backupStatus = value; backupError = false; } } catch { backupError = true; }
@@ -2689,18 +2854,18 @@ async function loadBackups(stamp?: number) {
 }
 /** SB-28: closing the window keeps Switchboard working; it opens at login in the background. */
 function residencyPanel() {
-  const panel = el('section', 'about-panel'); panel.setAttribute('aria-labelledby', 'residency-heading');
-  const heading = el('h2', '', t('Running in the background')); heading.id = 'residency-heading';
-  panel.append(heading, el('p', '', (trayInArea() ? t('Closing the window keeps Switchboard running, so quota checks, automatic switching, sign-in renewal and backups continue. To stop it, choose Quit Switchboard from its icon in the notification area.') : t('Closing the window keeps Switchboard running, so quota checks, automatic switching, sign-in renewal and backups continue. To stop it, choose Quit Switchboard from its menu-bar icon or the app menu.'))));
-  if (loginItemError) { panel.append(el('p', 'form-note', t('The login setting is unavailable. Refresh to retry.'))); updateControls(panel); return panel; }
-  if (!loginItem) { panel.append(el('p', 'form-note', t('Reading the login setting…'))); updateControls(panel); return panel; }
+  const panel = el('div', 'fold-content');
+  panel.append(el('p', '', (trayInArea() ? t('Closing the window keeps Switchboard running, so quota checks, automatic switching, sign-in renewal and backups continue. To stop it, choose Quit Switchboard from its icon in the notification area.') : t('Closing the window keeps Switchboard running, so quota checks, automatic switching, sign-in renewal and backups continue. To stop it, choose Quit Switchboard from its menu-bar icon or the app menu.'))));
+  if (loginItemError) { panel.append(el('p', 'form-note', t('The login setting is unavailable. Refresh to retry.'))); return panel; }
+  if (!loginItem) { panel.append(el('p', 'form-note', t('Reading the login setting…'))); return panel; }
   const option = el('label', 'appearance-option login-option'); const box = el('input'); box.type = 'checkbox'; box.checked = loginItem.enabled; box.disabled = !loginItem.available; box.dataset.focus = 'login-item';
   box.addEventListener('change', () => { const wanted = box.checked; void mutate(async () => { loginItem = await adapter.setLoginItem(wanted); }, wanted ? t('Switchboard will open at login, in the background.') : t('Switchboard will no longer open at login.'), 'login-item'); });
   option.append(box, el('span', '', t('Open at login, in the background')));
   panel.append(option, el('p', 'form-note', loginItem.available ? (trayInArea() ? t('Starts without a window; open it from its icon in the notification area.') : t('Starts without a window; open it from the menu-bar icon.')) : t('Available in the installed app.')));
-  updateControls(panel);
   return panel;
 }
+/** WF-1.1: Settings → *Updates* (SB-55). */
+function updatesPanel() { const panel = el('div', 'fold-content'); updateControls(panel); return panel; }
 /** SB-104: a manual check runs in the background — it may download and install for minutes — and
  * says how it ended; the rest of the window stays usable meanwhile. */
 async function checkUpdatesNow() {
@@ -2735,9 +2900,8 @@ function updateControls(panel: HTMLElement) {
 }
 /** Anonymous usage analytics (docs/ANALYTICS.md): what is sent, and Switchboard's own switch (SB-246). */
 function analyticsPanel() {
-  const panel = el('section', 'about-panel'); panel.setAttribute('aria-labelledby', 'analytics-heading');
-  const heading = el('h2', '', t('Usage analytics')); heading.id = 'analytics-heading';
-  panel.append(heading, el('p', '', USAGE_COUNTED()));
+  const panel = el('div', 'fold-content');
+  panel.append(el('p', '', USAGE_COUNTED()));
   if (analyticsError) { panel.append(el('p', 'form-note', t('The analytics setting is unavailable. Refresh to retry.'))); return panel; }
   if (!analyticsState) { panel.append(el('p', 'form-note', t('Reading the analytics setting…'))); return panel; }
   const option = el('label', 'appearance-option login-option'); const box = el('input'); box.type = 'checkbox'; box.checked = analyticsState.enabled; box.disabled = !analyticsState.available; box.dataset.focus = 'analytics';
@@ -2747,8 +2911,7 @@ function analyticsPanel() {
   return panel;
 }
 function backupsPanel() {
-  const panel = el('section', 'about-panel'); panel.setAttribute('aria-labelledby', 'backups-heading');
-  const heading = el('h2', '', t('Backups')); heading.id = 'backups-heading'; panel.append(heading);
+  const panel = el('div', 'fold-content');
   if (backupError || !backupStatus) { panel.append(el('p', 'form-note', backupError ? t('Backup status is unavailable. Refresh to retry.') : t('Reading backups…'))); return panel; }
   const status = backupStatus;
   panel.append(el('p', '', status.enabled ? t('Switchboard saves an encrypted copy of your accounts after every change and once a day, and keeps the newest ten.') : t('Automatic backups run in the desktop app.')));
@@ -2782,8 +2945,8 @@ function showRestored(result: Restored) {
 }
 /** Language (L10N-01): the system's by default; a choice here reloads the window in that language. */
 function languagePanel() {
-  const panel = el('section', 'about-panel'); panel.setAttribute('aria-labelledby', 'language-heading');
-  const heading = el('h2', '', t('Language')); heading.id = 'language-heading';
+  const panel = el('div', 'fold-part'); panel.setAttribute('aria-labelledby', 'language-heading');
+  const heading = el('h3', 'fold-part-heading', t('Language')); heading.id = 'language-heading';
   const group = el('fieldset', 'appearance-options'); group.append(el('legend', 'sr-only', t('Language')));
   let chosen: LocaleChoice = 'system';
   try { chosen = parseLocaleChoice(localStorage.getItem(LOCALE_KEY)); } catch { chosen = 'system'; }
@@ -2800,8 +2963,8 @@ function languagePanel() {
   return panel;
 }
 function appearancePanel() {
-  const panel = el('section', 'about-panel'); panel.setAttribute('aria-labelledby', 'appearance-heading');
-  const heading = el('h2', '', t('Appearance')); heading.id = 'appearance-heading';
+  const panel = el('div', 'fold-part'); panel.setAttribute('aria-labelledby', 'appearance-heading');
+  const heading = el('h3', 'fold-part-heading', t('Appearance')); heading.id = 'appearance-heading';
   const group = el('fieldset', 'appearance-options'); group.append(el('legend', 'sr-only', t('Appearance')));
   for (const [value, text] of [['system', t('System')], ['dark', t('Dark')], ['light', t('Light')]] as const) {
     const option = el('label', 'appearance-option'); const radio = el('input'); radio.type = 'radio'; radio.name = 'appearance'; radio.value = value; radio.checked = appearance === value; radio.dataset.focus = `appearance-${value}`;
@@ -3009,22 +3172,6 @@ function byShort(by: AttributedBy | null) {
 function byText(by: AttributedBy | null, name: string) {
   if (by === 'provider') return t('Its team at the provider belongs to {name}.', { name });
   return t('You placed it in {name}.', { name });
-}
-/** SB-158: the filter and the way to organizations, above the accounts; one quiet line while there are none. */
-function organizationsBar(accounts: Account[]): HTMLElement | null {
-  const organizations = snapshot!.organizations ?? [];
-  const bar = el('div', 'org-bar');
-  if (!organizations.length) { orgFilter = 'all'; return null; }
-  if (orgFilter !== 'all' && orgFilter !== 'personal' && !organizations.some((o) => o.id === orgFilter)) orgFilter = 'all';
-  const count = (filter: string) => accounts.filter((a) => inOrganizationFilter(snapshot!, a, filter)).length;
-  const choices: [string, string][] = [['all', t('All')], ...organizations.map((o): [string, string] => [o.id, o.name]), ['personal', t('Personal')]];
-  const group = el('div', 'segmented org-filter'); group.setAttribute('role', 'group'); group.setAttribute('aria-label', t('Show accounts of'));
-  for (const [value, text] of choices) {
-    const chip = button(`${text} · ${count(value)}`, () => { orgFilter = value; render(); restoreFocus(`org-filter-${value}`); }, `segment ${orgFilter === value ? 'is-on' : ''}`, `org-filter-${value}`);
-    chip.setAttribute('aria-pressed', String(orgFilter === value)); group.append(chip);
-  }
-  bar.append(group);
-  return bar;
 }
 /** SB-159 (SCN-071): the PassionCode.ai connection, read when the page opens. */
 let passioncodeView: PassioncodeStatus | null = null; let passioncodeWaiting = false; let passioncodeError = '';
