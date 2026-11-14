@@ -8,11 +8,15 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
-- A long-running `switchboard mcp` no longer answers with the code it started with after an update: once the program file is replaced, each tool list and call goes to a fresh process of the new file (SB-375).
+## 0.7.81
 
-- Activity can be read one kind at a time: switches, sign-ins, groups, moves to other machines, errors, or the rest, and for one account. `switchboard events` takes `--kind`, `--account`, `--before` and `--limit`, and the agent tool `switchboard_events` takes the same, with a page that says where the next older one starts (SB-373).
-- The window can now set whether the sessions Switchboard starts skip their permission prompts, as `switchboard agents permissions` and the agent tool do (SB-372).
-- For each account given to an agent, the window and the agent tool `switchboard_accounts` now show the machine it runs on, the group and folder of its latest launch and when it was last active (SB-364).
+- API keys reads as three blocks: this computer's key, each group's key, and the paid accounts, each key with its last characters and what it spends (SB-369).
+- Each group's card opens with one line saying how it stands (its accounts with room, a key, a spending ceiling) and keeps its folders, accounts and keys in blocks that fold (SB-370).
+- Activity is grouped by day, with a filter by kind (switches, sign-ins, groups, moves to other machines, errors) and by account, and pages of older events. Statistics shows the top 10 rows of each table with *Show all* (SB-373).
+- Activity can be read one kind at a time from the CLI and the agent tool too: `switchboard events` takes `--kind`, `--account`, `--before` and `--limit`, and `switchboard_events` takes the same, with a page that says where the next older one starts (SB-373).
+- Agent settings has a block for whether the sessions Switchboard starts skip their permission prompts, as `switchboard agents permissions` and the agent tool do (SB-372).
+- For each account given to an agent, the window and the agent tool `switchboard_accounts` show the machine it sits on (its machine group, or the place you wrote for it; otherwise unknown), the group and folder of its latest launch and when it was last active (SB-364).
+- A long-running `switchboard mcp` no longer answers with the code it started with after an update: once the program file is replaced, each tool list and call goes to a fresh process of the new file. The machine's session list says when the process table could not be read instead of answering no sessions (SB-375).
 
 ## 0.7.80
 
