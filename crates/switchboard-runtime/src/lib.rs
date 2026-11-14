@@ -835,6 +835,11 @@ pub enum Operation {
         groups_remove: Vec<String>,
         #[serde(default)]
         all_new: Option<bool>,
+        /// WF-6, DEC-0016: groups to mark as backup (lend only), and to unmark.
+        #[serde(default)]
+        backup_add: Vec<String>,
+        #[serde(default)]
+        backup_remove: Vec<String>,
     },
     /// SB-352: the chosen groups, the accounts lent now, the last pass and the newest lends and
     /// returns.
@@ -6544,6 +6549,8 @@ async fn execute(
             groups_add,
             groups_remove,
             all_new,
+            backup_add,
+            backup_remove,
         } => {
             let snapshot = store.snapshot()?;
             let mut settings = match runtime {
@@ -6556,6 +6563,10 @@ async fn execute(
                 &groups_add,
                 &groups_remove,
                 all_new,
+                &balancing::Backup {
+                    add: backup_add,
+                    remove: backup_remove,
+                },
             )?;
             if changed {
                 // A group taken out, or balancing turned off, gets its lent accounts back now.

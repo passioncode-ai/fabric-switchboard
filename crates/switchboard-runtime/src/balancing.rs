@@ -38,6 +38,9 @@ const PROVIDERS: [Provider; 2] = [Provider::Claude, Provider::Codex];
 pub const UNREADABLE: &str = "Balancing settings (balancing.json) could not be read. Delete balancing.json to turn balancing off and start over.";
 pub const NO_SUCH_GROUP: &str =
     "No group has that id. Run switchboard project list to see the groups, or name default.";
+/// DEC-0016: the default group holds every folder in no group, so it can never only lend.
+pub const BACKUP_DEFAULT: &str =
+    "The default group cannot be a backup group: it holds every folder that is in no group.";
 pub const NOT_SAVED: &str =
     "Balancing settings could not be saved. Check that the data folder is writable, then try again.";
 
@@ -60,6 +63,12 @@ pub struct Settings {
     /// When each account was last lent or returned (the cooldown).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub moved: BTreeMap<String, i64>,
+    /// WF-6, DEC-0016: chosen groups that only lend. A backup group never borrows, keeps no
+    /// minimum and is asked first; its own folders still come first (`home_needs`). Kept here,
+    /// not in `accounts.json`, so an older Switchboard reads the store unchanged (it reads such
+    /// a group as an ordinary chosen one).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub backup: Vec<String>,
 }
 impl Settings {
     pub fn on(&self) -> bool {
@@ -67,6 +76,9 @@ impl Settings {
     }
     fn chosen(&self, pool: &str) -> bool {
         self.groups.iter().any(|g| g == pool)
+    }
+    pub fn is_backup(&self, pool: &str) -> bool {
+        self.backup.iter().any(|g| g == pool)
     }
     fn lent_out(&self, id: &str) -> bool {
         self.lent.iter().any(|l| l.account == id)
@@ -120,6 +132,9 @@ pub fn resolve(settings: &mut Settings, snapshot: &Snapshot) -> bool {
     let pools = pools(snapshot);
     settings.groups.retain(|g| pools.contains(g));
     settings.seen.retain(|g| pools.contains(g));
+    // DEC-0016: a backup group that left the chosen ones lends no more.
+    let groups = settings.groups.clone();
+    settings.backup.retain(|g| groups.contains(g));
     if settings.on() {
         for pool in &pools {
             if !settings.seen.contains(pool) {
@@ -339,6 +354,23 @@ impl View<'_> {
             .filter(|a| room(self.snapshot, a, pool, self.held, self.now).is_some())
             .count()
     }
+    /// Accounts of `provider` serving `pool` with room that are not on loan to it: its own
+    /// accounts and those it shares by the person's choice (DEC-0016's return rule).
+    fn rooms_of_its_own(&self, pool: &str, provider: Provider) -> usize {
+        self.snapshot
+            .pool_accounts(pool)
+            .into_iter()
+            .filter(|a| a.provider == provider && usable(self.snapshot, a))
+            .filter(|a| {
+                !self
+                    .settings
+                    .lent
+                    .iter()
+                    .any(|l| l.account == a.id && l.to == pool)
+            })
+            .filter(|a| room(self.snapshot, a, pool, self.held, self.now).is_some())
+            .count()
+    }
     /// A group needs room when it had requests in the last 6 hours and none of its accounts has
     /// room, or one while it had limit refusals.
     fn needs(&self, pool: &str, provider: Provider) -> bool {
@@ -466,6 +498,11 @@ pub fn plan(
         };
         let reason = if view.needs(&lend.from, lend.provider) {
             Some("home_needs")
+        } else if settings.is_backup(&lend.from)
+            && view.rooms_of_its_own(&lend.to, lend.provider) > 0
+        {
+            // DEC-0016: a backup account goes home once the group has room of its own again.
+            Some("own_room")
         } else if now - lend.at >= QUIET_SECONDS && borrower.refusals_2h == 0 {
             Some("quiet")
         } else {
@@ -488,6 +525,10 @@ pub fn plan(
         .collect();
     let mut needy: Vec<(&str, Provider, Signal)> = Vec::new();
     for g in &groups {
+        // A backup group only lends (DEC-0016).
+        if settings.is_backup(g) {
+            continue;
+        }
         for p in PROVIDERS {
             if view.needs(g, p) {
                 needy.push((*g, p, view.signal(g, p)));
@@ -502,13 +543,21 @@ pub fn plan(
             .then_with(|| a.1.as_str().cmp(b.1.as_str()))
     });
     for (borrower, provider, signal) in needy {
-        let mut best: Option<(f64, i64, &Account, &str, usize, Signal)> = None;
+        let mut best: Option<(bool, f64, i64, &Account, &str, usize, Signal)> = None;
         for lender in &groups {
             if *lender == borrower || view.needs(lender, provider) {
                 continue;
             }
             let lender_signal = view.signal(lender, provider);
-            let keep = if lender_signal.requests_6h == 0 { 1 } else { 2 };
+            // DEC-0016: a backup group keeps no minimum.
+            let backup = settings.is_backup(lender);
+            let keep = if backup {
+                0
+            } else if lender_signal.requests_6h == 0 {
+                1
+            } else {
+                2
+            };
             let own = view.own_rooms(lender, provider);
             if own < keep + 1 {
                 continue;
@@ -528,18 +577,20 @@ pub fn plan(
                     continue;
                 };
                 let reset = latest_reset(a);
-                let better = best.as_ref().is_none_or(|(u, r, b, ..)| {
-                    used.total_cmp(u)
+                // A backup group's account first (DEC-0016), then the most room.
+                let better = best.as_ref().is_none_or(|(k, u, r, b, ..)| {
+                    k.cmp(&backup)
+                        .then_with(|| used.total_cmp(u))
                         .then_with(|| r.cmp(&reset))
                         .then_with(|| a.id.cmp(&b.id))
                         .is_lt()
                 });
                 if better {
-                    best = Some((used, reset, a, *lender, own, lender_signal));
+                    best = Some((backup, used, reset, a, *lender, own, lender_signal));
                 }
             }
         }
-        if let Some((used, _, account, lender, own, lender_signal)) = best {
+        if let Some((_, used, _, account, lender, own, lender_signal)) = best {
             out.push(Action {
                 action: "lend",
                 account: account.id.clone(),
@@ -653,6 +704,13 @@ fn append_journal(root: &Path, new: &[Value]) -> Result<(), String> {
     switchboard_core::private_fs::private_write(&root.join(JOURNAL), text.as_bytes())
 }
 
+/// WF-6: groups to mark as backup (lend only) and groups to unmark.
+#[derive(Clone, Debug, Default)]
+pub struct Backup {
+    pub add: Vec<String>,
+    pub remove: Vec<String>,
+}
+
 /// The person's change of the chosen groups: each named group must exist; `default` may be
 /// chosen. Answers whether anything changed. Adding the first group, or changing `all_new`,
 /// takes every group that exists now as seen, so only a group made afterwards counts as new.
@@ -662,18 +720,38 @@ pub fn change(
     add: &[String],
     remove: &[String],
     all_new: Option<bool>,
+    backup: &Backup,
 ) -> Result<bool, String> {
     let pools = pools(snapshot);
-    if add.iter().chain(remove).any(|g| !pools.contains(g)) {
+    if add
+        .iter()
+        .chain(remove)
+        .chain(&backup.add)
+        .chain(&backup.remove)
+        .any(|g| !pools.contains(g))
+    {
         return Err(NO_SUCH_GROUP.into());
     }
+    // DEC-0016: any group but `default` may only lend.
+    if backup.add.iter().any(|g| g == DEFAULT_POOL) {
+        return Err(BACKUP_DEFAULT.into());
+    }
     let before = settings.clone();
-    for g in add {
+    // A backup group is a chosen one: marking it chooses it.
+    for g in add.iter().chain(&backup.add) {
         if !settings.chosen(g) {
             settings.groups.push(g.clone());
         }
     }
+    for g in &backup.add {
+        if !settings.is_backup(g) {
+            settings.backup.push(g.clone());
+        }
+    }
     settings.groups.retain(|g| !remove.contains(g));
+    settings
+        .backup
+        .retain(|g| !remove.contains(g) && !backup.remove.contains(g));
     if let Some(all) = all_new {
         settings.all_new = all;
     }
@@ -733,10 +811,23 @@ pub fn status(
     // Every group there is, `default` first, for a window or an agent that offers the choice.
     let available: Vec<Value> = pools(snapshot)
         .iter()
-        .map(|g| json!({"pool": g, "name": name(g), "chosen": settings.chosen(g)}))
+        .map(|g| {
+            json!({"pool": g, "name": name(g), "chosen": settings.chosen(g),
+                "backup": settings.is_backup(g)})
+        })
+        .collect();
+    // DEC-0016: each backup group with its accounts and how many of them are lent now.
+    let backup: Vec<Value> = settings
+        .backup
+        .iter()
+        .map(|g| {
+            let own: Vec<&Account> = snapshot.accounts.iter().filter(|a| a.pool == *g).collect();
+            let lent = own.iter().filter(|a| settings.lent_out(&a.id)).count();
+            json!({"pool": g, "name": name(g), "accounts": own.len(), "lent": lent})
+        })
         .collect();
     json!({"on": settings.on(), "groups": groups, "available": available,
-        "all_new": settings.all_new,
+        "all_new": settings.all_new, "backup": backup,
         "pass_minutes": PASS_SECONDS / 60, "lent": lent, "recent": recent,
         "last_pass": last.cloned().unwrap_or(Value::Null)})
 }
@@ -871,6 +962,135 @@ mod tests {
         let mut s = estate();
         s.projects[0].shared_accounts.push("apps-1".into());
         s
+    }
+
+    /// The estate with Spare, a group with one account with room, marked backup.
+    fn with_backup(used: f64) -> (Snapshot, Settings) {
+        let mut s = estate();
+        s.projects.push(group("spare"));
+        s.accounts.push(account("spare-1", "spare", Some(used)));
+        let mut settings = chosen(&["agents", "apps", "spare"]);
+        settings.backup = vec!["spare".into()];
+        (s, settings)
+    }
+
+    #[test]
+    fn a_backup_group_lends_first_and_keeps_no_minimum() {
+        // DEC-0016: Spare's one account goes before Apps' with more room, and Spare keeps none.
+        let (s, settings) = with_backup(50.0);
+        let actions = plan(
+            &s,
+            &sig_map(&[busy("agents", 40, 3), busy("apps", 5, 0)]),
+            &Held::default(),
+            &settings,
+            NOW,
+        );
+        assert_eq!(actions.len(), 1, "{actions:?}");
+        assert_eq!(
+            (actions[0].account.as_str(), actions[0].from.as_str()),
+            ("spare-1", "spare")
+        );
+        assert_eq!(actions[0].figures.lender_room, Some(1));
+    }
+
+    #[test]
+    fn a_backup_group_never_borrows_and_its_own_work_takes_its_account_home() {
+        let (s, settings) = with_backup(99.0);
+        let actions = plan(
+            &s,
+            &sig_map(&[busy("spare", 40, 3), busy("apps", 5, 0)]),
+            &Held::default(),
+            &settings,
+            NOW,
+        );
+        assert!(actions.is_empty(), "{actions:?}");
+        // Spare's own folders are busy and its account is lent: it comes home (`home_needs`).
+        let (mut s, mut settings) = with_backup(50.0);
+        s.projects[0].shared_accounts.push("spare-1".into());
+        settings.lent = vec![lent(
+            "spare-1",
+            "spare",
+            "agents",
+            NOW - 2 * COOLDOWN_SECONDS,
+        )];
+        let actions = plan(
+            &s,
+            &sig_map(&[busy("spare", 40, 3), busy("agents", 40, 3)]),
+            &Held::default(),
+            &settings,
+            NOW,
+        );
+        assert!(
+            actions.iter().any(|a| a.action == "return"
+                && a.account == "spare-1"
+                && a.reason == "home_needs"),
+            "{actions:?}"
+        );
+    }
+
+    #[test]
+    fn a_backup_account_goes_home_once_the_borrower_has_room_of_its_own() {
+        let (mut s, mut settings) = with_backup(50.0);
+        s.projects[0].shared_accounts.push("spare-1".into());
+        settings.lent = vec![lent(
+            "spare-1",
+            "spare",
+            "agents",
+            NOW - 2 * COOLDOWN_SECONDS,
+        )];
+        let signals = sig_map(&[busy("agents", 40, 3)]);
+        // Agents' own account still has no room: the loan stays (Agents may borrow more).
+        let before = plan(&s, &signals, &Held::default(), &settings, NOW);
+        assert!(before.iter().all(|a| a.action != "return"), "{before:?}");
+        // Its own account has room again: the backup account goes home at once, refusals or not.
+        s.accounts[0] = account("agents-1", "agents", Some(10.0));
+        let actions = plan(&s, &signals, &Held::default(), &settings, NOW);
+        assert_eq!(actions.len(), 1, "{actions:?}");
+        assert_eq!(
+            (
+                actions[0].action,
+                actions[0].reason,
+                actions[0].account.as_str()
+            ),
+            ("return", "own_room", "spare-1")
+        );
+    }
+
+    #[test]
+    fn any_group_but_default_is_marked_backup_and_marking_chooses_it() {
+        let (s, _) = with_backup(50.0);
+        let mut settings = Settings::default();
+        let mark = |g: &str| Backup {
+            add: vec![g.into()],
+            remove: vec![],
+        };
+        assert_eq!(
+            change(&mut settings, &s, &[], &[], None, &mark("default")).unwrap_err(),
+            BACKUP_DEFAULT
+        );
+        assert!(change(&mut settings, &s, &[], &[], None, &mark("spare")).unwrap());
+        assert_eq!(
+            (settings.groups.clone(), settings.backup.clone()),
+            (vec!["spare".to_string()], vec!["spare".to_string()])
+        );
+        // Unmarking leaves the group chosen; taking it out of the chosen ones unmarks it too.
+        let unmark = Backup {
+            add: vec![],
+            remove: vec!["spare".into()],
+        };
+        assert!(change(&mut settings, &s, &[], &[], None, &unmark).unwrap());
+        assert!(settings.backup.is_empty() && settings.groups == ["spare"]);
+        change(&mut settings, &s, &[], &[], None, &mark("spare")).unwrap();
+        change(
+            &mut settings,
+            &s,
+            &[],
+            &["spare".into()],
+            None,
+            &Backup::default(),
+        )
+        .unwrap();
+        assert!(settings.backup.is_empty() && settings.groups.is_empty());
     }
 
     #[test]
@@ -1331,7 +1551,8 @@ mod tests {
             &s,
             &["agents".into(), "apps".into()],
             &[],
-            None
+            None,
+            &Backup::default()
         )
         .unwrap());
         assert_eq!(settings.seen, ["default", "agents", "apps"]);
@@ -1343,7 +1564,15 @@ mod tests {
         assert!(resolve(&mut settings, &s));
         assert_eq!(settings.groups, ["agents", "apps", "new"]);
         // A group the person takes out again stays out.
-        change(&mut settings, &s, &[], &["new".into()], None).unwrap();
+        change(
+            &mut settings,
+            &s,
+            &[],
+            &["new".into()],
+            None,
+            &Backup::default(),
+        )
+        .unwrap();
         assert!(!resolve(&mut settings, &s));
         assert_eq!(settings.groups, ["agents", "apps"]);
         // A deleted group leaves the settings; an unknown one is refused.
@@ -1351,7 +1580,14 @@ mod tests {
         assert!(resolve(&mut settings, &s));
         assert_eq!(settings.groups, ["agents"]);
         assert_eq!(
-            change(&mut settings, &s, &["nope".into()], &[], None),
+            change(
+                &mut settings,
+                &s,
+                &["nope".into()],
+                &[],
+                None,
+                &Backup::default()
+            ),
             Err(NO_SUCH_GROUP.into())
         );
         // Off, a new group joins nothing.
@@ -1473,6 +1709,8 @@ mod tests {
                 groups_add: vec![agents.clone(), apps.clone()],
                 groups_remove: vec![],
                 all_new: Some(true),
+                backup_add: vec![],
+                backup_remove: vec![],
             })
             .await
             .unwrap();
@@ -1522,6 +1760,8 @@ mod tests {
                 groups_add: vec![],
                 groups_remove: vec![agents.clone(), apps.clone()],
                 all_new: None,
+                backup_add: vec![],
+                backup_remove: vec![],
             })
             .await
             .unwrap();
@@ -1538,6 +1778,8 @@ mod tests {
                 groups_add: vec!["no-such-group".into()],
                 groups_remove: vec![],
                 all_new: None,
+                backup_add: vec![],
+                backup_remove: vec![],
             })
             .await
             .is_err());

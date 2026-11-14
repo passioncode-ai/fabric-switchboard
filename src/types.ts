@@ -277,13 +277,13 @@ export interface OpenrouterModel { id: string; name?: string | null; context?: n
 export interface OpenrouterModels { recommended: RecommendedModel[]; models: OpenrouterModel[]; available: boolean }
 /** SB-143: whether Codex sessions in project folders use the projects' Codex accounts. */
 /** SB-352: a change of the groups that take part in balancing (pool ids, `default` included). */
-export interface BalanceChange { add?: string[]; remove?: string[]; all_new?: boolean | null }
+export interface BalanceChange { add?: string[]; remove?: string[]; all_new?: boolean | null; backup_add?: string[]; backup_remove?: string[] }
 /** SB-352: one loan in `balance status`. */
 export interface BalanceLoan { account_id: string; label: string | null; provider: Provider; from: string; from_name: string; to: string; to_name: string; at: number }
 /** SB-352: one journal line (`balancing.jsonl`): codes and ids only. */
 export interface BalanceEntry { at: number; account: string; provider: Provider; from: string; to: string; action: 'lend' | 'return'; reason: string; outcome: string }
 /** SB-352: `balance status`, as `switchboard balance status --json` answers it. */
-export interface BalanceStatus { on: boolean; groups: { pool: string; name: string }[]; available: { pool: string; name: string; chosen: boolean }[]; all_new: boolean; pass_minutes: number; lent: BalanceLoan[]; recent: BalanceEntry[]; changed?: boolean }
+export interface BalanceStatus { on: boolean; groups: { pool: string; name: string }[]; available: { pool: string; name: string; chosen: boolean; backup?: boolean }[]; all_new: boolean; pass_minutes: number; lent: BalanceLoan[]; recent: BalanceEntry[]; changed?: boolean; /** WF-6, DEC-0016. */ backup?: { pool: string; name: string; accounts: number; lent: number }[] }
 export interface CodexRoute { on: boolean; applied: boolean; config: string | null; conflict: string | null; projects: string[] }
 /** SB-144: saved OpenRouter keys by project (`pool: null` is the machine's key). */
 export interface OpenrouterKeys { service: 'openrouter'; keys: { pool: string | null; project: string | null; saved_at: number; model: string | null }[]; projects: { pool: string; name: string; own: boolean }[] }

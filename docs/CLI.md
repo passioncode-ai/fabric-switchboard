@@ -410,6 +410,8 @@ Switchboard home or a terminal in an organization's folder. Run this from anothe
 switchboard balance status                                  # chosen groups, accounts lent now, the last pass, the newest lends and returns
 switchboard balance groups --add agents --add apps-soft --all-new true
 switchboard balance groups --remove apps-soft               # its lent accounts go back at once
+switchboard balance groups --backup-add spare               # Spare only lends, first and with no minimum (DEC-0016)
+switchboard balance groups --backup-remove spare            # Spare takes part like the others again
 ```
 
 Off until you choose groups ([DEC-0012](DECISIONS.md#dec-0012-accounts-are-lent-between-the-groups-the-person-chose-by-their-last-hours-and-days)).

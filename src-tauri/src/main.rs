@@ -902,15 +902,28 @@ async fn balance(
     add: Vec<String>,
     remove: Vec<String>,
     all_new: Option<bool>,
+    backup_add: Option<Vec<String>>,
+    backup_remove: Option<Vec<String>>,
     state: State<'_, Slot>,
 ) -> Result<Value, String> {
-    let operation = if add.is_empty() && remove.is_empty() && all_new.is_none() {
+    let (backup_add, backup_remove) = (
+        backup_add.unwrap_or_default(),
+        backup_remove.unwrap_or_default(),
+    );
+    let operation = if add.is_empty()
+        && remove.is_empty()
+        && all_new.is_none()
+        && backup_add.is_empty()
+        && backup_remove.is_empty()
+    {
         Operation::BalanceStatus
     } else {
         Operation::Balance {
             groups_add: add,
             groups_remove: remove,
             all_new,
+            backup_add,
+            backup_remove,
         }
     };
     state.runtime().await?.execute(operation).await

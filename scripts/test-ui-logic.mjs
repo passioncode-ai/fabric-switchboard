@@ -1493,6 +1493,22 @@ check(() => {
     assert.equal(logic.keyLimitLine({ limit: null, limit_reset: null }), "Key's own limit: none");
   });
 }
+// WF-6 (DEC-0016), a_backup_group_is_offered_marked_and_counted: a group that takes part may be
+// marked backup (never the default group), and each backup group says how many accounts it lent.
+check(() => {
+  i18nForShell.setLocale('en');
+  const available = [{ pool: 'default', name: 'default', chosen: true }, { pool: 'spare', name: 'Spare', chosen: true, backup: true }, { pool: 'apps', name: 'Apps', chosen: false }];
+  const view = logic.balancingView({ on: true, groups: [], available, all_new: false, pass_minutes: 15, lent: [], recent: [], backup: [{ pool: 'spare', name: 'Spare', accounts: 3, lent: 2 }] });
+  assert.deepEqual(view.groups.map((g) => [g.pool, g.canBackup, g.backup]), [['default', false, false], ['spare', true, true], ['apps', false, false]]);
+  assert.deepEqual(view.backups, ['Spare is a backup group: 2 of 3 lent now.']);
+  assert.match(logic.balancingNotice({ group: 'Spare', on: true, backup: true }), /^Spare is a backup group now: it lends its accounts first/);
+  assert.equal(logic.balancingNotice({ group: 'Spare', on: false, backup: false }), 'Spare is no longer a backup group and takes part like the others.');
+  // A status from a version before backup groups reads as none.
+  assert.deepEqual(logic.balancingView({ on: true, groups: [], available: available.map(({ backup, ...g }) => g), all_new: false, pass_minutes: 15, lent: [], recent: [] }).backups, []);
+  i18nForShell.setLocale('ru');
+  assert.deepEqual(logic.balancingView({ on: true, groups: [], available, all_new: false, pass_minutes: 15, lent: [], recent: [], backup: [{ pool: 'spare', name: 'Spare', accounts: 3, lent: 2 }] }).backups, ['Группа «Spare» резервная: одолжено 2 из 3.']);
+  i18nForShell.setLocale('en');
+});
 // SB-352 wave 2 (SCN-090), the_balancing_section_reads_every_state: reading, failed, off, on
 // with the default group named, the accounts lent now, the latest returns (an account lent again
 // is not shown as back), the notices, the activity entry and the default group's loans.

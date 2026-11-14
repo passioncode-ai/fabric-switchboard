@@ -609,12 +609,18 @@ function balancingSection() {
     const option = el('label', 'appearance-option login-option'); const box = el('input'); box.type = 'checkbox'; box.checked = g.chosen; box.dataset.focus = `balancing-${g.pool}`;
     box.addEventListener('change', () => { const on = box.checked; void mutate(async () => { balancingState = await adapter.balance(on ? { add: [g.pool] } : { remove: [g.pool] }); }, balancingNotice({ group: g.label, on }), `balancing-${g.pool}`); });
     option.append(box, el('span', '', g.label)); list.append(option);
+    // WF-6 (DEC-0016): a group that takes part may be marked to lend only.
+    if (g.canBackup) {
+      const backup = el('label', 'appearance-option login-option balancing-backup'); const backupBox = el('input'); backupBox.type = 'checkbox'; backupBox.checked = g.backup; backupBox.dataset.focus = `balancing-backup-${g.pool}`;
+      backupBox.addEventListener('change', () => { const on = backupBox.checked; void mutate(async () => { balancingState = await adapter.balance(on ? { backup_add: [g.pool] } : { backup_remove: [g.pool] }); }, balancingNotice({ group: g.label, on, backup: on }), `balancing-backup-${g.pool}`); });
+      backup.append(backupBox, el('span', '', t('Backup: lends only'))); list.append(backup);
+    }
   }
   const later = el('label', 'appearance-option login-option'); const laterBox = el('input'); laterBox.type = 'checkbox'; laterBox.checked = view.allNew; laterBox.dataset.focus = 'balancing-all-new';
   laterBox.addEventListener('change', () => { const allNew = laterBox.checked; void mutate(async () => { balancingState = await adapter.balance({ all_new: allNew }); }, balancingNotice({ on: allNew, allNew }), 'balancing-all-new'); });
   later.append(laterBox, el('span', '', t('Groups made later take part too')));
   section.append(list, later);
-  for (const line of [...view.loans, ...view.returns]) section.append(el('p', 'form-note', line));
+  for (const line of [...view.backups, ...view.loans, ...view.returns]) section.append(el('p', 'form-note', line));
   return section;
 }
 /** SB-143: Codex sessions in a project's folders use its Codex accounts, by one switch. */

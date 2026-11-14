@@ -659,7 +659,7 @@ or keeps it away; `default` sets the machine's default agent (an id, or null for
 `permissions` (`bypass`, the default, or `ask`) chooses whether the Claude Code and Codex
 sessions Switchboard starts bypass their permission prompts (SB-298).
 
-### `switchboard_balance`: `add?`, `remove?`, `all_new?`
+### `switchboard_balance`: `add?`, `remove?`, `all_new?`, `backup_add?`, `backup_remove?`
 
 Accounts lent between the groups the operator chose (SB-352, DEC-0012). Without arguments it
 reads: `{on, groups: [{pool, name}], available: [{pool, name, chosen}], all_new, pass_minutes,
@@ -677,6 +677,12 @@ it. A group not chosen is never touched; no account crosses an organization's bo
 ordinary CLI's account, an account given to an agent, used elsewhere, disabled or waiting for a
 sign-in is never lent.
 
+
+`backup_add` marks chosen groups as backup (DEC-0016; any group but `default`, which is refused):
+a backup group never borrows, keeps no minimum and is asked first, and its account goes home once
+the borrower has room of its own again or the backup group's own folders need it. Marking chooses
+the group; `backup_remove` unmarks it and leaves it chosen. The state then carries
+`backup: [{pool, name, accounts, lent}]` and `available[].backup`.
 ### `switchboard_login`: `action`, `login_id?`, `provider?`, `label?`, `pool?`
 
 Only when the operator asks. `begin` (provider, label, pool as the group id) opens Terminal on

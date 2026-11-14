@@ -72,7 +72,7 @@ export const nativeAdapter: Adapter = {
   projectRoots: () => invoke('project_roots'),
   moveRoot: (folder, pool, also, from) => invoke('move_root', { folder, pool, also: also ?? false, from: from ?? null }),
   codexRoute: (enabled) => invoke('codex_route', { enabled: enabled ?? null }),
-  balance: (change) => invoke('balance', { add: change?.add ?? [], remove: change?.remove ?? [], allNew: change?.all_new ?? null }),
+  balance: (change) => invoke('balance', { add: change?.add ?? [], remove: change?.remove ?? [], allNew: change?.all_new ?? null, backupAdd: change?.backup_add ?? [], backupRemove: change?.backup_remove ?? [] }),
   repositoryMap: (under) => readWithDeadline(invoke('repository_map', { under }), 60_000),
   statistics: (days) => invoke('statistics', { days }),
   moveAccount: (id, pool) => invoke('move_account', { id, pool }),
@@ -175,6 +175,7 @@ const safeErrors = new Set([
   // SB-352: balancing's own refusals, already sentences for a person.
   'Balancing settings (balancing.json) could not be read. Delete balancing.json to turn balancing off and start over.',
   'No group has that id. Run switchboard project list to see the groups, or name default.',
+  'The default group cannot be a backup group: it holds every folder that is in no group.',
   'Balancing settings could not be saved. Check that the data folder is writable, then try again.',
   'Group not found.',
   // Moving a sign-in to another machine (SB-283).
