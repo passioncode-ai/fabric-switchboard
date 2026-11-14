@@ -2,6 +2,18 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-11-14: wave 3 part 1 and WF-6; a duplicate session; 0.7.81 to 0.7.83
+
+- **Asked.** The window and fleet plan, wave 3 ([plan](plans/2026-11-14-window-and-fleet/README.md)); the operator: «дальше».
+- **0.7.81 and 0.7.82.** The tag `v0.7.81` stopped on its nightly: the error vocabulary check read the session list's three `degraded` codes (SB-375) as messages for people. They are allowlisted as codes; 0.7.81 stays unpublished and its notes shipped as 0.7.82 (PR #690, published 2026-11-14 21:15Z, every platform green). This MacBook runs 0.7.82: `sessions --machine` 36 sessions with `degraded: []`, `events --kind switches` answers.
+- **A duplicate session.** At 19:56Z Fabric Dashboards resumed this session with `claude --resume` in a second process (52556) while the first (28198) still ran in its terminal; for nine minutes both worked in this worktree (branch switches, commits on `release/0.7.82` and `w3`). The copy was stopped with SIGINT, its commits kept, its unfinished WF-5.2f edit moved to `w3`. SB-376: each open stop in `switchboard recovery` now carries `live {pid, status}` from Claude Code's `sessions/<pid>.json`; Dashboards asked to skip `--resume` while it is set (board thread `97c968e8`). Lesson recorded in Observatory (`mem:62e9d00206f841ec`).
+- **Wave 3, part 1 (PR #691).** WF-5.2a rotation outcomes in the log; 5.2b `Runtime::held`, one set for rotation, recovery, dispatch and the fallback, and dispatch skips an account past its group's room; 5.2c a stop in a deleted folder is kept by its path; 5.2d failover takes unhealthy accounts last; 5.2f (C9) a hand-over without a checkout continues in the last launch folder.
+- **WF-6 (PR #692).** Backup groups (DEC-0016). The plan's "no folders" could not ship: the store refuses a group without a folder (`projects.rs:445`) and an older Switchboard would refuse such a store, so any chosen group but `default` can be backup and the mark lives in `balancing.json`.
+- **Checks.** `./scripts/check.sh` on the Mac Studio exit 0 at `79359d9` (w3) and `255f4fb` (wf6); Linux clippy exit 0 at both (rust:1.99 in Docker under colima, the tree copied into `~/vmshare`). One earlier gate run failed on a doctest that could not find `switchboard_proxy`: the duplicate session built in the same `target` at the same time; the rerun passed.
+- **Open.** WF-4 (SB-366) on branch `wf4`: `remote_usage.rs` (background ssh read every 15 minutes, `remote-usage.json`, back-off after three failures, tests), `machines list` carries each machine's `read` and each account's `there`, the window's row line `remoteUsageLine`; not yet wired into the row, nor `refused_there` in Attention, DEC-0017, docs and strings. WF-5.2e, 5.2f C8, 5.3. Waves 4 and 5.
+
+**Exact next task.** After 0.7.83 is published and installed here, finish WF-4 on `wf4`: use `remoteUsageLine` in the Accounts row of an account on another machine (load `machinesList` while machine groups exist), add `refused_there` to Attention from the last read, write DEC-0017, the contract, the AGENTS.md lifecycle rows (`remote-usage.json`, the ssh read), strings with Copylot, SCN-092; gate, release 0.7.84.
+
 ## 2026-11-14: the window and the fleet, wave 2 (SB-369, SB-370, SB-372, SB-373, SB-364) and a stale MCP server (SB-375); 0.7.82
 
 - **Asked.** The same review (operator, 2026-11-14), wave 2 of the [plan](plans/2026-11-14-window-and-fleet/README.md); then «перезапусти что упало и продолжи» after the window agent stopped on a usage limit.
