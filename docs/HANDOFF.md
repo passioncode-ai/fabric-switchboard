@@ -15,7 +15,9 @@
 
 - **Release.** The tag `v0.7.77` (`d8e4762b`) failed its nightly on Windows only: `homes_lists_the_ordinary_one_then_switchboards_claude_homes` joined `homes/acc-2` with a forward slash, so its Keychain service name differed from the one `read_dir` gave. The test now joins each part (PR #681). The tag `v0.7.78` then failed on Windows arm only: `owner_tests::an_account_moves_between_projects_and_back_to_default` overflowed its 2 MiB test thread (debug). `Runtime::execute` awaited the whole inner `execute` future inline; PR #682 boxes it, and on macOS debug the test now passes at 1.75 MiB where 0.7.76 overflowed (SB-362 keeps the margin). The same changes ship as 0.7.79; 0.7.77 and 0.7.78 stay unpublished.
 
-**Exact next task.** After the app restarts on 0.7.79, launch one Claude session through Switchboard and read `switchboard mcp-homes`: the launched home's Figma entry `signed_in: true` with `own: false`, and an `mcp_sign_ins carried` line in the log; then take SB-352 wave 3.
+- **Released.** v0.7.79 published 2026-11-14 03:14Z (release run 43540431275, attempt 2: the first attempt's guard timed out at 60 min while the nightly queued, then the nightly passed on every platform, run of `f996f8f`). This MacBook: `switchboard 0.7.79`, the app restarted into it with `switchboard app restart-to-update` (owner 03:21:52Z, proxy port unchanged). Live: `mcp-homes` 41 homes in 1.66 s, 0 unknown, `stale_key` on the ordinary home for Figma and `partial` for Figma and Sentry; `sessions --machine` total 34; a turned-off account's usage check 0.03 s, `Account is disabled`. Not yet seen: an `mcp_sign_ins carried` line, which needs the first Claude launch through Switchboard on 0.7.79.
+
+**Exact next task.** On the first Claude launch through Switchboard on 0.7.79 (Fabric dispatches or a person), read `switchboard mcp-homes`: the launched home's Figma entry `signed_in: true` with `own: false`, and an `mcp_sign_ins carried` line in the log; then take SB-352 wave 3.
 
 ## 2026-11-13: MCP sign-ins are per Claude home (board request from riffly, SB-358, SB-359)
 
