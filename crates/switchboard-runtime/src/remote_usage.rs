@@ -99,10 +99,11 @@ pub fn due(state: &State, machine: &str, now: i64) -> bool {
 
 /// The code a failed read is kept with.
 pub fn reason_of(error: &str) -> &'static str {
-    if error == UNREACHABLE || error.contains("ssh") {
-        "unreachable"
-    } else if [TARGET_INVALID, REMOTE_INVALID, REMOTE_DATA_DIR_INVALID].contains(&error) {
+    // A refused target or path is named first: its sentence may itself mention ssh.
+    if [TARGET_INVALID, REMOTE_INVALID, REMOTE_DATA_DIR_INVALID].contains(&error) {
         "refused"
+    } else if error == UNREACHABLE || error.contains("ssh") {
+        "unreachable"
     } else {
         "unreadable"
     }
