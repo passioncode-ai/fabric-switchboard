@@ -72,6 +72,8 @@ pub const OUTCOME_UNKNOWN: &str = "The other machine's answer was lost. This mac
 pub const LEFT_THERE: &str = "The copy on the other machine could not be removed. This machine no longer uses the account; remove that copy there, then mark the account used here.";
 /// The location a surrender writes; `--undo` takes back only this mark.
 pub const CALLED_BACK: &str = "called back";
+/// SB-377: the mark of a surrender whose account was off here; `--undo` turns it off again.
+pub const CALLED_BACK_OFF: &str = "called back, was off";
 pub const NOT_CALLED_BACK: &str =
     "This account was not given back by a call back here, so its mark stays. Nothing changed.";
 pub const ONLY_ONE_HERE: &str = "This is the only account its group uses on this machine. Add another account to that group before calling this one back.";
@@ -498,10 +500,12 @@ pub fn surrender(
         if !snapshot.elsewhere.contains_key(id) {
             return Ok(json!({"restored": false}));
         }
-        if snapshot.locations.get(id).map(String::as_str) != Some(CALLED_BACK) {
-            return Err(NOT_CALLED_BACK.into());
-        }
-        store.mark_elsewhere(id, false, now)?;
+        let was_off = match snapshot.locations.get(id).map(String::as_str) {
+            Some(CALLED_BACK) => false,
+            Some(CALLED_BACK_OFF) => true,
+            _ => return Err(NOT_CALLED_BACK.into()),
+        };
+        restore(store, id, was_off, now)?;
         return Ok(json!({"restored": true}));
     }
     let snapshot = store.snapshot()?;
@@ -513,9 +517,12 @@ pub fn surrender(
     if account.kind != AuthKind::OAuth {
         return Err(NOT_A_SIGN_IN.into());
     }
-    if !account.enabled || snapshot.elsewhere.contains_key(id) {
+    // SB-377: a copy turned off here is given back too: nothing here uses it, so it is the
+    // safest one to give, and an undo turns it off again.
+    if snapshot.elsewhere.contains_key(id) {
         return Err(NOT_HERE.into());
     }
+    let was_off = !account.enabled;
     if store.is_in_use(id) {
         return Err(IN_USE_HERE.into());
     }
@@ -533,11 +540,16 @@ pub fn surrender(
             None => return Err(ONLY_ONE_HERE.into()),
         }
     }
-    store.mark_elsewhere_at(id, true, now, Some(CALLED_BACK))?;
+    let mark = if was_off {
+        CALLED_BACK_OFF
+    } else {
+        CALLED_BACK
+    };
+    store.mark_elsewhere_at(id, true, now, Some(mark))?;
     let credential = match store.stored_credential(id) {
         Ok(c) => c,
         Err(e) => {
-            store.mark_elsewhere(id, false, now)?;
+            restore(store, id, was_off, now)?;
             return Err(e);
         }
     };
@@ -548,6 +560,15 @@ pub fn surrender(
     let tokens: Value =
         serde_json::from_str(&credential.to_oauth_json(account.provider)).unwrap_or(Value::Null);
     Ok(json!({"provider": account.provider.as_str(), "credential": tokens}))
+}
+
+/// Takes a surrender's mark back: used here again, and off again when it was off.
+fn restore(store: &Store, id: &str, was_off: bool, now: i64) -> Result<(), String> {
+    store.mark_elsewhere(id, false, now)?;
+    if was_off {
+        store.update_fields(id, None, Some(false))?;
+    }
+    Ok(())
 }
 
 /// What `recall_take` brought back, for `recall_undo` when the provider does not answer it here.
@@ -1739,6 +1760,26 @@ mod tests {
             surrender(&keyed, &key, false, 7, &|_| {}).unwrap_err(),
             NOT_A_SIGN_IN
         );
+    }
+
+    #[test]
+    fn a_copy_turned_off_here_is_given_back_and_an_undo_turns_it_off_again() {
+        // SB-377 (2026-11-15, the Mac Studio): claude6 was off there, nothing used it, and the
+        // call back from the MacBook was refused with NOT_HERE.
+        let (_root, store, id) = store_with(AuthKind::OAuth);
+        store.update(&id, "Work O'Neil".into(), false).unwrap();
+        let given = surrender(&store, &id, false, 7, &|_| {}).unwrap();
+        assert_eq!(given["provider"], "claude");
+        let snapshot = store.snapshot().unwrap();
+        assert!(snapshot.elsewhere.contains_key(&id));
+        assert_eq!(
+            snapshot.locations.get(&id).map(String::as_str),
+            Some(CALLED_BACK_OFF)
+        );
+        surrender(&store, &id, true, 9, &|_| {}).unwrap();
+        let snapshot = store.snapshot().unwrap();
+        assert!(!snapshot.elsewhere.contains_key(&id));
+        assert!(snapshot.accounts.iter().any(|a| a.id == id && !a.enabled));
     }
 
     const RENEWED: &str = r#"{"claudeAiOauth":{"accessToken":"synthetic-access-2","refreshToken":"synthetic-refresh-2","expiresAt":2000000000000,"accountUuid":"synthetic-account"}}"#;
