@@ -367,6 +367,7 @@ impl Store {
         fits: Fits,
         now: i64,
     ) -> Result<Option<String>, String> {
+        let paced = self.paced.lock().map(|p| p.clone()).unwrap_or_default();
         let state = self.lock()?;
         Ok(state
             .accounts
@@ -385,7 +386,13 @@ impl Store {
                 Some(_) => None,
                 None => {
                     let used = last_known_usage(a, now);
-                    (used < 100.0).then_some((a, 1u8, used))
+                    // WF-5.2d (C4): an account whose last check failed, or whose checks the
+                    // provider refused lately (SB-106), is a blind guess: it comes last, after
+                    // every account last seen healthy, so the one replay SB-98 allows is not
+                    // spent on it while a better one is left.
+                    let blind = a.usage_health.as_ref().is_none_or(|h| h.status != "ok")
+                        || paced.contains(&a.id);
+                    (used < 100.0).then_some((a, if blind { 2u8 } else { 1u8 }, used))
                 }
             })
             .min_by(|(a, tier_a, x), (b, tier_b, y)| {
