@@ -190,7 +190,6 @@ const safeErrors = new Set([
   "Nothing was saved. The account stays on this computer.",
   "Only a Claude or Codex subscription sign-in moves this way. Give an API key through your vault.",
   "This account is already used elsewhere or turned off here.",
-  "Select another account for its group before moving this one.",
   "The other machine did not save the sign-in. Nothing changed here; check ssh and its Switchboard.",
   "The other machine already holds this sign-in in that group. Remove its old copy there, then move it again.",
   "The other machine saved the sign-in but the provider did not answer it there. It was removed there and stays here.",
@@ -207,7 +206,8 @@ const safeErrors = new Set([
   "This machine renewed the sign-in while it moved, so the copy sent was no longer valid. It was removed there and stays here; move it again.",
   "The other machine's answer was lost. This machine no longer uses the account; look at the other machine's accounts and call it back or remove its copy there.",
   "The copy on the other machine could not be removed. This machine no longer uses the account; remove that copy there, then mark the account used here.",
-  "This account was renewed here after it moved, so its copy there is no longer valid. Remove that copy there instead of calling it back.",
+  "This is the only account its group uses on this machine. Add another account to that group before moving this one.",
+  "Claude Code here is signed in to this account and no other Claude account here can take its place. Add one, then move this one.",
   "This account was not given back by a call back here, so its mark stays. Nothing changed.",
   "This is the only account its group uses on this machine. Add another account to that group before calling this one back.",
   // Where a data folder keeps its sign-ins (SB-287).

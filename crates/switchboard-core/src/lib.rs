@@ -40,7 +40,9 @@ pub use credential::Credential;
 pub use machines::{is_machine_pool, Machine, MachineRef};
 pub use organizations::{Attribution, By, Organization};
 pub use projects::{pool_from_name, Project, ProjectRule, RuleResolution, FOLDER_NESTED, KEY_POOL};
-pub use rotation::{default_managed_policy, FailoverTally, Fits, RotationDecision, RotationPolicy};
+pub use rotation::{
+    default_managed_policy, free_at, FailoverTally, Fits, RotationDecision, RotationPolicy,
+};
 pub use vault::{
     open_vault, set_vault_kind, vault_kind, FileVault, MemoryVault, NativeVault, Vault, VaultKind,
     CHOICE_FILE as VAULT_CHOICE_FILE, CHOICE_UNREADABLE as VAULT_CHOICE_UNREADABLE,
@@ -1310,6 +1312,15 @@ impl Store {
         self.in_use
             .lock()
             .is_ok_and(|set| set.as_ref().is_some_and(|ids| ids.contains(id)))
+    }
+    /// SB-377: the ordinary CLI was switched away from `id` just now; the monitor's next look
+    /// learns the rest.
+    pub fn not_in_use(&self, id: &str) {
+        if let Ok(mut set) = self.in_use.lock() {
+            if let Some(ids) = set.as_mut() {
+                ids.remove(id);
+            }
+        }
     }
     pub fn set_in_use(&self, ids: std::collections::BTreeSet<String>) -> Result<(), String> {
         let added: Vec<String> = {

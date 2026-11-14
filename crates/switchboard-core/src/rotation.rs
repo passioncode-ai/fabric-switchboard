@@ -284,6 +284,33 @@ impl Store {
                         .then_with(|| a.id.cmp(&b.id))
                 })
         });
+        // SB-377 (operator 2026-11-14): with no account that has room, a group whose account
+        // is at its limit waits on the account that will be free first, not on the one it has:
+        // the one whose limit resets earliest, and only when that is before the current one's.
+        let candidate = candidate.or_else(|| {
+            if !current_limited {
+                return None;
+            }
+            let current_free = free_at(current, now).unwrap_or(i64::MAX);
+            state
+                .accounts
+                .iter()
+                .filter(|a| {
+                    a.id != current.id
+                        && a.provider == policy.provider
+                        && state.serves(a, &policy.pool)
+                        && !state.is_assigned(&a.id)
+                        && state.context_admits(&policy.pool, a)
+                        && a.kind == current.kind
+                        && self.rotation_credential_eligible(a, policy, now)
+                })
+                // Only a known reset to come: an account held with no known reset is not a wait,
+                // and one with room was the steps above.
+                .filter_map(|a| free_at(a, now).map(|t| (a, t)))
+                .filter(|(_, t)| *t > now && *t < current_free)
+                .min_by(|(a, x), (b, y)| x.cmp(y).then_with(|| a.id.cmp(&b.id)))
+                .map(|(a, t)| (a, t as f64))
+        });
         Ok(match candidate {
             Some((a, _)) => RotationDecision {
                 candidate_id: Some(a.id.clone()),
@@ -516,6 +543,30 @@ impl Store {
             .map(|(a, _, _)| a.id.clone()))
     }
 }
+
+/// SB-377: when an account will have room again on what is known of it: now when it has room
+/// (last known usage under 100 %, a window whose reset passed counting as empty), else the latest
+/// reset of its full windows; none when that is not known.
+pub fn free_at(account: &Account, now: i64) -> Option<i64> {
+    if last_known_usage(account, now) < 100.0 {
+        return Some(now);
+    }
+    let usage = account.usage.as_ref()?;
+    let full: Vec<Option<i64>> = usage
+        .windows
+        .iter()
+        .filter(|w| !w.is_feature() && w.used_percent >= 100.0)
+        .map(|w| w.resets_at)
+        .collect();
+    if full.is_empty() {
+        return usage.resets_at.filter(|t| *t > now);
+    }
+    full.into_iter()
+        .collect::<Option<Vec<i64>>>()?
+        .into_iter()
+        .max()
+}
+
 /// The best guess at an account's usage when nothing fresh is known (SB-98): its last
 /// account-wide figure, 0 when every window it names has since reset, and 99 — last in line,
 /// still below a full account — when it was never measured.

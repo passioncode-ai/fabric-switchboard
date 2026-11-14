@@ -191,12 +191,7 @@ pub type ReadOne<'a> = dyn Fn(&str, &Program<'_>) -> Result<Vec<Value>, String> 
 
 /// Reads every machine group that is due, one after another, and keeps the answers. `read_one`
 /// is the ssh read (a fake in tests). Answers how many machines were read and how many failed.
-pub fn pass(
-    root: &Path,
-    snapshot: &Snapshot,
-    now: i64,
-    read_one: &ReadOne<'_>,
-) -> (usize, usize) {
+pub fn pass(root: &Path, snapshot: &Snapshot, now: i64, read_one: &ReadOne<'_>) -> (usize, usize) {
     let mut state = read(root);
     let mut tried = 0;
     let mut failed = 0;

@@ -586,8 +586,9 @@ function bringHereDialog(account: Account, machine: Machine) {
 /** SB-355 (SCN-092): a sign-in of this computer moves to a machine group's machine over ssh. */
 function moveHereDialog(machine: Machine) {
   const context = openDialog(t('Move an account to {machine}', { machine: machine.name }), t('Its sign-in moves over ssh: this computer stops using it first, the other machine saves it and checks that it answers. If a step fails, nothing changes.'));
-  const movable = snapshot!.accounts.filter((a) => a.kind === 'oauth' && a.enabled && snapshot?.elsewhere?.[a.id] === undefined && !Object.values(snapshot!.routes).includes(a.id));
-  if (!movable.length) { context.body.append(el('p', 'form-note', t('No account here can move now: only a subscription sign-in that is on and that no group has selected moves.'))); context.actions.append(button(t('Done'), () => context.close(), 'button primary')); return; }
+  // SB-377: a selected account moves too; its group switches to its next account here first.
+  const movable = snapshot!.accounts.filter((a) => a.kind === 'oauth' && a.enabled && snapshot?.elsewhere?.[a.id] === undefined);
+  if (!movable.length) { context.body.append(el('p', 'form-note', t('No account here can move now: only a subscription sign-in that is on and used on this computer moves.'))); context.actions.append(button(t('Done'), () => context.close(), 'button primary')); return; }
   const which = select(movable.map((a): [string, string] => [a.id, `${a.label} · ${providerName(a.provider)}`]));
   const pool = input('default'); pool.maxLength = 32;
   context.body.append(field(t('Account'), which), field(t('Group there'), pool, t('Its group on the other machine.')));
@@ -1896,6 +1897,7 @@ function sendDialog(account: Account) {
   const from = machineOf(snapshot!, account);
   const context = openDialog(t('Move {label} to another machine', { label: account.label }), from ? t('It comes back from {machine} first, then its sign-in moves over ssh. If the move fails, it stays on this computer.', { machine: from.name }) : t('Its sign-in moves over ssh: this computer stops using it first, the other machine saves it and checks that it answers. If a step fails, nothing changes.'));
   const machine = input(''); machine.maxLength = 255; machine.placeholder = 'user@studio.local'; machine.required = true;
+  if (!from && Object.values(snapshot!.routes).includes(account.id)) context.body.append(el('p', 'form-note', t('Its groups switch to their next account here first, so their sessions go on.')));
   const known = (snapshot?.machines ?? []).filter((m) => m.pool !== from?.pool);
   if (known.length) { const names = el('datalist'); names.id = 'machine-names'; for (const m of known) { const option = el('option'); option.value = m.name; names.append(option); } machine.setAttribute('list', 'machine-names'); context.body.append(names); }
   const pool = input(account.pool); pool.maxLength = 32;
@@ -2467,8 +2469,9 @@ function rowMenu(account: Account, state: { current: boolean; selected: boolean;
   items.push([snapshot?.elsewhere?.[account.id] === undefined ? t('Used on another machine') : t('Where it works…'), () => elsewhereDialog(account)]);
   // SB-322: an agent or service signs in with it now; its usage stays visible here.
   items.push([t('Give to an agent…'), () => givenToDialog(account)]);
-  // SB-283: a subscription sign-in no group has selected moves over ssh, without a new sign-in there.
-  if (account.kind === 'oauth' && (machine || (account.enabled && !state.selected && snapshot?.elsewhere?.[account.id] === undefined))) items.push([t('Move to another machine…'), () => sendDialog(account)]);
+  // SB-283, SB-377: a subscription sign-in moves over ssh, without a new sign-in there; a group
+  // that has it selected switches to its next account here first.
+  if (account.kind === 'oauth' && (machine || (account.enabled && snapshot?.elsewhere?.[account.id] === undefined))) items.push([t('Move to another machine…'), () => sendDialog(account)]);
   // SB-318: for a colleague or a machine ssh does not reach: a signed record they sign in with.
   if (account.kind === 'oauth' && account.enabled && snapshot?.elsewhere?.[account.id] === undefined) items.push([t('Hand over…'), () => handOverDialog(account)]);
   items.push([t('Rename or disable…'), () => editDialog(account)], [t('Remove…'), () => removeDialog(account), 'danger-text']);

@@ -48,7 +48,11 @@ pub const REMOTE_DATA_DIR_INVALID: &str =
 pub const NOT_A_SIGN_IN: &str =
     "Only a Claude or Codex subscription sign-in moves this way. Give an API key through your vault.";
 pub const NOT_HERE: &str = "This account is already used elsewhere or turned off here.";
-pub const SELECTED: &str = "Select another account for its group before moving this one.";
+/// SB-377: the group a selected account leaves keeps working only with another account here.
+/// SB-377: the account the ordinary Claude Code is signed in to moves only when another can take
+/// its place.
+pub const CLI_ONLY_ONE: &str = "Claude Code here is signed in to this account and no other Claude account here can take its place. Add one, then move this one.";
+pub const SEND_ONLY_ONE: &str = "This is the only account its group uses on this machine. Add another account to that group before moving this one.";
 pub const ADD_FAILED: &str =
     "The other machine did not save the sign-in. Nothing changed here; check ssh and its Switchboard.";
 /// The other machine's own answer to `accounts add` when the same sign-in already sits in that
@@ -71,7 +75,6 @@ pub const CALLED_BACK: &str = "called back";
 pub const NOT_CALLED_BACK: &str =
     "This account was not given back by a call back here, so its mark stays. Nothing changed.";
 pub const ONLY_ONE_HERE: &str = "This is the only account its group uses on this machine. Add another account to that group before calling this one back.";
-pub const USED_HERE_SINCE: &str = "This account was renewed here after it moved, so its copy there is no longer valid. Remove that copy there instead of calling it back.";
 
 pub const NOT_AWAY: &str = "This account is used here, not on another machine.";
 pub const NO_REMOTE_ID: &str =
@@ -142,6 +145,65 @@ pub fn token_print(token: &str) -> String {
     digest[..8].iter().map(|b| format!("{b:02x}")).collect()
 }
 
+/// SB-377: the account a group moves to when `account`, its selected one, leaves this machine:
+/// of the accounts serving `pool` (its own and shared, same provider and kind, on, used here, not
+/// given to an agent), the one with room and the least used; with none that has room, the one
+/// that will be free first (`free_at`); an account never measured comes after those with room.
+pub(crate) fn next_in_group<'a>(
+    snapshot: &'a switchboard_core::Snapshot,
+    account: &switchboard_core::Account,
+    pool: &str,
+    now: i64,
+) -> Option<&'a switchboard_core::Account> {
+    snapshot
+        .accounts
+        .iter()
+        .filter(|a| {
+            a.id != account.id
+                && a.provider == account.provider
+                && a.kind == account.kind
+                && a.enabled
+                && snapshot.serves(a, pool)
+                && !snapshot.elsewhere.contains_key(&a.id)
+                && !snapshot.is_assigned(&a.id)
+        })
+        .min_by_key(|a| next_rank(a, now))
+}
+/// The order an account takes the place of one that leaves: with room now, the least used first
+/// (in tenths of a percent); then never measured; then full ones, the one free first.
+fn next_rank(a: &switchboard_core::Account, now: i64) -> (u8, i64, i64) {
+    let used = a.usage.as_ref().and_then(|u| u.account_used_percent());
+    let free = switchboard_core::free_at(a, now).unwrap_or(i64::MAX);
+    match used {
+        Some(u) if free <= now => (0, (u * 10.0) as i64, a.created_at),
+        None => (1, 0, a.created_at),
+        Some(_) => (2, free, a.created_at),
+    }
+}
+/// SB-377: the account the ordinary Claude Code takes when the one it is signed in to moves away:
+/// a Claude sign-in here that may become Claude Code's (its identity known, in no group with
+/// folders of its own, not given to an agent), in the same order as a group's next account.
+pub(crate) fn next_for_cli<'a>(
+    snapshot: &'a switchboard_core::Snapshot,
+    account: &switchboard_core::Account,
+    now: i64,
+) -> Option<&'a switchboard_core::Account> {
+    snapshot
+        .accounts
+        .iter()
+        .filter(|a| {
+            a.id != account.id
+                && a.provider == Provider::Claude
+                && a.kind == AuthKind::OAuth
+                && a.enabled
+                && a.external_identity.is_some()
+                && snapshot.project_of_pool(&a.pool).is_none()
+                && !snapshot.elsewhere.contains_key(&a.id)
+                && !snapshot.is_assigned(&a.id)
+        })
+        .min_by_key(|a| next_rank(a, now))
+}
+
 /// Moves one sign-in. `settle` is called with the account's refresh token once it is marked used
 /// elsewhere here: it returns when no renewal of that token is on the network (SB-312), so the
 /// tokens read after it are the ones this machine will never renew again.
@@ -171,9 +233,6 @@ pub fn send(
     }
     if !account.enabled || snapshot.elsewhere.contains_key(id) {
         return Err(NOT_HERE.into());
-    }
-    if snapshot.routes.values().any(|v| v == id) {
-        return Err(SELECTED.into());
     }
     // SB-312: the ordinary Claude Code or Codex renews its own sign-in, and another saved copy
     // of the same sign-in takes every renewal here: either would spend the tokens that left.
@@ -233,6 +292,19 @@ pub fn send(
         .ok()
         .and_then(|out| remote_ids(&out))
         .ok_or(UNREACHABLE)?;
+    // SB-377 (operator 2026-11-14): a selected account moves too. Each group that has it selected
+    // first moves to its next account here (`next_in_group`: one with room, else the one free
+    // first), so the group's sessions go on; only a group with no other account refuses.
+    for (key, value) in &snapshot.routes {
+        if value != id {
+            continue;
+        }
+        let group = key.split_once(':').map_or(key.as_str(), |(_, p)| p);
+        match next_in_group(&snapshot, account, group, now) {
+            Some(next) => store.select(account.provider, group, &next.id)?,
+            None => return Err(SEND_ONLY_ONE.into()),
+        }
+    }
     // From here this machine never renews it: the tokens leave with one holder.
     store.mark_elsewhere_at(id, true, now, Some(target))?;
     let undo_here = || store.mark_elsewhere(id, false, now);
@@ -454,14 +526,9 @@ pub fn surrender(
             continue;
         }
         let pool = key.split_once(':').map_or(key.as_str(), |(_, p)| p);
-        let next = snapshot.accounts.iter().find(|a| {
-            a.id != id
-                && a.provider == account.provider
-                && a.pool == pool
-                && a.enabled
-                && !snapshot.elsewhere.contains_key(&a.id)
-        });
-        match next {
+        // SB-377: the group's best next account (room first, else the one free first), not the
+        // first one listed.
+        match next_in_group(&snapshot, account, pool, now) {
             Some(next) => store.select(account.provider, pool, &next.id)?,
             None => return Err(ONLY_ONE_HERE.into()),
         }
@@ -488,6 +555,9 @@ pub struct Taken {
     pub remote_id: String,
     /// The refresh token taken back, to tell a renewal here from no answer.
     pub token: Option<String>,
+    /// SB-377: the sign-in this machine held when it changed after the move (its print no longer
+    /// the one sent), kept aside: when the copy brought back does not answer, this one is tried.
+    pub kept: Option<Credential>,
 }
 
 /// SB-292 (S-3), on this machine: take the sign-in of an account this machine moved away
@@ -531,11 +601,15 @@ pub fn recall_take(
         .stored_credential(id)?
         .refresh_token
         .ok_or(NOT_A_SIGN_IN)?;
-    // SB-312: renewed here after it left (*Use here*, then a renewal), the copy there is spent and
-    // would overwrite the live one here.
-    if sent.is_some_and(|print| token_print(&spent) != print) {
-        return Err(USED_HERE_SINCE.into());
-    }
+    // SB-312, SB-377: the sign-in here changed after it left (a renewal, a sync of the ordinary
+    // Claude Code). Before, the call back was refused and no account could come back; now the
+    // copy there is taken, and the one here is kept aside: whichever the provider answers stays
+    // (`Taken::kept`, tried by the caller when the copy brought back does not answer).
+    let kept = if sent.is_some_and(|print| token_print(&spent) != print) {
+        Some(store.stored_credential(id)?)
+    } else {
+        None
+    };
     let ssh = |command: String| vec![target.to_owned(), "--".to_owned(), command];
     let undo_there = || {
         let _ = run(
@@ -581,6 +655,7 @@ pub fn recall_take(
     Ok(Taken {
         remote_id: remote_id.to_owned(),
         token: credential.refresh_token.clone(),
+        kept,
     })
 }
 
@@ -948,6 +1023,148 @@ mod tests {
         let snapshot = store.snapshot().unwrap();
         assert!(!snapshot.elsewhere.contains_key(&id));
         assert!(snapshot.accounts.iter().any(|a| a.id == id && a.enabled));
+    }
+
+    fn observed(store: &Store, id: &str, used: f64, resets: i64) {
+        store
+            .observe(
+                id,
+                switchboard_core::Usage {
+                    used_percent: used,
+                    observed_at: 90,
+                    resets_at: Some(resets),
+                    source: "claude_oauth".into(),
+                    windows: vec![switchboard_core::UsageWindow {
+                        name: "five_hour".into(),
+                        used_percent: used,
+                        resets_at: Some(resets),
+                    }],
+                },
+            )
+            .unwrap();
+    }
+    fn another(store: &Store, name: &str) -> String {
+        store
+            .add(
+                name.into(),
+                Provider::Claude,
+                AuthKind::OAuth,
+                "default".into(),
+                Credential {
+                    access_token: format!("{name}-access"),
+                    refresh_token: Some(format!("{name}-refresh")),
+                    id_token: None,
+                    native_context: None,
+                    expires_at: Some(2_000_000_000),
+                    account_id: None,
+                },
+            )
+            .unwrap()
+            .id
+    }
+
+    #[test]
+    fn a_selected_account_moves_after_its_group_takes_its_best_next_account() {
+        // SB-377 (operator 2026-11-14): before, a selected account refused to move ("Select
+        // another account for its group"). Now its group moves first to the account with room,
+        // and only a group with no other account here refuses.
+        let (_root, store, id) = store_with(AuthKind::OAuth);
+        store.select(Provider::Claude, "default", &id).unwrap();
+        let calls: Calls = Default::default();
+        assert_eq!(
+            send(
+                &store,
+                &id,
+                "studio.local",
+                "default",
+                &DEFAULT_APP,
+                100,
+                &fake(&calls, true, true),
+                &|_| {}
+            )
+            .unwrap_err(),
+            SEND_ONLY_ONE
+        );
+        assert!(!store.snapshot().unwrap().elsewhere.contains_key(&id));
+        let full = another(&store, "full");
+        let room = another(&store, "room");
+        observed(&store, &full, 100.0, 5_000);
+        observed(&store, &room, 30.0, 5_000);
+        send(
+            &store,
+            &id,
+            "studio.local",
+            "default",
+            &DEFAULT_APP,
+            100,
+            &fake(&calls, true, true),
+            &|_| {},
+        )
+        .unwrap();
+        let snapshot = store.snapshot().unwrap();
+        assert_eq!(snapshot.routes.get("claude:default"), Some(&room));
+        assert!(snapshot.elsewhere.contains_key(&id));
+    }
+
+    #[test]
+    fn the_next_account_is_the_one_with_room_else_the_one_free_first() {
+        let (_root, store, id) = store_with(AuthKind::OAuth);
+        let late = another(&store, "late");
+        let soon = another(&store, "soon");
+        observed(&store, &late, 100.0, 9_000);
+        observed(&store, &soon, 100.0, 3_000);
+        let snapshot = store.snapshot().unwrap();
+        let me = snapshot.accounts.iter().find(|a| a.id == id).unwrap();
+        // Every other account is full: the one whose limit resets first.
+        assert_eq!(
+            next_in_group(&snapshot, me, "default", 100).map(|a| a.id.clone()),
+            Some(soon.clone())
+        );
+        // One never measured comes before a full one, and one with room before both.
+        let never = another(&store, "never");
+        let snapshot = store.snapshot().unwrap();
+        let me = snapshot.accounts.iter().find(|a| a.id == id).unwrap();
+        assert_eq!(
+            next_in_group(&snapshot, me, "default", 100).map(|a| a.id.clone()),
+            Some(never)
+        );
+        let room = another(&store, "room");
+        observed(&store, &room, 60.0, 9_000);
+        let snapshot = store.snapshot().unwrap();
+        let me = snapshot.accounts.iter().find(|a| a.id == id).unwrap();
+        assert_eq!(
+            next_in_group(&snapshot, me, "default", 100).map(|a| a.id.clone()),
+            Some(room)
+        );
+    }
+
+    #[test]
+    fn claude_code_takes_a_sign_in_whose_identity_is_known_and_that_has_room() {
+        // SB-377: before the account Claude Code is signed in to moves, Claude Code takes the
+        // next one; only a sign-in whose identity is known can become Claude Code's.
+        let (_root, store, id) = store_with(AuthKind::OAuth);
+        let blind = another(&store, "blind");
+        observed(&store, &blind, 10.0, 9_000);
+        let snapshot = store.snapshot().unwrap();
+        let me = snapshot.accounts.iter().find(|a| a.id == id).unwrap();
+        assert!(next_for_cli(&snapshot, me, 100).is_none());
+        let identity = |n: &str| switchboard_core::ExternalIdentity {
+            account_id: Some(format!("{n}-uuid")),
+            organization_id: None,
+            email: Some(format!("{n}@example.com")),
+        };
+        let full = another(&store, "full");
+        let room = another(&store, "room");
+        store.learn_identity(&full, &identity("full")).unwrap();
+        store.learn_identity(&room, &identity("room")).unwrap();
+        observed(&store, &full, 100.0, 3_000);
+        observed(&store, &room, 70.0, 9_000);
+        let snapshot = store.snapshot().unwrap();
+        let me = snapshot.accounts.iter().find(|a| a.id == id).unwrap();
+        assert_eq!(
+            next_for_cli(&snapshot, me, 100).map(|a| a.id.clone()),
+            Some(room)
+        );
     }
 
     #[test]
@@ -1384,28 +1601,65 @@ mod tests {
     }
 
     #[test]
-    fn a_sign_in_renewed_here_after_it_moved_is_not_called_back() {
+    fn a_sign_in_changed_here_after_it_moved_is_called_back_with_the_one_here_kept_aside() {
+        // SB-377: before, a print that no longer matched refused every call back ("renewed here
+        // after it moved"), so no account could come back. Now the copy there is taken and the
+        // sign-in here is kept aside for the caller to try when the copy does not answer.
         let (_root, store, id) = store_with(AuthKind::OAuth);
         store
             .mark_elsewhere_at(&id, true, 1, Some("studio.local"))
             .unwrap();
+        let before = store.stored_credential(&id).unwrap();
         let calls: Calls = Default::default();
         let print = token_print("an-older-token");
+        let taken = recall_take(
+            &store,
+            &id,
+            "studio.local",
+            "remote-1",
+            &DEFAULT_APP,
+            2,
+            &member(&calls, Some(RENEWED), false),
+            Some(&print),
+        )
+        .unwrap();
         assert_eq!(
-            recall_take(
-                &store,
-                &id,
-                "studio.local",
-                "remote-1",
-                &DEFAULT_APP,
-                2,
-                &member(&calls, None, false),
-                Some(&print),
-            )
-            .err(),
-            Some(USED_HERE_SINCE.to_string())
+            store
+                .stored_credential(&id)
+                .unwrap()
+                .refresh_token
+                .as_deref(),
+            Some("synthetic-refresh-2"),
+            "the copy brought back is tried first"
         );
-        assert!(calls.lock().unwrap().is_empty(), "nothing asked there");
+        let kept = taken.kept.expect("the sign-in here is kept aside");
+        assert_eq!(kept.refresh_token, before.refresh_token);
+        // It can be put back: the caller does this when the copy brought back does not answer.
+        store
+            .adopt_refreshed(Provider::Claude, "synthetic-refresh-2", &kept)
+            .unwrap();
+        assert_eq!(
+            store.stored_credential(&id).unwrap().refresh_token,
+            before.refresh_token
+        );
+        // The print that matches keeps nothing aside, as before.
+        let (_root, store, id) = store_with(AuthKind::OAuth);
+        store
+            .mark_elsewhere_at(&id, true, 1, Some("studio.local"))
+            .unwrap();
+        let same = token_print(&store.stored_credential(&id).unwrap().refresh_token.unwrap());
+        let taken = recall_take(
+            &store,
+            &id,
+            "studio.local",
+            "remote-1",
+            &DEFAULT_APP,
+            2,
+            &member(&calls, Some(RENEWED), false),
+            Some(&same),
+        )
+        .unwrap();
+        assert!(taken.kept.is_none());
         assert_eq!(token_print("synthetic-refresh").len(), 16);
     }
 
