@@ -1219,8 +1219,19 @@ fn human_usage_and_events_print_utc_times_and_health() {
     let added: serde_json::Value =
         serde_json::from_str(&run(&["--json", "events", "--kind", "sign_ins"])).unwrap();
     let added = added["data"].as_array().unwrap();
-    assert_eq!(added.len(), 1, "{added:?}");
-    assert_eq!(added[0]["action"], "account_added");
+    // Every line is of the class; the usage check above may add a renewal (`login`) on a machine
+    // that reaches the network, so the count is not fixed.
+    assert!(
+        added
+            .iter()
+            .all(|e| ["login", "account_added", "kimi_account"]
+                .contains(&e["action"].as_str().unwrap_or_default())),
+        "{added:?}"
+    );
+    assert!(
+        added.iter().any(|e| e["action"] == "account_added"),
+        "{added:?}"
+    );
     let one: serde_json::Value =
         serde_json::from_str(&run(&["--json", "events", "--limit", "1"])).unwrap();
     assert_eq!(one["data"].as_array().unwrap().len(), 1);
