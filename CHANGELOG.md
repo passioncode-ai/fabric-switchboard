@@ -8,6 +8,8 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- An account on another machine no longer reads "Not checked while disabled": Switchboard reads each machine's accounts over ssh every 15 minutes in the background and shows "Used 42% on studio, 12 min ago", or that the machine did not answer and when it last did. The numbers are shown, never used to switch here. `switchboard machines list` and the agent tool `switchboard_machines` carry the same read, and *Needs attention* lists an account the provider refused on its machine (SB-366, DEC-0017).
+
 ## 0.7.83
 
 - A group can be marked as a backup group (Settings → Balancing between groups, *Backup: lends only*; `switchboard balance groups --backup-add`; MCP `switchboard_balance` `backup_add`). A group out of room takes a backup group's account first, and the account goes home once the group has room of its own again, or at once when the backup group's own folders need it. A backup group never borrows (SB-368, DEC-0016).

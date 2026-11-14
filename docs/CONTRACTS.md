@@ -3029,6 +3029,27 @@ unknown); runtime `machines::tests::location_words_read_a_typed_location_as_an_s
 (tool list), CLI `mcp_parity::every_cli_command_has_an_mcp_tool_or_a_reason`.
 
 
+
+### Background reads of other machines (SB-366, DEC-0017)
+
+`remote_usage::tick` runs from the owner's background pass after the dispatch sweep. With no
+machine group it returns at once and reads nothing. Otherwise, when a machine is due (15 minutes
+after its last try, or an hour once `failures >= 3`) and no read runs (`BUSY`), it starts one
+thread that reads every due machine one after another with `read_accounts`: a single
+`<switchboard> --json accounts list` over `ssh -o BatchMode=yes -o ConnectTimeout=15`, given up
+after 20 seconds. Each answer is matched to this machine's accounts of that machine group by label
+and provider, as `machines --live` matches, and written to `remote-usage.json` (0600):
+`{machines: {<name>: {tried_at, as_of, reason, failures, accounts: [{id, used_percent,
+usage_status, enabled}]}}}`. A failure keeps `as_of` and the accounts, sets `reason` (`unreachable`,
+`refused` for a refused target or path, `unreadable`) and counts `failures`; a success resets it. A
+machine group that is gone loses its entry. One log line `remote_usage` with `read` and `failed`
+counts per thread. `machines list` (no ssh) adds each machine's `read` and each account's `there`
+(`remote_usage::view`); Attention lists `refused_there` when an account's last read says
+`usage_status: rejected`. Nothing here selects, rotates, lends or renews (DEC-0013). Evidence:
+`remote_usage::tests::a_read_keeps_each_copy_there_and_a_failure_keeps_the_last_good_one`,
+`three_failures_in_a_row_read_a_machine_once_an_hour_and_a_gone_group_is_forgotten`,
+`nothing_starts_on_a_computer_without_machine_groups`,
+`attention::tests::a_copy_the_provider_refused_on_its_machine_is_listed_from_the_last_read`.
 ## MCP sign-ins across Claude homes (SB-358, SB-359, 2026-11-14)
 
 Claude Code keeps each MCP server's OAuth sign-in in its credential item, keyed

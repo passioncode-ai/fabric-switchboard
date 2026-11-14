@@ -4884,6 +4884,7 @@ async fn execute(
                 renewal_refused: &renewal_refused,
                 seats: &seats,
                 questions: &questions,
+                remote: &crate::remote_usage::read(root),
                 now,
             }))
         }

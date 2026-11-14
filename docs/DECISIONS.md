@@ -6,7 +6,7 @@ never renumber, never delete. The doc map ([DOCMAP.md](DOCMAP.md)) names this fi
 register. Decisions made before 2026-11-08 live where they were made (plans' `D-<n>`, board rows,
 research notes); the ones still in force that the board cites are seeded below with their source.
 
-**Next free ID:** `DEC-0021` (`DEC-0017`, `DEC-0018` and `DEC-0020` are held for the window and fleet plan's modules)
+**Next free ID:** `DEC-0021` (`DEC-0018` and `DEC-0020` are held for the window and fleet plan's modules)
 
 ## Format
 
@@ -301,6 +301,30 @@ research notes); the ones still in force that the board cites are seeded below w
   («добавить возможно группу backup аккаунтов … когда … не заканчивают аккаунты тогда они туда
   переключаются и поддерживают эту группу пока там не появится свой аккаунт потом возвращается
   обратно в бэкап»).
+
+### DEC-0017: The accounts on other machines are read in the background, and still never routed here
+
+- **Date:** 2026-11-14
+- **Status:** Accepted (built on branch `wf4`: SB-366, WF-4); amends DEC-0013's "on request"
+- **Context:** an account moved to another machine is turned off here (DEC-0013), so its row read
+  "Not checked while disabled", and its copy there was read only when a person asked
+  (`machines --live`). The operator asked that the usage of accounts on another device come here
+  and that the network work not fail.
+- **Decision:** the owner reads each machine group's Switchboard over ssh every 15 minutes while it
+  runs: one `accounts list` call per machine, 20 seconds at most, machines one after another, on a
+  thread of its own (never under the store's lock, never on the async worker). It keeps each
+  account's used percent, usage status and whether its copy is on in `remote-usage.json` (0600; ids,
+  numbers, codes and times, no label). A failed read keeps the last good one with its age and a code
+  (`unreachable`, `refused`, `unreadable`); three in a row read that machine once an hour. The
+  numbers are shown (the Accounts row, `machines list`, MCP `switchboard_machines`, Attention's
+  `refused_there`) and never used to switch, rotate or lend here: DEC-0013's routing rule stands.
+  When Fabric's hub carries each machine's holdings (SB-177), it replaces ssh.
+- **Consequences / affects:** [CONTRACTS](CONTRACTS.md#background-reads-of-other-machines-sb-366-dec-0017),
+  the lifecycle rows in AGENTS.md (a child `ssh` every 15 minutes, `remote-usage.json`), SCN-092
+  step 8, the Accounts row of an account on another machine.
+- **Source:** operator 2026-11-14, the window review ([plan](plans/2026-11-14-window-and-fleet/WF-04-remote-usage.md))
+  («чекинг подписок, который на другом устройстве, должен все равно сюда синхронизироваться как-то,
+  продумать все это сетевое взаимодействие … чтобы не вылетали»).
 
 ### DEC-0019: Every window action has an MCP tool or a written reason
 
