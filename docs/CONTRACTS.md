@@ -1727,6 +1727,18 @@ A session Switchboard launched keeps its transcript in its managed home
 Fabric Dashboards read twelve such stops as `no-transcript` on 2026-11-12. Evidence:
 `an_open_stop_names_its_launch_and_its_transcript_in_a_managed_home`.
 
+**A stop says when its session still runs (SB-376, 0.7.83).** Each waiting or claimed stop in
+`switchboard recovery` carries `live`: `{pid, status}` when a live Claude Code process holds the
+stop's session now, else null. Claude Code writes `sessions/<pid>.json` (with `sessionId` and
+`status`, `busy` or `idle`) in its config folder, the person's `~/.claude` and each home
+Switchboard launches in; a file counts only while its pid is a Claude Code process in this user's
+process table (`machine_sessions::live_sessions`, read only when a stop is open). Readiness and
+claims do not change: a host that resumes a session in its own terminal still claims it, and a host
+that would start the session again in a new process (`--resume`) must not while `live` is set. On
+2026-11-14 Fabric Dashboards resumed this repository's own session in a second process at 19:56Z
+while the first still ran in its terminal; both committed to one worktree until the second was
+stopped. Evidence: `a_session_is_live_only_while_its_pid_is_a_claude_code_process`.
+
 **Capacity has the room automatic switching wants (SB-345, 0.7.66).** An account is capacity for a
 stop only when its fresh account usage (`Usage::account_used_percent`, the fullest of its account
 windows) is under the stopped group's managed policy threshold less its hysteresis

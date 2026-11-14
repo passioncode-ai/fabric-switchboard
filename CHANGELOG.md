@@ -8,6 +8,13 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- Automatic switching writes each outcome to the log (switched, switched on a limit, switch failed, no account to move to), so the share that failed can be measured; "no account to move to" is written once while it lasts (SB-367, WF-5.2a).
+- Switching, continuing a stopped session and starting a board run now pass over the same accounts: those with a limit, those the provider refused since the last check, and limited Kimi Code accounts. A board run no longer starts on an account whose fresh usage is past the room its group keeps; an account with no fresh reading is not counted as full (SB-367, WF-5.2b).
+- A session that stops in a folder deleted since (a removed worktree) is still recorded by its path and waits to continue, instead of being dropped; a stop that cannot be recorded says why in the log (SB-367, WF-5.2c).
+- When a request is refused and moves once to the group's next account, an account whose last usage check failed or was refused comes last, after every account last seen healthy (SB-367, WF-5.2d).
+- When a workflow handed to another agent names no checkout, the hand-over continues in the folder of the workflow's newest launch that still exists, instead of stopping (SB-367, WF-5.2f).
+- `switchboard recovery` says, for each open stop, whether its session still runs in a live Claude Code process (`live` with its pid and status), so a host never starts a second copy of a session that is still open (SB-376).
+
 ## 0.7.82
 
 0.7.81 was tagged and not published: its nightly checks stopped on three codes the machine session list answers in `degraded`, which the error vocabulary check read as messages for people, and the gate also refused one board row whose status did not start with a known word. Both are fixed. The notes below are 0.7.81's, shipped here.

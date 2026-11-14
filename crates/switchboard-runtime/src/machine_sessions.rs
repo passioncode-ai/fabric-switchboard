@@ -86,6 +86,75 @@ fn transcript_roots(root: &Path) -> Vec<PathBuf> {
     roots
 }
 
+/// SB-376: the sessions a live Claude Code process holds now, by session id, with its pid and the
+/// status Claude Code reports (`busy`, `idle`). Claude Code writes `sessions/<pid>.json` in its
+/// config folder (the person's `~/.claude` and each home Switchboard launches in); a file whose pid
+/// is no longer a Claude Code process is left over and ignored. A host reads this before it starts
+/// a stopped session again: on 2026-11-14 Fabric Dashboards resumed this repository's session in a
+/// second process while the first still ran in its terminal, and both worked in one worktree.
+pub fn live_sessions(root: &Path) -> HashMap<String, (u32, String)> {
+    let Ok(procs) = agent_processes() else {
+        return HashMap::new();
+    };
+    let alive: std::collections::HashSet<u32> = procs
+        .iter()
+        .filter(|p| p.agent == "claude-code")
+        .map(|p| p.pid)
+        .collect();
+    let mut files = Vec::new();
+    for dir in session_dirs(root) {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            continue;
+        };
+        for path in entries.flatten().map(|e| e.path()) {
+            if path.extension().and_then(|x| x.to_str()) != Some("json") {
+                continue;
+            }
+            // A session file is a few hundred bytes; anything larger is not one.
+            if std::fs::metadata(&path).is_ok_and(|m| m.len() <= 64 * 1024) {
+                if let Some(v) = std::fs::read(&path)
+                    .ok()
+                    .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
+                {
+                    files.push(v);
+                }
+            }
+        }
+    }
+    live_from(&files, &alive)
+}
+
+/// The pure part of [`live_sessions`]: session files whose pid is a live Claude Code process.
+pub fn live_from(
+    files: &[Value],
+    alive: &std::collections::HashSet<u32>,
+) -> HashMap<String, (u32, String)> {
+    files
+        .iter()
+        .filter_map(|f| {
+            let pid = u32::try_from(f["pid"].as_u64()?).ok()?;
+            let session = f["sessionId"].as_str()?;
+            alive.contains(&pid).then(|| {
+                let status = f["status"].as_str().unwrap_or("unknown").to_owned();
+                (session.to_owned(), (pid, status))
+            })
+        })
+        .collect()
+}
+
+/// Claude Code's `sessions` folders: the person's own and each home Switchboard launches in.
+fn session_dirs(root: &Path) -> Vec<PathBuf> {
+    let mut dirs: Vec<PathBuf> = dirs::home_dir()
+        .map(|h| vec![h.join(".claude/sessions")])
+        .unwrap_or_default();
+    for folder in ["homes", "runtimes"] {
+        if let Ok(entries) = std::fs::read_dir(root.join(folder)) {
+            dirs.extend(entries.flatten().map(|e| e.path().join("sessions")));
+        }
+    }
+    dirs
+}
+
 /// The launch each home's session marker names: marker pid to launch id.
 fn launch_markers(root: &Path) -> HashMap<u32, String> {
     let mut found = HashMap::new();
@@ -412,6 +481,20 @@ mod tests {
         assert_eq!(rows[2]["quiet"], false);
     }
 
+    #[test]
+    fn a_session_is_live_only_while_its_pid_is_a_claude_code_process() {
+        // SB-376: a left-over file of an ended process never reads as a session still open.
+        let files = vec![
+            json!({"pid": 10, "sessionId": "s-open", "status": "idle"}),
+            json!({"pid": 11, "sessionId": "s-ended", "status": "busy"}),
+            json!({"pid": 12, "status": "busy"}),
+            json!({"sessionId": "s-nopid"}),
+        ];
+        let alive = std::collections::HashSet::from([10, 12]);
+        let live = live_from(&files, &alive);
+        assert_eq!(live.len(), 1, "{live:?}");
+        assert_eq!(live["s-open"], (10, "idle".to_string()));
+    }
     #[test]
     fn the_scan_answers_on_this_machine_without_failing() {
         let data = tempfile::tempdir().unwrap();

@@ -81,7 +81,7 @@ pub struct Wait {
     pub mode: Option<Mode>,
 }
 
-fn identifier(s: &str) -> bool {
+pub(crate) fn identifier(s: &str) -> bool {
     !s.is_empty()
         && s.len() <= 160
         && s.bytes()
@@ -331,7 +331,14 @@ pub(crate) fn register_stop(
     if !identifier(session) {
         return Err(INVALID.into());
     }
-    let directory = directory.canonicalize().map_err(|_| INVALID)?;
+    // WF-5.2c (C6): a folder gone since the stop (a removed worktree) still records the stop, by
+    // the path as the session stated it, so it shows and waits rather than vanishing; before,
+    // 440 stops in 30 days were refused this way and never resumed.
+    let directory = match directory.canonicalize() {
+        Ok(found) => found,
+        Err(_) if directory.is_absolute() => directory.to_path_buf(),
+        Err(_) => return Err(INVALID.into()),
+    };
     let _writing = writing();
     let (mut rows, dropped) = current(root, now)?;
     if let Some(live) = rows
@@ -431,6 +438,28 @@ pub(crate) fn candidates(
         .collect();
     eligible.sort_by(|a, b| a.id.cmp(&b.id));
     eligible.into_iter().map(|a| a.id.clone()).collect()
+}
+
+/// WF-5.2b (C3): the subscription accounts whose fresh usage (checked within [`MAX_AGE`]) is at or
+/// past the room their group's switching keeps (`headroom_percent`): automatic switching would move
+/// a session off them at once, so no new run starts there. An account with no fresh reading is
+/// not in it: an unknown is not a full account.
+pub(crate) fn past_headroom(snapshot: &Snapshot, now: i64) -> HashSet<String> {
+    snapshot
+        .accounts
+        .iter()
+        .filter(|a| a.kind == AuthKind::OAuth)
+        .filter(|a| {
+            a.usage.as_ref().is_some_and(|u| {
+                u.observed_at <= now
+                    && now - u.observed_at <= MAX_AGE
+                    && u.account_used_percent().is_some_and(|n| {
+                        n.is_finite() && n >= headroom_percent(snapshot, a.provider, &a.pool)
+                    })
+            })
+        })
+        .map(|a| a.id.clone())
+        .collect()
 }
 
 /// The used share below which an account may take a stopped session of `pool` (SB-345): the
@@ -673,6 +702,13 @@ pub(crate) fn status(
         .map(|r| r.session.as_str())
         .collect();
     let launched = crate::launches::by_session(root, &open);
+    // SB-376: a stop whose session still runs in a live process says so; a host that would start
+    // it again in another process must not.
+    let live = if open.is_empty() {
+        Default::default()
+    } else {
+        crate::machine_sessions::live_sessions(root)
+    };
     let sessions: Vec<_> = rows
         .iter()
         .map(|r| {
@@ -683,7 +719,9 @@ pub(crate) fn status(
                 .map_or((None, None), |(l, t)| (Some(l), t));
             serde_json::json!({"stop": r, "ready": ready.mode.is_some(), "mode": ready.mode,
                 "candidates": ready.accounts, "probe_at": ready.probe_at, "reason": ready.reason,
-                "launch_id": launch_id, "transcript": transcript})
+                "launch_id": launch_id, "transcript": transcript,
+                "live": open.contains(r.session.as_str()).then(|| live.get(&r.session)).flatten()
+                    .map(|(pid, status)| serde_json::json!({"pid": pid, "status": status}))})
         })
         .collect();
     let ready = sessions.iter().filter(|r| r["ready"] == true).count();
@@ -728,6 +766,34 @@ mod tests {
             accounts: vec![account("old"), account("new")],
             ..Default::default()
         }
+    }
+    #[test]
+    fn a_fresh_reading_past_the_groups_room_keeps_new_runs_off_an_account() {
+        // WF-5.2b (C3): a dispatch never starts on an account switching would move off at once.
+        let mut s = Snapshot {
+            accounts: vec![
+                account("full"),
+                account("room"),
+                account("stale"),
+                account("key"),
+            ],
+            ..Default::default()
+        };
+        for a in &mut s.accounts {
+            a.usage.as_mut().unwrap().used_percent = 95.0;
+        }
+        s.accounts[1].usage.as_mut().unwrap().used_percent = 50.0;
+        s.accounts[2].usage.as_mut().unwrap().observed_at = 101 - MAX_AGE - 1;
+        s.accounts[3].kind = AuthKind::ApiKey;
+        assert_eq!(past_headroom(&s, 101), HashSet::from(["full".to_string()]));
+        // The initial policy keeps 80 %: at 80 an account is past it, at 79 it is not.
+        s.accounts[1].usage.as_mut().unwrap().used_percent = 80.0;
+        assert!(past_headroom(&s, 101).contains("room"));
+        s.accounts[1].usage.as_mut().unwrap().used_percent = 79.0;
+        assert!(!past_headroom(&s, 101).contains("room"));
+        // No reading at all is unknown, never full.
+        s.accounts[0].usage = None;
+        assert!(past_headroom(&s, 101).is_empty());
     }
     #[test]
     fn a_stop_survives_restart_and_a_reset_is_not_capacity() {
@@ -1106,6 +1172,37 @@ mod tests {
         }
     }
 
+    #[test]
+    fn a_stop_in_a_folder_deleted_since_is_still_registered() {
+        // WF-5.2c (C6): the worktree went before the hook ran; the stop is kept by its path.
+        let root = tempfile::tempdir().unwrap();
+        let s = snapshot();
+        let gone = root.path().join("removed-worktree");
+        let stopped = register_stop(
+            root.path(),
+            &s,
+            "session-gone",
+            "old",
+            &gone,
+            StopKind::Limit,
+            100,
+        );
+        assert!(matches!(stopped, Ok(Stopped::New(_))), "{stopped:?}");
+        let waits = read(root.path()).unwrap();
+        assert_eq!(waits.len(), 1);
+        assert_eq!(waits[0].directory, gone);
+        // A relative folder still says nothing about where the session ran.
+        assert!(register_stop(
+            root.path(),
+            &s,
+            "session-rel",
+            "old",
+            std::path::Path::new("relative/folder"),
+            StopKind::Limit,
+            100,
+        )
+        .is_err());
+    }
     #[test]
     fn a_billing_stop_is_never_probed() {
         let root = tempfile::tempdir().unwrap();

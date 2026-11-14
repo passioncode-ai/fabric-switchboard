@@ -1160,10 +1160,10 @@ fn rotate(runtime: &Runtime, native_sources: bool) -> Result<(), String> {
         };
         // A rejected sign-in is never a candidate: activation would refuse it every pass and
         // the next eligible account would never be tried.
-        let mut excluded = runtime.limits.limited_ids(now());
         // SB-102: refusals the proxy recorded since the last scan count at once, so the pass
-        // never moves a pool back onto the account a request was just refused on.
-        excluded.extend(runtime.store.limited());
+        // never moves a pool back onto the account a request was just refused on (WF-5.2b: the
+        // set rotation, recovery and dispatch share).
+        let mut excluded = runtime.held(now());
         excluded.extend(
             runtime
                 .refresh
@@ -1286,6 +1286,7 @@ fn rotate(runtime: &Runtime, native_sources: bool) -> Result<(), String> {
                 _ => break (decision.candidate_id, reason),
             }
         };
+        log_rotation(runtime, policy, &reason);
         decisions.push(json!({"provider":policy.provider,"pool":policy.pool,"target":policy.target,"reason":reason,"candidate_id":candidate}));
     }
     *runtime
@@ -1293,6 +1294,61 @@ fn rotate(runtime: &Runtime, native_sources: bool) -> Result<(), String> {
         .lock()
         .map_err(|_| "Monitor state unavailable.")? = decisions;
     Ok(())
+}
+
+/// WF-5.2a: the outcome of a pass's switch for one policy, in the log, so the share of automatic
+/// switches that failed can be measured from the operations digests (the inventory of
+/// 2026-11-14 found the journal kept about 48 minutes and the log nothing). Codes only: no
+/// group name, no account. A switch tried is logged every time; `no_candidate` once while it
+/// lasts; a hold (below the threshold, no usage) logs nothing and ends a stretch.
+fn log_rotation(runtime: &Runtime, policy: &switchboard_core::RotationPolicy, reason: &str) {
+    let (outcome, result) = match reason {
+        "switched" => ("switched", "ok"),
+        "switched_on_limit" => ("switched_on_limit", "ok"),
+        "switch_failed" => ("switch_failed", "failed"),
+        "activation_failed" => ("activation_failed", "failed"),
+        "no_eligible_account" | "limit_no_eligible_account" => ("no_candidate", "no_account"),
+        _ => {
+            if let Ok(mut logged) = runtime.rotation_logged.lock() {
+                logged.remove(&policy_key(policy));
+            }
+            return;
+        }
+    };
+    if let Ok(mut logged) = runtime.rotation_logged.lock() {
+        let previous = logged.insert(policy_key(policy), outcome);
+        if outcome == "no_candidate" && previous == Some("no_candidate") {
+            return;
+        }
+    }
+    crate::oplog::event(
+        "rotation",
+        &[
+            (
+                "provider",
+                crate::oplog::Field::Code(policy.provider.as_str()),
+            ),
+            (
+                "target",
+                crate::oplog::Field::Code(if policy.target == "managed" {
+                    "managed"
+                } else {
+                    "native"
+                }),
+            ),
+            ("outcome", crate::oplog::Field::Code(outcome)),
+            ("result", crate::oplog::Field::Code(result)),
+        ],
+    );
+}
+
+fn policy_key(policy: &switchboard_core::RotationPolicy) -> String {
+    format!(
+        "{}:{}:{}",
+        policy.provider.as_str(),
+        policy.pool,
+        policy.target
+    )
 }
 
 #[cfg(test)]
@@ -1698,6 +1754,89 @@ mod tests {
         assert_eq!(
             events(&runtime.store, "rotation"),
             [(Some(b.id), "switched".to_string())]
+        );
+    }
+    #[tokio::test]
+    async fn the_shared_set_holds_a_refusal_the_proxy_recorded_since_the_last_scan() {
+        // WF-5.2b (C2, C3): rotation, recovery and dispatch read one set, and a request the
+        // provider just refused counts before the next scan writes it as a limit.
+        use crate::fixtures::*;
+        let root = tempfile::tempdir().unwrap();
+        let runtime = crate::fixtures::runtime(root.path(), signed_out, activates).await;
+        let a = save(&runtime.store, "synthetic-a", "default");
+        let b = save(&runtime.store, "synthetic-b", "default");
+        assert!(runtime.held(now()).is_empty());
+        runtime
+            .store
+            .set_limited(std::collections::HashSet::from([b.id.clone()]));
+        let held = runtime.held(now());
+        assert!(held.contains(&b.id) && !held.contains(&a.id), "{held:?}");
+        // Rotation passes over it too: from a spent `a`, nothing is left to move to.
+        quota(&runtime.store, &a.id, 95.0);
+        quota(&runtime.store, &b.id, 10.0);
+        runtime
+            .store
+            .select(Provider::Claude, "default", &a.id)
+            .unwrap();
+        runtime.store.set_policy(policy("managed")).unwrap();
+        rotate(&runtime, false).unwrap();
+        assert_eq!(reason(&runtime), "no_eligible_account");
+    }
+    #[tokio::test]
+    async fn each_rotation_outcome_is_logged_and_no_candidate_once_a_stretch() {
+        // WF-5.2a: the share of automatic switches that failed is read from the log, so every
+        // switch tried says how it ended, and a group with no account to move to says so once.
+        use crate::fixtures::*;
+        let rotations = |events: Vec<crate::oplog::Captured>| -> Vec<Vec<&'static str>> {
+            events
+                .into_iter()
+                .filter(|(e, _)| *e == "rotation")
+                .map(|(_, codes)| codes)
+                .collect()
+        };
+        let root = tempfile::tempdir().unwrap();
+        let runtime = crate::fixtures::runtime(root.path(), signed_out, activates).await;
+        let a = save(&runtime.store, "synthetic-a", "default");
+        let b = save(&runtime.store, "synthetic-b", "default");
+        quota(&runtime.store, &a.id, 95.0);
+        quota(&runtime.store, &b.id, 10.0);
+        runtime
+            .store
+            .select(Provider::Claude, "default", &a.id)
+            .unwrap();
+        runtime.store.set_policy(policy("managed")).unwrap();
+        crate::oplog::capture_begin();
+        rotate(&runtime, false).unwrap();
+        assert_eq!(
+            rotations(crate::oplog::capture_end()),
+            [vec!["claude", "managed", "switched", "ok"]]
+        );
+
+        let root = tempfile::tempdir().unwrap();
+        let runtime = crate::fixtures::runtime(root.path(), signed_out, activates).await;
+        let a = save(&runtime.store, "synthetic-a", "default");
+        let b = save(&runtime.store, "synthetic-b", "default");
+        quota(&runtime.store, &a.id, 95.0);
+        quota(&runtime.store, &b.id, 96.0);
+        runtime
+            .store
+            .select(Provider::Claude, "default", &a.id)
+            .unwrap();
+        runtime.store.set_policy(policy("managed")).unwrap();
+        crate::oplog::capture_begin();
+        rotate(&runtime, false).unwrap();
+        rotate(&runtime, false).unwrap();
+        assert_eq!(reason(&runtime), "no_eligible_account");
+        // Back under the threshold the stretch ends; the next one is logged again.
+        quota(&runtime.store, &a.id, 10.0);
+        rotate(&runtime, false).unwrap();
+        assert_eq!(reason(&runtime), "below_threshold");
+        quota(&runtime.store, &a.id, 95.0);
+        rotate(&runtime, false).unwrap();
+        let no_candidate = vec!["claude", "managed", "no_candidate", "no_account"];
+        assert_eq!(
+            rotations(crate::oplog::capture_end()),
+            [no_candidate.clone(), no_candidate]
         );
     }
     #[tokio::test]

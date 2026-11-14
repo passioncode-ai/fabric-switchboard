@@ -2217,3 +2217,38 @@ fn automatic_switching_never_moves_a_subscription_onto_a_paid_key() {
     };
     assert!(needs_key.admits(&account(&key)));
 }
+
+/// WF-5.2d (C4): with no fresh figure, failover takes an account last seen healthy before one
+/// whose last check failed or whose checks the provider refused lately; the blind one is still
+/// taken when nothing else is left.
+#[test]
+fn failover_takes_a_blind_account_only_after_every_healthy_one() {
+    let (_root, _vault, store) = setup();
+    let now = clock();
+    let a = account(&store, "org-a", now);
+    let failed = account(&store, "org-b", now);
+    let paced = account(&store, "org-c", now);
+    let healthy = account(&store, "org-d", now);
+    observe(&store, &a, 20., now);
+    // Stale figures, so none of them is fresh; the blind ones look least used.
+    for (id, percent) in [(&failed, 5.), (&paced, 6.), (&healthy, 60.)] {
+        observe(&store, id, percent, now - 3600);
+    }
+    store
+        .usage_health(&failed, "failed", now - 60, now + 600)
+        .unwrap();
+    store.set_paced(std::collections::HashSet::from([paced.clone()]));
+    store.select(Provider::Claude, "default", &a).unwrap();
+
+    let (moved, _) = store
+        .failover(Provider::Claude, "default", &a, OAUTH, now)
+        .unwrap()
+        .unwrap();
+    assert_eq!(moved.id, healthy);
+    // The healthy one refused too: a blind one is better than none.
+    let (moved, _) = store
+        .failover(Provider::Claude, "default", &healthy, OAUTH, now)
+        .unwrap()
+        .unwrap();
+    assert!(moved.id == failed || moved.id == paced, "{}", moved.id);
+}
