@@ -10,7 +10,7 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## 0.7.82
 
-0.7.81 was tagged and not published: its nightly checks stopped on three codes the machine session list answers in `degraded`, which the error vocabulary check read as messages for people. They are now listed as codes. The notes below are 0.7.81's, shipped here.
+0.7.81 was tagged and not published: its nightly checks stopped on three codes the machine session list answers in `degraded`, which the error vocabulary check read as messages for people, and the gate also refused one board row whose status did not start with a known word. Both are fixed. The notes below are 0.7.81's, shipped here.
 
 - API keys reads as three blocks: this computer's key, each group's key, and the paid accounts, each key with its last characters and what it spends (SB-369).
 - Each group's card opens with one line saying how it stands (its accounts with room, a key, a spending ceiling) and keeps its folders, accounts and keys in blocks that fold (SB-370).
