@@ -8,6 +8,8 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+## 0.7.85
+
 - A cap on the coding sessions this computer runs at once: `switchboard capacity set 20` (MCP `switchboard_capacity`). Working Claude Code and Codex sessions count, Switchboard's or not; a session whose folder was not written for 30 minutes does not. At the cap, `switchboard dispatch` answers `at_capacity` and `launch --hosted` waits, so Fabric's board queues its requests instead of starting more sessions on a loaded machine. `switchboard capacity` shows the cap, how many count and how many are free (SB-378).
 - `switchboard uninstall` also removes `remote-usage.json` (SB-366) and `capacity.json`.
 ## 0.7.84
