@@ -8,9 +8,9 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
-## 0.7.78
+## 0.7.79
 
-- 0.7.77 was tagged but never published: one of its tests failed on Windows only (a path written with a forward slash). 0.7.78 carries the same changes, listed below.
+- 0.7.77 and 0.7.78 were tagged but never published: their tests failed on Windows only (a path written with a forward slash, then a test that ran out of stack on Windows on Arm). 0.7.79 carries the same changes, listed below.
 
 - A session Switchboard starts now has your MCP sign-ins. When you have signed in to an MCP server such as Figma or Sentry in one Claude home, a launch copies that sign-in into the home it starts, so the session no longer says "Needs authentication" there. Only the access token is copied, never the refresh token or client secret, so only the home you signed in from ever renews it, and a home's own sign-in is never replaced (SB-358).
 - New: `switchboard mcp-homes` and the agent tool `switchboard_mcp_homes` show which of your Claude homes is signed in to which MCP server, and name a server signed in in some homes and not others, or one whose sign-in sits under an older configuration of the server. Names and URLs only, never a token (SB-359).
