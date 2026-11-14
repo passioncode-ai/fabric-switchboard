@@ -300,15 +300,16 @@ export function createDemoAdapter(): Adapter {
   let codexOn = false;
   // SB-352 wave 2 (SCN-090): balancing, off until the person turns a group on; with two groups
   // on, the demo shows one account lent between them.
-  let balanceGroups: string[] = []; let balanceAllNew = false;
+  let balanceGroups: string[] = []; let balanceAllNew = false; let balanceBackup: string[] = [];
   const balanceStatus = () => {
     const pools = ['default', ...(state.projects ?? []).map((p) => p.pool)];
     const name = (pool: string) => pool === 'default' ? 'default' : (state.projects ?? []).find((p) => p.pool === pool)?.name ?? pool;
     balanceGroups = balanceGroups.filter((g) => pools.includes(g));
+    balanceBackup = balanceBackup.filter((g) => balanceGroups.includes(g));
     const [from, to] = balanceGroups;
     const lender = from ? state.accounts.find((a) => a.pool === from && a.provider === 'claude') : undefined;
     const lent = lender && to ? [{ account_id: lender.id, label: lender.label, provider: lender.provider, from, from_name: name(from), to, to_name: name(to), at: now() - 1800 }] : [];
-    return { on: balanceGroups.length > 0, groups: balanceGroups.map((pool) => ({ pool, name: name(pool) })), available: pools.map((pool) => ({ pool, name: name(pool), chosen: balanceGroups.includes(pool) })), all_new: balanceAllNew, pass_minutes: 15, lent, recent: [] };
+    return { on: balanceGroups.length > 0, groups: balanceGroups.map((pool) => ({ pool, name: name(pool) })), available: pools.map((pool) => ({ pool, name: name(pool), chosen: balanceGroups.includes(pool), backup: balanceBackup.includes(pool) })), all_new: balanceAllNew, pass_minutes: 15, lent, recent: [], backup: balanceBackup.map((pool) => { const own = state.accounts.filter((a) => a.pool === pool); return { pool, name: name(pool), accounts: own.length, lent: lent.filter((l) => l.from === pool).length }; }) };
   };
   // SB-183 (node A-7): the terminal hook, every state of SCN-075 by `?shell=` (default_on, on,
   // off, default_off, held (SB-222: the organization's folders belong to another group), inactive,
@@ -634,6 +635,13 @@ export function createDemoAdapter(): Adapter {
       await pause();
       if (change?.add?.length || change?.remove?.length) { balanceGroups = [...balanceGroups.filter((g) => !(change.remove ?? []).includes(g)), ...(change.add ?? []).filter((g) => !balanceGroups.includes(g))]; }
       if (typeof change?.all_new === 'boolean') balanceAllNew = change.all_new;
+      // WF-6 (DEC-0016): marking a group backup chooses it; `default` cannot be one.
+      for (const g of change?.backup_add ?? []) {
+        if (g === 'default') throw new Error('The default group cannot be a backup group: it holds every folder that is in no group.');
+        if (!balanceGroups.includes(g)) balanceGroups.push(g);
+        if (!balanceBackup.includes(g)) balanceBackup.push(g);
+      }
+      if (change?.backup_remove?.length) balanceBackup = balanceBackup.filter((g) => !change.backup_remove?.includes(g));
       return balanceStatus();
     },
     async codexRoute(enabled) {

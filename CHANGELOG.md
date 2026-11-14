@@ -8,6 +8,8 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- A group can be marked as a backup group (Settings → Balancing between groups, *Backup: lends only*; `switchboard balance groups --backup-add`; MCP `switchboard_balance` `backup_add`). A group out of room takes a backup group's account first, and the account goes home once the group has room of its own again, or at once when the backup group's own folders need it. A backup group never borrows (SB-368, DEC-0016).
+
 - Automatic switching writes each outcome to the log (switched, switched on a limit, switch failed, no account to move to), so the share that failed can be measured; "no account to move to" is written once while it lasts (SB-367, WF-5.2a).
 - Switching, continuing a stopped session and starting a board run now pass over the same accounts: those with a limit, those the provider refused since the last check, and limited Kimi Code accounts. A board run no longer starts on an account whose fresh usage is past the room its group keeps; an account with no fresh reading is not counted as full (SB-367, WF-5.2b).
 - A session that stops in a folder deleted since (a removed worktree) is still recorded by its path and waits to continue, instead of being dropped; a stop that cannot be recorded says why in the log (SB-367, WF-5.2c).

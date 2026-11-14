@@ -2928,6 +2928,23 @@ balancing off a pass reads no file and writes none); MCP
 `crates/switchboard-cli/tests/mcp.rs` (`switchboard_balance` reads off, refuses an unknown group,
 chooses and takes out `default`).
 
+
+### Backup groups (WF-6, DEC-0016)
+
+`balancing.json` carries `backup`: the pool ids of chosen groups that only lend (absent when
+none; an older reader ignores it). `balancing::change` takes `Backup {add, remove}`: `default` is
+refused with “The default group cannot be a backup group: it holds every folder that is in no
+group.”, a group marked is chosen too, and a group taken out of the chosen ones is unmarked;
+`resolve` drops a mark whose group is no longer chosen. In `plan`: a backup group is never a
+borrower; as a lender it keeps no minimum (`own >= 1`), and its account is taken before any other
+group's (then the most room, the latest reset, the id). A loan from a backup group returns with
+reason `own_room` once the borrower has, after the account's cooldown, an account with room that
+is not on loan to it (`View::rooms_of_its_own`), and with `home_needs` when the backup group itself
+needs room. `balance status` adds `backup: [{pool, name, accounts, lent}]` and
+`available[].backup`. Evidence: `balancing::tests::a_backup_group_lends_first_and_keeps_no_minimum`,
+`a_backup_group_never_borrows_and_its_own_work_takes_its_account_home`,
+`a_backup_account_goes_home_once_the_borrower_has_room_of_its_own`,
+`any_group_but_default_is_marked_backup_and_marking_chooses_it`.
 ## Machine groups (SB-355)
 
 Decided in [DEC-0013](DECISIONS.md#dec-0013-an-account-on-another-machine-belongs-to-that-machines-group-and-to-no-group-here);

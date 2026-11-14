@@ -1776,7 +1776,10 @@ export function githubSource(owner: string): string {
 export interface BalancingView {
   state: 'reading' | 'failed' | 'off' | 'on';
   line: string;
-  groups: { pool: string; label: string; chosen: boolean }[];
+  /** `canBackup`: any group but `default` (DEC-0016); `backup`: marked now. */
+  groups: { pool: string; label: string; chosen: boolean; canBackup: boolean; backup: boolean }[];
+  /** WF-6: one line per backup group, with how many of its accounts are lent now. */
+  backups: string[];
   allNew: boolean;
   loans: string[];
   returns: string[];
@@ -1784,7 +1787,7 @@ export interface BalancingView {
   retry: boolean;
 }
 export function balancingView(status: BalanceStatus | null, error: string | null = null, accounts: Pick<Account, 'id' | 'label'>[] = []): BalancingView {
-  const none = { groups: [], allNew: false, loans: [], returns: [] };
+  const none = { groups: [], backups: [], allNew: false, loans: [], returns: [] };
   if (!status) {
     if (error) return { ...none, state: 'failed', line: t('Balancing could not be read.'), error, retry: true };
     return { ...none, state: 'reading', line: t('Reading balancing…'), error: null, retry: false };
@@ -1792,7 +1795,8 @@ export function balancingView(status: BalanceStatus | null, error: string | null
   const label = (pool: string, name: string) => pool === 'default' ? t('Default group') : name;
   const names = new Map(status.available.map((g) => [g.pool, label(g.pool, g.name)]));
   const group = (pool: string) => names.get(pool) ?? poolName(pool);
-  const groups = status.available.map((g) => ({ pool: g.pool, label: label(g.pool, g.name), chosen: g.chosen }));
+  const groups = status.available.map((g) => ({ pool: g.pool, label: label(g.pool, g.name), chosen: g.chosen, canBackup: g.pool !== 'default' && g.chosen, backup: g.backup === true }));
+  const backups = (status.backup ?? []).map((b) => t('{group} is a backup group: {lent} of {total} lent now.', { group: group(b.pool), lent: b.lent, total: b.accounts }));
   const chosen = groups.filter((g) => g.chosen).length;
   const line = status.on ? plural(chosen, { one: 'On: {n} group takes part.', other: 'On: {n} groups take part.' }) : t('Off: no group takes part.');
   const accountLabel = (id: string, known: string | null = null) => known ?? accounts.find((a) => a.id === id)?.label ?? t('An account no longer saved');
@@ -1802,10 +1806,11 @@ export function balancingView(status: BalanceStatus | null, error: string | null
     .filter((e) => e.action === 'return' && e.outcome === 'done' && !lentNow.has(e.account))
     .slice(0, 3)
     .map((e) => t('{account} is back in {group}.', { account: accountLabel(e.account), group: group(e.from) }));
-  return { state: status.on ? 'on' : 'off', line, groups, allNew: status.all_new, loans, returns, error, retry: false };
+  return { state: status.on ? 'on' : 'off', line, groups, backups, allNew: status.all_new, loans, returns, error, retry: false };
 }
 /** The notice after one switch (SCN-090 steps 2 to 4). */
-export function balancingNotice(change: { group?: string; on: boolean; allNew?: boolean }): string {
+export function balancingNotice(change: { group?: string; on: boolean; allNew?: boolean; backup?: boolean }): string {
+  if (change.backup !== undefined) return change.backup ? t('{group} is a backup group now: it lends its accounts first and gets each back once the borrower has room of its own.', { group: change.group ?? '' }) : t('{group} is no longer a backup group and takes part like the others.', { group: change.group ?? '' });
   if (change.allNew !== undefined) return change.allNew ? t('Groups made later take part in balancing.') : t('Groups made later stay out of balancing until you turn them on.');
   return change.on ? t('{group} takes part in balancing.', { group: change.group ?? '' }) : t('{group} no longer takes part. Accounts it lent or borrowed are back in their own groups.', { group: change.group ?? '' });
 }

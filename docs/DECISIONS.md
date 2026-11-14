@@ -6,7 +6,7 @@ never renumber, never delete. The doc map ([DOCMAP.md](DOCMAP.md)) names this fi
 register. Decisions made before 2026-11-08 live where they were made (plans' `D-<n>`, board rows,
 research notes); the ones still in force that the board cites are seeded below with their source.
 
-**Next free ID:** `DEC-0021` (`DEC-0016` to `DEC-0018` and `DEC-0020` are held for the window and fleet plan's modules)
+**Next free ID:** `DEC-0021` (`DEC-0017`, `DEC-0018` and `DEC-0020` are held for the window and fleet plan's modules)
 
 ## Format
 
@@ -274,6 +274,33 @@ research notes); the ones still in force that the board cites are seeded below w
 - **Source:** operator 2026-11-14, the window review ([plan](plans/2026-11-14-window-and-fleet/WF-03-attention.md))
   («Подписки, которые у нас с ошибками, нужно залогиниться, их сразу поднимаем вверх, в отдельную
   категорию, типа "Attention" … после залогинивания они возвращаются туда же, где были»).
+
+### DEC-0016: A backup group lends first, keeps no minimum and never borrows
+
+- **Date:** 2026-11-14
+- **Status:** Accepted (built on branch `wf6`: SB-368, WF-6)
+- **Context:** balancing (DEC-0012) lends between working groups only, and each lender keeps two
+  accounts with room. The operator asked for a group of accounts kept in reserve that supports a
+  group out of room and comes back once that group has its own room again. The plan said a backup
+  group holds no folders; the store refuses a group without a folder (`projects.rs:445`), and an
+  older Switchboard reading such a store would refuse it too, so that wording could not ship.
+- **Decision:** any chosen group but `default` can be marked backup. It never borrows, keeps no
+  minimum, and is asked first: a group out of room takes a backup group's account before any other
+  group's. A backup account goes home once the borrower has an account of its own (its own or one it
+  shares by the person's choice, never another loan) with room, after the account's one-hour
+  cooldown; and at once when the backup group's own folders have requests and no room
+  (`home_needs`). Organization boundaries hold as in DEC-0012. The mark lives in `balancing.json`
+  (`backup`), not in `accounts.json`: an older Switchboard reads the store unchanged and treats the
+  group as an ordinary chosen one. Marking a group chooses it; taking it out of the chosen groups
+  unmarks it.
+- **Consequences / affects:** [CONTRACTS](CONTRACTS.md#backup-groups-wf-6-dec-0016), [CLI](CLI.md)
+  `balance groups --backup-add|--backup-remove`, MCP `switchboard_balance` `backup_add`,
+  `backup_remove`, the window's *Backup: lends only* switch (SCN-090 step 7), `balance status`
+  `backup` and `available[].backup`.
+- **Source:** operator 2026-11-14, the window review ([plan](plans/2026-11-14-window-and-fleet/WF-06-backup-group.md))
+  («добавить возможно группу backup аккаунтов … когда … не заканчивают аккаунты тогда они туда
+  переключаются и поддерживают эту группу пока там не появится свой аккаунт потом возвращается
+  обратно в бэкап»).
 
 ### DEC-0019: Every window action has an MCP tool or a written reason
 

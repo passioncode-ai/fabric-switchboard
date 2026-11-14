@@ -41,9 +41,6 @@ pub const NO_SUCH_GROUP: &str =
 /// DEC-0016: the default group holds every folder in no group, so it can never only lend.
 pub const BACKUP_DEFAULT: &str =
     "The default group cannot be a backup group: it holds every folder that is in no group.";
-/// DEC-0016: a backup group starts no session, so it holds no folder.
-pub const BACKUP_HAS_FOLDERS: &str =
-    "A backup group holds no folders. Take its folders out first, then mark it as backup.";
 pub const NOT_SAVED: &str =
     "Balancing settings could not be saved. Check that the data folder is writable, then try again.";
 
@@ -67,8 +64,9 @@ pub struct Settings {
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub moved: BTreeMap<String, i64>,
     /// WF-6, DEC-0016: chosen groups that only lend. A backup group never borrows, keeps no
-    /// minimum and is asked first; kept here, not in `accounts.json`, so an older Switchboard
-    /// reads the store unchanged (it reads such a group as an ordinary chosen one).
+    /// minimum and is asked first; its own folders still come first (`home_needs`). Kept here,
+    /// not in `accounts.json`, so an older Switchboard reads the store unchanged (it reads such
+    /// a group as an ordinary chosen one).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub backup: Vec<String>,
 }
@@ -134,14 +132,9 @@ pub fn resolve(settings: &mut Settings, snapshot: &Snapshot) -> bool {
     let pools = pools(snapshot);
     settings.groups.retain(|g| pools.contains(g));
     settings.seen.retain(|g| pools.contains(g));
-    // DEC-0016: a backup group that gained a folder, or left the chosen ones, lends no more.
+    // DEC-0016: a backup group that left the chosen ones lends no more.
     let groups = settings.groups.clone();
-    settings.backup.retain(|g| {
-        groups.contains(g)
-            && snapshot
-                .project_of_pool(g)
-                .is_some_and(|p| p.folders.is_empty())
-    });
+    settings.backup.retain(|g| groups.contains(g));
     if settings.on() {
         for pool in &pools {
             if !settings.seen.contains(pool) {
@@ -739,17 +732,9 @@ pub fn change(
     {
         return Err(NO_SUCH_GROUP.into());
     }
-    // DEC-0016: only a group with no folder, never `default`, only lends.
-    for g in &backup.add {
-        if g == DEFAULT_POOL {
-            return Err(BACKUP_DEFAULT.into());
-        }
-        if snapshot
-            .project_of_pool(g)
-            .is_some_and(|p| !p.folders.is_empty())
-        {
-            return Err(BACKUP_HAS_FOLDERS.into());
-        }
+    // DEC-0016: any group but `default` may only lend.
+    if backup.add.iter().any(|g| g == DEFAULT_POOL) {
+        return Err(BACKUP_DEFAULT.into());
     }
     let before = settings.clone();
     // A backup group is a chosen one: marking it chooses it.
@@ -979,12 +964,10 @@ mod tests {
         s
     }
 
-    /// The estate with Spare, a group with no folders and one account with room, marked backup.
+    /// The estate with Spare, a group with one account with room, marked backup.
     fn with_backup(used: f64) -> (Snapshot, Settings) {
         let mut s = estate();
-        let mut spare = group("spare");
-        spare.folders.clear();
-        s.projects.push(spare);
+        s.projects.push(group("spare"));
         s.accounts.push(account("spare-1", "spare", Some(used)));
         let mut settings = chosen(&["agents", "apps", "spare"]);
         settings.backup = vec!["spare".into()];
@@ -1011,7 +994,7 @@ mod tests {
     }
 
     #[test]
-    fn a_backup_group_never_borrows() {
+    fn a_backup_group_never_borrows_and_its_own_work_takes_its_account_home() {
         let (s, settings) = with_backup(99.0);
         let actions = plan(
             &s,
@@ -1021,6 +1004,28 @@ mod tests {
             NOW,
         );
         assert!(actions.is_empty(), "{actions:?}");
+        // Spare's own folders are busy and its account is lent: it comes home (`home_needs`).
+        let (mut s, mut settings) = with_backup(50.0);
+        s.projects[0].shared_accounts.push("spare-1".into());
+        settings.lent = vec![lent(
+            "spare-1",
+            "spare",
+            "agents",
+            NOW - 2 * COOLDOWN_SECONDS,
+        )];
+        let actions = plan(
+            &s,
+            &sig_map(&[busy("spare", 40, 3), busy("agents", 40, 3)]),
+            &Held::default(),
+            &settings,
+            NOW,
+        );
+        assert!(
+            actions.iter().any(|a| a.action == "return"
+                && a.account == "spare-1"
+                && a.reason == "home_needs"),
+            "{actions:?}"
+        );
     }
 
     #[test]
@@ -1052,8 +1057,8 @@ mod tests {
     }
 
     #[test]
-    fn only_a_group_with_no_folders_is_marked_backup_and_marking_chooses_it() {
-        let (mut s, _) = with_backup(50.0);
+    fn any_group_but_default_is_marked_backup_and_marking_chooses_it() {
+        let (s, _) = with_backup(50.0);
         let mut settings = Settings::default();
         let mark = |g: &str| Backup {
             add: vec![g.into()],
@@ -1063,22 +1068,12 @@ mod tests {
             change(&mut settings, &s, &[], &[], None, &mark("default")).unwrap_err(),
             BACKUP_DEFAULT
         );
-        assert_eq!(
-            change(&mut settings, &s, &[], &[], None, &mark("apps")).unwrap_err(),
-            BACKUP_HAS_FOLDERS
-        );
         assert!(change(&mut settings, &s, &[], &[], None, &mark("spare")).unwrap());
         assert_eq!(
             (settings.groups.clone(), settings.backup.clone()),
             (vec!["spare".to_string()], vec!["spare".to_string()])
         );
-        // A folder added later ends the mark at the next pass; the group stays chosen.
-        s.projects[2].folders.push("/work/spare".into());
-        assert!(resolve(&mut settings, &s));
-        assert!(settings.backup.is_empty() && settings.groups == ["spare"]);
         // Unmarking leaves the group chosen; taking it out of the chosen ones unmarks it too.
-        s.projects[2].folders.clear();
-        change(&mut settings, &s, &[], &[], None, &mark("spare")).unwrap();
         let unmark = Backup {
             add: vec![],
             remove: vec!["spare".into()],
