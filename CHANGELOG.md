@@ -8,6 +8,11 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+## 0.7.80
+
+- A new Settings page holds what stays set: automatic switching, balancing between groups, Codex in group folders, terminals, running in the background, updates, language and appearance, backups and usage counts. The Accounts page keeps one line on switching with a link there (SB-363).
+- Accounts are shown by machine: this computer first, Claude then Codex, then each other machine in its own section that folds. One row of filters replaces the two chip bars: find by name or e-mail, an organization, and *Needs attention only* (SB-364).
+- *Needs attention* at the top of Accounts lists what needs you, each with one button; the account also stays in its group. The Claude and Codex cards under *In use now* now look alike, and *Given to agents* says which agent, its organization, machine and latest launch (SB-364, SB-365).
 - New: `switchboard attention` and the agent tool `switchboard_attention` list what needs you, each with the step that fixes it: an account to sign in to again (its sign-in ended, its organization's seat ended, or the provider refused to renew it), usage checks failing for over an hour, a move to another machine whose answer was lost, and a spending ceiling waiting for your answer. Listed accounts stay in their groups with their selection, and nothing moves; signed in again, an account leaves the list on the next background check (SB-365).
 - A move to another machine whose answer was lost is now written down, so it shows under Attention until you call the account back (SB-365).
 - Every action of the window now has an agent tool, or a written reason it has none, and a test fails when a new window action lands without one (SB-363).
