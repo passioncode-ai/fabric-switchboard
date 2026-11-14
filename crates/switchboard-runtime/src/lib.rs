@@ -7,6 +7,7 @@ pub mod agent_settings;
 pub mod agents;
 pub mod analytics;
 pub mod app_doors;
+pub mod attention;
 pub mod attribution;
 pub(crate) mod balancing;
 mod bindings;
@@ -357,6 +358,9 @@ pub enum Operation {
         #[serde(default)]
         live: bool,
     },
+    /// SB-365 (WF-3.1, DEC-0015): what needs a person, each with its reason and the action that
+    /// fixes it. A view: nothing moves, the accounts stay in their groups.
+    Attention,
     /// SB-359: which of the person's Claude homes is signed in to which MCP server (names, URLs,
     /// booleans and expiry times, never a token).
     McpHomes,
@@ -1349,6 +1353,9 @@ impl Runtime {
                 // SB-355: `ssh -G` and the live reads run outside the store; its writes are
                 // their own short calls.
                 | Operation::Machines { .. }
+                // SB-365: the snapshot, the owner's sign-in verdicts in memory, seats.jsonl and
+                // spend.json; nothing is written.
+                | Operation::Attention
                 // SB-359: Keychain reads of Claude Code's items; the store is only read.
                 | Operation::McpHomes
                 | Operation::MachinesAdopt { .. }
@@ -4153,6 +4160,35 @@ fn record_seat(
         );
     }
 }
+/// SB-365: a move whose answer was lost (`OUTCOME_UNKNOWN`) leaves the account marked here and
+/// its copy there unknown; an `unknown` line lets Attention list it until a later move or call
+/// back. Any other outcome writes nothing here.
+fn record_lost_move(
+    root: &Path,
+    moved: &Result<Value, String>,
+    id: &str,
+    to: &str,
+    pool: &str,
+    decision: Option<&spend::Decision>,
+    remote: &account_send::Program<'_>,
+) {
+    if moved
+        .as_ref()
+        .is_err_and(|e| e == account_send::OUTCOME_UNKNOWN)
+    {
+        record_seat(
+            root,
+            "unknown",
+            id,
+            to,
+            pool,
+            decision,
+            None,
+            None,
+            Some(remote),
+        );
+    }
+}
 /// SB-292: a seat granted to another machine, which the operator's words order and
 /// `seats.jsonl` records.
 fn seat_operation(operation: &Operation) -> bool {
@@ -4795,6 +4831,28 @@ async fn execute(
         Operation::SetPolicy { policy } => {
             store.set_policy(policy)?;
             Ok(Value::Null)
+        }
+        Operation::Attention => {
+            let snapshot = store.snapshot()?;
+            let sign_in = refresh_state.sign_in_known(&store);
+            let renewal_refused = refresh_state.lineages_refused();
+            let seats = seats::recent(root, 1000);
+            let now = monitor::now();
+            // An unreadable spend.json has no question to show; the ceilings page says why.
+            let questions = spend::read(root)
+                .map(|mut file| {
+                    spend::prune(&mut file, Some(&snapshot), now);
+                    file.questions
+                })
+                .unwrap_or_default();
+            Ok(attention::build(&attention::Inputs {
+                snapshot: &snapshot,
+                sign_in: &sign_in,
+                renewal_refused: &renewal_refused,
+                seats: &seats,
+                questions: &questions,
+                now,
+            }))
         }
         Operation::MonitorStatus => Ok(json!({
             "running": runtime.is_some(), "interval_seconds": monitor::INTERVAL_SECONDS, "idle_interval_seconds": switchboard_core::CHECK_IDLE_SECONDS,
@@ -5840,7 +5898,11 @@ async fn execute(
                         &|token| refresh_state.wait_settled(token),
                     )
                 })
-            }?;
+            };
+            // SB-365: a lost answer leaves the account marked here and its copy there unknown;
+            // the line lets Attention list it until it is called back.
+            record_lost_move(root, &moved, &id, &to, &pool, decision.as_ref(), &remote);
+            let moved = moved?;
             record_seat(
                 root,
                 "granted",
@@ -10766,6 +10828,106 @@ mod owner_tests {
         let all = accounts_of(&runtime.store);
         assert_eq!(all.len(), 1);
         assert_eq!(all[0].label, "Personal");
+    }
+    /// SB-365: only a lost answer to a move writes an `unknown` seat line; a refusal writes none.
+    #[test]
+    fn only_a_lost_move_is_recorded_as_unknown() {
+        let root = tempfile::tempdir().unwrap();
+        let remote = account_send::Program {
+            path: account_send::REMOTE_DEFAULT,
+            data_dir: None,
+        };
+        let refused: Result<Value, String> = Err(account_send::ADD_FAILED.into());
+        record_lost_move(
+            root.path(),
+            &refused,
+            "a",
+            "studio.local",
+            "default",
+            None,
+            &remote,
+        );
+        record_lost_move(
+            root.path(),
+            &Ok(json!({})),
+            "a",
+            "studio.local",
+            "default",
+            None,
+            &remote,
+        );
+        assert!(seats::recent(root.path(), 10).is_empty());
+        let lost: Result<Value, String> = Err(account_send::OUTCOME_UNKNOWN.into());
+        record_lost_move(
+            root.path(),
+            &lost,
+            "a",
+            "studio.local",
+            "default",
+            None,
+            &remote,
+        );
+        let lines = seats::recent(root.path(), 10);
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[0].event, "unknown");
+        assert_eq!(lines[0].account, "a");
+        assert_eq!(lines[0].machine, "studio.local");
+        assert_eq!(lines[0].remote_account, None);
+        // A lost move is not a grant: a call back still finds no outstanding move.
+        assert!(seats::outstanding(root.path(), "a").is_none());
+    }
+    /// SB-365 (WF-3.3, DEC-0015): an account Attention lists for a sign-in is in its group the
+    /// whole time; signed in again it leaves the list on the next pass and keeps its group, its
+    /// label and its group's selection.
+    #[tokio::test]
+    async fn an_account_signed_in_again_leaves_attention_and_stays_where_it_was() {
+        let root = tempfile::tempdir().unwrap();
+        let runtime = fixtures::runtime(root.path(), signed_out, activates).await;
+        let work = runtime
+            .store
+            .upsert(
+                "Work A".into(),
+                Provider::Claude,
+                AuthKind::OAuth,
+                "work".into(),
+                credential("synthetic-a"),
+                Some(identity("synthetic-a")),
+            )
+            .unwrap();
+        runtime
+            .store
+            .select(Provider::Claude, "work", &work.id)
+            .unwrap();
+        runtime.refresh.mark_dead_for_test(&runtime.store, &work.id);
+        runtime.refresh.sign_in_required(&runtime.store);
+        let listed = runtime.execute(Operation::Attention).await.unwrap();
+        assert_eq!(listed["count"], 1);
+        assert_eq!(listed["items"][0]["account_id"], work.id.as_str());
+        assert_eq!(listed["items"][0]["reason"], "renewal_refused");
+        assert_eq!(listed["items"][0]["pool"], "work");
+        // Listed, the account is still in its group and still selected there.
+        let during = runtime.store.snapshot().unwrap();
+        assert_eq!(during.accounts[0].pool, "work");
+        assert_eq!(during.routes.get("claude:work"), Some(&work.id));
+
+        file_sign_in(
+            &runtime.store,
+            Provider::Claude,
+            "",
+            "default",
+            fresh_sign_in("synthetic-a"),
+        )
+        .unwrap();
+        // The background pass recomputes the verdicts (every 30 s).
+        runtime.refresh.sign_in_required(&runtime.store);
+        let after = runtime.execute(Operation::Attention).await.unwrap();
+        assert_eq!(after, json!({"count": 0, "items": []}));
+        let snapshot = runtime.store.snapshot().unwrap();
+        assert_eq!(snapshot.accounts.len(), 1, "no copy appears elsewhere");
+        assert_eq!(snapshot.accounts[0].id, work.id);
+        assert_eq!(snapshot.accounts[0].pool, "work");
+        assert_eq!(snapshot.accounts[0].label, "Work A");
+        assert_eq!(snapshot.routes.get("claude:work"), Some(&work.id));
     }
     #[tokio::test]
     async fn a_new_identity_is_added_under_its_email_in_the_requested_pool() {

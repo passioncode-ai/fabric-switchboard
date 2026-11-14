@@ -369,6 +369,15 @@ impl RefreshState {
             *at -= seconds;
         }
     }
+    /// SB-365: the accounts whose lineage the token endpoint refused (`invalid_grant`), as
+    /// remembered: a lineage replaced since may still be named, so a reader intersects it with
+    /// `sign_in_known`. No vault read.
+    pub(crate) fn lineages_refused(&self) -> Vec<String> {
+        self.dead
+            .lock()
+            .map(|dead| dead.keys().cloned().collect())
+            .unwrap_or_default()
+    }
     #[cfg(test)]
     pub(crate) fn mark_dead_for_test(&self, store: &Store, id: &str) {
         let token = store.stored_credential(id).unwrap().refresh_token.unwrap();
