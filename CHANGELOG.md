@@ -8,6 +8,8 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- `switchboard launch` takes `--surface fabric`, so a session Fabric's own console starts (`--in-place --hosted`) is recorded as Fabric's, as a board run `switchboard dispatch` starts already is, instead of `cli` (Fabric CO-584).
+
 ## 0.7.83
 
 - A group can be marked as a backup group (Settings → Balancing between groups, *Backup: lends only*; `switchboard balance groups --backup-add`; MCP `switchboard_balance` `backup_add`). A group out of room takes a backup group's account first, and the account goes home once the group has room of its own again, or at once when the backup group's own folders need it. A backup group never borrows (SB-368, DEC-0016).
