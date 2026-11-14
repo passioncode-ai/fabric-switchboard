@@ -634,17 +634,17 @@ check(() => {
   assert.equal(logic.usageAnswerText(false), 'Анонимная аналитика использования для Switchboard выключена.');
   i18n.setLocale('en');
 });
-// The wiring: the notice sits above every page but About; OK acknowledges it, Turn off and
-// About's checkbox set Switchboard's own switch; Escape never ends a tour that is not shown.
+// The wiring: the notice sits above every page but Settings (WF-1.1: its switch lives there); OK
+// acknowledges it, Turn off and Settings' checkbox set Switchboard's own switch; Escape never ends a tour that is not shown.
 check(() => {
   const main = readFileSync(new URL('../src/main.ts', import.meta.url), 'utf8');
-  assert.match(main, /if \(page !== 'about' && usageNotice\(analyticsState\)\) main\.append\(usageNoticeCard\(\)\);/, 'the notice above the page');
+  assert.match(main, /if \(page !== 'settings' && usageNotice\(analyticsState\)\) main\.append\(usageNoticeCard\(\)\);/, 'the notice above the page');
   const card = main.slice(main.indexOf('function usageNoticeCard() {'), main.indexOf('let termsDismissed'));
   assert.match(card, /adapter\.analyticsNoticeSeen\(\)/, 'OK acknowledges the notice');
   assert.match(card, /setUsage\(false, 'page-title'\)/, 'Turn off turns the switch off');
   assert.match(card, /This applies to Switchboard only\./, 'and says the switch is this app\'s');
   const about = main.slice(main.indexOf('function analyticsPanel() {'), main.indexOf('function backupsPanel() {'));
-  assert.match(about, /box\.addEventListener\('change', \(\) => setUsage\(box\.checked, 'analytics'\)\);/, 'About sets the same switch');
+  assert.match(about, /box\.addEventListener\('change', \(\) => setUsage\(box\.checked, 'analytics'\)\);/, 'Settings sets the same switch');
   assert.match(about, /t\('This switch applies to Switchboard only\.'\)/, 'for Switchboard only');
   assert.doesNotMatch(main, /every PassionCode\.ai tool on this computer/, 'no line says the switch is shared');
   assert.match(main, /analyticsState = await adapter\.setAnalytics\(wanted\);/, 'the choice goes to the backend');
@@ -1565,5 +1565,84 @@ check(() => {
   i18nForShell.setLocale('ru');
   assert.equal(logic.machineCopyLine({ pool: 'agents', enabled: true, used_percent: 41.6, usage_status: 'ok' }, true), 'Там: agents, использовано 42%.');
   i18nForShell.setLocale('en');
+});
+// WF-1.2 (SB-363): a folding section keeps the person's choice across renders, else its default.
+check(() => {
+  const choices = new Map();
+  assert.equal(logic.foldOpen(choices, 'switching', false), false);
+  assert.equal(logic.foldOpen(choices, 'machine_studio', true), true);
+  choices.set('switching', true); choices.set('machine_studio', false);
+  assert.equal(logic.foldOpen(choices, 'switching', false), true, 'opened by the person stays open');
+  assert.equal(logic.foldOpen(choices, 'machine_studio', true), false, 'closed by the person stays closed');
+  assert.ok(logic.usableWhileBusy('fold-switching'), 'a section folds while an action runs');
+});
+// WF-2.1 (SB-364): this computer first (Claude, then Codex), then each machine by name, then given to agents; every account exactly once.
+check(() => {
+  const a = (id, provider, pool, created_at = 1) => ({ id, provider, pool, enabled: true, created_at, kind: 'oauth', label: id });
+  const machines = [{ pool: 'machine_zeta', name: 'zeta-box', created_at: 1 }, { pool: 'machine_studio', name: 'studio-sshlg', created_at: 1 }, { pool: 'machine_empty', name: 'empty-box', created_at: 1 }];
+  const accounts = [
+    a('m-codex', 'codex', 'machine_studio'), a('h-codex', 'codex', 'default'), a('z-claude', 'claude', 'machine_zeta'),
+    a('m-claude', 'claude', 'machine_studio', 2), a('h-claude-work', 'claude', 'work'), a('h-claude', 'claude', 'default'),
+    a('given', 'claude', 'machine_studio'), a('given-here', 'codex', 'work'), a('orphan', 'claude', 'machine_gone'),
+  ];
+  const sections = logic.accountSections(accounts, { machines, assigned_to: { given: 'Frame Agent', 'given-here': 'Copylot' } });
+  const ids = (groups) => groups.flatMap((g) => g.pools.flatMap((p) => p.accounts.map((x) => x.id)));
+  assert.deepEqual(sections.here.map((g) => g.provider), ['claude', 'codex'], 'Claude, then Codex');
+  assert.deepEqual(sections.here[0].pools.map((p) => p.pool), ['default', 'machine_gone', 'work'], 'an unknown machine pool stays here');
+  assert.deepEqual(ids(sections.here), ['h-claude', 'orphan', 'h-claude-work', 'h-codex']);
+  assert.deepEqual(sections.machines.map((m) => [m.name, m.count]), [['studio-sshlg', 2], ['zeta-box', 1]], 'by name; a machine with no account is not a section');
+  assert.deepEqual(sections.machines[0].groups.map((g) => g.provider), ['claude', 'codex']);
+  assert.deepEqual(ids(sections.machines[0].groups), ['m-claude', 'm-codex']);
+  assert.deepEqual(sections.given.map((x) => x.id), ['given', 'given-here'], 'given to an agent wins over its machine');
+  const all = [...ids(sections.here), ...sections.machines.flatMap((m) => ids(m.groups)), ...sections.given.map((x) => x.id)];
+  assert.equal(all.length, accounts.length, 'nothing dropped, nothing doubled');
+  assert.deepEqual([...all].sort(), accounts.map((x) => x.id).sort());
+  const empty = logic.accountSections([], {});
+  assert.deepEqual([empty.here, empty.machines, empty.given], [[], [], []]);
+  assert.ok(logic.MACHINE_FOLD_LIMIT === 6);
+});
+// WF-2.2: one filter row: words of the label or e-mail, and Needs attention only.
+check(() => {
+  const account = { id: 'x', label: 'Studio team', external_identity: { email: 'Studio@Example.test' } };
+  assert.ok(logic.accountMatches(account, { query: '' }));
+  assert.ok(logic.accountMatches(account, { query: '  studio ' }));
+  assert.ok(logic.accountMatches(account, { query: 'example team' }), 'every word, in label or e-mail');
+  assert.ok(!logic.accountMatches(account, { query: 'north' }));
+  assert.ok(!logic.accountMatches(account, { query: '', attention: new Set(['y']) }), 'attention only hides the rest');
+  assert.ok(logic.accountMatches(account, { query: 'studio', attention: new Set(['x']) }));
+  assert.ok(logic.accountMatches({ id: 'k', label: 'Key', external_identity: null }, { query: 'key' }));
+});
+// WF-3 (SB-365): the attention answer is read defensively; reason lines and actions are the window's.
+check(() => {
+  assert.deepEqual(logic.attentionView(undefined), { count: 0, items: [] }, 'a missing command is an empty list');
+  assert.deepEqual(logic.attentionView({ count: 3, items: 'no' }), { count: 0, items: [] });
+  const raw = { count: 3, items: [
+    { account_id: 'a1', label: 'Meadow', provider: 'claude', pool: 'work', reason: 'sign_in', detail: 'x', since: 10, action: { tool: 'switchboard_login', window: 'sign_in' } },
+    { account_id: null, label: null, provider: null, pool: null, reason: 'ceiling_question', detail: '', since: null, action: { tool: 'switchboard_ceiling_answer', window: 'answer_ceiling' } },
+    { account_id: 'a2', reason: 'teleported', action: { tool: 't', window: 'sign_in' } },
+    { account_id: 'a3', reason: 'usage_failing', action: { tool: 't', window: 'fly' } },
+  ] };
+  const view = logic.attentionView(raw);
+  assert.equal(view.count, 2, 'an unknown reason or window drops that item only');
+  assert.deepEqual(view.items.map((i) => i.reason), ['sign_in', 'ceiling_question']);
+  assert.deepEqual([...logic.attentionAccounts(view, ['a9', 'a1'])].sort(), ['a1', 'a9']);
+  assert.deepEqual([...logic.attentionAccounts(null)], []);
+  for (const reason of ['sign_in', 'seat_ended', 'renewal_refused', 'usage_failing', 'move_unknown', 'refused_there', 'ceiling_question']) {
+    const line = logic.attentionReasonText(reason);
+    assert.ok(line && !line.includes('\u2014'), reason);
+  }
+  assert.deepEqual(['sign_in', 'answer_ceiling', 'check_usage', 'open_machines'].map(logic.attentionActionLabel), ['Sign in', 'Answer', 'Check again', 'Open Other machines']);
+  i18nForShell.setLocale('ru');
+  assert.equal(logic.attentionActionLabel('check_usage'), 'Проверить снова');
+  i18nForShell.setLocale('en');
+});
+// WF-2.4 and WF-1.1: the given-to-agent facts and the one switching line on Accounts.
+check(() => {
+  assert.deepEqual(logic.givenFacts({ organization: 'Northwind', machine: 'studio', launch: { group: 'Agents', folder: 'frame' }, lastActivity: '2h ago' }), ['Organization: Northwind', 'Machine: studio', 'Last launch: Agents, frame', 'Last activity 2h ago']);
+  assert.deepEqual(logic.givenFacts({ organization: null, machine: null, launch: null, lastActivity: null }), ['Personal account', 'Machine not recorded', 'No launch recorded', 'No activity recorded']);
+  assert.equal(logic.switchingLine([]), 'Automatic switching is off.');
+  assert.equal(logic.switchingLine([{ enabled: false, pool: 'default' }]), 'Automatic switching is off.');
+  assert.equal(logic.switchingLine([{ enabled: true, pool: 'default' }, { enabled: true, pool: 'default' }]), 'Automatic switching is on for 1 group.');
+  assert.equal(logic.switchingLine([{ enabled: true, pool: 'default' }, { enabled: true, pool: 'web' }]), 'Automatic switching is on for 2 groups.');
 });
 console.log(`${cases} ui-logic cases passed, including quota priority and wall-clock countdowns.`);
