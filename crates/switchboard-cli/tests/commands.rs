@@ -1234,7 +1234,11 @@ fn human_usage_and_events_print_utc_times_and_health() {
     );
     let one: serde_json::Value =
         serde_json::from_str(&run(&["--json", "events", "--limit", "1"])).unwrap();
-    assert_eq!(one["data"].as_array().unwrap().len(), 1);
+    // A page never splits a second: `--limit 1` holds the newest event and any other of its
+    // second (a fast machine writes two in one).
+    let one = one["data"].as_array().unwrap();
+    assert!(!one.is_empty(), "{one:?}");
+    assert!(one.iter().all(|e| e["at"] == one[0]["at"]), "{one:?}");
     let none: serde_json::Value =
         serde_json::from_str(&run(&["--json", "events", "--before", "1"])).unwrap();
     assert_eq!(none["data"], serde_json::json!([]));
