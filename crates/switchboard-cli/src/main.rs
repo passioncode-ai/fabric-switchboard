@@ -939,7 +939,10 @@ enum Org {
 #[derive(Subcommand)]
 enum CapacityCmd {
     /// Set the cap: at most this many working coding sessions at once (1 to 500).
-    Set { cap: u32 },
+    Set {
+        /// The most working coding sessions at once, 1 to 500.
+        cap: u32,
+    },
     /// Remove the cap: nothing waits.
     Clear,
 }
