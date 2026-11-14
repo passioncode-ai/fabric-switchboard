@@ -304,8 +304,10 @@ impl Store {
                         && a.kind == current.kind
                         && self.rotation_credential_eligible(a, policy, now)
                 })
+                // Only a known reset to come: an account held with no known reset is not a wait,
+                // and one with room was the steps above.
                 .filter_map(|a| free_at(a, now).map(|t| (a, t)))
-                .filter(|(_, t)| *t < current_free)
+                .filter(|(_, t)| *t > now && *t < current_free)
                 .min_by(|(a, x), (b, y)| x.cmp(y).then_with(|| a.id.cmp(&b.id)))
                 .map(|(a, t)| (a, t as f64))
         });
