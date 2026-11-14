@@ -30,7 +30,9 @@ pub const SPEND_UNKNOWN: &str = "spend_unknown";
 pub const AGENT_NOT_INSTALLED: &str = "agent_not_installed";
 pub const PERMISSION_MODE: &str = "permission_mode";
 pub const HANDOFF_REFUSED: &str = "handoff_refused";
-pub const REFUSALS: [&str; 10] = [
+/// SB-378: this computer's session pool is full; a wait, not a failed run.
+pub const AT_CAPACITY: &str = "at_capacity";
+pub const REFUSALS: [&str; 11] = [
     NO_AGENT,
     NOT_IN_GROUP,
     CEILING_REACHED,
@@ -38,6 +40,7 @@ pub const REFUSALS: [&str; 10] = [
     AGENT_NOT_INSTALLED,
     PERMISSION_MODE,
     HANDOFF_REFUSED,
+    AT_CAPACITY,
     crate::remote_dispatch::NOT_ON_TARGET,
     crate::remote_dispatch::TARGET_BUSY,
     crate::remote_dispatch::TARGET_UNREACHABLE,
@@ -86,6 +89,7 @@ pub fn sentence(reason: &str) -> &'static str {
         SPEND_UNKNOWN => "A spending ceiling covers this start and its spend could not be read, so no paid agent starts.",
         AGENT_NOT_INSTALLED => "The default agent is not installed on this computer. Install it, then try again.",
         PERMISSION_MODE => "Only Claude Code and Codex run a request with no person. Choose one of them as the default agent.",
+        AT_CAPACITY => "This computer runs as many coding sessions as its limit allows. The run waits until one ends.",
         crate::remote_dispatch::NOT_ON_TARGET => "The other machine has no checkout of this folder's repository, so no session starts there.",
         crate::remote_dispatch::TARGET_BUSY => "The other machine already runs two dispatched sessions. Try again when one ends.",
         crate::remote_dispatch::TARGET_UNREACHABLE => "The other machine did not answer over ssh, so no session starts there.",

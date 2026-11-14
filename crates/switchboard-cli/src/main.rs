@@ -151,6 +151,13 @@ enum Command {
     /// signed in in some homes and not in others, and two names for one URL in one home. A home
     /// whose credential item would ask for access reads `unknown`. Reads only.
     McpHomes,
+    /// This computer's cap on live coding sessions (Claude Code and Codex, managed or not, quiet
+    /// ones not counted): the cap, how many count and how many are free. `dispatch` and
+    /// `launch --hosted` wait at the cap. Without a subcommand, reads only.
+    Capacity {
+        #[command(subcommand)]
+        command: Option<CapacityCmd>,
+    },
     /// What needs a person: accounts to sign in to again, usage checks failing for over an hour,
     /// moves to another machine whose answer was lost and spending ceilings waiting for an answer,
     /// each with the action that fixes it. The accounts stay in their groups. Reads only.
@@ -927,6 +934,17 @@ enum Org {
         #[arg(required = true, num_args = 1..)]
         organization: Vec<String>,
     },
+}
+
+#[derive(Subcommand)]
+enum CapacityCmd {
+    /// Set the cap: at most this many working coding sessions at once (1 to 500).
+    Set {
+        /// The most working coding sessions at once, 1 to 500.
+        cap: u32,
+    },
+    /// Remove the cap: nothing waits.
+    Clear,
 }
 
 #[derive(Subcommand)]
@@ -2154,6 +2172,20 @@ async fn run(cli: &Cli) -> Result<Value, String> {
         Command::Targets { probe } => Operation::Targets { probe: *probe },
         Command::McpHomes => Operation::McpHomes,
         Command::Attention => Operation::Attention,
+        Command::Capacity { command } => match command {
+            None => Operation::Capacity {
+                cap: None,
+                clear: false,
+            },
+            Some(CapacityCmd::Set { cap }) => Operation::Capacity {
+                cap: Some(*cap),
+                clear: false,
+            },
+            Some(CapacityCmd::Clear) => Operation::Capacity {
+                cap: None,
+                clear: true,
+            },
+        },
         Command::Machines { command } => match command {
             MachinesCmd::List { live } => Operation::Machines { live: *live },
             MachinesCmd::Adopt { apply } => Operation::MachinesAdopt { apply: *apply },
@@ -3078,6 +3110,11 @@ async fn launch(
             "Launching in place needs a terminal on stdin and stdout. Use --headless with no terminal."
                 .into(),
         );
+    }
+    // SB-378: a hosted session (Fabric's and Dashboards' consoles) waits while this computer's
+    // session pool is full; the same gate as `dispatch`.
+    if here == Here::Hosted {
+        switchboard_runtime::capacity::admit(root)?;
     }
     let id = match (id, provider) {
         (Some(id), None) => id.clone(),
@@ -4451,6 +4488,16 @@ fn print_result(value: &Value, cli: &Cli) {
             text(&value["platform"]),
             text(&value["proxy_address"])
         ),
+        Command::Capacity { .. } => match value["cap"].as_u64() {
+            Some(cap) => println!(
+                "Sessions: {} of {cap} working, {} free ({} quiet not counted).",
+                value["used"], value["free"], value["quiet"]
+            ),
+            None => println!(
+                "No session limit: {} working sessions ({} quiet not counted).",
+                value["used"], value["quiet"]
+            ),
+        },
         _ => print_value(value, false),
     }
 }
@@ -4938,6 +4985,8 @@ mod mcp_parity {
         ("machines list", Tool("switchboard_machines")),
         ("mcp-homes", Tool("switchboard_mcp_homes")),
         ("attention", Tool("switchboard_attention")),
+        ("capacity set", Tool("switchboard_capacity")),
+        ("capacity clear", Tool("switchboard_capacity")),
         ("machines adopt", Tool("switchboard_machine_set")),
         ("machines place", Tool("switchboard_machine_set")),
         ("machines forget", Tool("switchboard_machine_set")),
