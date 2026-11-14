@@ -484,6 +484,25 @@ pub(crate) fn live_dispatch(root: &Path, workflow: &str) -> Option<(String, Valu
         })
         .max_by_key(|(_, r)| r["launched_at"].as_i64().unwrap_or(0))
 }
+/// WF-5.2f (C9): the folder the newest launch of `workflow` ran in, while it still exists: a
+/// hand-over continues there when the workflow's checkpoint names no checkout (140 of 183
+/// fallback attempts in 30 days stopped on `no_checkout`).
+pub(crate) fn last_folder(root: &Path, workflow: &str) -> Option<PathBuf> {
+    let candidates: Vec<Value> = match workflow_key(workflow).and_then(|k| indexed(root, k)) {
+        Some(ids) => ids.into_iter().filter_map(|id| read(root, &id)).collect(),
+        None => all(root).into_values().collect(),
+    };
+    candidates
+        .into_iter()
+        .filter(|r| r["continues"].as_str() == Some(workflow))
+        .filter_map(|r| {
+            let folder = PathBuf::from(r["working_directory"].as_str()?);
+            (folder.is_absolute() && folder.is_dir())
+                .then(|| (r["launched_at"].as_i64().unwrap_or(0), folder))
+        })
+        .max_by_key(|(at, _)| *at)
+        .map(|(_, folder)| folder)
+}
 /// SB-247: the home a record ran in, while that home still holds this launch.
 pub(crate) fn own_home(root: &Path, record: &Value) -> Option<PathBuf> {
     let home = home_of(root, record)?;
@@ -1473,6 +1492,37 @@ mod tests {
             ..LaunchedBy::surface(Surface::Cli)
         };
         assert_eq!(resolve(&snapshot, by).unwrap_err(), PARENT_INVALID);
+    }
+    #[test]
+    fn a_workflows_last_folder_is_its_newest_launch_whose_folder_still_exists() {
+        // WF-5.2f (C9): the hand-over's folder when the checkpoint names no checkout.
+        let (temp, root, first) = fixture();
+        let workflow = "wf_0123456789abcdef";
+        assert!(last_folder(&root, workflow).is_none());
+        let kept = temp.path().join("kept");
+        let gone = temp.path().join("gone");
+        std::fs::create_dir_all(&kept).unwrap();
+        update(&root, &first, |r| {
+            r["continues"] = workflow.into();
+            r["working_directory"] = kept.to_string_lossy().into_owned().into();
+            true
+        });
+        let home = root.join("runtimes").join("claude-continue");
+        switchboard_core::private_fs::private_dir(&home).unwrap();
+        let newer = new_id();
+        record(
+            &root,
+            &home,
+            json!({"launched_at": 300, "continues": workflow,
+                   "working_directory": gone.to_string_lossy()}),
+            &newer,
+        )
+        .unwrap();
+        // The newer launch's folder is gone: the older one, still on disk, is the answer.
+        assert_eq!(last_folder(&root, workflow), Some(kept.clone()));
+        std::fs::create_dir_all(&gone).unwrap();
+        assert_eq!(last_folder(&root, workflow), Some(gone));
+        assert!(last_folder(&root, "wf_fedcba9876543210").is_none());
     }
     #[test]
     fn a_hand_over_names_the_launch_it_holds_and_the_one_it_continues_points_through_it() {

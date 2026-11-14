@@ -926,7 +926,11 @@ pub(crate) async fn pass_with_reads<F, Fut, R, RFut>(
             log("fabric_request");
             continue;
         }
-        let Some(dir) = continuation::checkouts(&shown).into_iter().next() else {
+        let Some(dir) = continuation::checkouts(&shown)
+            .into_iter()
+            .next()
+            .or_else(|| crate::launches::last_folder(&runtime.root, id))
+        else {
             runtime.fallback.mark(id, now);
             log("no_checkout");
             continue;
