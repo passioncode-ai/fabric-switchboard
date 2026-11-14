@@ -186,13 +186,16 @@ pub fn read_accounts(
     }
 }
 
+/// One machine's account list as `read_accounts` answers it (a fake in tests).
+pub type ReadOne<'a> = dyn Fn(&str, &Program<'_>) -> Result<Vec<Value>, String> + 'a;
+
 /// Reads every machine group that is due, one after another, and keeps the answers. `read_one`
 /// is the ssh read (a fake in tests). Answers how many machines were read and how many failed.
 pub fn pass(
     root: &Path,
     snapshot: &Snapshot,
     now: i64,
-    read_one: &dyn Fn(&str, &Program<'_>) -> Result<Vec<Value>, String>,
+    read_one: &ReadOne<'_>,
 ) -> (usize, usize) {
     let mut state = read(root);
     let mut tried = 0;
