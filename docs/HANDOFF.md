@@ -2,6 +2,16 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-11-14: the window and the fleet, spec and wave 1 (SB-363 to SB-374); 0.7.80
+
+- **Asked.** The operator (2026-11-14, about 16:40 UTC): a review of the whole window and the work across machines (accounts by machine, Attention, settings off the main screen, API keys, groups, organizations and PassionCode.ai, agents as the central place, Activity and Statistics, MCP parity, an organization's fleet, routing between machines, a backup group); «составь общую спеку, раздели ее на модули ... Потом по task pipeline все это закрываем, волнами».
+- **Spec.** [window-and-fleet](plans/2026-11-14-window-and-fleet/README.md): REQ spine R-01 to R-18, twelve modules WF-1 to WF-12 (board SB-363 to SB-374), five waves, decisions DEC-0014 to DEC-0020, four assumed answers asked once on the Fabric board (question `8222791a`). The architect's class template `account-service` 1.1.2 lacks window to MCP parity, a fleet view and a backup pool: sent to fabric-agents-database (board thread `13fac8c8`).
+- **Wave 1 (PR #685, `d6afbdcd`).** WF-1 Settings page and folding sections (DEC-0014), window to MCP parity test (DEC-0019, 101 commands); WF-2 accounts by machine, one filter row, *In use now* alike, *Given to agents* details; WF-3 *Needs attention* with MCP `switchboard_attention` (DEC-0015). Built by two agents in parallel (backend, window) and merged here.
+- **Checks.** `./scripts/check.sh` on the Mac Studio exit 0 on `1592000`; Linux clippy in a container exit 0; WebKit demo screenshots (Accounts with other machines and Attention; Settings).
+- **Open.** WF-2.4's latest launch from history and the agent's own machine; `refused_there` (WF-4). Wave 2 next: WF-7 API keys, WF-8 Groups, WF-11 Activity and Statistics, WF-10.1 agent settings. WF-5.1's failure inventory is being written.
+
+**Exact next task.** After 0.7.80 is installed here, read the Accounts page and `switchboard attention` on this MacBook; then start wave 2 (WF-7, WF-8, WF-11, WF-10.1) as in the plan.
+
 ## 2026-11-14: audit after 0.7.76; the architect's blocking gap (SB-217); MCP sign-ins carried into launched homes (SB-358, SB-359); machine sessions see npm Claude Code (SB-353); usage checks of turned-off accounts (SB-360); 0.7.79
 
 - **Asked.** The operator (2026-11-14): restore the last work, audit it, collect bugs and gaps, and finish autonomously to the last release, checking the board and the North Star.
