@@ -41,6 +41,7 @@ switchboard accounts receive handover.json --signer KEY [--apply] [--headless]  
 switchboard accounts recall ACCOUNT_UUID --from member@vm   # SB-292: take a moved sign-in back; its copy there is removed and proved gone (Claude and Codex)
 switchboard accounts send ACCOUNT_UUID --to user@studio.local --remote /usr/local/bin/switchboard --remote-data-dir /srv/switchboard   # SB-315: a Switchboard there that runs with --data-dir; a recall uses the same by default
 switchboard accounts seats [--limit 50]                     # SB-312: the moves, hand-overs and call backs recorded here, with the id there
+switchboard attention                                  # SB-365: what needs a person (sign-in, refused renewal, ended seat, failing usage checks, a lost move, a ceiling question), each with the tool that fixes it; the accounts stay in their groups
 switchboard mcp-homes                                  # SB-359: which Claude home is signed in to which MCP server (names, URLs, booleans; never a token)
 switchboard machines list [--live]                     # SB-355: each machine group with its accounts, and accounts used elsewhere in none; --live reads each machine over ssh (20 s per call)
 switchboard machines adopt [--apply]                   # SB-355: place accounts already used elsewhere in their machines' groups (recorded move, else location); never guessed

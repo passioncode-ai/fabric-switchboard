@@ -3044,3 +3044,68 @@ Code: [mcp_homes.rs](../crates/switchboard-runtime/src/mcp_homes.rs).
 - **Not done.** The ordinary home is only a source, never written: its item is the person's own
   login (AGENTS.md). Shell homes are written only when a launch starts one. A mirror lives until
   its `expiresAt`; the next launch after the source renews carries the new token.
+
+## Attention (SB-365)
+
+What needs a person, in one list ([DEC-0015](DECISIONS.md#dec-0015-attention-is-a-view-not-a-group),
+WF-3.1). Code: [attention.rs](../crates/switchboard-runtime/src/attention.rs).
+
+- **One answer, three doors.** `Operation::Attention` (read-only: answered without the owner
+  transaction, beside `Operation::Machines`), CLI `switchboard attention` (`--json` for the
+  answer), MCP `switchboard_attention` (read-only server too), the window's Tauri command
+  `attention`. All answer:
+  `{"count": N, "items": [{"account_id", "label", "provider", "pool", "reason", "detail", "since", "action": {"tool", "window"}}]}`.
+  `account_id`, `label` and `provider` are null for a ceiling question; `pool` is the account's
+  home group, a group ceiling's group, or null; `since` is Unix seconds or null; `detail` is one
+  fixed English sentence per reason (no label, machine name or secret; constants in
+  `attention.rs`), so the window words it in the person's language.
+- **Reasons, in the order listed** (then by label), each with its fix:
+
+  | `reason` | When | `action.tool` | `action.window` |
+  |---|---|---|---|
+  | `sign_in` | `sign_in_known` names the account (its stored sign-in was rejected) | `switchboard_login` | `sign_in` |
+  | `seat_ended` | as `sign_in`, and the account belongs to an organization (`Snapshot::attribution`) | `switchboard_login` | `sign_in` |
+  | `renewal_refused` | as `sign_in`, and the token endpoint refused its lineage (`invalid_grant`, `RefreshState::lineages_refused`) | `switchboard_login` | `sign_in` |
+  | `move_unknown` | marked used elsewhere, and its newest `seats.jsonl` line of `granted`, `recalled` or `unknown` is `unknown`; `since` is that line's time | `switchboard_remote` | `open_machines` |
+  | `usage_failing` | enabled, not used elsewhere, not already listed, `usage_health.status` `failed`, and no observation for over `USAGE_FAILING_SECONDS` (3600); `since` is the last observation (else when it was added) | `switchboard_usage` | `check_usage` |
+  | `ceiling_question` | an unanswered question in `spend.json`, pruned as its readers prune; `since` is `reached_at` | `switchboard_ceiling_answer` | `answer_ceiling` |
+
+  An account is listed once: a sign-in reason wins over failing usage. `refused_there` (a copy
+  on another machine the provider refused there) is not listed yet: no stored source holds it;
+  `switchboard_remote` `check` reads it on request, and WF-4 adds the background read.
+- **A lost move is recorded.** When `accounts send` ends in `OUTCOME_UNKNOWN` (the other
+  machine's answer to `accounts add` was lost and its account list could not tell), the runtime
+  writes a `seats.jsonl` line with `event: unknown` (no remote id). `seats::outstanding` and
+  `seats::last_grant` read only `granted` and `recalled`, so call backs and moves behave as before;
+  a later `granted` or `recalled` line, or clearing the mark here, takes the item off the list.
+- **A view, not a group.** Nothing is written by the read and nothing moves: the account keeps its
+  group, label and selection while listed and after it is fixed
+  (`an_account_signed_in_again_leaves_attention_and_stays_where_it_was`). A sign-in again leaves the
+  list on the next background pass, which recomputes the verdicts.
+- **Cost.** The snapshot, the verdicts the background pass keeps in memory (`sign_in_known`: no
+  Keychain read while its answer is current), one read of `seats.jsonl` (at most 2 MiB) and one of
+  `spend.json` (at most 128 KiB). An unreadable `spend.json` lists no question.
+- Tests: `attention::tests::*`, the MCP handshake list, `every_cli_command_has_an_mcp_tool_or_a_reason`,
+  `every_window_command_has_an_mcp_tool_or_a_reason`.
+
+## Window to MCP parity (SB-363)
+
+Every command the window registers in `tauri::generate_handler![..]` names its MCP tool or a written
+reason it has none ([DEC-0019](DECISIONS.md#dec-0019-every-window-action-has-an-mcp-tool-or-a-written-reason),
+WF-1.3). Code: [parity.rs](../src-tauri/src/parity.rs), a test module of the window's crate.
+
+- **The table.** `PARITY` maps each command to `Tool("switchboard_…")` or `Not(reason)`. The reasons:
+  `PERSON` (a secret typed into the window, another tool's sign-ins imported, a removal that
+  cannot be restored: the CLI's table says the same for its commands), `LAUNCH` (launching an
+  agent from an agent, SB-64, SB-74) and `UI_ONLY` (a system picker, a notice the window shows
+  once, its start signal). `set_language` has its own reason: the language is the viewer's choice
+  kept in the window (`src/i18n.ts`), and the command only tells the tray menu which language to
+  draw; Switchboard stores no language, so there is no setting for an agent.
+- **The test.** `every_window_command_has_an_mcp_tool_or_a_reason` reads the handler list from
+  `main.rs` and the tool names from the MCP server's source (`"name":"switchboard_…"` in
+  `crates/switchboard-cli/src/mcp.rs`), both as text, and fails on a command with no row, a row
+  whose command is gone, a row naming a tool the server does not list, or a reason of 20
+  characters or fewer. `a_command_without_a_row_and_a_row_without_its_tool_both_fail` keeps the
+  check honest both ways.
+- **One direction only.** MCP may do more than the window; a tool with no window control needs
+  nothing here. A new window command lands with its row in the same change.
