@@ -1160,10 +1160,10 @@ fn rotate(runtime: &Runtime, native_sources: bool) -> Result<(), String> {
         };
         // A rejected sign-in is never a candidate: activation would refuse it every pass and
         // the next eligible account would never be tried.
-        let mut excluded = runtime.limits.limited_ids(now());
         // SB-102: refusals the proxy recorded since the last scan count at once, so the pass
-        // never moves a pool back onto the account a request was just refused on.
-        excluded.extend(runtime.store.limited());
+        // never moves a pool back onto the account a request was just refused on (WF-5.2b: the
+        // set rotation, recovery and dispatch share).
+        let mut excluded = runtime.held(now());
         excluded.extend(
             runtime
                 .refresh
@@ -1755,6 +1755,32 @@ mod tests {
             events(&runtime.store, "rotation"),
             [(Some(b.id), "switched".to_string())]
         );
+    }
+    #[tokio::test]
+    async fn the_shared_set_holds_a_refusal_the_proxy_recorded_since_the_last_scan() {
+        // WF-5.2b (C2, C3): rotation, recovery and dispatch read one set, and a request the
+        // provider just refused counts before the next scan writes it as a limit.
+        use crate::fixtures::*;
+        let root = tempfile::tempdir().unwrap();
+        let runtime = crate::fixtures::runtime(root.path(), signed_out, activates).await;
+        let a = save(&runtime.store, "synthetic-a", "default");
+        let b = save(&runtime.store, "synthetic-b", "default");
+        assert!(runtime.held(now()).is_empty());
+        runtime
+            .store
+            .set_limited(std::collections::HashSet::from([b.id.clone()]));
+        let held = runtime.held(now());
+        assert!(held.contains(&b.id) && !held.contains(&a.id), "{held:?}");
+        // Rotation passes over it too: from a spent `a`, nothing is left to move to.
+        quota(&runtime.store, &a.id, 95.0);
+        quota(&runtime.store, &b.id, 10.0);
+        runtime
+            .store
+            .select(Provider::Claude, "default", &a.id)
+            .unwrap();
+        runtime.store.set_policy(policy("managed")).unwrap();
+        rotate(&runtime, false).unwrap();
+        assert_eq!(reason(&runtime), "no_eligible_account");
     }
     #[tokio::test]
     async fn each_rotation_outcome_is_logged_and_no_candidate_once_a_stretch() {

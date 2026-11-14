@@ -507,9 +507,9 @@ pub(crate) fn account_for_default(
     now: i64,
 ) -> Result<String, String> {
     let snapshot = runtime.store.snapshot()?;
-    let kimi_limited = runtime.kimi_watch.limited(now);
-    let mut limited = runtime.limits.limited_ids(now);
-    limited.extend(kimi_limited.iter().cloned());
+    // WF-5.2b (C3): the shared set, and an account whose fresh usage is past its group's room.
+    let mut limited = runtime.held(now);
+    limited.extend(crate::recovery::past_headroom(&snapshot, now));
     // Without an accountRef the ordinary CLI's accounts are the executor: an unreadable answer
     // refuses rather than risk choosing the account that just ran out.
     let current = if executor.get("accountRef").is_some() {
@@ -771,13 +771,13 @@ pub(crate) async fn pass_with_reads<F, Fut, R, RFut>(
     if snapshot.chains.is_empty() {
         return;
     }
+    // A limited Kimi account is never a chain's next step either (SB-99); WF-5.2b: nor one the
+    // proxy refused since the last scan.
     let kimi_limited = runtime.kimi_watch.limited(now);
-    let mut limited = runtime.limits.limited_ids(now);
-    if (limited.is_empty() && kimi_limited.is_empty()) || !runtime.fallback.due(now) {
+    let limited = runtime.held(now);
+    if limited.is_empty() || !runtime.fallback.due(now) {
         return;
     }
-    // A limited Kimi account is never a chain's next step either (SB-99).
-    limited.extend(kimi_limited.iter().cloned());
     let kimi_ids: Vec<String> = snapshot
         .kimi_accounts
         .iter()

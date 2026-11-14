@@ -2859,6 +2859,17 @@ impl Runtime {
             }
         }
     }
+    /// WF-5.2b: the accounts no switch, continuation or dispatch may move onto now: a limit the
+    /// transcripts or a check showed, a refusal the proxy recorded since the last scan (SB-102),
+    /// and a limited Kimi Code account (SB-99). One set for rotation, recovery and dispatch: the
+    /// inventory of 2026-11-14 found dispatch built it from the first alone and started 31 runs on
+    /// an account already spent.
+    pub(crate) fn held(&self, now: i64) -> HashSet<String> {
+        let mut held = self.limits.limited_ids(now);
+        held.extend(self.store.limited());
+        held.extend(self.kimi_watch.limited(now));
+        held
+    }
     fn invalidate_current(&self) {
         (self.native.forget)();
         self.invalidate_current_accounts();
@@ -4974,7 +4985,7 @@ async fn execute(
         Operation::Recovery => {
             let rt = needs_owner()?;
             let time = monitor::now();
-            let limited = rt.limits.limited_ids(time);
+            let limited = rt.held(time);
             // SB-347: the answer the background pass keeps, never a Keychain read per call.
             let sign_in = rt.refresh.sign_in_known(&store).into_iter().collect();
             let snapshot = store.snapshot()?;
@@ -5168,10 +5179,7 @@ async fn execute(
                 serde_json::Map::new()
             } else {
                 let now = monitor::now();
-                let mut limited = runtime.map_or_else(HashSet::new, |r| r.limits.limited_ids(now));
-                if let Some(r) = runtime {
-                    limited.extend(r.kimi_watch.limited(now));
-                }
+                let limited = runtime.map_or_else(HashSet::new, |r| r.held(now));
                 let sign_in: HashSet<String> =
                     refresh_state.sign_in_known(&store).into_iter().collect();
                 let settings = agent_settings::read(root);

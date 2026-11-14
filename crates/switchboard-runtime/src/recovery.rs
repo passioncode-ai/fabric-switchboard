@@ -433,6 +433,28 @@ pub(crate) fn candidates(
     eligible.into_iter().map(|a| a.id.clone()).collect()
 }
 
+/// WF-5.2b (C3): the subscription accounts whose fresh usage (checked within [`MAX_AGE`]) is at or
+/// past the room their group's switching keeps (`headroom_percent`): automatic switching would move
+/// a session off them at once, so no new run starts there. An account with no fresh reading is
+/// not in it: an unknown is not a full account.
+pub(crate) fn past_headroom(snapshot: &Snapshot, now: i64) -> HashSet<String> {
+    snapshot
+        .accounts
+        .iter()
+        .filter(|a| a.kind == AuthKind::OAuth)
+        .filter(|a| {
+            a.usage.as_ref().is_some_and(|u| {
+                u.observed_at <= now
+                    && now - u.observed_at <= MAX_AGE
+                    && u.account_used_percent().is_some_and(|n| {
+                        n.is_finite() && n >= headroom_percent(snapshot, a.provider, &a.pool)
+                    })
+            })
+        })
+        .map(|a| a.id.clone())
+        .collect()
+}
+
 /// The used share below which an account may take a stopped session of `pool` (SB-345): the
 /// group's managed switching policy, threshold less hysteresis, or the initial policy's figures
 /// when none is saved. A policy switched off still says how much room the operator wants.
@@ -728,6 +750,34 @@ mod tests {
             accounts: vec![account("old"), account("new")],
             ..Default::default()
         }
+    }
+    #[test]
+    fn a_fresh_reading_past_the_groups_room_keeps_new_runs_off_an_account() {
+        // WF-5.2b (C3): a dispatch never starts on an account switching would move off at once.
+        let mut s = Snapshot {
+            accounts: vec![
+                account("full"),
+                account("room"),
+                account("stale"),
+                account("key"),
+            ],
+            ..Default::default()
+        };
+        for a in &mut s.accounts {
+            a.usage.as_mut().unwrap().used_percent = 95.0;
+        }
+        s.accounts[1].usage.as_mut().unwrap().used_percent = 50.0;
+        s.accounts[2].usage.as_mut().unwrap().observed_at = 101 - MAX_AGE - 1;
+        s.accounts[3].kind = AuthKind::ApiKey;
+        assert_eq!(past_headroom(&s, 101), HashSet::from(["full".to_string()]));
+        // The initial policy keeps 80 %: at 80 an account is past it, at 79 it is not.
+        s.accounts[1].usage.as_mut().unwrap().used_percent = 80.0;
+        assert!(past_headroom(&s, 101).contains("room"));
+        s.accounts[1].usage.as_mut().unwrap().used_percent = 79.0;
+        assert!(!past_headroom(&s, 101).contains("room"));
+        // No reading at all is unknown, never full.
+        s.accounts[0].usage = None;
+        assert!(past_headroom(&s, 101).is_empty());
     }
     #[test]
     fn a_stop_survives_restart_and_a_reset_is_not_capacity() {
