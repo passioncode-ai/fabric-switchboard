@@ -581,13 +581,13 @@ export function switchingLine(policies: Pick<RotationPolicy, 'enabled' | 'pool'>
  * WF-11.1 (SB-373): the Activity filter's kinds. One event may be of two kinds: its action's kind,
  * and `errors` when its outcome is a failure. The mapping, which the `events` command's `kind`
  * filter follows too:
- * - `switches`: an account chosen, switched or moved on (actions `account_selected`, `activation`,
- *   `rotation`, the last with its `switched_on_limit`, `failover` and `unusable` causes);
- * - `sign_ins`: a sign-in or its renewal (action `login`);
- * - `groups`: a group or a folder rule changed (actions `project`, `project_rule`);
- * - `moves`: an account or a task moved somewhere else (actions `machine`: sent to or called back
- *   from another machine; `fallback`: a hand-over to another agent; `balancing`: lent to another
- *   group and back);
+ * - `switches`: which account or agent serves next (actions `account_selected`, `activation`,
+ *   `rotation` with its causes, `fallback`: a hand-over to the next agent of a chain);
+ * - `sign_ins`: a sign-in made or an account added by one (actions `login`, `account_added`,
+ *   `kimi_account`);
+ * - `groups`: what a group holds (actions `project`, `project_rule`, `balancing`: lent and back);
+ * - `moves`: an account leaving this machine's use (actions `machine`: sent or called back;
+ *   `assignment`: given to an agent);
  * - `errors`: any action whose outcome is a failure (`failed`, `unauthorized`, `rate_limited`,
  *   `upstream_error`, `network_error`, `connection_failed`, `timeout`, `rejected`, `aborted`,
  *   `unavailable`, `4xx`, `5xx`);
@@ -598,10 +598,11 @@ export type EventKind = 'switches' | 'sign_ins' | 'groups' | 'moves' | 'errors' 
 /** WF-11.1: the kinds the filter offers, in its order (`other` is filtered by the command but not offered). */
 export const EVENT_FILTER_KINDS: EventKind[] = ['switches', 'sign_ins', 'groups', 'moves', 'errors'];
 const KIND_ACTIONS: Record<'switches' | 'sign_ins' | 'groups' | 'moves', readonly string[]> = {
-  switches: ['account_selected', 'activation', 'rotation'],
-  sign_ins: ['login'],
-  groups: ['project', 'project_rule'],
-  moves: ['machine', 'fallback', 'balancing'],
+  // The same classes as the owner's `events` command (`switchboard_core::activity::class_of`).
+  switches: ['account_selected', 'activation', 'rotation', 'fallback'],
+  sign_ins: ['login', 'account_added', 'kimi_account'],
+  groups: ['project', 'project_rule', 'balancing'],
+  moves: ['machine', 'assignment'],
 };
 const FAILURE_DETAILS = new Set(['failed', 'unauthorized', 'rate_limited', 'upstream_error', 'network_error', 'connection_failed', 'timeout', 'rejected', 'aborted', 'unavailable', '4xx', '5xx']);
 /** WF-11.1: every kind an event is of; `other` only when no action kind names it. */
