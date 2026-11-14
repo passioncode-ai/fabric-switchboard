@@ -13,7 +13,7 @@ names and fields call rotation. Say group and automatic switching to the person.
 
 `switchboard mcp --read-only` lists only the 24 tools that read (every tool under
 [Read tools](#read-tools)) and none of the 24 that write. A session Switchboard launches in
-isolated mode gets that set. The server lists 48 tools; each has a section below.
+isolated mode gets that set. The server lists 75 tools; each has a section below.
 
 ## Contents
 

@@ -6,7 +6,7 @@ never renumber, never delete. The doc map ([DOCMAP.md](DOCMAP.md)) names this fi
 register. Decisions made before 2026-11-08 live where they were made (plans' `D-<n>`, board rows,
 research notes); the ones still in force that the board cites are seeded below with their source.
 
-**Next free ID:** `DEC-0021` (`DEC-0014`, `DEC-0016` to `DEC-0018` and `DEC-0020` are held for the window and fleet plan's modules)
+**Next free ID:** `DEC-0021` (`DEC-0016` to `DEC-0018` and `DEC-0020` are held for the window and fleet plan's modules)
 
 ## Format
 
@@ -238,6 +238,20 @@ research notes); the ones still in force that the board cites are seeded below w
   какие-то удаленные машины, в отдельные группы этих удаленных машин … Каждая удаленная машина -
   это новая своя группа … перекидывать аккаунты между группами … так я буду видеть все свои
   удаленные машины и какие там на них стоят аккаунты»).
+
+### DEC-0014: Settings owns standing configuration
+
+- **Date:** 2026-11-14
+- **Status:** Accepted (built in `w1-window`: SB-363, WF-1.1)
+- **Decision:** what stays set until someone changes it lives on one Settings page: automatic
+  switching, balancing between groups, Codex in group folders, terminals in organization folders,
+  running in the background, updates, language and appearance, backups and usage counts. Other pages
+  show the state in one line and link there; Accounts keeps only "Automatic switching is on for N
+  groups" and the warnings about the accounts themselves.
+- **Consequences / affects:** the window's `settings` page (SCN-093), About keeps the product,
+  terms and tour, Groups points to Settings; [the plan](plans/2026-11-14-window-and-fleet/WF-01-foundations.md).
+- **Source:** operator 2026-11-14 («automatic switching, вот этот меню большое, пусть оно будет в
+  настройках, переорганизовать, чтобы оно не показывалось здесь на главном экране»).
 
 ### DEC-0015: Attention is a view, not a group
 
