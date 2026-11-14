@@ -543,9 +543,7 @@ impl Store {
             .map(|(a, _, _)| a.id.clone()))
     }
 }
-/// The best guess at an account's usage when nothing fresh is known (SB-98): its last
-/// account-wide figure, 0 when every window it names has since reset, and 99 — last in line,
-/// still below a full account — when it was never measured.
+
 /// SB-377: when an account will have room again on what is known of it: now when it has room
 /// (last known usage under 100 %, a window whose reset passed counting as empty), else the latest
 /// reset of its full windows; none when that is not known.
@@ -568,6 +566,10 @@ pub fn free_at(account: &Account, now: i64) -> Option<i64> {
         .into_iter()
         .max()
 }
+
+/// The best guess at an account's usage when nothing fresh is known (SB-98): its last
+/// account-wide figure, 0 when every window it names has since reset, and 99 — last in line,
+/// still below a full account — when it was never measured.
 fn last_known_usage(account: &Account, now: i64) -> f64 {
     let Some(usage) = account.usage.as_ref() else {
         return 99.0;

@@ -48,7 +48,6 @@ pub const REMOTE_DATA_DIR_INVALID: &str =
 pub const NOT_A_SIGN_IN: &str =
     "Only a Claude or Codex subscription sign-in moves this way. Give an API key through your vault.";
 pub const NOT_HERE: &str = "This account is already used elsewhere or turned off here.";
-pub const SELECTED: &str = "Select another account for its group before moving this one.";
 /// SB-377: the group a selected account leaves keeps working only with another account here.
 pub const SEND_ONLY_ONE: &str = "This is the only account its group uses on this machine. Add another account to that group before moving this one.";
 pub const ADD_FAILED: &str =
@@ -73,7 +72,6 @@ pub const CALLED_BACK: &str = "called back";
 pub const NOT_CALLED_BACK: &str =
     "This account was not given back by a call back here, so its mark stays. Nothing changed.";
 pub const ONLY_ONE_HERE: &str = "This is the only account its group uses on this machine. Add another account to that group before calling this one back.";
-pub const USED_HERE_SINCE: &str = "This account was renewed here after it moved, so its copy there is no longer valid. Remove that copy there instead of calling it back.";
 
 pub const NOT_AWAY: &str = "This account is used here, not on another machine.";
 pub const NO_REMOTE_ID: &str =

@@ -62,7 +62,8 @@ no password prompt):
 
 3. To take one back: `switchboard accounts recall <account id> --from user@host`. It stops being
    used there, its tokens come back over ssh, the provider is checked here, then its copy there is
-   removed.
+   removed. When the sign-in here changed after the move, the one here is kept aside and whichever
+   of the two the provider answers stays (SB-377); the answer's `kept` says which.
 
 Then continue with steps 4 to 6 of "On the new computer" (keys, PassionCode.ai, the check), run
 on the new computer.
