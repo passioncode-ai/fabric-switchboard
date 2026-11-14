@@ -2,6 +2,15 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-11-14: `launch --surface fabric` for Fabric's consoles (board request `885bbb81`)
+
+- **Asked.** Fabric, on the board (thread `9b2bbd4a`, its spec `docs/evidence/specs/2026-11-14-consoles-in-switchboard-host.md`, row CO-584): Fabric's own Claude Code and Codex consoles will start through `switchboard launch --mode managed --in-place --hosted`; (1) take `--surface fabric`, (2) confirm the session host gives the agent the launching process's environment.
+- **Done.** `LaunchSurface::Fabric` in `crates/switchboard-cli/src/main.rs`, mapped to `launches::Surface::Fabric` (which `switchboard dispatch` already writes) and passed on by `launch --target`; the owner already took `fabric` from outside (`from_outside` turns only `window` into `cli`). Docs: CLI.md, CONTRACTS.md (`launched_by.surface`), CHANGELOG Unreleased.
+- **Environment, read in code.** Neither `hosted::spawn` (`crates/switchboard-cli/src/hosted.rs`) nor `session_host::run` (`crates/switchboard-runtime/src/session_host.rs`) clears or edits the environment; the program the host runs is the launch script, which unsets `CONFLICTS` (`crates/switchboard-runtime/src/launch.rs:31`) and exports its own, exactly as for a plain `--in-place` launch. Answered on the thread with the list.
+- **Checks.** `cargo fmt --check`, the new test `every_surface_launch_takes_is_recorded_under_its_own_word`, clippy and the CLI crate's tests on this MacBook (see the PR).
+
+**Exact next task.** Unchanged: the entry below. `--surface fabric` ships with the next release (0.7.84).
+
 ## 2026-11-14: wave 3 part 1 and WF-6; a duplicate session; 0.7.81 to 0.7.83
 
 - **Asked.** The window and fleet plan, wave 3 ([plan](plans/2026-11-14-window-and-fleet/README.md)); the operator: «дальше».

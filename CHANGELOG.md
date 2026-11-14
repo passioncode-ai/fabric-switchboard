@@ -8,7 +8,11 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+<<<<<<< HEAD
 - An account on another machine no longer reads "Not checked while disabled": Switchboard reads each machine's accounts over ssh every 15 minutes in the background and shows "Used 42% on studio, 12 min ago", or that the machine did not answer and when it last did. The numbers are shown, never used to switch here. `switchboard machines list` and the agent tool `switchboard_machines` carry the same read, and *Needs attention* lists an account the provider refused on its machine (SB-366, DEC-0017).
+=======
+- `switchboard launch` takes `--surface fabric`, so a session Fabric's own console starts (`--in-place --hosted`) is recorded as Fabric's, as a board run `switchboard dispatch` starts already is, instead of `cli` (Fabric CO-584).
+>>>>>>> origin/main
 
 ## 0.7.83
 

@@ -257,7 +257,8 @@ enum Command {
         #[arg(long, value_name = "LAUNCH_ID")]
         parent: Option<String>,
         /// Where the launch is asked from: `dashboards` for Fabric Dashboards' console,
-        /// `recovery` for a host resuming a stopped session; default `cli`.
+        /// `fabric` for Fabric's own console, `recovery` for a host resuming a stopped session;
+        /// default `cli`.
         #[arg(long, value_enum, default_value = "cli")]
         surface: LaunchSurface,
         /// Start the session on another machine, as ssh knows it (`switchboard targets`): that
@@ -1726,7 +1727,31 @@ enum SessionsCommand {
 enum LaunchSurface {
     Cli,
     Dashboards,
+    /// Fabric's own Claude Code and Codex consoles (Fabric CO-584), recorded like a run its
+    /// dispatcher starts (`switchboard dispatch`, SB-247).
+    Fabric,
     Recovery,
+}
+impl LaunchSurface {
+    /// The word `--surface` takes for it, as a launch on another machine passes it on.
+    fn word(self) -> &'static str {
+        match self {
+            Self::Cli => "cli",
+            Self::Dashboards => "dashboards",
+            Self::Fabric => "fabric",
+            Self::Recovery => "recovery",
+        }
+    }
+}
+impl From<LaunchSurface> for launches::Surface {
+    fn from(s: LaunchSurface) -> Self {
+        match s {
+            LaunchSurface::Cli => Self::Cli,
+            LaunchSurface::Dashboards => Self::Dashboards,
+            LaunchSurface::Fabric => Self::Fabric,
+            LaunchSurface::Recovery => Self::Recovery,
+        }
+    }
 }
 #[derive(Clone, Copy, ValueEnum)]
 enum ProviderArg {
@@ -2491,11 +2516,7 @@ async fn run(cli: &Cli) -> Result<Value, String> {
             if parent.as_deref().is_some_and(|p| !launches::valid_id(p)) {
                 return Err(launches::PARENT_INVALID.into());
             }
-            let surface = match surface {
-                LaunchSurface::Cli => launches::Surface::Cli,
-                LaunchSurface::Dashboards => launches::Surface::Dashboards,
-                LaunchSurface::Recovery => launches::Surface::Recovery,
-            };
+            let surface = launches::Surface::from(*surface);
             let by = launches::LaunchedBy::from_caller(surface, by.clone(), parent.clone());
             return launch(
                 &root,
@@ -3205,15 +3226,7 @@ async fn launch_there(
     if l.hosted {
         words.push("--hosted".to_owned());
     }
-    words.extend([
-        "--surface".to_owned(),
-        match l.surface {
-            LaunchSurface::Cli => "cli",
-            LaunchSurface::Dashboards => "dashboards",
-            LaunchSurface::Recovery => "recovery",
-        }
-        .to_owned(),
-    ]);
+    words.extend(["--surface".to_owned(), l.surface.word().to_owned()]);
     if let Some(by) = &l.by {
         words.extend(["--by".to_owned(), by.clone()]);
     }
@@ -5378,5 +5391,47 @@ mod moving_commands {
                 }
             }
         }
+    }
+}
+#[cfg(test)]
+mod launch_surface_tests {
+    use super::{Cli, Command, LaunchSurface};
+    use clap::{Parser, ValueEnum};
+    use switchboard_runtime::launches;
+
+    #[test]
+    fn every_surface_launch_takes_is_recorded_under_its_own_word() {
+        // Fabric CO-584: Fabric's consoles pass `--surface fabric`; each word `launch` takes is
+        // the one its record stores and the one a launch on another machine passes on.
+        for surface in LaunchSurface::value_variants() {
+            let word = surface.word();
+            let cli = Cli::try_parse_from([
+                "switchboard",
+                "launch",
+                "--provider",
+                "claude",
+                "--mode",
+                "managed",
+                "--working-directory",
+                "/tmp",
+                "--in-place",
+                "--hosted",
+                "--surface",
+                word,
+            ])
+            .unwrap_or_else(|e| panic!("--surface {word}: {e}"));
+            let Command::Launch {
+                surface: parsed, ..
+            } = cli.command
+            else {
+                panic!("not a launch");
+            };
+            assert_eq!(parsed.word(), word);
+            let recorded = serde_json::to_value(launches::Surface::from(parsed)).unwrap();
+            assert_eq!(recorded, word, "the record stores what --surface said");
+        }
+        assert!(LaunchSurface::value_variants()
+            .iter()
+            .any(|s| s.word() == "fabric"));
     }
 }
