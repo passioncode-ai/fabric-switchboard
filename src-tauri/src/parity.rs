@@ -58,6 +58,8 @@ const PARITY: &[(&str, Over)] = &[
     ("recall_account", Tool("switchboard_account_recall")),
     ("machines", Tool("switchboard_machines")),
     ("attention", Tool("switchboard_attention")),
+    ("given_accounts", Tool("switchboard_accounts")),
+    ("events", Tool("switchboard_events")),
     ("hand_over_account", Tool("switchboard_account_hand_over")),
     // The system file picker; an agent passes the record to switchboard_account_receive itself.
     ("open_handover", Not(UI_ONLY)),
@@ -127,6 +129,7 @@ const PARITY: &[(&str, Over)] = &[
     ("answer_ceiling", Tool("switchboard_ceiling_answer")),
     ("agent_enable", Tool("switchboard_agent_set")),
     ("agent_default", Tool("switchboard_agent_set")),
+    ("agent_permissions", Tool("switchboard_agent_set")),
     ("openrouter_models", Tool("switchboard_openrouter_models")),
     ("project_suggestions", Tool("switchboard_project_suggestions")),
     ("accept_project_suggestion", Tool("switchboard_project_suggestion")),

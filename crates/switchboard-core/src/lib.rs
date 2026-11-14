@@ -1,4 +1,5 @@
 //! Private account storage. Secret-bearing types deliberately do not implement Debug.
+pub mod activity;
 pub mod agent_keys;
 /// One write of the spending ceilings' file (`spend.json`) and of a saved agent key under a
 /// ceiling's watch at a time in this process (SB-223): the runtime's spend module holds it to

@@ -1215,6 +1215,25 @@ fn human_usage_and_events_print_utc_times_and_health() {
     );
     let json: serde_json::Value = serde_json::from_str(&run(&["--json", "events"])).unwrap();
     assert!(json["data"][0]["at"].is_i64());
+    // SB-373: the same filters as `switchboard_events`; the data stays a list, oldest first.
+    let added: serde_json::Value =
+        serde_json::from_str(&run(&["--json", "events", "--kind", "sign_ins"])).unwrap();
+    let added = added["data"].as_array().unwrap();
+    assert_eq!(added.len(), 1, "{added:?}");
+    assert_eq!(added[0]["action"], "account_added");
+    let one: serde_json::Value =
+        serde_json::from_str(&run(&["--json", "events", "--limit", "1"])).unwrap();
+    assert_eq!(one["data"].as_array().unwrap().len(), 1);
+    let none: serde_json::Value =
+        serde_json::from_str(&run(&["--json", "events", "--before", "1"])).unwrap();
+    assert_eq!(none["data"], serde_json::json!([]));
+    let refused = binary()
+        .arg("--data-dir")
+        .arg(tmp.path())
+        .args(["events", "--kind", "logins"])
+        .output()
+        .unwrap();
+    assert!(!refused.status.success());
 }
 #[test]
 fn offline_backup_never_writes_and_a_scratch_folder_restores_nothing() {
