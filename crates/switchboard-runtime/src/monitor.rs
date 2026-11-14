@@ -323,6 +323,11 @@ impl Pass {
         // watched it is recorded. Nothing is read while no run is watched.
         let analytics = runtime.analytics();
         crate::blocking::run(|| crate::dispatch::sweep(&runtime.root, time, analytics.as_deref()));
+        // SB-366 (DEC-0017): the accounts on other machines, read over ssh every 15 minutes on a
+        // thread of their own; nothing at all without a machine group.
+        if let Ok(snapshot) = runtime.store.snapshot() {
+            crate::remote_usage::tick(&runtime.root, &snapshot, time);
+        }
         // Analytics: the daily active event and accounts added by any path; sends what waits.
         if let Some(client) = runtime.analytics() {
             if let Ok(snapshot) = runtime.store.snapshot() {

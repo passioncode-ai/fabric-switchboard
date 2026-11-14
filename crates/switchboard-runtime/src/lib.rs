@@ -48,6 +48,7 @@ pub mod recovery;
 mod refresh;
 pub mod remote_check;
 pub mod remote_dispatch;
+pub mod remote_usage;
 pub mod roots;
 pub mod seats;
 pub mod self_update;

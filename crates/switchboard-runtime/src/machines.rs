@@ -286,12 +286,19 @@ pub fn adopt_once(
 /// Every machine group with its accounts, and the accounts marked elsewhere that no machine
 /// group holds. From the store and files here; no ssh.
 pub fn list(root: &Path, snapshot: &Snapshot) -> Value {
+    // SB-366 (DEC-0017): the last background read of each machine, from its file.
+    let reads = crate::remote_usage::read(root);
+    let machine_of = |pool: &str| snapshot.machines.iter().find(|m| m.pool == pool);
     let account = |a: &switchboard_core::Account| {
+        let there = machine_of(&a.pool)
+            .and_then(|m| crate::remote_usage::view(&reads, &m.name, &a.id))
+            .unwrap_or(Value::Null);
         json!({
             "id": a.id, "label": a.label, "provider": a.provider, "kind": a.kind,
             "since": snapshot.elsewhere.get(&a.id),
             "location": snapshot.locations.get(&a.id),
             "returns_to": snapshot.returns_to.get(&a.id),
+            "there": there,
         })
     };
     let machines: Vec<Value> = snapshot
@@ -299,9 +306,13 @@ pub fn list(root: &Path, snapshot: &Snapshot) -> Value {
         .iter()
         .map(|m| {
             let (program, data_dir) = crate::targets::program_for(root, &m.name, None, None);
+            let read = reads.machines.get(&m.name).map_or(Value::Null, |r| {
+                json!({"as_of": r.as_of, "tried_at": r.tried_at, "reason": r.reason,
+                    "failures": r.failures})
+            });
             json!({
                 "pool": m.pool, "name": m.name, "identity": m.identity, "aliases": m.aliases,
-                "created_at": m.created_at,
+                "created_at": m.created_at, "read": read,
                 "program": program, "data_dir": data_dir,
                 "accounts": snapshot.accounts.iter().filter(|a| a.pool == m.pool).map(account).collect::<Vec<_>>(),
             })
