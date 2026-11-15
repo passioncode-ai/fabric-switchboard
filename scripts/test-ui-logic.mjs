@@ -1684,6 +1684,19 @@ check(() => {
   assert.equal(logic.attentionActionLabel('check_usage'), 'Проверить снова');
   i18nForShell.setLocale('en');
 });
+// SB-384: the duty officer's reasons and outcomes in words.
+check(() => {
+  for (const reason of ['idle', 'old', 'waiting', 'stuck', 'duplicate']) {
+    const line = logic.dutyReasonText(reason);
+    assert.ok(line && line !== reason && !line.includes('\u2014'), reason);
+  }
+  assert.equal(logic.dutyReasonText('martian'), 'martian', 'an unknown reason shows its code');
+  for (const outcome of [undefined, 'restarted', 'closed', 'planned']) assert.equal(logic.dutyOutcomeText(outcome), null, String(outcome));
+  for (const outcome of ['still_running', 'closed_held_elsewhere', 'closed_no_folder', 'closed_no_claude', 'closed_not_restarted']) assert.ok(logic.dutyOutcomeText(outcome)?.length, outcome);
+  i18nForShell.setLocale('ru');
+  assert.equal(logic.dutyReasonText('idle'), 'закончила работу и простаивала');
+  i18nForShell.setLocale('en');
+});
 // WF-2.4 and WF-1.1: the given-to-agent facts and the one switching line on Accounts.
 check(() => {
   assert.deepEqual(logic.givenFacts({ organization: 'Northwind', machine: 'studio', launch: { group: 'Agents', folder: 'frame' }, lastActivity: '2h ago' }), ['Organization: Northwind', 'Machine: studio', 'Last launch: Agents, frame', 'Last activity 2h ago']);

@@ -301,6 +301,7 @@ export function createDemoAdapter(): Adapter {
   // SB-352 wave 2 (SCN-090): balancing, off until the person turns a group on; with two groups
   // on, the demo shows one account lent between them.
   let demoCap: number | null = null;
+  let demoDutyOn = true;
   let balanceGroups: string[] = []; let balanceAllNew = false; let balanceBackup: string[] = [];
   const balanceStatus = () => {
     const pools = ['default', ...(state.projects ?? []).map((p) => p.pool)];
@@ -661,6 +662,19 @@ export function createDemoAdapter(): Adapter {
       // The same two working sessions the demo's session tree shows.
       const used = 2;
       return { cap: demoCap, used, free: demoCap === null ? null : Math.max(0, demoCap - used), at_capacity: demoCap !== null && used >= demoCap, total: 5, quiet: 1, quiet_after_minutes: 30 };
+    },
+    async duty(change) {
+      await pause();
+      if (typeof change?.on === 'boolean') demoDutyOn = change.on;
+      const now = Math.floor(Date.now() / 1000);
+      return {
+        settings: { on: demoDutyOn, stuck_minutes: 45, waiting_minutes: 60, idle_minutes: 60, max_age_hours: 4 }, check_seconds: 300, watched: 5, left_to_dashboards: 1, supported: true,
+        due: [{ action: 'close', reason: 'idle', session: 'demo-s3', folder: '/Users/demo/Code/notes', pid: 4103, host: 'terminal' }],
+        recent: [
+          { at: now - 1200, action: 'restart', reason: 'stuck', outcome: 'restarted', session: 'demo-s1', folder: '/Users/demo/Code/shop-api', pid: 4101, host: 'terminal' },
+          { at: now - 5400, action: 'close', reason: 'duplicate', outcome: 'closed', session: 'demo-s2', folder: '/Users/demo/Code/shop-web', pid: 4102, host: 'terminal' },
+        ],
+      };
     },
     async balance(change) {
       await pause();

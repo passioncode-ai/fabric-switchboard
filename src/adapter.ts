@@ -77,6 +77,7 @@ export const nativeAdapter: Adapter = {
   codexRoute: (enabled) => invoke('codex_route', { enabled: enabled ?? null }),
   sessionTree: () => invoke('session_tree'),
   capacity: (change) => invoke('capacity', { cap: change?.cap ?? null, clear: change?.clear ?? false }),
+  duty: (change) => invoke('duty', { on: change?.on ?? null, run: change?.run ?? false }),
   balance: (change) => invoke('balance', { add: change?.add ?? [], remove: change?.remove ?? [], allNew: change?.all_new ?? null, backupAdd: change?.backup_add ?? [], backupRemove: change?.backup_remove ?? [] }),
   repositoryMap: (under) => readWithDeadline(invoke('repository_map', { under }), 60_000),
   statistics: (days) => invoke('statistics', { days }),

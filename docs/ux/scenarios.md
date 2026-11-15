@@ -2063,3 +2063,24 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Coverage:** `session_watch::tests::*`, `attention::tests::a_copy_of_a_live_session_and_a_quiet_board_run_come_first`, ui-logic `sessionTreeRows`, `surfaceLabel` (`scripts/test-ui-logic.mjs`); WebKit demo (`?demo=1`).
 **Product:** unobserved
 **Traces:** SB-379, SB-376, SB-378, SCN-094
+
+### SCN-096: Let the duty officer restart stalled sessions and close finished ones
+**Persona:** P-01
+**Goal:** A person leaves coding sessions running and finds no hung or forgotten one hours later: a stalled session is resumed in a new Terminal window, a finished one is gone.
+**Preconditions:** the owner runs; `duty.json` absent or `on: true`.
+**Entry point:** Settings → “Session duty officer”.
+**Steps:**
+1. Open the fold → the note, then “Watching {n} sessions. Restart after {stuck} minutes without writes or {waiting} minutes waiting for an answer; close after {idle} minutes idle; restart a session older than {hours} hours between turns.”
+2. “At the next check” lists what the next check would do; “Recent actions” the last five with their time, each “Restarted in {folder}: it {reason}.” or “Closed in {folder}: it {reason}.” and, when it did not go to plan, “Result: {outcome}.”
+3. *Check now* acts at once; *Turn off* / *Turn on* switches it (“The duty officer is off.”, “The duty officer is on.”). The limits change with `switchboard duty set` or MCP `switchboard_duty`.
+**Alt paths:** on Windows “On this system the duty officer only reports; it restarts nothing.” and no *Check now*; the read fails → the read error and the rest of Settings stays.
+**Expected result:** no interactive Claude Code session outside Fabric Dashboards stays stalled past its limit or idle past `idle_minutes`; a restarted one continues in Terminal with its history.
+**UI elements:** the fold and its state, the two lists, *Check now*, *Turn off* / *Turn on*.
+**States covered:** reading, read failed, on, off, nothing due, actions due, unsupported.
+**Errors & recovery:** a restart that could not open Terminal leaves the session closed and says so; its transcript keeps the work, and `claude --resume` from its folder continues it.
+**Status:** draft
+**Meaning:** SB-384, DEC-0021 (operator 2026-11-15: «дежурный по сессиям … не накапливаем эти висящие сессии»).
+**Copy:** checked with Copylot, register ui; report ids in [strings](../brand/strings.md).
+**Coverage:** `duty::tests::*`, ui-logic `dutyReasonText`, `dutyOutcomeText` (`scripts/test-ui-logic.mjs`); WebKit demo (`?demo=1`).
+**Product:** unobserved
+**Traces:** SB-384, DEC-0021, SCN-095

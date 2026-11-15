@@ -116,6 +116,25 @@ pub struct Seen {
     pub last_write: Option<i64>,
     /// Runs in a Fabric Dashboards console.
     pub dashboards: bool,
+    /// The program hosting its terminal: `dashboards`, `orca`, `terminal`, `iterm` or `other`.
+    pub host: &'static str,
+}
+
+/// The terminal host of a session from its ancestors' executable paths (DEC-0018: an Orca or
+/// other host is acted on like Terminal and the resumed copy opens in Terminal).
+pub fn host_of(ancestors: &[String]) -> &'static str {
+    let has = |needle: &str| ancestors.iter().any(|p| p.contains(needle));
+    if has("Fabric Dashboards") {
+        "dashboards"
+    } else if has("/orca/") {
+        "orca"
+    } else if has("Terminal.app") {
+        "terminal"
+    } else if has("iTerm") {
+        "iterm"
+    } else {
+        "other"
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -187,11 +206,14 @@ pub fn observe(root: &Path) -> Vec<Seen> {
             kind: file["kind"].as_str().unwrap_or("").to_owned(),
             cwd: cwd.to_owned(),
             last_write: crate::machine_sessions::session_last_write(&config, cwd, session),
-            dashboards: crate::machine_sessions::ancestor_paths(pid)
-                .iter()
-                .any(|p| p.contains("Fabric Dashboards")),
+            dashboards: false,
+            host: "other",
             config,
         });
+    }
+    for s in &mut seen {
+        s.host = host_of(&crate::machine_sessions::ancestor_paths(s.pid));
+        s.dashboards = s.host == "dashboards";
     }
     seen
 }
@@ -303,7 +325,7 @@ pub fn status(root: &Path, now: i64) -> Result<Value, String> {
         .iter()
         .filter_map(|s| {
             decide(s, &set, now, copies.contains(&s.pid)).map(|(act, reason)| {
-                json!({"pid": s.pid, "session": s.session, "folder": s.cwd, "reason": reason,
+                json!({"pid": s.pid, "session": s.session, "folder": s.cwd, "reason": reason, "host": s.host,
                     "action": if act == Act::Close { "close" } else { "restart" }})
             })
         })
@@ -366,7 +388,7 @@ pub fn check(root: &Path, now: i64, dry_run: bool) -> Result<Value, String> {
             act_on(root, s, act)
         };
         let line = json!({"at": now, "action": action, "reason": reason, "outcome": outcome,
-            "session": s.session, "folder": s.cwd, "pid": s.pid});
+            "session": s.session, "folder": s.cwd, "pid": s.pid, "host": s.host});
         if !dry_run {
             append(root, line.clone());
             crate::oplog::event(
@@ -461,7 +483,33 @@ mod tests {
             config: PathBuf::from("/h/.claude"),
             last_write: quiet_min.map(|q| now - q * 60),
             dashboards: false,
+            host: "terminal",
         }
+    }
+
+    #[test]
+    fn the_host_is_read_from_the_ancestors_and_dashboards_wins() {
+        let paths = |v: &[&str]| v.iter().map(|p| (*p).to_owned()).collect::<Vec<_>>();
+        assert_eq!(
+            host_of(&paths(&[
+                "/Applications/Fabric Dashboards.app/Contents/MacOS/x",
+                "/a/orca/daemon-host/macos/terminal-host-1"
+            ])),
+            "dashboards"
+        );
+        assert_eq!(
+            host_of(&paths(&[
+                "/Users/u/Library/Application Support/orca/daemon-host/macos/terminal-host-1"
+            ])),
+            "orca"
+        );
+        assert_eq!(
+            host_of(&paths(&[
+                "/System/Applications/Utilities/Terminal.app/Contents/MacOS/Terminal"
+            ])),
+            "terminal"
+        );
+        assert_eq!(host_of(&paths(&["/bin/zsh"])), "other");
     }
 
     #[test]

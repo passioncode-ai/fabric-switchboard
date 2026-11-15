@@ -147,6 +147,8 @@ export interface Adapter {
   sessionTree(): Promise<SessionTree>;
   /** SB-378: the session pool; `cap` sets it, `clear` removes it, neither reads. */
   capacity(change?: { cap?: number; clear?: boolean } | null): Promise<CapacityStatus>;
+  /** SB-384: the session duty officer: its settings, what it did and what a check would do now. */
+  duty(change?: { on?: boolean; run?: boolean } | null): Promise<DutyStatus>;
   repositoryMap(under: string[]): Promise<import('./ui-logic').RepositoryMap>;
   /** SB-145: what the proxy relayed in the last `days` days. */
   statistics(days: number): Promise<import('./ui-logic').Statistics>;
@@ -297,6 +299,10 @@ export interface TreeLaunch { launch_id: string; launched_at: number; pool: stri
 export interface WatchFinding { kind: 'duplicate' | 'stuck' | 'gone'; launch_id?: string; session_id?: string; pids?: number[]; folder?: string; quiet_minutes?: number }
 export interface SessionTree { live: TreeSession[]; launches: TreeLaunch[]; counts: { live: number; working: number; quiet: number; managed: number; by_pool: Record<string, number>; by_surface: Record<string, number> }; findings: WatchFinding[]; capacity?: CapacityStatus; /** SB-382: sessions in each organization's folders, and the terminal hook's state. */ context?: { hook: 'on' | 'off' | 'default_on' | 'default_off'; map: string; organizations: { context: string; live: number; managed: number; other: number }[] } }
 /** SB-378: `switchboard capacity`, this computer's cap on working coding sessions. */
+/** SB-384 (DEC-0018): the session duty officer. */
+export interface DutySettings { on: boolean; stuck_minutes: number; waiting_minutes: number; idle_minutes: number; max_age_hours: number }
+export interface DutyLine { at?: number; action: 'restart' | 'close'; reason: string; outcome?: string; session: string; folder: string; pid: number; host?: string }
+export interface DutyStatus { settings: DutySettings; check_seconds: number; watched: number; left_to_dashboards: number; due: DutyLine[]; recent: DutyLine[]; supported: boolean }
 export interface CapacityStatus { cap: number | null; used: number; free: number | null; at_capacity: boolean; total: number; quiet: number; quiet_after_minutes: number }
 /** SB-352: one loan in `balance status`. */
 export interface BalanceLoan { account_id: string; label: string | null; provider: Provider; from: string; from_name: string; to: string; to_name: string; at: number }
