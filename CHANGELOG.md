@@ -8,6 +8,8 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- A group's fallback chain can pin only an account that serves the group: the dialog lists only those, and `chain set` refuses another account (window audit item 43).
+
 - Sections and panels share one width on every page; a page's subtitle no longer wraps early beside its buttons; API keys names agents as the lists do and explains when a changed key applies and why a group cannot start on OpenRouter; the Statistics index stays on one line (window audit 19, 42, 45, 46, 47, 56).
 
 - Agents: the takeover switches, the default marker and Set up line up on every row; the default agent reads as a label, not a button; the settings' controls share one height; a long command wraps after a slash, not inside a word; the fallback chain reads on its own line; the note about the switchboard command on PATH no longer reads as contradicting registered tools (window audit 20, 31, 34, 35, 37, 38).

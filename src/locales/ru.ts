@@ -459,6 +459,7 @@ export const RU: Record<string, string> = {
   "The same agent and account appear twice in the chain.": "Один и тот же агент с тем же аккаунтом указан в цепочке дважды.",
   "Give a preset or a list of agents, not both.": "Укажите либо пресет, либо список агентов.",
   "Unknown preset.": "Неизвестный пресет.",
+  "This account does not serve this group. Pin one of the group's own accounts, or leave the step on any account with room.": "Этот аккаунт не обслуживает эту группу. Закрепите один из аккаунтов группы или оставьте шаг на любом аккаунте с запасом.",
   "Claude Code runs on a Claude account.": "Claude Code работает на аккаунте Claude.",
   "A Kimi Code account runs only Kimi Code.": "Аккаунт Kimi Code запускает только Kimi Code.",
   "Codex runs on a Codex account.": "Codex работает на аккаунте Codex.",

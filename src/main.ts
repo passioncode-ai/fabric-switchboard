@@ -1433,7 +1433,10 @@ function chainDialog(scope: ChainScope, initial: ChainExecutor[], returnFocus: s
         if (!TAKEOVER_ORDER.includes(step.agent)) agents.push([step.agent, t('{agent} (not automatic)', { agent: name })]);
         const agent = select(agents); agent.value = step.agent; agent.dataset.key = `chain-step-${index}-agent`; agent.setAttribute('aria-label', t('Agent for step {n}', { n }));
         agent.addEventListener('change', () => { steps[index] = { agent: agent.value }; paint(`chain-step-${index}-agent`); });
-        const choices = accountsForStep(step.agent, snapshot?.accounts ?? [], kimiAccounts);
+        // Window audit item 43: a group's chain offers only accounts that serve the group (its own or
+        // lent to it); a step pinned to another could never run there.
+        const groupAccounts = (snapshot?.accounts ?? []).filter((a) => scope.kind !== 'project' || servesPool(snapshot!, a, scope.pool));
+        const choices = accountsForStep(step.agent, groupAccounts, kimiAccounts);
         const openrouterAgent = step.agent === 'hermes' || step.agent === 'opencode';
         const options: [string, string][] = [['', openrouterAgent ? t('The OpenRouter key') : t('Any account with room')], ...choices.map((c): [string, string] => [c.id, c.label])];
         if (step.account_id && !choices.some((c) => c.id === step.account_id)) options.push([step.account_id, chainAccountLabel(step.account_id) ?? step.account_id]);

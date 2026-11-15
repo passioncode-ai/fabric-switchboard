@@ -81,6 +81,8 @@ fn key_name_valid(name: &str) -> bool {
 /// One executor against the saved accounts. A provider's own client runs on one of that
 /// provider's accounts; any other agent runs on an API-key account or a paid key — never on a
 /// subscription sign-in, which is for the provider's own client (the catalog's subscription rule).
+/// A group's chain named an account that does not serve that group.
+pub const PIN_OUTSIDE_GROUP: &str = "This account does not serve this group. Pin one of the group's own accounts, or leave the step on any account with room.";
 fn validate_executor(s: &Snapshot, e: &Executor) -> Result<(), String> {
     if !agent_id_valid(&e.agent) {
         return Err("Name the agent by its catalog id (switchboard agents list).".into());
@@ -216,6 +218,19 @@ impl Store {
         }
         for e in &executors {
             validate_executor(&candidate, e)?;
+            // Window audit item 43: a group's chain pins only an account that serves the group (its
+            // own or one lent to it); a fallback walk skips any other (`project_allows`), so such a
+            // step could never run.
+            if let (ChainScope::Project { pool }, Some(id)) = (&scope, &e.account_id) {
+                let outside = candidate
+                    .accounts
+                    .iter()
+                    .find(|a| &a.id == id)
+                    .is_some_and(|a| !candidate.serves(a, pool));
+                if outside {
+                    return Err(PIN_OUTSIDE_GROUP.into());
+                }
+            }
         }
         let mut seen = std::collections::HashSet::new();
         for e in &executors {
@@ -498,6 +513,43 @@ mod tests {
             1,
             "the project's chain left with it"
         );
+    }
+
+    #[test]
+    fn a_groups_chain_pins_only_an_account_that_serves_the_group() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = store(dir.path());
+        let outside = add(&store, Provider::Claude, AuthKind::OAuth, "outside");
+        let work = tempfile::tempdir().unwrap();
+        let project = store
+            .save_project(None, "Work", &[work.path().canonicalize().unwrap()], &[])
+            .unwrap();
+        let pinned = |id: &str| Executor {
+            agent: "claude-code".into(),
+            account_id: Some(id.to_owned()),
+            key: None,
+        };
+        let scope = ChainScope::Project {
+            pool: project.pool.clone(),
+        };
+        assert_eq!(
+            store.set_chain(scope.clone(), vec![pinned(&outside)]).unwrap_err(),
+            PIN_OUTSIDE_GROUP
+        );
+        // The same account pinned on the machine's chain is fine, and in the group once it serves it.
+        store
+            .set_chain(ChainScope::Machine, vec![pinned(&outside)])
+            .unwrap();
+        let mine = store
+            .save_project(
+                Some(&project.pool),
+                "Work",
+                &[work.path().canonicalize().unwrap()],
+                std::slice::from_ref(&outside),
+            )
+            .unwrap();
+        assert_eq!(mine.pool, project.pool);
+        store.set_chain(scope, vec![pinned(&outside)]).unwrap();
     }
 
     #[test]

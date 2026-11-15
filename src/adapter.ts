@@ -309,6 +309,7 @@ const safeErrors = new Set([
   'The same agent and account appear twice in the chain.',
   'Give a preset or a list of agents, not both.',
   'Unknown preset.',
+  "This account does not serve this group. Pin one of the group's own accounts, or leave the step on any account with room.",
   'Claude Code runs on a Claude account.',
   'Codex runs on a Codex account.',
   'A Kimi Code account runs only Kimi Code.',

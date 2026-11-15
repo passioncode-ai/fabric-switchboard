@@ -245,7 +245,7 @@ export function createDemoAdapter(): Adapter {
   const presetAgents = ['claude-code', 'codex', 'kimi-code', 'hermes'];
   let demoChains: Chain[] = [
     { scope: { kind: 'machine' }, executors: presetAgents.map((agent) => ({ agent })), updated_at: now() - 86_400 },
-    { scope: { kind: 'project', pool: 'alpha-web' }, executors: [{ agent: 'codex', account_id: 'demo-codex-work' }, { agent: 'opencode' }], updated_at: now() - 7200 },
+    { scope: { kind: 'project', pool: 'alpha-web' }, executors: [{ agent: 'codex', account_id: 'demo-codex-lab' }, { agent: 'opencode' }], updated_at: now() - 7200 },
     { scope: { kind: 'workflow', id: 'wf_0123456789abcdef' }, executors: [{ agent: 'claude-code' }, { agent: 'hermes', key: 'alpha-web/prod/OPENROUTER_API_KEY' }], updated_at: now() - 600 },
   ];
   let lastHandover: LastHandover | null = { at: now() - 3 * 3600, workflow: 'wf_0123456789abcdef', outcome: 'offered', skipped: [{ agent: 'hermes', reason: 'no_usable_account' }] };
@@ -761,6 +761,7 @@ export function createDemoAdapter(): Adapter {
       if (preset && preset !== 'subscriptions-first') throw new Error('Unknown preset.');
       const list: ChainExecutor[] = preset ? presetAgents.map((agent) => ({ agent })) : executors;
       if (list.length > 8) throw new Error('A chain holds at most 8 agents.');
+      if (scope.kind === 'project' && list.some((e) => { const a = e.account_id ? state.accounts.find((x) => x.id === e.account_id) : undefined; return !!a && !servesPool(state, a, scope.pool); })) throw new Error("This account does not serve this group. Pin one of the group's own accounts, or leave the step on any account with room.");
       demoChains = demoChains.filter((c) => scopeKey(c.scope) !== scopeKey(scope));
       if (!list.length) { log('fallback_chain', '', 'cleared'); return { chain: null }; }
       const chain: Chain = { scope: structuredClone(scope), executors: structuredClone(list), updated_at: now() };
