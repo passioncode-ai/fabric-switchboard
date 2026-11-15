@@ -201,7 +201,7 @@ enum Command {
         /// minutes, a launch whose process is gone. Read here, without the owner.
         #[arg(long, conflicts_with_all = ["history", "all", "machine"])]
         tree: bool,
-        /// SB-380: read it on another machine, as ssh knows it (`switchboard targets`), through
+        /// Read it on another machine, as ssh knows it (`switchboard targets`), through
         /// that machine's Switchboard; the answer is the one it gives there.
         #[arg(long)]
         target: Option<String>,
@@ -309,7 +309,7 @@ enum Command {
     Attach {
         /// The launch id.
         launch_id: String,
-        /// SB-380: attach to a session on another machine, as ssh knows it (`switchboard targets`), through
+        /// Attach to a session on another machine, as ssh knows it (`switchboard targets`), through
         /// that machine's Switchboard; the session shows in this terminal.
         #[arg(long)]
         target: Option<String>,
@@ -1766,7 +1766,7 @@ enum SessionsCommand {
     End {
         /// The launch id.
         launch_id: String,
-        /// SB-380: end a session on another machine, as ssh knows it (`switchboard targets`), through
+        /// End a session on another machine, as ssh knows it (`switchboard targets`), through
         /// that machine's Switchboard; it answers as it does there.
         #[arg(long)]
         target: Option<String>,

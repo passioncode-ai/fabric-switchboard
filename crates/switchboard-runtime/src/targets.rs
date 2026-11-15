@@ -271,7 +271,7 @@ mod tests {
     #[test]
     fn a_command_there_quotes_every_word_and_asks_for_json_and_a_terminal_only_when_told() {
         let program = Program {
-            path: DEFAULT_APP,
+            path: DEFAULT_APP.path,
             data_dir: Some("/srv/sb"),
         };
         let args = command_ssh(
