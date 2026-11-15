@@ -3021,7 +3021,7 @@ function renderStats(main: HTMLElement) {
     const grid = el('div', 'stat-grid'); grid.append(chart, ...tables);
     page.append(grid);
   }
-  page.append(el('p', 'surface-note', t('What is counted where: Claude Code and Codex sessions that go through Switchboard (managed launches, group folders, the Codex switch) and agents on an API-key account through its proxy are counted above, each request placed in the repository of the group folder it came from; “No folder recorded” holds requests counted before 0.6.53, when the folder was not kept, and requests that named no group folder. Agents on OpenRouter (Hermes, OpenCode, Pi and others) go to OpenRouter directly: their spend is under API keys, per key. Kimi Code runs on its own subscription: its usage is on its card under Accounts. A session on its own sign-in outside Switchboard is not counted. Token counts are the ones the provider reports; counts only, never a prompt, an answer or a path; kept for 90 days.') + (s.since ? ` ${t('Counted since {date}.', { date: s.since })}` : '')));
+  page.append(el('p', 'surface-note', t('Counted here: requests that go through Switchboard (managed sessions, group folders, the Codex switch, API-key accounts), by the repository they came from; “No folder recorded” holds requests that named no group folder or came before folders were kept. Not counted: agents on OpenRouter (their spend is under API keys), Kimi Code (its usage is on its card under Accounts) and sessions on their own sign-in. Token counts are the provider\'s; counts only, never a prompt or an answer; kept for 90 days.') + (s.since ? ` ${t('Counted since {date}.', { date: s.since })}` : '')));
 }
 let sessionList: SessionInfo[] | null = null;
 let sessionsError = false;

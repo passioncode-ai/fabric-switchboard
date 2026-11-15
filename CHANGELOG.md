@@ -8,6 +8,7 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- The note under Statistics is half as long and names no internal version (SB-379).
 ## 0.7.91
 
 - A crash of a `switchboard` command or of `switchboard mcp` is counted in the anonymous error report like a crash of the app, as the name of the file it happened in only (SB-379).
