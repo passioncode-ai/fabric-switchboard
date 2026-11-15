@@ -298,6 +298,9 @@ impl Pass {
             crate::refresh::learn_live_owner(&runtime.store, runtime.native, &runtime.refresh)
                 .await;
         }
+        // W4 items 2 and 14: Claude Code's sign-in and the accounts that need a new sign-in are
+        // read once per pass, before the transaction (Keychain reads held it up to 48 s).
+        let inputs = crate::blocking::run(|| rotate_inputs(runtime, native_sources));
         {
             let _mutation = runtime.hold("rotate").await;
             // SB-310: a group with accounts and no saved managed policy gets an enabled one.
@@ -316,7 +319,7 @@ impl Pass {
             // A native switch writes Claude Code's files and Keychain item: a blocking section, so
             // the proxy and control tasks on this worker do not wait with it (up to 49 s on a
             // swapping machine, 2026-10-19).
-            let _ = crate::blocking::run(|| rotate(runtime, native_sources));
+            let _ = crate::blocking::run(|| rotate_with(runtime, native_sources, inputs));
         }
         // SB-352 (DEC-0012): accounts lent between the chosen groups, every 15 minutes and only
         // while groups are chosen or an account is still lent; off, nothing is read.
@@ -1166,7 +1169,41 @@ fn log_failovers(tally: &switchboard_core::FailoverTally) {
     );
 }
 
+/// What a rotation pass reads outside the owner transaction: the profile Claude Code is signed in
+/// with (only when a native policy is on) and the accounts that need a new sign-in.
+struct RotateInputs {
+    native: Option<Result<external::CapturedProfile, String>>,
+    sign_in: Vec<String>,
+}
+fn rotate_inputs(runtime: &Runtime, native_sources: bool) -> RotateInputs {
+    let wants_native = native_sources
+        && runtime.store.snapshot().is_ok_and(|s| {
+            s.policies
+                .iter()
+                .any(|p| p.enabled && p.target == "claude_cli")
+        });
+    RotateInputs {
+        native: wants_native.then(|| (runtime.native.current)(Provider::Claude)),
+        sign_in: runtime.refresh.sign_in_required(&runtime.store),
+    }
+}
+#[cfg(test)]
 fn rotate(runtime: &Runtime, native_sources: bool) -> Result<(), String> {
+    rotate_with(
+        runtime,
+        native_sources,
+        rotate_inputs(runtime, native_sources),
+    )
+}
+fn rotate_with(
+    runtime: &Runtime,
+    native_sources: bool,
+    inputs: RotateInputs,
+) -> Result<(), String> {
+    let RotateInputs {
+        mut native,
+        sign_in,
+    } = inputs;
     let mut decisions = Vec::new();
     let snapshot = runtime.store.snapshot()?;
     for policy in snapshot.policies.iter().filter(|p| p.enabled) {
@@ -1182,7 +1219,10 @@ fn rotate(runtime: &Runtime, native_sources: bool) -> Result<(), String> {
                 .get(&format!("{}:{}", policy.provider.as_str(), policy.pool))
                 .cloned()
         } else if native_sources {
-            (runtime.native.current)(Provider::Claude)
+            // Read before the transaction; after a native switch in this pass, read again.
+            native
+                .get_or_insert_with(|| (runtime.native.current)(Provider::Claude))
+                .as_ref()
                 .ok()
                 .and_then(|profile| {
                     runtime
@@ -1202,11 +1242,10 @@ fn rotate(runtime: &Runtime, native_sources: bool) -> Result<(), String> {
         // set rotation, recovery and dispatch share).
         let mut excluded = runtime.held(now());
         excluded.extend(
-            runtime
-                .refresh
-                .sign_in_required(&runtime.store)
-                .into_iter()
-                .filter(|id| current.as_deref() != Some(id.as_str())),
+            sign_in
+                .iter()
+                .filter(|id| current.as_deref() != Some(id.as_str()))
+                .cloned(),
         );
         // SB-98: a candidate whose switch fails is set aside for ten minutes and the next one
         // is tried in the same pass — up to three — instead of the same one every 30 s.
@@ -1256,6 +1295,7 @@ fn rotate(runtime: &Runtime, native_sources: bool) -> Result<(), String> {
                     }
                     runtime.invalidate_current();
                     if policy.target == "claude_cli" {
+                        native = None;
                         let identity = snapshot
                             .accounts
                             .iter()
