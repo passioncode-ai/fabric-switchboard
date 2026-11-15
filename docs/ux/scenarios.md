@@ -2070,11 +2070,11 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Preconditions:** the owner runs; `duty.json` absent or `on: true`.
 **Entry point:** Settings → “Session duty officer”.
 **Steps:**
-1. Open the fold → the note, then “Watching {n} sessions. Restart after {stuck} minutes without writes or {waiting} minutes waiting for an answer; close after {idle} minutes idle; restart a session older than {hours} hours between turns.”
+1. Open the fold → the note, then “Watching {n} sessions: {running} running commands, {waiting} waiting for your answer. A session is restarted after {stuck} minutes stalled and closed after {idle} minutes finished.”
 2. “At the next check” lists what the next check would do; “Recent actions” the last five with their time, each “Restarted in {folder}: it {reason}.” or “Closed in {folder}: it {reason}.” and, when it did not go to plan, “Result: {outcome}.”
 3. *Check now* acts at once; *Turn off* / *Turn on* switches it (“The duty officer is off.”, “The duty officer is on.”). The limits change with `switchboard duty set` or MCP `switchboard_duty`.
 **Alt paths:** on Windows “On this system the duty officer only reports; it restarts nothing.” and no *Check now*; the read fails → the read error and the rest of Settings stays.
-**Expected result:** no interactive Claude Code session Switchboard started stays stalled past its limit or idle past `idle_minutes`; a restarted one continues in Terminal with its history and its hooks; a session the person started in their own terminal, and a Fabric Dashboards console, is never touched (“Left alone: {n} sessions you started yourself.”).
+**Expected result:** no interactive Claude Code session stays stalled past its limit (busy, writing nothing, using no CPU) or finished past `idle_minutes`; a session with a command of its own running, or waiting for the person's answer, is never ended; a restarted one continues in Terminal with its history and its hooks; a Fabric Dashboards console is never touched.
 **UI elements:** the fold and its state, the two lists, *Check now*, *Turn off* / *Turn on*.
 **States covered:** reading, read failed, on, off, nothing due, actions due, unsupported.
 **Errors & recovery:** a restart that could not open Terminal leaves the session closed and says so; its transcript keeps the work, and `claude --resume` from its folder continues it.

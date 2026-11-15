@@ -385,6 +385,17 @@ research notes); the ones still in force that the board cites are seeded below w
   resume script exports the PATH a run started by the owner gets, and runs `claude` without
   `exec` so an end by a signal leaves status 0 and the window closes. Operator: «вот эти окна потом
   не закрываются, а работающие сессии отдельные закрылись».
+- **Amended again 2026-11-15 (0.7.96).** The operator: «чтобы они не зависали и не убивались раньше
+  чем доработают, только когда закончила сессия работу можно ее кикать, либо если диагноз застой
+  - типо работает но нет». The 0.7.95 scope (only sessions Switchboard started) is lifted: every
+  interactive session outside Fabric Dashboards is watched again, under rules that never end work.
+  A session is closed only when finished (idle for `idle_minutes` with none of its own commands
+  running: a background task that will wake it is work) and restarted only when stalled (busy,
+  status and transcript still for `stuck_minutes`, no CPU in its process tree since the previous
+  check, no command of its own running or one hung three times as long). `waiting` (a question for
+  the person) and the age rule `old` are gone; of two copies of one session only a finished one is
+  closed. Live dry read on the MacBook with this build: 30 sessions watched, 16 running commands,
+  nothing due (the one duplicate has both copies working).
 - **Consequences / affects:** [CONTRACTS](CONTRACTS.md#session-duty-officer-sb-384-dec-0021), the
   lifecycle rows in AGENTS.md (signals to session processes, Terminal windows, `duty.json`,
   `duty.jsonl`), SCN-096, Settings → Session duty officer.
