@@ -1673,7 +1673,7 @@ check(() => {
     const line = logic.attentionReasonText(reason);
     assert.ok(line && !line.includes('\u2014'), reason);
   }
-  assert.deepEqual(['sign_in', 'answer_ceiling', 'check_usage', 'open_machines'].map(logic.attentionActionLabel), ['Sign in', 'Answer', 'Check again', 'Open Other machines']);
+  assert.deepEqual(['sign_in', 'answer_ceiling', 'check_usage', 'open_machines'].map(logic.attentionActionLabel), ['Sign in again', 'Answer', 'Check again', 'Open Other machines']);
   i18nForShell.setLocale('ru');
   assert.equal(logic.attentionActionLabel('check_usage'), 'Проверить снова');
   i18nForShell.setLocale('en');

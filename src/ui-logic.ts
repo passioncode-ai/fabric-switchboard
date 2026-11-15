@@ -557,7 +557,7 @@ export function attentionReasonText(reason: AttentionReason): string {
 /** WF-3.2: the one action an item offers, by the window flow it opens. */
 export function attentionActionLabel(window: AttentionWindow): string {
   switch (window) {
-    case 'sign_in': return t('Sign in');
+    case 'sign_in': return t('Sign in again');
     case 'answer_ceiling': return t('Answer');
     case 'check_usage': return t('Check again');
     case 'open_machines': return t('Open Other machines');

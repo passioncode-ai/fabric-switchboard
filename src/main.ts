@@ -421,7 +421,7 @@ function render(options: { background?: boolean } = {}): boolean {
   if (demo) main.append(el('div', 'demo-banner', t('SYNTHETIC DEMO · No real accounts, vault, proxy, or terminal. Changes reset when you reload.')));
   const header = el('header', 'page-header');
   const heading = el('div'); const title = el('h1', '', { accounts: t('Accounts'), tokens: t('API keys'), projects: t('Groups'), orgs: t('Organizations'), agents: t('Agents'), activity: t('Activity'), stats: t('Statistics'), settings: t('Settings'), about: t('About Switchboard') }[page]); title.tabIndex = -1; title.dataset.focus = 'page-title';
-  heading.append(el('p', 'eyebrow', t('FABRIC SWITCHBOARD')), title, el('p', 'subtitle', { accounts: t('Switch Claude Code, keep sign-ins fresh and watch quota.'), tokens: t('API keys agents run on: the machine\'s, and one per group.'), projects: t('Groups of repositories with accounts of their own; other groups never switch to them.'), orgs: t('Companies your accounts belong to, by your word or their team at the provider.'), agents: t('Choose which coding agents take over work, and connect them to Switchboard.'), activity: t('Local account and session events.'), stats: t('Which accounts and agents work in which groups, and where tokens go.'), settings: t('How Switchboard switches, lends, updates and backs up on this computer.'), about: t('Deliberate account switching for coding sessions.') }[page]));
+  heading.append(el('p', 'eyebrow', t('FABRIC SWITCHBOARD')), title, el('p', 'subtitle', { accounts: t('Switch Claude Code, keep sign-ins fresh and watch quota.'), tokens: t('API keys agents run on: the machine\'s, and one per group.'), projects: t('Groups of repositories with accounts of their own; other groups never switch to them.'), orgs: t('Companies your accounts belong to: set by you, or read from their team at the provider.'), agents: t('Choose which coding agents take over work, and connect them to Switchboard.'), activity: t('Local account and session events.'), stats: t('Which accounts and agents work in which groups, and where tokens go.'), settings: t('How Switchboard switches, lends, updates and backs up on this computer.'), about: t('Deliberate account switching for coding sessions.') }[page]));
   header.append(heading);
   if (native || demo) {
     const actions = el('div', 'header-actions');
@@ -2383,7 +2383,7 @@ function kimiRow(account: KimiAccount, status: KimiStatus) {
   const unusable = signedOut || !!status.error;
   const relogin = () => void mutate(async () => { await adapter.kimiSignInAgain(account.id); if (unusable) watchKimiSignIn(account.id); }, unusable ? t('Sign in to {label} in Terminal. The row updates when you finish.', { label: account.label }) : t('Sign in to {label} in Terminal, then refresh.', { label: account.label }), `kimi-primary-${account.id}`, undefined, 'sign_in');
   const primary = el('div', 'row-primary');
-  primary.append(signedOut ? button(t('Sign in'), relogin, 'button row-button', `kimi-primary-${account.id}`) : button(t('Launch…'), () => kimiLaunchDialog(account.id, account.label), 'button row-button', `kimi-primary-${account.id}`));
+  primary.append(signedOut ? button(t('Sign in again'), relogin, 'button row-button', `kimi-primary-${account.id}`) : button(t('Launch…'), () => kimiLaunchDialog(account.id, account.label), 'button row-button', `kimi-primary-${account.id}`));
   const items: ([string, () => void] | [string, () => void, string])[] = [];
   if (!signedOut) items.push([t('Sign in again'), relogin]);
   items.push([t('Remove…'), () => kimiRemoveDialog(account.id, account.label), 'danger-text']);
@@ -2497,7 +2497,7 @@ function primaryButton(account: Account, state: { current: boolean; selected: bo
   else if (action === 'selected') slot.append(status(t('✓ Selected')));
   else if (action === 'switch') { const control = button(t('Switch'), () => switchNative(account), 'button row-button', key); control.title = t('Make this the Claude Code account on this computer'); slot.append(control); }
   else if (action === 'select') slot.append(button(t('Select'), () => void mutate(() => adapter.select(account), t('{label} selected for the next managed request {where}.', { label: account.label, where: inGroup(account.pool, snapshot?.projects) }), key), 'button row-button', key));
-  else if (action === 'sign_in') slot.append(button(t('Sign in'), () => void startLogin(account.provider, account.label, account.pool), 'button row-button', key));
+  else if (action === 'sign_in') slot.append(button(t('Sign in again'), () => void startLogin(account.provider, account.label, account.pool), 'button row-button', key));
   else if (machineOf(snapshot!, account)) { const machine = machineOf(snapshot!, account)!; slot.append(button(t('Call back'), () => bringHereDialog(account, machine), 'button row-button quiet', key)); }
   else if (snapshot?.elsewhere?.[account.id] !== undefined && sshTarget(snapshot?.locations?.[account.id])) { const from = snapshot!.locations![account.id]!; slot.append(button(t('Call back'), () => void mutate(() => adapter.recallAccount(account.id, from), t('{label} is back on this computer.', { label: account.label }), key), 'button row-button quiet', key)); }
   else if (snapshot?.elsewhere?.[account.id] !== undefined) slot.append(button(t('Use here'), () => void mutate(() => adapter.markElsewhere(account.id, false), t('{label} is used on this computer again.', { label: account.label }), key), 'button row-button quiet', key));
@@ -2706,7 +2706,7 @@ function renderCurrent(main: HTMLElement, quiet = false) {
       }, 'button quiet row-button', `retry-current-${provider}`));
     }
     // The same place on both cards: how the account changes, or why it does not change here.
-    copy.append(el('span', 'current-how', provider === 'claude' ? t('Switch on an account\'s row makes it the account of Claude Code on this computer.') : t('Codex CLI keeps its own sign-in: Switchboard does not switch it. Codex sessions in a group\'s folders use that group\'s accounts.')));
+    copy.append(el('span', 'current-how', provider === 'claude' ? t('To change it, press Switch on an account\'s row below.') : t('Codex CLI keeps its own sign-in: Switchboard does not switch it. Codex sessions in a group\'s folders use that group\'s accounts.')));
     card.append(copy);
     if (action.childElementCount) card.append(action);
     grid.append(card);

@@ -661,7 +661,7 @@ g:hover > .chart-bar { opacity: .82; }
 .filter-toggle { display: inline-flex; align-items: center; gap: var(--space-2); font-size: var(--t-label); color: var(--muted); white-space: nowrap; cursor: pointer; }
 /* WF-2.3: both In use now cards in one layout: identity, the saved line, then how it changes. */
 .current-card { align-items: flex-start; }
-.current-meta { font-size: var(--t-chip); color: var(--info); overflow-wrap: anywhere; }
+.current-meta { font-size: var(--t-chip); color: var(--ink); overflow-wrap: anywhere; }
 .current-how { margin-top: var(--space-1); font-size: var(--t-chip); color: var(--muted); overflow-wrap: anywhere; }
 .current-action { flex: none; align-self: center; }
 /* WF-2.4: the facts of an account given to an agent, under its row. */
