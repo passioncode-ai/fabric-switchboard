@@ -20,6 +20,7 @@ pub mod continuation;
 pub mod control;
 mod digest;
 pub mod dispatch;
+pub mod duty;
 pub mod errors;
 pub mod external;
 #[cfg(target_os = "macos")]
@@ -371,6 +372,24 @@ pub enum Operation {
         cap: Option<u32>,
         #[serde(default)]
         clear: bool,
+    },
+    /// SB-384: the session duty officer: its settings, what it did and what a check would do now;
+    /// each field given changes that setting; `run` checks now (`dry_run`: only lists).
+    Duty {
+        #[serde(default)]
+        on: Option<bool>,
+        #[serde(default)]
+        stuck_minutes: Option<u32>,
+        #[serde(default)]
+        waiting_minutes: Option<u32>,
+        #[serde(default)]
+        idle_minutes: Option<u32>,
+        #[serde(default)]
+        max_age_hours: Option<u32>,
+        #[serde(default)]
+        run: bool,
+        #[serde(default)]
+        dry_run: bool,
     },
     /// SB-365 (WF-3.1, DEC-0015): what needs a person, each with its reason and the action that
     /// fixes it. A view: nothing moves, the accounts stay in their groups.
@@ -1381,6 +1400,8 @@ impl Runtime {
                 | Operation::Machines { .. }
                 // SB-378: the process table and its own small file.
                 | Operation::Capacity { .. }
+                // SB-384: the process table and its own two small files.
+                | Operation::Duty { .. }
                 // SB-379: the process table, session files and the day's launch records.
                 | Operation::SessionTree
                 // SB-365: the snapshot, the owner's sign-in verdicts in memory, seats.jsonl and
@@ -6105,6 +6126,39 @@ async fn execute(
             }
             let root = root.to_owned();
             blocking::run(move || capacity::status(&root))
+        }
+        Operation::Duty {
+            on,
+            stuck_minutes,
+            waiting_minutes,
+            idle_minutes,
+            max_age_hours,
+            run,
+            dry_run,
+        } => {
+            let root = root.to_owned();
+            blocking::run(move || {
+                let changed = on.is_some()
+                    || stuck_minutes.is_some()
+                    || waiting_minutes.is_some()
+                    || idle_minutes.is_some()
+                    || max_age_hours.is_some();
+                if changed {
+                    let mut set = duty::settings(&root).unwrap_or_default();
+                    set.on = on.unwrap_or(set.on);
+                    set.stuck_minutes = stuck_minutes.unwrap_or(set.stuck_minutes);
+                    set.waiting_minutes = waiting_minutes.unwrap_or(set.waiting_minutes);
+                    set.idle_minutes = idle_minutes.unwrap_or(set.idle_minutes);
+                    set.max_age_hours = max_age_hours.unwrap_or(set.max_age_hours);
+                    duty::save(&root, &set)?;
+                }
+                let now = session_watch::now();
+                let mut answer = duty::status(&root, now)?;
+                if run || dry_run {
+                    answer["check"] = duty::check(&root, now, !run || dry_run)?;
+                }
+                Ok(answer)
+            })
         }
         Operation::Machines { live } => {
             let snapshot = store.snapshot()?;

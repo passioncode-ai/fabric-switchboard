@@ -6,7 +6,7 @@ never renumber, never delete. The doc map ([DOCMAP.md](DOCMAP.md)) names this fi
 register. Decisions made before 2026-11-08 live where they were made (plans' `D-<n>`, board rows,
 research notes); the ones still in force that the board cites are seeded below with their source.
 
-**Next free ID:** `DEC-0021` (`DEC-0018` and `DEC-0020` are held for the window and fleet plan's modules)
+**Next free ID:** `DEC-0022` (`DEC-0018` and `DEC-0020` are held for the window and fleet plan's modules)
 
 ## Format
 
@@ -347,3 +347,39 @@ research notes); the ones still in force that the board cites are seeded below w
 - **Source:** operator 2026-11-14, the window review ([plan](plans/2026-11-14-window-and-fleet/WF-01-foundations.md))
   («не должно быть никакой функции, которая работает в интерфейсе и не работает в MCP. Могут быть
   наоборот»).
+
+### DEC-0021: A duty officer restarts stalled Claude Code sessions and closes finished ones
+
+- **Date:** 2026-11-15
+- **Status:** Accepted (built on branch `duty`: SB-384)
+- **Context:** the session watch (SB-379) reports a stalled or duplicated session but acts on
+  none, and sessions that stall or finish their work keep their terminal and memory for hours.
+  The operator asked for a duty officer in the lifecycle that closes a hung session and resumes it
+  in a new terminal, restarts a session that has run for hours, and takes away one that finished
+  and only hangs.
+- **Decision:** the one-minute session watch calls the duty officer; every 5 minutes, while it is
+  on (default on, `duty.json`), it reads the interactive Claude Code sessions of this computer
+  (process plus its `sessions/<pid>.json`) and acts on at most 3 of them:
+  - a newer second process of one session: closed (`duplicate`);
+  - idle for `idle_minutes` (60): closed (`idle`), the work is in the transcript;
+  - idle between turns for 2 minutes and started over `max_age_hours` (4) ago: restarted (`old`);
+  - waiting for an answer for `waiting_minutes` (60): restarted with a prompt to continue (`waiting`);
+  - busy or in a shell with no status change and no transcript write for `stuck_minutes` (45):
+    restarted with a prompt to continue (`stuck`).
+  Close is SIGTERM, then SIGKILL after 10 s. Restart is close, then a new Terminal window that runs
+  `claude --resume <session>` in its folder with the home's own exports and config folder (a
+  Switchboard home's `launch.command`, minus its launch id), and the bypass setting of SB-298. A
+  session restarted 3 times in 6 hours is closed instead. A session in a Fabric Dashboards console
+  is left to Dashboards. A session hosted elsewhere (Orca's terminal host, iTerm) is acted on like
+  one in Terminal, and its resumed copy opens in Terminal, since Switchboard cannot open a tab in
+  another program; the host is recorded with each action. Codex sessions are not watched yet.
+  Every action is a line in `duty.jsonl` (500 kept) and an oplog event `session_duty`, codes only.
+  Off with `switchboard duty off`, MCP `switchboard_duty {on: false}` or the window's Settings.
+  Windows only reports.
+- **Consequences / affects:** [CONTRACTS](CONTRACTS.md#session-duty-officer-sb-384-dec-0021), the
+  lifecycle rows in AGENTS.md (signals to session processes, Terminal windows, `duty.json`,
+  `duty.jsonl`), SCN-096, Settings → Session duty officer.
+- **Source:** operator 2026-11-15 in this session («Каждую минуту дежурный пробегает по сессиям и
+  смотрит, не стоят ли они … закрыть предыдущую сессию и переоткрыть ее в новом сессии … сессий,
+  которые … висят больше … 2-3-4 часов … просим ее остановиться, перезагружаем и продолжаем … если
+  сессия уже закончила работа, она все еще висит, мы ее уводим»).

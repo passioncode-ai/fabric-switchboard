@@ -957,6 +957,27 @@ async fn capacity(cap: Option<u32>, clear: bool, state: State<'_, Slot>) -> Resu
         .execute(Operation::Capacity { cap, clear })
         .await
 }
+/// SB-384: the session duty officer; `on` turns it on or off, `run` checks now, nothing reads it.
+#[tauri::command]
+async fn duty(
+    on: Option<bool>,
+    run: Option<bool>,
+    state: State<'_, Slot>,
+) -> Result<Value, String> {
+    state
+        .runtime()
+        .await?
+        .execute(Operation::Duty {
+            on,
+            stuck_minutes: None,
+            waiting_minutes: None,
+            idle_minutes: None,
+            max_age_hours: None,
+            run: run.unwrap_or(false),
+            dry_run: false,
+        })
+        .await
+}
 /// SB-135: a repository with its worktrees and clones into another project, in one step.
 #[tauri::command]
 async fn move_root(
@@ -1881,6 +1902,7 @@ fn main() {
             codex_route,
             balance,
             capacity,
+            duty,
             session_tree,
             report_problem,
             repository_map,

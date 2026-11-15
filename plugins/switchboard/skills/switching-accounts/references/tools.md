@@ -683,6 +683,20 @@ folder's transcripts were written in the last 30 minutes; quiet ones are not cou
 Ask again when a session ends. A process table that could not be read admits the start and is
 named in `degraded`.
 
+### `switchboard_duty`: `on?`, `stuck_minutes?`, `waiting_minutes?`, `idle_minutes?`, `max_age_hours?`, `run?`, `dry_run?`
+
+The session duty officer (SB-384, DEC-0018). Every five minutes it looks at each live interactive
+Claude Code session of this user (not Fabric Dashboards' consoles, not `claude -p` runs) through
+the session's own `sessions/<pid>.json` and its transcript's modification time. Busy without a
+transcript write for `stuck_minutes` (45), or waiting for an answer for `waiting_minutes` (60):
+closed and resumed in a new Terminal window (`claude --resume <id>` with a prompt to continue).
+At the end of its turn for `idle_minutes` (60): closed. Running for `max_age_hours` (4): resumed
+in a fresh process at the end of a turn. A second process of one session: the newer is closed.
+At most three actions a check, three restarts of a session in six hours. Without arguments it
+reads `{settings, check_seconds, watched, left_to_dashboards, due, recent, supported}`; the fields
+change its settings (only when the operator asks), `run: true` checks now and `dry_run: true`
+lists what a check would do.
+
 ### `switchboard_balance`: `add?`, `remove?`, `all_new?`, `backup_add?`, `backup_remove?`
 
 Accounts lent between the groups the operator chose (SB-352, DEC-0012). Without arguments it

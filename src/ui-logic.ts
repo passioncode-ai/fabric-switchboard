@@ -541,6 +541,29 @@ export function attentionAccounts(attention: Attention | null, signInRequired: r
   return new Set([...(attention?.items ?? []).map((i) => i.account_id).filter((id): id is string => !!id), ...signInRequired]);
 }
 /** WF-3.2: the reason line of an item, worded by the window from its code (never the backend's English). */
+/** SB-384: why the duty officer acted on a session, in words. */
+export function dutyReasonText(reason: string): string {
+  switch (reason) {
+    case 'idle': return t('finished its work and sat idle');
+    case 'old': return t('ran past the age limit');
+    case 'waiting': return t('waited too long for an answer');
+    case 'stuck': return t('stopped writing while busy');
+    case 'duplicate': return t('was a second copy of a session');
+    default: return reason;
+  }
+}
+/** SB-384: how a duty action ended, in words; null for a plain success. */
+export function dutyOutcomeText(outcome: string | undefined): string | null {
+  switch (outcome) {
+    case undefined: case 'restarted': case 'closed': case 'planned': return null;
+    case 'still_running': return t('it did not stop');
+    case 'closed_held_elsewhere': return t('closed, not reopened: another process holds it');
+    case 'closed_no_folder': return t('closed, not reopened: its folder is gone');
+    case 'closed_no_claude': return t('closed, not reopened: Claude Code was not found');
+    case 'closed_not_restarted': return t('closed, not reopened: the Terminal window did not open');
+    default: return outcome;
+  }
+}
 export function attentionReasonText(reason: AttentionReason): string {
   switch (reason) {
     case 'session_duplicate': return t('One session runs in two processes. Close the newer copy so they do not work over each other.');

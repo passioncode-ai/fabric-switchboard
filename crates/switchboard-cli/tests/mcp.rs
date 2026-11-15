@@ -171,6 +171,7 @@ async fn handshake_lists_tools_and_rejects_malformed_messages() {
             "switchboard_accounts",
             "switchboard_usage",
             "switchboard_capacity",
+            "switchboard_duty",
             "switchboard_attention",
             "switchboard_switch",
             "switchboard_session_end",

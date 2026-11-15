@@ -158,6 +158,14 @@ enum Command {
         #[command(subcommand)]
         command: Option<CapacityCmd>,
     },
+    /// The session duty officer: every five minutes it closes and continues a Claude Code session
+    /// that stopped moving, closes one that finished and only holds a terminal, and gives a
+    /// long-lived one a fresh process at the end of a turn. Without a subcommand: its settings,
+    /// its last actions and what a check would do now.
+    Duty {
+        #[command(subcommand)]
+        command: Option<DutyCmd>,
+    },
     /// What needs a person: accounts to sign in to again, usage checks failing for over an hour,
     /// moves to another machine whose answer was lost and spending ceilings waiting for an answer,
     /// each with the action that fixes it. The accounts stay in their groups. Reads only.
@@ -973,6 +981,35 @@ enum CapacityCmd {
     },
     /// Remove the cap: nothing waits.
     Clear,
+}
+
+#[derive(Subcommand)]
+enum DutyCmd {
+    /// Turn the duty officer on (the default).
+    On,
+    /// Turn the duty officer off: nothing is closed or restarted.
+    Off,
+    /// Change its limits; each one left out keeps its value.
+    Set {
+        /// Minutes a session may work without writing its transcript before it is restarted (10 to 1440).
+        #[arg(long)]
+        stuck_minutes: Option<u32>,
+        /// Minutes a session may wait for an answer or a permission before it is restarted (10 to 1440).
+        #[arg(long)]
+        waiting_minutes: Option<u32>,
+        /// Minutes a session may sit at the end of its turn before it is closed (10 to 1440).
+        #[arg(long)]
+        idle_minutes: Option<u32>,
+        /// Hours after which a session gets a fresh process at the end of a turn (1 to 72).
+        #[arg(long)]
+        max_age_hours: Option<u32>,
+    },
+    /// Check now instead of waiting for the next five minutes.
+    Run {
+        /// Only list what would be done.
+        #[arg(long)]
+        dry_run: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -2249,6 +2286,47 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                 clear: true,
             },
         },
+        Command::Duty { command } => {
+            fn duty(
+                on: Option<bool>,
+                limits: [Option<u32>; 4],
+                run: bool,
+                dry_run: bool,
+            ) -> Operation {
+                let [stuck_minutes, waiting_minutes, idle_minutes, max_age_hours] = limits;
+                Operation::Duty {
+                    on,
+                    stuck_minutes,
+                    waiting_minutes,
+                    idle_minutes,
+                    max_age_hours,
+                    run,
+                    dry_run,
+                }
+            }
+            match command {
+                None => duty(None, [None; 4], false, false),
+                Some(DutyCmd::On) => duty(Some(true), [None; 4], false, false),
+                Some(DutyCmd::Off) => duty(Some(false), [None; 4], false, false),
+                Some(DutyCmd::Set {
+                    stuck_minutes,
+                    waiting_minutes,
+                    idle_minutes,
+                    max_age_hours,
+                }) => duty(
+                    None,
+                    [
+                        *stuck_minutes,
+                        *waiting_minutes,
+                        *idle_minutes,
+                        *max_age_hours,
+                    ],
+                    false,
+                    false,
+                ),
+                Some(DutyCmd::Run { dry_run }) => duty(None, [None; 4], !*dry_run, *dry_run),
+            }
+        }
         Command::Machines { command } => match command {
             MachinesCmd::List { live } => Operation::Machines { live: *live },
             MachinesCmd::Adopt { apply } => Operation::MachinesAdopt { apply: *apply },
@@ -5149,6 +5227,10 @@ mod mcp_parity {
         ("attention", Tool("switchboard_attention")),
         ("capacity set", Tool("switchboard_capacity")),
         ("capacity clear", Tool("switchboard_capacity")),
+        ("duty on", Tool("switchboard_duty")),
+        ("duty off", Tool("switchboard_duty")),
+        ("duty set", Tool("switchboard_duty")),
+        ("duty run", Tool("switchboard_duty")),
         ("machines adopt", Tool("switchboard_machine_set")),
         ("machines place", Tool("switchboard_machine_set")),
         ("machines forget", Tool("switchboard_machine_set")),

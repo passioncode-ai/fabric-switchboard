@@ -3250,3 +3250,41 @@ Vesta's board request `a7325ed3` (G2, plan fabric-workspace `docs/plans/2026-11-
 - `placed_by`: `person` (the person's word) or `provider` (the account's team at the provider is the organization's).
 - `where`: `here`, or `elsewhere` for an account marked as used on another machine or in a machine group. No machine name.
 - Left out by construction: personal accounts, labels, e-mail addresses, account ids, tokens and machine names (test `an_organizations_seats_name_no_person_and_leave_personal_accounts_out`). The provider's plan is not known to Switchboard, so it is not given; the field set is offered to Observatory (OBS-415) on thread `f3aa795e`.
+
+## Session duty officer (SB-384, DEC-0021)
+
+`duty::tick` runs first in the owner's one-minute session watch and checks at most every 300 s,
+only while `duty.json` (0600: `on`, `stuck_minutes`, `waiting_minutes`, `idle_minutes`,
+`max_age_hours`; absent reads as on with 45, 60, 60 and 4) says on. A check (`duty::check`):
+
+- reads the live Claude Code processes and the `sessions/<pid>.json` of every Claude config folder
+  Switchboard knows (the person's, `homes/*`, `runtimes/*`, `shell/*`); a session is the process
+  whose pid its file names. `kind` other than `interactive` is never watched;
+- reads each session's host from its ancestors' executable paths (`dashboards`, `orca`,
+  `terminal`, `iterm`, `other`); a `dashboards` session is left alone;
+- decides with `duty::decide` (the rules of DEC-0021) and acts on at most 3 sessions: close is SIGTERM, then SIGKILL after 10 s (outcome
+  `still_running` if it outlives that); restart writes `<data>/duty/<session>.command` (0700) and
+  opens it in a new Terminal window, only after the old process has ended and no other process
+  holds the session (`closed_held_elsewhere`), the folder exists (`closed_no_folder`) and the
+  `claude` program is found (`closed_no_claude`); a failed write or Terminal start is
+  `closed_not_restarted`;
+- writes one `duty.jsonl` line per action: `at`, `action` (`restart`, `close`), `reason` (`idle`,
+  `old`, `waiting`, `stuck`, `duplicate`), `outcome`, `session`, `folder`, `pid`, `host`; the newest
+  500 kept. Restarts of one session within 6 hours are counted from it: from the fourth, a restart
+  becomes a close.
+
+The resume script unsets the variables a nested launch must not inherit (`CONFLICTS`), copies the
+`export` lines of the home's `launch.command` except `SWITCHBOARD_LAUNCH_ID` and
+`CLAUDE_CONFIG_DIR`, sets `CLAUDE_CONFIG_DIR` to the session's config folder unless it is the
+person's own, then `cd <folder> || exit 1` and `exec claude [bypass flag] --resume <session>`, with
+the prompt `duty::CONTINUE_PROMPT` («Switchboard restarted this session because it had stopped making progress. Continue the task from where you left off.») for `waiting` and
+`stuck`. No credential is in it: the home's sign-in stays in its own Keychain item or file.
+
+`Operation::Duty` (no store lock) answers `status`: `settings`, `check_seconds`, `watched`,
+`left_to_dashboards`, `due` (what a check would do now: `pid`, `session`, `folder`, `reason`,
+`host`, `action`), `recent` (the newest 20 journal lines) and `supported` (false on Windows, which
+only reports); with `run` it acts now, with `dry_run` it lists the actions as `planned`, both under
+`check`. CLI `switchboard duty`, `duty on|off`, `duty set --stuck-minutes … --waiting-minutes …
+--idle-minutes … --max-age-hours …` (minutes 10 to 1440, hours 1 to 72; out of range is
+`SETTINGS_INVALID`), `duty run [--dry-run]`; MCP `switchboard_duty`; the window's `duty`
+command (Settings → Session duty officer). Codex sessions are not watched.
