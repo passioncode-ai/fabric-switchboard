@@ -44,6 +44,13 @@ const OWNED: &[&str] = &[
     "capacity.json",
     // The one-minute watch of live sessions (SB-379).
     "session-watch.json",
+    // The session duty officer's settings, journal and resume scripts (SB-384).
+    "duty.json",
+    "duty.jsonl",
+    "duty",
+    // The owner's run and the crashes found at its starts (SB-379 W3 part 2).
+    "owner-run.json",
+    "bugs.jsonl",
     "statistics.json",
     // Usage analytics' own state, Switchboard's switch and the notice's acknowledgement included
     // (SB-246): uninstalling forgets both, and the notice returns at the next first start.

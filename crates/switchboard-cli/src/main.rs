@@ -170,6 +170,10 @@ enum Command {
     /// moves to another machine whose answer was lost and spending ceilings waiting for an answer,
     /// each with the action that fixes it. The accounts stay in their groups. Reads only.
     Attention,
+    /// What went wrong: crashes of the app or `serve` found at the next start (with the
+    /// exception type macOS reported) and, with usage counts on, the error counts of the last
+    /// seven days by class and code. Reads only.
+    Bugs,
     /// Report online/offline mode and the proxy address, without its capability.
     Status,
     /// The other machines this Switchboard knows, from accounts moved there and runs started
@@ -1829,6 +1833,17 @@ enum SessionsCommand {
     CloseCopy {
         /// The session id (the duplicate's session_id).
         session_id: String,
+        /// Close the copy on another machine, as ssh knows it (`switchboard targets`), through
+        /// that machine's Switchboard (0.7.98 or later); it answers as it does there.
+        #[arg(long)]
+        target: Option<String>,
+        /// With --target: that machine's switchboard, an absolute path; by default the one the
+        /// newest move or run there used, else the macOS app's.
+        #[arg(long, requires = "target")]
+        remote: Option<String>,
+        /// With --target: that machine's data folder, when its Switchboard runs with --data-dir.
+        #[arg(long, requires = "target")]
+        remote_data_dir: Option<String>,
     },
 }
 /// Where `switchboard launch` is run from, for the launch record.
@@ -1945,8 +1960,11 @@ async fn run(cli: &Cli) -> Result<Value, String> {
     // SB-380: a session read, ended or attached on another machine runs that machine's
     // Switchboard over ssh; nothing is asked of this machine's owner.
     if let Some((target, remote, remote_data_dir, words, tty)) = there(&cli.command) {
+        // A launch or session id is checked here before it travels (the same characters).
         let names_launch = words.first().is_some_and(|w| w == "attach")
-            || words.get(1).is_some_and(|w| w == "end");
+            || words
+                .get(1)
+                .is_some_and(|w| w == "end" || w == "close-copy");
         if names_launch && !words.last().is_some_and(|id| launches::valid_id(id)) {
             return Err(launches::NO_SUCH_LAUNCH.into());
         }
@@ -2296,6 +2314,7 @@ async fn run(cli: &Cli) -> Result<Value, String> {
         Command::Targets { probe } => Operation::Targets { probe: *probe },
         Command::McpHomes => Operation::McpHomes,
         Command::Attention => Operation::Attention,
+        Command::Bugs => Operation::Bugs,
         Command::Capacity { command } => match command {
             None => Operation::Capacity {
                 cap: None,
@@ -2547,7 +2566,7 @@ async fn run(cli: &Cli) -> Result<Value, String> {
             return Err("A session host runs on macOS and Linux for now.".into());
         }
         Command::Sessions {
-            command: Some(SessionsCommand::CloseCopy { session_id }),
+            command: Some(SessionsCommand::CloseCopy { session_id, .. }),
             ..
         } => Operation::SessionCloseCopy {
             session_id: session_id.clone(),
@@ -3436,6 +3455,23 @@ fn there(command: &Command) -> Option<There> {
             remote.clone(),
             remote_data_dir.clone(),
             vec!["sessions".into(), "end".into(), launch_id.clone()],
+            false,
+        )),
+        // Dashboards' FD-247 (board `35e1a402`): a duplicate on another machine is closed there.
+        Command::Sessions {
+            command:
+                Some(SessionsCommand::CloseCopy {
+                    session_id,
+                    target: Some(target),
+                    remote,
+                    remote_data_dir,
+                }),
+            ..
+        } => Some((
+            target.clone(),
+            remote.clone(),
+            remote_data_dir.clone(),
+            vec!["sessions".into(), "close-copy".into(), session_id.clone()],
             false,
         )),
         Command::Attach {
@@ -4809,6 +4845,34 @@ fn print_result(value: &Value, cli: &Cli) {
                 );
             }
         }
+        Command::Bugs => {
+            let crashes = value["crashes"].as_array().cloned().unwrap_or_default();
+            if crashes.is_empty() {
+                println!("No crash found.");
+            }
+            for crash in &crashes {
+                println!(
+                    "Crash of {} started at {} (ran {}): {} {}",
+                    text(&crash["version"]),
+                    text(&crash["started_at"]),
+                    text(&crash["uptime"]),
+                    crash["exception"].as_str().unwrap_or("no crash report"),
+                    crash["signal"].as_str().unwrap_or("")
+                );
+            }
+            if value["counting"].as_bool() != Some(true) {
+                println!("Error counts are kept only while usage counts are on.");
+            }
+            for error in value["errors"].as_array().cloned().unwrap_or_default() {
+                println!(
+                    "Day {}: {} {} x{}",
+                    text(&error["day"]),
+                    text(&error["class"]),
+                    text(&error["code"]),
+                    text(&error["count"])
+                );
+            }
+        }
         Command::Attention => {
             let items = value["items"].as_array().cloned().unwrap_or_default();
             if items.is_empty() {
@@ -5331,6 +5395,7 @@ mod mcp_parity {
         ("machines list", Tool("switchboard_machines")),
         ("mcp-homes", Tool("switchboard_mcp_homes")),
         ("attention", Tool("switchboard_attention")),
+        ("bugs", Tool("switchboard_bugs")),
         ("capacity set", Tool("switchboard_capacity")),
         ("capacity clear", Tool("switchboard_capacity")),
         ("duty on", Tool("switchboard_duty")),
@@ -5833,5 +5898,44 @@ mod launch_surface_tests {
         assert!(LaunchSurface::value_variants()
             .iter()
             .any(|s| s.word() == "fabric"));
+    }
+}
+
+#[cfg(test)]
+mod there_tests {
+    use super::{there, Cli};
+    use clap::Parser;
+
+    #[test]
+    fn close_copy_with_a_target_runs_there_and_without_one_here() {
+        // Dashboards' FD-247 (board `35e1a402`): a duplicate on another machine is closed by
+        // that machine's Switchboard.
+        let parse = |args: &[&str]| Cli::try_parse_from(args).unwrap();
+        let cli = parse(&[
+            "switchboard",
+            "sessions",
+            "close-copy",
+            "s-1",
+            "--target",
+            "studio",
+        ]);
+        let (target, remote, _, words, tty) = there(&cli.command).expect("runs there");
+        assert_eq!(target, "studio");
+        assert_eq!(remote, None);
+        assert_eq!(words, ["sessions", "close-copy", "s-1"]);
+        assert!(!tty);
+        assert!(there(&parse(&["switchboard", "sessions", "close-copy", "s-1"]).command).is_none());
+        assert!(
+            Cli::try_parse_from([
+                "switchboard",
+                "sessions",
+                "close-copy",
+                "s-1",
+                "--remote",
+                "/x"
+            ])
+            .is_err(),
+            "--remote needs --target"
+        );
     }
 }

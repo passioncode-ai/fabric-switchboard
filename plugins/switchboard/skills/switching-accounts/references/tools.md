@@ -122,6 +122,15 @@ last) gets `SIGTERM`, then `SIGKILL` after ten seconds. Answers `{session_id, cl
 kept_pids}`. Refused when the session no longer runs in two processes, or when every copy is
 working. macOS and Linux.
 
+### `switchboard_bugs`: no arguments
+
+What went wrong (SB-379 W3 part 2): crashes of the app or `switchboard serve` found at the next
+start, newest first (`crashes`, at most 20; `crashes_total` of the 200 kept), each with `version`,
+`started_at`, `crashed_at` (the crash report's time, or null), `uptime` (`under_1m` to `over_1d`,
+or `unknown`), `exception` and `signal` as macOS reported them (`EXC_BAD_ACCESS`, `SIGSEGV`; null
+without a report); and, while usage counts are on (`counting`), `errors`: the counts of the last
+seven days as `{day, class, code, count}`. `running` is this run. Codes only. Reads only.
+
 ### `switchboard_session_end`: `launch_id` (string)
 
 Ends a session a session host holds (`switchboard_sessions` marks it `attachable`), as
