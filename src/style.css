@@ -736,3 +736,7 @@ g:hover > .chart-bar { opacity: .82; }
 .fold-content > .button, .fold-content > button { justify-self: start; }
 /* B24: the version line stays on one line. */
 .sidebar-foot .version { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; }
+/* Q2 item 6: groups with accounts and no folders. */
+.foldless-groups { display: grid; gap: var(--space-2); margin-top: var(--space-4); }
+.foldless-list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-2); }
+.foldless-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-3); }
