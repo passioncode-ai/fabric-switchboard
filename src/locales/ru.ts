@@ -61,6 +61,7 @@ export const RU: Record<string, string> = {
   "Reading the journal…": "Загрузка журнала…",
   "Showing the latest {shown}.": "Показаны последние {shown}.",
   "{n} events": "{n} событие|{n} события|{n} событий",
+  "{n} launches": "{n} запуск|{n} запуска|{n} запусков",
   "None of the events read so far matches. Show more to read older ones.": "Среди прочитанных событий совпадений нет. Нажмите «Показать ещё», чтобы прочитать более ранние.",
   "No event matches these filters.": "Ни одно событие не подходит под эти фильтры.",
   "Yesterday": "Вчера",
