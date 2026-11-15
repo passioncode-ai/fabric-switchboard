@@ -9,6 +9,7 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 ## Unreleased
 
 - A crash of a `switchboard` command or of `switchboard mcp` is counted in the anonymous error report like a crash of the app, as the name of the file it happened in only (SB-379).
+- *Details* and *Show all* on Agents open with the same chevron as every folding section, instead of the browser's triangle (SB-379).
 - `switchboard sessions`, `sessions end` and `attach` take `--target` (with `--remote` and `--remote-data-dir`) and run on another machine's Switchboard over ssh, so Fabric Dashboards can show and act on sessions there (SB-380).
 - A group or an organization's group takes every repository in one chosen folder at once (*Add every repository in a folder…*), instead of picking each repository (SB-379).
 - Every sign-in button reads *Sign in again*, like the badge beside it; *In use now* no longer colours its details like links; clearer lines on Accounts and Organizations; an account's quota details no longer repeat the reset its summary line already shows (SB-379).

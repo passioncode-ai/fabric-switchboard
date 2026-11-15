@@ -534,7 +534,7 @@ function machinesSection() {
   section.append(heading, el('p', 'surface-note', t('Each machine your accounts live on is a group of its own. An account there is in no group on this computer: Switchboard never renews it, switches to it or lends it here. Bring one here to use it in a group of this computer.')));
   const machines = snapshot!.machines ?? [];
   const unplaced = unplacedAccounts(snapshot!);
-  if (!machines.length) section.append(el('p', 'form-note', t('No account lives on another machine. Move one there with Move to another machine… on Accounts.')));
+  if (!machines.length) section.append(el('p', 'form-note', t('No account lives on another machine. To move one, open its menu on Accounts and choose Move to another machine….')));
   else {
     const read = button(machinesReading ? t('Reading the other machines…') : machinesLive ? t('Read again') : t('Read their state'), () => readMachines(), 'button', 'machines-read');
     read.disabled = machinesReading; section.append(read);
