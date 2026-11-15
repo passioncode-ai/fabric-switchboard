@@ -5227,7 +5227,6 @@ mod mcp_parity {
         ("attention", Tool("switchboard_attention")),
         ("capacity set", Tool("switchboard_capacity")),
         ("capacity clear", Tool("switchboard_capacity")),
-        ("duty", Tool("switchboard_duty")),
         ("duty on", Tool("switchboard_duty")),
         ("duty off", Tool("switchboard_duty")),
         ("duty set", Tool("switchboard_duty")),
