@@ -4456,7 +4456,8 @@ async fn dispatch_start(
     let Ok(bin) = continuation::observatory() else {
         return refuse(dispatch::HANDOFF_REFUSED);
     };
-    let shown = match continuation::show(&bin, workflow_id) {
+    // W4 item 1: the engine is a subprocess; it never runs on the async worker.
+    let shown = match crate::blocking::run(|| continuation::show(&bin, workflow_id)) {
         Ok(shown) if dispatch::handoff_waiting(&shown, workflow_id, handoff_id, provider) => shown,
         _ => return refuse(dispatch::HANDOFF_REFUSED),
     };
@@ -4558,7 +4559,7 @@ async fn dispatch_start(
         adopt_live(store, native, refresh_state, &id);
     }
     launch::preflight(root, store, &id, "isolated", &folder)?;
-    let Ok(observatory) = continuation::observatory_mcp(&bin) else {
+    let Ok(observatory) = crate::blocking::run(|| continuation::observatory_mcp(&bin)) else {
         return refuse(dispatch::HANDOFF_REFUSED);
     };
     let resumed = continuation::Continuation {
@@ -5706,7 +5707,9 @@ async fn execute(
             let runtime = needs_owner()?;
             // SB-120: no account named → the machine's default agent (`continue_default`).
             let id = if id.is_empty() {
-                continue_default(root, runtime, &workflow_id, &working_directory)?
+                crate::blocking::run(|| {
+                    continue_default(root, runtime, &workflow_id, &working_directory)
+                })?
             } else {
                 id
             };
@@ -5729,7 +5732,7 @@ async fn execute(
             }
             // SB-119: OpenCode on the saved OpenRouter key and its default model, as Hermes.
             if id == launch::OPENCODE_TARGET {
-                let shown = continuation::show(&bin, &workflow_id)?;
+                let shown = crate::blocking::run(|| continuation::show(&bin, &workflow_id))?;
                 let plan = continuation::plan_named(
                     &shown,
                     &workflow_id,
@@ -5740,8 +5743,8 @@ async fn execute(
                 )?;
                 launch::opencode_continuation_preflight(&store)?;
                 launch::agent_folder(root, &directory)?;
-                let observatory = continuation::observatory_mcp(&bin)?;
-                let offer = continuation::offer(&bin, &plan, &id)?;
+                let observatory = crate::blocking::run(|| continuation::observatory_mcp(&bin))?;
+                let offer = crate::blocking::run(|| continuation::offer(&bin, &plan, &id))?;
                 let resumed = continuation::Continuation {
                     workflow_id: workflow_id.clone(),
                     handoff_id: offer.handoff_id.clone(),
@@ -5765,7 +5768,7 @@ async fn execute(
                 }));
             }
             if id == hermes::HERMES_TARGET {
-                let shown = continuation::show(&bin, &workflow_id)?;
+                let shown = crate::blocking::run(|| continuation::show(&bin, &workflow_id))?;
                 let plan = continuation::plan_named(
                     &shown,
                     &workflow_id,
@@ -5783,8 +5786,8 @@ async fn execute(
                     .flatten();
                 launch::hermes_continuation_preflight(&store, own_model.as_deref())?;
                 launch::agent_folder(root, &directory)?;
-                let observatory = continuation::observatory_mcp(&bin)?;
-                let offer = continuation::offer(&bin, &plan, &id)?;
+                let observatory = crate::blocking::run(|| continuation::observatory_mcp(&bin))?;
+                let offer = crate::blocking::run(|| continuation::offer(&bin, &plan, &id))?;
                 let resumed = continuation::Continuation {
                     workflow_id: workflow_id.clone(),
                     handoff_id: offer.handoff_id.clone(),
@@ -5816,7 +5819,7 @@ async fn execute(
             // SB-99: a saved Kimi Code account continues through `kimi`, with the same order —
             // every refusal before the offer, a failed launch after it left to lapse.
             if store.kimi_account(&id).is_ok() {
-                let shown = continuation::show(&bin, &workflow_id)?;
+                let shown = crate::blocking::run(|| continuation::show(&bin, &workflow_id))?;
                 let plan = continuation::plan_named(
                     &shown,
                     &workflow_id,
@@ -5827,8 +5830,8 @@ async fn execute(
                 )?;
                 kimi::continuation_preflight(root, &store, &id)?;
                 launch::agent_folder(root, &directory)?;
-                let observatory = continuation::observatory_mcp(&bin)?;
-                let offer = continuation::offer(&bin, &plan, &id)?;
+                let observatory = crate::blocking::run(|| continuation::observatory_mcp(&bin))?;
+                let offer = crate::blocking::run(|| continuation::offer(&bin, &plan, &id))?;
                 let resumed = continuation::Continuation {
                     workflow_id: workflow_id.clone(),
                     handoff_id: offer.handoff_id.clone(),
@@ -5853,7 +5856,7 @@ async fn execute(
                 .into_iter()
                 .find(|a| a.id == id)
                 .ok_or("Account not found.")?;
-            let shown = continuation::show(&bin, &workflow_id)?;
+            let shown = crate::blocking::run(|| continuation::show(&bin, &workflow_id))?;
             let plan = continuation::plan(&shown, &workflow_id, &account, &directory)?;
             if mode == "isolated" {
                 refresh::learn_live_owner(&store, native, refresh_state).await;
@@ -5867,8 +5870,8 @@ async fn execute(
                 }
             }
             launch::preflight(root, &store, &id, &mode, &directory)?;
-            let observatory = continuation::observatory_mcp(&bin)?;
-            let offer = continuation::offer(&bin, &plan, &id)?;
+            let observatory = crate::blocking::run(|| continuation::observatory_mcp(&bin))?;
+            let offer = crate::blocking::run(|| continuation::offer(&bin, &plan, &id))?;
             let resumed = continuation::Continuation {
                 workflow_id: workflow_id.clone(),
                 handoff_id: offer.handoff_id.clone(),

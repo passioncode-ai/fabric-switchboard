@@ -3995,7 +3995,9 @@ function backgroundRefresh() {
 setInterval(backgroundRefresh, 60_000);
 // SB-117/SB-131: the owner says when it added a folder to a project or took a deleted one out;
 // the project list is read again at once.
-onProjectSuggestions(() => backgroundRefresh());
+// W4 item 18: a burst of folder events (a branch checked out, worktrees made) is one read, two seconds after the last.
+let suggestionsTimer: ReturnType<typeof setTimeout> | undefined;
+onProjectSuggestions(() => { clearTimeout(suggestionsTimer); suggestionsTimer = setTimeout(() => backgroundRefresh(), 2000); });
 // SB-183 (node A-7): the owner wrote the terminal hook for the first time; the window says so once.
 onShellHook(() => { shellHookState = null; checkShellHookNotice(); backgroundRefresh(); });
 // C-7 (SB-72): spend.json changed (a ceiling reached, set or answered); the questions are read again at once.

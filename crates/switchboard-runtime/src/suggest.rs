@@ -25,6 +25,8 @@ const MAX_PENDING: usize = 256;
 /// Declined folders remembered. Past this many the oldest declined folder may be offered again.
 const MAX_DISMISSED: usize = 2048;
 const MAX_ROWS: usize = MAX_PENDING + MAX_DISMISSED;
+/// W4 item 11: a `gone` row serves only its notification, shown for a day; it is kept two.
+const GONE_KEPT: i64 = 2 * 24 * 3600;
 /// A folder path longer than this is never suggested (projects allow 1024 bytes).
 const MAX_FOLDER: usize = 1024;
 const MAX_LABEL: usize = 300;
@@ -899,6 +901,9 @@ pub(crate) fn mark_gone(
     now: i64,
 ) -> Result<(), String> {
     let mut rows = read(root)?;
+    // A deleted folder's row outlives its notification by a day, then goes: one that comes back
+    // is found again either way, and the file no longer grows with every deleted worktree.
+    rows.retain(|r| r.state != State::Gone || r.first_seen >= now - GONE_KEPT);
     for folder in folders {
         match rows.iter_mut().find(|r| &r.folder == folder) {
             Some(row) if row.state == State::Dismissed => {}
@@ -1591,6 +1596,26 @@ mod tests {
             unassigned(root.path(), &s, &repos, &fresh).unwrap(),
             Outcome::Unassigned { .. }
         ));
+    }
+
+    #[test]
+    fn a_gone_row_is_forgotten_two_days_after_its_folder_left() {
+        let root = tempfile::tempdir().unwrap();
+        mark_gone(root.path(), "work", &["/w/old".into()], 1_000).unwrap();
+        mark_gone(
+            root.path(),
+            "work",
+            &["/w/recent".into()],
+            1_000 + GONE_KEPT,
+        )
+        .unwrap();
+        mark_gone(root.path(), "work", &["/w/new".into()], 1_001 + GONE_KEPT).unwrap();
+        let folders: Vec<String> = read(root.path())
+            .unwrap()
+            .into_iter()
+            .map(|r| r.folder)
+            .collect();
+        assert_eq!(folders, vec!["/w/recent".to_owned(), "/w/new".to_owned()]);
     }
 
     #[test]

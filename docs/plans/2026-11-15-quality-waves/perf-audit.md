@@ -20,3 +20,11 @@ The operations log since 2026-11-12 and the code at `3b07b71e`. At load around 4
 16. `statistics.json` (1.3 MB) rewritten with fsync every 15 minutes.
 17. The limit scan stats about 500 transcripts every 30 s pass; filter folders by mtime first.
 18. Renderer: full re-render with `outerHTML` compare on each refresh; a refresh on every folder event (about 480 a day); debounce.
+
+## Status, 2026-11-15
+
+- Item 1: done. `dispatch_start` and the continuation branches of `execute` run the engine (`continuation::show`, `observatory_mcp`, `offer`, `continue_default`) through `blocking::run`, off the async worker.
+- Item 9: overlap and process walks done in #706; the tree per call stays open.
+- Item 11: done. `mark_gone` forgets a `gone` row two days after its folder left (`GONE_KEPT`; the notification reads one day); test `a_gone_row_is_forgotten_two_days_after_its_folder_left`.
+- Item 17: not taken as proposed. A folder's modification time moves when a file is created or removed in it, not when Claude Code appends to a transcript, so filtering folders by it would miss a long session still writing; the per-file stat stays until a safe signal exists.
+- Item 18: the window reads the folder list once, two seconds after the last of a burst of folder events, not once per event.
