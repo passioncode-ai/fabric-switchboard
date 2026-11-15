@@ -749,7 +749,7 @@ g:hover > .chart-bar { opacity: .82; }
   .stat-page .stat-tiles > .stat-tile, .stat-page .stat-tiles > .stat-tile:nth-child(n+4) { grid-column: auto; }
 }
 /* Q2 item 7: name cells wrap, so a narrow window keeps the key columns in view. */
-.stat-table td:not(.num) { white-space: normal; overflow-wrap: break-word; min-width: 8ch; }
+.stat-table td:not(.num) { white-space: normal; overflow-wrap: break-word; }
 /* Q2 item 18: balancing's group choices are a compact list of checkboxes, not cards. */
 .balancing-groups { display: flex; flex-wrap: wrap; gap: var(--space-2); }
 .balancing-groups .login-option { margin-top: 0; }
@@ -757,5 +757,7 @@ g:hover > .chart-bar { opacity: .82; }
 .about-panel > .watch-findings { margin-top: 0; }
 @media (max-width: 980px) {
   .stat-table th, .stat-table td { padding-inline: var(--space-2); }
-  .stat-table thead th { white-space: normal; }
+  .stat-table thead th, .stat-table thead .sort-button { white-space: normal; }
+  .stat-table thead .sort-button { padding-inline: var(--space-1); }
+  .stat-table tbody th { white-space: normal; }
 }
