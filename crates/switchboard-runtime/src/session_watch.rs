@@ -215,7 +215,54 @@ pub fn tree(root: &Path, now: i64) -> Value {
     let (scan, records, pairs) = read(root, now);
     let mut answer = assemble(&scan, &records, &pairs, now);
     answer["capacity"] = crate::capacity::view(crate::capacity::cap(root).ok().flatten(), &scan);
+    let map = crate::shell::map::read(root);
+    let hook = hook_state(
+        crate::shell::map::choice(root),
+        crate::shell::map::organizations_mapped(&map),
+    );
+    answer["context"] = context(&answer["live"], &map, hook);
     answer
+}
+
+/// SB-382: the terminal hook's state as `shell status` names it: the person's choice, else on by
+/// default while an organization's group has folders in the map.
+fn hook_state(choice: crate::shell::map::Choice, mapped: bool) -> &'static str {
+    use crate::shell::map::Choice;
+    match (choice, mapped) {
+        (Choice::On, _) => "on",
+        (Choice::Off, _) => "off",
+        (Choice::Default, true) => "default_on",
+        (Choice::Default, false) => "default_off",
+    }
+}
+
+/// SB-382 (Vesta's G4, OBS-550): for each organization context of the folder map, the live
+/// sessions in its folders, those Switchboard launched in that group (`managed`) and the rest
+/// (`other`: started from a terminal, which has the context only through the hook, or from
+/// elsewhere), with the hook's state, so a reader sees why a session runs without its context.
+/// Read from the map only; no session's environment is read.
+pub fn context(live: &Value, map: &crate::shell::map::Loaded, hook: &str) -> Value {
+    let mut by: BTreeMap<String, (u64, u64)> = BTreeMap::new();
+    if let crate::shell::map::Loaded::Read(map) = map {
+        for row in live.as_array().into_iter().flatten() {
+            let Some(folder) = row["folder"].as_str() else {
+                continue;
+            };
+            let Some(group) = map.lookup(Path::new(folder)) else {
+                continue;
+            };
+            let entry = by.entry(group.context.clone()).or_default();
+            entry.0 += 1;
+            if row["managed"] == true && row["pool"].as_str() == Some(group.pool.as_str()) {
+                entry.1 += 1;
+            }
+        }
+    }
+    let rows: Vec<Value> = by
+        .into_iter()
+        .map(|(context, (live, managed))| json!({"context": context, "live": live, "managed": managed, "other": live - managed}))
+        .collect();
+    json!({"hook": hook, "map": map.code(), "organizations": rows})
 }
 
 /// The last watch the owner kept; none before its first pass.
@@ -308,6 +355,48 @@ fn last_keys(root: &Path) -> HashSet<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_context_block_counts_an_organizations_sessions_and_who_launched_them() {
+        // SB-382: a session in an organization's folder is counted there; one Switchboard
+        // launched in that group is `managed`, a terminal's is `other`; outside the map, nothing.
+        use crate::shell::map::{Loaded, Map, Row};
+        let acme = tempfile::tempdir().unwrap();
+        let mine = tempfile::tempdir().unwrap();
+        let folder = acme.path().canonicalize().unwrap();
+        let map = Loaded::Read(Map {
+            version: crate::shell::map::VERSION,
+            rows: vec![Row {
+                folder: folder.to_string_lossy().into_owned(),
+                pool: "acme".into(),
+                context: "org:acme".into(),
+                claude: true,
+                codex: false,
+            }],
+        });
+        let sub = folder.join("app");
+        std::fs::create_dir_all(&sub).unwrap();
+        let live = json!([
+            {"folder": sub, "managed": true, "pool": "acme"},
+            {"folder": folder, "managed": false, "pool": null},
+            {"folder": mine.path(), "managed": false, "pool": null},
+        ]);
+        let view = context(&live, &map, "default_on");
+        assert_eq!(view["hook"], "default_on");
+        assert_eq!(
+            view["organizations"],
+            json!([{"context": "org:acme", "live": 2, "managed": 1, "other": 1}])
+        );
+        assert_eq!(
+            context(&live, &Loaded::Missing, "default_off")["organizations"],
+            json!([])
+        );
+        assert_eq!(
+            hook_state(crate::shell::map::Choice::Default, true),
+            "default_on"
+        );
+        assert_eq!(hook_state(crate::shell::map::Choice::Off, true), "off");
+    }
 
     fn row(pid: u32, launch: Option<&str>, quiet: i64) -> Value {
         json!({"pid": pid, "agent": "claude-code", "folder": "/work/a", "launch_id": launch,

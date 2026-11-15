@@ -1062,6 +1062,17 @@ export function withoutFolder(folders: string[], roots: ProjectRoot[] | null, fo
 export interface FoundRepository { folder: string; remote: string | null; branch: string | null; pool: string | null; project: string | null; place: 'folder' | 'inside' | null; groups?: { pool: string; name: string }[]; module_of?: string | null }
 export interface RepositoryMap { under: string[]; repositories: FoundRepository[]; truncated: boolean }
 export type MapFilter = 'unassigned' | 'all';
+/** SB-382: one line per organization: its sessions, those Switchboard launched in its group, and the rest with the hook's state. */
+export function contextLines(context: { hook: string; organizations: { context: string; live: number; managed: number; other: number }[] } | undefined, nameOf: (id: string) => string | undefined): string[] {
+  if (!context) return [];
+  const hookOn = context.hook === 'on' || context.hook === 'default_on';
+  return context.organizations.map((o) => {
+    const name = nameOf(o.context.replace(/^org:/, '')) ?? t('an organization');
+    const head = t('{name}: {live} in its folders, {managed} launched by Switchboard in its group', { name, live: o.live, managed: o.managed });
+    if (!o.other) return `${head}.`;
+    return `${head}; ${hookOn ? t('{n} from a terminal, which takes the context through the terminal hook.', { n: o.other }) : t('{n} without its context: the terminal hook is off.', { n: o.other })}`;
+  });
+}
 /** Q3b: the repositories one chosen folder holds, for a group: every repository found under it, not a module checkout (it moves with the repository holding it), sorted. */
 export function repositoriesUnder(map: Pick<RepositoryMap, 'repositories'>): string[] {
   return [...new Set(map.repositories.filter((r) => !r.module_of).map((r) => r.folder))].sort((a, b) => a.localeCompare(b));

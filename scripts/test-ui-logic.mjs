@@ -954,6 +954,10 @@ check(() => {
   assert.equal(logic.inGroup('default', projects), 'in the default group');
   assert.equal(logic.inGroup('alpha', projects), 'in group “Alpha Web”');
   assert.equal(logic.inGroup('work', projects), 'in group work (no folders)');
+  // SB-382: an organization's line says how many ran without its context, and why.
+  assert.deepEqual(logic.contextLines({ hook: 'off', organizations: [{ context: 'org:a', live: 3, managed: 1, other: 2 }] }, (id) => (id === 'a' ? 'Acme' : undefined)), ['Acme: 3 in its folders, 1 launched by Switchboard in its group; 2 without its context: the terminal hook is off.']);
+  assert.deepEqual(logic.contextLines({ hook: 'default_on', organizations: [{ context: 'org:a', live: 1, managed: 1, other: 0 }] }, () => 'Acme'), ['Acme: 1 in its folders, 1 launched by Switchboard in its group.']);
+  assert.deepEqual(logic.contextLines(undefined, () => undefined), []);
   // Q3b: one chosen folder gives every repository in it, without module checkouts, each once.
   assert.deepEqual(logic.repositoriesUnder({ repositories: [{ folder: '/w/b', module_of: null }, { folder: '/w/a' }, { folder: '/w/a/vendor/x', module_of: '/w/a' }, { folder: '/w/b' }] }), ['/w/a', '/w/b']);
   // Q2 item 6: a group with accounts and no group record is named, the default group and machine groups are not.

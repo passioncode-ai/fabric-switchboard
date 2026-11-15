@@ -295,7 +295,7 @@ export interface TreeSession { pid: number; agent: string; folder: string | null
 export interface TreeLaunch { launch_id: string; launched_at: number; pool: string | null; account_id: string | null; provider: string | null; folder: string | null; surface: string; parent: string | null; task: SessionTask; state: 'running' | 'ended' | 'gone'; ended: { kind?: string } | null }
 /** SB-379: what the one-minute watch found. */
 export interface WatchFinding { kind: 'duplicate' | 'stuck' | 'gone'; launch_id?: string; session_id?: string; pids?: number[]; folder?: string; quiet_minutes?: number }
-export interface SessionTree { live: TreeSession[]; launches: TreeLaunch[]; counts: { live: number; working: number; quiet: number; managed: number; by_pool: Record<string, number>; by_surface: Record<string, number> }; findings: WatchFinding[]; capacity?: CapacityStatus }
+export interface SessionTree { live: TreeSession[]; launches: TreeLaunch[]; counts: { live: number; working: number; quiet: number; managed: number; by_pool: Record<string, number>; by_surface: Record<string, number> }; findings: WatchFinding[]; capacity?: CapacityStatus; /** SB-382: sessions in each organization's folders, and the terminal hook's state. */ context?: { hook: 'on' | 'off' | 'default_on' | 'default_off'; map: string; organizations: { context: string; live: number; managed: number; other: number }[] } }
 /** SB-378: `switchboard capacity`, this computer's cap on working coding sessions. */
 export interface CapacityStatus { cap: number | null; used: number; free: number | null; at_capacity: boolean; total: number; quiet: number; quiet_after_minutes: number }
 /** SB-352: one loan in `balance status`. */
