@@ -73,6 +73,7 @@ export const nativeAdapter: Adapter = {
   projectRoots: () => invoke('project_roots'),
   moveRoot: (folder, pool, also, from) => invoke('move_root', { folder, pool, also: also ?? false, from: from ?? null }),
   codexRoute: (enabled) => invoke('codex_route', { enabled: enabled ?? null }),
+  sessionTree: () => invoke('session_tree'),
   capacity: (change) => invoke('capacity', { cap: change?.cap ?? null, clear: change?.clear ?? false }),
   balance: (change) => invoke('balance', { add: change?.add ?? [], remove: change?.remove ?? [], allNew: change?.all_new ?? null, backupAdd: change?.backup_add ?? [], backupRemove: change?.backup_remove ?? [] }),
   repositoryMap: (under) => readWithDeadline(invoke('repository_map', { under }), 60_000),

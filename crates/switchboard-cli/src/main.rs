@@ -195,6 +195,12 @@ enum Command {
         /// have been quiet. Read from the process table here, without the owner.
         #[arg(long, conflicts_with_all = ["history", "all"])]
         machine: bool,
+        /// Every live session joined to its launch (who started it, from where, for which task),
+        /// the launches of the last day with who started whom, counts by group and surface, and
+        /// what the one-minute watch found: a copy of a live session, a board run quiet for 30
+        /// minutes, a launch whose process is gone. Read here, without the owner.
+        #[arg(long, conflicts_with_all = ["history", "all", "machine"])]
+        tree: bool,
         #[command(subcommand)]
         command: Option<SessionsCommand>,
     },
@@ -2381,6 +2387,12 @@ async fn run(cli: &Cli) -> Result<Value, String> {
         } => {
             return Err("A session host runs on macOS and Linux for now.".into());
         }
+        Command::Sessions { tree: true, .. } => {
+            return Ok(switchboard_runtime::session_watch::tree(
+                &root,
+                switchboard_runtime::session_watch::now(),
+            ));
+        }
         Command::Sessions { machine: true, .. } => {
             return Ok(switchboard_runtime::machine_sessions::scan(&root));
         }
@@ -3912,6 +3924,33 @@ fn print_result(value: &Value, cli: &Cli) {
             command: Some(SessionsCommand::Show { .. }),
             ..
         } => print_launch(value),
+        Command::Sessions { tree: true, .. } => {
+            let c = &value["counts"];
+            println!(
+                "Live: {} ({} working, {} quiet, {} started by Switchboard).",
+                c["live"], c["working"], c["quiet"], c["managed"]
+            );
+            for f in value["findings"].as_array().cloned().unwrap_or_default() {
+                println!(
+                    "! {} {}",
+                    text(&f["kind"]),
+                    f["launch_id"]
+                        .as_str()
+                        .or(f["session_id"].as_str())
+                        .unwrap_or("")
+                );
+            }
+            for s in value["live"].as_array().cloned().unwrap_or_default() {
+                println!(
+                    "{:<7} {:<11} {:<10} {:<12} {}",
+                    s["pid"].to_string(),
+                    text(&s["agent"]),
+                    s["surface"].as_str().unwrap_or("unmanaged"),
+                    s["pool"].as_str().unwrap_or("-"),
+                    text(&s["folder"])
+                );
+            }
+        }
         Command::Sessions { machine: true, .. } => {
             let rows = value["sessions"].as_array().cloned().unwrap_or_default();
             for s in &rows {

@@ -145,6 +145,8 @@ launch or hand-over its work went to). With `launch_id`: `{launch, up, down}`, t
 launched it up to the first launch, and what it launched or what took its work over.
 
 
+
+With `tree: true` it answers the session tree instead (SB-379): every live Claude Code and Codex process joined to its launch (`surface`, `parent`, `task` with `workflow` and `request`, `pool`), the launches of the last day with `state` (`running`, `ended`, `gone`), `counts` by group and surface, the session pool, and `findings` of the one-minute watch: `duplicate` (one session in two processes), `stuck` (a board run quiet 30 minutes), `gone` (a launch whose process ended with no end recorded).
 ### `switchboard_provenance`: `provider?` (`claude` or `codex`), `pool?` (string), `launch_id?` (string)
 
 Which account serves a provider's group (the default group when `pool` is left out), or one

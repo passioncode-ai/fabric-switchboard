@@ -515,8 +515,8 @@ export function accountMatches(account: Pick<Account, 'id' | 'label' | 'external
   return words.every((word) => text.includes(word));
 }
 
-const ATTENTION_REASONS: AttentionReason[] = ['sign_in', 'seat_ended', 'renewal_refused', 'usage_failing', 'move_unknown', 'refused_there', 'ceiling_question'];
-const ATTENTION_WINDOWS: AttentionWindow[] = ['sign_in', 'answer_ceiling', 'check_usage', 'open_machines'];
+const ATTENTION_REASONS: AttentionReason[] = ['session_duplicate', 'session_stuck', 'sign_in', 'seat_ended', 'renewal_refused', 'usage_failing', 'move_unknown', 'refused_there', 'ceiling_question'];
+const ATTENTION_WINDOWS: AttentionWindow[] = ['sign_in', 'answer_ceiling', 'check_usage', 'open_machines', 'open_sessions'];
 /**
  * WF-3 (SB-365): the answer of the `attention` command, kept to the fields the window knows. An
  * answer that is not one (an older owner without the command, a malformed item) is an empty list
@@ -543,6 +543,8 @@ export function attentionAccounts(attention: Attention | null, signInRequired: r
 /** WF-3.2: the reason line of an item, worded by the window from its code (never the backend's English). */
 export function attentionReasonText(reason: AttentionReason): string {
   switch (reason) {
+    case 'session_duplicate': return t('One session runs in two processes. Close the newer copy so they do not work over each other.');
+    case 'session_stuck': return t('A board run has been quiet for 30 minutes. Look at it, or stop it.');
     case 'sign_in': return t('Its sign-in ended. Sign in again to use it and see its usage.');
     case 'seat_ended': return t('Its seat in the organization ended. Sign in again if the seat was given back.');
     case 'renewal_refused': return t('The provider refused to renew its sign-in. Sign in again.');
@@ -559,6 +561,7 @@ export function attentionActionLabel(window: AttentionWindow): string {
     case 'answer_ceiling': return t('Answer');
     case 'check_usage': return t('Check again');
     case 'open_machines': return t('Open Other machines');
+    case 'open_sessions': return t('Open sessions');
   }
 }
 /** WF-2.4: the facts line of an account given to an agent; each part is said even when it is not recorded. */
@@ -574,6 +577,38 @@ export function givenFacts(facts: { organization: string | null; machine: string
 export function switchingLine(policies: Pick<RotationPolicy, 'enabled' | 'pool'>[]): string {
   const groups = new Set(policies.filter((p) => p.enabled).map((p) => p.pool)).size;
   return groups ? plural(groups, { one: 'Automatic switching is on for {n} group.', other: 'Automatic switching is on for {n} groups.' }) : t('Automatic switching is off.');
+}
+
+/** SB-379: how a launch was started, in the window's words. */
+export function surfaceLabel(surface: string | null): string {
+  switch (surface) {
+    case 'fabric': return t('Fabric board');
+    case 'dashboards': return t('Fabric Dashboards');
+    case 'cli': return t('Command line');
+    case 'mcp': return t('An agent through MCP');
+    case 'window': return t('This window');
+    case 'fallback': return t('Hand-over to the next agent');
+    case 'recovery': return t('Continued after a limit');
+    case null: return t('Not started by Switchboard');
+    default: return t('Other');
+  }
+}
+/** SB-379: the live sessions in tree order: each session that started another comes before it,
+ * children indented one level per parent among the live ones; a parent that is not live is no row. */
+export function sessionTreeRows<T extends { launch_id: string | null; parent: string | null; started_at: number | null }>(live: readonly T[]): { session: T; depth: number }[] {
+  const ids = new Set(live.map((s) => s.launch_id).filter((id): id is string => !!id));
+  const children = new Map<string, T[]>();
+  const roots: T[] = [];
+  for (const s of live) {
+    if (s.parent && ids.has(s.parent) && s.parent !== s.launch_id) { const list = children.get(s.parent) ?? []; list.push(s); children.set(s.parent, list); } else roots.push(s);
+  }
+  const byStart = (a: T, b: T) => (a.started_at ?? 0) - (b.started_at ?? 0);
+  const out: { session: T; depth: number }[] = [];
+  const seen = new Set<T>();
+  const walk = (s: T, depth: number) => { if (seen.has(s)) return; seen.add(s); out.push({ session: s, depth }); for (const c of (s.launch_id ? children.get(s.launch_id) ?? [] : []).sort(byStart)) walk(c, depth + 1); };
+  for (const r of roots.sort(byStart)) walk(r, 0);
+  for (const s of live) if (!seen.has(s)) out.push({ session: s, depth: 0 });
+  return out;
 }
 
 // #region wave-2 (WF-7, WF-8, WF-10.1, WF-11, WF-2.4)

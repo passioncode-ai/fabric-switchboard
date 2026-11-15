@@ -447,7 +447,7 @@ fn limit_secs(operation: &Operation) -> u64 {
         | Operation::MachinesAdopt { .. }
         | Operation::MachinePlace { .. } => 120,
         // SB-378: the process table and every live session's transcripts.
-        Operation::Capacity { .. } => 120,
+        Operation::Capacity { .. } | Operation::SessionTree => 120,
         // SB-336: a group change reads its repositories' Git files and rewrites their folder
         // bindings; on a starved machine `move_root` took 44 s (2026-11-11), so a 30 s client
         // gave up on a change that went on and finished.

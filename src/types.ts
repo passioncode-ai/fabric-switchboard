@@ -63,9 +63,9 @@ export interface MachinesList { machines: { pool: string; name: string; read?: {
 /** SB-355: `machines --live`: each machine group, read over ssh. */
 export interface MachinesLive { machines: { pool: string; name: string; accounts: { id: string; there?: MachineCopy | null }[]; live?: { reachable: boolean; error?: string } }[] }
 /** WF-3 (SB-365, DEC-0015): why an account (or a ceiling) needs a person; the Tauri command `attention`, the same list as MCP `switchboard_attention`. */
-export type AttentionReason = 'sign_in' | 'seat_ended' | 'renewal_refused' | 'usage_failing' | 'move_unknown' | 'refused_there' | 'ceiling_question';
+export type AttentionReason = 'session_duplicate' | 'session_stuck' | 'sign_in' | 'seat_ended' | 'renewal_refused' | 'usage_failing' | 'move_unknown' | 'refused_there' | 'ceiling_question';
 /** WF-3: the window flow that fixes an item; `tool` is the MCP tool that does the same. */
-export type AttentionWindow = 'sign_in' | 'answer_ceiling' | 'check_usage' | 'open_machines';
+export type AttentionWindow = 'sign_in' | 'answer_ceiling' | 'check_usage' | 'open_machines' | 'open_sessions';
 export interface AttentionItem { account_id: string | null; label: string | null; provider: Provider | null; pool: string | null; reason: AttentionReason; detail: string; since: number | null; action: { tool: string; window: AttentionWindow } }
 export interface Attention { count: number; items: AttentionItem[] }
 export interface RuntimeStatus { proxy_address: string; platform: string; live_mode: string }
@@ -143,6 +143,8 @@ export interface Adapter {
   codexRoute(enabled?: boolean | null): Promise<CodexRoute>;
   /** SB-352: the groups that take part in balancing; with no change, the state. */
   balance(change?: BalanceChange | null): Promise<BalanceStatus>;
+  /** SB-379: live sessions with their launches, the day's launches, counts and the watch's findings. */
+  sessionTree(): Promise<SessionTree>;
   /** SB-378: the session pool; `cap` sets it, `clear` removes it, neither reads. */
   capacity(change?: { cap?: number; clear?: boolean } | null): Promise<CapacityStatus>;
   repositoryMap(under: string[]): Promise<import('./ui-logic').RepositoryMap>;
@@ -285,6 +287,15 @@ export interface OpenrouterModels { recommended: RecommendedModel[]; models: Ope
 /** SB-143: whether Codex sessions in project folders use the projects' Codex accounts. */
 /** SB-352: a change of the groups that take part in balancing (pool ids, `default` included). */
 export interface BalanceChange { add?: string[]; remove?: string[]; all_new?: boolean | null; backup_add?: string[]; backup_remove?: string[] }
+/** SB-379: one task a launch serves. */
+export interface SessionTask { workflow: string | null; request: string | null; project: string | null }
+/** SB-379: a live coding session joined to its launch (`switchboard sessions --tree`). */
+export interface TreeSession { pid: number; agent: string; folder: string | null; started_at: number | null; quiet: boolean; quiet_minutes: number | null; managed: boolean; launch_id: string | null; session_id: string | null; pool: string | null; account_id: string | null; surface: string | null; parent: string | null; task: SessionTask | null }
+/** SB-379: a launch of the last day. */
+export interface TreeLaunch { launch_id: string; launched_at: number; pool: string | null; account_id: string | null; provider: string | null; folder: string | null; surface: string; parent: string | null; task: SessionTask; state: 'running' | 'ended' | 'gone'; ended: { kind?: string } | null }
+/** SB-379: what the one-minute watch found. */
+export interface WatchFinding { kind: 'duplicate' | 'stuck' | 'gone'; launch_id?: string; session_id?: string; pids?: number[]; folder?: string; quiet_minutes?: number }
+export interface SessionTree { live: TreeSession[]; launches: TreeLaunch[]; counts: { live: number; working: number; quiet: number; managed: number; by_pool: Record<string, number>; by_surface: Record<string, number> }; findings: WatchFinding[]; capacity?: CapacityStatus }
 /** SB-378: `switchboard capacity`, this computer's cap on working coding sessions. */
 export interface CapacityStatus { cap: number | null; used: number; free: number | null; at_capacity: boolean; total: number; quiet: number; quiet_after_minutes: number }
 /** SB-352: one loan in `balance status`. */

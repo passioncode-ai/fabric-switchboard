@@ -526,6 +526,37 @@ pub fn records(root: &Path) -> Vec<Value> {
     all(root).into_values().collect()
 }
 
+/// SB-379: the records written at or after `since` (Unix seconds, by the file's modified time),
+/// read one by one; older files are only stat-ed, so a watch every minute stays cheap.
+pub fn recent_records(root: &Path, since: i64) -> Vec<Value> {
+    let Ok(entries) = fs::read_dir(root.join(DIR)) else {
+        return Vec::new();
+    };
+    let mut found = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|x| x.to_str()) != Some("json") {
+            continue;
+        }
+        let fresh = entry
+            .metadata()
+            .ok()
+            .filter(|m| m.is_file() && m.len() <= 256 * 1024)
+            .and_then(|m| m.modified().ok())
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .is_some_and(|d| d.as_secs() as i64 >= since);
+        if fresh {
+            if let Some(v) = fs::read(&path)
+                .ok()
+                .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
+            {
+                found.push(v);
+            }
+        }
+    }
+    found
+}
+
 fn all(root: &Path) -> BTreeMap<String, Value> {
     #[cfg(test)]
     SCANS.with(|n| n.set(n.get() + 1));

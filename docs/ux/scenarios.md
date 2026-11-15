@@ -101,6 +101,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 | SCN-092 | See every other machine and the accounts on it, and move accounts both ways | draft |
 | SCN-093 | Find every standing setting on one Settings page | draft |
 | SCN-094 | See what needs you at the top of Accounts | draft |
+| SCN-095 | Follow every coding session on this computer and what the watch found | draft |
 ### SCN-001: First run
 **Persona:** P-01
 **Goal:** Deliberately control which account a coding session uses.
@@ -2037,3 +2038,25 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Coverage:** ui-logic `attentionView`, `attentionAccounts`, reason and action cases (`scripts/test-ui-logic.mjs`); WebKit demo (`?demo=1`: two items, *Check again* takes one off; `&ceilings=reached` adds the ceiling's items). The runtime's own list and its tests belong to the backend change that adds the `attention` command. No walk in the installed app yet.
 **Product:** unobserved
 **Traces:** SB-365, DEC-0015, SCN-003, SCN-008, SCN-084, SCN-092
+
+### SCN-095: Follow every coding session on this computer and what the watch found
+**Persona:** P-01
+**Goal:** A person sees which coding sessions run on this computer, who started each and for which task, how many work in each group, and whether any session is a copy of another, stuck or gone without an end.
+**Preconditions:** the owner answers `session_tree` (the same answer as `switchboard sessions --tree` and MCP `switchboard_sessions` with `tree`); the owner's one-minute watch keeps its findings in `session-watch.json`.
+**Entry point:** Activity, first panel; *Needs attention* → *Open sessions*.
+**Steps:**
+1. Open Activity → “Sessions on this computer”: “{live} live: {working} working, {quiet} quiet, {managed} started by Switchboard.”, “By group: {list}.”, then one row per live Claude Code or Codex process, a session another started indented under it, each with its folder, “Working” or “Quiet {n} min”, how it started (Fabric board, Fabric Dashboards, command line, an agent through MCP, this window, a hand-over, a continuation after a limit, or not started by Switchboard), its group, its task (“Board request {id}” or “Task {id}”) and pid.
+2. The watch found something → its lines above the rows: a session in two processes, a board run quiet for 30 minutes, a launch that ended with no end recorded. The first two are also in *Needs attention* on Accounts with *Open sessions*.
+3. Open “Launches of the last day” → each launch with its time, state (Running, Ended, Gone without an end), how it started, group and task.
+4. The panel reads again at most once a minute while Activity is on screen.
+**Alt paths:** no session runs → “No session runs now.”; the read fails → “The sessions could not be read. Refresh to retry.” and the rest of Activity stays.
+**Expected result:** every session and launch of the last day is followable from one panel, and a copy or a stuck run is named without reading logs.
+**UI elements:** the panel, its counts and findings, the rows in tree order, the launches fold, *Open sessions* in *Needs attention*.
+**States covered:** reading, read failed, none, working, quiet, duplicate, stuck, gone.
+**Errors & recovery:** a failed read keeps the last answer on screen.
+**Status:** draft
+**Meaning:** SB-379 Q4, Q5 (operator 2026-11-15: «проследи за лайфсайклом агентов … какая цепочка агентов, какие запускаются, какие остались живы, где сколько сессий, кто как запускался, какая задача … мониторим каждую минуту»).
+**Copy:** checked with Copylot, register ui; report ids in [strings](../brand/strings.md).
+**Coverage:** `session_watch::tests::*`, `attention::tests::a_copy_of_a_live_session_and_a_quiet_board_run_come_first`, ui-logic `sessionTreeRows`, `surfaceLabel` (`scripts/test-ui-logic.mjs`); WebKit demo (`?demo=1`).
+**Product:** unobserved
+**Traces:** SB-379, SB-376, SB-378, SCN-094

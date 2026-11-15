@@ -42,6 +42,8 @@ const OWNED: &[&str] = &[
     "remote-usage.json",
     // This computer's cap on live coding sessions (SB-378).
     "capacity.json",
+    // The one-minute watch of live sessions (SB-379).
+    "session-watch.json",
     "statistics.json",
     // Usage analytics' own state, Switchboard's switch and the notice's acknowledgement included
     // (SB-246): uninstalling forgets both, and the notice returns at the next first start.
