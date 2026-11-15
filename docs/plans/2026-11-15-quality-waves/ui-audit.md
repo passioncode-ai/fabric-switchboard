@@ -65,3 +65,11 @@ Every page of the demo (`?demo=1`) in Playwright WebKit at 1280, 960 and 760 px,
 56. Statistics at 760: "By day" alone on a second line of the pinned bar.
 57. Statistics footnote: 12 lines, an internal version.
 58. About: jargon ("user claims", "HTTP/SSE proxy", "Imported OAuth").
+
+## Status, 2026-11-15 (Agents page)
+
+- Items 20, 35: the takeover switch and a “Tools only” label share one width, the default marker is a plain label (`.default-badge`), so the columns line up.
+- Item 34: the default agent's choices take the compact control height, like the permissions switch.
+- Item 38: a command wraps only after a slash or a hyphen (`breakableCode`, `<wbr>`), never inside a word.
+- Item 31: the fallback chain reads on its own line, its link after it.
+- Item 37: the PATH note says registered agents still reach the tools through the app; Copylot en-US `50b7ce3a`, ru-RU `f94d8fd9`.
