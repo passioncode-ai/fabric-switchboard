@@ -656,7 +656,8 @@ export function createDemoAdapter(): Adapter {
     async capacity(change) {
       if (change?.clear) demoCap = null;
       else if (typeof change?.cap === 'number') { if (!Number.isInteger(change.cap) || change.cap < 1 || change.cap > 500) throw new Error('Give the session limit as a whole number from 1 to 500.'); demoCap = change.cap; }
-      const used = 4;
+      // The same two working sessions the demo's session tree shows.
+      const used = 2;
       return { cap: demoCap, used, free: demoCap === null ? null : Math.max(0, demoCap - used), at_capacity: demoCap !== null && used >= demoCap, total: 5, quiet: 1, quiet_after_minutes: 30 };
     },
     async balance(change) {

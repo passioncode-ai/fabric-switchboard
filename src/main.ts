@@ -2307,7 +2307,7 @@ function kimiSection() {
   // SB-100: a failed refresh is said even while the last figures stay on screen.
   if (kimiError) section.append(el('p', 'usage-error', t('Kimi Code could not be refreshed: {error}', { error: t(kimiError) })));
   const current = el('p', 'form-note');
-  if (kimi.current?.signed_in && !kimi.current.error) current.append(t('Ordinary kimi: {name}', { name: [kimi.current.nickname, kimi.current.tier].filter(Boolean).join(' · ') || t('signed in') }), ' · ', kimiStatusLine(kimi.current));
+  if (kimi.current?.signed_in && !kimi.current.error) current.append(t('Ordinary kimi: {name}', { name: [kimi.current.nickname, kimi.current.tier].filter(Boolean).join(' · ') || t('signed in') }), kimiStatusLine(kimi.current));
   else if (kimi.current) { current.append(t('Ordinary kimi: '), el('span', kimi.current.signed_in ? 'usage-sub is-stale' : 'usage-error', ordinaryKimiNote(kimi.current) ?? '')); }
   else current.append(kimi.installed ? t('Ordinary kimi: not signed in.') : t('Kimi Code is not installed. Install it from kimi.com/code, then add an account.'));
   section.append(current);
@@ -2741,7 +2741,7 @@ function policiesPanel(quiet = false): HTMLElement {
   const actions = el('div', 'rotation-actions');
   const pool = autoSwitchPool(snapshot!.accounts, policies, (snapshot!.projects ?? []).map((p) => p.pool));
   if (pool) actions.append(button(t('Turn on for Claude Code'), () => { const saved = policies.find((policy) => policy.provider === 'claude' && policy.pool === pool && policy.target === 'claude_cli'); void mutate(() => adapter.setPolicy({ provider: 'claude', pool, target: 'claude_cli', enabled: true, threshold_percent: saved?.threshold_percent ?? 90, hysteresis_percent: saved?.hysteresis_percent ?? 10, cooldown_seconds: saved?.cooldown_seconds ?? 1800, max_age_seconds: saved?.max_age_seconds ?? 300, last_switched_at: saved?.last_switched_at ?? null }), t('Automatic switching is on for Claude Code {where}. It moves at {threshold}% used to an account with at least {headroom} points more headroom.', { where: inGroup(pool, snapshot!.projects), threshold: saved?.threshold_percent ?? 90, headroom: saved?.hysteresis_percent ?? 10 }), 'menu-policies'); }, quiet ? 'button row-button' : 'button primary row-button', 'auto-on'));
-  actions.append(menu('policies', t('Automatic switching settings'), [...policies.map((policy): [string, () => void] => [t('Edit {provider} {where} ({target})…', { provider: providerName(policy.provider), where: inGroup(policy.pool, snapshot!.projects), target: policyTarget(policy.target) }), () => policyDialog(policy)]), [t('New automatic switching…'), () => policyDialog()]], 'icon-button', '⚙'));
+  actions.append(menu('policies', t('Automatic switching settings'), [...policies.map((policy): [string, () => void] => [t('Edit {provider} {where} · {target}…', { provider: providerName(policy.provider), where: inGroup(policy.pool, snapshot!.projects), target: policyTarget(policy.target) }), () => policyDialog(policy)]), [t('New automatic switching…'), () => policyDialog()]], 'icon-button', '⚙'));
   head.append(actions); panel.append(head);
   if (enabled.length) {
     const list = el('ul', 'rotation-list');
@@ -2750,7 +2750,7 @@ function policiesPanel(quiet = false): HTMLElement {
       const row = el('li', 'rotation-row');
       row.append(el('span', 'usage-caption', `${providerName(policy.provider)} · ${poolName(policy.pool, snapshot!.projects)} · ${policyTarget(policy.target)} · ${t('at {percent}% used', { percent: policy.threshold_percent })}${decision ? ` · ${decisionText(decision.reason)}` : ''}`));
       const stop = button(t('Stop'), () => void mutate(() => adapter.setPolicy({ ...policy, enabled: false }), t('Automatic switching stopped for {provider} {where}.', { provider: providerName(policy.provider), where: inGroup(policy.pool, snapshot!.projects) }), 'menu-policies'), 'button quiet row-button', `stop-${policy.provider}-${policy.pool}-${policy.target}`);
-      stop.setAttribute('aria-label', t('Stop automatic switching for {provider} {where} ({target})', { provider: providerName(policy.provider), where: inGroup(policy.pool, snapshot!.projects), target: policyTarget(policy.target) }));
+      stop.setAttribute('aria-label', t('Stop automatic switching for {provider} {where} · {target}', { provider: providerName(policy.provider), where: inGroup(policy.pool, snapshot!.projects), target: policyTarget(policy.target) }));
       row.append(stop); list.append(row);
     }
     panel.append(list);
@@ -3005,7 +3005,7 @@ async function loadSessions(stamp?: number) {
 /** SB-65, WF-11.1: the sessions Switchboard launched that start or run, running first, read from their records (SB-95). */
 function sessionsPanel() {
   const running = (sessionList ?? []).filter((s) => s.state === 'running').length;
-  return foldSection({ key: 'sessions', title: t('Sessions'), state: sessionList ? plural(running, { one: '{n} running', other: '{n} running' }) : undefined, open: true, className: 'sessions-fold', body: () => [sessionsBody()] });
+  return foldSection({ key: 'sessions', title: t('Launched by Switchboard'), state: sessionList ? plural(running, { one: '{n} running', other: '{n} running' }) : undefined, open: true, className: 'sessions-fold', body: () => [sessionsBody()] });
 }
 function sessionsBody() {
   const panel = el('div', 'fold-content');
@@ -3093,7 +3093,7 @@ function findingText(f: WatchFinding): string {
   switch (f.kind) {
     case 'duplicate': return t('One session runs in two processes ({pids}).', { pids: (f.pids ?? []).join(', ') });
     case 'stuck': return t('A board run in {folder} has been quiet for {minutes} minutes.', { folder, minutes: f.quiet_minutes ?? 30 });
-    default: return t('A launch in {folder} ended with no end recorded.', { folder: folder || t('an unknown folder') });
+    default: return t('A launch in {folder} stopped without recording how it ended.', { folder: folder || t('an unknown folder') });
   }
 }
 function sessionTreePanel() {
@@ -3105,7 +3105,7 @@ function sessionTreePanel() {
   if (!tree) { panel.append(el('p', 'form-note', t('Reading sessions…'))); return panel; }
   const c = tree.counts;
   panel.append(el('p', 'account-meta section-state', t('{live} live: {working} working, {quiet} quiet, {managed} started by Switchboard.', { live: c.live, working: c.working, quiet: c.quiet, managed: c.managed })));
-  const groups = Object.entries(c.by_pool).map(([pool, n]) => `${pool === 'unmanaged' ? t('outside groups') : poolName(pool, snapshot?.projects ?? [])} ${n}`);
+  const groups = Object.entries(c.by_pool).map(([pool, n]) => `${pool === 'unmanaged' ? t('outside groups') : poolName(pool, snapshot?.projects ?? [])} (${n})`);
   if (groups.length) panel.append(el('p', 'form-note', t('By group: {list}.', { list: groups.join(', ') })));
   if (tree.findings.length) {
     const list = el('ul', 'watch-findings'); list.setAttribute('role', 'list');
@@ -3115,7 +3115,7 @@ function sessionTreePanel() {
   if (!tree.live.length) panel.append(el('p', 'surface-note', t('No session runs now.')));
   const list = el('ol', 'event-list session-tree-list');
   for (const { session: s, depth } of sessionTreeRows(tree.live)) {
-    const row = el('li', 'event-row'); row.style.paddingInlineStart = `calc(${depth} * var(--space-5))`;
+    const row = el('li', 'event-row'); if (depth) row.style.paddingInlineStart = `calc(var(--space-4) + ${depth} * var(--space-5))`;
     const line = el('div', 'event-title');
     line.append(el('strong', '', `${s.agent === 'codex' ? 'Codex' : 'Claude Code'} · ${s.folder ? folderName(s.folder) : t('an unknown folder')}`), el('span', 'badge', s.quiet ? t('Quiet {n} min', { n: s.quiet_minutes ?? 30 }) : t('Working')));
     const parts = [surfaceLabel(s.surface)];
@@ -3132,7 +3132,7 @@ function sessionTreePanel() {
     for (const l of recent) {
       const row = el('li', 'event-row'); const line = el('div', 'event-title');
       line.append(el('strong', '', l.folder ? folderName(l.folder) : t('an unknown folder')), el('time', '', new Date(l.launched_at * 1000).toLocaleTimeString(dateLocale(), { hour: '2-digit', minute: '2-digit' })));
-      const state = l.state === 'running' ? t('Running') : l.state === 'ended' ? t('Ended') : t('Gone without an end');
+      const state = l.state === 'running' ? t('Running') : l.state === 'ended' ? t('Ended') : t('Stopped, end not recorded');
       const parts = [state, surfaceLabel(l.surface)];
       if (l.pool) parts.push(poolName(l.pool, snapshot?.projects ?? []));
       if (l.task.request) parts.push(t('Board request {id}', { id: l.task.request.slice(0, 8) })); else if (l.task.workflow) parts.push(t('Task {id}', { id: shortWorkflow(l.task.workflow) }));
@@ -3200,7 +3200,7 @@ function renderAbout(main: HTMLElement) {
     [t('Compatibility'), t('macOS, Windows and Linux builds. Live provider acceptance is a separate check on each platform. Existing external CLI sessions and Codex Desktop are not controlled.')],
     [t('Imported OAuth'), t('A snapshot of a credential you pasted. After you sign in again elsewhere, add the account the CLI uses again. Switchboard renews inactive Claude accounts; the account Claude Code uses is renewed by Claude Code.')],
     [t('Switch'), t('Switch changes the account of the ordinary Claude Code. New claude sessions start on it; a session already running may keep its account until it restarts.')],
-    [t('Automatic switching'), t('Off by default for each provider, group and target. Uses fresh quota observations, a threshold, a minimum improvement and a cooldown. No eligible account means the current account stays selected.')],
+    [t('Automatic switching'), t('On by default for the managed sessions of each group. Uses fresh quota observations, a threshold, a minimum improvement and a cooldown. No eligible account means the current account stays selected.')],
   ]) { definitions.append(el('dt', '', term), el('dd', '', description)); }
   section.append(definitions); const tour = el('section', 'about-panel'); tour.append(el('h2', '', t('Tour')), el('p', '', t('Five short steps: what Switchboard does and where to press.')), button(t('Show the tour again'), () => tourGo(0), 'button', 'tour-again'));
   // WF-1.1 (DEC-0014): running in the background, updates, backups, usage counts, appearance and language are on Settings now.
@@ -3220,7 +3220,7 @@ function renderSettings(main: HTMLElement) {
   main.append(
     foldSection({ key: 'switching', title: t('Automatic switching'), state: switchingState, body: () => snapshot ? [policiesPanel()] : reading() }),
     foldSection({ key: 'balancing', title: t('Balancing between groups'), state: onOff(balancingState?.on), body: () => snapshot ? [balancingSection()] : reading() }),
-    foldSection({ key: 'sessions', title: t('Coding sessions'), state: capacityState ? (capacityState.cap === null ? t('No limit') : t('{used} of {cap} working', { used: capacityState.used, cap: capacityState.cap })) : undefined, body: () => [capacitySection()] }),
+    foldSection({ key: 'session-limit', title: t('Coding sessions'), state: capacityState ? (capacityState.cap === null ? t('No limit') : t('{used} of {cap} working', { used: capacityState.used, cap: capacityState.cap })) : undefined, body: () => [capacitySection()] }),
     foldSection({ key: 'codex-route', title: t('Codex in group folders'), state: onOff(codexRouteState?.on), body: () => snapshot ? [codexRouteSection()] : reading() }),
     foldSection({ key: 'terminals', title: t('Terminals in organization folders'), state: shell === 'on' || shell === 'default_on' || shell === 'inactive' ? t('On') : shell === 'off' || shell === 'default_off' ? t('Off') : undefined, body: () => snapshot ? [shellHookSection()] : reading() }),
     foldSection({ key: 'background', title: t('Running in the background'), state: onOff(loginItem?.available ? loginItem.enabled : null), body: () => [residencyPanel()] }),
@@ -3380,7 +3380,7 @@ function productPanel() {
   const definitions = el('dl', 'definitions');
   const row = (term: string, ...content: (Node | string)[]) => { const dd = el('dd'); dd.append(...content); definitions.append(el('dt', '', term), dd); };
   row(t('Version'), `Fabric Switchboard ${version}`);
-  row(t('License'), el('span', 'block', t('Open source under the GNU AGPL-3.0; a commercial license is available at passioncode.ai/business.')), address('https://passioncode.ai/business/'), address(`${REPOSITORY}/blob/main/LICENSE`));
+  row(t('License'), el('span', 'block', t('Open source under the GNU AGPL-3.0; a commercial license is available at passioncode.ai/business.')), address('https://passioncode.ai/business/'), el('br'), address(`${REPOSITORY}/blob/main/LICENSE`));
   row(t('Third-party'), el('span', 'block', t('The app includes third-party components under their own licenses.')), address(`${REPOSITORY}/blob/main/THIRD_PARTY_NOTICES.md`));
   row(t('Toolkit'), el('span', 'block', t('Part of the PassionCode.ai toolkit.')), address('https://passioncode.ai/switchboard/'));
   panel.append(heading, definitions);
