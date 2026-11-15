@@ -115,10 +115,12 @@ sign-in on that machine, or call the account back with `switchboard_account_reca
 
 When one Claude Code session runs in two processes (`switchboard_attention` reason
 `session_duplicate`, whose item carries the `session_id`; a `duplicate` finding of
-`switchboard_sessions` with `tree`), closes the copy started last, as `switchboard sessions
-close-copy` and Needs attention's *Close the newer copy* do (SB-388): `SIGTERM`, then `SIGKILL`
-after ten seconds; the older copy keeps working. Answers `{session_id, closed_pid, kept_pids}`.
-Refused when the session no longer runs in two processes. macOS and Linux.
+`switchboard_sessions` with `tree`), closes the copy that is not working, as `switchboard sessions
+close-copy` and Needs attention's *Close the quiet copy* do (SB-388): of the copies neither busy
+nor running a command, the one whose status has not changed for longest (then the one started
+last) gets `SIGTERM`, then `SIGKILL` after ten seconds. Answers `{session_id, closed_pid,
+kept_pids}`. Refused when the session no longer runs in two processes, or when every copy is
+working. macOS and Linux.
 
 ### `switchboard_session_end`: `launch_id` (string)
 

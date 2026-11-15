@@ -566,7 +566,7 @@ export function dutyOutcomeText(outcome: string | undefined): string | null {
 }
 export function attentionReasonText(reason: AttentionReason): string {
   switch (reason) {
-    case 'session_duplicate': return t('One session runs in two processes. Close the newer copy so they do not work over each other.');
+    case 'session_duplicate': return t('One session runs in two processes. Close the quiet copy so they do not work over each other.');
     case 'session_stuck': return t('A board run has been quiet for 30 minutes. Look at it, or stop it.');
     case 'sign_in': return t('Its sign-in ended. Sign in again to use it and see its usage.');
     case 'seat_ended': return t('Its seat in the organization ended. Sign in again if the seat was given back.');
@@ -585,7 +585,7 @@ export function attentionActionLabel(window: AttentionWindow): string {
     case 'check_usage': return t('Check again');
     case 'open_machines': return t('Open Other machines');
     case 'open_sessions': return t('Open sessions');
-    case 'close_copy': return t('Close the newer copy');
+    case 'close_copy': return t('Close the quiet copy');
   }
 }
 /** WF-2.4: the facts line of an account given to an agent; each part is said even when it is not recorded. */

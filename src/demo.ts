@@ -49,7 +49,7 @@ export function createDemoAdapter(): Adapter {
   const ceilingsParam = new URLSearchParams(location.search).get('ceilings');
   let demoCeilings: CeilingView[] = [];
   let demoQuestions: CeilingQuestionView[] = [];
-  // SB-388: one session in two processes, for Needs attention's Close the newer copy.
+  // SB-388: one session in two processes, for Needs attention's Close the quiet copy.
   let demoDuplicate: string | null = 's-demo-dup';
   const ceilingView = (scope: ChainScope, cents: number, doubledFrom: number | null = null): CeilingView => ({ scope, cents, usd: cents / 100, set_at: now() - 7200, doubled_from: doubledFrom, active: true, inactive_reason: null });
   if (ceilingsParam === 'set' || ceilingsParam === 'reached') {

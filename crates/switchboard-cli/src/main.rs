@@ -1822,9 +1822,10 @@ enum SessionsCommand {
         #[arg(long, requires = "target")]
         remote_data_dir: Option<String>,
     },
-    /// Close the newer of two processes holding one Claude Code session (`switchboard attention`
-    /// lists it as session_duplicate): it gets SIGTERM, then SIGKILL after ten seconds, and the
-    /// older copy keeps working. macOS and Linux.
+    /// Close the quiet one of two processes holding one Claude Code session (`switchboard
+    /// attention` lists it as session_duplicate): of the copies neither busy nor running a
+    /// command, the one quiet longest gets SIGTERM, then SIGKILL after ten seconds; a working
+    /// copy is never closed. macOS and Linux.
     CloseCopy {
         /// The session id (the duplicate's session_id).
         session_id: String,

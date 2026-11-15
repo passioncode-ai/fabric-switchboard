@@ -282,7 +282,7 @@ pub fn last(root: &Path) -> Vec<Value> {
         .unwrap_or_default()
 }
 
-/// SB-388: a finding fixed by hand (a duplicate's newer copy closed) leaves the kept watch at
+/// SB-388: a finding fixed by hand (a duplicate's quiet copy closed) leaves the kept watch at
 /// once, so Needs attention does not list it until the next minute's pass.
 pub fn forget(root: &Path, kind: &str, id: &str) {
     let Some(mut kept) = std::fs::read(root.join(FILE))
@@ -478,7 +478,7 @@ mod tests {
             found[0]["folder"], "/work/a",
             "the item is named by its folder"
         );
-        // Closing the newer copy by hand takes the finding out of the kept watch at once.
+        // Closing the quiet copy by hand takes the finding out of the kept watch at once.
         let root = tempfile::tempdir().unwrap();
         let kept = json!({"at": now, "findings": found});
         std::fs::write(root.path().join(FILE), serde_json::to_vec(&kept).unwrap()).unwrap();

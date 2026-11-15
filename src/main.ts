@@ -2795,8 +2795,8 @@ function attentionAct(item: AttentionItem, account: Account | undefined, key: st
     case 'answer_ceiling': goTo('agents'); return;
     case 'open_machines': goTo('projects', 'machines-heading'); return;
     case 'open_sessions': goTo('activity', 'sessions-tree-heading'); return;
-    // SB-388: one press closes the newer copy; the older one keeps working.
-    case 'close_copy': { const id = item.session_id; if (id) void mutate(() => adapter.sessionCloseCopy(id), t('Closed the newer copy. The older one keeps working.'), key); return; }
+    // SB-388: one press closes the copy quiet longest, never a working one.
+    case 'close_copy': { const id = item.session_id; if (id) void mutate(() => adapter.sessionCloseCopy(id), t('Closed the quiet copy. The other one keeps working.'), key); return; }
   }
 }
 const policyTarget = (target: RotationPolicy['target']) => target === 'managed' ? t('Managed route') : t('Claude Code account');
