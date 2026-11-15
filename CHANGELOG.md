@@ -8,13 +8,14 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+## 0.7.92
+
+- 0.7.91 was tagged but not published: its Windows build failed (`session_host` named outside `cfg(unix)`); everything it held ships here.
 - Activity and `switchboard sessions --tree` say, for each organization, how many live sessions run in its folders, how many Switchboard launched in its group, and whether the rest take its context through the terminal hook or run without it (SB-382).
 - `switchboard organizations` and MCP `switchboard_organizations` also answer each organization's seats as data (provider, subscription or API key, who placed it, here or elsewhere, an opaque seat id), with no personal account, label, e-mail or id, for Observatory and Vesta (SB-381).
 - On Accounts, the line that says what *Switch* and *Select* do sits above the accounts, not after Codex (SB-379).
 - `switchboard project suggest`, asked when a session starts, reads the groups' Git files at most every 30 seconds instead of on every call (W4, SB-379).
 - The note under Statistics is half as long and names no internal version (SB-379).
-## 0.7.91
-
 - A crash of a `switchboard` command or of `switchboard mcp` is counted in the anonymous error report like a crash of the app, as the name of the file it happened in only (SB-379).
 - *Details* and *Show all* on Agents open with the same chevron as every folding section, instead of the browser's triangle (SB-379).
 - `switchboard sessions`, `sessions end` and `attach` take `--target` (with `--remote` and `--remote-data-dir`) and run on another machine's Switchboard over ssh, so Fabric Dashboards can show and act on sessions there (SB-380).
