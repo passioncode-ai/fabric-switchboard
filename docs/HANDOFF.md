@@ -2,6 +2,18 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-11-15: accounts come back from other machines (SB-386, P0); the duty officer live; 0.7.93 out, 0.7.94 prepared
+
+- **Asked.** The operator: claude14@sshlg.me (and others) could not be called back from the Mac Studio and the Mac Pro: “This is the only account its group uses on this machine…”, a priority bug.
+- **Cause.** The other machine's `accounts surrender` refused an account that was the only one its group used there (`account_send.rs`, SB-312 guard); the words read as if this machine refused.
+- **Done (PR #734, `8a2bdc53`).** `surrender` gives the account back and leaves that group with none selected (`groups_left_without_account`; an undo selects it again); an older machine's refusal reads “update Switchboard there” (`OLD_THERE`). The duty officer reads a session's parent with `PROC_PIDT_SHORTBSDINFO`, so its host walk passes the root-owned `/usr/bin/login` (live on 0.7.93 every host read `other`).
+- **Live on 0.7.93 (this MacBook, updated 15:04 local).** The duty officer's first check restarted one session (fabric-inbox, `old`) and closed two (`idle`); 30 sessions watched, none in Dashboards consoles.
+- **Also merged.** PR #733 (perf audit item 12: the found list written once per pass; item 13 recorded as cached). A stray conflict marker #733 left in CHANGELOG removed in #734.
+- **Board.** Dashboards (`56a640dc`): consoles stay theirs, FD-262 (0.8.100) already checks a session is not held before continuing, FD-275 adds `stuck`/`waiting`/`old` in their console. fabric-workspace recorded the duty officer (PR #881). studio-agent closed STU-12.
+- **Checks.** `./scripts/check.sh` on the Mac Studio EXIT 0 at `87ea251`; Linux clippy (rust:1.99) clean; preflight for v0.7.94 ok.
+
+**Exact next task.** When 0.7.94 publishes and studio-sshlg reads 0.7.94 (`switchboard targets --probe`): call claude14@sshlg.me back (`switchboard accounts recall <id>` or MCP `switchboard_account_recall`), confirm `proved`, then the other accounts away on studio-sshlg, studio-appvillis and passioncode@100.69.20.19 the operator wants back; close SB-386 with the receipts. Then audit items for the Agents page (20, 31, 34, 35, 37, 38).
+
 ## 2026-11-15: the session duty officer (SB-384, DEC-0021); 0.7.92 out, 0.7.93 prepared
 
 - **Asked.** The operator: a duty officer in the lifecycle that walks the sessions every minute, every 5 minutes closes a hung session and resumes it in a new terminal, restarts sessions running for hours, and takes away sessions that finished and only hang.
