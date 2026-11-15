@@ -2370,6 +2370,13 @@ function kimiRow(account: KimiAccount, status: KimiStatus) {
   const nowSeconds = Math.floor(Date.now() / 1000);
   const lines = status.error ? [] : kimiWindowsLines(status.windows ?? [], nowSeconds);
   if (lines.length) {
+    // Q2 item 21: the fullest live window carries the same meter as a Claude or Codex row.
+    const live = (status.windows ?? []).filter((w) => !w.resets_at || w.resets_at > nowSeconds).map((w) => w.used_percent);
+    if (live.length) {
+      const used = Math.max(...live); const top = el('span', 'usage-line');
+      const meter = el('progress', `usage-meter is-${row.dataset.state === 'blocked' ? 'blocked' : used >= 80 ? 'low' : 'available'}`); meter.max = 100; meter.value = used; meter.setAttribute('aria-hidden', 'true');
+      top.append(meter, el('strong', 'usage-pct', `${Math.round(used)}%`)); usage.append(top);
+    }
     for (const line of lines) { const item = el('span', 'usage-sub usage-line', line); item.title = line; usage.append(item); }
     if (status.checked_at) usage.append(el('span', 'usage-sub usage-line', t('checked {time} ago', { time: compactCountdown(nowSeconds, Math.min(status.checked_at, nowSeconds)) })));
   } else usage.append(kimiStatusLine(status));
@@ -2539,8 +2546,10 @@ function compactWait(lead: string, until: number, estimated = false) {
   remaining.dataset.countdown = String(until); remaining.dataset.format = 'compact'; remaining.setAttribute('aria-live', 'off');
   const time = el('time', '', date(until)); time.dateTime = new Date(until * 1000).toISOString();
   time.title = new Date(until * 1000).toLocaleString(dateLocale(), { timeZoneName: 'short' });
-  wrapper.append(`${lead} `, remaining, ' · ', time);
-  if (estimated) wrapper.append(el('span', 'usage-estimate', t(' · estimated')));
+  // Q2 item 22: the time and its "estimated" stay on one line.
+  const when = el('span', 'usage-when'); when.append(time);
+  if (estimated) when.append(el('span', 'usage-estimate', t(' · estimated')));
+  wrapper.append(`${lead} `, remaining, ' · ', when);
   return wrapper;
 }
 /** Two lines in every state (compact list): use and freshness, then the one time that matters. */

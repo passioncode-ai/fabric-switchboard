@@ -740,3 +740,18 @@ g:hover > .chart-bar { opacity: .82; }
 .foldless-groups { display: grid; gap: var(--space-2); margin-top: var(--space-4); }
 .foldless-list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-2); }
 .foldless-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-3); }
+/* Q2 item 16: five tiles never wrap 4+1: three over two below a wide window, five in a row above. */
+.stat-page .stat-tiles { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+.stat-page .stat-tiles > .stat-tile { grid-column: span 2; min-width: 0; }
+.stat-page .stat-tiles > .stat-tile:nth-child(n+4) { grid-column: span 3; }
+@media (min-width: 1180px) {
+  .stat-page .stat-tiles { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+  .stat-page .stat-tiles > .stat-tile, .stat-page .stat-tiles > .stat-tile:nth-child(n+4) { grid-column: auto; }
+}
+/* Q2 item 7: name cells wrap, so a narrow window keeps the key columns in view. */
+.stat-table td:not(.num) { white-space: normal; overflow-wrap: anywhere; min-width: 10ch; }
+/* Q2 item 18: balancing's group choices are a compact list of checkboxes, not cards. */
+.balancing-groups { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.balancing-groups .login-option { margin-top: 0; }
+.usage-when { white-space: nowrap; }
+.about-panel > .watch-findings { margin-top: 0; }
