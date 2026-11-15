@@ -2,6 +2,18 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-11-15: sessions view and watch, bug counts, window audit wave 1, W4 part 1; 0.7.89, 0.7.90 (SB-379)
+
+- **Done (PR #706, 0.7.89).** Activity → *Sessions on this computer*: every live Claude Code and Codex session (Switchboard's or not), who started it, group, task, a session started by another under it, counts by group, the last day's launches; `switchboard sessions --tree`, MCP `switchboard_sessions` with `tree`; a one-minute watch (`session-watch.json`) names a session in two processes, a board run quiet for 30 minutes and a launch that stopped without recording how it ended, the first two also in *Needs attention*. Published.
+- **Done (PR #708).** A background pass that panics is counted (`pass_panicked`) and the next pass runs; the window's own errors, refused operations, freezes and unknown answers are counted as codes only (`renderer_problem`, closed lists, `src/bugs.ts`, `scripts/test-bugs.mjs`).
+- **Done (PR #709).** Window audit wave 1 (`docs/plans/2026-11-15-quality-waves/ui-audit.md` items 1 to 7, 9 to 18, 21 to 27): menus inside a narrow window, long group names wrap, Statistics tiles 3+2 or 5 and every table fits at 760 px (WebKit overflow check clean on all nine pages at 1280, 960, 760), Activity folds renamed and spaced, Groups names groups that hold accounts but no folders with *Move to the default group*, Kimi usage bar, About corrected (automatic switching on by default since 0.7.35). Copylot ids in `docs/brand/strings.md`.
+- **Done (PR #711).** W4 items 1, 11, 18 (`perf-audit.md` status section): engine subprocesses off the async worker in dispatch and hand-overs; `gone` suggestion rows expire after two days; folder events debounced in the window. Item 17 recorded as unsafe as proposed.
+- **Release.** 0.7.90 tagged on `053f0761` (#708, #709); run 43687519604, its guard running the nightly suite on the tag; watcher `bwwye1xjc` reruns failed jobs once. #711 is after the tag (next release).
+- **Checks.** `./scripts/check.sh` on the Mac Studio EXIT 0 at `9446fd1` (#709) and `f6591e5` (#711); Linux clippy (rust:1.99) clean on switchboard-runtime and switchboard-cli at `f6591e5`.
+- **Open.** Audit items 8, 19, 20 and C 28 to 58 (copy and consistency); Q3b (a group from one parent folder or a GitHub owner); W3 part 2 (panic hook in CLI and MCP, crash detection, `switchboard bugs`); W4 items 2, 3, 4, 5, 6, 8, 10, 12 to 16; W5 backlog hygiene and issue #36; the live call back of claude6 (both machines now on 0.7.88+).
+
+**Exact next task.** Once 0.7.90 publishes: update this MacBook (`switchboard update`), then W4 items 5 and 6 on a new branch: `launches` history with an index and paging (`limit`, `before`) and `recovery` without a full scan of launch records per call, keeping the answer shape for callers that pass no paging arguments; then audit wave 2 (items 8, 19, 20, C 28 to 58).
+
 ## 2026-11-15: quality waves started (SB-379); 0.7.88; a resumed copy of this session again
 
 - **Asked.** The operator: Statistics runs sideways and scrolls badly, fix every page; make agents' sessions followable (chain, alive, counts, how started, task) and watched every minute; the Organizations card asked for a PassionCode.ai group whose accounts live on the Mac Studio; analyse interfaces, latency and bugs, add a bug tracker on our own analytics, gather GitHub issues and the board into one plan and fix it in waves to the end. Plan: [quality waves](plans/2026-11-15-quality-waves/README.md).
