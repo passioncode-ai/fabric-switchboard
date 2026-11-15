@@ -2,6 +2,17 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-11-15: bugs, UI, refactoring and docs after the duty officer (SB-387, window audit); 0.7.97 prepared
+
+- **Asked.** The operator: finish the sessions work, then bug fixes, refactoring, UI and documentation.
+- **Bug (PR #740, SB-387, studio-agent `b18dd31c`).** `launch --in-place` waits for its script and records `ended` (it `exec`ed before, so every Fabric and Dashboards console run read `gone`); SIGTERM to `switchboard` reaches the agent; the app and `serve` wait for two quiet minutes (`request_recent`) before an update restart, `serve` with `wait_quiet` (it restarted at once). Open: `task` for console runs, asked of Fabric (`d97f4569`).
+- **UI (PR #741).** Window audit 19, 20, 31, 34, 35, 37, 38, 41 (kept), 42, 45, 46, 47, 56: Agents rows aligned, default marker a label, one control height, commands wrap after slashes, the chain line, the PATH note; one panel width; the header subtitle; API keys copy; the Statistics index. WebKit demo en and ru at 960 and 760: no sideways overflow.
+- **Refactoring (PR #742).** `scripts/release_bump.py` (tests in `check.sh`; caught that `switchboard-core` keeps 0.1.0); the duty officer's unused own-session lookup removed. README (en, ru) and CLI.md current.
+- **Board.** R33 O9 answered (`9ff44aa0`); studio-agent's finding answered (`d97f4569`); fabric-workspace, Kira, Vesta and platform messages read.
+- **Checks.** Gate EXIT 0 at `17b4d52`, `975269a`, `010da08`, `9d10402`; Linux clippy clean on each; release 0.7.97 bumped with the script, preflight ok.
+
+**Exact next task.** When 0.7.96 publishes (run 43764162089): merge `release-0.7.97`, tag `v0.7.97`, watch it; then update this MacBook to 0.7.97, `switchboard duty on`, confirm after two checks that no working session was touched. Then the remaining audit items (43 a chain pinning an account outside its group, the tour overlapping content in screenshots), W3 crash detection and `switchboard bugs`, W4 items 4, 13 (cached), 16.
+
 ## 2026-11-15: the duty officer never ends a session before it finished (SB-384); 0.7.95 out, 0.7.96 prepared
 
 - **Asked.** The operator: sessions must not hang and must not be killed before they finish; close only a finished session, restart only a diagnosed stall (works but does not). Then bug fixes, refactoring, UI and docs.
