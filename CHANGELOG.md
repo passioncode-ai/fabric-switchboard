@@ -8,6 +8,7 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- Settings has a *Coding sessions* section: how many coding sessions work on this computer now, and the limit at which Fabric board runs and hosted consoles wait, set or removed there (SB-378).
 ## 0.7.86
 
 - An account whose copy on the other machine is turned off can be called back: that machine gives it back too, and turns it off again if the call back is undone. Before, the call back was refused with "This account is already used elsewhere or turned off here." The other machine needs this version (SB-377).

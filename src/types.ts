@@ -143,6 +143,8 @@ export interface Adapter {
   codexRoute(enabled?: boolean | null): Promise<CodexRoute>;
   /** SB-352: the groups that take part in balancing; with no change, the state. */
   balance(change?: BalanceChange | null): Promise<BalanceStatus>;
+  /** SB-378: the session pool; `cap` sets it, `clear` removes it, neither reads. */
+  capacity(change?: { cap?: number; clear?: boolean } | null): Promise<CapacityStatus>;
   repositoryMap(under: string[]): Promise<import('./ui-logic').RepositoryMap>;
   /** SB-145: what the proxy relayed in the last `days` days. */
   statistics(days: number): Promise<import('./ui-logic').Statistics>;
@@ -283,6 +285,8 @@ export interface OpenrouterModels { recommended: RecommendedModel[]; models: Ope
 /** SB-143: whether Codex sessions in project folders use the projects' Codex accounts. */
 /** SB-352: a change of the groups that take part in balancing (pool ids, `default` included). */
 export interface BalanceChange { add?: string[]; remove?: string[]; all_new?: boolean | null; backup_add?: string[]; backup_remove?: string[] }
+/** SB-378: `switchboard capacity`, this computer's cap on working coding sessions. */
+export interface CapacityStatus { cap: number | null; used: number; free: number | null; at_capacity: boolean; total: number; quiet: number; quiet_after_minutes: number }
 /** SB-352: one loan in `balance status`. */
 export interface BalanceLoan { account_id: string; label: string | null; provider: Provider; from: string; from_name: string; to: string; to_name: string; at: number }
 /** SB-352: one journal line (`balancing.jsonl`): codes and ids only. */

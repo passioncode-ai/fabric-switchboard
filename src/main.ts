@@ -9,7 +9,7 @@ import { demo, demoFirstRun, native, nativeAdapter, onProjectSuggestions, onShel
 import type { CardState, AccountGroup } from './ui-logic';
 import { statAlert, ceilingQuestion, ceilingWarning, ceilingLine, keyLimitLine, dollars, POOL_PATTERN, poolChoices, poolName, inGroup, tourPlacement, usableWhileBusy, APPEARANCE_KEY, attribution, placementAdmits, domainSuggestion, groupSeatsElsewhere, passioncodeLine, seatEndedText, groupSeatsEndedText, organizationReleasedAt, inOrganizationFilter, domainList, type AttributedBy, sortStatRows, nextStatSort, type StatRow, type StatSort, statCacheShare, statTokensPerRequest, chartSeries, niceMax, groupProjectRows, type ChartMetric, groupProjects, compactCount, statTokens, statTrouble, statTroubleText, statAgentName, type Statistics, EXPIRY_CHOICES, folderName, folderRows, withoutFolder, type ProjectRoot, moveTargets, mapRows, rootTargets, storedMapFolders, MAP_FOLDERS_KEY, type MapFilter, type MapRow, type RepositoryMap, sortAgents, defaultAgentChoices, backgroundReads, clockedRead, chainScopeKey, afterRead, ceilingRemovalNote, modelMeta, modelUse, ordinaryKimiNote, kimiLimitUntil, limitReasonText, limitTitle, agentSetupFacts, sessionHow, sessionAgentName, sessionStateLabel, kimiWindowsLine, kimiWindowsLines, openrouterCreditLine, eventAction, eventDetail, MutationClock, activeRules, autoSwitchPool, autoSwitchPossible, launchChoice, withFolders, githubDefaultSelection, githubPlan, githubSource, replaceFolder, storedFolder, LAST_FOLDER_KEY, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, signInNotice, signInMove, organizationMoveNote, dismissTermsNotice, termsNoticeDismissed, termsNoticeOn, termsNoticeText, tourWaits, orgSetups, releasedOrganizations, releasedSummary, orgSetupAction, orgSetupShown, orgSetupCaveat, orgSetupLeads, orgSetupPrimary, accountsOrgActionLeads, firstPrimary, orgSetupUnread, orgSetupStateLabel, orgSetupTitle, hiddenOrgSetups, ORG_SETUP_HIDDEN_KEY, accountsEmptyKey, type OrgSetup, usageAnswerText, usageNotice, usageFreshness, windowReset, type Appearance, shellHookView, balancingView, balancingNotice, shellHookToggleNotice, shellHookNoticeText, codexHookLine, moveStep, accountsForStep, chainSummary, stepReasonText, handoverOutcomeText, handoverSkipped, shortWorkflow, TAKEOVER_ORDER, groupOrganizations, servesPool, sharedGroups, holdsContext, accountOrganizations, machineOf, remoteUsageLine, unplacedAccounts, machineAliasesLine, machineLiveLine, machineCopyLine, foldOpen, accountSections, accountMatches, attentionAccounts, attentionReasonText, attentionActionLabel, givenFacts, switchingLine, MACHINE_FOLD_LIMIT, EVENT_FILTER_KINDS, eventKindLabel, filterEvents, eventsByDay, relativeDay, EVENTS_PAGE, eventPage, sortSessions, statRowsShown, STAT_TOP, spendShare, groupKeyBlocks, keyTail, groupStateLine, type EventKind, type EventFilter } from './ui-logic';
 import agentCatalog from '../catalog/agents.json';
-import type { AnalyticsStatus, Ceilings, CeilingView, CeilingQuestionView, OpenrouterCredit, BackupInfo, PassioncodeStatus, Account, Adapter, AgentConnection, AgentInfo, AgentRow, AgentsOverview, OpenrouterModels, HermesModel, KimiAccounts, KimiRegion, KimiStatus, OpenrouterStatus, OpenrouterKeys, CodexRoute, BalanceStatus, ShellHookStatus, AgentSetup, AuthKind, BackupStatus, KimiAccount, CurrentAccounts, LoginItem, Project, Restored, HandoverPlan, ExternalIdentity, MonitorStatus, ProjectRule, Provider, RotationPolicy, RuntimeStatus, SessionInfo, Snapshot, UpdateStatus, Onboarding, Chains, ChainExecutor, ChainScope, ChainStepView, GithubRepository, Machine, MachinesLive, MachinesList, Attention, AttentionItem, Event, GivenAccount } from './types';
+import type { AnalyticsStatus, Ceilings, CeilingView, CeilingQuestionView, OpenrouterCredit, BackupInfo, PassioncodeStatus, Account, Adapter, AgentConnection, AgentInfo, AgentRow, AgentsOverview, OpenrouterModels, HermesModel, KimiAccounts, KimiRegion, KimiStatus, OpenrouterStatus, OpenrouterKeys, CodexRoute, BalanceStatus, CapacityStatus, ShellHookStatus, AgentSetup, AuthKind, BackupStatus, KimiAccount, CurrentAccounts, LoginItem, Project, Restored, HandoverPlan, ExternalIdentity, MonitorStatus, ProjectRule, Provider, RotationPolicy, RuntimeStatus, SessionInfo, Snapshot, UpdateStatus, Onboarding, Chains, ChainExecutor, ChainScope, ChainStepView, GithubRepository, Machine, MachinesLive, MachinesList, Attention, AttentionItem, Event, GivenAccount } from './types';
 
 const root = document.querySelector<HTMLDivElement>('#app')!;
 const announcements = document.querySelector<HTMLDivElement>('#announcements')!;
@@ -599,6 +599,40 @@ function moveHereDialog(machine: Machine) {
     void dialogSave(context, () => adapter.sendAccount(account.id, machine.name, pool.value.trim() || 'default'), t('{label} moved to {machine}. This computer no longer uses it.', { label: account.label, machine: machine.name }));
   });
   which.focus();
+}
+/** SB-378 (SCN-093 step 7): this computer's cap on working coding sessions. */
+let capacityState: CapacityStatus | null = null; let capacityLoading = false; let capacityError = '';
+function loadCapacity() {
+  if (capacityLoading) return;
+  capacityLoading = true; const stamp = clock.stamp();
+  void adapter.capacity(null).then((s) => { if (clock.accepts(stamp) || !capacityState) { capacityState = s; capacityError = ''; } }, (e) => { if (clock.accepts(stamp) || !capacityState) capacityError = t(safeError(e, 'read')); }).finally(() => { capacityLoading = false; render(); });
+}
+function capacitySection() {
+  const section = el('div', 'fold-content');
+  section.append(el('p', 'surface-note', t('Switchboard counts every Claude Code and Codex session working on this computer, except those with no writes for 30 minutes. At the limit, Fabric board runs and hosted consoles wait until one ends.')));
+  if (capacityError) { section.append(el('p', 'form-error', capacityError)); return section; }
+  if (!capacityState) { if (!capacityLoading) loadCapacity(); section.append(el('p', 'form-note', t('Counting sessions…'))); return section; }
+  const state = capacityState;
+  section.append(el('p', 'account-meta section-state', t('Working now: {used}, {quiet} quiet not counted.', { used: state.used, quiet: state.quiet })));
+  const actions = el('div', 'management-actions');
+  actions.append(button(state.cap === null ? t('Set limit…') : t('Change limit…'), capacityDialog, 'button', 'capacity-set'));
+  if (state.cap !== null) actions.append(button(t('Remove limit'), () => { void mutate(async () => { capacityState = await adapter.capacity({ clear: true }); }, t('Limit removed.'), 'capacity-set'); }, 'button', 'capacity-clear'));
+  section.append(actions);
+  return section;
+}
+function capacityDialog() {
+  const context = openDialog(t('Limit of working coding sessions'), t('Fabric board runs and hosted consoles wait while this many sessions work on this computer.'), 'capacity-set');
+  const limit = input(capacityState?.cap ? String(capacityState.cap) : '20', 'number'); limit.min = '1'; limit.max = '500'; limit.step = '1'; limit.inputMode = 'numeric';
+  const grid = el('div', 'form-grid');
+  grid.append(field(t('Sessions'), limit, t('From 1 to 500.')));
+  context.body.append(grid); context.actions.append(submit(t('Save limit')));
+  context.form.addEventListener('submit', (event) => {
+    event.preventDefault();
+    const value = Number(limit.value);
+    if (!Number.isInteger(value) || value < 1 || value > 500) { context.error.textContent = t('Give the session limit as a whole number from 1 to 500.'); limit.focus(); return; }
+    void dialogSave(context, async () => { capacityState = await adapter.capacity({ cap: value }); }, t('Limit saved: {cap} working sessions.', { cap: value }));
+  });
+  limit.focus();
 }
 /** SB-352 wave 2 (SCN-090): which groups lend accounts to each other, one switch per group. */
 let balancingState: BalanceStatus | null = null; let balancingLoading = false; let balancingError = ''; let balancingKey = '';
@@ -3111,13 +3145,14 @@ function renderSettings(main: HTMLElement) {
   const switchingState = snapshot ? (() => { const groups = new Set(policies.filter((p) => p.enabled).map((p) => p.pool)).size; return groups ? plural(groups, { one: 'On for {n} group', other: 'On for {n} groups' }) : t('Off'); })() : undefined;
   const reading = () => [el('p', 'form-note', t('Reading account metadata from the native app…'))];
   // The reads behind the headers start with the page, so each header can say its state before it is opened.
-  if (snapshot) { if (!balancingState && !balancingError) loadBalancing(); if (!codexRouteState && !codexRouteError) loadCodexRoute(); if (!shellHookState && !shellHookError) loadShellHook(); }
+  if (snapshot) { if (!balancingState && !balancingError) loadBalancing(); if (!codexRouteState && !codexRouteError) loadCodexRoute(); if (!shellHookState && !shellHookError) loadShellHook(); if (!capacityState && !capacityError) loadCapacity(); }
   const shell = shellHookView(shellHookState, shellHookError || null).state;
   const newest = backupStatus?.backups.slice().sort((a, b) => b.created_at - a.created_at)[0];
   let language: LocaleChoice = 'system'; try { language = parseLocaleChoice(localStorage.getItem(LOCALE_KEY)); } catch { language = 'system'; }
   main.append(
     foldSection({ key: 'switching', title: t('Automatic switching'), state: switchingState, body: () => snapshot ? [policiesPanel()] : reading() }),
     foldSection({ key: 'balancing', title: t('Balancing between groups'), state: onOff(balancingState?.on), body: () => snapshot ? [balancingSection()] : reading() }),
+    foldSection({ key: 'sessions', title: t('Coding sessions'), state: capacityState ? (capacityState.cap === null ? t('No limit') : t('{used} of {cap} working', { used: capacityState.used, cap: capacityState.cap })) : undefined, body: () => [capacitySection()] }),
     foldSection({ key: 'codex-route', title: t('Codex in group folders'), state: onOff(codexRouteState?.on), body: () => snapshot ? [codexRouteSection()] : reading() }),
     foldSection({ key: 'terminals', title: t('Terminals in organization folders'), state: shell === 'on' || shell === 'default_on' || shell === 'inactive' ? t('On') : shell === 'off' || shell === 'default_off' ? t('Off') : undefined, body: () => snapshot ? [shellHookSection()] : reading() }),
     foldSection({ key: 'background', title: t('Running in the background'), state: onOff(loginItem?.available ? loginItem.enabled : null), body: () => [residencyPanel()] }),
