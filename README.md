@@ -30,6 +30,8 @@ and Linux (x64 and ARM), built by
 | Choose the next account | Native Claude switching or managed request routing; a response in progress keeps its identity |
 | Use Kimi Code subscriptions | Official sign-in, membership and usage, then launch the chosen account in a project |
 | Choose and configure coding agents | See which agents are installed, which take over work and the default one; OpenCode and Hermes continue workflows on an OpenRouter key; pick the model from OpenRouter's list |
+| Follow coding sessions and keep them from hanging | Activity shows every live Claude Code and Codex session, who started it and for which task; the session duty officer closes a session that finished and restarts one that stalled, never one still working |
+| Work with accounts on other machines | Move an account to another machine over ssh and call it back, without a new sign-in; each machine's accounts are a group of their own |
 | Work from your terminal or agent | `switchboard` CLI, MCP tools and `launch --in-place` |
 
 Saved secrets use macOS Keychain, Windows DPAPI or the Linux Secret Service (GNOME Keyring,
@@ -41,10 +43,7 @@ See [account behavior](docs/ACCOUNTS-AND-ROTATION.md) and
 ## Release status
 
 **Latest published:** [the latest release](https://github.com/passioncode-ai/fabric-switchboard/releases/latest)
-(its number is on that page; installed copies update themselves). Recent changes: 0.6.81 no longer
-makes everything wait while one account's sign-in is read slowly from the vault; 0.6.80 shows
-which organization a session works for; 0.6.79 keeps a sign-in that was being renewed when you
-quit or Switchboard updated. Release notes for each version are in
+(its number is on that page; installed copies update themselves). Recent changes: 0.7.96 never ends a session before it finished its work; 0.7.94 brings back an account that is the only one its group uses on the other machine; 0.7.92 counts sessions per organization. Release notes for each version are in
 [CHANGELOG.md](CHANGELOG.md).
 
 macOS releases are universal, Developer ID signed and notarized by Apple. Windows releases (x64,

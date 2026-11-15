@@ -124,8 +124,6 @@ pub struct Seen {
     pub dashboards: bool,
     /// The program hosting its terminal: `dashboards`, `orca`, `terminal`, `iterm` or `other`.
     pub host: &'static str,
-    /// Switchboard started it (a launch record names it, or the duty officer resumed it).
-    pub ours: bool,
     /// Its own commands running now (Bash tool shells, foreground or background).
     pub commands: usize,
     /// How long its oldest running command has run, seconds.
@@ -225,7 +223,6 @@ pub fn observe(root: &Path) -> Vec<Seen> {
             last_write: crate::machine_sessions::session_last_write(&config, cwd, session),
             dashboards: false,
             host: "other",
-            ours: false,
             commands: 0,
             command_age: None,
             cpu: None,
@@ -233,12 +230,10 @@ pub fn observe(root: &Path) -> Vec<Seen> {
             config,
         });
     }
-    let ours = started_here(root);
     let table = process_table();
     for s in &mut seen {
         s.host = host_of(&crate::machine_sessions::ancestor_paths(s.pid));
         s.dashboards = s.host == "dashboards";
-        s.ours = ours.contains(&s.session);
         if let Some(table) = &table {
             let tree = tree_of(table, s.pid);
             s.cpu = Some(tree.cpu);
@@ -379,23 +374,6 @@ fn compare_cpu(seen: &mut [Seen], now: i64, keep: bool) {
     if keep {
         *kept = Some(next);
     }
-}
-
-/// The sessions Switchboard started: those its launch records of the last 30 days name, and
-/// those the duty officer resumed.
-fn started_here(root: &Path) -> std::collections::HashSet<String> {
-    let since = crate::session_watch::now() - 30 * 86_400;
-    let mut found: std::collections::HashSet<String> = crate::launches::recent_records(root, since)
-        .iter()
-        .filter_map(|r| r["provider_session_id"].as_str().map(str::to_owned))
-        .collect();
-    found.extend(
-        journal(root)
-            .iter()
-            .filter(|l| l["outcome"] == "restarted")
-            .filter_map(|l| l["session"].as_str().map(str::to_owned)),
-    );
-    found
 }
 
 /// The pids to close among processes holding one session: each copy that is finished (idle, no
@@ -692,7 +670,6 @@ mod tests {
             last_write: quiet_min.map(|q| now - q * 60),
             dashboards: false,
             host: "terminal",
-            ours: true,
             commands: 0,
             command_age: None,
             cpu: Some(10.0),
