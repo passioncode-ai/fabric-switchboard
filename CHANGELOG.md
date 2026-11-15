@@ -8,7 +8,11 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+<<<<<<< HEAD
+- A background pass that finds several new folders writes the list of found folders once, not once per folder, under the owner transaction (perf audit item 12).
+=======
 ## 0.7.93
+>>>>>>> origin/main
 
 - `switchboard sessions --history` and MCP `switchboard_sessions {history}` page with `limit` and `before` and answer `next_before`; a page reads only the newest record files, and `recovery` reads only the launch records written around its open stops, not every record (perf audit items 5 and 6); `switchboard sessions` reads an ended session's records only with `--all` (item 15).
 

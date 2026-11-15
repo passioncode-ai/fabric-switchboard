@@ -507,7 +507,14 @@ pub(crate) fn read(root: &Path) -> Result<Vec<Suggestion>, String> {
     Ok(rows)
 }
 
+#[cfg(test)]
+thread_local! {
+    /// How many times this thread wrote the found list.
+    static WRITES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
 fn write(root: &Path, rows: &[Suggestion]) -> Result<(), String> {
+    #[cfg(test)]
+    WRITES.with(|n| n.set(n.get() + 1));
     let bytes = serde_json::to_vec(rows).map_err(|_| UNREADABLE)?;
     // Never write what `read` would refuse.
     if bytes.len() as u64 > MAX_BYTES || rows.len() > MAX_ROWS {
@@ -780,11 +787,27 @@ fn record_row(
     now: i64,
 ) -> Result<Outcome, String> {
     let mut rows = read(root)?;
+    let outcome = record_in(&mut rows, text, pool, reason, repository, now);
+    if matches!(outcome, Outcome::New(_)) {
+        write(root, &rows)?;
+    }
+    Ok(outcome)
+}
+/// `record_row` on rows already read, writing nothing (perf audit item 12: a pass records all its
+/// folders and writes the file once).
+fn record_in(
+    rows: &mut Vec<Suggestion>,
+    text: String,
+    pool: String,
+    reason: Reason,
+    repository: String,
+    now: i64,
+) -> Outcome {
     if let Some(i) = rows.iter().position(|r| r.folder == text) {
         match rows[i].state {
-            State::Pending => return Ok(Outcome::Waiting),
+            State::Pending => return Outcome::Waiting,
             // Added once and since removed from the project by the person: their choice stands.
-            State::Dismissed | State::Added | State::Shared => return Ok(Outcome::Declined),
+            State::Dismissed | State::Added | State::Shared => return Outcome::Declined,
             // Deleted and back again: a new folder like any other.
             State::Gone => {
                 rows.remove(i);
@@ -794,7 +817,7 @@ fn record_row(
     // A label is shown, never parsed: bounded so a row stays small.
     let repository: String = repository.chars().take(MAX_LABEL).collect();
     if rows.iter().filter(|r| r.state == State::Pending).count() >= MAX_PENDING {
-        return Ok(Outcome::Full);
+        return Outcome::Full;
     }
     let remembered = rows.iter().filter(|r| r.state != State::Pending).count();
     if remembered >= MAX_DISMISSED {
@@ -817,8 +840,7 @@ fn record_row(
         state: State::Pending,
     };
     rows.push(suggestion.clone());
-    write(root, &rows)?;
-    Ok(Outcome::New(suggestion))
+    Outcome::New(suggestion)
 }
 
 /// The open suggestions: still pending, the folder still there and still in no project.
@@ -1166,6 +1188,10 @@ impl Scanner {
         now: i64,
     ) -> Vec<Suggestion> {
         let mut found = Vec::new();
+        // Perf audit item 12: the found list is read once, on the first folder of ours, and
+        // written once after the last; a failed write records none of its new rows.
+        let mut rows: Option<Result<Vec<Suggestion>, String>> = None;
+        let mut new_rows: Vec<(PathBuf, Suggestion)> = Vec::new();
         for Candidate {
             path,
             assessed,
@@ -1183,14 +1209,13 @@ impl Scanner {
                     pool,
                     reason,
                     repository,
-                } => record_row(root, text, pool, reason, repository, now),
+                } => match rows.get_or_insert_with(|| read(root)) {
+                    Ok(rows) => Ok(record_in(rows, text, pool, reason, repository, now)),
+                    Err(e) => Err(e.clone()),
+                },
             };
             match outcome {
-                Ok(Outcome::New(s)) => {
-                    self.unsettled.remove(&path);
-                    self.seen.insert(path);
-                    found.push(s);
-                }
+                Ok(Outcome::New(s)) => new_rows.push((path, s)),
                 Ok(Outcome::NotOurs { settled: false }) => {
                     if self.unsettled.len() < MAX_UNSETTLED || self.unsettled.contains_key(&path) {
                         self.unsettled.insert(path.clone(), stamp);
@@ -1206,6 +1231,21 @@ impl Scanner {
                 Ok(_) => {
                     self.unsettled.remove(&path);
                     self.seen.insert(path);
+                }
+            }
+        }
+        if !new_rows.is_empty() {
+            let written = match &rows {
+                Some(Ok(rows)) => write(root, rows).is_ok(),
+                _ => false,
+            };
+            for (path, s) in new_rows {
+                if written {
+                    self.unsettled.remove(&path);
+                    self.seen.insert(path);
+                    found.push(s);
+                } else if self.retry.len() < MAX_PENDING {
+                    self.retry.insert(path);
                 }
             }
         }
@@ -1852,5 +1892,39 @@ mod tests {
         assert_eq!(found[0].reason, Reason::Ecosystem);
         assert_eq!(read(root.path()).unwrap().len(), 1);
         assert!(scan.seen.contains(&sibling));
+    }
+
+    #[test]
+    fn a_pass_that_finds_several_folders_writes_the_list_once() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let data = tmp.path().canonicalize().unwrap();
+        let main = data.join("app");
+        git(&main, Some("git@github.com:org/app.git"));
+        let s = snapshot(&[("p", &[&main], &["github.com/org"])]);
+        let found: Vec<PathBuf> = ["api", "web", "docs"]
+            .iter()
+            .map(|name| {
+                let folder = data.join(name);
+                git(&folder, Some(&format!("git@github.com:org/{name}.git")));
+                folder
+            })
+            .collect();
+        let mut scan = Scanner::default();
+        WRITES.with(|n| n.set(0));
+        let recorded = scan.settle_assessed(root.path(), assess_all(&s, found), 130);
+        assert_eq!(recorded.len(), 3);
+        assert_eq!(WRITES.with(|n| n.get()), 1, "three new folders, one write");
+        assert_eq!(read(root.path()).unwrap().len(), 3);
+        WRITES.with(|n| n.set(0));
+        let again = data.join("api");
+        assert!(scan
+            .settle_assessed(root.path(), assess_all(&s, vec![again]), 160)
+            .is_empty());
+        assert_eq!(
+            WRITES.with(|n| n.get()),
+            0,
+            "a folder already waiting writes nothing"
+        );
     }
 }
