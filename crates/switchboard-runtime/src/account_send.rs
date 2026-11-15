@@ -76,7 +76,11 @@ pub const CALLED_BACK: &str = "called back";
 pub const CALLED_BACK_OFF: &str = "called back, was off";
 pub const NOT_CALLED_BACK: &str =
     "This account was not given back by a call back here, so its mark stays. Nothing changed.";
+/// What a Switchboard before 0.7.94 answered when the account was the only one its group used
+/// there; a newer one gives it back and leaves that group with no selected account.
 pub const ONLY_ONE_HERE: &str = "This is the only account its group uses on this machine. Add another account to that group before calling this one back.";
+/// SB-386: the caller's reading of that old answer: it came from the other machine.
+pub const OLD_THERE: &str = "The other machine runs a Switchboard older than 0.7.94, which keeps an account its group uses alone. Update Switchboard there, then call the account back again.";
 
 pub const NOT_AWAY: &str = "This account is used here, not on another machine.";
 pub const NO_REMOTE_ID: &str =
@@ -528,6 +532,10 @@ pub fn surrender(
     }
     // SB-312: a group's selected account is the normal state after a move (switching is on by
     // default), so its group moves to another account of its own here instead of refusing.
+    // SB-386 (operator 2026-11-15: accounts could not be called back from the Mac Studio and the
+    // Mac Pro): a group with no other account here is left with none selected; the person asked
+    // for the account back, and its mark below drops the selection (`mark_elsewhere_at`).
+    let mut left_without = Vec::new();
     for (key, value) in &snapshot.routes {
         if value != id {
             continue;
@@ -537,7 +545,7 @@ pub fn surrender(
         // first one listed.
         match next_in_group(&snapshot, account, pool, now) {
             Some(next) => store.select(account.provider, pool, &next.id)?,
-            None => return Err(ONLY_ONE_HERE.into()),
+            None => left_without.push(pool.to_owned()),
         }
     }
     let mark = if was_off {
@@ -559,7 +567,10 @@ pub fn surrender(
     let credential = store.stored_credential(id)?;
     let tokens: Value =
         serde_json::from_str(&credential.to_oauth_json(account.provider)).unwrap_or(Value::Null);
-    Ok(json!({"provider": account.provider.as_str(), "credential": tokens}))
+    Ok(
+        json!({"provider": account.provider.as_str(), "credential": tokens,
+        "groups_left_without_account": left_without}),
+    )
 }
 
 /// Takes a surrender's mark back: used here again, and off again when it was off.
@@ -567,6 +578,15 @@ fn restore(store: &Store, id: &str, was_off: bool, now: i64) -> Result<(), Strin
     store.mark_elsewhere(id, false, now)?;
     if was_off {
         store.update_fields(id, None, Some(false))?;
+        return Ok(());
+    }
+    // SB-386: a group the surrender left with no account selected takes this one again.
+    let snapshot = store.snapshot()?;
+    if let Some(account) = snapshot.accounts.iter().find(|a| a.id == id) {
+        let key = format!("{}:{}", account.provider.as_str(), account.pool);
+        if !snapshot.routes.contains_key(&key) {
+            let _ = store.select(account.provider, &account.pool, id);
+        }
     }
     Ok(())
 }
@@ -655,6 +675,10 @@ pub fn recall_take(
         // SB-312: the other machine's own reason, when it gave one; a lost answer may have
         // marked it there, so that mark is taken back.
         if let Some(reason) = refusal(output) {
+            // SB-386: "on this machine" in an older Switchboard's answer meant that machine.
+            if reason == ONLY_ONE_HERE {
+                return Err(OLD_THERE.into());
+            }
             return Err(reason);
         }
         undo_there();
@@ -1584,11 +1608,17 @@ mod tests {
     fn a_selected_account_hands_its_group_to_another_before_it_is_given_back() {
         let (_root, store, id) = store_with(AuthKind::OAuth);
         store.select(Provider::Claude, "default", &id).unwrap();
-        assert_eq!(
-            surrender(&store, &id, false, 7, &|_| {}).unwrap_err(),
-            ONLY_ONE_HERE
-        );
-        assert!(!store.snapshot().unwrap().elsewhere.contains_key(&id));
+        // SB-386: the only account of its group is given back too; the group is left with none
+        // selected and says so, and an undo selects it again.
+        let given = surrender(&store, &id, false, 7, &|_| {}).unwrap();
+        assert_eq!(given["groups_left_without_account"], json!(["default"]));
+        let snapshot = store.snapshot().unwrap();
+        assert!(snapshot.elsewhere.contains_key(&id));
+        assert_eq!(snapshot.routes.get("claude:default"), None);
+        surrender(&store, &id, true, 7, &|_| {}).unwrap();
+        let snapshot = store.snapshot().unwrap();
+        assert!(!snapshot.elsewhere.contains_key(&id));
+        assert_eq!(snapshot.routes.get("claude:default"), Some(&id));
         let other = store
             .add(
                 "Other".into(),
@@ -1840,6 +1870,39 @@ mod tests {
         assert_eq!(
             kept["proved"], false,
             "a copy still listed there is not proved gone"
+        );
+    }
+
+    #[test]
+    fn an_older_machines_only_account_refusal_says_to_update_it_there() {
+        // SB-386: before 0.7.94 the other machine refused an account its group used alone, in
+        // words that read as if this machine refused it.
+        let (_root, store, id) = store_with(AuthKind::OAuth);
+        store
+            .mark_elsewhere_at(&id, true, 5, Some("studio.local"))
+            .unwrap();
+        let refused = json!({"ok": false, "error": ONLY_ONE_HERE}).to_string();
+        let run = move |_: &[String], _: Option<&[u8]>| -> Result<String, String> {
+            Err(refused.clone())
+        };
+        assert_eq!(
+            recall_take(
+                &store,
+                &id,
+                "studio.local",
+                "remote-1",
+                &DEFAULT_APP,
+                6,
+                &run,
+                None
+            )
+            .err()
+            .unwrap(),
+            OLD_THERE
+        );
+        assert!(
+            store.snapshot().unwrap().elsewhere.contains_key(&id),
+            "nothing changed here"
         );
     }
 

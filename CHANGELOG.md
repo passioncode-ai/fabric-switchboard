@@ -8,11 +8,11 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
-<<<<<<< HEAD
+- An account can be called back from another machine when it is the only account its group uses there: that group is left with none selected (and takes it again if the call back fails), instead of the call back being refused. A machine still on an older version is named as the one to update (SB-386, operator 2026-11-15).
 - A background pass that finds several new folders writes the list of found folders once, not once per folder, under the owner transaction (perf audit item 12).
-=======
+- The session duty officer reads a session's host past `/usr/bin/login`, so a session in Terminal or in Orca's terminal host is recorded as `terminal` or `orca`, not `other`; and a Fabric Dashboards console started through `login` is left to Dashboards (SB-384).
+
 ## 0.7.93
->>>>>>> origin/main
 
 - `switchboard sessions --history` and MCP `switchboard_sessions {history}` page with `limit` and `before` and answer `next_before`; a page reads only the newest record files, and `recovery` reads only the launch records written around its open stops, not every record (perf audit items 5 and 6); `switchboard sessions` reads an ended session's records only with `--all` (item 15).
 

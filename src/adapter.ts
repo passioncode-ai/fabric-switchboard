@@ -222,6 +222,7 @@ const safeErrors = new Set([
   "Claude Code here is signed in to this account and no other Claude account here can take its place. Add one, then move this one.",
   "This account was not given back by a call back here, so its mark stays. Nothing changed.",
   "This is the only account its group uses on this machine. Add another account to that group before calling this one back.",
+  "The other machine runs a Switchboard older than 0.7.94, which keeps an account its group uses alone. Update Switchboard there, then call the account back again.",
   // Where a data folder keeps its sign-ins (SB-287).
   "The sign-in store's choice (vault.json) could not be read. Delete vault.json to use this computer's own store, or choose again with switchboard vault use.",
   "This computer's own sign-in store works here, so Switchboard keeps sign-ins in it. A file store is only for a machine with no graphical login.",

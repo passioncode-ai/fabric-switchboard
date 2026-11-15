@@ -242,13 +242,16 @@ pub(crate) fn ancestor_paths(pid: u32) -> Vec<String> {
     let mut current = pid as i32;
     let mut path = vec![0u8; libc::PROC_PIDPATHINFO_MAXSIZE as usize];
     for _ in 0..8 {
-        let mut info = std::mem::MaybeUninit::<libc::proc_bsdinfo>::zeroed();
-        let size = std::mem::size_of::<libc::proc_bsdinfo>() as i32;
+        // The short info, as `ps` reads it: the full one is refused for a process of another
+        // user, and an interactive Terminal session's parent is `/usr/bin/login`, owned by root,
+        // so the walk stopped there and never reached the terminal's host.
+        let mut info = std::mem::MaybeUninit::<libc::proc_bsdshortinfo>::zeroed();
+        let size = std::mem::size_of::<libc::proc_bsdshortinfo>() as i32;
         // SAFETY: a plain read of one process's info into a buffer of the size passed.
         let got = unsafe {
             libc::proc_pidinfo(
                 current,
-                libc::PROC_PIDTBSDINFO,
+                libc::PROC_PIDT_SHORTBSDINFO,
                 0,
                 info.as_mut_ptr().cast(),
                 size,
@@ -257,7 +260,8 @@ pub(crate) fn ancestor_paths(pid: u32) -> Vec<String> {
         if got != size {
             break;
         }
-        let ppid = unsafe { info.assume_init() }.pbi_ppid as i32;
+        // SAFETY: proc_pidinfo filled the whole struct (checked above).
+        let ppid = unsafe { info.assume_init() }.pbsi_ppid as i32;
         if ppid <= 1 {
             break;
         }
