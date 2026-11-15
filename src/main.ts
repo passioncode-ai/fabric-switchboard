@@ -10,7 +10,7 @@ if (native) watchProblems(reportProblem);
 import { LOCALE_KEY, dateLocale, locale, parseLocaleChoice, plural, saveLocaleChoice, t, type LocaleChoice } from './i18n';
 import { demo, demoFirstRun, native, nativeAdapter, onProjectSuggestions, onShellHook, onSpendChanged, safeError, reportFrontendReady, reportLanguage, reportProblem, type Operation } from './adapter';
 import type { CardState, AccountGroup } from './ui-logic';
-import { statAlert, ceilingQuestion, ceilingWarning, ceilingLine, keyLimitLine, dollars, POOL_PATTERN, poolChoices, poolName, inGroup, tourPlacement, usableWhileBusy, APPEARANCE_KEY, attribution, placementAdmits, domainSuggestion, groupSeatsElsewhere, passioncodeLine, seatEndedText, groupSeatsEndedText, organizationReleasedAt, inOrganizationFilter, domainList, type AttributedBy, sortStatRows, nextStatSort, type StatRow, type StatSort, statCacheShare, statTokensPerRequest, chartSeries, niceMax, groupProjectRows, type ChartMetric, groupProjects, compactCount, statTokens, statTrouble, statTroubleText, statAgentName, type Statistics, EXPIRY_CHOICES, folderName, folderRows, withoutFolder, type ProjectRoot, moveTargets, mapRows, rootTargets, storedMapFolders, MAP_FOLDERS_KEY, type MapFilter, type MapRow, type RepositoryMap, sortAgents, defaultAgentChoices, backgroundReads, clockedRead, chainScopeKey, afterRead, ceilingRemovalNote, modelMeta, modelUse, ordinaryKimiNote, kimiLimitUntil, limitReasonText, limitTitle, agentSetupFacts, sessionHow, sessionAgentName, sessionStateLabel, kimiWindowsLine, kimiWindowsLines, openrouterCreditLine, eventAction, eventDetail, MutationClock, activeRules, autoSwitchPool, autoSwitchPossible, launchChoice, withFolders, githubDefaultSelection, githubPlan, githubSource, replaceFolder, storedFolder, LAST_FOLDER_KEY, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, signInNotice, signInMove, organizationMoveNote, dismissTermsNotice, termsNoticeDismissed, termsNoticeOn, termsNoticeText, tourWaits, orgSetups, releasedOrganizations, releasedSummary, orgSetupAction, orgSetupShown, orgSetupCaveat, orgSetupLeads, orgSetupPrimary, accountsOrgActionLeads, firstPrimary, orgSetupUnread, orgSetupStateLabel, orgSetupTitle, hiddenOrgSetups, ORG_SETUP_HIDDEN_KEY, accountsEmptyKey, type OrgSetup, usageAnswerText, usageNotice, usageFreshness, windowReset, type Appearance, shellHookView, balancingView, balancingNotice, shellHookToggleNotice, shellHookNoticeText, codexHookLine, moveStep, accountsForStep, chainSummary, stepReasonText, handoverOutcomeText, handoverSkipped, shortWorkflow, TAKEOVER_ORDER, groupOrganizations, servesPool, sharedGroups, holdsContext, accountOrganizations, machineOf, remoteUsageLine, unplacedAccounts, machineAliasesLine, machineLiveLine, machineCopyLine, foldOpen, accountSections, accountMatches, attentionAccounts, attentionReasonText, attentionActionLabel, surfaceLabel, sessionTreeRows, givenFacts, switchingLine, MACHINE_FOLD_LIMIT, EVENT_FILTER_KINDS, eventKindLabel, filterEvents, eventsByDay, relativeDay, EVENTS_PAGE, eventPage, sortSessions, statRowsShown, STAT_TOP, spendShare, groupKeyBlocks, keyTail, groupStateLine, type EventKind, type EventFilter } from './ui-logic';
+import { statAlert, ceilingQuestion, ceilingWarning, ceilingLine, keyLimitLine, dollars, POOL_PATTERN, poolChoices, poolName, inGroup, tourPlacement, usableWhileBusy, APPEARANCE_KEY, attribution, placementAdmits, domainSuggestion, groupSeatsElsewhere, passioncodeLine, seatEndedText, groupSeatsEndedText, organizationReleasedAt, inOrganizationFilter, domainList, type AttributedBy, sortStatRows, nextStatSort, type StatRow, type StatSort, statCacheShare, statTokensPerRequest, chartSeries, niceMax, groupProjectRows, type ChartMetric, groupProjects, compactCount, statTokens, statTrouble, statTroubleText, statAgentName, type Statistics, EXPIRY_CHOICES, folderName, folderRows, withoutFolder, type ProjectRoot, moveTargets, mapRows, rootTargets, storedMapFolders, MAP_FOLDERS_KEY, type MapFilter, type MapRow, type RepositoryMap, sortAgents, defaultAgentChoices, backgroundReads, clockedRead, chainScopeKey, afterRead, ceilingRemovalNote, modelMeta, modelUse, ordinaryKimiNote, kimiLimitUntil, limitReasonText, limitTitle, agentSetupFacts, sessionHow, sessionAgentName, sessionStateLabel, kimiWindowsLine, kimiWindowsLines, openrouterCreditLine, eventAction, eventDetail, MutationClock, activeRules, autoSwitchPool, autoSwitchPossible, launchChoice, withFolders, githubDefaultSelection, githubPlan, githubSource, replaceFolder, storedFolder, LAST_FOLDER_KEY, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, signInNotice, signInMove, organizationMoveNote, dismissTermsNotice, termsNoticeDismissed, termsNoticeOn, termsNoticeText, tourWaits, orgSetups, releasedOrganizations, releasedSummary, orgSetupAction, orgSetupShown, orgSetupCaveat, orgSetupLeads, orgSetupPrimary, accountsOrgActionLeads, firstPrimary, orgSetupUnread, orgSetupStateLabel, orgSetupTitle, hiddenOrgSetups, ORG_SETUP_HIDDEN_KEY, accountsEmptyKey, type OrgSetup, usageAnswerText, usageNotice, usageFreshness, windowReset, type Appearance, shellHookView, balancingView, balancingNotice, shellHookToggleNotice, shellHookNoticeText, codexHookLine, moveStep, accountsForStep, chainSummary, stepReasonText, handoverOutcomeText, handoverSkipped, shortWorkflow, TAKEOVER_ORDER, groupOrganizations, servesPool, sharedGroups, holdsContext, accountOrganizations, machineOf, remoteUsageLine, unplacedAccounts, foldlessGroups, machineAliasesLine, machineLiveLine, machineCopyLine, foldOpen, accountSections, accountMatches, attentionAccounts, attentionReasonText, attentionActionLabel, surfaceLabel, sessionTreeRows, givenFacts, switchingLine, MACHINE_FOLD_LIMIT, EVENT_FILTER_KINDS, eventKindLabel, filterEvents, eventsByDay, relativeDay, EVENTS_PAGE, eventPage, sortSessions, statRowsShown, STAT_TOP, spendShare, groupKeyBlocks, keyTail, groupStateLine, type EventKind, type EventFilter } from './ui-logic';
 import agentCatalog from '../catalog/agents.json';
 import type { AnalyticsStatus, Ceilings, CeilingView, CeilingQuestionView, OpenrouterCredit, BackupInfo, PassioncodeStatus, Account, Adapter, AgentConnection, AgentInfo, AgentRow, AgentsOverview, OpenrouterModels, HermesModel, KimiAccounts, KimiRegion, KimiStatus, OpenrouterStatus, OpenrouterKeys, CodexRoute, BalanceStatus, CapacityStatus, SessionTree, WatchFinding, ShellHookStatus, AgentSetup, AuthKind, BackupStatus, KimiAccount, CurrentAccounts, LoginItem, Project, Restored, HandoverPlan, ExternalIdentity, MonitorStatus, ProjectRule, Provider, RotationPolicy, RuntimeStatus, SessionInfo, Snapshot, UpdateStatus, Onboarding, Chains, ChainExecutor, ChainScope, ChainStepView, GithubRepository, Machine, MachinesLive, MachinesList, Attention, AttentionItem, Event, GivenAccount } from './types';
 
@@ -696,7 +696,7 @@ function codexRouteSection() {
     const line = r.on ? (r.applied ? t('On: Codex goes through Switchboard.') : t('On, but not in Codex\'s settings right now.')) : t('Off: Codex uses your own sign-in in every folder.');
     section.append(el('p', 'account-meta section-state', line));
     if (r.projects.length) section.append(el('p', 'form-note', t('Groups with a Codex account: {names}.', { names: r.projects.join(', ') })));
-    else section.append(el('p', 'form-note', t('No group has a Codex account yet. Move one into a group first.')));
+    else section.append(el('p', 'form-note', t('No group with folders has a Codex account yet. Move one into a group first.')));
     const hookLine = codexHookLine(shellHookState); if (hookLine) section.append(el('p', 'form-note', hookLine));
     if (r.conflict) section.append(el('p', 'form-error', t(r.conflict)));
     const act = button(r.on ? t('Turn off') : t('Turn on'), () => void mutate(async () => { codexRouteState = await adapter.codexRoute(!r.on); }, r.on ? t('Codex uses your own sign-in again.') : t('Codex sessions in group folders now use their groups\' Codex accounts. Start a new Codex session to pick it up.'), 'codex-route-toggle'), 'button', 'codex-route-toggle');
@@ -891,12 +891,28 @@ function projectsSection() {
   if (!projects.length) {
     const empty = emptyState(t('No groups yet'), t('Create one when a client or a team should work only on its own subscriptions. Its accounts move into the group, and its folders stay on them.'));
     empty.append(button(t('+ New group'), () => projectDialog(), 'button primary', 'empty-new-project'));
-    section.append(empty); return section;
+    section.append(empty, ...foldlessSection()); return section;
   }
   // WF-8.1 (SB-370): each group folds to one line of state; open, it reads Accounts, Repositories, Agents and keys.
   const list = el('div', 'group-cards'); list.setAttribute('aria-label', t('Groups'));
   for (const project of projects) list.append(groupCard(project, projects.length === 1));
-  section.append(list); return section;
+  section.append(list); section.append(...foldlessSection()); return section;
+}
+/** Q2 item 6: accounts in a group with no folders serve no session; they are named here with a way out. */
+function foldlessSection(): HTMLElement[] {
+  const groups = foldlessGroups(snapshot!);
+  if (!groups.length) return [];
+  const box = el('div', 'surface-note foldless-groups');
+  box.append(el('p', '', plural(groups.length, { one: 'One group holds accounts but has no folders, so no session uses them:', other: '{n} groups hold accounts but have no folders, so no session uses them:' })));
+  const list = el('ul', 'foldless-list');
+  for (const g of groups) {
+    const row = el('li', 'foldless-row');
+    row.append(el('span', '', t('{id}: {accounts}', { id: g.pool, accounts: g.accounts.map((a) => a.label).join(', ') })));
+    row.append(button(t('Move to the default group'), () => void mutate(async () => { for (const a of g.accounts) await adapter.moveAccount(a.id, 'default'); }, plural(g.accounts.length, { one: 'The account is in the default group now.', other: '{n} accounts are in the default group now.' }), `foldless-${g.pool}`), 'button quiet row-button', `foldless-${g.pool}`));
+    list.append(row);
+  }
+  box.append(list, el('p', 'form-note', t('Or add them to a group with folders: Edit in that group\'s menu.')));
+  return [box];
 }
 /** WF-8.1: the chain a group's tasks fall back along (its own, else this computer's); null until the chains are read. */
 function groupChainText(pool: string): string | null {
@@ -2307,7 +2323,7 @@ function kimiSection() {
   // SB-100: a failed refresh is said even while the last figures stay on screen.
   if (kimiError) section.append(el('p', 'usage-error', t('Kimi Code could not be refreshed: {error}', { error: t(kimiError) })));
   const current = el('p', 'form-note');
-  if (kimi.current?.signed_in && !kimi.current.error) current.append(t('Ordinary kimi: {name}', { name: [kimi.current.nickname, kimi.current.tier].filter(Boolean).join(' · ') || t('signed in') }), ' · ', kimiStatusLine(kimi.current));
+  if (kimi.current?.signed_in && !kimi.current.error) current.append(t('Ordinary kimi: {name}', { name: [kimi.current.nickname, kimi.current.tier].filter(Boolean).join(' · ') || t('signed in') }), kimiStatusLine(kimi.current));
   else if (kimi.current) { current.append(t('Ordinary kimi: '), el('span', kimi.current.signed_in ? 'usage-sub is-stale' : 'usage-error', ordinaryKimiNote(kimi.current) ?? '')); }
   else current.append(kimi.installed ? t('Ordinary kimi: not signed in.') : t('Kimi Code is not installed. Install it from kimi.com/code, then add an account.'));
   section.append(current);
@@ -2354,6 +2370,13 @@ function kimiRow(account: KimiAccount, status: KimiStatus) {
   const nowSeconds = Math.floor(Date.now() / 1000);
   const lines = status.error ? [] : kimiWindowsLines(status.windows ?? [], nowSeconds);
   if (lines.length) {
+    // Q2 item 21: the fullest live window carries the same meter as a Claude or Codex row.
+    const live = (status.windows ?? []).filter((w) => !w.resets_at || w.resets_at > nowSeconds).map((w) => w.used_percent);
+    if (live.length) {
+      const used = Math.max(...live); const top = el('span', 'usage-line');
+      const meter = el('progress', `usage-meter is-${row.dataset.state === 'blocked' ? 'blocked' : used >= 80 ? 'low' : 'available'}`); meter.max = 100; meter.value = used; meter.setAttribute('aria-hidden', 'true');
+      top.append(meter, el('strong', 'usage-pct', `${Math.round(used)}%`)); usage.append(top);
+    }
     for (const line of lines) { const item = el('span', 'usage-sub usage-line', line); item.title = line; usage.append(item); }
     if (status.checked_at) usage.append(el('span', 'usage-sub usage-line', t('checked {time} ago', { time: compactCountdown(nowSeconds, Math.min(status.checked_at, nowSeconds)) })));
   } else usage.append(kimiStatusLine(status));
@@ -2523,8 +2546,10 @@ function compactWait(lead: string, until: number, estimated = false) {
   remaining.dataset.countdown = String(until); remaining.dataset.format = 'compact'; remaining.setAttribute('aria-live', 'off');
   const time = el('time', '', date(until)); time.dateTime = new Date(until * 1000).toISOString();
   time.title = new Date(until * 1000).toLocaleString(dateLocale(), { timeZoneName: 'short' });
-  wrapper.append(`${lead} `, remaining, ' · ', time);
-  if (estimated) wrapper.append(el('span', 'usage-estimate', t(' · estimated')));
+  // Q2 item 22: the time and its "estimated" stay on one line.
+  const when = el('span', 'usage-when'); when.append(time);
+  if (estimated) when.append(el('span', 'usage-estimate', t(' · estimated')));
+  wrapper.append(`${lead} `, remaining, ' · ', when);
   return wrapper;
 }
 /** Two lines in every state (compact list): use and freshness, then the one time that matters. */
@@ -2741,7 +2766,7 @@ function policiesPanel(quiet = false): HTMLElement {
   const actions = el('div', 'rotation-actions');
   const pool = autoSwitchPool(snapshot!.accounts, policies, (snapshot!.projects ?? []).map((p) => p.pool));
   if (pool) actions.append(button(t('Turn on for Claude Code'), () => { const saved = policies.find((policy) => policy.provider === 'claude' && policy.pool === pool && policy.target === 'claude_cli'); void mutate(() => adapter.setPolicy({ provider: 'claude', pool, target: 'claude_cli', enabled: true, threshold_percent: saved?.threshold_percent ?? 90, hysteresis_percent: saved?.hysteresis_percent ?? 10, cooldown_seconds: saved?.cooldown_seconds ?? 1800, max_age_seconds: saved?.max_age_seconds ?? 300, last_switched_at: saved?.last_switched_at ?? null }), t('Automatic switching is on for Claude Code {where}. It moves at {threshold}% used to an account with at least {headroom} points more headroom.', { where: inGroup(pool, snapshot!.projects), threshold: saved?.threshold_percent ?? 90, headroom: saved?.hysteresis_percent ?? 10 }), 'menu-policies'); }, quiet ? 'button row-button' : 'button primary row-button', 'auto-on'));
-  actions.append(menu('policies', t('Automatic switching settings'), [...policies.map((policy): [string, () => void] => [t('Edit {provider} {where} ({target})…', { provider: providerName(policy.provider), where: inGroup(policy.pool, snapshot!.projects), target: policyTarget(policy.target) }), () => policyDialog(policy)]), [t('New automatic switching…'), () => policyDialog()]], 'icon-button', '⚙'));
+  actions.append(menu('policies', t('Automatic switching settings'), [...policies.map((policy): [string, () => void] => [t('Edit {provider} {where} · {target}…', { provider: providerName(policy.provider), where: inGroup(policy.pool, snapshot!.projects), target: policyTarget(policy.target) }), () => policyDialog(policy)]), [t('New automatic switching…'), () => policyDialog()]], 'icon-button', '⚙'));
   head.append(actions); panel.append(head);
   if (enabled.length) {
     const list = el('ul', 'rotation-list');
@@ -2750,7 +2775,7 @@ function policiesPanel(quiet = false): HTMLElement {
       const row = el('li', 'rotation-row');
       row.append(el('span', 'usage-caption', `${providerName(policy.provider)} · ${poolName(policy.pool, snapshot!.projects)} · ${policyTarget(policy.target)} · ${t('at {percent}% used', { percent: policy.threshold_percent })}${decision ? ` · ${decisionText(decision.reason)}` : ''}`));
       const stop = button(t('Stop'), () => void mutate(() => adapter.setPolicy({ ...policy, enabled: false }), t('Automatic switching stopped for {provider} {where}.', { provider: providerName(policy.provider), where: inGroup(policy.pool, snapshot!.projects) }), 'menu-policies'), 'button quiet row-button', `stop-${policy.provider}-${policy.pool}-${policy.target}`);
-      stop.setAttribute('aria-label', t('Stop automatic switching for {provider} {where} ({target})', { provider: providerName(policy.provider), where: inGroup(policy.pool, snapshot!.projects), target: policyTarget(policy.target) }));
+      stop.setAttribute('aria-label', t('Stop automatic switching for {provider} {where} · {target}', { provider: providerName(policy.provider), where: inGroup(policy.pool, snapshot!.projects), target: policyTarget(policy.target) }));
       row.append(stop); list.append(row);
     }
     panel.append(list);
@@ -2982,7 +3007,7 @@ function renderStats(main: HTMLElement) {
       statTable('stat-accounts', t('By account'), [t('Account')], s.accounts.map((r) => ({ cells: [`${accountName(r.label)}${r.provider ? ` · ${providerName(r.provider as Provider)}` : ''}`], counts: r })), true),
       statTable('stat-agents', t('By agent'), [t('Agent')], s.agents.map((r) => ({ cells: [statAgentName(r.agent)], counts: r })), true),
       statKeysPanel(),
-      statTable('stat-routes', t('Who works where'), [t('Repository'), t('Group'), t('Account'), t('Agent')], s.routes.map((r) => ({ cells: [projectName(r.project_name), groupName(r.pool, r.name), accountName(r.label), statAgentName(r.agent)], counts: r }))),
+      statTable('stat-routes', t('Who works where'), [t('Repository'), t('Group'), t('Account'), t('Agent')], s.routes.map((r) => ({ cells: [projectName(r.project_name), groupName(r.pool, r.name), accountName(r.label), statAgentName(r.agent)], counts: r })), true),
       statTable('stat-days', t('By day'), [t('Day')], s.by_day.map((r) => ({ cells: [r.day], counts: r }))),
     ];
     const chart = statChart(s); chart.id = 'stat-chart';
@@ -3005,7 +3030,7 @@ async function loadSessions(stamp?: number) {
 /** SB-65, WF-11.1: the sessions Switchboard launched that start or run, running first, read from their records (SB-95). */
 function sessionsPanel() {
   const running = (sessionList ?? []).filter((s) => s.state === 'running').length;
-  return foldSection({ key: 'sessions', title: t('Sessions'), state: sessionList ? plural(running, { one: '{n} running', other: '{n} running' }) : undefined, open: true, className: 'sessions-fold', body: () => [sessionsBody()] });
+  return foldSection({ key: 'sessions', title: t('Launched by Switchboard'), state: sessionList ? plural(running, { one: '{n} running', other: '{n} running' }) : undefined, open: true, className: 'sessions-fold', body: () => [sessionsBody()] });
 }
 function sessionsBody() {
   const panel = el('div', 'fold-content');
@@ -3093,7 +3118,7 @@ function findingText(f: WatchFinding): string {
   switch (f.kind) {
     case 'duplicate': return t('One session runs in two processes ({pids}).', { pids: (f.pids ?? []).join(', ') });
     case 'stuck': return t('A board run in {folder} has been quiet for {minutes} minutes.', { folder, minutes: f.quiet_minutes ?? 30 });
-    default: return t('A launch in {folder} ended with no end recorded.', { folder: folder || t('an unknown folder') });
+    default: return t('A launch in {folder} stopped without recording how it ended.', { folder: folder || t('an unknown folder') });
   }
 }
 function sessionTreePanel() {
@@ -3105,7 +3130,7 @@ function sessionTreePanel() {
   if (!tree) { panel.append(el('p', 'form-note', t('Reading sessions…'))); return panel; }
   const c = tree.counts;
   panel.append(el('p', 'account-meta section-state', t('{live} live: {working} working, {quiet} quiet, {managed} started by Switchboard.', { live: c.live, working: c.working, quiet: c.quiet, managed: c.managed })));
-  const groups = Object.entries(c.by_pool).map(([pool, n]) => `${pool === 'unmanaged' ? t('outside groups') : poolName(pool, snapshot?.projects ?? [])} ${n}`);
+  const groups = Object.entries(c.by_pool).map(([pool, n]) => `${pool === 'unmanaged' ? t('outside groups') : poolName(pool, snapshot?.projects ?? [])} (${n})`);
   if (groups.length) panel.append(el('p', 'form-note', t('By group: {list}.', { list: groups.join(', ') })));
   if (tree.findings.length) {
     const list = el('ul', 'watch-findings'); list.setAttribute('role', 'list');
@@ -3115,7 +3140,7 @@ function sessionTreePanel() {
   if (!tree.live.length) panel.append(el('p', 'surface-note', t('No session runs now.')));
   const list = el('ol', 'event-list session-tree-list');
   for (const { session: s, depth } of sessionTreeRows(tree.live)) {
-    const row = el('li', 'event-row'); row.style.paddingInlineStart = `calc(${depth} * var(--space-5))`;
+    const row = el('li', 'event-row'); if (depth) row.style.paddingInlineStart = `calc(var(--space-4) + ${depth} * var(--space-5))`;
     const line = el('div', 'event-title');
     line.append(el('strong', '', `${s.agent === 'codex' ? 'Codex' : 'Claude Code'} · ${s.folder ? folderName(s.folder) : t('an unknown folder')}`), el('span', 'badge', s.quiet ? t('Quiet {n} min', { n: s.quiet_minutes ?? 30 }) : t('Working')));
     const parts = [surfaceLabel(s.surface)];
@@ -3132,7 +3157,7 @@ function sessionTreePanel() {
     for (const l of recent) {
       const row = el('li', 'event-row'); const line = el('div', 'event-title');
       line.append(el('strong', '', l.folder ? folderName(l.folder) : t('an unknown folder')), el('time', '', new Date(l.launched_at * 1000).toLocaleTimeString(dateLocale(), { hour: '2-digit', minute: '2-digit' })));
-      const state = l.state === 'running' ? t('Running') : l.state === 'ended' ? t('Ended') : t('Gone without an end');
+      const state = l.state === 'running' ? t('Running') : l.state === 'ended' ? t('Ended') : t('Stopped, end not recorded');
       const parts = [state, surfaceLabel(l.surface)];
       if (l.pool) parts.push(poolName(l.pool, snapshot?.projects ?? []));
       if (l.task.request) parts.push(t('Board request {id}', { id: l.task.request.slice(0, 8) })); else if (l.task.workflow) parts.push(t('Task {id}', { id: shortWorkflow(l.task.workflow) }));
@@ -3200,7 +3225,7 @@ function renderAbout(main: HTMLElement) {
     [t('Compatibility'), t('macOS, Windows and Linux builds. Live provider acceptance is a separate check on each platform. Existing external CLI sessions and Codex Desktop are not controlled.')],
     [t('Imported OAuth'), t('A snapshot of a credential you pasted. After you sign in again elsewhere, add the account the CLI uses again. Switchboard renews inactive Claude accounts; the account Claude Code uses is renewed by Claude Code.')],
     [t('Switch'), t('Switch changes the account of the ordinary Claude Code. New claude sessions start on it; a session already running may keep its account until it restarts.')],
-    [t('Automatic switching'), t('Off by default for each provider, group and target. Uses fresh quota observations, a threshold, a minimum improvement and a cooldown. No eligible account means the current account stays selected.')],
+    [t('Automatic switching'), t('On by default for the managed sessions of each group. Uses fresh quota observations, a threshold, a minimum improvement and a cooldown. No eligible account means the current account stays selected.')],
   ]) { definitions.append(el('dt', '', term), el('dd', '', description)); }
   section.append(definitions); const tour = el('section', 'about-panel'); tour.append(el('h2', '', t('Tour')), el('p', '', t('Five short steps: what Switchboard does and where to press.')), button(t('Show the tour again'), () => tourGo(0), 'button', 'tour-again'));
   // WF-1.1 (DEC-0014): running in the background, updates, backups, usage counts, appearance and language are on Settings now.
@@ -3220,7 +3245,7 @@ function renderSettings(main: HTMLElement) {
   main.append(
     foldSection({ key: 'switching', title: t('Automatic switching'), state: switchingState, body: () => snapshot ? [policiesPanel()] : reading() }),
     foldSection({ key: 'balancing', title: t('Balancing between groups'), state: onOff(balancingState?.on), body: () => snapshot ? [balancingSection()] : reading() }),
-    foldSection({ key: 'sessions', title: t('Coding sessions'), state: capacityState ? (capacityState.cap === null ? t('No limit') : t('{used} of {cap} working', { used: capacityState.used, cap: capacityState.cap })) : undefined, body: () => [capacitySection()] }),
+    foldSection({ key: 'session-limit', title: t('Coding sessions'), state: capacityState ? (capacityState.cap === null ? t('No limit') : t('{used} of {cap} working', { used: capacityState.used, cap: capacityState.cap })) : undefined, body: () => [capacitySection()] }),
     foldSection({ key: 'codex-route', title: t('Codex in group folders'), state: onOff(codexRouteState?.on), body: () => snapshot ? [codexRouteSection()] : reading() }),
     foldSection({ key: 'terminals', title: t('Terminals in organization folders'), state: shell === 'on' || shell === 'default_on' || shell === 'inactive' ? t('On') : shell === 'off' || shell === 'default_off' ? t('Off') : undefined, body: () => snapshot ? [shellHookSection()] : reading() }),
     foldSection({ key: 'background', title: t('Running in the background'), state: onOff(loginItem?.available ? loginItem.enabled : null), body: () => [residencyPanel()] }),
@@ -3380,7 +3405,7 @@ function productPanel() {
   const definitions = el('dl', 'definitions');
   const row = (term: string, ...content: (Node | string)[]) => { const dd = el('dd'); dd.append(...content); definitions.append(el('dt', '', term), dd); };
   row(t('Version'), `Fabric Switchboard ${version}`);
-  row(t('License'), el('span', 'block', t('Open source under the GNU AGPL-3.0; a commercial license is available at passioncode.ai/business.')), address('https://passioncode.ai/business/'), address(`${REPOSITORY}/blob/main/LICENSE`));
+  row(t('License'), el('span', 'block', t('Open source under the GNU AGPL-3.0; a commercial license is available at passioncode.ai/business.')), address('https://passioncode.ai/business/'), el('br'), address(`${REPOSITORY}/blob/main/LICENSE`));
   row(t('Third-party'), el('span', 'block', t('The app includes third-party components under their own licenses.')), address(`${REPOSITORY}/blob/main/THIRD_PARTY_NOTICES.md`));
   row(t('Toolkit'), el('span', 'block', t('Part of the PassionCode.ai toolkit.')), address('https://passioncode.ai/switchboard/'));
   panel.append(heading, definitions);

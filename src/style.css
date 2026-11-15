@@ -721,3 +721,46 @@ g:hover > .chart-bar { opacity: .82; }
 .watch-findings { list-style: none; margin: var(--space-2) 0; padding: 0; display: grid; gap: var(--space-1); }
 .session-tree .event-title .badge { flex: none; }
 .session-tree-list .event-row p { overflow-wrap: anywhere; }
+/* Window audit 2026-11-15 (Q2). */
+/* A4: a group's name never breaks letter by letter; its state line wraps under it instead. */
+.group-card .fold-head { flex-wrap: wrap; }
+.group-card .fold-title { overflow-wrap: break-word; flex: 1 1 12ch; }
+/* A5: below 820 px the header actions sit at the left, so their menu opens to the right. */
+@media (max-width: 820px) { .header-actions .menu { right: auto; left: 0; } }
+/* B12, B14: the session panel's fold blends in, and no list ends with a divider. */
+.session-tree .day-fold { background: transparent; }
+.event-list > .event-row:last-child { border-bottom: 0; }
+/* B15: a table's vertical scrollbar is as thin as its horizontal one. */
+.stat-scroll::-webkit-scrollbar { width: 8px; }
+/* B17: a lone button in a section keeps its own width. */
+.fold-content > .button, .fold-content > button { justify-self: start; }
+/* B24: the version line stays on one line. */
+.sidebar-foot .version { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; }
+/* Q2 item 6: groups with accounts and no folders. */
+.foldless-groups { display: grid; gap: var(--space-2); margin-top: var(--space-4); }
+.foldless-list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-2); }
+.foldless-row { display: grid; justify-items: start; gap: var(--space-2); }
+/* Q2 item 16: five tiles never wrap 4+1: three over two below a wide window, five in a row above. */
+.stat-page .stat-tiles { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+.stat-page .stat-tiles > .stat-tile { grid-column: span 2; min-width: 0; }
+.stat-page .stat-tiles > .stat-tile:nth-child(n+4) { grid-column: span 3; }
+@media (min-width: 1180px) {
+  .stat-page .stat-tiles { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+  .stat-page .stat-tiles > .stat-tile, .stat-page .stat-tiles > .stat-tile:nth-child(n+4) { grid-column: auto; }
+}
+/* Q2 item 7: name cells wrap, so a narrow window keeps the key columns in view. */
+.stat-table td:not(.num) { white-space: normal; overflow-wrap: break-word; }
+/* Q2 item 18: balancing's group choices are a compact list of checkboxes, not cards. */
+.balancing-groups { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.balancing-groups .login-option { margin-top: 0; }
+.usage-when { white-space: nowrap; }
+.about-panel > .watch-findings { margin-top: 0; }
+@media (max-width: 980px) {
+  .stat-table th, .stat-table td { padding-inline: var(--space-2); }
+  .stat-table thead th, .stat-table thead .sort-button { white-space: normal; }
+  .stat-table thead .sort-button { padding-inline: var(--space-1); }
+  .stat-table tbody th { white-space: normal; }
+}
+/* Q2 items 13, 14: no rule under the last session, and the sessions fold keeps its distance from the panel below. */
+.session-list > .session-row:last-child { border-bottom: 0; padding-bottom: 0; }
+.sessions-fold + * { margin-top: var(--space-4); }

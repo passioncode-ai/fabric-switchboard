@@ -1859,6 +1859,16 @@ export const MACHINE_POOL_PREFIX = 'machine_';
 export function machineOf(snapshot: { machines?: Machine[] }, account: Pick<Account, 'pool'>): Machine | undefined {
   return account.pool.startsWith(MACHINE_POOL_PREFIX) ? snapshot.machines?.find((m) => m.pool === account.pool) : undefined;
 }
+/** Q2 item 6: the groups that hold accounts but have no folders (no group record): no session uses those accounts, so the Groups page names them. */
+export function foldlessGroups<A extends Pick<Account, 'id' | 'pool'>>(snapshot: { accounts: A[]; projects?: { pool: string }[] }): { pool: string; accounts: A[] }[] {
+  const known = new Set((snapshot.projects ?? []).map((p) => p.pool));
+  const groups = new Map<string, A[]>();
+  for (const a of snapshot.accounts) {
+    if (a.pool === 'default' || a.pool.startsWith(MACHINE_POOL_PREFIX) || known.has(a.pool)) continue;
+    groups.set(a.pool, [...(groups.get(a.pool) ?? []), a]);
+  }
+  return [...groups].sort(([x], [y]) => x.localeCompare(y)).map(([pool, accounts]) => ({ pool, accounts }));
+}
 /** SB-355: accounts marked as used elsewhere whose machine is not known, so they stay in their groups here. */
 export function unplacedAccounts<A extends Pick<Account, 'id' | 'pool'>>(snapshot: { accounts: A[]; elsewhere?: Record<string, number> }): A[] {
   return snapshot.accounts.filter((a) => snapshot.elsewhere?.[a.id] !== undefined && !a.pool.startsWith(MACHINE_POOL_PREFIX));
