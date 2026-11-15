@@ -113,6 +113,7 @@ const PARITY: &[(&str, Over)] = &[
     ("balance", Tool("switchboard_balance")),
     ("capacity", Tool("switchboard_capacity")),
     ("session_tree", Tool("switchboard_sessions")),
+    ("report_problem", Not(UI_ONLY)),
     ("repository_map", Tool("switchboard_repository_map")),
     ("statistics", Tool("switchboard_statistics")),
     ("move_account", Tool("switchboard_account_move")),

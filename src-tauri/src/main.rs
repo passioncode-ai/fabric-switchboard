@@ -928,6 +928,19 @@ async fn balance(
     };
     state.runtime().await?.execute(operation).await
 }
+/// SB-379 (W3): a problem the window saw (an uncaught error, a rejected promise, an answer it did
+/// not know, a timed-out read, a stall), as two codes from closed lists; counted in the error
+/// report (`app_error`, class `renderer_problem`), never with text.
+#[tauri::command]
+fn report_problem(kind: String, code: String) -> Result<(), String> {
+    let code = switchboard_runtime::errors::renderer_problem(&kind, &code)
+        .ok_or("Problem report not recognised.")?;
+    switchboard_runtime::oplog::event(
+        "renderer_problem",
+        &[("code", switchboard_runtime::oplog::Field::Code(code))],
+    );
+    Ok(())
+}
 /// SB-379: the session tree: live sessions with their launches, the day's launches, counts and
 /// the one-minute watch's findings.
 #[tauri::command]
@@ -1869,6 +1882,7 @@ fn main() {
             balance,
             capacity,
             session_tree,
+            report_problem,
             repository_map,
             statistics,
             move_account,

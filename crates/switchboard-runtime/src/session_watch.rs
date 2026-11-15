@@ -204,12 +204,9 @@ pub fn assemble(scan: &Value, records: &[Value], pairs: &[(String, u32)], now: i
 
 /// What the live processes and records read now give.
 fn read(root: &Path, now: i64) -> (Value, Vec<Value>, Vec<(String, u32)>) {
-    let scan = crate::machine_sessions::scan(root);
+    let (scan, pairs) = crate::machine_sessions::scan_and_pairs(root);
     let records = crate::launches::recent_records(root, now - WINDOW_SECONDS);
-    let pairs = crate::machine_sessions::session_pairs(root)
-        .into_iter()
-        .map(|(s, p, _)| (s, p))
-        .collect();
+    let pairs = pairs.into_iter().map(|(s, p, _)| (s, p)).collect();
     (scan, records, pairs)
 }
 
@@ -231,6 +228,8 @@ pub fn last(root: &Path) -> Vec<Value> {
 }
 
 static LAST_TICK: AtomicI64 = AtomicI64::new(0);
+/// A watch in flight: under load a scan takes tens of seconds, and a second must not start beside it.
+static RUNNING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// The owner's background pass: at most once a minute, the watch is run and kept; a finding that
 /// was not there before is logged once.
@@ -249,8 +248,21 @@ pub fn tick(root: &Path, now: i64) {
     }
     // The process table and the records are read on a thread of their own, so the monitor's pass
     // never waits for them.
+    if RUNNING.swap(true, Ordering::AcqRel) {
+        return;
+    }
     let root = root.to_owned();
-    std::thread::spawn(move || watch(&root, now));
+    std::thread::spawn(move || {
+        // Cleared however the watch ends, a panic included, so the next minute runs again.
+        struct Done;
+        impl Drop for Done {
+            fn drop(&mut self) {
+                RUNNING.store(false, Ordering::Release);
+            }
+        }
+        let _done = Done;
+        watch(&root, now);
+    });
 }
 
 fn watch(root: &Path, now: i64) {

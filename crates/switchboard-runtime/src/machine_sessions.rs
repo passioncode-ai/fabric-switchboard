@@ -102,9 +102,12 @@ pub fn live_sessions(root: &Path) -> HashMap<String, (u32, String)> {
 /// SB-379: every live Claude Code process with the session id its `sessions/<pid>.json` names,
 /// one pair per process: two pairs with one session id are a resumed copy of a live session.
 pub fn session_pairs(root: &Path) -> Vec<(String, u32, String)> {
-    let Ok(procs) = agent_processes() else {
-        return Vec::new();
-    };
+    agent_processes()
+        .map(|procs| pairs_for(root, &procs))
+        .unwrap_or_default()
+}
+
+fn pairs_for(root: &Path, procs: &[Proc]) -> Vec<(String, u32, String)> {
     let alive: std::collections::HashSet<u32> = procs
         .iter()
         .filter(|p| p.agent == "claude-code")
@@ -256,8 +259,23 @@ pub fn assemble(
 
 /// Every Claude Code and Codex process of this user, joined to Switchboard's launches.
 pub fn scan(root: &Path) -> Value {
+    scan_procs(root, agent_processes())
+}
+
+/// SB-379: the scan and the live session pairs from one walk of the process table (the watch and
+/// the tree need both; two walks each read about a thousand pid paths under load).
+pub fn scan_and_pairs(root: &Path) -> (Value, Vec<(String, u32, String)>) {
+    let procs = agent_processes();
+    let pairs = procs
+        .as_ref()
+        .map(|p| pairs_for(root, p))
+        .unwrap_or_default();
+    (scan_procs(root, procs), pairs)
+}
+
+fn scan_procs(root: &Path, procs: Result<Vec<Proc>, &'static str>) -> Value {
     // SB-375: a table that could not be read is said so, never answered as no sessions.
-    let (procs, degraded) = match agent_processes() {
+    let (procs, degraded) = match procs {
         Ok(procs) => (procs, vec![]),
         Err(reason) => (
             vec![],
@@ -270,12 +288,19 @@ pub fn scan(root: &Path) -> Value {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0);
+    // SB-379: each folder's newest transcript once per scan, however many sessions share it.
+    let seen: std::cell::RefCell<HashMap<String, Option<i64>>> = Default::default();
     let last_write = |folder: &str| -> Option<i64> {
+        if let Some(known) = seen.borrow().get(folder) {
+            return *known;
+        }
         let name = projects_dir_name(folder);
-        roots
+        let newest = roots
             .iter()
             .filter_map(|r| newest_transcript(&r.join(&name)))
-            .max()
+            .max();
+        seen.borrow_mut().insert(folder.to_owned(), newest);
+        newest
     };
     let mut answer = assemble(&procs, &markers, last_write, now);
     answer["observed_at"] = now.into();
