@@ -634,10 +634,8 @@ fn act_on(_: &Path, _: &Seen, _: Act) -> &'static str {
     "unsupported"
 }
 
-pub const NOT_TWO: &str =
-    "That session no longer runs in two processes. Refresh to see it now.";
-pub const COPY_STILL_RUNNING: &str =
-    "The newer copy did not close. Close it in its own window.";
+pub const NOT_TWO: &str = "That session no longer runs in two processes. Refresh to see it now.";
+pub const COPY_STILL_RUNNING: &str = "The newer copy did not close. Close it in its own window.";
 pub const CLOSE_UNSUPPORTED: &str = "Closing a session's copy works on macOS and Linux for now.";
 
 /// Of the copies of `session`, the one to close: the newest (started last, then the higher pid).
@@ -915,7 +913,10 @@ mod tests {
         let (newest, kept) = newest_copy(&all, &all[0].session).unwrap();
         assert_eq!(newest.pid, 7, "started last, whatever its pid");
         assert_eq!(kept.iter().map(|s| s.pid).collect::<Vec<_>>(), [10]);
-        assert!(newest_copy(&all, "other").is_none(), "one process is not a duplicate");
+        assert!(
+            newest_copy(&all, "other").is_none(),
+            "one process is not a duplicate"
+        );
         assert!(newest_copy(&all, "absent").is_none());
     }
 

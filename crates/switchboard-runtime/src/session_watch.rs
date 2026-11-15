@@ -91,7 +91,9 @@ pub fn findings(
                 .find(|r| r["pid"].as_u64() == Some(u64::from(pids[0])))
                 .map(|r| r["folder"].clone())
                 .unwrap_or(Value::Null);
-            out.push(json!({"kind": DUPLICATE, "session_id": session, "pids": pids, "folder": folder}));
+            out.push(
+                json!({"kind": DUPLICATE, "session_id": session, "pids": pids, "folder": folder}),
+            );
         }
     }
     let live: HashMap<&str, &Value> = rows
@@ -472,7 +474,10 @@ mod tests {
             [(DUPLICATE, "s-1"), (STUCK, "L-run"), (GONE, "L-gone")]
         );
         assert_eq!(found[0]["pids"], json!([10, 12]));
-        assert_eq!(found[0]["folder"], "/work/a", "the item is named by its folder");
+        assert_eq!(
+            found[0]["folder"], "/work/a",
+            "the item is named by its folder"
+        );
         // Closing the newer copy by hand takes the finding out of the kept watch at once.
         let root = tempfile::tempdir().unwrap();
         let kept = json!({"at": now, "findings": found});

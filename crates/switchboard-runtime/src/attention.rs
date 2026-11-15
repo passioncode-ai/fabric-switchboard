@@ -324,7 +324,10 @@ mod tests {
         assert_eq!(answer["items"][1]["action"]["window"], "open_sessions");
         assert_eq!(answer["items"][0]["session_id"], "s-1");
         assert_eq!(answer["items"][0]["action"]["window"], "close_copy");
-        assert_eq!(answer["items"][0]["action"]["tool"], "switchboard_session_close_copy");
+        assert_eq!(
+            answer["items"][0]["action"]["tool"],
+            "switchboard_session_close_copy"
+        );
     }
     fn reasons(answer: &Value) -> Vec<String> {
         answer["items"]

@@ -393,7 +393,9 @@ pub enum Operation {
     },
     /// SB-388: close the newer of two processes holding one Claude Code session
     /// (`duty::close_copy`); the older keeps working.
-    SessionCloseCopy { session_id: String },
+    SessionCloseCopy {
+        session_id: String,
+    },
     /// SB-365 (WF-3.1, DEC-0015): what needs a person, each with its reason and the action that
     /// fixes it. A view: nothing moves, the accounts stay in their groups.
     Attention,
