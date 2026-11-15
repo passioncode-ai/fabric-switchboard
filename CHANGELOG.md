@@ -8,6 +8,8 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+## 0.7.98
+
 - A group's fallback chain can pin only an account that serves the group: the dialog lists only those, and `chain set` refuses another account (window audit item 43).
 
 - Needs attention: a session that runs in two processes is named by its folder and offers *Close the quiet copy*, which closes the copy whose status has not changed for longest and never one that is busy or running a command; the same as `switchboard sessions close-copy` and MCP `switchboard_session_close_copy` (SB-388).
