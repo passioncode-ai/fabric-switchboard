@@ -3007,7 +3007,7 @@ function renderStats(main: HTMLElement) {
       statTable('stat-accounts', t('By account'), [t('Account')], s.accounts.map((r) => ({ cells: [`${accountName(r.label)}${r.provider ? ` · ${providerName(r.provider as Provider)}` : ''}`], counts: r })), true),
       statTable('stat-agents', t('By agent'), [t('Agent')], s.agents.map((r) => ({ cells: [statAgentName(r.agent)], counts: r })), true),
       statKeysPanel(),
-      statTable('stat-routes', t('Who works where'), [t('Repository'), t('Group'), t('Account'), t('Agent')], s.routes.map((r) => ({ cells: [projectName(r.project_name), groupName(r.pool, r.name), accountName(r.label), statAgentName(r.agent)], counts: r }))),
+      statTable('stat-routes', t('Who works where'), [t('Repository'), t('Group'), t('Account'), t('Agent')], s.routes.map((r) => ({ cells: [projectName(r.project_name), groupName(r.pool, r.name), accountName(r.label), statAgentName(r.agent)], counts: r })), true),
       statTable('stat-days', t('By day'), [t('Day')], s.by_day.map((r) => ({ cells: [r.day], counts: r }))),
     ];
     const chart = statChart(s); chart.id = 'stat-chart';
