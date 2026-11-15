@@ -24,6 +24,45 @@ pub const EVERY: Duration = Duration::from_secs(5 * 60);
 /// takes as "stay stopped"; `EX_TEMPFAIL`.
 pub const RESTART_STATUS: i32 = 75;
 
+/// How long a restart onto a new program waits for a quiet moment before it drains anyway, and
+/// how often it looks (the app's own watch waits as long, `DRAIN_AFTER_SECONDS`).
+pub const QUIET_WAIT: Duration = Duration::from_secs(30 * 60);
+pub const QUIET_LOOK: Duration = Duration::from_secs(30);
+
+/// Waits until `busy` answers nothing on two looks in a row (no managed request in flight or
+/// started in the last two minutes, no sign-in waiting), at most `max`; what kept it, the first
+/// time, is logged (`update_waiting`). Before 0.7.96 `serve` restarted at once and a managed
+/// session's next request met a closed port (studio-agent's finding `b18dd31c`).
+pub async fn wait_quiet(
+    busy: impl Fn() -> Option<&'static str>,
+    look: Duration,
+    max: Duration,
+) -> bool {
+    let started = std::time::Instant::now();
+    let mut quiet_before = false;
+    let mut told = false;
+    loop {
+        match busy() {
+            None if quiet_before => return true,
+            None => quiet_before = true,
+            Some(reason) => {
+                quiet_before = false;
+                if !told {
+                    crate::oplog::event(
+                        "update_waiting",
+                        &[("reason", crate::oplog::Field::Code(reason))],
+                    );
+                    told = true;
+                }
+            }
+        }
+        if started.elapsed() >= max {
+            return false;
+        }
+        tokio::time::sleep(look).await;
+    }
+}
+
 /// The identity of a program file: device, inode, length and modification time. A replacement
 /// by rename (an update) changes it; the running process keeps its old inode open.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -248,6 +287,32 @@ mod tests {
         assert_eq!(
             pass(dir.path(), &program, &at_start, "0.0.1", &mut told).await,
             Pass::Restart("replaced")
+        );
+    }
+
+    #[tokio::test]
+    async fn a_restart_waits_for_two_quiet_looks_and_gives_up_at_its_limit() {
+        let looks = std::sync::atomic::AtomicUsize::new(0);
+        // Busy on the first two looks, then quiet: it returns on the second quiet look.
+        let quiet = wait_quiet(
+            || {
+                let n = looks.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                (n < 2).then_some("request_recent")
+            },
+            Duration::from_millis(1),
+            Duration::from_secs(5),
+        )
+        .await;
+        assert!(quiet);
+        assert_eq!(looks.load(std::sync::atomic::Ordering::Relaxed), 4);
+        // Always busy: it stops at its limit and says it was not quiet.
+        assert!(
+            !wait_quiet(
+                || Some("request_in_flight"),
+                Duration::from_millis(1),
+                Duration::from_millis(20)
+            )
+            .await
         );
     }
 }

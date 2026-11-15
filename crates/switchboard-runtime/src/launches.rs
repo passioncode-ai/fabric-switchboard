@@ -411,6 +411,12 @@ fn update(root: &Path, id: &str, change: impl FnOnce(&mut Value) -> bool) -> boo
 pub(crate) fn get(root: &Path, id: &str) -> Option<Value> {
     read(root, id).map(|r| with_state(root, r))
 }
+/// A session run in place (`launch --in-place`) ended with `exit_code`: its record says so once,
+/// as a hosted session's does (studio-agent's finding `b18dd31c`: before, `launch` replaced
+/// itself with the script, nobody saw the end, and the launch read `gone`).
+pub fn record_exit(root: &Path, id: &str, exit_code: i32, now: i64) -> bool {
+    end_once(root, id, crate::dispatch::EXITED, now, Some(exit_code))
+}
 /// SB-247: sets `ended` on launch `id` when nothing set it yet, under the records' lock; whether
 /// this call set it. A dispatched run's end is the object `{kind, exit_code?, at}` (Fabric
 /// Dashboards FD-137 reads it), with `ended_at` beside it as every record has; it is set once: by
@@ -1535,6 +1541,42 @@ mod tests {
         }
         assert!(!root.join("escape.json").exists());
     }
+    #[test]
+    fn an_in_place_session_records_its_exit_once_and_its_script_names_its_launch() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        fs::write(root.join("accounts.json"), "{}").unwrap();
+        fs::create_dir_all(root.join(DIR)).unwrap();
+        let id = "0b9d6c3e-6f2a-4c1e-9d3b-2a1f0e5c7d8a";
+        fs::write(
+            root.join(DIR).join(format!("{id}.json")),
+            serde_json::to_vec(&json!({"launch_id": id, "launched_at": 10})).unwrap(),
+        )
+        .unwrap();
+        let home = root.join("runtimes").join("claude-default");
+        fs::create_dir_all(&home).unwrap();
+        let script = home.join("launch.command");
+        fs::write(
+            &script,
+            format!("#!/bin/zsh\nexport SWITCHBOARD_LAUNCH_ID='{id}'\nexec claude\n"),
+        )
+        .unwrap();
+        let (found_root, found_id) = crate::launch::script_launch(&script).unwrap();
+        assert_eq!(found_root, root);
+        assert_eq!(found_id, id);
+        assert!(record_exit(root, id, 0, 100));
+        assert!(!record_exit(root, id, 1, 200), "the first end stands");
+        let stored = read(root, id).unwrap();
+        assert_eq!(stored["ended"]["kind"], "exited");
+        assert_eq!(stored["ended"]["exit_code"], 0);
+        assert_eq!(stored["ended_at"], 100);
+        fs::write(&script, "#!/bin/zsh\nexec claude\n").unwrap();
+        assert!(
+            crate::launch::script_launch(&script).is_none(),
+            "no launch named: none"
+        );
+    }
+
     #[test]
     fn a_stops_launch_is_found_among_the_records_written_since_and_older_files_are_left() {
         let dir = tempfile::tempdir().unwrap();
