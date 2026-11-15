@@ -1241,7 +1241,7 @@ function agentSettingsPanel(view: AgentsOverview) {
   // This computer's fallback chain; the editor is below under Fallback chains.
   const chain = el('div', 'fold-part'); chain.append(el('h3', 'fold-part-heading', t('This computer\'s fallback chain')));
   const machine = chainFor('machine');
-  const chainLine = el('p', ''); chainLine.append(chainsView ? chainSummary(machine?.executors, chainAgentName, chainAccountLabel) : t('Reading fallback chains…'), ' ', button(t('Edit under Fallback chains'), () => { document.getElementById('chain-row-machine')?.scrollIntoView({ block: 'start' }); restoreFocus('chain-edit-machine'); }, 'text-button', 'settings-chain'));
+  const chainLine = el('p', 'chain-summary-line'); chainLine.append(el('span', 'chain-summary', chainsView ? chainSummary(machine?.executors, chainAgentName, chainAccountLabel) : t('Reading fallback chains…')), ' ', button(t('Edit under Fallback chains'), () => { document.getElementById('chain-row-machine')?.scrollIntoView({ block: 'start' }); restoreFocus('chain-edit-machine'); }, 'text-button', 'settings-chain'));
   chain.append(chainLine);
   section.append(permissions, fallback, takeover, chain);
   return section;
@@ -1259,12 +1259,19 @@ function installedAgentsPanel(view: AgentsOverview) {
   section.append(list);
   return section;
 }
+/** Audit item 38: a long command wraps after a slash, a space or a hyphen, never inside a word. */
+function breakableCode(cls: string, text: string): HTMLElement {
+  const code = el('code', cls);
+  for (const part of text.split(/(?<=[/-])/)) { code.append(document.createTextNode(part), document.createElement('wbr')); }
+  code.lastChild?.remove();
+  return code;
+}
 function agentRow(agent: AgentRow) {
   const row = el('div', `agent-row${agent.switchable && !agent.enabled ? ' is-off' : ''}`); row.dataset.agent = agent.id;
   const info = el('div', 'agent-info'); const title = el('div', 'agent-title');
   title.append(el('strong', '', agent.name));
   if (agent.switchable && agent.disabled) title.append(el('span', 'badge muted', t('Disabled')));
-  info.append(title, el('code', 'agent-command', agent.command));
+  info.append(title, breakableCode('agent-command', agent.command));
   if (agent.id === 'hermes' && hermes?.installed) info.append(el('span', 'form-note', `${t('Model: {model}', { model: hermes.model ?? t('not set') })} · ${t('Provider: {provider}', { provider: hermes.provider ?? t('not set') })}`));
   if (agent.id === 'hermes' && hermesError) info.append(el('span', 'usage-error', t(hermesError)));
   const controls = el('div', 'agent-controls');
@@ -1482,7 +1489,7 @@ function connectPanel() {
     for (const fact of agentSetupFacts(agentSetup)) facts.append(el('li', fact.done ? 'is-done' : '', fact.text));
     setup.append(facts, el('h3', '', t('Or register the tools yourself')));
   }
-  setup.append(el('p', 'form-note', agentSetup.cli_path ? t('Command-line tool: {path}', { path: agentSetup.cli_path }) : t('The switchboard command-line tool was not found on PATH.')));
+  setup.append(el('p', 'form-note', agentSetup.cli_path ? t('Command-line tool: {path}', { path: agentSetup.cli_path }) : t('The switchboard command is not on this computer\'s PATH. Registered agents still reach its tools through the app; link it to type switchboard commands in a terminal.')));
   // VIS-21: *Use Subscriptions first* above leads while no chain is set; then this one does.
   const linkLeads = firstPrimary([['chain_preset', !!chainsView && !chainsView.chains.length], ['link_cli', true]]) === 'link_cli';
   if (agentSetup.can_link && !agentSetup.linked_cli) setup.append(button(t('Link switchboard into ~/.local/bin'), () => void mutate(async () => { await adapter.linkCli(); agentSetup = await adapter.agentSetup(); }, t('The command-line tool is linked. Agents and plugins can now start switchboard mcp.'), 'link-cli'), linkLeads ? 'button primary' : 'button', 'link-cli'));

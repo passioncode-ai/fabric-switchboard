@@ -367,7 +367,7 @@ h2.section-heading, .about-panel h2.section-heading { font-size: var(--t-heading
 
 /* SB-119/120: the Agents page: default-agent chips, agent rows, model picker. */
 .choice-chips { display: flex; flex-wrap: wrap; gap: var(--space-2); margin: var(--space-2) 0 var(--space-3); }
-.choice-chip { padding: var(--space-1) var(--space-3); min-height: var(--control-h); line-height: 1.25; border: 1px solid var(--border-strong); border-radius: var(--r-control); background: var(--panel); color: var(--ink); font-weight: 550; }
+.choice-chip { padding: var(--space-1) var(--space-3); min-height: var(--control-h-compact); line-height: 1.25; border: 1px solid var(--border-strong); border-radius: var(--r-control); background: var(--panel); color: var(--ink); font-weight: 550; }
 .choice-chip:hover:not(:disabled):not(.is-on) { background: var(--hover-bg); }
 .choice-chip.is-on { background: var(--chosen-bg); border-color: var(--chosen-border); color: var(--chosen-ink); font-weight: 600; }
 .agents-head { display: flex; align-items: center; gap: var(--space-2); margin-bottom: var(--space-2); }
@@ -379,11 +379,16 @@ h2.section-heading, .about-panel h2.section-heading { font-size: var(--t-heading
 .agent-row.is-off .agent-info { opacity: .6; }
 .agent-info { display: grid; gap: var(--space-1); min-width: 0; }
 .agent-title { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
-.agent-command { font-family: var(--font-data); font-size: var(--t-chip); color: var(--muted); overflow-wrap: anywhere; }
+.agent-command { font-family: var(--font-data); font-size: var(--t-chip); color: var(--muted); overflow-wrap: break-word; word-break: normal; }
 .agent-controls { display: flex; align-items: center; gap: var(--space-3); flex-shrink: 0; }
 .agent-controls .badge { white-space: nowrap; }
 .default-slot, .default-badge, .agent-controls .text-button { display: inline-flex; justify-content: center; width: 132px; box-sizing: border-box; }
-.default-badge { color: var(--chosen-ink); background: var(--chosen-bg); border-color: var(--chosen-border); }
+/* Audit items 20 and 35: the default marker is a quiet label, not a pill a person would press, and
+   the takeover switch and a "Tools only" label take one width, so every row's columns line up. */
+.default-badge { color: var(--ink); background: none; border: 0; font-weight: 600; }
+.agent-controls .segmented, .agent-controls > .badge.muted { min-width: 11.5rem; box-sizing: border-box; justify-content: center; }
+.agent-controls > .badge.muted { display: inline-flex; }
+.agent-controls .segmented > .segment { flex: 1; }
 /* VIS-10: the track is control height (30 px segments, 2 px inset, 1 px line); the segment that is on
    takes the chosen language: gold-tinted fill, a 1 px gold line (3:1 or more on the track, measured by
    check-brand) and ink text in semibold, so it reads without colour too. */
@@ -392,6 +397,8 @@ h2.section-heading, .about-panel h2.section-heading { font-size: var(--t-heading
 .segment.is-on { background: var(--chosen-bg); color: var(--chosen-ink); box-shadow: inset 0 0 0 1px var(--chosen-border); font-weight: 650; }
 .segment:hover:not(.is-on):not(:disabled) { color: var(--ink); background: var(--hover-bg); }
 .agent-more { padding: 0 0 var(--space-3); }
+/* Audit item 31: the chain reads as one line of its own, its link after it. */
+.chain-summary-line .chain-summary { display: block; margin-bottom: var(--space-1); }
 .agent-more > summary { cursor: pointer; color: var(--muted); font-size: var(--t-label); }
 .available-list > summary { padding: var(--space-2) 0; }
 .model-picker { display: grid; gap: var(--space-2); }

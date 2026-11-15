@@ -769,7 +769,7 @@ export const RU: Record<string, string> = {
   "Reading agent setup…": "Загрузка настроек агентов…",
   "macOS is running Switchboard from a temporary copy of the download. Move Fabric Switchboard to Applications and open it from there before connecting agents; a path into the copy stops working when the app quits.": "macOS запускает Switchboard из временной копии загруженного файла. Прежде чем подключать агентов, переместите Fabric Switchboard в папку «Программы» и откройте оттуда: путь к временной копии перестанет работать, когда приложение завершится.",
   "Command-line tool: {path}": "Утилита командной строки: {path}",
-  "The switchboard command-line tool was not found on PATH.": "Утилита командной строки switchboard не найдена в PATH.",
+  "The switchboard command is not on this computer's PATH. Registered agents still reach its tools through the app; link it to type switchboard commands in a terminal.": "Команды switchboard нет в PATH этого компьютера. Подключённые агенты всё равно получают её инструменты через приложение; добавьте ссылку, чтобы набирать команды switchboard в терминале.",
   "Link switchboard into ~/.local/bin": "Создать ссылку switchboard в ~/.local/bin",
   "The command-line tool is linked. Agents and plugins can now start switchboard mcp.": "Ссылка на утилиту командной строки создана. Агенты и плагины теперь могут запускать switchboard mcp.",
   "Claude Code plugin (tools and the switching-accounts skill)": "Плагин Claude Code (инструменты и навык переключения аккаунтов)",
