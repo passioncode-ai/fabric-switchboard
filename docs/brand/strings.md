@@ -127,7 +127,7 @@ Banner on Accounts until dismissed, and About “Provider terms”: “Use Switc
 
 ### Codex in group folders (SCN-066)
 
-“Codex in group folders”, “On: Codex goes through Switchboard.”, “On, but not in Codex's settings right now.”, “Off: Codex uses your own sign-in in every folder.”, “Groups with a Codex account: {names}.”, “No group has a Codex account yet. Move one into a group first.”, “Turn on”, “Turn off”, “Codex uses your own sign-in again.”
+“Codex in group folders”, “On: Codex goes through Switchboard.”, “On, but not in Codex's settings right now.”, “Off: Codex uses your own sign-in in every folder.”, “Groups with a Codex account: {names}.”, “No group with folders has a Codex account yet. Move one into a group first.” (wording since 2026-11-15), “Turn on”, “Turn off”, “Codex uses your own sign-in again.”
 
 ### Balancing between groups (SCN-090; SB-352 wave 2)
 
