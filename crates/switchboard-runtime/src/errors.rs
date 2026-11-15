@@ -33,6 +33,8 @@ const ERROR_EVENTS: &[&str] = &[
     "external_file_refused",
     "hard_exit",
     "metadata_write_slow",
+    "pass_panicked",
+    "renderer_problem",
     "transaction_held",
     "usage_holds_unreadable",
     "usage_holds_unsaved",
@@ -66,6 +68,25 @@ const USAGE_FAILURES: &[&str] = &[
     "unreachable",
     "vault",
 ];
+
+/// SB-379 (W3): the problems the window reports (`report_problem`), as `(kind, code)` from closed
+/// lists only: never a message, a stack, a URL or a path. Anything else is refused.
+pub fn renderer_problem(kind: &str, code: &str) -> Option<&'static str> {
+    Some(match (kind, code) {
+        ("js_error", "type_error") => "js_error_type",
+        ("js_error", "range_error") => "js_error_range",
+        ("js_error", "reference_error") => "js_error_reference",
+        ("js_error", "syntax_error") => "js_error_syntax",
+        ("js_error", "error") => "js_error",
+        ("js_error", "other") => "js_error_other",
+        ("js_rejection", "error") => "js_rejection",
+        ("js_rejection", "other") => "js_rejection_other",
+        ("ipc_unknown", "error") => "ipc_unknown",
+        ("ipc_timeout", "error") => "ipc_timeout",
+        ("ui_stall", "stall") => "ui_stall",
+        _ => return None,
+    })
+}
 
 /// The class and code a log line is counted under, or none when it is not an error.
 pub(crate) fn classify(
@@ -360,6 +381,24 @@ pub(crate) fn now() -> i64 {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_window_problem_is_a_code_from_the_list_and_nothing_else() {
+        assert_eq!(
+            renderer_problem("js_error", "type_error"),
+            Some("js_error_type")
+        );
+        assert_eq!(renderer_problem("ui_stall", "stall"), Some("ui_stall"));
+        assert_eq!(renderer_problem("js_error", "person@example.invalid"), None);
+        assert_eq!(renderer_problem("/Users/planted/app.js", "error"), None);
+        assert_eq!(
+            classify(
+                "renderer_problem",
+                &[("code", Field::Code("js_error_type"))]
+            ),
+            Some(("renderer_problem", "js_error_type"))
+        );
+    }
+
     use super::*;
 
     #[test]

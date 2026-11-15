@@ -8,6 +8,8 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- A background pass that crashes no longer stops Switchboard's background work until a restart: the crash is counted and the next pass runs (SB-379).
+- The window's own errors, rejected operations, freezes and answers it does not understand are counted in the anonymous error report, as codes only (the type of error, never its text), so they can be found and fixed (SB-379).
 ## 0.7.89
 
 - Activity opens with *Sessions on this computer*: every Claude Code and Codex session running here, Switchboard's or not, who started it (Fabric board, Fabric Dashboards, the command line, an agent, a hand-over, a continuation), its group and task, a session started by another under it, counts by group, and the launches of the last day. `switchboard sessions --tree` and MCP `switchboard_sessions` with `tree` give the same (SB-379).

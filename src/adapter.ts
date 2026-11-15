@@ -5,6 +5,8 @@ import { matchFormatted } from './formatted-errors';
 import { attentionView, eventsPageView, givenAccountsView, missingCommand } from './ui-logic';
 import personErrors from '../crates/switchboard-runtime/src/person-errors.json';
 export const reportFrontendReady = () => invoke('frontend_ready');
+/** SB-379 (W3): a problem the window saw, as two codes; nothing is sent in the demo or a browser. */
+export const reportProblem = (kind: string, code: string) => { if (isTauri()) void invoke('report_problem', { kind, code }).catch(() => undefined); };
 /** The interface language, for the native menu-bar / notification-area menu (L10N-01). */
 export const reportLanguage = (locale: string) => invoke('set_language', { locale });
 
@@ -458,5 +460,7 @@ export function safeError(error: unknown, operation: Operation = 'change'): stri
   if (Object.hasOwn(coreErrors, candidate)) return coreErrors[candidate];
   // A sentence the window already rewrote (a refusal shown, then handed back through safeError) stays as it is.
   if (Object.values(coreErrors).includes(candidate) || Object.values(fallbackErrors).includes(candidate)) return candidate;
+  // SB-379 (W3): an answer the window does not know is a bug to count (its text is never sent).
+  reportProblem(candidate === READ_TIMEOUT ? 'ipc_timeout' : 'ipc_unknown', 'error');
   return fallbackErrors[operation];
 }

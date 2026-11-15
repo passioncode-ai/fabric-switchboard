@@ -37,6 +37,24 @@ pub fn now() -> i64 {
         .unwrap_or(0)
 }
 
+/// A future whose panic is caught and answered as `Err`, polled through its box so no unsafe pin
+/// projection is needed.
+struct CatchUnwind<'a, T>(std::pin::Pin<Box<dyn std::future::Future<Output = T> + Send + 'a>>);
+impl<T> std::future::Future for CatchUnwind<'_, T> {
+    type Output = Result<T, ()>;
+    fn poll(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Self::Output> {
+        let inner = self.0.as_mut();
+        match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| inner.poll(cx))) {
+            Ok(std::task::Poll::Pending) => std::task::Poll::Pending,
+            Ok(std::task::Poll::Ready(value)) => std::task::Poll::Ready(Ok(value)),
+            Err(_) => std::task::Poll::Ready(Err(())),
+        }
+    }
+}
+
 pub struct MonitorHandle {
     stop: tokio::sync::watch::Sender<bool>,
     task: Option<JoinHandle<()>>,
@@ -60,8 +78,20 @@ impl MonitorHandle {
                 let Some(runtime) = weak.upgrade() else {
                     break;
                 };
-                pass.run_with_stop(&runtime, native_sources, now(), Some(&stopped))
-                    .await;
+                // SB-379 (W3): a pass that panics is logged and the loop goes on with a fresh pass;
+                // before, one panic ended the task for good, so quota checks, renewals and
+                // switching stopped until the app restarted, and nothing said so.
+                let ran = CatchUnwind(Box::pin(pass.run_with_stop(
+                    &runtime,
+                    native_sources,
+                    now(),
+                    Some(&stopped),
+                )))
+                .await;
+                if ran.is_err() {
+                    crate::oplog::event("pass_panicked", &[]);
+                    pass = Pass::default();
+                }
             }
         });
         Self {
@@ -1360,6 +1390,14 @@ fn policy_key(policy: &switchboard_core::RotationPolicy) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[tokio::test]
+    async fn a_pass_that_panics_is_caught_and_the_next_one_runs() {
+        let caught = super::CatchUnwind(Box::pin(async { panic!("synthetic pass panic") })).await;
+        assert!(caught.is_err());
+        let fine: Result<u8, ()> = super::CatchUnwind(Box::pin(async { 7 })).await;
+        assert_eq!(fine, Ok(7));
+    }
+
     use super::*;
     use switchboard_core::{Credential, MemoryVault};
     struct CountingVault {
