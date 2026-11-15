@@ -65,7 +65,7 @@ const MAX_DESCRIPTOR: u64 = 4096;
 /// The frame protocol's version, in both `HELLO`s: a viewer refuses a host that speaks another.
 pub const PROTOCOL: u64 = 1;
 
-pub const NOT_FOUND: &str = "No session with this launch id is open here.";
+pub const NOT_FOUND: &str = crate::launches::NO_SUCH_LAUNCH;
 pub const TOO_MANY_VIEWERS: &str = "This session already has eight viewers.";
 
 /// Writes one frame.
