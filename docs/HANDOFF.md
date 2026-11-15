@@ -2,6 +2,16 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-11-15: the duty officer never ends a session before it finished (SB-384); 0.7.95 out, 0.7.96 prepared
+
+- **Asked.** The operator: sessions must not hang and must not be killed before they finish; close only a finished session, restart only a diagnosed stall (works but does not). Then bug fixes, refactoring, UI and docs.
+- **Done (PR #738, `4feeaa35`).** Finished = idle `idle_minutes` with none of its own commands running (Bash tool shells via `.claude/shell-snapshots/`, background ones included); stalled = busy, still for `stuck_minutes`, under 2 s CPU in its tree since the previous check, no command running or one hung 3× as long. `waiting` and `old` removed; a duplicate closes only a finished copy. Watches every interactive session again. Live dry read: 30 watched, 16 running commands, nothing due. Gate EXIT 0 at `d27f271`, Linux clippy clean.
+- **Board.** R33 O9 (Telegram channels) in AGENTS.md, answered `9ff44aa0`. studio-agent's finding `b18dd31c` item 4 (an app update drops the proxy for seconds; dispatched runs then read `gone` with `ended`, `log` and `task` empty) is the first bug of the next phase.
+- **Machine.** The MacBook disk was at 2.8 GB free (Colima's VM journal aborted twice today); this worktree's `target/` (14 GB) cleaned: 15 GB free. Builds run on the Mac Studio.
+- **MacBook.** Duty officer still off (since 0.7.93); turn it on after 0.7.96 installs.
+
+**Exact next task.** When 0.7.96 publishes: `switchboard update --app "/Applications/Fabric Switchboard.app"`, wait for the app's own restart, `switchboard duty on`, and after two five-minute checks confirm `duty.jsonl` has no action on a working session. Then the bug from `b18dd31c` item 4: keep managed sessions' requests across an app update (the proxy's port is kept, so look at the gap between the old owner's drain and the new one's listen; queue or retry inside the proxy) and fill `task` for `fabric` runs in `session_watch::tree`, recording `ended` for a run whose owner restarted.
+
 ## 2026-11-15: the duty officer scoped to Switchboard's own sessions (SB-384); 0.7.94 out, 0.7.95 prepared
 
 - **Asked.** The operator: the windows the duty officer opened do not close, and separate working sessions were closed (screenshot: resumed sessions in Terminal with every hook failing `node: command not found`).
