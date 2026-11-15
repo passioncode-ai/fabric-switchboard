@@ -533,7 +533,9 @@ mod tests {
             pool: project.pool.clone(),
         };
         assert_eq!(
-            store.set_chain(scope.clone(), vec![pinned(&outside)]).unwrap_err(),
+            store
+                .set_chain(scope.clone(), vec![pinned(&outside)])
+                .unwrap_err(),
             PIN_OUTSIDE_GROUP
         );
         // The same account pinned on the machine's chain is fine, and in the group once it serves it.
