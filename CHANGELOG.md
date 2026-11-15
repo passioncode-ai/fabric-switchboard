@@ -8,6 +8,7 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- Activity and `switchboard sessions --tree` say, for each organization, how many live sessions run in its folders, how many Switchboard launched in its group, and whether the rest take its context through the terminal hook or run without it (SB-382).
 - `switchboard organizations` and MCP `switchboard_organizations` also answer each organization's seats as data (provider, subscription or API key, who placed it, here or elsewhere, an opaque seat id), with no personal account, label, e-mail or id, for Observatory and Vesta (SB-381).
 - On Accounts, the line that says what *Switch* and *Select* do sits above the accounts, not after Codex (SB-379).
 - `switchboard project suggest`, asked when a session starts, reads the groups' Git files at most every 30 seconds instead of on every call (W4, SB-379).

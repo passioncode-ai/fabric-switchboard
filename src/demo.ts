@@ -651,6 +651,8 @@ export function createDemoAdapter(): Adapter {
         counts: { live: 3, working: 2, quiet: 1, managed: 2, by_pool: { 'alpha-web': 2, unmanaged: 1 }, by_surface: { fabric: 1, fallback: 1, unmanaged: 1 } },
         findings: [{ kind: 'gone', launch_id: 'L-gone', folder: '/Users/demo/work/tools-cli' }],
         capacity: { cap: demoCap, used: 2, free: demoCap === null ? null : Math.max(0, demoCap - 2), at_capacity: demoCap !== null && demoCap <= 2, total: 3, quiet: 1, quiet_after_minutes: 30 },
+        // SB-382: the first organization's folders, when the demo has one.
+        context: { hook: 'default_on' as const, map: 'read', organizations: state.organizations?.[0] ? [{ context: `org:${state.organizations[0].id}`, live: 2, managed: 1, other: 1 }] : [] },
       };
     },
     async capacity(change) {
