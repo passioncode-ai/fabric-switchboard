@@ -2,6 +2,17 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-11-15: 0.7.84 to 0.7.87; a copy turned off on the other machine (SB-377); the session limit in the window (SB-378)
+
+- **Published.** 0.7.84 (SB-377 moves, WF-4) and 0.7.85 (SB-378 session pool), every platform green. This MacBook runs 0.7.85; the Mac Studio (studio-sshlg) ran 0.7.84 at 01:40 UTC and updates itself.
+- **Session limit live.** `switchboard capacity set 20` on this MacBook at 00:36 UTC: `used` 32, `free` 0, `quiet` 3 (board reply `764057e4` on thread `ebc84cbb`).
+- **Live call back found a defect.** `switchboard accounts recall 3ac80a60…` (claude6) was refused by the Studio with `NOT_HERE`: its copy there was turned off (usage `failed`) and `surrender` refused any account off. Fixed in PR #700 (`8492c043`, 0.7.86): a copy that is off is given back, marked `called back, was off`, and an undo turns it off again. Both machines need 0.7.86.
+- **Window (PR #702, `12741eb4`, 0.7.87).** Settings → *Coding sessions*: working sessions now, *Set limit…* dialog (1 to 500), *Remove limit*; Tauri `capacity`, strings with Copylot ids, SCN-093 step 5.
+- **Checks.** `./scripts/check.sh` on the Mac Studio exit 0 at `4302e55` (#700) and `fa29760` (#702); Linux clippy exit 0 at `4302e55`.
+- **Open.** The live call back of claude6 once 0.7.86 runs on both machines; WF-5.2e (borrow at once on exhaustion), 5.2f C8, 5.3; waves 4 and 5.
+
+**Exact next task.** When 0.7.86 is published: tag `v0.7.87` on the release commit, update this MacBook, wait for studio-sshlg to read 0.7.86 (`ssh studio-sshlg '"/Applications/Fabric Switchboard.app/Contents/MacOS/switchboard" --version'`), then `switchboard --json accounts recall 3ac80a60-a5ce-4cb4-ad6a-89ee7f973b91` and record its `kept`.
+
 ## 2026-11-14: a cap on live coding sessions (SB-378); 0.7.85
 
 - **Asked.** Fabric's board request `52f5a962` (thread `ebc84cbb`), the operator's words relayed verbatim: one pool of sessions per machine (example 20), new sessions from the board wait in a queue until one ends, the queue checked every minute, to keep the machine's load down. At the time this MacBook read load averages of 256 to 590, 42 live sessions and free disk down to 125 MB.
