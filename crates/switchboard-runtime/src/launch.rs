@@ -3447,6 +3447,15 @@ pub fn sessions(root: &Path, all: bool) -> Vec<serde_json::Value> {
             if !entry.file_type().is_ok_and(|t| t.is_dir()) {
                 continue;
             }
+            // Perf audit item 15: a home without a record is skipped by a stat, and an ended
+            // session's record, launch record and host are read only for `all`.
+            if fs::symlink_metadata(home.join(SESSION_RECORD)).is_err() {
+                continue;
+            }
+            let (state, started) = home_state(&home);
+            if !all && !matches!(state, "starting" | "running") {
+                continue;
+            }
             let Some(mut record) = read_regular(&home.join(SESSION_RECORD))
                 .ok()
                 .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
@@ -3454,10 +3463,6 @@ pub fn sessions(root: &Path, all: bool) -> Vec<serde_json::Value> {
             else {
                 continue;
             };
-            let (state, started) = home_state(&home);
-            if !all && !matches!(state, "starting" | "running") {
-                continue;
-            }
             record["state"] = state.into();
             record["started_at"] = started.into();
             record["home"] = folder.into();
