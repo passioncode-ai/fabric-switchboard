@@ -161,7 +161,7 @@ pub fn idle_moment(
 
 /// What keeps a ready update from starting on its own, as a log code (SB-105), in the order the
 /// idle watch looks: `updates_off`, `needs_person` (a bundle that needs a password), `window_visible`,
-/// `checking` (a newer release is being fetched), then the runtime's own (`request_in_flight`,
+/// `checking` (a newer release is being fetched), then the runtime's own (`request_in_flight`, `request_recent`,
 /// `sign_in_waiting`, or `owner_unavailable`). None exactly when `idle_moment` finds it idle.
 pub fn idle_blocker(
     enabled: bool,
@@ -266,7 +266,7 @@ pub fn drain_from(waiting_since: i64, last: Option<i64>, now: i64, urgent: bool)
 /// DRAIN_AFTER_SECONDS and nothing else keeps it (the window, a sign-in, the switch) but requests
 /// in flight.
 pub fn drain_due(waited: i64, blocker: Option<&str>) -> bool {
-    waited >= DRAIN_AFTER_SECONDS && blocker == Some("request_in_flight")
+    waited >= DRAIN_AFTER_SECONDS && matches!(blocker, Some("request_in_flight" | "request_recent"))
 }
 
 /// When the idle watch logs its reason (SB-105): the first time it has one, then at most once per
@@ -2069,6 +2069,7 @@ mod tests {
             Some("request_in_flight")
         ));
         assert!(drain_due(DRAIN_AFTER_SECONDS, Some("request_in_flight")));
+        assert!(drain_due(DRAIN_AFTER_SECONDS, Some("request_recent")));
         // Anything else that keeps it waits on: the person, a sign-in, the switch, a check.
         for other in [
             "window_visible",

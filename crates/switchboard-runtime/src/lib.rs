@@ -1244,6 +1244,8 @@ pub const BACKUPS_DEFAULT_FOLDER_ONLY: &str =
     "Backups belong to the default data folder; this data folder has none.";
 /// Saved sign-ins remembered for a repeated Finish (SB-42).
 const COMPLETED_LOGINS: usize = 16;
+/// How long no managed request has to start before a restart counts as quiet (an update).
+pub const QUIET_SECONDS: i64 = 120;
 
 #[derive(Default)]
 struct CurrentCache {
@@ -1256,10 +1258,14 @@ impl Runtime {
     pub fn busy(&self) -> bool {
         self.busy_reason().is_some()
     }
-    /// What `busy` found, as a log code (SB-105): `request_in_flight` or `sign_in_waiting`.
+    /// What `busy` found, as a log code (SB-105): `request_in_flight`, `request_recent` (a
+    /// managed request started within `QUIET_SECONDS`: a session between two requests is still
+    /// working) or `sign_in_waiting`.
     pub fn busy_reason(&self) -> Option<&'static str> {
         if self.proxy.in_flight() > 0 {
             Some("request_in_flight")
+        } else if monitor::now() - self.proxy.last_request_at() < QUIET_SECONDS {
+            Some("request_recent")
         } else if self.logins.lock().map_or(true, |l| !l.is_empty()) {
             Some("sign_in_waiting")
         } else {

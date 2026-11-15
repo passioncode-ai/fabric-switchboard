@@ -8,6 +8,8 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- A session launched in place (Fabric's and Fabric Dashboards' consoles) records how it ended, so `switchboard sessions --tree` no longer reads every finished one as `gone`; and an update of the app or of `serve` waits until no managed request has started for two minutes (at most half an hour), so a working session's next request no longer meets a closed port (studio-agent's finding, SB-387).
+
 ## 0.7.96
 
 - The session duty officer never ends a session before it finished: it closes a session only when its turn ended an hour ago and none of its commands (background ones included) still runs, and restarts one only when it is stalled (busy, writing nothing and using no CPU, with no command of its own running). A session waiting for your answer is left alone, nothing is restarted for its age, and of two copies of one session only a finished one is closed. It watches every session again, not only those Switchboard started (SB-384, DEC-0021 amended).

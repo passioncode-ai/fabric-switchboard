@@ -683,8 +683,9 @@ pub(crate) fn write_launch_script(home: &Path, content: &str) -> Result<PathBuf,
 /// SB-342 H-1b: `attach.command` beside the launch script `script`: it starts the session in a
 /// session host and attaches this window to it (`switchboard session-open`). None when the
 /// script names no launch, its data folder cannot be found, or no switchboard CLI is installed.
-#[cfg(unix)]
-fn hosted_wrapper(script: &Path) -> Option<PathBuf> {
+/// The launch a session script runs and the data folder it lies in: the script's
+/// `SWITCHBOARD_LAUNCH_ID` line and the nearest of its four parents holding `accounts.json`.
+pub fn script_launch(script: &Path) -> Option<(PathBuf, String)> {
     let text = std::fs::read_to_string(script).ok()?;
     let id = text
         .lines()
@@ -698,6 +699,12 @@ fn hosted_wrapper(script: &Path) -> Option<PathBuf> {
         .skip(1)
         .take(4)
         .find(|dir| dir.join("accounts.json").is_file())?;
+    Some((root.to_path_buf(), id.to_owned()))
+}
+#[cfg(unix)]
+fn hosted_wrapper(script: &Path) -> Option<PathBuf> {
+    let (root, id) = script_launch(script)?;
+    let (root, id) = (root.as_path(), id.as_str());
     let cli = agent_cli()?;
     let wrapper = script.with_file_name("attach.command");
     private_write(
