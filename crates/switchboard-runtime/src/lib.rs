@@ -8389,6 +8389,9 @@ mod owner_tests {
             .add_organization("Acme", &["example.invalid".into()])
             .unwrap();
         store.assign_organization(&work.id, Some(&acme.id)).unwrap();
+        store
+            .assign_organization(&own.id, Some(switchboard_core::organizations::PERSONAL))
+            .unwrap();
         let read = || organization_seats(&store.snapshot().unwrap());
         let view = read();
         assert_eq!(view["schema"], "org-seats/1");
