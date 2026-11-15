@@ -8,6 +8,7 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- *Details* and *Show all* on Agents open with the same chevron as every folding section, instead of the browser's triangle (SB-379).
 - A group or an organization's group takes every repository in one chosen folder at once (*Add every repository in a folder…*), instead of picking each repository (SB-379).
 - Every sign-in button reads *Sign in again*, like the badge beside it; *In use now* no longer colours its details like links; clearer lines on Accounts and Organizations; an account's quota details no longer repeat the reset its summary line already shows (SB-379).
 - Text buttons look like links before you hover them; an event in Activity shows its detail smaller than its title and names its account by label instead of its id (SB-379).
