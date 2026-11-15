@@ -8,6 +8,7 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- A group or an organization's group takes every repository in one chosen folder at once (*Add every repository in a folder…*), instead of picking each repository (SB-379).
 - Every sign-in button reads *Sign in again*, like the badge beside it; *In use now* no longer colours its details like links; clearer lines on Accounts and Organizations; an account's quota details no longer repeat the reset its summary line already shows (SB-379).
 - Text buttons look like links before you hover them; an event in Activity shows its detail smaller than its title and names its account by label instead of its id (SB-379).
 - Clearer words in the window: Hermes and OpenCode say they wait for an OpenRouter key, not for an account; Agents names the scope of its settings once; the Groups count in the navigation says it counts folder rules; About, Settings and Agents explain the proxy, the terminal hook and the MCP switch without internal terms or a repository path (SB-379).

@@ -1062,6 +1062,10 @@ export function withoutFolder(folders: string[], roots: ProjectRoot[] | null, fo
 export interface FoundRepository { folder: string; remote: string | null; branch: string | null; pool: string | null; project: string | null; place: 'folder' | 'inside' | null; groups?: { pool: string; name: string }[]; module_of?: string | null }
 export interface RepositoryMap { under: string[]; repositories: FoundRepository[]; truncated: boolean }
 export type MapFilter = 'unassigned' | 'all';
+/** Q3b: the repositories one chosen folder holds, for a group: every repository found under it, not a module checkout (it moves with the repository holding it), sorted. */
+export function repositoriesUnder(map: Pick<RepositoryMap, 'repositories'>): string[] {
+  return [...new Set(map.repositories.filter((r) => !r.module_of).map((r) => r.folder))].sort((a, b) => a.localeCompare(b));
+}
 export interface MapRow extends FoundRepository { name: string; action: 'assign' | 'move' | null }
 /** The rows the disk map shows: the unassigned ones only, or all; a repository inside a project folder moves with that folder, and a module checkout with the repository holding it, so neither has an action of its own. */
 export function mapRows(map: RepositoryMap | null, filter: MapFilter): MapRow[] {

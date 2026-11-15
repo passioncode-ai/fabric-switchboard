@@ -770,3 +770,5 @@ g:hover > .chart-bar { opacity: .82; }
 /* Q2 item 28: an event reads title, then a smaller detail, then who. */
 .event-row .event-detail { font-size: var(--t-label); }
 .event-row .event-id { font-family: var(--font-ui); }
+.folder-picker-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.folder-picker-status:empty { display: none; }
