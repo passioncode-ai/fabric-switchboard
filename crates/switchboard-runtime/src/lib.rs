@@ -4044,7 +4044,46 @@ pub fn organizations_view(snapshot: &switchboard_core::Snapshot) -> Value {
                 "created_at": o.created_at, "passioncode": o.vesta_id.is_some()})
         })
         .collect();
-    json!({"schema": 1, "organizations": organizations, "accounts": accounts})
+    json!({"schema": 1, "organizations": organizations, "accounts": accounts,
+        "seats": organization_seats(snapshot)})
+}
+/// SB-381 (Vesta's request `a7325ed3` G2): each organization's AI seats as data Observatory
+/// sends on: provider, class (`subscription` or `api_key`), who placed the seat with the
+/// organization (`person`, or `provider` for its team there), whether it lives here or on another
+/// machine, and an opaque `seat` id (a digest of the organization and the account, the same on
+/// every read, never the account's id). No personal account, label, e-mail, token or machine name.
+fn organization_seats(snapshot: &switchboard_core::Snapshot) -> Value {
+    use sha2::{Digest, Sha256};
+    let seats: Vec<Value> = snapshot
+        .organizations
+        .iter()
+        .map(|o| {
+            let rows: Vec<Value> = snapshot
+                .accounts
+                .iter()
+                .filter_map(|a| {
+                    let at = snapshot.attribution(a);
+                    if at.organization.as_deref() != Some(o.id.as_str()) {
+                        return None;
+                    }
+                    let digest = Sha256::digest(format!("{}:{}", o.id, a.id).as_bytes());
+                    let seat: String = digest.iter().take(8).map(|b| format!("{b:02x}")).collect();
+                    let class = match a.kind {
+                        switchboard_core::AuthKind::ApiKey => "api_key",
+                        _ => "subscription",
+                    };
+                    let elsewhere = snapshot.elsewhere.contains_key(&a.id)
+                        || a.pool
+                            .starts_with(switchboard_core::machines::MACHINE_POOL_PREFIX);
+                    Some(json!({"seat": seat, "provider": a.provider, "class": class,
+                        "placed_by": at.by, "enabled": a.enabled,
+                        "where": if elsewhere { "elsewhere" } else { "here" }}))
+                })
+                .collect();
+            json!({"organization": o.id, "name": o.name, "passioncode": o.vesta_id, "seats": rows})
+        })
+        .collect();
+    json!({"schema": "org-seats/1", "organizations": seats})
 }
 /// C-Q1: the window answers in the app's own process (`Runtime::execute`). An operation that
 /// names the window but arrives through the control listener or an offline command (anything
@@ -8339,6 +8378,46 @@ mod owner_tests {
             "Sign-in not found. Start again."
         );
     }
+    #[test]
+    fn an_organizations_seats_name_no_person_and_leave_personal_accounts_out() {
+        // SB-381: provider, class, who placed it and where; never a label, an e-mail or an id.
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::open(root.path().to_owned(), Arc::new(MemoryVault::default())).unwrap();
+        let work = save(&store, "synthetic-work", "default");
+        let own = save(&store, "synthetic-own", "default");
+        let acme = store
+            .add_organization("Acme", &["example.invalid".into()])
+            .unwrap();
+        store.assign_organization(&work.id, Some(&acme.id)).unwrap();
+        let read = || organization_seats(&store.snapshot().unwrap());
+        let view = read();
+        assert_eq!(view["schema"], "org-seats/1");
+        let org = &view["organizations"][0];
+        assert_eq!(org["name"], "Acme");
+        let seats = org["seats"].as_array().unwrap();
+        assert_eq!(seats.len(), 1, "the personal account is left out");
+        assert_eq!(seats[0]["provider"], "claude");
+        assert_eq!(seats[0]["class"], "subscription");
+        assert_eq!(seats[0]["placed_by"], "person");
+        assert_eq!(seats[0]["where"], "here");
+        assert_eq!(seats[0]["seat"].as_str().unwrap().len(), 16);
+        assert_eq!(
+            read()["organizations"][0]["seats"][0]["seat"],
+            seats[0]["seat"],
+            "the same seat id on every read"
+        );
+        let text = view.to_string();
+        for private in [
+            work.id.as_str(),
+            own.id.as_str(),
+            "synthetic-work",
+            "synthetic-own",
+            "@",
+        ] {
+            assert!(!text.contains(private), "{private} must not appear: {text}");
+        }
+    }
+
     #[tokio::test]
     async fn a_new_seat_of_an_organization_outside_its_only_group_is_offered_it() {
         // SB-160 (B-4, SCN-077): a seat of an organization that has one group (SB-285: or one
