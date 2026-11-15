@@ -8,6 +8,8 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+## 0.7.87
+
 - Settings has a *Coding sessions* section: how many coding sessions work on this computer now, and the limit at which Fabric board runs and hosted consoles wait, set or removed there (SB-378).
 ## 0.7.86
 
