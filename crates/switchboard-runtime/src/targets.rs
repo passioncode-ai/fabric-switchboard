@@ -223,20 +223,91 @@ pub fn launch_ssh(
     }
     words.push(quoted("launch"));
     words.extend(launch_args.iter().map(|a| quoted(a)));
-    Ok(vec![
+    Ok(ssh_words(target, tty, words))
+}
+
+/// SB-380: `ssh` arguments that run one command of the other machine's Switchboard, such as
+/// `sessions --all`, `attach <launch_id>` or `sessions end <launch_id>`; `--json` there when
+/// `json` is set here. Every word is quoted for the remote shell.
+pub fn command_ssh(
+    target: &str,
+    program: &Program<'_>,
+    command: &[String],
+    json: bool,
+    tty: bool,
+) -> Result<Vec<String>, String> {
+    if !target_valid(target) {
+        return Err(TARGET_INVALID.into());
+    }
+    program.check()?;
+    let mut words: Vec<String> = vec![quoted(program.path)];
+    if let Some(dir) = program.data_dir {
+        words.push(quoted("--data-dir"));
+        words.push(quoted(dir));
+    }
+    if json {
+        words.push(quoted("--json"));
+    }
+    words.extend(command.iter().map(|a| quoted(a)));
+    Ok(ssh_words(target, tty, words))
+}
+
+fn ssh_words(target: &str, tty: bool, words: Vec<String>) -> Vec<String> {
+    vec![
         if tty { "-t" } else { "-T" }.to_owned(),
         "-o".to_owned(),
         "ConnectTimeout=15".to_owned(),
         target.to_owned(),
         "--".to_owned(),
         words.join(" "),
-    ])
+    ]
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::account_send::DEFAULT_APP;
+
+    #[test]
+    fn a_command_there_quotes_every_word_and_asks_for_json_and_a_terminal_only_when_told() {
+        let program = Program {
+            path: DEFAULT_APP,
+            data_dir: Some("/srv/sb"),
+        };
+        let args = command_ssh(
+            "studio",
+            &program,
+            &["sessions".into(), "end".into(), "L1;rm".into()],
+            true,
+            false,
+        )
+        .unwrap();
+        assert_eq!(args[0], "-T");
+        assert_eq!(args[3], "studio");
+        let line = args.last().unwrap();
+        assert!(
+            line.contains("'--data-dir' '/srv/sb' '--json' 'sessions' 'end' 'L1;rm'"),
+            "{line}"
+        );
+        let attach = command_ssh(
+            "studio",
+            &program,
+            &["attach".into(), "L1".into()],
+            false,
+            true,
+        )
+        .unwrap();
+        assert_eq!(attach[0], "-t");
+        assert!(!attach.last().unwrap().contains("--json"));
+        assert!(command_ssh(
+            "-oProxyCommand=x",
+            &program,
+            &["sessions".into()],
+            false,
+            false
+        )
+        .is_err());
+    }
 
     #[test]
     fn machines_come_from_moves_and_runs_newest_first() {
