@@ -1007,8 +1007,21 @@ Asked for by Fabric Dashboards (an embedded console beside each service, operato
   account (`NO_PROJECT_SELECTION` without one — never another pool's), else the account of the
   folder's rule in force, else the default pool's selected account (`NO_SELECTION`). Metadata only,
   no credential read.
-- The CLI refuses `--in-place` without a terminal on stdin and stdout, then `exec`s the script, so
-  the agent replaces the `switchboard` process and its exit status is the command's.
+- The CLI refuses `--in-place` without a terminal on stdin and stdout, then runs the script as its
+  child and waits for it; its exit status (128 + the signal for one a signal ended) is the
+  command's, and the launch record gets `ended: {kind: exited, exit_code, at}` once
+  (`launches::record_exit`). Since 0.7.97 (studio-agent's finding `b18dd31c`: every in-place
+  launch read `gone`, nobody saw its end); before, the CLI `exec`ed the script. The agent keeps the
+  terminal: the CLI ignores SIGINT, SIGQUIT and SIGHUP (the child restores them before the script
+  runs), so Ctrl-C and a closed window reach the agent, and passes a SIGTERM sent to it on to the
+  agent. A script that names no launch is still `exec`ed.
+- **An update waits for a quiet spell (0.7.97, `b18dd31c`).** `Runtime::busy_reason` also answers
+  `request_recent` while a managed request started within `QUIET_SECONDS` (120): between two
+  requests of a working session nothing is in flight for a moment, and a restart there met the
+  next request with a closed port (`ECONNREFUSED`). The app's idle watch waits for it as for
+  `request_in_flight` and drains after half an hour either way (`drain_due`); `serve`'s
+  self-update waits for two quiet looks 30 s apart, at most 30 minutes, before it restarts
+  (`serve_update::wait_quiet`, logging `update_waiting` with the reason once).
 - **Headless (SB-317, 2026-11-09).** `launch --headless` (refused with `--in-place`) prepares the
   same session (`Operation::Launch { in_place: true }`, `launch::launch_here`) for a caller with no
   terminal, such as a launchd job: no terminal check, then the CLI `exec`s the script with stdin
