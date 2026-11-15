@@ -1169,6 +1169,9 @@ check(() => {
     assert.equal(shown(answered, null, 'agents'), false, 'nowhere else');
     assert.equal(shown(answered, null, 'accounts', ['o-acme']), false, 'Hide keeps it off Accounts');
     assert.equal(shown(answered, null, 'orgs', ['o-acme']), true, 'and on Organizations');
+    // 2026-11-15: every account of the organization lives on another machine; nothing is asked here.
+    const away = withOrg([{ id: 'org_group', state: 'optional', away: ['studio'] }, { id: 'seat', state: 'optional', away: ['studio'] }, { id: 'hook', state: 'optional', terminals: 'waiting' }, { id: 'launch', state: 'optional' }]);
+    assert.deepEqual(logic.orgSetups(away), [], 'no card: nothing needs the person on this computer');
     const [seat] = logic.orgSetups(noSeat);
     assert.deepEqual(logic.orgSetupAction(seat), { kind: 'sign_in', pool: 'acme-work', label: 'Sign in with your Acme address' });
     assert.equal(seat.lines[2].line, 'Sign in with your Acme address. It goes to the group “Acme work”.');

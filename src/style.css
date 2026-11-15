@@ -497,12 +497,14 @@ h3 { font-size: var(--t-label); font-weight: 600; margin: var(--space-4) 0 var(-
 .stat-page > * + * { margin-top: var(--space-4); }
 .stat-page .stat-bar { margin-bottom: 0; }
 .stat-page .stat-tiles { margin-bottom: 0; }
-.stat-grid { display: grid; grid-template-columns: 1fr; gap: var(--space-4); }
+/* minmax(0, 1fr): a plain 1fr track grows to its widest item's own width, and the chart's SVG is
+   900 units wide, so the page ran 350 px past a 760 px window. */
+.stat-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-4); }
 .stat-grid > .stat-panel { margin: 0; min-width: 0; }
 .about-panel.stat-panel + .about-panel.stat-panel { margin-top: var(--space-4); }
 .stat-chart-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); flex-wrap: wrap; margin-bottom: var(--space-3); }
 .stat-chart-head h2 { margin: 0; }
-.stat-chart-svg { display: block; width: 100%; height: auto; }
+.stat-chart-svg { display: block; width: 100%; max-width: 100%; height: auto; }
 .chart-grid { stroke: var(--border); stroke-width: 1; }
 /* VIS-05: the chart is drawn in a 900-unit viewBox and scaled to the panel, so a fixed 11 px label
    shrank to about 6 px at the 740 px window. The panel is a size container and the label's size in
@@ -705,12 +707,12 @@ g:hover > .chart-bar { opacity: .82; }
 .events-count { margin: var(--space-2) 0 0; }
 .events-panel .day-fold { background: transparent; }
 .events-panel .day-fold .event-list { margin: 0; }
-/* WF-11.2: the period, the tiles and the index stay at the top; a table showing every row scrolls in its box under a header that stays. */
+/* WF-11.2: the period and the index stay at the top (the tiles scroll); a table showing every row scrolls in its box under a header that stays. */
 .stat-pinned { position: sticky; top: 0; z-index: 5; display: grid; gap: var(--space-3); padding: var(--space-2) 0 var(--space-3); background: var(--bg); border-bottom: 1px solid var(--border); }
 .stat-page .stat-pinned .stat-bar, .stat-page .stat-pinned .stat-tiles { margin: 0; }
 .stat-index { display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-3); }
 .stat-index-link { border: 0; background: transparent; padding: 0; color: var(--link); font: inherit; font-size: var(--t-chip); text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
-.stat-page .fold, .stat-page .stat-chart { scroll-margin-top: 280px; }
+.stat-page .fold, .stat-page .stat-chart { scroll-margin-top: 120px; }
 .stat-grid > .fold { margin-top: 0; }
 .stat-scroll.is-all { max-height: min(60vh, 560px); overflow-y: auto; }
 .stat-scroll.is-all .stat-table thead th { position: sticky; top: 0; z-index: 1; background: var(--panel); }

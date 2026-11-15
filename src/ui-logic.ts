@@ -1556,9 +1556,12 @@ function orgSetupLine(step: OnboardStep, organization: string, group: { pool: st
       // SB-282: an organization may have several groups.
       if (step.state === 'done' && (step.groups ?? []).length > 1) return t('Its groups are {groups}.', { groups: (step.groups ?? []).map((g) => `“${g}”`).join(', ') });
       if (step.state === 'done' && step.group) return t('Its group is “{group}”.', { group: step.group.name });
+      // 2026-11-15: every account of the organization lives on another machine; it works there.
+      if (step.away) return step.away.length ? t('{organization}\'s accounts work on {machines}, so its sessions run there. Make a group here only to work on this computer.', { organization, machines: step.away.join(', ') }) : t('{organization}\'s accounts work on another machine, so its sessions run there. Make a group here only to work on this computer.', { organization });
       return t('{organization} has no group on this computer yet.', { organization });
     case 'seat':
       if (step.state === 'done') return group ? t('Your {organization} account in “{group}” is signed in.', { organization, group: group.name }) : t('Your {organization} account is signed in.', { organization });
+      if (!group && step.away) return t('Its accounts are on another machine. Call one back on Accounts to work here.');
       if (!group) return t('Sign in once the group exists.');
       return (step.ended ?? 0) > 0 ? t('Your {organization} accounts in “{group}” must sign in again. If {organization} removed your seat, ask its administrator.', { organization, group: group.name }) : seatLeadLine(organization, group.name);
     case 'hook':

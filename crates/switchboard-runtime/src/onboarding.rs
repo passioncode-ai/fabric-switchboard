@@ -402,6 +402,36 @@ fn organization_steps(probe: &Probe, cli: &str) -> Vec<Value> {
         // checklist's sign-in and launch steps name.
         let groups = snapshot.organization_groups(&organization.id);
         let group = groups.first().copied();
+        // 2026-11-15 (operator): an organization whose every account lives on another machine
+        // works there; this computer has nothing to set up unless the person wants to work here,
+        // so its group and seat are optional and name the machines.
+        let theirs: Vec<&switchboard_core::Account> = snapshot
+            .accounts
+            .iter()
+            .filter(|a| snapshot.attribution(a).holds(Some(&organization.id)))
+            .collect();
+        let mut away: Vec<String> = Vec::new();
+        let all_away = !theirs.is_empty()
+            && theirs.iter().all(|a| {
+                let machine = snapshot
+                    .machine_of(&a.id)
+                    .map(|m| m.name.clone())
+                    .or_else(|| {
+                        snapshot
+                            .elsewhere
+                            .contains_key(&a.id)
+                            .then(|| snapshot.locations.get(&a.id).cloned().unwrap_or_default())
+                    });
+                match machine {
+                    Some(name) => {
+                        if !name.is_empty() && !away.contains(&name) {
+                            away.push(name);
+                        }
+                        true
+                    }
+                    None => false,
+                }
+            });
         let bound: Vec<&str> = groups.iter().map(|p| p.name.as_str()).collect();
         push(match group {
             Some(group) => {
@@ -422,6 +452,22 @@ fn organization_steps(probe: &Probe, cli: &str) -> Vec<Value> {
                 }
                 s
             }
+            None if all_away => with(
+                "away",
+                json!(away),
+                step(
+                    "org_group",
+                    "optional",
+                    format!(
+                        "{name}'s accounts work on {}, so its sessions run there. Make a group here only to work on this computer.",
+                        if away.is_empty() { "another machine".to_owned() } else { away.join(", ") }
+                    ),
+                    json!({"alternatives": [
+                        format!("{cli} project save --name {} --folder <absolute folder>", shell_word(name)),
+                        format!("{cli} accounts recall <account id>"),
+                    ]}),
+                ),
+            ),
             // Whether a settings file exists, and which folders, is the person's to say.
             None => step(
                 "org_group",
@@ -478,6 +524,18 @@ fn organization_steps(probe: &Probe, cli: &str) -> Vec<Value> {
                         "command": format!("{cli} login begin --provider {provider} --pool {}", shell_word(&group.pool)),
                         "person": person,
                     }),
+                ),
+            ),
+            None if all_away => with(
+                "away",
+                json!(away),
+                step(
+                    "seat",
+                    "optional",
+                    format!(
+                        "{name}'s accounts are on another machine; call one back to work here."
+                    ),
+                    json!({"command": format!("{cli} accounts recall <account id>")}),
                 ),
             ),
             None => step(
@@ -1089,6 +1147,30 @@ mod tests {
             by_id(&steps(&probe), "org_group")["groups"],
             json!(["Acme work", "Acme two"])
         );
+    }
+
+    #[test]
+    fn an_organization_whose_accounts_all_live_elsewhere_asks_nothing_here() {
+        // 2026-11-15 (operator): PassionCode.ai's accounts live on the Mac Studio; the MacBook's
+        // checklist asked for a group and a sign-in it did not need.
+        let mut probe = acme();
+        let snapshot = probe.snapshot.as_mut().unwrap();
+        snapshot.projects.clear();
+        snapshot.accounts[0].pool = "default".into();
+        snapshot.elsewhere.insert("a-1".into(), 1);
+        snapshot.locations.insert("a-1".into(), "studio".into());
+        let answer = steps(&probe);
+        let group = by_id(&answer, "org_group");
+        assert_eq!(group["state"], "optional", "{group}");
+        assert_eq!(group["away"], json!(["studio"]));
+        let seat = by_id(&answer, "seat");
+        assert_eq!(seat["state"], "optional", "{seat}");
+        // An account here again: the group is needed again.
+        let mut probe = acme();
+        let snapshot = probe.snapshot.as_mut().unwrap();
+        snapshot.projects.clear();
+        snapshot.accounts[0].pool = "default".into();
+        assert_eq!(by_id(&steps(&probe), "org_group")["state"], "needs_person");
     }
 
     #[test]

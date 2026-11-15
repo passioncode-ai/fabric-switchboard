@@ -2947,7 +2947,8 @@ function renderStats(main: HTMLElement) {
     choice.setAttribute('aria-pressed', String(statsDays === days)); range.append(choice);
   }
   const page = el('div', 'stat-page');
-  // WF-11.2: the period, the tiles and the index of sections stay at the top while the tables scroll.
+  // WF-11.2: the period and the index of sections stay at the top while the tables scroll; the tiles
+  // scroll with the page, so the pinned bar stays one or two lines on a narrow window.
   const pinned = el('div', 'stat-pinned');
   const bar = el('div', 'stat-bar'); bar.append(range); pinned.append(bar); page.append(pinned); main.append(page);
   if (statsError) { page.append(el('p', 'usage-error', t('Statistics are unavailable. Refresh to retry.')), button(t('Retry'), () => { statsError = false; void loadStats(); render(); restoreFocus('stats-retry'); }, 'button', 'stats-retry')); return; }
@@ -2966,7 +2967,7 @@ function renderStats(main: HTMLElement) {
       statTile(t('Per request'), perRequest === null ? '–' : compactCount(perRequest), t('tokens on average')),
       statTile(t('Limits and errors'), compactCount(s.total.limited + s.total.failed), statTrouble(s.total) === null ? '–' : t('{percent} of requests', { percent: statTroubleText(s.total) })),
     );
-    pinned.append(tiles);
+    page.append(tiles);
     const groupName = (pool: string, name: string | null) => name ?? poolName(pool);
     const projectName = (name: string | null) => name ?? t('No folder recorded');
     const accountName = (label: string | null) => label ?? t('Removed account');
