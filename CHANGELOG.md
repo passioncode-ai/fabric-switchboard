@@ -8,6 +8,7 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- `switchboard project suggest`, asked when a session starts, reads the groups' Git files at most every 30 seconds instead of on every call (W4, SB-379).
 ## 0.7.91
 
 - A crash of a `switchboard` command or of `switchboard mcp` is counted in the anonymous error report like a crash of the app, as the name of the file it happened in only (SB-379).
