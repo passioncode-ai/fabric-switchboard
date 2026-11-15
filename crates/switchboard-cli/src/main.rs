@@ -1822,6 +1822,14 @@ enum SessionsCommand {
         #[arg(long, requires = "target")]
         remote_data_dir: Option<String>,
     },
+    /// Close the quiet one of two processes holding one Claude Code session (`switchboard
+    /// attention` lists it as session_duplicate): of the copies neither busy nor running a
+    /// command, the one quiet longest gets SIGTERM, then SIGKILL after ten seconds; a working
+    /// copy is never closed. macOS and Linux.
+    CloseCopy {
+        /// The session id (the duplicate's session_id).
+        session_id: String,
+    },
 }
 /// Where `switchboard launch` is run from, for the launch record.
 #[derive(Clone, Copy, ValueEnum)]
@@ -2538,6 +2546,12 @@ async fn run(cli: &Cli) -> Result<Value, String> {
         } => {
             return Err("A session host runs on macOS and Linux for now.".into());
         }
+        Command::Sessions {
+            command: Some(SessionsCommand::CloseCopy { session_id }),
+            ..
+        } => Operation::SessionCloseCopy {
+            session_id: session_id.clone(),
+        },
         Command::Sessions { tree: true, .. } => {
             return Ok(switchboard_runtime::session_watch::tree(
                 &root,
@@ -5329,6 +5343,7 @@ mod mcp_parity {
         // `sessions` itself (and its `--all`, `--history`) answers through the same tool.
         ("sessions show", Tool("switchboard_sessions")),
         ("sessions end", Tool("switchboard_session_end")),
+        ("sessions close-copy", Tool("switchboard_session_close_copy")),
         ("provenance", Tool("switchboard_provenance")),
         ("current", Tool("switchboard_status")),
         ("rotation status", Tool("switchboard_rotation")),

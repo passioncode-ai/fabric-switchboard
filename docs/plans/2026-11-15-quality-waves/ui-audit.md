@@ -49,7 +49,7 @@ Every page of the demo (`?demo=1`) in Playwright WebKit at 1280, 960 and 760 px,
 40. Navigation: the Groups badge counts folder rules but reads as a group count.
 41. Intro paragraphs capped at 72ch above full-width panels.
 42. Groups at 960: the subtitle wraps early.
-43. Groups: a chain pins an account that is not in the group.
+43. Groups: a chain pins an account that is not in the group. **Fixed 2026-11-15:** the chain dialog lists only the group's accounts and the core refuses another (`PIN_OUTSIDE_GROUP`).
 44. Groups: awkward copy ("Move one there with Move to another machine… on Accounts").
 45. Groups vs Agents: a group "Tools" beside a "Tools only" chip.
 46. API keys: agents named differently on one page.

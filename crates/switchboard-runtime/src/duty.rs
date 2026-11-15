@@ -634,6 +634,70 @@ fn act_on(_: &Path, _: &Seen, _: Act) -> &'static str {
     "unsupported"
 }
 
+pub const NOT_TWO: &str = "That session no longer runs in two processes. Refresh to see it now.";
+pub const ALL_WORKING: &str =
+    "Both copies of this session are working. Close one in its own window when it finishes.";
+pub const COPY_STILL_RUNNING: &str = "The quiet copy did not close. Close it in its own window.";
+pub const CLOSE_UNSUPPORTED: &str = "Closing a session's copy works on macOS and Linux for now.";
+
+/// Of the copies of `session`, the one a person closes and the ones kept: never a copy that is
+/// working (busy, or one of its commands running); of the others, the one whose status has not
+/// changed for longest (then the one started last). `NOT_TWO` with fewer than two copies,
+/// `ALL_WORKING` when every copy works.
+pub fn quiet_copy<'a>(
+    seen: &'a [Seen],
+    session: &str,
+) -> Result<(&'a Seen, Vec<&'a Seen>), &'static str> {
+    let copies: Vec<&Seen> = seen.iter().filter(|s| s.session == session).collect();
+    if copies.len() < 2 {
+        return Err(NOT_TWO);
+    }
+    let working = |s: &Seen| s.status == "busy" || s.commands > 0;
+    let close = *copies
+        .iter()
+        .filter(|s| !working(s))
+        .min_by_key(|s| (s.status_since, std::cmp::Reverse((s.started_at, s.pid))))
+        .ok_or(ALL_WORKING)?;
+    let kept = copies.into_iter().filter(|s| s.pid != close.pid).collect();
+    Ok((close, kept))
+}
+
+/// SB-388: the person's *Close the quiet copy* on a duplicate (Needs attention): the copy
+/// `quiet_copy` names gets SIGTERM, then SIGKILL after ten seconds; the other keeps working.
+/// Journalled in `duty.jsonl` with `by: person`.
+pub fn close_copy(root: &Path, session: &str, now: i64) -> Result<Value, String> {
+    #[cfg(not(unix))]
+    {
+        let _ = (root, session, now);
+        Err(CLOSE_UNSUPPORTED.into())
+    }
+    #[cfg(unix)]
+    {
+        let seen = observe(root);
+        let (close, kept) = quiet_copy(&seen, session)?;
+        let closed = stop(close.pid);
+        append(
+            root,
+            json!({
+                "at": now, "session": session, "pid": close.pid, "cwd": close.cwd,
+                "reason": "duplicate", "by": "person",
+                "result": if closed { "closed" } else { "still_running" },
+            }),
+        );
+        if !closed {
+            return Err(COPY_STILL_RUNNING.into());
+        }
+        if kept.len() < 2 {
+            crate::session_watch::forget(root, crate::session_watch::DUPLICATE, session);
+        }
+        Ok(json!({
+            "session_id": session,
+            "closed_pid": close.pid,
+            "kept_pids": kept.iter().map(|s| s.pid).collect::<Vec<_>>(),
+        }))
+    }
+}
+
 /// SIGTERM, then SIGKILL after ten seconds; whether the process is gone.
 #[cfg(unix)]
 fn stop(pid: u32) -> bool {
@@ -843,6 +907,42 @@ mod tests {
         }];
         compare_cpu(&mut d, 1_600 + 3 * CHECK_SECONDS, true);
         assert_eq!(d[0].cpu_quiet, None, "a sample from long ago says nothing");
+    }
+
+    #[test]
+    fn a_person_closes_the_copy_quiet_longest_and_never_a_working_one() {
+        // The case on the operator's MacBook (2026-11-15): the older copy works, the newer one has
+        // waited for five hours.
+        let copy = |pid: u32, status: &str, started_at: i64, status_since: i64| Seen {
+            pid,
+            started_at,
+            status_since,
+            ..seen(status, 1, 1, None)
+        };
+        let all = [
+            copy(84681, "busy", 100, 9_000),
+            copy(38550, "waiting", 200, 1_000),
+            Seen {
+                session: "other".into(),
+                ..copy(30, "idle", 100, 100)
+            },
+        ];
+        let session = all[0].session.clone();
+        let (close, kept) = quiet_copy(&all, &session).unwrap();
+        assert_eq!(close.pid, 38550, "the quiet one, though it started later");
+        assert_eq!(kept.iter().map(|s| s.pid).collect::<Vec<_>>(), [84681]);
+        // Two quiet copies: the one quiet longer; quiet as long: the one started last.
+        let two = [copy(1, "idle", 100, 5_000), copy(2, "idle", 200, 4_000)];
+        assert_eq!(quiet_copy(&two, &session).unwrap().0.pid, 2);
+        let tie = [copy(1, "idle", 100, 5_000), copy(2, "idle", 200, 5_000)];
+        assert_eq!(quiet_copy(&tie, &session).unwrap().0.pid, 2);
+        // A copy running a command works too; when every copy works nothing is closed.
+        let mut running = copy(3, "idle", 300, 1);
+        running.commands = 1;
+        let both = [copy(4, "busy", 100, 9_000), running];
+        assert_eq!(quiet_copy(&both, &session).unwrap_err(), ALL_WORKING);
+        assert_eq!(quiet_copy(&all, "other").unwrap_err(), NOT_TWO);
+        assert_eq!(quiet_copy(&all, "absent").unwrap_err(), NOT_TWO);
     }
 
     #[test]

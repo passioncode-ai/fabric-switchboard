@@ -3333,3 +3333,21 @@ only reports); with `run` it acts now, with `dry_run` it lists the actions as `p
 --idle-minutes … --max-age-hours …` (minutes 10 to 1440, hours 1 to 72; out of range is
 `SETTINGS_INVALID`), `duty run [--dry-run]`; MCP `switchboard_duty`; the window's `duty`
 command (Settings → Session duty officer). Codex sessions are not watched.
+
+**Closing a duplicate by hand (SB-388, operator 2026-11-15).** A `session_duplicate` item of
+*Needs attention* carries the session's `session_id` and the folder of its first process (named by
+the folder, no longer by the id), and its action is `close_copy` (`switchboard_session_close_copy`).
+`Operation::SessionCloseCopy {session_id}` (no store lock; `duty::close_copy`) reads the live
+sessions as the duty officer does and closes the copy `duty::quiet_copy` names: never one that is
+working (status `busy`, or a command of its own running); of the others, the one whose status has
+not changed for longest, then the one started last. On the operator's MacBook that day both
+duplicates were a newer copy waiting for five hours beside an older one at work, so closing the
+newer copy would have been right there and is wrong in general. SIGTERM, then SIGKILL after ten
+seconds; the other copy keeps working. The act is journalled in `duty.jsonl` with `by: person`, and
+the finding leaves the kept watch at once (`session_watch::forget`) when one process is left.
+Refusals: `NOT_TWO` (the session no longer runs in two processes), `ALL_WORKING`,
+`COPY_STILL_RUNNING`, `CLOSE_UNSUPPORTED` (Windows). CLI `switchboard sessions close-copy
+<session_id>`; MCP `switchboard_session_close_copy`; the window's `session_close_copy` (*Close the
+quiet copy* on the item). Tests `duty::tests::a_person_closes_the_copy_quiet_longest_and_never_a_working_one`,
+`session_watch::tests::a_copy_of_a_live_session_a_quiet_board_run_and_a_vanished_launch_are_found`,
+`attention::tests::a_copy_of_a_live_session_and_a_quiet_board_run_come_first`.

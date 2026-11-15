@@ -85,7 +85,15 @@ pub fn findings(
     for (session, mut pids) in by_session {
         if pids.len() > 1 {
             pids.sort_unstable();
-            out.push(json!({"kind": DUPLICATE, "session_id": session, "pids": pids}));
+            // SB-388: the session's folder names the item in Needs attention (not its id).
+            let folder = rows
+                .iter()
+                .find(|r| r["pid"].as_u64() == Some(u64::from(pids[0])))
+                .map(|r| r["folder"].clone())
+                .unwrap_or(Value::Null);
+            out.push(
+                json!({"kind": DUPLICATE, "session_id": session, "pids": pids, "folder": folder}),
+            );
         }
     }
     let live: HashMap<&str, &Value> = rows
@@ -274,6 +282,27 @@ pub fn last(root: &Path) -> Vec<Value> {
         .unwrap_or_default()
 }
 
+/// SB-388: a finding fixed by hand (a duplicate's quiet copy closed) leaves the kept watch at
+/// once, so Needs attention does not list it until the next minute's pass.
+pub fn forget(root: &Path, kind: &str, id: &str) {
+    let Some(mut kept) = std::fs::read(root.join(FILE))
+        .ok()
+        .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
+    else {
+        return;
+    };
+    let gone = format!("{kind}:{id}");
+    let Some(list) = kept["findings"].as_array_mut() else {
+        return;
+    };
+    let before = list.len();
+    list.retain(|f| key(f) != gone);
+    if list.len() != before {
+        let bytes = serde_json::to_vec(&kept).unwrap_or_default();
+        let _ = switchboard_core::private_fs::private_write(&root.join(FILE), &bytes);
+    }
+}
+
 static LAST_TICK: AtomicI64 = AtomicI64::new(0);
 /// A watch in flight: under load a scan takes tens of seconds, and a second must not start beside it.
 static RUNNING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
@@ -445,6 +474,17 @@ mod tests {
             [(DUPLICATE, "s-1"), (STUCK, "L-run"), (GONE, "L-gone")]
         );
         assert_eq!(found[0]["pids"], json!([10, 12]));
+        assert_eq!(
+            found[0]["folder"], "/work/a",
+            "the item is named by its folder"
+        );
+        // Closing the quiet copy by hand takes the finding out of the kept watch at once.
+        let root = tempfile::tempdir().unwrap();
+        let kept = json!({"at": now, "findings": found});
+        std::fs::write(root.path().join(FILE), serde_json::to_vec(&kept).unwrap()).unwrap();
+        forget(root.path(), DUPLICATE, "s-1");
+        let left: Vec<String> = last(root.path()).iter().map(key).collect();
+        assert_eq!(left, ["stuck:L-run", "gone:L-gone"]);
         assert_eq!(found[1]["task"]["request"], "r-1");
     }
 

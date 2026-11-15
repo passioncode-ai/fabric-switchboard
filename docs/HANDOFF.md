@@ -2,6 +2,16 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-11-15: a duplicate session closed in one press (SB-388); a group's chain pins only its accounts (audit 43); 0.7.96 out, 0.7.97 building
+
+- **Asked.** The operator, on Needs attention's two "One session runs in two processes" items: «так чего не дашь кнопку сразу закрыть».
+- **Found.** Both duplicates on this MacBook were a newer copy waiting for five hours beside an older copy at work (go-to-market-strategy: 84681 busy, 38550 waiting 338 min; research-agent: 32882 idle 112 min, 47029 idle 331 min). "Close the newer copy" would have been right there only by chance.
+- **Done (PR #744, branch `dup-close`).** `duty::quiet_copy` and `close_copy`: never a copy that is busy or running a command; of the others the one quiet longest, then the one started last; SIGTERM, SIGKILL after 10 s; journalled `by: person`; the finding forgotten at once. Item named by its folder, action `close_copy`; CLI `sessions close-copy`, MCP `switchboard_session_close_copy`, the window's *Close the quiet copy* (checked in the demo, en and ru: the item leaves, the notice shows). Audit item 43: core `PIN_OUTSIDE_GROUP`, the chain dialog lists only the group's accounts.
+- **Note.** `dup-close` was rebased once onto `chain-pin` and pushed with `--force-with-lease` before the PR existed; nothing else used the branch.
+- **Release.** 0.7.96 published; v0.7.97 tagged on `0c18c111`, run 43771282316 (guard first), watched by `rel97.sh`.
+
+**Exact next task.** When PR #744's gate (Mac Studio) and Linux clippy read EXIT 0, merge it. When 0.7.97 publishes: `switchboard update --app "/Applications/Fabric Switchboard.app"`, let the app restart, `switchboard duty on`, and after two checks confirm `duty.jsonl` acts on no working session. Then prepare 0.7.98 with #744.
+
 ## 2026-11-15: bugs, UI, refactoring and docs after the duty officer (SB-387, window audit); 0.7.97 prepared
 
 - **Asked.** The operator: finish the sessions work, then bug fixes, refactoring, UI and documentation.

@@ -1433,7 +1433,10 @@ function chainDialog(scope: ChainScope, initial: ChainExecutor[], returnFocus: s
         if (!TAKEOVER_ORDER.includes(step.agent)) agents.push([step.agent, t('{agent} (not automatic)', { agent: name })]);
         const agent = select(agents); agent.value = step.agent; agent.dataset.key = `chain-step-${index}-agent`; agent.setAttribute('aria-label', t('Agent for step {n}', { n }));
         agent.addEventListener('change', () => { steps[index] = { agent: agent.value }; paint(`chain-step-${index}-agent`); });
-        const choices = accountsForStep(step.agent, snapshot?.accounts ?? [], kimiAccounts);
+        // Window audit item 43: a group's chain offers only accounts that serve the group (its own or
+        // lent to it); a step pinned to another could never run there.
+        const groupAccounts = (snapshot?.accounts ?? []).filter((a) => scope.kind !== 'project' || servesPool(snapshot!, a, scope.pool));
+        const choices = accountsForStep(step.agent, groupAccounts, kimiAccounts);
         const openrouterAgent = step.agent === 'hermes' || step.agent === 'opencode';
         const options: [string, string][] = [['', openrouterAgent ? t('The OpenRouter key') : t('Any account with room')], ...choices.map((c): [string, string] => [c.id, c.label])];
         if (step.account_id && !choices.some((c) => c.id === step.account_id)) options.push([step.account_id, chainAccountLabel(step.account_id) ?? step.account_id]);
@@ -2776,7 +2779,7 @@ function attentionSection(main: HTMLElement) {
     const key = `attention-${item.account_id ?? `${item.reason}-${index}`}`;
     const act = button(attentionActionLabel(item.action.window), () => attentionAct(item, account, key), 'button row-button', key);
     // A sign-in or a check needs the account here; without it the action has nothing to act on.
-    if ((item.action.window === 'sign_in' && !account && !item.provider) || (item.action.window === 'check_usage' && !account)) { act.disabled = true; act.dataset.locked = 'true'; }
+    if ((item.action.window === 'sign_in' && !account && !item.provider) || (item.action.window === 'check_usage' && !account) || (item.action.window === 'close_copy' && !item.session_id)) { act.disabled = true; act.dataset.locked = 'true'; }
     row.append(copy, act); list.append(row);
   });
   section.append(list); main.append(section);
@@ -2792,6 +2795,8 @@ function attentionAct(item: AttentionItem, account: Account | undefined, key: st
     case 'answer_ceiling': goTo('agents'); return;
     case 'open_machines': goTo('projects', 'machines-heading'); return;
     case 'open_sessions': goTo('activity', 'sessions-tree-heading'); return;
+    // SB-388: one press closes the copy quiet longest, never a working one.
+    case 'close_copy': { const id = item.session_id; if (id) void mutate(() => adapter.sessionCloseCopy(id), t('Closed the quiet copy. The other one keeps working.'), key); return; }
   }
 }
 const policyTarget = (target: RotationPolicy['target']) => target === 'managed' ? t('Managed route') : t('Claude Code account');

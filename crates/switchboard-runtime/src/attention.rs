@@ -33,7 +33,7 @@ pub const CEILING_GROUP: &str =
 pub const CEILING_TASK: &str = "A task's spending ceiling was reached. Keep it or double it.";
 /// SB-379: one Claude Code session runs in two processes (a resumed copy of a live session).
 pub const SESSION_DUPLICATE: &str =
-    "One session runs in two processes. Close the newer copy so they do not work over each other.";
+    "One session runs in two processes. Close the quiet copy so they do not work over each other.";
 /// SB-379: a board run whose folder has not been written for 30 minutes.
 pub const SESSION_STUCK: &str =
     "A board run has been quiet for 30 minutes. Look at it, or stop it.";
@@ -229,7 +229,13 @@ pub fn build(inputs: &Inputs) -> Value {
                 "since": null,
                 "pids": finding["pids"],
                 "launch_id": finding["launch_id"],
-                "action": {"tool": "switchboard_sessions", "window": "open_sessions"},
+                "session_id": finding["session_id"],
+                // SB-388: a duplicate is fixed in one press: its quiet copy is closed.
+                "action": if reason == "session_duplicate" {
+                    json!({"tool": "switchboard_session_close_copy", "window": "close_copy"})
+                } else {
+                    json!({"tool": "switchboard_sessions", "window": "open_sessions"})
+                },
             }),
         );
     }
@@ -316,6 +322,12 @@ mod tests {
         assert_eq!(answer["items"][0]["pids"], json!([3, 4]));
         assert_eq!(answer["items"][1]["label"], "alpha");
         assert_eq!(answer["items"][1]["action"]["window"], "open_sessions");
+        assert_eq!(answer["items"][0]["session_id"], "s-1");
+        assert_eq!(answer["items"][0]["action"]["window"], "close_copy");
+        assert_eq!(
+            answer["items"][0]["action"]["tool"],
+            "switchboard_session_close_copy"
+        );
     }
     fn reasons(answer: &Value) -> Vec<String> {
         answer["items"]

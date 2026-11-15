@@ -1680,6 +1680,11 @@ check(() => {
     assert.ok(line && !line.includes('\u2014'), reason);
   }
   assert.deepEqual(['sign_in', 'answer_ceiling', 'check_usage', 'open_machines'].map(logic.attentionActionLabel), ['Sign in again', 'Answer', 'Check again', 'Open Other machines']);
+  // SB-388: a duplicate's item carries its session id and offers to close the quiet copy.
+  const dup = logic.attentionView({ items: [{ account_id: null, label: 'alpha', reason: 'session_duplicate', session_id: 's-1', action: { tool: 'switchboard_session_close_copy', window: 'close_copy' } }] });
+  assert.equal(dup.items[0].session_id, 's-1');
+  assert.equal(logic.attentionActionLabel(dup.items[0].action.window), 'Close the quiet copy');
+  assert.equal(view.items[0].session_id, null, 'an item without one reads null');
   i18nForShell.setLocale('ru');
   assert.equal(logic.attentionActionLabel('check_usage'), 'Проверить снова');
   i18nForShell.setLocale('en');

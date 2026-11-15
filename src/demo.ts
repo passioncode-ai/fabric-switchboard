@@ -49,6 +49,8 @@ export function createDemoAdapter(): Adapter {
   const ceilingsParam = new URLSearchParams(location.search).get('ceilings');
   let demoCeilings: CeilingView[] = [];
   let demoQuestions: CeilingQuestionView[] = [];
+  // SB-388: one session in two processes, for Needs attention's Close the quiet copy.
+  let demoDuplicate: string | null = 's-demo-dup';
   const ceilingView = (scope: ChainScope, cents: number, doubledFrom: number | null = null): CeilingView => ({ scope, cents, usd: cents / 100, set_at: now() - 7200, doubled_from: doubledFrom, active: true, inactive_reason: null });
   if (ceilingsParam === 'set' || ceilingsParam === 'reached') {
     Object.assign(openrouter, { saved: true, saved_at: now() - 86_400, model: 'moonshotai/kimi-k3.1-pro', credit: { label: 'demo', limit: 10, limit_remaining: 8.8, limit_reset: 'daily', usage: 31.2, usage_daily: 1.2, is_free_tier: false }, credit_error: null });
@@ -245,7 +247,7 @@ export function createDemoAdapter(): Adapter {
   const presetAgents = ['claude-code', 'codex', 'kimi-code', 'hermes'];
   let demoChains: Chain[] = [
     { scope: { kind: 'machine' }, executors: presetAgents.map((agent) => ({ agent })), updated_at: now() - 86_400 },
-    { scope: { kind: 'project', pool: 'alpha-web' }, executors: [{ agent: 'codex', account_id: 'demo-codex-work' }, { agent: 'opencode' }], updated_at: now() - 7200 },
+    { scope: { kind: 'project', pool: 'alpha-web' }, executors: [{ agent: 'codex', account_id: 'demo-codex-lab' }, { agent: 'opencode' }], updated_at: now() - 7200 },
     { scope: { kind: 'workflow', id: 'wf_0123456789abcdef' }, executors: [{ agent: 'claude-code' }, { agent: 'hermes', key: 'alpha-web/prod/OPENROUTER_API_KEY' }], updated_at: now() - 600 },
   ];
   let lastHandover: LastHandover | null = { at: now() - 3 * 3600, workflow: 'wf_0123456789abcdef', outcome: 'offered', skipped: [{ agent: 'hermes', reason: 'no_usable_account' }] };
@@ -356,6 +358,7 @@ export function createDemoAdapter(): Adapter {
     async attention() {
       const item = (id: string) => state.accounts.find((a) => a.id === id);
       const items = [
+        ...(demoDuplicate ? [{ account_id: null, label: 'alpha-web', provider: null, pool: null, reason: 'session_duplicate' as const, detail: 'Synthetic: one session in two processes.', since: null, session_id: demoDuplicate, action: { tool: 'switchboard_session_close_copy', window: 'close_copy' as const } }] : []),
         ...[...signInRequired].map((id) => item(id)).filter((a): a is Account => !!a).map((a) => ({ account_id: a.id, label: a.label, provider: a.provider, pool: a.pool, reason: 'sign_in' as const, detail: 'Synthetic: the sign-in ended.', since: now() - 3600, action: { tool: 'switchboard_login', window: 'sign_in' as const } })),
         ...[...failingChecks].map((id) => item(id)).filter((a): a is Account => !!a).map((a) => ({ account_id: a.id, label: a.label, provider: a.provider, pool: a.pool, reason: 'usage_failing' as const, detail: 'Synthetic: the usage check fails.', since: now() - 5400, action: { tool: 'switchboard_usage', window: 'check_usage' as const } })),
         ...demoQuestions.map(() => ({ account_id: null, label: null, provider: null, pool: null, reason: 'ceiling_question' as const, detail: 'Synthetic: a ceiling was reached.', since: now() - 600, action: { tool: 'switchboard_ceiling_answer', window: 'answer_ceiling' as const } })),
@@ -635,6 +638,12 @@ export function createDemoAdapter(): Adapter {
       if (tree.length >= from.folders.length) throw new Error("This is the project's only repository. Add another folder to the project first, or delete the project.");
       from.folders = from.folders.filter((f) => !tree.includes(f)); target.folders.push(...tree); log('project', '', 'updated');
     },
+    async sessionCloseCopy(sessionId) {
+      await pause();
+      if (sessionId !== demoDuplicate) throw new Error('That session no longer runs in two processes. Refresh to see it now.');
+      demoDuplicate = null;
+      return { session_id: sessionId, closed_pid: 4188, kept_pids: [4101] };
+    },
     async sessionTree() {
       const now = Math.floor(Date.now() / 1000);
       const task = (workflow: string | null, request: string | null = null) => ({ workflow, request, project: null });
@@ -761,6 +770,7 @@ export function createDemoAdapter(): Adapter {
       if (preset && preset !== 'subscriptions-first') throw new Error('Unknown preset.');
       const list: ChainExecutor[] = preset ? presetAgents.map((agent) => ({ agent })) : executors;
       if (list.length > 8) throw new Error('A chain holds at most 8 agents.');
+      if (scope.kind === 'project' && list.some((e) => { const a = e.account_id ? state.accounts.find((x) => x.id === e.account_id) : undefined; return !!a && !servesPool(state, a, scope.pool); })) throw new Error("This account does not serve this group. Pin one of the group's own accounts, or leave the step on any account with room.");
       demoChains = demoChains.filter((c) => scopeKey(c.scope) !== scopeKey(scope));
       if (!list.length) { log('fallback_chain', '', 'cleared'); return { chain: null }; }
       const chain: Chain = { scope: structuredClone(scope), executors: structuredClone(list), updated_at: now() };
