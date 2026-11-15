@@ -59,7 +59,10 @@ h1:focus { outline: none; }
 .usage-error { color: var(--danger); font-size: var(--t-chip); margin-top: var(--space-1); }
 .text-button { border: 0; background: transparent; padding: var(--space-1) 0; min-height: var(--control-h-compact); color: var(--muted); font-size: var(--t-label); white-space: nowrap; }
 .text-button:hover:not(:disabled) { color: var(--ink); text-decoration: underline; text-underline-offset: 3px; }
-.danger-text { color: var(--danger); }
+/* Q2 item 39: a text button reads as a link before it is hovered. */
+.text-button:not(:disabled) { color: var(--link); text-decoration: underline; text-decoration-color: color-mix(in srgb, currentColor 40%, transparent); text-underline-offset: 3px; cursor: pointer; }
+.text-button:hover:not(:disabled) { text-decoration-color: currentColor; }
+.danger-text, .text-button.danger-text:not(:disabled) { color: var(--danger); }
 .surface-note { font-size: var(--t-label); line-height: 1.65; margin-top: var(--space-4); max-width: 800px; }
 .operation-progress { color: var(--muted); margin-bottom: var(--space-3); }
 /* VIS-14: one notice. Every strip above a page (result, error, terms, active rules, a found folder,
@@ -764,3 +767,6 @@ g:hover > .chart-bar { opacity: .82; }
 /* Q2 items 13, 14: no rule under the last session, and the sessions fold keeps its distance from the panel below. */
 .session-list > .session-row:last-child { border-bottom: 0; padding-bottom: 0; }
 .sessions-fold + * { margin-top: var(--space-4); }
+/* Q2 item 28: an event reads title, then a smaller detail, then who. */
+.event-row .event-detail { font-size: var(--t-label); }
+.event-row .event-id { font-family: var(--font-ui); }

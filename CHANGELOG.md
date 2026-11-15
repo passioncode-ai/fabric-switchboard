@@ -8,6 +8,7 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- Text buttons look like links before you hover them; an event in Activity shows its detail smaller than its title and names its account by label instead of its id (SB-379).
 - Clearer words in the window: Hermes and OpenCode say they wait for an OpenRouter key, not for an account; Agents names the scope of its settings once; the Groups count in the navigation says it counts folder rules; About, Settings and Agents explain the proxy, the terminal hook and the MCP switch without internal terms or a repository path (SB-379).
 - Automatic switching reads Claude Code's sign-in and which accounts need a new sign-in before it takes the owner's lock, once per pass, so a slow Keychain no longer holds every other operation behind it (W4, SB-379).
 - Faster under load: a Fabric board dispatch and a hand-over run the workflow engine off the owner's request thread, so other calls are not held behind it; `project-suggestions.json` forgets a deleted folder's row two days after it left instead of keeping it for good; the window reads the folder list once per burst of folder events (W4, SB-379).

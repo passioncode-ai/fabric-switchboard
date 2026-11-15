@@ -890,7 +890,7 @@ export const RU: Record<string, string> = {
   "Automatic switching settings": "Настройки автопереключения",
   "No activity yet": "Событий пока нет",
   "Adding accounts, changing routes, and launching sessions will appear here. Credentials and prompts are never part of this journal.": "Здесь будут видны добавление аккаунтов, смена маршрутов и запуски сессий. Учётные данные и промпты в журнал никогда не попадают.",
-  "A bounded local journal. A terminal launch is not proof of a successful provider request.": "Локальный журнал ограниченного размера. Запуск в Терминале ещё не значит, что запрос к провайдеру прошёл.",
+  "Kept on this computer, newest first; older events drop off. A terminal that opened does not mean the provider answered.": "Хранится на этом компьютере, новые сверху; старые события уходят. Открытый терминал не значит, что провайдер ответил.",
   "A local account workbench": "Локальный менеджер аккаунтов",
   "Switchboard stores credentials in the native vault and manages private homes for Claude Code and Codex CLI. Account labels and imported identities are what you entered until a provider confirms them.": "Switchboard хранит учётные данные в системном хранилище и ведёт отдельные домашние папки для Claude Code и Codex CLI. Названия аккаунтов и владельцы импортированных аккаунтов остаются тем, что вы ввели, пока их не подтвердит провайдер.",
   "Isolated launch": "Изолированный запуск",

@@ -3198,8 +3198,9 @@ function renderActivity(main: HTMLElement) {
         const row = el('li', 'event-row'); const line = el('div', 'event-title');
         const account = snapshot!.accounts.find((item) => item.id === event.account_id);
         line.append(el('strong', '', eventAction(event.action)), el('time', '', new Date(event.at * 1000).toLocaleTimeString(dateLocale(), { hour: '2-digit', minute: '2-digit' })));
-        row.append(line, el('p', '', eventDetail(event.detail)));
-        if (event.account_id) row.append(el('span', 'event-id', `${account ? `${account.label} · ` : ''}${event.account_id}`));
+        // Q2 item 28: the detail reads smaller than its title; the account by its label, its id only on hover.
+        row.append(line, el('p', 'event-detail', eventDetail(event.detail)));
+        if (event.account_id) { const who = el('span', 'event-id', account ? account.label : event.account_id); who.title = event.account_id; row.append(who); }
         list.append(row);
       }
       return [list];
@@ -3209,7 +3210,7 @@ function renderActivity(main: HTMLElement) {
     const more = button(journalLoading ? t('Reading older events…') : t('Show more'), () => { activityShown += EVENTS_PAGE; if (page.fetch) void loadJournal(true); render(); restoreFocus('activity-more'); }, 'button quiet', 'activity-more');
     more.disabled = journalLoading; panel.append(more);
   }
-  panel.append(el('p', 'surface-note', t('A bounded local journal. A terminal launch is not proof of a successful provider request.')));
+  panel.append(el('p', 'surface-note', t('Kept on this computer, newest first; older events drop off. A terminal that opened does not mean the provider answered.')));
   main.append(panel);
 }
 function renderAbout(main: HTMLElement) {
