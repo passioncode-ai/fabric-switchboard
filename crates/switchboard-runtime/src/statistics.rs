@@ -32,12 +32,17 @@ struct Saved {
 #[derive(Default)]
 pub(crate) struct Statistics {
     inner: Mutex<State>,
+    /// W4 item 16: one save at a time, so an older copy never lands after a newer one; the
+    /// counts' own lock is not held while the file is written.
+    writing: Mutex<()>,
 }
 #[derive(Default)]
 struct State {
     tallies: Tallies,
     names: BTreeMap<String, String>,
     dirty: bool,
+    /// Counts absorbed so far; a save clears `dirty` only when none came in while it wrote.
+    generation: u64,
     saved_at: i64,
     /// SB-352: what this owner absorbed in the last hours, by quarter of an hour, group and
     /// account: `(quarter start, pool, account)` → (requests, limit refusals). Memory only.
@@ -70,10 +75,12 @@ impl Statistics {
                 tallies,
                 names: saved.names,
                 dirty: false,
+                generation: 0,
                 saved_at: 0,
                 recent: BTreeMap::new(),
                 since: crate::monitor::now(),
             }),
+            writing: Mutex::new(()),
         }
     }
     /// Adds the proxy's new counts.
@@ -100,6 +107,7 @@ impl Statistics {
             }
             s.recent.retain(|(q, _, _), _| *q + RECENT_KEEP >= now);
             s.dirty = true;
+            s.generation += 1;
         }
     }
     /// SB-352: requests and limit refusals per group and account in the last `seconds`, by
@@ -205,32 +213,41 @@ impl Statistics {
     /// Writes when something changed and the last write is older than a quarter of an hour, or
     /// at once with `force` (the stop).
     pub(crate) fn save(&self, root: &Path, now: i64, force: bool) {
-        let Ok(mut s) = self.inner.lock() else {
+        let Ok(_writing) = self.writing.lock() else {
             return;
         };
-        if !s.dirty || (!force && now - s.saved_at < FLUSH_SECONDS) {
-            return;
-        }
-        let oldest = stats::day_of(now - (KEEP_DAYS - 1) * 86_400);
-        s.tallies
-            .retain(|k, _| stats::parts(k).is_some_and(|p| p.day >= oldest.as_str()));
-        while s.tallies.len() > MAX_ROWS {
-            // Oldest day first: keys start with the day.
-            let Some(first) = s.tallies.keys().next().cloned() else {
-                break;
+        // W4 item 16 (perf audit): the counts are pruned and copied under their lock, and the
+        // file (1.3 MB, fsync'd) is written after it is released, so a read of the counts never
+        // waits for the disk.
+        let (saved, rows, generation) = {
+            let Ok(mut s) = self.inner.lock() else {
+                return;
             };
-            s.tallies.remove(&first);
-        }
-        let keys: std::collections::BTreeSet<String> = s
-            .tallies
-            .keys()
-            .filter_map(|k| stats::parts(k).map(|p| p.folder.to_owned()))
-            .collect();
-        s.names.retain(|k, _| keys.contains(k));
-        let saved = Saved {
-            version: 1,
-            tallies: s.tallies.clone(),
-            names: s.names.clone(),
+            if !s.dirty || (!force && now - s.saved_at < FLUSH_SECONDS) {
+                return;
+            }
+            let oldest = stats::day_of(now - (KEEP_DAYS - 1) * 86_400);
+            s.tallies
+                .retain(|k, _| stats::parts(k).is_some_and(|p| p.day >= oldest.as_str()));
+            while s.tallies.len() > MAX_ROWS {
+                // Oldest day first: keys start with the day.
+                let Some(first) = s.tallies.keys().next().cloned() else {
+                    break;
+                };
+                s.tallies.remove(&first);
+            }
+            let keys: std::collections::BTreeSet<String> = s
+                .tallies
+                .keys()
+                .filter_map(|k| stats::parts(k).map(|p| p.folder.to_owned()))
+                .collect();
+            s.names.retain(|k, _| keys.contains(k));
+            let saved = Saved {
+                version: 1,
+                tallies: s.tallies.clone(),
+                names: s.names.clone(),
+            };
+            (saved, s.tallies.len(), s.generation)
         };
         let written = serde_json::to_vec(&saved)
             .map_err(|_| String::new())
@@ -244,12 +261,17 @@ impl Statistics {
                     "outcome",
                     crate::oplog::Field::Code(if written.is_ok() { "written" } else { "failed" }),
                 ),
-                ("rows", crate::oplog::Field::Number(s.tallies.len() as i64)),
+                ("rows", crate::oplog::Field::Number(rows as i64)),
             ],
         );
         if written.is_ok() {
-            s.dirty = false;
-            s.saved_at = now;
+            if let Ok(mut s) = self.inner.lock() {
+                // Counts absorbed while the file was written stay dirty for the next save.
+                if s.generation == generation {
+                    s.dirty = false;
+                }
+                s.saved_at = now;
+            }
         }
     }
     /// SB-173: the folders the counts carry. Counts kept before SB-156, or from a folder taken out
@@ -611,6 +633,43 @@ impl ProjectIndex {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_save_writes_off_the_counts_lock_and_keeps_later_counts_dirty() {
+        let dir = tempfile::tempdir().unwrap();
+        let stats = Statistics::load(dir.path());
+        let key = |day: &str| stats::key(day, "acc", "default", "claude-code", "/work/a");
+        let now = 1_800_000_000;
+        let day = stats::day_of(now);
+        let mut first = Tallies::new();
+        first.insert(
+            key(&day),
+            Tally {
+                requests: 1,
+                ..Tally::default()
+            },
+        );
+        stats.absorb_at(first, now);
+        stats.save(dir.path(), now, true);
+        assert!(dir.path().join(FILE).exists());
+        assert!(
+            !stats.inner.lock().unwrap().dirty,
+            "nothing came in while it wrote"
+        );
+        // A count absorbed after the copy was taken is not lost by the save that follows it.
+        let generation = stats.inner.lock().unwrap().generation;
+        let mut second = Tallies::new();
+        second.insert(
+            key(&day),
+            Tally {
+                requests: 1,
+                ..Tally::default()
+            },
+        );
+        stats.absorb_at(second, now + 1);
+        assert_eq!(stats.inner.lock().unwrap().generation, generation + 1);
+        assert!(stats.inner.lock().unwrap().dirty);
+    }
+
     use super::*;
 
     fn tally(requests: u64, input: u64) -> Tally {
