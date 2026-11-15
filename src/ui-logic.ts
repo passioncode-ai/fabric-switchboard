@@ -1189,7 +1189,9 @@ export function chainSummary(executors: readonly ChainExecutor[] | null | undefi
 }
 /** Why a step would be passed over, as a phrase: the chains view's readiness reasons and the
  * hand-over gate's (fallback.rs, spend gate C-5). An unknown code is shown as itself. */
-export function skipReasonText(reason: string | null | undefined): string | null {
+export function skipReasonText(reason: string | null | undefined, agent?: string): string | null {
+  // Q2 item 32: Hermes and OpenCode run on the OpenRouter key, not on an account.
+  if (reason === 'no_usable_account' && (agent === 'hermes' || agent === 'opencode')) return t('no OpenRouter key ready');
   switch (reason) {
     case 'no_usable_account': return t('no account with room');
     case 'agent_disabled': return t('disabled under Installed');
@@ -1209,7 +1211,7 @@ export function skipReasonText(reason: string | null | undefined): string | null
 }
 /** One readiness line for a step (SCN-082): ready on which account or key, or why not. A paid
  * step's spend is read only at a hand-over, so the window says it has not been read. */
-export function stepReasonText(step: Pick<ChainStepView, 'state' | 'reason' | 'paid' | 'account_label' | 'key_scope' | 'key' | 'containment'>, groupName?: string): string {
+export function stepReasonText(step: Pick<ChainStepView, 'state' | 'reason' | 'paid' | 'account_label' | 'key_scope' | 'key' | 'containment'> & { agent?: string }, groupName?: string): string {
   if (step.state === 'ready') {
     const where = step.key_scope === 'group' ? (groupName ? t('the key of {group}', { group: groupName }) : t('the group\'s key')) : step.key_scope === 'machine' ? t('this computer\'s key') : step.account_label ?? '';
     const line = where ? t('Ready: {where}', { where }) : t('Ready');
@@ -1219,7 +1221,7 @@ export function stepReasonText(step: Pick<ChainStepView, 'state' | 'reason' | 'p
   }
   if (step.state === 'not_installed') return t('Not installed');
   if (step.state === 'not_automatic') return step.reason === 'key_pinned' && step.key ? t('Pinned to key {name}: not automatic yet (waits for project grants)', { name: step.key }) : t('Not automatic yet');
-  const phrase = skipReasonText(step.reason);
+  const phrase = skipReasonText(step.reason, step.agent);
   return phrase ? t('Skipped: {reason}', { reason: phrase }) : t('Skipped ({code})', { code: step.reason ?? '?' });
 }
 /** What the last hand-over did, as a phrase after “Last hand-over: {time},”. */
@@ -1234,7 +1236,7 @@ export function handoverOutcomeText(outcome: string): string {
 }
 /** The steps the last hand-over passed over, one “Agent: reason” each. */
 export function handoverSkipped(skipped: readonly { agent: string; reason: string }[], nameOf: (agent: string) => string): string[] {
-  return skipped.map((s) => `${nameOf(s.agent)}: ${skipReasonText(s.reason) ?? s.reason}`);
+  return skipped.map((s) => `${nameOf(s.agent)}: ${skipReasonText(s.reason, s.agent) ?? s.reason}`);
 }
 /** A workflow id short enough for a row: wf_ and its first eight hex digits. */
 export const shortWorkflow = (id: string) => id.slice(0, 11);

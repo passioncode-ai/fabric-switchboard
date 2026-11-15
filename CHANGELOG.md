@@ -8,6 +8,7 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- Clearer words in the window: Hermes and OpenCode say they wait for an OpenRouter key, not for an account; Agents names the scope of its settings once; the Groups count in the navigation says it counts folder rules; About, Settings and Agents explain the proxy, the terminal hook and the MCP switch without internal terms or a repository path (SB-379).
 - Faster under load: a Fabric board dispatch and a hand-over run the workflow engine off the owner's request thread, so other calls are not held behind it; `project-suggestions.json` forgets a deleted folder's row two days after it left instead of keeping it for good; the window reads the folder list once per burst of folder events (W4, SB-379).
 ## 0.7.90
 
