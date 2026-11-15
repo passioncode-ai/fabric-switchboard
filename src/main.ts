@@ -2601,6 +2601,7 @@ function quotaDetails(account: Account) {
   const details = el('div', 'row-details');
   const windows = observation.windows?.length ? observation.windows : [{ name: t('Highest reported window'), used_percent: observation.used_percent, resets_at: observation.resets_at }];
   const limit = accountLimit(account);
+  const single = !observation.windows?.length; const shown = cardState(account, quotaContext()); const sayingReset = shown === 'available' || shown === 'low';
   if (limit) {
     // The hold is not a quota reset; the windows below keep their own reset times.
     const row = el('div', 'quota-window'); row.append(el('strong', '', limitTitle(limit)), resetDisplay(limit.until, (when) => (limitLabel(limit) === t('Limit resets') ? t('Limit resets {date}', { date: when }) : t('Retry hold until {date}', { date: when }))));
@@ -2612,8 +2613,9 @@ function quotaDetails(account: Account) {
     const name = 'name' in window && isFeatureWindow(window) ? featureWindowLabel(window.name) : window.name;
     const row = el('div', 'quota-window'); row.append(el('strong', '', reset ? t('{name} · usage unknown since reset', { name }) : t('{name} · {percent}% used', { name, percent: Math.round(window.used_percent) })));
     if (reset) row.append(el('span', 'usage-caption', t('Reset {date} · {percent}% was used before', { date: date(window.resets_at!), percent: Math.round(window.used_percent) })));
-    else if (window.resets_at) row.append(resetDisplay(window.resets_at));
-    else row.append(el('span', 'usage-caption', t('Reset time unavailable')));
+    // Q2 item 53: with one window and room left, the summary line already says when it resets.
+    else if (window.resets_at && !(single && sayingReset)) row.append(resetDisplay(window.resets_at));
+    else if (!window.resets_at) row.append(el('span', 'usage-caption', t('Reset time unavailable')));
     details.append(row);
   }
   details.append(el('p', 'usage-caption', t('{source} · Observed {date}', { source: observation.source, date: date(observation.observed_at) })));
