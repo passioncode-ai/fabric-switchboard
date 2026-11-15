@@ -201,6 +201,17 @@ enum Command {
         /// minutes, a launch whose process is gone. Read here, without the owner.
         #[arg(long, conflicts_with_all = ["history", "all", "machine"])]
         tree: bool,
+        /// Read it on another machine, as ssh knows it (`switchboard targets`), through
+        /// that machine's Switchboard; the answer is the one it gives there.
+        #[arg(long)]
+        target: Option<String>,
+        /// With --target: that machine's switchboard, an absolute path; by default the one the
+        /// newest move or run there used, else the macOS app's.
+        #[arg(long, requires = "target")]
+        remote: Option<String>,
+        /// With --target: that machine's data folder, when its Switchboard runs with --data-dir.
+        #[arg(long, requires = "target")]
+        remote_data_dir: Option<String>,
         #[command(subcommand)]
         command: Option<SessionsCommand>,
     },
@@ -298,6 +309,17 @@ enum Command {
     Attach {
         /// The launch id.
         launch_id: String,
+        /// Attach to a session on another machine, as ssh knows it (`switchboard targets`), through
+        /// that machine's Switchboard; the session shows in this terminal.
+        #[arg(long)]
+        target: Option<String>,
+        /// With --target: that machine's switchboard, an absolute path; by default the one the
+        /// newest move or run there used, else the macOS app's.
+        #[arg(long, requires = "target")]
+        remote: Option<String>,
+        /// With --target: that machine's data folder, when its Switchboard runs with --data-dir.
+        #[arg(long, requires = "target")]
+        remote_data_dir: Option<String>,
     },
     /// Starts one session in a session host and shows it in this terminal: the command a Terminal
     /// window Switchboard opens runs.
@@ -1744,6 +1766,17 @@ enum SessionsCommand {
     End {
         /// The launch id.
         launch_id: String,
+        /// End a session on another machine, as ssh knows it (`switchboard targets`), through
+        /// that machine's Switchboard; it answers as it does there.
+        #[arg(long)]
+        target: Option<String>,
+        /// With --target: that machine's switchboard, an absolute path; by default the one the
+        /// newest move or run there used, else the macOS app's.
+        #[arg(long, requires = "target")]
+        remote: Option<String>,
+        /// With --target: that machine's data folder, when its Switchboard runs with --data-dir.
+        #[arg(long, requires = "target")]
+        remote_data_dir: Option<String>,
     },
 }
 /// Where `switchboard launch` is run from, for the launch record.
@@ -1854,6 +1887,28 @@ async fn run(cli: &Cli) -> Result<Value, String> {
     let root = cli.data_dir.clone().map(Ok).unwrap_or_else(default_root)?;
     if !root.is_absolute() {
         return Err("--data-dir must be an absolute private directory.".into());
+    }
+    // SB-380: a session read, ended or attached on another machine runs that machine's
+    // Switchboard over ssh; nothing is asked of this machine's owner.
+    if let Some((target, remote, remote_data_dir, words, tty)) = there(&cli.command) {
+        let names_launch = words.first().is_some_and(|w| w == "attach")
+            || words.get(1).is_some_and(|w| w == "end");
+        if names_launch && !words.last().is_some_and(|id| launches::valid_id(id)) {
+            return Err(switchboard_runtime::session_host::NOT_FOUND.into());
+        }
+        let (program, data_dir) =
+            switchboard_runtime::targets::program_for(&root, &target, remote, remote_data_dir);
+        let ssh_args = switchboard_runtime::targets::command_ssh(
+            &target,
+            &switchboard_runtime::account_send::Program {
+                path: &program,
+                data_dir: data_dir.as_deref(),
+            },
+            &words,
+            cli.json && !tty,
+            tty,
+        )?;
+        return exec_ssh(&ssh_args);
     }
     if let Command::Mcp { read_only } = cli.command {
         mcp::Server::new(root, read_only).serve().await?;
@@ -2375,7 +2430,7 @@ async fn run(cli: &Cli) -> Result<Value, String> {
         ),
         #[cfg(unix)]
         Command::Sessions {
-            command: Some(SessionsCommand::End { launch_id }),
+            command: Some(SessionsCommand::End { launch_id, .. }),
             ..
         } => {
             return switchboard_runtime::session_host::end(&root, launch_id);
@@ -2583,7 +2638,7 @@ async fn run(cli: &Cli) -> Result<Value, String> {
             .await;
         }
         #[cfg(unix)]
-        Command::Attach { launch_id } => {
+        Command::Attach { launch_id, .. } => {
             return finish_attach(launch_id, hosted::attach(&root, launch_id)?);
         }
         #[cfg(not(unix))]
@@ -3202,6 +3257,72 @@ fn finish_attach(launch_id: &str, ended: hosted::Ended) -> Result<Value, String>
 #[cfg(not(unix))]
 fn run_hosted(_: &std::path::Path, _: &str, _: &std::path::Path) -> Result<Value, String> {
     Err("A session host runs on macOS and Linux for now.".into())
+}
+/// SB-380: the command to run on another machine for `sessions`, `sessions end` and `attach`
+/// given `--target`: the machine, its program and data folder, the words, and whether it needs a
+/// terminal. A launch id is checked here, before it reaches the other machine.
+type There = (String, Option<String>, Option<String>, Vec<String>, bool);
+fn there(command: &Command) -> Option<There> {
+    match command {
+        Command::Sessions {
+            target: Some(target),
+            remote,
+            remote_data_dir,
+            all,
+            history,
+            machine,
+            tree,
+            command: None,
+        } => {
+            let mut words = vec!["sessions".to_owned()];
+            for (on, flag) in [
+                (*all, "--all"),
+                (*history, "--history"),
+                (*machine, "--machine"),
+                (*tree, "--tree"),
+            ] {
+                if on {
+                    words.push(flag.to_owned());
+                }
+            }
+            Some((
+                target.clone(),
+                remote.clone(),
+                remote_data_dir.clone(),
+                words,
+                false,
+            ))
+        }
+        Command::Sessions {
+            command:
+                Some(SessionsCommand::End {
+                    launch_id,
+                    target: Some(target),
+                    remote,
+                    remote_data_dir,
+                }),
+            ..
+        } => Some((
+            target.clone(),
+            remote.clone(),
+            remote_data_dir.clone(),
+            vec!["sessions".into(), "end".into(), launch_id.clone()],
+            false,
+        )),
+        Command::Attach {
+            launch_id,
+            target: Some(target),
+            remote,
+            remote_data_dir,
+        } => Some((
+            target.clone(),
+            remote.clone(),
+            remote_data_dir.clone(),
+            vec!["attach".into(), launch_id.clone()],
+            true,
+        )),
+        _ => None,
+    }
 }
 /// SB-332: what `launch --target` passes on to the other machine's `switchboard launch`.
 struct LaunchThere {
