@@ -31,6 +31,12 @@ pub const CEILING_MACHINE: &str =
 pub const CEILING_GROUP: &str =
     "A group's daily spending ceiling was reached. Keep it or double it.";
 pub const CEILING_TASK: &str = "A task's spending ceiling was reached. Keep it or double it.";
+/// SB-379: one Claude Code session runs in two processes (a resumed copy of a live session).
+pub const SESSION_DUPLICATE: &str =
+    "One session runs in two processes. Close the newer copy so they do not work over each other.";
+/// SB-379: a board run whose folder has not been written for 30 minutes.
+pub const SESSION_STUCK: &str =
+    "A board run has been quiet for 30 minutes. Look at it, or stop it.";
 
 /// What the list is built from; every field is already in memory or one small file read.
 pub struct Inputs<'a> {
@@ -45,11 +51,15 @@ pub struct Inputs<'a> {
     pub questions: &'a [Question],
     /// SB-366: the last background read of the accounts on other machines.
     pub remote: &'a crate::remote_usage::State,
+    /// SB-379: the one-minute watch's last findings (`session_watch::last`).
+    pub watch: &'a [Value],
     pub now: i64,
 }
 
 /// Reasons in the order they are listed.
-const ORDER: [&str; 7] = [
+const ORDER: [&str; 9] = [
+    "session_duplicate",
+    "session_stuck",
     "sign_in",
     "seat_ended",
     "renewal_refused",
@@ -193,6 +203,36 @@ pub fn build(inputs: &Inputs) -> Value {
             }),
         );
     }
+    for finding in inputs.watch {
+        let (reason, detail) = match finding["kind"].as_str() {
+            Some(crate::session_watch::DUPLICATE) => ("session_duplicate", SESSION_DUPLICATE),
+            Some(crate::session_watch::STUCK) => ("session_stuck", SESSION_STUCK),
+            _ => continue,
+        };
+        let label = finding["folder"]
+            .as_str()
+            .and_then(|f| std::path::Path::new(f).file_name())
+            .and_then(|n| n.to_str())
+            .map(str::to_owned)
+            .or_else(|| finding["session_id"].as_str().map(str::to_owned))
+            .unwrap_or_default();
+        push(
+            reason,
+            label.clone(),
+            json!({
+                "account_id": null,
+                "label": label,
+                "provider": null,
+                "pool": null,
+                "reason": reason,
+                "detail": detail,
+                "since": null,
+                "pids": finding["pids"],
+                "launch_id": finding["launch_id"],
+                "action": {"tool": "switchboard_sessions", "window": "open_sessions"},
+            }),
+        );
+    }
     items.sort_by(|a, b| (a.0, &a.1).cmp(&(b.0, &b.1)));
     let items: Vec<Value> = items.into_iter().map(|(_, _, item)| item).collect();
     json!({"count": items.len(), "items": items})
@@ -249,8 +289,33 @@ mod tests {
             seats,
             questions,
             remote: &crate::remote_usage::State::default(),
+            watch: &[],
             now: 10_000,
         })
+    }
+    #[test]
+    fn a_copy_of_a_live_session_and_a_quiet_board_run_come_first() {
+        let snapshot = Snapshot::default();
+        let watch = vec![
+            json!({"kind": "stuck", "launch_id": "L-1", "pids": [7], "folder": "/work/alpha"}),
+            json!({"kind": "duplicate", "session_id": "s-1", "pids": [3, 4]}),
+            json!({"kind": "gone", "launch_id": "L-2"}),
+        ];
+        let answer = build(&Inputs {
+            snapshot: &snapshot,
+            sign_in: &[],
+            renewal_refused: &[],
+            seats: &[],
+            questions: &[],
+            remote: &crate::remote_usage::State::default(),
+            watch: &watch,
+            now: 10_000,
+        });
+        // A launch that is gone is shown in the session tree, not here.
+        assert_eq!(reasons(&answer), ["session_duplicate", "session_stuck"]);
+        assert_eq!(answer["items"][0]["pids"], json!([3, 4]));
+        assert_eq!(answer["items"][1]["label"], "alpha");
+        assert_eq!(answer["items"][1]["action"]["window"], "open_sessions");
     }
     fn reasons(answer: &Value) -> Vec<String> {
         answer["items"]
@@ -401,6 +466,7 @@ mod tests {
             seats: &[],
             questions: &[],
             remote: &remote,
+            watch: &[],
             now: 10_000,
         });
         assert_eq!(reasons(&answer), ["refused_there"]);

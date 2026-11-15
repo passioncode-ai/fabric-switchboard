@@ -93,8 +93,17 @@ fn transcript_roots(root: &Path) -> Vec<PathBuf> {
 /// a stopped session again: on 2026-11-14 Fabric Dashboards resumed this repository's session in a
 /// second process while the first still ran in its terminal, and both worked in one worktree.
 pub fn live_sessions(root: &Path) -> HashMap<String, (u32, String)> {
+    session_pairs(root)
+        .into_iter()
+        .map(|(session, pid, status)| (session, (pid, status)))
+        .collect()
+}
+
+/// SB-379: every live Claude Code process with the session id its `sessions/<pid>.json` names,
+/// one pair per process: two pairs with one session id are a resumed copy of a live session.
+pub fn session_pairs(root: &Path) -> Vec<(String, u32, String)> {
     let Ok(procs) = agent_processes() else {
-        return HashMap::new();
+        return Vec::new();
     };
     let alive: std::collections::HashSet<u32> = procs
         .iter()
@@ -121,7 +130,25 @@ pub fn live_sessions(root: &Path) -> HashMap<String, (u32, String)> {
             }
         }
     }
-    live_from(&files, &alive)
+    pairs_from(&files, &alive)
+}
+
+/// The pure part of [`session_pairs`]: one pair per session file whose pid is a live process.
+pub fn pairs_from(
+    files: &[Value],
+    alive: &std::collections::HashSet<u32>,
+) -> Vec<(String, u32, String)> {
+    files
+        .iter()
+        .filter_map(|f| {
+            let pid = u32::try_from(f["pid"].as_u64()?).ok()?;
+            let session = f["sessionId"].as_str()?;
+            alive.contains(&pid).then(|| {
+                let status = f["status"].as_str().unwrap_or("unknown").to_owned();
+                (session.to_owned(), pid, status)
+            })
+        })
+        .collect()
 }
 
 /// The pure part of [`live_sessions`]: session files whose pid is a live Claude Code process.

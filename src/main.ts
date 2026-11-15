@@ -7,9 +7,9 @@ import { platformLabel } from './platform';
 import { LOCALE_KEY, dateLocale, locale, parseLocaleChoice, plural, saveLocaleChoice, t, type LocaleChoice } from './i18n';
 import { demo, demoFirstRun, native, nativeAdapter, onProjectSuggestions, onShellHook, onSpendChanged, safeError, reportFrontendReady, reportLanguage, type Operation } from './adapter';
 import type { CardState, AccountGroup } from './ui-logic';
-import { statAlert, ceilingQuestion, ceilingWarning, ceilingLine, keyLimitLine, dollars, POOL_PATTERN, poolChoices, poolName, inGroup, tourPlacement, usableWhileBusy, APPEARANCE_KEY, attribution, placementAdmits, domainSuggestion, groupSeatsElsewhere, passioncodeLine, seatEndedText, groupSeatsEndedText, organizationReleasedAt, inOrganizationFilter, domainList, type AttributedBy, sortStatRows, nextStatSort, type StatRow, type StatSort, statCacheShare, statTokensPerRequest, chartSeries, niceMax, groupProjectRows, type ChartMetric, groupProjects, compactCount, statTokens, statTrouble, statTroubleText, statAgentName, type Statistics, EXPIRY_CHOICES, folderName, folderRows, withoutFolder, type ProjectRoot, moveTargets, mapRows, rootTargets, storedMapFolders, MAP_FOLDERS_KEY, type MapFilter, type MapRow, type RepositoryMap, sortAgents, defaultAgentChoices, backgroundReads, clockedRead, chainScopeKey, afterRead, ceilingRemovalNote, modelMeta, modelUse, ordinaryKimiNote, kimiLimitUntil, limitReasonText, limitTitle, agentSetupFacts, sessionHow, sessionAgentName, sessionStateLabel, kimiWindowsLine, kimiWindowsLines, openrouterCreditLine, eventAction, eventDetail, MutationClock, activeRules, autoSwitchPool, autoSwitchPossible, launchChoice, withFolders, githubDefaultSelection, githubPlan, githubSource, replaceFolder, storedFolder, LAST_FOLDER_KEY, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, signInNotice, signInMove, organizationMoveNote, dismissTermsNotice, termsNoticeDismissed, termsNoticeOn, termsNoticeText, tourWaits, orgSetups, releasedOrganizations, releasedSummary, orgSetupAction, orgSetupShown, orgSetupCaveat, orgSetupLeads, orgSetupPrimary, accountsOrgActionLeads, firstPrimary, orgSetupUnread, orgSetupStateLabel, orgSetupTitle, hiddenOrgSetups, ORG_SETUP_HIDDEN_KEY, accountsEmptyKey, type OrgSetup, usageAnswerText, usageNotice, usageFreshness, windowReset, type Appearance, shellHookView, balancingView, balancingNotice, shellHookToggleNotice, shellHookNoticeText, codexHookLine, moveStep, accountsForStep, chainSummary, stepReasonText, handoverOutcomeText, handoverSkipped, shortWorkflow, TAKEOVER_ORDER, groupOrganizations, servesPool, sharedGroups, holdsContext, accountOrganizations, machineOf, remoteUsageLine, unplacedAccounts, machineAliasesLine, machineLiveLine, machineCopyLine, foldOpen, accountSections, accountMatches, attentionAccounts, attentionReasonText, attentionActionLabel, givenFacts, switchingLine, MACHINE_FOLD_LIMIT, EVENT_FILTER_KINDS, eventKindLabel, filterEvents, eventsByDay, relativeDay, EVENTS_PAGE, eventPage, sortSessions, statRowsShown, STAT_TOP, spendShare, groupKeyBlocks, keyTail, groupStateLine, type EventKind, type EventFilter } from './ui-logic';
+import { statAlert, ceilingQuestion, ceilingWarning, ceilingLine, keyLimitLine, dollars, POOL_PATTERN, poolChoices, poolName, inGroup, tourPlacement, usableWhileBusy, APPEARANCE_KEY, attribution, placementAdmits, domainSuggestion, groupSeatsElsewhere, passioncodeLine, seatEndedText, groupSeatsEndedText, organizationReleasedAt, inOrganizationFilter, domainList, type AttributedBy, sortStatRows, nextStatSort, type StatRow, type StatSort, statCacheShare, statTokensPerRequest, chartSeries, niceMax, groupProjectRows, type ChartMetric, groupProjects, compactCount, statTokens, statTrouble, statTroubleText, statAgentName, type Statistics, EXPIRY_CHOICES, folderName, folderRows, withoutFolder, type ProjectRoot, moveTargets, mapRows, rootTargets, storedMapFolders, MAP_FOLDERS_KEY, type MapFilter, type MapRow, type RepositoryMap, sortAgents, defaultAgentChoices, backgroundReads, clockedRead, chainScopeKey, afterRead, ceilingRemovalNote, modelMeta, modelUse, ordinaryKimiNote, kimiLimitUntil, limitReasonText, limitTitle, agentSetupFacts, sessionHow, sessionAgentName, sessionStateLabel, kimiWindowsLine, kimiWindowsLines, openrouterCreditLine, eventAction, eventDetail, MutationClock, activeRules, autoSwitchPool, autoSwitchPossible, launchChoice, withFolders, githubDefaultSelection, githubPlan, githubSource, replaceFolder, storedFolder, LAST_FOLDER_KEY, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, signInNotice, signInMove, organizationMoveNote, dismissTermsNotice, termsNoticeDismissed, termsNoticeOn, termsNoticeText, tourWaits, orgSetups, releasedOrganizations, releasedSummary, orgSetupAction, orgSetupShown, orgSetupCaveat, orgSetupLeads, orgSetupPrimary, accountsOrgActionLeads, firstPrimary, orgSetupUnread, orgSetupStateLabel, orgSetupTitle, hiddenOrgSetups, ORG_SETUP_HIDDEN_KEY, accountsEmptyKey, type OrgSetup, usageAnswerText, usageNotice, usageFreshness, windowReset, type Appearance, shellHookView, balancingView, balancingNotice, shellHookToggleNotice, shellHookNoticeText, codexHookLine, moveStep, accountsForStep, chainSummary, stepReasonText, handoverOutcomeText, handoverSkipped, shortWorkflow, TAKEOVER_ORDER, groupOrganizations, servesPool, sharedGroups, holdsContext, accountOrganizations, machineOf, remoteUsageLine, unplacedAccounts, machineAliasesLine, machineLiveLine, machineCopyLine, foldOpen, accountSections, accountMatches, attentionAccounts, attentionReasonText, attentionActionLabel, surfaceLabel, sessionTreeRows, givenFacts, switchingLine, MACHINE_FOLD_LIMIT, EVENT_FILTER_KINDS, eventKindLabel, filterEvents, eventsByDay, relativeDay, EVENTS_PAGE, eventPage, sortSessions, statRowsShown, STAT_TOP, spendShare, groupKeyBlocks, keyTail, groupStateLine, type EventKind, type EventFilter } from './ui-logic';
 import agentCatalog from '../catalog/agents.json';
-import type { AnalyticsStatus, Ceilings, CeilingView, CeilingQuestionView, OpenrouterCredit, BackupInfo, PassioncodeStatus, Account, Adapter, AgentConnection, AgentInfo, AgentRow, AgentsOverview, OpenrouterModels, HermesModel, KimiAccounts, KimiRegion, KimiStatus, OpenrouterStatus, OpenrouterKeys, CodexRoute, BalanceStatus, CapacityStatus, ShellHookStatus, AgentSetup, AuthKind, BackupStatus, KimiAccount, CurrentAccounts, LoginItem, Project, Restored, HandoverPlan, ExternalIdentity, MonitorStatus, ProjectRule, Provider, RotationPolicy, RuntimeStatus, SessionInfo, Snapshot, UpdateStatus, Onboarding, Chains, ChainExecutor, ChainScope, ChainStepView, GithubRepository, Machine, MachinesLive, MachinesList, Attention, AttentionItem, Event, GivenAccount } from './types';
+import type { AnalyticsStatus, Ceilings, CeilingView, CeilingQuestionView, OpenrouterCredit, BackupInfo, PassioncodeStatus, Account, Adapter, AgentConnection, AgentInfo, AgentRow, AgentsOverview, OpenrouterModels, HermesModel, KimiAccounts, KimiRegion, KimiStatus, OpenrouterStatus, OpenrouterKeys, CodexRoute, BalanceStatus, CapacityStatus, SessionTree, WatchFinding, ShellHookStatus, AgentSetup, AuthKind, BackupStatus, KimiAccount, CurrentAccounts, LoginItem, Project, Restored, HandoverPlan, ExternalIdentity, MonitorStatus, ProjectRule, Provider, RotationPolicy, RuntimeStatus, SessionInfo, Snapshot, UpdateStatus, Onboarding, Chains, ChainExecutor, ChainScope, ChainStepView, GithubRepository, Machine, MachinesLive, MachinesList, Attention, AttentionItem, Event, GivenAccount } from './types';
 
 const root = document.querySelector<HTMLDivElement>('#app')!;
 const announcements = document.querySelector<HTMLDivElement>('#announcements')!;
@@ -2718,6 +2718,7 @@ function attentionAct(item: AttentionItem, account: Account | undefined, key: st
     case 'check_usage': if (account) void mutate(() => adapter.probe(account.id), t('Usage observation updated.'), key, account.id); return;
     case 'answer_ceiling': goTo('agents'); return;
     case 'open_machines': goTo('projects', 'machines-heading'); return;
+    case 'open_sessions': goTo('activity', 'sessions-tree-heading'); return;
   }
 }
 const policyTarget = (target: RotationPolicy['target']) => target === 'managed' ? t('Managed route') : t('Claude Code account');
@@ -3077,7 +3078,70 @@ function activityFilters(accountIds: string[]) {
   row.append(kind, who, search);
   return row;
 }
+/** SB-379 (Q4): every live coding session on this computer, who started it and for what, read every minute while Activity is on screen. */
+let sessionTreeState: SessionTree | null = null; let sessionTreeError = false; let sessionTreeAt = 0; let sessionTreeLoading = false;
+function loadSessionTree() {
+  if (sessionTreeLoading) return;
+  sessionTreeLoading = true;
+  void adapter.sessionTree().then((tree) => { sessionTreeState = tree; sessionTreeError = false; }, () => { sessionTreeError = true; }).finally(() => { sessionTreeAt = Date.now(); sessionTreeLoading = false; backgroundRender(); });
+}
+function findingText(f: WatchFinding): string {
+  const folder = f.folder ? folderName(f.folder) : '';
+  switch (f.kind) {
+    case 'duplicate': return t('One session runs in two processes ({pids}).', { pids: (f.pids ?? []).join(', ') });
+    case 'stuck': return t('A board run in {folder} has been quiet for {minutes} minutes.', { folder, minutes: f.quiet_minutes ?? 30 });
+    default: return t('A launch in {folder} ended with no end recorded.', { folder: folder || t('an unknown folder') });
+  }
+}
+function sessionTreePanel() {
+  if (Date.now() - sessionTreeAt > 60_000) loadSessionTree();
+  const panel = el('section', 'about-panel session-tree'); panel.setAttribute('aria-labelledby', 'sessions-tree-heading');
+  const heading = el('h2', '', t('Sessions on this computer')); heading.id = 'sessions-tree-heading'; heading.tabIndex = -1; panel.append(heading);
+  if (sessionTreeError && !sessionTreeState) { panel.append(el('p', 'form-note', t('The sessions could not be read. Refresh to retry.'))); return panel; }
+  const tree = sessionTreeState;
+  if (!tree) { panel.append(el('p', 'form-note', t('Reading sessions…'))); return panel; }
+  const c = tree.counts;
+  panel.append(el('p', 'account-meta section-state', t('{live} live: {working} working, {quiet} quiet, {managed} started by Switchboard.', { live: c.live, working: c.working, quiet: c.quiet, managed: c.managed })));
+  const groups = Object.entries(c.by_pool).map(([pool, n]) => `${pool === 'unmanaged' ? t('outside groups') : poolName(pool, snapshot?.projects ?? [])} ${n}`);
+  if (groups.length) panel.append(el('p', 'form-note', t('By group: {list}.', { list: groups.join(', ') })));
+  if (tree.findings.length) {
+    const list = el('ul', 'watch-findings'); list.setAttribute('role', 'list');
+    for (const f of tree.findings) list.append(el('li', f.kind === 'gone' ? 'form-note' : 'form-error', findingText(f)));
+    panel.append(list);
+  }
+  if (!tree.live.length) panel.append(el('p', 'surface-note', t('No session runs now.')));
+  const list = el('ol', 'event-list session-tree-list');
+  for (const { session: s, depth } of sessionTreeRows(tree.live)) {
+    const row = el('li', 'event-row'); row.style.paddingInlineStart = `calc(${depth} * var(--space-5))`;
+    const line = el('div', 'event-title');
+    line.append(el('strong', '', `${s.agent === 'codex' ? 'Codex' : 'Claude Code'} · ${s.folder ? folderName(s.folder) : t('an unknown folder')}`), el('span', 'badge', s.quiet ? t('Quiet {n} min', { n: s.quiet_minutes ?? 30 }) : t('Working')));
+    const parts = [surfaceLabel(s.surface)];
+    if (s.pool) parts.push(poolName(s.pool, snapshot?.projects ?? []));
+    if (s.task?.request) parts.push(t('Board request {id}', { id: s.task.request.slice(0, 8) })); else if (s.task?.workflow) parts.push(t('Task {id}', { id: shortWorkflow(s.task.workflow) }));
+    parts.push(`pid ${s.pid}`);
+    row.append(line, el('p', 'account-meta', parts.join(' · ')));
+    list.append(row);
+  }
+  panel.append(list);
+  const recent = tree.launches;
+  if (recent.length) panel.append(foldSection({ key: 'launches-day', title: t('Launches of the last day'), state: plural(recent.length, { one: '{n} launch', other: '{n} launches' }), level: 'h3', className: 'day-fold', body: () => {
+    const items = el('ol', 'event-list');
+    for (const l of recent) {
+      const row = el('li', 'event-row'); const line = el('div', 'event-title');
+      line.append(el('strong', '', l.folder ? folderName(l.folder) : t('an unknown folder')), el('time', '', new Date(l.launched_at * 1000).toLocaleTimeString(dateLocale(), { hour: '2-digit', minute: '2-digit' })));
+      const state = l.state === 'running' ? t('Running') : l.state === 'ended' ? t('Ended') : t('Gone without an end');
+      const parts = [state, surfaceLabel(l.surface)];
+      if (l.pool) parts.push(poolName(l.pool, snapshot?.projects ?? []));
+      if (l.task.request) parts.push(t('Board request {id}', { id: l.task.request.slice(0, 8) })); else if (l.task.workflow) parts.push(t('Task {id}', { id: shortWorkflow(l.task.workflow) }));
+      row.append(line, el('p', 'account-meta', parts.join(' · ')));
+      items.append(row);
+    }
+    return [items];
+  } }));
+  return panel;
+}
 function renderActivity(main: HTMLElement) {
+  main.append(sessionTreePanel());
   main.append(sessionsPanel());
   if (!journal && !journalLoading) void loadJournal();
   const fromCommand = journal?.source === 'command';

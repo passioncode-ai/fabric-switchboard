@@ -8,6 +8,8 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- Activity opens with *Sessions on this computer*: every Claude Code and Codex session running here, Switchboard's or not, who started it (Fabric board, Fabric Dashboards, the command line, an agent, a hand-over, a continuation), its group and task, a session started by another under it, counts by group, and the launches of the last day. `switchboard sessions --tree` and MCP `switchboard_sessions` with `tree` give the same (SB-379).
+- Switchboard watches the sessions every minute: a session running in two processes (a resumed copy of a live one) and a board run quiet for 30 minutes are listed first in *Needs attention*; a launch whose process ended with no end recorded is shown in the session list (SB-379).
 ## 0.7.88
 
 - Statistics no longer runs past a narrow window: the chart pushed the page 216 px past a 960 px window and 352 px past a 760 px one. Only the period and the list of sections stay at the top while you scroll; the tiles scroll with the page, so the pinned bar no longer covers a third of a narrow window.

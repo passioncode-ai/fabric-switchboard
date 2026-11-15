@@ -717,3 +717,7 @@ g:hover > .chart-bar { opacity: .82; }
 .stat-scroll.is-all { max-height: min(60vh, 560px); overflow-y: auto; }
 .stat-scroll.is-all .stat-table thead th { position: sticky; top: 0; z-index: 1; background: var(--panel); }
 @media (max-height: 700px) { .stat-pinned { position: static; } }
+/* SB-379 (Q4): the sessions on this computer and what the watch found. */
+.watch-findings { list-style: none; margin: var(--space-2) 0; padding: 0; display: grid; gap: var(--space-1); }
+.session-tree .event-title .badge { flex: none; }
+.session-tree-list .event-row p { overflow-wrap: anywhere; }

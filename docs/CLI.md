@@ -43,6 +43,7 @@ switchboard accounts send ACCOUNT_UUID --to user@studio.local --remote /usr/loca
 switchboard accounts seats [--limit 50]                     # SB-312: the moves, hand-overs and call backs recorded here, with the id there
 switchboard attention                                  # SB-365: what needs a person (sign-in, refused renewal, ended seat, failing usage checks, a lost move, a ceiling question), each with the tool that fixes it; the accounts stay in their groups
 switchboard mcp-homes                                  # SB-359: which Claude home is signed in to which MCP server (names, URLs, booleans; never a token)
+switchboard sessions --tree                            # SB-379: live sessions with who started them and for which task, the day's launches, counts, the watch's findings
 switchboard capacity [set N | clear]                   # SB-378: this computer's cap on working coding sessions (quiet ones not counted); dispatch and launch --hosted wait at it
 switchboard machines list [--live]                     # SB-355: each machine group with its accounts, and accounts used elsewhere in none; --live reads each machine over ssh (20 s per call)
 switchboard machines adopt [--apply]                   # SB-355: place accounts already used elsewhere in their machines' groups (recorded move, else location); never guessed

@@ -56,6 +56,7 @@ pub mod self_update;
 pub mod serve_update;
 #[cfg(unix)]
 pub mod session_host;
+pub mod session_watch;
 pub mod settings_bundle;
 pub mod settings_signing;
 pub mod shell;
@@ -361,6 +362,8 @@ pub enum Operation {
         #[serde(default)]
         live: bool,
     },
+    /// SB-379: the session tree and the one-minute watch's findings (`session_watch::tree`).
+    SessionTree,
     /// SB-378: this computer's cap on live coding sessions: the cap, what counts and what is
     /// free; `cap` sets it, `clear` removes it.
     Capacity {
@@ -1378,6 +1381,8 @@ impl Runtime {
                 | Operation::Machines { .. }
                 // SB-378: the process table and its own small file.
                 | Operation::Capacity { .. }
+                // SB-379: the process table, session files and the day's launch records.
+                | Operation::SessionTree
                 // SB-365: the snapshot, the owner's sign-in verdicts in memory, seats.jsonl and
                 // spend.json; nothing is written.
                 | Operation::Attention
@@ -4914,6 +4919,7 @@ async fn execute(
                 seats: &seats,
                 questions: &questions,
                 remote: &crate::remote_usage::read(root),
+                watch: &session_watch::last(root),
                 now,
             }))
         }
@@ -6041,6 +6047,12 @@ async fn execute(
                 moved["cli_switched_to"] = cli_switched_to;
             }
             Ok(moved)
+        }
+        Operation::SessionTree => {
+            let root = root.to_owned();
+            Ok(blocking::run(move || {
+                session_watch::tree(&root, session_watch::now())
+            }))
         }
         Operation::Capacity { cap, clear } => {
             if clear && cap.is_some() {

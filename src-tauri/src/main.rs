@@ -928,6 +928,12 @@ async fn balance(
     };
     state.runtime().await?.execute(operation).await
 }
+/// SB-379: the session tree: live sessions with their launches, the day's launches, counts and
+/// the one-minute watch's findings.
+#[tauri::command]
+async fn session_tree(state: State<'_, Slot>) -> Result<Value, String> {
+    state.runtime().await?.execute(Operation::SessionTree).await
+}
 /// SB-378: this computer's cap on working coding sessions; `cap` sets it, `clear` removes it,
 /// neither reads it (`switchboard capacity`).
 #[tauri::command]
@@ -1862,6 +1868,7 @@ fn main() {
             codex_route,
             balance,
             capacity,
+            session_tree,
             repository_map,
             statistics,
             move_account,

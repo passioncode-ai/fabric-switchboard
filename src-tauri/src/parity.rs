@@ -112,6 +112,7 @@ const PARITY: &[(&str, Over)] = &[
     ("codex_route", Tool("switchboard_codex_route")),
     ("balance", Tool("switchboard_balance")),
     ("capacity", Tool("switchboard_capacity")),
+    ("session_tree", Tool("switchboard_sessions")),
     ("repository_map", Tool("switchboard_repository_map")),
     ("statistics", Tool("switchboard_statistics")),
     ("move_account", Tool("switchboard_account_move")),

@@ -1735,4 +1735,16 @@ check(() => {
   assert.ok(line.includes('3 accounts') && line.includes('12'), line);
   assert.ok(!line.includes('\u2014'));
 });
+// SB-379 (Q4): the session tree's order and the watch's reasons.
+check(() => {
+  const s = (launch_id, parent, started_at) => ({ launch_id, parent, started_at });
+  const rows = logic.sessionTreeRows([s('child', 'root', 20), s(null, null, 5), s('root', null, 10), s('grand', 'child', 30), s('orphan', 'gone', 1)]);
+  assert.deepEqual(rows.map((r) => [r.session.launch_id, r.depth]), [['orphan', 0], [null, 0], ['root', 0], ['child', 1], ['grand', 2]]);
+  assert.equal(logic.surfaceLabel('fabric'), 'Fabric board');
+  assert.equal(logic.surfaceLabel(null), 'Not started by Switchboard');
+  const view = logic.attentionView({ items: [{ reason: 'session_duplicate', detail: 'x', action: { tool: 'switchboard_sessions', window: 'open_sessions' } }] });
+  assert.equal(view.count, 1);
+  assert.equal(logic.attentionActionLabel('open_sessions'), 'Open sessions');
+  assert.ok(logic.attentionReasonText('session_stuck').includes('30 minutes'));
+});
 console.log(`${cases} ui-logic cases passed, including quota priority and wall-clock countdowns.`);
