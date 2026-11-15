@@ -3194,7 +3194,7 @@ pub const DISPATCH_WOULD_NOT_STOP: &str =
 /// SB-247: the PATH a run started by the owner gets: the program's own folder first (a
 /// `#!/usr/bin/env node` launcher finds its `node` beside it), then the owner's, then the
 /// per-user and Homebrew folders the desktop app's PATH lacks.
-fn headless_path(program: &Path) -> std::ffi::OsString {
+pub(crate) fn headless_path(program: &Path) -> std::ffi::OsString {
     let mut dirs: Vec<PathBuf> = program
         .parent()
         .map(Path::to_path_buf)

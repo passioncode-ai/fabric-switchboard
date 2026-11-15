@@ -651,7 +651,7 @@ function dutyLineText(line: DutyLine): string {
 }
 function dutySection() {
   const section = el('div', 'fold-content');
-  section.append(el('p', 'surface-note', t('Every 5 minutes Switchboard looks at the Claude Code sessions on this computer. A session that stopped writing or waited too long for an answer is closed and resumed in a new Terminal window; one that finished and sat idle is closed. Fabric Dashboards consoles are left to Dashboards.')));
+  section.append(el('p', 'surface-note', t('Every 5 minutes Switchboard looks at the Claude Code sessions it started on this computer. A session that stopped writing or waited too long for an answer is closed and resumed in a new Terminal window; one that finished and sat idle is closed. Sessions you started in your own terminal and Fabric Dashboards consoles are left alone.')));
   if (dutyError) { section.append(el('p', 'form-error', dutyError)); return section; }
   if (!dutyState) { if (!dutyLoading) loadDuty(); section.append(el('p', 'form-note', t('Counting sessions…'))); return section; }
   const state = dutyState; const set = state.settings;
@@ -661,6 +661,7 @@ function dutySection() {
     section.append(el('h3', 'fold-part-heading', t('At the next check')));
     const list = el('ul', 'watch-findings'); for (const line of state.due.slice(0, 5)) list.append(el('li', 'account-meta', dutyLineText(line))); section.append(list);
   }
+  if (state.left_to_person) section.append(el('p', 'account-meta', t('Left alone: {n} sessions you started yourself.', { n: state.left_to_person })));
   const recent = state.recent.filter((l) => typeof l.at === 'number').slice(0, 5);
   if (recent.length) {
     section.append(el('h3', 'fold-part-heading', t('Recent actions')));

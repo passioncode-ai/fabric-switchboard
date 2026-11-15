@@ -668,7 +668,7 @@ export function createDemoAdapter(): Adapter {
       if (typeof change?.on === 'boolean') demoDutyOn = change.on;
       const now = Math.floor(Date.now() / 1000);
       return {
-        settings: { on: demoDutyOn, stuck_minutes: 45, waiting_minutes: 60, idle_minutes: 60, max_age_hours: 4 }, check_seconds: 300, watched: 5, left_to_dashboards: 1, supported: true,
+        settings: { on: demoDutyOn, stuck_minutes: 45, waiting_minutes: 60, idle_minutes: 60, max_age_hours: 4 }, check_seconds: 300, watched: 5, left_to_dashboards: 1, left_to_person: 3, supported: true,
         due: [{ action: 'close', reason: 'idle', session: 'demo-s3', folder: '/Users/demo/Code/notes', pid: 4103, host: 'terminal' }],
         recent: [
           { at: now - 1200, action: 'restart', reason: 'stuck', outcome: 'restarted', session: 'demo-s1', folder: '/Users/demo/Code/shop-api', pid: 4101, host: 'terminal' },
