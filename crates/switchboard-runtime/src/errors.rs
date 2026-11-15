@@ -189,6 +189,22 @@ pub(crate) fn add(day: i64, class: String, code: String) {
     with_pending(true, |p| *p.entry((day, class, code)).or_default() += 1);
 }
 
+/// W3 (SB-379): a `switchboard` command or `switchboard mcp` counts its own panics into the same
+/// file the owner sends, as the owner does: only a release build (it carries the App Key), over
+/// the app's own data folder, with usage counts on. A count only, by the file it came from.
+pub fn install_panic_counter_for_cli(root: &Path) {
+    let Some(shared) = crate::analytics::shared_folder() else {
+        return;
+    };
+    if crate::analytics::APP_KEY.is_none()
+        || crate::default_root().ok().as_deref() != Some(root)
+        || !crate::analytics::shared_enabled(&shared)
+    {
+        return;
+    }
+    install_panic_counter(root);
+}
+
 /// The owner (the desktop app, `switchboard serve`): counts its panics too, keeping the hook in
 /// place before it (the panic is still reported as before). Once per process.
 pub fn install_panic_counter(root: &Path) {

@@ -1888,6 +1888,8 @@ async fn run(cli: &Cli) -> Result<Value, String> {
     if !root.is_absolute() {
         return Err("--data-dir must be an absolute private directory.".into());
     }
+    // W3 (SB-379): this command's own panics are counted for the error report, as the owner's.
+    switchboard_runtime::errors::install_panic_counter_for_cli(&root);
     // SB-380: a session read, ended or attached on another machine runs that machine's
     // Switchboard over ssh; nothing is asked of this machine's owner.
     if let Some((target, remote, remote_data_dir, words, tty)) = there(&cli.command) {
