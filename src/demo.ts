@@ -300,6 +300,7 @@ export function createDemoAdapter(): Adapter {
   let codexOn = false;
   // SB-352 wave 2 (SCN-090): balancing, off until the person turns a group on; with two groups
   // on, the demo shows one account lent between them.
+  let demoCap: number | null = null;
   let balanceGroups: string[] = []; let balanceAllNew = false; let balanceBackup: string[] = [];
   const balanceStatus = () => {
     const pools = ['default', ...(state.projects ?? []).map((p) => p.pool)];
@@ -632,6 +633,12 @@ export function createDemoAdapter(): Adapter {
       const tree = from.folders.filter((f) => f === folder || (/-wt-|\/\.worktrees\//.test(f) && from.folders.indexOf(folder) === 0));
       if (tree.length >= from.folders.length) throw new Error("This is the project's only repository. Add another folder to the project first, or delete the project.");
       from.folders = from.folders.filter((f) => !tree.includes(f)); target.folders.push(...tree); log('project', '', 'updated');
+    },
+    async capacity(change) {
+      if (change?.clear) demoCap = null;
+      else if (typeof change?.cap === 'number') { if (!Number.isInteger(change.cap) || change.cap < 1 || change.cap > 500) throw new Error('Give the session limit as a whole number from 1 to 500.'); demoCap = change.cap; }
+      const used = 4;
+      return { cap: demoCap, used, free: demoCap === null ? null : Math.max(0, demoCap - used), at_capacity: demoCap !== null && used >= demoCap, total: 5, quiet: 1, quiet_after_minutes: 30 };
     },
     async balance(change) {
       await pause();

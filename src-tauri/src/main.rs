@@ -928,6 +928,16 @@ async fn balance(
     };
     state.runtime().await?.execute(operation).await
 }
+/// SB-378: this computer's cap on working coding sessions; `cap` sets it, `clear` removes it,
+/// neither reads it (`switchboard capacity`).
+#[tauri::command]
+async fn capacity(cap: Option<u32>, clear: bool, state: State<'_, Slot>) -> Result<Value, String> {
+    state
+        .runtime()
+        .await?
+        .execute(Operation::Capacity { cap, clear })
+        .await
+}
 /// SB-135: a repository with its worktrees and clones into another project, in one step.
 #[tauri::command]
 async fn move_root(
@@ -1851,6 +1861,7 @@ fn main() {
             move_root,
             codex_route,
             balance,
+            capacity,
             repository_map,
             statistics,
             move_account,
