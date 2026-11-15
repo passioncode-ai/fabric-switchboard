@@ -2074,7 +2074,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 2. “At the next check” lists what the next check would do; “Recent actions” the last five with their time, each “Restarted in {folder}: it {reason}.” or “Closed in {folder}: it {reason}.” and, when it did not go to plan, “Result: {outcome}.”
 3. *Check now* acts at once; *Turn off* / *Turn on* switches it (“The duty officer is off.”, “The duty officer is on.”). The limits change with `switchboard duty set` or MCP `switchboard_duty`.
 **Alt paths:** on Windows “On this system the duty officer only reports; it restarts nothing.” and no *Check now*; the read fails → the read error and the rest of Settings stays.
-**Expected result:** no interactive Claude Code session outside Fabric Dashboards stays stalled past its limit or idle past `idle_minutes`; a restarted one continues in Terminal with its history.
+**Expected result:** no interactive Claude Code session Switchboard started stays stalled past its limit or idle past `idle_minutes`; a restarted one continues in Terminal with its history and its hooks; a session the person started in their own terminal, and a Fabric Dashboards console, is never touched (“Left alone: {n} sessions you started yourself.”).
 **UI elements:** the fold and its state, the two lists, *Check now*, *Turn off* / *Turn on*.
 **States covered:** reading, read failed, on, off, nothing due, actions due, unsupported.
 **Errors & recovery:** a restart that could not open Terminal leaves the session closed and says so; its transcript keeps the work, and `claude --resume` from its folder continues it.

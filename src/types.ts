@@ -302,7 +302,7 @@ export interface SessionTree { live: TreeSession[]; launches: TreeLaunch[]; coun
 /** SB-384 (DEC-0018): the session duty officer. */
 export interface DutySettings { on: boolean; stuck_minutes: number; waiting_minutes: number; idle_minutes: number; max_age_hours: number }
 export interface DutyLine { at?: number; action: 'restart' | 'close'; reason: string; outcome?: string; session: string; folder: string; pid: number; host?: string }
-export interface DutyStatus { settings: DutySettings; check_seconds: number; watched: number; left_to_dashboards: number; due: DutyLine[]; recent: DutyLine[]; supported: boolean }
+export interface DutyStatus { settings: DutySettings; check_seconds: number; watched: number; left_to_dashboards: number; /** Interactive sessions the person started; never acted on. */ left_to_person?: number; due: DutyLine[]; recent: DutyLine[]; supported: boolean }
 export interface CapacityStatus { cap: number | null; used: number; free: number | null; at_capacity: boolean; total: number; quiet: number; quiet_after_minutes: number }
 /** SB-352: one loan in `balance status`. */
 export interface BalanceLoan { account_id: string; label: string | null; provider: Provider; from: string; from_name: string; to: string; to_name: string; at: number }

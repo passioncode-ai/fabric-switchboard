@@ -3276,7 +3276,9 @@ only while `duty.json` (0600: `on`, `stuck_minutes`, `waiting_minutes`, `idle_mi
 
 - reads the live Claude Code processes and the `sessions/<pid>.json` of every Claude config folder
   Switchboard knows (the person's, `homes/*`, `runtimes/*`, `shell/*`); a session is the process
-  whose pid its file names. `kind` other than `interactive` is never watched;
+  whose pid its file names. `kind` other than `interactive` is never watched, and since 0.7.95
+  neither is a session Switchboard did not start (no launch record of the last 30 days names it and
+  the duty officer never resumed it): it is counted as `left_to_person` and never acted on;
 - reads each session's host from its ancestors' executable paths (`dashboards`, `orca`,
   `terminal`, `iterm`, `other`); a `dashboards` session is left alone;
 - decides with `duty::decide` (the rules of DEC-0021) and acts on at most 3 sessions: close is SIGTERM, then SIGKILL after 10 s (outcome
@@ -3293,7 +3295,8 @@ only while `duty.json` (0600: `on`, `stuck_minutes`, `waiting_minutes`, `idle_mi
 The resume script unsets the variables a nested launch must not inherit (`CONFLICTS`), copies the
 `export` lines of the home's `launch.command` except `SWITCHBOARD_LAUNCH_ID` and
 `CLAUDE_CONFIG_DIR`, sets `CLAUDE_CONFIG_DIR` to the session's config folder unless it is the
-person's own, then `cd <folder> || exit 1` and `exec claude [bypass flag] --resume <session>`, with
+person's own, then `export PATH=<the owner's headless PATH>`, `cd <folder> || exit 1` and `claude
+[bypass flag] --resume <session>` (not `exec`: an end by a signal exits 0, so the window closes), with
 the prompt `duty::CONTINUE_PROMPT` («Switchboard restarted this session because it had stopped making progress. Continue the task from where you left off.») for `waiting` and
 `stuck`. No credential is in it: the home's sign-in stays in its own Keychain item or file.
 

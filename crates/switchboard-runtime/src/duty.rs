@@ -118,6 +118,9 @@ pub struct Seen {
     pub dashboards: bool,
     /// The program hosting its terminal: `dashboards`, `orca`, `terminal`, `iterm` or `other`.
     pub host: &'static str,
+    /// Switchboard started it (a launch record names it, or the duty officer resumed it); only
+    /// such a session is acted on (DEC-0021, amended 2026-11-15).
+    pub ours: bool,
 }
 
 /// The terminal host of a session from its ancestors' executable paths (DEC-0018: an Orca or
@@ -146,7 +149,10 @@ pub enum Act {
 /// What to do with one session now, and why; none to leave it. `newer_copy`: another process
 /// holding the same session started before this one.
 pub fn decide(s: &Seen, set: &Settings, now: i64, newer_copy: bool) -> Option<(Act, &'static str)> {
-    if s.kind != "interactive" || s.dashboards {
+    // Amended 2026-11-15 (operator: the sessions in Orca were closed and the resumed ones opened
+    // in Terminal windows that stayed): a session the person started in their own terminal is
+    // theirs; only one Switchboard started is restarted or closed.
+    if s.kind != "interactive" || s.dashboards || !s.ours {
         return None;
     }
     if newer_copy {
@@ -208,14 +214,34 @@ pub fn observe(root: &Path) -> Vec<Seen> {
             last_write: crate::machine_sessions::session_last_write(&config, cwd, session),
             dashboards: false,
             host: "other",
+            ours: false,
             config,
         });
     }
+    let ours = started_here(root);
     for s in &mut seen {
         s.host = host_of(&crate::machine_sessions::ancestor_paths(s.pid));
         s.dashboards = s.host == "dashboards";
+        s.ours = ours.contains(&s.session);
     }
     seen
+}
+
+/// The sessions Switchboard started: those its launch records of the last 30 days name, and
+/// those the duty officer resumed.
+fn started_here(root: &Path) -> std::collections::HashSet<String> {
+    let since = crate::session_watch::now() - 30 * 86_400;
+    let mut found: std::collections::HashSet<String> = crate::launches::recent_records(root, since)
+        .iter()
+        .filter_map(|r| r["provider_session_id"].as_str().map(str::to_owned))
+        .collect();
+    found.extend(
+        journal(root)
+            .iter()
+            .filter(|l| l["outcome"] == "restarted")
+            .filter_map(|l| l["session"].as_str().map(str::to_owned)),
+    );
+    found
 }
 
 /// The pids holding a session another, older process also holds.
@@ -270,8 +296,15 @@ pub fn resume_script(
         ));
     }
     let _ = root;
+    // A Terminal window runs the script without the person's login shell: the PATH a run started
+    // by the owner gets, so the session's hooks find `node` (operator 2026-11-15: every hook failed
+    // with "node: command not found").
     out.push_str(&format!(
-        "cd {} || exit 1\nexec {}",
+        "export PATH={}\n",
+        quote(&crate::launch::headless_path(program).to_string_lossy())
+    ));
+    out.push_str(&format!(
+        "cd {} || exit 1\n{}",
         quote(&s.cwd),
         quote(&program.to_string_lossy())
     ));
@@ -284,7 +317,9 @@ pub fn resume_script(
         out.push(' ');
         out.push_str(&quote(CONTINUE_PROMPT));
     }
-    out.push('\n');
+    // Ended by a signal (the duty officer closing it, the person's Ctrl-C) is a clean end: the
+    // window settings close the window on status 0, so it does not stay behind.
+    out.push_str("\nstatus=$?\n[ \"$status\" -ge 128 ] && exit 0\nexit \"$status\"\n");
     out
 }
 
@@ -335,8 +370,9 @@ pub fn status(root: &Path, now: i64) -> Result<Value, String> {
     Ok(json!({
         "settings": set,
         "check_seconds": CHECK_SECONDS,
-        "watched": seen.iter().filter(|s| s.kind == "interactive" && !s.dashboards).count(),
+        "watched": seen.iter().filter(|s| s.kind == "interactive" && !s.dashboards && s.ours).count(),
         "left_to_dashboards": seen.iter().filter(|s| s.dashboards).count(),
+        "left_to_person": seen.iter().filter(|s| s.kind == "interactive" && !s.dashboards && !s.ours).count(),
         "due": due,
         "recent": recent,
         "supported": cfg!(unix),
@@ -484,6 +520,7 @@ mod tests {
             last_write: quiet_min.map(|q| now - q * 60),
             dashboards: false,
             host: "terminal",
+            ours: true,
         }
     }
 
@@ -631,7 +668,27 @@ mod tests {
         assert!(script
             .contains("'--dangerously-skip-permissions' --resume 's-1' 'Switchboard restarted"));
         let quiet = resume_script(home.path(), &s, Path::new("/bin/claude"), &[], false);
-        assert!(quiet.trim_end().ends_with("--resume 's-1'"));
+        assert!(quiet.contains("'/bin/claude' --resume 's-1'\nstatus=$?"));
+        // The person's tools are found (hooks run `node`), and an end by a signal closes the
+        // window (status 0 for the window settings), not `exec`.
+        assert!(quiet.contains("export PATH='/bin:"));
+        assert!(quiet.contains("/opt/homebrew/bin"));
+        assert!(!quiet.contains("exec "));
+        assert!(quiet.trim_end().ends_with("exit \"$status\""));
+    }
+
+    #[test]
+    fn a_session_the_person_started_is_never_acted_on() {
+        let set = Settings::default();
+        let now = 1_000_000;
+        let theirs = Seen {
+            ours: false,
+            ..seen("idle", 600, 9, Some(600))
+        };
+        assert_eq!(decide(&theirs, &set, now, false), None);
+        assert_eq!(decide(&theirs, &set, now, true), None, "not even a copy");
+        let mine = seen("idle", 600, 9, Some(600));
+        assert!(decide(&mine, &set, now, false).is_some());
     }
 
     #[test]

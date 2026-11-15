@@ -8,6 +8,8 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- The session duty officer acts only on sessions Switchboard started; a session you started in your own terminal (Orca, Terminal, iTerm) is never restarted or closed. A resumed session finds your tools (its hooks no longer fail with `node: command not found`), and its window closes when the session is ended (SB-384, DEC-0021 amended).
+
 ## 0.7.94
 
 - An account can be called back from another machine when it is the only account its group uses there: that group is left with none selected (and takes it again if the call back fails), instead of the call back being refused. A machine still on an older version is named as the one to update (SB-386, operator 2026-11-15).

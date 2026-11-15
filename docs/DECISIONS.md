@@ -376,6 +376,15 @@ research notes); the ones still in force that the board cites are seeded below w
   Every action is a line in `duty.jsonl` (500 kept) and an oplog event `session_duty`, codes only.
   Off with `switchboard duty off`, MCP `switchboard_duty {on: false}` or the window's Settings.
   Windows only reports.
+- **Amended 2026-11-15 (0.7.95).** On 0.7.93 the duty officer acted on the operator's sessions in Orca: 7 were
+  restarted into new Terminal windows, where every hook failed (`node: command not found`, no PATH),
+  and 6 idle ones were closed, which the operator saw as working sessions closing; windows of
+  sessions it ended stayed open. Now it acts only on sessions Switchboard started (a launch record
+  of the last 30 days names the session, or the duty officer resumed it); a session the person
+  started in their own terminal, any host, is listed (`left_to_person`) and never touched. The
+  resume script exports the PATH a run started by the owner gets, and runs `claude` without
+  `exec` so an end by a signal leaves status 0 and the window closes. Operator: «вот эти окна потом
+  не закрываются, а работающие сессии отдельные закрылись».
 - **Consequences / affects:** [CONTRACTS](CONTRACTS.md#session-duty-officer-sb-384-dec-0021), the
   lifecycle rows in AGENTS.md (signals to session processes, Terminal windows, `duty.json`,
   `duty.jsonl`), SCN-096, Settings → Session duty officer.
