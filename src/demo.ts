@@ -36,7 +36,7 @@ export function createDemoAdapter(): Adapter {
       { path: '/srv/projects/beta-api', provider: 'codex', account_id: 'demo-codex-work', target: 'managed', enabled: false, created_at: now() - 86400, expires_at: null },
     ],
     // SB-135: a project whose main checkout has two worktrees beside it (shown under it).
-    projects: [{ pool: 'alpha-web', name: 'Alpha Web', folders: ['/srv/projects/.worktrees/alpha-web-wt-login', '/srv/projects/alpha-web', '/srv/projects/.worktrees/alpha-web-wt-pricing', '/srv/projects/alpha-docs'], created_at: now() - 86400 }, { pool: 'tools', name: 'Tools', folders: ['/srv/projects/tools-cli', '/srv/projects/alpha-docs'], created_at: now() - 3600 }],
+    projects: [{ pool: 'alpha-web', name: 'Alpha Web', folders: ['/srv/projects/.worktrees/alpha-web-wt-login', '/srv/projects/alpha-web', '/srv/projects/.worktrees/alpha-web-wt-pricing', '/srv/projects/alpha-docs'], created_at: now() - 86400 }, { pool: 'tools', name: 'CLI tools', folders: ['/srv/projects/tools-cli', '/srv/projects/alpha-docs'], created_at: now() - 3600 }],
   };
   const hermes: HermesModel = { installed: true, configured: true, model: 'deepseek/deepseek-v4-pro-0813', provider: 'openrouter', base_url: 'https://openrouter.ai/api/v1', api_mode: 'chat_completions', providers: ['openrouter', 'anthropic', 'nous', 'openai-codex', 'kimi-coding', 'deepseek', 'gemini', 'xai', 'auto'], error: null };
   const kimi: KimiAccounts = { installed: true, current: { signed_in: true, nickname: 'Demo', tier: 'Allegretto', windows: [{ name: '5h', used_percent: 18, resets_at: now() + 9000 }, { name: 'month', used_percent: 42, resets_at: now() + 1_200_000 }], error: null, region: 'global', checked_at: now() - 40 }, accounts: [{ account: { id: '00000000-0000-4000-8000-0000000000a1', label: 'Kimi · work', region: 'global', added_at: now() - 86_400, nickname: 'Demo', tier: 'Allegretto' }, status: { signed_in: true, nickname: 'Demo', tier: 'Allegretto', windows: [{ name: '5h', used_percent: 64, resets_at: now() + 4200 }, { name: '7d', used_percent: 31, resets_at: now() + 300_000 }, { name: 'month', used_percent: 42, resets_at: now() + 1_200_000 }], error: null, checked_at: now() - 40 } }] };
@@ -143,7 +143,7 @@ export function createDemoAdapter(): Adapter {
   const longCase = new URLSearchParams(location.search).get('long') === '1';
   const longEvents: { at: number; action: string; account_id: string | null; detail: string }[] = [];
   if (longCase) {
-    const names = ['Alpha Web', 'Tools', 'Beta API', 'Client Northwind', 'Client Contoso', 'Data pipeline', 'Mobile app', 'Docs site', 'Infra', 'Research', 'Design system', 'Agents lab'];
+    const names = ['Alpha Web', 'CLI tools', 'Beta API', 'Client Northwind', 'Client Contoso', 'Data pipeline', 'Mobile app', 'Docs site', 'Infra', 'Research', 'Design system', 'Agents lab'];
     state.projects = names.map((name, g) => {
       const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-');
       const repos = Array.from({ length: 6 + (g * 5) % 17 }, (_, i) => `/srv/projects/${slug}-${['web', 'api', 'cli', 'docs', 'infra', 'ui', 'bot', 'sdk', 'site', 'jobs', 'auth', 'pay', 'search', 'feed', 'chat', 'maps', 'mail', 'sync', 'edge', 'core', 'lab', 'ops'][i % 22]}${i >= 22 ? `-${i}` : ''}`);

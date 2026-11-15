@@ -29,6 +29,16 @@ h1:focus { outline: none; }
 .subtitle, .surface-note { color: var(--muted); }
 .header-actions { display: flex; align-items: center; gap: var(--space-2); flex-shrink: 0; }
 .page-header > :first-child { flex: 1; min-width: 0; }
+/* Audit item 42: on a wide window the subtitle takes the header's whole width under the title, so
+   the actions beside the title (Refresh, + New group) never squeeze it into an early wrap. */
+@media (min-width: 821px) {
+  .page-header { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: var(--space-5); align-items: end; }
+  .page-header > :first-child { display: contents; }
+  .page-header .eyebrow { grid-column: 1; grid-row: 1; }
+  .page-header h1 { grid-column: 1; grid-row: 2; }
+  .page-header .subtitle { grid-column: 1 / -1; grid-row: 3; margin: 0; }
+  .page-header > .header-actions { grid-column: 2; grid-row: 1 / 3; align-self: center; }
+}
 /* VIS-09: two heights. --control-h for header, panel and dialog actions; .row-button, .text-button
    and .icon-button are --control-h-compact. Line height 1.25 so the minimum height is the height. */
 .button { padding: var(--space-1) var(--space-3); min-height: var(--control-h); line-height: 1.25; border: 1px solid var(--border-strong); color: var(--ink); background: var(--panel); border-radius: var(--r-control); white-space: nowrap; font-weight: 550; }
@@ -367,7 +377,7 @@ h2.section-heading, .about-panel h2.section-heading { font-size: var(--t-heading
 
 /* SB-119/120: the Agents page: default-agent chips, agent rows, model picker. */
 .choice-chips { display: flex; flex-wrap: wrap; gap: var(--space-2); margin: var(--space-2) 0 var(--space-3); }
-.choice-chip { padding: var(--space-1) var(--space-3); min-height: var(--control-h); line-height: 1.25; border: 1px solid var(--border-strong); border-radius: var(--r-control); background: var(--panel); color: var(--ink); font-weight: 550; }
+.choice-chip { padding: var(--space-1) var(--space-3); min-height: var(--control-h-compact); line-height: 1.25; border: 1px solid var(--border-strong); border-radius: var(--r-control); background: var(--panel); color: var(--ink); font-weight: 550; }
 .choice-chip:hover:not(:disabled):not(.is-on) { background: var(--hover-bg); }
 .choice-chip.is-on { background: var(--chosen-bg); border-color: var(--chosen-border); color: var(--chosen-ink); font-weight: 600; }
 .agents-head { display: flex; align-items: center; gap: var(--space-2); margin-bottom: var(--space-2); }
@@ -379,11 +389,16 @@ h2.section-heading, .about-panel h2.section-heading { font-size: var(--t-heading
 .agent-row.is-off .agent-info { opacity: .6; }
 .agent-info { display: grid; gap: var(--space-1); min-width: 0; }
 .agent-title { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
-.agent-command { font-family: var(--font-data); font-size: var(--t-chip); color: var(--muted); overflow-wrap: anywhere; }
+.agent-command { font-family: var(--font-data); font-size: var(--t-chip); color: var(--muted); overflow-wrap: break-word; word-break: normal; }
 .agent-controls { display: flex; align-items: center; gap: var(--space-3); flex-shrink: 0; }
 .agent-controls .badge { white-space: nowrap; }
 .default-slot, .default-badge, .agent-controls .text-button { display: inline-flex; justify-content: center; width: 132px; box-sizing: border-box; }
-.default-badge { color: var(--chosen-ink); background: var(--chosen-bg); border-color: var(--chosen-border); }
+/* Audit items 20 and 35: the default marker is a quiet label, not a pill a person would press, and
+   the takeover switch and a "Tools only" label take one width, so every row's columns line up. */
+.default-badge { color: var(--ink); background: none; border: 0; font-weight: 600; }
+.agent-controls .segmented, .agent-controls > .badge.muted { min-width: 11.5rem; box-sizing: border-box; justify-content: center; }
+.agent-controls > .badge.muted { display: inline-flex; }
+.agent-controls .segmented > .segment { flex: 1; }
 /* VIS-10: the track is control height (30 px segments, 2 px inset, 1 px line); the segment that is on
    takes the chosen language: gold-tinted fill, a 1 px gold line (3:1 or more on the track, measured by
    check-brand) and ink text in semibold, so it reads without colour too. */
@@ -392,6 +407,8 @@ h2.section-heading, .about-panel h2.section-heading { font-size: var(--t-heading
 .segment.is-on { background: var(--chosen-bg); color: var(--chosen-ink); box-shadow: inset 0 0 0 1px var(--chosen-border); font-weight: 650; }
 .segment:hover:not(.is-on):not(:disabled) { color: var(--ink); background: var(--hover-bg); }
 .agent-more { padding: 0 0 var(--space-3); }
+/* Audit item 31: the chain reads as one line of its own, its link after it. */
+.chain-summary-line .chain-summary { display: block; margin-bottom: var(--space-1); }
 .agent-more > summary { cursor: pointer; color: var(--muted); font-size: var(--t-label); }
 .available-list > summary { padding: var(--space-2) 0; }
 .model-picker { display: grid; gap: var(--space-2); }
@@ -632,7 +649,7 @@ g:hover > .chart-bar { opacity: .82; }
 
 /* WF-1.2 (SB-363): one folding section. The header is a full-width button: a chevron, the title,
    and its state on the right in the muted role; the body follows only while open. */
-.fold { margin-top: var(--space-3); border: 1px solid var(--border); border-radius: var(--r-card); background: var(--panel); }
+.fold { margin-top: var(--space-3); border: 1px solid var(--border); border-radius: var(--r-card); background: var(--panel); max-width: 980px; }
 .fold + .fold { margin-top: var(--space-2); }
 .fold-heading { margin: 0; font-size: var(--t-card); font-weight: 650; }
 .fold-toggle { display: flex; align-items: baseline; gap: var(--space-2); width: 100%; min-height: var(--control-h); padding: var(--space-2) var(--space-3); border: 0; border-radius: var(--r-card); background: transparent; color: var(--ink); font: inherit; text-align: left; cursor: pointer; }
@@ -713,7 +730,11 @@ g:hover > .chart-bar { opacity: .82; }
 /* WF-11.2: the period and the index stay at the top (the tiles scroll); a table showing every row scrolls in its box under a header that stays. */
 .stat-pinned { position: sticky; top: 0; z-index: 5; display: grid; gap: var(--space-3); padding: var(--space-2) 0 var(--space-3); background: var(--bg); border-bottom: 1px solid var(--border); }
 .stat-page .stat-pinned .stat-bar, .stat-page .stat-pinned .stat-tiles { margin: 0; }
-.stat-index { display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-3); }
+/* Audit item 56: the index stays one line in the pinned bar and scrolls sideways when narrow,
+   instead of leaving its last link alone on a second line. */
+.stat-index { display: flex; flex-wrap: nowrap; gap: var(--space-1) var(--space-3); overflow-x: auto; scrollbar-width: none; }
+.stat-index::-webkit-scrollbar { display: none; }
+.stat-index-link { flex: none; white-space: nowrap; }
 .stat-index-link { border: 0; background: transparent; padding: 0; color: var(--link); font: inherit; font-size: var(--t-chip); text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
 .stat-page .fold, .stat-page .stat-chart { scroll-margin-top: 120px; }
 .stat-grid > .fold { margin-top: 0; }
