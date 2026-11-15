@@ -28,3 +28,6 @@ The operations log since 2026-11-12 and the code at `3b07b71e`. At load around 4
 - Item 11: done. `mark_gone` forgets a `gone` row two days after its folder left (`GONE_KEPT`; the notification reads one day); test `a_gone_row_is_forgotten_two_days_after_its_folder_left`.
 - Item 17: not taken as proposed. A folder's modification time moves when a file is created or removed in it, not when Claude Code appends to a transcript, so filtering folders by it would miss a long session still writing; the per-file stat stays until a safe signal exists.
 - Item 18: the window reads the folder list once, two seconds after the last of a burst of folder events, not once per event.
+- Items 2 and 14: done. A rotation pass reads Claude Code's sign-in (only while a native policy is on) and the accounts that need a new sign-in once, before the `rotate` transaction (`rotate_inputs`), and reads Claude Code's sign-in again only after a native switch in the same pass.
+- Item 3: the sync's plan already runs before the transaction (SB-347); only `follow_claude_swap` stays under it.
+- Item 8: `sign_in_required` answers from its cache while credentials and rejected lineages are unchanged (SB-182), so dispatch reads credentials only after a change; no further change.
