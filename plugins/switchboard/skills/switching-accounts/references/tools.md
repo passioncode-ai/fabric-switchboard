@@ -119,7 +119,9 @@ still runs, and every viewer is told it ended. Answers `{launch_id, exit_code, r
 Closing a viewer only detaches; this ends the session. A write: not on a read-only server.
 macOS and Linux.
 
-### `switchboard_sessions`: `all?` (boolean), `history?` (boolean), `launch_id?` (string), `machine?` (boolean)
+### `switchboard_sessions`: `all?` (boolean), `history?` (boolean), `limit?` (integer), `before?` (integer), `launch_id?` (string), `machine?` (boolean)
+
+With `history: true`, `limit` (1 to 500, default 500) and `before` (Unix seconds) page the launches; the answer's `next_before` is the next page's `before`, null at the end.
 
 With `machine: true` (SB-353): every Claude Code and Codex process of this user instead, Switchboard's or not: `pid`, `agent`, `folder`, `started_at`, `launch_id` (null when unmanaged), `managed`, `last_write_at`, `quiet_minutes`, `quiet` (30 minutes or more), and `total`, `managed`, `unmanaged`, `quiet`. Read from the process table without the owner.
 

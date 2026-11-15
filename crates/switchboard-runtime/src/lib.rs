@@ -518,9 +518,14 @@ pub enum Operation {
         source: Option<String>,
     },
     /// SB-212: every launch record, newest first; with `launch_id`, that launch and its chain.
+    /// `limit` (1 to 500, default 500) and `before` (Unix seconds) page the history.
     Launches {
         #[serde(default)]
         launch_id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        limit: Option<usize>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        before: Option<i64>,
     },
     /// Creates (`pool: None`) or updates a project: its name, folders and whole account set.
     SaveProject {
@@ -7608,7 +7613,11 @@ async fn execute(
             source.as_deref(),
             monitor::now(),
         )),
-        Operation::Launches { launch_id } => {
+        Operation::Launches {
+            launch_id,
+            limit,
+            before,
+        } => {
             let snapshot = store.snapshot()?;
             // The states may ask `kill -0`/`ps`: never on an async worker (SB-103).
             match launch_id {
@@ -7618,12 +7627,18 @@ async fn execute(
                     Ok(shown)
                 }
                 None => {
-                    let (listed, total) = crate::blocking::run(|| launches::history(root));
+                    let (listed, total, next) = crate::blocking::run(|| {
+                        launches::history_page(
+                            root,
+                            limit.unwrap_or(launches::HISTORY_LIMIT),
+                            before,
+                        )
+                    });
                     let listed: Vec<Value> = listed
                         .into_iter()
                         .map(|r| label_session(&snapshot, r))
                         .collect();
-                    Ok(json!({"launches": listed, "total": total}))
+                    Ok(json!({"launches": listed, "total": total, "next_before": next}))
                 }
             }
         }
@@ -13172,7 +13187,11 @@ mod launch_record_tests {
         )
         .unwrap();
         let listed = runtime
-            .execute(Operation::Launches { launch_id: None })
+            .execute(Operation::Launches {
+                launch_id: None,
+                limit: None,
+                before: None,
+            })
             .await
             .unwrap();
         assert_eq!(listed["total"], 1);
@@ -13193,6 +13212,8 @@ mod launch_record_tests {
         let shown = runtime
             .execute(Operation::Launches {
                 launch_id: Some(id.clone()),
+                limit: None,
+                before: None,
             })
             .await
             .unwrap();

@@ -1238,6 +1238,23 @@ through `project suggest --from-hook` and `recovery hook`, MCP `switchboard_sess
   continued_as`), 64 at most each way; a record no longer kept reads `missing: true`. Only
   `<id>.json` regular files are read, and `home_path` is followed only inside `homes`,
   `runtimes` or `kimi`. Records written before 0.7.0 have no `launch_id` and list as before.
+- **Paging (perf audit item 5, 2026-11-15).** `Operation::Launches {limit, before}` (CLI
+  `sessions --history --limit N --before T`, MCP `switchboard_sessions {history, limit, before}`)
+  answers the `limit` newest launches (1 to 500, default 500) launched strictly before `before`
+  (Unix seconds), with `total` (the record files) and `next_before`, the `launched_at` of the
+  page's last row when the page is full (pass it as `before` for the next page), else null. A
+  record is written at its launch and only rewritten later, so its file's modified time is never
+  earlier than its `launched_at`: `launches::history_page` reads the files newest modified first
+  and stops once the page is full and the next file was last written before the page's oldest
+  launch, so a page of 50 out of 750 records reads about 50 files (test
+  `a_history_page_reads_only_the_newest_files_and_pages_by_launch_time`). Two launches in the same
+  second as a page's last row: the second one starts no next page; such a tie is rare and the full
+  history (no `limit`) still lists it.
+- **Stops and their launches (perf audit item 6).** `recovery` finds the launch of each open stop
+  among the records written since a day before the oldest open stop (`launches::by_session`,
+  `since`), never by reading every record; with no open stop it reads none, and the process table
+  only when a stop is open (test
+  `a_stops_launch_is_found_among_the_records_written_since_and_older_files_are_left`).
 - **Retention.** The background pass removes records not written for 90 days, at its first pass
   and then at most once an hour (`launch_records_pruned` with `count`); `switchboard uninstall`
   removes `launches/`. Nothing of it is sent to analytics.

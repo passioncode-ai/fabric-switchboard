@@ -8,6 +8,8 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- `switchboard sessions --history` and MCP `switchboard_sessions {history}` page with `limit` and `before` and answer `next_before`; a page reads only the newest record files, and `recovery` reads only the launch records written around its open stops, not every record (perf audit items 5 and 6).
+
 - A session duty officer: every 5 minutes it restarts, in a new Terminal window with `claude --resume`, a Claude Code session that stopped writing for 45 minutes, waited 60 minutes for an answer or has run over 4 hours (between turns), and closes one idle for an hour or a second copy of a session. Fabric Dashboards consoles are left alone; a session restarted 3 times in 6 hours is closed instead. On by default; Settings → Session duty officer, `switchboard duty`, MCP `switchboard_duty` (SB-384, DEC-0021).
 
 ## 0.7.92
