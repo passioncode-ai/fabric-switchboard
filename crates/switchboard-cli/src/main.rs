@@ -170,6 +170,10 @@ enum Command {
     /// moves to another machine whose answer was lost and spending ceilings waiting for an answer,
     /// each with the action that fixes it. The accounts stay in their groups. Reads only.
     Attention,
+    /// What went wrong: crashes of the app or `serve` found at the next start (with the
+    /// exception type macOS reported) and, with usage counts on, the error counts of the last
+    /// seven days by class and code. Reads only.
+    Bugs,
     /// Report online/offline mode and the proxy address, without its capability.
     Status,
     /// The other machines this Switchboard knows, from accounts moved there and runs started
@@ -2296,6 +2300,7 @@ async fn run(cli: &Cli) -> Result<Value, String> {
         Command::Targets { probe } => Operation::Targets { probe: *probe },
         Command::McpHomes => Operation::McpHomes,
         Command::Attention => Operation::Attention,
+        Command::Bugs => Operation::Bugs,
         Command::Capacity { command } => match command {
             None => Operation::Capacity {
                 cap: None,
@@ -4809,6 +4814,34 @@ fn print_result(value: &Value, cli: &Cli) {
                 );
             }
         }
+        Command::Bugs => {
+            let crashes = value["crashes"].as_array().cloned().unwrap_or_default();
+            if crashes.is_empty() {
+                println!("No crash found.");
+            }
+            for crash in &crashes {
+                println!(
+                    "Crash of {} started at {} (ran {}): {} {}",
+                    text(&crash["version"]),
+                    text(&crash["started_at"]),
+                    text(&crash["uptime"]),
+                    crash["exception"].as_str().unwrap_or("no crash report"),
+                    crash["signal"].as_str().unwrap_or("")
+                );
+            }
+            if value["counting"].as_bool() != Some(true) {
+                println!("Error counts are kept only while usage counts are on.");
+            }
+            for error in value["errors"].as_array().cloned().unwrap_or_default() {
+                println!(
+                    "Day {}: {} {} x{}",
+                    text(&error["day"]),
+                    text(&error["class"]),
+                    text(&error["code"]),
+                    text(&error["count"])
+                );
+            }
+        }
         Command::Attention => {
             let items = value["items"].as_array().cloned().unwrap_or_default();
             if items.is_empty() {
@@ -5331,6 +5364,7 @@ mod mcp_parity {
         ("machines list", Tool("switchboard_machines")),
         ("mcp-homes", Tool("switchboard_mcp_homes")),
         ("attention", Tool("switchboard_attention")),
+        ("bugs", Tool("switchboard_bugs")),
         ("capacity set", Tool("switchboard_capacity")),
         ("capacity clear", Tool("switchboard_capacity")),
         ("duty on", Tool("switchboard_duty")),

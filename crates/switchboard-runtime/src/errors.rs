@@ -33,6 +33,7 @@ const ERROR_EVENTS: &[&str] = &[
     "external_file_refused",
     "hard_exit",
     "metadata_write_slow",
+    "owner_crashed",
     "pass_panicked",
     "renderer_problem",
     "transaction_held",
@@ -232,6 +233,24 @@ pub fn install_panic_counter(root: &Path) {
 struct Counts {
     /// UTC day (days since 1970-01-01) → class → code → count.
     days: BTreeMap<i64, BTreeMap<String, BTreeMap<String, u64>>>,
+}
+
+/// W3 part 2: the counts kept for days from `from` on (UTC days), newest first, for `switchboard
+/// bugs`: `{day, class, code, count}`. Only what usage counts kept (the file exists while they
+/// are on); what is still in memory is not read.
+pub fn recent_days(root: &Path, from: i64) -> Vec<serde_json::Value> {
+    let counts = read(&root.join(FILE));
+    let mut out = Vec::new();
+    for (day, classes) in counts.days.iter().rev().filter(|(d, _)| **d >= from) {
+        for (class, codes) in classes {
+            for (code, count) in codes {
+                out.push(
+                    serde_json::json!({"day": day, "class": class, "code": code, "count": count}),
+                );
+            }
+        }
+    }
+    out
 }
 
 fn read(path: &Path) -> Counts {

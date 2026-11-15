@@ -12,6 +12,7 @@ pub mod attribution;
 pub(crate) mod balancing;
 mod bindings;
 mod blocking;
+pub mod bugs;
 pub mod capacity;
 mod carry;
 mod chain_view;
@@ -399,6 +400,9 @@ pub enum Operation {
     /// SB-365 (WF-3.1, DEC-0015): what needs a person, each with its reason and the action that
     /// fixes it. A view: nothing moves, the accounts stay in their groups.
     Attention,
+    /// W3 part 2 (SB-379): crashes found at start (`bugs.jsonl`) and the last days' error
+    /// counts. A view: nothing is written.
+    Bugs,
     /// SB-364 (WF-2.4): the accounts given to an agent, each with where it is, the newest launch
     /// that ran on it and when it was last active. A view: nothing is written.
     GivenAccounts,
@@ -1425,6 +1429,8 @@ impl Runtime {
                 // SB-365: the snapshot, the owner's sign-in verdicts in memory, seats.jsonl and
                 // spend.json; nothing is written.
                 | Operation::Attention
+                // W3 part 2: two small files of its own.
+                | Operation::Bugs
                 // SB-364: the snapshot and the launch records, each its own small file.
                 | Operation::GivenAccounts
                 // SB-359: Keychain reads of Claude Code's items; the store is only read.
@@ -3241,6 +3247,8 @@ pub fn arm_hard_exit_with(after: std::time::Duration, code: i32) {
         .spawn(move || {
             std::thread::sleep(after);
             oplog::event("hard_exit", &[]);
+            // A hard exit is a quit that overran, logged above; it is not a crash.
+            bugs::end_this_run();
             std::process::exit(code);
         });
 }
@@ -3398,6 +3406,11 @@ impl Owner {
                 }
             });
         }
+        // W3 part 2 (SB-379): the previous run's crash, if any, and this run, for the real
+        // owner only (never a `--data-dir` scratch store or a test).
+        if native_sources && default_store {
+            bugs::begin(&runtime.root, monitor::now());
+        }
         let monitor = monitor::MonitorHandle::start(&runtime, native_sources);
         oplog::event(
             "owner_started",
@@ -3453,6 +3466,8 @@ impl Owner {
         digest::save_open(&runtime.root);
         let _ = runtime.store.flush();
         drop(transaction);
+        // W3 part 2: this run ended through its drain; the next start finds no crash.
+        bugs::end(&runtime.root);
         let millis = started.elapsed().as_millis() as u64;
         oplog::event(
             "owner_stopped",
@@ -4977,6 +4992,10 @@ async fn execute(
                 .map_err(|_| "Snapshot unavailable.".to_owned())?;
             // SB-347: the launch records are files: off the async worker.
             Ok(blocking::run(|| given::accounts(root, &snapshot)))
+        }
+        Operation::Bugs => {
+            let root = root.to_owned();
+            Ok(blocking::run(move || bugs::list(&root, monitor::now())))
         }
         Operation::Attention => {
             let snapshot = store.snapshot()?;
