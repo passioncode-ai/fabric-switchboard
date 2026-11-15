@@ -516,7 +516,7 @@ export function accountMatches(account: Pick<Account, 'id' | 'label' | 'external
 }
 
 const ATTENTION_REASONS: AttentionReason[] = ['session_duplicate', 'session_stuck', 'sign_in', 'seat_ended', 'renewal_refused', 'usage_failing', 'move_unknown', 'refused_there', 'ceiling_question'];
-const ATTENTION_WINDOWS: AttentionWindow[] = ['sign_in', 'answer_ceiling', 'check_usage', 'open_machines', 'open_sessions'];
+const ATTENTION_WINDOWS: AttentionWindow[] = ['sign_in', 'answer_ceiling', 'check_usage', 'open_machines', 'open_sessions', 'close_copy'];
 /**
  * WF-3 (SB-365): the answer of the `attention` command, kept to the fields the window knows. An
  * answer that is not one (an older owner without the command, a malformed item) is an empty list
@@ -532,7 +532,7 @@ export function attentionView(raw: unknown): Attention {
     const action = e.action && typeof e.action === 'object' ? e.action as Record<string, unknown> : null;
     if (!ATTENTION_REASONS.includes(e.reason as AttentionReason) || !action || !ATTENTION_WINDOWS.includes(action.window as AttentionWindow)) continue;
     const provider = e.provider === 'claude' || e.provider === 'codex' ? e.provider : null;
-    items.push({ account_id: text(e.account_id), label: text(e.label), provider, pool: text(e.pool), reason: e.reason as AttentionReason, detail: text(e.detail) ?? '', since: typeof e.since === 'number' ? e.since : null, action: { tool: text(action.tool) ?? '', window: action.window as AttentionWindow } });
+    items.push({ account_id: text(e.account_id), label: text(e.label), provider, pool: text(e.pool), reason: e.reason as AttentionReason, detail: text(e.detail) ?? '', since: typeof e.since === 'number' ? e.since : null, action: { tool: text(action.tool) ?? '', window: action.window as AttentionWindow }, session_id: text(e.session_id) });
   }
   return { count: items.length, items };
 }
@@ -585,6 +585,7 @@ export function attentionActionLabel(window: AttentionWindow): string {
     case 'check_usage': return t('Check again');
     case 'open_machines': return t('Open Other machines');
     case 'open_sessions': return t('Open sessions');
+    case 'close_copy': return t('Close the newer copy');
   }
 }
 /** WF-2.4: the facts line of an account given to an agent; each part is said even when it is not recorded. */

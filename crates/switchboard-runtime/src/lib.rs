@@ -391,6 +391,9 @@ pub enum Operation {
         #[serde(default)]
         dry_run: bool,
     },
+    /// SB-388: close the newer of two processes holding one Claude Code session
+    /// (`duty::close_copy`); the older keeps working.
+    SessionCloseCopy { session_id: String },
     /// SB-365 (WF-3.1, DEC-0015): what needs a person, each with its reason and the action that
     /// fixes it. A view: nothing moves, the accounts stay in their groups.
     Attention,
@@ -1413,6 +1416,8 @@ impl Runtime {
                 | Operation::Capacity { .. }
                 // SB-384: the process table and its own two small files.
                 | Operation::Duty { .. }
+                // SB-388: the process table, the session files and one signal.
+                | Operation::SessionCloseCopy { .. }
                 // SB-379: the process table, session files and the day's launch records.
                 | Operation::SessionTree
                 // SB-365: the snapshot, the owner's sign-in verdicts in memory, seats.jsonl and
@@ -6170,6 +6175,10 @@ async fn execute(
                 }
                 Ok(answer)
             })
+        }
+        Operation::SessionCloseCopy { session_id } => {
+            let root = root.to_owned();
+            blocking::run(move || duty::close_copy(&root, &session_id, session_watch::now()))
         }
         Operation::Machines { live } => {
             let snapshot = store.snapshot()?;

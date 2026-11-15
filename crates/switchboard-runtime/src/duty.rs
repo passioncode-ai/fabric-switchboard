@@ -634,6 +634,61 @@ fn act_on(_: &Path, _: &Seen, _: Act) -> &'static str {
     "unsupported"
 }
 
+pub const NOT_TWO: &str =
+    "That session no longer runs in two processes. Refresh to see it now.";
+pub const COPY_STILL_RUNNING: &str =
+    "The newer copy did not close. Close it in its own window.";
+pub const CLOSE_UNSUPPORTED: &str = "Closing a session's copy works on macOS and Linux for now.";
+
+/// Of the copies of `session`, the one to close: the newest (started last, then the higher pid).
+pub fn newest_copy<'a>(seen: &'a [Seen], session: &str) -> Option<(&'a Seen, Vec<&'a Seen>)> {
+    let copies: Vec<&Seen> = seen.iter().filter(|s| s.session == session).collect();
+    if copies.len() < 2 {
+        return None;
+    }
+    let newest = *copies.iter().max_by_key(|s| (s.started_at, s.pid))?;
+    let kept = copies.into_iter().filter(|s| s.pid != newest.pid).collect();
+    Some((newest, kept))
+}
+
+/// SB-388: the person's *Close the newer copy* on a duplicate (Needs attention): the newest
+/// process holding `session` gets SIGTERM, then SIGKILL after ten seconds; the older copy keeps
+/// working. Journalled in `duty.jsonl` with `by: person`.
+pub fn close_copy(root: &Path, session: &str, now: i64) -> Result<Value, String> {
+    #[cfg(not(unix))]
+    {
+        let _ = (root, session, now);
+        Err(CLOSE_UNSUPPORTED.into())
+    }
+    #[cfg(unix)]
+    {
+        let seen = observe(root);
+        let Some((newest, kept)) = newest_copy(&seen, session) else {
+            return Err(NOT_TWO.into());
+        };
+        let closed = stop(newest.pid);
+        append(
+            root,
+            json!({
+                "at": now, "session": session, "pid": newest.pid, "cwd": newest.cwd,
+                "reason": "duplicate", "by": "person",
+                "result": if closed { "closed" } else { "still_running" },
+            }),
+        );
+        if !closed {
+            return Err(COPY_STILL_RUNNING.into());
+        }
+        if kept.len() < 2 {
+            crate::session_watch::forget(root, crate::session_watch::DUPLICATE, session);
+        }
+        Ok(json!({
+            "session_id": session,
+            "closed_pid": newest.pid,
+            "kept_pids": kept.iter().map(|s| s.pid).collect::<Vec<_>>(),
+        }))
+    }
+}
+
 /// SIGTERM, then SIGKILL after ten seconds; whether the process is gone.
 #[cfg(unix)]
 fn stop(pid: u32) -> bool {
@@ -843,6 +898,25 @@ mod tests {
         }];
         compare_cpu(&mut d, 1_600 + 3 * CHECK_SECONDS, true);
         assert_eq!(d[0].cpu_quiet, None, "a sample from long ago says nothing");
+    }
+
+    #[test]
+    fn the_newer_copy_of_a_session_is_the_one_a_person_closes() {
+        let mut a = seen("busy", 1, 1, None);
+        a.pid = 10;
+        a.started_at = 100;
+        let mut b = a.clone();
+        b.pid = 7;
+        b.started_at = 200;
+        let mut other = a.clone();
+        other.session = "other".into();
+        other.pid = 30;
+        let all = [a, b, other];
+        let (newest, kept) = newest_copy(&all, &all[0].session).unwrap();
+        assert_eq!(newest.pid, 7, "started last, whatever its pid");
+        assert_eq!(kept.iter().map(|s| s.pid).collect::<Vec<_>>(), [10]);
+        assert!(newest_copy(&all, "other").is_none(), "one process is not a duplicate");
+        assert!(newest_copy(&all, "absent").is_none());
     }
 
     #[test]

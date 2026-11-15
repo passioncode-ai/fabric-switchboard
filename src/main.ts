@@ -2779,7 +2779,7 @@ function attentionSection(main: HTMLElement) {
     const key = `attention-${item.account_id ?? `${item.reason}-${index}`}`;
     const act = button(attentionActionLabel(item.action.window), () => attentionAct(item, account, key), 'button row-button', key);
     // A sign-in or a check needs the account here; without it the action has nothing to act on.
-    if ((item.action.window === 'sign_in' && !account && !item.provider) || (item.action.window === 'check_usage' && !account)) { act.disabled = true; act.dataset.locked = 'true'; }
+    if ((item.action.window === 'sign_in' && !account && !item.provider) || (item.action.window === 'check_usage' && !account) || (item.action.window === 'close_copy' && !item.session_id)) { act.disabled = true; act.dataset.locked = 'true'; }
     row.append(copy, act); list.append(row);
   });
   section.append(list); main.append(section);
@@ -2795,6 +2795,8 @@ function attentionAct(item: AttentionItem, account: Account | undefined, key: st
     case 'answer_ceiling': goTo('agents'); return;
     case 'open_machines': goTo('projects', 'machines-heading'); return;
     case 'open_sessions': goTo('activity', 'sessions-tree-heading'); return;
+    // SB-388: one press closes the newer copy; the older one keeps working.
+    case 'close_copy': { const id = item.session_id; if (id) void mutate(() => adapter.sessionCloseCopy(id), t('Closed the newer copy. The older one keeps working.'), key); return; }
   }
 }
 const policyTarget = (target: RotationPolicy['target']) => target === 'managed' ? t('Managed route') : t('Claude Code account');

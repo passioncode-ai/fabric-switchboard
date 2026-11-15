@@ -229,7 +229,13 @@ pub fn build(inputs: &Inputs) -> Value {
                 "since": null,
                 "pids": finding["pids"],
                 "launch_id": finding["launch_id"],
-                "action": {"tool": "switchboard_sessions", "window": "open_sessions"},
+                "session_id": finding["session_id"],
+                // SB-388: a duplicate is fixed in one press: its newer copy is closed.
+                "action": if reason == "session_duplicate" {
+                    json!({"tool": "switchboard_session_close_copy", "window": "close_copy"})
+                } else {
+                    json!({"tool": "switchboard_sessions", "window": "open_sessions"})
+                },
             }),
         );
     }
@@ -316,6 +322,9 @@ mod tests {
         assert_eq!(answer["items"][0]["pids"], json!([3, 4]));
         assert_eq!(answer["items"][1]["label"], "alpha");
         assert_eq!(answer["items"][1]["action"]["window"], "open_sessions");
+        assert_eq!(answer["items"][0]["session_id"], "s-1");
+        assert_eq!(answer["items"][0]["action"]["window"], "close_copy");
+        assert_eq!(answer["items"][0]["action"]["tool"], "switchboard_session_close_copy");
     }
     fn reasons(answer: &Value) -> Vec<String> {
         answer["items"]

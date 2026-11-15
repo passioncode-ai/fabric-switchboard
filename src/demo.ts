@@ -49,6 +49,8 @@ export function createDemoAdapter(): Adapter {
   const ceilingsParam = new URLSearchParams(location.search).get('ceilings');
   let demoCeilings: CeilingView[] = [];
   let demoQuestions: CeilingQuestionView[] = [];
+  // SB-388: one session in two processes, for Needs attention's Close the newer copy.
+  let demoDuplicate: string | null = 's-demo-dup';
   const ceilingView = (scope: ChainScope, cents: number, doubledFrom: number | null = null): CeilingView => ({ scope, cents, usd: cents / 100, set_at: now() - 7200, doubled_from: doubledFrom, active: true, inactive_reason: null });
   if (ceilingsParam === 'set' || ceilingsParam === 'reached') {
     Object.assign(openrouter, { saved: true, saved_at: now() - 86_400, model: 'moonshotai/kimi-k3.1-pro', credit: { label: 'demo', limit: 10, limit_remaining: 8.8, limit_reset: 'daily', usage: 31.2, usage_daily: 1.2, is_free_tier: false }, credit_error: null });
@@ -358,6 +360,7 @@ export function createDemoAdapter(): Adapter {
       const items = [
         ...[...signInRequired].map((id) => item(id)).filter((a): a is Account => !!a).map((a) => ({ account_id: a.id, label: a.label, provider: a.provider, pool: a.pool, reason: 'sign_in' as const, detail: 'Synthetic: the sign-in ended.', since: now() - 3600, action: { tool: 'switchboard_login', window: 'sign_in' as const } })),
         ...[...failingChecks].map((id) => item(id)).filter((a): a is Account => !!a).map((a) => ({ account_id: a.id, label: a.label, provider: a.provider, pool: a.pool, reason: 'usage_failing' as const, detail: 'Synthetic: the usage check fails.', since: now() - 5400, action: { tool: 'switchboard_usage', window: 'check_usage' as const } })),
+        ...(demoDuplicate ? [{ account_id: null, label: 'alpha-web', provider: null, pool: null, reason: 'session_duplicate' as const, detail: 'Synthetic: one session in two processes.', since: null, session_id: demoDuplicate, action: { tool: 'switchboard_session_close_copy', window: 'close_copy' as const } }] : []),
         ...demoQuestions.map(() => ({ account_id: null, label: null, provider: null, pool: null, reason: 'ceiling_question' as const, detail: 'Synthetic: a ceiling was reached.', since: now() - 600, action: { tool: 'switchboard_ceiling_answer', window: 'answer_ceiling' as const } })),
       ];
       return { count: items.length, items };
@@ -634,6 +637,12 @@ export function createDemoAdapter(): Adapter {
       const tree = from.folders.filter((f) => f === folder || (/-wt-|\/\.worktrees\//.test(f) && from.folders.indexOf(folder) === 0));
       if (tree.length >= from.folders.length) throw new Error("This is the project's only repository. Add another folder to the project first, or delete the project.");
       from.folders = from.folders.filter((f) => !tree.includes(f)); target.folders.push(...tree); log('project', '', 'updated');
+    },
+    async sessionCloseCopy(sessionId) {
+      await pause();
+      if (sessionId !== demoDuplicate) throw new Error('That session no longer runs in two processes. Refresh to see it now.');
+      demoDuplicate = null;
+      return { session_id: sessionId, closed_pid: 4188, kept_pids: [4101] };
     },
     async sessionTree() {
       const now = Math.floor(Date.now() / 1000);
