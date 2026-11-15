@@ -313,6 +313,8 @@ pub fn tick(root: &Path, now: i64) {
 }
 
 fn watch(root: &Path, now: i64) {
+    // SB-384: the duty officer acts at most every five minutes, on this same thread.
+    crate::duty::tick(root, now);
     let (scan, records, pairs) = read(root, now);
     let rows: Vec<Value> = scan["sessions"].as_array().cloned().unwrap_or_default();
     let found = findings(&rows, &records, &pairs, now);

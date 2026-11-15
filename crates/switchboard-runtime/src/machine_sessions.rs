@@ -173,11 +173,140 @@ pub fn live_from(
 }
 
 /// Claude Code's `sessions` folders: the person's own and each home Switchboard launches in.
+/// SB-384: the live Claude Code and Codex processes of this user, as the process table shows them.
+pub(crate) fn processes() -> Vec<Proc> {
+    agent_processes().unwrap_or_default()
+}
+
+/// SB-384: every session file (`sessions/<pid>.json`) with the config folder it lies in: the
+/// person's `~/.claude`, each home Switchboard launches in and the organizations' shell homes.
+pub(crate) fn session_files(root: &Path) -> Vec<(PathBuf, Value)> {
+    let mut found = Vec::new();
+    for dir in session_dirs(root) {
+        let Some(config) = dir.parent().map(Path::to_path_buf) else {
+            continue;
+        };
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for path in entries.flatten().map(|e| e.path()) {
+            if path.extension().and_then(|x| x.to_str()) != Some("json")
+                || !std::fs::metadata(&path).is_ok_and(|m| m.len() <= 64 * 1024)
+            {
+                continue;
+            }
+            if let Some(v) = std::fs::read(&path)
+                .ok()
+                .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
+            {
+                found.push((config.clone(), v));
+            }
+        }
+    }
+    found
+}
+
+/// SB-384: the newest write (Unix seconds) of one Claude Code session's transcript and of the
+/// files under its own folder (its subagents' transcripts), in `config/projects/<folder>/`.
+pub(crate) fn session_last_write(config: &Path, cwd: &str, session: &str) -> Option<i64> {
+    let dir = config.join("projects").join(projects_dir_name(cwd));
+    let stamp = |p: &Path| {
+        std::fs::metadata(p)
+            .ok()?
+            .modified()
+            .ok()?
+            .duration_since(std::time::UNIX_EPOCH)
+            .ok()
+            .map(|d| d.as_secs() as i64)
+    };
+    let mut newest = stamp(&dir.join(format!("{session}.jsonl")));
+    let own = dir.join(session);
+    for sub in [own.clone(), own.join("subagents")] {
+        if let Ok(entries) = std::fs::read_dir(&sub) {
+            for t in entries
+                .flatten()
+                .take(MAX_TRANSCRIPTS)
+                .filter_map(|e| stamp(&e.path()))
+            {
+                newest = Some(newest.map_or(t, |n| n.max(t)));
+            }
+        }
+    }
+    newest
+}
+
+/// SB-384: the executables of a process's ancestors, nearest first, at most eight.
+#[cfg(target_os = "macos")]
+pub(crate) fn ancestor_paths(pid: u32) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut current = pid as i32;
+    let mut path = vec![0u8; libc::PROC_PIDPATHINFO_MAXSIZE as usize];
+    for _ in 0..8 {
+        let mut info = std::mem::MaybeUninit::<libc::proc_bsdinfo>::zeroed();
+        let size = std::mem::size_of::<libc::proc_bsdinfo>() as i32;
+        // SAFETY: a plain read of one process's info into a buffer of the size passed.
+        let got = unsafe {
+            libc::proc_pidinfo(
+                current,
+                libc::PROC_PIDTBSDINFO,
+                0,
+                info.as_mut_ptr().cast(),
+                size,
+            )
+        };
+        if got != size {
+            break;
+        }
+        let ppid = unsafe { info.assume_init() }.pbi_ppid as i32;
+        if ppid <= 1 {
+            break;
+        }
+        // SAFETY: as above, into `path`'s own length.
+        let n = unsafe { libc::proc_pidpath(ppid, path.as_mut_ptr().cast(), path.len() as u32) };
+        if n > 0 {
+            out.push(String::from_utf8_lossy(&path[..n as usize]).into_owned());
+        }
+        current = ppid;
+    }
+    out
+}
+#[cfg(target_os = "linux")]
+pub(crate) fn ancestor_paths(pid: u32) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut current = pid;
+    for _ in 0..8 {
+        let Ok(stat) = std::fs::read_to_string(format!("/proc/{current}/stat")) else {
+            break;
+        };
+        // The command sits in parentheses and may hold spaces: the fields follow the last `)`.
+        let Some(ppid) = stat
+            .rsplit_once(')')
+            .and_then(|(_, rest)| rest.split_whitespace().nth(1))
+            .and_then(|p| p.parse::<u32>().ok())
+        else {
+            break;
+        };
+        if ppid <= 1 {
+            break;
+        }
+        if let Ok(exe) = std::fs::read_link(format!("/proc/{ppid}/exe")) {
+            out.push(exe.to_string_lossy().into_owned());
+        }
+        current = ppid;
+    }
+    out
+}
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+pub(crate) fn ancestor_paths(_: u32) -> Vec<String> {
+    Vec::new()
+}
+
 fn session_dirs(root: &Path) -> Vec<PathBuf> {
     let mut dirs: Vec<PathBuf> = dirs::home_dir()
         .map(|h| vec![h.join(".claude/sessions")])
         .unwrap_or_default();
-    for folder in ["homes", "runtimes"] {
+    // SB-384: the organizations' shell homes too (the terminal hook's `CLAUDE_CONFIG_DIR`).
+    for folder in ["homes", "runtimes", crate::shell::map::DIR] {
         if let Ok(entries) = std::fs::read_dir(root.join(folder)) {
             dirs.extend(entries.flatten().map(|e| e.path().join("sessions")));
         }

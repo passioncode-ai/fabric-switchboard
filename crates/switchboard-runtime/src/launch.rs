@@ -28,7 +28,7 @@ pub struct Login {
 }
 /// SB-259: names the operator's own Claude folder in a session Switchboard launched.
 pub(crate) const SOURCE_DIR: &str = "SWITCHBOARD_CLAUDE_SOURCE_DIR";
-const CONFLICTS: &[&str] = &[
+pub(crate) const CONFLICTS: &[&str] = &[
     "ANTHROPIC_API_KEY",
     "ANTHROPIC_AUTH_TOKEN",
     "ANTHROPIC_BASE_URL",
@@ -665,6 +665,10 @@ pub(crate) fn repoint_managed(
         }
     }
     changed
+}
+/// SB-384: a script at a path of its own (the duty officer's resume scripts), executable, 0700.
+pub(crate) fn write_script_at(path: &Path, content: &str) -> Result<(), String> {
+    private_write(path, content.as_bytes(), true)
 }
 pub(crate) fn write_launch_script(home: &Path, content: &str) -> Result<PathBuf, String> {
     #[cfg(windows)]
