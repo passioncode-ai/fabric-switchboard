@@ -1896,7 +1896,7 @@ async fn run(cli: &Cli) -> Result<Value, String> {
         let names_launch = words.first().is_some_and(|w| w == "attach")
             || words.get(1).is_some_and(|w| w == "end");
         if names_launch && !words.last().is_some_and(|id| launches::valid_id(id)) {
-            return Err(switchboard_runtime::session_host::NOT_FOUND.into());
+            return Err(launches::NO_SUCH_LAUNCH.into());
         }
         let (program, data_dir) =
             switchboard_runtime::targets::program_for(&root, &target, remote, remote_data_dir);

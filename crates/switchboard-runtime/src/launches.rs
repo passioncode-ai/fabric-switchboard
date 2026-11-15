@@ -120,6 +120,9 @@ impl LaunchedBy {
 }
 
 /// A launch id: a UUID, or what an earlier writer used, within 64 safe characters.
+/// A launch id no session answers to (the session host's own refusal; SB-380 checks it before a
+/// launch id travels to another machine, on every platform).
+pub const NO_SUCH_LAUNCH: &str = "No session with this launch id is open here.";
 pub fn valid_id(id: &str) -> bool {
     (1..=64).contains(&id.len()) && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
 }
