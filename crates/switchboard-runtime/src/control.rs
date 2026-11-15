@@ -951,7 +951,11 @@ mod tests {
         for operation in [
             Operation::Recovery,
             Operation::Sessions { all: true },
-            Operation::Launches { launch_id: None },
+            Operation::Launches {
+                launch_id: None,
+                limit: None,
+                before: None,
+            },
             Operation::MonitorStatus,
         ] {
             let kind = operation_kind(&operation);
@@ -974,7 +978,11 @@ mod tests {
         let recovery = runtime.execute(Operation::Recovery).await.unwrap();
         assert_eq!(recovery["sessions"], json!([]));
         let launches = runtime
-            .execute(Operation::Launches { launch_id: None })
+            .execute(Operation::Launches {
+                launch_id: None,
+                limit: None,
+                before: None,
+            })
             .await
             .unwrap();
         assert_eq!(launches["total"], 1);

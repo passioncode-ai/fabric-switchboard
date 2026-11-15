@@ -701,7 +701,15 @@ pub(crate) fn status(
         .filter(|r| matches!(r.state, State::Waiting | State::Claimed))
         .map(|r| r.session.as_str())
         .collect();
-    let launched = crate::launches::by_session(root, &open);
+    // Perf audit item 6: the launch records written since a day before the oldest open stop.
+    let since = rows
+        .iter()
+        .filter(|r| matches!(r.state, State::Waiting | State::Claimed))
+        .map(|r| r.stopped_at)
+        .min()
+        .unwrap_or(now)
+        .saturating_sub(86_400);
+    let launched = crate::launches::by_session(root, &open, since);
     // SB-376: a stop whose session still runs in a live process says so; a host that would start
     // it again in another process must not.
     let live = if open.is_empty() {

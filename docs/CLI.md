@@ -532,6 +532,7 @@ switchboard sessions          # sessions Switchboard launched (Claude Code, Code
 switchboard sessions --all    # also the ended ones (each home keeps its last launch's record)
 switchboard --json sessions   # {sessions: [...]}
 switchboard sessions --history          # every launch of the last 90 days, newest first (SB-212)
+switchboard sessions --history --limit 50 --before 1794700000   # one page; next_before starts the next
 switchboard sessions show LAUNCH_ID     # one launch, who launched it and where its work went
 switchboard sessions --machine          # every Claude Code and Codex process of this user, Switchboard's or not (SB-353)
 ```

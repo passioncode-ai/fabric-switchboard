@@ -522,6 +522,8 @@ pub(crate) fn own_home(root: &Path, record: &Value) -> Option<PathBuf> {
 thread_local! {
     /// How many full scans of the records this thread made (SB-219).
     static SCANS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    /// How many records a history page read.
+    static PAGE_READS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 /// Every record, by id. Only `<id>.json` regular files are read.
 /// SB-364: every launch record in `root`, in no particular order, as stored (no state added).
@@ -583,9 +585,14 @@ fn all(root: &Path) -> BTreeMap<String, Value> {
 /// transcript as the session's own hook reported it, so a host resumes a stop whose transcript
 /// lives in a managed home (`homes/<account>/projects/...`), not in `~/.claude/projects`. One scan,
 /// and none when `sessions` is empty. A transcript no longer on disk is left out.
+///
+/// Perf audit item 6: only records written at or after `since` (Unix seconds) are read. A launch's
+/// record is rewritten at each turn and at its limit stop, so a caller passes a day before the
+/// oldest stop it asks about; older files are only stat-ed.
 pub(crate) fn by_session(
     root: &Path,
     sessions: &std::collections::HashSet<&str>,
+    since: i64,
 ) -> std::collections::HashMap<String, (String, Option<String>)> {
     let mut found: std::collections::HashMap<String, (i64, String, Option<String>)> =
         std::collections::HashMap::new();
@@ -595,7 +602,14 @@ pub(crate) fn by_session(
             .map(|(k, (_, l, t))| (k, (l, t)))
             .collect();
     }
-    for (id, record) in all(root) {
+    for record in recent_records(root, since) {
+        let Some(id) = record["launch_id"]
+            .as_str()
+            .filter(|i| valid_id(i))
+            .map(str::to_owned)
+        else {
+            continue;
+        };
         let Some(session) = record["provider_session_id"].as_str() else {
             continue;
         };
@@ -1068,16 +1082,73 @@ pub(crate) fn add_outcome(root: &Path, row: &mut Value) {
     }
 }
 pub fn history(root: &Path) -> (Vec<Value>, usize) {
-    let mut records: Vec<Value> = all(root).into_values().collect();
-    records.sort_by_key(|r| std::cmp::Reverse(r["launched_at"].as_i64().unwrap_or(0)));
-    let total = records.len();
-    let mut homes = Homes::default();
-    let listed = records
-        .into_iter()
-        .take(HISTORY_LIMIT)
-        .map(|r| with_state_in(root, r, &mut homes))
-        .collect();
+    let (listed, total, _) = history_page(root, HISTORY_LIMIT, None);
     (listed, total)
+}
+
+/// One page of the history (perf audit item 5): the `limit` newest launches launched strictly
+/// before `before` (Unix seconds), with the number of records and the `before` of the next page
+/// (null when this page is not full). A record is written at its launch and only rewritten later,
+/// so its file's modified time is never earlier than its `launched_at`: the files are read newest
+/// modified first, and reading stops once the page is full and the next file was last written
+/// before the page's oldest launch. Older files are only stat-ed.
+pub fn history_page(
+    root: &Path,
+    limit: usize,
+    before: Option<i64>,
+) -> (Vec<Value>, usize, Option<i64>) {
+    let limit = limit.clamp(1, HISTORY_LIMIT);
+    let mut files: Vec<(i64, String)> = Vec::new();
+    if let Ok(entries) = fs::read_dir(root.join(DIR)) {
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            let Some(id) = name.to_str().and_then(|n| n.strip_suffix(".json")) else {
+                continue;
+            };
+            if !valid_id(id) {
+                continue;
+            }
+            let modified = entry
+                .metadata()
+                .ok()
+                .and_then(|m| m.modified().ok())
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map_or(i64::MAX, |d| d.as_secs() as i64);
+            files.push((modified, id.to_owned()));
+        }
+    }
+    files.sort_by(|a, b| b.cmp(a));
+    let total = files.len();
+    // The page so far, newest launch first.
+    let mut page: Vec<(i64, Value)> = Vec::new();
+    for (modified, id) in files {
+        if page.len() == limit && page.last().is_some_and(|(oldest, _)| modified < *oldest) {
+            break;
+        }
+        #[cfg(test)]
+        PAGE_READS.with(|n| n.set(n.get() + 1));
+        let Some(record) = read(root, &id) else {
+            continue;
+        };
+        let at = record["launched_at"].as_i64().unwrap_or(0);
+        if before.is_some_and(|b| at >= b) {
+            continue;
+        }
+        let place = page.partition_point(|(t, _)| *t >= at);
+        if place < limit {
+            page.insert(place, (at, record));
+            page.truncate(limit);
+        }
+    }
+    let next = (page.len() == limit)
+        .then(|| page.last().map(|(t, _)| *t))
+        .flatten();
+    let mut homes = Homes::default();
+    let listed = page
+        .into_iter()
+        .map(|(_, r)| with_state_in(root, r, &mut homes))
+        .collect();
+    (listed, total, next)
 }
 fn short(record: &Value) -> Value {
     let mut out = Map::new();
@@ -1464,6 +1535,112 @@ mod tests {
         }
         assert!(!root.join("escape.json").exists());
     }
+    #[test]
+    fn a_stops_launch_is_found_among_the_records_written_since_and_older_files_are_left() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join(DIR)).unwrap();
+        for (id, session, written) in [
+            ("launch-new", "s-new", 2_000_000_u64),
+            ("launch-old", "s-old", 1_000_000),
+        ] {
+            let path = root.join(DIR).join(format!("{id}.json"));
+            let body =
+                json!({"launch_id": id, "provider_session_id": session, "launched_at": written});
+            fs::write(&path, serde_json::to_vec(&body).unwrap()).unwrap();
+            let when = std::time::UNIX_EPOCH + std::time::Duration::from_secs(written);
+            fs::File::options()
+                .write(true)
+                .open(&path)
+                .unwrap()
+                .set_modified(when)
+                .unwrap();
+        }
+        let wanted = std::collections::HashSet::from(["s-new", "s-old"]);
+        let found = by_session(root, &wanted, 1_900_000);
+        assert_eq!(
+            found.get("s-new").map(|(l, _)| l.as_str()),
+            Some("launch-new")
+        );
+        assert!(
+            !found.contains_key("s-old"),
+            "a file last written before `since` is not read"
+        );
+        assert_eq!(by_session(root, &wanted, 0).len(), 2);
+    }
+
+    #[test]
+    fn a_history_page_reads_only_the_newest_files_and_pages_by_launch_time() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join(DIR)).unwrap();
+        for n in 0..30_i64 {
+            let id = format!("launch-{n:02}");
+            let body =
+                json!({"launch_id": id, "launched_at": 1_000 + n * 10, "provider": "claude"});
+            let path = root.join(DIR).join(format!("{id}.json"));
+            fs::write(&path, serde_json::to_vec(&body).unwrap()).unwrap();
+            let when =
+                std::time::UNIX_EPOCH + std::time::Duration::from_secs((1_000 + n * 10) as u64);
+            fs::File::options()
+                .write(true)
+                .open(&path)
+                .unwrap()
+                .set_modified(when)
+                .unwrap();
+        }
+        let ids = |v: &[Value]| {
+            v.iter()
+                .map(|r| r["launch_id"].as_str().unwrap().to_owned())
+                .collect::<Vec<_>>()
+        };
+        PAGE_READS.with(|n| n.set(0));
+        let (first, total, next) = history_page(root, 5, None);
+        assert_eq!(total, 30);
+        assert_eq!(
+            PAGE_READS.with(|n| n.get()),
+            5,
+            "the page is full after the five newest files"
+        );
+        assert_eq!(
+            ids(&first),
+            [
+                "launch-29",
+                "launch-28",
+                "launch-27",
+                "launch-26",
+                "launch-25"
+            ]
+        );
+        assert_eq!(next, Some(1_250));
+        let (second, _, next) = history_page(root, 5, next);
+        assert_eq!(
+            ids(&second),
+            [
+                "launch-24",
+                "launch-23",
+                "launch-22",
+                "launch-21",
+                "launch-20"
+            ]
+        );
+        assert_eq!(next, Some(1_200));
+        // An old launch rewritten just now still sorts by its launch time.
+        let path = root.join(DIR).join("launch-03.json");
+        fs::File::options()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_modified(std::time::SystemTime::now())
+            .unwrap();
+        let (again, _, _) = history_page(root, 3, None);
+        assert_eq!(ids(&again), ["launch-29", "launch-28", "launch-27"]);
+        let (tail, _, next) = history_page(root, 5, Some(1_030));
+        assert_eq!(ids(&tail), ["launch-02", "launch-01", "launch-00"]);
+        assert_eq!(next, None, "a page that is not full ends the history");
+        assert_eq!(history(root).0.len(), 30);
+    }
+
     #[test]
     fn records_older_than_ninety_days_are_pruned_and_nothing_else_is() {
         let (_temp, root, id) = fixture();

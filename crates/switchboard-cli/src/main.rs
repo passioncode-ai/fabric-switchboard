@@ -198,6 +198,13 @@ enum Command {
         /// it did: one record per launch, also when a later launch reused its home.
         #[arg(long)]
         history: bool,
+        /// With --history: at most this many launches, from 1 to 500 (default 500).
+        #[arg(long, requires = "history", value_parser = clap::value_parser!(u16).range(1..=500))]
+        limit: Option<u16>,
+        /// With --history: only launches started before this time, in Unix seconds: the
+        /// `next_before` of the previous page.
+        #[arg(long, requires = "history")]
+        before: Option<i64>,
         /// Every Claude Code and Codex process running for this user, Switchboard's or not: its
         /// folder, age, the launch it belongs to (or none) and how long its folder's transcripts
         /// have been quiet. Read from the process table here, without the owner.
@@ -2536,8 +2543,19 @@ async fn run(cli: &Cli) -> Result<Value, String> {
             ..
         } => Operation::Launches {
             launch_id: Some(launch_id.clone()),
+            limit: None,
+            before: None,
         },
-        Command::Sessions { history: true, .. } => Operation::Launches { launch_id: None },
+        Command::Sessions {
+            history: true,
+            limit,
+            before,
+            ..
+        } => Operation::Launches {
+            launch_id: None,
+            limit: limit.map(usize::from),
+            before: *before,
+        },
         Command::Sessions { all, .. } => Operation::Sessions { all: *all },
         Command::Provenance {
             provider,
@@ -3350,6 +3368,8 @@ fn there(command: &Command) -> Option<There> {
             remote_data_dir,
             all,
             history,
+            limit,
+            before,
             machine,
             tree,
             command: None,
@@ -3364,6 +3384,12 @@ fn there(command: &Command) -> Option<There> {
                 if on {
                     words.push(flag.to_owned());
                 }
+            }
+            if let Some(n) = limit {
+                words.extend(["--limit".to_owned(), n.to_string()]);
+            }
+            if let Some(t) = before {
+                words.extend(["--before".to_owned(), t.to_string()]);
             }
             Some((
                 target.clone(),
