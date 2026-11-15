@@ -8,6 +8,8 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- Sections and panels share one width on every page; a page's subtitle no longer wraps early beside its buttons; API keys names agents as the lists do and explains when a changed key applies and why a group cannot start on OpenRouter; the Statistics index stays on one line (window audit 19, 42, 45, 46, 47, 56).
+
 - Agents: the takeover switches, the default marker and Set up line up on every row; the default agent reads as a label, not a button; the settings' controls share one height; a long command wraps after a slash, not inside a word; the fallback chain reads on its own line; the note about the switchboard command on PATH no longer reads as contradicting registered tools (window audit 20, 31, 34, 35, 37, 38).
 
 - A session launched in place (Fabric's and Fabric Dashboards' consoles) records how it ended, so `switchboard sessions --tree` no longer reads every finished one as `gone`; and an update of the app or of `serve` waits until no managed request has started for two minutes (at most half an hour), so a working session's next request no longer meets a closed port (studio-agent's finding, SB-387).

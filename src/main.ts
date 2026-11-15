@@ -1531,7 +1531,7 @@ function renderTokens(main: HTMLElement) {
   if (!openrouter && !openrouterError) void loadOpenrouter();
   if (openrouterKeys && !groupKeyStatus) loadGroupKeys();
   ceilingBanners(main);
-  main.append(el('p', 'surface-note', t('Agents that run on an API key (Hermes, OpenCode, Pi, Kimi Code CLI and others on OpenRouter) take the key of the group whose folder they start in. A folder outside every group, or a group without a key of its own, uses the machine\'s key. Nothing waits: each launch reads its key when it starts.')));
+  main.append(el('p', 'surface-note', t('Agents that run on an API key (Hermes Agent, OpenCode, pi, Kimi Code CLI and others on OpenRouter) take the key of the group whose folder they start in. A folder outside every group, or a group without a key of its own, uses this computer\'s key. A key you change applies from the next launch; running agents keep the one they started with.')));
   main.append(foldSection({ key: 'keys-machine', title: t('This computer\'s key'), state: !openrouter ? undefined : openrouter.saved ? keyStateText(openrouter.credit?.label, openrouter.model) : t('No key'), open: true, className: 'keys-fold', body: () => [openrouterPanel()] }));
   const projects = openrouterKeys?.projects ?? [];
   const own = projects.filter((p) => openrouterKeys?.keys.some((k) => k.pool === p.pool)).length;
@@ -1567,7 +1567,7 @@ function projectKeysPanel() {
   }
   if (rest.length) {
     const line = el('div', 'key-rest');
-    line.append(el('p', 'form-note', openrouter?.saved ? plural(rest.length, { one: '{n} group uses this computer\'s key.', other: '{n} groups use this computer\'s key.' }) : plural(rest.length, { one: '{n} group has no key: agents there cannot start on OpenRouter.', other: '{n} groups have no key: agents there cannot start on OpenRouter.' })),
+    line.append(el('p', 'form-note', openrouter?.saved ? plural(rest.length, { one: '{n} group uses this computer\'s key.', other: '{n} groups use this computer\'s key.' }) : plural(rest.length, { one: '{n} group has no key of its own, and this computer has none: agents in its folders cannot start on OpenRouter.', other: '{n} groups have no key of their own, and this computer has none: agents in their folders cannot start on OpenRouter.' })),
       button(t('Give a group its own key…'), () => giveGroupKeyDialog(rest), 'button quiet', 'key-give'));
     section.append(line);
   }

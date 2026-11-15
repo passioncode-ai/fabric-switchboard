@@ -29,6 +29,16 @@ h1:focus { outline: none; }
 .subtitle, .surface-note { color: var(--muted); }
 .header-actions { display: flex; align-items: center; gap: var(--space-2); flex-shrink: 0; }
 .page-header > :first-child { flex: 1; min-width: 0; }
+/* Audit item 42: on a wide window the subtitle takes the header's whole width under the title, so
+   the actions beside the title (Refresh, + New group) never squeeze it into an early wrap. */
+@media (min-width: 821px) {
+  .page-header { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: var(--space-5); align-items: end; }
+  .page-header > :first-child { display: contents; }
+  .page-header .eyebrow { grid-column: 1; grid-row: 1; }
+  .page-header h1 { grid-column: 1; grid-row: 2; }
+  .page-header .subtitle { grid-column: 1 / -1; grid-row: 3; margin: 0; }
+  .page-header > .header-actions { grid-column: 2; grid-row: 1 / 3; align-self: center; }
+}
 /* VIS-09: two heights. --control-h for header, panel and dialog actions; .row-button, .text-button
    and .icon-button are --control-h-compact. Line height 1.25 so the minimum height is the height. */
 .button { padding: var(--space-1) var(--space-3); min-height: var(--control-h); line-height: 1.25; border: 1px solid var(--border-strong); color: var(--ink); background: var(--panel); border-radius: var(--r-control); white-space: nowrap; font-weight: 550; }
@@ -639,7 +649,7 @@ g:hover > .chart-bar { opacity: .82; }
 
 /* WF-1.2 (SB-363): one folding section. The header is a full-width button: a chevron, the title,
    and its state on the right in the muted role; the body follows only while open. */
-.fold { margin-top: var(--space-3); border: 1px solid var(--border); border-radius: var(--r-card); background: var(--panel); }
+.fold { margin-top: var(--space-3); border: 1px solid var(--border); border-radius: var(--r-card); background: var(--panel); max-width: 980px; }
 .fold + .fold { margin-top: var(--space-2); }
 .fold-heading { margin: 0; font-size: var(--t-card); font-weight: 650; }
 .fold-toggle { display: flex; align-items: baseline; gap: var(--space-2); width: 100%; min-height: var(--control-h); padding: var(--space-2) var(--space-3); border: 0; border-radius: var(--r-card); background: transparent; color: var(--ink); font: inherit; text-align: left; cursor: pointer; }
@@ -720,7 +730,11 @@ g:hover > .chart-bar { opacity: .82; }
 /* WF-11.2: the period and the index stay at the top (the tiles scroll); a table showing every row scrolls in its box under a header that stays. */
 .stat-pinned { position: sticky; top: 0; z-index: 5; display: grid; gap: var(--space-3); padding: var(--space-2) 0 var(--space-3); background: var(--bg); border-bottom: 1px solid var(--border); }
 .stat-page .stat-pinned .stat-bar, .stat-page .stat-pinned .stat-tiles { margin: 0; }
-.stat-index { display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-3); }
+/* Audit item 56: the index stays one line in the pinned bar and scrolls sideways when narrow,
+   instead of leaving its last link alone on a second line. */
+.stat-index { display: flex; flex-wrap: nowrap; gap: var(--space-1) var(--space-3); overflow-x: auto; scrollbar-width: none; }
+.stat-index::-webkit-scrollbar { display: none; }
+.stat-index-link { flex: none; white-space: nowrap; }
 .stat-index-link { border: 0; background: transparent; padding: 0; color: var(--link); font: inherit; font-size: var(--t-chip); text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
 .stat-page .fold, .stat-page .stat-chart { scroll-margin-top: 120px; }
 .stat-grid > .fold { margin-top: 0; }
