@@ -8,6 +8,7 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- Automatic switching reads Claude Code's sign-in and which accounts need a new sign-in before it takes the owner's lock, once per pass, so a slow Keychain no longer holds every other operation behind it (W4, SB-379).
 - Faster under load: a Fabric board dispatch and a hand-over run the workflow engine off the owner's request thread, so other calls are not held behind it; `project-suggestions.json` forgets a deleted folder's row two days after it left instead of keeping it for good; the window reads the folder list once per burst of folder events (W4, SB-379).
 ## 0.7.90
 
