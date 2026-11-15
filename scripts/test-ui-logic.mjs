@@ -954,6 +954,8 @@ check(() => {
   assert.equal(logic.inGroup('default', projects), 'in the default group');
   assert.equal(logic.inGroup('alpha', projects), 'in group “Alpha Web”');
   assert.equal(logic.inGroup('work', projects), 'in group work (no folders)');
+  // Q3b: one chosen folder gives every repository in it, without module checkouts, each once.
+  assert.deepEqual(logic.repositoriesUnder({ repositories: [{ folder: '/w/b', module_of: null }, { folder: '/w/a' }, { folder: '/w/a/vendor/x', module_of: '/w/a' }, { folder: '/w/b' }] }), ['/w/a', '/w/b']);
   // Q2 item 6: a group with accounts and no group record is named, the default group and machine groups are not.
   assert.deepEqual(logic.foldlessGroups({ projects, accounts: [{ id: 'a', pool: 'work' }, { id: 'b', pool: 'default' }, { id: 'c', pool: 'alpha' }, { id: 'd', pool: 'machine_studio' }, { id: 'e', pool: 'work' }, { id: 'f', pool: 'archive' }] }).map((g) => [g.pool, g.accounts.map((a) => a.id)]), [['archive', ['f']], ['work', ['a', 'e']]]);
   // Statistics names: a group by its name, the default pool as the default group, never "No group".
@@ -1673,7 +1675,7 @@ check(() => {
     const line = logic.attentionReasonText(reason);
     assert.ok(line && !line.includes('\u2014'), reason);
   }
-  assert.deepEqual(['sign_in', 'answer_ceiling', 'check_usage', 'open_machines'].map(logic.attentionActionLabel), ['Sign in', 'Answer', 'Check again', 'Open Other machines']);
+  assert.deepEqual(['sign_in', 'answer_ceiling', 'check_usage', 'open_machines'].map(logic.attentionActionLabel), ['Sign in again', 'Answer', 'Check again', 'Open Other machines']);
   i18nForShell.setLocale('ru');
   assert.equal(logic.attentionActionLabel('check_usage'), 'Проверить снова');
   i18nForShell.setLocale('en');
