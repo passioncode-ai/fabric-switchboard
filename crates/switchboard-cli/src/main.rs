@@ -2287,42 +2287,44 @@ async fn run(cli: &Cli) -> Result<Value, String> {
             },
         },
         Command::Duty { command } => {
-            let none = Operation::Duty {
-                on: None,
-                stuck_minutes: None,
-                waiting_minutes: None,
-                idle_minutes: None,
-                max_age_hours: None,
-                run: false,
-                dry_run: false,
-            };
+            fn duty(
+                on: Option<bool>,
+                limits: [Option<u32>; 4],
+                run: bool,
+                dry_run: bool,
+            ) -> Operation {
+                let [stuck_minutes, waiting_minutes, idle_minutes, max_age_hours] = limits;
+                Operation::Duty {
+                    on,
+                    stuck_minutes,
+                    waiting_minutes,
+                    idle_minutes,
+                    max_age_hours,
+                    run,
+                    dry_run,
+                }
+            }
             match command {
-                None => none,
-                Some(DutyCmd::On) => Operation::Duty {
-                    on: Some(true),
-                    ..none
-                },
-                Some(DutyCmd::Off) => Operation::Duty {
-                    on: Some(false),
-                    ..none
-                },
+                None => duty(None, [None; 4], false, false),
+                Some(DutyCmd::On) => duty(Some(true), [None; 4], false, false),
+                Some(DutyCmd::Off) => duty(Some(false), [None; 4], false, false),
                 Some(DutyCmd::Set {
                     stuck_minutes,
                     waiting_minutes,
                     idle_minutes,
                     max_age_hours,
-                }) => Operation::Duty {
-                    stuck_minutes: *stuck_minutes,
-                    waiting_minutes: *waiting_minutes,
-                    idle_minutes: *idle_minutes,
-                    max_age_hours: *max_age_hours,
-                    ..none
-                },
-                Some(DutyCmd::Run { dry_run }) => Operation::Duty {
-                    run: !*dry_run,
-                    dry_run: *dry_run,
-                    ..none
-                },
+                }) => duty(
+                    None,
+                    [
+                        *stuck_minutes,
+                        *waiting_minutes,
+                        *idle_minutes,
+                        *max_age_hours,
+                    ],
+                    false,
+                    false,
+                ),
+                Some(DutyCmd::Run { dry_run }) => duty(None, [None; 4], !*dry_run, *dry_run),
             }
         }
         Command::Machines { command } => match command {
