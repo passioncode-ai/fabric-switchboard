@@ -3240,3 +3240,13 @@ WF-2.4. Code: [given.rs](../crates/switchboard-runtime/src/given.rs).
 - **Cost.** Nothing given: no record read. Otherwise one read of the launch records (each file
   answered from memory while unchanged, SB-347).
 - Tests: `given::tests::*`, `accounts_rotation_activity_and_queues_are_reachable_over_mcp`.
+
+## An organization's seats as data (SB-381, 2026-11-15)
+
+Vesta's board request `a7325ed3` (G2, plan fabric-workspace `docs/plans/2026-11-15-work-machines/README.md`) asks for each organization's AI seats as data Observatory sends to Vesta. `Operation::Organizations` (CLI `switchboard organizations`, MCP `switchboard_organizations`) answers a `seats` field beside `organizations` and `accounts`: `{"schema": "org-seats/1", "organizations": [{"organization", "name", "passioncode", "seats": [{"seat", "provider", "class", "placed_by", "enabled", "where"}]}]}` (`organization_seats`).
+
+- `seat`: 16 hex digits of SHA-256 over the organization's id and the account's id, the same on every read and never the account's id itself.
+- `class`: `api_key` for an API-key account, `subscription` for a subscription sign-in.
+- `placed_by`: `person` (the person's word) or `provider` (the account's team at the provider is the organization's).
+- `where`: `here`, or `elsewhere` for an account marked as used on another machine or in a machine group. No machine name.
+- Left out by construction: personal accounts, labels, e-mail addresses, account ids, tokens and machine names (test `an_organizations_seats_name_no_person_and_leave_personal_accounts_out`). The provider's plan is not known to Switchboard, so it is not given; the field set is offered to Observatory (OBS-415) on thread `f3aa795e`.
