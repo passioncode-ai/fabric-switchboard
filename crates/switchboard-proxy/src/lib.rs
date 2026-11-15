@@ -79,6 +79,8 @@ struct Gateway {
     address: SocketAddr,
     client: reqwest::Client,
     slots: Arc<Semaphore>,
+    /// When the last managed request started, Unix seconds.
+    last_request: Arc<std::sync::atomic::AtomicI64>,
     claude: String,
     openai: String,
     chatgpt: String,
@@ -126,6 +128,7 @@ pub struct ProxyHandle {
     stop: std::sync::Mutex<Option<oneshot::Sender<()>>>,
     task: std::sync::Mutex<Option<JoinHandle<()>>>,
     slots: Arc<Semaphore>,
+    last_request: Arc<std::sync::atomic::AtomicI64>,
     stats: stats::Stats,
     stat_folders: StatFolders,
     /// SB-273: connections closed because another account's process opened them.
@@ -134,13 +137,12 @@ pub struct ProxyHandle {
 /// Requests relayed at once; each holds a slot until its response stream ends. 16 was too few for
 /// a machine with two dozen agent sessions streaming at once (2026-10-18): the rest got 503.
 const SLOTS: usize = 64;
-/// When the last managed request started, Unix seconds (`ProxyHandle::last_request_at`).
-static LAST_REQUEST: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
-fn note_request() {
+/// Notes that a managed request started now on `last` (`ProxyHandle::last_request_at`).
+fn note_request(last: &std::sync::atomic::AtomicI64) {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| d.as_secs() as i64);
-    LAST_REQUEST.store(now, std::sync::atomic::Ordering::Relaxed);
+    last.store(now, std::sync::atomic::Ordering::Relaxed);
 }
 /// How long a start waits for its recorded port to be released by a previous owner.
 const REBIND_ATTEMPTS: u32 = 5;
@@ -271,6 +273,7 @@ impl ProxyHandle {
             address,
             client,
             slots: Arc::new(Semaphore::new(SLOTS)),
+            last_request: Arc::new(std::sync::atomic::AtomicI64::new(0)),
             claude,
             openai,
             chatgpt,
@@ -284,6 +287,7 @@ impl ProxyHandle {
             stat_folders: stat_folders.clone(),
         };
         let slots = state.slots.clone();
+        let last_request = state.last_request.clone();
         let router = Router::new()
             .route("/{provider}/{pool}/v1/{*operation}", post(relay))
             .route("/claude/{pool}/api/hello", get(connectivity))
@@ -315,6 +319,7 @@ impl ProxyHandle {
             stop: std::sync::Mutex::new(Some(stop)),
             task: std::sync::Mutex::new(Some(task)),
             slots,
+            last_request,
             stats,
             stat_folders,
             foreign_refused,
@@ -324,7 +329,7 @@ impl ProxyHandle {
     /// requests of a working session nothing is in flight for a moment; an update waits for a
     /// quiet spell, not that moment (studio-agent's finding `b18dd31c`, 2026-11-15).
     pub fn last_request_at(&self) -> i64 {
-        LAST_REQUEST.load(std::sync::atomic::Ordering::Relaxed)
+        self.last_request.load(std::sync::atomic::Ordering::Relaxed)
     }
     /// Managed requests in flight, streams included: zero means no managed session is waiting
     /// on an answer right now (an update may activate, LC-16).
@@ -680,7 +685,7 @@ async fn relay(
     }
     let permit = match g.slots.clone().try_acquire_owned() {
         Ok(p) => {
-            note_request();
+            note_request(&g.last_request);
             p
         }
         Err(_) => {
@@ -1005,7 +1010,7 @@ async fn codex_auto(g: Gateway, operation: String, request: Request<Body>) -> Re
     }
     let permit = match g.slots.clone().try_acquire_owned() {
         Ok(p) => {
-            note_request();
+            note_request(&g.last_request);
             p
         }
         Err(_) => {
