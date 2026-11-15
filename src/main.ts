@@ -410,7 +410,7 @@ function render(options: { background?: boolean } = {}): boolean {
     const control = button('', () => { if (target === 'stats') { stats = null; statsError = false; } goTo(target); }, `nav-item ${page === target ? 'active' : ''}`, `nav-${target}`);
     const symbol = el('span', 'nav-icon'); symbol.setAttribute('aria-hidden', 'true'); symbol.append(navIcon(target));
     control.append(symbol, el('span', '', label));
-    if (target === 'projects' && liveRules) { const count = el('span', 'nav-count', String(liveRules)); count.setAttribute('aria-label', plural(liveRules, { one: '{n} active rule', other: '{n} active rules' })); control.append(count); }
+    if (target === 'projects' && liveRules) { const count = el('span', 'nav-count', String(liveRules)); const rules = plural(liveRules, { one: '{n} active folder rule', other: '{n} active folder rules' }); count.setAttribute('aria-label', rules); count.title = rules; control.append(count); }
     if (page === target) control.setAttribute('aria-current', 'page'); nav.append(control);
   }
   sidebar.append(nav);
@@ -720,7 +720,7 @@ function setShellHook(on: boolean, focusKey: string) {
 }
 function shellHookSection() {
   const section = el('div', 'fold-content');
-  section.append(el('p', 'surface-note', t('In the folders of a group that belongs to an organization, new terminals run claude and codex in that organization\'s context: its accounts, history and settings. Leaving the folder gives your own settings back. Switchboard adds one marked block to each shell\'s start file and takes it out byte for byte when you turn this off.')));
+  section.append(el('p', 'surface-note', t('In the folders of a group that belongs to an organization, new terminals run claude and codex in that organization\'s context: its accounts, history and settings. Leaving the folder gives your own settings back. Switchboard adds one marked block to each shell\'s start file and removes exactly that block when you turn this off.')));
   if (shellHookState && shellHookKey !== shellHookInputs()) loadShellHook();
   if (!shellHookState && !shellHookError) loadShellHook();
   const view = shellHookView(shellHookState, shellHookError || null);
@@ -1177,8 +1177,8 @@ function renderAgents(main: HTMLElement) {
 function agentSettingsPanel(view: AgentsOverview) {
   const section = el('section', 'about-panel agent-settings'); section.setAttribute('aria-labelledby', 'agent-settings-heading');
   const heading = el('h2', '', t('Agent settings')); heading.id = 'agent-settings-heading';
-  section.append(heading);
-  const applies = () => el('p', 'form-note', t('Applies to every session Switchboard starts on this computer.'));
+  // Q2 item 33: said once for the whole panel, not under each part.
+  section.append(heading, el('p', 'form-note', t('Applies to every session Switchboard starts on this computer.')));
   // Permissions: bypass the agent's own prompts, or ask (SB-298).
   const permissions = el('div', 'fold-part'); permissions.append(el('h3', 'fold-part-heading', t('Permissions')));
   const seg = el('div', 'segmented'); seg.setAttribute('role', 'group'); seg.setAttribute('aria-label', t('Permissions'));
@@ -1187,7 +1187,7 @@ function agentSettingsPanel(view: AgentsOverview) {
     const b = button(label, () => { if (!on) void mutate(async () => { await adapter.agentPermissions(value); agentsView = await adapter.agentsOverview(); }, value === 'bypass' ? t('Sessions Switchboard starts now skip permission prompts.') : t('Sessions Switchboard starts now ask for permission.'), key); }, `segment${on ? ' is-on' : ''}`, key);
     b.setAttribute('aria-pressed', String(on)); seg.append(b);
   }
-  permissions.append(seg, el('p', '', view.permissions === 'ask' ? t('Claude Code and Codex ask you before they edit files or run commands.') : view.permissions === 'bypass' ? t('Claude Code and Codex edit files and run commands without asking first.') : t('This version does not report the setting yet.')), applies());
+  permissions.append(seg, el('p', '', view.permissions === 'ask' ? t('Claude Code and Codex ask you before they edit files or run commands.') : view.permissions === 'bypass' ? t('Claude Code and Codex edit files and run commands without asking first.') : t('This version does not report the setting yet.')));
   // The default agent (SB-120).
   const fallback = el('div', 'fold-part'); fallback.append(el('h3', 'fold-part-heading', t('Default agent')));
   fallback.append(el('p', '', t('The agent that takes over a workflow when none is named: switchboard continue without an account hands it there, and Fabric starts with it unless a project sets its own. Fallback chains keep their own order.')));
@@ -1197,17 +1197,17 @@ function agentSettingsPanel(view: AgentsOverview) {
     const chip = button(choice.on ? `✓ ${choice.label}` : choice.label, () => { if (!choice.on) void mutate(async () => { await adapter.agentDefault(choice.id); agentsView = await adapter.agentsOverview(); }, choice.id ? t('{agent} is the default agent.', { agent: choice.label }) : t('The default agent is Auto.'), key); }, `choice-chip${choice.on ? ' is-on' : ''}`, key);
     chip.setAttribute('aria-pressed', String(choice.on)); chips.append(chip);
   }
-  fallback.append(chips, el('p', 'form-note', t('Auto: switchboard continue asks for an account, and Fabric uses its own choice. Claude Code, Codex and Kimi Code continue on whichever of their accounts has room; Hermes and OpenCode on the OpenRouter key.')), applies());
+  fallback.append(chips, el('p', 'form-note', t('Auto: switchboard continue asks for an account, and Fabric uses its own choice. Claude Code, Codex and Kimi Code continue on whichever of their accounts has room; Hermes and OpenCode on the OpenRouter key.')));
   // Which agents may take over work: the switches are under Installed.
   const takeover = el('div', 'fold-part'); takeover.append(el('h3', 'fold-part-heading', t('Agents that take over work')));
   const enabled = sortAgents(view.agents.filter((a) => a.installed && a.switchable && a.enabled)).map((a) => a.name);
   const line = el('p', ''); line.append(enabled.length ? t('Enabled: {agents}.', { agents: enabled.join(', ') }) : t('No installed agent takes over work.'), ' ', button(t('Choose under Installed'), () => { document.getElementById('installed-agents-heading')?.scrollIntoView({ block: 'start' }); restoreFocus(`agent-on-${view.agents.find((a) => a.installed && a.switchable)?.id ?? ''}`); }, 'text-button', 'settings-takeover'));
-  takeover.append(line, applies());
+  takeover.append(line);
   // This computer's fallback chain; the editor is below under Fallback chains.
   const chain = el('div', 'fold-part'); chain.append(el('h3', 'fold-part-heading', t('This computer\'s fallback chain')));
   const machine = chainFor('machine');
   const chainLine = el('p', ''); chainLine.append(chainsView ? chainSummary(machine?.executors, chainAgentName, chainAccountLabel) : t('Reading fallback chains…'), ' ', button(t('Edit under Fallback chains'), () => { document.getElementById('chain-row-machine')?.scrollIntoView({ block: 'start' }); restoreFocus('chain-edit-machine'); }, 'text-button', 'settings-chain'));
-  chain.append(chainLine, applies());
+  chain.append(chainLine);
   section.append(permissions, fallback, takeover, chain);
   return section;
 }
@@ -1274,7 +1274,7 @@ function availableAgentsPanel(view: AgentsOverview) {
     if (agent.install) { const copy = button(t('Copy'), () => copyText(copy, agent.install!, agent.name), 'text-button', `install-${agent.id}`); controls.append(copy); }
     row.append(info, controls); list.append(row);
   }
-  details.append(list); section.append(details, el('p', 'form-note', t('Sources for every agent: docs/research/agents-2026-10-05.md in the repository. CLI: switchboard agents status | enable | disable | default | launch.')));
+  details.append(list); section.append(details, el('p', 'form-note', t('From the command line: switchboard agents status, enable, disable, default and launch.')));
   return section;
 }
 // C-3 (SB-71, SCN-080..082): the fallback chains, read with what each step would do now.
@@ -1438,7 +1438,7 @@ function clearChainDialog(scope: ChainScope, returnFocus: string) {
 /** Registering Switchboard's tools with coding agents (SB-93), shown after the agents. */
 function connectPanel() {
   const setup = el('section', 'about-panel'); setup.id = 'connect-panel'; setup.append(el('h2', '', t('Connect an agent')));
-  setup.append(el('p', '', t('Coding agents connect to switchboard mcp. They read who handles their requests and how much quota remains, switch the account of a managed session from the next request, and apply a folder rule when they start work in a folder. Changing the ordinary Claude Code login affects every claude session, so agents must pass global: true and should ask you first.')));
+  setup.append(el('p', '', t('Coding agents connect to switchboard mcp. They read who handles their requests and how much quota remains, switch the account of a managed session from the next request, and apply a folder rule when they start work in a folder. Changing the ordinary Claude Code login affects every claude session, so an agent must say so explicitly and should ask you first.')));
   if (agentSetupError || !agentSetup) { setup.append(el('p', 'form-note', agentSetupError ? t('Agent setup is unavailable. Refresh to retry.') : t('Reading agent setup…'))); return setup; }
   if (agentSetup.translocated) setup.append(el('p', 'form-note', runtime?.platform === 'linux' ? t('This Switchboard runs from an AppImage, whose files exist only while it runs. To connect agents, install the .deb package, which puts switchboard on your PATH.') : t('macOS is running Switchboard from a temporary copy of the download. Move Fabric Switchboard to Applications and open it from there before connecting agents; a path into the copy stops working when the app quits.')));
   if (agentSetup.agent_prompt) {
@@ -3198,8 +3198,9 @@ function renderActivity(main: HTMLElement) {
         const row = el('li', 'event-row'); const line = el('div', 'event-title');
         const account = snapshot!.accounts.find((item) => item.id === event.account_id);
         line.append(el('strong', '', eventAction(event.action)), el('time', '', new Date(event.at * 1000).toLocaleTimeString(dateLocale(), { hour: '2-digit', minute: '2-digit' })));
-        row.append(line, el('p', '', eventDetail(event.detail)));
-        if (event.account_id) row.append(el('span', 'event-id', `${account ? `${account.label} · ` : ''}${event.account_id}`));
+        // Q2 item 28: the detail reads smaller than its title; the account by its label, its id only on hover.
+        row.append(line, el('p', 'event-detail', eventDetail(event.detail)));
+        if (event.account_id) { const who = el('span', 'event-id', account ? account.label : event.account_id); who.title = event.account_id; row.append(who); }
         list.append(row);
       }
       return [list];
@@ -3209,16 +3210,16 @@ function renderActivity(main: HTMLElement) {
     const more = button(journalLoading ? t('Reading older events…') : t('Show more'), () => { activityShown += EVENTS_PAGE; if (page.fetch) void loadJournal(true); render(); restoreFocus('activity-more'); }, 'button quiet', 'activity-more');
     more.disabled = journalLoading; panel.append(more);
   }
-  panel.append(el('p', 'surface-note', t('A bounded local journal. A terminal launch is not proof of a successful provider request.')));
+  panel.append(el('p', 'surface-note', t('Kept on this computer, newest first; older events drop off. A terminal that opened does not mean the provider answered.')));
   main.append(panel);
 }
 function renderAbout(main: HTMLElement) {
   const section = el('section', 'about-panel');
-  section.append(el('h2', '', t('A local account workbench')), el('p', '', t('Switchboard stores credentials in the native vault and manages private homes for Claude Code and Codex CLI. Account labels and imported identities are user claims until a provider confirms them.')));
+  section.append(el('h2', '', t('A local account workbench')), el('p', '', t('Switchboard stores credentials in the native vault and manages private homes for Claude Code and Codex CLI. Account labels and imported identities are what you entered until a provider confirms them.')));
   const definitions = el('dl', 'definitions');
   for (const [term, description] of [
     [t('Isolated launch'), t('A new official CLI session using this account’s private home. Account changes affect new launches.')],
-    [t('Managed launch'), t('A session routed through the local HTTP/SSE proxy. Select an account for each provider and group; the next request uses that selection. A response already in progress keeps its identity.')],
+    [t('Managed launch'), t('A session whose requests go through Switchboard on this computer. Select an account for each provider and group; the next request uses that selection. A response already in progress keeps its account.')],
     [t('Groups'), t('Repositories with accounts of their own, such as a client\'s. Accounts in no other group are in the default group, which works in every other folder. Selection never silently falls back to another group.')],
     [t('Usage'), t('A timestamped provider observation. Unknown, stale, and unavailable are distinct from measured zero. API billing is separate from subscription quota.')],
     [t('Build'), demo ? t('Synthetic browser demo; it runs without the native app.') : t('{platform} build. Native platform is reported by the running app.', { platform: platformLabel(runtime?.platform) })],

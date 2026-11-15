@@ -1385,6 +1385,9 @@ check(() => {
     const step = (state, reason = null, extra = {}) => ({ agent: 'claude-code', name: 'Claude Code', state, reason, paid: false, ...extra });
     assert.equal(logic.stepReasonText(step('ready', null, { account_label: 'Work Max' })), 'Ready: Work Max');
     assert.equal(logic.stepReasonText(step('ready')), 'Ready');
+    // Q2 item 32: Hermes and OpenCode are held by the OpenRouter key, never by an account.
+    assert.equal(logic.stepReasonText({ ...step('skipped', 'no_usable_account'), agent: 'hermes' }), 'Skipped: no OpenRouter key ready');
+    assert.equal(logic.stepReasonText({ ...step('skipped', 'no_usable_account'), agent: 'claude-code' }), 'Skipped: no account with room');
     assert.equal(logic.stepReasonText(step('ready', null, { paid: true, key_scope: 'group', spend: null }), 'Alpha web'), 'Ready: the key of Alpha web. Spend not read yet.');
     assert.equal(logic.stepReasonText(step('ready', null, { paid: true, key_scope: 'machine', spend: null })), "Ready: this computer's key. Spend not read yet.");
     assert.equal(logic.stepReasonText(step('ready', null, { paid: true, account_label: 'Claude API' })), 'Ready: Claude API. Spend not read yet.');
@@ -1415,7 +1418,7 @@ check(() => {
     assert.equal(logic.handoverOutcomeText('every_step_refused'), 'every step was refused');
     assert.equal(logic.handoverOutcomeText('no_usable_executor'), 'no agent could take it');
     assert.equal(logic.handoverOutcomeText('ceiling_reached'), "today's ceiling reached");
-    assert.deepEqual(logic.handoverSkipped([{ agent: 'hermes', reason: 'no_usable_account' }, { agent: 'codex', reason: 'agent_disabled' }], nameOf), ['Hermes: no account with room', 'Codex: disabled under Installed']);
+    assert.deepEqual(logic.handoverSkipped([{ agent: 'hermes', reason: 'no_usable_account' }, { agent: 'codex', reason: 'agent_disabled' }], nameOf), ['Hermes: no OpenRouter key ready', 'Codex: disabled under Installed']);
     assert.deepEqual(logic.handoverSkipped([{ agent: 'kimi-code', reason: 'permission_mode' }, { agent: 'claude-code', reason: 'quota_unknown' }], nameOf), ['Kimi Code: asks for less approval than the agent before it', 'Claude Code: remaining quota not seen yet']);
     assert.equal(logic.shortWorkflow('wf_0123456789abcdef'), 'wf_01234567');
   });

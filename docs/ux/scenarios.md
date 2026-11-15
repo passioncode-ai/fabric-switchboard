@@ -556,7 +556,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Steps:**
 1. Open Groups → *Folder rules* → without rules, an empty state explains that selection and automatic switching apply everywhere.
 2. Add rule → folder, account, target (managed sessions, or the Claude Code login for Claude OAuth profiles only), expiry (default 8 hours).
-3. Return to Accounts → the notices block (shared with the provider terms, VIS-13) names each active rule, its account and expiry; navigation shows the count beside Groups as a neutral outlined number, never the accent, so it does not read as unread items (SB-192, VIS-20).
+3. Return to Accounts → the notices block (shared with the provider terms, VIS-13) names each active rule, its account and expiry; navigation shows the count beside Groups as a neutral outlined number, never the accent, so it does not read as unread items (SB-192, VIS-20); hovering it reads “{n} active folder rules”, so it is not taken for a count of groups (2026-11-15).
 4. Pause, Resume (asks for a new expiry), Edit or Remove a rule on Groups.
 **Alt paths:** An expired or paused rule stays listed with its state and never applies; removing an account removes its rules.
 **Expected result:** A rule applies only when an agent or `switchboard project apply` asks, only to that session, and never turns automatic switching off.
