@@ -2,6 +2,16 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-11-15: the duty officer scoped to Switchboard's own sessions (SB-384); 0.7.94 out, 0.7.95 prepared
+
+- **Asked.** The operator: the windows the duty officer opened do not close, and separate working sessions were closed (screenshot: resumed sessions in Terminal with every hook failing `node: command not found`).
+- **Cause.** On 0.7.93 it acted on every interactive session, the operator's Orca ones included: 7 restarted into Terminal (journal 15:04 to 15:44), 6 idle closed; the resume script had no PATH; `exec claude` ended by a signal left a window that stays.
+- **Done.** Turned off on the MacBook at once (`switchboard duty off`). PR #736 (`71c0ddd8`): acts only on sessions Switchboard started (launch records of 30 days, its own resumes; others `left_to_person`); the resume script exports the owner's headless PATH and ends with status 0 on a signal. Live dry read: 3 its own, 24 left, 1 Dashboards console. Gate EXIT 0 at `191a4c2`, Linux clippy clean.
+- **0.7.94 published.** studio-sshlg, studio-appvillis and passioncode@100.69.20.19 read 0.7.94; this MacBook restarted into 0.7.94 at 17:21. claude14@sshlg.me is recorded on the machine that moved it (not this MacBook): calling it back there now works.
+- **The sessions moved on 0.7.93** (to resume in Orca with `claude --resume <id>` where wanted): fabric-inbox `4a39317d`, research-agent `f466d30b`, fabric-workspace `388bc40a`, fabric-agent-contract `a9c84eac`, go-to-market-strategy `8fa1b537`, sshlg-brand-agent `62ca5a38`, 0xDEV `93361b5b`; closed idle: seo-content-agent `47dbae41`, hyperframes-agent `5249feed`, traffic-growth-agent `36f57cb8`, copylot-agent `2f7a5b79`, milka-userbot `0e59b581`.
+
+**Exact next task.** When 0.7.95 publishes: update this MacBook, turn the duty officer back on (`switchboard duty on`) and check `switchboard duty` shows `left_to_person` for the Orca sessions and acts on none of them after one 5-minute check; close SB-386 once the operator confirms claude14 came back. Then the Agents page audit items (20, 31, 34, 35, 37, 38).
+
 ## 2026-11-15: accounts come back from other machines (SB-386, P0); the duty officer live; 0.7.93 out, 0.7.94 prepared
 
 - **Asked.** The operator: claude14@sshlg.me (and others) could not be called back from the Mac Studio and the Mac Pro: “This is the only account its group uses on this machine…”, a priority bug.
