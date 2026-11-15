@@ -358,9 +358,9 @@ export function createDemoAdapter(): Adapter {
     async attention() {
       const item = (id: string) => state.accounts.find((a) => a.id === id);
       const items = [
+        ...(demoDuplicate ? [{ account_id: null, label: 'alpha-web', provider: null, pool: null, reason: 'session_duplicate' as const, detail: 'Synthetic: one session in two processes.', since: null, session_id: demoDuplicate, action: { tool: 'switchboard_session_close_copy', window: 'close_copy' as const } }] : []),
         ...[...signInRequired].map((id) => item(id)).filter((a): a is Account => !!a).map((a) => ({ account_id: a.id, label: a.label, provider: a.provider, pool: a.pool, reason: 'sign_in' as const, detail: 'Synthetic: the sign-in ended.', since: now() - 3600, action: { tool: 'switchboard_login', window: 'sign_in' as const } })),
         ...[...failingChecks].map((id) => item(id)).filter((a): a is Account => !!a).map((a) => ({ account_id: a.id, label: a.label, provider: a.provider, pool: a.pool, reason: 'usage_failing' as const, detail: 'Synthetic: the usage check fails.', since: now() - 5400, action: { tool: 'switchboard_usage', window: 'check_usage' as const } })),
-        ...(demoDuplicate ? [{ account_id: null, label: 'alpha-web', provider: null, pool: null, reason: 'session_duplicate' as const, detail: 'Synthetic: one session in two processes.', since: null, session_id: demoDuplicate, action: { tool: 'switchboard_session_close_copy', window: 'close_copy' as const } }] : []),
         ...demoQuestions.map(() => ({ account_id: null, label: null, provider: null, pool: null, reason: 'ceiling_question' as const, detail: 'Synthetic: a ceiling was reached.', since: now() - 600, action: { tool: 'switchboard_ceiling_answer', window: 'answer_ceiling' as const } })),
       ];
       return { count: items.length, items };
