@@ -1,25 +1,30 @@
-//! SB-384 (operator 2026-11-15): the session duty officer. Every live Claude Code session on this
-//! machine is looked at; one that stopped moving is closed and continued in a new session, one
-//! that finished and only holds a terminal is closed, and a long-lived one gets a fresh process at
-//! the end of a turn, so stuck and forgotten sessions never pile up.
+//! SB-384 (operator 2026-11-15): the session duty officer. Every live interactive Claude Code
+//! session on this machine is looked at, and a session is never ended before it finished its work
+//! (operator 2026-11-15: «чтобы они не … убивались раньше чем доработают, только когда закончила
+//! сессия работу можно ее кикать, либо если диагноз застой»).
 //!
-//! What it reads: the process table and each session's own file `sessions/<pid>.json`, in which
-//! Claude Code writes its status (`busy`, `shell`, `waiting`, `idle`) and since when, and the
-//! modification time of that session's transcript. Never a transcript's content.
+//! What it reads: the process table (`ps`: each process's parent, age, CPU time and command), each
+//! session's own file `sessions/<pid>.json`, in which Claude Code writes its status (`busy`,
+//! `shell`, `waiting`, `idle`) and since when, and the modification time of that session's
+//! transcript. Never a transcript's content. A session's own commands are the shells its Bash tool
+//! starts (their command line names `.claude/shell-snapshots/`), foreground or background; its MCP
+//! servers and helpers (`caffeinate`) are not work.
 //!
-//! What it does, at most once every five minutes and at most three times a check (DEC-0018):
-//! - `stuck`: busy (or running a shell command) for `stuck_minutes` and no transcript written for
-//!   as long: closed, then resumed in a new Terminal window (`claude --resume <id>`) with a prompt
-//!   to continue.
-//! - `waiting`: waiting for an answer or a permission for `waiting_minutes`: the same.
-//! - `idle`: its turn ended `idle_minutes` ago: closed (it can be resumed from Claude Code's history).
-//! - `old`: running for `max_age_hours` and at the end of a turn: resumed in a fresh process, no prompt.
+//! What it does, at most once every five minutes and at most three times a check (DEC-0021):
+//! - `idle` (finished): its turn ended `idle_minutes` ago and none of its commands still runs:
+//!   closed; it can be resumed from Claude Code's history.
+//! - `stuck` (stalled): busy, its status unchanged and its transcript not written for
+//!   `stuck_minutes`, its whole process tree used no CPU since the last check, and no command of
+//!   its own runs (or one has run for three times `stuck_minutes` without CPU): closed, then
+//!   resumed in a new Terminal window (`claude --resume <id>`) with a prompt to continue.
 //! - `duplicate`: a second process holding the same session: the newer one is closed.
 //!
-//! Left alone: sessions in Fabric Dashboards' consoles (Dashboards owns them), non-interactive runs
-//! (`claude -p`, dispatched runs end by themselves), Codex. A session is restarted at most three
-//! times in six hours. `duty.json` (0600) keeps the person's settings, `duty.jsonl` (0600) one line
-//! per action (session id, folder, reason; never text the session wrote).
+//! Left alone: a session waiting for the person's answer (a question or a permission), a session
+//! with a command running, sessions in Fabric Dashboards' consoles (Dashboards owns them),
+//! non-interactive runs (`claude -p`), Codex. Nothing is restarted for its age. A session is
+//! restarted at most three times in six hours. `duty.json` (0600) keeps the person's settings,
+//! `duty.jsonl` (0600) one line per action (session id, folder, reason; never text the session
+//! wrote).
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -35,7 +40,6 @@ const RESTARTS_PER_WINDOW: usize = 3;
 const RESTART_WINDOW: i64 = 6 * 3600;
 const JOURNAL_LINES: usize = 500;
 /// A session at the end of its turn for this long counts as between turns (an `old` restart).
-const BETWEEN_TURNS: i64 = 120;
 /// The prompt a resumed session continues with.
 pub const CONTINUE_PROMPT: &str = "Switchboard restarted this session because it had stopped making progress. Continue the task from where you left off.";
 
@@ -49,8 +53,10 @@ pub const NOT_SAVED: &str = "The duty officer's settings could not be saved.";
 pub struct Settings {
     pub on: bool,
     pub stuck_minutes: u32,
+    /// Kept for settings written before 0.7.96; a waiting session is no longer acted on.
     pub waiting_minutes: u32,
     pub idle_minutes: u32,
+    /// Kept for settings written before 0.7.96; nothing is restarted for its age.
     pub max_age_hours: u32,
 }
 impl Default for Settings {
@@ -118,9 +124,16 @@ pub struct Seen {
     pub dashboards: bool,
     /// The program hosting its terminal: `dashboards`, `orca`, `terminal`, `iterm` or `other`.
     pub host: &'static str,
-    /// Switchboard started it (a launch record names it, or the duty officer resumed it); only
-    /// such a session is acted on (DEC-0021, amended 2026-11-15).
+    /// Switchboard started it (a launch record names it, or the duty officer resumed it).
     pub ours: bool,
+    /// Its own commands running now (Bash tool shells, foreground or background).
+    pub commands: usize,
+    /// How long its oldest running command has run, seconds.
+    pub command_age: Option<i64>,
+    /// CPU seconds its process and every descendant used, as `ps` reads it.
+    pub cpu: Option<f64>,
+    /// Whether its tree used (almost) no CPU since the previous check; unknown on the first look.
+    pub cpu_quiet: Option<bool>,
 }
 
 /// The terminal host of a session from its ancestors' executable paths (DEC-0018: an Orca or
@@ -149,10 +162,7 @@ pub enum Act {
 /// What to do with one session now, and why; none to leave it. `newer_copy`: another process
 /// holding the same session started before this one.
 pub fn decide(s: &Seen, set: &Settings, now: i64, newer_copy: bool) -> Option<(Act, &'static str)> {
-    // Amended 2026-11-15 (operator: the sessions in Orca were closed and the resumed ones opened
-    // in Terminal windows that stayed): a session the person started in their own terminal is
-    // theirs; only one Switchboard started is restarted or closed.
-    if s.kind != "interactive" || s.dashboards || !s.ours {
+    if s.kind != "interactive" || s.dashboards {
         return None;
     }
     if newer_copy {
@@ -160,23 +170,24 @@ pub fn decide(s: &Seen, set: &Settings, now: i64, newer_copy: bool) -> Option<(A
     }
     let since = now - s.status_since;
     let quiet = now - s.last_write.unwrap_or(s.status_since).max(s.status_since);
+    let stuck = i64::from(set.stuck_minutes) * 60;
     match s.status.as_str() {
-        "idle" if since >= i64::from(set.idle_minutes) * 60 => Some((Act::Close, "idle")),
-        "idle"
-            if now - s.started_at >= i64::from(set.max_age_hours) * 3600
-                && since >= BETWEEN_TURNS =>
-        {
-            Some((Act::Restart { prompt: false }, "old"))
+        // Finished: the turn ended long ago and nothing it started still runs (a background task
+        // that will wake it is work, not a hang).
+        "idle" if since >= i64::from(set.idle_minutes) * 60 && s.commands == 0 => {
+            Some((Act::Close, "idle"))
         }
-        "waiting" if since >= i64::from(set.waiting_minutes) * 60 => {
-            Some((Act::Restart { prompt: true }, "waiting"))
-        }
+        // Stalled: says it works, writes nothing, uses no CPU, and runs no command of its own, or
+        // one that has run very long without CPU. Unknown CPU (a first look) is never a stall.
         "busy" | "shell"
-            if since >= i64::from(set.stuck_minutes) * 60
-                && quiet >= i64::from(set.stuck_minutes) * 60 =>
+            if since >= stuck
+                && quiet >= stuck
+                && s.cpu_quiet == Some(true)
+                && (s.commands == 0 || s.command_age.is_some_and(|a| a >= 3 * stuck)) =>
         {
             Some((Act::Restart { prompt: true }, "stuck"))
         }
+        // `waiting` is a question or a permission for the person: never theirs to lose.
         _ => None,
     }
 }
@@ -215,16 +226,159 @@ pub fn observe(root: &Path) -> Vec<Seen> {
             dashboards: false,
             host: "other",
             ours: false,
+            commands: 0,
+            command_age: None,
+            cpu: None,
+            cpu_quiet: None,
             config,
         });
     }
     let ours = started_here(root);
+    let table = process_table();
     for s in &mut seen {
         s.host = host_of(&crate::machine_sessions::ancestor_paths(s.pid));
         s.dashboards = s.host == "dashboards";
         s.ours = ours.contains(&s.session);
+        if let Some(table) = &table {
+            let tree = tree_of(table, s.pid);
+            s.cpu = Some(tree.cpu);
+            s.commands = tree.commands.len();
+            s.command_age = tree.commands.iter().copied().max();
+        }
     }
     seen
+}
+
+/// One process as `ps` reads it: parent, age and CPU time in seconds, command line.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Row {
+    pub ppid: u32,
+    pub age: i64,
+    pub cpu: f64,
+    pub command: String,
+}
+
+/// `[[dd-]hh:]mm:ss[.ff]` (`ps` `etime` and `time`) in seconds.
+fn clock_seconds(text: &str) -> Option<f64> {
+    let (days, rest) = match text.split_once('-') {
+        Some((d, r)) => (d.parse::<f64>().ok()?, r),
+        None => (0.0, text),
+    };
+    let mut total = 0.0;
+    for part in rest.split(':') {
+        total = total * 60.0 + part.parse::<f64>().ok()?;
+    }
+    Some(days * 86_400.0 + total)
+}
+
+/// The rows of `ps -axww -o pid=,ppid=,etime=,time=,command=`, by pid.
+pub fn parse_table(text: &str) -> HashMap<u32, Row> {
+    let mut rows = HashMap::new();
+    for line in text.lines() {
+        let mut words = line.split_whitespace();
+        let (Some(pid), Some(ppid), Some(age), Some(cpu)) =
+            (words.next(), words.next(), words.next(), words.next())
+        else {
+            continue;
+        };
+        let (Ok(pid), Ok(ppid), Some(age), Some(cpu)) = (
+            pid.parse::<u32>(),
+            ppid.parse::<u32>(),
+            clock_seconds(age),
+            clock_seconds(cpu),
+        ) else {
+            continue;
+        };
+        let command = words.collect::<Vec<_>>().join(" ");
+        rows.insert(
+            pid,
+            Row {
+                ppid,
+                age: age as i64,
+                cpu,
+                command,
+            },
+        );
+    }
+    rows
+}
+
+/// The whole process table once per check; None when `ps` could not be read (then no session
+/// is found stalled or finished by its commands).
+fn process_table() -> Option<HashMap<u32, Row>> {
+    #[cfg(unix)]
+    {
+        let out = std::process::Command::new("/bin/ps")
+            .args(["-axww", "-o", "pid=,ppid=,etime=,time=,command="])
+            .env("LC_ALL", "C")
+            .output()
+            .ok()
+            .filter(|o| o.status.success())?;
+        let rows = parse_table(&String::from_utf8_lossy(&out.stdout));
+        (!rows.is_empty()).then_some(rows)
+    }
+    #[cfg(not(unix))]
+    None
+}
+
+/// What a session's process tree holds: the CPU of the process and every descendant, and the
+/// ages of its own commands (the shells its Bash tool starts, foreground or background).
+pub struct Tree {
+    pub cpu: f64,
+    pub commands: Vec<i64>,
+}
+pub fn tree_of(table: &HashMap<u32, Row>, root: u32) -> Tree {
+    let mut children: HashMap<u32, Vec<u32>> = HashMap::new();
+    for (pid, row) in table {
+        children.entry(row.ppid).or_default().push(*pid);
+    }
+    let mut tree = Tree {
+        cpu: table.get(&root).map_or(0.0, |r| r.cpu),
+        commands: Vec::new(),
+    };
+    let mut stack = children.get(&root).cloned().unwrap_or_default();
+    let mut seen = std::collections::HashSet::new();
+    while let Some(pid) = stack.pop() {
+        if !seen.insert(pid) {
+            continue;
+        }
+        let Some(row) = table.get(&pid) else {
+            continue;
+        };
+        tree.cpu += row.cpu;
+        if row.ppid == root && row.command.contains("/.claude/shell-snapshots/") {
+            tree.commands.push(row.age);
+        }
+        stack.extend(children.get(&pid).cloned().unwrap_or_default());
+    }
+    tree
+}
+
+/// CPU seconds per session process at the previous check, and when.
+static CPU_SEEN: std::sync::Mutex<Option<HashMap<u32, (f64, i64)>>> = std::sync::Mutex::new(None);
+/// Less than this many CPU seconds since the previous check is no work.
+const CPU_QUIET: f64 = 2.0;
+
+/// Fills `cpu_quiet` against the previous check's sample (one taken at most two checks ago), and
+/// keeps this check's samples for the next.
+fn compare_cpu(seen: &mut [Seen], now: i64, keep: bool) {
+    let Ok(mut kept) = CPU_SEEN.lock() else {
+        return;
+    };
+    let before = kept.clone().unwrap_or_default();
+    let mut next = HashMap::new();
+    for s in seen.iter_mut() {
+        let Some(cpu) = s.cpu else { continue };
+        if let Some((was, at)) = before.get(&s.pid) {
+            if now - at <= 2 * CHECK_SECONDS + 60 {
+                s.cpu_quiet = Some(cpu - was < CPU_QUIET);
+            }
+        }
+        next.insert(s.pid, (cpu, now));
+    }
+    if keep {
+        *kept = Some(next);
+    }
 }
 
 /// The sessions Switchboard started: those its launch records of the last 30 days name, and
@@ -244,20 +398,30 @@ fn started_here(root: &Path) -> std::collections::HashSet<String> {
     found
 }
 
-/// The pids holding a session another, older process also holds.
+/// The pids to close among processes holding one session: each copy that is finished (idle, no
+/// command of its own running) while another copy remains; when every copy is finished the oldest
+/// stays. Copies that work are never closed, so two working copies are left for the person to
+/// choose between (operator 2026-11-15: nothing is ended before it finished).
 pub fn newer_copies(seen: &[Seen]) -> std::collections::HashSet<u32> {
     let mut by: HashMap<&str, Vec<&Seen>> = HashMap::new();
     for s in seen {
         by.entry(s.session.as_str()).or_default().push(s);
     }
+    let finished = |s: &Seen| s.status == "idle" && s.commands == 0;
     by.values()
         .filter(|v| v.len() > 1)
         .flat_map(|v| {
-            let oldest = v
-                .iter()
-                .min_by_key(|s| (s.started_at, s.pid))
-                .map(|s| s.pid);
-            v.iter().map(|s| s.pid).filter(move |p| Some(*p) != oldest)
+            let keep = if v.iter().all(|s| finished(s)) {
+                v.iter()
+                    .min_by_key(|s| (s.started_at, s.pid))
+                    .map(|s| s.pid)
+            } else {
+                None
+            };
+            v.iter()
+                .filter(move |s| finished(s) && Some(s.pid) != keep)
+                .map(|s| s.pid)
+                .collect::<Vec<_>>()
         })
         .collect()
 }
@@ -354,7 +518,8 @@ fn restarts(lines: &[Value], session: &str, now: i64) -> usize {
 /// `switchboard duty`: the settings, the last actions and what a check would do now.
 pub fn status(root: &Path, now: i64) -> Result<Value, String> {
     let set = settings(root)?;
-    let seen = observe(root);
+    let mut seen = observe(root);
+    compare_cpu(&mut seen, now, false);
     let copies = newer_copies(&seen);
     let due: Vec<Value> = seen
         .iter()
@@ -367,12 +532,17 @@ pub fn status(root: &Path, now: i64) -> Result<Value, String> {
         .collect();
     let lines = journal(root);
     let recent: Vec<Value> = lines.iter().rev().take(20).cloned().collect();
+    let watched: Vec<&Seen> = seen
+        .iter()
+        .filter(|s| s.kind == "interactive" && !s.dashboards)
+        .collect();
     Ok(json!({
         "settings": set,
         "check_seconds": CHECK_SECONDS,
-        "watched": seen.iter().filter(|s| s.kind == "interactive" && !s.dashboards && s.ours).count(),
+        "watched": watched.len(),
         "left_to_dashboards": seen.iter().filter(|s| s.dashboards).count(),
-        "left_to_person": seen.iter().filter(|s| s.kind == "interactive" && !s.dashboards && !s.ours).count(),
+        "waiting_for_person": watched.iter().filter(|s| s.status == "waiting").count(),
+        "running_commands": watched.iter().filter(|s| s.commands > 0).count(),
         "due": due,
         "recent": recent,
         "supported": cfg!(unix),
@@ -396,7 +566,9 @@ pub fn tick(root: &Path, now: i64) {
 /// One check: what is due, done (or only listed with `dry_run`).
 pub fn check(root: &Path, now: i64, dry_run: bool) -> Result<Value, String> {
     let set = settings(root)?;
-    let seen = observe(root);
+    let mut seen = observe(root);
+    // Only the five-minute checks keep their CPU samples: a stall is measured across them.
+    compare_cpu(&mut seen, now, !dry_run);
     let copies = newer_copies(&seen);
     let lines = journal(root);
     let mut done = Vec::new();
@@ -521,6 +693,10 @@ mod tests {
             dashboards: false,
             host: "terminal",
             ours: true,
+            commands: 0,
+            command_age: None,
+            cpu: Some(10.0),
+            cpu_quiet: Some(true),
         }
     }
 
@@ -550,11 +726,16 @@ mod tests {
     }
 
     #[test]
-    fn each_kind_of_stall_gets_its_action_and_a_working_session_is_left_alone() {
+    fn only_a_finished_or_a_stalled_session_is_acted_on() {
         let set = Settings::default();
         let now = 1_000_000;
+        // Stalled: busy, nothing written, no CPU, no command of its own.
         assert_eq!(
             decide(&seen("busy", 50, 1, Some(50)), &set, now, false),
+            Some((Act::Restart { prompt: true }, "stuck"))
+        );
+        assert_eq!(
+            decide(&seen("shell", 50, 1, Some(46)), &set, now, false),
             Some((Act::Restart { prompt: true }, "stuck"))
         );
         // Busy for long but still writing: working.
@@ -562,32 +743,54 @@ mod tests {
             decide(&seen("busy", 300, 2, Some(1)), &set, now, false),
             None
         );
+        // Writing nothing but using CPU (a long answer, a build): working.
+        let thinking = Seen {
+            cpu_quiet: Some(false),
+            ..seen("busy", 90, 2, Some(90))
+        };
+        assert_eq!(decide(&thinking, &set, now, false), None);
+        // The first look has no CPU sample yet: never a stall.
+        let unknown = Seen {
+            cpu_quiet: None,
+            ..seen("busy", 90, 2, Some(90))
+        };
+        assert_eq!(decide(&unknown, &set, now, false), None);
+        // A command of its own runs (a gate, a wait on a release): working, until it has run
+        // three times the limit with no CPU at all.
+        let waiting_on_a_command = Seen {
+            commands: 1,
+            command_age: Some(40 * 60),
+            ..seen("busy", 50, 1, Some(50))
+        };
+        assert_eq!(decide(&waiting_on_a_command, &set, now, false), None);
+        let hung_command = Seen {
+            commands: 1,
+            command_age: Some(3 * 45 * 60),
+            ..seen("busy", 140, 3, Some(140))
+        };
         assert_eq!(
-            decide(&seen("shell", 50, 1, Some(46)), &set, now, false),
+            decide(&hung_command, &set, now, false),
             Some((Act::Restart { prompt: true }, "stuck"))
         );
+        // Waiting for the person's answer: never acted on.
         assert_eq!(
-            decide(&seen("waiting", 61, 1, None), &set, now, false),
-            Some((Act::Restart { prompt: true }, "waiting"))
-        );
-        assert_eq!(
-            decide(&seen("waiting", 30, 1, None), &set, now, false),
+            decide(&seen("waiting", 600, 9, None), &set, now, false),
             None
         );
+        // Finished: idle long and nothing of its own runs.
         assert_eq!(
             decide(&seen("idle", 61, 1, None), &set, now, false),
             Some((Act::Close, "idle"))
         );
-        assert_eq!(
-            decide(&seen("idle", 5, 5, None), &set, now, false),
-            Some((Act::Restart { prompt: false }, "old"))
-        );
-        assert_eq!(
-            decide(&seen("idle", 1, 5, None), &set, now, false),
-            None,
-            "a turn that just ended is left a moment"
-        );
-        assert_eq!(decide(&seen("idle", 5, 1, None), &set, now, false), None);
+        // Idle with a background task that will wake it: not finished.
+        let background = Seen {
+            commands: 1,
+            command_age: Some(3600),
+            ..seen("idle", 120, 1, None)
+        };
+        assert_eq!(decide(&background, &set, now, false), None);
+        // Nothing is restarted for its age.
+        assert_eq!(decide(&seen("idle", 5, 30, None), &set, now, false), None);
         assert_eq!(
             decide(&seen("idle", 5, 1, None), &set, now, true),
             Some((Act::Close, "duplicate"))
@@ -605,18 +808,97 @@ mod tests {
     }
 
     #[test]
-    fn the_newer_copy_of_a_session_is_the_one_closed() {
+    fn the_process_table_gives_a_sessions_commands_and_its_trees_cpu() {
+        let table = parse_table(
+            "  100     1 01-17:44:36  40:47.26 /opt/claude\n\
+               101   100 01-17:44:36   0:01.33 switchboard mcp\n\
+               102   100       33:13   0:00.03 /bin/zsh -c source /Users/u/.claude/shell-snapshots/snapshot-zsh-1.sh && eval 'cargo build'\n\
+               103   102       33:13   1:00.50 cargo build\n\
+               104   100       01:28   0:00.00 caffeinate -i -t 300\n\
+               200     1    2-03:00:00  0:00:05 unrelated\n\
+               bad line\n",
+        );
+        assert_eq!(table.len(), 6);
+        assert_eq!(table[&103].cpu, 60.5);
+        assert_eq!(table[&200].age, 2 * 86_400 + 3 * 3600);
+        let tree = tree_of(&table, 100);
+        assert_eq!(
+            tree.commands,
+            vec![33 * 60 + 13],
+            "only the Bash tool's shell is a command"
+        );
+        assert!((tree.cpu - (2447.26 + 1.33 + 0.03 + 60.5)).abs() < 0.01);
+        assert!(tree_of(&table, 999).commands.is_empty());
+    }
+
+    #[test]
+    fn cpu_is_compared_across_checks_and_a_status_read_keeps_no_sample() {
+        let mut a = vec![Seen {
+            pid: 4242,
+            cpu: Some(10.0),
+            cpu_quiet: None,
+            ..seen("busy", 1, 1, None)
+        }];
+        compare_cpu(&mut a, 1_000, false);
+        assert_eq!(a[0].cpu_quiet, None);
+        compare_cpu(&mut a, 1_000, true);
+        let mut b = vec![Seen {
+            pid: 4242,
+            cpu: Some(10.5),
+            cpu_quiet: None,
+            ..seen("busy", 1, 1, None)
+        }];
+        compare_cpu(&mut b, 1_300, true);
+        assert_eq!(b[0].cpu_quiet, Some(true));
+        let mut c = vec![Seen {
+            pid: 4242,
+            cpu: Some(30.0),
+            cpu_quiet: None,
+            ..seen("busy", 1, 1, None)
+        }];
+        compare_cpu(&mut c, 1_600, true);
+        assert_eq!(c[0].cpu_quiet, Some(false));
+        let mut d = vec![Seen {
+            pid: 4242,
+            cpu: Some(30.0),
+            cpu_quiet: None,
+            ..seen("busy", 1, 1, None)
+        }];
+        compare_cpu(&mut d, 1_600 + 3 * CHECK_SECONDS, true);
+        assert_eq!(d[0].cpu_quiet, None, "a sample from long ago says nothing");
+    }
+
+    #[test]
+    fn only_a_finished_copy_of_a_session_is_closed() {
         let mut a = seen("busy", 1, 3, None);
-        let mut b = seen("busy", 1, 1, None);
+        let mut b = seen("waiting", 1, 1, None);
         a.pid = 10;
         b.pid = 11;
         let other = Seen {
             session: "s-2".into(),
             pid: 12,
-            ..seen("busy", 1, 1, None)
+            ..seen("idle", 1, 1, None)
         };
-        let copies = newer_copies(&[a, b, other]);
-        assert_eq!(copies.into_iter().collect::<Vec<_>>(), vec![11]);
+        // Both copies work: the person decides, nothing is closed.
+        assert!(newer_copies(&[a.clone(), b.clone(), other]).is_empty());
+        // The older copy sits idle (a resumed copy nobody uses): it is closed, not the one in use.
+        a.status = "idle".into();
+        assert_eq!(
+            newer_copies(&[a.clone(), b.clone()])
+                .into_iter()
+                .collect::<Vec<_>>(),
+            vec![10]
+        );
+        // An idle copy with a background command is not finished.
+        a.commands = 1;
+        assert!(newer_copies(&[a.clone(), b.clone()]).is_empty());
+        // Every copy finished: the oldest stays.
+        a.commands = 0;
+        b.status = "idle".into();
+        assert_eq!(
+            newer_copies(&[a, b]).into_iter().collect::<Vec<_>>(),
+            vec![11]
+        );
     }
 
     #[test]
@@ -675,20 +957,6 @@ mod tests {
         assert!(quiet.contains("/opt/homebrew/bin"));
         assert!(!quiet.contains("exec "));
         assert!(quiet.trim_end().ends_with("exit \"$status\""));
-    }
-
-    #[test]
-    fn a_session_the_person_started_is_never_acted_on() {
-        let set = Settings::default();
-        let now = 1_000_000;
-        let theirs = Seen {
-            ours: false,
-            ..seen("idle", 600, 9, Some(600))
-        };
-        assert_eq!(decide(&theirs, &set, now, false), None);
-        assert_eq!(decide(&theirs, &set, now, true), None, "not even a copy");
-        let mine = seen("idle", 600, 9, Some(600));
-        assert!(decide(&mine, &set, now, false).is_some());
     }
 
     #[test]

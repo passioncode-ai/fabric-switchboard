@@ -651,17 +651,16 @@ function dutyLineText(line: DutyLine): string {
 }
 function dutySection() {
   const section = el('div', 'fold-content');
-  section.append(el('p', 'surface-note', t('Every 5 minutes Switchboard looks at the Claude Code sessions it started on this computer. A session that stopped writing or waited too long for an answer is closed and resumed in a new Terminal window; one that finished and sat idle is closed. Sessions you started in your own terminal and Fabric Dashboards consoles are left alone.')));
+  section.append(el('p', 'surface-note', t('Every 5 minutes Switchboard looks at the Claude Code sessions on this computer and never ends one before it finished. A session that stalled (busy, writing nothing, using no CPU) is closed and resumed in a new Terminal window; one that finished, with nothing of its own still running, is closed. Sessions waiting for your answer and Fabric Dashboards consoles are left alone.')));
   if (dutyError) { section.append(el('p', 'form-error', dutyError)); return section; }
   if (!dutyState) { if (!dutyLoading) loadDuty(); section.append(el('p', 'form-note', t('Counting sessions…'))); return section; }
   const state = dutyState; const set = state.settings;
   if (!state.supported) section.append(el('p', 'form-note', t('On this system the duty officer only reports; it restarts nothing.')));
-  section.append(el('p', 'account-meta section-state', t('Watching {n} sessions. Restart after {stuck} minutes without writes or {waiting} minutes waiting for an answer; close after {idle} minutes idle; restart a session older than {hours} hours between turns.', { n: state.watched, stuck: set.stuck_minutes, waiting: set.waiting_minutes, idle: set.idle_minutes, hours: set.max_age_hours })));
+  section.append(el('p', 'account-meta section-state', t('Watching {n} sessions: {running} running commands, {waiting} waiting for your answer. A session is restarted after {stuck} minutes stalled and closed after {idle} minutes finished.', { n: state.watched, running: state.running_commands ?? 0, waiting: state.waiting_for_person ?? 0, stuck: set.stuck_minutes, idle: set.idle_minutes })));
   if (state.due.length) {
     section.append(el('h3', 'fold-part-heading', t('At the next check')));
     const list = el('ul', 'watch-findings'); for (const line of state.due.slice(0, 5)) list.append(el('li', 'account-meta', dutyLineText(line))); section.append(list);
   }
-  if (state.left_to_person) section.append(el('p', 'account-meta', t('Left alone: {n} sessions you started yourself.', { n: state.left_to_person })));
   const recent = state.recent.filter((l) => typeof l.at === 'number').slice(0, 5);
   if (recent.length) {
     section.append(el('h3', 'fold-part-heading', t('Recent actions')));

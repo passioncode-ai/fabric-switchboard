@@ -687,17 +687,21 @@ named in `degraded`.
 
 ### `switchboard_duty`: `on?`, `stuck_minutes?`, `waiting_minutes?`, `idle_minutes?`, `max_age_hours?`, `run?`, `dry_run?`
 
-The session duty officer (SB-384, DEC-0018). Every five minutes it looks at each live interactive
+The session duty officer (SB-384, DEC-0021). Every five minutes it looks at each live interactive
 Claude Code session of this user (not Fabric Dashboards' consoles, not `claude -p` runs) through
-the session's own `sessions/<pid>.json` and its transcript's modification time. Busy without a
-transcript write for `stuck_minutes` (45), or waiting for an answer for `waiting_minutes` (60):
-closed and resumed in a new Terminal window (`claude --resume <id>` with a prompt to continue).
-At the end of its turn for `idle_minutes` (60): closed. Running for `max_age_hours` (4): resumed
-in a fresh process at the end of a turn. A second process of one session: the newer is closed.
-At most three actions a check, three restarts of a session in six hours. Without arguments it
-reads `{settings, check_seconds, watched, left_to_dashboards, due, recent, supported}`; the fields
-change its settings (only when the operator asks), `run: true` checks now and `dry_run: true`
-lists what a check would do.
+the session's own `sessions/<pid>.json`, its transcript's modification time and the process table
+(`ps`), and never ends a session before it finished. Finished: idle for `idle_minutes` (60) with
+none of its own commands running (its Bash tool's shells, background ones included): closed.
+Stalled: busy, its status unchanged and its transcript unwritten for `stuck_minutes` (45), its
+process tree using no CPU since the previous check, and no command of its own running (or one
+running three times `stuck_minutes` without CPU): closed and resumed in a new Terminal window
+(`claude --resume <id>` with a prompt to continue). A session waiting for the person's answer is
+left alone, nothing is restarted for its age, and of two copies of one session only a finished
+copy is closed. At most three actions a check, three restarts of a session in six hours. Without
+arguments it reads `{settings, check_seconds, watched, left_to_dashboards, waiting_for_person,
+running_commands, due, recent, supported}`; `on`, `stuck_minutes` and `idle_minutes` change it
+(only when the operator asks; `waiting_minutes` and `max_age_hours` are kept for older settings
+and unused), `run: true` checks now and `dry_run: true` lists what a check would do.
 
 ### `switchboard_balance`: `add?`, `remove?`, `all_new?`, `backup_add?`, `backup_remove?`
 

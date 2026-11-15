@@ -47,6 +47,7 @@ Start at [docs/HANDOFF.md](docs/HANDOFF.md). [docs/DOCMAP.md](docs/DOCMAP.md) sa
 
 ## Local rules
 
+- **Telegram (agents base R33 O9, operator 2026-11-15, D-50).** Switchboard itself sends nothing to Telegram. An agent working here reports to the operator through his notification channel (the personal communicator's `communicator_notify`, one stable `eventId` per event, text only, a file as a link; `communicator_status` first), never through the messaging gateway; anyone else (a person, a group, a channel, acting as an account) goes through the messaging gateway (`telegram-gateway.default`, `telegram.messages.send`) under the agent's own grant, never through the notification channel.
 - Analytics ([docs/ANALYTICS.md](docs/ANALYTICS.md)) sends counts and kinds only; a new event or prop that could carry an identifier, label, e-mail, pool name, path or provider text is a privacy change: update ANALYTICS.md and the planted-identifier test in the same change. Only release builds carry the App Key.
 
 - Never read or replace global Claude/Codex credentials to test the app. Use synthetic Vault/upstream fixtures; real login is an explicit operator-assisted acceptance task.

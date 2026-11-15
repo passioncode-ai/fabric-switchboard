@@ -998,16 +998,16 @@ enum DutyCmd {
     Off,
     /// Change its limits; each one left out keeps its value.
     Set {
-        /// Minutes a session may work without writing its transcript before it is restarted (10 to 1440).
+        /// Minutes a session may stay busy with no transcript write, no CPU and no command of its own before it is restarted (10 to 1440).
         #[arg(long)]
         stuck_minutes: Option<u32>,
-        /// Minutes a session may wait for an answer or a permission before it is restarted (10 to 1440).
+        /// Kept for older settings and unused: a session waiting for an answer is left alone (10 to 1440).
         #[arg(long)]
         waiting_minutes: Option<u32>,
-        /// Minutes a session may sit at the end of its turn before it is closed (10 to 1440).
+        /// Minutes a finished session (idle, none of its commands running) may stay before it is closed (10 to 1440).
         #[arg(long)]
         idle_minutes: Option<u32>,
-        /// Hours after which a session gets a fresh process at the end of a turn (1 to 72).
+        /// Kept for older settings and unused: nothing is restarted for its age (1 to 72).
         #[arg(long)]
         max_age_hours: Option<u32>,
     },

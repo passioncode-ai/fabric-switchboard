@@ -3276,12 +3276,25 @@ only while `duty.json` (0600: `on`, `stuck_minutes`, `waiting_minutes`, `idle_mi
 
 - reads the live Claude Code processes and the `sessions/<pid>.json` of every Claude config folder
   Switchboard knows (the person's, `homes/*`, `runtimes/*`, `shell/*`); a session is the process
-  whose pid its file names. `kind` other than `interactive` is never watched, and since 0.7.95
-  neither is a session Switchboard did not start (no launch record of the last 30 days names it and
-  the duty officer never resumed it): it is counted as `left_to_person` and never acted on;
+  whose pid its file names. `kind` other than `interactive` is never watched;
+- reads the process table once (`ps -axww -o pid=,ppid=,etime=,time=,command=`, `LC_ALL=C`): for
+  each session the CPU seconds of its process and every descendant, and its own commands, the
+  direct children whose command line names `.claude/shell-snapshots/` (the shells its Bash tool
+  starts, foreground or background; MCP servers and `caffeinate` are not commands). The CPU is
+  compared with the sample the previous five-minute check kept (`cpu_quiet`: under 2 s since then;
+  unknown on a first look or after a gap of more than two checks); a status read keeps no sample;
 - reads each session's host from its ancestors' executable paths (`dashboards`, `orca`,
   `terminal`, `iterm`, `other`); a `dashboards` session is left alone;
-- decides with `duty::decide` (the rules of DEC-0021) and acts on at most 3 sessions: close is SIGTERM, then SIGKILL after 10 s (outcome
+- decides with `duty::decide` and acts on at most 3 sessions. Since 0.7.96 (operator 2026-11-15:
+  never before a session finished): `idle` closes a session idle for `idle_minutes` with no
+  command of its own running; `stuck` restarts a busy (or shell) session whose status and
+  transcript have not moved for `stuck_minutes`, whose tree used no CPU since the previous check
+  (`cpu_quiet` true, never unknown) and which runs no command of its own, or one that has run for
+  three times `stuck_minutes`; `duplicate` closes a copy of a session that is finished (idle, no
+  command) while another copy remains, the oldest staying when all are finished, and never a
+  working copy. A `waiting` session is never acted on, and nothing is restarted for its age
+  (`waiting_minutes` and `max_age_hours` stay in `duty.json` for older settings, unused). Close is
+  SIGTERM, then SIGKILL after 10 s (outcome
   `still_running` if it outlives that); restart writes `<data>/duty/<session>.command` (0700) and
   opens it in a new Terminal window, only after the old process has ended and no other process
   holds the session (`closed_held_elsewhere`), the folder exists (`closed_no_folder`) and the
@@ -3297,11 +3310,10 @@ The resume script unsets the variables a nested launch must not inherit (`CONFLI
 `CLAUDE_CONFIG_DIR`, sets `CLAUDE_CONFIG_DIR` to the session's config folder unless it is the
 person's own, then `export PATH=<the owner's headless PATH>`, `cd <folder> || exit 1` and `claude
 [bypass flag] --resume <session>` (not `exec`: an end by a signal exits 0, so the window closes), with
-the prompt `duty::CONTINUE_PROMPT` («Switchboard restarted this session because it had stopped making progress. Continue the task from where you left off.») for `waiting` and
-`stuck`. No credential is in it: the home's sign-in stays in its own Keychain item or file.
+the prompt `duty::CONTINUE_PROMPT` («Switchboard restarted this session because it had stopped making progress. Continue the task from where you left off.») for `stuck`. No credential is in it: the home's sign-in stays in its own Keychain item or file.
 
 `Operation::Duty` (no store lock) answers `status`: `settings`, `check_seconds`, `watched`,
-`left_to_dashboards`, `due` (what a check would do now: `pid`, `session`, `folder`, `reason`,
+`left_to_dashboards`, `waiting_for_person`, `running_commands`, `due` (what a check would do now: `pid`, `session`, `folder`, `reason`,
 `host`, `action`), `recent` (the newest 20 journal lines) and `supported` (false on Windows, which
 only reports); with `run` it acts now, with `dry_run` it lists the actions as `planned`, both under
 `check`. CLI `switchboard duty`, `duty on|off`, `duty set --stuck-minutes … --waiting-minutes …
