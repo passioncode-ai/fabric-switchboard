@@ -8,6 +8,8 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+## 0.7.88
+
 - Statistics no longer runs past a narrow window: the chart pushed the page 216 px past a 960 px window and 352 px past a 760 px one. Only the period and the list of sections stay at the top while you scroll; the tiles scroll with the page, so the pinned bar no longer covers a third of a narrow window.
 - An organization whose accounts all live on another machine no longer asks for a group and a sign-in on this computer: its card says where its accounts work, and its sessions run there.
 ## 0.7.87

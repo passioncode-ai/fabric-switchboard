@@ -2,6 +2,16 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-11-15: quality waves started (SB-379); 0.7.88; a resumed copy of this session again
+
+- **Asked.** The operator: Statistics runs sideways and scrolls badly, fix every page; make agents' sessions followable (chain, alive, counts, how started, task) and watched every minute; the Organizations card asked for a PassionCode.ai group whose accounts live on the Mac Studio; analyse interfaces, latency and bugs, add a bug tracker on our own analytics, gather GitHub issues and the board into one plan and fix it in waves to the end. Plan: [quality waves](plans/2026-11-15-quality-waves/README.md).
+- **Done (PR #704, `4fb007cf`, 0.7.88).** Statistics: the chart's 1fr track grew to the SVG's 900 units (page 216 px past 960, 352 px past 760); now `minmax(0, 1fr)`, the tiles scroll and only the period and the index stay pinned. Onboarding: an organization whose every account lives on another machine has optional group and seat steps naming the machines, so no card asks for anything here. WebKit screenshots of every page at 1280, 960 and 760 (Playwright on the Mac Studio, `~/sb-shots`): no page wider than its window.
+- **Research in.** GitHub: one open issue (#36, already done by SB-47); 78 backlog rows with something left, several with a status contradicting their body (SB-65, SB-174, SB-192, SB-352, SB-32). Bug tracking: `app_error` daily counts work (276 events from 8 installs in 14 days); gaps are renderer errors, CLI and MCP panics, a panicking background pass that stops the loop for good, crashes, IPC failures and stalls; a `bug_seen` design with codes only. The page audit and the latency audit stopped on the session limit (resets 04:00 and 07:00 Warsaw).
+- **A copy again.** At ~00:30 UTC Fabric Dashboards 0.8.88 started `claude --resume 4c635d5e… "The usage limit has reset…"` while this session ran (pid 28198); the copy merged #702 and released 0.7.87 from checked code, then was stopped with SIGINT. Reported on thread `97c968e8` (`36e058ab`): FD-260's check is not on the limit-reset path.
+- **Also.** 0.7.85 to 0.7.87 published; the session cap set to 20 on the MacBook (`used` 32); the live call back of claude6 waits for 0.7.86+ on both machines (both read 0.7.85 at 01:15 UTC).
+
+**Exact next task.** W2 Q4 and Q5 on a new branch: a Sessions view (tree of launches from `launches/*.json` `launched_by`, live processes from `sessions --machine`, task, group, account, machine, counts) and a one-minute watch (quiet past its limit under a task or dispatch, dispatch past its deadline, a dead process with no end, a resumed copy of a live session) feeding *Needs attention*; then W3, W4; resume the page and latency audits after the limit.
+
 ## 2026-11-15: 0.7.84 to 0.7.87; a copy turned off on the other machine (SB-377); the session limit in the window (SB-378)
 
 - **Published.** 0.7.84 (SB-377 moves, WF-4) and 0.7.85 (SB-378 session pool), every platform green. This MacBook runs 0.7.85; the Mac Studio (studio-sshlg) ran 0.7.84 at 01:40 UTC and updates itself.
