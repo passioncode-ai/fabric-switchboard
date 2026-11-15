@@ -183,6 +183,7 @@ export const RU: Record<string, string> = {
   "This is the only account its group uses on this machine. Add another account to that group before moving this one.": "Это единственный аккаунт его группы на этом компьютере. Добавьте в группу другой аккаунт, а потом перемещайте этот.",
   "This account was not given back by a call back here, so its mark stays. Nothing changed.": "Этот аккаунт не отдавали здесь по возврату, поэтому отметка остаётся. Ничего не изменилось.",
   "This is the only account its group uses on this machine. Add another account to that group before calling this one back.": "Это единственный аккаунт, которым его группа пользуется на этой машине. Добавьте в группу другой аккаунт, прежде чем возвращать этот.",
+  "The other machine runs a Switchboard older than 0.7.94, which keeps an account its group uses alone. Update Switchboard there, then call the account back again.": "На другой машине Switchboard старше 0.7.94: он не отдаёт единственный аккаунт группы. Обновите там Switchboard и верните аккаунт ещё раз.",
   "Choose bypass or ask.": "Выберите bypass или ask.",
   "Balancing settings (balancing.json) could not be read. Delete balancing.json to turn balancing off and start over.": "Не удалось прочитать настройки балансировки (balancing.json). Удалите balancing.json, чтобы выключить балансировку и начать заново.",
   "No group has that id. Run switchboard project list to see the groups, or name default.": "Группы с таким id нет. Запустите switchboard project list, чтобы увидеть группы, или укажите default.",
