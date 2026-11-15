@@ -166,6 +166,14 @@ pub fn installation(folder: &Path) -> Result<(Installation, bool), String> {
     }
 }
 
+/// W3 (SB-379): whether usage counts are on for this computer, read from the shared file only:
+/// an absent or unreadable file is off here, and nothing is created.
+pub fn shared_enabled(folder: &Path) -> bool {
+    std::fs::read(folder.join(SHARED_FILE))
+        .ok()
+        .and_then(|bytes| parse(&bytes).ok())
+        .is_some_and(|i| i.analytics)
+}
 fn parse(bytes: &[u8]) -> Result<Installation, String> {
     let installation: Installation =
         serde_json::from_slice(bytes).map_err(|_| "Installation file unreadable.".to_string())?;

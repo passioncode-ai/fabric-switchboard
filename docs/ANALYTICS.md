@@ -146,7 +146,9 @@ The operator, 2026-11-04 about 12:25 UTC (coordinator session `74a9440a`): «у�
   `interrupted`, `rejected`, `too_large`, `unavailable`, `no_windows`, `other`, `vault`; a limit
   or an account the provider no longer has is an answer, not an error) and an `update_download`
   cut short (`partial`). And a panic of the installed app's owner, named by the stem of the source
-  file that panicked. The log holds fixed codes, numbers and flags only, by construction, so
+  file that panicked; since 2026-11-15 (SB-379, W3) also a panic of a `switchboard` command or
+  `switchboard mcp` of the same release build over the app's own data folder with the switch on
+  (`errors::install_panic_counter_for_cli`), written to the same file at once. The log holds fixed codes, numbers and flags only, by construction, so
   nothing else can reach the count (`only_failures_count_and_under_codes_only`,
   `a_panic_is_named_by_its_file_stem_only`).
 - **Where it waits.** In memory, then `<data>/error-counts.json` (0600: per UTC day, class and
