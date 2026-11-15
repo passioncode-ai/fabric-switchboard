@@ -8,6 +8,7 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- On Accounts, the line that says what *Switch* and *Select* do sits above the accounts, not after Codex (SB-379).
 - `switchboard project suggest`, asked when a session starts, reads the groups' Git files at most every 30 seconds instead of on every call (W4, SB-379).
 - The note under Statistics is half as long and names no internal version (SB-379).
 ## 0.7.91

@@ -2222,6 +2222,8 @@ function renderAccounts(main: HTMLElement) {
     countdownPaused = !countdownPaused; render(); restoreFocus('countdown-toggle');
   }, 'text-button', 'countdown-toggle'));
   main.append(sorting);
+  // Q2 item 50: what Switch and Select do is said above the rows that carry them, not after Codex.
+  main.append(el('p', 'surface-note', t('Switch changes the account of the ordinary Claude Code on this computer. Select chooses the account for managed sessions launched from Switchboard; a response already in progress keeps its account.')));
   // WF-2.1 (SB-364): this computer first, then each other machine, then the accounts given to agents; each account once.
   const sections = accountSections(filtered, snapshot!, quotaContext());
   if (!filtered.length) main.append(el('p', 'form-note', accounts.length && filtered.length !== accounts.length ? t('No account matches these filters.') : t('No account here yet.')));
@@ -2235,7 +2237,6 @@ function renderAccounts(main: HTMLElement) {
     main.append(foldSection({ key: machine.pool, title: machine.name, state: plural(machine.count, { one: '{n} account', other: '{n} accounts' }), open: machine.count <= MACHINE_FOLD_LIMIT, className: 'machine-section', body: () => machine.groups.map((group) => providerSection(group, accounts, 'h3', true)) }));
   }
   if (sections.given.length) main.append(givenSection(sections.given));
-  main.append(el('p', 'surface-note', t('Switch changes the account of the ordinary Claude Code on this computer. Select chooses the account for managed sessions launched from Switchboard; a response already in progress keeps its account.')));
   main.append(kimiSection());
 }
 /** WF-2.1: one provider's accounts, by group; inside a machine's section the group heading is left out (the machine names it). */
