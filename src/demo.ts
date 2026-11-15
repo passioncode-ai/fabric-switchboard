@@ -639,16 +639,16 @@ export function createDemoAdapter(): Adapter {
       const task = (workflow: string | null, request: string | null = null) => ({ workflow, request, project: null });
       return {
         live: [
-          { pid: 4101, agent: 'claude-code', folder: '/Users/demo/work/alpha-web', started_at: now - 5400, quiet: false, quiet_minutes: 2, managed: true, launch_id: 'L-root', session_id: 's-1', pool: 'alpha', account_id: null, surface: 'fabric', parent: null, task: task('wf_1a2b3c4d5e6f7a8b', 'req-42') },
-          { pid: 4177, agent: 'claude-code', folder: '/Users/demo/work/alpha-docs', started_at: now - 1800, quiet: false, quiet_minutes: 1, managed: true, launch_id: 'L-child', session_id: 's-2', pool: 'alpha', account_id: null, surface: 'fallback', parent: 'L-root', task: task('wf_1a2b3c4d5e6f7a8b') },
+          { pid: 4101, agent: 'claude-code', folder: '/Users/demo/work/alpha-web', started_at: now - 5400, quiet: false, quiet_minutes: 2, managed: true, launch_id: 'L-root', session_id: 's-1', pool: 'alpha-web', account_id: null, surface: 'fabric', parent: null, task: task('wf_1a2b3c4d5e6f7a8b', 'req-42') },
+          { pid: 4177, agent: 'claude-code', folder: '/Users/demo/work/alpha-docs', started_at: now - 1800, quiet: false, quiet_minutes: 1, managed: true, launch_id: 'L-child', session_id: 's-2', pool: 'alpha-web', account_id: null, surface: 'fallback', parent: 'L-root', task: task('wf_1a2b3c4d5e6f7a8b') },
           { pid: 5230, agent: 'codex', folder: '/Users/demo/work/tools-cli', started_at: now - 9000, quiet: true, quiet_minutes: 48, managed: false, launch_id: null, session_id: null, pool: null, account_id: null, surface: null, parent: null, task: null },
         ],
         launches: [
-          { launch_id: 'L-child', launched_at: now - 1800, pool: 'alpha', account_id: null, provider: 'claude', folder: '/Users/demo/work/alpha-docs', surface: 'fallback', parent: 'L-root', task: task('wf_1a2b3c4d5e6f7a8b'), state: 'running', ended: null },
+          { launch_id: 'L-child', launched_at: now - 1800, pool: 'alpha-web', account_id: null, provider: 'claude', folder: '/Users/demo/work/alpha-docs', surface: 'fallback', parent: 'L-root', task: task('wf_1a2b3c4d5e6f7a8b'), state: 'running', ended: null },
           { launch_id: 'L-gone', launched_at: now - 4000, pool: 'tools', account_id: null, provider: 'claude', folder: '/Users/demo/work/tools-cli', surface: 'dashboards', parent: null, task: task(null), state: 'gone', ended: null },
-          { launch_id: 'L-root', launched_at: now - 5400, pool: 'alpha', account_id: null, provider: 'claude', folder: '/Users/demo/work/alpha-web', surface: 'fabric', parent: null, task: task('wf_1a2b3c4d5e6f7a8b', 'req-42'), state: 'running', ended: null },
+          { launch_id: 'L-root', launched_at: now - 5400, pool: 'alpha-web', account_id: null, provider: 'claude', folder: '/Users/demo/work/alpha-web', surface: 'fabric', parent: null, task: task('wf_1a2b3c4d5e6f7a8b', 'req-42'), state: 'running', ended: null },
         ],
-        counts: { live: 3, working: 2, quiet: 1, managed: 2, by_pool: { alpha: 2, unmanaged: 1 }, by_surface: { fabric: 1, fallback: 1, unmanaged: 1 } },
+        counts: { live: 3, working: 2, quiet: 1, managed: 2, by_pool: { 'alpha-web': 2, unmanaged: 1 }, by_surface: { fabric: 1, fallback: 1, unmanaged: 1 } },
         findings: [{ kind: 'gone', launch_id: 'L-gone', folder: '/Users/demo/work/tools-cli' }],
         capacity: { cap: demoCap, used: 2, free: demoCap === null ? null : Math.max(0, demoCap - 2), at_capacity: demoCap !== null && demoCap <= 2, total: 3, quiet: 1, quiet_after_minutes: 30 },
       };
