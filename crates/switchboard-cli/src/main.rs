@@ -2071,6 +2071,15 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                 )
                 .await
                 {
+                    // A managed session between two requests is still working: wait for a quiet
+                    // spell (drain anyway after half an hour, as the app does).
+                    let runtime = owner.runtime.clone();
+                    su::wait_quiet(
+                        move || runtime.busy_reason(),
+                        su::QUIET_LOOK,
+                        su::QUIET_WAIT,
+                    )
+                    .await;
                     return why;
                 }
                 tokio::time::sleep(su::EVERY).await;
@@ -3595,15 +3604,72 @@ async fn continue_workflow(
         .ok_or("The session script is missing.")?;
     run_in_place(std::path::Path::new(script))
 }
-/// Replaces this process with the prepared session script: the agent runs in this terminal and
-/// its exit status is the command's.
+/// Runs the prepared session script in this terminal and waits for it: its exit status is the
+/// command's, and its launch record gets `ended` (before 0.7.96 this process replaced itself with
+/// the script, nobody saw the end, and every in-place launch read `gone`; studio-agent's finding
+/// `b18dd31c`). The agent keeps the terminal: Ctrl-C, Ctrl-\ and a closed window reach it, not
+/// this process, and a SIGTERM sent to this process (a console stopping its session) is passed
+/// on to it. A script that names no launch replaces this process as before.
 #[cfg(unix)]
 fn run_in_place(script: &std::path::Path) -> Result<Value, String> {
     use std::os::unix::process::CommandExt;
-    let error = std::process::Command::new(script).exec();
-    let _ = error;
-    release_reservation(script);
-    Err("The session could not start in this terminal.".into())
+    let Some((root, launch_id)) = switchboard_runtime::launch::script_launch(script) else {
+        let error = std::process::Command::new(script).exec();
+        let _ = error;
+        release_reservation(script);
+        return Err("The session could not start in this terminal.".into());
+    };
+    static CHILD: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
+    extern "C" fn pass_on(signal: libc::c_int) {
+        let child = CHILD.load(std::sync::atomic::Ordering::Relaxed);
+        if child > 0 {
+            // SAFETY: kill is async-signal-safe; the pid is our own child's.
+            unsafe { libc::kill(child, signal) };
+        }
+    }
+    // SAFETY: plain signal dispositions of this process; the child restores the defaults before
+    // it runs the script.
+    unsafe {
+        libc::signal(libc::SIGINT, libc::SIG_IGN);
+        libc::signal(libc::SIGQUIT, libc::SIG_IGN);
+        libc::signal(libc::SIGHUP, libc::SIG_IGN);
+        libc::signal(libc::SIGTERM, pass_on as *const () as libc::sighandler_t);
+    }
+    let mut command = std::process::Command::new(script);
+    // SAFETY: only async-signal-safe calls between fork and exec.
+    unsafe {
+        command.pre_exec(|| {
+            for signal in [libc::SIGINT, libc::SIGQUIT, libc::SIGHUP, libc::SIGTERM] {
+                libc::signal(signal, libc::SIG_DFL);
+            }
+            Ok(())
+        });
+    }
+    let mut child = match command.spawn() {
+        Ok(child) => child,
+        Err(_) => {
+            release_reservation(script);
+            return Err("The session could not start in this terminal.".into());
+        }
+    };
+    CHILD.store(child.id() as i32, std::sync::atomic::Ordering::Relaxed);
+    let code = match child.wait() {
+        Ok(status) => {
+            use std::os::unix::process::ExitStatusExt;
+            status
+                .code()
+                .unwrap_or_else(|| 128 + status.signal().unwrap_or(0))
+        }
+        Err(_) => 1,
+    };
+    switchboard_runtime::launches::record_exit(
+        &root,
+        &launch_id,
+        code,
+        switchboard_runtime::session_watch::now(),
+    );
+    // Nothing printed: the terminal may be gone, and the agent's own output was the answer.
+    std::process::exit(code)
 }
 /// The script never ran, so its home's reservation would block the account for ten minutes:
 /// release it now. The script sits in the home it reserved; only a regular file is removed.

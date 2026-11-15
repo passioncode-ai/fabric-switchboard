@@ -134,6 +134,14 @@ pub struct ProxyHandle {
 /// Requests relayed at once; each holds a slot until its response stream ends. 16 was too few for
 /// a machine with two dozen agent sessions streaming at once (2026-10-18): the rest got 503.
 const SLOTS: usize = 64;
+/// When the last managed request started, Unix seconds (`ProxyHandle::last_request_at`).
+static LAST_REQUEST: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
+fn note_request() {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs() as i64);
+    LAST_REQUEST.store(now, std::sync::atomic::Ordering::Relaxed);
+}
 /// How long a start waits for its recorded port to be released by a previous owner.
 const REBIND_ATTEMPTS: u32 = 5;
 const REBIND_WAIT: Duration = Duration::from_millis(100);
@@ -311,6 +319,12 @@ impl ProxyHandle {
             stat_folders,
             foreign_refused,
         })
+    }
+    /// When the last managed request started, Unix seconds (0 before the first). Between two
+    /// requests of a working session nothing is in flight for a moment; an update waits for a
+    /// quiet spell, not that moment (studio-agent's finding `b18dd31c`, 2026-11-15).
+    pub fn last_request_at(&self) -> i64 {
+        LAST_REQUEST.load(std::sync::atomic::Ordering::Relaxed)
     }
     /// Managed requests in flight, streams included: zero means no managed session is waiting
     /// on an answer right now (an update may activate, LC-16).
@@ -665,7 +679,10 @@ async fn relay(
         return response;
     }
     let permit = match g.slots.clone().try_acquire_owned() {
-        Ok(p) => p,
+        Ok(p) => {
+            note_request();
+            p
+        }
         Err(_) => {
             return error(
                 StatusCode::SERVICE_UNAVAILABLE,
@@ -987,7 +1004,10 @@ async fn codex_auto(g: Gateway, operation: String, request: Request<Body>) -> Re
         .await;
     }
     let permit = match g.slots.clone().try_acquire_owned() {
-        Ok(p) => p,
+        Ok(p) => {
+            note_request();
+            p
+        }
         Err(_) => {
             return error(
                 StatusCode::SERVICE_UNAVAILABLE,
