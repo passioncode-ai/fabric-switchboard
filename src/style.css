@@ -755,3 +755,7 @@ g:hover > .chart-bar { opacity: .82; }
 .balancing-groups .login-option { margin-top: 0; }
 .usage-when { white-space: nowrap; }
 .about-panel > .watch-findings { margin-top: 0; }
+@media (max-width: 980px) {
+  .stat-table th, .stat-table td { padding-inline: var(--space-2); }
+  .stat-table thead th { white-space: normal; }
+}
