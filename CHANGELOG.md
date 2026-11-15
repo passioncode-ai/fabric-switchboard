@@ -8,6 +8,8 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+## 0.7.96
+
 - The session duty officer never ends a session before it finished: it closes a session only when its turn ended an hour ago and none of its commands (background ones included) still runs, and restarts one only when it is stalled (busy, writing nothing and using no CPU, with no command of its own running). A session waiting for your answer is left alone, nothing is restarted for its age, and of two copies of one session only a finished one is closed. It watches every session again, not only those Switchboard started (SB-384, DEC-0021 amended).
 
 ## 0.7.95
