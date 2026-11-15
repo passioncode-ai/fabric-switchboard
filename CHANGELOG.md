@@ -8,6 +8,8 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+## 0.7.95
+
 - The session duty officer acts only on sessions Switchboard started; a session you started in your own terminal (Orca, Terminal, iTerm) is never restarted or closed. A resumed session finds your tools (its hooks no longer fail with `node: command not found`), and its window closes when the session is ended (SB-384, DEC-0021 amended).
 
 ## 0.7.94
