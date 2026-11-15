@@ -2,6 +2,18 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-11-15: audit waves 2 and 3, one folder for all repositories, sessions on another machine, board answered; 0.7.90 out, 0.7.91 tagged (SB-379, SB-380)
+
+- **Published.** 0.7.90 (run 43687519604, the guard ran the nightly suite on the tag first). This MacBook runs 0.7.90. 0.7.91 tagged on `c69cd236` (run 43692556419, watcher `bweiqv2oi`).
+- **In 0.7.91.** W4 items 2, 14 (rotation reads Claude Code's sign-in and the verdicts before its transaction, #713); audit wave 2 copy and links (#714); wave 3 and Q3b *Add every repository in a folder…* in the group and organization dialogs (#715, the operator's ask); sessions, `sessions end` and `attach` with `--target` (#718, SB-380 for Fabric Dashboards `d2bb5562`); details chevrons and Other machines copy (#719); CLI and MCP panics counted (#720).
+- **After the tag (next release).** Shorter Statistics note (#722), `project suggest` keeps group repositories 30 s (#723, W4 item 10), Switch and Select note above the accounts (#724).
+- **Live.** claude6 called back from studio-sshlg (`kept: brought_back`, `proved`, copy there removed); its quota check here answers (0 % used) although its copy there had failed since 2026-11-09.
+- **Board.** 31 unread read and marked. Answered: Dashboards on the pool (quiet sessions already left out of `used`, `55c057fc`), Vesta's work-machines request `a7325ed3` (SB-381, SB-382 by 2026-11-22, SB-184 owned here with a design by 2026-11-29, SB-159 sign-in step, `5d909cc8`), Dashboards `d2bb5562` (SB-380, `f21276d6`), ania `d78de275` (`dispatch --target` already does it, `4ee87803`). SB-376 closed (Dashboards 0.8.96, 0.8.100); SB-383 filed for permissions by autonomy level.
+- **Checks.** `./scripts/check.sh` on the Mac Studio EXIT 0 on every merged head (aed9c07, bab15ee, d0f4778, 4df74b7, 0c84e61, 5e5773b, 5fee690, c7a6f13 and the SB-380 head); Linux clippy (rust:1.99) clean for each Rust change; WebKit screenshots of every page at 1280, 960 and 760 px with no horizontal overflow.
+- **Open.** Audit items 19, 20, 31, 34, 35, 37, 38, 41 to 43, 45 to 47, 56; W3 crash detection and `switchboard bugs`; W4 items 4, 5, 6, 12, 13, 15, 16; SB-381 and SB-382 (2026-11-22); W5 backlog hygiene and issue #36.
+
+**Exact next task.** When 0.7.91 publishes: run `switchboard --json sessions --tree --target studio-sshlg` from this MacBook once studio-sshlg reads 0.7.91 and post the result on Dashboards' thread `9a462401`; then SB-381 (an organization's seats as data: agree the fields with Observatory OBS-415 on thread `f3aa795e`, then `switchboard organizations --seats`), then SB-382.
+
 ## 2026-11-15: sessions view and watch, bug counts, window audit wave 1, W4 part 1; 0.7.89, 0.7.90 (SB-379)
 
 - **Done (PR #706, 0.7.89).** Activity → *Sessions on this computer*: every live Claude Code and Codex session (Switchboard's or not), who started it, group, task, a session started by another under it, counts by group, the last day's launches; `switchboard sessions --tree`, MCP `switchboard_sessions` with `tree`; a one-minute watch (`session-watch.json`) names a session in two processes, a board run quiet for 30 minutes and a launch that stopped without recording how it ended, the first two also in *Needs attention*. Published.
