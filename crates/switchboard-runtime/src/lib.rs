@@ -3592,7 +3592,7 @@ fn add_suggested_folder(
 /// group claims it); None when the folder must be recorded and added, under the transaction.
 fn suggest_read_only(store: &Store, root: &Path, folder: &Path) -> Result<Option<Value>, String> {
     let snapshot = store.snapshot()?;
-    let repos = suggest::project_repos(&snapshot);
+    let repos = suggest::project_repos_cached(&snapshot);
     let outcome = match suggest::assess(&snapshot, &repos, folder) {
         suggest::Assessed::Ours { .. } => return Ok(None),
         suggest::Assessed::Decided(suggest::Outcome::NotOurs { .. }) => {

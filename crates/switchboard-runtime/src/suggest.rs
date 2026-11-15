@@ -267,6 +267,33 @@ pub(crate) fn project_repos(snapshot: &Snapshot) -> Vec<(String, Repo)> {
         .collect()
 }
 
+/// W4 item 10: `project_repos` for a read-only call (`project suggest`, asked at each session
+/// start), kept 30 s for the same groups' folders: it read the Git files of every group folder
+/// per call (174 folders on the MacBook). A change of the folders reads them again at once.
+pub(crate) fn project_repos_cached(snapshot: &Snapshot) -> Vec<(String, Repo)> {
+    use std::sync::Mutex;
+    use std::time::{Duration, Instant};
+    type Kept = (Instant, Vec<(String, Vec<String>)>, Vec<(String, Repo)>);
+    static KEPT: Mutex<Option<Kept>> = Mutex::new(None);
+    let key: Vec<(String, Vec<String>)> = snapshot
+        .projects
+        .iter()
+        .map(|p| (p.pool.clone(), p.folders.clone()))
+        .collect();
+    if let Ok(kept) = KEPT.lock() {
+        if let Some((at, k, repos)) = kept.as_ref() {
+            if *k == key && at.elapsed() < Duration::from_secs(30) {
+                return repos.clone();
+            }
+        }
+    }
+    let repos = project_repos(snapshot);
+    if let Ok(mut kept) = KEPT.lock() {
+        *kept = Some((Instant::now(), key, repos.clone()));
+    }
+    repos
+}
+
 /// Which project a folder belongs to, and why: the contract's attribution (DEC-0089, SB-141 part
 /// 2, `attribution::attribute_folder`) over the groups' folders. Only a checkout's top is a
 /// candidate. Attached by worktree, by repository or by an owner a group lists joins that group; a

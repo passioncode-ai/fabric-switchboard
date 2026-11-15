@@ -31,3 +31,4 @@ The operations log since 2026-11-12 and the code at `3b07b71e`. At load around 4
 - Items 2 and 14: done. A rotation pass reads Claude Code's sign-in (only while a native policy is on) and the accounts that need a new sign-in once, before the `rotate` transaction (`rotate_inputs`), and reads Claude Code's sign-in again only after a native switch in the same pass.
 - Item 3: the sync's plan already runs before the transaction (SB-347); only `follow_claude_swap` stays under it.
 - Item 8: `sign_in_required` answers from its cache while credentials and rejected lineages are unchanged (SB-182), so dispatch reads credentials only after a change; no further change.
+- Item 10: done. `project suggest` reads the group folders' Git files through `suggest::project_repos_cached`, kept 30 s for the same groups' folders; a change of the folders reads them again at once. The background pass and the writing paths keep reading them fresh.
