@@ -577,7 +577,7 @@ mod tests {
             true,
         );
         assert!(script.contains("export ANTHROPIC_BASE_URL='http://127.0.0.1:9/x'"));
-        assert!(!script.contains("SWITCHBOARD_LAUNCH_ID"));
+        assert!(!script.contains("export SWITCHBOARD_LAUNCH_ID"));
         assert!(script.contains("export CLAUDE_CONFIG_DIR="));
         assert!(script.contains("cd '/w/it'\\''s' || exit 1"));
         assert!(script
