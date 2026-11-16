@@ -167,6 +167,8 @@ const ALLOWLIST = {
   // Code's StopFailure hook; the CLI turns it into `registered: false`, the window never asks.
   'No saved account matches the stopped session.': 'StopFailure hook (CLI) only',
   'The stop could not be kept for later.': 'StopFailure hook (CLI) only, SB-397 W0.4 spool',
+  'Give the session id and a hold end within seven days from now, or 0 to release it.': 'monitor hold: Fabric calls the CLI only (SB-399)',
+  "The session's hold could not be saved.": 'monitor hold: Fabric calls the CLI only (SB-399)',
   // runtime analytics.rs installation()/set_shared_enabled(): internal. status() reads them as
   // "off"; set_enabled() replaces every one with "Could not save the analytics choice.".
   'Installation folder unavailable.': 'replaced by the analytics choice error',
