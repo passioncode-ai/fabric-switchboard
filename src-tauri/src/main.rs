@@ -1074,6 +1074,11 @@ async fn remove_project(pool: String, state: State<'_, Slot>) -> Result<Value, S
         })
         .await
 }
+/// SB-390: the saved Anthropic keys by name, never a value.
+#[tauri::command]
+async fn anthropic_keys(state: State<'_, Slot>) -> Result<Value, String> {
+    state.runtime().await?.execute(Operation::AnthropicKeys).await
+}
 /// Hermes's model and provider (SB-80): read, and changed only on the person's request.
 #[tauri::command]
 async fn hermes_model(state: State<'_, Slot>) -> Result<Value, String> {
@@ -1405,6 +1410,7 @@ async fn launch_agent(
     working_directory: std::path::PathBuf,
     via: Option<switchboard_runtime::AgentVia>,
     model: Option<String>,
+    key: Option<String>,
     state: State<'_, Slot>,
 ) -> Result<Value, String> {
     state
@@ -1416,6 +1422,7 @@ async fn launch_agent(
             working_directory,
             via: via.unwrap_or_default(),
             model,
+            key,
         })
         .await
 }
@@ -1901,6 +1908,7 @@ fn main() {
             openrouter_remove,
             kimi_accounts,
             hermes_model,
+            anthropic_keys,
             hermes_set_model,
             kimi_login_begin,
             kimi_login_status,

@@ -1973,6 +1973,92 @@ pub fn launch_agent_openrouter(
     start_terminal(&path)?;
     Ok(result)
 }
+/// SB-390: the agents that run on an Anthropic API key directly, with their provider flag.
+const ANTHROPIC_AGENTS: &[(&str, &str)] = &[("hermes", "Hermes Agent")];
+pub const ANTHROPIC_AGENT_UNSUPPORTED: &str =
+    "Only Hermes runs on an Anthropic key for now. Choose Hermes, or its OpenRouter key.";
+pub const ANTHROPIC_MODEL_NEEDED: &str =
+    "Choose a model for this launch, or set the key's default model with switchboard agents anthropic model.";
+/// SB-390: starts Hermes in a folder on the Anthropic key saved under `key` (`appvillis`,
+/// `personal`) and `model` (default: the key's model), as `hermes --provider anthropic -m
+/// <model>`. Like an OpenRouter launch (`launch_agent_openrouter`), it runs in a Hermes home of
+/// its own (`HERMES_HOME`, so `~/.hermes`'s own sign-ins do not win over the key), and the key is
+/// read when the session starts (`switchboard agents anthropic key <name>`), never written. No
+/// proxy, group or account is involved, and no ceiling counts it.
+pub fn launch_agent_anthropic(
+    root: &Path,
+    agent: &str,
+    key: &str,
+    model: Option<&str>,
+    working_directory: &Path,
+    start: fn(&Path) -> Result<(), String>,
+) -> Result<Value, String> {
+    let (id, name) = ANTHROPIC_AGENTS
+        .iter()
+        .find(|(id, _)| *id == agent)
+        .copied()
+        .ok_or(ANTHROPIC_AGENT_UNSUPPORTED)?;
+    let saved = crate::anthropic_keys::find(root, key)?;
+    let model = match model {
+        Some(m) if !crate::anthropic_keys::model_valid(m) => {
+            return Err(crate::anthropic_keys::MODEL_INVALID.into())
+        }
+        Some(m) => m.to_owned(),
+        None => saved.model.clone().ok_or(ANTHROPIC_MODEL_NEEDED)?,
+    };
+    let working_directory = agent_folder(root, working_directory)?;
+    let program = find_program(id).ok_or_else(|| {
+        format!("{name} is not installed. Install it first, then launch it again.")
+    })?;
+    let cli = agent_cli().ok_or(OPENROUTER_CLI_MISSING)?;
+    let homes = root.join("runtimes");
+    private_dir(&homes)?;
+    let home = homes.join(format!("agent-{id}-anthropic-{key}"));
+    private_dir(&home)?;
+    let own = home.join("agent-home");
+    private_dir(&own)?;
+    let launch_id = crate::launches::new_id();
+    let env = BTreeMap::from([
+        (
+            "HERMES_HOME".to_string(),
+            own.to_string_lossy().into_owned(),
+        ),
+        (crate::launches::ENV.to_string(), launch_id.clone()),
+    ]);
+    let args = ["--provider", "anthropic", "-m", model.as_str()];
+    let key_command = vec![
+        "--data-dir".to_string(),
+        root.to_string_lossy().into_owned(),
+        "agents".into(),
+        "anthropic".into(),
+        "key".into(),
+        key.to_owned(),
+    ];
+    let content = script_with(
+        &home,
+        &program,
+        &args,
+        &env,
+        Some(("ANTHROPIC_API_KEY", &cli, &key_command)),
+        false,
+        &working_directory,
+    );
+    let path = write_launch_script(&home, &content)?;
+    // Listed under Sessions like any launch, labelled with the key's name and model; never the key.
+    let record = json!({
+        "account_id": format!("anthropic:{key}"), "provider": "anthropic", "agent": id,
+        // The key's own name, as an OpenRouter launch writes `openrouter` (SB-240): never a group.
+        "pool": "anthropic", "mode": "isolated",
+        "working_directory": working_directory, "in_place": false,
+        "launched_at": switchboard_proxy::now(), "continues": null,
+        "label": format!("{key} · {model}"),
+    });
+    crate::launches::record(root, &home, record, &launch_id)?;
+    start(&path)?;
+    Ok(
+        json!({"launched": true, "agent": id, "name": name, "via": "anthropic", "key": key, "model": model}),
+    )
+}
 pub const OPENROUTER_CLI_MISSING: &str =
     "The switchboard command was not found. Install it from Agents, then launch again.";
 /// Printed when a continuation's first turn ended in an error: nothing was resumed.

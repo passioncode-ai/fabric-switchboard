@@ -4024,6 +4024,7 @@ mod tests {
                     working_directory: dir.clone(),
                     via: crate::AgentVia::Openrouter,
                     model: None,
+                    key: None,
                 }),
             )
             .await
@@ -4058,6 +4059,7 @@ mod tests {
                     working_directory: dir,
                     via: crate::AgentVia::Proxy,
                     model: None,
+                    key: None,
                 }),
             )
             .await
@@ -4303,6 +4305,7 @@ mod tests {
                     working_directory: dir.clone(),
                     via: crate::AgentVia::Openrouter,
                     model: None,
+                    key: None,
                 }),
             )
             .await
@@ -4350,6 +4353,7 @@ mod tests {
                     working_directory: dir,
                     via: crate::AgentVia::Openrouter,
                     model: None,
+                    key: None,
                 }),
             )
             .await
@@ -4774,6 +4778,7 @@ mod tests {
                         working_directory: dir,
                         via: crate::AgentVia::Openrouter,
                         model: None,
+                        key: None,
                     }),
                 ),
             ),
@@ -4827,6 +4832,7 @@ mod tests {
             working_directory: dir.clone(),
             via: crate::AgentVia::Openrouter,
             model: None,
+            key: None,
         });
         let probe = async {
             let waited = tokio::time::Instant::now();
@@ -4926,6 +4932,7 @@ mod tests {
                     working_directory: dir,
                     via: crate::AgentVia::Openrouter,
                     model: None,
+                    key: None,
                 }),
             )
             .await
@@ -5330,6 +5337,7 @@ mod tests {
                     working_directory: dir_of(&repo),
                     via: crate::AgentVia::Proxy,
                     model: None,
+                    key: None,
                 }),
             )
             .await

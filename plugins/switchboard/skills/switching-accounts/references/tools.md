@@ -111,6 +111,14 @@ fixed it leaves the list on the next background pass. Read-only, also on a read-
 Since 0.7.84 (SB-366) `refused_there` also appears: an account on another machine whose copy the
 provider refused there at the last background read (`since` is that read's time); fix it with a
 sign-in on that machine, or call the account back with `switchboard_account_recall`.
+### `switchboard_anthropic_keys`: `name?` (string), `model?` (string)
+
+The Anthropic API keys agents run on directly (SB-390), each under a name the person chose
+(`appvillis`, `personal`): `name`, `saved_at` and default `model`, never a key. With both `name`
+and `model`, changes that key's default model. Saving or removing a key is the person's
+(`switchboard agents anthropic set <name> --key-stdin`); a launch picks one with `switchboard
+agents launch hermes --anthropic <name>`. No spending ceiling counts these keys.
+
 ### `switchboard_session_close_copy`: `session_id` (string), `pid?` (integer)
 
 When one Claude Code session runs in two processes (`switchboard_attention` reason

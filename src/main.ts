@@ -1876,6 +1876,8 @@ async function agentDialog(agent: AgentInfo) {
   const keyFirst = !!viaKey?.run && agent.openrouter?.default !== false;
   if (launches || viaKey) context.body.append(groupField(t('Launch in folder'), dir.node, launches && !keyFirst ? t('Starts the agent in Terminal in this folder, on the group\'s API-key account.') : t('Starts the agent in Terminal in this folder.')));
   if (viaKey) context.body.append(viaKey.part);
+  // SB-390: Hermes on an Anthropic key the person saved by name (Appvillis's, their own).
+  if (agent.id === 'hermes') context.body.append(anthropicLaunch(agent, context, folder));
   const throughProxy = () => { const value = folder(); if (value) void dialogSave(context, () => adapter.launchAgent(agent.id, pool.value, value), t('Terminal launch requested for {agent}.', { agent: agent.name }), 'launch'); };
   if (keyFirst) {
     if (launches) context.actions.append(button(t('Launch through the proxy'), throughProxy, 'button', `proxy-launch-${agent.id}`));
@@ -1909,6 +1911,28 @@ function openrouterLaunch(agent: AgentInfo, context: DialogContext, folder: () =
     void dialogSave(context, () => adapter.launchOnOpenrouter(agent.id, picksItself ? null : model.value.trim() || null, value), t('Terminal launch requested for {agent} on OpenRouter.', { agent: agent.name }), 'launch');
   };
   return { part, run };
+}
+/** SB-390: Hermes on one of the saved Anthropic keys, chosen by name, with this launch's model. */
+function anthropicLaunch(agent: AgentInfo, context: DialogContext, folder: () => string | null): HTMLElement {
+  const part = el('div', 'agent-setup');
+  part.append(el('h3', 'pool-heading', t('On an Anthropic key')));
+  const body = el('div', ''); body.append(el('p', 'form-note', t('Reading the saved Anthropic keys…'))); part.append(body);
+  void adapter.anthropicKeys().then(({ keys }) => {
+    body.replaceChildren();
+    if (!keys.length) { body.append(el('p', 'form-note', t('No Anthropic key is saved. Save one under a name with switchboard agents anthropic set <name> --key-stdin, then {agent} launches on it.', { agent: agent.name }))); return; }
+    const choice = document.createElement('select'); choice.id = `anthropic-key-${agent.id}`;
+    for (const k of keys) { const o = document.createElement('option'); o.value = k.name; o.textContent = k.name; choice.append(o); }
+    const model = input(keys[0].model ?? ''); model.placeholder = 'claude-sonnet-5-5'; model.id = `anthropic-model-${agent.id}`;
+    choice.addEventListener('change', () => { model.value = keys.find((k) => k.name === choice.value)?.model ?? ''; });
+    const grid = el('div', 'form-grid');
+    grid.append(field(t('Key'), choice, t('Switchboard counts no spending ceiling for an Anthropic key.')), field(t('Model'), model, t('An Anthropic id. Empty: the key\'s default model.')));
+    const run = () => {
+      const value = folder(); if (!value) return;
+      void dialogSave(context, () => adapter.launchOnAnthropic(agent.id, choice.value, model.value.trim() || null, value), t('Terminal launch requested for {agent} on the Anthropic key {key}.', { agent: agent.name, key: choice.value }), 'launch');
+    };
+    body.append(grid, button(t('Launch on this Anthropic key'), run, 'button', `anthropic-launch-${agent.id}`));
+  }, (error) => { body.replaceChildren(el('p', 'usage-error', t(safeError(error, 'read')))); });
+  return part;
 }
 function emptyState(title: string, description: string) { const section = el('section', 'empty-state'); section.append(el('div', 'empty-symbol', '◇'), el('h2', '', title), el('p', '', description)); return section; }
 // ── Accounts (0.5): one click to add, compact grouped rows, row menus instead of dialogs ──

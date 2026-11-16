@@ -203,6 +203,10 @@ export interface Adapter {
   kimiLaunch(id: string, workingDirectory: string): Promise<unknown>;
   kimiRemove(id: string): Promise<unknown>;
   /** Starts an agent with an OpenRouter recipe on the saved key; `model` null: the key's model. */
+  /** SB-390: the Anthropic keys agents run on directly, by name; never a key. */
+  anthropicKeys(): Promise<{ keys: { name: string; saved_at: number; model: string | null }[] }>;
+  /** SB-390: Hermes on the Anthropic key saved under `key`, with this launch's model (null: the key's). */
+  launchOnAnthropic(agent: string, key: string, model: string | null, workingDirectory: string): Promise<unknown>;
   launchOnOpenrouter(agent: string, model: string | null, workingDirectory: string): Promise<{ model: string | null; model_choice: 'launch' | 'agent' }>;
   loginItem(): Promise<LoginItem>;
   setLoginItem(enabled: boolean): Promise<LoginItem>;

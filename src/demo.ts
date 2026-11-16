@@ -839,6 +839,8 @@ export function createDemoAdapter(): Adapter {
     async kimiLaunch() { await pause(); throw new Error('The browser demo cannot open a terminal.'); },
     async kimiRemove(id) { await pause(); kimi.accounts = kimi.accounts.filter((a) => a.account.id !== id); log('kimi_account', '', 'removed'); },
     async launchOnOpenrouter() { await pause(); throw new Error('The browser demo cannot open a terminal.'); },
+    async anthropicKeys() { await pause(); return { keys: [{ name: 'appvillis', saved_at: now() - 3600, model: 'claude-sonnet-5-5' }, { name: 'personal', saved_at: now() - 7200, model: null }] }; },
+    async launchOnAnthropic() { await pause(); throw new Error('The browser demo cannot open a terminal.'); },
     async loginItem() { return { ...loginItem }; },
     async shellHookNotice() { return shellNotice ? { organization: 'Northwind', group: 'Northwind web' } : null; },
     async acknowledgeShellHookNotice() { await pause(); shellNotice = false; },
