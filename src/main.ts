@@ -114,6 +114,9 @@ const noticeStore = () => { if (demoFirstRun) return { getItem: (k: string) => f
  * turns Switchboard's own switch off (and acknowledges it too). About's switch is the same one.
  */
 const USAGE_COUNTED = () => t('Switchboard counts installs, days of use, how many accounts are saved, by provider and type, and the errors it runs into, by a fixed code, to help PassionCode.ai improve its apps. It also counts how many groups, folders, folder rules, fallback chains and spending ceilings you have set, how many groups switch automatically, how often an account switches and why, and how each run it starts for Fabric starts and ends. It never sends account names, e-mail addresses, sign-ins, group names, folder paths, error messages or what your sessions write. A random installation number, shared by the PassionCode.ai tools on this computer, lets one person using several of them count once.');
+/** SB-385 (DEC-0157 UD-1): the installation id with whom it is shared, the session id, and where counts go. */
+const USAGE_IDS = () => t('This computer\'s installation number is {id}. The PassionCode.ai apps on it share it so that one person using several counts once; it names no person. Each run of Switchboard also gets a random session number that ties that run\'s counts together. Counts go to PassionCode.ai at analytics.passioncode.ai.', { id: analyticsState?.installation_id ?? t('made at the first count') });
+let usageNoticeReported = false;
 /** Switchboard's own switch (SB-246); the notice says what is now true. */
 function setUsage(wanted: boolean, focus: string) {
   void mutate(async () => { analyticsState = await adapter.setAnalytics(wanted); }, () => usageAnswerText(wanted), focus);
@@ -161,7 +164,9 @@ function usageNoticeCard() {
     button(t('OK'), () => void mutate(async () => { analyticsState = await adapter.analyticsNoticeSeen(); }, '', 'page-title'), 'button primary', 'usage-ok'),
     button(t('Turn off'), () => setUsage(false, 'page-title'), 'button', 'usage-turn-off'),
   );
-  card.append(title, el('p', '', USAGE_COUNTED()), actions, el('p', 'form-note', t('You can turn them off at any time in Settings. This applies to Switchboard only.')));
+  card.append(title, el('p', '', USAGE_COUNTED()), el('p', '', USAGE_IDS()), actions, el('p', 'form-note', t('You can turn them off at any time in Settings. This applies to Switchboard only.')));
+  // SB-385 (DEC-0157 UD-1): nothing leaves before the notice was shown where the person reads it.
+  if (!usageNoticeReported) { usageNoticeReported = true; void adapter.analyticsNoticeShown().then((value) => { analyticsState = value; }, () => { usageNoticeReported = false; }); }
   return card;
 }
 let termsDismissed = termsNoticeDismissed(noticeStore());
@@ -3449,6 +3454,10 @@ function analyticsPanel() {
   box.addEventListener('change', () => setUsage(box.checked, 'analytics'));
   option.append(box, el('span', '', t('Share anonymous usage and error counts')));
   panel.append(option, el('p', 'form-note', analyticsState.available ? t('This switch applies to Switchboard only.') : t('Only installed release builds send analytics; this build sends nothing.')));
+  // SB-385: what is true now, not only what the switch says.
+  if (analyticsState.available && analyticsState.enabled && analyticsState.held === 'shared_unreadable') panel.append(el('p', 'form-note', t('On, but nothing is sent: the installation file the PassionCode.ai apps share cannot be read.')));
+  if (analyticsState.available && !analyticsState.enabled && analyticsState.shared_no) panel.append(el('p', 'form-note', t('Off because another PassionCode.ai app on this computer was told no before Switchboard sent anything. Turn it on here if Switchboard should share its counts.')));
+  if (analyticsState.available && analyticsState.installation_id) panel.append(el('p', 'form-note', USAGE_IDS()));
   return panel;
 }
 function backupsPanel() {

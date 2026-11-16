@@ -1595,6 +1595,8 @@ mod tests {
         let url = serve(server.clone()).await;
         let folder = tempfile::tempdir().unwrap();
         let shared = folder.path().join("PassionCode");
+        // Another PassionCode app made the shared installation; the notice names its id.
+        let (made, _) = installation(&shared).unwrap();
         std::fs::write(
             folder.path().join(STATE_FILE),
             br#"{"rule":2,"installed":true,"notice_at":1790000000}"#,
