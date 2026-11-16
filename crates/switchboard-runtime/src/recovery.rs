@@ -684,6 +684,20 @@ pub fn session_has_live_stop(root: &Path, session: &str, now: i64) -> bool {
     }
 }
 
+/// SB-396 D2: every session with a waiting or claimed stop, read without the lock or the owner,
+/// so the duty officer never closes a session that waits for an account. An unreadable file
+/// answers none, as `session_has_live_stop` does.
+pub fn live_stop_sessions(root: &Path, now: i64) -> HashSet<String> {
+    current(root, now)
+        .map(|(rows, _)| {
+            rows.into_iter()
+                .filter(|r| matches!(r.state, State::Waiting | State::Claimed))
+                .map(|r| r.session)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 pub(crate) fn status(
     root: &Path,
     snapshot: &Snapshot,

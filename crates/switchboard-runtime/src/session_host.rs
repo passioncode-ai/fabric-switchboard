@@ -49,8 +49,10 @@ pub const HISTORY: u8 = 8;
 pub const END: u8 = 9;
 
 /// H-1c: a session nobody watches and that neither wrote nor read for this long is closed
-/// (`reason: idle`), as Fabric Dashboards' consoles do (LC-18).
-pub const DEFAULT_IDLE: Duration = Duration::from_secs(30 * 60);
+/// (`reason: idle`), as Fabric Dashboards' consoles do (LC-18). SB-396 D3: the duty officer's
+/// wake-up floor (65 minutes), not 30: a session waiting on a wake-up it set itself writes nothing
+/// until it wakes.
+pub const DEFAULT_IDLE: Duration = Duration::from_secs(crate::duty::WAKE_UP_FLOOR as u64);
 /// H-1c: how long an ended session's output stays readable on disk.
 const OUTPUT_KEPT: Duration = Duration::from_secs(24 * 3600);
 
@@ -443,6 +445,7 @@ pub fn serve(start: Start<'_>, ready: impl FnOnce()) -> Result<Ended, String> {
     prune_outputs(start.root);
     if let Some(idle) = start.idle {
         let session = session.clone();
+        let (root, launch) = (start.root.to_owned(), start.launch_id.to_owned());
         std::thread::spawn(move || {
             let check = (idle / 4).clamp(Duration::from_millis(100), Duration::from_secs(30));
             loop {
@@ -453,6 +456,14 @@ pub fn serve(start: Start<'_>, ready: impl FnOnce()) -> Result<Ended, String> {
                 }
                 if inner.viewers.is_empty() && inner.last_activity.elapsed() >= idle {
                     drop(inner);
+                    // SB-396 D3: a session stopped on a limit waits for an account; its host
+                    // continues it, so its window is not closed under it.
+                    let stopped = crate::launches::session_of(&root, &launch).is_some_and(|s| {
+                        crate::recovery::session_has_live_stop(&root, &s, crate::monitor::now())
+                    });
+                    if stopped {
+                        continue;
+                    }
                     session.end("idle");
                     return;
                 }

@@ -132,6 +132,9 @@ pub struct Seen {
     pub host: &'static str,
     /// Its own commands running now (Bash tool shells, foreground or background).
     pub commands: usize,
+    /// SB-396 D1: whether `commands` was read (`ps` answered). When it was not, nothing is known
+    /// of the session's commands, and a session that might run one is never closed as finished.
+    pub commands_known: bool,
     /// How long its oldest running command has run, seconds.
     pub command_age: Option<i64>,
     /// CPU seconds its process and every descendant used, as `ps` reads it.
@@ -163,6 +166,12 @@ pub enum Act {
     Close,
 }
 
+/// SB-396 D1: no command of its own runs, as far as the process table was read; unknown is not
+/// none.
+fn no_commands(s: &Seen) -> bool {
+    s.commands_known && s.commands == 0
+}
+
 /// What to do with one session now, and why; none to leave it. `newer_copy`: another process
 /// holding the same session started before this one.
 pub fn decide(s: &Seen, set: &Settings, now: i64, newer_copy: bool) -> Option<(Act, &'static str)> {
@@ -179,8 +188,7 @@ pub fn decide(s: &Seen, set: &Settings, now: i64, newer_copy: bool) -> Option<(A
         // Finished: the turn ended long ago and nothing it started still runs (a background task
         // that will wake it is work, not a hang).
         "idle"
-            if since >= (i64::from(set.idle_minutes) * 60).max(WAKE_UP_FLOOR)
-                && s.commands == 0 =>
+            if since >= (i64::from(set.idle_minutes) * 60).max(WAKE_UP_FLOOR) && no_commands(s) =>
         {
             Some((Act::Close, "idle"))
         }
@@ -190,7 +198,7 @@ pub fn decide(s: &Seen, set: &Settings, now: i64, newer_copy: bool) -> Option<(A
             if since >= stuck
                 && quiet >= stuck
                 && s.cpu_quiet == Some(true)
-                && (s.commands == 0 || s.command_age.is_some_and(|a| a >= 3 * stuck)) =>
+                && (no_commands(s) || s.command_age.is_some_and(|a| a >= 3 * stuck)) =>
         {
             Some((Act::Restart { prompt: true }, "stuck"))
         }
@@ -233,6 +241,7 @@ pub fn observe(root: &Path) -> Vec<Seen> {
             dashboards: false,
             host: "other",
             commands: 0,
+            commands_known: false,
             command_age: None,
             cpu: None,
             cpu_quiet: None,
@@ -247,6 +256,7 @@ pub fn observe(root: &Path) -> Vec<Seen> {
             let tree = tree_of(table, s.pid);
             s.cpu = Some(tree.cpu);
             s.commands = tree.commands.len();
+            s.commands_known = true;
             s.command_age = tree.commands.iter().copied().max();
         }
     }
@@ -308,7 +318,7 @@ pub fn parse_table(text: &str) -> HashMap<u32, Row> {
 }
 
 /// The whole process table once per check; None when `ps` could not be read (then no session
-/// is found stalled or finished by its commands).
+/// is found stalled or finished: `commands_known` stays false, SB-396 D1).
 fn process_table() -> Option<HashMap<u32, Row>> {
     #[cfg(unix)]
     {
@@ -385,16 +395,18 @@ fn compare_cpu(seen: &mut [Seen], now: i64, keep: bool) {
     }
 }
 
-/// The pids to close among processes holding one session: each copy that is finished (idle, no
-/// command of its own running) while another copy remains; when every copy is finished the oldest
-/// stays. Copies that work are never closed, so two working copies are left for the person to
-/// choose between (operator 2026-11-15: nothing is ended before it finished).
-pub fn newer_copies(seen: &[Seen]) -> std::collections::HashSet<u32> {
+/// The pids to close among processes holding one session: each copy that is finished (idle past
+/// the wake-up floor, no command of its own running) while another copy remains; when every copy
+/// is finished the oldest stays. Copies that work are never closed, so two working copies are left
+/// for the person to choose between (operator 2026-11-15: nothing is ended before it finished).
+/// SB-396 D4: a copy idle for less than `WAKE_UP_FLOOR` may hold a wake-up it set itself.
+pub fn newer_copies(seen: &[Seen], now: i64) -> std::collections::HashSet<u32> {
     let mut by: HashMap<&str, Vec<&Seen>> = HashMap::new();
     for s in seen {
         by.entry(s.session.as_str()).or_default().push(s);
     }
-    let finished = |s: &Seen| s.status == "idle" && s.commands == 0;
+    let finished =
+        |s: &Seen| s.status == "idle" && no_commands(s) && now - s.status_since >= WAKE_UP_FLOOR;
     by.values()
         .filter(|v| v.len() > 1)
         .flat_map(|v| {
@@ -507,9 +519,11 @@ pub fn status(root: &Path, now: i64) -> Result<Value, String> {
     let set = settings(root)?;
     let mut seen = observe(root);
     compare_cpu(&mut seen, now, false);
-    let copies = newer_copies(&seen);
+    let copies = newer_copies(&seen, now);
+    let stopped = crate::recovery::live_stop_sessions(root, now);
     let due: Vec<Value> = seen
         .iter()
+        .filter(|s| !stopped.contains(&s.session))
         .filter_map(|s| {
             decide(s, &set, now, copies.contains(&s.pid)).map(|(act, reason)| {
                 json!({"pid": s.pid, "session": s.session, "folder": s.cwd, "reason": reason, "host": s.host,
@@ -558,12 +572,17 @@ pub fn check(root: &Path, now: i64, dry_run: bool) -> Result<Value, String> {
     let mut seen = observe(root);
     // Only the five-minute checks keep their CPU samples: a stall is measured across them.
     compare_cpu(&mut seen, now, !dry_run);
-    let copies = newer_copies(&seen);
+    let copies = newer_copies(&seen, now);
+    // SB-396 D2: a session stopped on a limit waits for an account; its host continues it.
+    let stopped = crate::recovery::live_stop_sessions(root, now);
     let lines = journal(root);
     let mut done = Vec::new();
     for s in &seen {
         if done.len() >= MAX_ACTIONS {
             break;
+        }
+        if stopped.contains(&s.session) {
+            continue;
         }
         let Some((mut act, reason)) = decide(s, &set, now, copies.contains(&s.pid)) else {
             continue;
@@ -655,7 +674,7 @@ pub const CLOSE_UNSUPPORTED: &str = "Closing a session's copy works on macOS and
 
 /// A copy that works: answering (`busy`) or with a command of its own running.
 fn working(s: &Seen) -> bool {
-    s.status == "busy" || s.commands > 0
+    s.status == "busy" || !no_commands(s)
 }
 
 /// Of the copies of `session`, the one a person closes and the ones kept: never a copy that is
@@ -819,6 +838,7 @@ mod tests {
             dashboards: false,
             host: "terminal",
             commands: 0,
+            commands_known: true,
             command_age: None,
             cpu: Some(10.0),
             cpu_quiet: Some(true),
@@ -1085,35 +1105,91 @@ mod tests {
 
     #[test]
     fn only_a_finished_copy_of_a_session_is_closed() {
-        let mut a = seen("busy", 1, 3, None);
-        let mut b = seen("waiting", 1, 1, None);
+        let now = 1_000_000;
+        let mut a = seen("busy", 70, 3, None);
+        let mut b = seen("waiting", 70, 1, None);
         a.pid = 10;
         b.pid = 11;
         let other = Seen {
             session: "s-2".into(),
             pid: 12,
-            ..seen("idle", 1, 1, None)
+            ..seen("idle", 70, 1, None)
         };
         // Both copies work: the person decides, nothing is closed.
-        assert!(newer_copies(&[a.clone(), b.clone(), other]).is_empty());
+        assert!(newer_copies(&[a.clone(), b.clone(), other], now).is_empty());
         // The older copy sits idle (a resumed copy nobody uses): it is closed, not the one in use.
         a.status = "idle".into();
         assert_eq!(
-            newer_copies(&[a.clone(), b.clone()])
+            newer_copies(&[a.clone(), b.clone()], now)
                 .into_iter()
                 .collect::<Vec<_>>(),
             vec![10]
         );
-        // An idle copy with a background command is not finished.
+        // SB-396 D4: idle for less than the wake-up floor, it may hold a wake-up of its own.
+        let mut recent = a.clone();
+        recent.status_since = now - 30 * 60;
+        assert!(newer_copies(&[recent, b.clone()], now).is_empty());
+        // An idle copy with a background command is not finished, nor one whose commands are unknown.
         a.commands = 1;
-        assert!(newer_copies(&[a.clone(), b.clone()]).is_empty());
-        // Every copy finished: the oldest stays.
+        assert!(newer_copies(&[a.clone(), b.clone()], now).is_empty());
         a.commands = 0;
+        a.commands_known = false;
+        assert!(newer_copies(&[a.clone(), b.clone()], now).is_empty());
+        a.commands_known = true;
+        // Every copy finished: the oldest stays.
         b.status = "idle".into();
         assert_eq!(
-            newer_copies(&[a, b]).into_iter().collect::<Vec<_>>(),
+            newer_copies(&[a, b], now).into_iter().collect::<Vec<_>>(),
             vec![11]
         );
+    }
+
+    #[test]
+    fn a_session_whose_commands_could_not_be_read_is_never_closed_as_finished() {
+        // SB-396 D1: `ps` failed under load; nothing says the session runs no command.
+        let set = Settings::default();
+        let now = 1_000_000;
+        let mut unread = seen("idle", 180, 5, None);
+        unread.commands_known = false;
+        assert_eq!(decide(&unread, &set, now, false), None);
+        let mut stalled = seen("busy", 300, 6, Some(300));
+        stalled.commands_known = false;
+        assert_eq!(
+            decide(&stalled, &set, now, false),
+            None,
+            "no stall is diagnosed blind"
+        );
+        unread.commands_known = true;
+        assert_eq!(
+            decide(&unread, &set, now, false),
+            Some((Act::Close, "idle"))
+        );
+    }
+
+    #[test]
+    fn a_session_stopped_on_a_limit_is_left_to_its_host() {
+        // SB-396 D2: the duty officer's check skips every session with a waiting or claimed stop.
+        let root = tempfile::tempdir().unwrap();
+        let now = 1_000_000;
+        let stop = |session: &str, state: &str| {
+            serde_json::json!({
+                "event": format!("cc-{session}-1"), "session": session, "account": "a", "provider": "claude",
+                "pool": "default", "directory": "/w/app", "stopped_at": now - 4000, "state": state,
+                "selected_account": null
+            })
+        };
+        switchboard_core::private_fs::private_write(
+            &root.path().join("recovery.json"),
+            &serde_json::to_vec(&serde_json::json!([
+                stop("s-1", "waiting"),
+                stop("s-2", "resumed")
+            ]))
+            .unwrap(),
+        )
+        .unwrap();
+        let stopped = crate::recovery::live_stop_sessions(root.path(), now);
+        assert!(stopped.contains("s-1"));
+        assert!(!stopped.contains("s-2"));
     }
 
     #[test]
