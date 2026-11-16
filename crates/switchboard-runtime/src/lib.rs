@@ -75,6 +75,7 @@ mod statistics;
 pub mod stop_spool;
 pub mod suggest;
 pub mod targets;
+mod test_seams;
 pub mod uninstall;
 mod usage_gate;
 pub mod vault_choice;
