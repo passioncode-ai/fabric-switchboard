@@ -2,6 +2,16 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-11-16: 0.7.97 and 0.7.98 out and live; 0.7.99 building (crashes found at start, `switchboard bugs`, `close-copy --target`)
+
+- **Released.** 0.7.97 (in-place launches record their end, updates wait for a quiet spell) and 0.7.98 (SB-388: Needs attention's *Close the quiet copy*, PR #744; audit item 43). This MacBook ran 0.7.94 until 2026-11-16 by design: its log shows the automatic restart into 0.7.94 at 16:21 UTC, then `update_waiting cooldown` hourly (one automatic restart in 6 hours, SB-191) and `window_visible`; MCP `switchboard_app check_for_updates` then `restart_to_update` (the person's *Restart to update*) moved it to 0.7.97 and 0.7.98.
+- **Duty officer on** (0.7.97 rules): checks at 00:56, 01:01 and 01:06 closed six sessions idle over an hour with no commands (Orca and one Terminal) and the idle copy of research-agent's duplicate; nothing working was touched, nothing restarted.
+- **Merged for 0.7.99 (PR #746 `5690f529`).** SB-379 W3 part 2: `owner-run.json`, crashes found at the next start with macOS's exception type and signal (`owner_crashed`, `bugs.jsonl`), `switchboard bugs`, MCP `switchboard_bugs`; W4 item 16 (statistics written off its lock); `sessions close-copy --target` for Fabric Dashboards (FD-247, board `35e1a402`). Release PR #747, tag v0.7.99, run 43783877973.
+- **Board.** Dashboards thread 9a462401: `sessions --tree --target studio-sshlg` checked (0 live, 7 `gone` from in-place runs before 0.7.95); they move FD-247 to `sessions --all --target` and wait for word that 0.7.99 shipped.
+- **Open.** SB-386 closes once the operator confirms claude14@sshlg.me came back.
+
+**Exact next task.** When 0.7.99 publishes: `switchboard update --app "/Applications/Fabric Switchboard.app"`, `switchboard_app check_for_updates` then `restart_to_update`, check `switchboard bugs` answers, and tell Dashboards in thread 9a462401 that `close-copy --target` shipped. Then the next open row by priority on the board (SB-379 audit items left, W4 item 4).
+
 ## 2026-11-15: a duplicate session closed in one press (SB-388); a group's chain pins only its accounts (audit 43); 0.7.96 out, 0.7.97 building
 
 - **Asked.** The operator, on Needs attention's two "One session runs in two processes" items: «так чего не дашь кнопку сразу закрыть».
