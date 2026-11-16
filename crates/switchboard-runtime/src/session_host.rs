@@ -47,6 +47,12 @@ pub const HISTORY: u8 = 8;
 /// H-1d (Fabric Dashboards, `e3e2819c`): a viewer asks the host to end the session, as its idle
 /// close does (`reason: ended`); detaching never ends it.
 pub const END: u8 = 9;
+/// SB-397 R1: a controller asks the host to restart its session in place: the running process
+/// gets a hangup, and once it exits the host starts `program` (the session's resume script, a file
+/// under the data folder) on the same terminal. Viewers stay attached and see the new process's
+/// output; nobody gets `EXIT`. The host answers `RESTART` `{accepted}`. A host that does not
+/// offer it (`can` in its `HELLO` answer lacks `restart`) ignores the frame.
+pub const RESTART: u8 = 10;
 
 /// H-1c: a session nobody watches and that neither wrote nor read for this long is closed
 /// (`reason: idle`), as Fabric Dashboards' consoles do (LC-18). SB-396 D3: the duty officer's
@@ -223,6 +229,8 @@ struct Inner {
     last_activity: std::time::Instant,
     /// Set when the host itself ended the session (`idle`).
     reason: Option<&'static str>,
+    /// SB-397 R1: the program to start once the running process exits (a restart in place).
+    restart: Option<PathBuf>,
 }
 
 fn nonzero(n: u16) -> std::num::NonZeroU16 {
@@ -230,8 +238,9 @@ fn nonzero(n: u16) -> std::num::NonZeroU16 {
 }
 
 struct Session {
-    /// The session's process group: its process leads it (setsid).
-    pid: i32,
+    /// The session's process group: its process leads it (setsid). A restart in place starts a
+    /// new process, so it changes.
+    pid: std::sync::atomic::AtomicI32,
     root: PathBuf,
     launch_id: String,
     socket: PathBuf,
@@ -240,6 +249,9 @@ struct Session {
 }
 
 impl Session {
+    fn pid(&self) -> i32 {
+        self.pid.load(std::sync::atomic::Ordering::SeqCst)
+    }
     fn lock(&self) -> std::sync::MutexGuard<'_, Inner> {
         self.inner.lock().unwrap_or_else(|p| p.into_inner())
     }
@@ -294,14 +306,35 @@ impl Session {
             }
             inner.reason.get_or_insert(reason);
         }
-        unsafe { libc::kill(-self.pid, libc::SIGHUP) };
+        unsafe { libc::kill(-self.pid(), libc::SIGHUP) };
         let session = self.clone();
         std::thread::spawn(move || {
             std::thread::sleep(Duration::from_secs(5));
             if session.lock().exit.is_none() {
-                unsafe { libc::kill(-session.pid, libc::SIGTERM) };
+                unsafe { libc::kill(-session.pid(), libc::SIGTERM) };
             }
         });
+    }
+    /// SB-397 R1: ends the running process as `end` does, and has the host start `program` on
+    /// the same terminal once it exits. Refused when the session already ended or a restart waits.
+    fn restart(self: &Arc<Self>, program: PathBuf) -> bool {
+        let pid = {
+            let mut inner = self.lock();
+            if inner.exit.is_some() || inner.restart.is_some() {
+                return false;
+            }
+            inner.restart = Some(program);
+            self.pid()
+        };
+        unsafe { libc::kill(-pid, libc::SIGHUP) };
+        let session = self.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_secs(5));
+            if session.pid() == pid {
+                unsafe { libc::kill(-pid, libc::SIGTERM) };
+            }
+        });
+        true
     }
     /// What a viewer that attaches is shown first: the screen, entering the alternate screen
     /// when the session is on it.
@@ -343,6 +376,27 @@ fn open_pty(rows: u16, cols: u16) -> io::Result<(OwnedFd, OwnedFd)> {
         unsafe { libc::fcntl(fd.as_raw_fd(), libc::F_SETFD, libc::FD_CLOEXEC) };
     }
     Ok((master, slave))
+}
+
+/// Starts `program` as the leader of a new session whose controlling terminal is `slave`.
+fn spawn_on(program: &Path, slave: &OwnedFd) -> io::Result<std::process::Child> {
+    let mut command = Command::new(program);
+    command
+        .stdin(Stdio::from(slave.try_clone()?))
+        .stdout(Stdio::from(slave.try_clone()?))
+        .stderr(Stdio::from(slave.try_clone()?));
+    unsafe {
+        command.pre_exec(|| {
+            if libc::setsid() == -1 {
+                return Err(io::Error::last_os_error());
+            }
+            if libc::ioctl(0, libc::TIOCSCTTY as _, 0) == -1 {
+                return Err(io::Error::last_os_error());
+            }
+            Ok(())
+        });
+    }
+    command.spawn()
 }
 
 /// What a host starts.
@@ -392,33 +446,10 @@ pub fn serve(start: Start<'_>, ready: impl FnOnce()) -> Result<Ended, String> {
         ws_ypixel: 0,
     };
     unsafe { libc::ioctl(master.as_raw_fd(), libc::TIOCSWINSZ as _, &size) };
-    let slave_out = slave
-        .try_clone()
-        .map_err(|_| "No terminal could be opened.")?;
-    let slave_err = slave
-        .try_clone()
-        .map_err(|_| "No terminal could be opened.")?;
-    let mut command = Command::new(start.program);
-    command
-        .stdin(Stdio::from(slave))
-        .stdout(Stdio::from(slave_out))
-        .stderr(Stdio::from(slave_err));
-    unsafe {
-        command.pre_exec(|| {
-            if libc::setsid() == -1 {
-                return Err(io::Error::last_os_error());
-            }
-            if libc::ioctl(0, libc::TIOCSCTTY as _, 0) == -1 {
-                return Err(io::Error::last_os_error());
-            }
-            Ok(())
-        });
-    }
-    let mut child = command.spawn().map_err(|_| {
+    let mut child = spawn_on(start.program, &slave).map_err(|_| {
         let _ = std::fs::remove_file(&socket);
         "The session could not start.".to_string()
     })?;
-    drop(command);
 
     let reader = File::from(
         master
@@ -426,7 +457,7 @@ pub fn serve(start: Start<'_>, ready: impl FnOnce()) -> Result<Ended, String> {
             .map_err(|_| "No terminal could be opened.")?,
     );
     let session = Arc::new(Session {
-        pid: child.id() as i32,
+        pid: std::sync::atomic::AtomicI32::new(child.id() as i32),
         root: start.root.to_owned(),
         launch_id: start.launch_id.to_owned(),
         socket: socket.clone(),
@@ -439,6 +470,7 @@ pub fn serve(start: Start<'_>, ready: impl FnOnce()) -> Result<Ended, String> {
             exit: None,
             last_activity: std::time::Instant::now(),
             reason: None,
+            restart: None,
         }),
     });
     write_descriptor(start.root, start.launch_id, &socket, 0);
@@ -516,9 +548,26 @@ pub fn serve(start: Start<'_>, ready: impl FnOnce()) -> Result<Ended, String> {
     }
     ready();
 
-    let status = child
-        .wait()
-        .map_err(|_| "The session could not be watched.")?;
+    let status = loop {
+        let status = child
+            .wait()
+            .map_err(|_| "The session could not be watched.")?;
+        // SB-397 R1: a restart in place starts the session's next process on the same terminal;
+        // the viewers stay. One that cannot start ends the session as it would have.
+        let Some(program) = session.lock().restart.take() else {
+            break status;
+        };
+        match spawn_on(&program, &slave) {
+            Ok(next) => {
+                session
+                    .pid
+                    .store(next.id() as i32, std::sync::atomic::Ordering::SeqCst);
+                session.output(b"\r\n[Switchboard restarted this session]\r\n");
+                child = next;
+            }
+            Err(_) => break status,
+        }
+    };
     use std::os::unix::process::ExitStatusExt;
     let code = status
         .code()
@@ -631,6 +680,8 @@ fn viewer(session: &Arc<Session>, mut stream: UnixStream) {
             "protocol": PROTOCOL,
             "launch_id": session.launch_id,
             "viewers": inner.viewers.len() + 1,
+            // SB-397 R1: what this host does beyond protocol 1's frames.
+            "can": ["restart"],
         });
         let replay = Session::snapshot(&inner);
         if write_frame(&mut stream, HELLO, ack.to_string().as_bytes()).is_err()
@@ -688,6 +739,20 @@ fn viewer(session: &Arc<Session>, mut stream: UnixStream) {
                 }
             }
             Ok((END, _)) => session.end("ended"),
+            Ok((RESTART, body)) => {
+                let program = serde_json::from_slice::<Value>(&body)
+                    .ok()
+                    .and_then(|v| v["program"].as_str().map(PathBuf::from))
+                    .filter(|p| restart_program_allowed(&session.root, p));
+                let accepted = program.is_some_and(|p| session.restart(p));
+                let mut inner = session.lock();
+                if let Some((_, w)) = inner.viewers.iter_mut().find(|(v, _)| *v == id) {
+                    let answer = json!({"accepted": accepted}).to_string();
+                    if write_frame(w, RESTART, answer.as_bytes()).is_err() {
+                        break;
+                    }
+                }
+            }
             Ok((DETACH, _)) | Err(_) => break,
             Ok(_) => {}
         }
@@ -710,6 +775,8 @@ fn viewer(session: &Arc<Session>, mut stream: UnixStream) {
 pub struct Attached {
     pub stream: UnixStream,
     pub viewers: u64,
+    /// What the host offers beyond protocol 1 (`restart`, SB-397 R1).
+    pub can: Vec<String>,
 }
 
 /// Attaches to the session of `launch_id`: connects, says hello with the viewer's size and
@@ -744,6 +811,53 @@ pub fn end(root: &Path, launch_id: &str) -> Result<Value, String> {
 pub const END_UNCONFIRMED: &str =
     "The session was asked to end, and its end was not seen within 15 seconds.";
 
+/// The folder a restart's program must be in: the scripts Switchboard writes for restarts.
+pub const RESTART_DIR: &str = "restarts";
+
+/// SB-397 R1: only a regular file Switchboard wrote under `<data>/restarts/`, owned by this user,
+/// may be started by a restart: a viewer cannot have the host run anything else.
+fn restart_program_allowed(root: &Path, program: &Path) -> bool {
+    let Ok(dir) = root.join(RESTART_DIR).canonicalize() else {
+        return false;
+    };
+    let Ok(path) = program.canonicalize() else {
+        return false;
+    };
+    let Ok(meta) = std::fs::symlink_metadata(&path) else {
+        return false;
+    };
+    use std::os::unix::fs::MetadataExt;
+    path.parent() == Some(dir.as_path())
+        && meta.is_file()
+        && meta.uid() == unsafe { libc::getuid() }
+        && meta.mode() & 0o022 == 0
+}
+
+/// SB-397 R1: asks the host of `launch_id` to restart its session in place with `program`.
+/// `Ok(true)` once the host accepted; `Ok(false)` when this host cannot (it predates restarts,
+/// or a restart already waits); `Err` when no host answers.
+pub fn restart(root: &Path, launch_id: &str, program: &Path) -> Result<bool, String> {
+    let attached = connect(root, launch_id, None)?;
+    if !attached.can.iter().any(|c| c == "restart") {
+        return Ok(false);
+    }
+    let mut stream = attached.stream;
+    let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
+    let body = json!({"program": program}).to_string();
+    write_frame(&mut stream, RESTART, body.as_bytes()).map_err(|_| NOT_FOUND.to_string())?;
+    loop {
+        match read_frame(&mut stream) {
+            Ok((RESTART, body)) => {
+                let answer: Value = serde_json::from_slice(&body).unwrap_or(Value::Null);
+                let _ = write_frame(&mut stream, DETACH, b"");
+                return Ok(answer["accepted"] == true);
+            }
+            Ok(_) => continue,
+            Err(_) => return Ok(false),
+        }
+    }
+}
+
 fn connect(root: &Path, launch_id: &str, size: Option<(u16, u16)>) -> Result<Attached, String> {
     if !crate::launches::valid_id(launch_id) {
         return Err(NOT_FOUND.into());
@@ -766,6 +880,14 @@ fn connect(root: &Path, launch_id: &str, size: Option<(u16, u16)>) -> Result<Att
             Ok(Attached {
                 stream,
                 viewers: ack["viewers"].as_u64().unwrap_or(1),
+                can: ack["can"]
+                    .as_array()
+                    .map(|c| {
+                        c.iter()
+                            .filter_map(|v| v.as_str().map(str::to_owned))
+                            .collect()
+                    })
+                    .unwrap_or_default(),
             })
         }
         Ok((ERROR, body)) => Err(serde_json::from_slice::<Value>(&body)
@@ -867,6 +989,44 @@ mod tests {
         // H-1c: its last output stays readable for a day.
         let kept = std::fs::read(ended_output(&root, &id).unwrap()).unwrap();
         assert!(String::from_utf8_lossy(&kept).contains("got one"));
+    }
+
+    #[test]
+    fn a_restart_in_place_keeps_the_viewers_and_runs_the_next_program_on_the_same_terminal() {
+        // SB-397 R1: a restart wave restarts a hosted session in its host: the viewer attached
+        // before stays attached, sees the next process's output and gets no exit in between.
+        let data = tempfile::tempdir().unwrap();
+        let root = data.path().canonicalize().unwrap();
+        let program = script(&root, "echo first; read line; exit 0");
+        let id = crate::launches::new_id();
+        let host = start_host(&root, &id, &program, None);
+        let mut viewer = attach(&root, &id, 24, 80).unwrap();
+        assert!(viewer.can.iter().any(|c| c == "restart"));
+        until(&mut viewer.stream, "first");
+
+        // Only a program of this user under `restarts/` is started.
+        let outside = script(&root, "echo never");
+        assert_eq!(restart(&root, &id, &outside), Ok(false));
+        let dir = root.join(RESTART_DIR);
+        std::fs::create_dir_all(&dir).unwrap();
+        let next = dir.join("next.command");
+        std::fs::write(&next, "#!/bin/sh\necho second; read line; exit 3\n").unwrap();
+        std::fs::set_permissions(&next, std::fs::Permissions::from_mode(0o700)).unwrap();
+        assert_eq!(restart(&root, &id, &next), Ok(true));
+        let (seen, exit) = until(&mut viewer.stream, "second");
+        assert_eq!(
+            exit, None,
+            "no exit reached the viewer between the two processes"
+        );
+        assert!(seen.contains("restarted this session"), "{seen}");
+        assert!(
+            attachable(&root, &id).is_some(),
+            "the session is still open"
+        );
+
+        write_frame(&mut viewer.stream, INPUT, b"done\n").unwrap();
+        assert_eq!(until(&mut viewer.stream, "").1, Some(3));
+        assert_eq!(host.join().unwrap().unwrap().exit_code, 3);
     }
 
     fn start_host(
