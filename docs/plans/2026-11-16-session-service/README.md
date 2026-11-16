@@ -78,8 +78,8 @@ hand, and never updates itself ([estate](research-estate.md) 2, 3).
   it would come back outside Dashboards); a session whose host predates restarts (`host_too_old`);
   a non-interactive run (`not_interactive`); one whose folder or transcript is gone, or with no
   `claude` to resume it (`cannot_resume`); and the preflight below.
-- **Preflight before any end.** The folder and transcript exist, `claude` is found, the machine cap
-  and admission allow a start, and for a session in a managed or isolated home its home's
+- **Preflight before any end.** The folder and transcript exist, `claude` is found (no capacity
+  check: a restart replaces its own session), and for a session in a managed or isolated home its home's
   `launch.command` is readable. A session failing any check is skipped and never ended.
 - **Same session.** Resumed with `claude --resume <id>` in its own config folder and working folder
   (`duty::resume_script_for`), with Switchboard's permission choice as the duty officer's restart
@@ -93,7 +93,8 @@ hand, and never updates itself ([estate](research-estate.md) 2, 3).
   host hangs up the session's process group, starts the script on the same terminal once it exited,
   and every viewer (a Dashboards hosted console, a Terminal window) stays attached and sees the new
   process. A session not in a host is stopped as the duty officer stops it and resumed in a new
-  Terminal window through a host (`start_terminal`); its old tab shows the ended process.
+  Terminal window (`start_terminal`), through a host when it has a launch; its old tab shows the
+  ended process.
 - **What it is told.** A session that was idle (waiting for the person's next message) resumes with
   no prompt: it is back, waiting as before, and does no work nobody asked for. Only the caller
   resumes with a prompt: the wave id, which sessions are back, failed or still pending, and to call

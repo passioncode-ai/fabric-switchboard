@@ -4,7 +4,7 @@ The operator asked for two to three rounds on accuracy before any wave starts. E
 independent reviewers against the code and the research, and every finding is either taken into the
 next draft (named where) or answered here.
 
-## Round 1 (draft 1, `b37f80d1`)
+## Round 1 (draft 1, `b37f80d1`; ids as of draft 2)
 
 Three reviewers: accuracy against the code (26 findings), implementation readiness (38), design (17
 plus a simpler D-14). Taken into draft 2:
@@ -92,3 +92,32 @@ first release). Taken into draft 3:
 | O-2 is not about sessions; a claim lease is new behaviour; one idle time for every app (simplicity 4) | O-2 removed; the lease dropped; D-11 keeps each app's idle time |
 
 Not taken: none.
+
+## Round 3 (draft 3, `4ae6dda9`, and the R1 code on `restart-waves`)
+
+One reviewer against the code: 7 blockers, 10 shoulds. Each is fixed in the R1 code on branch
+`restart-waves` or stated in the spec:
+
+| Finding | Where |
+|---|---|
+| macOS revokes the kept terminal end when the session leader exits | `session_host`: the terminal is opened again by name (`reopen_slave`), the reader waits across the restart; `a_restart_in_place_keeps_the_viewers_and_runs_the_next_program_on_the_same_terminal` green on macOS (six runs) and Linux |
+| An end or idle close racing a restart | `end` clears a waiting restart and signals only the pid it saw; `restart` refuses after an end; `an_end_wins_over_a_restart_and_a_restart_after_the_end_is_refused` |
+| The host waited only for the script shell | the next process starts once the whole old process group is gone, SIGKILL after 10 s |
+| Restart scripts shared one `attach.command` | Terminal resumes in `restarts/<wave>/<session>/resume.command`; host restarts flat in `restarts/` |
+| "or subagent" was not observable | between turns also needs the transcript (subagents included) still for 120 s |
+| Not every Terminal resume is hosted | README: through a host when it has a launch |
+| `accepted` after the final exit | `finished` set when the last process exits with no restart waiting |
+| Machine cap and admission | not checked: a restart replaces its own session |
+| SS-14's timing on a dropped tick | stated as 5 minutes after the end plus the watch's passes |
+| Act-time checks | limit stop, waits, folder and transcript checked again at the act |
+| `has_waits` released a cron session after 6 h | `holds_wait`: any cron job, or an end ahead within `GRACE` |
+| A wave that never ends | `skipped: still_busy` a day after `apply`; the caller's `back` settles after 10 minutes |
+| Failure reasons; no SIGKILL on a restart | reasons listed in the tool and CONTRACTS; SIGTERM at 5 s, SIGKILL at 10 s |
+| Scripts carry a home's exports | removed once their session is settled, and with their wave |
+| An act a quit cut | `ending` written before the act; the next pass finishes or reverts it |
+| The execute bit | a restart program must be executable |
+| `--resume` and the id | measured: the same id on Claude Code 2.1.299 ([evidence](https://github.com/passioncode-ai/fabric-switchboard/blob/restart-waves/docs/evidence/2026-11-16-restart-wave-measurements.md)) |
+
+Not taken: an isolated home's token refreshed before a resume (a resume carries the home's
+`launch.command` exports as the duty officer's restart does; a stale token shows as the session not
+working, a row for W2's `Accounts`).
