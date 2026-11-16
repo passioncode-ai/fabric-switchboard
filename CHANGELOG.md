@@ -8,6 +8,8 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+## 0.7.105
+
 - A session that waits on something it set up itself (a wake-up, a monitor, a cron job) is never closed while it waits: the plugin's hooks tell Switchboard when the wait ends, and the Sessions page shows it as waiting. A cron job with no end holds its session six hours after its last turn; a session closed after that can be continued as itself (SB-396).
 
 - A Sessions page in the window: every coding session on this computer and on the other machines Switchboard knows, grouped by what needs you, what runs, what waits for quota and what ended, with *Close this copy*, *Open here*, *End* and *Continue*; also `switchboard sessions --rows [--target]` and MCP `switchboard_sessions` with `rows` (SB-395).
