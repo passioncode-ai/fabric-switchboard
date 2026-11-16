@@ -1077,7 +1077,11 @@ async fn remove_project(pool: String, state: State<'_, Slot>) -> Result<Value, S
 /// SB-390: the saved Anthropic keys by name, never a value.
 #[tauri::command]
 async fn anthropic_keys(state: State<'_, Slot>) -> Result<Value, String> {
-    state.runtime().await?.execute(Operation::AnthropicKeys).await
+    state
+        .runtime()
+        .await?
+        .execute(Operation::AnthropicKeys)
+        .await
 }
 /// Hermes's model and provider (SB-80): read, and changed only on the person's request.
 #[tauri::command]
