@@ -8,6 +8,10 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+## 0.7.106
+
+- Release 0.7.105 was not published: its Windows build failed on a Unix-only name the shared resume script used. This release carries every change listed under 0.7.105 below, and builds on Windows again.
+
 - A session stopped on a limit is no longer probed on an account that a fresh reading shows full until a known reset: it waits for the reset instead of stopping again every few minutes; and a stop whose session still runs is never started a second time, whichever app asks (SB-396).
 
 ## 0.7.105
