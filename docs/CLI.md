@@ -56,6 +56,8 @@ switchboard machines list [--live]                     # SB-355: each machine gr
 switchboard machines adopt [--apply]                   # SB-355: place accounts already used elsewhere in their machines' groups (recorded move, else location); never guessed
 switchboard machines place ACCOUNT_UUID --on studio-sshlg   # SB-355: record where it lives without ssh; it leaves every group here
 switchboard machines forget studio-sshlg               # SB-355: remove a machine group that holds no account
+switchboard machines keys                             # SB-357: the keys trusted for other machines (public keys only)
+switchboard machines trust studio-sshlg --key KEY     # SB-357: trust the key `settings signer` printed on that machine
 switchboard accounts recall ACCOUNT_UUID --pool agents   # SB-355: back from its machine group into a group here (default: the group it left); --from defaults to the recorded move's machine
 switchboard accounts send ACCOUNT_UUID --to member@vm --pool acme --operator-said "…" --said-at … --said-in …   # SB-292: the grant is recorded in seats.jsonl with the operator's words
 switchboard accounts move ACCOUNT_UUID --pool agents                  # a project's pool, or default (SB-122)

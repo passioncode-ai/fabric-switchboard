@@ -40,6 +40,7 @@ pub mod launch;
 pub mod launch_keys;
 pub mod launches;
 mod limits;
+pub mod machine_proof;
 pub mod machine_sessions;
 pub mod machines;
 mod mcp_homes;
@@ -431,6 +432,19 @@ pub enum Operation {
     MachineForget {
         machine: String,
     },
+    /// SB-357: sign another machine's challenge with this computer's settings signing key, so it
+    /// can tell this is the machine it trusted (`machines prove`, run over ssh).
+    MachineProve {
+        nonce: String,
+    },
+    /// SB-357: accept `key` as `machine`'s, after the person checked it there
+    /// (`switchboard settings signer` on that machine).
+    MachineTrust {
+        machine: String,
+        key: String,
+    },
+    /// SB-357: the keys trusted for other machines. A view: nothing is written.
+    MachineKeys,
     /// SB-283: moves an account's sign-in to another machine over ssh (`account_send`): marked
     /// used elsewhere here first, saved there, checked there, undone on any failure.
     SendAccount {
@@ -1535,6 +1549,10 @@ impl Runtime {
                 | Operation::InboxSet { .. }
                 // SB-272: the vault and `settings-signing.json` only.
                 | Operation::SettingsSigner
+                // SB-357: the same key's signature; `machine-keys.json` only.
+                | Operation::MachineProve { .. }
+                | Operation::MachineTrust { .. }
+                | Operation::MachineKeys
                 | Operation::InboxStatus { .. }
                 | Operation::InboxRemove
                 | Operation::AgentsOverview
@@ -4815,7 +4833,9 @@ fn dispatch_remote(
         timeout_seconds: u64::from(timeout_minutes) * 60,
     };
     let started = blocking::run(|| {
-        remote_dispatch::start(&target.machine, &program, &start, &account_send::ssh_runner)
+        // SB-357: a request body goes only to the machine trusted for this name.
+        let ssh = machine_proof::ssh(root, &target.machine, &program);
+        remote_dispatch::start(&target.machine, &program, &start, &|a, i| ssh.run(a, i))
     })?;
     if started["state"] != "started" {
         let reason = match started["reason"].as_str() {
@@ -6204,18 +6224,22 @@ async fn execute(
             let moved = {
                 let (store, id, to, pool) = (store.clone(), id.clone(), to.clone(), pool.clone());
                 let (program, data_dir) = (program.clone(), remote_data_dir.clone());
+                let root = root.to_owned();
                 blocking::run(move || {
+                    let program = account_send::Program {
+                        path: &program,
+                        data_dir: data_dir.as_deref(),
+                    };
+                    // SB-357: the machine proves it is the one trusted before anything is sent.
+                    let ssh = machine_proof::ssh(&root, &to, &program);
                     account_send::send(
                         &store,
                         &id,
                         &to,
                         &pool,
-                        &account_send::Program {
-                            path: &program,
-                            data_dir: data_dir.as_deref(),
-                        },
+                        &program,
                         monitor::now(),
-                        &account_send::ssh_runner,
+                        &|a, i| ssh.run(a, i),
                         &|token| refresh_state.wait_settled(token),
                     )
                 })
@@ -6368,6 +6392,11 @@ async fn execute(
             let gone = store.forget_machine(&machine)?;
             Ok(json!({"forgotten": gone.pool, "name": gone.name}))
         }
+        Operation::MachineProve { nonce } => machine_proof::prove(root, &store, &nonce),
+        Operation::MachineTrust { machine, key } => {
+            machine_proof::trust(root, &machine, &key, monitor::now())
+        }
+        Operation::MachineKeys => Ok(json!({"machines": machine_proof::list(root)})),
         Operation::Seats { limit } => Ok(json!({
             "seats": seats::recent(root, limit.unwrap_or(50).clamp(1, 1000)),
         })),
@@ -6402,15 +6431,14 @@ async fn execute(
             remote_data_dir,
         } => {
             let (program, data_dir) = remote_program(root, &target, program, remote_data_dir);
+            let root = root.to_owned();
             blocking::run(move || {
-                remote_check::status(
-                    &target,
-                    &account_send::Program {
-                        path: &program,
-                        data_dir: data_dir.as_deref(),
-                    },
-                    &account_send::ssh_runner,
-                )
+                let program = account_send::Program {
+                    path: &program,
+                    data_dir: data_dir.as_deref(),
+                };
+                let ssh = machine_proof::ssh(&root, &target, &program);
+                remote_check::status(&target, &program, &|a, i| ssh.run(a, i))
             })
         }
         Operation::SettingsSync {
@@ -6430,18 +6458,16 @@ async fn execute(
             let signer = signature.key.clone();
             bundle.signature = Some(signature);
             let bytes = serde_json::to_vec(&bundle).map_err(|_| settings_bundle::NOT_A_BUNDLE)?;
+            let root = root.to_owned();
             blocking::run(move || {
-                remote_check::sync(
-                    &bytes,
-                    &signer,
-                    apply,
-                    &target,
-                    &account_send::Program {
-                        path: &program,
-                        data_dir: data_dir.as_deref(),
-                    },
-                    &account_send::ssh_runner,
-                )
+                let program = account_send::Program {
+                    path: &program,
+                    data_dir: data_dir.as_deref(),
+                };
+                let ssh = machine_proof::ssh(&root, &target, &program);
+                remote_check::sync(&bytes, &signer, apply, &target, &program, &|a, i| {
+                    ssh.run(a, i)
+                })
             })
         }
         Operation::RemoteCheck {
@@ -6452,17 +6478,14 @@ async fn execute(
             let (program, data_dir) = remote_program(root, &target, program, remote_data_dir);
             let snapshot = store.snapshot()?;
             let seats = seats::recent(root, 1000);
+            let root = root.to_owned();
             blocking::run(move || {
-                remote_check::check(
-                    &snapshot,
-                    &seats,
-                    &target,
-                    &account_send::Program {
-                        path: &program,
-                        data_dir: data_dir.as_deref(),
-                    },
-                    &account_send::ssh_runner,
-                )
+                let program = account_send::Program {
+                    path: &program,
+                    data_dir: data_dir.as_deref(),
+                };
+                let ssh = machine_proof::ssh(&root, &target, &program);
+                remote_check::check(&snapshot, &seats, &target, &program, &|a, i| ssh.run(a, i))
             })
         }
         Operation::SurrenderAccount { id, undo } => {
@@ -6511,18 +6534,23 @@ async fn execute(
                     program.clone(),
                     remote_data_dir.clone(),
                 );
+                let root = root.to_owned();
                 blocking::run(move || {
+                    let program = account_send::Program {
+                        path: &program,
+                        data_dir: data_dir.as_deref(),
+                    };
+                    // SB-357: a sign-in is taken only from the machine trusted for this name; the
+                    // calls that finish or undo this call back follow its proof.
+                    let ssh = machine_proof::ssh(&root, &from, &program);
                     account_send::recall_take(
                         &store,
                         &id,
                         &from,
                         &remote_id,
-                        &account_send::Program {
-                            path: &program,
-                            data_dir: data_dir.as_deref(),
-                        },
+                        &program,
                         monitor::now(),
-                        &account_send::ssh_runner,
+                        &|a, i| ssh.run(a, i),
                         sent.as_deref(),
                     )
                 })
