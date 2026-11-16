@@ -1579,7 +1579,7 @@ enum AgentsCommand {
         command: OpenrouterCommand,
     },
     /// Anthropic API keys agents run on directly, each under a name you choose (`appvillis`,
-    /// `personal`); `agents launch hermes --anthropic <name>` picks one (SB-390).
+    /// `personal`); `agents launch hermes --anthropic <name>` picks one.
     Anthropic {
         #[command(subcommand)]
         command: AnthropicCommand,
