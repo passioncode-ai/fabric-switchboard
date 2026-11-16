@@ -188,6 +188,13 @@ enum Command {
         #[arg(long)]
         probe: bool,
     },
+    /// What a session waits on that it set up itself (a wake-up, a monitor, a cron job), kept so
+    /// nothing closes it meanwhile. Claude Code's hooks run it; nothing else needs to.
+    #[command(hide = true)]
+    Monitor {
+        #[command(subcommand)]
+        command: MonitorCmd,
+    },
     /// Machine groups: every other machine this computer's accounts live on is a group of its
     /// own, holding exactly the accounts there; an account on a machine is in no group here.
     /// `accounts send` moves one there, `accounts recall --pool GROUP` brings it back.
@@ -1033,6 +1040,12 @@ enum DutyCmd {
     },
 }
 
+#[derive(Subcommand)]
+enum MonitorCmd {
+    /// Read one hook input (`PreToolUse` on ScheduleWakeup, Monitor, CronCreate or CronDelete, or
+    /// `SessionEnd`) on standard input and record the session's wait; prints `{}`, never fails.
+    Hook,
+}
 #[derive(Subcommand)]
 enum MachinesCmd {
     /// Each machine group with its accounts, and the accounts marked used elsewhere that no
@@ -2468,6 +2481,9 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                 Some(DutyCmd::Run { dry_run }) => duty(None, [None; 4], !*dry_run, *dry_run),
             }
         }
+        Command::Monitor {
+            command: MonitorCmd::Hook,
+        } => return Ok(monitor_hook(&root)),
         Command::Machines { command } => match command {
             MachinesCmd::List { live } => Operation::Machines { live: *live },
             MachinesCmd::Adopt { apply } => Operation::MachinesAdopt { apply: *apply },
@@ -4186,6 +4202,23 @@ async fn project_sources(
     )
     .await
 }
+/// `switchboard monitor hook` (SB-396 wave C): a session's own wait, read from the hook input.
+/// Prints `{}`: a `PreToolUse` hook's output is read as its decision, and this one decides nothing.
+fn monitor_hook(root: &std::path::Path) -> Value {
+    use std::io::Read;
+    let mut input = Vec::new();
+    let read = std::io::stdin().take(1024 * 1024).read_to_end(&mut input);
+    if let Some(hook) = read
+        .ok()
+        .and_then(|_| serde_json::from_slice::<Value>(&input).ok())
+    {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_secs() as i64);
+        switchboard_runtime::monitors::hook(root, &hook, now);
+    }
+    json!({})
+}
 /// The largest hook input read; Claude Code's `StopFailure` payload is a few hundred bytes.
 /// A `Stop` input carries the turn's whole last message (Claude Code 2.1.299), so the bound fits
 /// a long one: before 0.6.83 round 2 it was 64 KiB and a longer message settled nothing.
@@ -5705,6 +5738,10 @@ mod mcp_parity {
         ("sessions end", Tool("switchboard_session_end")),
         ("sessions close-copy", Tool("switchboard_session_close_copy")),
         ("sessions continue", Tool("switchboard_session_continue")),
+        (
+            "monitor hook",
+            Not("SB-396: Claude Code's own hooks run it with the hook input; an agent records nothing by it"),
+        ),
         ("provenance", Tool("switchboard_provenance")),
         ("current", Tool("switchboard_status")),
         ("rotation status", Tool("switchboard_rotation")),

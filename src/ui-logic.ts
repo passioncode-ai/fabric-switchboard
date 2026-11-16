@@ -1997,13 +1997,14 @@ export function sessionGroupTitle(group: SessionGroup): string {
   }
 }
 /** SB-395: why a row is where it is, in words; `now` in Unix seconds. */
-export function sessionWhyText(row: Pick<SessionRow, 'why' | 'quiet_minutes' | 'probe_at'>, now: number): string {
+export function sessionWhyText(row: Pick<SessionRow, 'why' | 'quiet_minutes' | 'probe_at' | 'wait'>, now: number): string {
   switch (row.why) {
     case 'duplicate': return t('Runs in two processes');
     case 'stuck': return t('A board run quiet for {n} min', { n: row.quiet_minutes ?? 0 });
     case 'gone': return t('Its process is gone without an end');
     case 'ready_to_continue': return t('Stopped on a limit, ready to continue');
     case 'limit': return row.probe_at && row.probe_at > now ? t('Stopped on a limit, next try in {when}', { when: compactCountdown(row.probe_at, now) }) : t('Stopped on a limit');
+    case 'monitoring': return row.wait?.until ? t('Waiting on its own wake-up, due in {when}', { when: compactCountdown(row.wait.until, now) }) : t('Waiting on a schedule of its own');
     case 'working': return t('Working');
     case 'quiet': return t('Quiet {n} min', { n: row.quiet_minutes ?? 0 });
     case 'closed_idle': return t('Closed after an idle hour, can continue');

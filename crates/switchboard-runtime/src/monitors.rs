@@ -1,0 +1,223 @@
+//! SB-396 wave C (LC-6, MON-1 to MON-3; operator 2026-11-16: «Лайфсайкл должен понимать, что
+//! сессия находится в режиме мониторинга … чтобы не кикать сессии, которые остаются в режиме
+//! мониторинга … если … непонятно, когда этот мониторинг придет, значит, надо, чтобы сессия
+//! умерла»): a session that finished its turn and waits on something it set up itself.
+//!
+//! Claude Code writes nothing a reader outside the session can see about a pending wake-up, a
+//! `Monitor` or a cron job (`~/.claude/sessions/<pid>.json` reads `idle` throughout; the lifecycle
+//! audit, section 2). The plugin's `PreToolUse` hook on `ScheduleWakeup`, `Monitor`, `CronCreate`
+//! and `CronDelete`, and its `SessionEnd` hook, run `switchboard monitor hook`, which keeps one
+//! file per session in `<data>/monitors/` (0600: kinds, times and a count, never a prompt or a
+//! command): a wake-up or a monitor with an honest end (`until`), and how many cron jobs it holds,
+//! which have none.
+//!
+//! - A session with a wait whose end is known is never closed before that end plus `GRACE`
+//!   (MON-2): the duty officer, a duplicate close and the session host all ask `holds`.
+//! - A session holding a cron job (no known end) is kept for `OPEN_SECONDS` after its last turn,
+//!   then may be closed like any finished session (MON-3); its close is recorded as resumable, so
+//!   *Continue* brings back the same session (wave B).
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use std::path::{Path, PathBuf};
+
+pub const DIR: &str = "monitors";
+/// After a wait's end, how long its session is still let be (it may be taking the turn it woke for;
+/// the clock may have run while the Mac slept).
+pub const GRACE: i64 = 600;
+/// How long a session holding a cron job is kept after its last turn (MON-3).
+pub const OPEN_SECONDS: i64 = 6 * 3600;
+/// `ScheduleWakeup` clamps to [60, 3600] s; `Monitor` to at most an hour.
+const MAX_WAIT: i64 = 3600;
+const MAX_BYTES: u64 = 16 * 1024;
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Waits {
+    /// The end of the wake-up or monitor that ends last, Unix seconds.
+    pub until: Option<i64>,
+    /// Cron jobs created and not deleted (they have no end).
+    pub crons: u32,
+    /// When the hook last wrote, Unix seconds.
+    pub at: i64,
+}
+
+fn path(root: &Path, session: &str) -> Option<PathBuf> {
+    crate::launches::valid_id(session).then(|| root.join(DIR).join(format!("{session}.json")))
+}
+
+pub fn read(root: &Path, session: &str) -> Waits {
+    path(root, session)
+        .and_then(|p| switchboard_core::private_fs::read_private(&p, MAX_BYTES).ok())
+        .and_then(|b| serde_json::from_slice(&b).ok())
+        .unwrap_or_default()
+}
+
+/// What one hook input changes, as a pure step: the waits after it, or None to forget the session.
+pub fn apply(mut waits: Waits, hook: &Value, now: i64) -> Option<Waits> {
+    let event = hook["hook_event_name"].as_str().unwrap_or("");
+    if event == "SessionEnd" {
+        return None;
+    }
+    let input = &hook["tool_input"];
+    let wait = |seconds: Option<i64>| seconds.map(|s| now + s.clamp(1, MAX_WAIT));
+    let until = match hook["tool_name"].as_str() {
+        Some("ScheduleWakeup") => wait(input["delaySeconds"].as_i64().or(Some(MAX_WAIT))),
+        Some("Monitor") => wait(Some(input["timeout_ms"].as_i64().unwrap_or(300_000) / 1000)),
+        Some("CronCreate") => {
+            waits.crons = waits.crons.saturating_add(1);
+            None
+        }
+        Some("CronDelete") => {
+            waits.crons = waits.crons.saturating_sub(1);
+            None
+        }
+        _ => None,
+    };
+    if let Some(until) = until {
+        waits.until = Some(
+            waits
+                .until
+                .filter(|u| *u > now)
+                .map_or(until, |u| u.max(until)),
+        );
+    }
+    waits.at = now;
+    Some(waits)
+}
+
+/// `switchboard monitor hook`: records what the hook input says. Never fails a tool call: a
+/// session id it cannot use, or a file it cannot write, records nothing.
+pub fn hook(root: &Path, hook: &Value, now: i64) {
+    let Some(session) = hook["session_id"].as_str() else {
+        return;
+    };
+    let Some(file) = path(root, session) else {
+        return;
+    };
+    match apply(read(root, session), hook, now) {
+        None => {
+            let _ = std::fs::remove_file(&file);
+        }
+        Some(waits) => {
+            let _ = std::fs::create_dir_all(root.join(DIR));
+            if let Ok(bytes) = serde_json::to_vec(&waits) {
+                let _ = switchboard_core::private_fs::private_write(&file, &bytes);
+            }
+        }
+    }
+}
+
+/// Whether `session` is waiting on something it set up itself, so nothing may close it now.
+/// `idle_since`: when its last turn ended.
+pub fn holds(waits: &Waits, now: i64, idle_since: i64) -> bool {
+    waits.until.is_some_and(|u| now < u + GRACE)
+        || (waits.crons > 0 && now - idle_since < OPEN_SECONDS)
+}
+
+/// The session's wait as a row shows it: `{until}` while a known end is ahead, `{open: true}` while
+/// a cron job holds it, none otherwise.
+pub fn shown(waits: &Waits, now: i64) -> Option<Value> {
+    if let Some(u) = waits.until.filter(|u| now < u + GRACE) {
+        return Some(serde_json::json!({"until": u}));
+    }
+    (waits.crons > 0).then(|| serde_json::json!({"open": true}))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn tool(name: &str, input: Value) -> Value {
+        json!({"session_id": "S1", "hook_event_name": "PreToolUse", "tool_name": name, "tool_input": input})
+    }
+
+    #[test]
+    fn a_wake_up_or_a_monitor_holds_its_session_until_its_end_and_a_little_after() {
+        let w = apply(
+            Waits::default(),
+            &tool("ScheduleWakeup", json!({"delaySeconds": 1800})),
+            1000,
+        )
+        .unwrap();
+        assert_eq!(w.until, Some(2800));
+        assert!(holds(&w, 2800 + GRACE - 1, 900));
+        assert!(
+            !holds(&w, 2800 + GRACE, 900),
+            "past its end and the grace it is a finished session again"
+        );
+        // A wake-up past the clamp is an hour; a monitor counts its own timeout; the later end wins.
+        let w = apply(
+            w,
+            &tool("ScheduleWakeup", json!({"delaySeconds": 99_999})),
+            1000,
+        )
+        .unwrap();
+        assert_eq!(w.until, Some(1000 + MAX_WAIT));
+        let w = apply(w, &tool("Monitor", json!({"timeout_ms": 600_000})), 1000).unwrap();
+        assert_eq!(
+            w.until,
+            Some(1000 + MAX_WAIT),
+            "an earlier end does not shorten the wait"
+        );
+        assert_eq!(shown(&w, 1000), Some(json!({"until": 1000 + MAX_WAIT})));
+    }
+
+    #[test]
+    fn a_cron_job_holds_its_session_for_six_hours_after_its_last_turn_then_lets_it_go() {
+        let w = apply(
+            Waits::default(),
+            &tool("CronCreate", json!({"cron": "*/5 * * * *"})),
+            100,
+        )
+        .unwrap();
+        assert_eq!(w.crons, 1);
+        assert!(holds(&w, 100 + OPEN_SECONDS - 1, 100));
+        assert!(
+            !holds(&w, 100 + OPEN_SECONDS, 100),
+            "an open-ended wait does not hold forever"
+        );
+        assert_eq!(shown(&w, 200), Some(json!({"open": true})));
+        let w = apply(w, &tool("CronDelete", json!({"id": "c1"})), 300).unwrap();
+        assert_eq!(w.crons, 0);
+        assert!(!holds(&w, 400, 300));
+        assert!(apply(
+            w,
+            &json!({"session_id": "S1", "hook_event_name": "SessionEnd"}),
+            500
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn the_hook_writes_one_private_file_per_session_and_forgets_it_at_the_end() {
+        let root = tempfile::tempdir().unwrap();
+        hook(
+            root.path(),
+            &tool("ScheduleWakeup", json!({"delaySeconds": 600})),
+            1000,
+        );
+        assert_eq!(read(root.path(), "S1").until, Some(1600));
+        let file = root.path().join(DIR).join("S1.json");
+        #[cfg(unix)]
+        assert_eq!(
+            std::os::unix::fs::PermissionsExt::mode(
+                &std::fs::metadata(&file).unwrap().permissions()
+            ) & 0o777,
+            0o600
+        );
+        hook(
+            root.path(),
+            &json!({"session_id": "S1", "hook_event_name": "SessionEnd"}),
+            1100,
+        );
+        assert!(!file.exists());
+        // A session id that is not one writes nothing.
+        hook(
+            root.path(),
+            &json!({"session_id": "../x", "hook_event_name": "PreToolUse", "tool_name": "ScheduleWakeup", "tool_input": {}}),
+            1,
+        );
+        assert_eq!(std::fs::read_dir(root.path().join(DIR)).unwrap().count(), 0);
+    }
+}

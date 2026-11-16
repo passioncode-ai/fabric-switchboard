@@ -459,8 +459,15 @@ pub fn serve(start: Start<'_>, ready: impl FnOnce()) -> Result<Ended, String> {
                     // SB-396 D3: a session stopped on a limit waits for an account; its host
                     // continues it, so its window is not closed under it.
                     let id = crate::launches::session_of(&root, &launch);
+                    let now = crate::monitor::now();
+                    // SB-396 wave C: nor one waiting on a wake-up, a monitor or a cron job of its own.
                     let stopped = id.as_deref().is_some_and(|s| {
-                        crate::recovery::session_has_live_stop(&root, s, crate::monitor::now())
+                        crate::recovery::session_has_live_stop(&root, s, now)
+                            || crate::monitors::holds(
+                                &crate::monitors::read(&root, s),
+                                now,
+                                now - idle.as_secs() as i64,
+                            )
                     });
                     if stopped {
                         continue;

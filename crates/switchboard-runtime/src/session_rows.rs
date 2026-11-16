@@ -30,6 +30,8 @@ pub struct Sources<'a> {
     pub attachable: &'a HashSet<String>,
     /// SB-396: the ends Switchboard recorded (`resumable::recent`), newest first.
     pub resumable: &'a [Value],
+    /// SB-396 wave C: each live session's own wait (`monitors::shown`), by session id.
+    pub monitors: &'a HashMap<String, Value>,
 }
 
 fn label(sources: &Sources, account: &Value) -> Value {
@@ -124,6 +126,11 @@ pub fn build(sources: &Sources) -> Value {
                 ("needs_you", "stuck")
             } else if stop.is_some() {
                 ("waiting", "limit")
+            } else if live["session_id"]
+                .as_str()
+                .is_some_and(|id| sources.monitors.contains_key(id))
+            {
+                ("waiting", "monitoring")
             } else if live["quiet"] == true {
                 ("running", "quiet")
             } else {
@@ -142,6 +149,7 @@ pub fn build(sources: &Sources) -> Value {
                 "origin": live["surface"], "since": live["started_at"],
                 "quiet_minutes": live["quiet_minutes"], "task": live["task"],
                 "probe_at": stop.map_or(Value::Null, |s| s["probe_at"].clone()),
+                "wait": live["session_id"].as_str().and_then(|id| sources.monitors.get(id)).cloned(),
             }),
             acts,
         ));
@@ -343,6 +351,7 @@ mod tests {
             labels: &labels,
             attachable: &HashSet::from(["L2".to_owned()]),
             resumable: &[],
+            monitors: &HashMap::new(),
         })
     }
 
@@ -450,6 +459,7 @@ mod tests {
             labels: &labels,
             attachable: &HashSet::new(),
             resumable: &ledger,
+            monitors: &HashMap::from([("S1".to_owned(), json!({"until": 5000}))]),
         });
         let list = answer["rows"].as_array().unwrap();
         let of = |session: &str| {
@@ -484,6 +494,34 @@ mod tests {
                 s7[0]["acts"].clone()
             ),
             (json!("ended"), json!("closed_idle"), json!(["continue"]))
+        );
+    }
+
+    #[test]
+    fn a_session_waiting_on_its_own_wake_up_reads_waiting_with_its_end() {
+        let tree = json!({"live": [{"pid": 21, "agent": "claude-code", "folder": "/w/a", "session_id": "S10",
+            "launch_id": null, "quiet": true, "quiet_minutes": 40, "started_at": 100, "surface": null}],
+            "launches": [], "findings": []});
+        let answer = build(&Sources {
+            tree: &tree,
+            recovery: &json!({"sessions": []}),
+            labels: &HashMap::new(),
+            attachable: &HashSet::new(),
+            resumable: &[],
+            monitors: &HashMap::from([("S10".to_owned(), json!({"until": 5000}))]),
+        });
+        let row = &answer["rows"][0];
+        assert_eq!(
+            (
+                row["group"].clone(),
+                row["why"].clone(),
+                row["wait"].clone()
+            ),
+            (
+                json!("waiting"),
+                json!("monitoring"),
+                json!({"until": 5000})
+            )
         );
     }
 

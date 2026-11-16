@@ -319,7 +319,7 @@ export interface SessionTree { live: TreeSession[]; launches: TreeLaunch[]; coun
 /** SB-395: one row of the Sessions page (`sessions --rows`): fields only, never text a session wrote. */
 export type SessionGroup = 'needs_you' | 'running' | 'waiting' | 'ended';
 export type SessionAct = 'close_copy' | 'attach' | 'end' | 'continue';
-export interface SessionRow { id: string; group: SessionGroup; why: string; acts: SessionAct[]; agent: string | null; folder: string | null; account: string | null; pool: string | null; origin: string | null; since: number | null; launch_id: string | null; session_id: string | null; pid?: number | null; quiet_minutes?: number | null; probe_at?: number | null }
+export interface SessionRow { id: string; group: SessionGroup; why: string; acts: SessionAct[]; agent: string | null; folder: string | null; account: string | null; pool: string | null; origin: string | null; since: number | null; launch_id: string | null; session_id: string | null; pid?: number | null; quiet_minutes?: number | null; probe_at?: number | null; /** SB-396 wave C: its own wait: a known end, or a schedule with none. */ wait?: { until?: number; open?: boolean } | null }
 export interface SessionRows { rows: SessionRow[]; counts: Record<SessionGroup, number>; degraded: string[]; observed_at?: number }
 export type MachineReadStatus = 'read' | 'unreachable' | 'no_switchboard' | 'too_old' | 'bad_answer';
 export interface MachineSessions { machine: string; status: MachineReadStatus; rows?: SessionRow[]; counts?: Record<SessionGroup, number>; read_at: number }

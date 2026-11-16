@@ -45,6 +45,7 @@ pub mod machine_sessions;
 pub mod machines;
 mod mcp_homes;
 mod monitor;
+pub mod monitors;
 pub mod onboarding;
 pub mod oplog;
 pub mod person;
@@ -6455,12 +6456,23 @@ async fn execute(
                     .collect();
                 let resumable =
                     resumable::recent(&root, session_watch::now() - resumable::WINDOW_SECONDS);
+                let now = session_watch::now();
+                let monitors: HashMap<String, Value> = tree["live"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|l| l["session_id"].as_str())
+                    .filter_map(|id| {
+                        monitors::shown(&monitors::read(&root, id), now).map(|w| (id.to_owned(), w))
+                    })
+                    .collect();
                 session_rows::build(&session_rows::Sources {
                     tree: &tree,
                     recovery: &recovery,
                     labels: &labels,
                     attachable: &attachable,
                     resumable: &resumable,
+                    monitors: &monitors,
                 })
             }))
         }
