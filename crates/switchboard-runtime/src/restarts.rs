@@ -17,7 +17,9 @@ use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
-pub const DIR: &str = crate::session_host::RESTART_DIR;
+/// The wave records and their scripts; a host starts a restart program only from this folder
+/// (`session_host::RESTART_DIR`, the same name).
+pub const DIR: &str = "restarts";
 /// Sessions ending or resuming at once.
 pub const IN_FLIGHT: usize = 3;
 /// How long after its end a session must hold its id again.
@@ -343,6 +345,7 @@ fn script_path(root: &Path, wave: &str, session: &str) -> PathBuf {
         .join(format!("{wave}-{}.command", safe(session)))
 }
 
+#[cfg_attr(not(unix), allow(dead_code))]
 /// A Terminal resume: a folder of its own, since the window's wrapper (`attach.command`) is
 /// written beside its script and two resumes must never share one.
 fn terminal_script_path(root: &Path, wave: &str, session: &str) -> PathBuf {
@@ -359,6 +362,7 @@ fn remove_scripts(root: &Path, wave: &str, session: &str) {
     let _ = std::fs::remove_dir_all(root.join(DIR).join(wave).join(safe(session)));
 }
 
+#[cfg_attr(not(unix), allow(dead_code))]
 /// MON-2, MON-3 for a wave: a known end still ahead (or within `GRACE`), or any cron job; unlike
 /// the idle close, a cron job holds its session however long ago its last turn was.
 fn holds_wait(root: &Path, session: &str, now: i64) -> bool {
@@ -366,6 +370,7 @@ fn holds_wait(root: &Path, session: &str, now: i64) -> bool {
     w.crons > 0 || w.until.is_some_and(|u| now < u + crate::monitors::GRACE)
 }
 
+#[cfg_attr(not(unix), allow(dead_code))]
 /// Whether the session can still be resumed: its folder and transcript are there.
 fn resumable_now(e: &Entry) -> bool {
     Path::new(&e.cwd).is_dir()
@@ -457,6 +462,7 @@ fn caller_session(seen: &[crate::duty::Seen], pid: u32) -> Option<String> {
     None
 }
 
+#[cfg_attr(not(unix), allow(dead_code))]
 fn plan_value(restart: &[Entry], skipped: &[Skipped], caller: Option<&str>) -> Value {
     json!({
         "restart": restart.iter().map(|e| json!({
@@ -677,6 +683,7 @@ pub fn tick(root: &Path, now: i64) {
     let _ = write(root, &wave);
 }
 
+#[cfg_attr(not(unix), allow(dead_code))]
 fn set(wave: &mut Wave, session: &str, state: &str, reason: Option<&str>, ended: Option<i64>) {
     if let Some(e) = wave.sessions.iter_mut().find(|e| e.session == session) {
         e.state = state.into();
@@ -1011,6 +1018,12 @@ mod tests {
             "a cron job has no end"
         );
         assert!(!holds_wait(root.path(), "S2", 0));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_wave_folder_is_the_one_a_host_starts_restarts_from() {
+        assert_eq!(DIR, crate::session_host::RESTART_DIR);
     }
 
     #[test]
