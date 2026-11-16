@@ -8,6 +8,8 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- Fabric can mark a session that holds one of its tasks (`switchboard monitor hold`), so no idle or duplicate close and no restart wave ends it while the task is claimed; and Fabric can start a run that continues a task a session left unfinished (`switchboard dispatch --reason resume`), with its own exit rules (SB-398, SB-399).
+
 ## 0.7.108
 
 - Releases 0.7.105 to 0.7.107 were not published: their Windows checks failed on test folders and a name that exist only on Unix. This release carries their changes, listed under them below.

@@ -451,7 +451,8 @@ enum Command {
         #[arg(long)]
         dispatch_id: Option<String>,
         /// Why the session starts: `request`, a board request nobody answered; `inbox`, the project's
-        /// unread board messages (it settles by read marks, never with `--target`).
+        /// unread board messages (it settles by read marks, never with `--target`); `resume`, a
+        /// Fabric task a session let go of unfinished (`--request` names the task).
         #[arg(long, value_enum, default_value = "request")]
         reason: DispatchReason,
         /// `ask`: the agent's own defaults. `all`: Claude Code with
@@ -1045,6 +1046,17 @@ enum MonitorCmd {
     /// Read one hook input (`PreToolUse` on ScheduleWakeup, Monitor, CronCreate or CronDelete, or
     /// `SessionEnd`) on standard input and record the session's wait; prints `{}`, never fails.
     Hook,
+    /// Mark a Claude Code session as holding live work another tool tracks (a Fabric task's
+    /// claim): the duty officer, a duplicate close, a session host's idle close and a restart
+    /// wave leave it alone until the end given. Renew it as the claim is renewed; 0 releases it.
+    Hold {
+        /// The session id.
+        #[arg(long)]
+        session: String,
+        /// Until when, Unix seconds, at most seven days ahead; 0 releases the hold.
+        #[arg(long)]
+        until: i64,
+    },
 }
 #[derive(Subcommand)]
 enum MachinesCmd {
@@ -1891,6 +1903,8 @@ enum DispatchReason {
     Request,
     /// The project's unread board messages; the run settles by read marks (no `--target`).
     Inbox,
+    /// A Fabric task a session left unfinished; `--request` is the task id (SB-398).
+    Resume,
 }
 /// How much a dispatched run may do without asking.
 #[derive(Clone, Copy, ValueEnum)]
@@ -2484,6 +2498,14 @@ async fn run(cli: &Cli) -> Result<Value, String> {
         Command::Monitor {
             command: MonitorCmd::Hook,
         } => return Ok(monitor_hook(&root)),
+        Command::Monitor {
+            command: MonitorCmd::Hold { session, until },
+        } => {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.as_secs() as i64);
+            return switchboard_runtime::monitors::hold(&root, session, *until, now);
+        }
         Command::Machines { command } => match command {
             MachinesCmd::List { live } => Operation::Machines { live: *live },
             MachinesCmd::Adopt { apply } => Operation::MachinesAdopt { apply: *apply },
@@ -2658,6 +2680,7 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                 reason: match reason {
                     DispatchReason::Request => switchboard_runtime::dispatch::Reason::Request,
                     DispatchReason::Inbox => switchboard_runtime::dispatch::Reason::Inbox,
+                    DispatchReason::Resume => switchboard_runtime::dispatch::Reason::Resume,
                 },
                 permissions: match permissions {
                     DispatchPermissions::Ask => switchboard_runtime::launch::Permissions::Ask,
@@ -5760,6 +5783,10 @@ mod mcp_parity {
         (
             "monitor hook",
             Not("SB-396: Claude Code's own hooks run it with the hook input; an agent records nothing by it"),
+        ),
+        (
+            "monitor hold",
+            Not("SB-399: Fabric's claim bookkeeping marks a session that holds its task; an agent's own waits come through its hooks"),
         ),
         ("provenance", Tool("switchboard_provenance")),
         ("current", Tool("switchboard_status")),

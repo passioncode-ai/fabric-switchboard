@@ -74,6 +74,10 @@ pub enum Reason {
     /// SB-338 (Fabric's request `b37b398f`, CO-559): a project's unread board messages, with no
     /// request of their own. The run settles by read marks, not by completing a request.
     Inbox,
+    /// SB-398 (Fabric's request `bcb9ca3e`, ADR-0195): a Fabric task a session let go of
+    /// unfinished. `--request` names the task; the run takes it, continues it from its checkpoint
+    /// and releases it, never completing a board request.
+    Resume,
 }
 
 /// SB-338: an inbox run reads this machine's board, which another machine does not have.
@@ -225,6 +229,7 @@ pub(crate) fn prompt(
     let what = match reason {
         Reason::Request => "one board request",
         Reason::Inbox => "this project's unread board messages",
+        Reason::Resume => "one Fabric task a session left unfinished",
     };
     format!(
         "Fabric started this session for {what}; no person is watching it. \
@@ -292,6 +297,9 @@ pub const DISPATCH_ID_INVALID: &str =
 pub const EXIT_CONTRACT: &str = "You run with no person, for one Fabric board request. Do the request, answer it in its board thread, complete it (completed, or failed_known with the reason when an error stops you), then end the session. If com.enroll is refused, follow Fabric's board.read-at-start: reply only at an absent slot of generation 0, and always ask the operator. Close the workflow with the final checkpoint only once the request is settled: the board accepted your complete or reconcile, or com.get reads it answered, finished or outcome_unknown. A run that leaves it queued, claimed, accepted or in progress writes its checkpoint without closing, so Fabric can take the workflow back. Never wait for a person: money, deletion and publication go through fabric_effect_request.";
 
 /// SB-338: the contract of an inbox run (Fabric's request `b37b398f`): it settles by read marks.
+/// SB-398: the contract of a run that continues a Fabric task a session let go of.
+pub const RESUME_CONTRACT: &str = "You run with no person, to continue one Fabric task a session left unfinished; its id is the request id in your header. Take it with fabric_work_claim (taskId that id); when another agent holds it, release nothing and end. Continue it from the checkpoint you accepted and the task's own notes, writing observatory_checkpoint_write after every step. End by releasing it with fabric_work_release: how done once its work is finished, or let-go with the reason when you cannot go on; a wait is never an end: record it and its watcher, and keep working on what does not depend on it. This run answers no board request: never claim, accept or complete one. Close the workflow with the final checkpoint once the task is released, then end the session. Never wait for a person: money, deletion and publication go through fabric_effect_request.";
+
 pub const INBOX_CONTRACT: &str = "You run with no person, for this project's unread Fabric board messages; there is no board request of its own. Read every unread message addressed to the project (com.list with unread true), do what is the project's own, answer in its thread where an answer is owed, and mark each message you handled read with com.read_ack. Never claim, accept or complete a request in this run. Write observatory_checkpoint_write at least every 10 minutes. Close the workflow with the final checkpoint once com.list reads nothing unread, then end the session. Never wait for a person: money, deletion and publication go through fabric_effect_request.";
 
 /// The exit contract a run is started with.
@@ -299,6 +307,7 @@ pub fn contract(reason: Reason) -> &'static str {
     match reason {
         Reason::Request => EXIT_CONTRACT,
         Reason::Inbox => INBOX_CONTRACT,
+        Reason::Resume => RESUME_CONTRACT,
     }
 }
 
@@ -765,6 +774,29 @@ mod tests {
         assert_eq!(
             serde_json::to_value(Reason::Inbox).unwrap(),
             serde_json::json!("inbox")
+        );
+    }
+
+    #[test]
+    fn a_resume_run_continues_a_fabric_task_and_answers_no_request() {
+        // SB-398 (Fabric's request bcb9ca3e, ADR-0195): the request id names a task.
+        let resume = contract(Reason::Resume);
+        assert!(resume.contains("fabric_work_claim"));
+        assert!(resume.contains("fabric_work_release"));
+        assert!(resume.contains("never claim, accept or complete one"));
+        assert!(!resume.contains('\u{2014}'));
+        let text = prompt(
+            "handoff:0123456789abcdef",
+            Provider::Claude,
+            "a",
+            Reason::Resume,
+        );
+        assert!(text.starts_with(
+            "Fabric started this session for one Fabric task a session left unfinished"
+        ));
+        assert_eq!(
+            serde_json::to_value(Reason::Resume).unwrap(),
+            serde_json::json!("resume")
         );
     }
 

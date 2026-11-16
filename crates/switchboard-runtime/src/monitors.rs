@@ -39,6 +39,9 @@ pub struct Waits {
     pub crons: u32,
     /// When the hook last wrote, Unix seconds.
     pub at: i64,
+    /// SB-399 (Fabric's request `bcb9ca3e`): the session holds live work another tool tracks (a
+    /// Fabric task's claim) until this time; nothing closes it before. Set by `monitor hold`.
+    pub hold_until: Option<i64>,
 }
 
 fn path(root: &Path, session: &str) -> Option<PathBuf> {
@@ -110,13 +113,39 @@ pub fn hook(root: &Path, hook: &Value, now: i64) {
 /// Whether `session` is waiting on something it set up itself, so nothing may close it now.
 /// `idle_since`: when its last turn ended.
 pub fn holds(waits: &Waits, now: i64, idle_since: i64) -> bool {
-    waits.until.is_some_and(|u| now < u + GRACE)
+    waits.hold_until.is_some_and(|u| now < u)
+        || waits.until.is_some_and(|u| now < u + GRACE)
         || (waits.crons > 0 && now - idle_since < OPEN_SECONDS)
 }
 
 /// The session's wait as a row shows it: `{until}` while a known end is ahead, `{open: true}` while
 /// a cron job holds it, none otherwise.
+/// The longest a hold may run: a claim is renewed, never set once for days.
+pub const MAX_HOLD: i64 = 7 * 86_400;
+pub const HOLD_INVALID: &str =
+    "Give the session id and a hold end within seven days from now, or 0 to release it.";
+pub const HOLD_NOT_SAVED: &str = "The session's hold could not be saved.";
+
+/// SB-399: `switchboard monitor hold`: the session holds live work until `until` (Unix seconds),
+/// or no longer with 0. Answers what is recorded.
+pub fn hold(root: &Path, session: &str, until: i64, now: i64) -> Result<Value, String> {
+    let file = path(root, session).ok_or(HOLD_INVALID)?;
+    if until != 0 && (until <= now || until > now + MAX_HOLD) {
+        return Err(HOLD_INVALID.into());
+    }
+    let mut waits = read(root, session);
+    waits.hold_until = (until != 0).then_some(until);
+    waits.at = now;
+    std::fs::create_dir_all(root.join(DIR)).map_err(|_| HOLD_NOT_SAVED)?;
+    let bytes = serde_json::to_vec(&waits).map_err(|_| HOLD_NOT_SAVED)?;
+    switchboard_core::private_fs::private_write(&file, &bytes).map_err(|_| HOLD_NOT_SAVED)?;
+    Ok(serde_json::json!({"session_id": session, "hold_until": waits.hold_until}))
+}
+
 pub fn shown(waits: &Waits, now: i64) -> Option<Value> {
+    if let Some(u) = waits.hold_until.filter(|u| now < *u) {
+        return Some(serde_json::json!({"until": u, "held": true}));
+    }
     if let Some(u) = waits.until.filter(|u| now < u + GRACE) {
         return Some(serde_json::json!({"until": u}));
     }
@@ -187,6 +216,36 @@ mod tests {
             500
         )
         .is_none());
+    }
+
+    #[test]
+    fn a_hold_keeps_its_session_until_its_end_and_is_released_with_zero() {
+        let root = tempfile::tempdir().unwrap();
+        assert_eq!(
+            hold(root.path(), "S1", 1000 + 1800, 1000).unwrap()["hold_until"],
+            2800
+        );
+        let w = read(root.path(), "S1");
+        assert!(holds(&w, 2799, 0), "held however long the session was idle");
+        assert!(!holds(&w, 2800, 0));
+        assert_eq!(shown(&w, 2000), Some(json!({"until": 2800, "held": true})));
+        hold(root.path(), "S1", 0, 1100).unwrap();
+        assert!(!holds(&read(root.path(), "S1"), 1200, 0));
+        // An end in the past, past seven days, or a session id that is not one: refused.
+        assert_eq!(hold(root.path(), "S1", 900, 1000), Err(HOLD_INVALID.into()));
+        assert_eq!(
+            hold(root.path(), "S1", 1000 + MAX_HOLD + 1, 1000),
+            Err(HOLD_INVALID.into())
+        );
+        assert_eq!(
+            hold(root.path(), "../x", 2000, 1000),
+            Err(HOLD_INVALID.into())
+        );
+        // A hook that comes after keeps the hold.
+        hold(root.path(), "S1", 5000, 1000).unwrap();
+        hook(root.path(), &tool("CronCreate", json!({})), 1001);
+        let w = read(root.path(), "S1");
+        assert_eq!((w.hold_until, w.crons), (Some(5000), 1));
     }
 
     #[test]

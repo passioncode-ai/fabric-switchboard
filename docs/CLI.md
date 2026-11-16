@@ -51,6 +51,7 @@ switchboard mcp-homes                                  # SB-359: which Claude ho
 switchboard sessions --tree                            # SB-379: live sessions with who started them and for which task, the day's launches, counts, the watch's findings
 switchboard sessions --rows [--target studio]           # SB-395: every session in four groups (needs you, running, waiting, ended) with the acts it has; here or there
 switchboard sessions continue SESSION_ID              # SB-396: continue an ended session as itself (claude --resume in its own config folder)
+switchboard monitor hold --session ID --until UNIX    # SB-399: the session holds live work (a Fabric task's claim) until then; 0 releases
 switchboard sessions close-copy SESSION_ID [--pid N] [--target M]  # SB-388, SB-389 (--pid: the copy attention offers when both work) (--target: the copy on another machine, closed by its Switchboard): one session in two processes: close the copy quiet longest (SIGTERM, SIGKILL after 10 s); never a busy one or one running a command
 switchboard duty [on | off | set … | run [--dry-run]]   # SB-384: the session duty officer: closes a finished session, restarts a stalled one, never one still working
 switchboard capacity [set N | clear]                   # SB-378: this computer's cap on working coding sessions (quiet ones not counted); dispatch and launch --hosted wait at it
@@ -173,6 +174,7 @@ switchboard launch ACCOUNT_UUID --working-directory /absolute/project/path --by 
 switchboard continue wf_0123456789abcdef --account ACCOUNT_UUID --dir /absolute/checkout
 switchboard --json dispatch --dir /absolute/project --workflow wf_0123456789abcdef --handoff handoff:0123456789abcdef --request REQUEST_UUID --dispatch-id DISPATCH_ID --reason request --permissions all --timeout-minutes 30
 switchboard --json dispatch --dir /absolute/project --workflow wf_0123456789abcdef --handoff handoff:0123456789abcdef --reason inbox --timeout-minutes 30   # SB-338: the project's unread board messages, settled by read marks; never with --target
+switchboard --json dispatch --dir /absolute/project --workflow wf_0123456789abcdef --handoff handoff:0123456789abcdef --request TASK_UUID --reason resume --timeout-minutes 60   # SB-398: continue a Fabric task a session let go of; the run claims and releases the task, answers no request
 switchboard --json dispatch stop --launch-id LAUNCH_ID
 switchboard --json dispatch --dir /absolute/project --workflow wf_0123456789abcdef --handoff handoff:0123456789abcdef --request REQUEST_UUID --target sshlg@studio   # SB-317: the session runs on that machine in a fresh worktree of the repository there
 switchboard --json dispatch --dir /absolute/project --workflow wf_0123456789abcdef --handoff handoff:0123456789abcdef --target auto --candidates sshlg@studio   # SB-317: here or on the candidate whose accounts have the most room

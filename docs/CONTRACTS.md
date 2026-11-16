@@ -3392,6 +3392,14 @@ session with a wait as `waiting` (`why: monitoring`, `wait: {until}` or `{open: 
 `monitors::tests::*`,
 `session_rows::tests::a_session_waiting_on_its_own_wake_up_reads_waiting_with_its_end`.
 
+**A hold another tool sets (SB-399, Fabric's request `bcb9ca3e`).** `switchboard monitor hold
+--session <id> --until <unix>` records `hold_until` in the session's `monitors/<session>.json`
+(at most seven days ahead; `0` releases it): Fabric marks a session that holds a task's claim and
+renews it with the claim. While it holds, `monitors::holds` is true whatever the session's idle
+time, so the duty officer, a duplicate close and a session host's idle close leave it alone, and a
+restart wave skips it; rows show it as `{until, held: true}`. A hook that writes later keeps it.
+Test: `monitors::tests::a_hold_keeps_its_session_until_its_end_and_is_released_with_zero`.
+
 The window's Sessions page reads `session_rows` on arrival and once a minute while it is on screen
 (`backgroundReads('sessions')`), never while another page is. Tests
 `session_rows::tests::every_session_lands_in_one_group_with_the_acts_it_has`,
