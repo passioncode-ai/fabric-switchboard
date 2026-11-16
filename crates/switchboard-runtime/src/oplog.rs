@@ -227,6 +227,8 @@ pub(crate) async fn capture_async<R>(
 /// keeps it on this thread); [`capture_end`] answers each event with its code fields' values.
 #[cfg(test)]
 pub(crate) fn capture_begin() {
+    // SB-397 W1.3: the session core's events reach this thread's capture too.
+    bridge();
     CAPTURED.with(|c| *c.borrow_mut() = Some(Vec::new()));
 }
 #[cfg(test)]

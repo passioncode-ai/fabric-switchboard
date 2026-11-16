@@ -3457,6 +3457,9 @@ pub struct Owner {
 }
 impl Owner {
     pub async fn start(root: PathBuf, vault: Arc<dyn Vault>) -> Result<Self, String> {
+        // SB-397 W1.3: the session core's events reach the log, the error report and the digest
+        // from the owner's first act, with or without a log installed.
+        oplog::bridge();
         Self::start_with_sources(root, vault, false).await
     }
     async fn start_with_sources(
