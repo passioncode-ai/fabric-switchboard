@@ -508,8 +508,10 @@ exit 3\n",
         let started = start("studio.local", &program, &s, &run).unwrap();
         assert_eq!(started["state"], "started", "{started}");
         let dir = home.path().join(DIR).join(&launch);
-        // The run ends by itself (the fake agent exits 3 after writing its result).
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+        // The run ends by itself (the fake agent exits 3 after writing its result). SB-361: the test
+        // waits for that end; the deadline is only a backstop against a hang, wide enough for a
+        // machine at load 100 (20 s failed once there).
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(180);
         let answer = loop {
             let answer = status("studio.local", &launch, &run);
             if answer["state"] != "running" || std::time::Instant::now() > deadline {
@@ -588,7 +590,8 @@ exit 3\n",
             .path()
             .join(format!("DATA/_worktrees/dispatch-{launch}"));
         std::fs::write(wt.join("work.txt"), "not pushed\n").unwrap();
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+        // SB-361: a backstop, not a bound the run is expected to meet.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(180);
         let answer = loop {
             let answer = status("studio.local", &launch, &run);
             if answer["state"] != "running" || std::time::Instant::now() > deadline {

@@ -148,9 +148,76 @@ pub fn owner_of(repository: &str) -> &str {
 static JWT_SHAPE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"eyJ[A-Za-z0-9_-]{2,}\.[A-Za-z0-9_-]{2,}\.[A-Za-z0-9_-]*").unwrap()
 });
+/// The boundary a provider key's prefix must follow (DEC-0151): the start of the value, a character
+/// that is no ASCII letter or digit, or an escape (percent, double percent, backslash, octal, `\x`,
+/// `\u`, an ESC colour sequence raw or escaped). The contract matches it as a consuming group.
+const BOUNDARY: &str = r#"(?:^|[^A-Za-z0-9]|%[0-9A-Fa-f]{2}|\\[nrt"']|\\u[0-9A-Fa-f]{4}|\\x[0-9A-Fa-f]{2}|\\[bfv0ae]|\\[0-7]{1,3}|%25[0-9A-Fa-f]{2}|\x1b\[[0-9;:]*m|(?:\\u001[bB]|\\x1[bB]|\\e|\\033|\\33)\[[0-9;:]*m)"#;
+/// `SECRET_VALUE` of the contract's `src/secret-shape.ts` (DEC-0151) without its `sk-` part, which
+/// needs look-ahead (`sk_key`): `Bearer ` at the start in any case, else a provider key's prefix in
+/// its canonical case after a boundary. No case-insensitive flag; digits are ASCII.
 static SECRET_VALUE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)(^bearer\s.+|sk-[A-Za-z0-9_-]{16,}|gh[pousr]_[A-Za-z0-9]{20,}|xox[abposr]-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{16}|glpat-[A-Za-z0-9_-]{20,})").unwrap()
+    Regex::new(&format!(
+        r"(^[Bb][Ee][Aa][Rr][Ee][Rr]\s.+|{BOUNDARY}(?:gh[pousr]_[A-Za-z0-9]{{20,}}|xox[abposr]-[A-Za-z0-9-]{{10,}}|AKIA[0-9A-Z]{{16}}|glpat-[A-Za-z0-9_-]{{20,}}))"
+    ))
+    .unwrap()
 });
+/// The contract's boundary, read as what ends right before an `sk-`.
+static BOUNDARY_BEFORE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(&format!(r"{BOUNDARY}\z")).unwrap());
+/// An `sk-` key (DEC-0151): after a boundary, `sk-` and a run of `[A-Za-z0-9_-]` holding a digit
+/// within its first 256 characters, and either an upper-case letter there with 16 or more
+/// characters, or 32 or more. Every `sk-` is tried, an inner one after `-` or `_` included, as the
+/// contract's regex retries there.
+fn sk_key(value: &str) -> bool {
+    let key_char = |b: u8| b.is_ascii_alphanumeric() || b == b'-' || b == b'_';
+    value.match_indices("sk-").any(|(at, _)| {
+        if !BOUNDARY_BEFORE.is_match(&value[..at]) {
+            return false;
+        }
+        let rest = &value.as_bytes()[at + 3..];
+        let run = rest.iter().take_while(|b| key_char(**b)).count();
+        let head = &rest[..run.min(256)];
+        head.iter().any(u8::is_ascii_digit)
+            && ((run >= 16 && head.iter().any(u8::is_ascii_uppercase)) || run >= 32)
+    })
+}
+fn secret_value(value: &str) -> bool {
+    SECRET_VALUE.is_match(value) || sk_key(value)
+}
+/// `tokenUserName` (DEC-0177): a URL's user name read as a token, 40 or more of `[A-Za-z0-9_-]`
+/// holding a letter and a digit (a classic token's 40 hex). A name such as `git` is none.
+fn token_user_name(user: &str) -> bool {
+    user.len() >= 40
+        && user
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+        && user.bytes().any(|b| b.is_ascii_digit())
+        && user.bytes().any(|b| b.is_ascii_alphabetic())
+}
+/// Percent-decoding that keeps `+` as `+` (`decodeKeepingPlus`); a malformed escape keeps the text.
+fn decode_keeping_plus(raw: &str) -> String {
+    let bytes = raw.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' {
+            let hex = raw
+                .get(i + 1..i + 3)
+                .and_then(|h| u8::from_str_radix(h, 16).ok());
+            match hex {
+                Some(b) => {
+                    out.push(b);
+                    i += 3;
+                    continue;
+                }
+                None => return raw.to_owned(),
+            }
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8(out).unwrap_or_else(|_| raw.to_owned())
+}
 // `\bbearer\s+(?=[...]*\d)[...]{12,}`: Rust's regex has no look-ahead, so the token run is
 // captured whole and its digit checked.
 static BEARER: LazyLock<Regex> =
@@ -184,7 +251,7 @@ fn path_like(piece: &str) -> bool {
 }
 fn secret_argument(value: &str) -> bool {
     JWT_SHAPE.is_match(value)
-        || SECRET_VALUE.is_match(value)
+        || secret_value(value)
         || bearer_inside(value)
         || value
             .split(|c: char| c.is_whitespace() || c == '=')
@@ -207,9 +274,10 @@ fn secret_url(value: &str) -> bool {
     };
     let rest = &value[i + 3..];
     let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
-    authority
-        .rsplit_once('@')
-        .is_some_and(|(info, _)| info.split_once(':').is_some_and(|(_, p)| !p.is_empty()))
+    authority.rsplit_once('@').is_some_and(|(info, _)| {
+        let (user, password) = info.split_once(':').unwrap_or((info, ""));
+        !password.is_empty() || token_user_name(&decode_keeping_plus(user))
+    })
 }
 
 static SCHEME: LazyLock<Regex> =
@@ -239,6 +307,11 @@ pub fn record_origin(origin: Option<&str>) -> Option<String> {
             Some(at) if !http => user_of(&authority[..at]),
             _ => String::new(),
         };
+        // A kept user up to the last `@` may hold a token after another `@`, which the URL reading
+        // takes for no token's shape (DEC-0177).
+        if user.split('@').any(token_user_name) {
+            return None;
+        }
         let host = at.map_or(authority, |at| &authority[at + 1..]);
         value = format!(
             "{prefix}{}{host}{}",
@@ -254,6 +327,13 @@ pub fn record_origin(origin: Option<&str>) -> Option<String> {
         crate::suggest::normalize(&value)?;
         let host = &scp[2];
         let host = host.rfind('@').map_or(host, |i| &host[i + 1..]);
+        // The scp form is no URL, so its user name is read for a token here (DEC-0177).
+        if scp
+            .get(1)
+            .is_some_and(|u| token_user_name(&user_of(u.as_str())))
+        {
+            return None;
+        }
         let user = scp
             .get(1)
             .map(|u| format!("{}@", user_of(u.as_str())))
@@ -726,7 +806,7 @@ mod tests {
     fn records_are_kept_as_the_contracts_vectors_say() {
         let file = vectors();
         let cases = file["record"].as_array().unwrap();
-        assert_eq!(cases.len(), 28);
+        assert_eq!(cases.len(), 40, "the pinned vectors changed size");
         let mut wrong = Vec::new();
         for case in cases {
             let got = explain_folder(&case["snapshot"])
@@ -740,6 +820,39 @@ mod tests {
             }
         }
         assert!(wrong.is_empty(), "{}\n{}", wrong.len(), wrong.join("\n"));
+    }
+
+    #[test]
+    fn sk_keys_and_token_users_read_as_the_contract_reads_them() {
+        let hex = "0123456789abcdef".repeat(4);
+        assert!(secret_value(&format!("sk-or-v1-{hex}")));
+        assert!(!secret_value("project:helpdesk-customer-support"));
+        assert!(!secret_value("sk-learn-experiments-app"));
+        assert!(
+            !secret_value("SK-T0kenWithUpperAndDigits12345"),
+            "canonical case only"
+        );
+        // The digit must sit within 256 characters of the `sk-`.
+        let late = format!("sk-{}1", "a".repeat(300));
+        assert!(!secret_value(&late));
+        // An inner `sk-` after `-` is tried again.
+        assert!(secret_value(&format!("sk-learn-sk-Ab1{}", "x".repeat(16))));
+        // A key glued after a letter is knowingly not found; after a percent-escape it is.
+        assert!(!secret_value(&format!("ask-Ab1{}", "x".repeat(16))));
+        assert!(secret_value(&format!("%22sk-Ab1{}", "x".repeat(16))));
+        let token = "a1".repeat(20);
+        assert!(token_user_name(&token));
+        assert!(!token_user_name("deploy-bot"));
+        assert!(secret_url(&format!("https://{token}@github.com/o/r.git")));
+        assert!(!secret_url("https://git@github.com/o/r.git"));
+        assert_eq!(
+            record_origin(Some(&format!("{token}@github.com:o/r.git"))),
+            None
+        );
+        assert_eq!(
+            record_origin(Some("git@github.com:o/r.git")).as_deref(),
+            Some("git@github.com:o/r.git")
+        );
     }
 
     #[test]
