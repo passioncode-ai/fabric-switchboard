@@ -283,6 +283,10 @@ pub(crate) fn private_write(path: &Path, bytes: &[u8], executable: bool) -> Resu
 pub(crate) const SCRIPT_SHELL: &str = "/bin/zsh";
 #[cfg(all(unix, not(target_os = "macos")))]
 pub(crate) const SCRIPT_SHELL: &str = "/bin/sh";
+/// Windows runs no session script; the duty officer's and Continue's resume scripts are written
+/// only on Unix, but the text they share is built on every platform (SB-396 wave B).
+#[cfg(windows)]
+pub(crate) const SCRIPT_SHELL: &str = "/bin/sh";
 #[cfg(unix)]
 fn quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))

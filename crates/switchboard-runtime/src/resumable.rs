@@ -186,10 +186,11 @@ mod tests {
             (PathBuf::from("/h/.claude"), "/w/b")
         );
         assert!(locate(root.path(), "S9", 300).is_none());
-        let mode = std::fs::metadata(root.path().join(FILE)).unwrap();
         #[cfg(unix)]
         assert_eq!(
-            std::os::unix::fs::PermissionsExt::mode(&mode.permissions()) & 0o777,
+            std::os::unix::fs::PermissionsExt::mode(
+                &std::fs::metadata(root.path().join(FILE)).unwrap().permissions()
+            ) & 0o777,
             0o600
         );
     }
