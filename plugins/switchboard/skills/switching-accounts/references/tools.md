@@ -144,6 +144,22 @@ no longer runs in two processes. macOS and Linux.
 ### `switchboard_session_continue`: `session_id` (string)
 
 SB-396: continues a session that ended (the duty officer closed it, its hosted window was idle past the wake-up floor, a launch of the last week) as that same session: `claude --resume <id>` in its own Claude config folder and its folder, in a Terminal window of its own, so its history and context are the ones it had (`{continued, folder}`). Refused while a process still holds the session, when its folder or history is gone, and for a session Switchboard has no record of: never a fresh session in its place. `switchboard_sessions` with `rows` marks each such row with the act `continue`; the CLI is `switchboard sessions continue <session_id>`.
+### `switchboard_sessions_restart_plan`: no arguments
+
+SB-397 R1: the plan of a restart wave, which restarts every running Claude Code session so it loads new skills, plugins, hooks or a new Claude Code. Restarts nothing. Answers `restart` (each `session_id`, `folder`, `how`: `in_place` in its session host, viewers kept, or `terminal` in a new Terminal window; `caller` true for your own session), `skipped` with the reason (`limit`: stopped on a limit, recovery resumes it; `has_waits`: a wake-up, monitor or cron job of its own; `duplicate`; `console_not_hosted`: a Fabric Dashboards plain console; `host_too_old`; `not_interactive`; `cannot_resume`), `caller`, `digest`, `warning` and `permissions` (resumed sessions use Switchboard's permission choice). CLI: `switchboard sessions restart plan`.
+
+### `switchboard_sessions_restart_apply`: `digest` (string), `reason` (string)
+
+SB-397 R1: starts the wave of that exact plan (`PLAN_STALE` when the sessions changed since, `WAVE_RUNNING` while one runs). Each listed session ends only at the end of its current turn (idle, nothing of its own running, its transcript still for two minutes), at most three at a time, and is resumed as itself (`claude --resume <id>` in its own config and working folders); the caller restarts last, after the others settled or 15 minutes, with a prompt naming the wave. End your turn after the call. The session watch advances the wave every minute and marks a session not back five minutes after its end `failed`; a session still mid-turn a day later is `skipped: still_busy`. CLI: `switchboard sessions restart apply --digest <d> --reason <text>`.
+
+### `switchboard_sessions_restart_status`: `wave` (string, optional)
+
+SB-397 R1: a wave's state, the newest by default: per session `pending`, `ending`, `resuming`, `back`, `continuing` (the caller working again), `failed` or `skipped` with the reason, or `cancelled`; `counts`; `done_at`. CLI: `switchboard sessions restart status [wave]`.
+
+### `switchboard_sessions_restart_cancel`: `wave` (string)
+
+SB-397 R1: every session of the wave still waiting for its turn stays as it is; one already ending or resuming finishes its restart. CLI: `switchboard sessions restart cancel <wave>`.
+
 ### `switchboard_health`: no arguments
 
 This Switchboard's health as one report, `agent-health/1` (SB-393), for a watcher that turns

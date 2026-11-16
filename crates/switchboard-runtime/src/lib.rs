@@ -392,6 +392,28 @@ pub enum Operation {
     SessionContinue {
         session_id: String,
     },
+    /// SB-397 R1: which running sessions a restart wave would restart and skip, the caller's own
+    /// (the session whose process is the nearest ancestor of `caller_pid`) and the plan's digest.
+    SessionsRestartPlan {
+        #[serde(default)]
+        caller_pid: Option<u32>,
+    },
+    /// SB-397 R1: starts the restart wave of the plan whose digest is `digest`.
+    SessionsRestartApply {
+        digest: String,
+        reason: String,
+        #[serde(default)]
+        caller_pid: Option<u32>,
+    },
+    /// SB-397 R1: a wave's state, the newest when none is named.
+    SessionsRestartStatus {
+        #[serde(default)]
+        wave: Option<String>,
+    },
+    /// SB-397 R1: every session of the wave still waiting for its turn stays as it is.
+    SessionsRestartCancel {
+        wave: String,
+    },
     /// SB-395: ends a hosted session, here or on `target` (after that machine proves it, SB-357).
     SessionEnd {
         launch_id: String,
@@ -1516,6 +1538,11 @@ impl Runtime {
                 | Operation::SessionAttach { .. }
                 | Operation::SessionEnd { .. }
                 | Operation::SessionContinue { .. }
+                // SB-397 R1: the process table, session files and its own small records.
+                | Operation::SessionsRestartPlan { .. }
+                | Operation::SessionsRestartApply { .. }
+                | Operation::SessionsRestartStatus { .. }
+                | Operation::SessionsRestartCancel { .. }
                 // SB-365: the snapshot, the owner's sign-in verdicts in memory, seats.jsonl and
                 // spend.json; nothing is written.
                 | Operation::Attention
@@ -6424,6 +6451,28 @@ async fn execute(
         Operation::SessionContinue { session_id } => {
             let root = root.to_owned();
             blocking::run(move || resumable::continue_session(&root, &session_id, monitor::now()))
+        }
+        Operation::SessionsRestartPlan { caller_pid } => {
+            let root = root.to_owned();
+            blocking::run(move || restarts::plan(&root, caller_pid, monitor::now()))
+        }
+        Operation::SessionsRestartApply {
+            digest,
+            reason,
+            caller_pid,
+        } => {
+            let root = root.to_owned();
+            blocking::run(move || {
+                restarts::apply(&root, &digest, &reason, caller_pid, monitor::now())
+            })
+        }
+        Operation::SessionsRestartStatus { wave } => {
+            let root = root.to_owned();
+            blocking::run(move || restarts::status(&root, wave.as_deref(), monitor::now()))
+        }
+        Operation::SessionsRestartCancel { wave } => {
+            let root = root.to_owned();
+            blocking::run(move || restarts::cancel(&root, &wave, monitor::now()))
         }
         Operation::SessionEnd { launch_id, target } => {
             if !launches::valid_id(&launch_id) {
