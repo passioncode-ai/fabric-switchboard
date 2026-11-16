@@ -1059,6 +1059,25 @@ enum MachinesCmd {
         /// The machine group: its id, its name or another name of it.
         machine: String,
     },
+    /// Trust a key as another machine's. Every move, call back, remote read or dispatch first has
+    /// that machine sign a fresh challenge; its first answer is trusted, and a later one signed
+    /// by another key is refused. After checking a machine that changed (reinstalled, replaced),
+    /// run `switchboard settings signer` there and trust the key it prints.
+    Trust {
+        /// The machine as ssh knows it (`user@host`, or a Host from ~/.ssh/config).
+        machine: String,
+        /// The key `switchboard settings signer` printed on that machine.
+        #[arg(long)]
+        key: String,
+    },
+    /// The keys trusted for other machines: machine names, public keys and times.
+    Keys,
+    /// Sign another machine's challenge with this computer's key. Run by that machine over ssh.
+    #[command(hide = true)]
+    Prove {
+        #[arg(long)]
+        nonce: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -2444,6 +2463,14 @@ async fn run(cli: &Cli) -> Result<Value, String> {
             },
             MachinesCmd::Forget { machine } => Operation::MachineForget {
                 machine: machine.clone(),
+            },
+            MachinesCmd::Trust { machine, key } => Operation::MachineTrust {
+                machine: machine.clone(),
+                key: key.clone(),
+            },
+            MachinesCmd::Keys => Operation::MachineKeys,
+            MachinesCmd::Prove { nonce } => Operation::MachineProve {
+                nonce: nonce.clone(),
             },
         },
         Command::Stats { days } => Operation::Statistics { days: Some(*days) },
@@ -5644,6 +5671,12 @@ mod mcp_parity {
         ("machines adopt", Tool("switchboard_machine_set")),
         ("machines place", Tool("switchboard_machine_set")),
         ("machines forget", Tool("switchboard_machine_set")),
+        ("machines trust", Tool("switchboard_machine_set")),
+        ("machines keys", Tool("switchboard_machine_set")),
+        (
+            "machines prove",
+            Not("SB-357: another machine's Switchboard runs it over ssh to sign its challenge; an agent proves nothing by it"),
+        ),
         // `sessions` itself (and its `--all`, `--history`) answers through the same tool.
         ("sessions show", Tool("switchboard_sessions")),
         ("sessions end", Tool("switchboard_session_end")),

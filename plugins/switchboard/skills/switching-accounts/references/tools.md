@@ -585,7 +585,7 @@ of the owner's last background read (every 15 minutes while the owner runs, one 
 failures in a row; `reason` is `unreachable`, `refused` or `unreadable`), and each account `there`:
 `{used_percent, usage_status, enabled, as_of, tried_at, reason}` of its copy on that machine, or
 null before a first read. The numbers are shown, never used to switch or route here.
-### `switchboard_machine_set`: `action`, `apply?`, `account_id?`, `on?`, `machine?`
+### `switchboard_machine_set`: `action`, `apply?`, `account_id?`, `on?`, `machine?`, `key?`, `decision?`
 
 Only when the operator asks. `adopt`: places each account marked used elsewhere and in no machine
 group into its machine's group, by the move recorded in `seats.jsonl` (not called back), else its
@@ -594,6 +594,14 @@ what it would do (`placed`, `unplaced`). An account whose machine cannot be told
 `place`: `account_id` lives on machine `on` (as ssh knows it), without ssh; it joins that
 machine's group and leaves every group here. `forget`: removes the machine group `machine` (its
 pool, name or an alias) once it holds no account.
+
+Every move, call back, remote read or check, settings sync and dispatch to another machine first
+has it sign a fresh random challenge with its own settings signing key (SB-357). Its first answer
+is trusted (`machine-keys.json`, public keys only); a later one signed by another key is refused
+before anything else is sent, and so is a machine with a trusted key whose Switchboard no longer
+proves it. `keys`: the keys trusted, `{machines: [{machine, public_key, pinned_at, by}]}`.
+`trust`: `machine` (as ssh knows it) is trusted with `key`, the key `switchboard settings signer`
+printed on that machine; it needs `decision`, the operator's own words.
 
 ### `switchboard_targets`: `probe?`
 
