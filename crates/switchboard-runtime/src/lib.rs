@@ -71,6 +71,7 @@ pub mod settings_signing;
 pub mod shell;
 pub mod spend;
 mod statistics;
+pub mod stop_spool;
 pub mod suggest;
 pub mod targets;
 pub mod uninstall;
@@ -5320,7 +5321,22 @@ async fn execute(
             directory,
             billing,
         } => {
-            let rt = needs_owner()?;
+            // SB-397 W0.4: with no owner the stop is kept for the next one, never refused.
+            let Some(rt) = runtime else {
+                let kept = stop_spool::spool(
+                    root,
+                    &stop_spool::Spooled {
+                        session,
+                        directory,
+                        billing,
+                        at: monitor::now(),
+                    },
+                );
+                let result = if kept.is_ok() { "spooled" } else { "spool_failed" };
+                oplog::event("recovery_hook", &[("result", oplog::Field::Code(result))]);
+                kept?;
+                return Ok(json!({"registered": false, "spooled": true}));
+            };
             let snapshot = store.snapshot()?;
             let saved = |id: &String| snapshot.accounts.iter().any(|a| &a.id == id);
             // A session in a project's folder ran on the project's pool (SB-118), never on the

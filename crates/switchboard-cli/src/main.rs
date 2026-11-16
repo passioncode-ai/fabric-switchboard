@@ -4295,7 +4295,26 @@ async fn recovery_hook(root: &std::path::Path) -> Value {
         };
         match call(root, operation).await {
             Ok(value) => value,
-            Err(error) => json!({"registered": false, "reason": "refused", "message": error}),
+            // SB-397 W0.4: an owner draining or starting holds the store; the stop is kept for
+            // the next owner's pass, which registers it (or refuses it once more and forgets it).
+            Err(error) => {
+                let kept = switchboard_runtime::stop_spool::spool(
+                    root,
+                    &switchboard_runtime::stop_spool::Spooled {
+                        session: session.to_owned(),
+                        directory: std::path::PathBuf::from(cwd),
+                        billing,
+                        at: std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .map_or(0, |d| d.as_secs() as i64),
+                    },
+                );
+                if kept.is_ok() {
+                    json!({"registered": false, "spooled": true})
+                } else {
+                    json!({"registered": false, "reason": "refused", "message": error})
+                }
+            }
         }
     };
     let ((), answer) = tokio::join!(

@@ -356,6 +356,16 @@ impl Pass {
         // watched it is recorded. Nothing is read while no run is watched.
         let analytics = runtime.analytics();
         crate::blocking::run(|| crate::dispatch::sweep(&runtime.root, time, analytics.as_deref()));
+        // SB-397 W0.4: limit stops reported while no owner ran are registered now, oldest first.
+        for stop in crate::blocking::run(|| crate::stop_spool::take(&runtime.root, time)) {
+            let _ = runtime
+                .execute(crate::Operation::RecoveryHook {
+                    session: stop.session,
+                    directory: stop.directory,
+                    billing: stop.billing,
+                })
+                .await;
+        }
         // SB-366 (DEC-0017): the accounts on other machines, read over ssh every 15 minutes on a
         // thread of their own; nothing at all without a machine group.
         if let Ok(snapshot) = runtime.store.snapshot() {
