@@ -352,14 +352,18 @@ impl Pass {
         // Each file goes only once the owner answered, registered or refused for good.
         for (file, stop) in crate::blocking::run(|| crate::stop_spool::waiting(&runtime.root, time))
         {
-            let _ = runtime
+            let answer = runtime
                 .execute(crate::Operation::RecoveryHook {
                     session: stop.session,
                     directory: stop.directory,
                     billing: stop.billing,
                 })
                 .await;
-            crate::stop_spool::done(&file);
+            // A stop file the owner could not read this pass is tried again on the next; any
+            // other answer (registered, or refused for good) settles it (review of 2026-11-16).
+            if !matches!(&answer, Err(e) if e == crate::recovery::UNREADABLE) {
+                crate::stop_spool::done(&file);
+            }
         }
         // SB-366 (DEC-0017): the accounts on other machines, read over ssh every 15 minutes on a
         // thread of their own; nothing at all without a machine group.

@@ -757,6 +757,9 @@ fn act_on(_: &Path, _: &Seen, _: Act) -> &'static str {
 
 /// How long after its intent a cut act is still finished; older ones are left as they are.
 const INTERRUPTED_WINDOW: i64 = 3600;
+/// How old an intent is before a check finishes it: older than any act of a running check (a stop
+/// waits at most ten seconds).
+const SETTLE_SECONDS: i64 = 60;
 
 /// SB-397 W0.1: the acts whose intent has no outcome line, newest intent per session, within
 /// `INTERRUPTED_WINDOW`. Pure, for tests.
@@ -771,10 +774,13 @@ pub fn interrupted(lines: &[Value], now: i64) -> Vec<Value> {
             open.retain(|o| (o["session"].clone(), o["at"].clone()) != key);
         }
     }
+    // An intent younger than `SETTLE_SECONDS` may belong to a check still running beside this one
+    // (`duty --run` and the watch's tick): it is left for the next check (review of 2026-11-16,
+    // defect 3).
     open.retain(|o| {
         o["at"]
             .as_i64()
-            .is_some_and(|at| now - at < INTERRUPTED_WINDOW)
+            .is_some_and(|at| now - at >= SETTLE_SECONDS && now - at < INTERRUPTED_WINDOW)
     });
     open
 }
@@ -1032,6 +1038,10 @@ mod tests {
         assert!(
             interrupted(&lines, 400 + INTERRUPTED_WINDOW).is_empty(),
             "an act cut more than an hour ago is left as it is"
+        );
+        assert!(
+            interrupted(&[intent("S4", 470)], 500).is_empty(),
+            "an intent of a check that may still run is left for the next check"
         );
     }
 

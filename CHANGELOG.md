@@ -8,6 +8,7 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- Restart waves, after a review of 0.7.109: a session restarted in its own window keeps its launch (its record and hooks go on), an *End* that arrives during a restart is never followed by a new process, cancelling a wave lets a session already ending finish its restart, a session the wave stopped can always be continued, and starting a wave needs Switchboard running (offline it would restart nothing). The duty officer leaves another check's act in progress alone, the `StopFailure` hook answers an owner's refusal as one instead of keeping the stop, and a session's waits are changed under a lock (SB-397, SB-399).
 - `switchboard monitor hold` takes an optional `--reason` (for example `fabric_claim`), so Fabric can name why it holds a session; and a hold is no longer lost by a session host of an earlier version when a later one adds a field to the session's record (SB-399).
 
 ## 0.7.109

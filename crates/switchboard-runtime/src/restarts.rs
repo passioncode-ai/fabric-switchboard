@@ -563,7 +563,7 @@ pub fn status(root: &Path, wave: Option<&str>, now: i64) -> Result<Value, String
     let count = |state: &str| w.sessions.iter().filter(|e| e.state == state).count();
     Ok(json!({
         "wave": w.id, "reason": w.reason, "at": w.at, "done_at": w.done_at, "caller": w.caller,
-        "counts": {"pending": count("pending"), "resuming": count("resuming"), "back": count("back"),
+        "counts": {"pending": count("pending"), "ending": count("ending"), "resuming": count("resuming"), "back": count("back"),
             "continuing": count("continuing"), "failed": count("failed"), "cancelled": count("cancelled"),
             "skipped": w.skipped.len()},
         "sessions": w.sessions.iter().map(|e| json!({
@@ -588,7 +588,13 @@ pub fn cancel(root: &Path, wave: &str, now: i64) -> Result<Value, String> {
         e.state = "cancelled".into();
         cancelled += 1;
     }
-    if !w.sessions.iter().any(|e| e.state == "resuming") {
+    // A session already ending (its process stopped, a quit between) still finishes its restart:
+    // the wave stays open for it (review of 2026-11-16, defect 4).
+    if !w
+        .sessions
+        .iter()
+        .any(|e| matches!(e.state.as_str(), "ending" | "resuming"))
+    {
         w.done_at.get_or_insert(now);
     }
     write(root, &w)?;
@@ -699,6 +705,25 @@ fn set(wave: &mut Wave, session: &str, state: &str, reason: Option<&str>, ended:
 #[cfg(not(unix))]
 pub fn tick(_: &Path, _: i64) {}
 
+/// The resume script with the launch it continues exported after its `unset` line: that line
+/// clears every variable the launch must not inherit, `SWITCHBOARD_LAUNCH_ID` among them, so an
+/// export before it would be cleared at once (review of 2026-11-16, blocker 1).
+fn with_launch_id(script: &str, launch: &str) -> String {
+    let export = format!(
+        "export SWITCHBOARD_LAUNCH_ID={}\n",
+        fabric_sessions_core::cli::quoted(launch)
+    );
+    match script.find("\nunset ") {
+        Some(at) => {
+            let end = script[at + 1..]
+                .find('\n')
+                .map_or(script.len(), |n| at + 1 + n + 1);
+            format!("{}{export}{}", &script[..end], &script[end..])
+        }
+        None => format!("{script}{export}"),
+    }
+}
+
 /// Restarts one session: in its host when it runs in one that restarts in place, else as the duty
 /// officer does (stopped, then resumed in a Terminal window, through a host when it has a launch).
 /// The state that follows and, for a failure, why: `cannot_resume`, `not_written`,
@@ -721,11 +746,7 @@ fn restart_one(root: &Path, wave: &Wave, e: &Entry) -> (&'static str, Option<&'s
     );
     if let Some(launch) = &e.launch_id {
         // The host's own launch continues: its record and its viewers stay the session's.
-        script = script.replacen(
-            "set +x\n",
-            &format!("set +x\nexport SWITCHBOARD_LAUNCH_ID='{launch}'\n"),
-            1,
-        );
+        script = with_launch_id(&script, launch);
     }
     if let (true, Some(launch)) = (e.in_place, &e.launch_id) {
         let path = script_path(root, &wave.id, &e.session);
@@ -749,6 +770,13 @@ fn restart_one(root: &Path, wave: &Wave, e: &Entry) -> (&'static str, Option<&'s
     if !crate::duty::stop(e.pid) {
         return ("failed", Some("still_running"));
     }
+    // Ended by the wave: *Continue* finds it even when the window below does not open
+    // (review of 2026-11-16, defect 6).
+    crate::resumable::record(
+        root,
+        json!({"session": e.session, "config": e.config, "cwd": e.cwd, "reason": "restart",
+            "at": crate::monitor::now(), "by": "wave"}),
+    );
     match crate::launch::start_terminal(&path) {
         Ok(()) => ("resuming", None),
         Err(_) => ("failed", Some("not_started")),
@@ -779,6 +807,29 @@ mod tests {
             cpu: None,
             cpu_quiet: None,
         }
+    }
+
+    #[test]
+    fn the_launch_id_is_exported_after_the_line_that_clears_it() {
+        let script = "#!/bin/zsh\nset +x\nunset A SWITCHBOARD_LAUNCH_ID B\nexport PATH='/bin'\nexec claude\n";
+        let out = with_launch_id(script, "L-1");
+        let unset = out.find("unset A").unwrap();
+        let export = out.find("export SWITCHBOARD_LAUNCH_ID='L-1'").unwrap();
+        assert!(export > unset, "{out}");
+        assert!(out.ends_with("exec claude\n"));
+        // The script the duty officer writes has the same shape.
+        let real = crate::duty::resume_script_for(
+            Path::new("/h/.claude"),
+            "/w/app",
+            "S1",
+            Path::new("/usr/bin/claude"),
+            &[],
+            None,
+        );
+        let out = with_launch_id(&real, "L-2");
+        assert!(
+            out.find("export SWITCHBOARD_LAUNCH_ID='L-2'").unwrap() > out.find("\nunset ").unwrap()
+        );
     }
 
     #[test]
@@ -1025,6 +1076,24 @@ mod tests {
         assert!(
             holds_wait(root.path(), "S2", 100),
             "a held session is left out of a wave"
+        );
+    }
+
+    #[test]
+    fn cancel_keeps_a_wave_open_while_a_session_is_ending() {
+        let root = tempfile::tempdir().unwrap();
+        let mut w = wave(vec![entry("A", 1, true), entry("B", 2, false)]);
+        w.id = crate::launches::new_id();
+        w.sessions[0].state = "ending".into();
+        write(root.path(), &w).unwrap();
+        assert_eq!(cancel(root.path(), &w.id, 1100).unwrap()["cancelled"], 1);
+        assert!(
+            running(root.path(), 1100).is_some(),
+            "the ending session still comes back"
+        );
+        assert_eq!(
+            status(root.path(), None, 1100).unwrap()["counts"]["ending"],
+            1
         );
     }
 

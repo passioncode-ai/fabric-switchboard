@@ -4522,6 +4522,20 @@ fn take_turn_wait() -> std::time::Duration {
 /// One command from the CLI or `switchboard mcp`: to the running owner, else offline. While the
 /// store's lock is held and no owner answers (an owner draining or starting, another offline
 /// command), it asks again every 200 ms, the owner first, until `STORE_WAIT` has passed.
+/// The refusal of an operation that needs the owner when none runs.
+pub const NEEDS_OWNER: &str =
+    "Start the desktop app or 'switchboard serve' before login or launch.";
+/// Whether `error` says no owner could be asked (none runs, it is starting or quitting with the
+/// store held, or the control connection failed), as opposed to an owner that answered with a
+/// refusal. A caller that keeps work for the next owner keeps it only then (review of 2026-11-16,
+/// defect 5).
+pub fn owner_unreachable(error: &str) -> bool {
+    error == NEEDS_OWNER
+        || error == switchboard_core::STORE_LOCKED
+        || error.starts_with("Control connection did not complete.")
+        || error.starts_with("Control request timed out.")
+        || error == "Control metadata unavailable."
+}
 pub async fn call(root: &Path, operation: Operation) -> Result<Value, String> {
     call_within(root, operation, STORE_WAIT, execute_offline).await
 }
@@ -5021,11 +5035,7 @@ async fn execute(
     // still refused, from the owner's journal.
     let offline_refresh = refresh::RefreshState::offline(root.join("renewal-state.json"));
     let refresh_state = runtime.map_or(&offline_refresh, |r| &r.refresh);
-    let needs_owner = || {
-        runtime.ok_or_else(|| {
-            "Start the desktop app or 'switchboard serve' before login or launch.".to_string()
-        })
-    };
+    let needs_owner = || runtime.ok_or_else(|| NEEDS_OWNER.to_string());
     match operation {
         Operation::Snapshot => {
             serde_json::to_value(store.snapshot()?).map_err(|_| "Snapshot unavailable.".into())
@@ -6465,6 +6475,10 @@ async fn execute(
             reason,
             caller_pid,
         } => {
+            // Only the owner's one-minute watch moves a wave on: offline, a wave written now
+            // would restart nothing and keep the duty officer off its sessions for a day
+            // (review of 2026-11-16, defect 7). Planning, status and cancel stay offline.
+            needs_owner()?;
             let root = root.to_owned();
             blocking::run(move || {
                 restarts::apply(&root, &digest, &reason, caller_pid, monitor::now())
