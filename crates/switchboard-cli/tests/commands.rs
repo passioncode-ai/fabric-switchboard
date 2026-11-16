@@ -465,6 +465,7 @@ fn recovery_hook_never_fails_the_session() {
         (
             json["data"]["registered"].clone(),
             json["data"]["reason"].clone(),
+            json["data"]["spooled"].clone(),
         )
     };
     let dir = tmp.path().to_string_lossy().into_owned();
@@ -473,14 +474,16 @@ fn recovery_hook_never_fails_the_session() {
     assert_eq!(hook(&overloaded.to_string()).1, "not_a_limit");
     let no_session = serde_json::json!({"cwd": dir, "error": "rate_limit"});
     assert_eq!(hook(&no_session.to_string()).1, "malformed_input");
-    // No owner runs in this data folder: refused, still exit 0, nothing written.
+    // No owner runs in this data folder: the stop is kept for the next owner (SB-397 W0.4),
+    // still exit 0, nothing registered yet.
     let limit = serde_json::json!({"session_id": "s-1", "cwd": dir, "error": "rate_limit"});
-    let (registered, reason) = hook(&limit.to_string());
+    let (registered, _, spooled) = hook(&limit.to_string());
     assert_eq!(
-        (registered, reason),
-        (serde_json::json!(false), serde_json::json!("refused"))
+        (registered, spooled),
+        (serde_json::json!(false), serde_json::json!(true))
     );
     assert!(!tmp.path().join("recovery.json").exists());
+    assert!(tmp.path().join("stop-spool").join("s-1.json").exists());
 }
 #[test]
 fn the_stop_hook_after_a_turn_is_silent_and_never_fails() {

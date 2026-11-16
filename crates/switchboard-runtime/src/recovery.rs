@@ -2252,6 +2252,42 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_stop_reported_with_no_owner_is_kept_and_registered_by_the_next_owner() {
+        // SB-397 W0.4: before, the hook was refused while the app quit or updated and the stop
+        // was lost.
+        use crate::{fixtures, Operation};
+        let root = tempfile::tempdir().unwrap();
+        let runtime = fixtures::runtime(root.path(), fixtures::signed_out, fixtures::fails).await;
+        let old = fixtures::save(&runtime.store, "old", "default");
+        let op = Operation::RecoveryHook {
+            session: "s-9".into(),
+            directory: root.path().into(),
+            billing: false,
+        };
+        let offline = crate::execute(runtime.store.clone(), root.path(), None, op)
+            .await
+            .unwrap();
+        assert_eq!(offline["spooled"], true);
+        assert!(read(root.path()).unwrap().is_empty());
+        runtime
+            .limits
+            .bind("s-9", std::slice::from_ref(&old.id), crate::monitor::now());
+        let waiting = crate::stop_spool::waiting(root.path(), crate::monitor::now());
+        assert_eq!(waiting.len(), 1);
+        let stop = &waiting[0].1;
+        let done = runtime
+            .execute(Operation::RecoveryHook {
+                session: stop.session.clone(),
+                directory: stop.directory.clone(),
+                billing: stop.billing,
+            })
+            .await
+            .unwrap();
+        assert_eq!(done["result"], "registered", "{done}");
+        assert_eq!(read(root.path()).unwrap()[0].account, old.id);
+    }
+
+    #[tokio::test]
     async fn a_stop_in_a_project_folder_is_the_projects_account() {
         // 2026-10-18: 1,202 stops in project folders were refused in one day: the hook named the
         // ordinary CLI's account, which a project's folder never uses.

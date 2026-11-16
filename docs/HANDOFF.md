@@ -2,6 +2,19 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-11-16 late: Fabric Sessions planned, W0 released, restart waves (R1) built; Nicegram back in the default group
+
+- **Asked.** The operator: the session lifecycle must survive app restarts and updates, as a service installed apart from the apps by whichever product comes first (its own repository); restart every running session through MCP (to load skills) with monitoring until each is back and continues; research, plan, spec, decompose, verify two to three times, then waves to the end. Also: Nicegram Business and all of Nicegram in the default group, its agents in Agents.
+- **Spec.** [Fabric Sessions](https://github.com/passioncode-ai/fabric-switchboard/blob/session-service/docs/plans/2026-11-16-session-service/README.md) on branch `session-service` (draft 3, `e3f9654b`), [plan](https://github.com/passioncode-ai/fabric-switchboard/blob/session-service/docs/plans/2026-11-16-session-service/plan.md) (W0, R1, W1 to W4, Later), [verification](https://github.com/passioncode-ai/fabric-switchboard/blob/session-service/docs/plans/2026-11-16-session-service/verification.md) (three rounds, every finding placed), research on Switchboard and the estate. Backlog SB-397.
+- **W0 (merged #775, released in 0.7.108).** Duty acts journaled first and finished by the next owner; `StopFailure` with no owner spooled and registered later; `resumable.jsonl` and `duty.jsonl` under locks; the watch runs when the snapshot fails.
+- **Releases.** 0.7.105 to 0.7.107 failed their Windows nightlies (a Unix-only name in the shared resume script #773, test folders not absolute on Windows #776, #778); 0.7.108 tagged (`56db77bc`), its nightly's Linux job failed in AppImage bundling (`linuxdeploy`, not code) and was re-run.
+- **R1 (PR #780, branch `restart-waves`).** Session hosts restart in place (`can: ["restart"]`), `restarts` waves, CLI `sessions restart`, MCP `switchboard_sessions_restart_*`, the Sessions page's *Restart all sessions*, SCN-099, Copylot ids. Gate EXIT 0 at `aa50fdfc`; Linux clippy and tests in docker; WebKit demo screenshots en and ru. `claude --resume <id>` keeps the id (evidence file).
+- **Fabric (thread `179a88f6`).** Answered ADR-0195: `--reason resume` (SB-398) and `monitor hold` (SB-399) on branch `fabric-resume`; Fabric consoles survive a Fabric restart today through `launch --in-place --hosted` and `attach`.
+- **Groups.** `nicegram-business` (with its worktrees and clones), `nicegram-business-app` and `Wiki` taken out of Agents into the default group (`switchboard_project_edit remove_folders`); Nicegram's agents stay in Agents.
+- **Note.** `session-w0` was rebased once and pushed with `--force-with-lease` (own unmerged branch), against the rule; branches are updated by merge since.
+
+**Exact next task.** When 0.7.108 publishes: update this MacBook and check `switchboard --version`. Merge #780 after its gate on the final head reads EXIT 0, merge `fabric-resume` (add `hold_until` to `restarts::holds_wait`), release 0.7.109, then run a live restart wave on this MacBook (R1.7, `switchboard_sessions_restart_plan` then `_apply`) and record it in `docs/evidence/`. Complete board request `fddc7902` with the release. Then W1 of the plan.
+
 ## 2026-11-16 evening: session lifecycle waves A to C and the Sessions page (SB-396, SB-395); 0.7.103 and 0.7.104 released, 0.7.105 next
 
 - **Asked.** The operator: Dissy, PlaySign and Sound Engine hang without quota: check they come back and continue; a way to move an account from the default group to another; the lifecycle must know a session is monitoring and never kick it, or let it die and later restore the very same session; a detailed audit of the session lifecycle, a refactoring plan, a final spec, a sessions screen to manage them, 2 to 3 UI iterations, release. Earlier the same day: monitoring of agent errors across PassionCode (SB-393).

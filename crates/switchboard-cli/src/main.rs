@@ -451,7 +451,8 @@ enum Command {
         #[arg(long)]
         dispatch_id: Option<String>,
         /// Why the session starts: `request`, a board request nobody answered; `inbox`, the project's
-        /// unread board messages (it settles by read marks, never with `--target`).
+        /// unread board messages (it settles by read marks, never with `--target`); `resume`, a
+        /// Fabric task a session let go of unfinished (`--request` names the task).
         #[arg(long, value_enum, default_value = "request")]
         reason: DispatchReason,
         /// `ask`: the agent's own defaults. `all`: Claude Code with
@@ -1045,6 +1046,17 @@ enum MonitorCmd {
     /// Read one hook input (`PreToolUse` on ScheduleWakeup, Monitor, CronCreate or CronDelete, or
     /// `SessionEnd`) on standard input and record the session's wait; prints `{}`, never fails.
     Hook,
+    /// Mark a Claude Code session as holding live work another tool tracks (a Fabric task's
+    /// claim): the duty officer, a duplicate close, a session host's idle close and a restart
+    /// wave leave it alone until the end given. Renew it as the claim is renewed; 0 releases it.
+    Hold {
+        /// The session id.
+        #[arg(long)]
+        session: String,
+        /// Until when, Unix seconds, at most seven days ahead; 0 releases the hold.
+        #[arg(long)]
+        until: i64,
+    },
 }
 #[derive(Subcommand)]
 enum MachinesCmd {
@@ -1891,6 +1903,8 @@ enum DispatchReason {
     Request,
     /// The project's unread board messages; the run settles by read marks (no `--target`).
     Inbox,
+    /// A Fabric task a session left unfinished; `--request` is the task id (SB-398).
+    Resume,
 }
 /// How much a dispatched run may do without asking.
 #[derive(Clone, Copy, ValueEnum)]
@@ -1954,6 +1968,38 @@ enum SessionsCommand {
     Continue {
         /// The session id (`sessions --rows` names it).
         session_id: String,
+    },
+    /// Restart every running Claude Code session, for example so it loads new skills: each ends
+    /// at the end of its current turn and is resumed as itself; this command's own session
+    /// restarts last. `plan` first, then `apply` with its digest. macOS and Linux.
+    Restart {
+        #[command(subcommand)]
+        command: RestartCmd,
+    },
+}
+#[derive(Subcommand)]
+enum RestartCmd {
+    /// Which sessions a wave would restart, which it skips and why, and the plan's digest.
+    /// Restarts nothing.
+    Plan,
+    /// Start the wave of the plan whose digest is given; refused when the sessions changed since.
+    Apply {
+        /// The digest `sessions restart plan` answered.
+        #[arg(long)]
+        digest: String,
+        /// Why the sessions restart, in a few words; recorded with the wave.
+        #[arg(long)]
+        reason: String,
+    },
+    /// A wave's state: each session pending, resuming, back, continuing, failed or skipped.
+    Status {
+        /// The wave id; by default the newest.
+        wave: Option<String>,
+    },
+    /// Leave every session of the wave still waiting for its turn as it is.
+    Cancel {
+        /// The wave id.
+        wave: String,
     },
 }
 /// Where `switchboard launch` is run from, for the launch record.
@@ -2484,6 +2530,14 @@ async fn run(cli: &Cli) -> Result<Value, String> {
         Command::Monitor {
             command: MonitorCmd::Hook,
         } => return Ok(monitor_hook(&root)),
+        Command::Monitor {
+            command: MonitorCmd::Hold { session, until },
+        } => {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.as_secs() as i64);
+            return switchboard_runtime::monitors::hold(&root, session, *until, now);
+        }
         Command::Machines { command } => match command {
             MachinesCmd::List { live } => Operation::Machines { live: *live },
             MachinesCmd::Adopt { apply } => Operation::MachinesAdopt { apply: *apply },
@@ -2658,6 +2712,7 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                 reason: match reason {
                     DispatchReason::Request => switchboard_runtime::dispatch::Reason::Request,
                     DispatchReason::Inbox => switchboard_runtime::dispatch::Reason::Inbox,
+                    DispatchReason::Resume => switchboard_runtime::dispatch::Reason::Resume,
                 },
                 permissions: match permissions {
                     DispatchPermissions::Ask => switchboard_runtime::launch::Permissions::Ask,
@@ -2702,6 +2757,21 @@ async fn run(cli: &Cli) -> Result<Value, String> {
             ..
         } => Operation::SessionContinue {
             session_id: session_id.clone(),
+        },
+        Command::Sessions {
+            command: Some(SessionsCommand::Restart { command }),
+            ..
+        } => match command {
+            RestartCmd::Plan => Operation::SessionsRestartPlan {
+                caller_pid: Some(std::process::id()),
+            },
+            RestartCmd::Apply { digest, reason } => Operation::SessionsRestartApply {
+                digest: digest.clone(),
+                reason: reason.clone(),
+                caller_pid: Some(std::process::id()),
+            },
+            RestartCmd::Status { wave } => Operation::SessionsRestartStatus { wave: wave.clone() },
+            RestartCmd::Cancel { wave } => Operation::SessionsRestartCancel { wave: wave.clone() },
         },
         Command::Sessions { rows: true, .. } => Operation::SessionRows,
         Command::Sessions { tree: true, .. } => {
@@ -4295,7 +4365,26 @@ async fn recovery_hook(root: &std::path::Path) -> Value {
         };
         match call(root, operation).await {
             Ok(value) => value,
-            Err(error) => json!({"registered": false, "reason": "refused", "message": error}),
+            // SB-397 W0.4: an owner draining or starting holds the store; the stop is kept for
+            // the next owner's pass, which registers it (or refuses it once more and forgets it).
+            Err(error) => {
+                let kept = switchboard_runtime::stop_spool::spool(
+                    root,
+                    &switchboard_runtime::stop_spool::Spooled {
+                        session: session.to_owned(),
+                        directory: std::path::PathBuf::from(cwd),
+                        billing,
+                        at: std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .map_or(0, |d| d.as_secs() as i64),
+                    },
+                );
+                if kept.is_ok() {
+                    json!({"registered": false, "spooled": true})
+                } else {
+                    json!({"registered": false, "reason": "refused", "message": error})
+                }
+            }
         }
     };
     let ((), answer) = tokio::join!(
@@ -5738,9 +5827,17 @@ mod mcp_parity {
         ("sessions end", Tool("switchboard_session_end")),
         ("sessions close-copy", Tool("switchboard_session_close_copy")),
         ("sessions continue", Tool("switchboard_session_continue")),
+        ("sessions restart plan", Tool("switchboard_sessions_restart_plan")),
+        ("sessions restart apply", Tool("switchboard_sessions_restart_apply")),
+        ("sessions restart status", Tool("switchboard_sessions_restart_status")),
+        ("sessions restart cancel", Tool("switchboard_sessions_restart_cancel")),
         (
             "monitor hook",
             Not("SB-396: Claude Code's own hooks run it with the hook input; an agent records nothing by it"),
+        ),
+        (
+            "monitor hold",
+            Not("SB-399: Fabric's claim bookkeeping marks a session that holds its task; an agent's own waits come through its hooks"),
         ),
         ("provenance", Tool("switchboard_provenance")),
         ("current", Tool("switchboard_status")),

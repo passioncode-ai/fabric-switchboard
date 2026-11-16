@@ -3347,8 +3347,42 @@ the answer `{rows, counts, degraded, observed_at}`.
   `--json sessions end <id>` through `machine_proof::ssh`, so it is refused unless that machine
   proves its key.
 
+**Restart waves (SB-397 R1).** `Operation::SessionsRestartPlan {caller_pid}` (CLI `sessions restart
+plan`, MCP `switchboard_sessions_restart_plan`) lists every live Claude Code session
+`duty::observe` sees: those a wave restarts and those it skips with the reason (`not_interactive`,
+`duplicate`, `limit`, `has_waits`: a wait of its own with an end ahead or any cron job,
+`host_too_old`, `console_not_hosted`, `cannot_resume`), the caller (the session whose process is
+the nearest ancestor of `caller_pid`, found in the process table; none: `null`) and a digest (sha256
+over the sorted restart and skip lines and the caller). `SessionsRestartApply {digest, reason,
+caller_pid}` starts the wave only for a plan with that digest (`PLAN_STALE`), only when none runs
+(`WAVE_RUNNING`), with a reason of 1 to 300 characters (`REASON_NEEDED`); it writes
+`restarts/<wave>.json` (0600; ids, folders, states and times; kept 30 days, at most 200) under
+`restarts/waves.lock`. The session watch's one-minute pass advances it (`restarts::tick`): a session
+is between turns when its file says `idle`, no command of its own runs and its transcript has not
+moved for 120 s; at most three are `ending` or `resuming`; each is checked again at its act (a limit
+stop or a wait since the plan: `skipped: changed_since_plan`; its folder or transcript gone:
+`cannot_resume`); `ending` is written before the act, so the next owner finishes one a quit cut. A
+hosted session whose host offers `restart` (its `HELLO` answer's `can`) restarts in place: its
+resume script (`restarts/<wave>-<session>.command`, keeping `SWITCHBOARD_LAUNCH_ID`) is sent in a
+`RESTART` frame, the host hangs up the process group, waits for the whole group to be gone (SIGKILL
+after 10 s), opens the terminal again by name (macOS revokes it when the session leader exits) and
+starts the script; viewers stay attached and get no `EXIT`. An `END` wins over a waiting restart, and
+a restart after the last process exited is refused. Any other session is stopped as the duty officer
+stops it and resumed in a Terminal window from `restarts/<wave>/<session>/resume.command`. `back`:
+a process other than the old one holds the session id; not back five minutes after the end:
+`failed: not_back`. The caller restarts last (the others settled, or 15 minutes after `apply`) with
+a prompt naming the wave and is `continuing` once its transcript is written after the resume. A
+session still mid-turn a day after `apply` is `skipped: still_busy`. Scripts are removed once their
+session is settled. The duty officer leaves a session in a running wave alone. Log event
+`restart_wave` (`phase` `started` or `done`, counts). `SessionsRestartStatus {wave}`,
+`SessionsRestartCancel {wave}` (pending sessions `cancelled`). Tests: `restarts::tests`,
+`session_host::tests::a_restart_in_place_keeps_the_viewers_and_runs_the_next_program_on_the_same_terminal`,
+`an_end_wins_over_a_restart_and_a_restart_after_the_end_is_refused`.
+
 **Continue the same session (SB-396 wave B, LC-5, LC-7).** `resumable.jsonl` (0600, the newest
-1000 lines, ids and paths only) gets one line per end Switchboard causes: the duty officer's close
+1000 lines, ids and paths only; every append under an exclusive lock on `resumable.lock`, 0600,
+because the owner and each session host write it, SB-397 W0.2) gets one line per end Switchboard
+causes: the duty officer's close
 (`{session, config, cwd, reason, at, by: duty}`) and a session host's idle close (`{session,
 launch_id, reason: host_idle, at, by: host}`). `Operation::SessionContinue {session_id}` (CLI
 `sessions continue <id>`, MCP `switchboard_session_continue`, the window's `session_continue`)
@@ -3389,6 +3423,14 @@ finished one and is recorded in `resumable.jsonl` for *Continue*. The Sessions p
 session with a wait as `waiting` (`why: monitoring`, `wait: {until}` or `{open: true}`). Tests
 `monitors::tests::*`,
 `session_rows::tests::a_session_waiting_on_its_own_wake_up_reads_waiting_with_its_end`.
+
+**A hold another tool sets (SB-399, Fabric's request `bcb9ca3e`).** `switchboard monitor hold
+--session <id> --until <unix>` records `hold_until` in the session's `monitors/<session>.json`
+(at most seven days ahead; `0` releases it): Fabric marks a session that holds a task's claim and
+renews it with the claim. While it holds, `monitors::holds` is true whatever the session's idle
+time, so the duty officer, a duplicate close and a session host's idle close leave it alone, and a
+restart wave skips it; rows show it as `{until, held: true}`. A hook that writes later keeps it.
+Test: `monitors::tests::a_hold_keeps_its_session_until_its_end_and_is_released_with_zero`.
 
 The window's Sessions page reads `session_rows` on arrival and once a minute while it is on screen
 (`backgroundReads('sessions')`), never while another page is. Tests

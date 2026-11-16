@@ -28,18 +28,61 @@ for section in re.split(r'^### SCN-', scenarios, flags=re.M)[1:]:
         errors.append(f'SCN-{section[:3]}: coverage must name evidence or explicit NOT_RUN')
 # SB-306: the board keeps its table shape and a status that starts with its state, because
 # readers of the shared backlog take a status's first word (docs/DOCMAP.md, Registers).
+def table_cells(line):
+    """A table row's cells as the shared backlog reader splits them (fabric-workspace
+    lib/backlog.mjs `cells`): `\\|` is a literal bar, a bar inside a code span is not a
+    separator, and an empty first and last cell (the row's edge bars) are dropped."""
+    result, cell, ticks, i = [], '', 0, 0
+    while i < len(line):
+        c = line[i]
+        if c == '\\' and line[i + 1:i + 2] == '|':
+            cell += '|'
+            i += 2
+            continue
+        if c == '`':
+            n = 1
+            while line[i + n:i + n + 1] == '`':
+                n += 1
+            if not ticks:
+                ticks = n
+            elif ticks == n:
+                ticks = 0
+            cell += '`' * n
+            i += n
+            continue
+        if c == '|' and not ticks:
+            result.append(cell.strip())
+            cell = ''
+        else:
+            cell += c
+        i += 1
+    result.append(cell.strip())
+    if result and result[0] == '':
+        result.pop(0)
+    if result and result[-1] == '':
+        result.pop()
+    return result
 BOARD_WORDS = ('open', 'in', 'done', 'closed', 'released', 'fixed', 'superseded', 'decided', 'filed', 'transferred', 'handed')
 board = root / 'docs/evidence/backlog.md'
 if board.exists():
     for number, line in enumerate(board.read_text(encoding='utf-8').splitlines(), 1):
         if not line.startswith('| SB-'):
             continue
-        cells = re.split(r'(?<!\\)\|', line)
+        cells = table_cells(line)
+        # GitHub splits on every unescaped bar, inside code spans too; the shared reader keeps a
+        # code span's bars. A row has five cells for both, and its closing bar.
+        github = [c.strip() for c in re.split(r'(?<!\\)\|', line.strip())]
+        github = github[1:] if github and github[0] == '' else github
+        github = github[:-1] if github and github[-1] == '' else github
         where = f'docs/evidence/backlog.md:{number}'
-        if len(cells) != 7:
-            errors.append(f'{where}: {len(cells) - 2} cells, not 5 (write a | inside a cell as \\|)')
+        if len(github) != 5 or len(cells) != 5:
+            count = len(github) if len(github) != 5 else len(cells)
+            errors.append(f'{where}: {count} cells, not 5 (write a | inside a cell as \\|)')
             continue
-        status = cells[5].strip()
+        if not line.rstrip().endswith('|'):
+            errors.append(f'{where}: no closing | (the shared reader reads text after the last bar as a cell)')
+            continue
+        status = cells[4]
         word = re.match(r'[a-z]*', re.sub(r'^[*_\s]+', '', status).lower())[0]
         if word not in BOARD_WORDS:
             errors.append(f'{where}: status starts with "{word}", not one of {", ".join(BOARD_WORDS)}')

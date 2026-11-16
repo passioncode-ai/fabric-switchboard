@@ -8,6 +8,23 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- Restart every running Claude Code session, for example so it loads new skills: `switchboard sessions restart plan`, then `apply` (MCP `switchboard_sessions_restart_plan` and `_apply`). Each session restarts only at the end of its current turn and comes back as itself; a session in a session host restarts inside it and its windows stay attached; sessions stopped on a limit or waiting on something they set up are left alone; the session that asked restarts last and is told how the others came back; Switchboard watches each one until it is back (SB-397).
+- Fabric can mark a session that holds one of its tasks (`switchboard monitor hold`), so no idle or duplicate close and no restart wave ends it while the task is claimed; and Fabric can start a run that continues a task a session left unfinished (`switchboard dispatch --reason resume`), with its own exit rules (SB-398, SB-399).
+
+## 0.7.108
+
+- Releases 0.7.105 to 0.7.107 were not published: their Windows checks failed on test folders and a name that exist only on Unix. This release carries their changes, listed under them below.
+
+## 0.7.107
+
+- Releases 0.7.105 and 0.7.106 were not published: their Windows checks failed (a Unix-only name in the shared resume script, then a test folder that is not absolute on Windows). This release carries their changes, listed below.
+
+- A limit stop a session reports while Switchboard is quitting, updating or starting is kept and registered as soon as Switchboard runs again, instead of being lost; a restart or close the duty officer was in the middle of when Switchboard quit is finished by the next start (SB-397).
+
+## 0.7.106
+
+- Release 0.7.105 was not published: its Windows build failed on a Unix-only name the shared resume script used. This release carries every change listed under 0.7.105 below, and builds on Windows again.
+
 - A session stopped on a limit is no longer probed on an account that a fresh reading shows full until a known reset: it waits for the reset instead of stopping again every few minutes; and a stop whose session still runs is never started a second time, whichever app asks (SB-396).
 
 ## 0.7.105

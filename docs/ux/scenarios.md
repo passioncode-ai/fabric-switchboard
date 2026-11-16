@@ -103,6 +103,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 | SCN-094 | See what needs you at the top of Accounts | draft |
 | SCN-095 | Follow every coding session on this computer and what the watch found | draft |
 | SCN-098 | See and manage every session here and on other machines on one page | draft |
+| SCN-099 | Restart every running session so it loads new skills, and watch each come back | draft |
 ### SCN-001: First run
 **Persona:** P-01
 **Goal:** Deliberately control which account a coding session uses.
@@ -2130,3 +2131,24 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Coverage:** `session_rows::tests::*`; WebKit demo (`?demo=1`, sidebar → Sessions).
 **Product:** unobserved
 **Traces:** SB-395, SCN-095, SB-388, SB-342, SB-357
+### SCN-099: Restart every running session so it loads new skills, and watch each come back
+**Persona:** P-01
+**Goal:** After a new skill, plugin, hook or Claude Code, every running session picks it up without losing its work or history, and the person (or an agent) sees each one come back.
+**Preconditions:** the owner runs; macOS or Linux.
+**Entry point:** Sessions → *Restart all sessions*; an agent: MCP `switchboard_sessions_restart_plan`, then `_apply`.
+**Steps:**
+1. *Restart all sessions* → a dialog “Restart every running session?” reads the plan (“Reading which sessions can restart…”), then says how many sessions restart at the end of their current turn and come back as themselves, lists their folders, and under “Left as they are:” each skipped one with why (“stopped on a limit; it resumes when an account has room”, “waiting on a wake-up or a schedule it set”, “runs in two processes”, “a Fabric Dashboards console”, “its window predates restarts in place”, “not an interactive session”, “its folder or history is gone”).
+2. *Restart {n} sessions* → “The restart started. Each session restarts when its current turn ends.”; nothing ends mid-turn.
+3. A session in a Switchboard window restarts in place: the window stays, shows “[Switchboard restarted this session]” and the resumed session; another comes back in a new Terminal window.
+4. Above the machines, “Restart: {back} back, {waiting} waiting for their turn, {failed} failed.” while it runs, then “Last restart: {back} back, {failed} failed.” for a day; a failure reads as an error.
+**Alt paths:** nothing can restart → “No running session can be restarted now.” and no confirm button; the plan cannot be read → “The plan could not be read. Retry.”; the sessions changed since the plan → its refusal, make it again; a wave already runs → its refusal.
+**Expected result:** every listed session is back as itself with its history, and the page says how many came back.
+**UI elements:** the button, the dialog with its two lists, the confirm button, the status line.
+**States covered:** reading the plan, plan failed, nothing to restart, plan shown, running, done, failed.
+**Errors & recovery:** a session not back five minutes after its end is `failed` (the status line turns red); the transcript is never lost, so *Continue* on its row still resumes it.
+**Status:** draft
+**Meaning:** SB-397 R1 (operator 2026-11-16: «перезапустить все работающие сессии … например для перезагрузки скилов … мониторинг должен следить чтобы все поднялись назад и продолжили работу»).
+**Copy:** checked with Copylot, register ui; report ids in [strings](../brand/strings.md).
+**Coverage:** `restarts::tests::*`, `session_host::tests::a_restart_in_place_*`; WebKit demo (`?demo=1`, Sessions → *Restart all sessions*).
+**Product:** unobserved
+**Traces:** SB-397, SCN-098, SB-342
