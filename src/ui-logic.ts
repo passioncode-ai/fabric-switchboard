@@ -2083,7 +2083,7 @@ export function restartTone(state: string): 'ok' | 'warn' | 'danger' | 'muted' {
 export function restartSkipText(reason: string): string {
   switch (reason) {
     case 'limit': return t('stopped on a limit; it resumes when an account has room');
-    case 'has_waits': return t('waiting on a wake-up or a schedule it set');
+    case 'has_waits': return t('waiting on a wake-up or a schedule it set, or held by another tool');
     case 'duplicate': return t('runs in two processes');
     case 'console_not_hosted': return t('a Fabric Dashboards console');
     case 'host_too_old': return t('its window predates restarts in place');

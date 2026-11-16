@@ -2115,11 +2115,11 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Entry point:** the sidebar → *Sessions*.
 **Steps:**
 1. Open Sessions → “This computer” first, then a fold per group in this order, each with “{n} sessions”: *Needs attention*, *Running now*, *Waiting* (for quota or for a wake-up of its own), *Ended in the last day* (starts folded).
-2. Each row: “{agent} · {account}”, its state in words, coloured by the state itself (“Working” green; “Runs in two processes”, “A board run quiet for {n} min”, “Stopped on a limit, ready to continue”, “Stopped on a limit, next try in {when}” amber; “Its process is gone without an end” red; “Quiet {n} min”, “Ended” and the rest muted), its folder's name (the full path on hover), then how it started, its group and since when.
+2. Each row: “{agent} · {account}”, its state in words, coloured by the state itself (“Working” green; “Runs in two processes”, “A board run quiet for {n} min”, “Stopped on a limit, ready to continue”, “Stopped on a limit, next try in {when}” amber; “Its process is gone without an end”, “Did not start”, “Stopped at its time limit” red; “Quiet {n} min”, “Ended” and the rest muted), its folder's name (the full path on hover), then how it started, its group and since when.
 3. A copy of a session running twice → *Close this copy* on the copy Needs attention offers (the quiet or older one); the other keeps working.
 4. A hosted session → *Open here* (a Terminal window attached to it; closing that window leaves it running) and *End…* (asks first: “End this session?”, focus on *Cancel*).
 5. A session Switchboard closed (idle, a quiet copy, stopped making progress) or one that ended on a limit → *Continue*: it resumes as the same session in its own folder, with its history, in a Terminal window (SB-396).
-6. Each act's button names its session for a screen reader (“End the session in {folder}”); after an act focus returns to the button, or to *Restart all sessions…* when the row left its group.
+6. Each act's button names its session for a screen reader, starting with the words it shows (“Open here: the session in {folder}”); after an act focus returns to the button, or to *Restart all sessions…* when the row left its group (*Cancel the restart* while a restart runs).
 7. Each other machine follows as its own section with the same groups; one that could not be read says why: “Not answering over ssh now.”, “Switchboard is not installed there.”, “Its Switchboard is older than this page. Update it there.”, “Its answer could not be read.”, with when it was asked.
 8. The page reads again once a minute while it is on screen, never while another page is, and at once on *Refresh*.
 9. *Needs attention* on Accounts → *Open sessions* comes here.

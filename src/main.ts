@@ -3313,7 +3313,8 @@ async function loadSessionRows() {
   if (sessionRowsLoading) return;
   sessionRowsLoading = true; const stamp = clock.stamp();
   try { const value = await adapter.sessionRows(); if (clock.accepts(stamp)) { sessionRows = value; sessionRowsError = false; } } catch { sessionRowsError = true; }
-  try { const wave = await adapter.sessionsRestartStatus(); if (clock.accepts(stamp)) restartWave = wave; } catch { if (clock.accepts(stamp)) restartWave = null; }
+  // A read that failed for another reason than "no wave ran" keeps the wave on screen (a timeout mid-wave).
+  try { const wave = await adapter.sessionsRestartStatus(); if (clock.accepts(stamp)) restartWave = wave; } catch (failure) { if (clock.accepts(stamp) && safeError(failure, 'read') === RESTART_NONE) restartWave = null; }
   sessionRowsLoading = false; watchRestart(); backgroundRender();
 }
 /** SB-397 R1: while a wave runs, its progress is read every ten seconds, only while this page is on screen. */
@@ -3322,12 +3323,14 @@ function watchRestart() {
   if (page === 'sessions' && restartWave && !restartWave.done_at) restartPoll = window.setTimeout(() => { if (page === 'sessions') void loadSessionRows(); }, 10_000);
 }
 const restartRunning = () => !!restartWave && !restartWave.done_at;
+/** Where focus goes after an act that removes its row: the page's restart action, or *Cancel the restart* while it is off. */
+const actFocus = () => restartRunning() ? 'restart-cancel' : 'sessions-restart';
 function renderSessionsPage(main: HTMLElement) {
   if (!sessionRows) {
     if (sessionRowsError) {
       const state = emptyState(t('Unable to load sessions'), t('The sessions could not be read.')); state.classList.add('error-state');
       state.append(button(t('Retry'), () => void loadSessionRows(), 'button primary', 'sessions-retry')); main.append(state);
-    } else { const state = emptyState(t('Loading sessions'), t('Reading sessions…')); state.setAttribute('role', 'status'); main.append(state); }
+    } else { const state = emptyState(t('Loading sessions'), t('Asking this computer and your other machines…')); state.setAttribute('role', 'status'); main.append(state); }
     return;
   }
   if (sessionRowsError) { const stale = el('div', 'notice error stale-list'); stale.setAttribute('role', 'status'); stale.append(el('span', '', t('The list may be out of date: the last read failed.')), button(t('Retry'), () => void loadSessionRows(), 'text-button', 'sessions-retry')); main.append(stale); }
@@ -3370,10 +3373,10 @@ function sessionRowItem(row: SessionRow, target: string | null, now: number) {
   const key = `session-${row.id}`;
   // An act that ends the row's place in its group returns focus to the page's own action, which stays.
   const named = (node: HTMLButtonElement, label: string) => { node.setAttribute('aria-label', label); return node; };
-  if (row.acts.includes('close_copy') && !target && row.session_id) acts.append(named(button(t('Close this copy'), () => { const id = row.session_id!; void mutate(() => adapter.sessionCloseCopy(id, row.pid ?? undefined), t('Closed the quiet copy. The other one keeps working.'), 'sessions-restart').then(() => loadSessionRows()); }, 'button', `${key}-close`), t('Close the quiet copy of the session in {folder}', { folder: where })));
-  if (row.acts.includes('attach') && row.launch_id) acts.append(named(button(t('Open here'), () => { const id = row.launch_id!; void mutate(() => adapter.sessionAttach(id, target), t('Opened in a Terminal window. Closing that window leaves the session running.'), `${key}-attach`); }, 'button', `${key}-attach`), t('Open the session in {folder} here', { folder: where })));
+  if (row.acts.includes('close_copy') && !target && row.session_id) acts.append(named(button(t('Close this copy'), () => { const id = row.session_id!; void mutate(() => adapter.sessionCloseCopy(id, row.pid ?? undefined), t('Closed the quiet copy. The other one keeps working.'), actFocus()).then(() => loadSessionRows()); }, 'button', `${key}-close`), t('Close this copy: the session in {folder}', { folder: where })));
+  if (row.acts.includes('attach') && row.launch_id) acts.append(named(button(t('Open here'), () => { const id = row.launch_id!; void mutate(() => adapter.sessionAttach(id, target), t('Opened in a Terminal window. Closing that window leaves the session running.'), `${key}-attach`); }, 'button', `${key}-attach`), t('Open here: the session in {folder}', { folder: where })));
   // SB-396: Continue resumes this very session, with its own history; only here, never on another machine.
-  if (row.acts.includes('continue') && !target && row.session_id) acts.append(named(button(t('Continue'), () => { const id = row.session_id!; void mutate(() => adapter.sessionContinue(id), t('Continued in a Terminal window as the same session, with its history.'), 'sessions-restart').then(() => loadSessionRows()); }, 'button primary', `${key}-continue`), t('Continue the session in {folder}', { folder: where })));
+  if (row.acts.includes('continue') && !target && row.session_id) acts.append(named(button(t('Continue'), () => { const id = row.session_id!; void mutate(() => adapter.sessionContinue(id), t('Continued in a Terminal window as the same session, with its history.'), actFocus()).then(() => loadSessionRows()); }, 'button primary', `${key}-continue`), t('Continue the session in {folder}', { folder: where })));
   if (row.acts.includes('end') && row.launch_id) acts.append(named(button(t('End…'), () => endSessionDialog(row, target), 'button danger-text', `${key}-end`), t('End the session in {folder}', { folder: where })));
   if (acts.childElementCount) item.append(acts);
   return item;
@@ -3399,7 +3402,7 @@ function restartPanel(): HTMLElement | null {
       top.append(folder, el('span', `session-state is-${restartTone(s.state)}`, restartStateText(s.state, s.reason)));
       item.append(top);
       if (s.caller) item.append(el('p', 'form-note', t('The session that started this restart; it restarts last.')));
-      if (s.state === 'failed' && s.session_id) { const acts = el('div', 'row-actions'); acts.append(button(t('Continue'), () => { const id = s.session_id; void mutate(() => adapter.sessionContinue(id), t('Continued in a Terminal window as the same session, with its history.'), 'sessions-restart').then(() => loadSessionRows()); }, 'button primary', `restart-continue-${s.session_id}`)); item.append(acts); }
+      if (s.state === 'failed' && s.session_id) { const acts = el('div', 'row-actions'); const go = button(t('Continue'), () => { const id = s.session_id; void mutate(() => adapter.sessionContinue(id), t('Continued in a Terminal window as the same session, with its history.'), actFocus()).then(() => loadSessionRows()); }, 'button primary', `restart-continue-${s.session_id}`); go.setAttribute('aria-label', t('Continue the session in {folder}', { folder: s.folder ? folderName(s.folder) : t('an unknown folder') })); acts.append(go); item.append(acts); }
       list.append(item);
     }
     return [list];
@@ -3415,8 +3418,11 @@ async function restartDialog(note?: string) {
   if (note) context.body.append(el('p', 'form-note', note));
   let plan: RestartPlan;
   try { plan = await adapter.sessionsRestartPlan(); }
-  catch {
-    if (intro) intro.textContent = t('The restart plan could not be read.');
+  catch (failure) {
+    // A refusal the window knows (on Windows: restarts work on macOS and Linux) is said as it is.
+    const known = safeError(failure, 'read');
+    if (intro) intro.textContent = known === RESTART_UNSUPPORTED ? t(known) : t('The restart plan could not be read.');
+    if (known === RESTART_UNSUPPORTED) { if (cancel) cancel.textContent = t('Close'); cancel?.focus(); return; }
     const retry = button(t('Retry'), () => { context.close(); void restartDialog(); }, 'button primary'); context.actions.append(retry); retry.focus();
     return;
   }
@@ -3447,9 +3453,11 @@ async function restartDialog(note?: string) {
     event.preventDefault();
     void (async () => {
       context.error.textContent = ''; context.setBusy(true); clock.begin();
+      let started = false;
       try {
         await adapter.sessionsRestartApply(plan.digest, 'Restarted from the Sessions page');
-        context.setBusy(false); context.close(); showNotice(t('The restart started. Each session restarts when its current turn ends.')); void loadSessionRows();
+        started = true;
+        context.setBusy(false); context.close(); showNotice(t('The restart started. Each session restarts when its current turn ends.'));
       } catch (failure) {
         context.setBusy(false);
         const message = safeError(failure);
@@ -3457,17 +3465,21 @@ async function restartDialog(note?: string) {
         if (message === RESTART_PLAN_STALE) { context.close(); void restartDialog(t('The sessions changed since the last plan, so this is a new one.')); return; }
         context.error.textContent = t(message); context.error.tabIndex = -1; context.error.focus();
       } finally { clock.end(); }
+      // Read only once the mutation clock ended, or the read is dropped as older than the change.
+      if (started) { await loadSessionRows(); restoreFocus(actFocus()); }
     })();
   });
   // A restart of every session is a bulk act: focus starts on Cancel, as End's dialog does.
   cancel?.focus();
 }
 const RESTART_PLAN_STALE = 'The sessions changed since that plan was made. Make a new plan, check it, then apply it.';
+const RESTART_UNSUPPORTED = 'Restarting sessions works on macOS and Linux for now.';
+const RESTART_NONE = 'No restart wave has run on this computer.';
 /** SB-395: ending a hosted session asks first: its work in progress stops. */
 function endSessionDialog(row: SessionRow, target: string | null) {
   const where = target ? t('on {machine}', { machine: target }) : t('on this computer');
   const folder = row.folder ? folderName(row.folder) : t('an unknown folder');
-  const context = openDialog(t('End this session?'), t('The session in {folder} {where} stops now, with whatever it was doing. Its transcript stays, so it can be continued later.', { folder, where }));
+  const context = openDialog(t('End this session?'), t('The session in {folder} {where} stops now, with whatever it was doing. Its transcript stays, so it can be continued later.', { folder, where }), actFocus());
   const confirm = submit(t('End session')); confirm.className = 'button danger'; context.actions.append(confirm);
   context.form.addEventListener('submit', (event) => { event.preventDefault(); const id = row.launch_id!; void dialogSave(context, () => adapter.sessionEnd(id, target), t('The session ended.')).then(() => loadSessionRows()); });
   context.actions.querySelector('button')?.focus();

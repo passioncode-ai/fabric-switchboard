@@ -170,7 +170,6 @@ const ALLOWLIST = {
   'The stop could not be kept for later.': 'StopFailure hook (CLI) only, SB-397 W0.4 spool',
   // SB-397 R1: what the window never sends (it always names a reason) or reads and ignores (no wave yet).
   'Say why the sessions restart, in a few words.': 'restart waves: the window always names a reason and ignores a missing wave',
-  'No restart wave has run on this computer.': 'restart waves: the window always names a reason and ignores a missing wave',
   'Give the session id and a hold end within seven days from now, or 0 to release it.': 'monitor hold: Fabric calls the CLI only (SB-399)',
   "Give the hold's reason as one short word: lowercase letters, digits and underscores.": 'monitor hold --reason: Fabric calls the CLI only (SB-399)',
   "The session's hold could not be saved.": 'monitor hold: Fabric calls the CLI only (SB-399)',

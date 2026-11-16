@@ -206,6 +206,8 @@ a.address { color: var(--link); text-decoration: underline; text-underline-offse
 /* Sessions page: a row's acts and the restart panel's sit apart, as management actions do. */
 .row-actions { display: flex; flex-wrap: wrap; gap: var(--space-3); margin-top: var(--space-1); }
 .session-folder { overflow-wrap: anywhere; }
+/* A row's lines (folder, facts, a reason) sit close under its title, as an event row's do. */
+.session-row > p { margin: 0; }
 .setup-facts { list-style: none; margin: var(--space-2) 0 var(--space-3); padding: 0; display: grid; gap: var(--space-1); }
 .setup-facts li { color: var(--muted); }
 .setup-facts li::before { content: '–'; display: inline-block; width: 1.4em; }
