@@ -64,6 +64,7 @@ pub mod seats;
 pub mod self_update;
 pub mod serve_update;
 #[cfg(unix)]
+pub mod session_accounts;
 pub mod session_host;
 pub mod session_rows;
 pub mod session_watch;
@@ -75,7 +76,6 @@ mod statistics;
 pub mod stop_spool;
 pub mod suggest;
 pub mod targets;
-mod test_seams;
 pub mod uninstall;
 mod usage_gate;
 pub mod vault_choice;

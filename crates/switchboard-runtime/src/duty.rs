@@ -330,7 +330,7 @@ pub fn parse_table(text: &str) -> HashMap<u32, Row> {
 /// The whole process table once per check; None when `ps` could not be read (then no session
 /// is found stalled or finished: `commands_known` stays false, SB-396 D1).
 pub(crate) fn process_table() -> Option<HashMap<u32, Row>> {
-    if crate::test_seams::no_processes() {
+    if fabric_sessions_core::test_seams::no_processes() {
         return Some(HashMap::new());
     }
     #[cfg(unix)]
