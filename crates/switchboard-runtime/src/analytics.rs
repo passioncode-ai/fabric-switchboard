@@ -132,6 +132,16 @@ pub(crate) fn adopt(folder: &Path, old: &Path) -> bool {
     linked
 }
 
+/// SB-385: the shared installation as it is, never creating it: `None` when no PassionCode app
+/// has written it yet, `Err` when it cannot be read or parsed.
+fn read_installation(folder: &Path) -> Result<Option<Installation>, ()> {
+    match std::fs::read(folder.join(SHARED_FILE)) {
+        Ok(bytes) => parse(&bytes).map(Some).map_err(|_| ()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(_) => Err(()),
+    }
+}
+
 /// Reads the shared installation, creating it when no PassionCode app has yet. Creation never
 /// replaces a file another app wrote at the same moment: the new file is linked into place, which
 /// fails if one is already there, and that one is read instead. `created` tells the caller this
@@ -203,7 +213,11 @@ pub fn set_shared_enabled(folder: &Path, enabled: bool) -> Result<Installation, 
 /// The rule this state was last written under: absent (0) in every state written before SB-246,
 /// 2 since. Only a state from before reads the old fields (`disclosed_at`, a day without the
 /// install flag) as history.
-const RULE: u32 = 2;
+const RULE: u32 = 3;
+/// SB-385 (the contract's DEC-0157 UD-1): the notice's wording. Version 2 names the installation
+/// id shared with the other PassionCode.ai apps and the session id; a person who read version 1
+/// sees it again, once, and nothing is sent until the current version was shown.
+pub const NOTICE_VERSION: u32 = 2;
 
 /// This app's bookkeeping: whether the install was reported, the last day reported active, the
 /// accounts already counted (ids stay on this machine), Switchboard's own switch (SB-246; absent
@@ -224,6 +238,20 @@ struct State {
     /// When the person acknowledged the first-run notice (SB-246); absent shows it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     notice_at: Option<i64>,
+    /// SB-385 (UD-1): the notice version the person acknowledged (`notice_at` with no version
+    /// is version 1) and the one the window last showed. Nothing is sent before the current
+    /// version was shown.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    notice_version: u32,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    shown_version: u32,
+    /// SB-385 (UD-2): something was sent once; before that, an off in the shared file that the
+    /// person never answered here is read as their earlier no.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    sent: bool,
+    /// SB-385: the switch is off because of that earlier no (the notice says where to turn it on).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    shared_no: bool,
     #[serde(default)]
     active_day: Option<i64>,
     #[serde(default)]
@@ -233,13 +261,41 @@ struct State {
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     machine_first: bool,
 }
+fn is_zero(v: &u32) -> bool {
+    *v == 0
+}
 impl State {
+    /// SB-385: the current notice still waits for the person.
+    fn notice_pending(&self) -> bool {
+        self.notice_version < NOTICE_VERSION
+    }
+    /// SB-385 (UD-2): before the first send, or at the first run under this rule for an install
+    /// that sent before it, an off in the shared file the person never answered here is their
+    /// earlier no. Whether it changed the state.
+    fn read_shared_no(&mut self, shared: &Path) -> Result<bool, ()> {
+        if self.enabled.is_some() || (self.sent && self.rule >= RULE) {
+            return Ok(false);
+        }
+        // No shared file yet: no other app said anything, so there is no earlier no.
+        let Some(installation) = read_installation(shared)? else {
+            return Ok(false);
+        };
+        if installation.analytics {
+            return Ok(false);
+        }
+        self.enabled = Some(false);
+        self.shared_no = true;
+        Ok(true)
+    }
     /// At load: a state from before SB-246 that was never answered under issue #128 and reported
     /// a day but not the install (0.6.81 and earlier) was an install all the same, so it is never
     /// reported a second time. A day in a state answered under issue #128 says nothing about the
     /// install: an answer of off, then on in one run, reported a day before the install.
     fn migrated(mut self) -> Self {
-        if self.rule < RULE
+        if self.notice_at.is_some() && self.notice_version == 0 {
+            self.notice_version = 1;
+        }
+        if self.rule < 2
             && self.disclosed_at.is_none()
             && self.active_day.is_some()
             && !self.installed
@@ -320,7 +376,7 @@ impl Analytics {
         // Off for this run only, not written: the shared file could not be read, so the old
         // answer is decided at a later start (the state keeps its old rule until then).
         let mut deferred = false;
-        if state.rule < RULE && state.enabled.is_none() && state.disclosed_at.is_some() {
+        if state.rule < 2 && state.enabled.is_none() && state.disclosed_at.is_some() {
             match installation(&shared) {
                 Ok((i, _)) => {
                     state.enabled = Some(i.analytics);
@@ -329,7 +385,14 @@ impl Analytics {
                 Err(_) => deferred = true,
             }
         }
+        // SB-385 (UD-2): an earlier no in the shared file. A shared file that cannot be read now
+        // defers the reading: nothing can be sent meanwhile (fail closed), and the rule is kept.
+        match state.read_shared_no(&shared) {
+            Ok(changed) => migrate |= changed,
+            Err(()) => deferred = true,
+        }
         if !deferred {
+            migrate |= state.rule != RULE;
             state.rule = RULE;
         }
         let on = state.on() && !deferred;
@@ -379,10 +442,28 @@ impl Analytics {
     /// first-run notice still waits to be acknowledged (SB-246).
     pub fn status(&self) -> Value {
         let state = self.state.lock().unwrap_or_else(|p| p.into_inner());
+        let shared = read_installation(&self.shared);
+        let shown = state.shown_version >= NOTICE_VERSION;
+        // SB-385: why nothing leaves while the switch reads on: the notice was not shown yet, or
+        // the shared installation file cannot be read ("on, but nothing is sent").
+        let held = if !self.on() {
+            None
+        } else if shared.is_err() {
+            Some("shared_unreadable")
+        } else if !shown {
+            Some("notice")
+        } else {
+            None
+        };
         json!({
             "available": true,
             "enabled": self.on(),
-            "notice_pending": state.notice_at.is_none(),
+            "notice_pending": state.notice_pending(),
+            "notice_version": NOTICE_VERSION,
+            "sending": self.on() && held.is_none(),
+            "held": held,
+            "shared_no": state.shared_no,
+            "installation_id": shared.ok().flatten().map(|i| i.id),
         })
     }
 
@@ -390,12 +471,38 @@ impl Analytics {
     pub fn acknowledge(&self) -> Value {
         {
             let mut state = self.state.lock().unwrap_or_else(|p| p.into_inner());
-            if state.notice_at.is_none() {
+            if state.notice_pending() {
                 state.notice_at = Some(now());
+                state.notice_version = NOTICE_VERSION;
+                state.shown_version = NOTICE_VERSION;
                 self.save(&state);
             }
         }
         self.status()
+    }
+
+    /// SB-385 (UD-1): the window showed the current notice where the person reads it; from now
+    /// on what waits may leave. It answers nothing.
+    pub fn notice_shown(&self) -> Value {
+        {
+            let mut state = self.state.lock().unwrap_or_else(|p| p.into_inner());
+            if state.shown_version < NOTICE_VERSION {
+                state.shown_version = NOTICE_VERSION;
+                self.save(&state);
+            }
+        }
+        self.status()
+    }
+
+    /// SB-385 (UD-1): whether events may leave now: the switch is on and the current notice was
+    /// shown.
+    fn may_send(&self) -> bool {
+        self.on()
+            && self
+                .state
+                .lock()
+                .map(|s| s.shown_version >= NOTICE_VERSION)
+                .unwrap_or(false)
     }
 
     /// Switchboard's own switch (SB-246): About's checkbox or the notice's *Turn off*. It never
@@ -405,8 +512,11 @@ impl Analytics {
         {
             let mut state = self.state.lock().unwrap_or_else(|p| p.into_inner());
             state.enabled = Some(enabled);
-            if state.notice_at.is_none() {
+            state.shared_no = false;
+            if state.notice_pending() {
                 state.notice_at = Some(now());
+                state.notice_version = NOTICE_VERSION;
+                state.shown_version = NOTICE_VERSION;
             }
             // A choice that cannot be written (`analytics_state_unwritable`) holds for this run.
             self.save(&state);
@@ -497,6 +607,21 @@ impl Analytics {
             // The shared file cannot be read just now: keep what waits for a later pass.
             return;
         }
+        if !self.may_send() {
+            // SB-385 (UD-1): the notice has not been shown yet; what waits stays queued.
+            return;
+        }
+        {
+            // SB-385 (UD-2): before the first send, a shared off read as the person's earlier no.
+            let mut state = self.state.lock().unwrap_or_else(|p| p.into_inner());
+            if let Ok(true) = state.read_shared_no(&self.shared) {
+                self.save(&state);
+                self.on.store(false, Ordering::SeqCst);
+                drop(state);
+                clear();
+                return;
+            }
+        }
         loop {
             let batch: Vec<Event> = {
                 let mut queue = self.queue.lock().unwrap_or_else(|p| p.into_inner());
@@ -533,6 +658,13 @@ impl Analytics {
                 break;
             }
             self.retry_at.store(0, Ordering::SeqCst);
+            if outcome == "sent" {
+                let mut state = self.state.lock().unwrap_or_else(|p| p.into_inner());
+                if !state.sent {
+                    state.sent = true;
+                    self.save(&state);
+                }
+            }
             let sent: std::collections::BTreeSet<u64> = batch.iter().map(|e| e.seq).collect();
             let mut queue = self.queue.lock().unwrap_or_else(|p| p.into_inner());
             queue.retain(|e| !sent.contains(&e.seq));
@@ -848,6 +980,13 @@ fn rfc3339(seconds: i64) -> String {
 
 #[cfg(test)]
 mod tests {
+    /// SB-385: a client whose window has shown the current notice, as every client did before
+    /// UD-1; the tests of the notice itself build theirs without it.
+    fn shown(client: Analytics) -> Analytics {
+        client.notice_shown();
+        client
+    }
+
     use super::*;
     use axum::{extract::State, http::StatusCode, routing::post, Json, Router};
     use std::sync::Arc;
@@ -1110,7 +1249,12 @@ mod tests {
         let url = serve(server.clone()).await;
         let folder = tempfile::tempdir().unwrap();
         let shared = folder.path().join("PassionCode");
-        let client = Analytics::new("A-SH-0000000000", &url, shared.clone(), folder.path());
+        let client = shown(Analytics::new(
+            "A-SH-0000000000",
+            &url,
+            shared.clone(),
+            folder.path(),
+        ));
         let mut one = snapshot(vec![account("acct-1", Provider::Claude, AuthKind::OAuth)]);
         // C-Q6: chains and ceilings whose scopes, ids, key name and amount are planted.
         one.chains = planted_chains();
@@ -1214,7 +1358,7 @@ mod tests {
         let url = serve(server.clone()).await;
         let folder = tempfile::tempdir().unwrap();
         let shared = folder.path().join("PassionCode");
-        let client = Analytics::new("k", &url, shared.clone(), folder.path());
+        let client = shown(Analytics::new("k", &url, shared.clone(), folder.path()));
         let one = snapshot(vec![account("acct-1", Provider::Claude, AuthKind::OAuth)]);
         let today = 20_001;
         crate::errors::add(today - 1, "update_check".into(), "check_failed".into());
@@ -1274,7 +1418,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn on_by_default_a_background_start_sends_from_the_first_start() {
+    async fn on_by_default_a_background_start_queues_and_sends_once_the_notice_was_shown() {
         // SB-246 (operator 2026-11-04): on by default, nothing held for an answer.
         let server = Server::default();
         let url = serve(server.clone()).await;
@@ -1287,6 +1431,13 @@ mod tests {
             (&json!(true), &json!(true))
         );
         everything(&client, "background");
+        // SB-385 (UD-1): queued from the first start, sent only once the notice was shown.
+        client.flush().await;
+        assert!(names(&server).is_empty(), "nothing before the notice");
+        assert_eq!(client.status()["held"], "notice");
+        assert_eq!(client.status()["sending"], false);
+        client.notice_shown();
+        assert_eq!(client.status()["sending"], true);
         client.flush().await;
         assert_eq!(
             names(&server),
@@ -1306,7 +1457,7 @@ mod tests {
         // The notice still waits: nothing was acknowledged by sending.
         assert_eq!(client.status()["notice_pending"], true);
         // A restart (the login item) sends its start, never a second install.
-        let again = Analytics::new("k", &url, shared, folder.path());
+        let again = shown(Analytics::new("k", &url, shared, folder.path()));
         again.started("background", &snapshot(vec![]));
         again.flush().await;
         assert_eq!(
@@ -1325,7 +1476,7 @@ mod tests {
         let url = serve(server.clone()).await;
         let folder = tempfile::tempdir().unwrap();
         let shared = folder.path().join("PassionCode");
-        let client = Analytics::new("k", &url, shared.clone(), folder.path());
+        let client = shown(Analytics::new("k", &url, shared.clone(), folder.path()));
         client.started("ordinary", &snapshot(vec![]));
         let status = client.acknowledge();
         assert_eq!(
@@ -1337,11 +1488,16 @@ mod tests {
             state_file(folder.path()).get("enabled").is_none(),
             "absent is on"
         );
-        let restarted = Analytics::new("k", &url, shared, folder.path());
+        let restarted = shown(Analytics::new("k", &url, shared, folder.path()));
         assert_eq!(restarted.status()["notice_pending"], false, "shown once");
         // Turning off from the notice answers it too.
         let other = tempfile::tempdir().unwrap();
-        let fresh = Analytics::new("k", &url, other.path().join("PassionCode"), other.path());
+        let fresh = shown(Analytics::new(
+            "k",
+            &url,
+            other.path().join("PassionCode"),
+            other.path(),
+        ));
         let status = fresh.set_enabled(false).unwrap();
         assert_eq!(
             (&status["enabled"], &status["notice_pending"]),
@@ -1362,7 +1518,7 @@ mod tests {
             br#"{"installed":true,"disclosed_at":1791165882,"active_day":20000,"known":{}}"#,
         )
         .unwrap();
-        let client = Analytics::new("k", &url, shared.clone(), folder.path());
+        let client = shown(Analytics::new("k", &url, shared.clone(), folder.path()));
         let status = client.status();
         assert_eq!(
             (&status["enabled"], &status["notice_pending"]),
@@ -1372,7 +1528,7 @@ mod tests {
         client.flush().await;
         assert_eq!(names(&server), ["app_started"], "never a second install");
         client.acknowledge();
-        let restarted = Analytics::new("k", &url, shared, folder.path());
+        let restarted = shown(Analytics::new("k", &url, shared, folder.path()));
         assert_eq!(restarted.status()["notice_pending"], false);
         let state = state_file(folder.path());
         assert_eq!(
@@ -1382,19 +1538,20 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn an_install_whose_shared_file_says_off_still_sends_when_never_answered_here() {
-        // SB-246: "для всех уже текущих тоже по дефолту включено"; another app's switch is its own.
+    async fn a_shared_off_before_the_first_send_is_the_persons_earlier_no() {
+        // SB-385 (the contract's DEC-0157 UD-2): an off in the shared file, present before this
+        // product's first send (or at the first run of this rule for an install that sent before),
+        // on an install whose own switch the person never set, is their earlier no.
         let server = Server::default();
         let url = serve(server.clone()).await;
         let folder = tempfile::tempdir().unwrap();
         let shared = folder.path().join("PassionCode");
         set_shared_enabled(&shared, false).unwrap();
-        // Fresh, and from 0.6.81 or earlier (never answered here).
         for (name, body) in [
             ("fresh", None),
             (
                 "old",
-                Some(&br#"{"installed":true,"active_day":20000}"#[..]),
+                Some(&br#"{"rule":2,"installed":true,"active_day":20000}"#[..]),
             ),
         ] {
             let data = folder.path().join(name);
@@ -1402,13 +1559,65 @@ mod tests {
             if let Some(body) = body {
                 std::fs::write(data.join(STATE_FILE), body).unwrap();
             }
-            let client = Analytics::new("k", &url, shared.clone(), &data);
-            assert_eq!(client.status()["enabled"], true, "{name}");
+            let client = shown(Analytics::new("k", &url, shared.clone(), &data));
+            let status = client.status();
+            assert_eq!(status["enabled"], false, "{name}");
+            assert_eq!(status["shared_no"], true, "{name}");
             client.switched("claude", "native", "manual");
             client.flush().await;
+            // The person turns it on in Switchboard: from then on its own switch alone counts.
+            client.set_enabled(true).unwrap();
+            assert_eq!(client.status()["shared_no"], false);
+            client.switched("claude", "native", "manual");
+            client.flush().await;
+            let again = Analytics::new("k", &url, shared.clone(), &data);
+            assert_eq!(again.status()["enabled"], true, "{name}: own switch kept");
         }
         assert_eq!(names(&server), ["account_switched", "account_switched"]);
         assert!(!installation(&shared).unwrap().0.analytics, "never written");
+        // After the first send, a shared off written later changes nothing.
+        let data = folder.path().join("sent");
+        std::fs::create_dir_all(&data).unwrap();
+        set_shared_enabled(&shared, true).unwrap();
+        let client = shown(Analytics::new("k", &url, shared.clone(), &data));
+        client.switched("claude", "native", "manual");
+        client.flush().await;
+        set_shared_enabled(&shared, false).unwrap();
+        let restarted = Analytics::new("k", &url, shared.clone(), &data);
+        assert_eq!(restarted.status()["enabled"], true);
+    }
+
+    #[tokio::test]
+    async fn the_notice_v2_shows_once_more_to_those_who_read_v1_and_nothing_leaves_before_it() {
+        // SB-385 (UD-1): the notice changed (installation id shared, session id); a person who
+        // acknowledged version 1 sees it again once, and nothing is sent before it was shown.
+        let server = Server::default();
+        let url = serve(server.clone()).await;
+        let folder = tempfile::tempdir().unwrap();
+        let shared = folder.path().join("PassionCode");
+        // Another PassionCode app made the shared installation; the notice names its id.
+        let (made, _) = installation(&shared).unwrap();
+        std::fs::write(
+            folder.path().join(STATE_FILE),
+            br#"{"rule":2,"installed":true,"notice_at":1790000000}"#,
+        )
+        .unwrap();
+        let client = Analytics::new("k", &url, shared.clone(), folder.path());
+        let status = client.status();
+        assert_eq!(status["notice_pending"], true);
+        assert_eq!(status["notice_version"], NOTICE_VERSION);
+        assert_eq!(status["installation_id"], made.id.as_str());
+        client.switched("claude", "native", "manual");
+        client.flush().await;
+        assert!(names(&server).is_empty());
+        client.notice_shown();
+        client.flush().await;
+        assert_eq!(names(&server), ["account_switched"]);
+        client.acknowledge();
+        assert_eq!(client.status()["notice_pending"], false);
+        let restarted = Analytics::new("k", &url, shared, folder.path());
+        assert_eq!(restarted.status()["notice_pending"], false);
+        assert_eq!(restarted.status()["sending"], true);
     }
 
     #[tokio::test]
@@ -1426,7 +1635,7 @@ mod tests {
             set_shared_enabled(&shared, shared_on).unwrap();
             std::fs::write(data.join(STATE_FILE), old).unwrap();
             let before = shared_bytes(&shared);
-            let client = Analytics::new("k", &url, shared.clone(), &data);
+            let client = shown(Analytics::new("k", &url, shared.clone(), &data));
             assert_eq!(client.status()["enabled"], shared_on, "{name}");
             assert_eq!(
                 state_file(&data)["enabled"],
@@ -1437,7 +1646,7 @@ mod tests {
             client.flush().await;
             // Decided once: the shared switch flipping later does not change Switchboard's.
             set_shared_enabled(&shared, !shared_on).unwrap();
-            let restarted = Analytics::new("k", &url, shared.clone(), &data);
+            let restarted = shown(Analytics::new("k", &url, shared.clone(), &data));
             assert_eq!(restarted.status()["enabled"], shared_on, "{name}");
             set_shared_enabled(&shared, shared_on).unwrap();
             assert_eq!(shared_bytes(&shared).len(), before.len());
@@ -1457,7 +1666,7 @@ mod tests {
         std::fs::write(data.path().join(STATE_FILE), old).unwrap();
         // The shared file cannot be read: a folder in its place.
         std::fs::create_dir_all(shared.join(SHARED_FILE)).unwrap();
-        let client = Analytics::new("k", &url, shared.clone(), data.path());
+        let client = shown(Analytics::new("k", &url, shared.clone(), data.path()));
         assert_eq!(client.status()["enabled"], false, "fail closed for the run");
         everything(&client, "ordinary");
         client.flush().await;
@@ -1471,7 +1680,7 @@ mod tests {
         // Readable again and on: the old answer is decided now, once.
         std::fs::remove_dir(shared.join(SHARED_FILE)).unwrap();
         set_shared_enabled(&shared, true).unwrap();
-        let restarted = Analytics::new("k", &url, shared.clone(), data.path());
+        let restarted = shown(Analytics::new("k", &url, shared.clone(), data.path()));
         assert_eq!(restarted.status()["enabled"], true);
         assert_eq!(state_file(data.path())["enabled"], true);
     }
@@ -1482,7 +1691,7 @@ mod tests {
         let url = serve(server.clone()).await;
         let folder = tempfile::tempdir().unwrap();
         let shared = folder.path().join("PassionCode");
-        let client = Analytics::new("k", &url, shared.clone(), folder.path());
+        let client = shown(Analytics::new("k", &url, shared.clone(), folder.path()));
         client.started("ordinary", &snapshot(vec![]));
         let before = shared_bytes(&shared);
         assert!(client.pending() > 0);
@@ -1490,7 +1699,7 @@ mod tests {
         assert_eq!(client.pending(), 0, "what waits is dropped");
         everything(&client, "ordinary");
         client.flush().await;
-        let restarted = Analytics::new("k", &url, shared.clone(), folder.path());
+        let restarted = shown(Analytics::new("k", &url, shared.clone(), folder.path()));
         everything(&restarted, "background");
         restarted.flush().await;
         assert!(server.bodies.lock().unwrap().is_empty());
@@ -1525,14 +1734,14 @@ mod tests {
             br#"{"rule":2,"enabled":false}"#,
         )
         .unwrap();
-        let client = Analytics::new("k", &url, shared.clone(), folder.path());
+        let client = shown(Analytics::new("k", &url, shared.clone(), folder.path()));
         let none = snapshot(vec![]);
         client.started("ordinary", &none);
         client.set_enabled(true).unwrap();
         client.tick(&none, now());
         client.flush().await;
         assert_eq!(names(&server), ["app_active"]);
-        let restarted = Analytics::new("k", &url, shared.clone(), folder.path());
+        let restarted = shown(Analytics::new("k", &url, shared.clone(), folder.path()));
         restarted.started("ordinary", &none);
         restarted.flush().await;
         assert_eq!(
@@ -1541,7 +1750,7 @@ mod tests {
         );
         assert_eq!(events(&server)[1]["props"]["first_passioncode_app"], true);
         assert!(state_file(folder.path()).get("machine_first").is_none());
-        let again = Analytics::new("k", &url, shared, folder.path());
+        let again = shown(Analytics::new("k", &url, shared, folder.path()));
         again.started("ordinary", &none);
         again.flush().await;
         assert_eq!(
@@ -1563,7 +1772,12 @@ mod tests {
             br#"{"installed":false,"active_day":20000}"#,
         )
         .unwrap();
-        let client = Analytics::new("k", &url, folder.path().join("PassionCode"), folder.path());
+        let client = shown(Analytics::new(
+            "k",
+            &url,
+            folder.path().join("PassionCode"),
+            folder.path(),
+        ));
         client.started("ordinary", &snapshot(vec![]));
         client.flush().await;
         assert_eq!(names(&server), ["app_started"]);
@@ -1577,7 +1791,12 @@ mod tests {
         let url = serve(server.clone()).await;
         let folder = tempfile::tempdir().unwrap();
         std::fs::write(folder.path().join(STATE_FILE), b"{not json").unwrap();
-        let client = Analytics::new("k", &url, folder.path().join("PassionCode"), folder.path());
+        let client = shown(Analytics::new(
+            "k",
+            &url,
+            folder.path().join("PassionCode"),
+            folder.path(),
+        ));
         assert_eq!(client.status()["enabled"], false);
         everything(&client, "ordinary");
         client.flush().await;
@@ -1594,7 +1813,7 @@ mod tests {
         let url = serve(server.clone()).await;
         let folder = tempfile::tempdir().unwrap();
         let shared = folder.path().join("PassionCode");
-        let client = Analytics::new("k", &url, shared.clone(), folder.path());
+        let client = shown(Analytics::new("k", &url, shared.clone(), folder.path()));
         client.track("x", Map::new());
         let file = shared.join(SHARED_FILE);
         let body = std::fs::read(&file).unwrap();
@@ -1619,7 +1838,12 @@ mod tests {
         let folder = tempfile::tempdir().unwrap();
         // A folder where the state file should be: unreadable and unwritable.
         std::fs::create_dir(folder.path().join(STATE_FILE)).unwrap();
-        let client = Analytics::new("k", &url, folder.path().join("PassionCode"), folder.path());
+        let client = shown(Analytics::new(
+            "k",
+            &url,
+            folder.path().join("PassionCode"),
+            folder.path(),
+        ));
         assert!(
             !client.save(&State::default()),
             "a failed write is reported"
@@ -1642,7 +1866,7 @@ mod tests {
         let url = serve(server.clone()).await;
         let folder = tempfile::tempdir().unwrap();
         let shared = folder.path().join("PassionCode");
-        let client = Analytics::new("k", &url, shared.clone(), folder.path());
+        let client = shown(Analytics::new("k", &url, shared.clone(), folder.path()));
         client.started("ordinary", &snapshot(vec![]));
         let before = shared_bytes(&shared);
         for enabled in [false, true, false] {
@@ -1656,7 +1880,8 @@ mod tests {
     /// Through the runtime, as the desktop app runs it: a background start sends its start and
     /// the day at once (SB-246).
     #[tokio::test]
-    async fn through_the_runtime_a_background_start_sends_the_start_and_the_day() {
+    async fn through_the_runtime_a_background_start_queues_the_start_and_the_day_until_the_notice()
+    {
         let server = Server::default();
         let url = serve(server.clone()).await;
         let root = tempfile::tempdir().unwrap();
@@ -1672,6 +1897,10 @@ mod tests {
         let mut pass = crate::monitor::Pass::default();
         pass.run(&runtime, false, now()).await;
         let client = runtime.analytics().unwrap();
+        // SB-385 (UD-1): queued by the pass, held until the window showed the notice.
+        client.flush().await;
+        assert!(names(&server).is_empty(), "nothing before the notice");
+        assert_eq!(runtime.analytics_notice_shown()["sending"], true);
         // The pass spawns its own flush; ours may find it running, so wait for the queue to empty.
         for _ in 0..200 {
             client.flush().await;
@@ -1707,7 +1936,7 @@ mod tests {
         let shared = folder.path().join("PassionCode");
         let accounts = snapshot(vec![account("acct-1", Provider::Claude, AuthKind::OAuth)]);
         {
-            let client = Analytics::new("k", &url, shared.clone(), folder.path());
+            let client = shown(Analytics::new("k", &url, shared.clone(), folder.path()));
             client.set_enabled(true).unwrap();
             client.started("ordinary", &accounts);
             client.tick(&accounts, 86_400 * 20_000 + 10);
@@ -1715,7 +1944,7 @@ mod tests {
             client.flush().await;
         }
         // A restart on the same day: no second install, no second active, nothing "added".
-        let client = Analytics::new("k", &url, shared, folder.path());
+        let client = shown(Analytics::new("k", &url, shared, folder.path()));
         client.started("ordinary", &accounts);
         client.tick(&accounts, 86_400 * 20_000 + 900);
         client.tick(&accounts, 86_400 * 20_001 + 1);
@@ -1738,7 +1967,7 @@ mod tests {
         let url = serve(server.clone()).await;
         let folder = tempfile::tempdir().unwrap();
         let shared = folder.path().join("PassionCode");
-        let client = Analytics::new("k", &url, shared.clone(), folder.path());
+        let client = shown(Analytics::new("k", &url, shared.clone(), folder.path()));
         client.set_enabled(true).unwrap();
         let one = snapshot(vec![account("acct-1", Provider::Claude, AuthKind::OAuth)]);
         client.started("ordinary", &one);
@@ -1763,7 +1992,12 @@ mod tests {
         let server = Server::default();
         let url = serve(server.clone()).await;
         let folder = tempfile::tempdir().unwrap();
-        let client = Analytics::new("k", &url, folder.path().join("PassionCode"), folder.path());
+        let client = shown(Analytics::new(
+            "k",
+            &url,
+            folder.path().join("PassionCode"),
+            folder.path(),
+        ));
         client.set_enabled(true).unwrap();
         *server.status.lock().unwrap() = 429;
         for _ in 0..30 {
@@ -1793,7 +2027,12 @@ mod tests {
         let server = Server::default();
         let url = serve(server.clone()).await;
         let folder = tempfile::tempdir().unwrap();
-        let client = Analytics::new("k", &url, folder.path().join("PassionCode"), folder.path());
+        let client = shown(Analytics::new(
+            "k",
+            &url,
+            folder.path().join("PassionCode"),
+            folder.path(),
+        ));
         client.set_enabled(true).unwrap();
         for _ in 0..3 {
             client.track("first", Map::new());

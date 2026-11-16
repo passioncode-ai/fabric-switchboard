@@ -152,7 +152,7 @@ pub(crate) fn tools() -> Vec<(bool, Value)> {
         (true, json!({"name":"switchboard_project_move_root","title":"Move a repository to another group","description":"Move a repository (its root folder) with the worktrees and clones under it into another group in one step, add one that is in no group, or with also add it to one more group and keep it in its others (a repository may be in several groups). Only when the operator asks. A group keeps at least one folder; a repository inside a group folder moves with that folder.","inputSchema":{"type":"object","properties":{"folder":{"type":"string","minLength":1,"description":"The repository's absolute folder, as switchboard_projects or switchboard_repository_map lists it."},"pool":{"type":"string","minLength":1,"description":"The group id from switchboard_projects."},"also":{"type":"boolean","description":"Add it to this group and keep it in its other groups (a repository may be in several)."},"from":{"type":"string","minLength":1,"description":"The group id it leaves, when it is in several."}},"required":["folder","pool"],"additionalProperties":false}})),
         (true, json!({"name":"switchboard_app","title":"Updates and opening at login","description":"What the installed app's About and tray do, answered by the running app only. action updates: the update state, or with enabled turns Install updates automatically on or off; check_for_updates: check now; restart_to_update: install a downloaded update and restart (Switchboard drains as on Quit); login_item: whether Switchboard opens at login, or with enabled sets it. Changing anything only when the operator asks.","inputSchema":{"type":"object","properties":{"action":{"type":"string","enum":["updates","check_for_updates","restart_to_update","login_item"]},"enabled":{"type":"boolean"}},"required":["action"],"additionalProperties":false}})),
         (true, json!({"name":"switchboard_link_cli","title":"Put switchboard on PATH","description":"Link this switchboard into ~/.local/bin, as the window's Link the CLI does. Never replaces a file that is not Switchboard's. Only when the operator asks.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}})),
-        (true, json!({"name":"switchboard_analytics","title":"Usage analytics","description":"Switchboard's own usage analytics (counts and kinds only), as the window's About sets it: enabled true or false turns them on or off, only when the operator asks; without enabled, the state (available, enabled, notice_pending). Only the installed app sends them.","inputSchema":{"type":"object","properties":{"enabled":{"type":"boolean"}},"additionalProperties":false}})),
+        (true, json!({"name":"switchboard_analytics","title":"Usage analytics","description":"Switchboard's own usage analytics (counts and kinds only), as the window's Settings sets it. Without enabled, the state: available, enabled, notice_pending, sending (false while the notice was not shown yet or the shared installation file cannot be read: held names which), shared_no (off because the shared file said no before the first send) and installation_id. enabled true or false turns them on or off and needs decision, the operator's own words relayed (by operator, instruction verbatim, at RFC 3339, source): a change of policy is the operator's. Only the installed app sends them.","inputSchema":{"type":"object","properties":{"enabled":{"type":"boolean"},"decision":{"type":"object","properties":{"by":{"type":"string","enum":["operator"]},"instruction":{"type":"string","minLength":1,"maxLength":500},"at":{"type":"string"},"source":{"type":"string","minLength":1,"maxLength":200}},"required":["by","instruction","at","source"],"additionalProperties":false,"description":"The operator's words that ordered the change."}},"additionalProperties":false}})),
         (false, json!({"name":"switchboard_github","title":"GitHub owners and repositories","description":"Through the person's own gh: without owner, the owners gh can see (the person and their organizations); with owner, that owner's repositories, each with where it is on this computer and its group. Reads only.","inputSchema":{"type":"object","properties":{"owner":{"type":"string","minLength":1,"maxLength":100}},"additionalProperties":false}})),
         (true, json!({"name":"switchboard_github_clone","title":"Clone a GitHub repository","description":"Clone one repository with the person's own gh into an absolute folder that does not exist yet, as the window's GitHub page does. Only when the operator asks.","inputSchema":{"type":"object","properties":{"owner":{"type":"string","minLength":1,"maxLength":100},"name":{"type":"string","minLength":1,"maxLength":100},"into":{"type":"string","minLength":1,"description":"An absolute folder that does not exist yet."}},"required":["owner","name","into"],"additionalProperties":false}})),
         (false, json!({"name":"switchboard_repository_map","title":"Repositories on disk","description":"The Git repositories under the folders named (absolute; none: ~/DATA, else the home folder; up to three folders deep, not into a repository, a hidden folder or dependencies), each with its group (pool as its id, name; place folder or inside) or none. Linked worktrees are listed under their root in switchboard_projects, not here. Reads only.","inputSchema":{"type":"object","properties":{"under":{"type":"array","maxItems":16,"items":{"type":"string","minLength":1}}},"additionalProperties":false}})),
@@ -225,6 +225,8 @@ pub(crate) fn tools() -> Vec<(bool, Value)> {
     .collect()
 }
 
+/// SB-385: turning usage data on or off through MCP without the operator's relayed words.
+const ANALYTICS_DECISION_REQUIRED: &str = "Turning usage data on or off is the operator's choice: pass decision with the operator's own words (by operator, instruction, at, source).";
 /// SB-299: an operation wrapped in the operator's words when the call carries `decision`.
 fn on_operators_word(args: &Map<String, Value>, operation: Operation) -> Result<Operation, String> {
     let Some(decision) = args.get("decision") else {
@@ -305,6 +307,23 @@ impl Server {
         }
     }
 
+    /// SB-385 (the contract's DEC-0157 UD-4, OW-1): turning usage data on or off is a
+    /// `change-policy` act that needs the operator's relayed words; reading needs none.
+    async fn analytics(&self, args: &Map<String, Value>) -> Result<Value, String> {
+        let enabled = args.get("enabled").and_then(Value::as_bool);
+        if enabled.is_some() {
+            let decision: switchboard_runtime::spend::Decision = args
+                .get("decision")
+                .cloned()
+                .ok_or(ANALYTICS_DECISION_REQUIRED.to_string())
+                .and_then(|d| {
+                    serde_json::from_value(d)
+                        .map_err(|_| switchboard_runtime::spend::DECISION_INVALID.to_string())
+                })?;
+            decision.check()?;
+        }
+        self.call(Operation::Analytics { enabled }).await
+    }
     /// SB-392 K-1: the keys an agent can start on, by name.
     async fn launch_keys(&self, args: &Map<String, Value>) -> Result<Value, String> {
         let agent = args
@@ -1531,12 +1550,7 @@ impl Server {
             "switchboard_repository_map" => self.repository_map(args).await,
             "switchboard_link_cli" => switchboard_runtime::agents::link_this_cli(),
             "switchboard_app" => self.app(args).await,
-            "switchboard_analytics" => {
-                self.call(Operation::Analytics {
-                    enabled: args.get("enabled").and_then(Value::as_bool),
-                })
-                .await
-            }
+            "switchboard_analytics" => self.analytics(args).await,
             "switchboard_github" => match args.get("owner").and_then(Value::as_str) {
                 Some(owner) => {
                     self.call(Operation::GithubRepositories {

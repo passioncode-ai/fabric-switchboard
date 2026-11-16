@@ -232,7 +232,7 @@ export function createDemoAdapter(): Adapter {
   const update: UpdateStatus = { available: true, reason: null, enabled: true, state: 'idle', current: version, version: null, checked_at: now(), error: null, needs_permission: false, restart_after: null };
   // `?usage=notice` shows the first-run usage notice (SB-246).
   const usage = new URLSearchParams(location.search).get('usage');
-  const analytics = { available: true, enabled: true, notice_pending: usage === 'notice' || (firstRun && usage === null) };
+  const analytics = { available: true, enabled: true, notice_pending: usage === 'notice' || (firstRun && usage === null), installation_id: '3f6a1c2e-8b4d-4e9a-a1f0-5d2c7b9e0a14' };
   // SB-120: the agents a synthetic computer has.
   type CatalogAgent = { id: string; name: string; maker?: string | null; url: string; install?: string | null; binary?: string | null; mcp: { supported: boolean }; openrouter?: unknown };
   const catalogAgents = (agentCatalogData as unknown as { agents: CatalogAgent[] }).agents;
@@ -873,6 +873,7 @@ export function createDemoAdapter(): Adapter {
     async checkForUpdates() { await pause(); update.checked_at = now(); return { ...update }; },
     async analytics() { return { ...analytics }; },
     async setAnalytics(enabled) { await pause(); analytics.enabled = enabled; analytics.notice_pending = false; return { ...analytics }; },
+    async analyticsNoticeShown() { await pause(); return { ...analytics, sending: analytics.enabled, held: null }; },
     async analyticsNoticeSeen() { await pause(); analytics.notice_pending = false; return { ...analytics }; },
     async setLoginItem(enabled) { await pause(); loginItem.enabled = enabled; return { ...loginItem }; },
     async linkCli() { await pause(); setup.linked_cli = '~/.local/bin/switchboard'; setup.cli_path = setup.linked_cli; setup.commands.claude_code = `claude mcp add --scope user switchboard -- '${setup.linked_cli}' mcp`; setup.commands.codex = `codex mcp add switchboard -- '${setup.linked_cli}' mcp`; return { linked_cli: setup.linked_cli }; },

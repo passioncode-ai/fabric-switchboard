@@ -1593,6 +1593,11 @@ async fn set_analytics(slot: State<'_, Slot>, enabled: bool) -> Result<Value, St
 async fn analytics_notice_seen(slot: State<'_, Slot>) -> Result<Value, String> {
     Ok(slot.runtime().await?.analytics_notice_seen())
 }
+/// SB-385 (UD-1): the window drew the current notice where the person reads it.
+#[tauri::command]
+async fn analytics_notice_shown(slot: State<'_, Slot>) -> Result<Value, String> {
+    Ok(slot.runtime().await?.analytics_notice_shown())
+}
 /// SB-183 (node A-3): the terminal hook's first-time notice, `{organization, group}`, or null.
 /// It waits in `shell-hook.json` until the window acknowledges it, so a restart before the window
 /// showed it keeps it; node A-7 draws it.
@@ -1876,6 +1881,7 @@ fn main() {
             analytics_status,
             set_analytics,
             analytics_notice_seen,
+            analytics_notice_shown,
             snapshot,
             current_accounts,
             capture_current,

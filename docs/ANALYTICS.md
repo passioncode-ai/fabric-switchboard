@@ -25,31 +25,52 @@ relayed verbatim on the Fabric board by fabric-32: «Включает первы
 ADR-0127, audit finding A7-012: nothing queued or sent before the person answered a question) and
 the two-tier idea of 2026-11-03, which was not built.
 
-- **On from the first start.** `app_installed`, `app_started`, `app_active`, `account_added`,
-  `account_removed`, `project_changed` and `account_switched` are queued and sent from the first
-  start, a background start (the login item, the lifecycle broker) or a run whose window never
-  opens included (`on_by_default_a_background_start_sends_from_the_first_start`,
-  `through_the_runtime_a_background_start_sends_the_start_and_the_day`).
-- **A notice, not a question.** The window shows a first-run notice above every page but About
-  (SCN-073): “Anonymous usage and error counts are on”, what is counted, *OK* and *Turn off*, and “You can
-  turn them off at any time in About. This applies to Switchboard only.” *OK* records `notice_at`
-  (Unix seconds) in `<data>/analytics-state.json`; *Turn off* turns the switch off and records it
-  too. Nothing waits for the notice: it only tells. An install that answered the old question
-  (`disclosed_at`) sees the new notice once
+- **On from the first start, sent after the notice (SB-385, the contract's DEC-0157 UD-1).**
+  `app_installed`, `app_started`, `app_active`, `account_added`, `account_removed`,
+  `project_changed` and `account_switched` are queued from the first start, a background start
+  (the login item, the lifecycle broker) or a run whose window never opens included, and leave
+  only once the window has shown the current notice where the person reads it (`shown_version` in
+  `<data>/analytics-state.json`, written when the window draws it, `analytics_notice_shown`); a
+  queued event older than its maximum age is dropped, never sent late
+  (`on_by_default_a_background_start_queues_and_sends_once_the_notice_was_shown`,
+  `through_the_runtime_a_background_start_queues_the_start_and_the_day_until_the_notice`). A machine
+  whose window never opens (a `serve` on a server) sends nothing.
+- **A notice, not a question.** The window shows a first-run notice above every page but Settings
+  (SCN-073): “Anonymous usage and error counts are on”, what is counted, and since version 2
+  (`NOTICE_VERSION`) the installation number itself, that the PassionCode.ai apps on this computer
+  share it, that each run gets a random session number tying its counts together, and that counts go
+  to PassionCode.ai at analytics.passioncode.ai; *OK* and *Turn off*; “You can turn them off at any
+  time in Settings. This applies to Switchboard only.” *OK* records `notice_at` and `notice_version`;
+  *Turn off* turns the switch off and records them too. A person who acknowledged version 1 sees
+  version 2 once, and nothing is sent before it was shown
+  (`the_notice_v2_shows_once_more_to_those_who_read_v1_and_nothing_leaves_before_it`). An install that
+  answered the old question (`disclosed_at`) sees the notice once
   (`the_notice_waits_until_acknowledged_and_ok_changes_nothing_else`,
   `an_install_that_answered_under_the_old_rule_sees_the_notice_once`).
-- **An agent's door (SB-299).** `switchboard analytics on|off` and the MCP tool `switchboard_analytics`
-  (`enabled`) set the same switch as About on the operator's word; without an argument they read the
-  state. They reach the installed app's owner; anywhere else the switch answers
-  `ANALYTICS_APP_ONLY` and the state reads `available: false`
+- **An earlier no in the shared file (SB-385, UD-2).** Before Switchboard's first send, and at the
+  first run of rule 3 for an install that sent before it, an `analytics: false` in the shared
+  `installation.json` on an install whose own switch the person never set is read as their earlier
+  no: Switchboard's switch reads off (`shared_no`), Settings says why and where to turn it on, and the
+  person's own switch alone counts from then on. After the first send a shared off written later
+  changes nothing (`a_shared_off_before_the_first_send_is_the_persons_earlier_no`).
+- **What is true now.** `analytics_status` answers `available`, `enabled`, `notice_pending`,
+  `notice_version`, `sending`, `held` (`notice`: not shown yet; `shared_unreadable`: the shared file
+  cannot be read, shown in Settings as “On, but nothing is sent”), `shared_no` and `installation_id`
+  (read without creating the shared file).
+- **An agent's door (SB-299, SB-385).** `switchboard analytics on|off` (the person's terminal) and
+  the MCP tool `switchboard_analytics` (`enabled`) set the same switch as Settings; through MCP a
+  change needs `decision`, the operator's own words relayed (the contract's DEC-0157 UD-4: a
+  `change-policy` act), and without it answers “Turning usage data on or off is the operator's
+  choice …”. Without an argument they read the state. They reach the installed app's owner;
+  anywhere else the switch answers `ANALYTICS_APP_ONLY` and the state reads `available: false`
   (`the_analytics_door_reads_the_state_and_refuses_a_switch_without_the_app`).
 - **Switchboard's own switch.** The switch is `enabled` in `<data>/analytics-state.json`
   (absent = on), set by About → *Share anonymous usage and error counts* (SCN-044) or the notice's
   *Turn off*. It turns Switchboard off or on only: the shared `PassionCode/installation.json`
-  supplies the installation id and is never written for the switch, and its `analytics` field,
-  another app's, is no longer read
+  supplies the installation id and is never written for the switch; its `analytics` field,
+  another app's, is read only as the earlier no above
   (`the_switch_adds_no_field_to_the_shared_file_and_never_writes_it`,
-  `an_install_whose_shared_file_says_off_still_sends_when_never_answered_here`).
+  `a_shared_off_before_the_first_send_is_the_persons_earlier_no`).
 - **Off stops everything.** Turning it off drops what waits and nothing more leaves, at this run or
   later; there is no reduced tier. Turning it on again later counts again under the same shared
   installation id, which Switchboard does not own and never rotates

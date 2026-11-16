@@ -8,6 +8,8 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- Usage counts follow the PassionCode contract's DEC-0157: they leave only after the window has shown the notice (a background start queues them); the notice now names this computer's installation number, which the PassionCode.ai apps share, and the session number; an off another PassionCode.ai app recorded before Switchboard's first send is read as your earlier no, and Settings says so; Settings says "On, but nothing is sent" when the shared file cannot be read; through MCP the switch needs the operator's relayed words (SB-385).
+
 ## 0.7.103
 
 - Balancing lends an account within a minute after a request found its group out of room, instead of waiting for the next quarter hour (WF-5.2e, SB-367).
