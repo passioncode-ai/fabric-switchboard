@@ -753,7 +753,11 @@ pub fn interrupted(lines: &[Value], now: i64) -> Vec<Value> {
             open.retain(|o| (o["session"].clone(), o["at"].clone()) != key);
         }
     }
-    open.retain(|o| o["at"].as_i64().is_some_and(|at| now - at < INTERRUPTED_WINDOW));
+    open.retain(|o| {
+        o["at"]
+            .as_i64()
+            .is_some_and(|at| now - at < INTERRUPTED_WINDOW)
+    });
     open
 }
 
@@ -803,7 +807,13 @@ fn finish_interrupted(root: &Path, now: i64) -> Vec<Value> {
 }
 
 #[cfg(unix)]
-fn finish_restart(root: &Path, session: &str, config: &Path, cwd: &str, prompt: bool) -> &'static str {
+fn finish_restart(
+    root: &Path,
+    session: &str,
+    config: &Path,
+    cwd: &str,
+    prompt: bool,
+) -> &'static str {
     resume(root, session, config, cwd, prompt)
 }
 #[cfg(not(unix))]
@@ -982,12 +992,8 @@ mod tests {
 
     #[test]
     fn an_intent_without_its_outcome_is_an_act_cut_by_a_quit() {
-        let intent = |session: &str, at: i64| {
-            json!({"at": at, "phase": "intent", "action": "close", "session": session, "pid": 1})
-        };
-        let outcome = |session: &str, at: i64| {
-            json!({"at": at, "action": "close", "outcome": "closed", "session": session})
-        };
+        let intent = |session: &str, at: i64| json!({"at": at, "phase": "intent", "action": "close", "session": session, "pid": 1});
+        let outcome = |session: &str, at: i64| json!({"at": at, "action": "close", "outcome": "closed", "session": session});
         let lines = vec![
             intent("S1", 100),
             outcome("S1", 100),
@@ -997,8 +1003,14 @@ mod tests {
             intent("S3", 400),
         ];
         let open = interrupted(&lines, 500);
-        let open: Vec<_> = open.iter().map(|v| (v["session"].clone(), v["at"].clone())).collect();
-        assert_eq!(open, vec![(json!("S2"), json!(200)), (json!("S3"), json!(400))]);
+        let open: Vec<_> = open
+            .iter()
+            .map(|v| (v["session"].clone(), v["at"].clone()))
+            .collect();
+        assert_eq!(
+            open,
+            vec![(json!("S2"), json!(200)), (json!("S3"), json!(400))]
+        );
         assert!(
             interrupted(&lines, 400 + INTERRUPTED_WINDOW).is_empty(),
             "an act cut more than an hour ago is left as it is"
@@ -1009,7 +1021,10 @@ mod tests {
     #[test]
     fn a_cut_close_is_finished_by_the_next_owner_and_a_live_process_is_left_alone() {
         let root = tempfile::tempdir().unwrap();
-        let mut child = std::process::Command::new("/bin/sleep").arg("30").spawn().unwrap();
+        let mut child = std::process::Command::new("/bin/sleep")
+            .arg("30")
+            .spawn()
+            .unwrap();
         let gone = child.id();
         child.kill().unwrap();
         child.wait().unwrap();
@@ -1027,17 +1042,26 @@ mod tests {
                 "config": "/h/.claude", "prompt": false}),
         );
         let done = finish_interrupted(root.path(), 1100);
-        let outcomes: Vec<_> = done.iter().map(|l| (l["session"].clone(), l["outcome"].clone())).collect();
+        let outcomes: Vec<_> = done
+            .iter()
+            .map(|l| (l["session"].clone(), l["outcome"].clone()))
+            .collect();
         assert_eq!(
             outcomes,
-            vec![(json!("S1"), json!("closed")), (json!("S2"), json!("interrupted"))]
+            vec![
+                (json!("S1"), json!("closed")),
+                (json!("S2"), json!("interrupted"))
+            ]
         );
         assert_eq!(
             crate::resumable::recent(root.path(), 0)[0]["session"],
             "S1",
             "the closed session can be continued as itself"
         );
-        assert!(finish_interrupted(root.path(), 1200).is_empty(), "finished once");
+        assert!(
+            finish_interrupted(root.path(), 1200).is_empty(),
+            "finished once"
+        );
         assert_eq!(
             restarts(&journal(root.path()), "S1", 1200),
             0,

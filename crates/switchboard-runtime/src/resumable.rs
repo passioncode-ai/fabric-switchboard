@@ -208,7 +208,9 @@ mod tests {
         #[cfg(unix)]
         assert_eq!(
             std::os::unix::fs::PermissionsExt::mode(
-                &std::fs::metadata(root.path().join(FILE)).unwrap().permissions()
+                &std::fs::metadata(root.path().join(FILE))
+                    .unwrap()
+                    .permissions()
             ) & 0o777,
             0o600
         );
@@ -230,7 +232,11 @@ mod tests {
         for t in threads {
             t.join().unwrap();
         }
-        assert_eq!(recent(root.path(), 0).len(), 200, "no line is lost to a race");
+        assert_eq!(
+            recent(root.path(), 0).len(),
+            200,
+            "no line is lost to a race"
+        );
     }
 
     #[test]

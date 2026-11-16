@@ -94,7 +94,10 @@ mod tests {
         );
         let taken = take(root.path(), 200);
         assert_eq!(taken, vec![stop("S2", 50), stop("S1", 120)]);
-        assert!(take(root.path(), 200).is_empty(), "each stop is handed over once");
+        assert!(
+            take(root.path(), 200).is_empty(),
+            "each stop is handed over once"
+        );
     }
 
     #[test]

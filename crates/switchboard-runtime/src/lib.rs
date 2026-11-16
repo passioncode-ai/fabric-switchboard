@@ -5332,7 +5332,11 @@ async fn execute(
                         at: monitor::now(),
                     },
                 );
-                let result = if kept.is_ok() { "spooled" } else { "spool_failed" };
+                let result = if kept.is_ok() {
+                    "spooled"
+                } else {
+                    "spool_failed"
+                };
                 oplog::event("recovery_hook", &[("result", oplog::Field::Code(result))]);
                 kept?;
                 return Ok(json!({"registered": false, "spooled": true}));
