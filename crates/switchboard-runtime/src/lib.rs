@@ -2840,6 +2840,11 @@ impl Runtime {
         let client = self.analytics().ok_or(ANALYTICS_APP_ONLY)?;
         client.set_enabled(enabled)
     }
+    /// SB-385 (UD-1): the window showed the current notice; what waits may leave from now on.
+    pub fn analytics_notice_shown(&self) -> Value {
+        self.analytics()
+            .map_or_else(|| self.analytics_status(), |a| a.notice_shown())
+    }
     /// The first-run notice was read (*OK*); it is not shown again.
     pub fn analytics_notice_seen(&self) -> Value {
         self.analytics()

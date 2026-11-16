@@ -44,6 +44,7 @@ const PARITY: &[(&str, Over)] = &[
     ("analytics_status", Tool("switchboard_analytics")),
     ("set_analytics", Tool("switchboard_analytics")),
     ("analytics_notice_seen", Not(UI_ONLY)),
+    ("analytics_notice_shown", Not(UI_ONLY)),
     ("snapshot", Tool("switchboard_accounts")),
     ("current_accounts", Tool("switchboard_status")),
     ("capture_current", Not(PERSON)),

@@ -28,7 +28,7 @@ the two-tier idea of 2026-11-03, which was not built.
 - **On from the first start.** `app_installed`, `app_started`, `app_active`, `account_added`,
   `account_removed`, `project_changed` and `account_switched` are queued and sent from the first
   start, a background start (the login item, the lifecycle broker) or a run whose window never
-  opens included (`on_by_default_a_background_start_sends_from_the_first_start`,
+  opens included (`on_by_default_a_background_start_queues_and_sends_once_the_notice_was_shown`,
   `through_the_runtime_a_background_start_sends_the_start_and_the_day`).
 - **A notice, not a question.** The window shows a first-run notice above every page but About
   (SCN-073): “Anonymous usage and error counts are on”, what is counted, *OK* and *Turn off*, and “You can
@@ -49,7 +49,7 @@ the two-tier idea of 2026-11-03, which was not built.
   supplies the installation id and is never written for the switch, and its `analytics` field,
   another app's, is no longer read
   (`the_switch_adds_no_field_to_the_shared_file_and_never_writes_it`,
-  `an_install_whose_shared_file_says_off_still_sends_when_never_answered_here`).
+  `a_shared_off_before_the_first_send_is_the_persons_earlier_no`).
 - **Off stops everything.** Turning it off drops what waits and nothing more leaves, at this run or
   later; there is no reduced tier. Turning it on again later counts again under the same shared
   installation id, which Switchboard does not own and never rotates
