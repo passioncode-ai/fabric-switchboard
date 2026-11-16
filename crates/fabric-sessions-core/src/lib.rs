@@ -5,6 +5,8 @@
 
 /// What the core asks the app that manages coding accounts (D-7).
 pub mod accounts;
+/// One cap on the coding sessions this computer runs at once.
+pub mod capacity;
 /// Talking to a command line: shell quoting, a JSON answer's data.
 pub mod cli;
 /// Identifiers a session record may carry.

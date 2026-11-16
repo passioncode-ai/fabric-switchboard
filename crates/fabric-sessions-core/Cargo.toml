@@ -11,6 +11,7 @@ publish.workspace = true
 # D-2: no switchboard-* crate, ever (`cargo tree -p fabric-sessions-core`).
 [dependencies]
 uuid.workspace = true
+serde.workspace = true
 serde_json.workspace = true
 dirs = "6"
 libc = "0.2"
