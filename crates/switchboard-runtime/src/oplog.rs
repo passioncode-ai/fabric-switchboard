@@ -19,14 +19,8 @@ pub const FILE: &str = "switchboard.log";
 const CAP_BYTES: u64 = 5 * 1024 * 1024;
 const KEEP_FILES: usize = 5;
 
-/// One field of an event: a fixed code, a number or a yes/no. There is deliberately no string
-/// variant that takes an owned or borrowed runtime value.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Field {
-    Code(&'static str),
-    Number(i64),
-    Flag(bool),
-}
+/// One field of an event: a fixed code, a number or a yes/no (the core's, SB-397 W1.3).
+pub use fabric_sessions_core::events::Field;
 
 pub struct Log {
     dir: PathBuf,
@@ -182,6 +176,12 @@ static GLOBAL: OnceLock<Log> = OnceLock::new();
 /// installs one. Later calls keep the first.
 pub fn install(log: Log) {
     let _ = GLOBAL.set(log);
+    bridge();
+}
+/// SB-397 W1.3: events the session core writes come here, so they reach this log, the error
+/// report and the operations digest like Switchboard's own. Idempotent.
+pub fn bridge() {
+    fabric_sessions_core::events::set_sink(event);
 }
 /// One event captured by a test: its name and its code fields' values.
 #[cfg(test)]
