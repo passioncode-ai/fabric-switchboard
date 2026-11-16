@@ -3387,7 +3387,7 @@ function restartPanel(): HTMLElement | null {
   const heading = el('h2', '', running ? t('Restart in progress') : t('Last restart')); heading.id = 'restart-heading';
   const back = wave.counts.back + wave.counts.continuing;
   const counts = running
-    ? t('{back} back, {waiting} waiting for their turn, {failed} not back.', { back, waiting: wave.counts.pending + wave.counts.resuming, failed: wave.counts.failed })
+    ? t('{back} back, {waiting} waiting for their turn, {failed} not back.', { back, waiting: wave.counts.pending + (wave.counts.ending ?? 0) + wave.counts.resuming, failed: wave.counts.failed })
     : t('{back} back, {failed} not back.', { back, failed: wave.counts.failed });
   const line = el('p', wave.counts.failed ? 'usage-error' : 'form-note', counts); line.setAttribute('role', 'status');
   section.append(heading, line);

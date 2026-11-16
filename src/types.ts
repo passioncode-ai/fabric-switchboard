@@ -332,7 +332,7 @@ export interface SessionRows { rows: SessionRow[]; counts: Record<SessionGroup, 
 /** SB-397 R1: a restart wave's plan: what restarts (in its host or in a Terminal window), what is skipped and why. */
 export interface RestartPlan { restart: { session_id: string; folder: string; caller: boolean; how: 'in_place' | 'terminal' }[]; skipped: { session_id: string; folder: string; reason: string }[]; caller: string | null; digest: string; warning: string }
 /** SB-397 R1: a wave's state per session. */
-export interface RestartWave { wave: string; reason: string; at: number; done_at: number | null; caller: string | null; counts: Record<'pending' | 'resuming' | 'back' | 'continuing' | 'failed' | 'cancelled' | 'skipped', number>; sessions: { session_id: string; folder: string; state: string; reason: string | null; caller: boolean; how: string }[]; skipped: { session_id: string; folder: string; reason: string }[] }
+export interface RestartWave { wave: string; reason: string; at: number; done_at: number | null; caller: string | null; counts: Record<'pending' | 'resuming' | 'back' | 'continuing' | 'failed' | 'cancelled' | 'skipped', number> & { ending?: number }; sessions: { session_id: string; folder: string; state: string; reason: string | null; caller: boolean; how: string }[]; skipped: { session_id: string; folder: string; reason: string }[] }
 export type MachineReadStatus = 'read' | 'unreachable' | 'no_switchboard' | 'too_old' | 'bad_answer';
 export interface MachineSessions { machine: string; status: MachineReadStatus; rows?: SessionRow[]; counts?: Record<SessionGroup, number>; read_at: number }
 export interface SessionsEverywhere { here: SessionRows; machines: MachineSessions[] }
