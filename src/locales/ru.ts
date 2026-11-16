@@ -471,7 +471,7 @@ export const RU: Record<string, string> = {
   "No key is saved that {agent} can start on.": "Нет сохранённого ключа, на котором можно запустить {agent}.",
   "a launch in this folder uses it": "его использует запуск в этой папке",
   "choose it below": "выберите его ниже",
-  "used in the folders of {group}": "используется в папках группы {group}",
+  "used {where}": "используется {where}",
   "this folder's group has an OpenRouter key of its own": "у группы этой папки свой ключ OpenRouter",
   "no default model": "модель по умолчанию не задана",
   "Check for the chosen folder": "Проверить для выбранной папки",

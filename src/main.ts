@@ -1928,7 +1928,7 @@ function launchKeysPart(agent: AgentInfo, folder: () => string | null): HTMLElem
       const list = el('ul', 'key-list');
       for (const key of answer.keys) {
         const kind = key.kind === 'anthropic' ? 'Anthropic' : 'OpenRouter';
-        const state = key.default ? t('a launch in this folder uses it') : key.kind === 'anthropic' ? t('choose it below') : key.scope === 'group' ? t('used in the folders of {group}', { group: key.name }) : t('this folder\'s group has an OpenRouter key of its own');
+        const state = key.default ? t('a launch in this folder uses it') : key.kind === 'anthropic' ? t('choose it below') : key.scope === 'group' ? t('used {where}', { where: inGroup(key.pool ?? '', snapshot?.projects) }) : t('this folder\'s group has an OpenRouter key of its own');
         const item = el('li', key.default ? 'key-item is-default' : 'key-item', `${kind}: ${key.scope === 'machine' ? t('This computer') : key.name}`);
         item.append(el('span', 'folder-note', ` · ${key.model ?? t('no default model')} · ${state}`));
         list.append(item);

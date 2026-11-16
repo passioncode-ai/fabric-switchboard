@@ -2074,7 +2074,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 2. “At the next check” lists what the next check would do; “Recent actions” the last five with their time, each “Restarted in {folder}: it {reason}.” or “Closed in {folder}: it {reason}.” and, when it did not go to plan, “Result: {outcome}.”
 3. *Check now* acts at once; *Turn off* / *Turn on* switches it (“The duty officer is off.”, “The duty officer is on.”). The limits change with `switchboard duty set` or MCP `switchboard_duty`.
 **Alt paths:** on Windows “On this system the duty officer only reports; it restarts nothing.” and no *Check now*; the read fails → the read error and the rest of Settings stays.
-**Expected result:** no interactive Claude Code session stays stalled past its limit (busy, writing nothing, using no CPU) or finished past `idle_minutes`; a session with a command of its own running, or waiting for the person's answer, is never ended; a restarted one continues in Terminal with its history and its hooks; a Fabric Dashboards console is never touched.
+**Expected result:** no interactive Claude Code session stays stalled past its limit (busy, writing nothing, using no CPU) or finished past `idle_minutes` (and never before 65 minutes, the longest wake-up a session can set itself; SB-392); a session with a command of its own running, or waiting for the person's answer, is never ended; a restarted one continues in Terminal with its history and its hooks; a Fabric Dashboards console is never touched.
 **UI elements:** the fold and its state, the two lists, *Check now*, *Turn off* / *Turn on*.
 **States covered:** reading, read failed, on, off, nothing due, actions due, unsupported.
 **Errors & recovery:** a restart that could not open Terminal leaves the session closed and says so; its transcript keeps the work, and `claude --resume` from its folder continues it.
@@ -2084,3 +2084,24 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Coverage:** `duty::tests::*`, ui-logic `dutyReasonText`, `dutyOutcomeText` (`scripts/test-ui-logic.mjs`); WebKit demo (`?demo=1`).
 **Product:** unobserved
 **Traces:** SB-384, DEC-0021, SCN-095
+
+### SCN-097: See which keys an agent can start on before launching it
+**Persona:** P-01
+**Goal:** Before launching an agent the person sees every key it can run on here and which one a launch in the chosen folder spends, and picks another (an Anthropic key for Hermes) on purpose.
+**Preconditions:** the owner runs; at least one OpenRouter or Anthropic key saved.
+**Entry point:** Agents → an agent with an OpenRouter recipe, or Hermes → its launch dialog.
+**Steps:**
+1. Open the dialog → “Keys you can run on” lists each key as “OpenRouter: This computer” or “OpenRouter: <group>”, “Anthropic: <name>”, with its default model (or “no default model”) and its state: “a launch in this folder uses it”, “used in group “<name>”” (another group's key), “this folder's group has an OpenRouter key of its own”, “choose it below” (an Anthropic key).
+2. Choose another folder, then *Check for the chosen folder* → the list marks the key a launch there spends.
+3. Launch with *Launch on OpenRouter* (the marked key) or, for Hermes, *Launch on this Anthropic key* with the chosen name.
+**Alt paths:** no key saved → “No key is saved that {agent} can start on.”; the read fails → the read error, the rest of the dialog stays.
+**Expected result:** the person never wonders which key a launch spends; OpenRouter stays the default; no key value is ever shown.
+**UI elements:** the section, its list, *Check for the chosen folder*.
+**States covered:** reading, read failed, no key, one key, keys in several groups, Anthropic keys.
+**Errors & recovery:** saving an Anthropic Admin key from the CLI is refused with words that say it cannot run a model and where an API key is made.
+**Status:** draft
+**Meaning:** SB-392 K-1, K-3 (operator 2026-11-16: «какие ключи у нас есть и на чем мы будем запускаться»).
+**Copy:** checked with Copylot, register ui; report ids in [strings](../brand/strings.md).
+**Coverage:** `launch_keys::tests::*`, `anthropic_keys::tests::*`; WebKit demo (`?demo=1`).
+**Product:** unobserved
+**Traces:** SB-392, SB-390, SCN-096
