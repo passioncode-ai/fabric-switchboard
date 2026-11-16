@@ -15,7 +15,7 @@ pid=26762 resume=1eae20cd-22b1-40a9-8094-24fc40e86237 file=1eae20cd-22b1-40a9-80
 ```
 
 So a wave's `back` state reads the same session id under a new pid (`restarts::advance`), and R-6 of
-the [spec](../plans/2026-11-16-session-service/README.md) holds for this version. A later Claude
+the [spec](https://github.com/passioncode-ai/fabric-switchboard/blob/session-service/docs/plans/2026-11-16-session-service/README.md) holds for this version. A later Claude
 Code that changed it would show as `failed: not_back` for every session of a wave: re-run this check
 after a Claude Code update that touches `--resume`.
 
