@@ -81,7 +81,8 @@ mod tests {
     fn stop(session: &str, at: i64) -> Spooled {
         Spooled {
             session: session.into(),
-            directory: PathBuf::from("/w/a"),
+            // Absolute on every platform (`/w/a` is not one on Windows).
+            directory: std::env::temp_dir(),
             billing: false,
             at,
         }

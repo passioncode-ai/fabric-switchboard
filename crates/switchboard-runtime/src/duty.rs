@@ -1432,10 +1432,12 @@ mod tests {
         // SB-396 D2: the duty officer's check skips every session with a waiting or claimed stop.
         let root = tempfile::tempdir().unwrap();
         let now = 1_000_000;
+        // A folder that is absolute on every platform (`/w/app` is not one on Windows).
+        let folder = root.path().to_path_buf();
         let stop = |session: &str, state: &str| {
             serde_json::json!({
                 "event": format!("cc-{session}-1"), "session": session, "account": "a", "provider": "claude",
-                "pool": "default", "directory": "/w/app", "stopped_at": now - 4000, "state": state,
+                "pool": "default", "directory": folder, "stopped_at": now - 4000, "state": state,
                 "selected_account": null
             })
         };
