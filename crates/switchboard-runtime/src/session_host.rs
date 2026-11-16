@@ -231,6 +231,9 @@ struct Inner {
     reason: Option<&'static str>,
     /// SB-397 R1: the program to start once the running process exits (a restart in place).
     restart: Option<PathBuf>,
+    /// SB-397 R1: a restart is under way; the terminal's other end is briefly gone, which is not
+    /// the session's end.
+    respawning: bool,
 }
 
 fn nonzero(n: u16) -> std::num::NonZeroU16 {
@@ -324,6 +327,7 @@ impl Session {
                 return false;
             }
             inner.restart = Some(program);
+            inner.respawning = true;
             self.pid()
         };
         unsafe { libc::kill(-pid, libc::SIGHUP) };
@@ -376,6 +380,31 @@ fn open_pty(rows: u16, cols: u16) -> io::Result<(OwnedFd, OwnedFd)> {
         unsafe { libc::fcntl(fd.as_raw_fd(), libc::F_SETFD, libc::FD_CLOEXEC) };
     }
     Ok((master, slave))
+}
+
+/// The terminal's other end opened again by its name, for the next process of a restart.
+fn reopen_slave(session: &Session) -> io::Result<OwnedFd> {
+    static NAME: Mutex<()> = Mutex::new(());
+    let name = {
+        let _one = NAME.lock().unwrap_or_else(|p| p.into_inner());
+        let master = session.master.lock().unwrap_or_else(|p| p.into_inner());
+        // SAFETY: `ptsname` returns a static buffer; the lock keeps it this thread's.
+        let ptr = unsafe { libc::ptsname(master.as_raw_fd()) };
+        if ptr.is_null() {
+            return Err(io::Error::last_os_error());
+        }
+        unsafe { std::ffi::CStr::from_ptr(ptr) }.to_owned()
+    };
+    let fd = unsafe {
+        libc::open(
+            name.as_ptr(),
+            libc::O_RDWR | libc::O_NOCTTY | libc::O_CLOEXEC,
+        )
+    };
+    if fd < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(unsafe { OwnedFd::from_raw_fd(fd) })
 }
 
 /// Starts `program` as the leader of a new session whose controlling terminal is `slave`.
@@ -450,6 +479,8 @@ pub fn serve(start: Start<'_>, ready: impl FnOnce()) -> Result<Ended, String> {
         let _ = std::fs::remove_file(&socket);
         "The session could not start.".to_string()
     })?;
+    // The host keeps no end of the terminal but the master: the session's end reads as EIO.
+    drop(slave);
 
     let reader = File::from(
         master
@@ -471,6 +502,7 @@ pub fn serve(start: Start<'_>, ready: impl FnOnce()) -> Result<Ended, String> {
             last_activity: std::time::Instant::now(),
             reason: None,
             restart: None,
+            respawning: false,
         }),
     });
     write_descriptor(start.root, start.launch_id, &socket, 0);
@@ -527,11 +559,14 @@ pub fn serve(start: Start<'_>, ready: impl FnOnce()) -> Result<Ended, String> {
             let mut buf = [0u8; 16 * 1024];
             loop {
                 match reader.read(&mut buf) {
-                    Ok(0) => break,
-                    Ok(n) => session.output(&buf[..n]),
+                    Ok(n) if n > 0 => session.output(&buf[..n]),
                     Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
-                    // EIO once every holder of the terminal's other end is gone.
-                    Err(_) => break,
+                    // End of output or EIO once every holder of the terminal's other end is gone;
+                    // during a restart in place it comes back with the next process.
+                    _ if session.lock().respawning => {
+                        std::thread::sleep(Duration::from_millis(50));
+                    }
+                    _ => break,
                 }
             }
             let _ = drained_tx.send(());
@@ -557,15 +592,22 @@ pub fn serve(start: Start<'_>, ready: impl FnOnce()) -> Result<Ended, String> {
         let Some(program) = session.lock().restart.take() else {
             break status;
         };
-        match spawn_on(&program, &slave) {
+        // macOS revokes every open end of the terminal when its session leader exits: the next
+        // process gets the terminal opened again by name.
+        let next = reopen_slave(&session).and_then(|slave| spawn_on(&program, &slave));
+        match next {
             Ok(next) => {
                 session
                     .pid
                     .store(next.id() as i32, std::sync::atomic::Ordering::SeqCst);
+                session.lock().respawning = false;
                 session.output(b"\r\n[Switchboard restarted this session]\r\n");
                 child = next;
             }
-            Err(_) => break status,
+            Err(_) => {
+                session.lock().respawning = false;
+                break status;
+            }
         }
     };
     use std::os::unix::process::ExitStatusExt;
