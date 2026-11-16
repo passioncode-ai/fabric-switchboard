@@ -137,6 +137,7 @@ pub(crate) fn tools() -> Vec<(bool, Value)> {
         (true, json!({"name":"switchboard_duty","title":"Session duty officer","description":"The session duty officer: every five minutes it looks at each live interactive Claude Code session on this computer (not Fabric Dashboards' consoles, not claude -p runs) and never ends one before it finished. Finished: idle for idle_minutes (default 60, never under 65 so a session waiting for a wake-up it set itself is kept) with none of its own commands (Bash tool shells, background ones included) still running: closed. Stalled: busy with its status unchanged and its transcript unwritten for stuck_minutes (45), its process tree using no CPU since the previous check, and no command of its own running (or one running three times stuck_minutes without CPU): closed and resumed in a new Terminal window with claude --resume and a prompt to continue. A session waiting for the person's answer is left alone, nothing is restarted for its age, and of two copies of one session only a finished copy is closed. At most three actions a check and three restarts of one session in six hours. Answers settings, due (what a check would do now), recent (its last actions), watched, waiting_for_person and running_commands. on, stuck_minutes, idle_minutes and run (check now) change it (waiting_minutes and max_age_hours are kept for older settings and unused); dry_run lists without acting.","inputSchema":{"type":"object","properties":{"on":{"type":"boolean"},"stuck_minutes":{"type":"integer","minimum":10,"maximum":1440},"waiting_minutes":{"type":"integer","minimum":10,"maximum":1440},"idle_minutes":{"type":"integer","minimum":10,"maximum":1440},"max_age_hours":{"type":"integer","minimum":1,"maximum":72},"run":{"type":"boolean"},"dry_run":{"type":"boolean"}},"additionalProperties":false}})),
         (false, json!({"name":"switchboard_attention","title":"What needs attention","description":"Accounts and questions that need a person, each with its reason and the action that fixes it: reason sign_in, seat_ended (an organization's seat ended) or renewal_refused (fix with switchboard_login), usage_failing (no usage check succeeded for over an hour; switchboard_usage with refresh), move_unknown (a move to another machine lost its answer; switchboard_remote, then switchboard_account_recall), refused_there (the last background read of its copy on its machine says the provider refused it; sign in there, or switchboard_account_recall) or ceiling_question (a reached spending ceiling waits for keep or double; switchboard_ceiling_answer), session_duplicate (one Claude Code session runs in two processes; switchboard_session_close_copy with the item's session_id closes the quiet copy) or session_stuck (a board run quiet for 30 minutes; switchboard_sessions with tree). Each item names account_id, label, provider and pool (null for a ceiling), since (Unix seconds, or null) and action.tool. A view: every account listed stays in its group, and nothing moves. Reads only.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}})),
         (false, json!({"name":"switchboard_bugs","title":"What went wrong","description":"Crashes of the app or switchboard serve found at the next start, newest first (at most 20; crashes_total counts the 200 kept): version, started_at, crashed_at (the crash report's time, or null), uptime (under_1m, under_10m, under_1h, under_1d, over_1d or unknown), exception and signal as macOS reported them (EXC_BAD_ACCESS, SIGSEGV; null without a report); and, while usage counts are on (counting), the error counts of the last seven days by day, class (the log event, or panic) and code. running is this run. Codes only: no stack, path, message or identifier. Reads only.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}})),
+        (false, json!({"name":"switchboard_health","title":"Health of this Switchboard","description":"One health report, agent-health/1, for a watcher that turns readings into incidents: schema, product, version, at, state (the worst check) and checks, each {id, area, state, count, fix}. state is ok, warn, fail or unknown (never read as ok: errors_today is unknown while usage counts are off). Checks: owner (lifecycle), sign_in and accounts (accounts needing a person), sessions_stuck, sessions_duplicate, sessions_gone (sessions), crashes (a crash in the last day fails, in the week warns), errors_today (50 or more warn). fix names the tool that repairs it. Counts and kinds only: no account, folder, session id or text. Reads only.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}})),
         (true, json!({"name":"switchboard_switch","title":"Switch account","description":"Choose the account for the next request. target session (default) switches this managed session; route selects the account in its own group for every managed session of that group; claude_cli changes the ordinary Claude Code login for every claude session on this machine and requires global: true. A response already streaming keeps its account. An account given to an agent (assigned_to) is refused unless force: true, only when the operator asks to use it anyway.","inputSchema":{"type":"object","properties":{"account_id":account,"target":{"type":"string","enum":["session","route","claude_cli"],"default":"session"},"global":{"type":"boolean","default":false},"force":{"type":"boolean","default":false,"description":"Use an account given to an agent anyway; the activity records it."}},"required":["account_id"],"additionalProperties":false}})),
         (true, json!({"name":"switchboard_session_close_copy","title":"Close a session's quiet copy","description":"When one Claude Code session runs in two processes (switchboard_attention reason session_duplicate, switchboard_sessions tree finding duplicate), close the copy that is not working, as Needs attention's Close the quiet copy does: of the copies neither busy nor running a command, the one whose status has not changed for longest (then the one started last) gets SIGTERM, then SIGKILL after ten seconds, and the other keeps working. Answers {session_id, closed_pid, kept_pids}; journalled in the duty officer's duty.jsonl with by: person. Without pid, refused when every copy is working; then switchboard_attention's item offers close {pid, why: older}, the copy waiting longest on a command of its own (never one answering), which pid closes. Refused when the session no longer runs in two processes. macOS and Linux.","inputSchema":{"type":"object","properties":{"session_id":{"type":"string","description":"The session id (session_id of the duplicate finding)."},"pid":{"type":"integer","minimum":1,"description":"The copy to close, when every copy works: the attention item's close.pid (why: older). Refused while that copy is answering; a command of its own still running ends with it."}},"required":["session_id"],"additionalProperties":false}})),
         (true, json!({"name":"switchboard_session_end","title":"End a hosted session","description":"End a session a session host holds (switchboard_sessions marks it attachable), as `switchboard sessions end` does: its process gets a hangup, a SIGTERM 5 s later if it still runs, and every viewer is told it ended. Answers {launch_id, exit_code, reason: ended}. Closing a viewer only detaches; this ends the session. macOS and Linux.","inputSchema":{"type":"object","properties":{"launch_id":{"type":"string","description":"The launch id."}},"required":["launch_id"],"additionalProperties":false}})),
@@ -304,6 +305,20 @@ impl Server {
         }
     }
 
+    /// SB-392 K-1: the keys an agent can start on, by name.
+    async fn launch_keys(&self, args: &Map<String, Value>) -> Result<Value, String> {
+        let agent = args
+            .get("agent")
+            .and_then(Value::as_str)
+            .ok_or("Name the agent, such as hermes.")?
+            .to_owned();
+        let folder = match args.get("folder").and_then(Value::as_str) {
+            Some(f) if std::path::Path::new(f).is_absolute() => Some(PathBuf::from(f)),
+            Some(_) => return Err("The folder must be an absolute path.".into()),
+            None => None,
+        };
+        self.call(Operation::LaunchKeys { agent, folder }).await
+    }
     async fn status(&self) -> Result<Value, String> {
         let (session, status) = self.session().await;
         let snapshot = self.call(Operation::Snapshot).await?;
@@ -1291,6 +1306,7 @@ impl Server {
             "switchboard_usage" => self.usage(args).await,
             "switchboard_attention" => self.call(Operation::Attention).await,
             "switchboard_bugs" => self.call(Operation::Bugs).await,
+            "switchboard_health" => self.call(Operation::Health).await,
             "switchboard_capacity" => {
                 self.call(Operation::Capacity {
                     cap: args
@@ -1636,19 +1652,7 @@ impl Server {
             "switchboard_project_suggestion" => self.project_suggestion(args).await,
             "switchboard_project_sources" => self.project_sources(args).await,
             "switchboard_hermes_status" => self.call(Operation::HermesModel).await,
-            "switchboard_launch_keys" => {
-                let agent = args
-                    .get("agent")
-                    .and_then(Value::as_str)
-                    .ok_or("Name the agent, such as hermes.")?
-                    .to_owned();
-                let folder = match args.get("folder").and_then(Value::as_str) {
-                    Some(f) if std::path::Path::new(f).is_absolute() => Some(PathBuf::from(f)),
-                    Some(_) => return Err("The folder must be an absolute path.".into()),
-                    None => None,
-                };
-                self.call(Operation::LaunchKeys { agent, folder }).await
-            }
+            "switchboard_launch_keys" => self.launch_keys(args).await,
             "switchboard_anthropic_keys" => {
                 let text = |k: &str| args.get(k).and_then(Value::as_str).map(str::to_owned);
                 match (text("name"), text("model")) {

@@ -32,6 +32,7 @@ pub mod github;
 pub mod given;
 pub mod handovers;
 mod headless_login;
+pub mod health;
 pub mod hermes;
 mod inbox;
 pub mod kimi;
@@ -971,6 +972,8 @@ pub enum Operation {
     },
     /// SB-390: the saved Anthropic keys by name, never a value.
     AnthropicKeys,
+    /// SB-393: this Switchboard's health as `agent-health/1`: counts and kinds, never names.
+    Health,
     /// SB-392 K-1: every key `agent` can start on here, the folder's OpenRouter key first, by name.
     LaunchKeys {
         agent: String,
@@ -1468,6 +1471,7 @@ impl Runtime {
                 | Operation::Attention
                 // W3 part 2: two small files of its own.
                 | Operation::Bugs
+                | Operation::Health
                 // SB-364: the snapshot and the launch records, each its own small file.
                 | Operation::GivenAccounts
                 // SB-359: Keychain reads of Claude Code's items; the store is only read.
@@ -4863,6 +4867,35 @@ fn dispatch_remote(
         "state": "started",
     }))
 }
+/// Needs attention (SB-365), for `Operation::Attention` and the health report (SB-393).
+fn attention_report(
+    root: &Path,
+    store: &Store,
+    refresh_state: &refresh::RefreshState,
+) -> Result<Value, String> {
+    let snapshot = store.snapshot()?;
+    let sign_in = refresh_state.sign_in_known(store);
+    let renewal_refused = refresh_state.lineages_refused();
+    let seats = seats::recent(root, 1000);
+    let now = monitor::now();
+    // An unreadable spend.json has no question to show; the ceilings page says why.
+    let questions = spend::read(root)
+        .map(|mut file| {
+            spend::prune(&mut file, Some(&snapshot), now);
+            file.questions
+        })
+        .unwrap_or_default();
+    Ok(attention::build(&attention::Inputs {
+        snapshot: &snapshot,
+        sign_in: &sign_in,
+        renewal_refused: &renewal_refused,
+        seats: &seats,
+        questions: &questions,
+        remote: &crate::remote_usage::read(root),
+        watch: &session_watch::last(root),
+        now,
+    }))
+}
 async fn execute(
     store: Arc<Store>,
     root: &Path,
@@ -5038,30 +5071,21 @@ async fn execute(
             let root = root.to_owned();
             Ok(blocking::run(move || bugs::list(&root, monitor::now())))
         }
-        Operation::Attention => {
-            let snapshot = store.snapshot()?;
-            let sign_in = refresh_state.sign_in_known(&store);
-            let renewal_refused = refresh_state.lineages_refused();
-            let seats = seats::recent(root, 1000);
-            let now = monitor::now();
-            // An unreadable spend.json has no question to show; the ceilings page says why.
-            let questions = spend::read(root)
-                .map(|mut file| {
-                    spend::prune(&mut file, Some(&snapshot), now);
-                    file.questions
-                })
-                .unwrap_or_default();
-            Ok(attention::build(&attention::Inputs {
-                snapshot: &snapshot,
-                sign_in: &sign_in,
-                renewal_refused: &renewal_refused,
-                seats: &seats,
-                questions: &questions,
-                remote: &crate::remote_usage::read(root),
-                watch: &session_watch::last(root),
-                now,
+        Operation::Health => {
+            let attention = attention_report(root, &store, refresh_state)?;
+            let bugs = {
+                let root = root.to_owned();
+                blocking::run(move || bugs::list(&root, monitor::now()))
+            };
+            Ok(health::report(&health::Inputs {
+                attention: &attention,
+                bugs: &bugs,
+                owner_running: runtime.is_some(),
+                version: env!("CARGO_PKG_VERSION"),
+                now: monitor::now(),
             }))
         }
+        Operation::Attention => attention_report(root, &store, refresh_state),
         Operation::MonitorStatus => Ok(json!({
             "running": runtime.is_some(), "interval_seconds": monitor::INTERVAL_SECONDS, "idle_interval_seconds": switchboard_core::CHECK_IDLE_SECONDS,
             "decisions": runtime.and_then(|r| r.monitor_decisions.lock().ok().map(|v| v.clone())).unwrap_or_default(),

@@ -174,6 +174,10 @@ enum Command {
     /// exception type macOS reported) and, with usage counts on, the error counts of the last
     /// seven days by class and code. Reads only.
     Bugs,
+    /// This Switchboard's health as one report (`agent-health/1`): each check's area, state (ok,
+    /// warn, fail or unknown), a count and the tool that fixes it. Counts and kinds only, for a
+    /// watcher that turns them into incidents. Reads only.
+    Health,
     /// Report online/offline mode and the proxy address, without its capability.
     Status,
     /// The other machines this Switchboard knows, from accounts moved there and runs started
@@ -2375,6 +2379,7 @@ async fn run(cli: &Cli) -> Result<Value, String> {
         Command::McpHomes => Operation::McpHomes,
         Command::Attention => Operation::Attention,
         Command::Bugs => Operation::Bugs,
+        Command::Health => Operation::Health,
         Command::Capacity { command } => match command {
             None => Operation::Capacity {
                 cap: None,
@@ -5021,6 +5026,22 @@ fn print_result(value: &Value, cli: &Cli) {
                 );
             }
         }
+        Command::Health => {
+            println!("{} · {}", text(&value["state"]), text(&value["version"]));
+            for check in value["checks"].as_array().cloned().unwrap_or_default() {
+                let fix = check["fix"]["tool"]
+                    .as_str()
+                    .map(|t| format!(" · fix: {t}"))
+                    .unwrap_or_default();
+                println!(
+                    "{} ({}): {} · {}{fix}",
+                    text(&check["id"]),
+                    text(&check["area"]),
+                    text(&check["state"]),
+                    text(&check["count"])
+                );
+            }
+        }
         Command::Bugs => {
             let crashes = value["crashes"].as_array().cloned().unwrap_or_default();
             if crashes.is_empty() {
@@ -5572,6 +5593,7 @@ mod mcp_parity {
         ("mcp-homes", Tool("switchboard_mcp_homes")),
         ("attention", Tool("switchboard_attention")),
         ("bugs", Tool("switchboard_bugs")),
+        ("health", Tool("switchboard_health")),
         ("capacity set", Tool("switchboard_capacity")),
         ("capacity clear", Tool("switchboard_capacity")),
         ("duty on", Tool("switchboard_duty")),
