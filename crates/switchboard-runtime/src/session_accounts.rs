@@ -48,6 +48,12 @@ impl Accounts for Homes<'_> {
         }
         found
     }
+    fn open_terminal(&self, script: &Path) -> Result<(), String> {
+        crate::launch::start_terminal(script)
+    }
+    fn resume_flags(&self) -> Vec<&'static str> {
+        crate::launch::bypass_args(self.root, switchboard_core::Provider::Claude, &[])
+    }
 }
 
 #[cfg(test)]
