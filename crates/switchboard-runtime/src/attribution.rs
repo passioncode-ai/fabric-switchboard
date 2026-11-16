@@ -823,6 +823,39 @@ mod tests {
     }
 
     #[test]
+    fn sk_keys_and_token_users_read_as_the_contract_reads_them() {
+        let hex = "0123456789abcdef".repeat(4);
+        assert!(secret_value(&format!("sk-or-v1-{hex}")));
+        assert!(!secret_value("project:helpdesk-customer-support"));
+        assert!(!secret_value("sk-learn-experiments-app"));
+        assert!(
+            !secret_value("SK-T0kenWithUpperAndDigits12345"),
+            "canonical case only"
+        );
+        // The digit must sit within 256 characters of the `sk-`.
+        let late = format!("sk-{}1", "a".repeat(300));
+        assert!(!secret_value(&late));
+        // An inner `sk-` after `-` is tried again.
+        assert!(secret_value(&format!("sk-learn-sk-Ab1{}", "x".repeat(16))));
+        // A key glued after a letter is knowingly not found; after a percent-escape it is.
+        assert!(!secret_value(&format!("ask-Ab1{}", "x".repeat(16))));
+        assert!(secret_value(&format!("%22sk-Ab1{}", "x".repeat(16))));
+        let token = "a1".repeat(20);
+        assert!(token_user_name(&token));
+        assert!(!token_user_name("deploy-bot"));
+        assert!(secret_url(&format!("https://{token}@github.com/o/r.git")));
+        assert!(!secret_url("https://git@github.com/o/r.git"));
+        assert_eq!(
+            record_origin(Some(&format!("{token}@github.com:o/r.git"))),
+            None
+        );
+        assert_eq!(
+            record_origin(Some("git@github.com:o/r.git")).as_deref(),
+            Some("git@github.com:o/r.git")
+        );
+    }
+
+    #[test]
     fn any_value_is_an_answer() {
         for value in [
             Value::Null,
