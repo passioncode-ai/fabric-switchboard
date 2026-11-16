@@ -731,11 +731,16 @@ function codexRouteSection() {
     const line = r.on ? (r.applied ? t('On: Codex goes through Switchboard.') : t('On, but not in Codex\'s settings right now.')) : t('Off: Codex uses your own sign-in in every folder.');
     section.append(el('p', 'account-meta section-state', line));
     if (r.projects.length) section.append(el('p', 'form-note', t('Groups with a Codex account: {names}.', { names: r.projects.join(', ') })));
-    else section.append(el('p', 'form-note', t('No group with folders has a Codex account yet. Move one into a group first.')));
+    else {
+      // Audit item 8: a Codex account in a group without folders reads as "a Codex account in a group" on Accounts; name those groups.
+      const loose = [...new Set((snapshot?.accounts ?? []).filter((a) => a.provider === 'codex' && a.pool !== 'default' && !(snapshot?.projects ?? []).some((p) => p.pool === a.pool && p.folders.length)).map((a) => poolName(a.pool, snapshot?.projects)))];
+      section.append(el('p', 'form-note', loose.length ? t('Codex accounts are in groups without folders ({names}). Add a folder to one of them, or move the account into a group with folders.', { names: loose.join(', ') }) : t('No group with folders has a Codex account yet. Move one into a group first.')));
+    }
     const hookLine = codexHookLine(shellHookState); if (hookLine) section.append(el('p', 'form-note', hookLine));
     if (r.conflict) section.append(el('p', 'form-error', t(r.conflict)));
     const act = button(r.on ? t('Turn off') : t('Turn on'), () => void mutate(async () => { codexRouteState = await adapter.codexRoute(!r.on); }, r.on ? t('Codex uses your own sign-in again.') : t('Codex sessions in group folders now use their groups\' Codex accounts. Start a new Codex session to pick it up.'), 'codex-route-toggle'), 'button', 'codex-route-toggle');
-    act.disabled = !r.on && !!r.conflict;
+    // Audit item 8: with no group to route, turning it on would change nothing.
+    act.disabled = !r.on && (!!r.conflict || !r.projects.length);
     section.append(act);
   }
   return section;

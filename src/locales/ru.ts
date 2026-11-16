@@ -415,6 +415,7 @@ export const RU: Record<string, string> = {
   "Move to the default group": "Перенести в группу по умолчанию",
   "{n} accounts are in the default group now.": "{n} аккаунт теперь в группе по умолчанию.|{n} аккаунта теперь в группе по умолчанию.|{n} аккаунтов теперь в группе по умолчанию.",
   "Or add them to a group with folders: Edit in that group's menu.": "Или добавьте их в группу с папками: «Изменить» в меню этой группы.",
+  "Codex accounts are in groups without folders ({names}). Add a folder to one of them, or move the account into a group with folders.": "Аккаунты Codex находятся в группах без папок ({names}). Добавьте папку в одну из них или перенесите аккаунт в группу с папками.",
   "No group with folders has a Codex account yet. Move one into a group first.": "Пока ни в одной группе с папками нет Codex-аккаунта. Сначала перенесите аккаунт в группу.",
   "Add every repository in a folder…": "Добавить все репозитории из папки…",
   "Looking for repositories in {folder}…": "Поиск репозиториев в {folder}…",

@@ -79,3 +79,13 @@ Every page of the demo (`?demo=1`) in Playwright WebKit at 1280, 960 and 760 px,
 - Item 45: the demo's group named “Tools” (beside the agents' “Tools only”) is “CLI tools”.
 - Items 46, 47: API keys names the agents as the lists do and says when a changed key applies; the no-key line says this computer has no key either.
 - Item 56: the Statistics index stays one line in the pinned bar and scrolls sideways when narrow.
+
+## Status, 2026-11-16 (the rest)
+
+- Item 8: *Codex in group folders* names the groups that hold a Codex account but no folders, and *Turn on* is disabled while no group with folders has one (`codexRouteSection`).
+- Item 36: done in #741 (`style.css` "Q2 item 36": a details summary carries the folds' chevron, not the native triangle).
+- Item 44: done in #715 (the Other machines empty line names *Move to another machine…* on Accounts; strings registry, SB-379).
+- Item 48: done with items 46 and 47 (#741): the no-key line says this computer has no key either.
+- Item 50: done: the Switch note sits in the Claude Code card of *In use now* (`main.ts` `current-how`), before the account rows it points to.
+- Item 57: done in #715 (the Statistics footnote shortened, the internal version left out).
+- Every item of this audit is now fixed, kept on purpose (41) or recorded above.
