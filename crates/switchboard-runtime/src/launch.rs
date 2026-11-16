@@ -4019,7 +4019,13 @@ mod tests {
         );
         assert!(text.starts_with("#!/bin/sh\n"));
         let path = write_launch_script(&home, &text).unwrap();
-        spawn_linux_terminal(&path, Some(terminal.into_os_string()), |_| None).unwrap();
+        fabric_sessions_core::terminal::spawn_linux_terminal(
+            &path,
+            Some(terminal.into_os_string()),
+            |_| None,
+            CONFLICTS,
+        )
+        .unwrap();
         // 60 s as the other process tests (SB-297): the v0.7.36 nightly's arm runner needed more
         // than 10; it still ends as soon as the script completes.
         let deadline = std::time::Instant::now() + Duration::from_secs(60);
@@ -4038,7 +4044,8 @@ mod tests {
         assert!(home.join(".session-pid").exists());
         // No terminal at all: the person is told what to install.
         assert_eq!(
-            spawn_linux_terminal(&path, None, |_| None).unwrap_err(),
+            fabric_sessions_core::terminal::spawn_linux_terminal(&path, None, |_| None, CONFLICTS)
+                .unwrap_err(),
             LINUX_TERMINAL_MISSING
         );
     }
