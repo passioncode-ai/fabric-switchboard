@@ -729,6 +729,20 @@ fn an_openrouter_launch_runs_without_an_owner_and_needs_a_saved_key() {
         launch(&["--openrouter", "--pool", "agents"]).status.code(),
         Some(2)
     );
+    // SB-390: one key source at a time, and an Anthropic launch names a saved key.
+    assert_eq!(
+        launch(&["--openrouter", "--anthropic", "appvillis"])
+            .status
+            .code(),
+        Some(2)
+    );
+    let output = launch(&["--anthropic", "appvillis", "--model", "claude-sonnet-5-5"]);
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("No Anthropic key is saved under that name"),
+        "{stderr}"
+    );
     // Agents whose sessions never read the launch's environment are refused by name.
     let output = binary()
         .arg("--data-dir")

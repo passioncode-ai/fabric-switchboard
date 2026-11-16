@@ -1592,6 +1592,7 @@ enum AgentsCommand {
     /// Start an agent in a folder in Terminal: on the group's API-key account through the
     /// proxy, with `--openrouter` on the saved OpenRouter key, or with `--anthropic <name>` on the
     /// Anthropic key saved under that name (Hermes).
+    #[command(group = clap::ArgGroup::new("key_source").args(["openrouter", "anthropic"]).multiple(false))]
     Launch {
         /// The agent's catalog id (`switchboard agents list`).
         agent: String,
@@ -1610,7 +1611,7 @@ enum AgentsCommand {
         anthropic: Option<String>,
         /// The model for this launch: an OpenRouter id such as `moonshotai/kimi-k2`, or with
         /// `--anthropic` an Anthropic id such as `claude-sonnet-5-5`; default: the key's model.
-        #[arg(long)]
+        #[arg(long, requires = "key_source")]
         model: Option<String>,
     },
 }
@@ -3105,28 +3106,20 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                 openrouter,
                 anthropic,
                 model,
-            } => {
-                if model.is_some() && !*openrouter && anthropic.is_none() {
-                    return Err(
-                        "--model goes with --openrouter or --anthropic: a proxy launch runs on the group's account."
-                            .into(),
-                    );
-                }
-                Operation::LaunchAgent {
-                    agent: agent.clone(),
-                    pool: pool.clone(),
-                    working_directory: folder(dir)?,
-                    via: if anthropic.is_some() {
-                        AgentVia::Anthropic
-                    } else if *openrouter {
-                        AgentVia::Openrouter
-                    } else {
-                        AgentVia::Proxy
-                    },
-                    model: model.clone(),
-                    key: anthropic.clone(),
-                }
-            }
+            } => Operation::LaunchAgent {
+                agent: agent.clone(),
+                pool: pool.clone(),
+                working_directory: folder(dir)?,
+                via: if anthropic.is_some() {
+                    AgentVia::Anthropic
+                } else if *openrouter {
+                    AgentVia::Openrouter
+                } else {
+                    AgentVia::Proxy
+                },
+                model: model.clone(),
+                key: anthropic.clone(),
+            },
         },
         Command::Kimi { command } => match command {
             KimiCommand::List => Operation::KimiAccounts,
