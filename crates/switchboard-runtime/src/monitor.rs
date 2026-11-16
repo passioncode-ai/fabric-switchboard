@@ -356,13 +356,27 @@ impl Pass {
         // watched it is recorded. Nothing is read while no run is watched.
         let analytics = runtime.analytics();
         crate::blocking::run(|| crate::dispatch::sweep(&runtime.root, time, analytics.as_deref()));
+        // SB-397 W0.4: limit stops reported while no owner ran are registered now, oldest first.
+        // Each file goes only once the owner answered, registered or refused for good.
+        for (file, stop) in crate::blocking::run(|| crate::stop_spool::waiting(&runtime.root, time))
+        {
+            let _ = runtime
+                .execute(crate::Operation::RecoveryHook {
+                    session: stop.session,
+                    directory: stop.directory,
+                    billing: stop.billing,
+                })
+                .await;
+            crate::stop_spool::done(&file);
+        }
         // SB-366 (DEC-0017): the accounts on other machines, read over ssh every 15 minutes on a
         // thread of their own; nothing at all without a machine group.
         if let Ok(snapshot) = runtime.store.snapshot() {
             crate::remote_usage::tick(&runtime.root, &snapshot, time);
-            // SB-379: the one-minute watch of live sessions.
-            crate::session_watch::tick(&runtime.root, time);
         }
+        // SB-379: the one-minute watch of live sessions. It reads no account, so a snapshot that
+        // could not be read never skips it (SB-397 W0.3).
+        crate::session_watch::tick(&runtime.root, time);
         // Analytics: the daily active event and accounts added by any path; sends what waits.
         if let Some(client) = runtime.analytics() {
             if let Ok(snapshot) = runtime.store.snapshot() {

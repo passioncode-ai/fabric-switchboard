@@ -526,6 +526,19 @@ fn journal(root: &Path) -> Vec<Value> {
 }
 
 fn append(root: &Path, line: Value) {
+    // SB-397 W0.1: the owner's checks and an offline `close_copy` both append; one at a time.
+    let lock = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(root.join("duty.lock"));
+    #[cfg(unix)]
+    if let Ok(file) = &lock {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = file.set_permissions(std::fs::Permissions::from_mode(0o600));
+    }
+    let _held = lock.ok().filter(|f| f.lock().is_ok());
     let mut lines = journal(root);
     lines.push(line);
     let keep = lines.len().saturating_sub(JOURNAL_LINES);
@@ -540,6 +553,7 @@ fn restarts(lines: &[Value], session: &str, now: i64) -> usize {
         .filter(|l| {
             l["session"] == session
                 && l["action"] == "restart"
+                && l["phase"] != "intent"
                 && l["at"].as_i64().is_some_and(|t| now - t < RESTART_WINDOW)
         })
         .count()
@@ -563,7 +577,14 @@ pub fn status(root: &Path, now: i64) -> Result<Value, String> {
         })
         .collect();
     let lines = journal(root);
-    let recent: Vec<Value> = lines.iter().rev().take(20).cloned().collect();
+    // An intent line is bookkeeping for a cut act (SB-397 W0.1); the outcome line is the act.
+    let recent: Vec<Value> = lines
+        .iter()
+        .rev()
+        .filter(|l| l["phase"] != "intent")
+        .take(20)
+        .cloned()
+        .collect();
     let watched: Vec<&Seen> = seen
         .iter()
         .filter(|s| s.kind == "interactive" && !s.dashboards)
@@ -606,8 +627,12 @@ pub fn check(root: &Path, now: i64, dry_run: bool) -> Result<Value, String> {
     let copies = newer_copies(&seen, now);
     // SB-396 D2: a session stopped on a limit waits for an account; its host continues it.
     let stopped = crate::recovery::live_stop_sessions(root, now);
-    let lines = journal(root);
     let mut done = Vec::new();
+    // SB-397 W0.1: an act a quitting owner cut between its intent and its outcome is finished.
+    if !dry_run {
+        done.extend(finish_interrupted(root, now));
+    }
+    let lines = journal(root);
     for s in &seen {
         if done.len() >= MAX_ACTIONS {
             break;
@@ -629,9 +654,18 @@ pub fn check(root: &Path, now: i64, dry_run: bool) -> Result<Value, String> {
         } else {
             "restart"
         };
+        let prompt = matches!(act, Act::Restart { prompt: true });
         let outcome = if dry_run {
             "planned"
         } else {
+            // SB-397 W0.1: the intent first, with what a later owner needs to finish the act
+            // when this one is cut by a quit (a close takes up to 10.5 s, the drain 8 s).
+            append(
+                root,
+                json!({"at": now, "phase": "intent", "action": action, "reason": reason,
+                    "session": s.session, "folder": s.cwd, "pid": s.pid, "host": s.host,
+                    "config": s.config, "prompt": prompt}),
+            );
             act_on(root, s, act)
         };
         let line = json!({"at": now, "action": action, "reason": reason, "outcome": outcome,
@@ -668,22 +702,35 @@ fn act_on(root: &Path, s: &Seen, act: Act) -> &'static str {
     let Act::Restart { prompt } = act else {
         return "closed";
     };
+    resume(root, &s.session, &s.config, &s.cwd, prompt)
+}
+
+/// The second half of a restart: the stopped session resumed as itself in a Terminal window.
+#[cfg(unix)]
+fn resume(root: &Path, session: &str, config: &Path, cwd: &str, prompt: bool) -> &'static str {
     // Another process may hold the session by now (a host continued it): never a second copy.
-    if crate::machine_sessions::live_sessions(root).contains_key(&s.session) {
+    if crate::machine_sessions::live_sessions(root).contains_key(session) {
         return "closed_held_elsewhere";
     }
-    if !Path::new(&s.cwd).is_dir() {
+    if !Path::new(cwd).is_dir() {
         return "closed_no_folder";
     }
     let Some(program) = crate::launch::find_program("claude") else {
         return "closed_no_claude";
     };
     let bypass = crate::launch::bypass_args(root, switchboard_core::Provider::Claude, &[]);
-    let script = resume_script(root, s, &program, &bypass, prompt);
+    let script = resume_script_for(
+        config,
+        cwd,
+        session,
+        &program,
+        &bypass,
+        prompt.then_some(CONTINUE_PROMPT),
+    );
     let dir = root.join("duty");
     let path = dir.join(format!(
         "{}.command",
-        s.session
+        session
             .chars()
             .filter(|c| c.is_ascii_alphanumeric() || *c == '-')
             .collect::<String>()
@@ -701,6 +748,100 @@ fn act_on(root: &Path, s: &Seen, act: Act) -> &'static str {
 #[cfg(not(unix))]
 fn act_on(_: &Path, _: &Seen, _: Act) -> &'static str {
     "unsupported"
+}
+
+/// How long after its intent a cut act is still finished; older ones are left as they are.
+const INTERRUPTED_WINDOW: i64 = 3600;
+
+/// SB-397 W0.1: the acts whose intent has no outcome line, newest intent per session, within
+/// `INTERRUPTED_WINDOW`. Pure, for tests.
+pub fn interrupted(lines: &[Value], now: i64) -> Vec<Value> {
+    let mut open: Vec<Value> = Vec::new();
+    for line in lines {
+        let key = (line["session"].clone(), line["at"].clone());
+        if line["phase"] == "intent" {
+            open.retain(|o| o["session"] != line["session"]);
+            open.push(line.clone());
+        } else {
+            open.retain(|o| (o["session"].clone(), o["at"].clone()) != key);
+        }
+    }
+    open.retain(|o| {
+        o["at"]
+            .as_i64()
+            .is_some_and(|at| now - at < INTERRUPTED_WINDOW)
+    });
+    open
+}
+
+/// Finishes each cut act: a close whose process is gone is recorded as closed (and resumable); a
+/// restart whose process is gone is resumed; a process still running was never stopped, so the
+/// act is recorded as `interrupted` and the next check decides again.
+fn finish_interrupted(root: &Path, now: i64) -> Vec<Value> {
+    let mut done = Vec::new();
+    for intent in interrupted(&journal(root), now) {
+        let (Some(session), Some(cwd), Some(pid)) = (
+            intent["session"].as_str(),
+            intent["folder"].as_str(),
+            intent["pid"].as_u64(),
+        ) else {
+            continue;
+        };
+        let config = PathBuf::from(intent["config"].as_str().unwrap_or_default());
+        let gone = !process_alive(pid as u32);
+        let outcome = if !gone {
+            "interrupted"
+        } else if intent["action"] == "restart" {
+            finish_restart(root, session, &config, cwd, intent["prompt"] == true)
+        } else {
+            "closed"
+        };
+        let line = json!({"at": intent["at"], "action": intent["action"], "reason": intent["reason"],
+            "outcome": outcome, "session": session, "folder": cwd, "pid": pid, "host": intent["host"],
+            "finished_at": now});
+        append(root, line.clone());
+        if outcome.starts_with("closed") {
+            crate::resumable::record(
+                root,
+                json!({"session": session, "config": config, "cwd": cwd,
+                    "reason": intent["reason"], "at": now, "by": "duty"}),
+            );
+        }
+        crate::oplog::event(
+            "session_duty",
+            &[
+                ("action", crate::oplog::Field::Code("finish_interrupted")),
+                ("outcome", crate::oplog::Field::Code(outcome)),
+            ],
+        );
+        done.push(line);
+    }
+    done
+}
+
+#[cfg(unix)]
+fn finish_restart(
+    root: &Path,
+    session: &str,
+    config: &Path,
+    cwd: &str,
+    prompt: bool,
+) -> &'static str {
+    resume(root, session, config, cwd, prompt)
+}
+#[cfg(not(unix))]
+fn finish_restart(_: &Path, _: &str, _: &Path, _: &str, _: bool) -> &'static str {
+    "closed_not_restarted"
+}
+
+#[cfg(unix)]
+fn process_alive(pid: u32) -> bool {
+    // SAFETY: signal 0 only checks that the process exists.
+    unsafe { libc::kill(pid as libc::pid_t, 0) == 0 }
+}
+#[cfg(not(unix))]
+fn process_alive(_: u32) -> bool {
+    true
 }
 
 pub const NOT_TWO: &str = "That session no longer runs in two processes. Refresh to see it now.";
@@ -861,6 +1002,85 @@ fn stop(pid: u32) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_intent_without_its_outcome_is_an_act_cut_by_a_quit() {
+        let intent = |session: &str, at: i64| json!({"at": at, "phase": "intent", "action": "close", "session": session, "pid": 1});
+        let outcome = |session: &str, at: i64| json!({"at": at, "action": "close", "outcome": "closed", "session": session});
+        let lines = vec![
+            intent("S1", 100),
+            outcome("S1", 100),
+            intent("S2", 200),
+            intent("S3", 300),
+            outcome("S3", 300),
+            intent("S3", 400),
+        ];
+        let open = interrupted(&lines, 500);
+        let open: Vec<_> = open
+            .iter()
+            .map(|v| (v["session"].clone(), v["at"].clone()))
+            .collect();
+        assert_eq!(
+            open,
+            vec![(json!("S2"), json!(200)), (json!("S3"), json!(400))]
+        );
+        assert!(
+            interrupted(&lines, 400 + INTERRUPTED_WINDOW).is_empty(),
+            "an act cut more than an hour ago is left as it is"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_cut_close_is_finished_by_the_next_owner_and_a_live_process_is_left_alone() {
+        let root = tempfile::tempdir().unwrap();
+        let mut child = std::process::Command::new("/bin/sleep")
+            .arg("30")
+            .spawn()
+            .unwrap();
+        let gone = child.id();
+        child.kill().unwrap();
+        child.wait().unwrap();
+        let live = std::process::id();
+        append(
+            root.path(),
+            json!({"at": 1000, "phase": "intent", "action": "close", "reason": "idle",
+                "session": "S1", "folder": "/w/a", "pid": gone, "host": "terminal",
+                "config": "/h/.claude", "prompt": false}),
+        );
+        append(
+            root.path(),
+            json!({"at": 1000, "phase": "intent", "action": "close", "reason": "idle",
+                "session": "S2", "folder": "/w/b", "pid": live, "host": "terminal",
+                "config": "/h/.claude", "prompt": false}),
+        );
+        let done = finish_interrupted(root.path(), 1100);
+        let outcomes: Vec<_> = done
+            .iter()
+            .map(|l| (l["session"].clone(), l["outcome"].clone()))
+            .collect();
+        assert_eq!(
+            outcomes,
+            vec![
+                (json!("S1"), json!("closed")),
+                (json!("S2"), json!("interrupted"))
+            ]
+        );
+        assert_eq!(
+            crate::resumable::recent(root.path(), 0)[0]["session"],
+            "S1",
+            "the closed session can be continued as itself"
+        );
+        assert!(
+            finish_interrupted(root.path(), 1200).is_empty(),
+            "finished once"
+        );
+        assert_eq!(
+            restarts(&journal(root.path()), "S1", 1200),
+            0,
+            "an intent never counts as a restart"
+        );
+    }
 
     fn seen(status: &str, since_min: i64, age_h: i64, quiet_min: Option<i64>) -> Seen {
         let now = 1_000_000;

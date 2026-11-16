@@ -3348,7 +3348,9 @@ the answer `{rows, counts, degraded, observed_at}`.
   proves its key.
 
 **Continue the same session (SB-396 wave B, LC-5, LC-7).** `resumable.jsonl` (0600, the newest
-1000 lines, ids and paths only) gets one line per end Switchboard causes: the duty officer's close
+1000 lines, ids and paths only; every append under an exclusive lock on `resumable.lock`, 0600,
+because the owner and each session host write it, SB-397 W0.2) gets one line per end Switchboard
+causes: the duty officer's close
 (`{session, config, cwd, reason, at, by: duty}`) and a session host's idle close (`{session,
 launch_id, reason: host_idle, at, by: host}`). `Operation::SessionContinue {session_id}` (CLI
 `sessions continue <id>`, MCP `switchboard_session_continue`, the window's `session_continue`)
