@@ -1824,3 +1824,30 @@ fn a_launcher_name_or_parent_that_is_not_one_is_refused_before_anything_is_asked
         assert!(!root.exists());
     }
 }
+
+#[cfg(unix)]
+#[test]
+fn a_short_command_writing_to_a_closed_pipe_ends_quietly() {
+    // 2026-11-16: `println!` into a pipe whose reader had gone panicked (25 `panic stdio` counts
+    // in a day). A short command now ends by SIGPIPE, as other command-line tools do.
+    use std::os::unix::process::ExitStatusExt;
+    let data = tempfile::tempdir().unwrap();
+    let mut child = binary()
+        .args(["--data-dir"])
+        .arg(data.path())
+        .args(["agents", "list"])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    // Close the reading end before the command writes.
+    drop(child.stdout.take());
+    let output = child.wait_with_output().unwrap();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!stderr.contains("panicked"), "{stderr}");
+    assert!(
+        output.status.success() || output.status.signal() == Some(libc::SIGPIPE),
+        "{:?} {stderr}",
+        output.status
+    );
+}

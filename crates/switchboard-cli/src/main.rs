@@ -5038,7 +5038,7 @@ fn print_result(value: &Value, cli: &Cli) {
                     text(&check["id"]),
                     text(&check["area"]),
                     text(&check["state"]),
-                    text(&check["count"])
+                    check["count"].as_u64().unwrap_or(0)
                 );
             }
         }
@@ -5254,6 +5254,21 @@ fn command_path(args: impl IntoIterator<Item = std::ffi::OsString>) -> Vec<Strin
     }
     path
 }
+/// The commands that run for long and talk over sockets or pipes they do not own the other end
+/// of (the owner, the MCP server, a session's host and its viewers, a launch that waits for its
+/// session, a dispatched run): a closed peer must not end them.
+fn keeps_running(command: &Command) -> bool {
+    matches!(
+        command,
+        Command::Serve
+            | Command::Mcp { .. }
+            | Command::SessionHost { .. }
+            | Command::SessionOpen { .. }
+            | Command::Attach { .. }
+            | Command::Launch { .. }
+            | Command::Dispatch { .. }
+    )
+}
 async fn start() -> ExitCode {
     // Parse before resolving app data or creating any files. Even parsing failures
     // are generic: never reflect a user accidentally typing a secret as an argument.
@@ -5312,6 +5327,16 @@ async fn start() -> ExitCode {
             return ExitCode::from(2);
         }
     };
+    // Printing to a closed pipe (`switchboard ... | head`) made `println!` panic: 25 `panic stdio`
+    // counts on 2026-11-16. A short command ends quietly instead, as other command-line tools do;
+    // the long-running ones keep SIGPIPE ignored so a viewer or client going away never kills them.
+    #[cfg(unix)]
+    if !keeps_running(&cli.command) {
+        // SAFETY: restoring a signal's default action, before any other thread of ours writes.
+        unsafe {
+            libc::signal(libc::SIGPIPE, libc::SIG_DFL);
+        }
+    }
     match run(&cli).await {
         Ok(_)
             if matches!(
