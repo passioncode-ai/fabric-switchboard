@@ -65,6 +65,13 @@ class CheckDocs(unittest.TestCase):
         self.board("", row="| SB-1 | P3 | `a\\|b` | a source | open |")
         self.assertEqual(self.run_checker().returncode, 0)
 
+    def test_a_row_without_its_closing_bar_fails(self):
+        # 2026-11-16: three rows ended in "| status | · note" and the shared reader read six cells.
+        self.board("", row="| SB-1 | P3 | An item | a source | open | · a note")
+        self.assertFails("6 cells, not 5")
+        self.board("", row="| SB-1 | P3 | An item | a source | open")
+        self.assertFails("no closing |")
+
     def test_a_status_must_start_with_a_declared_word(self):
         self.board("maybe later")
         self.assertFails('status starts with "maybe"')
