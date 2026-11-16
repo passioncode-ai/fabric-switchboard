@@ -2,6 +2,20 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-11-16: one spec for the session's tasks (SB-392), keys to choose from, agent health across PassionCode (SB-393); 0.7.102 released, wave 2 on `wave2`
+
+- **Asked.** The operator: move the sound engine to Apps & Soft; validate that sessions do not hang or end early; analyse, refactor, inventory every task of this session in one spec and close it in waves; keys: OpenRouter now, Anthropic keys as a choice. Then: move test-stand-agent to Agents and check nothing else is left; monitoring of agents' errors across every PassionCode organization, repair agents, updates, environment and security.
+- **Spec.** [plan](plans/2026-11-16-sessions-and-keys/README.md): every task of the session with its state and evidence, the live session audit, the waves.
+- **Groups.** `sound-engine` in Apps & Soft; `test-stand-agent` and 19 more agent repositories (appvillis-*, esim-*-agent, nicegram-sales-agent, world-pulse-agent, studio-agent-data, content-factory-*) in Agents; skill repositories left in no group (not agents).
+- **Released 0.7.102 (PR #757 `754772d0`, release #758 `810e13cd`).** S-1: the duty officer closes an idle session only after 65 minutes (a pending `ScheduleWakeup` reads idle). K-1: `agents launch-keys`, MCP `switchboard_launch_keys`, the launch dialog's *Keys you can run on*. K-3: an Anthropic Admin key refused by name. SB-393: `switchboard health`, MCP `switchboard_health` (`agent-health/1`).
+- **Keys.** Observatory holds only Anthropic Admin keys (`appvillis`, `sshlg-personal-os`), which cannot run a model; the Admin API lists no API key for Appvillis and three for the personal organization, none of whose values is stored. K-0 is a person's step: create an API key in Claude Console, put it in Observatory, then `use_secret.py run … | switchboard agents anthropic set <name> --key-stdin`.
+- **Estate.** [agent health proposal](research/2026-11-16-agent-health-estate.md) (AH-1 to AH-8, AH-D1 to AH-D4), sent to 14 projects on the board, thread `d9622c6f`.
+- **Wave 2 (branch `wave2`).** WF-5 finished: 5.2e a balancing pass a minute after a group ran out of room, 5.2f C8 streams get the drain's whole deadline, 5.3 switching shares on Statistics; perf item 9 the session tree reuses a read younger than 15 s; item 4 filed as SB-394.
+- **Hygiene.** Receipts for SB-380 to SB-382 and SB-390; 64 remote branches removed, 20 unmerged ones kept under `refs/archive/2026-11-16/`.
+- **Machine.** This MacBook's disk is at about 3.5 GB free (Observatory critical); tool caches pruned; `cleanupPeriodDays` was already 14 (set by another session), so Claude Code trims transcripts at its next start; set it back to 90 once the disk has room.
+
+**Exact next task.** When wave 2's gate on the Mac Studio and Linux clippy read EXIT 0: PR `wave2`, merge, release 0.7.103 with `scripts/release_bump.py`, tag, watch; update this MacBook to 0.7.102 or 0.7.103 (`switchboard update --app "/Applications/Fabric Switchboard.app"`, `switchboard_app check_for_updates`, `restart_to_update`) and check `switchboard health`, `switchboard agents launch-keys hermes`. Then wave 3: SB-391 (re-pin attribution to DEC-0177). Read the board thread `d9622c6f` for the projects' answers.
+
 ## 2026-11-16: 0.7.97 and 0.7.98 out and live; 0.7.99 building (crashes found at start, `switchboard bugs`, `close-copy --target`)
 
 - **Released.** 0.7.97 (in-place launches record their end, updates wait for a quiet spell) and 0.7.98 (SB-388: Needs attention's *Close the quiet copy*, PR #744; audit item 43). This MacBook ran 0.7.94 until 2026-11-16 by design: its log shows the automatic restart into 0.7.94 at 16:21 UTC, then `update_waiting cooldown` hourly (one automatic restart in 6 hours, SB-191) and `window_visible`; MCP `switchboard_app check_for_updates` then `restart_to_update` (the person's *Restart to update*) moved it to 0.7.97 and 0.7.98.
