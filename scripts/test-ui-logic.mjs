@@ -1785,4 +1785,28 @@ check(() => {
   assert.equal(logic.attentionActionLabel('open_sessions'), 'Open sessions');
   assert.ok(logic.attentionReasonText('session_stuck').includes('30 minutes'));
 });
+// Sessions wave 1 (2026-11-16): a row's colour follows its state; what was not read is said; a restart's sessions read in words.
+check(() => {
+  i18n.setLocale('en');
+  assert.equal(logic.sessionTone('working'), 'ok');
+  for (const why of ['duplicate', 'stuck', 'ready_to_continue', 'limit']) assert.equal(logic.sessionTone(why), 'warn', why);
+  assert.equal(logic.sessionTone('gone'), 'danger');
+  for (const why of ['quiet', 'monitoring', 'closed_idle', 'ended']) assert.equal(logic.sessionTone(why), 'muted', why);
+  assert.equal(logic.sessionDegradedText([]), '');
+  assert.equal(logic.sessionDegradedText(['recovery']), 'Stops on a limit could not be read, so they are not listed.');
+  assert.ok(logic.sessionDegradedText(['recovery', 'tree']).endsWith('Part of this list could not be read, so some sessions may be missing.'));
+  assert.equal(logic.sessionGroupTitle('needs_you'), 'Needs attention');
+  assert.equal(logic.sessionGroupTitle('waiting'), 'Waiting');
+  assert.equal(logic.restartStateText('back', null), 'Came back');
+  assert.equal(logic.restartStateText('failed', 'not_back'), 'Not back five minutes after it ended');
+  assert.equal(logic.restartStateText('failed', 'something new'), 'Not back');
+  assert.equal(logic.restartStateText('skipped', 'still_busy'), 'Left as it was: busy for a day');
+  assert.equal(logic.restartTone('continuing'), 'ok');
+  assert.equal(logic.restartTone('failed'), 'danger');
+  assert.equal(logic.restartTone('pending'), 'muted');
+  i18n.setLocale('ru');
+  assert.equal(logic.restartStateText('back', null), 'Вернулась', 'never the navigation «Назад»');
+  assert.equal(logic.sessionGroupTitle('waiting'), 'Ждут');
+  i18n.setLocale('en');
+});
 console.log(`${cases} ui-logic cases passed, including quota priority and wall-clock countdowns.`);

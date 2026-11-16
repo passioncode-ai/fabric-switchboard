@@ -200,7 +200,12 @@ a.address { color: var(--link); text-decoration: underline; text-underline-offse
 .session-list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-3); }
 .session-row { display: grid; gap: var(--space-1); padding-bottom: var(--space-3); border-bottom: 1px solid var(--border); }
 .session-state { font-size: var(--t-label); color: var(--muted); }
-.session-state.is-running { color: var(--ok); }
+.session-state.is-ok { color: var(--ok); }
+.session-state.is-warn { color: var(--warn); }
+.session-state.is-danger { color: var(--danger); }
+/* Sessions page: a row's acts and the restart panel's sit apart, as management actions do. */
+.row-actions { display: flex; flex-wrap: wrap; gap: var(--space-3); margin-top: var(--space-1); }
+.session-folder { overflow-wrap: anywhere; }
 .setup-facts { list-style: none; margin: var(--space-2) 0 var(--space-3); padding: 0; display: grid; gap: var(--space-1); }
 .setup-facts li { color: var(--muted); }
 .setup-facts li::before { content: '–'; display: inline-block; width: 1.4em; }

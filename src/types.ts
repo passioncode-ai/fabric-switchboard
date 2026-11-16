@@ -157,6 +157,8 @@ export interface Adapter {
   sessionsRestartApply(digest: string, reason: string): Promise<{ wave: string; restart: number; skipped: number }>;
   /** SB-397 R1: the newest restart wave, or the refusal that none ran. */
   sessionsRestartStatus(): Promise<RestartWave>;
+  /** SB-397 R1: cancel a running wave: sessions still waiting for their turn are left as they are. */
+  sessionsRestartCancel(wave: string): Promise<{ wave: string; cancelled: number }>;
   /** SB-395: *End* a hosted session, here or on `target`. */
   sessionEnd(launchId: string, target?: string | null): Promise<unknown>;
   /** SB-388: close the quiet one of two processes holding one session, never a working one. */

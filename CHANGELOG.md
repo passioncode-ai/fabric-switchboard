@@ -8,6 +8,7 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- The Sessions page is finished: *Refresh* reads it again, each row's state is coloured by the state itself (working, needs a look, failed, quiet), rows show the folder's name with the full path on hover, buttons are spaced and named for screen readers, *Needs attention* → *Open sessions* comes here, and loading and errors look as on the other pages. *Restart all sessions…* sits in the page's header; the restart shows each session's state with *Continue* on one that did not come back and *Cancel the restart* while it runs, re-plans by itself when the sessions changed, and shows the refusals it can meet in words (SCN-098, SCN-099).
 - `switchboard monitor hold` takes an optional `--reason` (for example `fabric_claim`), so Fabric can name why it holds a session; and a hold is no longer lost by a session host of an earlier version when a later one adds a field to the session's record (SB-399).
 
 ## 0.7.109

@@ -123,6 +123,7 @@ const PARITY: &[(&str, Over)] = &[
     ("sessions_restart_plan", Tool("switchboard_sessions_restart_plan")),
     ("sessions_restart_apply", Tool("switchboard_sessions_restart_apply")),
     ("sessions_restart_status", Tool("switchboard_sessions_restart_status")),
+    ("sessions_restart_cancel", Tool("switchboard_sessions_restart_cancel")),
     (
         "session_attach",
         // A Terminal window on this computer for the person to look at; an agent reads the
