@@ -27,13 +27,27 @@ pub struct Inputs<'a> {
     pub now: i64,
 }
 
-fn rank(state: &str) -> u8 {
+/// The contract's order (DEC-0179 HL-2): ok < unknown < warn < fail. A value that is no state
+/// has no rank, so the worst of a list holding one is `unknown`, never `fail` or `ok`.
+fn rank(state: &str) -> Option<u8> {
     match state {
-        "ok" => 0,
-        "unknown" => 1,
-        "warn" => 2,
-        _ => 3,
+        "ok" => Some(0),
+        "unknown" => Some(1),
+        "warn" => Some(2),
+        "fail" => Some(3),
+        _ => None,
     }
+}
+
+/// The worst of a list of states (HL-2): `unknown` for an empty list or a value that is no state.
+pub fn worst<'a>(states: impl IntoIterator<Item = &'a str>) -> &'static str {
+    const NAMES: [&str; 4] = ["ok", "unknown", "warn", "fail"];
+    let mut top: Option<u8> = None;
+    for s in states {
+        let Some(r) = rank(s) else { return "unknown" };
+        top = Some(top.map_or(r, |t| t.max(r)));
+    }
+    top.map_or("unknown", |r| NAMES[usize::from(r)])
 }
 
 fn check(id: &str, area: &str, state: &str, count: u64, fix: Option<&str>) -> Value {
@@ -142,12 +156,7 @@ pub fn report(inputs: &Inputs) -> Value {
         check("errors_today", "errors", "unknown", 0, None)
     };
     checks.push(errors);
-    let state = checks
-        .iter()
-        .map(|c| c["state"].as_str().unwrap_or("unknown"))
-        .max_by_key(|s| rank(s))
-        .unwrap_or("unknown")
-        .to_owned();
+    let state = worst(checks.iter().map(|c| c["state"].as_str().unwrap_or("")));
     json!({
         "schema": SCHEMA,
         "product": "fabric-switchboard",
@@ -181,6 +190,67 @@ mod tests {
             .unwrap()["state"]
             .as_str()
             .unwrap()
+    }
+
+    fn vectors() -> Value {
+        serde_json::from_str(include_str!("../tests/fixtures/agent-health.json")).unwrap()
+    }
+
+    #[test]
+    fn the_worst_state_is_the_contracts_worst() {
+        let file = vectors();
+        let cases = file["worst"].as_array().unwrap();
+        assert_eq!(cases.len(), 8, "the pinned vectors changed size");
+        for case in cases {
+            let states = case["input"].as_array().unwrap();
+            let got = worst(states.iter().map(|s| s.as_str().unwrap()));
+            assert_eq!(got, case["expected"], "{}", case["name"]);
+        }
+    }
+
+    /// What the contract's reader requires of a report (HL-1, HL-2, FAC-SEM-181), checked on our
+    /// own: the fields and no other, a slug product, whole-second `at`, every count present,
+    /// each check id once, `fix` null or one tool, and the report's state the worst check's.
+    #[test]
+    fn our_report_reads_as_valid_by_the_contracts_rules() {
+        let slug = regex::Regex::new("^[a-z][a-z0-9-]{1,62}$").unwrap();
+        for (attention, bugs, owner) in [
+            (
+                json!({"items": []}),
+                json!({"crashes": [], "counting": true, "errors": []}),
+                true,
+            ),
+            (
+                json!({"items": [{"reason": "sign_in"}]}),
+                json!({"crashes": [], "counting": false}),
+                false,
+            ),
+        ] {
+            let r = run(attention, bugs, owner);
+            let keys: Vec<&str> = r.as_object().unwrap().keys().map(String::as_str).collect();
+            assert_eq!(keys.len(), 6, "{keys:?}");
+            for k in ["schema", "product", "version", "at", "state", "checks"] {
+                assert!(keys.contains(&k), "{k}");
+            }
+            assert!(slug.is_match(r["product"].as_str().unwrap()));
+            assert!(r["at"].is_i64());
+            let checks = r["checks"].as_array().unwrap();
+            let mut ids: Vec<&str> = checks.iter().map(|c| c["id"].as_str().unwrap()).collect();
+            ids.sort_unstable();
+            ids.dedup();
+            assert_eq!(ids.len(), checks.len(), "a check id twice");
+            for c in checks {
+                assert_eq!(c.as_object().unwrap().len(), 5, "{c}");
+                assert!(c["count"].is_u64(), "{c}");
+                assert!(rank(c["state"].as_str().unwrap()).is_some(), "{c}");
+                assert!(
+                    c["fix"].is_null() || c["fix"].as_object().unwrap().len() == 1,
+                    "{c}"
+                );
+            }
+            let states = checks.iter().map(|c| c["state"].as_str().unwrap());
+            assert_eq!(r["state"], worst(states));
+        }
     }
 
     #[test]

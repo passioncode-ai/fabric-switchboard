@@ -10,6 +10,10 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 - Usage counts follow the PassionCode contract's DEC-0157: they leave only after the window has shown the notice (a background start queues them); the notice now names this computer's installation number, which the PassionCode.ai apps share, and the session number; an off another PassionCode.ai app recorded before Switchboard's first send is read as your earlier no, and Settings says so; Settings says "On, but nothing is sent" when the shared file cannot be read; through MCP the switch needs the operator's relayed words (SB-385).
 
+- A short command whose output is cut off by the reader (`switchboard accounts | head`) ends quietly instead of recording a crash; `switchboard health` prints each check's count.
+
+- `switchboard health` follows the PassionCode contract's `agent-health/1` as published (DEC-0179): a state it does not know makes the report `unknown`, never `fail`, and the contract's own test vectors run in Switchboard's checks (SB-393).
+
 ## 0.7.103
 
 - Balancing lends an account within a minute after a request found its group out of room, instead of waiting for the next quarter hour (WF-5.2e, SB-367).
