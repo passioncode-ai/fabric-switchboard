@@ -1804,6 +1804,7 @@ check(() => {
   assert.equal(logic.restartTone('continuing'), 'ok');
   assert.equal(logic.restartTone('failed'), 'danger');
   assert.equal(logic.restartTone('pending'), 'muted');
+  assert.equal(logic.sessionWhyText({ why: 'closed_restart' }, 0), 'Ended by a restart and not back, can continue');
   i18n.setLocale('ru');
   assert.equal(logic.restartStateText('back', null), 'Вернулась', 'never the navigation «Назад»');
   assert.equal(logic.sessionGroupTitle('waiting'), 'Ждут');

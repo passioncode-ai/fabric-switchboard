@@ -2012,6 +2012,7 @@ export function sessionWhyText(row: Pick<SessionRow, 'why' | 'quiet_minutes' | '
     case 'closed_idle_window': return t('Its window closed after an idle hour, can continue');
     case 'closed_duplicate': return t('Closed as a second copy');
     case 'closed_stuck': return t('Closed after it stopped making progress');
+    case 'closed_restart': return t('Ended by a restart and not back, can continue');
     case 'not_started': return t('Did not start');
     case 'exited': case 'ended': return t('Ended');
     case 'stopped': return t('Stopped');
