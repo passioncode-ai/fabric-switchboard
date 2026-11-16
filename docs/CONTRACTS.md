@@ -3367,6 +3367,15 @@ with its session id and every ledger line carry `continue` (ledger rows read `cl
 (`"limit"`, `"not_started"`) reads as that word (D11). Tests `resumable::tests::*`,
 `session_rows::tests::one_row_per_session_and_every_ended_one_can_be_continued_as_itself`.
 
+**Recovery guards (SB-396 wave D, D7, LC-9).** `recovery::claim` takes a `live` test and refuses
+with `SESSION_LIVE` while the stop's session runs in a process (`RecoveryClaim` passes
+`machine_sessions::live_sessions`): whatever host asks, a session is never started a second time. A
+probe is not offered on an account whose usage reading younger than 600 s says a window (not a
+feature window) is at 100 % until a known reset: such an account waits for it; when every probe
+account does, the stop reads `reason: reset` with `probe_at` the first reset (`full_until`). Tests
+`a_stop_whose_session_still_runs_is_never_claimed`,
+`a_probe_waits_for_a_known_reset_while_a_fresh_reading_says_full`.
+
 **A session's own wait (SB-396 wave C, MON-1 to MON-3).** The plugin's hooks run
 `switchboard monitor hook` (hidden; reads the hook input on standard input, prints `{}`, never fails)
 on `PreToolUse` for `ScheduleWakeup`, `Monitor`, `CronCreate` and `CronDelete`, and on `SessionEnd`.
