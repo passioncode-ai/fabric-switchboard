@@ -37,6 +37,15 @@ fn label(sources: &Sources, account: &Value) -> Value {
         .map_or(Value::Null, |l| json!(l))
 }
 
+/// The coding agent a launch record or a stop names by its provider: one field across rows.
+fn agent_of(provider: &Value) -> Value {
+    match provider.as_str() {
+        Some("claude") => json!("claude-code"),
+        Some(other) => json!(other),
+        None => Value::Null,
+    }
+}
+
 fn row(group: &str, why: &str, id: String, fields: Value, acts: Vec<&str>) -> Value {
     let mut row = json!({"id": id, "group": group, "why": why, "acts": acts});
     if let (Some(row), Some(fields)) = (row.as_object_mut(), fields.as_object()) {
@@ -122,7 +131,7 @@ pub fn build(sources: &Sources) -> Value {
             why,
             format!("launch:{}", l["launch_id"].as_str().unwrap_or_default()),
             json!({
-                "agent": l["provider"], "folder": l["folder"], "launch_id": l["launch_id"],
+                "agent": agent_of(&l["provider"]), "folder": l["folder"], "launch_id": l["launch_id"],
                 "account": label(sources, &l["account_id"]), "pool": l["pool"],
                 "origin": l["surface"], "since": l["ended"]["at"].as_i64().or(l["launched_at"].as_i64()),
                 "task": l["task"],
@@ -148,7 +157,7 @@ pub fn build(sources: &Sources) -> Value {
             why,
             format!("stop:{}", stop["event"].as_str().unwrap_or_default()),
             json!({
-                "agent": stop["provider"], "folder": stop["directory"],
+                "agent": agent_of(&stop["provider"]), "folder": stop["directory"],
                 "session_id": stop["session"], "launch_id": s["launch_id"],
                 "account": label(sources, &stop["account"]), "pool": stop["pool"],
                 "origin": Value::Null, "since": stop["stopped_at"], "probe_at": s["probe_at"],
@@ -300,6 +309,7 @@ mod tests {
             (json!("ended"), json!("exited"))
         );
         assert_eq!(by("launch:L4")["why"], "gone");
+        assert_eq!(by("launch:L3")["agent"], "claude-code", "a provider reads as its agent");
         assert_eq!(
             (by("stop:E1")["group"].clone(), by("stop:E1")["why"].clone()),
             (json!("needs_you"), json!("ready_to_continue"))

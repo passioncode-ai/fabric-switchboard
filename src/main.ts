@@ -3325,6 +3325,7 @@ function sessionMachine(title: string, target: string | null, status: MachineRea
   if (status !== 'read') { section.append(el('p', 'usage-error', machineReadText(status))); if (readAt) section.append(el('p', 'form-note', t('Asked {date}.', { date: date(readAt) }))); return section; }
   if (degraded.includes('recovery')) section.append(el('p', 'form-note', t('Sessions stopped on a limit are not listed: Switchboard is not running here.')));
   if (!rows.length) { section.append(el('p', 'form-note', t('No session runs or waits here, and none ended in the last day.'))); return section; }
+  section.append(el('p', 'form-note session-summary', SESSION_GROUPS.map((g) => [g, rows.filter((r) => r.group === g).length] as const).filter(([, n]) => n > 0).map(([g, n]) => `${sessionGroupTitle(g)}: ${n}`).join(' · ')));
   const now = Date.now() / 1000;
   for (const group of SESSION_GROUPS) {
     const items = rows.filter((r) => r.group === group);
@@ -3344,7 +3345,9 @@ function sessionRowItem(row: SessionRow, target: string | null, now: number) {
   title.append(name, el('span', `session-state is-${row.group}`, sessionWhyText(row, now)));
   item.append(title);
   if (row.folder) item.append(el('code', 'address', row.folder));
-  const facts = [surfaceLabel(row.origin), row.pool ? inGroup(poolName(row.pool, snapshot?.projects)) : null, row.since ? date(row.since) : null].filter(Boolean).join(' · ');
+  // A stop on a limit does not say how its session started, so no origin is claimed for it.
+  const origin = row.id.startsWith('stop:') ? null : surfaceLabel(row.origin);
+  const facts = [origin, row.pool ? inGroup(row.pool, snapshot?.projects ?? []) : null, row.since ? date(row.since) : null].filter(Boolean).join(' · ');
   item.append(el('p', 'form-note', facts));
   const acts = el('div', 'row-actions');
   const key = `session-${row.id}`;

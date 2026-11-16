@@ -1991,8 +1991,8 @@ export const SESSION_GROUPS: readonly SessionGroup[] = ['needs_you', 'running', 
 export function sessionGroupTitle(group: SessionGroup): string {
   switch (group) {
     case 'needs_you': return t('Needs you');
-    case 'running': return t('Running');
-    case 'waiting': return t('Waiting');
+    case 'running': return t('Running now');
+    case 'waiting': return t('Waiting for quota');
     case 'ended': return t('Ended in the last day');
   }
 }
