@@ -367,7 +367,10 @@ fn remove_scripts(root: &Path, wave: &str, session: &str) {
 /// the idle close, a cron job holds its session however long ago its last turn was.
 fn holds_wait(root: &Path, session: &str, now: i64) -> bool {
     let w = crate::monitors::read(root, session);
-    w.crons > 0 || w.until.is_some_and(|u| now < u + crate::monitors::GRACE)
+    w.crons > 0
+        || w.until.is_some_and(|u| now < u + crate::monitors::GRACE)
+        // SB-399: a session holding a Fabric task's claim.
+        || w.hold_until.is_some_and(|u| now < u)
 }
 
 #[cfg_attr(not(unix), allow(dead_code))]
@@ -1018,6 +1021,11 @@ mod tests {
             "a cron job has no end"
         );
         assert!(!holds_wait(root.path(), "S2", 0));
+        crate::monitors::hold(root.path(), "S2", 500, 0).unwrap();
+        assert!(
+            holds_wait(root.path(), "S2", 100),
+            "a held session is left out of a wave"
+        );
     }
 
     #[cfg(unix)]

@@ -174,6 +174,8 @@ const ALLOWLIST = {
   'No restart wave has run on this computer.': 'restart waves: CLI and MCP only until R1.6',
   'The restart wave could not be saved.': 'restart waves: CLI and MCP only until R1.6',
   'Restarting sessions works on macOS and Linux for now.': 'restart waves: CLI and MCP only until R1.6',
+  'Give the session id and a hold end within seven days from now, or 0 to release it.': 'monitor hold: Fabric calls the CLI only (SB-399)',
+  "The session's hold could not be saved.": 'monitor hold: Fabric calls the CLI only (SB-399)',
   // runtime analytics.rs installation()/set_shared_enabled(): internal. status() reads them as
   // "off"; set_enabled() replaces every one with "Could not save the analytics choice.".
   'Installation folder unavailable.': 'replaced by the analytics choice error',
