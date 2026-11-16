@@ -4519,9 +4519,6 @@ fn take_turn_wait() -> std::time::Duration {
     #[cfg(not(test))]
     TAKE_TURN_WAIT
 }
-/// One command from the CLI or `switchboard mcp`: to the running owner, else offline. While the
-/// store's lock is held and no owner answers (an owner draining or starting, another offline
-/// command), it asks again every 200 ms, the owner first, until `STORE_WAIT` has passed.
 /// The refusal of an operation that needs the owner when none runs.
 pub const NEEDS_OWNER: &str =
     "Start the desktop app or 'switchboard serve' before login or launch.";
@@ -4529,12 +4526,50 @@ pub const NEEDS_OWNER: &str =
 /// store held, or the control connection failed), as opposed to an owner that answered with a
 /// refusal. A caller that keeps work for the next owner keeps it only then (review of 2026-11-16,
 /// defect 5).
+/// Every control failure that attempted nothing ends "No operation was attempted." (an owner's
+/// refusal of an offline fallback ends "No offline operation was attempted."); the ones whose
+/// outcome is unknown ("Check state before retrying") are kept too, since the next owner answers a
+/// stop it already has as a replay. The owner busy, and its recovery file unreadable for a moment,
+/// are worth the next pass as well (round 2 of the review).
 pub fn owner_unreachable(error: &str) -> bool {
     error == NEEDS_OWNER
         || error == switchboard_core::STORE_LOCKED
-        || error.starts_with("Control connection did not complete.")
-        || error.starts_with("Control request timed out.")
+        || error == control::CONTROL_BUSY
+        || error == recovery::UNREADABLE
         || error == "Control metadata unavailable."
+        || error.ends_with(" No operation was attempted.")
+        || error.contains("Check state before retrying")
+}
+/// One command from the CLI or `switchboard mcp`: to the running owner, else offline. While the
+/// store's lock is held and no owner answers (an owner draining or starting, another offline
+/// command), it asks again every 200 ms, the owner first, until `STORE_WAIT` has passed.
+#[cfg(test)]
+mod owner_unreachable_tests {
+    use super::*;
+
+    #[test]
+    fn a_stop_is_kept_whenever_no_owner_was_asked_and_never_for_an_owners_refusal() {
+        for kept in [
+            NEEDS_OWNER,
+            switchboard_core::STORE_LOCKED,
+            control::CONTROL_BUSY,
+            recovery::UNREADABLE,
+            "Control metadata unavailable.",
+            "Control connection did not complete. No operation was attempted.",
+            "Control handshake failed. No operation was attempted.",
+            "Control request timed out. Check state before retrying a mutation.",
+            "Control response interrupted. Check state before retrying.",
+        ] {
+            assert!(owner_unreachable(kept), "{kept}");
+        }
+        for refused in [
+            "Control authentication refused. No offline operation was attempted.",
+            "Control request refused. No offline operation was attempted.",
+            "No saved account matches the stopped session.",
+        ] {
+            assert!(!owner_unreachable(refused), "{refused}");
+        }
+    }
 }
 pub async fn call(root: &Path, operation: Operation) -> Result<Value, String> {
     call_within(root, operation, STORE_WAIT, execute_offline).await

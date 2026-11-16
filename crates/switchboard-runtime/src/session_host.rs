@@ -630,6 +630,10 @@ pub fn serve(start: Start<'_>, ready: impl FnOnce()) -> Result<Ended, String> {
         // An end (a person's *End*, the idle close) that came while the old process was going
         // wins over the restart: nothing starts after it. The check, the start and the new pid
         // happen under one lock, which `end` also takes (review of 2026-11-16, defect 2).
+        // macOS revokes every open end of the terminal when its session leader exits: the next
+        // process gets the terminal opened again by name. Opened before the session's lock, so a
+        // viewer's write held on the terminal never keeps an end waiting behind it.
+        let slave = reopen_slave(&session);
         let started = {
             let mut inner = session.lock();
             if inner.reason.is_some() {
@@ -637,9 +641,7 @@ pub fn serve(start: Start<'_>, ready: impl FnOnce()) -> Result<Ended, String> {
                 inner.finished = true;
                 None
             } else {
-                // macOS revokes every open end of the terminal when its session leader exits: the
-                // next process gets the terminal opened again by name.
-                let next = reopen_slave(&session).and_then(|slave| spawn_on(&program, &slave));
+                let next = slave.and_then(|slave| spawn_on(&program, &slave));
                 inner.respawning = false;
                 if let Ok(next) = &next {
                     session

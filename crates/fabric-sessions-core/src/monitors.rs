@@ -92,8 +92,6 @@ pub fn apply(mut waits: Waits, hook: &Value, now: i64) -> Option<Waits> {
     Some(waits)
 }
 
-/// `switchboard monitor hook`: records what the hook input says. Never fails a tool call: a
-/// session id it cannot use, or a file it cannot write, records nothing.
 /// Held while a session's file is read, changed and written: a hook and a hold (two processes)
 /// never lose each other's change (review of 2026-11-16, nit 8). A lock that cannot be taken
 /// still lets the write happen, as `resumable` does.
@@ -106,9 +104,16 @@ fn writing(root: &Path) -> Option<std::fs::File> {
         .truncate(false)
         .open(root.join(DIR).join(".lock"))
         .ok()?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = file.set_permissions(std::fs::Permissions::from_mode(0o600));
+    }
     file.lock().ok().map(|()| file)
 }
 
+/// `switchboard monitor hook`: records what the hook input says. Never fails a tool call: a
+/// session id it cannot use, or a file it cannot write, records nothing.
 pub fn hook(root: &Path, hook: &Value, now: i64) {
     let Some(session) = hook["session_id"].as_str() else {
         return;
