@@ -35,7 +35,8 @@ mod tests {
     use super::*;
     use std::sync::Mutex;
 
-    static SEEN: Mutex<Vec<(&'static str, Vec<(&'static str, Field)>)>> = Mutex::new(Vec::new());
+    type Seen = (&'static str, Vec<(&'static str, Field)>);
+    static SEEN: Mutex<Vec<Seen>> = Mutex::new(Vec::new());
     fn record(name: &'static str, fields: &[(&'static str, Field)]) {
         SEEN.lock().unwrap().push((name, fields.to_vec()));
     }
