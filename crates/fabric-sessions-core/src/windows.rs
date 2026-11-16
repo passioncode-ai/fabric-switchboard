@@ -1,0 +1,714 @@
+//! Windows private storage and process identity (SB-397 D-2: moved from switchboard-core, unchanged). No plaintext fallback or machine-wide scope.
+use std::{
+    ffi::c_void,
+    fs::{self, File},
+    io,
+    mem::{size_of, zeroed},
+    os::windows::{
+        ffi::OsStrExt,
+        io::{AsRawHandle, FromRawHandle},
+    },
+    path::Path,
+    ptr::{null, null_mut},
+};
+use windows_sys::Win32::{
+    Foundation::*,
+    Security::{Authorization::*, *},
+    Storage::FileSystem::*,
+    System::Threading::*,
+};
+fn error(_: impl std::fmt::Display) -> String {
+    "Windows private storage unavailable".into()
+}
+fn wide(p: &Path) -> Result<Vec<u16>, String> {
+    let mut v: Vec<_> = p.as_os_str().encode_wide().collect();
+    if v.contains(&0) {
+        return Err("Invalid private storage path".into());
+    }
+    v.push(0);
+    Ok(v)
+}
+struct Local(*mut c_void);
+impl Drop for Local {
+    fn drop(&mut self) {
+        if !self.0.is_null() {
+            unsafe {
+                LocalFree(self.0);
+            }
+        }
+    }
+}
+struct Handle(HANDLE);
+impl Drop for Handle {
+    fn drop(&mut self) {
+        unsafe {
+            CloseHandle(self.0);
+        }
+    }
+}
+fn user_sid() -> Result<String, String> {
+    unsafe {
+        let mut token = null_mut();
+        if OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) == 0 {
+            return Err(error(io::Error::last_os_error()));
+        }
+        let token = Handle(token);
+        let mut needed = 0;
+        GetTokenInformation(token.0, TokenUser, null_mut(), 0, &mut needed);
+        let mut data = vec![0usize; (needed as usize).div_ceil(size_of::<usize>())];
+        if GetTokenInformation(
+            token.0,
+            TokenUser,
+            data.as_mut_ptr().cast(),
+            needed,
+            &mut needed,
+        ) == 0
+        {
+            return Err(error("token"));
+        }
+        let user = &*(data.as_ptr().cast::<TOKEN_USER>());
+        let mut text = null_mut();
+        if ConvertSidToStringSidW(user.User.Sid, &mut text) == 0 {
+            return Err(error("sid"));
+        }
+        let _text = Local(text.cast());
+        let mut len = 0;
+        while *text.add(len) != 0 {
+            len += 1;
+        }
+        String::from_utf16(std::slice::from_raw_parts(text, len)).map_err(error)
+    }
+}
+/// The owner Windows gives to what this process creates when it names none: the
+/// token's default owner. For an ordinary user it is the user; for an elevated
+/// member of Administrators it is, by default, the Administrators group — so a
+/// directory such a process made itself (a temporary directory, a data directory
+/// made before Switchboard ran) is owned by the group, not by the user's SID.
+struct DefaultOwner(Vec<usize>);
+impl DefaultOwner {
+    fn current() -> Result<Self, String> {
+        unsafe {
+            let mut token = null_mut();
+            if OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) == 0 {
+                return Err(error(io::Error::last_os_error()));
+            }
+            let token = Handle(token);
+            let mut needed = 0;
+            GetTokenInformation(token.0, TokenOwner, null_mut(), 0, &mut needed);
+            let mut data = vec![0usize; (needed as usize).div_ceil(size_of::<usize>())];
+            if GetTokenInformation(
+                token.0,
+                TokenOwner,
+                data.as_mut_ptr().cast(),
+                needed,
+                &mut needed,
+            ) == 0
+            {
+                return Err(error("token owner"));
+            }
+            Ok(Self(data))
+        }
+    }
+    fn sid(&self) -> PSID {
+        unsafe { (*(self.0.as_ptr().cast::<TOKEN_OWNER>())).Owner }
+    }
+}
+/// True when `owner` is this user, or the owner this process's own token gives to
+/// what it creates. Anything else belongs to another principal and is refused.
+fn owned_by_us(owner: PSID, user: PSID) -> Result<bool, String> {
+    unsafe {
+        if EqualSid(owner, user) != 0 {
+            return Ok(true);
+        }
+        let default = DefaultOwner::current()?;
+        Ok(EqualSid(owner, default.sid()) != 0)
+    }
+}
+/// One piece of this process's token (`TokenUser`, `TokenOwner`, `TokenGroups`), in memory
+/// aligned for its structure.
+fn token_information(class: TOKEN_INFORMATION_CLASS) -> Result<Vec<usize>, String> {
+    unsafe {
+        let mut token = null_mut();
+        if OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) == 0 {
+            return Err(error(io::Error::last_os_error()));
+        }
+        let token = Handle(token);
+        let mut needed = 0;
+        GetTokenInformation(token.0, class, null_mut(), 0, &mut needed);
+        let mut data = vec![0usize; (needed as usize).div_ceil(size_of::<usize>())];
+        if needed == 0
+            || GetTokenInformation(
+                token.0,
+                class,
+                data.as_mut_ptr().cast(),
+                needed,
+                &mut needed,
+            ) == 0
+        {
+            return Err(error("token"));
+        }
+        Ok(data)
+    }
+}
+/// SB-243: whether `owner` may own a file another program of this person wrote (Claude Code's
+/// or Codex's sign-in): this user; the owner this process's token gives what it creates; or the
+/// Administrators group while this token carries it, enabled or deny-only. A program the person
+/// ran as administrator (or with UAC off) creates files the group owns, not the user's SID, and
+/// a planted file of that group needs an administrator, who could read the sign-in anyway.
+fn trusted_owner(owner: PSID) -> Result<bool, String> {
+    unsafe {
+        let user = token_information(TokenUser)?;
+        if owned_by_us(owner, (*(user.as_ptr().cast::<TOKEN_USER>())).User.Sid)? {
+            return Ok(true);
+        }
+        let mut admins = [0usize; SECURITY_MAX_SID_SIZE as usize / size_of::<usize>() + 1];
+        let mut size = (admins.len() * size_of::<usize>()) as u32;
+        if CreateWellKnownSid(
+            WinBuiltinAdministratorsSid,
+            null_mut(),
+            admins.as_mut_ptr().cast(),
+            &mut size,
+        ) == 0
+        {
+            return Err(error("administrators"));
+        }
+        let admins: PSID = admins.as_mut_ptr().cast();
+        if EqualSid(owner, admins) == 0 {
+            return Ok(false);
+        }
+        let groups = token_information(TokenGroups)?;
+        let groups = &*(groups.as_ptr().cast::<TOKEN_GROUPS>());
+        let list = std::slice::from_raw_parts(groups.Groups.as_ptr(), groups.GroupCount as usize);
+        Ok(list.iter().any(|group| EqualSid(group.Sid, admins) != 0))
+    }
+}
+/// SB-243: why a sign-in file another program wrote is refused, as a code for the log, or Ok
+/// when it is this person's: one link, and an owner `trusted_owner` accepts. Its ACL is the
+/// writer's business; Switchboard copies the sign-in into its own private storage.
+pub fn check_foreign_file(file: &File) -> Result<(), &'static str> {
+    unsafe {
+        let mut info: BY_HANDLE_FILE_INFORMATION = zeroed();
+        if GetFileInformationByHandle(file.as_raw_handle(), &mut info) == 0 {
+            return Err("file_information");
+        }
+        if info.nNumberOfLinks != 1 {
+            return Err("links");
+        }
+        let mut owner = null_mut();
+        let mut sd = null_mut();
+        if GetSecurityInfo(
+            file.as_raw_handle(),
+            SE_FILE_OBJECT,
+            OWNER_SECURITY_INFORMATION,
+            &mut owner,
+            null_mut(),
+            null_mut(),
+            null_mut(),
+            &mut sd,
+        ) != 0
+        {
+            return Err("security_information");
+        }
+        let _sd = Local(sd);
+        if owner.is_null() {
+            return Err("owner");
+        }
+        match trusted_owner(owner) {
+            Ok(true) => Ok(()),
+            Ok(false) => Err("owner"),
+            Err(_) => Err("token"),
+        }
+    }
+}
+fn descriptor() -> Result<Local, String> {
+    let s = format!("O:{}D:P(A;OICI;FA;;;{})", user_sid()?, user_sid()?);
+    let wide: Vec<u16> = s.encode_utf16().chain(Some(0)).collect();
+    let mut sd = null_mut();
+    unsafe {
+        if ConvertStringSecurityDescriptorToSecurityDescriptorW(
+            wide.as_ptr(),
+            1,
+            &mut sd,
+            null_mut(),
+        ) == 0
+        {
+            return Err(error("descriptor"));
+        }
+    }
+    Ok(Local(sd))
+}
+/// Reject reparse points in every existing path component (including junctions).
+pub fn check_path(path: &Path) -> Result<(), String> {
+    use std::os::windows::fs::MetadataExt;
+    if !path.is_absolute() {
+        return Err("Account storage path must be absolute".into());
+    }
+    for ancestor in path.ancestors() {
+        match fs::symlink_metadata(ancestor) {
+            Ok(m) if m.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 => {
+                return Err("Unsafe Windows reparse point".into())
+            }
+            Ok(_) => {}
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+            Err(e) => return Err(error(e)),
+        }
+    }
+    Ok(())
+}
+fn protect(path: &Path) -> Result<(), String> {
+    unsafe {
+        let path = wide(path)?;
+        let mut existing = null_mut();
+        let mut owner = null_mut();
+        if GetNamedSecurityInfoW(
+            path.as_ptr(),
+            SE_FILE_OBJECT,
+            OWNER_SECURITY_INFORMATION,
+            &mut owner,
+            null_mut(),
+            null_mut(),
+            null_mut(),
+            &mut existing,
+        ) != 0
+        {
+            return Err(error("owner"));
+        }
+        let _existing = Local(existing);
+        let sd = descriptor()?;
+        let mut expected = null_mut();
+        let mut defaulted = 0;
+        // The DIRECTORY may be owned by the token's default owner as well as by the
+        // user: an elevated administrator's process creates directories owned by
+        // the Administrators group, and refusing those refused this user's own
+        // storage. The protected DACL set below still grants only the user.
+        if GetSecurityDescriptorOwner(sd.0, &mut expected, &mut defaulted) == 0
+            || !owned_by_us(owner, expected)?
+        {
+            return Err("Private storage belongs to another Windows user".into());
+        }
+        let mut dacl = null_mut();
+        let mut present = 0;
+        if GetSecurityDescriptorDacl(sd.0, &mut present, &mut dacl, &mut defaulted) == 0
+            || present == 0
+            || dacl.is_null()
+        {
+            return Err(error("dacl"));
+        }
+        if SetNamedSecurityInfoW(
+            path.as_ptr(),
+            SE_FILE_OBJECT,
+            DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
+            null_mut(),
+            null_mut(),
+            dacl,
+            null(),
+        ) != 0
+        {
+            return Err(error("protect"));
+        }
+        Ok(())
+    }
+}
+pub fn private_dir(path: &Path) -> Result<(), String> {
+    check_path(path)?;
+    if !path.exists() {
+        let parent = path.parent().ok_or("Private directory has no parent")?;
+        if !parent.exists() {
+            private_dir(parent)?;
+        }
+        let sd = descriptor()?;
+        let sa = SECURITY_ATTRIBUTES {
+            nLength: size_of::<SECURITY_ATTRIBUTES>() as u32,
+            lpSecurityDescriptor: sd.0,
+            bInheritHandle: 0,
+        };
+        if unsafe { CreateDirectoryW(wide(path)?.as_ptr(), &sa) } == 0 && !path.is_dir() {
+            return Err(error(io::Error::last_os_error()));
+        }
+    }
+    check_path(path)?;
+    if !path.is_dir() {
+        return Err("Unsafe private storage directory".into());
+    }
+    protect(path)
+}
+fn file(path: &Path, create: bool, write: bool, strict: bool) -> Result<File, String> {
+    check_path(path)?;
+    let sd = descriptor()?;
+    let sa = SECURITY_ATTRIBUTES {
+        nLength: size_of::<SECURITY_ATTRIBUTES>() as u32,
+        lpSecurityDescriptor: sd.0,
+        bInheritHandle: 0,
+    };
+    let handle = unsafe {
+        CreateFileW(
+            wide(path)?.as_ptr(),
+            GENERIC_READ | if write { GENERIC_WRITE } else { 0 },
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+            &sa,
+            if create { CREATE_NEW } else { OPEN_EXISTING },
+            FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT,
+            null_mut(),
+        )
+    };
+    if handle == INVALID_HANDLE_VALUE {
+        return Err(error(io::Error::last_os_error()));
+    }
+    let f = unsafe { File::from_raw_handle(handle) };
+    let mut info = unsafe { zeroed::<BY_HANDLE_FILE_INFORMATION>() };
+    if unsafe { GetFileInformationByHandle(f.as_raw_handle(), &mut info) } == 0
+        || info.dwFileAttributes & (FILE_ATTRIBUTE_REPARSE_POINT | FILE_ATTRIBUTE_DIRECTORY) != 0
+        || info.nNumberOfLinks != 1
+    {
+        return Err("Unsafe Windows private file".into());
+    }
+    if strict {
+        verify_private_handle(&f)?;
+    } else {
+        protect(path)?;
+    }
+    Ok(f)
+}
+pub fn create_new(path: &Path) -> Result<File, String> {
+    file(path, true, true, false)
+}
+pub fn open_private(path: &Path, write: bool) -> Result<File, String> {
+    file(path, false, write, false)
+}
+pub(crate) fn open_private_strict(path: &Path) -> Result<File, String> {
+    file(path, false, false, true)
+}
+fn verify_private_handle(file: &File) -> Result<(), String> {
+    let refused =
+        || "Private file permissions are unsafe; rotate its capability before reuse".to_string();
+    unsafe {
+        let mut sd = null_mut();
+        let mut owner = null_mut();
+        let mut dacl = null_mut();
+        if GetSecurityInfo(
+            file.as_raw_handle(),
+            SE_FILE_OBJECT,
+            OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION,
+            &mut owner,
+            null_mut(),
+            &mut dacl,
+            null_mut(),
+            &mut sd,
+        ) != 0
+        {
+            return Err(refused());
+        }
+        let _allocation = Local(sd);
+        let expected = descriptor()?;
+        let mut expected_owner = null_mut();
+        let mut defaulted = 0;
+        if GetSecurityDescriptorOwner(expected.0, &mut expected_owner, &mut defaulted) == 0
+            || EqualSid(owner, expected_owner) == 0
+        {
+            return Err(refused());
+        }
+        let mut control = 0;
+        let mut revision = 0;
+        if GetSecurityDescriptorControl(sd, &mut control, &mut revision) == 0
+            || control & SE_DACL_PROTECTED == 0
+            || dacl.is_null()
+            || (*dacl).AceCount == 0
+        {
+            return Err(refused());
+        }
+        for index in 0..(*dacl).AceCount {
+            let mut raw = null_mut();
+            if GetAce(dacl, index.into(), &mut raw) == 0 || raw.is_null() {
+                return Err(refused());
+            }
+            let header = &*(raw as *const ACE_HEADER);
+            // Only ordinary, explicit current-user allow ACEs are accepted. Object,
+            // callback, inherited and foreign-principal ACEs are deliberately refused.
+            if header.AceType != 0
+                || header.AceFlags & INHERITED_ACE as u8 != 0
+                || (header.AceSize as usize) < size_of::<ACCESS_ALLOWED_ACE>()
+            {
+                return Err(refused());
+            }
+            let ace = &*(raw as *const ACCESS_ALLOWED_ACE);
+            if EqualSid((&ace.SidStart as *const u32) as *mut c_void, expected_owner) == 0 {
+                return Err(refused());
+            }
+        }
+        Ok(())
+    }
+}
+pub fn replace(source: &Path, destination: &Path) -> Result<(), String> {
+    check_path(source)?;
+    check_path(destination)?;
+    if source.parent() != destination.parent() {
+        return Err("Private replacement must stay in one directory".into());
+    }
+    // No delete-before-rename gap. Sharing violations leave the old destination intact.
+    if unsafe {
+        MoveFileExW(
+            wide(source)?.as_ptr(),
+            wide(destination)?.as_ptr(),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+        )
+    } == 0
+    {
+        return Err(error(io::Error::last_os_error()));
+    }
+    Ok(())
+}
+/// SB-247: when process `pid` started, as Windows UTC FILETIME: the `created` a session marker
+/// records and [`process_matches`] compares.
+pub fn process_created(pid: u32) -> Result<u64, String> {
+    unsafe {
+        let h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+        if h.is_null() {
+            return Err("Session process cannot be inspected".into());
+        }
+        let h = Handle(h);
+        let (mut start, mut exit, mut kernel, mut user) = (zeroed(), zeroed(), zeroed(), zeroed());
+        if GetProcessTimes(h.0, &mut start, &mut exit, &mut kernel, &mut user) == 0 {
+            return Err("Session process cannot be inspected".into());
+        }
+        Ok((start.dwHighDateTime as u64) << 32 | start.dwLowDateTime as u64)
+    }
+}
+/// True only for the same living process incarnation; timestamp is Windows UTC FILETIME.
+pub fn process_matches(pid: u32, created: u64) -> Result<bool, String> {
+    unsafe {
+        let h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+        if h.is_null() {
+            return if GetLastError() == ERROR_INVALID_PARAMETER {
+                Ok(false)
+            } else {
+                Err("Session process cannot be inspected".into())
+            };
+        }
+        let h = Handle(h);
+        let (mut start, mut exit, mut kernel, mut user) = (zeroed(), zeroed(), zeroed(), zeroed());
+        if GetProcessTimes(h.0, &mut start, &mut exit, &mut kernel, &mut user) == 0 {
+            return Err("Session process cannot be inspected".into());
+        }
+        let mut code = 0;
+        if GetExitCodeProcess(h.0, &mut code) == 0 {
+            return Err("Session process cannot be inspected".into());
+        }
+        Ok(code == 259
+            && ((start.dwHighDateTime as u64) << 32 | start.dwLowDateTime as u64) == created)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::private_fs;
+    /// SB-243: a sign-in file another program wrote with an ordinary create (as Claude Code
+    /// and Codex do) belongs to this person whatever owner the token gave it: the user's SID,
+    /// or the Administrators group for a process run as administrator (as the CI runner is).
+    #[test]
+    fn a_file_another_program_wrote_plainly_is_this_persons() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(".credentials.json");
+        std::fs::write(&path, br#"{"claudeAiOauth":{}}"#).unwrap();
+        let file = File::open(&path).unwrap();
+        assert_eq!(check_foreign_file(&file), Ok(()));
+        // A second name for the same file is refused.
+        let other = dir.path().join("linked.json");
+        std::fs::hard_link(&path, &other).unwrap();
+        let file = File::open(&path).unwrap();
+        assert_eq!(check_foreign_file(&file), Err("links"));
+    }
+    /// SB-243: the group a token's default owner names (the Administrators group for an elevated
+    /// administrator) is trusted only while this token carries that group.
+    #[test]
+    fn the_tokens_own_user_and_default_owner_are_trusted_owners() {
+        let user = token_information(TokenUser).unwrap();
+        let owner = token_information(TokenOwner).unwrap();
+        unsafe {
+            assert!(trusted_owner((*(user.as_ptr().cast::<TOKEN_USER>())).User.Sid).unwrap());
+            assert!(trusted_owner((*(owner.as_ptr().cast::<TOKEN_OWNER>())).Owner).unwrap());
+            // LocalSystem is neither this user nor a group this token holds.
+            let mut system = [0usize; SECURITY_MAX_SID_SIZE as usize / size_of::<usize>() + 1];
+            let mut size = (system.len() * size_of::<usize>()) as u32;
+            assert_ne!(
+                CreateWellKnownSid(
+                    WinLocalSystemSid,
+                    null_mut(),
+                    system.as_mut_ptr().cast(),
+                    &mut size
+                ),
+                0
+            );
+            assert!(!trusted_owner(system.as_mut_ptr().cast()).unwrap());
+        }
+    }
+    #[test]
+    fn windows_strict_read_refuses_widened_acl_without_mutating_file() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("control.json");
+        private_fs::private_write(&path, b"synthetic capability").unwrap();
+        assert_eq!(
+            private_fs::read_private_strict(&path, 128).unwrap(),
+            b"synthetic capability"
+        );
+        unsafe {
+            let s = format!("D:P(A;;FA;;;{})(A;;FR;;;WD)", user_sid().unwrap());
+            let s: Vec<u16> = s.encode_utf16().chain(Some(0)).collect();
+            let mut sd = null_mut();
+            assert_ne!(
+                ConvertStringSecurityDescriptorToSecurityDescriptorW(
+                    s.as_ptr(),
+                    1,
+                    &mut sd,
+                    null_mut()
+                ),
+                0
+            );
+            let _sd = Local(sd);
+            let mut dacl = null_mut();
+            let mut present = 0;
+            let mut defaulted = 0;
+            assert_ne!(
+                GetSecurityDescriptorDacl(sd, &mut present, &mut dacl, &mut defaulted),
+                0
+            );
+            assert_eq!(
+                SetNamedSecurityInfoW(
+                    wide(&path).unwrap().as_ptr(),
+                    SE_FILE_OBJECT,
+                    DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
+                    null_mut(),
+                    null_mut(),
+                    dacl,
+                    null()
+                ),
+                0
+            );
+        }
+        for _ in 0..2 {
+            assert!(private_fs::read_private_strict(&path, 128)
+                .unwrap_err()
+                .contains("permissions are unsafe"));
+        }
+        assert_eq!(fs::read(&path).unwrap(), b"synthetic capability");
+    }
+    #[test]
+    fn windows_private_acl_has_only_current_user_and_no_inheritance() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("private");
+        private_dir(&root).unwrap();
+        let path = root.join("file");
+        private_fs::private_write(&path, b"synthetic").unwrap();
+        unsafe {
+            let mut sd = null_mut();
+            let mut dacl = null_mut();
+            let mut owner = null_mut();
+            assert_eq!(
+                GetNamedSecurityInfoW(
+                    wide(&path).unwrap().as_ptr(),
+                    SE_FILE_OBJECT,
+                    OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION,
+                    &mut owner,
+                    null_mut(),
+                    &mut dacl,
+                    null_mut(),
+                    &mut sd
+                ),
+                0
+            );
+            let _sd = Local(sd);
+            let mut control = 0;
+            let mut revision = 0;
+            assert_ne!(
+                GetSecurityDescriptorControl(sd, &mut control, &mut revision),
+                0
+            );
+            assert_ne!(control & SE_DACL_PROTECTED, 0);
+            assert_eq!((*dacl).AceCount, 1);
+            let mut ace = null_mut();
+            assert_ne!(GetAce(dacl, 0, &mut ace), 0);
+            let ace = &*(ace as *const ACCESS_ALLOWED_ACE);
+            assert_eq!(ace.Header.AceType, 0 /* ACCESS_ALLOWED_ACE_TYPE */);
+            assert_eq!(ace.Header.AceFlags & INHERITED_ACE as u8, 0);
+            assert_ne!(
+                EqualSid(owner, (&ace.SidStart as *const u32) as *mut c_void),
+                0
+            );
+        }
+        let hardlink = root.join("hardlink");
+        fs::hard_link(&path, &hardlink).unwrap();
+        assert!(private_fs::read_private(&path, 64).is_err());
+    }
+    #[test]
+    fn windows_existing_directory_made_by_this_process_is_ours() {
+        // A directory this process made WITHOUT Switchboard's descriptor gets the
+        // token's default owner: the user, or, for an elevated administrator (the
+        // CI runner), the Administrators group. Both are this process's own.
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("made-by-std");
+        fs::create_dir(&root).unwrap();
+        private_dir(&root).unwrap();
+        private_fs::private_write(&root.join("file"), b"synthetic").unwrap();
+        assert_eq!(
+            private_fs::read_private(&root.join("file"), 64).unwrap(),
+            b"synthetic"
+        );
+        unsafe {
+            let user = descriptor().unwrap();
+            let mut user_sid = null_mut();
+            let mut defaulted = 0;
+            assert_ne!(
+                GetSecurityDescriptorOwner(user.0, &mut user_sid, &mut defaulted),
+                0
+            );
+            let default = DefaultOwner::current().unwrap();
+            assert!(owned_by_us(default.sid(), user_sid).unwrap());
+            assert!(owned_by_us(user_sid, user_sid).unwrap());
+            // LocalSystem is neither this user nor this token's default owner.
+            let system: Vec<u16> = "S-1-5-18".encode_utf16().chain(Some(0)).collect();
+            let mut sid = null_mut();
+            assert_ne!(ConvertStringSidToSidW(system.as_ptr(), &mut sid), 0);
+            let _sid = Local(sid);
+            assert!(!owned_by_us(sid, user_sid).unwrap());
+        }
+    }
+    #[test]
+    fn windows_failed_replacement_preserves_old_bytes() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("private");
+        private_dir(&root).unwrap();
+        let path = root.join("file");
+        private_fs::private_write(&path, b"old").unwrap();
+        let held = fs::OpenOptions::new()
+            .read(true)
+            .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE)
+            .open(&path)
+            .unwrap();
+        assert!(private_fs::private_write(&path, b"new").is_err());
+        drop(held);
+        assert_eq!(private_fs::read_private(&path, 64).unwrap(), b"old");
+        private_fs::private_write(&path, b"new").unwrap();
+        assert_eq!(private_fs::read_private(&path, 64).unwrap(), b"new");
+    }
+    #[test]
+    fn windows_process_identity_rejects_reused_pid_timestamp() {
+        unsafe {
+            let (mut created, mut exit, mut kernel, mut user) =
+                (zeroed::<FILETIME>(), zeroed(), zeroed(), zeroed());
+            assert_ne!(
+                GetProcessTimes(
+                    GetCurrentProcess(),
+                    &mut created,
+                    &mut exit,
+                    &mut kernel,
+                    &mut user
+                ),
+                0
+            );
+            let timestamp = (created.dwHighDateTime as u64) << 32 | created.dwLowDateTime as u64;
+            assert!(process_matches(std::process::id(), timestamp).unwrap());
+            assert!(!process_matches(std::process::id(), timestamp + 1).unwrap());
+        }
+    }
+}

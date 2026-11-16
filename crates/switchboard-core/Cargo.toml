@@ -8,6 +8,7 @@ homepage.workspace = true
 publish.workspace = true
 
 [dependencies]
+fabric-sessions-core = { path = "../fabric-sessions-core" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 uuid = { version = "1", features = ["v4"] }
