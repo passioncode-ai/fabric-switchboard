@@ -8,7 +8,6 @@
 //! account into another group (SB-205).
 /// SB-397 D-2: the record and its storage live in fabric-sessions-core.
 pub use fabric_sessions_core::stops::*;
-use serde::{Deserialize, Serialize};
 use std::{
     collections::HashSet,
     path::{Path, PathBuf},
