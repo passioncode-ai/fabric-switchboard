@@ -29,9 +29,28 @@ pub const NOT_STARTED: &str = "The Terminal window to continue the session could
 pub const CONTINUE_PROMPT: &str =
     "Switchboard continued this session after it ended. Continue the task from where you left off.";
 
-/// Appends one end; a line that cannot be written is dropped (it never stops the close).
+/// The lock file beside the ledger: the owner's duty officer and every session host append to it,
+/// each a process of its own (SB-397 W0.2).
+const LOCK: &str = "resumable.lock";
+
+/// Appends one end; a line that cannot be written is dropped (it never stops the close). The read
+/// and the write happen under an exclusive lock on `resumable.lock`, so two processes ending
+/// sessions at once both keep their line.
 pub fn record(root: &Path, entry: Value) {
     let path = root.join(FILE);
+    let lock = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(root.join(LOCK));
+    #[cfg(unix)]
+    if let Ok(file) = &lock {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = file.set_permissions(std::fs::Permissions::from_mode(0o600));
+    }
+    // Held until the end of this function; a lock that cannot be taken still records the line.
+    let _held = lock.ok().filter(|f| f.lock().is_ok());
     let mut lines: Vec<String> = switchboard_core::private_fs::read_private(&path, MAX_BYTES)
         .ok()
         .map(|b| {
@@ -193,6 +212,25 @@ mod tests {
             ) & 0o777,
             0o600
         );
+    }
+
+    #[test]
+    fn two_writers_at_once_both_keep_every_line() {
+        let root = tempfile::tempdir().unwrap();
+        let threads: Vec<_> = (0..8)
+            .map(|t| {
+                let dir = root.path().to_path_buf();
+                std::thread::spawn(move || {
+                    for n in 0..25 {
+                        record(&dir, json!({"session": format!("S{t}-{n}"), "at": 1}));
+                    }
+                })
+            })
+            .collect();
+        for t in threads {
+            t.join().unwrap();
+        }
+        assert_eq!(recent(root.path(), 0).len(), 200, "no line is lost to a race");
     }
 
     #[test]

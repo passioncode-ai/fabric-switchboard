@@ -360,9 +360,10 @@ impl Pass {
         // thread of their own; nothing at all without a machine group.
         if let Ok(snapshot) = runtime.store.snapshot() {
             crate::remote_usage::tick(&runtime.root, &snapshot, time);
-            // SB-379: the one-minute watch of live sessions.
-            crate::session_watch::tick(&runtime.root, time);
         }
+        // SB-379: the one-minute watch of live sessions. It reads no account, so a snapshot that
+        // could not be read never skips it (SB-397 W0.3).
+        crate::session_watch::tick(&runtime.root, time);
         // Analytics: the daily active event and accounts added by any path; sends what waits.
         if let Some(client) = runtime.analytics() {
             if let Ok(snapshot) = runtime.store.snapshot() {
