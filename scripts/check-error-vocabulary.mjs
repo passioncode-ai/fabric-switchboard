@@ -166,6 +166,7 @@ const ALLOWLIST = {
   // runtime lib.rs RecoveryHook (SB-115): only `switchboard recovery hook` sends it, from Claude
   // Code's StopFailure hook; the CLI turns it into `registered: false`, the window never asks.
   'No saved account matches the stopped session.': 'StopFailure hook (CLI) only',
+  'The stop could not be kept for later.': 'StopFailure hook (CLI) only, SB-397 W0.4 spool',
   // runtime analytics.rs installation()/set_shared_enabled(): internal. status() reads them as
   // "off"; set_enabled() replaces every one with "Could not save the analytics choice.".
   'Installation folder unavailable.': 'replaced by the analytics choice error',
