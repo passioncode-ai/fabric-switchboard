@@ -140,6 +140,15 @@ answering; SB-389), and `pid` closes that copy, refused while it is answering; a
 still running ends with it. `close: null` means every copy is answering. Refused when the session
 no longer runs in two processes. macOS and Linux.
 
+### `switchboard_health`: no arguments
+
+This Switchboard's health as one report, `agent-health/1` (SB-393), for a watcher that turns
+readings into incidents: `state` (the worst check) and `checks`, each `{id, area, state, count,
+fix}`. `state` is `ok`, `warn`, `fail` or `unknown` (never read as ok: `errors_today` is unknown
+while usage counts are off). Checks: `owner`, `sign_in`, `accounts`, `sessions_stuck`,
+`sessions_duplicate`, `sessions_gone`, `crashes` (a crash in the last day fails, in the week warns),
+`errors_today` (50 or more warn). `fix.tool` names the tool that repairs it. Counts and kinds
+only: no account, folder, session id or text.
 ### `switchboard_bugs`: no arguments
 
 What went wrong (SB-379 W3 part 2): crashes of the app or `switchboard serve` found at the next
