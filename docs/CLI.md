@@ -839,7 +839,8 @@ session ran, and opens a new stop. It always exits 0: `registered: false` with
 allowed). Since SB-397 W0.4 a stop reported while no owner answers (the app quit, updating or
 starting) is not refused: it answers `registered: false, spooled: true` and waits in
 `<data>/stop-spool/<session>.json` (0600: session id, folder, billing, time; at most 256, a day at
-most), and the owner's next background pass registers it as if the hook had just run
+most), and the owner's next background pass registers it as if the hook had just run, removing the file
+only once it answered (a quit in between registers it again, never loses it)
 (`a_stop_reported_with_no_owner_is_kept_and_registered_by_the_next_owner`, `stop_spool::tests`).
 The owner logs `recovery_hook` with a result code (`spooled` for a kept stop). The rule for
 agents is fabric-workspace

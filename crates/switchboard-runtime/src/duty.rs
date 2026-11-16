@@ -526,6 +526,19 @@ fn journal(root: &Path) -> Vec<Value> {
 }
 
 fn append(root: &Path, line: Value) {
+    // SB-397 W0.1: the owner's checks and an offline `close_copy` both append; one at a time.
+    let lock = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(root.join("duty.lock"));
+    #[cfg(unix)]
+    if let Ok(file) = &lock {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = file.set_permissions(std::fs::Permissions::from_mode(0o600));
+    }
+    let _held = lock.ok().filter(|f| f.lock().is_ok());
     let mut lines = journal(root);
     lines.push(line);
     let keep = lines.len().saturating_sub(JOURNAL_LINES);

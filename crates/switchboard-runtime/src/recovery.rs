@@ -2272,9 +2272,9 @@ mod tests {
         runtime
             .limits
             .bind("s-9", std::slice::from_ref(&old.id), crate::monitor::now());
-        let waiting = crate::stop_spool::take(root.path(), crate::monitor::now());
+        let waiting = crate::stop_spool::waiting(root.path(), crate::monitor::now());
         assert_eq!(waiting.len(), 1);
-        let stop = &waiting[0];
+        let stop = &waiting[0].1;
         let done = runtime
             .execute(Operation::RecoveryHook {
                 session: stop.session.clone(),
