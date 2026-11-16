@@ -1,0 +1,190 @@
+{
+  "capacity": {
+    "exit": 0,
+    "stderr": "",
+    "stdout": {
+      "data": {
+        "at_capacity": false,
+        "cap": 12,
+        "counted": "live Claude Code and Codex processes whose folder was written within the last 30 minutes",
+        "degraded": [],
+        "free": 12,
+        "observed_at": "<observed_at>",
+        "quiet": 0,
+        "quiet_after_minutes": 30,
+        "total": 0,
+        "used": 0
+      },
+      "ok": true
+    }
+  },
+  "duty": {
+    "exit": 0,
+    "stderr": "",
+    "stdout": {
+      "data": {
+        "check_seconds": 300,
+        "due": [],
+        "idle_closes_after_minutes": 65,
+        "left_to_dashboards": 0,
+        "recent": [
+          {
+            "at": "<at>",
+            "by": "person",
+            "cwd": "<scratch>/home/work/app",
+            "outcome": "closed",
+            "pid": "<pid>",
+            "reason": "duplicate",
+            "session": "closed-dup"
+          },
+          {
+            "action": "close",
+            "at": "<at>",
+            "folder": "<scratch>/home/work/app",
+            "host": "terminal",
+            "outcome": "closed",
+            "pid": "<pid>",
+            "reason": "idle",
+            "session": "closed-idle"
+          }
+        ],
+        "running_commands": 0,
+        "settings": {
+          "idle_minutes": 60,
+          "max_age_hours": 4,
+          "on": true,
+          "stuck_minutes": 45,
+          "waiting_minutes": 60
+        },
+        "supported": true,
+        "waiting_for_person": 0,
+        "watched": 0
+      },
+      "ok": true
+    }
+  },
+  "monitor hold (past)": {
+    "exit": 1,
+    "stderr": {
+      "error": "Give the session id and a hold end within seven days from now, or 0 to release it.",
+      "ok": false
+    },
+    "stdout": null
+  },
+  "recovery": {
+    "exit": 1,
+    "stderr": {
+      "error": "Start the desktop app or 'switchboard serve' before login or launch.",
+      "ok": false
+    },
+    "stdout": null
+  },
+  "sessions --rows": {
+    "exit": 0,
+    "stderr": "",
+    "stdout": {
+      "data": {
+        "counts": {
+          "ended": 2,
+          "needs_you": 0,
+          "running": 0,
+          "waiting": 0
+        },
+        "degraded": [
+          "recovery"
+        ],
+        "observed_at": "<observed_at>",
+        "rows": [
+          {
+            "account": null,
+            "acts": [
+              "continue"
+            ],
+            "agent": "claude-code",
+            "folder": "<scratch>/home/work/app",
+            "group": "ended",
+            "id": "closed:host-ended",
+            "launch_id": null,
+            "origin": null,
+            "pool": null,
+            "session_id": "host-ended",
+            "since": "<since>",
+            "why": "closed_idle_window"
+          },
+          {
+            "account": null,
+            "acts": [
+              "continue"
+            ],
+            "agent": "claude-code",
+            "folder": "<scratch>/home/work/app",
+            "group": "ended",
+            "id": "closed:closed-idle",
+            "launch_id": null,
+            "origin": null,
+            "pool": null,
+            "session_id": "closed-idle",
+            "since": "<since>",
+            "why": "closed_idle"
+          }
+        ]
+      },
+      "ok": true
+    }
+  },
+  "sessions --tree": {
+    "exit": 0,
+    "stderr": "",
+    "stdout": {
+      "data": {
+        "capacity": {
+          "at_capacity": false,
+          "cap": 12,
+          "counted": "live Claude Code and Codex processes whose folder was written within the last 30 minutes",
+          "degraded": [],
+          "free": 12,
+          "observed_at": "<observed_at>",
+          "quiet": 0,
+          "quiet_after_minutes": 30,
+          "total": 0,
+          "used": 0
+        },
+        "context": {
+          "hook": "default_off",
+          "map": "missing",
+          "organizations": []
+        },
+        "counts": {
+          "by_pool": {},
+          "by_surface": {},
+          "live": "<live>",
+          "managed": 0,
+          "quiet": 0,
+          "working": 0
+        },
+        "degraded": [],
+        "findings": [],
+        "launches": [],
+        "live": "<live>",
+        "observed_at": "<observed_at>"
+      },
+      "ok": true
+    }
+  },
+  "sessions continue (unknown)": {
+    "exit": 1,
+    "stderr": {
+      "error": "Switchboard has no record of that session. Refresh the list, then retry.",
+      "ok": false
+    },
+    "stdout": null
+  },
+  "sessions restart status (none)": {
+    "exit": 1,
+    "stderr": {
+      "error": "No restart wave has run on this computer.",
+      "ok": false
+    },
+    "stdout": null
+  }
+}

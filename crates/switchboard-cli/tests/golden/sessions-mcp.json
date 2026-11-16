@@ -1,0 +1,354 @@
+{
+  "calls": [
+    {
+      "answer": {
+        "counts": {
+          "ended": 2,
+          "needs_you": 0,
+          "running": 0,
+          "waiting": 0
+        },
+        "degraded": [
+          "recovery"
+        ],
+        "observed_at": "<observed_at>",
+        "rows": [
+          {
+            "account": null,
+            "acts": [
+              "continue"
+            ],
+            "agent": "claude-code",
+            "folder": "<scratch>/home/work/app",
+            "group": "ended",
+            "id": "closed:host-ended",
+            "launch_id": null,
+            "origin": null,
+            "pool": null,
+            "session_id": "host-ended",
+            "since": "<since>",
+            "why": "closed_idle_window"
+          },
+          {
+            "account": null,
+            "acts": [
+              "continue"
+            ],
+            "agent": "claude-code",
+            "folder": "<scratch>/home/work/app",
+            "group": "ended",
+            "id": "closed:closed-idle",
+            "launch_id": null,
+            "origin": null,
+            "pool": null,
+            "session_id": "closed-idle",
+            "since": "<since>",
+            "why": "closed_idle"
+          }
+        ]
+      },
+      "arguments": {
+        "rows": true
+      },
+      "is_error": false,
+      "tool": "switchboard_sessions"
+    },
+    {
+      "answer": {
+        "capacity": {
+          "at_capacity": false,
+          "cap": 12,
+          "counted": "live Claude Code and Codex processes whose folder was written within the last 30 minutes",
+          "degraded": [],
+          "free": 12,
+          "observed_at": "<observed_at>",
+          "quiet": 0,
+          "quiet_after_minutes": 30,
+          "total": 0,
+          "used": 0
+        },
+        "context": {
+          "hook": "default_off",
+          "map": "missing",
+          "organizations": []
+        },
+        "counts": {
+          "by_pool": {},
+          "by_surface": {},
+          "live": "<live>",
+          "managed": 0,
+          "quiet": 0,
+          "working": 0
+        },
+        "degraded": [],
+        "findings": [],
+        "launches": [],
+        "live": "<live>",
+        "observed_at": "<observed_at>"
+      },
+      "arguments": {
+        "tree": true
+      },
+      "is_error": false,
+      "tool": "switchboard_sessions"
+    },
+    {
+      "answer": {
+        "check_seconds": 300,
+        "due": [],
+        "idle_closes_after_minutes": 65,
+        "left_to_dashboards": 0,
+        "recent": [
+          {
+            "at": "<at>",
+            "by": "person",
+            "cwd": "<scratch>/home/work/app",
+            "outcome": "closed",
+            "pid": "<pid>",
+            "reason": "duplicate",
+            "session": "closed-dup"
+          },
+          {
+            "action": "close",
+            "at": "<at>",
+            "folder": "<scratch>/home/work/app",
+            "host": "terminal",
+            "outcome": "closed",
+            "pid": "<pid>",
+            "reason": "idle",
+            "session": "closed-idle"
+          }
+        ],
+        "running_commands": 0,
+        "settings": {
+          "idle_minutes": 60,
+          "max_age_hours": 4,
+          "on": true,
+          "stuck_minutes": 45,
+          "waiting_minutes": 60
+        },
+        "supported": true,
+        "waiting_for_person": 0,
+        "watched": 0
+      },
+      "arguments": {},
+      "is_error": false,
+      "tool": "switchboard_duty"
+    },
+    {
+      "answer": {
+        "at_capacity": false,
+        "cap": 12,
+        "counted": "live Claude Code and Codex processes whose folder was written within the last 30 minutes",
+        "degraded": [],
+        "free": 12,
+        "observed_at": "<observed_at>",
+        "quiet": 0,
+        "quiet_after_minutes": 30,
+        "total": 0,
+        "used": 0
+      },
+      "arguments": {},
+      "is_error": false,
+      "tool": "switchboard_capacity"
+    },
+    {
+      "answer": "Start the desktop app or 'switchboard serve' before login or launch.",
+      "arguments": {},
+      "is_error": true,
+      "tool": "switchboard_recovery"
+    },
+    {
+      "answer": "Switchboard has no record of that session. Refresh the list, then retry.",
+      "arguments": {
+        "session_id": "no-such-session"
+      },
+      "is_error": true,
+      "tool": "switchboard_session_continue"
+    },
+    {
+      "answer": "No restart wave has run on this computer.",
+      "arguments": {},
+      "is_error": true,
+      "tool": "switchboard_sessions_restart_status"
+    }
+  ],
+  "tools": [
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "description": "This computer's cap on live coding sessions: cap (null when none), used (live Claude Code and Codex processes, managed or not, whose folder was written within the last 30 minutes), free, at_capacity, total and quiet (quiet ones are not counted), degraded when the process table could not be read. switchboard dispatch answers state refused with reason at_capacity (and used, cap) while the pool is full, and launch --hosted is refused: a wait, not a failed run; ask again when a session ends. cap sets the cap (1 to 500), clear removes it; without either, reads only. Setting or clearing it only when the operator asks.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "cap": {
+            "maximum": 500,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "clear": {
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "name": "switchboard_capacity",
+      "title": "Session pool"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "description": "The session duty officer: every five minutes it looks at each live interactive Claude Code session on this computer (not Fabric Dashboards' consoles, not claude -p runs) and never ends one before it finished. Finished: idle for idle_minutes (default 60, never under 65 so a session waiting for a wake-up it set itself is kept) with none of its own commands (Bash tool shells, background ones included) still running: closed. Stalled: busy with its status unchanged and its transcript unwritten for stuck_minutes (45), its process tree using no CPU since the previous check, and no command of its own running (or one running three times stuck_minutes without CPU): closed and resumed in a new Terminal window with claude --resume and a prompt to continue. A session waiting for the person's answer is left alone, nothing is restarted for its age, and of two copies of one session only a finished copy is closed. At most three actions a check and three restarts of one session in six hours. Answers settings, due (what a check would do now), recent (its last actions), watched, waiting_for_person and running_commands. on, stuck_minutes, idle_minutes and run (check now) change it (waiting_minutes and max_age_hours are kept for older settings and unused); dry_run lists without acting.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "dry_run": {
+            "type": "boolean"
+          },
+          "idle_minutes": {
+            "maximum": 1440,
+            "minimum": 10,
+            "type": "integer"
+          },
+          "max_age_hours": {
+            "maximum": 72,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "on": {
+            "type": "boolean"
+          },
+          "run": {
+            "type": "boolean"
+          },
+          "stuck_minutes": {
+            "maximum": 1440,
+            "minimum": 10,
+            "type": "integer"
+          },
+          "waiting_minutes": {
+            "maximum": 1440,
+            "minimum": 10,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "name": "switchboard_duty",
+      "title": "Session duty officer"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "description": "Continue a session that ended (closed by the duty officer, its window closed after an idle hour, stopped on a limit) as that same session: claude --resume in its own Claude config folder and its folder, in a Terminal window of its own, so its history and context are the ones it had. Refused while a process still holds it, when its folder or history is gone, and for a session Switchboard has no record of. sessions with rows names the sessions that can be continued (act continue).",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "session_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id"
+        ],
+        "type": "object"
+      },
+      "name": "switchboard_session_continue",
+      "title": "Continue a session as itself"
+    },
+    {
+      "annotations": {
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "The state of a restart wave, the newest when wave is left out: each session pending (waiting for its turn to end), ending, resuming, back (a new process holds it), continuing (yours, working again), failed with the reason (not_back, still_running, host_refused, host_gone, not_started, not_written, cannot_resume, gone), skipped with the reason (still_busy after a day, changed_since_plan) or cancelled; counts; done_at once nothing is left to do.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "wave": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "name": "switchboard_sessions_restart_status",
+      "title": "A restart wave's state"
+    },
+    {
+      "annotations": {
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "Sessions Switchboard launched: Claude Code, Codex, Kimi Code, Hermes, OpenCode and catalog agents (through an API-key account's proxy or on the OpenRouter key). Each with account_id, label, agent (the catalog id, such as claude-code, codex or goose), provider (the provider the route serves: claude for an agent through the proxy), group id (pool), context (personal or org:<id>) and context_name (the organization's name, or null), mode (managed or isolated), working_directory, in_place, launched_at, started_at, continues (a workflow id or null) and state: starting, running, ended or unknown. Without all, only starting and running ones. With history, every launch of the last 90 days instead, newest first: one record per launch with launch_id, launched_by (surface: window, cli, mcp, fallback, recovery, dashboards or fabric for a run switchboard dispatch started, whose launched_by.dispatch is {id, request, thread, project, workflow}; caller_launch_id, caller_project, caller_program, by, parent), provider_session_id, transcript (its path), turns, last_turn_at, ended (limit; a dispatched run's {kind: exited, stopped or timed_out, exit_code?, at}) and continued_as (where its work went), and for a dispatched run log (its log file's absolute path), plus total and next_before (pass it as before for the next page; null at the end; limit 1 to 500, default 500). With launch_id, that launch with up (who launched it, to the first) and down (what it launched or what took its work over). Reads only; no credential. With tree, the session tree instead: every live session joined to its launch (surface, parent launch, task: workflow and board request), the launches of the last day with their state (running, ended, gone), counts by group and surface, the session pool, and what the one-minute watch found (duplicate: one session in two processes; stuck: a board run quiet for 30 minutes; gone: a launch whose process ended with no end recorded).",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "all": {
+            "description": "Also list ended sessions.",
+            "type": "boolean"
+          },
+          "before": {
+            "description": "With history: only launches started before this time, Unix seconds: the previous page's next_before.",
+            "type": "integer"
+          },
+          "history": {
+            "description": "Every recorded launch, newest first, instead of the homes' current sessions.",
+            "type": "boolean"
+          },
+          "launch_id": {
+            "description": "One launch and its chain.",
+            "type": "string"
+          },
+          "limit": {
+            "description": "With history: at most this many launches (default 500).",
+            "maximum": 500,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "machine": "<machine>",
+          "rows": {
+            "description": "This computer's sessions as one list in four groups (needs_you, running, waiting, ended), each row with its agent, account, folder, origin and the acts it has (close_copy, attach, end).",
+            "type": "boolean"
+          },
+          "tree": {
+            "description": "Every live session joined to its launch (surface, parent, task, group, account), the last day's launches with who started whom, counts by group and surface, and the one-minute watch's findings (duplicate, stuck, gone).",
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "name": "switchboard_sessions",
+      "title": "Sessions"
+    },
+    {
+      "annotations": {
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "Sessions that stopped on a limit and the accounts ready for them to continue: each stop's mode and when to try again.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {},
+        "type": "object"
+      },
+      "name": "switchboard_recovery",
+      "title": "Stopped sessions"
+    }
+  ]
+}
