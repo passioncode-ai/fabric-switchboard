@@ -391,6 +391,14 @@ pub fn assemble(
 }
 
 /// Every Claude Code and Codex process of this user, joined to Switchboard's launches.
+/// This user's coding agent processes, or none under the golden test's switch (SB-397 W1.0).
+fn agent_processes() -> Result<Vec<Proc>, &'static str> {
+    if crate::test_seams::no_processes() {
+        return Ok(Vec::new());
+    }
+    os_agent_processes()
+}
+
 pub fn scan(root: &Path) -> Value {
     scan_procs(root, agent_processes())
 }
@@ -442,7 +450,7 @@ fn scan_procs(root: &Path, procs: Result<Vec<Proc>, &'static str>) -> Value {
 }
 
 #[cfg(target_os = "macos")]
-fn agent_processes() -> Result<Vec<Proc>, &'static str> {
+fn os_agent_processes() -> Result<Vec<Proc>, &'static str> {
     const PROC_UID_ONLY: u32 = 4;
     // SAFETY: plain reads of this user's process table into buffers of the sizes passed.
     let uid = unsafe { libc::geteuid() };
@@ -523,7 +531,7 @@ fn agent_processes() -> Result<Vec<Proc>, &'static str> {
 }
 
 #[cfg(target_os = "linux")]
-fn agent_processes() -> Result<Vec<Proc>, &'static str> {
+fn os_agent_processes() -> Result<Vec<Proc>, &'static str> {
     let Ok(entries) = std::fs::read_dir("/proc") else {
         return Err("proc_unreadable");
     };
@@ -574,7 +582,7 @@ fn agent_processes() -> Result<Vec<Proc>, &'static str> {
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "linux")))]
-fn agent_processes() -> Result<Vec<Proc>, &'static str> {
+fn os_agent_processes() -> Result<Vec<Proc>, &'static str> {
     Err("not_read_on_this_platform")
 }
 
