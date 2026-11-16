@@ -3430,7 +3430,13 @@ session with a wait as `waiting` (`why: monitoring`, `wait: {until}` or `{open: 
 renews it with the claim. While it holds, `monitors::holds` is true whatever the session's idle
 time, so the duty officer, a duplicate close and a session host's idle close leave it alone, and a
 restart wave skips it; rows show it as `{until, held: true}`. A hook that writes later keeps it.
-Test: `monitors::tests::a_hold_keeps_its_session_until_its_end_and_is_released_with_zero`.
+Test: `monitors::tests::a_hold_keeps_its_session_until_its_end_and_is_released_with_zero` (and below).
+`--reason <slug>` (0.7.110; Fabric passes `fabric_claim`): one short word (lowercase letters,
+digits, underscores, at most 40), echoed as `reason` in the answer and logged as the
+`monitor_hold` event's code (`fabric_claim`, `other` for any other word, `none` without one); the
+file does not keep it. The file's reader no longer refuses fields it does not know, so a field a
+later version adds never hides a hold from a session host of an earlier one (hosts outlive
+updates). Test: `monitors::tests::a_hold_takes_a_short_reason_and_a_newer_field_never_hides_the_waits`.
 
 The window's Sessions page reads `session_rows` on arrival and once a minute while it is on screen
 (`backgroundReads('sessions')`), never while another page is. Tests
