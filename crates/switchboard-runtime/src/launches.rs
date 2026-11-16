@@ -123,9 +123,7 @@ impl LaunchedBy {
 /// A launch id no session answers to (the session host's own refusal; SB-380 checks it before a
 /// launch id travels to another machine, on every platform).
 pub const NO_SUCH_LAUNCH: &str = "No session with this launch id is open here.";
-pub fn valid_id(id: &str) -> bool {
-    (1..=64).contains(&id.len()) && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
-}
+pub use fabric_sessions_core::ids::valid_id;
 /// A runner's name for itself (`--by`).
 pub fn valid_name(name: &str) -> bool {
     (1..=64).contains(&name.len())

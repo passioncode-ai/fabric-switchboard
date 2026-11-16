@@ -33,7 +33,7 @@ const CLAUDE_AUTH_KEYS: &[&str] = &[
 /// The operator's Claude Code user folder, as their own sessions see it (never one of
 /// Switchboard's homes, SB-183).
 pub(crate) fn claude_user_dir() -> Option<PathBuf> {
-    claude_user_dir_from(&crate::person::Sources::process())
+    claude_user_dir_from(&crate::person::process())
 }
 pub(crate) fn claude_user_dir_from(sources: &crate::person::Sources) -> Option<PathBuf> {
     crate::person::claude_dir_from(sources)
@@ -41,7 +41,7 @@ pub(crate) fn claude_user_dir_from(sources: &crate::person::Sources) -> Option<P
 /// The operator's Pi folder (`PI_CODING_AGENT_DIR`, else `~/.pi/agent`), never one of
 /// Switchboard's homes (SB-183).
 pub(crate) fn pi_user_dir() -> Option<PathBuf> {
-    pi_user_dir_from(&crate::person::Sources::process())
+    pi_user_dir_from(&crate::person::process())
 }
 pub(crate) fn pi_user_dir_from(sources: &crate::person::Sources) -> Option<PathBuf> {
     crate::person::pi_dir_from(sources)

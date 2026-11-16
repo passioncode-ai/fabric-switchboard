@@ -104,9 +104,7 @@ pub fn target_valid(target: &str) -> bool {
             .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-' | b'_' | b'@' | b':'))
 }
 /// One word for the remote shell: single-quoted, a quote inside written `'\''`.
-pub fn quoted(word: &str) -> String {
-    format!("'{}'", word.replace('\'', "'\\''"))
-}
+pub use fabric_sessions_core::cli::quoted;
 pub fn remote(program: &Program<'_>, args: &[&str]) -> String {
     let data_dir = program
         .data_dir
@@ -120,10 +118,7 @@ pub fn remote(program: &Program<'_>, args: &[&str]) -> String {
         .collect::<Vec<_>>()
         .join(" ")
 }
-pub fn data(output: &str) -> Option<Value> {
-    let value: Value = serde_json::from_str(output.lines().last()?.trim()).ok()?;
-    (value["ok"] == true).then(|| value["data"].clone())
-}
+pub use fabric_sessions_core::cli::data;
 /// The other machine's refusal (`{"ok":false,"error":...}`), from its output whether ssh ended
 /// with success or not.
 fn refusal(output: &str) -> Option<String> {

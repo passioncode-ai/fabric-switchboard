@@ -3,6 +3,12 @@
 //! uses them through this crate; nothing here may depend on a `switchboard-*` crate (D-2), so the
 //! service runs on a machine without Switchboard. Plan: `docs/plans/2026-11-16-session-service/`.
 
+/// Talking to a command line: shell quoting, a JSON answer's data.
+pub mod cli;
+/// Identifiers a session record may carry.
+pub mod ids;
+/// The person's own Claude Code and Codex folders.
+pub mod person;
 /// Private storage: owner-only files and folders, whole-file replacement (from switchboard-core).
 pub mod private_fs;
 #[cfg(windows)]

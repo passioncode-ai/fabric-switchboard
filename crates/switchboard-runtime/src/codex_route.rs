@@ -52,7 +52,7 @@ pub(crate) fn folders(snapshot: &switchboard_core::Snapshot) -> Vec<(String, Str
 /// `<CODEX_HOME or ~/.codex>/config.toml`, the person's own: never a Switchboard home's
 /// (SB-183).
 pub(crate) fn config_path() -> Option<PathBuf> {
-    config_path_from(&crate::person::Sources::process())
+    config_path_from(&crate::person::process())
 }
 pub(crate) fn config_path_from(sources: &crate::person::Sources) -> Option<PathBuf> {
     crate::person::codex_dir_from(sources).map(|d| d.join("config.toml"))
