@@ -17,11 +17,17 @@ cargo test --workspace --locked
 # Windows run (0.6.60, nightly 39676565992).
 (ulimit -s 1024 && cargo test -p switchboard-cli --test mcp --locked)
 cargo clippy --workspace --all-targets --locked -- -D warnings
+# SB-397 D-2: the sessions core never depends on a Switchboard crate, so the service runs on a
+# machine without Switchboard.
+if cargo tree -q -p fabric-sessions-core --locked --edges normal,build --prefix none | grep -q '^switchboard-'; then
+  echo "fabric-sessions-core depends on a switchboard crate (SB-397 D-2)" >&2
+  exit 1
+fi
 # Code that builds only on Unix reached a release tag and failed the nightly Windows jobs (0.7.31,
 # SB-303). With cargo-xwin installed the runtime and CLI are checked for Windows here; without it
 # the step says it was skipped.
 if command -v cargo-xwin >/dev/null 2>&1; then
-  cargo xwin check -q -p switchboard-runtime -p switchboard-cli --target x86_64-pc-windows-msvc --all-targets --locked
+  cargo xwin check -q -p switchboard-runtime -p switchboard-cli -p fabric-sessions-core -p fabric-sessions --target x86_64-pc-windows-msvc --all-targets --locked
 else
   echo "Windows check skipped: cargo-xwin is not installed (docs/DISTRIBUTION.md)."
 fi

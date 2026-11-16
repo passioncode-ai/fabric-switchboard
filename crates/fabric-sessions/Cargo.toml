@@ -1,0 +1,10 @@
+[package]
+name = "fabric-sessions"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+publish.workspace = true
+[dependencies]
+fabric-sessions-core = { path = "../fabric-sessions-core" }
