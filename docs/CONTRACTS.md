@@ -3367,6 +3367,20 @@ with its session id and every ledger line carry `continue` (ledger rows read `cl
 (`"limit"`, `"not_started"`) reads as that word (D11). Tests `resumable::tests::*`,
 `session_rows::tests::one_row_per_session_and_every_ended_one_can_be_continued_as_itself`.
 
+**A session's own wait (SB-396 wave C, MON-1 to MON-3).** The plugin's hooks run
+`switchboard monitor hook` (hidden; reads the hook input on standard input, prints `{}`, never fails)
+on `PreToolUse` for `ScheduleWakeup`, `Monitor`, `CronCreate` and `CronDelete`, and on `SessionEnd`.
+`monitors::apply` keeps `<data>/monitors/<session>.json` (0600: `{until, crons, at}`, no prompt or
+command): a wake-up's `delaySeconds` or a monitor's `timeout_ms` (clamped to an hour) sets `until`
+(the later end wins); each cron job counts in `crons` until deleted; `SessionEnd` removes the file.
+`monitors::holds`: a known end holds its session until `until + GRACE` (600 s), a cron job for
+`OPEN_SECONDS` (6 hours) after its last turn. The duty officer's check and `due`, and the session
+host's idle close, skip a session the wait holds; past it, a cron session may be closed like any
+finished one and is recorded in `resumable.jsonl` for *Continue*. The Sessions page shows a live
+session with a wait as `waiting` (`why: monitoring`, `wait: {until}` or `{open: true}`). Tests
+`monitors::tests::*`,
+`session_rows::tests::a_session_waiting_on_its_own_wake_up_reads_waiting_with_its_end`.
+
 The window's Sessions page reads `session_rows` on arrival and once a minute while it is on screen
 (`backgroundReads('sessions')`), never while another page is. Tests
 `session_rows::tests::every_session_lands_in_one_group_with_the_acts_it_has`,

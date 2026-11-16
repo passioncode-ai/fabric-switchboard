@@ -166,6 +166,16 @@ pub enum Act {
     Close,
 }
 
+/// SB-396 wave C (MON-2, MON-3): the session waits on a wake-up, a monitor or a cron job it set
+/// up itself (`monitors`); nothing closes it while that wait holds.
+fn monitoring(root: &Path, s: &Seen, now: i64) -> bool {
+    crate::monitors::holds(
+        &crate::monitors::read(root, &s.session),
+        now,
+        s.status_since,
+    )
+}
+
 /// SB-396 D1: no command of its own runs, as far as the process table was read; unknown is not
 /// none.
 fn no_commands(s: &Seen) -> bool {
@@ -544,7 +554,7 @@ pub fn status(root: &Path, now: i64) -> Result<Value, String> {
     let stopped = crate::recovery::live_stop_sessions(root, now);
     let due: Vec<Value> = seen
         .iter()
-        .filter(|s| !stopped.contains(&s.session))
+        .filter(|s| !stopped.contains(&s.session) && !monitoring(root, s, now))
         .filter_map(|s| {
             decide(s, &set, now, copies.contains(&s.pid)).map(|(act, reason)| {
                 json!({"pid": s.pid, "session": s.session, "folder": s.cwd, "reason": reason, "host": s.host,
@@ -602,7 +612,7 @@ pub fn check(root: &Path, now: i64, dry_run: bool) -> Result<Value, String> {
         if done.len() >= MAX_ACTIONS {
             break;
         }
-        if stopped.contains(&s.session) {
+        if stopped.contains(&s.session) || monitoring(root, s, now) {
             continue;
         }
         let Some((mut act, reason)) = decide(s, &set, now, copies.contains(&s.pid)) else {

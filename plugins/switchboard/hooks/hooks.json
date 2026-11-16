@@ -33,6 +33,29 @@
           }
         ]
       }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "ScheduleWakeup|Monitor|CronCreate|CronDelete",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "switchboard monitor hook 2>/dev/null || true",
+            "timeout": 3
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "switchboard monitor hook 2>/dev/null || true",
+            "timeout": 3
+          }
+        ]
+      }
     ]
   }
 }

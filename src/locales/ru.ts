@@ -2043,4 +2043,6 @@ export const RU: Record<string, string> = {
   "Claude Code was not found on this computer.": "Claude Code не найден на этом компьютере.",
   "The Terminal window to continue the session could not be opened.": "Не удалось открыть окно Терминала, чтобы продолжить сессию.",
   "A session host runs on macOS and Linux for now.": "Хост сессии пока работает на macOS и Linux.",
+  "Waiting on its own wake-up, due in {when}": "Ждёт своего пробуждения, через {when}",
+  "Waiting on a schedule of its own": "Ждёт своего расписания",
 };

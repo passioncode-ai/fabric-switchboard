@@ -81,6 +81,6 @@ this MacBook and a check of what the wave claims on the released app.
 | Wave | Content | State |
 |---|---|---|
 | A | LC-1 (D1), LC-2 (D2), LC-3 (D3, D4); docs: CONTRACTS duty section, AGENTS lifecycle rows | merged (#767, `2ea4dc09`) |
-| B | LC-5, LC-7 (continue the same session), SP-2 one row per session, D11 read side, the Sessions page with Continue (SB-395) | branch `lifecycle-b`; LC-4 (one written shape of `ended`) moves to wave D |
-| C | LC-6 monitor hooks (read-only first, then acting: MON-2 to MON-4) | after B |
+| B | LC-5, LC-7 (continue the same session), SP-2 one row per session, D11 read side, the Sessions page with Continue (SB-395) | merged (#768, `5ecc4ed2`); LC-4 (one written shape of `ended`) moves to wave D |
+| C | LC-6 monitor hooks and acting on them (MON-1 to MON-3); MON-4 (revive a parked cron session at its next fire) moves to wave D | branch `lifecycle-c` |
 | D | Recovery guards (D6, D7, D8), the fallback prefers `--resume` (D9), cleanups (D13, D17 to D23) | after C |
