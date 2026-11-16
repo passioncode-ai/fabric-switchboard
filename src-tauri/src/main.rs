@@ -970,6 +970,15 @@ async fn session_attach(
         .execute(Operation::SessionAttach { launch_id, target })
         .await
 }
+/// SB-396: *Continue* a session that ended, as that same session.
+#[tauri::command]
+async fn session_continue(session_id: String, state: State<'_, Slot>) -> Result<Value, String> {
+    state
+        .runtime()
+        .await?
+        .execute(Operation::SessionContinue { session_id })
+        .await
+}
 /// SB-395: *End* on a hosted session, here or on another machine.
 #[tauri::command]
 async fn session_end(
@@ -1991,6 +2000,7 @@ fn main() {
             session_rows,
             session_attach,
             session_end,
+            session_continue,
             session_close_copy,
             report_problem,
             repository_map,

@@ -119,6 +119,7 @@ const PARITY: &[(&str, Over)] = &[
     ("session_tree", Tool("switchboard_sessions")),
     ("session_rows", Tool("switchboard_sessions")),
     ("session_end", Tool("switchboard_session_end")),
+    ("session_continue", Tool("switchboard_session_continue")),
     (
         "session_attach",
         // A Terminal window on this computer for the person to look at; an agent reads the

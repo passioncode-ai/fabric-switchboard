@@ -56,6 +56,7 @@ mod refresh;
 pub mod remote_check;
 pub mod remote_dispatch;
 pub mod remote_usage;
+pub mod resumable;
 pub mod roots;
 pub mod seats;
 pub mod self_update;
@@ -382,6 +383,11 @@ pub enum Operation {
         launch_id: String,
         #[serde(default)]
         target: Option<String>,
+    },
+    /// SB-396 wave B: continues an ended session as itself (`claude --resume <id>` in its own
+    /// config folder), refused while a process holds it or when its history is gone.
+    SessionContinue {
+        session_id: String,
     },
     /// SB-395: ends a hosted session, here or on `target` (after that machine proves it, SB-357).
     SessionEnd {
@@ -1506,6 +1512,7 @@ impl Runtime {
                 | Operation::SessionRowsEverywhere
                 | Operation::SessionAttach { .. }
                 | Operation::SessionEnd { .. }
+                | Operation::SessionContinue { .. }
                 // SB-365: the snapshot, the owner's sign-in verdicts in memory, seats.jsonl and
                 // spend.json; nothing is written.
                 | Operation::Attention
@@ -6382,6 +6389,10 @@ async fn execute(
             blocking::run(move || launch::open_terminal(&folder, &script))?;
             Ok(json!({"opened": launch_id, "target": target}))
         }
+        Operation::SessionContinue { session_id } => {
+            let root = root.to_owned();
+            blocking::run(move || resumable::continue_session(&root, &session_id, monitor::now()))
+        }
         Operation::SessionEnd { launch_id, target } => {
             if !launches::valid_id(&launch_id) {
                 return Err(launches::LAUNCH_NOT_FOUND.into());
@@ -6442,11 +6453,14 @@ async fn execute(
                     .filter(|s| s["attachable"] == true)
                     .filter_map(|s| s["launch_id"].as_str().map(str::to_owned))
                     .collect();
+                let resumable =
+                    resumable::recent(&root, session_watch::now() - resumable::WINDOW_SECONDS);
                 session_rows::build(&session_rows::Sources {
                     tree: &tree,
                     recovery: &recovery,
                     labels: &labels,
                     attachable: &attachable,
+                    resumable: &resumable,
                 })
             }))
         }

@@ -140,6 +140,10 @@ answering; SB-389), and `pid` closes that copy, refused while it is answering; a
 still running ends with it. `close: null` means every copy is answering. Refused when the session
 no longer runs in two processes. macOS and Linux.
 
+
+### `switchboard_session_continue`: `session_id` (string)
+
+SB-396: continues a session that ended (the duty officer closed it, its hosted window was idle past the wake-up floor, a launch of the last week) as that same session: `claude --resume <id>` in its own Claude config folder and its folder, in a Terminal window of its own, so its history and context are the ones it had (`{continued, folder}`). Refused while a process still holds the session, when its folder or history is gone, and for a session Switchboard has no record of: never a fresh session in its place. `switchboard_sessions` with `rows` marks each such row with the act `continue`; the CLI is `switchboard sessions continue <session_id>`.
 ### `switchboard_health`: no arguments
 
 This Switchboard's health as one report, `agent-health/1` (SB-393), for a watcher that turns

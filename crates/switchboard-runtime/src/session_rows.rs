@@ -28,6 +28,8 @@ pub struct Sources<'a> {
     pub labels: &'a HashMap<String, String>,
     /// Launch ids of hosted sessions a viewer can open now.
     pub attachable: &'a HashSet<String>,
+    /// SB-396: the ends Switchboard recorded (`resumable::recent`), newest first.
+    pub resumable: &'a [Value],
 }
 
 fn label(sources: &Sources, account: &Value) -> Value {
@@ -77,6 +79,26 @@ pub fn build(sources: &Sources) -> Value {
             .copied()
     };
     let mut rows = Vec::new();
+    // SB-396 D10: one row per session. A session still alive in its window after a limit stop is
+    // its live row (waiting), never a second row for the stop.
+    let live_sessions: HashSet<&str> = tree["live"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|l| l["session_id"].as_str())
+        .collect();
+    let stops: Vec<&Value> = sources.recovery["sessions"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|s| s["stop"]["state"] == "waiting")
+        .collect();
+    let stopped_live: HashMap<&str, &Value> = stops
+        .iter()
+        .filter_map(|s| s["stop"]["session"].as_str().map(|id| (id, *s)))
+        .filter(|(id, _)| live_sessions.contains(id))
+        .collect();
+    let mut listed: HashSet<String> = live_sessions.iter().map(|s| (*s).to_owned()).collect();
 
     for live in tree["live"].as_array().into_iter().flatten() {
         let launch_id = &live["launch_id"];
@@ -88,6 +110,9 @@ pub fn build(sources: &Sources) -> Value {
         if hosted {
             acts.extend(["attach", "end"]);
         }
+        let stop = live["session_id"]
+            .as_str()
+            .and_then(|id| stopped_live.get(id));
         let (group, why) =
             if let Some(dup) = finding("duplicate", "session_id", &live["session_id"]) {
                 // Only the copy Needs attention offers to close carries the act (SB-388, SB-389).
@@ -97,6 +122,8 @@ pub fn build(sources: &Sources) -> Value {
                 ("needs_you", "duplicate")
             } else if finding("stuck", "launch_id", launch_id).is_some() {
                 ("needs_you", "stuck")
+            } else if stop.is_some() {
+                ("waiting", "limit")
             } else if live["quiet"] == true {
                 ("running", "quiet")
             } else {
@@ -114,43 +141,24 @@ pub fn build(sources: &Sources) -> Value {
                 "pool": live["pool"].as_str().map(str::to_owned).or(context),
                 "origin": live["surface"], "since": live["started_at"],
                 "quiet_minutes": live["quiet_minutes"], "task": live["task"],
+                "probe_at": stop.map_or(Value::Null, |s| s["probe_at"].clone()),
             }),
             acts,
         ));
     }
 
-    for l in &launches {
-        let state = l["state"].as_str().unwrap_or("");
-        let (group, why) = match state {
-            "running" => continue,
-            "gone" => ("needs_you", "gone"),
-            _ => ("ended", l["ended"]["kind"].as_str().unwrap_or("ended")),
-        };
-        rows.push(row(
-            group,
-            why,
-            format!("launch:{}", l["launch_id"].as_str().unwrap_or_default()),
-            json!({
-                "agent": agent_of(&l["provider"]), "folder": l["folder"], "launch_id": l["launch_id"],
-                "account": label(sources, &l["account_id"]), "pool": l["pool"],
-                "origin": l["surface"], "since": l["ended"]["at"].as_i64().or(l["launched_at"].as_i64()),
-                "task": l["task"],
-            }),
-            Vec::new(),
-        ));
-    }
-
-    let waiting = sources.recovery["sessions"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter(|s| s["stop"]["state"] == "waiting");
-    for s in waiting {
+    for s in &stops {
         let stop = &s["stop"];
-        let (group, why) = if s["ready"] == true {
-            ("needs_you", "ready_to_continue")
+        let Some(session) = stop["session"].as_str() else {
+            continue;
+        };
+        if !listed.insert(session.to_owned()) {
+            continue;
+        }
+        let (group, why, acts) = if s["ready"] == true {
+            ("needs_you", "ready_to_continue", vec!["continue"])
         } else {
-            ("waiting", "limit")
+            ("waiting", "limit", Vec::new())
         };
         rows.push(row(
             group,
@@ -158,11 +166,71 @@ pub fn build(sources: &Sources) -> Value {
             format!("stop:{}", stop["event"].as_str().unwrap_or_default()),
             json!({
                 "agent": agent_of(&stop["provider"]), "folder": stop["directory"],
-                "session_id": stop["session"], "launch_id": s["launch_id"],
+                "session_id": session, "launch_id": s["launch_id"],
                 "account": label(sources, &stop["account"]), "pool": stop["pool"],
                 "origin": Value::Null, "since": stop["stopped_at"], "probe_at": s["probe_at"],
             }),
-            Vec::new(),
+            acts,
+        ));
+    }
+
+    for l in &launches {
+        let state = l["state"].as_str().unwrap_or("");
+        // SB-396 D11: `ended` is an object `{kind, at}` or, written by older paths, a word.
+        let ended = l["ended"]["kind"].as_str().or_else(|| l["ended"].as_str());
+        let (group, why) = match state {
+            "running" => continue,
+            "gone" => ("needs_you", "gone"),
+            _ => ("ended", ended.unwrap_or("ended")),
+        };
+        let session = l["session_id"].as_str();
+        if session.is_some_and(|id| !listed.insert(id.to_owned())) {
+            continue;
+        }
+        let acts = if session.is_some() && l["provider"] == "claude" {
+            vec!["continue"]
+        } else {
+            Vec::new()
+        };
+        rows.push(row(
+            group,
+            why,
+            format!("launch:{}", l["launch_id"].as_str().unwrap_or_default()),
+            json!({
+                "agent": agent_of(&l["provider"]), "folder": l["folder"], "launch_id": l["launch_id"],
+                "session_id": session, "account": label(sources, &l["account_id"]), "pool": l["pool"],
+                "origin": l["surface"], "since": l["ended"]["at"].as_i64().or(l["launched_at"].as_i64()),
+                "task": l["task"],
+            }),
+            acts,
+        ));
+    }
+
+    // SB-396 D5: the sessions Switchboard closed (the duty officer, an idle session host) can be
+    // continued as themselves.
+    for r in sources.resumable {
+        let Some(session) = r["session"].as_str() else {
+            continue;
+        };
+        if !listed.insert(session.to_owned()) {
+            continue;
+        }
+        let why = match r["reason"].as_str() {
+            Some("host_idle") => "closed_idle_window",
+            Some("duplicate") => "closed_duplicate",
+            Some("stuck") => "closed_stuck",
+            _ => "closed_idle",
+        };
+        rows.push(row(
+            "ended",
+            why,
+            format!("closed:{session}"),
+            json!({
+                "agent": "claude-code", "folder": r["cwd"], "session_id": session,
+                "launch_id": r["launch_id"], "account": Value::Null, "pool": Value::Null,
+                "origin": Value::Null, "since": r["at"],
+            }),
+            vec!["continue"],
         ));
     }
 
@@ -274,6 +342,7 @@ mod tests {
             recovery,
             labels: &labels,
             attachable: &HashSet::from(["L2".to_owned()]),
+            resumable: &[],
         })
     }
 
@@ -309,7 +378,11 @@ mod tests {
             (json!("ended"), json!("exited"))
         );
         assert_eq!(by("launch:L4")["why"], "gone");
-        assert_eq!(by("launch:L3")["agent"], "claude-code", "a provider reads as its agent");
+        assert_eq!(
+            by("launch:L3")["agent"],
+            "claude-code",
+            "a provider reads as its agent"
+        );
         assert_eq!(
             (by("stop:E1")["group"].clone(), by("stop:E1")["why"].clone()),
             (json!("needs_you"), json!("ready_to_continue"))
@@ -352,6 +425,66 @@ mod tests {
         assert_eq!(there(Ok("garbage".into()))["status"], "bad_answer");
         let script = attach_script("/a b/switchboard", "/data", "L'1", Some("studio"));
         assert_eq!(script, "#!/bin/sh\nexec '/a b/switchboard' --data-dir '/data' attach 'L'\\''1' --target 'studio'\n");
+    }
+
+    #[test]
+    fn one_row_per_session_and_every_ended_one_can_be_continued_as_itself() {
+        let mut tree = tree();
+        // S3 runs (pid 14) and has a waiting stop: one row, waiting on its limit.
+        let recovery = json!({"sessions": [
+            {"ready": false, "probe_at": 2000, "stop": {"state": "waiting", "event": "E7", "provider": "claude", "directory": "/w/c", "session": "S3", "account": "A2", "pool": "default", "stopped_at": 960}}
+        ]});
+        // An ended launch with its session id, and one whose `ended` an older path wrote as a word.
+        tree["launches"].as_array_mut().unwrap().extend([
+            json!({"launch_id": "L5", "state": "ended", "ended": {"kind": "exited", "at": 995}, "provider": "claude", "folder": "/w/f", "launched_at": 900, "session_id": "S5"}),
+            json!({"launch_id": "L6", "state": "ended", "ended": "limit", "provider": "claude", "folder": "/w/g", "launched_at": 800, "session_id": "S6"}),
+        ]);
+        let ledger = [
+            json!({"session": "S7", "config": "/h", "cwd": "/w/h", "reason": "idle", "at": 990, "by": "duty"}),
+            json!({"session": "S5", "config": "/h", "cwd": "/w/f", "reason": "idle", "at": 980, "by": "duty"}),
+        ];
+        let labels = HashMap::new();
+        let answer = build(&Sources {
+            tree: &tree,
+            recovery: &recovery,
+            labels: &labels,
+            attachable: &HashSet::new(),
+            resumable: &ledger,
+        });
+        let list = answer["rows"].as_array().unwrap();
+        let of = |session: &str| {
+            list.iter()
+                .filter(|r| r["session_id"] == session)
+                .cloned()
+                .collect::<Vec<_>>()
+        };
+        let s3 = of("S3");
+        assert_eq!(s3.len(), 1, "{s3:?}");
+        assert_eq!(
+            (
+                s3[0]["group"].clone(),
+                s3[0]["why"].clone(),
+                s3[0]["probe_at"].clone()
+            ),
+            (json!("waiting"), json!("limit"), json!(2000))
+        );
+        let s5 = of("S5");
+        assert_eq!(
+            s5.len(),
+            1,
+            "the launch and the ledger line are one session"
+        );
+        assert_eq!(s5[0]["acts"], json!(["continue"]));
+        assert_eq!(of("S6")[0]["why"], "limit");
+        let s7 = of("S7");
+        assert_eq!(
+            (
+                s7[0]["group"].clone(),
+                s7[0]["why"].clone(),
+                s7[0]["acts"].clone()
+            ),
+            (json!("ended"), json!("closed_idle"), json!(["continue"]))
+        );
     }
 
     #[test]

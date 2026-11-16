@@ -1935,6 +1935,13 @@ enum SessionsCommand {
         #[arg(long, requires = "target")]
         remote_data_dir: Option<String>,
     },
+    /// Continue a session that ended, as that same session: `claude --resume` in its own Claude
+    /// config folder and its folder, in a Terminal window of its own, so its history and context
+    /// are the ones it had. Refused while a process still holds it, and when its history is gone.
+    Continue {
+        /// The session id (`sessions --rows` names it).
+        session_id: String,
+    },
 }
 /// Where `switchboard launch` is run from, for the launch record.
 #[derive(Clone, Copy, ValueEnum)]
@@ -2673,6 +2680,12 @@ async fn run(cli: &Cli) -> Result<Value, String> {
         } => Operation::SessionCloseCopy {
             session_id: session_id.clone(),
             pid: *pid,
+        },
+        Command::Sessions {
+            command: Some(SessionsCommand::Continue { session_id }),
+            ..
+        } => Operation::SessionContinue {
+            session_id: session_id.clone(),
         },
         Command::Sessions { rows: true, .. } => Operation::SessionRows,
         Command::Sessions { tree: true, .. } => {
@@ -5691,6 +5704,7 @@ mod mcp_parity {
         ("sessions show", Tool("switchboard_sessions")),
         ("sessions end", Tool("switchboard_session_end")),
         ("sessions close-copy", Tool("switchboard_session_close_copy")),
+        ("sessions continue", Tool("switchboard_session_continue")),
         ("provenance", Tool("switchboard_provenance")),
         ("current", Tool("switchboard_status")),
         ("rotation status", Tool("switchboard_rotation")),
