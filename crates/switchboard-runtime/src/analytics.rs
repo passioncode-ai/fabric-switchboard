@@ -132,6 +132,16 @@ pub(crate) fn adopt(folder: &Path, old: &Path) -> bool {
     linked
 }
 
+/// SB-385: the shared installation as it is, never creating it: `None` when no PassionCode app
+/// has written it yet, `Err` when it cannot be read or parsed.
+fn read_installation(folder: &Path) -> Result<Option<Installation>, ()> {
+    match std::fs::read(folder.join(SHARED_FILE)) {
+        Ok(bytes) => parse(&bytes).map(Some).map_err(|_| ()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(_) => Err(()),
+    }
+}
+
 /// Reads the shared installation, creating it when no PassionCode app has yet. Creation never
 /// replaces a file another app wrote at the same moment: the new file is linked into place, which
 /// fails if one is already there, and that one is read instead. `created` tells the caller this
@@ -266,7 +276,10 @@ impl State {
         if self.enabled.is_some() || (self.sent && self.rule >= RULE) {
             return Ok(false);
         }
-        let (installation, _) = installation(shared).map_err(|_| ())?;
+        // No shared file yet: no other app said anything, so there is no earlier no.
+        let Some(installation) = read_installation(shared)? else {
+            return Ok(false);
+        };
         if installation.analytics {
             return Ok(false);
         }
@@ -429,13 +442,13 @@ impl Analytics {
     /// first-run notice still waits to be acknowledged (SB-246).
     pub fn status(&self) -> Value {
         let state = self.state.lock().unwrap_or_else(|p| p.into_inner());
-        let shared = installation(&self.shared).ok();
+        let shared = read_installation(&self.shared);
         let shown = state.shown_version >= NOTICE_VERSION;
         // SB-385: why nothing leaves while the switch reads on: the notice was not shown yet, or
         // the shared installation file cannot be read ("on, but nothing is sent").
         let held = if !self.on() {
             None
-        } else if shared.is_none() {
+        } else if shared.is_err() {
             Some("shared_unreadable")
         } else if !shown {
             Some("notice")
@@ -450,7 +463,7 @@ impl Analytics {
             "sending": self.on() && held.is_none(),
             "held": held,
             "shared_no": state.shared_no,
-            "installation_id": shared.map(|(i, _)| i.id),
+            "installation_id": shared.ok().flatten().map(|i| i.id),
         })
     }
 
@@ -1867,7 +1880,8 @@ mod tests {
     /// Through the runtime, as the desktop app runs it: a background start sends its start and
     /// the day at once (SB-246).
     #[tokio::test]
-    async fn through_the_runtime_a_background_start_sends_the_start_and_the_day() {
+    async fn through_the_runtime_a_background_start_queues_the_start_and_the_day_until_the_notice()
+    {
         let server = Server::default();
         let url = serve(server.clone()).await;
         let root = tempfile::tempdir().unwrap();
@@ -1883,6 +1897,10 @@ mod tests {
         let mut pass = crate::monitor::Pass::default();
         pass.run(&runtime, false, now()).await;
         let client = runtime.analytics().unwrap();
+        // SB-385 (UD-1): queued by the pass, held until the window showed the notice.
+        client.flush().await;
+        assert!(names(&server).is_empty(), "nothing before the notice");
+        assert_eq!(runtime.analytics_notice_shown()["sending"], true);
         // The pass spawns its own flush; ours may find it running, so wait for the queue to empty.
         for _ in 0..200 {
             client.flush().await;
