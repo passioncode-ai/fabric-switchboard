@@ -1253,6 +1253,7 @@ dependencies = [
  "libc",
  "serde",
  "serde_json",
+ "sha2",
  "tempfile",
  "uuid",
  "windows-sys 0.61.2",
