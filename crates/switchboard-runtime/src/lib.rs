@@ -62,6 +62,7 @@ pub mod self_update;
 pub mod serve_update;
 #[cfg(unix)]
 pub mod session_host;
+pub mod session_rows;
 pub mod session_watch;
 pub mod settings_bundle;
 pub mod settings_signing;
@@ -370,6 +371,24 @@ pub enum Operation {
     },
     /// SB-379: the session tree and the one-minute watch's findings (`session_watch::tree`).
     SessionTree,
+    /// SB-395: this computer's sessions as one list in four groups (needs you, running, waiting,
+    /// ended), each row with the acts it has. A view: nothing is written.
+    SessionRows,
+    /// SB-395: `SessionRows` here and, read at once over ssh (20 s each), on every other machine
+    /// Switchboard knows, each with how its read went. Nothing is written.
+    SessionRowsEverywhere,
+    /// SB-395: opens a hosted session in a Terminal window of its own, here or on `target`.
+    SessionAttach {
+        launch_id: String,
+        #[serde(default)]
+        target: Option<String>,
+    },
+    /// SB-395: ends a hosted session, here or on `target` (after that machine proves it, SB-357).
+    SessionEnd {
+        launch_id: String,
+        #[serde(default)]
+        target: Option<String>,
+    },
     /// SB-378: this computer's cap on live coding sessions: the cap, what counts and what is
     /// free; `cap` sets it, `clear` removes it.
     Capacity {
@@ -1482,6 +1501,11 @@ impl Runtime {
                 | Operation::SessionCloseCopy { .. }
                 // SB-379: the process table, session files and the day's launch records.
                 | Operation::SessionTree
+                | Operation::SessionRows
+                // SB-395: the same, plus one ssh read per other machine.
+                | Operation::SessionRowsEverywhere
+                | Operation::SessionAttach { .. }
+                | Operation::SessionEnd { .. }
                 // SB-365: the snapshot, the owner's sign-in verdicts in memory, seats.jsonl and
                 // spend.json; nothing is written.
                 | Operation::Attention
@@ -6287,6 +6311,143 @@ async fn execute(
             let root = root.to_owned();
             Ok(blocking::run(move || {
                 session_watch::tree(&root, session_watch::now())
+            }))
+        }
+        Operation::SessionRowsEverywhere => {
+            let here = Box::pin(execute(
+                store.clone(),
+                root,
+                runtime,
+                Operation::SessionRows,
+            ))
+            .await?;
+            let root = root.to_owned();
+            let machines = blocking::run(move || {
+                let known = targets::collapse(targets::known(&root), &targets::ssh_identity);
+                std::thread::scope(|scope| {
+                    let reads: Vec<_> = known
+                        .iter()
+                        .map(|t| {
+                            scope.spawn(move || {
+                                let machine = t["machine"].as_str().unwrap_or_default();
+                                let program = account_send::Program {
+                                    path: t["program"]
+                                        .as_str()
+                                        .unwrap_or(account_send::REMOTE_DEFAULT),
+                                    data_dir: t["data_dir"].as_str(),
+                                };
+                                let words = ["--json", "sessions", "--rows"];
+                                let mut read = session_rows::there(account_send::ssh_runner_for(
+                                    &[
+                                        machine.to_owned(),
+                                        "--".to_owned(),
+                                        account_send::remote(&program, &words),
+                                    ],
+                                    None,
+                                    std::time::Duration::from_secs(machines::LIVE_SECONDS),
+                                ));
+                                read["machine"] = json!(machine);
+                                read["read_at"] = json!(monitor::now());
+                                read
+                            })
+                        })
+                        .collect();
+                    reads
+                        .into_iter()
+                        .map(|r| r.join().unwrap_or_else(|_| json!({"status": "bad_answer"})))
+                        .collect::<Vec<Value>>()
+                })
+            });
+            Ok(json!({"here": here, "machines": machines}))
+        }
+        Operation::SessionAttach { launch_id, target } => {
+            if !launches::valid_id(&launch_id) {
+                return Err(launches::LAUNCH_NOT_FOUND.into());
+            }
+            if target
+                .as_deref()
+                .is_some_and(|t| !account_send::target_valid(t))
+            {
+                return Err(account_send::TARGET_INVALID.into());
+            }
+            let cli = launch::agent_cli().ok_or(session_rows::NO_CLI)?;
+            let folder = root.join("open");
+            std::fs::create_dir_all(&folder).map_err(|_| session_rows::NO_CLI)?;
+            let script = session_rows::attach_script(
+                &cli.to_string_lossy(),
+                &root.to_string_lossy(),
+                &launch_id,
+                target.as_deref(),
+            );
+            blocking::run(move || launch::open_terminal(&folder, &script))?;
+            Ok(json!({"opened": launch_id, "target": target}))
+        }
+        Operation::SessionEnd { launch_id, target } => {
+            if !launches::valid_id(&launch_id) {
+                return Err(launches::LAUNCH_NOT_FOUND.into());
+            }
+            let root = root.to_owned();
+            blocking::run(move || match target {
+                None => {
+                    #[cfg(unix)]
+                    {
+                        session_host::end(&root, &launch_id)
+                    }
+                    #[cfg(not(unix))]
+                    {
+                        Err(session_rows::HOST_UNSUPPORTED.to_owned())
+                    }
+                }
+                Some(target) => {
+                    let (program, data_dir) = remote_program(&root, &target, None, None);
+                    let program = account_send::Program {
+                        path: &program,
+                        data_dir: data_dir.as_deref(),
+                    };
+                    let ssh = machine_proof::ssh(&root, &target, &program);
+                    let words = ["--json", "sessions", "end", launch_id.as_str()];
+                    let out = ssh.run(
+                        &[
+                            target.clone(),
+                            "--".to_owned(),
+                            account_send::remote(&program, &words),
+                        ],
+                        None,
+                    )?;
+                    account_send::data(&out).ok_or_else(|| account_send::UNREACHABLE.to_owned())
+                }
+            })
+        }
+        Operation::SessionRows => {
+            let snapshot = store.snapshot()?;
+            let recovery = Box::pin(execute(store.clone(), root, runtime, Operation::Recovery))
+                .await
+                .unwrap_or(Value::Null);
+            let labels: HashMap<String, String> = snapshot
+                .accounts
+                .iter()
+                .map(|a| (a.id.clone(), a.label.clone()))
+                .chain(
+                    snapshot
+                        .kimi_accounts
+                        .iter()
+                        .map(|k| (k.id.clone(), k.label.clone())),
+                )
+                .collect();
+            let root = root.to_owned();
+            Ok(blocking::run(move || {
+                let tree = session_watch::tree(&root, session_watch::now());
+                let attachable: HashSet<String> = launch::sessions(&root, false)
+                    .into_iter()
+                    .filter(|s| s["attachable"] == true)
+                    .filter_map(|s| s["launch_id"].as_str().map(str::to_owned))
+                    .collect();
+                session_rows::build(&session_rows::Sources {
+                    tree: &tree,
+                    recovery: &recovery,
+                    labels: &labels,
+                    attachable: &attachable,
+                })
             }))
         }
         Operation::Capacity { cap, clear } => {

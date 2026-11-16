@@ -145,6 +145,12 @@ export interface Adapter {
   balance(change?: BalanceChange | null): Promise<BalanceStatus>;
   /** SB-379: live sessions with their launches, the day's launches, counts and the watch's findings. */
   sessionTree(): Promise<SessionTree>;
+  /** SB-395: the Sessions page: this computer's sessions in four groups, and every other machine's. */
+  sessionRows(): Promise<SessionsEverywhere>;
+  /** SB-395: *Open here*: a Terminal window attached to a hosted session, here or on `target`. */
+  sessionAttach(launchId: string, target?: string | null): Promise<unknown>;
+  /** SB-395: *End* a hosted session, here or on `target`. */
+  sessionEnd(launchId: string, target?: string | null): Promise<unknown>;
   /** SB-388: close the quiet one of two processes holding one session, never a working one. */
   sessionCloseCopy(sessionId: string, pid?: number): Promise<{ session_id: string; closed_pid: number; kept_pids: number[] }>;
   /** SB-378: the session pool; `cap` sets it, `clear` removes it, neither reads. */
@@ -308,6 +314,14 @@ export interface TreeLaunch { launch_id: string; launched_at: number; pool: stri
 /** SB-379: what the one-minute watch found. */
 export interface WatchFinding { kind: 'duplicate' | 'stuck' | 'gone'; launch_id?: string; session_id?: string; pids?: number[]; folder?: string; quiet_minutes?: number }
 export interface SessionTree { live: TreeSession[]; launches: TreeLaunch[]; counts: { live: number; working: number; quiet: number; managed: number; by_pool: Record<string, number>; by_surface: Record<string, number> }; findings: WatchFinding[]; capacity?: CapacityStatus; /** SB-382: sessions in each organization's folders, and the terminal hook's state. */ context?: { hook: 'on' | 'off' | 'default_on' | 'default_off'; map: string; organizations: { context: string; live: number; managed: number; other: number }[] } }
+/** SB-395: one row of the Sessions page (`sessions --rows`): fields only, never text a session wrote. */
+export type SessionGroup = 'needs_you' | 'running' | 'waiting' | 'ended';
+export type SessionAct = 'close_copy' | 'attach' | 'end';
+export interface SessionRow { id: string; group: SessionGroup; why: string; acts: SessionAct[]; agent: string | null; folder: string | null; account: string | null; pool: string | null; origin: string | null; since: number | null; launch_id: string | null; session_id: string | null; pid?: number | null; quiet_minutes?: number | null; probe_at?: number | null }
+export interface SessionRows { rows: SessionRow[]; counts: Record<SessionGroup, number>; degraded: string[]; observed_at?: number }
+export type MachineReadStatus = 'read' | 'unreachable' | 'no_switchboard' | 'too_old' | 'bad_answer';
+export interface MachineSessions { machine: string; status: MachineReadStatus; rows?: SessionRow[]; counts?: Record<SessionGroup, number>; read_at: number }
+export interface SessionsEverywhere { here: SessionRows; machines: MachineSessions[] }
 /** SB-378: `switchboard capacity`, this computer's cap on working coding sessions. */
 /** SB-384 (DEC-0018): the session duty officer. */
 export interface DutySettings { on: boolean; stuck_minutes: number; waiting_minutes: number; idle_minutes: number; max_age_hours: number }

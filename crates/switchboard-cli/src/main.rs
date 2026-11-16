@@ -224,6 +224,11 @@ enum Command {
         /// minutes, a launch whose process is gone. Read here, without the owner.
         #[arg(long, conflicts_with_all = ["history", "all", "machine"])]
         tree: bool,
+        /// This computer's sessions as one list in four groups: needs you, running, waiting
+        /// (stopped on a limit) and ended (the last day), each with its agent, account, folder,
+        /// how it started and the acts it has: close the quiet copy, open here, end.
+        #[arg(long, conflicts_with_all = ["history", "all", "machine", "tree"])]
+        rows: bool,
         /// Read it on another machine, as ssh knows it (`switchboard targets`), through
         /// that machine's Switchboard; the answer is the one it gives there.
         #[arg(long)]
@@ -2669,6 +2674,7 @@ async fn run(cli: &Cli) -> Result<Value, String> {
             session_id: session_id.clone(),
             pid: *pid,
         },
+        Command::Sessions { rows: true, .. } => Operation::SessionRows,
         Command::Sessions { tree: true, .. } => {
             return Ok(switchboard_runtime::session_watch::tree(
                 &root,
@@ -3545,6 +3551,7 @@ fn there(command: &Command) -> Option<There> {
             before,
             machine,
             tree,
+            rows,
             command: None,
         } => {
             let mut words = vec!["sessions".to_owned()];
@@ -3553,6 +3560,7 @@ fn there(command: &Command) -> Option<There> {
                 (*history, "--history"),
                 (*machine, "--machine"),
                 (*tree, "--tree"),
+                (*rows, "--rows"),
             ] {
                 if on {
                     words.push(flag.to_owned());

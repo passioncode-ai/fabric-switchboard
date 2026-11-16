@@ -1,6 +1,7 @@
 // Pure interface rules, kept free of DOM access so scripts/test-ui-logic.mjs can
 // exercise them directly. main.ts owns rendering; these functions own decisions.
 import type { BalanceStatus, ShellHookNotice, ShellHookStatus, Onboarding, OnboardStep, ChainExecutor, ChainScope, ChainStepView } from './types';
+import type { SessionGroup, SessionRow, MachineReadStatus } from './types';
 import type { Machine, MachineCopy, RemoteRead, Attention, AttentionItem, AttentionReason, AttentionWindow, Event, EventsPage, GivenAccount } from './types';
 import type { Account, AccountLimit, Organization, OrganizationGroupOffer, Project, AgentRow, AgentSetup, OpenrouterCredit, RecommendedModel, SessionInfo, ProjectRule, RotationPolicy, UpdateStatus, Usage, UsageWindow } from './types';
 import { t, plural } from './i18n';
@@ -421,11 +422,12 @@ export function groupSeatsEndedText(snapshot: OrgSnapshot, group: { name: string
  * the session list on Activity (SB-104), the ceilings on Agents and API keys (C-7, local
  * `spend.json`), and the PassionCode.ai status on Organizations (SB-227: a local file read, so a
  * mark a background read made shows without reopening the page). */
-export type BackgroundRead = 'onboarding' | 'sessions' | 'ceilings' | 'passioncode';
+export type BackgroundRead = 'onboarding' | 'sessions' | 'ceilings' | 'passioncode' | 'session_rows';
 export function backgroundReads(page: string): BackgroundRead[] {
   if (page === 'orgs') return ['onboarding', 'passioncode'];
   if (page === 'accounts') return ['onboarding'];
   if (page === 'activity') return ['sessions'];
+  if (page === 'sessions') return ['session_rows'];
   if (page === 'agents' || page === 'tokens') return ['ceilings'];
   return [];
 }
@@ -1982,4 +1984,42 @@ export function machineCopyLine(copy: MachineCopy | null | undefined, reachable:
   if (copy.enabled === false) return t('Turned off there ({group}).', { group });
   if (typeof copy.used_percent === 'number') return t('There: {group}, {percent}% used.', { group, percent: Math.round(copy.used_percent) });
   return t('There: {group}.', { group });
+}
+
+/** SB-395: the Sessions page's groups, in the order a person acts on them. */
+export const SESSION_GROUPS: readonly SessionGroup[] = ['needs_you', 'running', 'waiting', 'ended'];
+export function sessionGroupTitle(group: SessionGroup): string {
+  switch (group) {
+    case 'needs_you': return t('Needs you');
+    case 'running': return t('Running now');
+    case 'waiting': return t('Waiting for quota');
+    case 'ended': return t('Ended in the last day');
+  }
+}
+/** SB-395: why a row is where it is, in words; `now` in Unix seconds. */
+export function sessionWhyText(row: Pick<SessionRow, 'why' | 'quiet_minutes' | 'probe_at'>, now: number): string {
+  switch (row.why) {
+    case 'duplicate': return t('Runs in two processes');
+    case 'stuck': return t('A board run quiet for {n} min', { n: row.quiet_minutes ?? 0 });
+    case 'gone': return t('Its process is gone without an end');
+    case 'ready_to_continue': return t('Stopped on a limit, ready to continue');
+    case 'limit': return row.probe_at && row.probe_at > now ? t('Stopped on a limit, next try in {when}', { when: compactCountdown(row.probe_at, now) }) : t('Stopped on a limit');
+    case 'working': return t('Working');
+    case 'quiet': return t('Quiet {n} min', { n: row.quiet_minutes ?? 0 });
+    case 'exited': case 'ended': return t('Ended');
+    case 'stopped': return t('Stopped');
+    case 'timed_out': return t('Stopped at its time limit');
+    case 'limit_stop': return t('Stopped on a limit');
+    default: return t('Ended');
+  }
+}
+/** SB-395: another machine's heading line when its sessions could not be read. */
+export function machineReadText(status: MachineReadStatus): string {
+  switch (status) {
+    case 'read': return '';
+    case 'unreachable': return t('Not answering over ssh now.');
+    case 'no_switchboard': return t('Switchboard is not installed there.');
+    case 'too_old': return t('Its Switchboard is older than this page. Update it there.');
+    case 'bad_answer': return t('Its answer could not be read.');
+  }
 }

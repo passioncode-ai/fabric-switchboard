@@ -3315,6 +3315,44 @@ Vesta's board request `a7325ed3` (G2, plan fabric-workspace `docs/plans/2026-11-
 - `where`: `here`, or `elsewhere` for an account marked as used on another machine or in a machine group. No machine name.
 - Left out by construction: personal accounts, labels, e-mail addresses, account ids, tokens and machine names (test `an_organizations_seats_name_no_person_and_leave_personal_accounts_out`). The provider's plan is not known to Switchboard, so it is not given; the field set is offered to Observatory (OBS-415) on thread `f3aa795e`.
 
+## Sessions page (SB-395)
+
+One list of this computer's coding sessions in four groups, the order Fabric Dashboards' Sessions
+mode uses: `needs_you`, `running`, `waiting`, `ended`. `session_rows::build` joins three answers
+already kept, never text a session wrote: the session tree (`session_watch::tree`: live
+processes, the last day's launches, the watch's findings), the stops on a limit
+(`Operation::Recovery`, `Null` without an owner, then named in `degraded` as `recovery`) and the
+hosted sessions a viewer can open (`launch::sessions` with `attachable`). A live process is
+`needs_you` when the watch found it running twice (`duplicate`; only the copy the watch offers to
+close carries `close_copy`) or a board run quiet for 30 minutes (`stuck`), else `running`
+(`working` or `quiet`); a launch of the last day not live is `ended` (`why` its `ended.kind`) or
+`needs_you` (`gone`); a waiting stop is `needs_you` when an account is ready (`ready_to_continue`),
+else `waiting` (`limit`, with `probe_at`). A hosted live session carries `attach` and `end`. Rows
+come in the groups' order, newest first in each. A row: `{id (pid:N, launch:ID or stop:EVENT),
+group, why, acts, agent (claude-code, codex, ...), folder, account (label), pool, origin (the
+surface, null when unknown), since, launch_id, session_id, pid?, quiet_minutes?, probe_at?, task?}`;
+the answer `{rows, counts, degraded, observed_at}`.
+
+- `Operation::SessionRows` (CLI `sessions --rows`, MCP `switchboard_sessions` with `rows`). With
+  `--target` the other machine's Switchboard answers it (the CLI's `there`).
+- `Operation::SessionRowsEverywhere` (the window's `session_rows`): this computer's rows and every
+  machine `targets` knows, read at once over ssh (`--json sessions --rows`, 20 s each,
+  `machines::LIVE_SECONDS`), each `{machine, status, rows?, counts?, read_at}` where
+  `session_rows::there` reads the answer as `read`, `unreachable`, `no_switchboard`, `too_old` (a
+  Switchboard without `--rows`) or `bad_answer`. Reads only; no proof is asked (SB-357 guards acts).
+- `Operation::SessionAttach {launch_id, target?}` opens a Terminal window running
+  `<cli> --data-dir <data> attach <id> [--target M]` (`session_rows::attach_script`, every word
+  quoted; the script in `<data>/open/`); closing it leaves the session running.
+- `Operation::SessionEnd {launch_id, target?}`: here `session_host::end`; on another machine its
+  `--json sessions end <id>` through `machine_proof::ssh`, so it is refused unless that machine
+  proves its key.
+
+The window's Sessions page reads `session_rows` on arrival and once a minute while it is on screen
+(`backgroundReads('sessions')`), never while another page is. Tests
+`session_rows::tests::every_session_lands_in_one_group_with_the_acts_it_has`,
+`another_machines_answer_reads_as_its_heading_says`,
+`a_recovery_that_could_not_be_read_is_named_not_guessed`; scenario SCN-098.
+
 ## Session duty officer (SB-384, DEC-0021)
 
 **SB-396 (2026-11-16, the [lifecycle audit](plans/2026-11-16-session-lifecycle/audit.md) D1, D2, D4).**

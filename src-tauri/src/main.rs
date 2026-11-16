@@ -947,6 +947,42 @@ fn report_problem(kind: String, code: String) -> Result<(), String> {
 async fn session_tree(state: State<'_, Slot>) -> Result<Value, String> {
     state.runtime().await?.execute(Operation::SessionTree).await
 }
+/// SB-395: the Sessions page: this computer's sessions in four groups, and every other
+/// machine's as its own Switchboard answers.
+#[tauri::command]
+async fn session_rows(state: State<'_, Slot>) -> Result<Value, String> {
+    state
+        .runtime()
+        .await?
+        .execute(Operation::SessionRowsEverywhere)
+        .await
+}
+/// SB-395: *Open here* on a hosted session: a Terminal window of its own attached to it.
+#[tauri::command]
+async fn session_attach(
+    launch_id: String,
+    target: Option<String>,
+    state: State<'_, Slot>,
+) -> Result<Value, String> {
+    state
+        .runtime()
+        .await?
+        .execute(Operation::SessionAttach { launch_id, target })
+        .await
+}
+/// SB-395: *End* on a hosted session, here or on another machine.
+#[tauri::command]
+async fn session_end(
+    launch_id: String,
+    target: Option<String>,
+    state: State<'_, Slot>,
+) -> Result<Value, String> {
+    state
+        .runtime()
+        .await?
+        .execute(Operation::SessionEnd { launch_id, target })
+        .await
+}
 /// SB-378: this computer's cap on working coding sessions; `cap` sets it, `clear` removes it,
 /// neither reads it (`switchboard capacity`).
 #[tauri::command]
@@ -1952,6 +1988,9 @@ fn main() {
             capacity,
             duty,
             session_tree,
+            session_rows,
+            session_attach,
+            session_end,
             session_close_copy,
             report_problem,
             repository_map,

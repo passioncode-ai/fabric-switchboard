@@ -10,9 +10,9 @@ if (native) watchProblems(reportProblem);
 import { LOCALE_KEY, dateLocale, locale, parseLocaleChoice, plural, saveLocaleChoice, t, type LocaleChoice } from './i18n';
 import { demo, demoFirstRun, native, nativeAdapter, onProjectSuggestions, onShellHook, onSpendChanged, safeError, reportFrontendReady, reportLanguage, reportProblem, type Operation } from './adapter';
 import type { CardState, AccountGroup } from './ui-logic';
-import { statAlert, ceilingQuestion, ceilingWarning, ceilingLine, keyLimitLine, dollars, POOL_PATTERN, poolChoices, poolName, inGroup, tourPlacement, usableWhileBusy, APPEARANCE_KEY, attribution, placementAdmits, domainSuggestion, groupSeatsElsewhere, passioncodeLine, seatEndedText, groupSeatsEndedText, organizationReleasedAt, inOrganizationFilter, domainList, type AttributedBy, sortStatRows, nextStatSort, type StatRow, type StatSort, statCacheShare, statTokensPerRequest, chartSeries, niceMax, groupProjectRows, type ChartMetric, groupProjects, compactCount, statTokens, statTrouble, statTroubleText, statAgentName, type Statistics, EXPIRY_CHOICES, folderName, folderRows, withoutFolder, type ProjectRoot, moveTargets, mapRows, rootTargets, storedMapFolders, MAP_FOLDERS_KEY, type MapFilter, type MapRow, type RepositoryMap, sortAgents, defaultAgentChoices, backgroundReads, clockedRead, chainScopeKey, afterRead, ceilingRemovalNote, modelMeta, modelUse, ordinaryKimiNote, kimiLimitUntil, limitReasonText, limitTitle, agentSetupFacts, sessionHow, sessionAgentName, sessionStateLabel, kimiWindowsLine, kimiWindowsLines, openrouterCreditLine, eventAction, eventDetail, MutationClock, activeRules, autoSwitchPool, autoSwitchPossible, launchChoice, withFolders, githubDefaultSelection, githubPlan, githubSource, replaceFolder, storedFolder, LAST_FOLDER_KEY, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, signInNotice, signInMove, organizationMoveNote, dismissTermsNotice, termsNoticeDismissed, termsNoticeOn, termsNoticeText, tourWaits, orgSetups, releasedOrganizations, releasedSummary, orgSetupAction, orgSetupShown, orgSetupCaveat, orgSetupLeads, orgSetupPrimary, accountsOrgActionLeads, firstPrimary, orgSetupUnread, orgSetupStateLabel, orgSetupTitle, hiddenOrgSetups, ORG_SETUP_HIDDEN_KEY, accountsEmptyKey, type OrgSetup, usageAnswerText, usageNotice, usageFreshness, windowReset, type Appearance, shellHookView, balancingView, balancingNotice, shellHookToggleNotice, shellHookNoticeText, codexHookLine, moveStep, accountsForStep, chainSummary, stepReasonText, handoverOutcomeText, handoverSkipped, shortWorkflow, TAKEOVER_ORDER, groupOrganizations, servesPool, sharedGroups, holdsContext, accountOrganizations, machineOf, remoteUsageLine, unplacedAccounts, foldlessGroups, repositoriesUnder, contextLines, machineAliasesLine, machineLiveLine, machineCopyLine, foldOpen, accountSections, accountMatches, attentionAccounts, attentionReasonText, duplicateOffer, attentionActionLabel, dutyReasonText, dutyOutcomeText, surfaceLabel, sessionTreeRows, givenFacts, switchingLine, MACHINE_FOLD_LIMIT, EVENT_FILTER_KINDS, eventKindLabel, filterEvents, eventsByDay, relativeDay, EVENTS_PAGE, eventPage, sortSessions, statRowsShown, STAT_TOP, spendShare, groupKeyBlocks, keyTail, groupStateLine, type EventKind, type EventFilter } from './ui-logic';
+import { statAlert, ceilingQuestion, ceilingWarning, ceilingLine, keyLimitLine, dollars, POOL_PATTERN, poolChoices, poolName, inGroup, tourPlacement, usableWhileBusy, APPEARANCE_KEY, attribution, placementAdmits, domainSuggestion, groupSeatsElsewhere, passioncodeLine, seatEndedText, groupSeatsEndedText, organizationReleasedAt, inOrganizationFilter, domainList, type AttributedBy, sortStatRows, nextStatSort, type StatRow, type StatSort, statCacheShare, statTokensPerRequest, chartSeries, niceMax, groupProjectRows, type ChartMetric, groupProjects, compactCount, statTokens, statTrouble, statTroubleText, statAgentName, type Statistics, EXPIRY_CHOICES, folderName, folderRows, withoutFolder, type ProjectRoot, moveTargets, mapRows, rootTargets, storedMapFolders, MAP_FOLDERS_KEY, type MapFilter, type MapRow, type RepositoryMap, sortAgents, defaultAgentChoices, backgroundReads, clockedRead, chainScopeKey, afterRead, ceilingRemovalNote, modelMeta, modelUse, ordinaryKimiNote, kimiLimitUntil, limitReasonText, limitTitle, agentSetupFacts, sessionHow, sessionAgentName, sessionStateLabel, kimiWindowsLine, kimiWindowsLines, openrouterCreditLine, eventAction, eventDetail, MutationClock, activeRules, autoSwitchPool, autoSwitchPossible, launchChoice, withFolders, githubDefaultSelection, githubPlan, githubSource, replaceFolder, storedFolder, LAST_FOLDER_KEY, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, signInNotice, signInMove, organizationMoveNote, dismissTermsNotice, termsNoticeDismissed, termsNoticeOn, termsNoticeText, tourWaits, orgSetups, releasedOrganizations, releasedSummary, orgSetupAction, orgSetupShown, orgSetupCaveat, orgSetupLeads, orgSetupPrimary, accountsOrgActionLeads, firstPrimary, orgSetupUnread, orgSetupStateLabel, orgSetupTitle, hiddenOrgSetups, ORG_SETUP_HIDDEN_KEY, accountsEmptyKey, type OrgSetup, usageAnswerText, usageNotice, usageFreshness, windowReset, type Appearance, shellHookView, balancingView, balancingNotice, shellHookToggleNotice, shellHookNoticeText, codexHookLine, moveStep, accountsForStep, chainSummary, stepReasonText, handoverOutcomeText, handoverSkipped, shortWorkflow, TAKEOVER_ORDER, groupOrganizations, servesPool, sharedGroups, holdsContext, accountOrganizations, machineOf, remoteUsageLine, unplacedAccounts, foldlessGroups, repositoriesUnder, contextLines, machineAliasesLine, machineLiveLine, machineCopyLine, foldOpen, accountSections, accountMatches, attentionAccounts, attentionReasonText, duplicateOffer, attentionActionLabel, dutyReasonText, dutyOutcomeText, surfaceLabel, sessionTreeRows, SESSION_GROUPS, sessionGroupTitle, sessionWhyText, machineReadText, givenFacts, switchingLine, MACHINE_FOLD_LIMIT, EVENT_FILTER_KINDS, eventKindLabel, filterEvents, eventsByDay, relativeDay, EVENTS_PAGE, eventPage, sortSessions, statRowsShown, STAT_TOP, spendShare, groupKeyBlocks, keyTail, groupStateLine, type EventKind, type EventFilter } from './ui-logic';
 import agentCatalog from '../catalog/agents.json';
-import type { AnalyticsStatus, Ceilings, CeilingView, CeilingQuestionView, OpenrouterCredit, BackupInfo, PassioncodeStatus, Account, Adapter, AgentConnection, AgentInfo, AgentRow, AgentsOverview, OpenrouterModels, HermesModel, KimiAccounts, KimiRegion, KimiStatus, OpenrouterStatus, OpenrouterKeys, CodexRoute, BalanceStatus, CapacityStatus, DutyStatus, DutyLine, SessionTree, WatchFinding, ShellHookStatus, AgentSetup, AuthKind, BackupStatus, KimiAccount, CurrentAccounts, LoginItem, Project, Restored, HandoverPlan, ExternalIdentity, MonitorStatus, ProjectRule, Provider, RotationPolicy, RuntimeStatus, SessionInfo, Snapshot, UpdateStatus, Onboarding, Chains, ChainExecutor, ChainScope, ChainStepView, GithubRepository, Machine, MachinesLive, MachinesList, Attention, AttentionItem, Event, GivenAccount } from './types';
+import type { AnalyticsStatus, Ceilings, CeilingView, CeilingQuestionView, OpenrouterCredit, BackupInfo, PassioncodeStatus, Account, Adapter, AgentConnection, AgentInfo, AgentRow, AgentsOverview, OpenrouterModels, HermesModel, KimiAccounts, KimiRegion, KimiStatus, OpenrouterStatus, OpenrouterKeys, CodexRoute, BalanceStatus, CapacityStatus, DutyStatus, DutyLine, SessionTree, WatchFinding, ShellHookStatus, AgentSetup, AuthKind, BackupStatus, KimiAccount, CurrentAccounts, LoginItem, Project, Restored, HandoverPlan, ExternalIdentity, MonitorStatus, ProjectRule, Provider, RotationPolicy, RuntimeStatus, SessionInfo, Snapshot, UpdateStatus, Onboarding, Chains, ChainExecutor, ChainScope, ChainStepView, GithubRepository, Machine, MachinesLive, MachinesList, Attention, AttentionItem, Event, GivenAccount, SessionsEverywhere, SessionRow, MachineReadStatus } from './types';
 
 const root = document.querySelector<HTMLDivElement>('#app')!;
 const announcements = document.querySelector<HTMLDivElement>('#announcements')!;
@@ -38,7 +38,7 @@ let snapshot: Snapshot | null = null;
 let runtime: RuntimeStatus | null = null;
 let currentAccounts: CurrentAccounts | null = null;
 let monitor: MonitorStatus | null = null;
-type Page = 'accounts' | 'tokens' | 'projects' | 'orgs' | 'agents' | 'activity' | 'stats' | 'settings' | 'about';
+type Page = 'accounts' | 'tokens' | 'projects' | 'orgs' | 'agents' | 'sessions' | 'activity' | 'stats' | 'settings' | 'about';
 let page: Page = 'accounts';
 /** First-run tour (operator request 2026-10-05): five steps, each on its screen, pointing at what to press. */
 const TOUR_KEY = 'switchboard.tour';
@@ -289,6 +289,7 @@ function showNotice(text: string, error = false) { notice = t(text); noticeError
 /** One way to change page: what each page reads on arrival, then focus on its title or on `focusKey`. */
 function goTo(target: Page, focusKey?: string) {
   page = target; notice = '';
+  if (target === 'sessions') void loadSessionRows();
   if (target === 'activity') { void loadSessions(); journal = null; void loadJournal(); } if (target === 'agents') { void loadAgents(); void loadChains(); void loadCeilings(); } if (target === 'projects') { void loadChains(); void loadCeilings(); if (!openrouterKeys) void loadOpenrouter(); } if (target === 'tokens') { groupKeyStatus = null; void loadOpenrouter(); void loadCeilings(); } if (target === 'stats' && !stats) void loadStats(); if (target === 'orgs') void loadPassioncode();
   render();
   if (focusKey) { restoreFocus(focusKey); document.querySelector<HTMLElement>(`[data-focus="${focusKey}"]`)?.scrollIntoView({ block: 'start' }); }
@@ -411,7 +412,7 @@ function render(options: { background?: boolean } = {}): boolean {
   sidebar.append(brand);
   const nav = el('nav', 'navigation'); nav.setAttribute('aria-label', t('Main navigation'));
   const liveRules = activeRules(snapshot?.rules, Date.now() / 1000).length;
-  for (const [target, label] of [['accounts', t('Accounts')], ['tokens', t('API keys')], ['projects', t('Groups')], ['orgs', t('Organizations')], ['agents', t('Agents')], ['activity', t('Activity')], ['stats', t('Statistics')], ['settings', t('Settings')], ['about', t('About')]] as const) {
+  for (const [target, label] of [['accounts', t('Accounts')], ['tokens', t('API keys')], ['projects', t('Groups')], ['orgs', t('Organizations')], ['agents', t('Agents')], ['sessions', t('Sessions')], ['activity', t('Activity')], ['stats', t('Statistics')], ['settings', t('Settings')], ['about', t('About')]] as const) {
     const control = button('', () => { if (target === 'stats') { stats = null; statsError = false; } goTo(target); }, `nav-item ${page === target ? 'active' : ''}`, `nav-${target}`);
     const symbol = el('span', 'nav-icon'); symbol.setAttribute('aria-hidden', 'true'); symbol.append(navIcon(target));
     control.append(symbol, el('span', '', label));
@@ -425,8 +426,8 @@ function render(options: { background?: boolean } = {}): boolean {
   const main = el('main', 'main'); main.id = 'main'; main.setAttribute('aria-busy', String(busy || loading));
   if (demo) main.append(el('div', 'demo-banner', t('SYNTHETIC DEMO · No real accounts, vault, proxy, or terminal. Changes reset when you reload.')));
   const header = el('header', 'page-header');
-  const heading = el('div'); const title = el('h1', '', { accounts: t('Accounts'), tokens: t('API keys'), projects: t('Groups'), orgs: t('Organizations'), agents: t('Agents'), activity: t('Activity'), stats: t('Statistics'), settings: t('Settings'), about: t('About Switchboard') }[page]); title.tabIndex = -1; title.dataset.focus = 'page-title';
-  heading.append(el('p', 'eyebrow', t('FABRIC SWITCHBOARD')), title, el('p', 'subtitle', { accounts: t('Switch Claude Code, keep sign-ins fresh and watch quota.'), tokens: t('API keys agents run on: the machine\'s, and one per group.'), projects: t('Groups of repositories with accounts of their own; other groups never switch to them.'), orgs: t('Companies your accounts belong to: set by you, or read from their team at the provider.'), agents: t('Choose which coding agents take over work, and connect them to Switchboard.'), activity: t('Local account and session events.'), stats: t('Which accounts and agents work in which groups, and where tokens go.'), settings: t('How Switchboard switches, lends, updates and backs up on this computer.'), about: t('Deliberate account switching for coding sessions.') }[page]));
+  const heading = el('div'); const title = el('h1', '', { accounts: t('Accounts'), tokens: t('API keys'), projects: t('Groups'), orgs: t('Organizations'), agents: t('Agents'), sessions: t('Sessions'), activity: t('Activity'), stats: t('Statistics'), settings: t('Settings'), about: t('About Switchboard') }[page]); title.tabIndex = -1; title.dataset.focus = 'page-title';
+  heading.append(el('p', 'eyebrow', t('FABRIC SWITCHBOARD')), title, el('p', 'subtitle', { accounts: t('Switch Claude Code, keep sign-ins fresh and watch quota.'), tokens: t('API keys agents run on: the machine\'s, and one per group.'), projects: t('Groups of repositories with accounts of their own; other groups never switch to them.'), orgs: t('Companies your accounts belong to: set by you, or read from their team at the provider.'), agents: t('Choose which coding agents take over work, and connect them to Switchboard.'), sessions: t('Every coding session here and on your other machines: what needs you, what runs, what waits and what ended.'), activity: t('Local account and session events.'), stats: t('Which accounts and agents work in which groups, and where tokens go.'), settings: t('How Switchboard switches, lends, updates and backs up on this computer.'), about: t('Deliberate account switching for coding sessions.') }[page]));
   header.append(heading);
   if (native || demo) {
     const actions = el('div', 'header-actions');
@@ -464,6 +465,7 @@ function render(options: { background?: boolean } = {}): boolean {
   else if (page === 'agents') renderAgents(main);
   else if (page === 'tokens') renderTokens(main);
   else if (page === 'stats') renderStats(main);
+  else if (page === 'sessions') renderSessionsPage(main);
   else if (loadError && !snapshot) {
     const state = emptyState(page === 'activity' ? t('Unable to load activity') : page === 'projects' ? t('Unable to load groups') : page === 'orgs' ? t('Unable to load organizations') : t('Unable to load accounts'), t(loadError)); state.classList.add('error-state'); state.append(button(t('Retry'), () => void reload(), 'button primary', 'retry-load')); main.append(state);
   } else if (loading && !snapshot) {
@@ -485,6 +487,7 @@ const NAV_ICONS: Record<Page, string> = {
   projects: 'M1.5 4.5V12a1 1 0 0 0 1 1h11a1 1 0 0 0 1-1V6a1 1 0 0 0-1-1H8L6.5 3h-4a1 1 0 0 0-1 1.5Z',
   orgs: 'M2.5 14V3.5a1 1 0 0 1 1-1h5a1 1 0 0 1 1 1V14M9.5 7h3a1 1 0 0 1 1 1v6M1.5 14h13M5 5.5h2M5 8h2M5 10.5h2',
   agents: 'M3 4.5h10a1 1 0 0 1 1 1V12a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V5.5a1 1 0 0 1 1-1ZM5 7.5l1.5 1.5L5 10.5M8.5 10.5H11M8 4.5V2',
+  sessions: 'M2.5 3h11a1 1 0 0 1 1 1v6.5a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1ZM5.5 14h5M8 11.5V14M4.5 5.5l1.8 1.5-1.8 1.5M8 8.5h3',
   activity: 'M1.5 8h3l2-5 3 10 2-5h3',
   stats: 'M2 14h12M4 14V9M7 14V5M10 14V8M13 14V3',
   settings: 'M2 4.5h7M12 4.5h2M2 11.5h2M7 11.5h7M10.5 3v3M5.5 10v3',
@@ -3292,6 +3295,76 @@ function sessionTreePanel() {
   } }));
   return panel;
 }
+/**
+ * SB-395: the Sessions page. This computer first, then each other machine Switchboard knows, each
+ * in four groups (needs you, running, waiting, ended); a row carries only the acts it has.
+ * Read on arrival and once a minute while the page is on screen, never while it is not.
+ */
+let sessionRows: SessionsEverywhere | null = null;
+let sessionRowsError = false; let sessionRowsLoading = false;
+async function loadSessionRows() {
+  if (sessionRowsLoading) return;
+  sessionRowsLoading = true; const stamp = clock.stamp();
+  try { const value = await adapter.sessionRows(); if (clock.accepts(stamp)) { sessionRows = value; sessionRowsError = false; } } catch { sessionRowsError = true; }
+  sessionRowsLoading = false; backgroundRender();
+}
+function renderSessionsPage(main: HTMLElement) {
+  if (!sessionRows) {
+    const state = el('p', sessionRowsError ? 'usage-error' : 'form-note', sessionRowsError ? t('The sessions could not be read. Refresh to retry.') : t('Reading sessions…')); state.setAttribute('role', 'status'); main.append(state);
+    if (sessionRowsError) main.append(button(t('Retry'), () => void loadSessionRows(), 'button primary', 'sessions-retry'));
+    return;
+  }
+  if (sessionRowsError) main.append(el('p', 'usage-error', t('The list may be out of date: the last read failed.')));
+  main.append(sessionMachine(t('This computer'), null, 'read', sessionRows.here.rows, sessionRows.here.degraded));
+  for (const m of sessionRows.machines) main.append(sessionMachine(m.machine, m.machine, m.status, m.rows ?? [], [], m.read_at));
+}
+function sessionMachine(title: string, target: string | null, status: MachineReadStatus, rows: SessionRow[], degraded: string[], readAt?: number) {
+  const section = el('section', 'about-panel session-machine');
+  const id = `machine-${target ?? 'here'}`.replace(/[^A-Za-z0-9_-]/g, '-'); section.setAttribute('aria-labelledby', id);
+  const heading = el('h2', '', title); heading.id = id; section.append(heading);
+  if (status !== 'read') { section.append(el('p', 'usage-error', machineReadText(status))); if (readAt) section.append(el('p', 'form-note', t('Asked {date}.', { date: date(readAt) }))); return section; }
+  if (degraded.includes('recovery')) section.append(el('p', 'form-note', t('Sessions stopped on a limit are not listed: Switchboard is not running here.')));
+  if (!rows.length) { section.append(el('p', 'form-note', t('No session runs or waits here, and none ended in the last day.'))); return section; }
+  section.append(el('p', 'form-note session-summary', SESSION_GROUPS.map((g) => [g, rows.filter((r) => r.group === g).length] as const).filter(([, n]) => n > 0).map(([g, n]) => `${sessionGroupTitle(g)}: ${n}`).join(' · ')));
+  const now = Date.now() / 1000;
+  for (const group of SESSION_GROUPS) {
+    const items = rows.filter((r) => r.group === group);
+    if (!items.length) continue;
+    section.append(foldSection({ key: `sessions-${target ?? 'here'}-${group}`, title: sessionGroupTitle(group), state: String(items.length), open: group !== 'ended', level: 'h3', className: `session-group is-${group}`, body: () => {
+      const list = el('ul', 'session-list');
+      for (const row of items) list.append(sessionRowItem(row, target, now));
+      return [list];
+    } }));
+  }
+  return section;
+}
+function sessionRowItem(row: SessionRow, target: string | null, now: number) {
+  const item = el('li', 'session-row'); const title = el('div', 'event-title');
+  const name = el('span', 'session-name');
+  name.append(el('strong', '', [statAgentName(row.agent ?? ''), row.account].filter(Boolean).join(' · ') || t('Unknown agent')));
+  title.append(name, el('span', `session-state is-${row.group}`, sessionWhyText(row, now)));
+  item.append(title);
+  if (row.folder) item.append(el('code', 'address', row.folder));
+  // A stop on a limit does not say how its session started, so no origin is claimed for it.
+  const origin = row.id.startsWith('stop:') ? null : surfaceLabel(row.origin);
+  const facts = [origin, row.pool ? inGroup(row.pool, snapshot?.projects ?? []) : null, row.since ? date(row.since) : null].filter(Boolean).join(' · ');
+  item.append(el('p', 'form-note', facts));
+  const acts = el('div', 'row-actions');
+  const key = `session-${row.id}`;
+  if (row.acts.includes('close_copy') && !target && row.session_id) acts.append(button(t('Close this copy'), () => { const id = row.session_id!; void mutate(() => adapter.sessionCloseCopy(id, row.pid ?? undefined), t('Closed the quiet copy. The other one keeps working.'), key).then(() => loadSessionRows()); }, 'button', `${key}-close`));
+  if (row.acts.includes('attach') && row.launch_id) acts.append(button(t('Open here'), () => { const id = row.launch_id!; void mutate(() => adapter.sessionAttach(id, target), t('Opened in a Terminal window. Closing that window leaves the session running.'), key); }, 'button', `${key}-attach`));
+  if (row.acts.includes('end') && row.launch_id) acts.append(button(t('End'), () => endSessionDialog(row, target), 'button danger-text', `${key}-end`));
+  if (acts.childElementCount) item.append(acts);
+  return item;
+}
+/** SB-395: ending a hosted session asks first: its work in progress stops. */
+function endSessionDialog(row: SessionRow, target: string | null) {
+  const where = target ? t('on {machine}', { machine: target }) : t('on this computer');
+  const context = openDialog(t('End this session?'), t('The session in {folder} {where} stops now, with whatever it was doing. Its transcript stays, so it can be resumed later.', { folder: row.folder ?? '', where }));
+  const confirm = submit(t('End session')); confirm.className = 'button danger'; context.actions.append(confirm);
+  context.form.addEventListener('submit', (event) => { event.preventDefault(); const id = row.launch_id!; void dialogSave(context, () => adapter.sessionEnd(id, target), t('The session ended.')).then(() => loadSessionRows()); });
+  context.actions.querySelector('button')?.focus();
+}
 function renderActivity(main: HTMLElement) {
   main.append(sessionTreePanel());
   main.append(sessionsPanel());
@@ -4131,6 +4204,7 @@ function backgroundRefresh() {
     const reads = backgroundReads(page);
     if (reads.includes('onboarding')) loadOnboarding();
     if (reads.includes('sessions')) void loadSessions();
+    if (reads.includes('session_rows')) void loadSessionRows();
     if (reads.includes('ceilings')) void loadCeilings();
     if (reads.includes('passioncode')) void loadPassioncode();
     // SB-100: Kimi's figures refresh in the background too, every five minutes.

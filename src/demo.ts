@@ -644,6 +644,31 @@ export function createDemoAdapter(): Adapter {
       demoDuplicate = null;
       return { session_id: sessionId, closed_pid: pid ?? 4188, kept_pids: [4101] };
     },
+    async sessionRows() {
+      await pause();
+      const now = Math.floor(Date.now() / 1000);
+      const counts = (rows: { group: string }[]) => ({ needs_you: rows.filter((r) => r.group === 'needs_you').length, running: rows.filter((r) => r.group === 'running').length, waiting: rows.filter((r) => r.group === 'waiting').length, ended: rows.filter((r) => r.group === 'ended').length });
+      const here = [
+        { id: 'pid:4188', group: 'needs_you' as const, why: 'duplicate', acts: ['close_copy' as const], agent: 'claude-code', folder: '/Users/demo/work/alpha-web', account: 'work@example.com', pool: 'alpha-web', origin: null, since: now - 7200, launch_id: null, session_id: 's-1', pid: 4188, quiet_minutes: 52 },
+        { id: 'stop:E1', group: 'needs_you' as const, why: 'ready_to_continue', acts: [], agent: 'claude-code', folder: '/Users/demo/work/tools-cli', account: 'home@example.com', pool: 'tools', origin: null, since: now - 1800, launch_id: null, session_id: 's-9' },
+        { id: 'pid:4101', group: 'running' as const, why: 'working', acts: ['attach' as const, 'end' as const], agent: 'claude-code', folder: '/Users/demo/work/alpha-web', account: 'work@example.com', pool: 'alpha-web', origin: 'fabric', since: now - 5400, launch_id: 'L-root', session_id: 's-1', pid: 4101, quiet_minutes: 2 },
+        { id: 'pid:5230', group: 'running' as const, why: 'quiet', acts: [], agent: 'codex', folder: '/Users/demo/work/tools-cli', account: null, pool: null, origin: null, since: now - 9000, launch_id: null, session_id: null, pid: 5230, quiet_minutes: 48 },
+        { id: 'stop:E2', group: 'waiting' as const, why: 'limit', acts: [], agent: 'claude-code', folder: '/Users/demo/work/alpha-docs', account: 'work@example.com', pool: 'alpha-web', origin: null, since: now - 600, launch_id: null, session_id: 's-8', probe_at: now + 540 },
+        { id: 'launch:L-old', group: 'ended' as const, why: 'exited', acts: [], agent: 'claude-code', folder: '/Users/demo/work/alpha-web', account: 'work@example.com', pool: 'alpha-web', origin: 'cli', since: now - 20000, launch_id: 'L-old', session_id: null },
+      ];
+      const studio = [
+        { id: 'pid:812', group: 'running' as const, why: 'working', acts: ['attach' as const, 'end' as const], agent: 'claude-code', folder: '/Users/demo/DATA/beta-api', account: 'studio@example.com', pool: 'default', origin: 'cli', since: now - 3000, launch_id: 'L-s1', session_id: 's-31', pid: 812, quiet_minutes: 0 },
+      ];
+      return {
+        here: { rows: here, counts: counts(here), degraded: [], observed_at: now },
+        machines: [
+          { machine: 'studio', status: 'read' as const, rows: studio, counts: counts(studio), read_at: now },
+          { machine: 'old-laptop', status: 'unreachable' as const, read_at: now },
+        ],
+      };
+    },
+    async sessionAttach() { await pause(); return { opened: true }; },
+    async sessionEnd() { await pause(); return { ended: true }; },
     async sessionTree() {
       const now = Math.floor(Date.now() / 1000);
       const task = (workflow: string | null, request: string | null = null) => ({ workflow, request, project: null });
