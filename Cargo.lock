@@ -1251,6 +1251,7 @@ version = "0.1.0"
 dependencies = [
  "dirs 6.0.0",
  "libc",
+ "serde",
  "serde_json",
  "tempfile",
  "uuid",
