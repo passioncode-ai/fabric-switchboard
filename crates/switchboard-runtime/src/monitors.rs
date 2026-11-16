@@ -288,19 +288,22 @@ mod tests {
     fn a_hold_keeps_its_session_until_its_end_and_is_released_with_zero() {
         let root = tempfile::tempdir().unwrap();
         assert_eq!(
-            hold(root.path(), "S1", 1000 + 1800, 1000).unwrap()["hold_until"],
+            hold(root.path(), "S1", 1000 + 1800, 1000, None).unwrap()["hold_until"],
             2800
         );
         let w = read(root.path(), "S1");
         assert!(holds(&w, 2799, 0), "held however long the session was idle");
         assert!(!holds(&w, 2800, 0));
         assert_eq!(shown(&w, 2000), Some(json!({"until": 2800, "held": true})));
-        hold(root.path(), "S1", 0, 1100).unwrap();
+        hold(root.path(), "S1", 0, 1100, None).unwrap();
         assert!(!holds(&read(root.path(), "S1"), 1200, 0));
         // An end in the past, past seven days, or a session id that is not one: refused.
-        assert_eq!(hold(root.path(), "S1", 900, 1000), Err(HOLD_INVALID.into()));
         assert_eq!(
-            hold(root.path(), "S1", 1000 + MAX_HOLD + 1, 1000),
+            hold(root.path(), "S1", 900, 1000, None),
+            Err(HOLD_INVALID.into())
+        );
+        assert_eq!(
+            hold(root.path(), "S1", 1000 + MAX_HOLD + 1, 1000, None),
             Err(HOLD_INVALID.into())
         );
         assert_eq!(
@@ -308,7 +311,7 @@ mod tests {
             Err(HOLD_INVALID.into())
         );
         // A hook that comes after keeps the hold.
-        hold(root.path(), "S1", 5000, 1000).unwrap();
+        hold(root.path(), "S1", 5000, 1000, None).unwrap();
         hook(root.path(), &tool("CronCreate", json!({})), 1001);
         let w = read(root.path(), "S1");
         assert_eq!((w.hold_until, w.crons), (Some(5000), 1));
