@@ -8,6 +8,10 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+## 0.7.108
+
+- Releases 0.7.105 to 0.7.107 were not published: their Windows checks failed on test folders and a name that exist only on Unix. This release carries their changes, listed under them below.
+
 ## 0.7.107
 
 - Releases 0.7.105 and 0.7.106 were not published: their Windows checks failed (a Unix-only name in the shared resume script, then a test folder that is not absolute on Windows). This release carries their changes, listed below.
