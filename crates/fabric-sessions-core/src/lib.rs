@@ -25,12 +25,30 @@ pub mod private_fs;
 pub mod session_rows;
 /// Limit stops kept while no owner runs.
 pub mod stop_spool;
+/// Limit stops as `recovery.json` keeps them.
+pub mod stops;
 /// Opening a terminal window for a script; finding programs.
 pub mod terminal;
 /// Switches a test sets on the binary it runs (debug builds only).
 pub mod test_seams;
 #[cfg(windows)]
 pub mod windows;
+
+/// The coding agent an account serves: Claude Code or Codex (from switchboard-core).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Provider {
+    Claude,
+    Codex,
+}
+impl Provider {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Claude => "claude",
+            Self::Codex => "codex",
+        }
+    }
+}
 
 /// This crate's version, which Fabric Sessions reports as its own.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
