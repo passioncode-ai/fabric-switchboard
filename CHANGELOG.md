@@ -8,6 +8,8 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+## 0.7.101
+
 - Hermes runs on an Anthropic API key of your choice: save keys by name (`switchboard agents anthropic set appvillis --key-stdin`, `... personal ...`), then pick one in Hermes's launch dialog (*On an Anthropic key*) or with `switchboard agents launch hermes --anthropic <name>`. The key stays in the OS vault and is read when the session starts; no spending ceiling counts it (SB-390).
 
 ## 0.7.100
