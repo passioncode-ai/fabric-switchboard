@@ -1995,4 +1995,9 @@ export const RU: Record<string, string> = {
   "No launch recorded": "Запусков не записано",
   "Last activity {time}": "Последняя активность {time}",
   "No activity recorded": "Активности не записано",
+  "That machine answered with another key than the one Switchboard trusted for it, so nothing was sent. If it is still your machine, run switchboard settings signer there and trust its key with switchboard machines trust.": "Эта машина ответила другим ключом, чем тот, которому Switchboard доверяет для неё, поэтому ничего не отправлено. Если это всё ещё ваша машина, выполните там switchboard settings signer и доверьте её ключ командой switchboard machines trust.",
+  "That machine did not prove it is the one Switchboard trusted for it, so nothing was sent. Update Switchboard there and make sure it can open its vault, then retry.": "Эта машина не доказала, что она та, которой доверяет Switchboard, поэтому ничего не отправлено. Обновите там Switchboard, убедитесь, что он может открыть своё хранилище, и повторите.",
+  "The challenge is not 64 hexadecimal characters.": "Запрос на подпись не состоит из 64 шестнадцатеричных символов.",
+  "That is not a machine's key. Give the key switchboard settings signer printed on that machine.": "Это не ключ машины. Укажите ключ, который вывела команда switchboard settings signer на той машине.",
+  "The machine keys Switchboard trusts could not be read or saved. Check its data folder, then retry.": "Не удалось прочитать или сохранить ключи машин, которым доверяет Switchboard. Проверьте его папку данных и повторите.",
 };

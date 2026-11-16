@@ -157,6 +157,12 @@ export const nativeAdapter: Adapter = {
 // Only exact, fixed backend vocabulary is surfaced. Unknown failures never print
 // raw provider output, credentials, filesystem paths, or serialized error objects.
 const safeErrors = new Set([
+  // SB-357: another machine proves it is the one trusted.
+  "That machine answered with another key than the one Switchboard trusted for it, so nothing was sent. If it is still your machine, run switchboard settings signer there and trust its key with switchboard machines trust.",
+  'That machine did not prove it is the one Switchboard trusted for it, so nothing was sent. Update Switchboard there and make sure it can open its vault, then retry.',
+  'The challenge is not 64 hexadecimal characters.',
+  "That is not a machine's key. Give the key switchboard settings signer printed on that machine.",
+  'The machine keys Switchboard trusts could not be read or saved. Check its data folder, then retry.',
   // SB-355: machine groups.
   'This account works on another machine. Call it back to use it in a group here.',
   'A machine group takes accounts only by a move to that machine.',

@@ -3072,6 +3072,31 @@ unknown); runtime `machines::tests::location_words_read_a_typed_location_as_an_s
 `the_machine_groups_read_every_state`; MCP `handshake_lists_tools_and_rejects_malformed_messages`
 (tool list), CLI `mcp_parity::every_cli_command_has_an_mcp_tool_or_a_reason`.
 
+**Proving the other machine (SB-357).** `machine_proof::Guard` wraps the ssh runner of every call
+that acts on another machine: `SendAccount`, the taking step of `RecallAccount` (its finishing and
+undoing calls follow that proof), `RemoteStatus`, `RemoteCheck`, `SettingsSync` and a dispatch's
+start on another machine. Before its first command it runs one ssh call,
+`<program> [--data-dir D] --json machines prove --nonce <64 hex>` (32 fresh bytes from
+`ring::rand::SystemRandom`), and the other Switchboard answers `{public_key, signature}`: an
+Ed25519 signature with its settings signing key (SB-272, `settings_signing::sign`) over
+`switchboard-machine-proof/1\n` followed by the 32 bytes, so it can never stand for a settings
+file's signature. `machine_proof::verify` compares the key with the one trusted for the machine's
+ssh name (lowercase) in `machine-keys.json` (0600, at most 256 KiB: `{machines: {name:
+{public_key, pinned_at, by: first-proof|person}}}`, public keys only): none yet, the key is
+trusted (`pinned`); the same key, `matched`; another key, refused with `KEY_CHANGED` and no other
+command sent. A Switchboard older than the challenge (its generic `Invalid arguments` refusal), or
+one that cannot answer it (unreachable, its vault locked, a signature that does not hold), passes
+as `unproven` only while nothing is trusted for that name, and is refused with `PROOF_MISSING`
+once something is. `Operation::MachineTrust {machine, key}` (CLI `machines trust MACHINE --key
+KEY`, MCP `switchboard_machine_set` action `trust` with the operator's `decision`) trusts the key
+`settings signer` printed on that machine, replacing the one before; `KEY_INVALID` for anything
+that is not a 32-byte key in base64. `Operation::MachineKeys` (`machines keys`, action `keys`)
+lists them. Reads of usage, live reads, `targets --probe` and the organizations carried after a
+move are not guarded: they act on nothing there. Tests `machine_proof::tests::*` (first proof
+pins, same machine matches, another key behind the same name is refused with only the challenge
+sent and accepted after `trust`, an older Switchboard passes only while nothing is pinned, a
+replayed answer proves nothing).
+
 
 
 ### Background reads of other machines (SB-366, DEC-0017)
