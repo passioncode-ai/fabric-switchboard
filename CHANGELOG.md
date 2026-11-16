@@ -8,6 +8,8 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+## 0.7.99
+
 - `switchboard sessions close-copy <session_id> --target M` closes a duplicate's quiet copy on another machine through that machine's Switchboard (for Fabric Dashboards' Sessions; FD-247).
 
 - A crash of the app or `switchboard serve` is found at its next start, with the exception type and signal macOS reported, logged and counted with the day's errors; `switchboard bugs` and MCP `switchboard_bugs` list those crashes and, with usage counts on, the week's error counts (SB-379 W3). `switchboard uninstall` also removes the duty officer's files.
