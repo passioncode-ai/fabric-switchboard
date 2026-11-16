@@ -43,25 +43,35 @@ pub fn spool(root: &Path, stop: &Spooled) -> Result<(), String> {
         .map_err(|_| "The stop could not be kept for later.".into())
 }
 
-/// Every stop waiting, oldest first, each removed as it is read. A file that is not a stop, or is
-/// older than `KEEP_SECONDS`, is removed and not returned.
-pub fn take(root: &Path, now: i64) -> Vec<Spooled> {
+/// Every stop waiting, oldest first, with its file. A stop stays until `done` removes it, after the
+/// owner registered it (or refused it for good): a quit between the two registers it again, as
+/// `again`, never loses it. A file that is not a stop, or is older than `KEEP_SECONDS`, is removed
+/// and not returned.
+pub fn waiting(root: &Path, now: i64) -> Vec<(PathBuf, Spooled)> {
     let Ok(entries) = std::fs::read_dir(root.join(DIR)) else {
         return Vec::new();
     };
-    let mut out: Vec<Spooled> = entries
+    let mut out: Vec<(PathBuf, Spooled)> = entries
         .flatten()
         .filter_map(|e| {
             let path = e.path();
             let stop = switchboard_core::private_fs::read_private(&path, MAX_BYTES)
                 .ok()
-                .and_then(|b| serde_json::from_slice::<Spooled>(&b).ok());
-            let _ = std::fs::remove_file(&path);
-            stop.filter(|s| now - s.at < KEEP_SECONDS)
+                .and_then(|b| serde_json::from_slice::<Spooled>(&b).ok())
+                .filter(|s| now - s.at < KEEP_SECONDS);
+            if stop.is_none() {
+                let _ = std::fs::remove_file(&path);
+            }
+            stop.map(|s| (path, s))
         })
         .collect();
-    out.sort_by_key(|s| s.at);
+    out.sort_by_key(|(_, s)| s.at);
     out
+}
+
+/// Removes a stop the owner handled.
+pub fn done(path: &Path) {
+    let _ = std::fs::remove_file(path);
 }
 
 #[cfg(test)]
@@ -78,7 +88,7 @@ mod tests {
     }
 
     #[test]
-    fn a_stop_is_kept_once_per_session_and_handed_over_once() {
+    fn a_stop_is_kept_once_per_session_until_it_was_handled() {
         let root = tempfile::tempdir().unwrap();
         spool(root.path(), &stop("S1", 100)).unwrap();
         spool(root.path(), &stop("S2", 50)).unwrap();
@@ -92,10 +102,19 @@ mod tests {
             ) & 0o777,
             0o600
         );
-        let taken = take(root.path(), 200);
-        assert_eq!(taken, vec![stop("S2", 50), stop("S1", 120)]);
+        let waiting: Vec<_> = waiting(root.path(), 200);
+        let stops: Vec<_> = waiting.iter().map(|(_, s)| s.clone()).collect();
+        assert_eq!(stops, vec![stop("S2", 50), stop("S1", 120)]);
+        assert_eq!(
+            super::waiting(root.path(), 200).len(),
+            2,
+            "a stop stays until it was handled"
+        );
+        for (path, _) in &waiting {
+            done(path);
+        }
         assert!(
-            take(root.path(), 200).is_empty(),
+            super::waiting(root.path(), 200).is_empty(),
             "each stop is handed over once"
         );
     }
@@ -105,7 +124,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         spool(root.path(), &stop("S1", 0)).unwrap();
         std::fs::write(root.path().join(DIR).join("junk.json"), b"{").unwrap();
-        assert!(take(root.path(), KEEP_SECONDS).is_empty());
+        assert!(waiting(root.path(), KEEP_SECONDS).is_empty());
         assert_eq!(std::fs::read_dir(root.path().join(DIR)).unwrap().count(), 0);
         assert!(spool(root.path(), &stop("../x", 1)).is_err());
         let mut relative = stop("S1", 1);

@@ -357,7 +357,9 @@ impl Pass {
         let analytics = runtime.analytics();
         crate::blocking::run(|| crate::dispatch::sweep(&runtime.root, time, analytics.as_deref()));
         // SB-397 W0.4: limit stops reported while no owner ran are registered now, oldest first.
-        for stop in crate::blocking::run(|| crate::stop_spool::take(&runtime.root, time)) {
+        // Each file goes only once the owner answered, registered or refused for good.
+        for (file, stop) in crate::blocking::run(|| crate::stop_spool::waiting(&runtime.root, time))
+        {
             let _ = runtime
                 .execute(crate::Operation::RecoveryHook {
                     session: stop.session,
@@ -365,6 +367,7 @@ impl Pass {
                     billing: stop.billing,
                 })
                 .await;
+            crate::stop_spool::done(&file);
         }
         // SB-366 (DEC-0017): the accounts on other machines, read over ssh every 15 minutes on a
         // thread of their own; nothing at all without a machine group.
