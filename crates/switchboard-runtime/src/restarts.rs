@@ -24,6 +24,11 @@ pub const IN_FLIGHT: usize = 3;
 pub const BACK_SECONDS: i64 = 300;
 /// How long the caller waits for the others before it restarts anyway.
 pub const CALLER_WAIT: i64 = 900;
+/// A session still mid-turn this long after the wave began is skipped (`still_busy`), so a wave
+/// always ends.
+pub const STILL_BUSY: i64 = 86_400;
+/// Between turns also means its transcript (subagents included) has not moved for this long.
+pub const QUIET_SECONDS: i64 = 120;
 const KEEP_SECONDS: i64 = 30 * 86_400;
 const KEEP_WAVES: usize = 200;
 const MAX_BYTES: u64 = 1024 * 1024;
@@ -50,7 +55,8 @@ pub struct Entry {
     pub launch_id: Option<String>,
     pub in_place: bool,
     pub caller: bool,
-    /// `pending`, `resuming`, `back`, `continuing`, `failed` or `cancelled`.
+    /// `pending`, `ending` (written before the act, so the next owner finishes one a quit cut),
+    /// `resuming`, `back`, `continuing`, `failed`, `skipped` or `cancelled`.
     pub state: String,
     pub reason: Option<String>,
     pub ended_at: Option<i64>,
@@ -200,14 +206,18 @@ pub fn advance(wave: &mut Wave, view: &HashMap<String, Now>, now: i64) -> Vec<St
                 e.state = "failed".into();
                 e.reason = Some("gone".into());
             }
+            "pending" if now - wave.at >= STILL_BUSY => {
+                e.state = "skipped".into();
+                e.reason = Some("still_busy".into());
+            }
             _ => {}
         }
     }
-    let busy = |e: &Entry| matches!(e.state.as_str(), "pending" | "resuming");
+    let busy = |e: &Entry| matches!(e.state.as_str(), "pending" | "ending" | "resuming");
     let in_flight = wave
         .sessions
         .iter()
-        .filter(|e| e.state == "resuming")
+        .filter(|e| matches!(e.state.as_str(), "ending" | "resuming"))
         .count();
     let others_settled = !wave.sessions.iter().any(|e| !e.caller && busy(e));
     let mut start = Vec::new();
@@ -226,10 +236,12 @@ pub fn advance(wave: &mut Wave, view: &HashMap<String, Now>, now: i64) -> Vec<St
         }
     }
     if wave.done_at.is_none()
-        && !wave
-            .sessions
-            .iter()
-            .any(|e| busy(e) || (e.caller && e.state == "back"))
+        && !wave.sessions.iter().any(|e| {
+            busy(e)
+                || (e.caller
+                    && e.state == "back"
+                    && e.back_at.is_some_and(|b| now - b < 2 * BACK_SECONDS))
+        })
     {
         wave.done_at = Some(now);
     }
@@ -290,8 +302,9 @@ pub fn waves(root: &Path, now: i64) -> Vec<Wave> {
             }
             // The scripts a wave wrote go with it.
             for e in &w.sessions {
-                let _ = std::fs::remove_file(script_path(root, &w.id, &e.session));
+                remove_scripts(root, &w.id, &e.session);
             }
+            let _ = std::fs::remove_dir_all(root.join(DIR).join(&w.id));
         }
     }
     all.truncate(KEEP_WAVES);
@@ -310,19 +323,53 @@ pub fn in_wave(root: &Path, now: i64) -> HashSet<String> {
         .map(|w| {
             w.sessions
                 .into_iter()
-                .filter(|e| matches!(e.state.as_str(), "pending" | "resuming"))
+                .filter(|e| matches!(e.state.as_str(), "pending" | "ending" | "resuming"))
                 .map(|e| e.session)
                 .collect()
         })
         .unwrap_or_default()
 }
 
-fn script_path(root: &Path, wave: &str, session: &str) -> PathBuf {
-    let safe: String = session
+fn safe(session: &str) -> String {
+    session
         .chars()
         .filter(|c| c.is_ascii_alphanumeric() || *c == '-')
-        .collect();
-    root.join(DIR).join(format!("{wave}-{safe}.command"))
+        .collect()
+}
+
+/// A host's restart program: directly in `restarts/`, the only folder a host starts one from.
+fn script_path(root: &Path, wave: &str, session: &str) -> PathBuf {
+    root.join(DIR)
+        .join(format!("{wave}-{}.command", safe(session)))
+}
+
+/// A Terminal resume: a folder of its own, since the window's wrapper (`attach.command`) is
+/// written beside its script and two resumes must never share one.
+fn terminal_script_path(root: &Path, wave: &str, session: &str) -> PathBuf {
+    root.join(DIR)
+        .join(wave)
+        .join(safe(session))
+        .join("resume.command")
+}
+
+/// The scripts of one session of a wave, removed once it is settled: they carry its home's
+/// exports.
+fn remove_scripts(root: &Path, wave: &str, session: &str) {
+    let _ = std::fs::remove_file(script_path(root, wave, session));
+    let _ = std::fs::remove_dir_all(root.join(DIR).join(wave).join(safe(session)));
+}
+
+/// MON-2, MON-3 for a wave: a known end still ahead (or within `GRACE`), or any cron job; unlike
+/// the idle close, a cron job holds its session however long ago its last turn was.
+fn holds_wait(root: &Path, session: &str, now: i64) -> bool {
+    let w = crate::monitors::read(root, session);
+    w.crons > 0 || w.until.is_some_and(|u| now < u + crate::monitors::GRACE)
+}
+
+/// Whether the session can still be resumed: its folder and transcript are there.
+fn resumable_now(e: &Entry) -> bool {
+    Path::new(&e.cwd).is_dir()
+        && crate::resumable::transcript(&e.config, &e.cwd, &e.session).is_file()
 }
 
 /// The prompt the caller resumes with.
@@ -349,13 +396,7 @@ fn gather(root: &Path, caller_pid: Option<u32>, now: i64) -> (Vec<crate::duty::S
     let stopped = crate::recovery::live_stop_sessions(root, now);
     let waiting = seen
         .iter()
-        .filter(|s| {
-            crate::monitors::holds(
-                &crate::monitors::read(root, &s.session),
-                now,
-                s.status_since,
-            )
-        })
+        .filter(|s| holds_wait(root, &s.session, now))
         .map(|s| s.session.clone())
         .collect();
     // A session's launch: the launch record naming it; hosted when its host is live.
@@ -557,29 +598,65 @@ pub fn tick(root: &Path, now: i64) {
     for s in &seen {
         let entry = view.entry(s.session.clone()).or_default();
         entry.pid = Some(s.pid);
-        entry.between_turns = s.status == "idle" && s.commands_known && s.commands == 0;
+        entry.between_turns = s.status == "idle"
+            && s.commands_known
+            && s.commands == 0
+            && s.last_write.is_none_or(|w| now - w >= QUIET_SECONDS);
         entry.last_write = s.last_write;
+    }
+    // An act a quit cut (`ending` left behind): not ended, it waits again; ended, it resumes.
+    let cut: Vec<String> = wave
+        .sessions
+        .iter()
+        .filter(|e| e.state == "ending")
+        .map(|e| e.session.clone())
+        .collect();
+    for session in cut {
+        let Some(e) = wave.sessions.iter_mut().find(|e| e.session == session) else {
+            continue;
+        };
+        let pid = view.get(&session).and_then(|v| v.pid);
+        if pid == Some(e.pid) {
+            e.state = "pending".into();
+        } else if pid.is_some() || e.in_place {
+            e.state = "resuming".into();
+        } else {
+            let path = terminal_script_path(root, &wave.id, &session);
+            let started = path.is_file() && crate::launch::start_terminal(&path).is_ok();
+            e.state = if started { "resuming" } else { "failed" }.into();
+            if !started {
+                e.reason = Some("not_started".into());
+            }
+        }
     }
     let start = advance(&mut wave, &view, now);
     let stopped = crate::recovery::live_stop_sessions(root, now);
     for session in start {
-        let Some(e) = wave.sessions.iter().find(|e| e.session == session) else {
+        let Some(e) = wave.sessions.iter().find(|e| e.session == session).cloned() else {
             continue;
         };
-        // A limit stop or a wait of its own since the plan: left as it is (SL-5, MON-2).
-        let (state, reason) = if stopped.contains(&session)
-            || crate::monitors::holds(&crate::monitors::read(root, &session), now, now)
-        {
-            ("cancelled", Some("changed_since_plan"))
+        // Checked again at the act: the plan may be hours old (SL-5, MON-2).
+        let skip = if stopped.contains(&session) || holds_wait(root, &session, now) {
+            Some("changed_since_plan")
+        } else if !resumable_now(&e) {
+            Some("cannot_resume")
         } else {
-            restart_one(root, &wave, e)
+            None
         };
-        if let Some(e) = wave.sessions.iter_mut().find(|e| e.session == session) {
-            e.state = state.into();
-            e.reason = reason.map(str::to_owned);
-            if state == "resuming" {
-                e.ended_at = Some(now);
-            }
+        if let Some(reason) = skip {
+            set(&mut wave, &session, "skipped", Some(reason), None);
+            continue;
+        }
+        // The intent first, so the next owner finishes an act a quit cut.
+        set(&mut wave, &session, "ending", None, Some(now));
+        let _ = write(root, &wave);
+        let (state, reason) = restart_one(root, &wave, &e);
+        set(&mut wave, &session, state, reason, Some(now));
+        let _ = write(root, &wave);
+    }
+    for e in &wave.sessions {
+        if !matches!(e.state.as_str(), "pending" | "ending" | "resuming") {
+            remove_scripts(root, &wave.id, &e.session);
         }
     }
     if wave.done_at.is_some() {
@@ -593,16 +670,30 @@ pub fn tick(root: &Path, now: i64) {
                     crate::oplog::Field::Number(count("back") + count("continuing")),
                 ),
                 ("failed", crate::oplog::Field::Number(count("failed"))),
+                ("skipped", crate::oplog::Field::Number(count("skipped"))),
             ],
         );
     }
     let _ = write(root, &wave);
 }
+
+fn set(wave: &mut Wave, session: &str, state: &str, reason: Option<&str>, ended: Option<i64>) {
+    if let Some(e) = wave.sessions.iter_mut().find(|e| e.session == session) {
+        e.state = state.into();
+        e.reason = reason.map(str::to_owned);
+        if ended.is_some() {
+            e.ended_at = ended;
+        }
+    }
+}
 #[cfg(not(unix))]
 pub fn tick(_: &Path, _: i64) {}
 
 /// Restarts one session: in its host when it runs in one that restarts in place, else as the duty
-/// officer does (stopped, then resumed in a Terminal window through a host).
+/// officer does (stopped, then resumed in a Terminal window, through a host when it has a launch).
+/// The state that follows and, for a failure, why: `cannot_resume`, `not_written`,
+/// `host_refused` (the host would not), `host_gone` (no host answered), `still_running` (the
+/// process did not end) or `not_started` (no Terminal window opened).
 #[cfg(unix)]
 fn restart_one(root: &Path, wave: &Wave, e: &Entry) -> (&'static str, Option<&'static str>) {
     let Some(program) = crate::launch::find_program("claude") else {
@@ -626,18 +717,27 @@ fn restart_one(root: &Path, wave: &Wave, e: &Entry) -> (&'static str, Option<&'s
             1,
         );
     }
-    let path = script_path(root, &wave.id, &e.session);
-    if crate::launch::write_script_at(&path, &script).is_err() {
-        return ("failed", Some("not_written"));
-    }
     if let (true, Some(launch)) = (e.in_place, &e.launch_id) {
+        let path = script_path(root, &wave.id, &e.session);
+        if crate::launch::write_script_at(&path, &script).is_err() {
+            return ("failed", Some("not_written"));
+        }
         return match crate::session_host::restart(root, launch, &path) {
             Ok(true) => ("resuming", None),
-            _ => ("failed", Some("host_refused")),
+            Ok(false) => ("failed", Some("host_refused")),
+            Err(_) => ("failed", Some("host_gone")),
         };
     }
+    let path = terminal_script_path(root, &wave.id, &e.session);
+    let written = path
+        .parent()
+        .is_some_and(|dir| std::fs::create_dir_all(dir).is_ok())
+        && crate::launch::write_script_at(&path, &script).is_ok();
+    if !written {
+        return ("failed", Some("not_written"));
+    }
     if !crate::duty::stop(e.pid) {
-        return ("failed", Some("would_not_end"));
+        return ("failed", Some("still_running"));
     }
     match crate::launch::start_terminal(&path) {
         Ok(()) => ("resuming", None),
@@ -881,6 +981,36 @@ mod tests {
         advance(&mut w, &HashMap::new(), 1000);
         assert_eq!(w.sessions[0].state, "failed");
         assert_eq!(w.done_at, Some(1000));
+    }
+
+    #[test]
+    fn a_session_busy_for_a_day_is_skipped_so_the_wave_ends() {
+        let mut w = wave(vec![entry("B", 2, false)]);
+        let view: HashMap<String, Now> = [("B".to_string(), now(2, false))].into();
+        advance(&mut w, &view, 1000 + STILL_BUSY - 1);
+        assert_eq!(w.sessions[0].state, "pending");
+        advance(&mut w, &view, 1000 + STILL_BUSY);
+        assert_eq!(
+            (
+                w.sessions[0].state.as_str(),
+                w.sessions[0].reason.as_deref()
+            ),
+            ("skipped", Some("still_busy"))
+        );
+        assert_eq!(w.done_at, Some(1000 + STILL_BUSY));
+    }
+
+    #[test]
+    fn a_wait_of_its_own_holds_a_session_out_of_a_wave_however_old_its_cron_job() {
+        let root = tempfile::tempdir().unwrap();
+        let cron = serde_json::json!({"session_id": "S1", "hook_event_name": "PreToolUse",
+            "tool_name": "CronCreate", "tool_input": {}});
+        crate::monitors::hook(root.path(), &cron, 0);
+        assert!(
+            holds_wait(root.path(), "S1", 10 * 86_400),
+            "a cron job has no end"
+        );
+        assert!(!holds_wait(root.path(), "S2", 0));
     }
 
     #[test]
