@@ -1685,6 +1685,15 @@ check(() => {
   assert.equal(dup.items[0].session_id, 's-1');
   assert.equal(logic.attentionActionLabel(dup.items[0].action.window), 'Close the quiet copy');
   assert.equal(view.items[0].session_id, null, 'an item without one reads null');
+  // SB-389: both copies working: the older one is offered by its pid and the line says its command ends.
+  const both = logic.attentionView({ items: [{ reason: 'session_duplicate', session_id: 's-2', close: { pid: 84681, why: 'older', command_age: 8700 }, action: { tool: 'switchboard_session_close_copy', window: 'close_copy' } }] }).items[0];
+  const offer = logic.duplicateOffer(both);
+  assert.equal(offer.pid, 84681); assert.equal(offer.label, 'Close the older copy'); assert.ok(offer.line.includes('2 h'), offer.line); assert.ok(!offer.disabled);
+  const busy = logic.duplicateOffer(logic.attentionView({ items: [{ reason: 'session_duplicate', session_id: 's-3', close: null, action: { tool: 't', window: 'close_copy' } }] }).items[0]);
+  assert.ok(busy.disabled, 'both answering: nothing to press'); assert.equal(busy.pid, null);
+  assert.equal(logic.duplicateOffer(dup.items[0]).label, 'Close the quiet copy', 'an older owner sends no offer: the quiet copy as before');
+  assert.ok(!logic.duplicateOffer(dup.items[0]).disabled, 'no offer is not "both answering"');
+  assert.equal(logic.attentionView({ items: [{ reason: 'session_duplicate', session_id: 's', close: { pid: 'x', why: 'older' }, action: { tool: 't', window: 'close_copy' } }] }).items[0].close, null, 'a malformed offer is none');
   i18nForShell.setLocale('ru');
   assert.equal(logic.attentionActionLabel('check_usage'), 'Проверить снова');
   i18nForShell.setLocale('en');

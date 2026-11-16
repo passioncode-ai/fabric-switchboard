@@ -396,6 +396,9 @@ pub enum Operation {
     /// (`duty::close_copy`); the older keeps working.
     SessionCloseCopy {
         session_id: String,
+        /// SB-389: the copy the person chose (Needs attention's *Close the older copy*).
+        #[serde(default)]
+        pid: Option<u32>,
     },
     /// SB-365 (WF-3.1, DEC-0015): what needs a person, each with its reason and the action that
     /// fixes it. A view: nothing moves, the accounts stay in their groups.
@@ -6197,9 +6200,9 @@ async fn execute(
                 Ok(answer)
             })
         }
-        Operation::SessionCloseCopy { session_id } => {
+        Operation::SessionCloseCopy { session_id, pid } => {
             let root = root.to_owned();
-            blocking::run(move || duty::close_copy(&root, &session_id, session_watch::now()))
+            blocking::run(move || duty::close_copy(&root, &session_id, pid, session_watch::now()))
         }
         Operation::Machines { live } => {
             let snapshot = store.snapshot()?;

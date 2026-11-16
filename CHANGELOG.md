@@ -8,6 +8,10 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- Needs attention: when both copies of a session work, it offers *Close the older copy* (the one waiting longest on a command of its own, never one answering) and says that command ends with it; when both are answering it says so and offers nothing. Before, it offered *Close the quiet copy* and the press was refused (SB-389).
+
+- `switchboard launch --headless` (scheduled jobs) waits for the agent and records how the launch ended, so `sessions --tree` no longer reads every scheduled launch as `gone` (SB-389).
+
 - Settings: *Codex in group folders* names the groups that hold a Codex account but no folders, and its *Turn on* waits until a group with folders has one (window audit item 8).
 
 ## 0.7.99

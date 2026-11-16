@@ -346,7 +346,8 @@ fn watch(root: &Path, now: i64) {
     crate::duty::tick(root, now);
     let (scan, records, pairs) = read(root, now);
     let rows: Vec<Value> = scan["sessions"].as_array().cloned().unwrap_or_default();
-    let found = findings(&rows, &records, &pairs, now);
+    let mut found = findings(&rows, &records, &pairs, now);
+    describe_duplicates(root, &mut found);
     let before = last_keys(root);
     for f in &found {
         if !before.contains(&key(f)) {
@@ -361,10 +362,27 @@ fn watch(root: &Path, now: i64) {
             );
         }
     }
-    let now_keys: HashSet<String> = found.iter().map(key).collect();
-    if now_keys != before {
+    // SB-389: a duplicate's copies and the offer change while its keys stay, so the whole
+    // findings are compared, not their keys.
+    if found != last(root) {
         let bytes = serde_json::to_vec(&json!({"at": now, "findings": found})).unwrap_or_default();
         let _ = switchboard_core::private_fs::private_write(&root.join(FILE), &bytes);
+    }
+}
+
+/// SB-389: each duplicate's copies (status, commands, where they run) and the copy Needs
+/// attention offers to close (`duty::suggestion`); read only while a duplicate exists.
+fn describe_duplicates(root: &Path, found: &mut [Value]) {
+    if !found.iter().any(|f| f["kind"] == DUPLICATE) {
+        return;
+    }
+    let seen = crate::duty::observe(root);
+    for f in found.iter_mut().filter(|f| f["kind"] == DUPLICATE) {
+        let Some(session) = f["session_id"].as_str().map(str::to_owned) else {
+            continue;
+        };
+        f["copies"] = Value::Array(crate::duty::copies(&seen, &session));
+        f["close"] = crate::duty::suggestion(&seen, &session);
     }
 }
 

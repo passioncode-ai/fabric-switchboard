@@ -532,9 +532,34 @@ export function attentionView(raw: unknown): Attention {
     const action = e.action && typeof e.action === 'object' ? e.action as Record<string, unknown> : null;
     if (!ATTENTION_REASONS.includes(e.reason as AttentionReason) || !action || !ATTENTION_WINDOWS.includes(action.window as AttentionWindow)) continue;
     const provider = e.provider === 'claude' || e.provider === 'codex' ? e.provider : null;
-    items.push({ account_id: text(e.account_id), label: text(e.label), provider, pool: text(e.pool), reason: e.reason as AttentionReason, detail: text(e.detail) ?? '', since: typeof e.since === 'number' ? e.since : null, action: { tool: text(action.tool) ?? '', window: action.window as AttentionWindow }, session_id: text(e.session_id) });
+    items.push({ account_id: text(e.account_id), label: text(e.label), provider, pool: text(e.pool), reason: e.reason as AttentionReason, detail: text(e.detail) ?? '', since: typeof e.since === 'number' ? e.since : null, action: { tool: text(action.tool) ?? '', window: action.window as AttentionWindow }, session_id: text(e.session_id), ...(e.close === undefined ? {} : { close: closeOffer(e.close) }) });
   }
   return { count: items.length, items };
+}
+/** SB-389: a duplicate's offer as the window reads it; anything else is no offer. */
+function closeOffer(raw: unknown): AttentionItem['close'] {
+  if (!raw || typeof raw !== 'object') return null;
+  const o = raw as Record<string, unknown>;
+  if (typeof o.pid !== 'number' || (o.why !== 'quiet' && o.why !== 'older')) return null;
+  return { pid: o.pid, why: o.why, command_age: typeof o.command_age === 'number' ? o.command_age : null };
+}
+/**
+ * SB-389: what a duplicate's item says and offers. A quiet copy is closed as before; when every
+ * copy works, the older one waiting on a command of its own is offered by its pid, and the line
+ * says that command ends with it; when every copy is answering nothing is offered.
+ */
+export function duplicateOffer(item: Pick<AttentionItem, 'session_id' | 'close'>): { line: string; label: string; pid: number | null; disabled: boolean } {
+  const close = item.close;
+  if (close?.why === 'older') {
+    const line = close.command_age !== null
+      ? t('One session runs in two processes, and both are working. The older copy has been in one command for {age}; closing it ends that command.', { age: shortAge(close.command_age) })
+      : t('One session runs in two processes, and both are working. Closing the older copy ends what it is doing.');
+    return { line, label: t('Close the older copy'), pid: close.pid, disabled: !item.session_id };
+  }
+  if (item.close === null && item.session_id) {
+    return { line: t('One session runs in two processes, and both are answering. Close one in its own window when it finishes.'), label: t('Close the quiet copy'), pid: null, disabled: true };
+  }
+  return { line: t('One session runs in two processes. Close the quiet copy so they do not work over each other.'), label: t('Close the quiet copy'), pid: null, disabled: !item.session_id };
 }
 /** WF-3: the accounts that need a person: those the list names, and those the monitor says must sign in again. */
 export function attentionAccounts(attention: Attention | null, signInRequired: readonly string[] = []): Set<string> {

@@ -959,11 +959,15 @@ async fn capacity(cap: Option<u32>, clear: bool, state: State<'_, Slot>) -> Resu
 }
 /// SB-388: Needs attention's *Close the newer copy* on a session running in two processes.
 #[tauri::command]
-async fn session_close_copy(session_id: String, state: State<'_, Slot>) -> Result<Value, String> {
+async fn session_close_copy(
+    session_id: String,
+    pid: Option<u32>,
+    state: State<'_, Slot>,
+) -> Result<Value, String> {
     state
         .runtime()
         .await?
-        .execute(Operation::SessionCloseCopy { session_id })
+        .execute(Operation::SessionCloseCopy { session_id, pid })
         .await
 }
 /// SB-384: the session duty officer; `on` turns it on or off, `run` checks now, nothing reads it.

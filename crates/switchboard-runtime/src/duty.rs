@@ -637,8 +637,15 @@ fn act_on(_: &Path, _: &Seen, _: Act) -> &'static str {
 pub const NOT_TWO: &str = "That session no longer runs in two processes. Refresh to see it now.";
 pub const ALL_WORKING: &str =
     "Both copies of this session are working. Close one in its own window when it finishes.";
-pub const COPY_STILL_RUNNING: &str = "The quiet copy did not close. Close it in its own window.";
+pub const COPY_BUSY: &str =
+    "That copy is answering right now. Close it in its own window when it finishes.";
+pub const COPY_STILL_RUNNING: &str = "The copy did not close. Close it in its own window.";
 pub const CLOSE_UNSUPPORTED: &str = "Closing a session's copy works on macOS and Linux for now.";
+
+/// A copy that works: answering (`busy`) or with a command of its own running.
+fn working(s: &Seen) -> bool {
+    s.status == "busy" || s.commands > 0
+}
 
 /// Of the copies of `session`, the one a person closes and the ones kept: never a copy that is
 /// working (busy, or one of its commands running); of the others, the one whose status has not
@@ -652,7 +659,6 @@ pub fn quiet_copy<'a>(
     if copies.len() < 2 {
         return Err(NOT_TWO);
     }
-    let working = |s: &Seen| s.status == "busy" || s.commands > 0;
     let close = *copies
         .iter()
         .filter(|s| !working(s))
@@ -662,19 +668,65 @@ pub fn quiet_copy<'a>(
     Ok((close, kept))
 }
 
-/// SB-388: the person's *Close the quiet copy* on a duplicate (Needs attention): the copy
-/// `quiet_copy` names gets SIGTERM, then SIGKILL after ten seconds; the other keeps working.
-/// Journalled in `duty.jsonl` with `by: person`.
-pub fn close_copy(root: &Path, session: &str, now: i64) -> Result<Value, String> {
+/// SB-389: when every copy works, the one a person may still choose to close: never one that is
+/// answering (`busy`); of those waiting on a command of their own, the one whose status has not
+/// changed for longest. On the operator's MacBook (2026-11-16) the old copy Switchboard 0.7.93
+/// reopened in Terminal had polled a remote job for two hours beside the person's copy at work.
+pub fn older_copy<'a>(seen: &'a [Seen], session: &str) -> Option<&'a Seen> {
+    let copies: Vec<&Seen> = seen.iter().filter(|s| s.session == session).collect();
+    if copies.len() < 2 {
+        return None;
+    }
+    copies
+        .into_iter()
+        .filter(|s| s.status != "busy")
+        .min_by_key(|s| (s.status_since, std::cmp::Reverse((s.started_at, s.pid))))
+}
+
+/// SB-389: what Needs attention offers on a duplicate: `{pid, why: quiet}` (a copy that is not
+/// working), `{pid, why: older}` (every copy works; the one waiting longest on its command), or
+/// null (every copy is answering).
+pub fn suggestion(seen: &[Seen], session: &str) -> Value {
+    match quiet_copy(seen, session) {
+        Ok((close, _)) => json!({"pid": close.pid, "why": "quiet"}),
+        Err(ALL_WORKING) => older_copy(seen, session).map_or(Value::Null, |s| {
+            json!({"pid": s.pid, "why": "older", "command_age": s.command_age, "status_since": s.status_since})
+        }),
+        Err(_) => Value::Null,
+    }
+}
+
+/// SB-389: each copy of `session` as Needs attention shows it: pid, status and since when, start,
+/// commands running and the oldest one's age, where it runs. No text the session wrote.
+pub fn copies(seen: &[Seen], session: &str) -> Vec<Value> {
+    let mut out: Vec<&Seen> = seen.iter().filter(|s| s.session == session).collect();
+    out.sort_by_key(|s| (s.started_at, s.pid));
+    out.into_iter()
+        .map(|s| {
+            json!({
+                "pid": s.pid, "status": s.status, "status_since": s.status_since,
+                "started_at": s.started_at, "commands": s.commands,
+                "command_age": s.command_age, "host": s.host,
+            })
+        })
+        .collect()
+}
+
+/// SB-388, SB-389: the person's *Close the quiet copy* or *Close the older copy* on a duplicate
+/// (Needs attention). Without `pid`, the copy `quiet_copy` names; with it, that copy of `session`,
+/// refused while it is answering (`COPY_BUSY`): one of its own commands still running ends with
+/// it, as the window said before the press. SIGTERM, then SIGKILL after ten seconds; the other
+/// keeps working. Journalled in `duty.jsonl` with `by: person`.
+pub fn close_copy(root: &Path, session: &str, pid: Option<u32>, now: i64) -> Result<Value, String> {
     #[cfg(not(unix))]
     {
-        let _ = (root, session, now);
+        let _ = (root, session, pid, now);
         Err(CLOSE_UNSUPPORTED.into())
     }
     #[cfg(unix)]
     {
         let seen = observe(root);
-        let (close, kept) = quiet_copy(&seen, session)?;
+        let (close, kept) = chosen_copy(&seen, session, pid)?;
         let closed = stop(close.pid);
         append(
             root,
@@ -696,6 +748,27 @@ pub fn close_copy(root: &Path, session: &str, now: i64) -> Result<Value, String>
             "kept_pids": kept.iter().map(|s| s.pid).collect::<Vec<_>>(),
         }))
     }
+}
+
+/// The copy `close_copy` closes and the ones kept.
+pub fn chosen_copy<'a>(
+    seen: &'a [Seen],
+    session: &str,
+    pid: Option<u32>,
+) -> Result<(&'a Seen, Vec<&'a Seen>), &'static str> {
+    let Some(pid) = pid else {
+        return quiet_copy(seen, session);
+    };
+    let copies: Vec<&Seen> = seen.iter().filter(|s| s.session == session).collect();
+    let close = *copies.iter().find(|s| s.pid == pid).ok_or(NOT_TWO)?;
+    if copies.len() < 2 {
+        return Err(NOT_TWO);
+    }
+    if close.status == "busy" {
+        return Err(COPY_BUSY);
+    }
+    let kept = copies.into_iter().filter(|s| s.pid != pid).collect();
+    Ok((close, kept))
 }
 
 /// SIGTERM, then SIGKILL after ten seconds; whether the process is gone.
@@ -943,6 +1016,47 @@ mod tests {
         assert_eq!(quiet_copy(&both, &session).unwrap_err(), ALL_WORKING);
         assert_eq!(quiet_copy(&all, "other").unwrap_err(), NOT_TWO);
         assert_eq!(quiet_copy(&all, "absent").unwrap_err(), NOT_TWO);
+    }
+
+    #[test]
+    fn when_both_copies_work_the_one_waiting_longest_on_its_command_is_offered() {
+        // The operator's MacBook, 2026-11-16: the old copy (reopened by 0.7.93 in Terminal) polls
+        // a remote job, its status unchanged for 108 minutes; the person's copy is answering.
+        let copy = |pid: u32, status: &str, commands: usize, status_since: i64| Seen {
+            pid,
+            commands,
+            status_since,
+            command_age: (commands > 0).then_some(8_700),
+            started_at: pid as i64,
+            ..seen(status, 1, 1, None)
+        };
+        let all = [
+            copy(84681, "shell", 1, 1_000),
+            copy(55682, "busy", 0, 7_400),
+        ];
+        let session = all[0].session.clone();
+        assert_eq!(quiet_copy(&all, &session).unwrap_err(), ALL_WORKING);
+        assert_eq!(older_copy(&all, &session).unwrap().pid, 84681);
+        let offer = suggestion(&all, &session);
+        assert_eq!(offer["why"], "older");
+        assert_eq!(offer["pid"], 84681);
+        assert_eq!(copies(&all, &session).len(), 2);
+        // The person's press names that copy; the answering one is refused.
+        assert_eq!(
+            chosen_copy(&all, &session, Some(84681)).unwrap().0.pid,
+            84681
+        );
+        assert_eq!(
+            chosen_copy(&all, &session, Some(55682)).unwrap_err(),
+            COPY_BUSY
+        );
+        assert_eq!(chosen_copy(&all, &session, Some(1)).unwrap_err(), NOT_TWO);
+        // Both answering: nothing is offered.
+        let busy = [copy(1, "busy", 0, 10), copy(2, "busy", 0, 20)];
+        assert!(suggestion(&busy, &session).is_null());
+        // A quiet copy is still the first choice.
+        let quiet = [copy(3, "idle", 0, 5), copy(4, "busy", 0, 50)];
+        assert_eq!(suggestion(&quiet, &session)["why"], "quiet");
     }
 
     #[test]

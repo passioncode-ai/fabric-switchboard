@@ -66,7 +66,7 @@ export interface MachinesLive { machines: { pool: string; name: string; accounts
 export type AttentionReason = 'session_duplicate' | 'session_stuck' | 'sign_in' | 'seat_ended' | 'renewal_refused' | 'usage_failing' | 'move_unknown' | 'refused_there' | 'ceiling_question';
 /** WF-3: the window flow that fixes an item; `tool` is the MCP tool that does the same. */
 export type AttentionWindow = 'sign_in' | 'answer_ceiling' | 'check_usage' | 'open_machines' | 'open_sessions' | 'close_copy';
-export interface AttentionItem { account_id: string | null; label: string | null; provider: Provider | null; pool: string | null; reason: AttentionReason; detail: string; since: number | null; action: { tool: string; window: AttentionWindow }; /** SB-388: a duplicate's session id, for *Close the quiet copy*. */ session_id?: string | null }
+export interface AttentionItem { account_id: string | null; label: string | null; provider: Provider | null; pool: string | null; reason: AttentionReason; detail: string; since: number | null; action: { tool: string; window: AttentionWindow }; /** SB-388: a duplicate's session id, for *Close the quiet copy*. */ session_id?: string | null; /** SB-389: the copy offered: a quiet one, or the older one when every copy works; null when every copy is answering. */ close?: { pid: number; why: 'quiet' | 'older'; command_age: number | null } | null }
 export interface Attention { count: number; items: AttentionItem[] }
 export interface RuntimeStatus { proxy_address: string; platform: string; live_mode: string }
 export interface AddInput { label: string; provider: Provider; kind: AuthKind; pool: string; secret: string }
@@ -146,7 +146,7 @@ export interface Adapter {
   /** SB-379: live sessions with their launches, the day's launches, counts and the watch's findings. */
   sessionTree(): Promise<SessionTree>;
   /** SB-388: close the quiet one of two processes holding one session, never a working one. */
-  sessionCloseCopy(sessionId: string): Promise<{ session_id: string; closed_pid: number; kept_pids: number[] }>;
+  sessionCloseCopy(sessionId: string, pid?: number): Promise<{ session_id: string; closed_pid: number; kept_pids: number[] }>;
   /** SB-378: the session pool; `cap` sets it, `clear` removes it, neither reads. */
   capacity(change?: { cap?: number; clear?: boolean } | null): Promise<CapacityStatus>;
   /** SB-384: the session duty officer: its settings, what it did and what a check would do now. */

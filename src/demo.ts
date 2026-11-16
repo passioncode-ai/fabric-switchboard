@@ -638,11 +638,11 @@ export function createDemoAdapter(): Adapter {
       if (tree.length >= from.folders.length) throw new Error("This is the project's only repository. Add another folder to the project first, or delete the project.");
       from.folders = from.folders.filter((f) => !tree.includes(f)); target.folders.push(...tree); log('project', '', 'updated');
     },
-    async sessionCloseCopy(sessionId) {
+    async sessionCloseCopy(sessionId, pid) {
       await pause();
       if (sessionId !== demoDuplicate) throw new Error('That session no longer runs in two processes. Refresh to see it now.');
       demoDuplicate = null;
-      return { session_id: sessionId, closed_pid: 4188, kept_pids: [4101] };
+      return { session_id: sessionId, closed_pid: pid ?? 4188, kept_pids: [4101] };
     },
     async sessionTree() {
       const now = Math.floor(Date.now() / 1000);
