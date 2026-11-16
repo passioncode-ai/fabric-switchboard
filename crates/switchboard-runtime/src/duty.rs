@@ -435,6 +435,28 @@ pub fn resume_script(
     bypass: &[&str],
     prompt: bool,
 ) -> String {
+    let _ = root;
+    resume_script_for(
+        &s.config,
+        &s.cwd,
+        &s.session,
+        program,
+        bypass,
+        prompt.then_some(CONTINUE_PROMPT),
+    )
+}
+
+/// SB-396 wave B: the resume script of session `session` begun in `cwd` under the Claude Code
+/// config folder `config`, with `prompt` to go on with when given; the duty officer's restart and
+/// a person's Continue share it.
+pub fn resume_script_for(
+    config: &Path,
+    cwd: &str,
+    session: &str,
+    program: &Path,
+    bypass: &[&str],
+    prompt: Option<&str>,
+) -> String {
     let quote = |v: &str| format!("'{}'", v.replace('\'', "'\\''"));
     let mut out = format!(
         "#!{}\nset +x\nunset {}\n",
@@ -442,8 +464,8 @@ pub fn resume_script(
         crate::launch::CONFLICTS.join(" ")
     );
     let person = crate::person::claude_dir();
-    if person.as_deref() != Some(s.config.as_path()) {
-        if let Ok(text) = std::fs::read_to_string(s.config.join("launch.command")) {
+    if person.as_deref() != Some(config) {
+        if let Ok(text) = std::fs::read_to_string(config.join("launch.command")) {
             for line in text.lines().filter(|l| l.starts_with("export ")) {
                 if !line.starts_with("export SWITCHBOARD_LAUNCH_ID=")
                     && !line.starts_with("export CLAUDE_CONFIG_DIR=")
@@ -455,10 +477,9 @@ pub fn resume_script(
         }
         out.push_str(&format!(
             "export CLAUDE_CONFIG_DIR={}\n",
-            quote(&s.config.to_string_lossy())
+            quote(&config.to_string_lossy())
         ));
     }
-    let _ = root;
     // A Terminal window runs the script without the person's login shell: the PATH a run started
     // by the owner gets, so the session's hooks find `node` (operator 2026-11-15: every hook failed
     // with "node: command not found").
@@ -468,17 +489,17 @@ pub fn resume_script(
     ));
     out.push_str(&format!(
         "cd {} || exit 1\n{}",
-        quote(&s.cwd),
+        quote(cwd),
         quote(&program.to_string_lossy())
     ));
     for arg in bypass {
         out.push(' ');
         out.push_str(&quote(arg));
     }
-    out.push_str(&format!(" --resume {}", quote(&s.session)));
-    if prompt {
+    out.push_str(&format!(" --resume {}", quote(session)));
+    if let Some(prompt) = prompt {
         out.push(' ');
-        out.push_str(&quote(CONTINUE_PROMPT));
+        out.push_str(&quote(prompt));
     }
     // Ended by a signal (the duty officer closing it, the person's Ctrl-C) is a clean end: the
     // window settings close the window on status 0, so it does not stay behind.
@@ -607,6 +628,14 @@ pub fn check(root: &Path, now: i64, dry_run: bool) -> Result<Value, String> {
             "session": s.session, "folder": s.cwd, "pid": s.pid, "host": s.host});
         if !dry_run {
             append(root, line.clone());
+            // SB-396 D5: what a later Continue needs to resume this very session.
+            if outcome.starts_with("closed") {
+                crate::resumable::record(
+                    root,
+                    json!({"session": s.session, "config": s.config, "cwd": s.cwd, "reason": reason,
+                        "at": now, "by": "duty"}),
+                );
+            }
             crate::oplog::event(
                 "session_duty",
                 &[

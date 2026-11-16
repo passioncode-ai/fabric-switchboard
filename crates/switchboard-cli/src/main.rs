@@ -224,6 +224,11 @@ enum Command {
         /// minutes, a launch whose process is gone. Read here, without the owner.
         #[arg(long, conflicts_with_all = ["history", "all", "machine"])]
         tree: bool,
+        /// This computer's sessions as one list in four groups: needs you, running, waiting
+        /// (stopped on a limit) and ended (the last day), each with its agent, account, folder,
+        /// how it started and the acts it has: close the quiet copy, open here, end.
+        #[arg(long, conflicts_with_all = ["history", "all", "machine", "tree"])]
+        rows: bool,
         /// Read it on another machine, as ssh knows it (`switchboard targets`), through
         /// that machine's Switchboard; the answer is the one it gives there.
         #[arg(long)]
@@ -1930,6 +1935,13 @@ enum SessionsCommand {
         #[arg(long, requires = "target")]
         remote_data_dir: Option<String>,
     },
+    /// Continue a session that ended, as that same session: `claude --resume` in its own Claude
+    /// config folder and its folder, in a Terminal window of its own, so its history and context
+    /// are the ones it had. Refused while a process still holds it, and when its history is gone.
+    Continue {
+        /// The session id (`sessions --rows` names it).
+        session_id: String,
+    },
 }
 /// Where `switchboard launch` is run from, for the launch record.
 #[derive(Clone, Copy, ValueEnum)]
@@ -2669,6 +2681,13 @@ async fn run(cli: &Cli) -> Result<Value, String> {
             session_id: session_id.clone(),
             pid: *pid,
         },
+        Command::Sessions {
+            command: Some(SessionsCommand::Continue { session_id }),
+            ..
+        } => Operation::SessionContinue {
+            session_id: session_id.clone(),
+        },
+        Command::Sessions { rows: true, .. } => Operation::SessionRows,
         Command::Sessions { tree: true, .. } => {
             return Ok(switchboard_runtime::session_watch::tree(
                 &root,
@@ -3545,6 +3564,7 @@ fn there(command: &Command) -> Option<There> {
             before,
             machine,
             tree,
+            rows,
             command: None,
         } => {
             let mut words = vec!["sessions".to_owned()];
@@ -3553,6 +3573,7 @@ fn there(command: &Command) -> Option<There> {
                 (*history, "--history"),
                 (*machine, "--machine"),
                 (*tree, "--tree"),
+                (*rows, "--rows"),
             ] {
                 if on {
                     words.push(flag.to_owned());
@@ -5683,6 +5704,7 @@ mod mcp_parity {
         ("sessions show", Tool("switchboard_sessions")),
         ("sessions end", Tool("switchboard_session_end")),
         ("sessions close-copy", Tool("switchboard_session_close_copy")),
+        ("sessions continue", Tool("switchboard_session_continue")),
         ("provenance", Tool("switchboard_provenance")),
         ("current", Tool("switchboard_status")),
         ("rotation status", Tool("switchboard_rotation")),

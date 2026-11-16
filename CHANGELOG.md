@@ -8,6 +8,12 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- A Sessions page in the window: every coding session on this computer and on the other machines Switchboard knows, grouped by what needs you, what runs, what waits for quota and what ended, with *Close this copy*, *Open here*, *End* and *Continue*; also `switchboard sessions --rows [--target]` and MCP `switchboard_sessions` with `rows` (SB-395).
+
+- *Continue* resumes a session that ended as that same session, with its own history: `claude --resume` in its own Claude folder and its folder. Every session Switchboard closes is recorded so it can be continued; a session still running or whose history is gone is refused, never replaced by a new one (`switchboard sessions continue`, MCP `switchboard_session_continue`; SB-396).
+
+- Sessions are never closed while they may still be waiting: when the process table cannot be read nothing is closed as finished, a session stopped on a limit is left to the app that continues it, and a session's window with no viewer now waits 65 minutes (the longest wake-up a session sets itself) instead of 30 (SB-396).
+
 ## 0.7.104
 
 - Before moving an account, calling one back, reading or checking another machine, carrying settings there or starting a run there, Switchboard has that machine sign a fresh challenge with its own key. The first answer is trusted; if the same name later answers with another key (a machine that changed hands, an ssh name pointed elsewhere), nothing is sent and the refusal says how to trust the new key: `switchboard machines trust <machine> --key <key>`, with the key `switchboard settings signer` prints there. `switchboard machines keys` lists the keys trusted (SB-357).

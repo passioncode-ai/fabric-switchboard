@@ -140,6 +140,10 @@ answering; SB-389), and `pid` closes that copy, refused while it is answering; a
 still running ends with it. `close: null` means every copy is answering. Refused when the session
 no longer runs in two processes. macOS and Linux.
 
+
+### `switchboard_session_continue`: `session_id` (string)
+
+SB-396: continues a session that ended (the duty officer closed it, its hosted window was idle past the wake-up floor, a launch of the last week) as that same session: `claude --resume <id>` in its own Claude config folder and its folder, in a Terminal window of its own, so its history and context are the ones it had (`{continued, folder}`). Refused while a process still holds the session, when its folder or history is gone, and for a session Switchboard has no record of: never a fresh session in its place. `switchboard_sessions` with `rows` marks each such row with the act `continue`; the CLI is `switchboard sessions continue <session_id>`.
 ### `switchboard_health`: no arguments
 
 This Switchboard's health as one report, `agent-health/1` (SB-393), for a watcher that turns
@@ -166,7 +170,9 @@ still runs, and every viewer is told it ended. Answers `{launch_id, exit_code, r
 Closing a viewer only detaches; this ends the session. A write: not on a read-only server.
 macOS and Linux.
 
-### `switchboard_sessions`: `all?` (boolean), `history?` (boolean), `limit?` (integer), `before?` (integer), `launch_id?` (string), `machine?` (boolean)
+### `switchboard_sessions`: `all?` (boolean), `history?` (boolean), `limit?` (integer), `before?` (integer), `launch_id?` (string), `machine?` (boolean), `rows?` (boolean)
+
+With `rows: true` (SB-395): `{rows[], counts {needs_you, running, waiting, ended}, degraded[], observed_at}`, this computer's sessions as the window's Sessions page shows them, needs you first, then running, waiting (stopped on a limit) and ended (the last day), newest first in each. A row is `{id, group, why, acts[], agent, folder, account (label), pool, origin (the surface, null when started by hand), since, launch_id, session_id, pid?, quiet_minutes?, probe_at?, task?}`; `why` is `duplicate`, `stuck`, `gone`, `ready_to_continue`, `working`, `quiet`, `limit` or how a launch ended (`exited`, `stopped`, `timed_out`, `limit`); `acts` names what applies: `close_copy` (`switchboard_session_close_copy` with its `session_id` and `pid`), `attach` and `end` (a hosted session, `switchboard_session_end`). A source that could not be read is named in `degraded` (`recovery` when no owner runs). `switchboard sessions --rows [--target MACHINE]` gives the same, here or on another machine.
 
 With `history: true`, `limit` (1 to 500, default 500) and `before` (Unix seconds) page the launches; the answer's `next_before` is the next page's `before`, null at the end.
 

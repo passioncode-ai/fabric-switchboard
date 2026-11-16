@@ -183,6 +183,7 @@ pub fn assemble(scan: &Value, records: &[Value], pairs: &[(String, u32)], now: i
                 "account_id": r["account_id"], "provider": r["provider"],
                 "folder": r["working_directory"], "surface": surface(r), "parent": parent(r),
                 "task": task(r), "state": state, "ended": r["ended"],
+                "session_id": r["provider_session_id"],
             })
         })
         .collect();

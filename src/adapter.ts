@@ -76,6 +76,10 @@ export const nativeAdapter: Adapter = {
   moveRoot: (folder, pool, also, from) => invoke('move_root', { folder, pool, also: also ?? false, from: from ?? null }),
   codexRoute: (enabled) => invoke('codex_route', { enabled: enabled ?? null }),
   sessionTree: () => invoke('session_tree'),
+  sessionRows: () => readWithDeadline(invoke('session_rows')),
+  sessionAttach: (launchId, target) => invoke('session_attach', { launchId, target: target ?? null }),
+  sessionEnd: (launchId, target) => invoke('session_end', { launchId, target: target ?? null }),
+  sessionContinue: (sessionId) => invoke('session_continue', { sessionId }),
   sessionCloseCopy: (sessionId, pid) => invoke('session_close_copy', { sessionId, pid: pid ?? null }),
   capacity: (change) => invoke('capacity', { cap: change?.cap ?? null, clear: change?.clear ?? false }),
   duty: (change) => invoke('duty', { on: change?.on ?? null, run: change?.run ?? false }),
@@ -157,6 +161,15 @@ export const nativeAdapter: Adapter = {
 // Only exact, fixed backend vocabulary is surfaced. Unknown failures never print
 // raw provider output, credentials, filesystem paths, or serialized error objects.
 const safeErrors = new Set([
+  // SB-395, SB-396: the Sessions page's acts.
+  "The switchboard command was not found next to this app, so the session cannot be opened here. Reinstall Switchboard, then retry.",
+  "A session host runs on macOS and Linux for now.",
+  "Switchboard has no record of that session. Refresh the list, then retry.",
+  "That session is still running in a process. Open its window, or close it there first.",
+  "That session's folder is gone, so it cannot be continued there.",
+  "That session's history is not on this computer any more, so it cannot be continued as the same session.",
+  "Claude Code was not found on this computer.",
+  "The Terminal window to continue the session could not be opened.",
   // SB-357: another machine proves it is the one trusted.
   "That machine answered with another key than the one Switchboard trusted for it, so nothing was sent. If it is still your machine, run switchboard settings signer there and trust its key with switchboard machines trust.",
   'That machine did not prove it is the one Switchboard trusted for it, so nothing was sent. Update Switchboard there and make sure it can open its vault, then retry.',

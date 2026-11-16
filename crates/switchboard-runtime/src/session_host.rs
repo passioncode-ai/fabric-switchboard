@@ -458,13 +458,22 @@ pub fn serve(start: Start<'_>, ready: impl FnOnce()) -> Result<Ended, String> {
                     drop(inner);
                     // SB-396 D3: a session stopped on a limit waits for an account; its host
                     // continues it, so its window is not closed under it.
-                    let stopped = crate::launches::session_of(&root, &launch).is_some_and(|s| {
-                        crate::recovery::session_has_live_stop(&root, &s, crate::monitor::now())
+                    let id = crate::launches::session_of(&root, &launch);
+                    let stopped = id.as_deref().is_some_and(|s| {
+                        crate::recovery::session_has_live_stop(&root, s, crate::monitor::now())
                     });
                     if stopped {
                         continue;
                     }
                     session.end("idle");
+                    // SB-396 D5: the session can be continued as itself later.
+                    if let Some(id) = id {
+                        crate::resumable::record(
+                            &root,
+                            serde_json::json!({"session": id, "launch_id": launch,
+                                "reason": "host_idle", "at": crate::monitor::now(), "by": "host"}),
+                        );
+                    }
                     return;
                 }
             }

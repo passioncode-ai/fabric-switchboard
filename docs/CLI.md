@@ -49,6 +49,8 @@ switchboard bugs                                       # SB-379 W3: crashes foun
 switchboard attention                                  # SB-365: what needs a person (sign-in, refused renewal, ended seat, failing usage checks, a lost move, a ceiling question), each with the tool that fixes it; the accounts stay in their groups
 switchboard mcp-homes                                  # SB-359: which Claude home is signed in to which MCP server (names, URLs, booleans; never a token)
 switchboard sessions --tree                            # SB-379: live sessions with who started them and for which task, the day's launches, counts, the watch's findings
+switchboard sessions --rows [--target studio]           # SB-395: every session in four groups (needs you, running, waiting, ended) with the acts it has; here or there
+switchboard sessions continue SESSION_ID              # SB-396: continue an ended session as itself (claude --resume in its own config folder)
 switchboard sessions close-copy SESSION_ID [--pid N] [--target M]  # SB-388, SB-389 (--pid: the copy attention offers when both work) (--target: the copy on another machine, closed by its Switchboard): one session in two processes: close the copy quiet longest (SIGTERM, SIGKILL after 10 s); never a busy one or one running a command
 switchboard duty [on | off | set … | run [--dry-run]]   # SB-384: the session duty officer: closes a finished session, restarts a stalled one, never one still working
 switchboard capacity [set N | clear]                   # SB-378: this computer's cap on working coding sessions (quiet ones not counted); dispatch and launch --hosted wait at it

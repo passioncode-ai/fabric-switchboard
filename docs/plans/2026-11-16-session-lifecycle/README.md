@@ -64,6 +64,15 @@ D16 to D23 (doc drift, dead parameters).
   to a group that has none is the operator's call (asked, not assumed).
 - **SP-1 to SP-5** The Sessions page ([audit](audit.md) section 6), SCN-098.
 
+## Observed after the requirements were written
+
+- 16:47 local: Fabric Dashboards continued dissy (`090b5f51`) and riffly (`08bb894b`) as the same
+  sessions (`claude --resume <id>`, attempts 2 and 3), with their context. The resume path works
+  when the disk admits a start.
+- dissy's stops show 17 probe attempts in one day while its account read 100 % with a known reset:
+  **LC-9** (wave D) a probe is not offered before a known reset of the account it would run on,
+  unless the usage reading is stale (SB-115 keeps probing for readings that lie).
+
 ## Waves
 
 Each wave: the gate on the Mac Studio (`./scripts/check.sh`), Linux clippy, a release, the update on
@@ -71,7 +80,7 @@ this MacBook and a check of what the wave claims on the released app.
 
 | Wave | Content | State |
 |---|---|---|
-| A | LC-1 (D1), LC-2 (D2), LC-3 (D3, D4); docs: CONTRACTS duty section, AGENTS lifecycle rows | branch `lifecycle-a` |
-| B | LC-4, LC-5, LC-7 (continue the same session), SP-2 one row per session, the Sessions page with Continue (SB-395, branch `sessions-view`) | after A |
+| A | LC-1 (D1), LC-2 (D2), LC-3 (D3, D4); docs: CONTRACTS duty section, AGENTS lifecycle rows | merged (#767, `2ea4dc09`) |
+| B | LC-5, LC-7 (continue the same session), SP-2 one row per session, D11 read side, the Sessions page with Continue (SB-395) | branch `lifecycle-b`; LC-4 (one written shape of `ended`) moves to wave D |
 | C | LC-6 monitor hooks (read-only first, then acting: MON-2 to MON-4) | after B |
 | D | Recovery guards (D6, D7, D8), the fallback prefers `--resume` (D9), cleanups (D13, D17 to D23) | after C |
