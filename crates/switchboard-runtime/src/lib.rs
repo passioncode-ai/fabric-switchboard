@@ -57,6 +57,7 @@ mod refresh;
 pub mod remote_check;
 pub mod remote_dispatch;
 pub mod remote_usage;
+pub mod restarts;
 pub mod resumable;
 pub mod roots;
 pub mod seats;

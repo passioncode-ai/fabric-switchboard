@@ -234,6 +234,8 @@ struct Inner {
     /// SB-397 R1: a restart is under way; the terminal's other end is briefly gone, which is not
     /// the session's end.
     respawning: bool,
+    /// SB-397 R1: the last process exited with no restart waiting; the session is ending.
+    finished: bool,
 }
 
 fn nonzero(n: u16) -> std::num::NonZeroU16 {
@@ -308,13 +310,16 @@ impl Session {
                 return;
             }
             inner.reason.get_or_insert(reason);
+            // SB-397 R1: an end wins over a restart that waits.
+            inner.restart = None;
         }
-        unsafe { libc::kill(-self.pid(), libc::SIGHUP) };
+        let pid = self.pid();
+        unsafe { libc::kill(-pid, libc::SIGHUP) };
         let session = self.clone();
         std::thread::spawn(move || {
             std::thread::sleep(Duration::from_secs(5));
-            if session.lock().exit.is_none() {
-                unsafe { libc::kill(-session.pid(), libc::SIGTERM) };
+            if session.lock().exit.is_none() && session.pid() == pid {
+                unsafe { libc::kill(-pid, libc::SIGTERM) };
             }
         });
     }
@@ -323,7 +328,11 @@ impl Session {
     fn restart(self: &Arc<Self>, program: PathBuf) -> bool {
         let pid = {
             let mut inner = self.lock();
-            if inner.exit.is_some() || inner.restart.is_some() {
+            if inner.exit.is_some()
+                || inner.finished
+                || inner.reason.is_some()
+                || inner.restart.is_some()
+            {
                 return false;
             }
             inner.restart = Some(program);
@@ -333,9 +342,12 @@ impl Session {
         unsafe { libc::kill(-pid, libc::SIGHUP) };
         let session = self.clone();
         std::thread::spawn(move || {
-            std::thread::sleep(Duration::from_secs(5));
-            if session.pid() == pid {
-                unsafe { libc::kill(-pid, libc::SIGTERM) };
+            for (wait, signal) in [(5, libc::SIGTERM), (5, libc::SIGKILL)] {
+                std::thread::sleep(Duration::from_secs(wait));
+                if session.pid() != pid {
+                    return;
+                }
+                unsafe { libc::kill(-pid, signal) };
             }
         });
         true
@@ -503,6 +515,7 @@ pub fn serve(start: Start<'_>, ready: impl FnOnce()) -> Result<Ended, String> {
             reason: None,
             restart: None,
             respawning: false,
+            finished: false,
         }),
     });
     write_descriptor(start.root, start.launch_id, &socket, 0);
@@ -589,9 +602,28 @@ pub fn serve(start: Start<'_>, ready: impl FnOnce()) -> Result<Ended, String> {
             .map_err(|_| "The session could not be watched.")?;
         // SB-397 R1: a restart in place starts the session's next process on the same terminal;
         // the viewers stay. One that cannot start ends the session as it would have.
-        let Some(program) = session.lock().restart.take() else {
+        let program = {
+            let mut inner = session.lock();
+            let program = inner.restart.take();
+            inner.finished = program.is_none();
+            program
+        };
+        let Some(program) = program else {
             break status;
         };
+        // The script that led the session may exit before the agent it ran: the next process
+        // starts only once the whole old process group is gone, never beside it (no two copies).
+        let old = session.pid();
+        for n in 0..100 {
+            if unsafe { libc::kill(-old, 0) } != 0 {
+                break;
+            }
+            if n == 99 {
+                unsafe { libc::kill(-old, libc::SIGKILL) };
+                std::thread::sleep(Duration::from_millis(200));
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
         // macOS revokes every open end of the terminal when its session leader exits: the next
         // process gets the terminal opened again by name.
         let next = reopen_slave(&session).and_then(|slave| spawn_on(&program, &slave));
@@ -873,6 +905,17 @@ fn restart_program_allowed(root: &Path, program: &Path) -> bool {
         && meta.is_file()
         && meta.uid() == unsafe { libc::getuid() }
         && meta.mode() & 0o022 == 0
+        && meta.mode() & 0o100 != 0
+}
+
+/// SB-397 R1: whether the host of `launch_id` restarts its session in place (its `HELLO` answer
+/// lists `restart`). Attaches with no size, so the session's size stays its viewers', and detaches.
+pub fn offers_restart(root: &Path, launch_id: &str) -> bool {
+    let Ok(mut attached) = connect(root, launch_id, None) else {
+        return false;
+    };
+    let _ = write_frame(&mut attached.stream, DETACH, b"");
+    attached.can.iter().any(|c| c == "restart")
 }
 
 /// SB-397 R1: asks the host of `launch_id` to restart its session in place with `program`.
@@ -1069,6 +1112,45 @@ mod tests {
         write_frame(&mut viewer.stream, INPUT, b"done\n").unwrap();
         assert_eq!(until(&mut viewer.stream, "").1, Some(3));
         assert_eq!(host.join().unwrap().unwrap().exit_code, 3);
+    }
+
+    #[test]
+    fn an_end_wins_over_a_restart_and_a_restart_after_the_end_is_refused() {
+        let data = tempfile::tempdir().unwrap();
+        let root = data.path().canonicalize().unwrap();
+        // A session that ignores the hangup for a moment, so the end comes while the restart waits.
+        let program = script(
+            &root,
+            "trap 'sleep 1; exit 0' HUP; echo up; while :; do sleep 1; done",
+        );
+        let id = crate::launches::new_id();
+        let host = start_host(&root, &id, &program, None);
+        let mut viewer = attach(&root, &id, 24, 80).unwrap();
+        until(&mut viewer.stream, "up");
+        let dir = root.join(RESTART_DIR);
+        std::fs::create_dir_all(&dir).unwrap();
+        let next = dir.join("next.command");
+        std::fs::write(&next, "#!/bin/sh\necho second\n").unwrap();
+        std::fs::set_permissions(&next, std::fs::Permissions::from_mode(0o700)).unwrap();
+        assert_eq!(restart(&root, &id, &next), Ok(true));
+        write_frame(&mut viewer.stream, END, b"").unwrap();
+        let (seen, exit) = until(&mut viewer.stream, "");
+        assert!(exit.is_some(), "the end reached the viewer");
+        assert!(
+            !seen.contains("second"),
+            "the restart did not run after the end: {seen}"
+        );
+        assert_eq!(host.join().unwrap().unwrap().reason, "ended");
+        // A script that is not executable is never started.
+        let id = crate::launches::new_id();
+        let program = script(&root, "echo up; read line");
+        let host = start_host(&root, &id, &program, None);
+        let plain = dir.join("plain.command");
+        std::fs::write(&plain, "#!/bin/sh\necho x\n").unwrap();
+        std::fs::set_permissions(&plain, std::fs::Permissions::from_mode(0o600)).unwrap();
+        assert_eq!(restart(&root, &id, &plain), Ok(false));
+        end(&root, &id).unwrap();
+        host.join().unwrap().unwrap();
     }
 
     fn start_host(
