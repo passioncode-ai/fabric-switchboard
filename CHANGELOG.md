@@ -8,6 +8,8 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- Settings: *Codex in group folders* names the groups that hold a Codex account but no folders, and its *Turn on* waits until a group with folders has one (window audit item 8).
+
 ## 0.7.99
 
 - `switchboard sessions close-copy <session_id> --target M` closes a duplicate's quiet copy on another machine through that machine's Switchboard (for Fabric Dashboards' Sessions; FD-247).
