@@ -9,14 +9,20 @@ pub mod accounts;
 pub mod capacity;
 /// Talking to a command line: shell quoting, a JSON answer's data.
 pub mod cli;
+/// The core's operations events, sent on to the app's log.
+pub mod events;
 /// Identifiers a session record may carry.
 pub mod ids;
 /// Every coding-agent session running on this machine.
 pub mod machine_sessions;
+/// What a session waits on (wake-ups, monitors, cron jobs, another tool's hold).
+pub mod monitors;
 /// The person's own Claude Code and Codex folders.
 pub mod person;
 /// Private storage: owner-only files and folders, whole-file replacement (from switchboard-core).
 pub mod private_fs;
+/// Limit stops kept while no owner runs.
+pub mod stop_spool;
 /// Switches a test sets on the binary it runs (debug builds only).
 pub mod test_seams;
 #[cfg(windows)]
