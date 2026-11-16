@@ -20,6 +20,8 @@ const MAX_KEY: usize = 512;
 pub const NAME_INVALID: &str =
     "A key's name is 1 to 32 lowercase letters, digits and hyphens, such as appvillis or personal.";
 pub const KEY_INVALID: &str = "That is not an Anthropic API key: it starts with sk-ant-api.";
+/// SB-392 K-3: an Admin key (`sk-ant-admin`) manages an organization and cannot run a model.
+pub const ADMIN_KEY: &str = "That is an Anthropic Admin key: it manages an organization and cannot run a model. Create an API key in Claude Console (platform.claude.com, Settings, API keys) and save that one.";
 pub const MODEL_INVALID: &str =
     "A model is an Anthropic id such as claude-sonnet-5-5 (letters, digits and . _ : -).";
 pub const NO_KEY: &str = "No Anthropic key is saved under that name. Save one with switchboard agents anthropic set <name>.";
@@ -41,8 +43,8 @@ pub struct Key {
 
 #[derive(Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct Keys {
-    keys: Vec<Key>,
+pub(crate) struct Keys {
+    pub(crate) keys: Vec<Key>,
 }
 
 pub fn name_valid(name: &str) -> bool {
@@ -72,7 +74,7 @@ pub fn key_valid(key: &str) -> bool {
         && key.bytes().all(|b| b.is_ascii_graphic())
 }
 
-fn read(root: &Path) -> Result<Keys, String> {
+pub(crate) fn read(root: &Path) -> Result<Keys, String> {
     match std::fs::read(root.join(FILE)) {
         Ok(bytes) => serde_json::from_slice(&bytes).map_err(|_| UNREADABLE.to_string()),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Keys::default()),
@@ -118,6 +120,9 @@ pub fn set(
         return Err(NAME_INVALID.into());
     }
     let key = key.trim();
+    if key.starts_with("sk-ant-admin") {
+        return Err(ADMIN_KEY.into());
+    }
     if !key_valid(key) {
         return Err(KEY_INVALID.into());
     }
@@ -237,6 +242,10 @@ mod tests {
         let root = dir.path();
         assert_eq!(
             set(root, &store, "appvillis", "sk-ant-admin01-x", None, 1).unwrap_err(),
+            ADMIN_KEY
+        );
+        assert_eq!(
+            set(root, &store, "appvillis", "sk-or-v1-x", None, 1).unwrap_err(),
             KEY_INVALID
         );
         set(

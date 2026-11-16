@@ -1083,6 +1083,22 @@ async fn anthropic_keys(state: State<'_, Slot>) -> Result<Value, String> {
         .execute(Operation::AnthropicKeys)
         .await
 }
+/// SB-392 K-1: every key an agent can start on here, by name, the folder's OpenRouter key first.
+#[tauri::command]
+async fn launch_keys(
+    state: State<'_, Slot>,
+    agent: String,
+    folder: Option<String>,
+) -> Result<Value, String> {
+    state
+        .runtime()
+        .await?
+        .execute(Operation::LaunchKeys {
+            agent,
+            folder: folder.map(std::path::PathBuf::from),
+        })
+        .await
+}
 /// Hermes's model and provider (SB-80): read, and changed only on the person's request.
 #[tauri::command]
 async fn hermes_model(state: State<'_, Slot>) -> Result<Value, String> {
@@ -1913,6 +1929,7 @@ fn main() {
             kimi_accounts,
             hermes_model,
             anthropic_keys,
+            launch_keys,
             hermes_set_model,
             kimi_login_begin,
             kimi_login_status,

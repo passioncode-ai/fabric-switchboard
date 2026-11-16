@@ -8,6 +8,10 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- An agent's launch dialog lists the keys it can start on, by name: the OpenRouter key a launch in the chosen folder spends (the group's own, else this computer's), the other OpenRouter keys with the group that uses them, and for Hermes the saved Anthropic keys; also `switchboard agents launch-keys <agent>` and MCP `switchboard_launch_keys`. Saving an Anthropic Admin key is refused with words that say it cannot run a model (SB-392).
+
+- The session duty officer never closes an idle session before 65 minutes, so a session waiting for a wake-up it set itself (at most an hour) keeps its turn (SB-392).
+
 ## 0.7.101
 
 - Hermes runs on an Anthropic API key of your choice: save keys by name (`switchboard agents anthropic set appvillis --key-stdin`, `... personal ...`), then pick one in Hermes's launch dialog (*On an Anthropic key*) or with `switchboard agents launch hermes --anthropic <name>`. The key stays in the OS vault and is read when the session starts; no spending ceiling counts it (SB-390).

@@ -11,8 +11,10 @@
 //! servers and helpers (`caffeinate`) are not work.
 //!
 //! What it does, at most once every five minutes and at most three times a check (DEC-0021):
-//! - `idle` (finished): its turn ended `idle_minutes` ago and none of its commands still runs:
-//!   closed; it can be resumed from Claude Code's history.
+//! - `idle` (finished): its turn ended `idle_minutes` ago, and at least `WAKE_UP_FLOOR` ago, and
+//!   none of its commands still runs: closed; it can be resumed from Claude Code's history. The
+//!   floor (SB-392 S-1): a session that set itself a wake-up (`ScheduleWakeup`, at most an hour)
+//!   reads `idle` while it waits and must not be closed in the minute before it wakes.
 //! - `stuck` (stalled): busy, its status unchanged and its transcript not written for
 //!   `stuck_minutes`, its whole process tree used no CPU since the last check, and no command of
 //!   its own runs (or one has run for three times `stuck_minutes` without CPU): closed, then
@@ -34,6 +36,10 @@ pub const FILE: &str = "duty.json";
 pub const JOURNAL: &str = "duty.jsonl";
 /// Seconds between two checks that may act.
 pub const CHECK_SECONDS: i64 = 300;
+/// SB-392 S-1: the longest wake-up Claude Code lets a session set itself (`ScheduleWakeup` clamps
+/// to 3600 s) plus five minutes: an `idle` session is finished only after it, whatever
+/// `idle_minutes` says, so a loop waiting for its next turn is never closed.
+pub const WAKE_UP_FLOOR: i64 = 3600 + 300;
 const MAX_BYTES: u64 = 4096;
 const MAX_ACTIONS: usize = 3;
 const RESTARTS_PER_WINDOW: usize = 3;
@@ -172,7 +178,10 @@ pub fn decide(s: &Seen, set: &Settings, now: i64, newer_copy: bool) -> Option<(A
     match s.status.as_str() {
         // Finished: the turn ended long ago and nothing it started still runs (a background task
         // that will wake it is work, not a hang).
-        "idle" if since >= i64::from(set.idle_minutes) * 60 && s.commands == 0 => {
+        "idle"
+            if since >= (i64::from(set.idle_minutes) * 60).max(WAKE_UP_FLOOR)
+                && s.commands == 0 =>
+        {
             Some((Act::Close, "idle"))
         }
         // Stalled: says it works, writes nothing, uses no CPU, and runs no command of its own, or
@@ -517,6 +526,8 @@ pub fn status(root: &Path, now: i64) -> Result<Value, String> {
     Ok(json!({
         "settings": set,
         "check_seconds": CHECK_SECONDS,
+        // SB-392 S-1: when a finished session is closed, after the wake-up floor.
+        "idle_closes_after_minutes": (i64::from(set.idle_minutes) * 60).max(WAKE_UP_FLOOR) / 60,
         "watched": watched.len(),
         "left_to_dashboards": seen.iter().filter(|s| s.dashboards).count(),
         "waiting_for_person": watched.iter().filter(|s| s.status == "waiting").count(),
@@ -893,7 +904,20 @@ mod tests {
         );
         // Finished: idle long and nothing of its own runs.
         assert_eq!(
-            decide(&seen("idle", 61, 1, None), &set, now, false),
+            decide(&seen("idle", 66, 1, None), &set, now, false),
+            Some((Act::Close, "idle"))
+        );
+        // SB-392 S-1: idle past `idle_minutes` but inside the longest wake-up a session can set
+        // itself: it may still be waiting for its next turn, so it is not finished yet, even with
+        // `idle_minutes` at its floor.
+        assert_eq!(decide(&seen("idle", 61, 1, None), &set, now, false), None);
+        let short = Settings {
+            idle_minutes: 10,
+            ..set.clone()
+        };
+        assert_eq!(decide(&seen("idle", 30, 1, None), &short, now, false), None);
+        assert_eq!(
+            decide(&seen("idle", 66, 1, None), &short, now, false),
             Some((Act::Close, "idle"))
         );
         // Idle with a background task that will wake it: not finished.

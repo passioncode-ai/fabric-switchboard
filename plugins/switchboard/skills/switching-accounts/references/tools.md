@@ -118,6 +118,13 @@ The Anthropic API keys agents run on directly (SB-390), each under a name the pe
 and `model`, changes that key's default model. Saving or removing a key is the person's
 (`switchboard agents anthropic set <name> --key-stdin`); a launch picks one with `switchboard
 agents launch hermes --anthropic <name>`. No spending ceiling counts these keys.
+### `switchboard_launch_keys`: `agent` (string), `folder?` (absolute path)
+
+Every key an agent can start on here (SB-392), by name and never a value: the OpenRouter key a
+launch in the folder spends, marked `default` (the folder's group's own, else this computer's), the
+other OpenRouter keys with `why_not` (the group whose folders use them), then the Anthropic keys
+for an agent that takes one (Hermes). `none_usable` says no saved key can start it. OpenRouter is
+the default; an Anthropic Admin key (`sk-ant-admin`) cannot run a model and is refused when saved.
 
 ### `switchboard_session_close_copy`: `session_id` (string), `pid?` (integer)
 

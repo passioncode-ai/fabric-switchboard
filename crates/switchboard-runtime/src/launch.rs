@@ -1975,6 +1975,10 @@ pub fn launch_agent_openrouter(
 }
 /// SB-390: the agents that run on an Anthropic API key directly, with their provider flag.
 const ANTHROPIC_AGENTS: &[(&str, &str)] = &[("hermes", "Hermes Agent")];
+/// SB-392 K-1: whether `agent` runs on a saved Anthropic key.
+pub fn takes_anthropic(agent: &str) -> bool {
+    ANTHROPIC_AGENTS.iter().any(|(id, _)| *id == agent)
+}
 pub const ANTHROPIC_AGENT_UNSUPPORTED: &str =
     "Only Hermes runs on an Anthropic key for now. Choose Hermes, or its OpenRouter key.";
 pub const ANTHROPIC_MODEL_NEEDED: &str =

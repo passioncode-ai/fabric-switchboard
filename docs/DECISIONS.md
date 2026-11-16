@@ -396,6 +396,10 @@ research notes); the ones still in force that the board cites are seeded below w
   the person) and the age rule `old` are gone; of two copies of one session only a finished one is
   closed. Live dry read on the MacBook with this build: 30 sessions watched, 16 running commands,
   nothing due (the one duplicate has both copies working).
+- **Amended 2026-11-16 (SB-392 S-1).** A session that set itself a wake-up (`ScheduleWakeup`, at
+  most an hour) reads `idle` while it waits, so with `idle_minutes` at 60 it could be closed in the
+  minute before it wakes: an end before the work finished. Idle closes only after 65 minutes
+  whatever `idle_minutes` says (`duty::WAKE_UP_FLOOR`).
 - **Consequences / affects:** [CONTRACTS](CONTRACTS.md#session-duty-officer-sb-384-dec-0021), the
   lifecycle rows in AGENTS.md (signals to session processes, Terminal windows, `duty.json`,
   `duty.jsonl`), SCN-096, Settings → Session duty officer.

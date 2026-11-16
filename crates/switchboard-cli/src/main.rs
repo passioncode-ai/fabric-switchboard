@@ -1008,7 +1008,7 @@ enum DutyCmd {
         /// Kept for older settings and unused: a session waiting for an answer is left alone (10 to 1440).
         #[arg(long)]
         waiting_minutes: Option<u32>,
-        /// Minutes a finished session (idle, none of its commands running) may stay before it is closed (10 to 1440).
+        /// Minutes a finished session (idle, none of its commands running) may stay before it is closed (10 to 1440; it is never closed before 65, the longest wake-up a session can set itself).
         #[arg(long)]
         idle_minutes: Option<u32>,
         /// Kept for older settings and unused: nothing is restarted for its age (1 to 72).
@@ -1583,6 +1583,16 @@ enum AgentsCommand {
     Anthropic {
         #[command(subcommand)]
         command: AnthropicCommand,
+    },
+    /// The keys an agent can start on here, by name: the OpenRouter key a launch in the folder
+    /// spends first (its group's own, else this computer's), the other OpenRouter keys with the
+    /// group that uses them, then the Anthropic keys for an agent that takes one. Never a value.
+    LaunchKeys {
+        /// The agent's catalog id (`switchboard agents list`).
+        agent: String,
+        /// The folder the agent would start in; default: the current folder.
+        #[arg(long)]
+        folder: Option<PathBuf>,
     },
     /// Hermes's model and provider (its own config); `set` changes them with `hermes config set`.
     Hermes {
@@ -3071,6 +3081,17 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                 OpenrouterCommand::List => Operation::AgentKeys {
                     service: "openrouter".into(),
                 },
+            },
+            AgentsCommand::LaunchKeys { agent, folder } => Operation::LaunchKeys {
+                agent: agent.clone(),
+                folder: Some({
+                    let here = std::env::current_dir()
+                        .map_err(|_| "The current folder could not be read.".to_string())?;
+                    match folder {
+                        Some(f) => here.join(f),
+                        None => here,
+                    }
+                }),
             },
             AgentsCommand::Anthropic { command } => match command {
                 AnthropicCommand::List => Operation::AnthropicKeys,
@@ -4792,6 +4813,34 @@ fn print_result(value: &Value, cli: &Cli) {
                 },
         } => println!("{}", text(&value["key"])),
         Command::Agents {
+            command: AgentsCommand::LaunchKeys { .. },
+        } => {
+            let keys = value["keys"].as_array().cloned().unwrap_or_default();
+            if keys.is_empty() {
+                println!("No key is saved that this agent can start on.");
+            }
+            for key in keys {
+                let kind = if key["kind"] == "anthropic" {
+                    "Anthropic"
+                } else {
+                    "OpenRouter"
+                };
+                let state = if key["default"] == true {
+                    "used by a launch here".to_string()
+                } else {
+                    key["why_not"]
+                        .as_str()
+                        .unwrap_or("can be chosen")
+                        .to_string()
+                };
+                println!(
+                    "{kind} · {} · model {} · {state}",
+                    text(&key["name"]),
+                    key["model"].as_str().unwrap_or("not set")
+                );
+            }
+        }
+        Command::Agents {
             command:
                 AgentsCommand::Anthropic {
                     command: AnthropicCommand::List,
@@ -5599,6 +5648,7 @@ mod mcp_parity {
             "agents openrouter list",
             Tool("switchboard_openrouter_status"),
         ),
+        ("agents launch-keys", Tool("switchboard_launch_keys")),
         ("agents anthropic list", Tool("switchboard_anthropic_keys")),
         ("agents anthropic model", Tool("switchboard_anthropic_keys")),
         ("agents anthropic set", Not(PERSON)),

@@ -36,6 +36,7 @@ pub mod hermes;
 mod inbox;
 pub mod kimi;
 pub mod launch;
+pub mod launch_keys;
 pub mod launches;
 mod limits;
 pub mod machine_sessions;
@@ -970,6 +971,12 @@ pub enum Operation {
     },
     /// SB-390: the saved Anthropic keys by name, never a value.
     AnthropicKeys,
+    /// SB-392 K-1: every key `agent` can start on here, the folder's OpenRouter key first, by name.
+    LaunchKeys {
+        agent: String,
+        #[serde(default)]
+        folder: Option<PathBuf>,
+    },
     /// SB-390: saves an Anthropic API key under `name` (the CLI pipes it on stdin; the window and
     /// MCP never send one).
     AnthropicKeySet {
@@ -1482,6 +1489,7 @@ impl Runtime {
                 | Operation::AgentKeyValue { .. }
                 // SB-390: its own small file and a vault read.
                 | Operation::AnthropicKeys
+                | Operation::LaunchKeys { .. }
                 | Operation::AnthropicKeyValue { .. }
                 | Operation::AgentKeys { .. }
                 | Operation::KimiAccounts
@@ -5637,6 +5645,9 @@ async fn execute(
             })
         }
         Operation::AnthropicKeys => anthropic_keys::list(root),
+        Operation::LaunchKeys { agent, folder } => {
+            launch_keys::list(root, &store, &agent, folder.as_deref())
+        }
         Operation::AnthropicKeySet { name, key, model } => {
             anthropic_keys::set(root, &store, &name, &key, model.as_deref(), monitor::now())
         }

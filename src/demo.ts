@@ -677,7 +677,7 @@ export function createDemoAdapter(): Adapter {
       if (typeof change?.on === 'boolean') demoDutyOn = change.on;
       const now = Math.floor(Date.now() / 1000);
       return {
-        settings: { on: demoDutyOn, stuck_minutes: 45, waiting_minutes: 60, idle_minutes: 60, max_age_hours: 4 }, check_seconds: 300, watched: 5, left_to_dashboards: 1, waiting_for_person: 1, running_commands: 2, supported: true,
+        settings: { on: demoDutyOn, stuck_minutes: 45, waiting_minutes: 60, idle_minutes: 60, max_age_hours: 4 }, check_seconds: 300, idle_closes_after_minutes: 65, watched: 5, left_to_dashboards: 1, waiting_for_person: 1, running_commands: 2, supported: true,
         due: [{ action: 'close', reason: 'idle', session: 'demo-s3', folder: '/Users/demo/Code/notes', pid: 4103, host: 'terminal' }],
         recent: [
           { at: now - 1200, action: 'restart', reason: 'stuck', outcome: 'restarted', session: 'demo-s1', folder: '/Users/demo/Code/shop-api', pid: 4101, host: 'terminal' },
@@ -839,6 +839,15 @@ export function createDemoAdapter(): Adapter {
     async kimiLaunch() { await pause(); throw new Error('The browser demo cannot open a terminal.'); },
     async kimiRemove(id) { await pause(); kimi.accounts = kimi.accounts.filter((a) => a.account.id !== id); log('kimi_account', '', 'removed'); },
     async launchOnOpenrouter() { await pause(); throw new Error('The browser demo cannot open a terminal.'); },
+    async launchKeys(agent: string, folder: string | null) {
+      await pause();
+      const anthropic = agent === 'hermes';
+      return { agent, folder, openrouter: true, anthropic, none_usable: false, keys: [
+        { kind: 'openrouter' as const, scope: 'machine' as const, pool: null, name: 'This computer', model: 'moonshotai/kimi-k2', usable: true, default: true, why_not: null },
+        { kind: 'openrouter' as const, scope: 'group' as const, pool: 'passioncode', name: 'PassionCode', model: null, usable: false, default: false, why_not: 'Used in the folders of PassionCode.' },
+        ...(anthropic ? [{ kind: 'anthropic' as const, name: 'appvillis', model: 'claude-sonnet-5-5', usable: true, default: false, why_not: null }] : []),
+      ] };
+    },
     async anthropicKeys() { await pause(); return { keys: [{ name: 'appvillis', saved_at: now() - 3600, model: 'claude-sonnet-5-5' }, { name: 'personal', saved_at: now() - 7200, model: null }] }; },
     async launchOnAnthropic() { await pause(); throw new Error('The browser demo cannot open a terminal.'); },
     async loginItem() { return { ...loginItem }; },

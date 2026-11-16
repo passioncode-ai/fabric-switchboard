@@ -205,6 +205,8 @@ export interface Adapter {
   /** Starts an agent with an OpenRouter recipe on the saved key; `model` null: the key's model. */
   /** SB-390: the Anthropic keys agents run on directly, by name; never a key. */
   anthropicKeys(): Promise<{ keys: { name: string; saved_at: number; model: string | null }[] }>;
+  /** SB-392 K-1: every key an agent can start on here, the folder's OpenRouter key first. */
+  launchKeys(agent: string, folder: string | null): Promise<LaunchKeys>;
   /** SB-390: Hermes on the Anthropic key saved under `key`, with this launch's model (null: the key's). */
   launchOnAnthropic(agent: string, key: string, model: string | null, workingDirectory: string): Promise<unknown>;
   launchOnOpenrouter(agent: string, model: string | null, workingDirectory: string): Promise<{ model: string | null; model_choice: 'launch' | 'agent' }>;
@@ -308,7 +310,10 @@ export interface SessionTree { live: TreeSession[]; launches: TreeLaunch[]; coun
 /** SB-384 (DEC-0018): the session duty officer. */
 export interface DutySettings { on: boolean; stuck_minutes: number; waiting_minutes: number; idle_minutes: number; max_age_hours: number }
 export interface DutyLine { at?: number; action: 'restart' | 'close'; reason: string; outcome?: string; session: string; folder: string; pid: number; host?: string }
-export interface DutyStatus { settings: DutySettings; check_seconds: number; watched: number; left_to_dashboards: number; /** Sessions waiting for the person's answer and sessions running a command of their own: never acted on. */ waiting_for_person?: number; running_commands?: number; due: DutyLine[]; recent: DutyLine[]; supported: boolean }
+/** SB-392 K-1: one key an agent can start on, by name; never a value. */
+export interface LaunchKey { kind: 'openrouter' | 'anthropic'; scope?: 'machine' | 'group'; pool?: string | null; name: string; model: string | null; usable: boolean; default: boolean; why_not: string | null }
+export interface LaunchKeys { agent: string; folder: string | null; openrouter: boolean; anthropic: boolean; keys: LaunchKey[]; none_usable: boolean }
+export interface DutyStatus { settings: DutySettings; check_seconds: number; /** SB-392: minutes after which a finished session is closed: `idle_minutes`, at least 65 (a wake-up a session set itself is at most an hour). */ idle_closes_after_minutes?: number; watched: number; left_to_dashboards: number; /** Sessions waiting for the person's answer and sessions running a command of their own: never acted on. */ waiting_for_person?: number; running_commands?: number; due: DutyLine[]; recent: DutyLine[]; supported: boolean }
 export interface CapacityStatus { cap: number | null; used: number; free: number | null; at_capacity: boolean; total: number; quiet: number; quiet_after_minutes: number }
 /** SB-352: one loan in `balance status`. */
 export interface BalanceLoan { account_id: string; label: string | null; provider: Provider; from: string; from_name: string; to: string; to_name: string; at: number }
