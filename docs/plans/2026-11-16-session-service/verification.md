@@ -53,3 +53,42 @@ Not taken: none. Answered: the operator's «может быть, в отдель
 destination (D-1), reached at W2's exit instead of day one.
 
 Done while the round ran: W0.2, W0.3, W0.4 on branch `session-w0`.
+
+## Round 2 (draft 2, `a8f29456`)
+
+Two reviewers: accuracy and consistency (23 findings, 4 blockers), simplicity and scope (cuts and a
+first release). Taken into draft 3:
+
+| Finding | Where in draft 3 |
+|---|---|
+| Restart waves can ship first, inside today's Switchboard (simplicity 1) | README "Two outcomes", "R1"; plan R1 |
+| W1.2 did not list every seam (accuracy 1) | D-2 lists them; W1.2 |
+| Resumes the service starts go through hosts (accuracy 2) | W2.6 |
+| The launch id on a resume (accuracy 3) | R1: kept in the restart script; the host's own launch |
+| Flags "read from the command line" were unverified (accuracy 4) | R1 uses Switchboard's permission choice, stated; carrying argv flags is a later row |
+| W0 rows did not match the branch (accuracy 5) | plan W0 marks each done with its tests |
+| W0.4 removed a spooled stop before registering it (accuracy 6) | fixed on `session-w0` (`ecc110e3`): removed only after the owner answered |
+| The wave watch ran on the 5-minute duty check (accuracy 7) | the 60 s session watch tick |
+| Idle time "65 minutes" (accuracy 8) | "at least 65 minutes" |
+| MCP table header and the machine mode (accuracy 9) | MCP table |
+| Owner-only recovery calls after the hand-over; the mirror (accuracy 10, simplicity 2) | data ownership: forward; no mirror (D-9) |
+| `resumable` lines have no id (accuracy 11) | no re-import needed (D-9) |
+| `launches/` writer (accuracy 12) | data ownership: the `Events` trait, spooled or dropped |
+| No writer of `sessions-handed-over.json` (accuracy 13) | W2.7 |
+| How a session starts (accuracy 14, simplicity 4) | D-4: `host.start` with a direct fallback; dispatch stays in Switchboard |
+| The host idle close during a wave (accuracy 15) | later row; R1 restarts promptly in place |
+| LC-13, SL-2 (accuracy 16) | contract rules |
+| Hook input size and private fields (accuracy 17) | D-12 |
+| `UserPromptSubmit` unverified; `Stop` on interrupt (accuracy 18) | R1 decides turns by the session file's status; R1.0 measures `Stop` |
+| `waiting` is mid-turn (accuracy 19) | R1: `waiting` stays `pending` |
+| `--resume` and the id (accuracy 20) | R1.0 gates it; R-6 |
+| The caller's mapping (accuracy 21) | R1.2: an ancestor-pid walk, `caller: null` when none |
+| Socket location and its cleanup (accuracy 22) | W2.2 |
+| The launch `Start` event registered twice (accuracy 23) | D-12; W2.9 |
+| `duty.jsonl` appended without a lock (accuracy, open questions) | fixed on `session-w0` (`ecc110e3`) |
+| W1.0 goldens read the real machine (accuracy, open questions) | W1.0 |
+| Cuts: the service's own feed, Studio and Linux service, export on uninstall, mirroring, the spawn op, contract decisions before the API settles, retries, re-arming waits, protocol 2 (simplicity 2) | D-3, D-9, D-10, D-8; R1; "Later"; the host's `can` list instead of a protocol bump |
+| Merge waves (simplicity 3) | W2 includes accounts; W3 install; W4 Fabric |
+| O-2 is not about sessions; a claim lease is new behaviour; one idle time for every app (simplicity 4) | O-2 removed; the lease dropped; D-11 keeps each app's idle time |
+
+Not taken: none.
