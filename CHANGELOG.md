@@ -8,6 +8,10 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+## 0.7.107
+
+- Releases 0.7.105 and 0.7.106 were not published: their Windows checks failed (a Unix-only name in the shared resume script, then a test folder that is not absolute on Windows). This release carries their changes, listed below.
+
 - A limit stop a session reports while Switchboard is quitting, updating or starting is kept and registered as soon as Switchboard runs again, instead of being lost; a restart or close the duty officer was in the middle of when Switchboard quit is finished by the next start (SB-397).
 
 ## 0.7.106
