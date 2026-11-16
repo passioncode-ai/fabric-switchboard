@@ -3393,13 +3393,13 @@ async function restartDialog() {
     : t('No running session can be restarted now.');
   if (count) {
     const list = el('ul', 'session-list');
-    for (const r of plan.restart) list.append(el('li', '', r.folder));
+    for (const r of plan.restart) { const item = el('li'); item.append(el('code', 'address', r.folder)); list.append(item); }
     context.body.append(list);
   }
   if (plan.skipped.length) {
     context.body.append(el('p', 'form-note', t('Left as they are:')));
     const list = el('ul', 'session-list');
-    for (const r of plan.skipped) list.append(el('li', '', `${r.folder}: ${restartSkipText(r.reason)}`));
+    for (const r of plan.skipped) { const item = el('li'); item.append(el('code', 'address', r.folder), el('p', 'form-note', restartSkipText(r.reason))); list.append(item); }
     context.body.append(list);
   }
   if (!count) return;
