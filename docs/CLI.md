@@ -55,7 +55,7 @@ switchboard sessions restart plan                     # SB-397: which running se
 switchboard sessions restart apply --digest D --reason T  # SB-397: restart them, each at the end of its turn, as itself; this session last
 switchboard sessions restart status [WAVE]            # SB-397: a wave's state per session
 switchboard sessions restart cancel WAVE              # SB-397: sessions still waiting for their turn stay as they are
-switchboard monitor hold --session ID --until UNIX    # SB-399: the session holds live work (a Fabric task's claim) until then; 0 releases
+switchboard monitor hold --session ID --until UNIX [--reason fabric_claim]    # SB-399: the session holds live work (a Fabric task's claim) until then; 0 releases; the reason is one short word, echoed and logged as a code
 switchboard sessions close-copy SESSION_ID [--pid N] [--target M]  # SB-388, SB-389 (--pid: the copy attention offers when both work) (--target: the copy on another machine, closed by its Switchboard): one session in two processes: close the copy quiet longest (SIGTERM, SIGKILL after 10 s); never a busy one or one running a command
 switchboard duty [on | off | set … | run [--dry-run]]   # SB-384: the session duty officer: closes a finished session, restarts a stalled one, never one still working
 switchboard capacity [set N | clear]                   # SB-378: this computer's cap on working coding sessions (quiet ones not counted); dispatch and launch --hosted wait at it

@@ -31,7 +31,9 @@ const MAX_WAIT: i64 = 3600;
 const MAX_BYTES: u64 = 16 * 1024;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+// No `deny_unknown_fields`: a session host of an older version reads these files too (hosts
+// outlive an update), so a field a newer version adds must never make the whole file unreadable.
+#[serde(default)]
 pub struct Waits {
     /// The end of the wake-up or monitor that ends last, Unix seconds.
     pub until: Option<i64>,
@@ -125,13 +127,35 @@ pub const MAX_HOLD: i64 = 7 * 86_400;
 pub const HOLD_INVALID: &str =
     "Give the session id and a hold end within seven days from now, or 0 to release it.";
 pub const HOLD_NOT_SAVED: &str = "The session's hold could not be saved.";
+pub const HOLD_REASON_INVALID: &str =
+    "Give the hold's reason as one short word: lowercase letters, digits and underscores.";
+/// The reasons the operations log names; any other reason is logged as `other` (the log keeps
+/// codes only, never text a caller wrote).
+const HOLD_REASONS: &[&str] = &["fabric_claim"];
 
 /// SB-399: `switchboard monitor hold`: the session holds live work until `until` (Unix seconds),
-/// or no longer with 0. Answers what is recorded.
-pub fn hold(root: &Path, session: &str, until: i64, now: i64) -> Result<Value, String> {
+/// or no longer with 0. `reason` (Fabric passes `fabric_claim`) is a short slug, echoed in the
+/// answer and logged as a code; the waits file does not keep it, so a session host of 0.7.109,
+/// whose reader refused unknown fields, still reads the hold. Answers what is recorded.
+pub fn hold(
+    root: &Path,
+    session: &str,
+    until: i64,
+    now: i64,
+    reason: Option<&str>,
+) -> Result<Value, String> {
     let file = path(root, session).ok_or(HOLD_INVALID)?;
     if until != 0 && (until <= now || until > now + MAX_HOLD) {
         return Err(HOLD_INVALID.into());
+    }
+    if let Some(r) = reason {
+        let mut chars = r.chars();
+        let slug = r.len() <= 40
+            && chars.next().is_some_and(|c| c.is_ascii_lowercase())
+            && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_');
+        if !slug {
+            return Err(HOLD_REASON_INVALID.into());
+        }
     }
     let mut waits = read(root, session);
     waits.hold_until = (until != 0).then_some(until);
@@ -139,7 +163,21 @@ pub fn hold(root: &Path, session: &str, until: i64, now: i64) -> Result<Value, S
     std::fs::create_dir_all(root.join(DIR)).map_err(|_| HOLD_NOT_SAVED)?;
     let bytes = serde_json::to_vec(&waits).map_err(|_| HOLD_NOT_SAVED)?;
     switchboard_core::private_fs::private_write(&file, &bytes).map_err(|_| HOLD_NOT_SAVED)?;
-    Ok(serde_json::json!({"session_id": session, "hold_until": waits.hold_until}))
+    let code = reason.map(|r| {
+        HOLD_REASONS
+            .iter()
+            .find(|k| **k == r)
+            .copied()
+            .unwrap_or("other")
+    });
+    crate::oplog::event(
+        "monitor_hold",
+        &[
+            ("reason", crate::oplog::Field::Code(code.unwrap_or("none"))),
+            ("released", crate::oplog::Field::Flag(until == 0)),
+        ],
+    );
+    Ok(serde_json::json!({"session_id": session, "hold_until": waits.hold_until, "reason": reason}))
 }
 
 pub fn shown(waits: &Waits, now: i64) -> Option<Value> {
@@ -156,6 +194,34 @@ pub fn shown(waits: &Waits, now: i64) -> Option<Value> {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn a_hold_takes_a_short_reason_and_a_newer_field_never_hides_the_waits() {
+        let root = tempfile::tempdir().unwrap();
+        let held = hold(root.path(), "S9", 500, 100, Some("fabric_claim")).unwrap();
+        assert_eq!(held["reason"], "fabric_claim");
+        assert_eq!(read(root.path(), "S9").hold_until, Some(500));
+        for bad in ["Fabric claim", "", "x".repeat(41).as_str(), "1abc"] {
+            assert_eq!(
+                hold(root.path(), "S9", 500, 100, Some(bad)).unwrap_err(),
+                HOLD_REASON_INVALID,
+                "{bad:?}"
+            );
+        }
+        assert_eq!(
+            read(root.path(), "S9").hold_until,
+            Some(500),
+            "a refusal changes nothing"
+        );
+        // A file a newer version wrote with a field this one does not know still reads.
+        let file = root.path().join(DIR).join("S8.json");
+        switchboard_core::private_fs::private_write(
+            &file,
+            br#"{"hold_until": 700, "at": 1, "a_later_field": "x"}"#,
+        )
+        .unwrap();
+        assert_eq!(read(root.path(), "S8").hold_until, Some(700));
+    }
 
     fn tool(name: &str, input: Value) -> Value {
         json!({"session_id": "S1", "hook_event_name": "PreToolUse", "tool_name": name, "tool_input": input})
@@ -222,27 +288,30 @@ mod tests {
     fn a_hold_keeps_its_session_until_its_end_and_is_released_with_zero() {
         let root = tempfile::tempdir().unwrap();
         assert_eq!(
-            hold(root.path(), "S1", 1000 + 1800, 1000).unwrap()["hold_until"],
+            hold(root.path(), "S1", 1000 + 1800, 1000, None).unwrap()["hold_until"],
             2800
         );
         let w = read(root.path(), "S1");
         assert!(holds(&w, 2799, 0), "held however long the session was idle");
         assert!(!holds(&w, 2800, 0));
         assert_eq!(shown(&w, 2000), Some(json!({"until": 2800, "held": true})));
-        hold(root.path(), "S1", 0, 1100).unwrap();
+        hold(root.path(), "S1", 0, 1100, None).unwrap();
         assert!(!holds(&read(root.path(), "S1"), 1200, 0));
         // An end in the past, past seven days, or a session id that is not one: refused.
-        assert_eq!(hold(root.path(), "S1", 900, 1000), Err(HOLD_INVALID.into()));
         assert_eq!(
-            hold(root.path(), "S1", 1000 + MAX_HOLD + 1, 1000),
+            hold(root.path(), "S1", 900, 1000, None),
             Err(HOLD_INVALID.into())
         );
         assert_eq!(
-            hold(root.path(), "../x", 2000, 1000),
+            hold(root.path(), "S1", 1000 + MAX_HOLD + 1, 1000, None),
+            Err(HOLD_INVALID.into())
+        );
+        assert_eq!(
+            hold(root.path(), "../x", 2000, 1000, None),
             Err(HOLD_INVALID.into())
         );
         // A hook that comes after keeps the hold.
-        hold(root.path(), "S1", 5000, 1000).unwrap();
+        hold(root.path(), "S1", 5000, 1000, None).unwrap();
         hook(root.path(), &tool("CronCreate", json!({})), 1001);
         let w = read(root.path(), "S1");
         assert_eq!((w.hold_until, w.crons), (Some(5000), 1));
