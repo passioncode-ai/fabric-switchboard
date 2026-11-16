@@ -23,6 +23,7 @@ const SOURCE_DIRS = ['crates/fabric-sessions-core/src', 'crates/switchboard-core
 const EXCLUDED_FILES = {
   // Host/CLI-only operations; no Tauri command exposes these registries.
   'crates/switchboard-runtime/src/recovery.rs': 'CLI-only recovery protocol; no renderer caller',
+  'crates/fabric-sessions-core/src/stops.rs': 'the recovery record (moved from recovery.rs, SB-397 D-2); CLI-only, no renderer caller',
   'crates/switchboard-runtime/src/handovers.rs': 'CLI-only hand-over queue; no renderer caller',
   // Automatic fallback logs fixed outcome codes and never returns these errors to a renderer.
   'crates/switchboard-runtime/src/fallback.rs': 'background fallback only; errors become outcome codes',

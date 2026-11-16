@@ -64,20 +64,8 @@ use std::{
 pub(crate) const MAX_ACCOUNTS: usize = 256;
 pub(crate) const MAX_EVENTS: usize = 256;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum Provider {
-    Claude,
-    Codex,
-}
-impl Provider {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Claude => "claude",
-            Self::Codex => "codex",
-        }
-    }
-}
+/// The coding agent an account serves (SB-397 D-2: defined in fabric-sessions-core).
+pub use fabric_sessions_core::Provider;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
