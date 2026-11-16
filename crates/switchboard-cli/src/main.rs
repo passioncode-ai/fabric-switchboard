@@ -1591,7 +1591,7 @@ enum AgentsCommand {
     },
     /// Start an agent in a folder in Terminal: on the group's API-key account through the
     /// proxy, with `--openrouter` on the saved OpenRouter key, or with `--anthropic <name>` on the
-    /// Anthropic key saved under that name (Hermes; SB-390).
+    /// Anthropic key saved under that name (Hermes).
     Launch {
         /// The agent's catalog id (`switchboard agents list`).
         agent: String,
@@ -1741,11 +1741,22 @@ enum AnthropicCommand {
         key_stdin: bool,
     },
     /// Change a key's default model.
-    Model { name: String, model: String },
+    Model {
+        /// The key's name.
+        name: String,
+        /// An Anthropic model id, such as `claude-sonnet-5-5`.
+        model: String,
+    },
     /// Remove a key from Switchboard and the OS vault.
-    Remove { name: String },
+    Remove {
+        /// The key's name.
+        name: String,
+    },
     /// Print a key, for a session script's `export`; never to paste anywhere.
-    Key { name: String },
+    Key {
+        /// The key's name.
+        name: String,
+    },
 }
 #[derive(Subcommand)]
 enum Backup {
