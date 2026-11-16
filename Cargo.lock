@@ -4420,6 +4420,7 @@ dependencies = [
  "axum",
  "base64 0.22.1",
  "dirs 6.0.0",
+ "fabric-sessions-core",
  "flate2",
  "hmac",
  "http-body-util",

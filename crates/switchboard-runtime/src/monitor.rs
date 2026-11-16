@@ -2,10 +2,7 @@
 //! the account signed in to the ordinary Claude Code is never refreshed here.
 use crate::{external, Runtime};
 use serde_json::json;
-use std::{
-    sync::Arc,
-    time::{Duration, SystemTime, UNIX_EPOCH},
-};
+use std::{sync::Arc, time::Duration};
 use switchboard_core::{Account, AuthKind, Provider, Store, Usage};
 use tokio::task::JoinHandle;
 
