@@ -117,6 +117,14 @@ const PARITY: &[(&str, Over)] = &[
     ("capacity", Tool("switchboard_capacity")),
     ("duty", Tool("switchboard_duty")),
     ("session_tree", Tool("switchboard_sessions")),
+    ("session_rows", Tool("switchboard_sessions")),
+    ("session_end", Tool("switchboard_session_end")),
+    (
+        "session_attach",
+        // A Terminal window on this computer for the person to look at; an agent reads the
+        // session's output itself (`switchboard attach`, `sessions --rows`).
+        Not("the window opens a Terminal for the person to watch a session; an agent has nothing to look at"),
+    ),
     ("session_close_copy", Tool("switchboard_session_close_copy")),
     ("report_problem", Not(UI_ONLY)),
     ("repository_map", Tool("switchboard_repository_map")),
