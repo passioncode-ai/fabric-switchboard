@@ -3,6 +3,11 @@
 //! uses them through this crate; nothing here may depend on a `switchboard-*` crate (D-2), so the
 //! service runs on a machine without Switchboard. Plan: `docs/plans/2026-11-16-session-service/`.
 
+/// Private storage: owner-only files and folders, whole-file replacement (from switchboard-core).
+pub mod private_fs;
+#[cfg(windows)]
+pub mod windows;
+
 /// This crate's version, which Fabric Sessions reports as its own.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 

@@ -1248,6 +1248,12 @@ dependencies = [
 [[package]]
 name = "fabric-sessions-core"
 version = "0.1.0"
+dependencies = [
+ "libc",
+ "tempfile",
+ "uuid",
+ "windows-sys 0.61.2",
+]
 
 [[package]]
 name = "fabric-switchboard"
@@ -4371,6 +4377,7 @@ version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
  "core-foundation 0.10.1",
+ "fabric-sessions-core",
  "fs2",
  "keyring",
  "libc",

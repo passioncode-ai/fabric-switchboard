@@ -18,7 +18,7 @@ const LIST = argv.includes('--list');
 
 // Sources whose errors can reach the renderer: the Tauri commands call the runtime
 // in-process, the runtime calls core, and the proxy's REJECTED is surfaced by probes.
-const SOURCE_DIRS = ['crates/switchboard-core/src', 'crates/switchboard-runtime/src', 'crates/switchboard-proxy/src', 'src-tauri/src'];
+const SOURCE_DIRS = ['crates/fabric-sessions-core/src', 'crates/switchboard-core/src', 'crates/switchboard-runtime/src', 'crates/switchboard-proxy/src', 'src-tauri/src'];
 // Whole files that never answer a renderer request. Each is excluded with its reason.
 const EXCLUDED_FILES = {
   // Host/CLI-only operations; no Tauri command exposes these registries.
