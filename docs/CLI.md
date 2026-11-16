@@ -52,7 +52,7 @@ switchboard sessions --tree                            # SB-379: live sessions w
 switchboard sessions --rows [--target studio]           # SB-395: every session in four groups (needs you, running, waiting, ended) with the acts it has; here or there
 switchboard sessions continue SESSION_ID              # SB-396: continue an ended session as itself (claude --resume in its own config folder)
 switchboard sessions restart plan                     # SB-397: which running sessions a restart wave restarts and skips, and its digest
-switchboard sessions restart apply --digest D --reason T  # SB-397: restart them, each at the end of its turn, as itself; this session last
+switchboard sessions restart apply --digest D --reason T  # SB-397: restart them, each at the end of its turn, as itself; this session last; needs the owner running
 switchboard sessions restart status [WAVE]            # SB-397: a wave's state per session
 switchboard sessions restart cancel WAVE              # SB-397: sessions still waiting for their turn stay as they are
 switchboard monitor hold --session ID --until UNIX [--reason fabric_claim]    # SB-399: the session holds live work (a Fabric task's claim) until then; 0 releases; the reason is one short word, echoed and logged as a code

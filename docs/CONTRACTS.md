@@ -3355,7 +3355,8 @@ plan`, MCP `switchboard_sessions_restart_plan`) lists every live Claude Code ses
 the nearest ancestor of `caller_pid`, found in the process table; none: `null`) and a digest (sha256
 over the sorted restart and skip lines and the caller). `SessionsRestartApply {digest, reason,
 caller_pid}` starts the wave only for a plan with that digest (`PLAN_STALE`), only when none runs
-(`WAVE_RUNNING`), with a reason of 1 to 300 characters (`REASON_NEEDED`); it writes
+(`WAVE_RUNNING`), with a reason of 1 to 300 characters (`REASON_NEEDED`), and only with the owner
+running (`NEEDS_OWNER`: only its watch moves a wave on); it writes
 `restarts/<wave>.json` (0600; ids, folders, states and times; kept 30 days, at most 200) under
 `restarts/waves.lock`. The session watch's one-minute pass advances it (`restarts::tick`): a session
 is between turns when its file says `idle`, no command of its own runs and its transcript has not
@@ -3363,7 +3364,8 @@ moved for 120 s; at most three are `ending` or `resuming`; each is checked again
 stop or a wait since the plan: `skipped: changed_since_plan`; its folder or transcript gone:
 `cannot_resume`); `ending` is written before the act, so the next owner finishes one a quit cut. A
 hosted session whose host offers `restart` (its `HELLO` answer's `can`) restarts in place: its
-resume script (`restarts/<wave>-<session>.command`, keeping `SWITCHBOARD_LAUNCH_ID`) is sent in a
+resume script (`restarts/<wave>-<session>.command`, keeping `SWITCHBOARD_LAUNCH_ID`, exported after
+the script's `unset` line that clears it, `restarts::tests::the_launch_id_is_exported_after_the_line_that_clears_it`) is sent in a
 `RESTART` frame, the host hangs up the process group, waits for the whole group to be gone (SIGKILL
 after 10 s), opens the terminal again by name (macOS revokes it when the session leader exits) and
 starts the script; viewers stay attached and get no `EXIT`. An `END` wins over a waiting restart, and

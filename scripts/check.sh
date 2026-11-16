@@ -19,7 +19,8 @@ cargo test --workspace --locked
 cargo clippy --workspace --all-targets --locked -- -D warnings
 # SB-397 D-2: the sessions core never depends on a Switchboard crate, so the service runs on a
 # machine without Switchboard.
-if cargo tree -q -p fabric-sessions-core --locked --edges normal,build --prefix none | grep -q '^switchboard-'; then
+core_tree=$(cargo tree -q -p fabric-sessions-core --locked --edges normal,build --prefix none) || exit 1
+if printf '%s\n' "$core_tree" | grep -q '^switchboard-'; then
   echo "fabric-sessions-core depends on a switchboard crate (SB-397 D-2)" >&2
   exit 1
 fi

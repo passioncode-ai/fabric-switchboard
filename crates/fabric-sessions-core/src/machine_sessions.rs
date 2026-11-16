@@ -172,7 +172,6 @@ pub fn live_from(
         .collect()
 }
 
-/// Claude Code's `sessions` folders: the person's own and each home Switchboard launches in.
 /// SB-384: the live Claude Code and Codex processes of this user, as the process table shows them.
 pub fn processes() -> Vec<Proc> {
     agent_processes().unwrap_or_default()
@@ -305,6 +304,7 @@ pub fn ancestor_paths(_: u32) -> Vec<String> {
     Vec::new()
 }
 
+/// Claude Code's `sessions` folders: the person's own and each home the app launches in.
 fn session_dirs(accounts: &dyn Accounts) -> Vec<PathBuf> {
     let mut dirs: Vec<PathBuf> = dirs::home_dir()
         .map(|h| vec![h.join(".claude/sessions")])
@@ -364,7 +364,6 @@ pub fn assemble(
     })
 }
 
-/// Every Claude Code and Codex process of this user, joined to Switchboard's launches.
 /// This user's coding agent processes, or none under the golden test's switch (SB-397 W1.0).
 fn agent_processes() -> Result<Vec<Proc>, &'static str> {
     if crate::test_seams::no_processes() {
@@ -373,6 +372,7 @@ fn agent_processes() -> Result<Vec<Proc>, &'static str> {
     os_agent_processes()
 }
 
+/// Every Claude Code and Codex process of this user, joined to the app's launches.
 pub fn scan(accounts: &dyn Accounts) -> Value {
     scan_procs(accounts, agent_processes())
 }

@@ -92,6 +92,26 @@ pub fn apply(mut waits: Waits, hook: &Value, now: i64) -> Option<Waits> {
     Some(waits)
 }
 
+/// Held while a session's file is read, changed and written: a hook and a hold (two processes)
+/// never lose each other's change (review of 2026-11-16, nit 8). A lock that cannot be taken
+/// still lets the write happen, as `resumable` does.
+fn writing(root: &Path) -> Option<std::fs::File> {
+    let _ = std::fs::create_dir_all(root.join(DIR));
+    let file = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(root.join(DIR).join(".lock"))
+        .ok()?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = file.set_permissions(std::fs::Permissions::from_mode(0o600));
+    }
+    file.lock().ok().map(|()| file)
+}
+
 /// `switchboard monitor hook`: records what the hook input says. Never fails a tool call: a
 /// session id it cannot use, or a file it cannot write, records nothing.
 pub fn hook(root: &Path, hook: &Value, now: i64) {
@@ -101,6 +121,7 @@ pub fn hook(root: &Path, hook: &Value, now: i64) {
     let Some(file) = path(root, session) else {
         return;
     };
+    let _held = writing(root);
     match apply(read(root, session), hook, now) {
         None => {
             let _ = std::fs::remove_file(&file);
@@ -122,8 +143,6 @@ pub fn holds(waits: &Waits, now: i64, idle_since: i64) -> bool {
         || (waits.crons > 0 && now - idle_since < OPEN_SECONDS)
 }
 
-/// The session's wait as a row shows it: `{until}` while a known end is ahead, `{open: true}` while
-/// a cron job holds it, none otherwise.
 /// The longest a hold may run: a claim is renewed, never set once for days.
 pub const MAX_HOLD: i64 = 7 * 86_400;
 pub const HOLD_INVALID: &str =
@@ -159,6 +178,7 @@ pub fn hold(
             return Err(HOLD_REASON_INVALID.into());
         }
     }
+    let _held = writing(root);
     let mut waits = read(root, session);
     waits.hold_until = (until != 0).then_some(until);
     waits.at = now;
@@ -182,6 +202,8 @@ pub fn hold(
     Ok(serde_json::json!({"session_id": session, "hold_until": waits.hold_until, "reason": reason}))
 }
 
+/// The session's wait as a row shows it: `{until, held: true}` while another tool holds it,
+/// `{until}` while a known end is ahead, `{open: true}` while a cron job holds it, none otherwise.
 pub fn shown(waits: &Waits, now: i64) -> Option<Value> {
     if let Some(u) = waits.hold_until.filter(|u| now < *u) {
         return Some(serde_json::json!({"until": u, "held": true}));
@@ -348,6 +370,11 @@ mod tests {
             &json!({"session_id": "../x", "hook_event_name": "PreToolUse", "tool_name": "ScheduleWakeup", "tool_input": {}}),
             1,
         );
-        assert_eq!(std::fs::read_dir(root.path().join(DIR)).unwrap().count(), 0);
+        let files: Vec<_> = std::fs::read_dir(root.path().join(DIR))
+            .unwrap()
+            .flatten()
+            .filter(|e| e.file_name() != ".lock")
+            .collect();
+        assert!(files.is_empty(), "{files:?}");
     }
 }
