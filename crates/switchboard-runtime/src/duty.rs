@@ -470,7 +470,7 @@ pub fn resume_script_for(
     bypass: &[&str],
     prompt: Option<&str>,
 ) -> String {
-    let quote = |v: &str| format!("'{}'", v.replace('\'', "'\\''"));
+    let quote = fabric_sessions_core::cli::quoted;
     let mut out = format!(
         "#!{}\nset +x\nunset {}\n",
         crate::launch::SCRIPT_SHELL,

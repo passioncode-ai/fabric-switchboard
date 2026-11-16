@@ -138,8 +138,6 @@ pub fn holds(waits: &Waits, now: i64, idle_since: i64) -> bool {
         || (waits.crons > 0 && now - idle_since < OPEN_SECONDS)
 }
 
-/// The session's wait as a row shows it: `{until}` while a known end is ahead, `{open: true}` while
-/// a cron job holds it, none otherwise.
 /// The longest a hold may run: a claim is renewed, never set once for days.
 pub const MAX_HOLD: i64 = 7 * 86_400;
 pub const HOLD_INVALID: &str =
@@ -199,6 +197,8 @@ pub fn hold(
     Ok(serde_json::json!({"session_id": session, "hold_until": waits.hold_until, "reason": reason}))
 }
 
+/// The session's wait as a row shows it: `{until, held: true}` while another tool holds it,
+/// `{until}` while a known end is ahead, `{open: true}` while a cron job holds it, none otherwise.
 pub fn shown(waits: &Waits, now: i64) -> Option<Value> {
     if let Some(u) = waits.hold_until.filter(|u| now < *u) {
         return Some(serde_json::json!({"until": u, "held": true}));
