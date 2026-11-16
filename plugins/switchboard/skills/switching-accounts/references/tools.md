@@ -111,7 +111,7 @@ fixed it leaves the list on the next background pass. Read-only, also on a read-
 Since 0.7.84 (SB-366) `refused_there` also appears: an account on another machine whose copy the
 provider refused there at the last background read (`since` is that read's time); fix it with a
 sign-in on that machine, or call the account back with `switchboard_account_recall`.
-### `switchboard_session_close_copy`: `session_id` (string)
+### `switchboard_session_close_copy`: `session_id` (string), `pid?` (integer)
 
 When one Claude Code session runs in two processes (`switchboard_attention` reason
 `session_duplicate`, whose item carries the `session_id`; a `duplicate` finding of
@@ -119,8 +119,11 @@ When one Claude Code session runs in two processes (`switchboard_attention` reas
 close-copy` and Needs attention's *Close the quiet copy* do (SB-388): of the copies neither busy
 nor running a command, the one whose status has not changed for longest (then the one started
 last) gets `SIGTERM`, then `SIGKILL` after ten seconds. Answers `{session_id, closed_pid,
-kept_pids}`. Refused when the session no longer runs in two processes, or when every copy is
-working. macOS and Linux.
+kept_pids}`. Without `pid`, refused when every copy is working; then the attention item's `close`
+is `{pid, why: "older", command_age}` (the copy waiting longest on a command of its own, never one
+answering; SB-389), and `pid` closes that copy, refused while it is answering; a command of its own
+still running ends with it. `close: null` means every copy is answering. Refused when the session
+no longer runs in two processes. macOS and Linux.
 
 ### `switchboard_bugs`: no arguments
 

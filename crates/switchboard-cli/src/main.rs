@@ -1828,11 +1828,15 @@ enum SessionsCommand {
     },
     /// Close the quiet one of two processes holding one Claude Code session (`switchboard
     /// attention` lists it as session_duplicate): of the copies neither busy nor running a
-    /// command, the one quiet longest gets SIGTERM, then SIGKILL after ten seconds; a working
-    /// copy is never closed. macOS and Linux.
+    /// command, the one quiet longest gets SIGTERM, then SIGKILL after ten seconds. With --pid,
+    /// the copy named (the attention item's close.pid when every copy works), refused while it
+    /// is answering; a command of its own still running ends with it. macOS and Linux.
     CloseCopy {
         /// The session id (the duplicate's session_id).
         session_id: String,
+        /// The copy to close, by its process id.
+        #[arg(long)]
+        pid: Option<u32>,
         /// Close the copy on another machine, as ssh knows it (`switchboard targets`), through
         /// that machine's Switchboard (0.7.98 or later); it answers as it does there.
         #[arg(long)]
@@ -2566,10 +2570,14 @@ async fn run(cli: &Cli) -> Result<Value, String> {
             return Err("A session host runs on macOS and Linux for now.".into());
         }
         Command::Sessions {
-            command: Some(SessionsCommand::CloseCopy { session_id, .. }),
+            command:
+                Some(SessionsCommand::CloseCopy {
+                    session_id, pid, ..
+                }),
             ..
         } => Operation::SessionCloseCopy {
             session_id: session_id.clone(),
+            pid: *pid,
         },
         Command::Sessions { tree: true, .. } => {
             return Ok(switchboard_runtime::session_watch::tree(
@@ -3462,18 +3470,25 @@ fn there(command: &Command) -> Option<There> {
             command:
                 Some(SessionsCommand::CloseCopy {
                     session_id,
+                    pid,
                     target: Some(target),
                     remote,
                     remote_data_dir,
                 }),
             ..
-        } => Some((
-            target.clone(),
-            remote.clone(),
-            remote_data_dir.clone(),
-            vec!["sessions".into(), "close-copy".into(), session_id.clone()],
-            false,
-        )),
+        } => {
+            let mut words = vec!["sessions".into(), "close-copy".into(), session_id.clone()];
+            if let Some(pid) = pid {
+                words.extend(["--pid".to_owned(), pid.to_string()]);
+            }
+            Some((
+                target.clone(),
+                remote.clone(),
+                remote_data_dir.clone(),
+                words,
+                false,
+            ))
+        }
         Command::Attach {
             launch_id,
             target: Some(target),
@@ -3662,12 +3677,29 @@ async fn continue_workflow(
 /// on to it. A script that names no launch replaces this process as before.
 #[cfg(unix)]
 fn run_in_place(script: &std::path::Path) -> Result<Value, String> {
+    run_and_record(script, false)
+}
+/// The session script as this process's child, waited for, its end recorded. In place it keeps
+/// the terminal (Ctrl-C, Ctrl-\ and a closed window reach it, a SIGTERM to this process is passed
+/// on); headless (SB-389) it reads nothing on stdin, writes to this process's stdout and stderr,
+/// and every stop a scheduler sends this process (SIGTERM, SIGINT, SIGHUP, SIGQUIT) is passed on.
+#[cfg(unix)]
+fn run_and_record(script: &std::path::Path, headless: bool) -> Result<Value, String> {
     use std::os::unix::process::CommandExt;
+    let refused = if headless {
+        "The session could not start."
+    } else {
+        "The session could not start in this terminal."
+    };
     let Some((root, launch_id)) = switchboard_runtime::launch::script_launch(script) else {
-        let error = std::process::Command::new(script).exec();
+        let mut command = std::process::Command::new(script);
+        if headless {
+            command.stdin(std::process::Stdio::null());
+        }
+        let error = command.exec();
         let _ = error;
         release_reservation(script);
-        return Err("The session could not start in this terminal.".into());
+        return Err(refused.into());
     };
     static CHILD: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
     extern "C" fn pass_on(signal: libc::c_int) {
@@ -3680,12 +3712,20 @@ fn run_in_place(script: &std::path::Path) -> Result<Value, String> {
     // SAFETY: plain signal dispositions of this process; the child restores the defaults before
     // it runs the script.
     unsafe {
-        libc::signal(libc::SIGINT, libc::SIG_IGN);
-        libc::signal(libc::SIGQUIT, libc::SIG_IGN);
-        libc::signal(libc::SIGHUP, libc::SIG_IGN);
+        let terminal_stop = if headless {
+            pass_on as *const () as libc::sighandler_t
+        } else {
+            libc::SIG_IGN
+        };
+        libc::signal(libc::SIGINT, terminal_stop);
+        libc::signal(libc::SIGQUIT, terminal_stop);
+        libc::signal(libc::SIGHUP, terminal_stop);
         libc::signal(libc::SIGTERM, pass_on as *const () as libc::sighandler_t);
     }
     let mut command = std::process::Command::new(script);
+    if headless {
+        command.stdin(std::process::Stdio::null());
+    }
     // SAFETY: only async-signal-safe calls between fork and exec.
     unsafe {
         command.pre_exec(|| {
@@ -3699,7 +3739,7 @@ fn run_in_place(script: &std::path::Path) -> Result<Value, String> {
         Ok(child) => child,
         Err(_) => {
             release_reservation(script);
-            return Err("The session could not start in this terminal.".into());
+            return Err(refused.into());
         }
     };
     CHILD.store(child.id() as i32, std::sync::atomic::Ordering::Relaxed);
@@ -3735,18 +3775,13 @@ fn release_reservation(script: &std::path::Path) {
 fn run_in_place(_: &std::path::Path) -> Result<Value, String> {
     Err("Launching in place runs on macOS and Linux for now.".into())
 }
-/// SB-317: replaces this process with the session script with nothing on stdin: a scheduler's
-/// job gets the agent's output on its own stdout and stderr and the agent's exit status, and a
-/// stop it sends reaches the agent itself.
+/// SB-317: the session script with nothing on stdin: a scheduler's job gets the agent's output
+/// on its own stdout and stderr and the agent's exit status, and a stop it sends reaches the
+/// agent itself. SB-389: run as a child and waited for, so its launch record gets `ended`
+/// (before, this process replaced itself with the script and every scheduled launch read `gone`).
 #[cfg(unix)]
 fn run_headless(script: &std::path::Path) -> Result<Value, String> {
-    use std::os::unix::process::CommandExt;
-    let error = std::process::Command::new(script)
-        .stdin(std::process::Stdio::null())
-        .exec();
-    let _ = error;
-    release_reservation(script);
-    Err("The session could not start.".into())
+    run_and_record(script, true)
 }
 #[cfg(not(unix))]
 fn run_headless(_: &std::path::Path) -> Result<Value, String> {

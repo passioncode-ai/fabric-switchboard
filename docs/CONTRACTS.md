@@ -1025,9 +1025,13 @@ Asked for by Fabric Dashboards (an embedded console beside each service, operato
   (`serve_update::wait_quiet`, logging `update_waiting` with the reason once).
 - **Headless (SB-317, 2026-11-09).** `launch --headless` (refused with `--in-place`) prepares the
   same session (`Operation::Launch { in_place: true }`, `launch::launch_here`) for a caller with no
-  terminal, such as a launchd job: no terminal check, then the CLI `exec`s the script with stdin
-  from `/dev/null` (`run_headless`), so the agent's output goes where the job's goes, a stop the job
-  sends reaches the agent, and the exit status is the agent's. Agent arguments after `--` go with
+  terminal, such as a launchd job: no terminal check, then the CLI runs the script as its child
+  with stdin from `/dev/null` (`run_headless`, `run_and_record`), so the agent's output goes where
+  the job's goes, every stop the job sends this process (SIGTERM, SIGINT, SIGHUP, SIGQUIT) is
+  passed on to the agent, and the exit status is the agent's. SB-389 (2026-11-16): it waits for
+  the script and writes the launch record's `ended`, as `--in-place` does since 0.7.95; before,
+  it `exec`ed the script, so every scheduled launch (fabric-workspace's pulse, nicegram-voc-agent's
+  bridge) read `gone` in `sessions --tree` half an hour after it started. Agent arguments after `--` go with
   `--in-place` or `--headless`. Studio's earlier `script -q /dev/null switchboard launch … --in-place`
   wrapper is no longer needed. Test `an_in_place_launch_is_refused_where_it_cannot_run`.
 - Tests: `an_in_place_launch_prepares_the_same_session_and_opens_no_terminal`,
@@ -3347,7 +3351,22 @@ newer copy would have been right there and is wrong in general. SIGTERM, then SI
 seconds; the other copy keeps working. The act is journalled in `duty.jsonl` with `by: person`, and
 the finding leaves the kept watch at once (`session_watch::forget`) when one process is left.
 Refusals: `NOT_TWO` (the session no longer runs in two processes), `ALL_WORKING`,
-`COPY_STILL_RUNNING`, `CLOSE_UNSUPPORTED` (Windows). CLI `switchboard sessions close-copy
+`COPY_STILL_RUNNING`, `CLOSE_UNSUPPORTED` (Windows).
+**When both copies work (SB-389, operator 2026-11-16).** The one-minute watch describes each
+duplicate while one exists (`session_watch::describe_duplicates`, `duty::observe` read then): its
+`copies` (pid, status and since when, start, commands running and the oldest one's age, where it
+runs) and `close`: `{pid, why: quiet}` for a copy that is not working, `{pid, why: older,
+command_age}` when every copy works (`duty::older_copy`: never one answering; of those waiting on a
+command of their own, the one whose status has not changed for longest), or null when every copy is
+answering. The kept watch is rewritten when the findings change, not only their keys. Needs
+attention passes both on; the window says which copy and what ends with it (`duplicateOffer`) and
+*Close the older copy* sends its pid. `Operation::SessionCloseCopy {session_id, pid?}` with a pid
+closes that copy (`duty::chosen_copy`), refused while it is answering (`COPY_BUSY`). The case that
+showed it: the copy Switchboard 0.7.93 reopened in Terminal had polled a remote job for two hours
+(status `shell`, its status unchanged 108 minutes) beside the person's copy answering in Orca, so
+the item offered *Close the quiet copy* and the press was refused. Tests
+`duty::tests::when_both_copies_work_the_one_waiting_longest_on_its_command_is_offered`,
+`scripts/test-ui-logic.mjs`. CLI `switchboard sessions close-copy
 <session_id>`; MCP `switchboard_session_close_copy`; the window's `session_close_copy` (*Close the
 quiet copy* on the item). Tests `duty::tests::a_person_closes_the_copy_quiet_longest_and_never_a_working_one`,
 `session_watch::tests::a_copy_of_a_live_session_a_quiet_board_run_and_a_vanished_launch_are_found`,

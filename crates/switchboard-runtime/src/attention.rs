@@ -230,6 +230,10 @@ pub fn build(inputs: &Inputs) -> Value {
                 "pids": finding["pids"],
                 "launch_id": finding["launch_id"],
                 "session_id": finding["session_id"],
+                // SB-389: the copies and the one offered (`quiet`, `older`, or null: every copy
+                // is answering).
+                "copies": finding["copies"],
+                "close": finding["close"],
                 // SB-388: a duplicate is fixed in one press: its quiet copy is closed.
                 "action": if reason == "session_duplicate" {
                     json!({"tool": "switchboard_session_close_copy", "window": "close_copy"})
