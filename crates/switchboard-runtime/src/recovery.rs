@@ -28,6 +28,11 @@ const INVALID: &str = "The recovery record is invalid or conflicts with an exist
 const UNREADABLE: &str =
     "Recovery records could not be read. Restore the private file before continuing.";
 const NOT_READY: &str = "This stop is not ready on that account. Read recovery status again.";
+/// SB-396 D7: a stop is never claimed while its session still runs in a process.
+pub const SESSION_LIVE: &str =
+    "That session still runs in a process, so it is not started again. Close it there first.";
+/// SB-396 LC-9: a reading of an account's usage younger than this decides a probe.
+const READING_FRESH: i64 = 600;
 /// Seconds after a stop before a probe without fresh capacity, by attempt (SB-115).
 pub(crate) const PROBE_BACKOFF: [i64; 4] = [120, 300, 600, 900];
 /// A stop this soon after the session's previous resumed stop counts as that restart failing.
@@ -573,6 +578,29 @@ pub(crate) fn readiness(
     if accounts.is_empty() {
         return not_ready("no_account");
     }
+    // SB-396 LC-9: a probe on an account whose fresh reading says it is full until a known reset
+    // only stops again (dissy: 17 probes in a day). Such accounts wait for that reset; when every
+    // one does, the stop is ready at the first reset.
+    let reset_of = |id: &String| {
+        snapshot
+            .accounts
+            .iter()
+            .find(|a| &a.id == id)
+            .and_then(|a| full_until(a, now))
+    };
+    let open: Vec<String> = accounts
+        .iter()
+        .filter(|id| reset_of(id).is_none())
+        .cloned()
+        .collect();
+    if open.is_empty() {
+        return Ready {
+            probe_at: accounts.iter().filter_map(reset_of).min(),
+            reason: Some("reset"),
+            ..Ready::default()
+        };
+    }
+    let accounts = open;
     let step = PROBE_BACKOFF[(wait.attempt as usize).min(PROBE_BACKOFF.len() - 1)];
     let probe_at = wait.stopped_at.saturating_add(step);
     if now < probe_at {
@@ -590,6 +618,27 @@ pub(crate) fn readiness(
     }
 }
 
+/// SB-396 LC-9: when a fresh reading says `account` is used up until a known reset, that reset.
+fn full_until(account: &Account, now: i64) -> Option<i64> {
+    let usage = account.usage.as_ref()?;
+    if now - usage.observed_at > READING_FRESH {
+        return None;
+    }
+    usage
+        .windows
+        .iter()
+        .filter(|w| !w.name.starts_with(switchboard_core::FEATURE_WINDOW_PREFIX))
+        .filter(|w| w.used_percent >= 100.0)
+        .filter_map(|w| w.resets_at)
+        .chain(
+            (usage.windows.is_empty() && usage.used_percent >= 100.0)
+                .then_some(usage.resets_at)
+                .flatten(),
+        )
+        .filter(|r| *r > now)
+        .max()
+}
+
 /// Must run under the runtime mutation lock (or the offline store's exclusive lock).
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn claim(
@@ -600,6 +649,7 @@ pub(crate) fn claim(
     limited: &HashSet<String>,
     capped: &HashSet<String>,
     sign_in: &HashSet<String>,
+    live: &dyn Fn(&str) -> bool,
     now: i64,
 ) -> Result<Wait, String> {
     let _writing = writing();
@@ -608,6 +658,9 @@ pub(crate) fn claim(
         .iter_mut()
         .find(|r| r.event == event)
         .ok_or(NOT_READY)?;
+    if live(&row.session) {
+        return Err(SESSION_LIVE.into());
+    }
     let ready = readiness(row, snapshot, limited, capped, sign_in, now);
     if !ready.accounts.iter().any(|id| id == account) {
         return Err(NOT_READY.into());
@@ -898,16 +951,49 @@ mod tests {
         )
         .is_err());
         assert!(finish(root.path(), "limit:1", true, 1000).is_err());
-        let claimed = claim(root.path(), "limit:1", "new", &s, &none, &none, &none, 102).unwrap();
+        let claimed = claim(
+            root.path(),
+            "limit:1",
+            "new",
+            &s,
+            &none,
+            &none,
+            &none,
+            &|_| false,
+            102,
+        )
+        .unwrap();
         assert_eq!(claimed.state, State::Claimed);
-        assert!(claim(root.path(), "limit:1", "new", &s, &none, &none, &none, 102).is_err());
+        assert!(claim(
+            root.path(),
+            "limit:1",
+            "new",
+            &s,
+            &none,
+            &none,
+            &none,
+            &|_| false,
+            102
+        )
+        .is_err());
         assert_eq!(read(root.path()).unwrap()[0].state, State::Claimed);
         finish(root.path(), "limit:1", true, 1000).unwrap();
         finish(root.path(), "limit:1", true, 1000).unwrap();
         // A settled stop stays as it was settled: a later report is answered, never applied.
         finish(root.path(), "limit:1", false, 1000).unwrap();
         assert_eq!(read(root.path()).unwrap()[0].state, State::Resumed);
-        assert!(claim(root.path(), "limit:1", "new", &s, &none, &none, &none, 102).is_err());
+        assert!(claim(
+            root.path(),
+            "limit:1",
+            "new",
+            &s,
+            &none,
+            &none,
+            &none,
+            &|_| false,
+            102
+        )
+        .is_err());
     }
     #[test]
     fn an_account_near_its_limit_is_not_capacity_for_a_stopped_session() {
@@ -960,7 +1046,18 @@ mod tests {
         let wait = &read(root.path()).unwrap()[0];
         let held = HashSet::from(["old".into(), "new".into()]);
         assert!(candidates(wait, &s, &held, &none, 102).is_empty());
-        assert!(claim(root.path(), "limit:1", "new", &s, &held, &none, &none, 102).is_err());
+        assert!(claim(
+            root.path(),
+            "limit:1",
+            "new",
+            &s,
+            &held,
+            &none,
+            &none,
+            &|_| false,
+            102
+        )
+        .is_err());
         assert!(candidates(wait, &s, &none, &none, 402).is_empty());
         for mutate in [
             (|a: &mut Account| a.pool = "other-project".into()) as fn(&mut Account),
@@ -1061,7 +1158,18 @@ mod tests {
             candidates(wait, &s, &held, &none, 102),
             vec!["reserved-account"]
         );
-        assert!(claim(root.path(), "limit:1", "new", &s, &held, &none, &none, 102).is_err());
+        assert!(claim(
+            root.path(),
+            "limit:1",
+            "new",
+            &s,
+            &held,
+            &none,
+            &none,
+            &|_| false,
+            102
+        )
+        .is_err());
         assert_eq!(read(root.path()).unwrap()[0].state, State::Waiting);
         // A group with no Claude account of its own reserves nothing, as a launch reads it.
         s.accounts.retain(|a| a.id != "reserved-account");
@@ -1155,6 +1263,93 @@ mod tests {
     /// Both accounts held: no fresh capacity anywhere, the situation SB-115 changes.
     fn held() -> HashSet<String> {
         HashSet::from(["old".into(), "new".into()])
+    }
+
+    #[test]
+    fn a_probe_waits_for_a_known_reset_while_a_fresh_reading_says_full() {
+        // SB-396 LC-9: dissy's stops were probed 17 times in a day on accounts read at 100 %.
+        let root = tempfile::tempdir().unwrap();
+        let mut s = snapshot();
+        let full = |reset: i64, observed: i64| {
+            Some(Usage {
+                windows: vec![switchboard_core::UsageWindow {
+                    name: "five_hour".into(),
+                    used_percent: 100.0,
+                    resets_at: Some(reset),
+                }],
+                used_percent: 100.0,
+                observed_at: observed,
+                resets_at: Some(reset),
+                source: "provider".into(),
+            })
+        };
+        s.accounts[0].usage = full(5000, 200);
+        s.accounts[1].usage = full(4000, 200);
+        let none = HashSet::new();
+        register(
+            root.path(),
+            &s,
+            "limit:1",
+            "session-1",
+            "old",
+            root.path(),
+            100,
+        )
+        .unwrap();
+        let wait = &read(root.path()).unwrap()[0];
+        let r = readiness(wait, &s, &held(), &none, &none, 400);
+        assert_eq!(
+            (r.mode, r.reason, r.probe_at),
+            (None, Some("reset"), Some(4000))
+        );
+        // A reading older than ten minutes proves nothing: that account is probed as before.
+        s.accounts[1].usage = full(4000, 400 - READING_FRESH - 1);
+        let r = readiness(wait, &s, &held(), &none, &none, 400);
+        assert_eq!(
+            (r.mode, r.accounts),
+            (Some(Mode::Probe), vec!["new".to_owned()])
+        );
+        // Past the reset the stop is a probe again.
+        s.accounts[1].usage = full(4000, 200);
+        assert_eq!(
+            readiness(wait, &s, &held(), &none, &none, 4001).mode,
+            Some(Mode::Probe)
+        );
+    }
+
+    #[test]
+    fn a_stop_whose_session_still_runs_is_never_claimed() {
+        // SB-396 D7: two processes on one session (SB-376) are refused at the claim, whatever host asks.
+        let root = tempfile::tempdir().unwrap();
+        let s = snapshot();
+        let none = HashSet::new();
+        register(
+            root.path(),
+            &s,
+            "limit:1",
+            "session-1",
+            "old",
+            root.path(),
+            100,
+        )
+        .unwrap();
+        let live = |session: &str| session == "session-1";
+        assert_eq!(
+            claim(
+                root.path(),
+                "limit:1",
+                "new",
+                &s,
+                &none,
+                &none,
+                &none,
+                &live,
+                102
+            )
+            .unwrap_err(),
+            SESSION_LIVE
+        );
+        assert_eq!(read(root.path()).unwrap()[0].state, State::Waiting);
     }
 
     #[test]
@@ -1259,6 +1454,7 @@ mod tests {
             &held(),
             &none,
             &none,
+            &|_| false,
             100_000
         )
         .is_err());
@@ -1375,6 +1571,7 @@ mod tests {
             &held(),
             &none,
             &none,
+            &|_| false,
             219
         )
         .is_err());
@@ -1389,6 +1586,7 @@ mod tests {
             &held(),
             &none,
             &none,
+            &|_| false,
             220,
         )
         .unwrap();
@@ -1404,6 +1602,7 @@ mod tests {
             &held(),
             &none,
             &none,
+            &|_| false,
             221
         )
         .is_err());
@@ -1429,6 +1628,7 @@ mod tests {
             &held(),
             &none,
             &sign_in,
+            &|_| false,
             220
         )
         .is_err());
@@ -1466,7 +1666,18 @@ mod tests {
             .any(|r| r.event == first && r.state == State::Resumed));
         assert_eq!(rows.iter().find(|r| r.event == second).unwrap().attempt, 0);
         // A host's resume still counts: claimed, the session ran, then stopped again.
-        claim(root.path(), &second, "new", &s, &held(), &none, &none, 450).unwrap();
+        claim(
+            root.path(),
+            &second,
+            "new",
+            &s,
+            &held(),
+            &none,
+            &none,
+            &|_| false,
+            450,
+        )
+        .unwrap();
         assert_eq!(continued(root.path(), "session-1", 460).unwrap(), 1);
         let Stopped::New(third) = at(500).unwrap() else {
             panic!()
@@ -1501,7 +1712,18 @@ mod tests {
             (rows.len(), rows[0].attempt, rows[0].stopped_at),
             (1, 1, 150)
         );
-        claim(root.path(), &first, "new", &s, &held(), &none, &none, 450).unwrap();
+        claim(
+            root.path(),
+            &first,
+            "new",
+            &s,
+            &held(),
+            &none,
+            &none,
+            &|_| false,
+            450,
+        )
+        .unwrap();
         // A stop after the claim: the session ran, so the claim is closed as resumed.
         let Stopped::New(second) = at(500).unwrap() else {
             panic!()
@@ -1729,7 +1951,18 @@ mod tests {
         assert_eq!(events, ["limit:2", "limit:3"], "the replay stored nothing");
         finish(root.path(), "limit:1", false, now).unwrap();
         assert_eq!(
-            claim(root.path(), "limit:1", "new", &s, &none, &none, &none, now).unwrap_err(),
+            claim(
+                root.path(),
+                "limit:1",
+                "new",
+                &s,
+                &none,
+                &none,
+                &none,
+                &|_| false,
+                now
+            )
+            .unwrap_err(),
             NOT_READY
         );
         assert!(
@@ -2213,7 +2446,18 @@ mod tests {
             100,
         )
         .unwrap();
-        claim(root.path(), "limit:1", "new", &s, &none, &none, &none, 102).unwrap();
+        claim(
+            root.path(),
+            "limit:1",
+            "new",
+            &s,
+            &none,
+            &none,
+            &none,
+            &|_| false,
+            102,
+        )
+        .unwrap();
         finish(root.path(), "limit:1", true, 100 + HORIZON_SECONDS + 1).unwrap();
         let (rows, _) = current(root.path(), 100 + HORIZON_SECONDS + 2).unwrap();
         assert_eq!(
@@ -2231,7 +2475,18 @@ mod tests {
             100,
         )
         .unwrap();
-        claim(root.path(), "limit:2", "new", &s, &none, &none, &none, 102).unwrap();
+        claim(
+            root.path(),
+            "limit:2",
+            "new",
+            &s,
+            &none,
+            &none,
+            &none,
+            &|_| false,
+            102,
+        )
+        .unwrap();
         assert_eq!(continued(root.path(), "session-2", 300).unwrap(), 1);
         finish(root.path(), "limit:2", false, 301).unwrap();
         let rows = read(root.path()).unwrap();
