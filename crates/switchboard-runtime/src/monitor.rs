@@ -2,10 +2,7 @@
 //! the account signed in to the ordinary Claude Code is never refreshed here.
 use crate::{external, Runtime};
 use serde_json::json;
-use std::{
-    sync::Arc,
-    time::{Duration, SystemTime, UNIX_EPOCH},
-};
+use std::{sync::Arc, time::Duration};
 use switchboard_core::{Account, AuthKind, Provider, Store, Usage};
 use tokio::task::JoinHandle;
 
@@ -30,12 +27,7 @@ pub(crate) const PACED_AFTER_REFUSAL_SECONDS: i64 = 3600;
 /// SB-185: a credential read at least this slow is logged as `vault_slow`.
 const SLOW_VAULT_READ_MS: u64 = 1000;
 
-pub fn now() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|v| v.as_secs() as i64)
-        .unwrap_or(0)
-}
+pub use fabric_sessions_core::clock::now;
 
 /// A future whose panic is caught and answered as `Err`, polled through its box so no unsafe pin
 /// projection is needed.
