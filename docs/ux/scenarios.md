@@ -2114,16 +2114,19 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Preconditions:** the owner runs (without it the stops on a limit are not listed and the page says so); other machines are those `switchboard targets` lists.
 **Entry point:** the sidebar → *Sessions*.
 **Steps:**
-1. Open Sessions → “This computer” first, its line “Needs you: {n} · Running now: {n} · Waiting for quota: {n} · Ended in the last day: {n}”, then a fold per group in that order; *Ended in the last day* starts folded.
-2. Each row: “{agent} · {account}”, its state in words (“Runs in two processes”, “A board run quiet for {n} min”, “Its process is gone without an end”, “Stopped on a limit, ready to continue”, “Stopped on a limit, next try in {when}”, “Working”, “Quiet {n} min”, “Ended”), its folder, then how it started, its group and since when.
+1. Open Sessions → “This computer” first, then a fold per group in this order, each with “{n} sessions”: *Needs attention*, *Running now*, *Waiting* (for quota or for a wake-up of its own), *Ended in the last day* (starts folded).
+2. Each row: “{agent} · {account}”, its state in words, coloured by the state itself (“Working” green; “Runs in two processes”, “A board run quiet for {n} min”, “Stopped on a limit, ready to continue”, “Stopped on a limit, next try in {when}” amber; “Its process is gone without an end”, “Did not start”, “Stopped at its time limit” red; “Quiet {n} min”, “Ended” and the rest muted), its folder's name (the full path on hover), then how it started, its group and since when.
 3. A copy of a session running twice → *Close this copy* on the copy Needs attention offers (the quiet or older one); the other keeps working.
-4. A hosted session → *Open here* (a Terminal window attached to it; closing that window leaves it running) and *End* (asks first: “End this session?”).
-5. Each other machine follows as its own section with the same groups; one that could not be read says why: “Not answering over ssh now.”, “Switchboard is not installed there.”, “Its Switchboard is older than this page. Update it there.”, “Its answer could not be read.”, with when it was asked.
-6. The page reads again once a minute while it is on screen, never while another page is.
-**Alt paths:** nothing anywhere → “No session runs or waits here, and none ended in the last day.”; the read fails → “The sessions could not be read. Refresh to retry.” with *Retry*; a later read fails → the last list stays with “The list may be out of date: the last read failed.”
+4. A hosted session → *Open here* (a Terminal window attached to it; closing that window leaves it running) and *End…* (asks first: “End this session?”, focus on *Cancel*).
+5. A session Switchboard closed (idle, a quiet copy, stopped making progress) or one that ended on a limit → *Continue*: it resumes as the same session in its own folder, with its history, in a Terminal window (SB-396).
+6. Each act's button names its session for a screen reader, starting with the words it shows (“Open here: the session in {folder}”); after an act focus returns to the button, or to *Restart all sessions…* when the row left its group (*Cancel the restart* while a restart runs).
+7. Each other machine follows as its own section with the same groups; one that could not be read says why: “Not answering over ssh now.”, “Switchboard is not installed there.”, “Its Switchboard is older than this page. Update it there.”, “Its answer could not be read.”, with when it was asked.
+8. The page reads again once a minute while it is on screen, never while another page is, and at once on *Refresh*.
+9. *Needs attention* on Accounts → *Open sessions* comes here.
+**Alt paths:** nothing anywhere → “No session runs or waits here, and none ended in the last day.”; the first read fails → the error state “Unable to load sessions” / “The sessions could not be read.” with *Retry*; a later read fails → the last list stays under the bar “The list may be out of date: the last read failed.” with *Retry*; the stops on a limit could not be read → “Stops on a limit could not be read, so they are not listed.”; another part not read → “Part of this list could not be read, so some sessions may be missing.”
 **Expected result:** one place answers what needs the person, what runs, what waits for quota and what ended, on every machine, and the acts Switchboard already has are one press away.
-**UI elements:** the sidebar entry, the machine sections, the group folds, the rows, *Close this copy*, *Open here*, *End* and its dialog.
-**States covered:** reading, read failed, empty, needs you, running, waiting, ended, a machine not answering, no Switchboard there, an older one there.
+**UI elements:** the sidebar entry, the machine sections, the group folds, the rows, *Close this copy*, *Open here*, *Continue*, *End…* and its dialog.
+**States covered:** reading, read failed, stale, part not read, empty, needs attention, running, waiting, ended, can continue, a machine not answering, no Switchboard there, an older one there.
 **Errors & recovery:** an act refused shows its sentence; ending on another machine first has that machine prove its key (SB-357).
 **Status:** draft
 **Meaning:** SB-395 (operator 2026-11-16 via fabric-dashboards: «сессиям, короче, на каждом уровне нужно видеть сессии»; in this session: «экран сессиями, чтобы виден был, можно было их менеджить»).
@@ -2135,20 +2138,21 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Persona:** P-01
 **Goal:** After a new skill, plugin, hook or Claude Code, every running session picks it up without losing its work or history, and the person (or an agent) sees each one come back.
 **Preconditions:** the owner runs; macOS or Linux.
-**Entry point:** Sessions → *Restart all sessions*; an agent: MCP `switchboard_sessions_restart_plan`, then `_apply`.
+**Entry point:** Sessions → *Restart all sessions…* (the page's header action, off while a restart runs); an agent: MCP `switchboard_sessions_restart_plan`, then `_apply`.
 **Steps:**
-1. *Restart all sessions* → a dialog “Restart every running session?” reads the plan (“Reading which sessions can restart…”), then says how many sessions restart at the end of their current turn and come back as themselves, lists their folders, and under “Left as they are:” each skipped one with why (“stopped on a limit; it resumes when an account has room”, “waiting on a wake-up or a schedule it set”, “runs in two processes”, “a Fabric Dashboards console”, “its window predates restarts in place”, “not an interactive session”, “its folder or history is gone”).
+1. *Restart all sessions…* → a dialog “Restart every running session?” loads the plan (“Loading the restart plan…”), then says how many sessions restart at the end of their current turn, load new skills, plugins and hooks and come back as the same sessions with their history; lists each by its folder's name with how it comes back (“restarts in its own window”, “comes back in a new Terminal window”), and under “Left as they are” each skipped one with why (“stopped on a limit; it resumes when an account has room” and the six others). Focus starts on *Cancel*.
 2. *Restart {n} sessions* → “The restart started. Each session restarts when its current turn ends.”; nothing ends mid-turn.
 3. A session in a Switchboard window restarts in place: the window stays, shows “[Switchboard restarted this session]” and the resumed session; another comes back in a new Terminal window.
-4. Above the machines, “Restart: {back} back, {waiting} waiting for their turn, {failed} failed.” while it runs, then “Last restart: {back} back, {failed} failed.” for a day; a failure reads as an error.
-**Alt paths:** nothing can restart → “No running session can be restarted now.” and no confirm button; the plan cannot be read → “The plan could not be read. Retry.”; the sessions changed since the plan → its refusal, make it again; a wave already runs → its refusal.
+4. Above the machines, a panel “Restart in progress” with “{back} back, {waiting} waiting for their turn, {failed} not back.”, read every ten seconds while the page is on screen, then “Last restart” with “{back} back, {failed} not back.” for a day. Its fold “Sessions in this restart” lists each session with its state (“Waiting for its turn to end”, “Ending”, “Coming back”, “Came back”, “Back and working”, “Left as it was”, “Not back five minutes after it ended” and the other reasons), the one that started the wave marked (“The session that started this restart; it restarts last.”); a session not back has *Continue*.
+5. While it runs: *Cancel the restart* → “Restart cancelled. Sessions still waiting for their turn are left as they are.”; one already ending finishes its restart.
+**Alt paths:** nothing can restart → “No running session can be restarted now.” and the only button reads *Close*; the plan cannot be read → “The restart plan could not be read.” with *Retry*; on Windows → “Restarting sessions works on macOS and Linux for now.”; the sessions changed since the plan → the dialog opens again with a new plan and “The sessions changed since the last plan, so this is a new one.”; a wave already runs → the header action is off (“A restart is running. Cancel it or wait for it to finish.”).
 **Expected result:** every listed session is back as itself with its history, and the page says how many came back.
-**UI elements:** the button, the dialog with its two lists, the confirm button, the status line.
-**States covered:** reading the plan, plan failed, nothing to restart, plan shown, running, done, failed.
-**Errors & recovery:** a session not back five minutes after its end is `failed` (the status line turns red); the transcript is never lost, so *Continue* on its row still resumes it.
+**UI elements:** the header action, the dialog with its two lists, the confirm button, the restart panel with its sessions, *Continue* on a session not back, *Cancel the restart*.
+**States covered:** loading the plan, plan failed, unsupported, nothing to restart, plan shown, plan changed, running, cancelled, done, failed.
+**Errors & recovery:** a session not back five minutes after its end is `failed` (the panel's line turns red and its row has *Continue*); the transcript is never lost.
 **Status:** draft
 **Meaning:** SB-397 R1 (operator 2026-11-16: «перезапустить все работающие сессии … например для перезагрузки скилов … мониторинг должен следить чтобы все поднялись назад и продолжили работу»).
 **Copy:** checked with Copylot, register ui; report ids in [strings](../brand/strings.md).
-**Coverage:** `restarts::tests::*`, `session_host::tests::a_restart_in_place_*`; WebKit demo (`?demo=1`, Sessions → *Restart all sessions*).
+**Coverage:** `restarts::tests::*`, `session_host::tests::a_restart_in_place_*`, `test-ui-logic` restart state texts; WebKit demo (`?demo=1`, Sessions → *Restart all sessions…*).
 **Product:** unobserved
 **Traces:** SB-397, SCN-098, SB-342

@@ -1015,6 +1015,15 @@ async fn sessions_restart_status(state: State<'_, Slot>) -> Result<Value, String
         .execute(Operation::SessionsRestartStatus { wave: None })
         .await
 }
+/// SB-397 R1: *Cancel the restart* on the Sessions page.
+#[tauri::command]
+async fn sessions_restart_cancel(wave: String, state: State<'_, Slot>) -> Result<Value, String> {
+    state
+        .runtime()
+        .await?
+        .execute(Operation::SessionsRestartCancel { wave })
+        .await
+}
 /// SB-395: *End* on a hosted session, here or on another machine.
 #[tauri::command]
 async fn session_end(
@@ -2040,6 +2049,7 @@ fn main() {
             sessions_restart_plan,
             sessions_restart_apply,
             sessions_restart_status,
+            sessions_restart_cancel,
             session_close_copy,
             report_problem,
             repository_map,

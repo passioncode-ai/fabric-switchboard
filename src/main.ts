@@ -10,7 +10,7 @@ if (native) watchProblems(reportProblem);
 import { LOCALE_KEY, dateLocale, locale, parseLocaleChoice, plural, saveLocaleChoice, t, type LocaleChoice } from './i18n';
 import { demo, demoFirstRun, native, nativeAdapter, onProjectSuggestions, onShellHook, onSpendChanged, safeError, reportFrontendReady, reportLanguage, reportProblem, type Operation } from './adapter';
 import type { CardState, AccountGroup } from './ui-logic';
-import { statAlert, ceilingQuestion, ceilingWarning, ceilingLine, keyLimitLine, dollars, POOL_PATTERN, poolChoices, poolName, inGroup, tourPlacement, usableWhileBusy, APPEARANCE_KEY, attribution, placementAdmits, domainSuggestion, groupSeatsElsewhere, passioncodeLine, seatEndedText, groupSeatsEndedText, organizationReleasedAt, inOrganizationFilter, domainList, type AttributedBy, sortStatRows, nextStatSort, type StatRow, type StatSort, statCacheShare, statTokensPerRequest, chartSeries, niceMax, groupProjectRows, type ChartMetric, groupProjects, compactCount, statTokens, statTrouble, statTroubleText, statAgentName, type Statistics, EXPIRY_CHOICES, folderName, folderRows, withoutFolder, type ProjectRoot, moveTargets, mapRows, rootTargets, storedMapFolders, MAP_FOLDERS_KEY, type MapFilter, type MapRow, type RepositoryMap, sortAgents, defaultAgentChoices, backgroundReads, clockedRead, chainScopeKey, afterRead, ceilingRemovalNote, modelMeta, modelUse, ordinaryKimiNote, kimiLimitUntil, limitReasonText, limitTitle, agentSetupFacts, sessionHow, sessionAgentName, sessionStateLabel, kimiWindowsLine, kimiWindowsLines, openrouterCreditLine, eventAction, eventDetail, MutationClock, activeRules, autoSwitchPool, autoSwitchPossible, launchChoice, withFolders, githubDefaultSelection, githubPlan, githubSource, replaceFolder, storedFolder, LAST_FOLDER_KEY, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, signInNotice, signInMove, organizationMoveNote, dismissTermsNotice, termsNoticeDismissed, termsNoticeOn, termsNoticeText, tourWaits, orgSetups, releasedOrganizations, releasedSummary, orgSetupAction, orgSetupShown, orgSetupCaveat, orgSetupLeads, orgSetupPrimary, accountsOrgActionLeads, firstPrimary, orgSetupUnread, orgSetupStateLabel, orgSetupTitle, hiddenOrgSetups, ORG_SETUP_HIDDEN_KEY, accountsEmptyKey, type OrgSetup, usageAnswerText, usageNotice, usageFreshness, windowReset, type Appearance, shellHookView, balancingView, balancingNotice, shellHookToggleNotice, shellHookNoticeText, codexHookLine, moveStep, accountsForStep, chainSummary, stepReasonText, handoverOutcomeText, handoverSkipped, shortWorkflow, TAKEOVER_ORDER, groupOrganizations, servesPool, sharedGroups, holdsContext, accountOrganizations, machineOf, remoteUsageLine, unplacedAccounts, foldlessGroups, repositoriesUnder, contextLines, machineAliasesLine, machineLiveLine, machineCopyLine, foldOpen, accountSections, accountMatches, attentionAccounts, attentionReasonText, duplicateOffer, attentionActionLabel, dutyReasonText, dutyOutcomeText, surfaceLabel, sessionTreeRows, SESSION_GROUPS, sessionGroupTitle, sessionWhyText, machineReadText, givenFacts, switchingLine, MACHINE_FOLD_LIMIT, EVENT_FILTER_KINDS, eventKindLabel, filterEvents, eventsByDay, relativeDay, EVENTS_PAGE, eventPage, sortSessions, statRowsShown, STAT_TOP, spendShare, groupKeyBlocks, keyTail, groupStateLine, type EventKind, type EventFilter, restartSkipText } from './ui-logic';
+import { statAlert, ceilingQuestion, ceilingWarning, ceilingLine, keyLimitLine, dollars, POOL_PATTERN, poolChoices, poolName, inGroup, tourPlacement, usableWhileBusy, APPEARANCE_KEY, attribution, placementAdmits, domainSuggestion, groupSeatsElsewhere, passioncodeLine, seatEndedText, groupSeatsEndedText, organizationReleasedAt, inOrganizationFilter, domainList, type AttributedBy, sortStatRows, nextStatSort, type StatRow, type StatSort, statCacheShare, statTokensPerRequest, chartSeries, niceMax, groupProjectRows, type ChartMetric, groupProjects, compactCount, statTokens, statTrouble, statTroubleText, statAgentName, type Statistics, EXPIRY_CHOICES, folderName, folderRows, withoutFolder, type ProjectRoot, moveTargets, mapRows, rootTargets, storedMapFolders, MAP_FOLDERS_KEY, type MapFilter, type MapRow, type RepositoryMap, sortAgents, defaultAgentChoices, backgroundReads, clockedRead, chainScopeKey, afterRead, ceilingRemovalNote, modelMeta, modelUse, ordinaryKimiNote, kimiLimitUntil, limitReasonText, limitTitle, agentSetupFacts, sessionHow, sessionAgentName, sessionStateLabel, kimiWindowsLine, kimiWindowsLines, openrouterCreditLine, eventAction, eventDetail, MutationClock, activeRules, autoSwitchPool, autoSwitchPossible, launchChoice, withFolders, githubDefaultSelection, githubPlan, githubSource, replaceFolder, storedFolder, LAST_FOLDER_KEY, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, signInNotice, signInMove, organizationMoveNote, dismissTermsNotice, termsNoticeDismissed, termsNoticeOn, termsNoticeText, tourWaits, orgSetups, releasedOrganizations, releasedSummary, orgSetupAction, orgSetupShown, orgSetupCaveat, orgSetupLeads, orgSetupPrimary, accountsOrgActionLeads, firstPrimary, orgSetupUnread, orgSetupStateLabel, orgSetupTitle, hiddenOrgSetups, ORG_SETUP_HIDDEN_KEY, accountsEmptyKey, type OrgSetup, usageAnswerText, usageNotice, usageFreshness, windowReset, type Appearance, shellHookView, balancingView, balancingNotice, shellHookToggleNotice, shellHookNoticeText, codexHookLine, moveStep, accountsForStep, chainSummary, stepReasonText, handoverOutcomeText, handoverSkipped, shortWorkflow, TAKEOVER_ORDER, groupOrganizations, servesPool, sharedGroups, holdsContext, accountOrganizations, machineOf, remoteUsageLine, unplacedAccounts, foldlessGroups, repositoriesUnder, contextLines, machineAliasesLine, machineLiveLine, machineCopyLine, foldOpen, accountSections, accountMatches, attentionAccounts, attentionReasonText, duplicateOffer, attentionActionLabel, dutyReasonText, dutyOutcomeText, surfaceLabel, sessionTreeRows, SESSION_GROUPS, sessionGroupTitle, sessionWhyText, machineReadText, givenFacts, switchingLine, MACHINE_FOLD_LIMIT, EVENT_FILTER_KINDS, eventKindLabel, filterEvents, eventsByDay, relativeDay, EVENTS_PAGE, eventPage, sortSessions, statRowsShown, STAT_TOP, spendShare, groupKeyBlocks, keyTail, groupStateLine, type EventKind, type EventFilter, restartSkipText, sessionTone, sessionDegradedText, restartStateText, restartTone } from './ui-logic';
 import agentCatalog from '../catalog/agents.json';
 import type { AnalyticsStatus, Ceilings, CeilingView, CeilingQuestionView, OpenrouterCredit, BackupInfo, PassioncodeStatus, Account, Adapter, AgentConnection, AgentInfo, AgentRow, AgentsOverview, OpenrouterModels, HermesModel, KimiAccounts, KimiRegion, KimiStatus, OpenrouterStatus, OpenrouterKeys, CodexRoute, BalanceStatus, CapacityStatus, DutyStatus, DutyLine, SessionTree, WatchFinding, ShellHookStatus, AgentSetup, AuthKind, BackupStatus, KimiAccount, CurrentAccounts, LoginItem, Project, Restored, HandoverPlan, ExternalIdentity, MonitorStatus, ProjectRule, Provider, RotationPolicy, RuntimeStatus, SessionInfo, Snapshot, UpdateStatus, Onboarding, Chains, ChainExecutor, ChainScope, ChainStepView, GithubRepository, Machine, MachinesLive, MachinesList, Attention, AttentionItem, Event, GivenAccount, SessionsEverywhere, SessionRow, MachineReadStatus, RestartPlan, RestartWave } from './types';
 
@@ -339,6 +339,8 @@ async function reload() {
   codexRouteState = null; codexRouteError = '';
   shellHookState = null; shellHookError = '';
   if (page === 'stats') { stats = null; statsError = false; void loadStats(); }
+  // UX: Refresh on the Sessions page reads the sessions and the restart again (SCN-098).
+  if (page === 'sessions') void loadSessionRows();
   // WF-11.1: Refresh reads the journal again from its newest page.
   if (page === 'activity') journal = null;
   given = null;
@@ -438,6 +440,8 @@ function render(options: { background?: boolean } = {}): boolean {
     if (page === 'projects' && !empty(snapshot?.projects)) actions.append(button(t('+ New group'), () => projectDialog(), 'button primary', 'new-project'));
     // SB-228 (VIS-21): the organization card's own action leads; this one goes quiet beside it.
     if (page === 'orgs' && !empty(snapshot?.organizations)) actions.append(button(t('+ New organization'), () => organizationDialog(null), orgCardLeads() ? 'button quiet' : 'button primary', 'org-add'));
+    // SB-397 R1: restarting every session is the page's own action; one restart at a time.
+    if (page === 'sessions' && sessionRows) { const restart = button(t('Restart all sessions…'), () => void restartDialog(), 'button', 'sessions-restart'); if (restartRunning()) { restart.disabled = true; restart.title = t('A restart is running. Cancel it or wait for it to finish.'); } actions.append(restart); }
     header.append(actions);
   }
   main.append(header);
@@ -2861,7 +2865,7 @@ function attentionAct(item: AttentionItem, account: Account | undefined, key: st
     case 'check_usage': if (account) void mutate(() => adapter.probe(account.id), t('Usage observation updated.'), key, account.id); return;
     case 'answer_ceiling': goTo('agents'); return;
     case 'open_machines': goTo('projects', 'machines-heading'); return;
-    case 'open_sessions': goTo('activity', 'sessions-tree-heading'); return;
+    case 'open_sessions': goTo('sessions'); return;
     // SB-388: one press closes the copy quiet longest, never a working one.
     case 'close_copy': { const id = item.session_id; if (id) void mutate(() => adapter.sessionCloseCopy(id, pid), pid ? t('Closed the older copy. The other one keeps working.') : t('Closed the quiet copy. The other one keeps working.'), key); return; }
   }
@@ -3304,21 +3308,33 @@ let sessionRows: SessionsEverywhere | null = null;
 let sessionRowsError = false; let sessionRowsLoading = false;
 /** SB-397 R1: the newest restart wave, read with the rows; none when no wave ran. */
 let restartWave: RestartWave | null = null;
+let restartPoll: number | undefined;
 async function loadSessionRows() {
   if (sessionRowsLoading) return;
   sessionRowsLoading = true; const stamp = clock.stamp();
   try { const value = await adapter.sessionRows(); if (clock.accepts(stamp)) { sessionRows = value; sessionRowsError = false; } } catch { sessionRowsError = true; }
-  try { restartWave = await adapter.sessionsRestartStatus(); } catch { restartWave = null; }
-  sessionRowsLoading = false; backgroundRender();
+  // A read that failed for another reason than "no wave ran" keeps the wave on screen (a timeout mid-wave).
+  try { const wave = await adapter.sessionsRestartStatus(); if (clock.accepts(stamp)) restartWave = wave; } catch (failure) { if (clock.accepts(stamp) && safeError(failure, 'read') === RESTART_NONE) restartWave = null; }
+  sessionRowsLoading = false; watchRestart(); backgroundRender();
 }
+/** SB-397 R1: while a wave runs, its progress is read every ten seconds, only while this page is on screen. */
+function watchRestart() {
+  window.clearTimeout(restartPoll);
+  if (page === 'sessions' && restartWave && !restartWave.done_at) restartPoll = window.setTimeout(() => { if (page === 'sessions') void loadSessionRows(); }, 10_000);
+}
+const restartRunning = () => !!restartWave && !restartWave.done_at;
+/** Where focus goes after an act that removes its row: the page's restart action, or *Cancel the restart* while it is off. */
+const actFocus = () => restartRunning() ? 'restart-cancel' : 'sessions-restart';
 function renderSessionsPage(main: HTMLElement) {
   if (!sessionRows) {
-    const state = el('p', sessionRowsError ? 'usage-error' : 'form-note', sessionRowsError ? t('The sessions could not be read. Refresh to retry.') : t('Reading sessions…')); state.setAttribute('role', 'status'); main.append(state);
-    if (sessionRowsError) main.append(button(t('Retry'), () => void loadSessionRows(), 'button primary', 'sessions-retry'));
+    if (sessionRowsError) {
+      const state = emptyState(t('Unable to load sessions'), t('The sessions could not be read.')); state.classList.add('error-state');
+      state.append(button(t('Retry'), () => void loadSessionRows(), 'button primary', 'sessions-retry')); main.append(state);
+    } else { const state = emptyState(t('Loading sessions'), t('Asking this computer and your other machines…')); state.setAttribute('role', 'status'); main.append(state); }
     return;
   }
-  if (sessionRowsError) main.append(el('p', 'usage-error', t('The list may be out of date: the last read failed.')));
-  main.append(restartPanel());
+  if (sessionRowsError) { const stale = el('div', 'notice error stale-list'); stale.setAttribute('role', 'status'); stale.append(el('span', '', t('The list may be out of date: the last read failed.')), button(t('Retry'), () => void loadSessionRows(), 'text-button', 'sessions-retry')); main.append(stale); }
+  const restart = restartPanel(); if (restart) main.append(restart);
   main.append(sessionMachine(t('This computer'), null, 'read', sessionRows.here.rows, sessionRows.here.degraded));
   for (const m of sessionRows.machines) main.append(sessionMachine(m.machine, m.machine, m.status, m.rows ?? [], [], m.read_at));
 }
@@ -3326,15 +3342,14 @@ function sessionMachine(title: string, target: string | null, status: MachineRea
   const section = el('section', 'about-panel session-machine');
   const id = `machine-${target ?? 'here'}`.replace(/[^A-Za-z0-9_-]/g, '-'); section.setAttribute('aria-labelledby', id);
   const heading = el('h2', '', title); heading.id = id; section.append(heading);
-  if (status !== 'read') { section.append(el('p', 'usage-error', machineReadText(status))); if (readAt) section.append(el('p', 'form-note', t('Asked {date}.', { date: date(readAt) }))); return section; }
-  if (degraded.includes('recovery')) section.append(el('p', 'form-note', t('Sessions stopped on a limit are not listed: Switchboard is not running here.')));
+  if (status !== 'read') { section.append(el('p', status === 'no_switchboard' ? 'form-note' : 'usage-error', machineReadText(status))); if (readAt) section.append(el('p', 'form-note', t('Asked {date}.', { date: date(readAt) }))); return section; }
+  const missing = sessionDegradedText(degraded); if (missing) section.append(el('p', 'form-note', missing));
   if (!rows.length) { section.append(el('p', 'form-note', t('No session runs or waits here, and none ended in the last day.'))); return section; }
-  section.append(el('p', 'form-note session-summary', SESSION_GROUPS.map((g) => [g, rows.filter((r) => r.group === g).length] as const).filter(([, n]) => n > 0).map(([g, n]) => `${sessionGroupTitle(g)}: ${n}`).join(' · ')));
   const now = Date.now() / 1000;
   for (const group of SESSION_GROUPS) {
     const items = rows.filter((r) => r.group === group);
     if (!items.length) continue;
-    section.append(foldSection({ key: `sessions-${target ?? 'here'}-${group}`, title: sessionGroupTitle(group), state: String(items.length), open: group !== 'ended', level: 'h3', className: `session-group is-${group}`, body: () => {
+    section.append(foldSection({ key: `sessions-${target ?? 'here'}-${group}`, title: sessionGroupTitle(group), state: plural(items.length, { one: '{n} session', other: '{n} sessions' }), open: group !== 'ended', level: 'h3', className: `session-group is-${group}`, body: () => {
       const list = el('ul', 'session-list');
       for (const row of items) list.append(sessionRowItem(row, target, now));
       return [list];
@@ -3346,71 +3361,125 @@ function sessionRowItem(row: SessionRow, target: string | null, now: number) {
   const item = el('li', 'session-row'); const title = el('div', 'event-title');
   const name = el('span', 'session-name');
   name.append(el('strong', '', [statAgentName(row.agent ?? ''), row.account].filter(Boolean).join(' · ') || t('Unknown agent')));
-  title.append(name, el('span', `session-state is-${row.group}`, sessionWhyText(row, now)));
+  title.append(name, el('span', `session-state is-${sessionTone(row.why)}`, sessionWhyText(row, now)));
   item.append(title);
-  if (row.folder) item.append(el('code', 'address', row.folder));
+  const where = row.folder ? folderName(row.folder) : t('an unknown folder');
+  if (row.folder) { const folder = el('p', 'account-meta session-folder', where); folder.title = row.folder; item.append(folder); }
   // A stop on a limit and a session Switchboard closed do not say how it started: no origin is claimed.
   const origin = row.id.startsWith('stop:') || row.id.startsWith('closed:') ? null : surfaceLabel(row.origin);
   const facts = [origin, row.pool ? inGroup(row.pool, snapshot?.projects ?? []) : null, row.since ? date(row.since) : null].filter(Boolean).join(' · ');
-  item.append(el('p', 'form-note', facts));
+  if (facts) item.append(el('p', 'form-note', facts));
   const acts = el('div', 'row-actions');
   const key = `session-${row.id}`;
-  if (row.acts.includes('close_copy') && !target && row.session_id) acts.append(button(t('Close this copy'), () => { const id = row.session_id!; void mutate(() => adapter.sessionCloseCopy(id, row.pid ?? undefined), t('Closed the quiet copy. The other one keeps working.'), key).then(() => loadSessionRows()); }, 'button', `${key}-close`));
-  if (row.acts.includes('attach') && row.launch_id) acts.append(button(t('Open here'), () => { const id = row.launch_id!; void mutate(() => adapter.sessionAttach(id, target), t('Opened in a Terminal window. Closing that window leaves the session running.'), key); }, 'button', `${key}-attach`));
+  // An act that ends the row's place in its group returns focus to the page's own action, which stays.
+  const named = (node: HTMLButtonElement, label: string) => { node.setAttribute('aria-label', label); return node; };
+  if (row.acts.includes('close_copy') && !target && row.session_id) acts.append(named(button(t('Close this copy'), () => { const id = row.session_id!; void mutate(() => adapter.sessionCloseCopy(id, row.pid ?? undefined), t('Closed the quiet copy. The other one keeps working.'), actFocus()).then(() => loadSessionRows()); }, 'button', `${key}-close`), t('Close this copy: the session in {folder}', { folder: where })));
+  if (row.acts.includes('attach') && row.launch_id) acts.append(named(button(t('Open here'), () => { const id = row.launch_id!; void mutate(() => adapter.sessionAttach(id, target), t('Opened in a Terminal window. Closing that window leaves the session running.'), `${key}-attach`); }, 'button', `${key}-attach`), t('Open here: the session in {folder}', { folder: where })));
   // SB-396: Continue resumes this very session, with its own history; only here, never on another machine.
-  if (row.acts.includes('continue') && !target && row.session_id) acts.append(button(t('Continue'), () => { const id = row.session_id!; void mutate(() => adapter.sessionContinue(id), t('Continued in a Terminal window as the same session, with its history.'), key).then(() => loadSessionRows()); }, 'button primary', `${key}-continue`));
-  if (row.acts.includes('end') && row.launch_id) acts.append(button(t('End'), () => endSessionDialog(row, target), 'button danger-text', `${key}-end`));
+  if (row.acts.includes('continue') && !target && row.session_id) acts.append(named(button(t('Continue'), () => { const id = row.session_id!; void mutate(() => adapter.sessionContinue(id), t('Continued in a Terminal window as the same session, with its history.'), actFocus()).then(() => loadSessionRows()); }, 'button primary', `${key}-continue`), t('Continue the session in {folder}', { folder: where })));
+  if (row.acts.includes('end') && row.launch_id) acts.append(named(button(t('End…'), () => endSessionDialog(row, target), 'button danger-text', `${key}-end`), t('End the session in {folder}', { folder: where })));
   if (acts.childElementCount) item.append(acts);
   return item;
 }
-/** SB-397 R1: restart every running session (to load new skills), and the newest wave's progress. */
-function restartPanel() {
-  const panel = el('section', 'session-restart');
-  const actions = el('div', 'row-actions');
-  actions.append(button(t('Restart all sessions'), () => void restartDialog(), 'button', 'sessions-restart'));
-  panel.append(actions);
+/** SB-397 R1: the newest wave of the last day, each session with its state; failed ones can be continued and a running wave cancelled. */
+function restartPanel(): HTMLElement | null {
   const wave = restartWave;
-  if (wave && Date.now() / 1000 - wave.at < 86_400) {
-    const back = wave.counts.back + wave.counts.continuing;
-    const text = wave.done_at
-      ? t('Last restart: {back} back, {failed} failed.', { back, failed: wave.counts.failed })
-      : t('Restart: {back} back, {waiting} waiting for their turn, {failed} failed.', { back, waiting: wave.counts.pending + wave.counts.resuming, failed: wave.counts.failed });
-    const line = el('p', wave.counts.failed ? 'usage-error' : 'form-note', text); line.setAttribute('role', 'status');
-    panel.append(line);
-  }
-  return panel;
+  if (!wave || Date.now() / 1000 - wave.at >= 86_400) return null;
+  const section = el('section', 'about-panel session-restart'); section.setAttribute('aria-labelledby', 'restart-heading');
+  const running = !wave.done_at;
+  const heading = el('h2', '', running ? t('Restart in progress') : t('Last restart')); heading.id = 'restart-heading';
+  const back = wave.counts.back + wave.counts.continuing;
+  const counts = running
+    ? t('{back} back, {waiting} waiting for their turn, {failed} not back.', { back, waiting: wave.counts.pending + (wave.counts.ending ?? 0) + wave.counts.resuming, failed: wave.counts.failed })
+    : t('{back} back, {failed} not back.', { back, failed: wave.counts.failed });
+  const line = el('p', wave.counts.failed ? 'usage-error' : 'form-note', counts); line.setAttribute('role', 'status');
+  section.append(heading, line);
+  if (wave.sessions.length) section.append(foldSection({ key: 'restart-sessions', title: t('Sessions in this restart'), state: plural(wave.sessions.length, { one: '{n} session', other: '{n} sessions' }), open: running || wave.counts.failed > 0, level: 'h3', body: () => {
+    const list = el('ul', 'session-list');
+    for (const s of wave.sessions) {
+      const item = el('li', 'session-row'); const top = el('div', 'event-title');
+      const folder = el('strong', '', s.folder ? folderName(s.folder) : t('an unknown folder')); if (s.folder) folder.title = s.folder;
+      top.append(folder, el('span', `session-state is-${restartTone(s.state)}`, restartStateText(s.state, s.reason)));
+      item.append(top);
+      if (s.caller) item.append(el('p', 'form-note', t('The session that started this restart; it restarts last.')));
+      if (s.state === 'failed' && s.session_id) { const acts = el('div', 'row-actions'); const go = button(t('Continue'), () => { const id = s.session_id; void mutate(() => adapter.sessionContinue(id), t('Continued in a Terminal window as the same session, with its history.'), actFocus()).then(() => loadSessionRows()); }, 'button primary', `restart-continue-${s.session_id}`); go.setAttribute('aria-label', t('Continue the session in {folder}', { folder: s.folder ? folderName(s.folder) : t('an unknown folder') })); acts.append(go); item.append(acts); }
+      list.append(item);
+    }
+    return [list];
+  } }));
+  if (running) { const acts = el('div', 'row-actions'); acts.append(button(t('Cancel the restart'), () => void mutate(() => adapter.sessionsRestartCancel(wave.wave), t('Restart cancelled. Sessions still waiting for their turn are left as they are.'), 'sessions-restart').then(() => loadSessionRows()), 'button', 'restart-cancel')); section.append(acts); }
+  return section;
 }
 /** SB-397 R1: the plan first (what restarts, what is left as it is and why), then the person confirms that exact plan. */
-async function restartDialog() {
-  const context = openDialog(t('Restart every running session?'), t('Reading which sessions can restart…'));
+async function restartDialog(note?: string) {
+  const context = openDialog(t('Restart every running session?'), t('Loading the restart plan…'), 'sessions-restart');
   const intro = context.form.querySelector('.dialog-header p');
+  const cancel = context.actions.querySelector('button');
+  if (note) context.body.append(el('p', 'form-note', note));
   let plan: RestartPlan;
   try { plan = await adapter.sessionsRestartPlan(); }
-  catch { context.error.textContent = t('The plan could not be read. Retry.'); return; }
+  catch (failure) {
+    // A refusal the window knows (on Windows: restarts work on macOS and Linux) is said as it is.
+    const known = safeError(failure, 'read');
+    if (intro) intro.textContent = known === RESTART_UNSUPPORTED ? t(known) : t('The restart plan could not be read.');
+    if (known === RESTART_UNSUPPORTED) { if (cancel) cancel.textContent = t('Close'); cancel?.focus(); return; }
+    const retry = button(t('Retry'), () => { context.close(); void restartDialog(); }, 'button primary'); context.actions.append(retry); retry.focus();
+    return;
+  }
   const count = plan.restart.length;
   if (intro) intro.textContent = count
-    ? plural(count, { one: '{n} session restarts at the end of its current turn and comes back as itself, with its history. A session in a Switchboard window restarts in place; the others come back in a new Terminal window.', other: '{n} sessions restart at the end of their current turn and come back as themselves, with their history. A session in a Switchboard window restarts in place; the others come back in a new Terminal window.' })
+    ? plural(count, { one: 'This session restarts at the end of its current turn, so it loads new skills, plugins and hooks, and comes back as the same session, with its history.', other: '{n} sessions restart at the end of their current turn, so they load new skills, plugins and hooks, and come back as the same sessions, with their history.' })
     : t('No running session can be restarted now.');
   if (count) {
     const list = el('ul', 'session-list');
-    for (const r of plan.restart) { const item = el('li'); item.append(el('code', 'address', r.folder)); list.append(item); }
+    for (const r of plan.restart) {
+      const item = el('li', 'session-row'); const top = el('div', 'event-title');
+      const folder = el('strong', '', folderName(r.folder)); folder.title = r.folder;
+      top.append(folder, el('span', 'session-state', r.how === 'in_place' ? t('restarts in its own window') : t('comes back in a new Terminal window')));
+      item.append(top);
+      list.append(item);
+    }
     context.body.append(list);
   }
   if (plan.skipped.length) {
-    context.body.append(el('p', 'form-note', t('Left as they are:')));
+    context.body.append(el('h3', '', t('Left as they are')));
     const list = el('ul', 'session-list');
-    for (const r of plan.skipped) { const item = el('li'); item.append(el('code', 'address', r.folder), el('p', 'form-note', restartSkipText(r.reason))); list.append(item); }
+    for (const r of plan.skipped) { const item = el('li', 'session-row'); const folder = el('strong', '', folderName(r.folder)); folder.title = r.folder; item.append(folder, el('p', 'form-note', restartSkipText(r.reason))); list.append(item); }
     context.body.append(list);
   }
-  if (!count) return;
+  if (!count) { if (cancel) cancel.textContent = t('Close'); cancel?.focus(); return; }
   const confirm = submit(plural(count, { one: 'Restart {n} session', other: 'Restart {n} sessions' })); confirm.className = 'button primary'; context.actions.append(confirm);
-  context.form.addEventListener('submit', (event) => { event.preventDefault(); void dialogSave(context, () => adapter.sessionsRestartApply(plan.digest, 'Restarted from the Sessions page'), t('The restart started. Each session restarts when its current turn ends.')).then(() => loadSessionRows()); });
-  confirm.focus();
+  context.form.addEventListener('submit', (event) => {
+    event.preventDefault();
+    void (async () => {
+      context.error.textContent = ''; context.setBusy(true); clock.begin();
+      let started = false;
+      try {
+        await adapter.sessionsRestartApply(plan.digest, 'Restarted from the Sessions page');
+        started = true;
+        context.setBusy(false); context.close(); showNotice(t('The restart started. Each session restarts when its current turn ends.'));
+      } catch (failure) {
+        context.setBusy(false);
+        const message = safeError(failure);
+        // The sessions moved since the plan: a new plan replaces it, never the old one sent again.
+        if (message === RESTART_PLAN_STALE) { context.close(); void restartDialog(t('The sessions changed since the last plan, so this is a new one.')); return; }
+        context.error.textContent = t(message); context.error.tabIndex = -1; context.error.focus();
+      } finally { clock.end(); }
+      // Read only once the mutation clock ended, or the read is dropped as older than the change.
+      if (started) { await loadSessionRows(); restoreFocus(actFocus()); }
+    })();
+  });
+  // A restart of every session is a bulk act: focus starts on Cancel, as End's dialog does.
+  cancel?.focus();
 }
+const RESTART_PLAN_STALE = 'The sessions changed since that plan was made. Make a new plan, check it, then apply it.';
+const RESTART_UNSUPPORTED = 'Restarting sessions works on macOS and Linux for now.';
+const RESTART_NONE = 'No restart wave has run on this computer.';
 /** SB-395: ending a hosted session asks first: its work in progress stops. */
 function endSessionDialog(row: SessionRow, target: string | null) {
   const where = target ? t('on {machine}', { machine: target }) : t('on this computer');
-  const context = openDialog(t('End this session?'), t('The session in {folder} {where} stops now, with whatever it was doing. Its transcript stays, so it can be resumed later.', { folder: row.folder ?? '', where }));
+  const folder = row.folder ? folderName(row.folder) : t('an unknown folder');
+  const context = openDialog(t('End this session?'), t('The session in {folder} {where} stops now, with whatever it was doing. Its transcript stays, so it can be continued later.', { folder, where }), actFocus());
   const confirm = submit(t('End session')); confirm.className = 'button danger'; context.actions.append(confirm);
   context.form.addEventListener('submit', (event) => { event.preventDefault(); const id = row.launch_id!; void dialogSave(context, () => adapter.sessionEnd(id, target), t('The session ended.')).then(() => loadSessionRows()); });
   context.actions.querySelector('button')?.focus();

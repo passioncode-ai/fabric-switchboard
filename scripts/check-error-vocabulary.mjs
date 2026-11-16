@@ -168,13 +168,8 @@ const ALLOWLIST = {
   // Code's StopFailure hook; the CLI turns it into `registered: false`, the window never asks.
   'No saved account matches the stopped session.': 'StopFailure hook (CLI) only',
   'The stop could not be kept for later.': 'StopFailure hook (CLI) only, SB-397 W0.4 spool',
-  // SB-397 R1: restart waves answer the CLI and MCP only until the Sessions page's button (R1.6).
-  'The sessions changed since that plan was made. Make a new plan, check it, then apply it.': 'restart waves: CLI and MCP only until R1.6',
-  'A restart wave is already running. Wait for it to finish, or cancel it first.': 'restart waves: CLI and MCP only until R1.6',
-  'Say why the sessions restart, in a few words.': 'restart waves: CLI and MCP only until R1.6',
-  'No restart wave has run on this computer.': 'restart waves: CLI and MCP only until R1.6',
-  'The restart wave could not be saved.': 'restart waves: CLI and MCP only until R1.6',
-  'Restarting sessions works on macOS and Linux for now.': 'restart waves: CLI and MCP only until R1.6',
+  // SB-397 R1: what the window never sends (it always names a reason) or reads and ignores (no wave yet).
+  'Say why the sessions restart, in a few words.': 'restart waves: the window always names a reason and ignores a missing wave',
   'Give the session id and a hold end within seven days from now, or 0 to release it.': 'monitor hold: Fabric calls the CLI only (SB-399)',
   "Give the hold's reason as one short word: lowercase letters, digits and underscores.": 'monitor hold --reason: Fabric calls the CLI only (SB-399)',
   "The session's hold could not be saved.": 'monitor hold: Fabric calls the CLI only (SB-399)',

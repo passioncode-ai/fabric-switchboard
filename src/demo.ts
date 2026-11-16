@@ -4,7 +4,7 @@ import { EVENT_FILTER_KINDS, filterEvents, type EventKind } from './ui-logic';
 import { attribution, domainOrganization, domainSuggestion, groupAdmits, groupOrganizations, placementAdmits, providerOrganization, servesPool } from './ui-logic';
 import agentCatalogData from '../catalog/agents.json';
 import { version } from '../package.json';
-import type { PassioncodeStatus, Ceilings, CeilingView, CeilingQuestionView, Account, OrganizationGroupOffer, Adapter, AgentSetup, CurrentAccounts, ExternalIdentity, HermesModel, KimiAccounts, LoginInput, OpenrouterStatus, ProjectSuggestion, Snapshot, UpdateStatus, AgentRow, AgentsOverview, RecommendedModel, Chain, ChainExecutor, ChainScope, ChainStepView, LastHandover, ShellHookFile, ShellHookStatus, Onboarding, OnboardStep } from './types';
+import type { PassioncodeStatus, Ceilings, CeilingView, CeilingQuestionView, Account, OrganizationGroupOffer, Adapter, AgentSetup, CurrentAccounts, ExternalIdentity, HermesModel, KimiAccounts, LoginInput, OpenrouterStatus, ProjectSuggestion, Snapshot, UpdateStatus, AgentRow, AgentsOverview, RecommendedModel, Chain, ChainExecutor, ChainScope, ChainStepView, LastHandover, ShellHookFile, ShellHookStatus, Onboarding, OnboardStep, RestartWave } from './types';
 
 // Imported only after an explicit browser-only ?demo=1. No credentials are kept,
 // no network/CLI/vault calls exist, and all state disappears on page reload.
@@ -51,6 +51,8 @@ export function createDemoAdapter(): Adapter {
   let demoQuestions: CeilingQuestionView[] = [];
   // SB-388: one session in two processes, for Needs attention's Close the quiet copy.
   let demoDuplicate: string | null = 's-demo-dup';
+  /** SB-397 R1: the demo's restart wave, after *Restart all sessions…*. */
+  let demoWave: RestartWave | null = null;
   const ceilingView = (scope: ChainScope, cents: number, doubledFrom: number | null = null): CeilingView => ({ scope, cents, usd: cents / 100, set_at: now() - 7200, doubled_from: doubledFrom, active: true, inactive_reason: null });
   if (ceilingsParam === 'set' || ceilingsParam === 'reached') {
     Object.assign(openrouter, { saved: true, saved_at: now() - 86_400, model: 'moonshotai/kimi-k3.1-pro', credit: { label: 'demo', limit: 10, limit_remaining: 8.8, limit_reset: 'daily', usage: 31.2, usage_daily: 1.2, is_free_tier: false }, credit_error: null });
@@ -673,8 +675,9 @@ export function createDemoAdapter(): Adapter {
     async sessionEnd() { await pause(); return { ended: true }; },
     async sessionContinue(sessionId) { await pause(); return { continued: sessionId }; },
     async sessionsRestartPlan() { await pause(); return { restart: [{ session_id: 'demo-1', folder: '/Users/demo/DATA/app', caller: false, how: 'in_place' }, { session_id: 'demo-2', folder: '/Users/demo/DATA/site', caller: false, how: 'terminal' }], skipped: [{ session_id: 'demo-3', folder: '/Users/demo/DATA/api', reason: 'limit' }], caller: null, digest: 'd'.repeat(64), warning: '' }; },
-    async sessionsRestartApply() { await pause(); return { wave: 'demo-wave', restart: 2, skipped: 1 }; },
-    async sessionsRestartStatus() { await pause(); throw new Error('No restart wave has run on this computer.'); },
+    async sessionsRestartApply() { await pause(); demoWave = { wave: 'demo-wave', reason: 'Restarted from the Sessions page', at: Math.floor(Date.now() / 1000), done_at: null, caller: null, counts: { pending: 1, ending: 0, resuming: 0, back: 1, continuing: 0, failed: 0, cancelled: 0, skipped: 1 }, sessions: [{ session_id: 'demo-1', folder: '/Users/demo/DATA/app', state: 'back', reason: null, caller: false, how: 'in_place' }, { session_id: 'demo-2', folder: '/Users/demo/DATA/site', state: 'pending', reason: null, caller: false, how: 'terminal' }], skipped: [{ session_id: 'demo-3', folder: '/Users/demo/DATA/api', reason: 'limit' }] }; return { wave: 'demo-wave', restart: 2, skipped: 1 }; },
+    async sessionsRestartStatus() { await pause(); if (!demoWave) throw new Error('No restart wave has run on this computer.'); return structuredClone(demoWave); },
+    async sessionsRestartCancel(wave: string) { await pause(); if (demoWave && !demoWave.done_at) { const pending = demoWave.sessions.filter((x) => x.state === 'pending'); pending.forEach((x) => { x.state = 'cancelled'; }); demoWave.counts.pending = 0; demoWave.counts.cancelled = pending.length; demoWave.done_at = Math.floor(Date.now() / 1000); return { wave, cancelled: pending.length }; } return { wave, cancelled: 0 }; },
     async sessionTree() {
       const now = Math.floor(Date.now() / 1000);
       const task = (workflow: string | null, request: string | null = null) => ({ workflow, request, project: null });

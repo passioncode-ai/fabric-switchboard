@@ -1990,9 +1990,10 @@ export function machineCopyLine(copy: MachineCopy | null | undefined, reachable:
 export const SESSION_GROUPS: readonly SessionGroup[] = ['needs_you', 'running', 'waiting', 'ended'];
 export function sessionGroupTitle(group: SessionGroup): string {
   switch (group) {
-    case 'needs_you': return t('Needs you');
+    case 'needs_you': return t('Needs attention');
     case 'running': return t('Running now');
-    case 'waiting': return t('Waiting for quota');
+    // Quota and a session's own wake-up both wait here (SB-396 wave C).
+    case 'waiting': return t('Waiting');
     case 'ended': return t('Ended in the last day');
   }
 }
@@ -2011,6 +2012,7 @@ export function sessionWhyText(row: Pick<SessionRow, 'why' | 'quiet_minutes' | '
     case 'closed_idle_window': return t('Its window closed after an idle hour, can continue');
     case 'closed_duplicate': return t('Closed as a second copy');
     case 'closed_stuck': return t('Closed after it stopped making progress');
+    case 'closed_restart': return t('Ended by a restart and not back, can continue');
     case 'not_started': return t('Did not start');
     case 'exited': case 'ended': return t('Ended');
     case 'stopped': return t('Stopped');
@@ -2030,11 +2032,59 @@ export function machineReadText(status: MachineReadStatus): string {
   }
 }
 
+/** SB-395: a row's state colour follows its own state, not its group: working is ok, a stop or a
+ * second copy asks for a look, a process gone without an end is a fault, the rest is quiet. */
+export function sessionTone(why: string): 'ok' | 'warn' | 'danger' | 'muted' {
+  switch (why) {
+    case 'working': return 'ok';
+    case 'duplicate': case 'stuck': case 'ready_to_continue': case 'limit': case 'limit_stop': return 'warn';
+    case 'gone': case 'not_started': case 'timed_out': return 'danger';
+    default: return 'muted';
+  }
+}
+/** SB-395: what the rows of this computer could not include, said by what was not read. */
+export function sessionDegradedText(degraded: readonly string[]): string {
+  if (!degraded.length) return '';
+  const known = degraded.filter((d) => d === 'recovery');
+  const other = degraded.length - known.length;
+  const parts: string[] = [];
+  if (known.length) parts.push(t('Stops on a limit could not be read, so they are not listed.'));
+  if (other) parts.push(t('Part of this list could not be read, so some sessions may be missing.'));
+  return parts.join(' ');
+}
+/** SB-397 R1: one session of a restart wave, in words. */
+export function restartStateText(state: string, reason: string | null): string {
+  switch (state) {
+    case 'pending': return t('Waiting for its turn to end');
+    case 'ending': return t('Ending');
+    case 'resuming': return t('Coming back');
+    case 'back': return t('Came back');
+    case 'continuing': return t('Back and working');
+    case 'cancelled': return t('Left as it was');
+    case 'skipped': return reason === 'still_busy' ? t('Left as it was: busy for a day') : t('Left as it was: it changed after the plan');
+    case 'failed': return restartFailureText(reason);
+    default: return t('State unknown');
+  }
+}
+function restartFailureText(reason: string | null): string {
+  switch (reason) {
+    case 'not_back': return t('Not back five minutes after it ended');
+    case 'still_running': return t('Not back: its old process did not end');
+    case 'host_refused': case 'host_gone': return t('Not back: its window could not restart it');
+    case 'not_started': case 'not_written': return t('Not back: the Terminal window did not open');
+    case 'cannot_resume': return t('Not back: its folder or history is gone');
+    default: return t('Not back');
+  }
+}
+export function restartTone(state: string): 'ok' | 'warn' | 'danger' | 'muted' {
+  return state === 'back' || state === 'continuing' ? 'ok' : state === 'failed' ? 'danger' : 'muted';
+}
+
 /** SB-397 R1: why a restart wave leaves a session as it is. */
 export function restartSkipText(reason: string): string {
   switch (reason) {
     case 'limit': return t('stopped on a limit; it resumes when an account has room');
-    case 'has_waits': return t('waiting on a wake-up or a schedule it set');
+    case 'has_waits': return t('waiting on a wake-up or a schedule it set, or held by another tool');
     case 'duplicate': return t('runs in two processes');
     case 'console_not_hosted': return t('a Fabric Dashboards console');
     case 'host_too_old': return t('its window predates restarts in place');

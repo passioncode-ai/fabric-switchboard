@@ -80,9 +80,10 @@ export const nativeAdapter: Adapter = {
   sessionAttach: (launchId, target) => invoke('session_attach', { launchId, target: target ?? null }),
   sessionEnd: (launchId, target) => invoke('session_end', { launchId, target: target ?? null }),
   sessionContinue: (sessionId) => invoke('session_continue', { sessionId }),
-  sessionsRestartPlan: () => invoke('sessions_restart_plan'),
+  sessionsRestartPlan: () => readWithDeadline(invoke('sessions_restart_plan')),
   sessionsRestartApply: (digest, reason) => invoke('sessions_restart_apply', { digest, reason }),
-  sessionsRestartStatus: () => invoke('sessions_restart_status'),
+  sessionsRestartStatus: () => readWithDeadline(invoke('sessions_restart_status')),
+  sessionsRestartCancel: (wave) => invoke('sessions_restart_cancel', { wave }),
   sessionCloseCopy: (sessionId, pid) => invoke('session_close_copy', { sessionId, pid: pid ?? null }),
   capacity: (change) => invoke('capacity', { cap: change?.cap ?? null, clear: change?.clear ?? false }),
   duty: (change) => invoke('duty', { on: change?.on ?? null, run: change?.run ?? false }),
@@ -165,6 +166,12 @@ export const nativeAdapter: Adapter = {
 // raw provider output, credentials, filesystem paths, or serialized error objects.
 const safeErrors = new Set([
   // SB-395, SB-396: the Sessions page's acts.
+  // SB-397 R1: refusals of a restart the window shows (the stale plan is answered with a new one).
+  "The sessions changed since that plan was made. Make a new plan, check it, then apply it.",
+  "A restart wave is already running. Wait for it to finish, or cancel it first.",
+  "The restart wave could not be saved.",
+  "Restarting sessions works on macOS and Linux for now.",
+  "No restart wave has run on this computer.",
   "The switchboard command was not found next to this app, so the session cannot be opened here. Reinstall Switchboard, then retry.",
   "A session host runs on macOS and Linux for now.",
   "Switchboard has no record of that session. Refresh the list, then retry.",
