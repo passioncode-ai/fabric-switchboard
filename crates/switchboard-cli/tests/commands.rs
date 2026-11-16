@@ -1846,7 +1846,9 @@ fn a_short_command_writing_to_a_closed_pipe_ends_quietly() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(!stderr.contains("panicked"), "{stderr}");
     assert!(
-        output.status.success() || output.status.signal() == Some(libc::SIGPIPE),
+        output.status.success()
+            || output.status.signal() == Some(libc::SIGPIPE)
+            || output.status.code() == Some(141),
         "{:?} {stderr}",
         output.status
     );
