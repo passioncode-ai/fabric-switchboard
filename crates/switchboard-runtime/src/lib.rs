@@ -1261,6 +1261,8 @@ pub struct Runtime {
 pub(crate) struct BalanceWatch {
     settings: Option<balancing::Settings>,
     last_pass: i64,
+    /// WF-5.2e: when a request last found its group out of room; a pass after it runs early.
+    exhausted_at: i64,
     last: Option<Value>,
 }
 #[derive(Default)]
@@ -3004,7 +3006,14 @@ impl Runtime {
         watch.settings = Some(settings.clone());
         Ok(settings)
     }
-    /// SB-352 (DEC-0012): one balancing pass, at most every 15 minutes, and only while groups
+    /// WF-5.2e (SB-367): a group ran out of room just now; the next pass may run early.
+    pub(crate) fn balance_soon(&self, time: i64) {
+        if let Ok(mut watch) = self.balancing.lock() {
+            watch.exhausted_at = time;
+        }
+    }
+    /// SB-352 (DEC-0012): one balancing pass, at most every 15 minutes (WF-5.2e: every minute
+    /// after a request found its group out of room), and only while groups
     /// are chosen or an account is still lent. With balancing off it reads nothing after the
     /// first look. The decision is `balancing::plan`; the moves run under the owner transaction,
     /// and only when the settings did not change since the pass read them.
@@ -3013,10 +3022,7 @@ impl Runtime {
             let Ok(mut watch) = self.balancing.lock() else {
                 return;
             };
-            if watch.last_pass != 0
-                && time >= watch.last_pass
-                && time - watch.last_pass < balancing::PASS_SECONDS
-            {
+            if !balancing::pass_due(watch.last_pass, watch.exhausted_at, time) {
                 return;
             }
             watch.last_pass = time;
@@ -3470,7 +3476,7 @@ impl Owner {
     /// The one shutdown every quit path runs (lifecycle LC-01): no new background pass or
     /// request starts; the pass and the operation in flight — a renewal must store the token
     /// the provider just returned — get until `deadline`; the proxy lets its streams finish
-    /// inside what is left (at most two seconds); pending timestamps are written; the
+    /// inside what is left of the deadline (WF-5.2f C8; before, at most two seconds); pending timestamps are written; the
     /// descriptor is removed. Returns once the store's lock is free, or at the deadline.
     pub async fn shutdown(self, deadline: std::time::Duration) -> Stopped {
         let started = std::time::Instant::now();
@@ -3499,10 +3505,9 @@ impl Owner {
             drained &= runtime.refresh.grants_ended(left(deadline)).await;
             refresh::adopt_all_kept(&runtime.store, &runtime.refresh);
         }
-        drained &= runtime
-            .proxy
-            .stop(left(std::time::Duration::from_secs(2)))
-            .await;
+        // WF-5.2f C8 (SB-367): a response still streaming gets what is left of the drain's
+        // deadline, as every other part does; two seconds cut 36 streams in 30 days.
+        drained &= runtime.proxy.stop(left(deadline)).await;
         // SB-143: no Codex should be pointed at a proxy that is gone.
         runtime.codex_route_sync(false);
         runtime.absorb_statistics();
@@ -7558,7 +7563,10 @@ async fn execute(
             let folders = stats.folders();
             let index =
                 blocking::run(|| statistics::ProjectIndex::build(&snapshot).with_strays(&folders));
-            Ok(stats.report(&snapshot, &index, days, monitor::now()))
+            let mut report = stats.report(&snapshot, &index, days, monitor::now());
+            // WF-5.3 (SB-367): how automatic switching and limit stops went this week.
+            report["switching"] = digest::switching_shares(root, monitor::now(), 7);
+            Ok(report)
         }
         Operation::SettingsExport { sign, groups } => {
             let mut bundle = settings_bundle::scope(

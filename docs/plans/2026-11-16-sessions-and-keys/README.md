@@ -33,7 +33,9 @@ MacBook unless the row says otherwise.
 | 9 | 11-16 03:03 | dissy, playsign, clawdbot in the Apps & Soft group | They already were | `switchboard_project_context` | done |
 | 10 | 11-16 03:11 | Hermes on Appvillis's or the operator's own Anthropic key, as an option | `agents anthropic`, `agents launch --anthropic` (SB-390) | PR #754, 0.7.101 | done; waits on a key (K-0) |
 | 11 | 11-16 11:35 | The sound engine in the Apps group | `~/DATA/sound-engine` added to Apps & Soft | `switchboard_project_context` | done |
-| 12 | 11-16 11:35 | Validate sessions, analyse, refactor, this spec, key choice | This plan | below | in progress |
+| 12 | 11-16 11:35 | Validate sessions, analyse, refactor, this spec, key choice | This plan | below | waves 1 and 2 |
+| 13 | 11-16 12:00 | test-stand-agent into Agents, nothing else left out | 20 agent repositories moved into Agents | `switchboard_project_context` | done |
+| 14 | 11-16 12:05 | Monitoring of agents' errors across every organization; repair agents; updates, environment, security | [agent health](../../research/2026-11-16-agent-health-estate.md), `switchboard health` (SB-393) | 0.7.102; board thread `d9622c6f` | Switchboard's part done; the estate's parts with their owners |
 
 Open from row 2 (window and fleet), each with its own module file and board row:
 
@@ -125,7 +127,7 @@ a release, the update on this MacBook and a check of what the wave claims on the
 
 | Wave | Content | State |
 |---|---|---|
-| 1 | S-1 wake-up floor; K-1, K-2, K-3; backlog hygiene; branch cleanup; this spec | in progress |
-| 2 | W4 item 4 (reads off the store lock), item 9 (tree cached per change); WF-5 5.2e, 5.2f C8, 5.3 | next |
+| 1 | S-1 wake-up floor; K-1, K-2, K-3; backlog hygiene; branch cleanup; this spec; `switchboard health` (SB-393) | released 0.7.102 (PR #757) |
+| 2 | W4 item 9 (tree read kept 15 s); WF-5 5.2e, 5.2f C8, 5.3; item 4 filed as SB-394 | branch `wave2` |
 | 3 | SB-391 re-pin to DEC-0177 | after wave 2 |
 | Waits | K-0 (a person creates API keys); WF-9, WF-10.2 and 10.3, WF-12; SB-385, SB-387 `task`, SB-353 *stalled*, SB-383, SB-350 | owners named above |
