@@ -5295,8 +5295,18 @@ async fn execute(
             let snapshot = store.snapshot()?;
             let blocked = rt.limits.recovery_blocked(&snapshot, time);
             let capped = rt.limits.capped_ids(time);
+            // SB-396 D7: a session that still runs in a process is never started a second time.
+            let live = blocking::run(|| machine_sessions::live_sessions(root));
             let claimed = recovery::claim(
-                root, &event, &account, &snapshot, &blocked, &capped, &sign_in, time,
+                root,
+                &event,
+                &account,
+                &snapshot,
+                &blocked,
+                &capped,
+                &sign_in,
+                &|session| live.contains_key(session),
+                time,
             )?;
             Ok(json!({"claimed": claimed, "resumed": false}))
         }

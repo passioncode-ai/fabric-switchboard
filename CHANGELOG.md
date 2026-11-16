@@ -8,6 +8,8 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- A session stopped on a limit is no longer probed on an account that a fresh reading shows full until a known reset: it waits for the reset instead of stopping again every few minutes; and a stop whose session still runs is never started a second time, whichever app asks (SB-396).
+
 ## 0.7.105
 
 - A session that waits on something it set up itself (a wake-up, a monitor, a cron job) is never closed while it waits: the plugin's hooks tell Switchboard when the wait ends, and the Sessions page shows it as waiting. A cron job with no end holds its session six hours after its last turn; a session closed after that can be continued as itself (SB-396).
