@@ -1021,7 +1021,7 @@ mod tests {
             "a cron job has no end"
         );
         assert!(!holds_wait(root.path(), "S2", 0));
-        crate::monitors::hold(root.path(), "S2", 500, 0).unwrap();
+        crate::monitors::hold(root.path(), "S2", 500, 0, None).unwrap();
         assert!(
             holds_wait(root.path(), "S2", 100),
             "a held session is left out of a wave"

@@ -8,6 +8,8 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- `switchboard monitor hold` takes an optional `--reason` (for example `fabric_claim`), so Fabric can name why it holds a session; and a hold is no longer lost by a session host of an earlier version when a later one adds a field to the session's record (SB-399).
+
 ## 0.7.109
 
 - Restart every running Claude Code session, for example so it loads new skills: `switchboard sessions restart plan`, then `apply` (MCP `switchboard_sessions_restart_plan` and `_apply`). Each session restarts only at the end of its current turn and comes back as itself; a session in a session host restarts inside it and its windows stay attached; sessions stopped on a limit or waiting on something they set up are left alone; the session that asked restarts last and is told how the others came back; Switchboard watches each one until it is back (SB-397).

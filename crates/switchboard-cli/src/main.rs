@@ -1056,6 +1056,10 @@ enum MonitorCmd {
         /// Until when, Unix seconds, at most seven days ahead; 0 releases the hold.
         #[arg(long)]
         until: i64,
+        /// Why it is held, one short word (`fabric_claim` for a Fabric task's claim): echoed in
+        /// the answer and logged as a code.
+        #[arg(long)]
+        reason: Option<String>,
     },
 }
 #[derive(Subcommand)]
@@ -2531,12 +2535,23 @@ async fn run(cli: &Cli) -> Result<Value, String> {
             command: MonitorCmd::Hook,
         } => return Ok(monitor_hook(&root)),
         Command::Monitor {
-            command: MonitorCmd::Hold { session, until },
+            command:
+                MonitorCmd::Hold {
+                    session,
+                    until,
+                    reason,
+                },
         } => {
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map_or(0, |d| d.as_secs() as i64);
-            return switchboard_runtime::monitors::hold(&root, session, *until, now);
+            return switchboard_runtime::monitors::hold(
+                &root,
+                session,
+                *until,
+                now,
+                reason.as_deref(),
+            );
         }
         Command::Machines { command } => match command {
             MachinesCmd::List { live } => Operation::Machines { live: *live },

@@ -80,7 +80,14 @@ fn seed(root: &Path, home: &Path) {
                 "at": at, "by": by}),
         );
     }
-    switchboard_runtime::monitors::hold(root, "held-by-fabric", now + 3600, now).unwrap();
+    switchboard_runtime::monitors::hold(
+        root,
+        "held-by-fabric",
+        now + 3600,
+        now,
+        Some("fabric_claim"),
+    )
+    .unwrap();
     switchboard_runtime::capacity::set(root, Some(12)).unwrap();
 }
 
