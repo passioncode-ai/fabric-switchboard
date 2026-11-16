@@ -6,6 +6,7 @@ pub mod agent_keys;
 pub mod agent_settings;
 pub mod agents;
 pub mod analytics;
+pub mod anthropic_keys;
 pub mod app_doors;
 pub mod attention;
 pub mod attribution;
@@ -963,6 +964,30 @@ pub enum Operation {
         via: AgentVia,
         #[serde(default)]
         model: Option<String>,
+        /// SB-390: with `via: anthropic`, the name of the saved Anthropic key.
+        #[serde(default)]
+        key: Option<String>,
+    },
+    /// SB-390: the saved Anthropic keys by name, never a value.
+    AnthropicKeys,
+    /// SB-390: saves an Anthropic API key under `name` (the CLI pipes it on stdin; the window and
+    /// MCP never send one).
+    AnthropicKeySet {
+        name: String,
+        key: String,
+        #[serde(default)]
+        model: Option<String>,
+    },
+    AnthropicKeyModel {
+        name: String,
+        model: String,
+    },
+    AnthropicKeyRemove {
+        name: String,
+    },
+    /// SB-390: the key's value, for a session script's `export`; only the CLI asks for it.
+    AnthropicKeyValue {
+        name: String,
     },
     ApplyProject {
         path: PathBuf,
@@ -1035,6 +1060,8 @@ pub enum AgentVia {
     Proxy,
     /// The operator's saved OpenRouter key; no proxy, pool or account.
     Openrouter,
+    /// SB-390: an Anthropic API key saved by name (`key`); no proxy, pool or account.
+    Anthropic,
 }
 
 /// The ordinary CLI sign-in: read by capture/current/rotation, written only by activation.
@@ -1453,6 +1480,9 @@ impl Runtime {
                 | Operation::AgentKey
                 | Operation::AgentKeyStatus { .. }
                 | Operation::AgentKeyValue { .. }
+                // SB-390: its own small file and a vault read.
+                | Operation::AnthropicKeys
+                | Operation::AnthropicKeyValue { .. }
                 | Operation::AgentKeys { .. }
                 | Operation::KimiAccounts
                 | Operation::HermesModel
@@ -5587,6 +5617,39 @@ async fn execute(
         Operation::LaunchAgent {
             agent,
             working_directory,
+            via: AgentVia::Anthropic,
+            model,
+            key,
+            ..
+        } => {
+            // SB-390: no ceiling counts an Anthropic key (Anthropic offers no read of its spend).
+            let key = key.ok_or(anthropic_keys::NO_KEY)?;
+            let root = root.to_owned();
+            blocking::run(move || {
+                launch::launch_agent_anthropic(
+                    &root,
+                    &agent,
+                    &key,
+                    model.as_deref(),
+                    &working_directory,
+                    launch::start_terminal,
+                )
+            })
+        }
+        Operation::AnthropicKeys => anthropic_keys::list(root),
+        Operation::AnthropicKeySet { name, key, model } => {
+            anthropic_keys::set(root, &store, &name, &key, model.as_deref(), monitor::now())
+        }
+        Operation::AnthropicKeyModel { name, model } => {
+            anthropic_keys::set_model(root, &name, &model)
+        }
+        Operation::AnthropicKeyRemove { name } => anthropic_keys::remove(root, &store, &name),
+        Operation::AnthropicKeyValue { name } => {
+            Ok(json!({"key": anthropic_keys::value(root, &store, &name)?}))
+        }
+        Operation::LaunchAgent {
+            agent,
+            working_directory,
             via: AgentVia::Openrouter,
             model,
             ..
@@ -8824,6 +8887,7 @@ mod owner_tests {
             working_directory: repo.path().to_owned(),
             via: AgentVia::Proxy,
             model: None,
+            key: None,
         };
         assert_eq!(
             runtime.execute(launch("goose")).await.unwrap_err(),

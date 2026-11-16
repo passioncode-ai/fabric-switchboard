@@ -1578,28 +1578,40 @@ enum AgentsCommand {
         #[command(subcommand)]
         command: OpenrouterCommand,
     },
+    /// Anthropic API keys agents run on directly, each under a name you choose (`appvillis`,
+    /// `personal`); `agents launch hermes --anthropic <name>` picks one.
+    Anthropic {
+        #[command(subcommand)]
+        command: AnthropicCommand,
+    },
     /// Hermes's model and provider (its own config); `set` changes them with `hermes config set`.
     Hermes {
         #[command(subcommand)]
         command: Option<HermesCommand>,
     },
     /// Start an agent in a folder in Terminal: on the group's API-key account through the
-    /// proxy, or with `--openrouter` on the saved OpenRouter key.
+    /// proxy, with `--openrouter` on the saved OpenRouter key, or with `--anthropic <name>` on the
+    /// Anthropic key saved under that name (Hermes).
+    #[command(group = clap::ArgGroup::new("key_source").args(["openrouter", "anthropic"]).multiple(false))]
     Launch {
         /// The agent's catalog id (`switchboard agents list`).
         agent: String,
-        /// The group id whose API-key account it uses (not with `--openrouter`).
-        #[arg(long, default_value = "default", conflicts_with = "openrouter")]
+        /// The group id whose API-key account it uses (not with `--openrouter` or `--anthropic`).
+        #[arg(long, default_value = "default", conflicts_with_all = ["openrouter", "anthropic"])]
         pool: String,
         /// The absolute folder it starts in; default: the current folder.
         #[arg(long)]
         dir: Option<PathBuf>,
         /// Run on the OpenRouter key saved with `switchboard agents openrouter set`.
-        #[arg(long)]
+        #[arg(long, conflicts_with = "anthropic")]
         openrouter: bool,
-        /// The OpenRouter model for this launch, such as `moonshotai/kimi-k2`; default: the key's
-        /// model.
-        #[arg(long, requires = "openrouter")]
+        /// Run on the Anthropic key saved under this name (`switchboard agents anthropic set
+        /// <name>`), such as `appvillis` or `personal`.
+        #[arg(long, value_name = "NAME")]
+        anthropic: Option<String>,
+        /// The model for this launch: an OpenRouter id such as `moonshotai/kimi-k2`, or with
+        /// `--anthropic` an Anthropic id such as `claude-sonnet-5-5`; default: the key's model.
+        #[arg(long, requires = "key_source")]
         model: Option<String>,
     },
 }
@@ -1712,6 +1724,40 @@ enum OpenrouterCommand {
     },
     /// Every saved key with the group it is for, and the groups without one.
     List,
+}
+#[derive(Subcommand)]
+enum AnthropicCommand {
+    /// The saved keys by name with their default models; never a key.
+    List,
+    /// Save the key piped on stdin (`sk-ant-api…`) under a name; it goes to the OS vault, never to
+    /// a file. Saving again under the same name replaces it.
+    Set {
+        /// The key's name, such as `appvillis` or `personal`.
+        name: String,
+        /// The model agents start on, an Anthropic id such as `claude-sonnet-5-5`.
+        #[arg(long)]
+        model: Option<String>,
+        /// Read the key from piped stdin. Interactive input is refused (no echo).
+        #[arg(long, required = true)]
+        key_stdin: bool,
+    },
+    /// Change a key's default model.
+    Model {
+        /// The key's name.
+        name: String,
+        /// An Anthropic model id, such as `claude-sonnet-5-5`.
+        model: String,
+    },
+    /// Remove a key from Switchboard and the OS vault.
+    Remove {
+        /// The key's name.
+        name: String,
+    },
+    /// Print a key, for a session script's `export`; never to paste anywhere.
+    Key {
+        /// The key's name.
+        name: String,
+    },
 }
 #[derive(Subcommand)]
 enum Backup {
@@ -3026,6 +3072,24 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                     service: "openrouter".into(),
                 },
             },
+            AgentsCommand::Anthropic { command } => match command {
+                AnthropicCommand::List => Operation::AnthropicKeys,
+                AnthropicCommand::Set { name, model, .. } => Operation::AnthropicKeySet {
+                    name: name.clone(),
+                    key: read_secret()?,
+                    model: model.clone(),
+                },
+                AnthropicCommand::Model { name, model } => Operation::AnthropicKeyModel {
+                    name: name.clone(),
+                    model: model.clone(),
+                },
+                AnthropicCommand::Remove { name } => {
+                    Operation::AnthropicKeyRemove { name: name.clone() }
+                }
+                AnthropicCommand::Key { name } => {
+                    Operation::AnthropicKeyValue { name: name.clone() }
+                }
+            },
             AgentsCommand::Hermes {
                 command: None | Some(HermesCommand::Status),
             } => Operation::HermesModel,
@@ -3040,17 +3104,21 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                 pool,
                 dir,
                 openrouter,
+                anthropic,
                 model,
             } => Operation::LaunchAgent {
                 agent: agent.clone(),
                 pool: pool.clone(),
                 working_directory: folder(dir)?,
-                via: if *openrouter {
+                via: if anthropic.is_some() {
+                    AgentVia::Anthropic
+                } else if *openrouter {
                     AgentVia::Openrouter
                 } else {
                     AgentVia::Proxy
                 },
                 model: model.clone(),
+                key: anthropic.clone(),
             },
         },
         Command::Kimi { command } => match command {
@@ -4719,6 +4787,30 @@ fn print_result(value: &Value, cli: &Cli) {
         } => println!("{}", text(&value["key"])),
         Command::Agents {
             command:
+                AgentsCommand::Anthropic {
+                    command: AnthropicCommand::Key { .. },
+                },
+        } => println!("{}", text(&value["key"])),
+        Command::Agents {
+            command:
+                AgentsCommand::Anthropic {
+                    command: AnthropicCommand::List,
+                },
+        } => {
+            let keys = value["keys"].as_array().cloned().unwrap_or_default();
+            if keys.is_empty() {
+                println!("No Anthropic key is saved.");
+            }
+            for key in keys {
+                println!(
+                    "{} · model {}",
+                    text(&key["name"]),
+                    key["model"].as_str().unwrap_or("not set")
+                );
+            }
+        }
+        Command::Agents {
+            command:
                 AgentsCommand::Openrouter {
                     command: OpenrouterCommand::Status { .. },
                 },
@@ -5507,6 +5599,11 @@ mod mcp_parity {
             "agents openrouter list",
             Tool("switchboard_openrouter_status"),
         ),
+        ("agents anthropic list", Tool("switchboard_anthropic_keys")),
+        ("agents anthropic model", Tool("switchboard_anthropic_keys")),
+        ("agents anthropic set", Not(PERSON)),
+        ("agents anthropic remove", Not(PERSON)),
+        ("agents anthropic key", Not(PERSON)),
         ("agents hermes status", Tool("switchboard_hermes_status")),
         ("agents hermes set", Tool("switchboard_hermes_set")),
         ("agents launch", Not(LAUNCH)),

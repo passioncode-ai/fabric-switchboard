@@ -48,6 +48,8 @@ const OWNED: &[&str] = &[
     "duty.json",
     "duty.jsonl",
     "duty",
+    // The names of the Anthropic keys agents run on (SB-390); their vault items are deleted below.
+    "anthropic-keys.json",
     // The owner's run and the crashes found at its starts (SB-379 W3 part 2).
     "owner-run.json",
     "bugs.jsonl",
@@ -323,6 +325,11 @@ pub fn uninstall_with(
     if let Some(item) = crate::inbox::vault_item(root) {
         if let Err(error) = vault.delete(&item) {
             failures.push(json!({"item": "fabric_inbox_key", "error": error}));
+        }
+    }
+    for item in crate::anthropic_keys::vault_items(root) {
+        if let Err(error) = vault.delete(&item) {
+            failures.push(json!({"item": "anthropic_key", "error": error}));
         }
     }
     if let Some(item) = crate::settings_signing::vault_item(root) {
