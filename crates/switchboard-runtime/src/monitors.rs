@@ -307,7 +307,7 @@ mod tests {
             Err(HOLD_INVALID.into())
         );
         assert_eq!(
-            hold(root.path(), "../x", 2000, 1000),
+            hold(root.path(), "../x", 2000, 1000, None),
             Err(HOLD_INVALID.into())
         );
         // A hook that comes after keeps the hold.
