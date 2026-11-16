@@ -1075,6 +1075,7 @@ enum MachinesCmd {
     /// Sign another machine's challenge with this computer's key. Run by that machine over ssh.
     #[command(hide = true)]
     Prove {
+        /// The other machine's challenge: 64 hexadecimal characters.
         #[arg(long)]
         nonce: String,
     },
