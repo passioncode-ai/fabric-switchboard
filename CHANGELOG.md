@@ -8,6 +8,8 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+## 0.7.103
+
 - Balancing lends an account within a minute after a request found its group out of room, instead of waiting for the next quarter hour (WF-5.2e, SB-367).
 
 - Statistics shows how automatic switching went over the last seven days: the share of switches that failed and the share of sessions stopped on a limit that were resumed, from the daily operations digests (WF-5.3, SB-367).
