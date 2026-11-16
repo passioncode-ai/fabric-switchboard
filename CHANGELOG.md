@@ -8,6 +8,8 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+## 0.7.104
+
 - Before moving an account, calling one back, reading or checking another machine, carrying settings there or starting a run there, Switchboard has that machine sign a fresh challenge with its own key. The first answer is trusted; if the same name later answers with another key (a machine that changed hands, an ssh name pointed elsewhere), nothing is sent and the refusal says how to trust the new key: `switchboard machines trust <machine> --key <key>`, with the key `switchboard settings signer` prints there. `switchboard machines keys` lists the keys trusted (SB-357).
 
 - Usage counts follow the PassionCode contract's DEC-0157: they leave only after the window has shown the notice (a background start queues them); the notice now names this computer's installation number, which the PassionCode.ai apps share, and the session number; an off another PassionCode.ai app recorded before Switchboard's first send is read as your earlier no, and Settings says so; Settings says "On, but nothing is sent" when the shared file cannot be read; through MCP the switch needs the operator's relayed words (SB-385).
