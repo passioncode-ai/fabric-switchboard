@@ -16,6 +16,8 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 - `sessions --tree` (and the window, Fabric Dashboards) reuses a scan of this machine's sessions younger than 15 seconds instead of scanning again on every call; closing a duplicate's copy reads anew (perf audit item 9).
 
+- Folder attribution reads secrets as the PassionCode contract does since DEC-0177 and DEC-0151: a repository remote whose user name is a token is not recorded, and a provider key counts only in its canonical case, so names such as `helpdesk-customer-support` or `sk-learn-experiments` are no longer taken for keys (SB-391).
+
 ## 0.7.102
 
 - An agent's launch dialog lists the keys it can start on, by name: the OpenRouter key a launch in the chosen folder spends (the group's own, else this computer's), the other OpenRouter keys with the group that uses them, and for Hermes the saved Anthropic keys; also `switchboard agents launch-keys <agent>` and MCP `switchboard_launch_keys`. Saving an Anthropic Admin key is refused with words that say it cannot run a model (SB-392).
