@@ -1,0 +1,35 @@
+//! Fabric Sessions' core (SB-397): the code that owns coding sessions apart from every app. In
+//! W1 the session modules move here from `switchboard-runtime`, one seam at a time, and Switchboard
+//! uses them through this crate; nothing here may depend on a `switchboard-*` crate (D-2), so the
+//! service runs on a machine without Switchboard. Plan: `docs/plans/2026-11-16-session-service/`.
+
+/// This crate's version, which Fabric Sessions reports as its own.
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+/// The wall clock in Unix seconds (D-2: Switchboard's `monitor::now`, moved as `clock::now`).
+pub mod clock {
+    /// Seconds since the Unix epoch; 0 for a clock set before it.
+    pub fn now() -> i64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn the_clock_reads_seconds_after_2026() {
+        assert!(super::clock::now() > 1_767_225_600, "2026-01-01 or later");
+    }
+
+    #[test]
+    fn the_version_is_the_crates_own() {
+        assert_eq!(super::VERSION, env!("CARGO_PKG_VERSION"));
+        assert!(
+            !super::VERSION.starts_with("0.7."),
+            "not Switchboard's version"
+        );
+    }
+}
