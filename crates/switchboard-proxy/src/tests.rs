@@ -780,6 +780,54 @@ async fn a_stream_idle_past_the_read_timeout_is_cut_and_journaled_as_aborted() {
     p.shutdown().await;
     up.abort();
 }
+#[tokio::test]
+async fn a_stop_with_a_longer_budget_lets_a_three_second_stream_finish() {
+    // WF-5.2f C8 (SB-367): the owner's drain now gives streams what is left of its 8 s, not 2 s.
+    let (_r, s) = store();
+    let a = add(&s, Provider::Claude, AuthKind::ApiKey, "a", "synthetic");
+    s.select(Provider::Claude, "default", &a.id).unwrap();
+    let (url, up) = fixture(Router::new().route(
+        "/v1/messages",
+        post(|| async {
+            let stream = futures_util::stream::unfold(0, |step| async move {
+                match step {
+                    0 => Some((
+                        Ok::<_, std::io::Error>(Bytes::from_static(b"data: first\n\n")),
+                        1,
+                    )),
+                    1 => {
+                        tokio::time::sleep(Duration::from_secs(3)).await;
+                        Some((Ok(Bytes::from_static(b"data: last\n\n")), 2))
+                    }
+                    _ => None,
+                }
+            });
+            Response::builder()
+                .header("content-type", "text/event-stream")
+                .body(Body::from_stream(stream))
+                .unwrap()
+        }),
+    ))
+    .await;
+    let p = start_with(s.clone(), url, timeouts(Duration::from_secs(10))).await;
+    let mut response = request(&p, "claude").await;
+    assert_eq!(response.status(), 200);
+    let reader = tokio::spawn(async move {
+        let mut received = Vec::new();
+        while let Ok(Some(chunk)) = response.chunk().await {
+            received.extend_from_slice(&chunk);
+        }
+        String::from_utf8(received).unwrap()
+    });
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert!(
+        p.stop(Duration::from_secs(8)).await,
+        "the stream ended inside the budget"
+    );
+    let text = reader.await.unwrap();
+    assert!(text.contains("first") && text.contains("last"), "{text}");
+    up.abort();
+}
 #[test]
 fn default_timeouts_bound_connect_and_idle_but_not_the_whole_stream() {
     let t = Timeouts::default();

@@ -3470,7 +3470,7 @@ impl Owner {
     /// The one shutdown every quit path runs (lifecycle LC-01): no new background pass or
     /// request starts; the pass and the operation in flight — a renewal must store the token
     /// the provider just returned — get until `deadline`; the proxy lets its streams finish
-    /// inside what is left (at most two seconds); pending timestamps are written; the
+    /// inside what is left of the deadline (WF-5.2f C8; before, at most two seconds); pending timestamps are written; the
     /// descriptor is removed. Returns once the store's lock is free, or at the deadline.
     pub async fn shutdown(self, deadline: std::time::Duration) -> Stopped {
         let started = std::time::Instant::now();
@@ -3499,10 +3499,9 @@ impl Owner {
             drained &= runtime.refresh.grants_ended(left(deadline)).await;
             refresh::adopt_all_kept(&runtime.store, &runtime.refresh);
         }
-        drained &= runtime
-            .proxy
-            .stop(left(std::time::Duration::from_secs(2)))
-            .await;
+        // WF-5.2f C8 (SB-367): a response still streaming gets what is left of the drain's
+        // deadline, as every other part does; two seconds cut 36 streams in 30 days.
+        drained &= runtime.proxy.stop(left(deadline)).await;
         // SB-143: no Codex should be pointed at a proxy that is gone.
         runtime.codex_route_sync(false);
         runtime.absorb_statistics();

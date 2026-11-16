@@ -210,8 +210,49 @@ pub fn assemble(scan: &Value, records: &[Value], pairs: &[(String, u32)], now: i
     })
 }
 
+type Read = (Value, Vec<Value>, Vec<(String, u32)>);
+/// Perf audit item 9: the last read (process scan, launch records, session pairs) with its time
+/// and data folder. A read under load takes seconds; Fabric Dashboards and the window ask for the
+/// tree every few seconds, so a read younger than `READ_FRESH` seconds answers them, and the
+/// one-minute watch always reads anew and leaves its read here.
+static LAST_READ: std::sync::Mutex<Option<(i64, std::path::PathBuf, Read)>> =
+    std::sync::Mutex::new(None);
+const READ_FRESH: i64 = 15;
+
+fn read_cached(root: &Path, now: i64) -> Read {
+    if let Ok(last) = LAST_READ.lock() {
+        if let Some((at, folder, read)) = last.as_ref() {
+            if usable(*at, folder, root, now) {
+                return read.clone();
+            }
+        }
+    }
+    read_fresh(root, now)
+}
+
+/// A kept read answers only for the same data folder, within `READ_FRESH` seconds, never from the
+/// future (a clock set back).
+fn usable(at: i64, folder: &Path, root: &Path, now: i64) -> bool {
+    folder == root && (0..READ_FRESH).contains(&(now - at))
+}
+
+/// After an act that changes the live sessions (a copy closed), the next tree reads anew.
+fn invalidate() {
+    if let Ok(mut last) = LAST_READ.lock() {
+        *last = None;
+    }
+}
+
+fn read_fresh(root: &Path, now: i64) -> Read {
+    let fresh = read(root, now);
+    if let Ok(mut last) = LAST_READ.lock() {
+        *last = Some((now, root.to_owned(), fresh.clone()));
+    }
+    fresh
+}
+
 /// What the live processes and records read now give.
-fn read(root: &Path, now: i64) -> (Value, Vec<Value>, Vec<(String, u32)>) {
+fn read(root: &Path, now: i64) -> Read {
     let (scan, pairs) = crate::machine_sessions::scan_and_pairs(root);
     let records = crate::launches::recent_records(root, now - WINDOW_SECONDS);
     let pairs = pairs.into_iter().map(|(s, p, _)| (s, p)).collect();
@@ -220,7 +261,7 @@ fn read(root: &Path, now: i64) -> (Value, Vec<Value>, Vec<(String, u32)>) {
 
 /// `switchboard sessions --tree` and MCP `switchboard_sessions` with `tree`.
 pub fn tree(root: &Path, now: i64) -> Value {
-    let (scan, records, pairs) = read(root, now);
+    let (scan, records, pairs) = read_cached(root, now);
     let mut answer = assemble(&scan, &records, &pairs, now);
     answer["capacity"] = crate::capacity::view(crate::capacity::cap(root).ok().flatten(), &scan);
     let map = crate::shell::map::read(root);
@@ -285,6 +326,7 @@ pub fn last(root: &Path) -> Vec<Value> {
 /// SB-388: a finding fixed by hand (a duplicate's quiet copy closed) leaves the kept watch at
 /// once, so Needs attention does not list it until the next minute's pass.
 pub fn forget(root: &Path, kind: &str, id: &str) {
+    invalidate();
     let Some(mut kept) = std::fs::read(root.join(FILE))
         .ok()
         .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
@@ -344,7 +386,7 @@ pub fn tick(root: &Path, now: i64) {
 fn watch(root: &Path, now: i64) {
     // SB-384: the duty officer acts at most every five minutes, on this same thread.
     crate::duty::tick(root, now);
-    let (scan, records, pairs) = read(root, now);
+    let (scan, records, pairs) = read_fresh(root, now);
     let rows: Vec<Value> = scan["sessions"].as_array().cloned().unwrap_or_default();
     let mut found = findings(&rows, &records, &pairs, now);
     describe_duplicates(root, &mut found);
@@ -403,6 +445,16 @@ fn last_keys(root: &Path) -> HashSet<String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_kept_read_answers_only_the_same_folder_for_fifteen_seconds() {
+        let root = Path::new("/data/a");
+        assert!(usable(100, root, root, 100));
+        assert!(usable(100, root, root, 114));
+        assert!(!usable(100, root, root, 115));
+        assert!(!usable(100, root, root, 99), "a clock set back reads anew");
+        assert!(!usable(100, Path::new("/data/b"), root, 101));
+    }
+
     use super::*;
 
     #[test]
