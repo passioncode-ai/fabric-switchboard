@@ -158,7 +158,10 @@ pub fn digest(restart: &[Entry], skipped: &[Skipped], caller: Option<&str>) -> S
         .collect();
     lines.sort();
     lines.push(format!("caller|{}", caller.unwrap_or("")));
-    hex::encode(Sha256::digest(lines.join("\n").as_bytes()))
+    Sha256::digest(lines.join("\n").as_bytes())
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
 }
 
 /// What a session looks like now, for `advance`.
