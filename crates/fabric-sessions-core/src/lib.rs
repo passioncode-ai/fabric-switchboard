@@ -25,6 +25,8 @@ pub mod private_fs;
 pub mod session_rows;
 /// Limit stops kept while no owner runs.
 pub mod stop_spool;
+/// Opening a terminal window for a script; finding programs.
+pub mod terminal;
 /// Switches a test sets on the binary it runs (debug builds only).
 pub mod test_seams;
 #[cfg(windows)]

@@ -4,7 +4,7 @@
 //! launches sessions in; further questions (a resume's environment, a stop's readiness, labels,
 //! the permission choice) join as the modules that ask them move here.
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 pub trait Accounts: Send + Sync {
     /// The config folders the app launches sessions in (each a `CLAUDE_CONFIG_DIR` with its own
@@ -22,6 +22,17 @@ pub trait Accounts: Send + Sync {
     fn launch_markers(&self) -> HashMap<u32, String> {
         HashMap::new()
     }
+    /// D-7: opens a script that resumes a session in a window of its own. The app decides how
+    /// (Switchboard runs it through a session host it can reopen later). None: a plain terminal
+    /// window (`terminal::open`).
+    fn open_terminal(&self, script: &Path) -> Result<(), String> {
+        crate::terminal::open(script, None, &[])
+    }
+    /// D-7: the arguments a resumed Claude Code session takes to skip its permission prompts,
+    /// as the person chose in the app. None: no such argument.
+    fn resume_flags(&self) -> Vec<&'static str> {
+        Vec::new()
+    }
 }
 
 /// No account manager on this machine: every answer is the empty one.
@@ -38,5 +49,6 @@ mod tests {
         assert!(none.launched_homes().is_empty());
         assert!(none.shell_homes().is_empty());
         assert!(none.launch_markers().is_empty());
+        assert!(none.resume_flags().is_empty());
     }
 }
