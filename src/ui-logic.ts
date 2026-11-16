@@ -2029,3 +2029,16 @@ export function machineReadText(status: MachineReadStatus): string {
     case 'bad_answer': return t('Its answer could not be read.');
   }
 }
+
+/** SB-397 R1: why a restart wave leaves a session as it is. */
+export function restartSkipText(reason: string): string {
+  switch (reason) {
+    case 'limit': return t('stopped on a limit; it resumes when an account has room');
+    case 'has_waits': return t('waiting on a wake-up or a schedule it set');
+    case 'duplicate': return t('runs in two processes');
+    case 'console_not_hosted': return t('a Fabric Dashboards console');
+    case 'host_too_old': return t('its window predates restarts in place');
+    case 'not_interactive': return t('not an interactive session');
+    default: return t('its folder or history is gone');
+  }
+}

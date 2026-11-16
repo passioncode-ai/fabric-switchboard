@@ -151,6 +151,12 @@ export interface Adapter {
   sessionAttach(launchId: string, target?: string | null): Promise<unknown>;
   /** SB-396: *Continue* a session that ended, as that same session (its own history and context). */
   sessionContinue(sessionId: string): Promise<unknown>;
+  /** SB-397 R1: the plan of a restart of every running session; restarts nothing. */
+  sessionsRestartPlan(): Promise<RestartPlan>;
+  /** SB-397 R1: restart the sessions of the plan whose digest this is. */
+  sessionsRestartApply(digest: string, reason: string): Promise<{ wave: string; restart: number; skipped: number }>;
+  /** SB-397 R1: the newest restart wave, or the refusal that none ran. */
+  sessionsRestartStatus(): Promise<RestartWave>;
   /** SB-395: *End* a hosted session, here or on `target`. */
   sessionEnd(launchId: string, target?: string | null): Promise<unknown>;
   /** SB-388: close the quiet one of two processes holding one session, never a working one. */
@@ -321,6 +327,10 @@ export type SessionGroup = 'needs_you' | 'running' | 'waiting' | 'ended';
 export type SessionAct = 'close_copy' | 'attach' | 'end' | 'continue';
 export interface SessionRow { id: string; group: SessionGroup; why: string; acts: SessionAct[]; agent: string | null; folder: string | null; account: string | null; pool: string | null; origin: string | null; since: number | null; launch_id: string | null; session_id: string | null; pid?: number | null; quiet_minutes?: number | null; probe_at?: number | null; /** SB-396 wave C: its own wait: a known end, or a schedule with none. */ wait?: { until?: number; open?: boolean } | null }
 export interface SessionRows { rows: SessionRow[]; counts: Record<SessionGroup, number>; degraded: string[]; observed_at?: number }
+/** SB-397 R1: a restart wave's plan: what restarts (in its host or in a Terminal window), what is skipped and why. */
+export interface RestartPlan { restart: { session_id: string; folder: string; caller: boolean; how: 'in_place' | 'terminal' }[]; skipped: { session_id: string; folder: string; reason: string }[]; caller: string | null; digest: string; warning: string }
+/** SB-397 R1: a wave's state per session. */
+export interface RestartWave { wave: string; reason: string; at: number; done_at: number | null; caller: string | null; counts: Record<'pending' | 'resuming' | 'back' | 'continuing' | 'failed' | 'cancelled' | 'skipped', number>; sessions: { session_id: string; folder: string; state: string; reason: string | null; caller: boolean; how: string }[]; skipped: { session_id: string; folder: string; reason: string }[] }
 export type MachineReadStatus = 'read' | 'unreachable' | 'no_switchboard' | 'too_old' | 'bad_answer';
 export interface MachineSessions { machine: string; status: MachineReadStatus; rows?: SessionRow[]; counts?: Record<SessionGroup, number>; read_at: number }
 export interface SessionsEverywhere { here: SessionRows; machines: MachineSessions[] }

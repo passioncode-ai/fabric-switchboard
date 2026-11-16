@@ -10,9 +10,9 @@ if (native) watchProblems(reportProblem);
 import { LOCALE_KEY, dateLocale, locale, parseLocaleChoice, plural, saveLocaleChoice, t, type LocaleChoice } from './i18n';
 import { demo, demoFirstRun, native, nativeAdapter, onProjectSuggestions, onShellHook, onSpendChanged, safeError, reportFrontendReady, reportLanguage, reportProblem, type Operation } from './adapter';
 import type { CardState, AccountGroup } from './ui-logic';
-import { statAlert, ceilingQuestion, ceilingWarning, ceilingLine, keyLimitLine, dollars, POOL_PATTERN, poolChoices, poolName, inGroup, tourPlacement, usableWhileBusy, APPEARANCE_KEY, attribution, placementAdmits, domainSuggestion, groupSeatsElsewhere, passioncodeLine, seatEndedText, groupSeatsEndedText, organizationReleasedAt, inOrganizationFilter, domainList, type AttributedBy, sortStatRows, nextStatSort, type StatRow, type StatSort, statCacheShare, statTokensPerRequest, chartSeries, niceMax, groupProjectRows, type ChartMetric, groupProjects, compactCount, statTokens, statTrouble, statTroubleText, statAgentName, type Statistics, EXPIRY_CHOICES, folderName, folderRows, withoutFolder, type ProjectRoot, moveTargets, mapRows, rootTargets, storedMapFolders, MAP_FOLDERS_KEY, type MapFilter, type MapRow, type RepositoryMap, sortAgents, defaultAgentChoices, backgroundReads, clockedRead, chainScopeKey, afterRead, ceilingRemovalNote, modelMeta, modelUse, ordinaryKimiNote, kimiLimitUntil, limitReasonText, limitTitle, agentSetupFacts, sessionHow, sessionAgentName, sessionStateLabel, kimiWindowsLine, kimiWindowsLines, openrouterCreditLine, eventAction, eventDetail, MutationClock, activeRules, autoSwitchPool, autoSwitchPossible, launchChoice, withFolders, githubDefaultSelection, githubPlan, githubSource, replaceFolder, storedFolder, LAST_FOLDER_KEY, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, signInNotice, signInMove, organizationMoveNote, dismissTermsNotice, termsNoticeDismissed, termsNoticeOn, termsNoticeText, tourWaits, orgSetups, releasedOrganizations, releasedSummary, orgSetupAction, orgSetupShown, orgSetupCaveat, orgSetupLeads, orgSetupPrimary, accountsOrgActionLeads, firstPrimary, orgSetupUnread, orgSetupStateLabel, orgSetupTitle, hiddenOrgSetups, ORG_SETUP_HIDDEN_KEY, accountsEmptyKey, type OrgSetup, usageAnswerText, usageNotice, usageFreshness, windowReset, type Appearance, shellHookView, balancingView, balancingNotice, shellHookToggleNotice, shellHookNoticeText, codexHookLine, moveStep, accountsForStep, chainSummary, stepReasonText, handoverOutcomeText, handoverSkipped, shortWorkflow, TAKEOVER_ORDER, groupOrganizations, servesPool, sharedGroups, holdsContext, accountOrganizations, machineOf, remoteUsageLine, unplacedAccounts, foldlessGroups, repositoriesUnder, contextLines, machineAliasesLine, machineLiveLine, machineCopyLine, foldOpen, accountSections, accountMatches, attentionAccounts, attentionReasonText, duplicateOffer, attentionActionLabel, dutyReasonText, dutyOutcomeText, surfaceLabel, sessionTreeRows, SESSION_GROUPS, sessionGroupTitle, sessionWhyText, machineReadText, givenFacts, switchingLine, MACHINE_FOLD_LIMIT, EVENT_FILTER_KINDS, eventKindLabel, filterEvents, eventsByDay, relativeDay, EVENTS_PAGE, eventPage, sortSessions, statRowsShown, STAT_TOP, spendShare, groupKeyBlocks, keyTail, groupStateLine, type EventKind, type EventFilter } from './ui-logic';
+import { statAlert, ceilingQuestion, ceilingWarning, ceilingLine, keyLimitLine, dollars, POOL_PATTERN, poolChoices, poolName, inGroup, tourPlacement, usableWhileBusy, APPEARANCE_KEY, attribution, placementAdmits, domainSuggestion, groupSeatsElsewhere, passioncodeLine, seatEndedText, groupSeatsEndedText, organizationReleasedAt, inOrganizationFilter, domainList, type AttributedBy, sortStatRows, nextStatSort, type StatRow, type StatSort, statCacheShare, statTokensPerRequest, chartSeries, niceMax, groupProjectRows, type ChartMetric, groupProjects, compactCount, statTokens, statTrouble, statTroubleText, statAgentName, type Statistics, EXPIRY_CHOICES, folderName, folderRows, withoutFolder, type ProjectRoot, moveTargets, mapRows, rootTargets, storedMapFolders, MAP_FOLDERS_KEY, type MapFilter, type MapRow, type RepositoryMap, sortAgents, defaultAgentChoices, backgroundReads, clockedRead, chainScopeKey, afterRead, ceilingRemovalNote, modelMeta, modelUse, ordinaryKimiNote, kimiLimitUntil, limitReasonText, limitTitle, agentSetupFacts, sessionHow, sessionAgentName, sessionStateLabel, kimiWindowsLine, kimiWindowsLines, openrouterCreditLine, eventAction, eventDetail, MutationClock, activeRules, autoSwitchPool, autoSwitchPossible, launchChoice, withFolders, githubDefaultSelection, githubPlan, githubSource, replaceFolder, storedFolder, LAST_FOLDER_KEY, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, signInNotice, signInMove, organizationMoveNote, dismissTermsNotice, termsNoticeDismissed, termsNoticeOn, termsNoticeText, tourWaits, orgSetups, releasedOrganizations, releasedSummary, orgSetupAction, orgSetupShown, orgSetupCaveat, orgSetupLeads, orgSetupPrimary, accountsOrgActionLeads, firstPrimary, orgSetupUnread, orgSetupStateLabel, orgSetupTitle, hiddenOrgSetups, ORG_SETUP_HIDDEN_KEY, accountsEmptyKey, type OrgSetup, usageAnswerText, usageNotice, usageFreshness, windowReset, type Appearance, shellHookView, balancingView, balancingNotice, shellHookToggleNotice, shellHookNoticeText, codexHookLine, moveStep, accountsForStep, chainSummary, stepReasonText, handoverOutcomeText, handoverSkipped, shortWorkflow, TAKEOVER_ORDER, groupOrganizations, servesPool, sharedGroups, holdsContext, accountOrganizations, machineOf, remoteUsageLine, unplacedAccounts, foldlessGroups, repositoriesUnder, contextLines, machineAliasesLine, machineLiveLine, machineCopyLine, foldOpen, accountSections, accountMatches, attentionAccounts, attentionReasonText, duplicateOffer, attentionActionLabel, dutyReasonText, dutyOutcomeText, surfaceLabel, sessionTreeRows, SESSION_GROUPS, sessionGroupTitle, sessionWhyText, machineReadText, givenFacts, switchingLine, MACHINE_FOLD_LIMIT, EVENT_FILTER_KINDS, eventKindLabel, filterEvents, eventsByDay, relativeDay, EVENTS_PAGE, eventPage, sortSessions, statRowsShown, STAT_TOP, spendShare, groupKeyBlocks, keyTail, groupStateLine, type EventKind, type EventFilter, restartSkipText } from './ui-logic';
 import agentCatalog from '../catalog/agents.json';
-import type { AnalyticsStatus, Ceilings, CeilingView, CeilingQuestionView, OpenrouterCredit, BackupInfo, PassioncodeStatus, Account, Adapter, AgentConnection, AgentInfo, AgentRow, AgentsOverview, OpenrouterModels, HermesModel, KimiAccounts, KimiRegion, KimiStatus, OpenrouterStatus, OpenrouterKeys, CodexRoute, BalanceStatus, CapacityStatus, DutyStatus, DutyLine, SessionTree, WatchFinding, ShellHookStatus, AgentSetup, AuthKind, BackupStatus, KimiAccount, CurrentAccounts, LoginItem, Project, Restored, HandoverPlan, ExternalIdentity, MonitorStatus, ProjectRule, Provider, RotationPolicy, RuntimeStatus, SessionInfo, Snapshot, UpdateStatus, Onboarding, Chains, ChainExecutor, ChainScope, ChainStepView, GithubRepository, Machine, MachinesLive, MachinesList, Attention, AttentionItem, Event, GivenAccount, SessionsEverywhere, SessionRow, MachineReadStatus } from './types';
+import type { AnalyticsStatus, Ceilings, CeilingView, CeilingQuestionView, OpenrouterCredit, BackupInfo, PassioncodeStatus, Account, Adapter, AgentConnection, AgentInfo, AgentRow, AgentsOverview, OpenrouterModels, HermesModel, KimiAccounts, KimiRegion, KimiStatus, OpenrouterStatus, OpenrouterKeys, CodexRoute, BalanceStatus, CapacityStatus, DutyStatus, DutyLine, SessionTree, WatchFinding, ShellHookStatus, AgentSetup, AuthKind, BackupStatus, KimiAccount, CurrentAccounts, LoginItem, Project, Restored, HandoverPlan, ExternalIdentity, MonitorStatus, ProjectRule, Provider, RotationPolicy, RuntimeStatus, SessionInfo, Snapshot, UpdateStatus, Onboarding, Chains, ChainExecutor, ChainScope, ChainStepView, GithubRepository, Machine, MachinesLive, MachinesList, Attention, AttentionItem, Event, GivenAccount, SessionsEverywhere, SessionRow, MachineReadStatus, RestartPlan, RestartWave } from './types';
 
 const root = document.querySelector<HTMLDivElement>('#app')!;
 const announcements = document.querySelector<HTMLDivElement>('#announcements')!;
@@ -3302,10 +3302,13 @@ function sessionTreePanel() {
  */
 let sessionRows: SessionsEverywhere | null = null;
 let sessionRowsError = false; let sessionRowsLoading = false;
+/** SB-397 R1: the newest restart wave, read with the rows; none when no wave ran. */
+let restartWave: RestartWave | null = null;
 async function loadSessionRows() {
   if (sessionRowsLoading) return;
   sessionRowsLoading = true; const stamp = clock.stamp();
   try { const value = await adapter.sessionRows(); if (clock.accepts(stamp)) { sessionRows = value; sessionRowsError = false; } } catch { sessionRowsError = true; }
+  try { restartWave = await adapter.sessionsRestartStatus(); } catch { restartWave = null; }
   sessionRowsLoading = false; backgroundRender();
 }
 function renderSessionsPage(main: HTMLElement) {
@@ -3315,6 +3318,7 @@ function renderSessionsPage(main: HTMLElement) {
     return;
   }
   if (sessionRowsError) main.append(el('p', 'usage-error', t('The list may be out of date: the last read failed.')));
+  main.append(restartPanel());
   main.append(sessionMachine(t('This computer'), null, 'read', sessionRows.here.rows, sessionRows.here.degraded));
   for (const m of sessionRows.machines) main.append(sessionMachine(m.machine, m.machine, m.status, m.rows ?? [], [], m.read_at));
 }
@@ -3358,6 +3362,50 @@ function sessionRowItem(row: SessionRow, target: string | null, now: number) {
   if (row.acts.includes('end') && row.launch_id) acts.append(button(t('End'), () => endSessionDialog(row, target), 'button danger-text', `${key}-end`));
   if (acts.childElementCount) item.append(acts);
   return item;
+}
+/** SB-397 R1: restart every running session (to load new skills), and the newest wave's progress. */
+function restartPanel() {
+  const panel = el('section', 'session-restart');
+  const actions = el('div', 'row-actions');
+  actions.append(button(t('Restart all sessions'), () => void restartDialog(), 'button', 'sessions-restart'));
+  panel.append(actions);
+  const wave = restartWave;
+  if (wave && Date.now() / 1000 - wave.at < 86_400) {
+    const back = wave.counts.back + wave.counts.continuing;
+    const text = wave.done_at
+      ? t('Last restart: {back} back, {failed} failed.', { back, failed: wave.counts.failed })
+      : t('Restart: {back} back, {waiting} waiting for their turn, {failed} failed.', { back, waiting: wave.counts.pending + wave.counts.resuming, failed: wave.counts.failed });
+    const line = el('p', wave.counts.failed ? 'usage-error' : 'form-note', text); line.setAttribute('role', 'status');
+    panel.append(line);
+  }
+  return panel;
+}
+/** SB-397 R1: the plan first (what restarts, what is left as it is and why), then the person confirms that exact plan. */
+async function restartDialog() {
+  const context = openDialog(t('Restart every running session?'), t('Reading which sessions can restart…'));
+  const intro = context.form.querySelector('.dialog-header p');
+  let plan: RestartPlan;
+  try { plan = await adapter.sessionsRestartPlan(); }
+  catch { context.error.textContent = t('The plan could not be read. Retry.'); return; }
+  const count = plan.restart.length;
+  if (intro) intro.textContent = count
+    ? plural(count, { one: '{n} session restarts at the end of its current turn and comes back as itself, with its history. A session in a Switchboard window restarts in place; the others come back in a new Terminal window.', other: '{n} sessions restart at the end of their current turn and come back as themselves, with their history. A session in a Switchboard window restarts in place; the others come back in a new Terminal window.' })
+    : t('No running session can be restarted now.');
+  if (count) {
+    const list = el('ul', 'session-list');
+    for (const r of plan.restart) list.append(el('li', '', r.folder));
+    context.body.append(list);
+  }
+  if (plan.skipped.length) {
+    context.body.append(el('p', 'form-note', t('Left as they are:')));
+    const list = el('ul', 'session-list');
+    for (const r of plan.skipped) list.append(el('li', '', `${r.folder}: ${restartSkipText(r.reason)}`));
+    context.body.append(list);
+  }
+  if (!count) return;
+  const confirm = submit(plural(count, { one: 'Restart {n} session', other: 'Restart {n} sessions' })); confirm.className = 'button primary'; context.actions.append(confirm);
+  context.form.addEventListener('submit', (event) => { event.preventDefault(); void dialogSave(context, () => adapter.sessionsRestartApply(plan.digest, 'Restarted from the Sessions page'), t('The restart started. Each session restarts when its current turn ends.')).then(() => loadSessionRows()); });
+  confirm.focus();
 }
 /** SB-395: ending a hosted session asks first: its work in progress stops. */
 function endSessionDialog(row: SessionRow, target: string | null) {
