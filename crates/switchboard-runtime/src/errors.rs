@@ -214,6 +214,10 @@ pub fn install_panic_counter(root: &Path) {
     }
     let previous = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
+        // A reader that went away (`switchboard ... | head`) is not a defect of ours.
+        if is_closed_pipe(info) {
+            return previous(info);
+        }
         let code = info
             .location()
             .map(|l| panic_code(l.file()))
@@ -227,6 +231,18 @@ pub fn install_panic_counter(root: &Path) {
         }
         previous(info);
     }));
+}
+
+/// A panic of `println!` or `eprintln!` whose reader closed the pipe (EPIPE): the standard
+/// library's own message, "failed printing to stdout: Broken pipe (os error 32)".
+pub fn is_closed_pipe(info: &std::panic::PanicHookInfo<'_>) -> bool {
+    let payload = info.payload();
+    let text = payload
+        .downcast_ref::<String>()
+        .map(String::as_str)
+        .or_else(|| payload.downcast_ref::<&str>().copied())
+        .unwrap_or("");
+    text.starts_with("failed printing to std") && text.contains("os error 32")
 }
 
 #[derive(Default, Serialize, Deserialize)]

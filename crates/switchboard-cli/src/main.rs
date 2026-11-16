@@ -5328,14 +5328,30 @@ async fn start() -> ExitCode {
         }
     };
     // Printing to a closed pipe (`switchboard ... | head`) made `println!` panic: 25 `panic stdio`
-    // counts on 2026-11-16. A short command ends quietly instead, as other command-line tools do;
-    // the long-running ones keep SIGPIPE ignored so a viewer or client going away never kills them.
+    // counts on 2026-11-16. A short command ends quietly instead, by SIGPIPE as other command-line
+    // tools do; the long-running ones keep SIGPIPE ignored so a viewer or client going away never
+    // kills them. Restoring SIGPIPE's default here is not enough: something this process loads
+    // ignores it again before the output is written (measured 2026-11-16, most runs still
+    // panicked), so the panic of a closed pipe itself ends the process the same way.
     #[cfg(unix)]
     if !keeps_running(&cli.command) {
         // SAFETY: restoring a signal's default action, before any other thread of ours writes.
         unsafe {
             libc::signal(libc::SIGPIPE, libc::SIG_DFL);
         }
+        let previous = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |info| {
+            if switchboard_runtime::errors::is_closed_pipe(info) {
+                // SAFETY: the default action again, then the signal itself, which ends the
+                // process as a closed pipe ends `cat`; 141 (128 + SIGPIPE) if it is blocked here.
+                unsafe {
+                    libc::signal(libc::SIGPIPE, libc::SIG_DFL);
+                    libc::kill(libc::getpid(), libc::SIGPIPE);
+                }
+                std::process::exit(141);
+            }
+            previous(info);
+        }));
     }
     match run(&cli).await {
         Ok(_)
