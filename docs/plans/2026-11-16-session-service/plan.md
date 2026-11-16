@@ -19,9 +19,11 @@ org-index, **AD** fabric-agents-database.
 | W0.3 | SB | The session watch runs when the account snapshot fails | **done** on `session-w0` |
 | W0.4 | SB | A `StopFailure` report with no owner, or while a draining owner holds the store, is kept in `stop-spool/`; the next owner's pass registers it and removes the file only after it answered | **done** on `session-w0`: `a_stop_reported_with_no_owner_is_kept_and_registered_by_the_next_owner`, `stop_spool::tests`, `recovery_hook_never_fails_the_session` |
 | W0.5 | SB | Backlog SB-397 (done) and rows: Linux, Windows and Studio spaces run the core in-process; hook events to launch records lost while no owner runs; argv flags not carried on a resume | rows under lease |
-| W0.6 | SB | Release W0 | a release with them |
+| W0.6 | SB | Release W0 | merged #775; in 0.7.108 (`56db77bc`) |
 
 ## R1. Restart waves in Switchboard (README "R1")
+
+State 2026-11-16: R1.0 to R1.6 built on `restart-waves` (PR #780), gate EXIT 0; R1.7 (release and the live wave) next.
 
 | Id | Repo | Task | Closed by |
 |---|---|---|---|
