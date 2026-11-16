@@ -656,7 +656,7 @@ function dutySection() {
   if (!dutyState) { if (!dutyLoading) loadDuty(); section.append(el('p', 'form-note', t('Counting sessions…'))); return section; }
   const state = dutyState; const set = state.settings;
   if (!state.supported) section.append(el('p', 'form-note', t('On this system the duty officer only reports; it restarts nothing.')));
-  section.append(el('p', 'account-meta section-state', t('Watching {n} sessions: {running} running commands, {waiting} waiting for your answer. A session is restarted after {stuck} minutes stalled and closed after {idle} minutes finished.', { n: state.watched, running: state.running_commands ?? 0, waiting: state.waiting_for_person ?? 0, stuck: set.stuck_minutes, idle: set.idle_minutes })));
+  section.append(el('p', 'account-meta section-state', t('Watching {n} sessions: {running} running commands, {waiting} waiting for your answer. A session is restarted after {stuck} minutes stalled and closed after {idle} minutes finished.', { n: state.watched, running: state.running_commands ?? 0, waiting: state.waiting_for_person ?? 0, stuck: set.stuck_minutes, idle: state.idle_closes_after_minutes ?? set.idle_minutes })));
   if (state.due.length) {
     section.append(el('h3', 'fold-part-heading', t('At the next check')));
     const list = el('ul', 'watch-findings'); for (const line of state.due.slice(0, 5)) list.append(el('li', 'account-meta', dutyLineText(line))); section.append(list);
@@ -1875,6 +1875,8 @@ async function agentDialog(agent: AgentInfo) {
   // default; one whose recipe says `default: false` (Kimi Code, on its subscription) keeps it second.
   const keyFirst = !!viaKey?.run && agent.openrouter?.default !== false;
   if (launches || viaKey) context.body.append(groupField(t('Launch in folder'), dir.node, launches && !keyFirst ? t('Starts the agent in Terminal in this folder, on the group\'s API-key account.') : t('Starts the agent in Terminal in this folder.')));
+  // SB-392 K-1: which keys this agent can start on here, and which one a launch in the folder spends.
+  if (viaKey || agent.id === 'hermes') context.body.append(launchKeysPart(agent, () => dir.value() || null));
   if (viaKey) context.body.append(viaKey.part);
   // SB-390: Hermes on an Anthropic key the person saved by name (Appvillis's, their own).
   if (agent.id === 'hermes') context.body.append(anthropicLaunch(agent, context, folder));
@@ -1911,6 +1913,32 @@ function openrouterLaunch(agent: AgentInfo, context: DialogContext, folder: () =
     void dialogSave(context, () => adapter.launchOnOpenrouter(agent.id, picksItself ? null : model.value.trim() || null, value), t('Terminal launch requested for {agent} on OpenRouter.', { agent: agent.name }), 'launch');
   };
   return { part, run };
+}
+/** SB-392 K-1 (operator 2026-11-16: «какие ключи у нас есть и на чем мы будем запускаться»): every key
+ * this agent can start on, by name; the OpenRouter key a launch in the chosen folder spends is marked. */
+function launchKeysPart(agent: AgentInfo, folder: () => string | null): HTMLElement {
+  const part = el('div', 'agent-setup');
+  part.append(el('h3', 'pool-heading', t('Keys you can run on')));
+  const body = el('div', '');
+  const read = () => {
+    body.replaceChildren(el('p', 'form-note', t('Reading the keys…')));
+    void adapter.launchKeys(agent.id, folder()).then((answer) => {
+      body.replaceChildren();
+      if (!answer.keys.length) { body.append(el('p', 'form-note', t('No key is saved that {agent} can start on.', { agent: agent.name }))); return; }
+      const list = el('ul', 'key-list');
+      for (const key of answer.keys) {
+        const kind = key.kind === 'anthropic' ? 'Anthropic' : 'OpenRouter';
+        const state = key.default ? t('a launch in this folder uses it') : key.kind === 'anthropic' ? t('choose it below') : key.scope === 'group' ? t('used {where}', { where: inGroup(key.pool ?? '', snapshot?.projects) }) : t('this folder\'s group has an OpenRouter key of its own');
+        const item = el('li', key.default ? 'key-item is-default' : 'key-item', `${kind}: ${key.scope === 'machine' ? t('This computer') : key.name}`);
+        item.append(el('span', 'folder-note', ` · ${key.model ?? t('no default model')} · ${state}`));
+        list.append(item);
+      }
+      body.append(list);
+    }, (error) => { body.replaceChildren(el('p', 'usage-error', t(safeError(error, 'read')))); });
+  };
+  part.append(body, button(t('Check for the chosen folder'), read, 'text-button', `launch-keys-${agent.id}`));
+  read();
+  return part;
 }
 /** SB-390: Hermes on one of the saved Anthropic keys, chosen by name, with this launch's model. */
 function anthropicLaunch(agent: AgentInfo, context: DialogContext, folder: () => string | null): HTMLElement {

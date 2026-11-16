@@ -43,6 +43,8 @@ switchboard accounts send ACCOUNT_UUID --to user@studio.local --remote /usr/loca
 switchboard accounts seats [--limit 50]                     # SB-312: the moves, hand-overs and call backs recorded here, with the id there
 switchboard agents anthropic set appvillis --key-stdin --model claude-sonnet-5-5   # SB-390: an Anthropic API key under a name (piped, never echoed); list | model | remove | key
 switchboard agents launch hermes --anthropic personal --dir /abs/folder     # SB-390: Hermes on the Anthropic key saved as personal
+switchboard agents launch-keys hermes --folder /abs/folder   # SB-392: the keys this agent can start on, by name: the folder's OpenRouter key first, then the others and the Anthropic keys
+use_secret.py run --vault-only --env prod appvillis ANTHROPIC_API_KEY -- sh -c 'printf %s "$ANTHROPIC_API_KEY" | switchboard agents anthropic set appvillis --key-stdin'   # SB-392 K-0: save a key from Observatory without seeing it (an Admin key is refused)
 switchboard bugs                                       # SB-379 W3: crashes found at the next start (exception type and signal from macOS's report) and, with usage counts on, the week's error counts
 switchboard attention                                  # SB-365: what needs a person (sign-in, refused renewal, ended seat, failing usage checks, a lost move, a ceiling question), each with the tool that fixes it; the accounts stay in their groups
 switchboard mcp-homes                                  # SB-359: which Claude home is signed in to which MCP server (names, URLs, booleans; never a token)

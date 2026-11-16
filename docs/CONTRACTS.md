@@ -1038,6 +1038,7 @@ Asked for by Fabric Dashboards (an embedded console beside each service, operato
   `the_account_for_a_folder_is_the_projects_then_the_rules_then_the_default_selection`,
   `an_in_place_launch_is_refused_where_it_cannot_run`. Not observed live with a real agent yet.
 - **Hermes on an Anthropic key (SB-390, operator 2026-11-16: «добавить возможность запустить гермеса на антропик токене апвиллис и моем на выбор»).** Anthropic API keys are saved by a name the person picks (`switchboard agents anthropic set <name> --key-stdin [--model M]`; names of 1 to 32 lowercase letters, digits and hyphens; a key starts with `sk-ant-api`, an Admin key is refused): the value goes to the OS vault (`Store::put_secret`), and `anthropic-keys.json` (0600) holds each key's name, vault item, save time and default model, never the value. It is a file of its own, so `accounts.json` keeps its shape and an older Switchboard still reads it. `agents anthropic list|model|remove|key`; MCP `switchboard_anthropic_keys` lists them and changes a model, and saving or removing a key stays the person's. `agents launch hermes --anthropic <name> [--model claude-sonnet-5-5]` (`Operation::LaunchAgent {via: anthropic, key}`, the window's *On an Anthropic key* in Hermes's launch dialog) starts `hermes --provider anthropic -m <model>` in Terminal in a Hermes home of its own (`runtimes/agent-hermes-anthropic-<name>/agent-home` as `HERMES_HOME`, so `~/.hermes`'s own sign-ins do not win over the key); the session script reads the key when it starts (`agents anthropic key <name>` into `ANTHROPIC_API_KEY`, `launch::launch_agent_anthropic`), never writing it. The launch record names `anthropic:<name>` and the model. No spending ceiling counts these keys: Anthropic offers no read of a key's spend. An Anthropic API key is created only in the Claude Console (its Admin API lists and updates keys and never returns one). Tests `anthropic_keys::tests::*`.
+- **The keys an agent can start on (SB-392 K-1, K-3, operator 2026-11-16: «чтобы мы могли выбрать на каких ключах запускаться, какие ключи у нас есть и на чем мы будем запускаться»).** `Operation::LaunchKeys {agent, folder?}` (`launch_keys::list`, no store lock), CLI `switchboard agents launch-keys <agent> [--folder F]` (default the current folder), MCP `switchboard_launch_keys`, the window's *Keys you can run on* in an agent's launch dialog: for an agent with an OpenRouter recipe, every saved OpenRouter key by name (`This computer` or the group's name), the one a launch in the folder spends first and marked `default` and `usable` (`switchboard_core::agent_keys::key_in`, the rule the launch and the spending gate use: the folder's group's own key, else this computer's), the others with `why_not` (the group whose folders use it, or that the folder's group has its own); then, for an agent that takes one (`launch::takes_anthropic`: Hermes), every saved Anthropic key, `usable`. `none_usable` when nothing can start it. Never a value. OpenRouter stays the default (the operator, same words: «мы используем open router»). Saving an Admin key (`sk-ant-admin`) is refused with `anthropic_keys::ADMIN_KEY`, which says it cannot run a model and where an API key is made. Tests `launch_keys::tests::the_folders_key_comes_first_and_is_the_only_openrouter_choice`, `anthropic_keys::tests::a_key_is_saved_in_the_vault_replaced_by_name_and_removed`.
 - **A caller's context (SB-94, 2026-10-11).** A console hands its own context in `args`, as
   files, so every argument stays inside the limit — no `--context` option; the per-runtime mapping
   is the caller's. Claude Code's `--mcp-config <configs...>` is variadic: a plain value after a
@@ -3305,8 +3306,11 @@ only while `duty.json` (0600: `on`, `stuck_minutes`, `waiting_minutes`, `idle_mi
 - reads each session's host from its ancestors' executable paths (`dashboards`, `orca`,
   `terminal`, `iterm`, `other`); a `dashboards` session is left alone;
 - decides with `duty::decide` and acts on at most 3 sessions. Since 0.7.96 (operator 2026-11-15:
-  never before a session finished): `idle` closes a session idle for `idle_minutes` with no
-  command of its own running; `stuck` restarts a busy (or shell) session whose status and
+  never before a session finished): `idle` closes a session idle for `idle_minutes`, and for at
+  least `duty::WAKE_UP_FLOOR` (65 minutes: the longest wake-up a session can set itself with
+  `ScheduleWakeup` is an hour, and a session waiting for it reads `idle`; SB-392 S-1), with no
+  command of its own running (a recurring `CronCreate` job lives inside its session and cannot be
+  seen from outside, so it is not counted); `stuck` restarts a busy (or shell) session whose status and
   transcript have not moved for `stuck_minutes`, whose tree used no CPU since the previous check
   (`cpu_quiet` true, never unknown) and which runs no command of its own, or one that has run for
   three times `stuck_minutes`; `duplicate` closes a copy of a session that is finished (idle, no
@@ -3331,7 +3335,8 @@ person's own, then `export PATH=<the owner's headless PATH>`, `cd <folder> || ex
 [bypass flag] --resume <session>` (not `exec`: an end by a signal exits 0, so the window closes), with
 the prompt `duty::CONTINUE_PROMPT` («Switchboard restarted this session because it had stopped making progress. Continue the task from where you left off.») for `stuck`. No credential is in it: the home's sign-in stays in its own Keychain item or file.
 
-`Operation::Duty` (no store lock) answers `status`: `settings`, `check_seconds`, `watched`,
+`Operation::Duty` (no store lock) answers `status`: `settings`, `check_seconds`,
+`idle_closes_after_minutes` (`idle_minutes`, at least 65), `watched`,
 `left_to_dashboards`, `waiting_for_person`, `running_commands`, `due` (what a check would do now: `pid`, `session`, `folder`, `reason`,
 `host`, `action`), `recent` (the newest 20 journal lines) and `supported` (false on Windows, which
 only reports); with `run` it acts now, with `dry_run` it lists the actions as `planned`, both under

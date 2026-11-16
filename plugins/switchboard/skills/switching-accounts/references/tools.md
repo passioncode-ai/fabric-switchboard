@@ -118,6 +118,13 @@ The Anthropic API keys agents run on directly (SB-390), each under a name the pe
 and `model`, changes that key's default model. Saving or removing a key is the person's
 (`switchboard agents anthropic set <name> --key-stdin`); a launch picks one with `switchboard
 agents launch hermes --anthropic <name>`. No spending ceiling counts these keys.
+### `switchboard_launch_keys`: `agent` (string), `folder?` (absolute path)
+
+Every key an agent can start on here (SB-392), by name and never a value: the OpenRouter key a
+launch in the folder spends, marked `default` (the folder's group's own, else this computer's), the
+other OpenRouter keys with `why_not` (the group whose folders use them), then the Anthropic keys
+for an agent that takes one (Hermes). `none_usable` says no saved key can start it. OpenRouter is
+the default; an Anthropic Admin key (`sk-ant-admin`) cannot run a model and is refused when saved.
 
 ### `switchboard_session_close_copy`: `session_id` (string), `pid?` (integer)
 
@@ -133,6 +140,15 @@ answering; SB-389), and `pid` closes that copy, refused while it is answering; a
 still running ends with it. `close: null` means every copy is answering. Refused when the session
 no longer runs in two processes. macOS and Linux.
 
+### `switchboard_health`: no arguments
+
+This Switchboard's health as one report, `agent-health/1` (SB-393), for a watcher that turns
+readings into incidents: `state` (the worst check) and `checks`, each `{id, area, state, count,
+fix}`. `state` is `ok`, `warn`, `fail` or `unknown` (never read as ok: `errors_today` is unknown
+while usage counts are off). Checks: `owner`, `sign_in`, `accounts`, `sessions_stuck`,
+`sessions_duplicate`, `sessions_gone`, `crashes` (a crash in the last day fails, in the week warns),
+`errors_today` (50 or more warn). `fix.tool` names the tool that repairs it. Counts and kinds
+only: no account, folder, session id or text.
 ### `switchboard_bugs`: no arguments
 
 What went wrong (SB-379 W3 part 2): crashes of the app or `switchboard serve` found at the next
