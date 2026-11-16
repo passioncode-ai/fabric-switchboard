@@ -371,9 +371,10 @@ enum Command {
         /// The terminal's width in columns.
         #[arg(long, default_value_t = 80)]
         cols: u16,
-        /// Close the session after this many minutes with no viewer, no input and no output;
-        /// 0 never.
-        #[arg(long, default_value_t = 30)]
+        /// Close the session after this many minutes with no viewer, no input and no output, and
+        /// no wait on a limit; 0 never. The default is the longest wake-up a session sets itself
+        /// plus five minutes.
+        #[arg(long, default_value_t = 65)]
         idle_minutes: u64,
     },
     /// Continue an Observatory workflow whose executor ran out of its limit on another account:

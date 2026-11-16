@@ -284,6 +284,12 @@ fn writing() -> std::sync::MutexGuard<'static, ()> {
 fn path(root: &Path, id: &str) -> PathBuf {
     root.join(DIR).join(format!("{id}.json"))
 }
+/// SB-396 D3: the session id Claude Code gave a launch (`provider_session_id`), when recorded.
+pub fn session_of(root: &Path, id: &str) -> Option<String> {
+    read(root, id)?["provider_session_id"]
+        .as_str()
+        .map(str::to_owned)
+}
 fn read(root: &Path, id: &str) -> Option<Value> {
     if !valid_id(id) {
         return None;
