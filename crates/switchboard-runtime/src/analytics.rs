@@ -1606,9 +1606,7 @@ mod tests {
         let status = client.status();
         assert_eq!(status["notice_pending"], true);
         assert_eq!(status["notice_version"], NOTICE_VERSION);
-        assert!(status["installation_id"]
-            .as_str()
-            .is_some_and(|i| !i.is_empty()));
+        assert_eq!(status["installation_id"], made.id.as_str());
         client.switched("claude", "native", "manual");
         client.flush().await;
         assert!(names(&server).is_empty());

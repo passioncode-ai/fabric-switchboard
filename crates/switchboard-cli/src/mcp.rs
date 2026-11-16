@@ -307,6 +307,23 @@ impl Server {
         }
     }
 
+    /// SB-385 (the contract's DEC-0157 UD-4, OW-1): turning usage data on or off is a
+    /// `change-policy` act that needs the operator's relayed words; reading needs none.
+    async fn analytics(&self, args: &Map<String, Value>) -> Result<Value, String> {
+        let enabled = args.get("enabled").and_then(Value::as_bool);
+        if enabled.is_some() {
+            let decision: switchboard_runtime::spend::Decision = args
+                .get("decision")
+                .cloned()
+                .ok_or(ANALYTICS_DECISION_REQUIRED.to_string())
+                .and_then(|d| {
+                    serde_json::from_value(d)
+                        .map_err(|_| switchboard_runtime::spend::DECISION_INVALID.to_string())
+                })?;
+            decision.check()?;
+        }
+        self.call(Operation::Analytics { enabled }).await
+    }
     /// SB-392 K-1: the keys an agent can start on, by name.
     async fn launch_keys(&self, args: &Map<String, Value>) -> Result<Value, String> {
         let agent = args
@@ -1533,24 +1550,7 @@ impl Server {
             "switchboard_repository_map" => self.repository_map(args).await,
             "switchboard_link_cli" => switchboard_runtime::agents::link_this_cli(),
             "switchboard_app" => self.app(args).await,
-            "switchboard_analytics" => {
-                let enabled = args.get("enabled").and_then(Value::as_bool);
-                // SB-385 (the contract's DEC-0157 UD-4, OW-1): turning usage data on or off is a
-                // `change-policy` act that needs the operator's relayed words.
-                if enabled.is_some() {
-                    let decision: switchboard_runtime::spend::Decision = args
-                        .get("decision")
-                        .cloned()
-                        .ok_or(ANALYTICS_DECISION_REQUIRED.to_string())
-                        .and_then(|d| {
-                            serde_json::from_value(d).map_err(|_| {
-                                switchboard_runtime::spend::DECISION_INVALID.to_string()
-                            })
-                        })?;
-                    decision.check()?;
-                }
-                self.call(Operation::Analytics { enabled }).await
-            }
+            "switchboard_analytics" => self.analytics(args).await,
             "switchboard_github" => match args.get("owner").and_then(Value::as_str) {
                 Some(owner) => {
                     self.call(Operation::GithubRepositories {
