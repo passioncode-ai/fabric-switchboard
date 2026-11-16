@@ -8,6 +8,7 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- Restart every running Claude Code session, for example so it loads new skills: `switchboard sessions restart plan`, then `apply` (MCP `switchboard_sessions_restart_plan` and `_apply`). Each session restarts only at the end of its current turn and comes back as itself; a session in a session host restarts inside it and its windows stay attached; sessions stopped on a limit or waiting on something they set up are left alone; the session that asked restarts last and is told how the others came back; Switchboard watches each one until it is back (SB-397).
 - Fabric can mark a session that holds one of its tasks (`switchboard monitor hold`), so no idle or duplicate close and no restart wave ends it while the task is claimed; and Fabric can start a run that continues a task a session left unfinished (`switchboard dispatch --reason resume`), with its own exit rules (SB-398, SB-399).
 
 ## 0.7.108

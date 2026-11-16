@@ -1969,6 +1969,38 @@ enum SessionsCommand {
         /// The session id (`sessions --rows` names it).
         session_id: String,
     },
+    /// Restart every running Claude Code session, for example so it loads new skills: each ends
+    /// at the end of its current turn and is resumed as itself; this command's own session
+    /// restarts last. `plan` first, then `apply` with its digest. macOS and Linux.
+    Restart {
+        #[command(subcommand)]
+        command: RestartCmd,
+    },
+}
+#[derive(Subcommand)]
+enum RestartCmd {
+    /// Which sessions a wave would restart, which it skips and why, and the plan's digest.
+    /// Restarts nothing.
+    Plan,
+    /// Start the wave of the plan whose digest is given; refused when the sessions changed since.
+    Apply {
+        /// The digest `sessions restart plan` answered.
+        #[arg(long)]
+        digest: String,
+        /// Why the sessions restart, in a few words; recorded with the wave.
+        #[arg(long)]
+        reason: String,
+    },
+    /// A wave's state: each session pending, resuming, back, continuing, failed or skipped.
+    Status {
+        /// The wave id; by default the newest.
+        wave: Option<String>,
+    },
+    /// Leave every session of the wave still waiting for its turn as it is.
+    Cancel {
+        /// The wave id.
+        wave: String,
+    },
 }
 /// Where `switchboard launch` is run from, for the launch record.
 #[derive(Clone, Copy, ValueEnum)]
@@ -2725,6 +2757,21 @@ async fn run(cli: &Cli) -> Result<Value, String> {
             ..
         } => Operation::SessionContinue {
             session_id: session_id.clone(),
+        },
+        Command::Sessions {
+            command: Some(SessionsCommand::Restart { command }),
+            ..
+        } => match command {
+            RestartCmd::Plan => Operation::SessionsRestartPlan {
+                caller_pid: Some(std::process::id()),
+            },
+            RestartCmd::Apply { digest, reason } => Operation::SessionsRestartApply {
+                digest: digest.clone(),
+                reason: reason.clone(),
+                caller_pid: Some(std::process::id()),
+            },
+            RestartCmd::Status { wave } => Operation::SessionsRestartStatus { wave: wave.clone() },
+            RestartCmd::Cancel { wave } => Operation::SessionsRestartCancel { wave: wave.clone() },
         },
         Command::Sessions { rows: true, .. } => Operation::SessionRows,
         Command::Sessions { tree: true, .. } => {
@@ -5780,6 +5827,10 @@ mod mcp_parity {
         ("sessions end", Tool("switchboard_session_end")),
         ("sessions close-copy", Tool("switchboard_session_close_copy")),
         ("sessions continue", Tool("switchboard_session_continue")),
+        ("sessions restart plan", Tool("switchboard_sessions_restart_plan")),
+        ("sessions restart apply", Tool("switchboard_sessions_restart_apply")),
+        ("sessions restart status", Tool("switchboard_sessions_restart_status")),
+        ("sessions restart cancel", Tool("switchboard_sessions_restart_cancel")),
         (
             "monitor hook",
             Not("SB-396: Claude Code's own hooks run it with the hook input; an agent records nothing by it"),

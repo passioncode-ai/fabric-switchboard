@@ -329,7 +329,7 @@ pub fn parse_table(text: &str) -> HashMap<u32, Row> {
 
 /// The whole process table once per check; None when `ps` could not be read (then no session
 /// is found stalled or finished: `commands_known` stays false, SB-396 D1).
-fn process_table() -> Option<HashMap<u32, Row>> {
+pub(crate) fn process_table() -> Option<HashMap<u32, Row>> {
     #[cfg(unix)]
     {
         let out = std::process::Command::new("/bin/ps")
@@ -627,6 +627,7 @@ pub fn check(root: &Path, now: i64, dry_run: bool) -> Result<Value, String> {
     let copies = newer_copies(&seen, now);
     // SB-396 D2: a session stopped on a limit waits for an account; its host continues it.
     let stopped = crate::recovery::live_stop_sessions(root, now);
+    let waving = crate::restarts::in_wave(root, now);
     let mut done = Vec::new();
     // SB-397 W0.1: an act a quitting owner cut between its intent and its outcome is finished.
     if !dry_run {
@@ -637,7 +638,8 @@ pub fn check(root: &Path, now: i64, dry_run: bool) -> Result<Value, String> {
         if done.len() >= MAX_ACTIONS {
             break;
         }
-        if stopped.contains(&s.session) || monitoring(root, s, now) {
+        // SB-397 R1: a session in a restart wave is the wave's.
+        if stopped.contains(&s.session) || monitoring(root, s, now) || waving.contains(&s.session) {
             continue;
         }
         let Some((mut act, reason)) = decide(s, &set, now, copies.contains(&s.pid)) else {
@@ -983,7 +985,7 @@ pub fn chosen_copy<'a>(
 
 /// SIGTERM, then SIGKILL after ten seconds; whether the process is gone.
 #[cfg(unix)]
-fn stop(pid: u32) -> bool {
+pub(crate) fn stop(pid: u32) -> bool {
     let pid = pid as libc::pid_t;
     let alive = || unsafe { libc::kill(pid, 0) } == 0;
     // SAFETY: signals to a process of this user found in its own process table.

@@ -979,6 +979,42 @@ async fn session_continue(session_id: String, state: State<'_, Slot>) -> Result<
         .execute(Operation::SessionContinue { session_id })
         .await
 }
+/// SB-397 R1: the Sessions page's *Restart all sessions*: the plan first. The window is no
+/// session, so the plan names no caller.
+#[tauri::command]
+async fn sessions_restart_plan(state: State<'_, Slot>) -> Result<Value, String> {
+    state
+        .runtime()
+        .await?
+        .execute(Operation::SessionsRestartPlan { caller_pid: None })
+        .await
+}
+/// SB-397 R1: the wave of the plan the person confirmed.
+#[tauri::command]
+async fn sessions_restart_apply(
+    digest: String,
+    reason: String,
+    state: State<'_, Slot>,
+) -> Result<Value, String> {
+    state
+        .runtime()
+        .await?
+        .execute(Operation::SessionsRestartApply {
+            digest,
+            reason,
+            caller_pid: None,
+        })
+        .await
+}
+/// SB-397 R1: the newest wave's state, for the Sessions page.
+#[tauri::command]
+async fn sessions_restart_status(state: State<'_, Slot>) -> Result<Value, String> {
+    state
+        .runtime()
+        .await?
+        .execute(Operation::SessionsRestartStatus { wave: None })
+        .await
+}
 /// SB-395: *End* on a hosted session, here or on another machine.
 #[tauri::command]
 async fn session_end(
@@ -2001,6 +2037,9 @@ fn main() {
             session_attach,
             session_end,
             session_continue,
+            sessions_restart_plan,
+            sessions_restart_apply,
+            sessions_restart_status,
             session_close_copy,
             report_problem,
             repository_map,

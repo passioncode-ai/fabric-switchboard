@@ -672,6 +672,9 @@ export function createDemoAdapter(): Adapter {
     async sessionAttach() { await pause(); return { opened: true }; },
     async sessionEnd() { await pause(); return { ended: true }; },
     async sessionContinue(sessionId) { await pause(); return { continued: sessionId }; },
+    async sessionsRestartPlan() { await pause(); return { restart: [{ session_id: 'demo-1', folder: '/Users/demo/DATA/app', caller: false, how: 'in_place' }, { session_id: 'demo-2', folder: '/Users/demo/DATA/site', caller: false, how: 'terminal' }], skipped: [{ session_id: 'demo-3', folder: '/Users/demo/DATA/api', reason: 'limit' }], caller: null, digest: 'd'.repeat(64), warning: '' }; },
+    async sessionsRestartApply() { await pause(); return { wave: 'demo-wave', restart: 2, skipped: 1 }; },
+    async sessionsRestartStatus() { await pause(); throw new Error('No restart wave has run on this computer.'); },
     async sessionTree() {
       const now = Math.floor(Date.now() / 1000);
       const task = (workflow: string | null, request: string | null = null) => ({ workflow, request, project: null });
