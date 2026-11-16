@@ -3347,6 +3347,26 @@ the answer `{rows, counts, degraded, observed_at}`.
   `--json sessions end <id>` through `machine_proof::ssh`, so it is refused unless that machine
   proves its key.
 
+**Continue the same session (SB-396 wave B, LC-5, LC-7).** `resumable.jsonl` (0600, the newest
+1000 lines, ids and paths only) gets one line per end Switchboard causes: the duty officer's close
+(`{session, config, cwd, reason, at, by: duty}`) and a session host's idle close (`{session,
+launch_id, reason: host_idle, at, by: host}`). `Operation::SessionContinue {session_id}` (CLI
+`sessions continue <id>`, MCP `switchboard_session_continue`, the window's `session_continue`)
+locates the session (`resumable::locate`: the newest line with its config folder, else the launch
+record naming it as `provider_session_id`, its home or the person's Claude folder, else a limit stop
+in the person's folder) and resumes it as itself: `duty::resume_script_for` writes
+`<data>/duty/continue-<id>.command` (`claude --resume <id>` in its folder, `CLAUDE_CONFIG_DIR` its
+config folder when it is not the person's, the prompt `resumable::CONTINUE_PROMPT`) and opens it in a
+Terminal window. Refused with `LIVE` while a process holds the session
+(`machine_sessions::live_sessions`), `UNKNOWN` without a record, `NO_FOLDER` and `NO_TRANSCRIPT`
+when its folder or `<config>/projects/<folder>/<id>.jsonl` is gone: never a fresh session in its
+place. On the Sessions page (SP-2) a session is one row: a live process with a waiting stop is
+`waiting` (`limit`, with `probe_at`) and no stop row; a ready stop not live, an ended Claude launch
+with its session id and every ledger line carry `continue` (ledger rows read `closed_idle`,
+`closed_idle_window`, `closed_duplicate`, `closed_stuck`); `ended` written as a word by an older path
+(`"limit"`, `"not_started"`) reads as that word (D11). Tests `resumable::tests::*`,
+`session_rows::tests::one_row_per_session_and_every_ended_one_can_be_continued_as_itself`.
+
 The window's Sessions page reads `session_rows` on arrival and once a minute while it is on screen
 (`backgroundReads('sessions')`), never while another page is. Tests
 `session_rows::tests::every_session_lands_in_one_group_with_the_acts_it_has`,
