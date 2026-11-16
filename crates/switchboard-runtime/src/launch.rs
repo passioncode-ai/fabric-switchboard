@@ -283,7 +283,7 @@ pub(crate) fn private_write(path: &Path, bytes: &[u8], executable: bool) -> Resu
 }
 #[cfg(unix)]
 fn quote(value: &str) -> String {
-    format!("'{}'", value.replace('\'', "'\\''"))
+    fabric_sessions_core::cli::quoted(value)
 }
 fn binary(provider: Provider) -> Result<PathBuf, String> {
     find_program(provider.as_str())

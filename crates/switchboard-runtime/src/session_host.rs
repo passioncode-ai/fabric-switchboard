@@ -304,7 +304,10 @@ impl Session {
     /// Ends the session as `reason`: a hangup to its process group, a `SIGTERM` 5 s later if it
     /// is still running. Its exit then reaches every viewer as usual.
     fn end(self: &Arc<Self>, reason: &'static str) {
-        {
+        // The pid is read under the lock that marks the end, so a restart that starts the next
+        // process under the same lock is either seen here (its pid) or sees the end (and starts
+        // nothing).
+        let pid = {
             let mut inner = self.lock();
             if inner.exit.is_some() {
                 return;
@@ -312,8 +315,8 @@ impl Session {
             inner.reason.get_or_insert(reason);
             // SB-397 R1: an end wins over a restart that waits.
             inner.restart = None;
-        }
-        let pid = self.pid();
+            self.pid()
+        };
         unsafe { libc::kill(-pid, libc::SIGHUP) };
         let session = self.clone();
         std::thread::spawn(move || {
@@ -624,22 +627,38 @@ pub fn serve(start: Start<'_>, ready: impl FnOnce()) -> Result<Ended, String> {
             }
             std::thread::sleep(Duration::from_millis(100));
         }
+        // An end (a person's *End*, the idle close) that came while the old process was going
+        // wins over the restart: nothing starts after it. The check, the start and the new pid
+        // happen under one lock, which `end` also takes (review of 2026-11-16, defect 2).
         // macOS revokes every open end of the terminal when its session leader exits: the next
-        // process gets the terminal opened again by name.
-        let next = reopen_slave(&session).and_then(|slave| spawn_on(&program, &slave));
-        match next {
-            Ok(next) => {
-                session
-                    .pid
-                    .store(next.id() as i32, std::sync::atomic::Ordering::SeqCst);
-                session.lock().respawning = false;
+        // process gets the terminal opened again by name. Opened before the session's lock, so a
+        // viewer's write held on the terminal never keeps an end waiting behind it.
+        let slave = reopen_slave(&session);
+        let started = {
+            let mut inner = session.lock();
+            if inner.reason.is_some() {
+                inner.respawning = false;
+                inner.finished = true;
+                None
+            } else {
+                let next = slave.and_then(|slave| spawn_on(&program, &slave));
+                inner.respawning = false;
+                if let Ok(next) = &next {
+                    session
+                        .pid
+                        .store(next.id() as i32, std::sync::atomic::Ordering::SeqCst);
+                } else {
+                    inner.finished = true;
+                }
+                Some(next)
+            }
+        };
+        match started {
+            Some(Ok(next)) => {
                 session.output(b"\r\n[Switchboard restarted this session]\r\n");
                 child = next;
             }
-            Err(_) => {
-                session.lock().respawning = false;
-                break status;
-            }
+            _ => break status,
         }
     };
     use std::os::unix::process::ExitStatusExt;

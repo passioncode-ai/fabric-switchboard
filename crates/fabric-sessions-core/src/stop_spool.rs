@@ -55,6 +55,21 @@ pub fn waiting(root: &Path, now: i64) -> Vec<(PathBuf, Spooled)> {
         .flatten()
         .filter_map(|e| {
             let path = e.path();
+            // Another hook's file being written (`private_write`'s temporary) is not ours to
+            // judge yet (review of 2026-11-16, nit 9).
+            if e.file_name().to_string_lossy().starts_with(".private-") {
+                // One a crash left behind (older than a minute) is removed, so it never fills
+                // the spool's `MAX_FILES`.
+                let stale = e
+                    .metadata()
+                    .ok()
+                    .and_then(|m| m.modified().ok())
+                    .and_then(|t| t.elapsed().ok());
+                if stale.is_some_and(|age| age.as_secs() > 60) {
+                    let _ = std::fs::remove_file(&path);
+                }
+                return None;
+            }
             let stop = crate::private_fs::read_private(&path, MAX_BYTES)
                 .ok()
                 .and_then(|b| serde_json::from_slice::<Spooled>(&b).ok())

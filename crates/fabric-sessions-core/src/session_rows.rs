@@ -230,6 +230,8 @@ pub fn build(sources: &Sources) -> Value {
             Some("host_idle") => "closed_idle_window",
             Some("duplicate") => "closed_duplicate",
             Some("stuck") => "closed_stuck",
+            // A restart wave stopped it and it did not come back (SB-397 R1).
+            Some("restart") => "closed_restart",
             _ => "closed_idle",
         };
         rows.push(row(

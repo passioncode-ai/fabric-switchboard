@@ -4382,7 +4382,8 @@ async fn recovery_hook(root: &std::path::Path) -> Value {
             Ok(value) => value,
             // SB-397 W0.4: an owner draining or starting holds the store; the stop is kept for
             // the next owner's pass, which registers it (or refuses it once more and forgets it).
-            Err(error) => {
+            // An owner that answered with a refusal is answered as one, never kept.
+            Err(error) if switchboard_runtime::owner_unreachable(&error) => {
                 let kept = switchboard_runtime::stop_spool::spool(
                     root,
                     &switchboard_runtime::stop_spool::Spooled {
@@ -4400,6 +4401,7 @@ async fn recovery_hook(root: &std::path::Path) -> Value {
                     json!({"registered": false, "reason": "refused", "message": error})
                 }
             }
+            Err(error) => json!({"registered": false, "reason": "refused", "message": error}),
         }
     };
     let ((), answer) = tokio::join!(
