@@ -149,6 +149,8 @@ export interface Adapter {
   sessionRows(): Promise<SessionsEverywhere>;
   /** SB-395: *Open here*: a Terminal window attached to a hosted session, here or on `target`. */
   sessionAttach(launchId: string, target?: string | null): Promise<unknown>;
+  /** SB-396: *Continue* a session that ended, as that same session (its own history and context). */
+  sessionContinue(sessionId: string): Promise<unknown>;
   /** SB-395: *End* a hosted session, here or on `target`. */
   sessionEnd(launchId: string, target?: string | null): Promise<unknown>;
   /** SB-388: close the quiet one of two processes holding one session, never a working one. */
@@ -316,7 +318,7 @@ export interface WatchFinding { kind: 'duplicate' | 'stuck' | 'gone'; launch_id?
 export interface SessionTree { live: TreeSession[]; launches: TreeLaunch[]; counts: { live: number; working: number; quiet: number; managed: number; by_pool: Record<string, number>; by_surface: Record<string, number> }; findings: WatchFinding[]; capacity?: CapacityStatus; /** SB-382: sessions in each organization's folders, and the terminal hook's state. */ context?: { hook: 'on' | 'off' | 'default_on' | 'default_off'; map: string; organizations: { context: string; live: number; managed: number; other: number }[] } }
 /** SB-395: one row of the Sessions page (`sessions --rows`): fields only, never text a session wrote. */
 export type SessionGroup = 'needs_you' | 'running' | 'waiting' | 'ended';
-export type SessionAct = 'close_copy' | 'attach' | 'end';
+export type SessionAct = 'close_copy' | 'attach' | 'end' | 'continue';
 export interface SessionRow { id: string; group: SessionGroup; why: string; acts: SessionAct[]; agent: string | null; folder: string | null; account: string | null; pool: string | null; origin: string | null; since: number | null; launch_id: string | null; session_id: string | null; pid?: number | null; quiet_minutes?: number | null; probe_at?: number | null }
 export interface SessionRows { rows: SessionRow[]; counts: Record<SessionGroup, number>; degraded: string[]; observed_at?: number }
 export type MachineReadStatus = 'read' | 'unreachable' | 'no_switchboard' | 'too_old' | 'bad_answer';

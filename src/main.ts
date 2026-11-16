@@ -3345,14 +3345,16 @@ function sessionRowItem(row: SessionRow, target: string | null, now: number) {
   title.append(name, el('span', `session-state is-${row.group}`, sessionWhyText(row, now)));
   item.append(title);
   if (row.folder) item.append(el('code', 'address', row.folder));
-  // A stop on a limit does not say how its session started, so no origin is claimed for it.
-  const origin = row.id.startsWith('stop:') ? null : surfaceLabel(row.origin);
+  // A stop on a limit and a session Switchboard closed do not say how it started: no origin is claimed.
+  const origin = row.id.startsWith('stop:') || row.id.startsWith('closed:') ? null : surfaceLabel(row.origin);
   const facts = [origin, row.pool ? inGroup(row.pool, snapshot?.projects ?? []) : null, row.since ? date(row.since) : null].filter(Boolean).join(' · ');
   item.append(el('p', 'form-note', facts));
   const acts = el('div', 'row-actions');
   const key = `session-${row.id}`;
   if (row.acts.includes('close_copy') && !target && row.session_id) acts.append(button(t('Close this copy'), () => { const id = row.session_id!; void mutate(() => adapter.sessionCloseCopy(id, row.pid ?? undefined), t('Closed the quiet copy. The other one keeps working.'), key).then(() => loadSessionRows()); }, 'button', `${key}-close`));
   if (row.acts.includes('attach') && row.launch_id) acts.append(button(t('Open here'), () => { const id = row.launch_id!; void mutate(() => adapter.sessionAttach(id, target), t('Opened in a Terminal window. Closing that window leaves the session running.'), key); }, 'button', `${key}-attach`));
+  // SB-396: Continue resumes this very session, with its own history; only here, never on another machine.
+  if (row.acts.includes('continue') && !target && row.session_id) acts.append(button(t('Continue'), () => { const id = row.session_id!; void mutate(() => adapter.sessionContinue(id), t('Continued in a Terminal window as the same session, with its history.'), key).then(() => loadSessionRows()); }, 'button primary', `${key}-continue`));
   if (row.acts.includes('end') && row.launch_id) acts.append(button(t('End'), () => endSessionDialog(row, target), 'button danger-text', `${key}-end`));
   if (acts.childElementCount) item.append(acts);
   return item;

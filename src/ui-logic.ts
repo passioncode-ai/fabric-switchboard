@@ -2006,6 +2006,11 @@ export function sessionWhyText(row: Pick<SessionRow, 'why' | 'quiet_minutes' | '
     case 'limit': return row.probe_at && row.probe_at > now ? t('Stopped on a limit, next try in {when}', { when: compactCountdown(row.probe_at, now) }) : t('Stopped on a limit');
     case 'working': return t('Working');
     case 'quiet': return t('Quiet {n} min', { n: row.quiet_minutes ?? 0 });
+    case 'closed_idle': return t('Closed after an idle hour, can continue');
+    case 'closed_idle_window': return t('Its window closed after an idle hour, can continue');
+    case 'closed_duplicate': return t('Closed as a second copy');
+    case 'closed_stuck': return t('Closed after it stopped making progress');
+    case 'not_started': return t('Did not start');
     case 'exited': case 'ended': return t('Ended');
     case 'stopped': return t('Stopped');
     case 'timed_out': return t('Stopped at its time limit');
