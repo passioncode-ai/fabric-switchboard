@@ -21,6 +21,8 @@ pub mod monitors;
 pub mod person;
 /// Private storage: owner-only files and folders, whole-file replacement (from switchboard-core).
 pub mod private_fs;
+/// This computer's sessions as one list in four groups (SB-395).
+pub mod session_rows;
 /// Limit stops kept while no owner runs.
 pub mod stop_spool;
 /// Switches a test sets on the binary it runs (debug builds only).
