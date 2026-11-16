@@ -1261,6 +1261,8 @@ pub struct Runtime {
 pub(crate) struct BalanceWatch {
     settings: Option<balancing::Settings>,
     last_pass: i64,
+    /// WF-5.2e: when a request last found its group out of room; a pass after it runs early.
+    exhausted_at: i64,
     last: Option<Value>,
 }
 #[derive(Default)]
@@ -3004,7 +3006,14 @@ impl Runtime {
         watch.settings = Some(settings.clone());
         Ok(settings)
     }
-    /// SB-352 (DEC-0012): one balancing pass, at most every 15 minutes, and only while groups
+    /// WF-5.2e (SB-367): a group ran out of room just now; the next pass may run early.
+    pub(crate) fn balance_soon(&self, time: i64) {
+        if let Ok(mut watch) = self.balancing.lock() {
+            watch.exhausted_at = time;
+        }
+    }
+    /// SB-352 (DEC-0012): one balancing pass, at most every 15 minutes (WF-5.2e: every minute
+    /// after a request found its group out of room), and only while groups
     /// are chosen or an account is still lent. With balancing off it reads nothing after the
     /// first look. The decision is `balancing::plan`; the moves run under the owner transaction,
     /// and only when the settings did not change since the pass read them.
@@ -3013,10 +3022,7 @@ impl Runtime {
             let Ok(mut watch) = self.balancing.lock() else {
                 return;
             };
-            if watch.last_pass != 0
-                && time >= watch.last_pass
-                && time - watch.last_pass < balancing::PASS_SECONDS
-            {
+            if !balancing::pass_due(watch.last_pass, watch.exhausted_at, time) {
                 return;
             }
             watch.last_pass = time;

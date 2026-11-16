@@ -2875,7 +2875,9 @@ person made, into a group that takes it by `context_admits` as the person's word
 new placement word) and holds no other copy of its sign-in; otherwise it changes nothing.
 
 **The pass.** `Runtime::balance_pass`, called by the background monitor after rotation, decides at
-most every 15 minutes and only while groups are chosen or an account is still lent; with
+most every 15 minutes (`balancing::pass_due`; WF-5.2e, SB-367: a minute after the last pass when a
+proxy failover since it found its group out of room, `exhausted` in the pass's failover tally,
+`Runtime::balance_soon`; test `balancing::tests::a_group_out_of_room_brings_the_next_pass_forward_to_a_minute`) and only while groups are chosen or an account is still lent; with
 balancing off it reads `balancing.json` once and nothing after (`BalanceWatch` keeps the settings,
 which `Operation::Balance` writes through). It reads the proxy's counts per group and account:
 the last 6 and 2 hours from the quarter-hour counts the owner absorbed (`Statistics::window`; a

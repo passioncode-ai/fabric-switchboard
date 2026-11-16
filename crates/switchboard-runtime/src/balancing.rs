@@ -19,6 +19,19 @@ pub const FILE: &str = "balancing.json";
 pub const JOURNAL: &str = "balancing.jsonl";
 /// How often the background pass decides.
 pub const PASS_SECONDS: i64 = 15 * 60;
+/// WF-5.2e (SB-367): after a request found its group out of room, a pass runs as soon as this
+/// long has passed since the last one, not after `PASS_SECONDS`.
+pub const EARLY_PASS_SECONDS: i64 = 60;
+
+/// Whether a balancing pass runs at `time`: the first one, one `PASS_SECONDS` after the last,
+/// or one `EARLY_PASS_SECONDS` after the last when a group ran out of room since it.
+pub fn pass_due(last_pass: i64, exhausted_at: i64, time: i64) -> bool {
+    if last_pass == 0 || time < last_pass {
+        return true;
+    }
+    let since = time - last_pass;
+    since >= PASS_SECONDS || (exhausted_at > last_pass && since >= EARLY_PASS_SECONDS)
+}
 /// The recent stretch a group's demand and refusals are read over.
 pub const RECENT_SECONDS: i64 = 6 * 3600;
 /// A lent account goes back after this long with no limit refusal in the borrower.
@@ -873,6 +886,21 @@ pub fn summary(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_group_out_of_room_brings_the_next_pass_forward_to_a_minute() {
+        // The first pass always runs; then every 15 minutes.
+        assert!(pass_due(0, 0, 100));
+        assert!(!pass_due(1_000, 0, 1_000 + 120));
+        assert!(pass_due(1_000, 0, 1_000 + PASS_SECONDS));
+        // A request found its group out of room after the last pass: a minute later is enough.
+        assert!(!pass_due(1_000, 1_030, 1_000 + 30));
+        assert!(pass_due(1_000, 1_030, 1_000 + 60));
+        // Out of room before the last pass: that pass already saw it.
+        assert!(!pass_due(1_000, 990, 1_000 + 120));
+        // A clock set back never stops the passes.
+        assert!(pass_due(1_000, 0, 900));
+    }
+
     use super::*;
     use switchboard_core::{Project, Usage, UsageHealth, UsageWindow};
 

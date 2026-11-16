@@ -8,6 +8,8 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- Balancing lends an account within a minute after a request found its group out of room, instead of waiting for the next quarter hour (WF-5.2e, SB-367).
+
 - Statistics shows how automatic switching went over the last seven days: the share of switches that failed and the share of sessions stopped on a limit that were resumed, from the daily operations digests (WF-5.3, SB-367).
 
 - On Quit or an update, a response still streaming through the proxy gets the rest of the eight-second drain instead of two seconds, so fewer sessions lose an answer mid-stream (WF-5.2f C8, SB-367).

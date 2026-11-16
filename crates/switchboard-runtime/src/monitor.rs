@@ -1143,7 +1143,13 @@ fn scan_limits(runtime: &Runtime, native_sources: bool, time: i64) {
         runtime.limits.refused(&snapshot, &refusals, time);
     }
     runtime.store.set_limited(runtime.limits.limited_ids(time));
-    log_failovers(&runtime.store.take_failover_tally());
+    let tally = runtime.store.take_failover_tally();
+    // WF-5.2e (SB-367): a request that found every account of its group held or full asks for a
+    // balancing pass now, not at the next quarter hour.
+    if tally.exhausted > 0 {
+        runtime.balance_soon(time);
+    }
+    log_failovers(&tally);
 }
 
 /// SB-237: what the proxy's failovers did since the last pass, one `proxy_failover` line when
