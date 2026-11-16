@@ -1338,7 +1338,9 @@ export interface StatAgent extends StatCounts { agent: string }
 export interface StatOrganization extends StatCounts { organization: string; name: string | null }
 export interface StatRoute extends StatAccount { pool: string; name: string | null; project: string; project_name: string | null; agent: string }
 export interface StatDay extends StatCounts { day: string; groups?: { pool: string; requests: number; tokens: number }[] }
-export interface Statistics { days: number; from: string; to: string; since: string | null; total: StatCounts; groups: StatGroup[]; organizations?: StatOrganization[]; projects: StatProject[]; accounts: StatAccount[]; agents: StatAgent[]; routes: StatRoute[]; by_day: StatDay[] }
+/** WF-5.3 (SB-367): how automatic switching and limit stops went over the last closed days; a share is null with nothing to divide. */
+export interface SwitchingShares { days: number; rotations: number; rotations_failed: number; automatic_switch_failed_share: number | null; limit_stops: number; limit_stops_resumed: number; limit_stop_resumed_share: number | null }
+export interface Statistics { switching?: SwitchingShares; days: number; from: string; to: string; since: string | null; total: StatCounts; groups: StatGroup[]; organizations?: StatOrganization[]; projects: StatProject[]; accounts: StatAccount[]; agents: StatAgent[]; routes: StatRoute[]; by_day: StatDay[] }
 /** A count as people read it in a table: 950, 12.4K, 3.21M. */
 export function compactCount(n: number): string {
   if (n < 1000) return String(n);

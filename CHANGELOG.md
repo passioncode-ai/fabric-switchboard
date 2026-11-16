@@ -8,6 +8,12 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- Statistics shows how automatic switching went over the last seven days: the share of switches that failed and the share of sessions stopped on a limit that were resumed, from the daily operations digests (WF-5.3, SB-367).
+
+- On Quit or an update, a response still streaming through the proxy gets the rest of the eight-second drain instead of two seconds, so fewer sessions lose an answer mid-stream (WF-5.2f C8, SB-367).
+
+- `sessions --tree` (and the window, Fabric Dashboards) reuses a scan of this machine's sessions younger than 15 seconds instead of scanning again on every call; closing a duplicate's copy reads anew (perf audit item 9).
+
 ## 0.7.102
 
 - An agent's launch dialog lists the keys it can start on, by name: the OpenRouter key a launch in the chosen folder spends (the group's own, else this computer's), the other OpenRouter keys with the group that uses them, and for Hermes the saved Anthropic keys; also `switchboard agents launch-keys <agent>` and MCP `switchboard_launch_keys`. Saving an Anthropic Admin key is refused with words that say it cannot run a model (SB-392).

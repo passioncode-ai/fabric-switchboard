@@ -7557,7 +7557,10 @@ async fn execute(
             let folders = stats.folders();
             let index =
                 blocking::run(|| statistics::ProjectIndex::build(&snapshot).with_strays(&folders));
-            Ok(stats.report(&snapshot, &index, days, monitor::now()))
+            let mut report = stats.report(&snapshot, &index, days, monitor::now());
+            // WF-5.3 (SB-367): how automatic switching and limit stops went this week.
+            report["switching"] = digest::switching_shares(root, monitor::now(), 7);
+            Ok(report)
         }
         Operation::SettingsExport { sign, groups } => {
             let mut bundle = settings_bundle::scope(

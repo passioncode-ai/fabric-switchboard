@@ -3105,6 +3105,15 @@ function renderStats(main: HTMLElement) {
       statTile(t('Per request'), perRequest === null ? '–' : compactCount(perRequest), t('tokens on average')),
       statTile(t('Limits and errors'), compactCount(s.total.limited + s.total.failed), statTrouble(s.total) === null ? '–' : t('{percent} of requests', { percent: statTroubleText(s.total) })),
     );
+    // WF-5.3 (SB-367): did automatic switching work this week, and were sessions stopped on a limit resumed.
+    const sw = s.switching;
+    if (sw) {
+      const pct = (share: number | null) => share === null ? '–' : `${Math.round(share * 100)}%`;
+      tiles.append(
+        statTile(t('Switches that failed'), pct(sw.automatic_switch_failed_share), t('{failed} of {count} automatic switches in {days} days', { failed: compactCount(sw.rotations_failed), count: compactCount(sw.rotations), days: sw.days })),
+        statTile(t('Limit stops resumed'), pct(sw.limit_stop_resumed_share), t('{resumed} of {count} sessions stopped on a limit', { resumed: compactCount(sw.limit_stops_resumed), count: compactCount(sw.limit_stops) })),
+      );
+    }
     page.append(tiles);
     const groupName = (pool: string, name: string | null) => name ?? poolName(pool);
     const projectName = (name: string | null) => name ?? t('No folder recorded');

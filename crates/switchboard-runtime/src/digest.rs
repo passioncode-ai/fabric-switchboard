@@ -659,6 +659,64 @@ fn month_index(yyyy_mm: &str) -> Option<i64> {
     Some(y.parse::<i64>().ok()? * 12 + m.parse::<i64>().ok()? - 1)
 }
 
+/// WF-5.3 (SB-367): from the daily digests of the last `days` closed UTC days, the share of
+/// automatic switches that failed (`rotation`: failed over every outcome) and the share of limit
+/// stops a session was resumed from (`recovery_continued` ok over `recovery_hook` ok). A share with
+/// nothing to divide by is null, never 0.
+pub fn switching_shares(root: &Path, now: i64, days: i64) -> serde_json::Value {
+    let today = now.div_euclid(DAY);
+    let first = today - days;
+    let mut sum: BTreeMap<String, Counts> = BTreeMap::new();
+    let mut counted = 0;
+    let months: std::collections::BTreeSet<String> = [first * DAY, (today - 1) * DAY]
+        .iter()
+        .map(|at| month(*at))
+        .collect();
+    for m in months {
+        for line in read::<Daily>(&root.join(DIR).join(format!("daily-{m}.jsonl"))) {
+            let Some(day) = day_number(&line.day) else {
+                continue;
+            };
+            if day < first || day >= today {
+                continue;
+            }
+            counted += 1;
+            for op in line.ops {
+                let c = sum.entry(op.op).or_default();
+                c.ok += op.ok;
+                c.failed += op.failed;
+                c.unknown += op.unknown;
+            }
+        }
+    }
+    let get = |op: &str| sum.get(op).copied().unwrap_or_default();
+    let share = |part: u64, whole: u64| (whole > 0).then(|| part as f64 / whole as f64);
+    let rotation = get("rotation");
+    let rotations = rotation.ok + rotation.failed + rotation.unknown;
+    let stops = get("recovery_hook").ok;
+    let resumed = get("recovery_continued").ok;
+    serde_json::json!({
+        "days": counted,
+        "rotations": rotations,
+        "rotations_failed": rotation.failed,
+        "automatic_switch_failed_share": share(rotation.failed, rotations),
+        "limit_stops": stops,
+        "limit_stops_resumed": resumed,
+        "limit_stop_resumed_share": share(resumed.min(stops), stops),
+    })
+}
+
+/// Days since 1970-01-01 of a `YYYY-MM-DD` day.
+fn day_number(text: &str) -> Option<i64> {
+    let mut parts = text.splitn(3, '-');
+    let year: i32 = parts.next()?.parse().ok()?;
+    let month: u8 = parts.next()?.parse().ok()?;
+    let day: u8 = parts.next()?.parse().ok()?;
+    let date =
+        time::Date::from_calendar_date(year, time::Month::try_from(month).ok()?, day).ok()?;
+    Some(i64::from(date.to_julian_day()) - 2_440_588)
+}
+
 /// `YYYY-MM` of a time.
 fn month(at: i64) -> String {
     crate::errors::date(at.div_euclid(DAY))[..7].to_owned()
@@ -675,6 +733,53 @@ fn stamp(hour: i64) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn switching_shares_read_the_closed_days_and_say_null_when_nothing_happened() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        // 2024-10-10 is day 20006; "now" is 2024-10-12 at noon.
+        assert_eq!(day_number("2024-10-10"), Some(20_006));
+        let now = 20_008 * DAY + 43_200;
+        let empty = switching_shares(root, now, 7);
+        assert_eq!(
+            empty["automatic_switch_failed_share"],
+            serde_json::Value::Null
+        );
+        assert_eq!(empty["limit_stop_resumed_share"], serde_json::Value::Null);
+        let line = |day: &str, ops: serde_json::Value| {
+            serde_json::json!({"schema": "ops.digest.daily@1", "day": day, "hours": 24, "ops": ops,
+                "total": {"ok": 0, "failed": 0, "unknown": 0}, "risen": []})
+            .to_string()
+        };
+        std::fs::create_dir_all(root.join(DIR)).unwrap();
+        let text = [
+            line(
+                "2024-10-10",
+                serde_json::json!([
+                {"op": "rotation", "ok": 6, "failed": 2, "unknown": 0},
+                {"op": "recovery_hook", "ok": 4, "failed": 0, "unknown": 0},
+                {"op": "recovery_continued", "ok": 3, "failed": 0, "unknown": 0}]),
+            ),
+            // Today is not closed yet: not counted.
+            line(
+                "2024-10-12",
+                serde_json::json!([{"op": "rotation", "ok": 0, "failed": 9, "unknown": 0}]),
+            ),
+            // Older than the window: not counted.
+            line(
+                "2024-10-01",
+                serde_json::json!([{"op": "rotation", "ok": 0, "failed": 9, "unknown": 0}]),
+            ),
+        ]
+        .join("\n");
+        std::fs::write(root.join(DIR).join("daily-2024-10.jsonl"), text).unwrap();
+        let shares = switching_shares(root, now, 7);
+        assert_eq!(shares["days"], 1);
+        assert_eq!(shares["rotations"], 8);
+        assert_eq!(shares["automatic_switch_failed_share"], 0.25);
+        assert_eq!(shares["limit_stop_resumed_share"], 0.75);
+    }
+
     use super::*;
     const DAY0: i64 = 20_000 * DAY;
 

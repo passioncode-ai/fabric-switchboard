@@ -705,7 +705,7 @@ export function createDemoAdapter(): Adapter {
     },
     async statistics(days) {
       await pause();
-      return demoStatistics(state, days);
+      return { ...demoStatistics(state, days), switching: { days: 7, rotations: 48, rotations_failed: 3, automatic_switch_failed_share: 3 / 48, limit_stops: 12, limit_stops_resumed: 11, limit_stop_resumed_share: 11 / 12 } };
     },
     async repositoryMap(under) {
       await pause();
