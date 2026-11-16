@@ -102,6 +102,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 | SCN-093 | Find every standing setting on one Settings page | draft |
 | SCN-094 | See what needs you at the top of Accounts | draft |
 | SCN-095 | Follow every coding session on this computer and what the watch found | draft |
+| SCN-098 | See and manage every session here and on other machines on one page | draft |
 ### SCN-001: First run
 **Persona:** P-01
 **Goal:** Deliberately control which account a coding session uses.
@@ -2106,3 +2107,26 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Coverage:** `launch_keys::tests::*`, `anthropic_keys::tests::*`; WebKit demo (`?demo=1`).
 **Product:** unobserved
 **Traces:** SB-392, SB-390, SCN-096
+### SCN-098: See and manage every session here and on other machines on one page
+**Persona:** P-01
+**Goal:** The person sees every coding session this computer and the other machines Switchboard knows run, wait or ended, grouped by what to do about them, and acts on one without a terminal.
+**Preconditions:** the owner runs (without it the stops on a limit are not listed and the page says so); other machines are those `switchboard targets` lists.
+**Entry point:** the sidebar → *Sessions*.
+**Steps:**
+1. Open Sessions → “This computer” first, its line “Needs you: {n} · Running now: {n} · Waiting for quota: {n} · Ended in the last day: {n}”, then a fold per group in that order; *Ended in the last day* starts folded.
+2. Each row: “{agent} · {account}”, its state in words (“Runs in two processes”, “A board run quiet for {n} min”, “Its process is gone without an end”, “Stopped on a limit, ready to continue”, “Stopped on a limit, next try in {when}”, “Working”, “Quiet {n} min”, “Ended”), its folder, then how it started, its group and since when.
+3. A copy of a session running twice → *Close this copy* on the copy Needs attention offers (the quiet or older one); the other keeps working.
+4. A hosted session → *Open here* (a Terminal window attached to it; closing that window leaves it running) and *End* (asks first: “End this session?”).
+5. Each other machine follows as its own section with the same groups; one that could not be read says why: “Not answering over ssh now.”, “Switchboard is not installed there.”, “Its Switchboard is older than this page. Update it there.”, “Its answer could not be read.”, with when it was asked.
+6. The page reads again once a minute while it is on screen, never while another page is.
+**Alt paths:** nothing anywhere → “No session runs or waits here, and none ended in the last day.”; the read fails → “The sessions could not be read. Refresh to retry.” with *Retry*; a later read fails → the last list stays with “The list may be out of date: the last read failed.”
+**Expected result:** one place answers what needs the person, what runs, what waits for quota and what ended, on every machine, and the acts Switchboard already has are one press away.
+**UI elements:** the sidebar entry, the machine sections, the group folds, the rows, *Close this copy*, *Open here*, *End* and its dialog.
+**States covered:** reading, read failed, empty, needs you, running, waiting, ended, a machine not answering, no Switchboard there, an older one there.
+**Errors & recovery:** an act refused shows its sentence; ending on another machine first has that machine prove its key (SB-357).
+**Status:** draft
+**Meaning:** SB-395 (operator 2026-11-16 via fabric-dashboards: «сессиям, короче, на каждом уровне нужно видеть сессии»; in this session: «экран сессиями, чтобы виден был, можно было их менеджить»).
+**Copy:** checked with Copylot, register ui; report ids in [strings](../brand/strings.md).
+**Coverage:** `session_rows::tests::*`; WebKit demo (`?demo=1`, sidebar → Sessions).
+**Product:** unobserved
+**Traces:** SB-395, SCN-095, SB-388, SB-342, SB-357
