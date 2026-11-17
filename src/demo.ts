@@ -926,7 +926,7 @@ function demoStatistics(state: Snapshot, days: number): Statistics {
   };
   const zero = (): StatCounts => ({ requests: 0, ok: 0, limited: 0, failed: 0, input_tokens: 0, output_tokens: 0, cache_read_tokens: 0, cache_write_tokens: 0 });
   const keys = Object.keys(zero()) as (keyof StatCounts)[];
-  const add = (into: StatCounts, c: StatCounts) => { for (const k of keys) into[k] += c[k]; };
+  const add = (into: StatCounts, c: StatCounts) => { for (const k of keys) into[k] = (into[k] ?? 0) + (c[k] ?? 0); };
   const tokens = (c: StatCounts) => c.input_tokens + c.output_tokens + c.cache_read_tokens + c.cache_write_tokens;
   const groupName = (pool: string) => (state.projects ?? []).find((p) => p.pool === pool)?.name ?? null;
   const base = [

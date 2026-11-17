@@ -742,6 +742,20 @@ fn a_pay_per_token_key_stays_in_its_group_and_serves_no_other() {
         .iter()
         .all(|p| p.shared_accounts.is_empty()));
     assert!(snapshot.default_lent.is_empty() && snapshot.default_shared.is_empty());
+    // A key listed for the pay-per-token group from elsewhere moves in; it is never shared in.
+    let other = add(&store, Provider::Claude, "default", "synthetic-other");
+    let saved = store
+        .save_project(
+            Some(&pool),
+            switchboard_core::TOKENS_NAME,
+            &[],
+            &[key.id.clone(), other.id.clone()],
+        )
+        .unwrap();
+    assert!(saved.shared_accounts.is_empty());
+    let snapshot = store.snapshot().unwrap();
+    assert!(snapshot.accounts.iter().all(|a| a.pool == pool));
+    store.remove(&other.id).unwrap();
     // Removing the account is how it leaves.
     store.remove(&key.id).unwrap();
     assert!(store.remove_project(&pool).is_ok());

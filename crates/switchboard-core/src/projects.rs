@@ -810,6 +810,9 @@ impl Store {
         if folders.is_empty() && !tokens {
             return Err("Add at least one project folder.".into());
         }
+        // SB-401: the pay-per-token group shares nothing in: a key listed for it moves there,
+        // where its switch and ceiling hold it.
+        let share = share && !tokens;
         if pool.is_some() && existing.is_none() {
             return Err("Project not found.".into());
         }

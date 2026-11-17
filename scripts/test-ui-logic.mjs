@@ -1813,4 +1813,27 @@ check(() => {
   assert.equal(logic.sessionGroupTitle('waiting'), 'Ждут');
   i18n.setLocale('en');
 });
+// SB-401: the pay-per-token group: its name, its spending line, and the list-price column.
+check(() => {
+  i18n.setLocale('en');
+  assert.equal(logic.groupDisplayName({ name: 'Pay-per-token keys', tokens: true }), 'Pay-per-token keys');
+  assert.equal(logic.poolName('tokens', [{ pool: 'tokens', name: 'Pay-per-token keys', tokens: true }]), 'Pay-per-token keys');
+  assert.equal(logic.tokensSpendLine(null).text, 'No daily ceiling. Set one before you turn this group on.');
+  assert.equal(logic.tokensSpendLine({ usd: 5, spent_today_usd: 1.25, reached: false }).text, '$1.25 of $5.00 spent today');
+  const reached = logic.tokensSpendLine({ usd: 5, spent_today_usd: 5.1, reached: true });
+  assert.equal(reached.reached, true);
+  assert.ok(reached.text.startsWith('Ceiling reached: $5.10 of $5.00 today.'));
+  assert.equal(logic.tokensSpendLine({ usd: 5, spent_today_usd: null }).text, 'Daily ceiling $5.00 · spent today not read');
+  assert.equal(logic.statCost({}), '–');
+  assert.equal(logic.statCost({ cost_micros: 1_234_000 }), '$1.23');
+  assert.equal(logic.statCost({ cost_micros: 1_234_000, cost_estimated: 1 }), '≈$1.23');
+  const z = { requests: 1, ok: 1, limited: 0, failed: 0, input_tokens: 0, output_tokens: 0, cache_read_tokens: 0, cache_write_tokens: 0 };
+  const rows = [{ cells: ['a'], counts: { ...z, cost_micros: 10 } }, { cells: ['b'], counts: { ...z } }, { cells: ['c'], counts: { ...z, cost_micros: 99 } }];
+  assert.deepEqual(logic.sortStatRows(rows, { column: 4, descending: true }, true).map((r) => r.cells[0]), ['c', 'a', 'b'], 'by list price, the last column');
+  assert.deepEqual(logic.sortStatRows(rows, { column: 6, descending: true }, false).map((r) => r.cells[0]), ['c', 'a', 'b']);
+  i18n.setLocale('ru');
+  assert.equal(logic.groupDisplayName({ name: 'Pay-per-token keys', tokens: true }), 'Ключи с оплатой за токены');
+  assert.equal(logic.groupDisplayName({ name: 'Pay-per-token keys' }), 'Pay-per-token keys', 'a group the person named so stays as typed');
+  i18n.setLocale('en');
+});
 console.log(`${cases} ui-logic cases passed, including quota priority and wall-clock countdowns.`);

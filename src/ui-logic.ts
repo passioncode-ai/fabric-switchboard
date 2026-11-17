@@ -1330,7 +1330,12 @@ export function modelUse(m: Pick<RecommendedModel, 'use'>): string {
 }
 
 /** SB-145: one row of the proxy's counts. */
-export interface StatCounts { requests: number; ok: number; limited: number; failed: number; input_tokens: number; output_tokens: number; cache_read_tokens: number; cache_write_tokens: number }
+export interface StatCounts { requests: number; ok: number; limited: number; failed: number; input_tokens: number; output_tokens: number; cache_read_tokens: number; cache_write_tokens: number; /** SB-401: Claude answers at Anthropic's list price, in micro-dollars; absent when none was priced. */ cost_micros?: number; /** SB-401: answers priced as an estimate (an unknown model at the dearest family, or counts that were cut). */ cost_estimated?: number }
+/** SB-401: a row's cost at the list price, `≈` when part of it is an estimate; a dash when nothing was priced. */
+export function statCost(c: Pick<StatCounts, 'cost_micros' | 'cost_estimated'>): string {
+  if (!c.cost_micros) return '–';
+  return `${c.cost_estimated ? '≈' : ''}${dollars(c.cost_micros / 1_000_000)}`;
+}
 export interface StatAccount extends StatCounts { account_id: string; label: string | null; provider: string | null; kind: string | null }
 export interface StatGroup extends StatCounts { pool: string; name: string | null }
 /** SB-147: a project (a repository with its checkouts, or a folder outside Git); `project` empty for requests whose folder is not known. */
@@ -1464,8 +1469,8 @@ export function sortStatRows(rows: StatRow[], sort: StatSort | null, compact: bo
   const names = rows[0]?.cells.length ?? 0;
   const text = (r: StatRow) => { const c = r.cells[sort.column]; return typeof c === 'string' ? c : c?.[0] ?? ''; };
   const counts: ((c: StatCounts) => number)[] = compact
-    ? [(c) => c.requests, statTokens, (c) => c.limited + c.failed]
-    : [(c) => c.requests, (c) => c.input_tokens + c.cache_write_tokens, (c) => c.cache_read_tokens, (c) => c.output_tokens, (c) => c.limited + c.failed];
+    ? [(c) => c.requests, statTokens, (c) => c.limited + c.failed, (c) => c.cost_micros ?? 0]
+    : [(c) => c.requests, (c) => c.input_tokens + c.cache_write_tokens, (c) => c.cache_read_tokens, (c) => c.output_tokens, (c) => c.limited + c.failed, (c) => c.cost_micros ?? 0];
   const pick = sort.column < names ? null : counts[sort.column - names];
   const indexed = rows.map((row, i) => ({ row, i }));
   indexed.sort((a, b) => {
@@ -1486,14 +1491,22 @@ export function nextStatSort(current: StatSort | null, column: number, isCount: 
  */
 export const POOL_PATTERN = '[a-z0-9_\\-]+';
 /** D-1, D-5: a pool as a label: its group's name, the default group, or a group without folders, never a bare id. */
-export function poolName(pool: string, projects: { pool: string; name: string }[] = []): string {
+/** SB-401: the name the pay-per-token group is made with (core `TOKENS_NAME`). */
+export const TOKENS_GROUP_NAME = 'Pay-per-token keys';
+/** SB-401: a group's name as shown: the pay-per-token group's default name in the window's language, any other as the person typed it. */
+export function groupDisplayName(project: { name: string; tokens?: boolean }): string {
+  return project.tokens && project.name === TOKENS_GROUP_NAME ? t('Pay-per-token keys') : project.name;
+}
+export function poolName(pool: string, projects: { pool: string; name: string; tokens?: boolean }[] = []): string {
   if (pool === 'default') return t('Default group');
-  return projects.find((p) => p.pool === pool)?.name ?? t('Group {id} · no folders', { id: pool });
+  const project = projects.find((p) => p.pool === pool);
+  return project ? groupDisplayName(project) : t('Group {id} · no folders', { id: pool });
 }
 /** The same pool after "in", for sentences (Russian takes the locative: «в группе по умолчанию»). */
-export function inGroup(pool: string, projects: { pool: string; name: string }[] = []): string {
+export function inGroup(pool: string, projects: { pool: string; name: string; tokens?: boolean }[] = []): string {
   if (pool === 'default') return t('in the default group');
-  const name = projects.find((p) => p.pool === pool)?.name;
+  const project = projects.find((p) => p.pool === pool);
+  const name = project ? groupDisplayName(project) : undefined;
   return name !== undefined ? t('in group “{name}”', { name }) : t('in group {id} (no folders)', { id: pool });
 }
 export interface PoolChoice { pool: string; name: string; group: boolean }
@@ -1847,6 +1860,14 @@ export function ceilingWarning(ceiling: number | null, credit: Pick<OpenrouterCr
   }
   if (credit.limit > ceiling) return `${t('The key\'s own limit, {limit} a day, is higher than this ceiling.', { limit: dollars(credit.limit) })} ${tail}`;
   return null;
+}
+/** SB-401: the pay-per-token group's spending on its card: its ceiling, what its keys cost today at the list price, and whether that reached it. */
+export function tokensSpendLine(ceiling: { usd: number; spent_today_usd?: number | null; reached?: boolean | null } | null): { text: string; reached: boolean } {
+  if (!ceiling) return { text: t('No daily ceiling. Set one before you turn this group on.'), reached: false };
+  const spent = ceiling.spent_today_usd;
+  if (spent === null || spent === undefined) return { text: t('Daily ceiling {usd} · spent today not read', { usd: dollars(ceiling.usd) }), reached: false };
+  if (ceiling.reached) return { text: t('Ceiling reached: {spent} of {usd} today. The group serves no request until the next UTC day, unless you raise the ceiling.', { spent: dollars(spent), usd: dollars(ceiling.usd) }), reached: true };
+  return { text: t('{spent} of {usd} spent today', { spent: dollars(spent), usd: dollars(ceiling.usd) }), reached: false };
 }
 /** The ceiling line of the machine key panel and a group key row. */
 export function ceilingLine(ceiling: { usd: number; doubled_from: number | null; active: boolean } | null): string {

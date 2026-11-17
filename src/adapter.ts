@@ -168,7 +168,10 @@ export const nativeAdapter: Adapter = {
 const safeErrors = new Set([
   // SB-401: the pay-per-token group's refusals.
   "Set a daily spending ceiling for the pay-per-token group first: its keys are charged per token, and the ceiling is what stops them.",
-  "A key in the pay-per-token group leaves it only for another group. Move it there, or remove the account.",
+  "A key in the pay-per-token group stays there, under its daily ceiling, and serves no other group. Remove the account to take it out.",
+  "A pay-per-token key runs only through Switchboard, where its daily ceiling is checked. Launch it in managed mode.",
+  "This group is switched off in Switchboard, so it serves no request. Turn it on in Switchboard, or work in a folder of another group.",
+  "The pay-per-token group reached its daily spending ceiling. Raise it in Switchboard, or wait for the next UTC day.",
   "Folders join the pay-per-token group only one by one, by hand. Add the folder to it yourself.",
   "Only a Claude API key can be in the pay-per-token group. Put this account in another group.",
   // SB-395, SB-396: the Sessions page's acts.

@@ -281,7 +281,7 @@ export interface ChainPreset { id: string; agents: { agent: string; name: string
 /** `readiness` is keyed `machine`, `project:<pool>` or `workflow:<id>`. */
 export interface Chains { chains: Chain[]; effective: Chain | null; presets: ChainPreset[]; readiness: Record<string, ChainStepView[]>; last_handover: LastHandover | null; ceilings_unreadable: boolean; limits_known: boolean }
 /** One spending ceiling as `spend::view` gives it: machine and group per UTC day, a task since its first paid hand-over. */
-export interface CeilingView { scope: ChainScope; cents: number; usd: number; set_at: number; doubled_from: number | null; active: boolean; inactive_reason: 'no_own_key' | null }
+export interface CeilingView { scope: ChainScope; cents: number; usd: number; set_at: number; doubled_from: number | null; active: boolean; inactive_reason: 'no_own_key' | null; /** SB-401: the pay-per-token group's ceiling. */ tokens?: boolean; /** SB-401: what its keys cost today at the list price; null when it could not be read. */ spent_today_usd?: number | null; /** SB-401: whether today's spend reached it. */ reached?: boolean | null }
 /** An open question of a reached ceiling; `double_usd` is null when doubling would pass $1,000. */
 export interface CeilingQuestionView { id: string; scope: ChainScope; cents: number; usd: number; double_usd: number | null; spent: number; reached_at: number }
 export interface Ceilings { ceilings: CeilingView[]; questions: CeilingQuestionView[]; last_handover: LastHandover | null; limits: { min_usd: number; max_usd: number; min_remaining_usd: number } }
