@@ -2463,12 +2463,16 @@ mod tests {
                 .any(|(c, _)| c
                     .contains(&format!("'surrender' '{remote_id}' '--sender-key' '{KEY}'")))
         );
-        // The restricted entry reads the words itself: no variable in front of them (SB-420).
+        // The restricted entry reads the words itself: a call under the key has no variable in
+        // front of them (SB-420); the call back without the key above had one.
+        let calls = calls.lock().unwrap();
         assert!(calls
-            .lock()
-            .unwrap()
             .iter()
+            .filter(|(c, _)| c.contains("'--sender-key'"))
             .all(|(c, _)| !c.contains("SWITCHBOARD_TRANSFER")));
+        assert!(calls.iter().any(|(c, _)| c
+            .starts_with("/usr/bin/env SWITCHBOARD_TRANSFER=surrender '")
+            && c.contains(&format!("'surrender' '{remote_id}'"))));
     }
 
     /// SB-403 (review P1-2): a delegated move whose check fails there removes the copy there
