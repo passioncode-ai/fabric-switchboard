@@ -739,7 +739,9 @@ pub(crate) fn record_resume(
     // SB-411: indexed first, so a session list that reads these records by id only never misses
     // one (a marker whose record was never written is skipped).
     homeless_ids(root);
-    mark_homeless(root, id);
+    // Review round 3: a marker that could not be written fails the resume before its record, so
+    // no record exists that the list cannot find.
+    mark_homeless(root, id)?;
     write(root, id, &record)
 }
 /// SB-411: `launches/homeless/<launch_id>`, an empty marker per launch with no home of its own (a
@@ -748,11 +750,10 @@ pub(crate) fn record_resume(
 /// short), one scan of the records' 90 days builds it again.
 const HOMELESS: &str = "homeless";
 const HOMELESS_COMPLETE: &str = ".complete";
-fn mark_homeless(root: &Path, id: &str) {
+fn mark_homeless(root: &Path, id: &str) -> Result<(), String> {
     let folder = root.join(DIR).join(HOMELESS);
-    if switchboard_core::private_fs::private_dir(&folder).is_ok() {
-        let _ = switchboard_core::private_fs::private_write(&folder.join(id), b"");
-    }
+    switchboard_core::private_fs::private_dir(&folder)?;
+    switchboard_core::private_fs::private_write(&folder.join(id), b"")
 }
 /// The launches with no home of their own, from the index (seeded once when absent).
 pub(crate) fn homeless_ids(root: &Path) -> Vec<String> {
@@ -768,8 +769,9 @@ pub(crate) fn homeless_ids(root: &Path) -> Vec<String> {
         if switchboard_core::private_fs::private_dir(&folder).is_err() {
             return ids;
         }
-        for id in &ids {
-            mark_homeless(root, id);
+        // A marker that could not be written leaves the index unbuilt: the next list scans again.
+        if ids.iter().any(|id| mark_homeless(root, id).is_err()) {
+            return ids;
         }
         // Markers a cut build or a resume wrote before stay; the list is what the folder holds.
         let _ = switchboard_core::private_fs::private_write(&folder.join(HOMELESS_COMPLETE), b"");
@@ -1477,8 +1479,17 @@ pub fn prune(root: &Path, now: std::time::SystemTime) -> usize {
     for folder in [BY_WORKFLOW, LOGS, HOMELESS] {
         if let Ok(entries) = fs::read_dir(root.join(DIR).join(folder)) {
             for entry in entries.flatten() {
-                // The homeless index's completion mark is never old.
-                if entry.file_name() == HOMELESS_COMPLETE {
+                // Review round 3: a homeless marker goes with its record, never by its own age
+                // (a record is rewritten while it lives); the completion mark is never old.
+                if folder == HOMELESS {
+                    let name = entry.file_name();
+                    let gone = name
+                        .to_str()
+                        .filter(|id| valid_id(id))
+                        .is_some_and(|id| fs::symlink_metadata(path(root, id)).is_err());
+                    if gone {
+                        let _ = fs::remove_file(entry.path());
+                    }
                     continue;
                 }
                 let old = fs::symlink_metadata(entry.path()).is_ok_and(|meta| {
@@ -1761,7 +1772,7 @@ mod tests {
         fs::remove_file(folder.join(HOMELESS_COMPLETE)).unwrap();
         fs::remove_file(folder.join(&ended)).unwrap();
         let orphan = new_id();
-        mark_homeless(&root, &orphan);
+        mark_homeless(&root, &orphan).unwrap();
         let mut rebuilt = homeless_ids(&root);
         rebuilt.sort();
         let mut with_orphan = vec![hosted.clone(), ended.clone(), orphan.clone()];
@@ -1771,10 +1782,39 @@ mod tests {
         let listed = crate::launch::sessions(&root, true);
         assert!(listed.iter().all(|r| r["launch_id"] != orphan.as_str()));
         assert_eq!(listed.len(), 3);
-        // The completion mark outlives the markers' 90 days.
-        let later = std::time::SystemTime::now() + std::time::Duration::from_secs(91 * 86_400);
-        prune(&root, later);
+        // Review round 3: a marker goes with its record, never by its own age: an old marker of
+        // a live record stays, an orphan's goes, and the completion mark stays.
+        let long_ago = std::time::SystemTime::now() - std::time::Duration::from_secs(100 * 86_400);
+        for name in [hosted.as_str(), HOMELESS_COMPLETE] {
+            fs::File::options()
+                .write(true)
+                .open(folder.join(name))
+                .unwrap()
+                .set_modified(long_ago)
+                .unwrap();
+        }
+        prune(&root, std::time::SystemTime::now());
+        assert!(folder.join(&hosted).is_file(), "its record lives");
+        assert!(!folder.join(&orphan).exists(), "no record");
         assert!(folder.join(HOMELESS_COMPLETE).is_file());
+        fs::remove_file(path(&root, &hosted)).unwrap();
+        prune(&root, std::time::SystemTime::now());
+        assert!(!folder.join(&hosted).exists(), "its record is gone");
+    }
+
+    #[test]
+    fn a_resume_whose_marker_cannot_be_written_records_nothing() {
+        // Review round 3: the marker comes first; when it fails, so does the resume.
+        let (_temp, root, _) = fixture();
+        fs::write(root.join(DIR).join(HOMELESS), b"not a folder").unwrap();
+        let id = new_id();
+        let by = LaunchedBy::surface(Surface::Dashboards);
+        let record = json!({"provider": "claude", "mode": "resume", "launched_at": 1});
+        assert!(record_resume(&root, &id, record, &by).is_err());
+        assert!(!path(&root, &id).exists(), "no record without its marker");
+        assert!(crate::launch::sessions(&root, true)
+            .iter()
+            .all(|r| r["launch_id"] != id.as_str()));
     }
     /// Windows: Claude Code names its transcript with a drive (`C:\Users\...\.claude\projects\...`,
     /// also with `/` separators); a path without a drive is not absolute there and is not
