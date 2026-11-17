@@ -6531,9 +6531,7 @@ async fn execute(
                 hosted: in_place && hosted,
                 by,
             };
-            blocking::run(move || {
-                resumable::continue_as(&root, &session_id, monitor::now(), &how)
-            })
+            blocking::run(move || resumable::continue_as(&root, &session_id, monitor::now(), &how))
         }
         Operation::SessionsRestartPlan { caller_pid } => {
             let root = root.to_owned();

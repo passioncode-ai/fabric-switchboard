@@ -196,7 +196,9 @@ pub fn continue_as(root: &Path, session: &str, now: i64, how: &How) -> Result<Va
             "session_continue",
             &[("outcome", crate::oplog::Field::Code("in_place"))],
         );
-        return Ok(json!({"continued": session, "folder": cwd, "script": path, "launch_id": launch_id}));
+        return Ok(
+            json!({"continued": session, "folder": cwd, "script": path, "launch_id": launch_id}),
+        );
     }
     crate::launch::start_terminal(&path).map_err(|_| NOT_STARTED)?;
     crate::oplog::event(

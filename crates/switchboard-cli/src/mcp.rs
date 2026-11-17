@@ -1459,7 +1459,7 @@ impl Server {
                     in_place: false,
                     hosted: false,
                 })
-                    .await
+                .await
             }
             "switchboard_sessions" => {
                 // SB-379: the tree of live sessions and launches, and the one-minute watch.
