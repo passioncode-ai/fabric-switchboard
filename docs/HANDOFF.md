@@ -2,6 +2,17 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-11-17: review rounds 3 to 5 closed, SB-400 and FD-291 merged, 0.7.110 cut; SB-401 started
+
+- **Asked.** The operator: two or three verification rounds over everything done, the Sessions UI in the brand pack, fix in waves, then release; later: Claude Code sessions on an Anthropic API key in a group of their own, off by default, with usage controlled when on (SB-401).
+- **Merged.** #797 (R1 fixes after rounds 1 and 2), #798 (the Sessions page), #799 (rounds 3 to 5: restart waves re-read before each act, a cancel holds, unclear host answers, Linux with no terminal, the caller left out told to keep working; FD-291 rows follow the transcript; SB-400 `sessions continue --in-place [--hosted] [--surface]`; the page reloads after every act and is quiet on arrival). Gate EXIT 0 at `0fa78ff` before the squash `8e03b114`.
+- **Rounds.** Round 3 (runtime, UI, docs): 5 + 3 P1; round 4: 3 + 1 P1; round 5: 1 P1, fixed; the pid-reuse P2 is SB-402.
+- **Release.** 0.7.110 cut on branch `release-0.7.110` (this entry, backlog SB-395 to SB-402, plan W1.2 progress).
+- **SB-401.** [Plan](plans/2026-11-17-token-group/README.md); branch `token-group`: T1 (the pay-per-token group in the core, schema 15, a key added to default goes there, the group never sends a key to default) and T2 begun (an off group routes no folder; the proxy refuses an off group with `GROUP_OFF`).
+- **Machine.** Tailscale on this MacBook had stopped (the Studio unreachable); `tailscale up` brought it back.
+
+**Exact next task.** After 0.7.110 publishes: update this MacBook (`switchboard_app restart_to_update`), post SB-400 on board thread `085ccbd7` and the FD-291 checks on `5a5ab221`, then SB-401 T2 (the switch: `project switch <pool> on|off`, MCP and window; turning the pay-per-token group on needs a daily ceiling, `spend::set_ceiling` without the own-key rule for it; no auto-join; delete refused while it holds a key), T3 (model per request in `statistics.json`, a price table, money per account and group), T4 (the ceiling checked by the proxy per request), T5 (the window), T6 (docs, release 0.7.111). R1.7 (a live wave here) after SB-401.
+
 ## 2026-11-16 night: 0.7.108 on this MacBook, 0.7.109 tagged with restart waves; Fabric Sessions W1.0 to W1.2f merged
 
 - **Releases.** 0.7.108 published 19:50 UTC; this MacBook restarted into it (`switchboard_app restart_to_update`, `switchboard 0.7.108`). 0.7.109 (R1 restart waves, SB-398, SB-399) tagged at `1a5d5082` from #782; its nightly 43944009377 passed, release run 43943646337 building.

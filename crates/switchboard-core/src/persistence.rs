@@ -44,7 +44,7 @@ fn schema_version(snapshot: &Snapshot) -> u32 {
     // either exists (SB-355, DEC-0013): a 0.7.75 or older reader refuses the unknown fields and
     // the unknown activity, rather than put an account on another machine back in a group here.
     // Version 15 only while the pay-per-token group exists or a group is switched off (SB-401):
-    // a 0.7.110 or older reader refuses the unknown fields rather than route folders to a key.
+    // a 0.7.111 or older reader refuses the unknown fields rather than route folders to a key.
     if snapshot.projects.iter().any(|p| p.tokens || p.off) {
         15
     } else if !snapshot.machines.is_empty()

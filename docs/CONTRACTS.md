@@ -3579,7 +3579,7 @@ Plan: [2026-11-17-token-group](plans/2026-11-17-token-group/README.md); decision
 
 - **Store.** `Project` carries `tokens` (the reserved group of Claude API keys) and `off`
   (switched off); both are absent from `accounts.json` when false, and the file is written at
-  schema 15 while either is set (a 0.7.110 or older reader refuses it rather than route folders to
+  schema 15 while either is set (a 0.7.111 or older reader refuses it rather than route folders to
   a key). `Project::tokens_group(pool, at)` makes it empty and off, named `TOKENS_NAME`
   (*Pay-per-token keys*); `Store::ensure_tokens_group` makes it once (pool `TOKENS_POOL`, or the
   first free `tokens-<n>`) and answers its pool; `Snapshot::tokens_group` finds it by its flag.
