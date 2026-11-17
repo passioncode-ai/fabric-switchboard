@@ -5,16 +5,27 @@
     "stdout": {
       "data": {
         "at_capacity": false,
+        "board_admitted": true,
+        "board_free": 3,
+        "board_share": 3,
+        "board_share_clamped": false,
+        "board_share_set": false,
+        "board_used": 0,
         "cap": 12,
-        "counted": "live Claude Code and Codex processes whose folder was written within the last 30 minutes",
+        "counted": "live Claude Code and Codex sessions doing work: a session quiet for 30 minutes outside a turn, on a limit stop or on a wait of its own is not counted",
         "degraded": [],
         "free": 12,
         "observed_at": "<observed_at>",
+        "on_limit_stop": 0,
+        "on_waits": 0,
+        "pending": 0,
         "quiet": 0,
         "quiet_after_minutes": 30,
         "refused_last_hour": null,
+        "refused_waiting": null,
         "total": 0,
-        "used": 0
+        "used": 0,
+        "waiting": 0
       },
       "ok": true
     }
@@ -208,11 +219,19 @@
       "data": {
         "capacity": {
           "at_capacity": false,
+          "board_admitted": true,
+          "board_free": 3,
+          "board_share": 3,
+          "board_share_set": false,
+          "board_used": 0,
           "cap": 12,
-          "counted": "live Claude Code and Codex processes whose folder was written within the last 30 minutes",
+          "counted": "live Claude Code and Codex sessions doing work: a session quiet for 30 minutes outside a turn, on a limit stop or on a wait of its own is not counted",
           "degraded": [],
           "free": 12,
           "observed_at": "<observed_at>",
+          "on_limit_stop": 0,
+          "on_waits": 0,
+          "pending": 0,
           "quiet": 0,
           "quiet_after_minutes": 30,
           "total": 0,

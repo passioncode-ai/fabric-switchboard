@@ -609,12 +609,12 @@ export function dispatchStopLineText(line: { reason: string; folder: string | nu
     ? t('Stopped a board run in {folder}: it reached its deadline.', { folder })
     : t('Stopped a board run in {folder} at your request.', { folder });
 }
-/** SB-412: the refused dispatches' line: how many in the last hour, and whether a session ended since. */
+/** SB-412, SB-417: the refused board runs that still wait, however long ago, and whether a session ended since. */
 export function dispatchRefusedLine(item: { count?: number; freed?: boolean }): string {
   const n = item.count ?? 0;
   const head = n > 0
-    ? plural(n, { one: "A board run was refused in the last hour: this computer's session limit was reached.", other: "{n} board runs were refused in the last hour: this computer's session limit was reached." })
-    : t("Board runs were refused in the last hour because this computer's session limit was reached.");
+    ? plural(n, { one: "A board run is waiting: this computer's session limit refused it.", other: "{n} board runs are waiting: this computer's session limit refused them." })
+    : t("Board runs are waiting: this computer's session limit refused them, and none has started since.");
   return `${head} ${item.freed ? t('A session has ended since, so the next run can start.') : t('No session has ended since.')}`;
 }
 /** SB-407: what *Stop the run* reports. */
@@ -626,7 +626,7 @@ export function attentionReasonText(reason: AttentionReason): string {
     case 'session_duplicate': return t('One session runs in two processes. Close the quiet copy so they do not work over each other.');
     case 'session_stuck': return t('A board run has been quiet for 30 minutes. Look at it, or stop it.');
     case 'session_gone': return t("A board run's process is gone, but its end was not recorded. Stop the run to record it.");
-    case 'dispatch_refused': return t("Board runs were refused in the last hour because this computer's session limit was reached.");
+    case 'dispatch_refused': return t("Board runs are waiting: this computer's session limit refused them, and none has started since.");
     case 'sign_in': return t('Its sign-in ended. Sign in again to use it and see its usage.');
     case 'seat_ended': return t('Its seat in the organization ended. Sign in again if the seat was given back.');
     case 'renewal_refused': return t('The provider refused to renew its sign-in. Sign in again.');
