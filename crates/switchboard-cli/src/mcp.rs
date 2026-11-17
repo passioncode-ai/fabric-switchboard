@@ -222,6 +222,7 @@ pub(crate) fn tools() -> Vec<(bool, Value)> {
         (false, json!({"name":"switchboard_shell_hook","title":"Terminals in organization folders","description":"Whether terminals on this computer follow organization folders (the terminal hook): its state (on, off, default_on: on because the folder map holds a folder of a group bound to an organization, default_off), the choice, whether the folder map reads, and each start file Switchboard changed with its state (written, removed_by_person, skipped_symlink, skipped_owner, skipped_zdotdir_unknown, unreadable, policy_blocked: a PowerShell profile on Windows whose execution policy, Restricted or AllSigned, keeps it from loading; Switchboard never changes the policy; constrained_language: PowerShell on Windows runs in Constrained Language Mode, where the hook cannot act); with path, the group, context and homes a terminal there gets. Reads files only.","inputSchema":{"type":"object","properties":{"path":path},"additionalProperties":false}})),
         (true, json!({"name":"switchboard_shell_hook_set","title":"Turn the terminal hook on or off","description":"Turn the terminal hook on or off for this computer's terminals, as switchboard shell on|off does. Only when the operator asks. off takes Switchboard's block out of every start file byte for byte and keeps it out; on writes it for every shell present, with or without an organization's group. Only Switchboard's own data folder changes start files. Answers the state switchboard_shell_hook reads.","inputSchema":{"type":"object","properties":{"on":{"type":"boolean"}},"required":["on"],"additionalProperties":false}})),
         (true, json!({"name":"switchboard_balance","title":"Accounts lent between chosen groups","description":"Accounts lent between the groups the operator chose. Every 15 minutes a chosen group out of room (no account with room, or one while the provider refused it for a limit in the last 6 hours) borrows the account with the most room from another chosen group that keeps two with room; the account keeps its home group and goes back after 2 hours without refusals, or when its home needs it. A group not chosen is never touched, no account crosses an organization's boundary, and the ordinary CLI's account or one given to an agent is never lent. Without arguments, the state: chosen groups, accounts lent now, the last pass's figures and the newest lends and returns. add and remove change the chosen groups by pool id (default included; an empty list is off and returns every lent account); all_new decides whether a group made later joins them. backup_add marks groups with no folders as backup (DEC-0016): a backup group only lends, keeps no minimum, is asked first, and its account goes home once the borrower has room of its own again; marking chooses it, backup_remove unmarks it; the state lists backup groups with how many accounts each has lent. Changing them only when the operator asks.","inputSchema":{"type":"object","properties":{"add":{"type":"array","maxItems":64,"items":{"type":"string","minLength":1},"description":"Pool ids from switchboard_projects, or default."},"remove":{"type":"array","maxItems":64,"items":{"type":"string","minLength":1}},"all_new":{"type":"boolean"},"backup_add":{"type":"array","maxItems":64,"items":{"type":"string","minLength":1},"description":"Pool ids of groups with no folders, never default."},"backup_remove":{"type":"array","maxItems":64,"items":{"type":"string","minLength":1}}},"additionalProperties":false}})),
+        (true, json!({"name":"switchboard_feed","title":"Groups fed from the default group","description":"Groups fed from the default group. A fed group keeps ready accounts (2 by default: the one in use and the next): an account counts as ready when it has room now or its limit resets within the look-ahead (30 minutes by default). Each pass (every 15 minutes, a minute after a group ran out) rests a fed group's spent accounts in the default group and places the default group's accounts there, the most room first, then the soonest reset; a higher priority (1 is the highest) is served first, and a fed group with none may take a lower fed group's last account. The ordinary CLI's account, one given to an agent, one turned off, a delegated seat and one on another machine are never moved, nothing crosses an organization's boundary, and a move takes effect from the next request. Without arguments, the state: fed groups with their ready accounts, the default group's accounts, the accounts moved now and the newest moves with their reasons. pool with on true or false turns a group's feed on or off (off gives back every account the feed moved); priority sets it; ready and lookahead_minutes set the targets for every fed group. Changing them only when the operator asks.","inputSchema":{"type":"object","properties":{"pool":{"type":"string","minLength":1,"description":"A group id from switchboard_projects, never default."},"on":{"type":"boolean"},"priority":{"type":"integer","minimum":1,"maximum":99},"ready":{"type":"integer","minimum":1,"maximum":10},"lookahead_minutes":{"type":"integer","minimum":0,"maximum":720}},"additionalProperties":false}})),
     ]
     .into_iter()
     .map(|(write, mut tool)| {
@@ -330,6 +331,40 @@ impl Server {
 
     /// SB-385 (the contract's DEC-0157 UD-4, OW-1): turning usage data on or off is a
     /// `change-policy` act that needs the operator's relayed words; reading needs none.
+    /// SB-419: the feed's state without arguments, else the change.
+    async fn feed(&self, args: &Map<String, Value>) -> Result<Value, String> {
+        let number = |key: &str| -> Result<Option<u32>, String> {
+            match args.get(key) {
+                None | Some(Value::Null) => Ok(None),
+                Some(v) => v
+                    .as_u64()
+                    .and_then(|n| u32::try_from(n).ok())
+                    .map(Some)
+                    .ok_or_else(|| format!("{key} is a whole number.")),
+            }
+        };
+        let pool = args.get("pool").and_then(Value::as_str).map(str::to_owned);
+        let on = args.get("on").and_then(Value::as_bool);
+        let priority = number("priority")?;
+        let ready = number("ready")?;
+        let lookahead = number("lookahead_minutes")?;
+        if pool.is_none()
+            && on.is_none()
+            && priority.is_none()
+            && ready.is_none()
+            && lookahead.is_none()
+        {
+            return self.call(Operation::FeedStatus).await;
+        }
+        self.call(Operation::Feed {
+            pool,
+            on,
+            priority,
+            ready,
+            lookahead_minutes: lookahead,
+        })
+        .await
+    }
     async fn analytics(&self, args: &Map<String, Value>) -> Result<Value, String> {
         let enabled = args.get("enabled").and_then(Value::as_bool);
         if enabled.is_some() {
@@ -1823,6 +1858,7 @@ impl Server {
                     .await
                 }
             }
+            "switchboard_feed" => self.feed(args).await,
             "switchboard_login" => self.login(args).await,
             "switchboard_project_set" => self.project_set(args).await,
             "switchboard_project_remove" => self.project_remove(args).await,

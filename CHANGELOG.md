@@ -8,6 +8,8 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- A group can be fed from the default group (SB-419, DEC-0028): `switchboard project feed <group> on|off [--priority N]` (MCP `switchboard_feed`; the window's *Fed from Default* switch and *Priority* field on each group's card, with arrows from the default group to each fed group at the top of Groups). A fed group keeps two ready accounts (`switchboard feed status --ready N --lookahead M`): its spent accounts rest in the default group, and accounts with room, or whose limit resets within 30 minutes, are placed there ahead of need, higher priority first. Moves are loans, take effect from the next request and are listed in Activity under *Fed from Default* with their reasons; turning a group's feed off gives back everything it moved. Nothing changes until you turn a group's feed on.
+
 ## 0.7.116
 
 - 0.7.116 carries 0.7.115's changes, which were tagged but never published: a test of the .deb check could not write its multi-architecture file list on Windows (an NTFS stream, not a file), so the Windows tests failed and the release stopped. The test now runs only where a .deb exists; nothing a person runs changed.
