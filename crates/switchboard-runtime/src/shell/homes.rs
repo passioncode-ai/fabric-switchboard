@@ -462,6 +462,7 @@ mod tests {
             created_at: 1,
             sources: vec![],
             organizations: organization.map(str::to_owned).into_iter().collect(),
+            ..Project::default()
         }
     }
     fn s(p: &Path) -> String {

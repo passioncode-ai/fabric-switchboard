@@ -1332,6 +1332,7 @@ mod tests {
                     created_at: 1,
                     sources: sources.iter().map(|s| (*s).into()).collect(),
                     organizations: Vec::new(),
+                    ..Project::default()
                 })
                 .collect(),
             ..Default::default()

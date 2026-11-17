@@ -330,6 +330,7 @@ mod tests {
             created_at: 1,
             sources: vec![],
             organizations: Vec::new(),
+            ..Project::default()
         };
         let snapshot = Snapshot {
             projects: vec![project("a", "/w/a"), project("b", "/w/b")],

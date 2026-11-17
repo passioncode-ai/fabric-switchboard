@@ -1197,6 +1197,7 @@ mod tests {
             created_at: 1,
             sources: vec![],
             organizations: Vec::new(),
+            ..Project::default()
         }
     }
     fn key(pool: Option<&str>) -> AgentKey {

@@ -838,6 +838,7 @@ mod tests {
             created_at: 1,
             sources: vec![],
             organizations: Vec::new(),
+            ..Project::default()
         }
     }
     fn env(folder: &Path) -> Option<Map<String, Value>> {

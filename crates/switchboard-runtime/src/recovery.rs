@@ -867,6 +867,7 @@ mod tests {
             created_at: 101,
             sources: vec![],
             organizations: Vec::new(),
+            ..switchboard_core::Project::default()
         });
         let mut reserved = account("reserved-account");
         reserved.pool = "reserved".into();

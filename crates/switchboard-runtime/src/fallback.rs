@@ -1788,6 +1788,7 @@ mod tests {
                 created_at: 1,
                 sources: vec![],
                 organizations: Vec::new(),
+                ..switchboard_core::Project::default()
             }],
             ..Default::default()
         };
@@ -2779,6 +2780,7 @@ mod tests {
             created_at: 1,
             sources: vec![],
             organizations: Vec::new(),
+            ..switchboard_core::Project::default()
         };
         let mut in_beta = account("in-beta", Provider::Claude, None);
         in_beta.pool = "beta".into();
@@ -3135,6 +3137,7 @@ mod tests {
                 created_at: 1,
                 sources: vec![],
                 organizations: Vec::new(),
+                ..switchboard_core::Project::default()
             }],
             agent_keys: keys,
             ..Default::default()

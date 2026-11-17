@@ -6121,6 +6121,7 @@ mod onboard_commands {
             sources: vec![],
             organizations: vec!["o-acme".into()],
             shared_accounts: vec![],
+            ..switchboard_core::Project::default()
         });
         snapshot.accounts.push(switchboard_core::Account {
             id: "a-1".into(),
