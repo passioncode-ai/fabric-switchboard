@@ -51,6 +51,7 @@ switchboard mcp-homes                                  # SB-359: which Claude ho
 switchboard sessions --tree                            # SB-379: live sessions with who started them and for which task, the day's launches, counts, the watch's findings
 switchboard sessions --rows [--target studio]           # SB-395: every session in four groups (needs you, running, waiting, ended) with the acts it has; here or there
 switchboard sessions continue SESSION_ID              # SB-396: continue an ended session as itself (claude --resume in its own config folder)
+switchboard sessions continue SESSION_ID --in-place [--hosted] [--surface recovery]  # SB-400: the same, in this terminal; --hosted: in a session host under a launch of its own, attached here
 switchboard sessions restart plan                     # SB-397: which running sessions a restart wave restarts and skips, and its digest
 switchboard sessions restart apply --digest D --reason T  # SB-397: restart them, each at the end of its turn, as itself; this session last; needs the owner running
 switchboard sessions restart status [WAVE]            # SB-397: a wave's state per session
@@ -848,6 +849,10 @@ starting) is not refused: it answers `registered: false, spooled: true` and wait
 most), and the owner's next background pass registers it as if the hook had just run, removing the file
 only once it answered (a quit in between registers it again, never loses it)
 (`a_stop_reported_with_no_owner_is_kept_and_registered_by_the_next_owner`, `stop_spool::tests`).
+A stop is kept only when no owner could be asked (`owner_unreachable`: none runs, its store is locked
+or its control is busy, the recovery file cannot be read, its control metadata is missing or invalid,
+or the request was not attempted); a refusal by an owner that answered is reported as `refused`. A
+temporary file in `stop-spool/` that a crash left (`.private-*`, older than 60 s) is removed.
 The owner logs `recovery_hook` with a result code (`spooled` for a kept stop). The rule for
 agents is fabric-workspace
 [principle 10, item 6](https://github.com/passioncode-ai/fabric-workspace/blob/main/knowledge/principles.md#10-a-free-agent-takes-the-next-task).

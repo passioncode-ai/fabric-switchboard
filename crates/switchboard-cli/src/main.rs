@@ -1972,7 +1972,7 @@ enum SessionsCommand {
     Continue {
         /// The session id (`sessions --rows` names it).
         session_id: String,
-        /// SB-400: in this terminal instead of a Terminal window of its own.
+        /// In this terminal instead of a Terminal window of its own.
         #[arg(long)]
         in_place: bool,
         /// With --in-place: in a session host under a launch of its own, so its viewers, restart
