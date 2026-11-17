@@ -161,6 +161,8 @@ pub fn list(store: &Store, service: &str) -> Result<Value, String> {
     let projects: Vec<Value> = snapshot
         .projects
         .iter()
+        // SB-401: the pay-per-token group runs on its Claude keys, never on a group key.
+        .filter(|p| !p.tokens)
         .map(|p| {
             let own = snapshot
                 .agent_keys

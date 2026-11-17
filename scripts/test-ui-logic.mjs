@@ -1831,8 +1831,23 @@ check(() => {
   const rows = [{ cells: ['a'], counts: { ...z, cost_micros: 10 } }, { cells: ['b'], counts: { ...z } }, { cells: ['c'], counts: { ...z, cost_micros: 99 } }];
   assert.deepEqual(logic.sortStatRows(rows, { column: 4, descending: true }, true).map((r) => r.cells[0]), ['c', 'a', 'b'], 'by list price, the last column');
   assert.deepEqual(logic.sortStatRows(rows, { column: 6, descending: true }, false).map((r) => r.cells[0]), ['c', 'a', 'b']);
+  // Round 2: on with no ceiling refuses, and says so; the reached question names the group after.
+  assert.equal(logic.tokensSpendLine(null, true).reached, true);
+  assert.ok(logic.tokensSpendLine(null, true).text.startsWith('On, but refusing every request'));
+  assert.equal(logic.ceilingQuestion({ value: 5, kind: 'project', scope: 'Pay-per-token keys', tokens: true }).text, 'The daily ceiling of Pay-per-token keys, $5.00, is reached.');
+  // Groups reads the ceilings again only while the pay-per-token group shows its spending.
+  assert.deepEqual(logic.backgroundReads('projects'), []);
+  assert.deepEqual(logic.backgroundReads('projects', true), ['ceilings']);
+  // A move the pay-per-token rule refuses is locked: a key goes only there, nothing else goes there, its keys stay.
+  const groups = [{ pool: 'apps', name: 'Apps' }, { pool: 'tokens', name: 'Pay-per-token keys', tokens: true }];
+  const pick = (targets) => Object.fromEntries(targets.map((x) => [x.pool, x.blocked]));
+  assert.deepEqual(pick(logic.moveTargets('default', groups, false, () => true, true)), { default: false, apps: true, tokens: false }, 'a key in default (now) goes only to the pay-per-token group');
+  assert.deepEqual(pick(logic.moveTargets('default', groups, false, () => true, false)), { default: false, apps: false, tokens: true }, 'nothing else goes there');
+  assert.deepEqual(pick(logic.moveTargets('tokens', groups, false, () => true, true)), { default: true, apps: true, tokens: false });
+  assert.equal(logic.poolChoices([], groups).find((c) => c.pool === 'tokens').name, 'Pay-per-token keys');
   i18n.setLocale('ru');
   assert.equal(logic.groupDisplayName({ name: 'Pay-per-token keys', tokens: true }), 'Ключи с оплатой за токены');
+  assert.equal(logic.poolChoices([], groups).find((c) => c.pool === 'tokens').name, 'Ключи с оплатой за токены');
   assert.equal(logic.groupDisplayName({ name: 'Pay-per-token keys' }), 'Pay-per-token keys', 'a group the person named so stays as typed');
   i18n.setLocale('en');
 });

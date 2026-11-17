@@ -589,7 +589,7 @@ function machinesSection() {
 function bringHereDialog(account: Account, machine: Machine) {
   const context = openDialog(t('Bring {label} back to this computer', { label: account.label }), t('Its sign-in comes back from {machine} over ssh: that machine stops using it, the provider is checked here, then its copy there is removed. If a step fails, it stays on {machine}.', { machine: machine.name }));
   const left = snapshot?.returns_to?.[account.id];
-  const choices: [string, string][] = [['default', t('Default group')], ...(snapshot?.projects ?? []).map((p): [string, string] => [p.pool, p.name])];
+  const choices: [string, string][] = [['default', t('Default group')], ...(snapshot?.projects ?? []).map((p): [string, string] => [p.pool, groupDisplayName(p)])];
   const group = select(choices); group.value = choices.some(([v]) => v === left) ? left! : 'default';
   context.body.append(field(t('Group here'), group, t('The group it left is chosen first.')));
   context.actions.append(submit(t('Bring here')));
@@ -999,12 +999,15 @@ function groupCard(project: Project, only: boolean) {
     }
     items.push(project.off
       ? [t('Turn on'), () => {
-        // The pay-per-token group turns on only with a daily ceiling: ask for it first.
-        if (project.tokens && !ceilingOf({ kind: 'project', pool: project.pool })) { ceilingDialog({ kind: 'project', pool: project.pool }, null, `menu-group-${project.pool}`); return; }
+        // The pay-per-token group turns on only with a daily ceiling: ask for it first (only once the
+        // ceilings are read; unread, the switch itself answers whether one is set).
+        if (project.tokens && ceilingsView && !ceilingOf({ kind: 'project', pool: project.pool })) { ceilingDialog({ kind: 'project', pool: project.pool }, null, `menu-group-${project.pool}`); return; }
         void mutate(() => adapter.projectSwitch(project.pool, true), t('{name} is on.', { name: shown }), `menu-group-${project.pool}`);
       }]
       : [t('Turn off…'), () => turnOffDialog(project)]);
-    items.push([t('Delete'), () => deleteProjectDialog(project), 'danger-text']);
+    // SB-401: the pay-per-token group is not deleted while it holds a key (the backend refuses).
+    const holdsKeys = project.tokens && snapshot!.accounts.some((a) => a.pool === project.pool);
+    if (!holdsKeys) items.push([t('Delete'), () => deleteProjectDialog(project), 'danger-text']);
     parts.push(menu(`group-${project.pool}`, t('Actions for {name}', { name: shown }), items));
     return parts;
   };
@@ -1033,7 +1036,7 @@ function groupCardBody(project: Project, accounts: Account[]): Node[] {
     for (const a of accounts) {
       const row = el('li', 'group-account');
       row.append(el('span', 'group-account-name', `${a.label} · ${providerName(a.provider)}`));
-      if (a.pool !== project.pool) row.append(el('span', 'folder-note', ` · ${t('shared from {name}', { name: projectOf(a.pool)?.name ?? a.pool })}`));
+      if (a.pool !== project.pool) row.append(el('span', 'folder-note', ` · ${t('shared from {name}', { name: poolName(a.pool, snapshot!.projects) })}`));
       row.append(el('span', 'folder-note', ` · ${CARD_STATE[cardState(a, context)]}`));
       if (snapshot!.routes[`${a.provider}:${project.pool}`] === a.id) row.append(' ', el('span', 'badge current-badge', t('Used now')));
       rows.append(row);
@@ -1041,12 +1044,20 @@ function groupCardBody(project: Project, accounts: Account[]): Node[] {
     people.append(rows);
   }
   // Repositories: the worktree tree as before (SB-147).
-  const repos = el('div', 'fold-part'); repos.append(el('h3', 'fold-part-heading', t('Repositories')), projectFolderList(project));
+  const repos = el('div', 'fold-part'); repos.append(el('h3', 'fold-part-heading', t('Repositories')));
+  // SB-401: the pay-per-token group starts with no folder: say so, and add one from here.
+  if (project.tokens && !project.folders.length) { const empty = el('p', 'account-meta'); empty.append(`${t('No folder yet: nothing runs on these keys.')} `, button(t('Add folder…'), () => void addTokensFolders(project), 'text-button', `tokens-add-folder-${project.pool}`)); repos.append(empty); }
+  else repos.append(projectFolderList(project));
   // SB-401: the pay-per-token group's spending: its daily ceiling and what its keys cost today.
   if (project.tokens) {
     const spending = el('div', 'fold-part'); spending.append(el('h3', 'fold-part-heading', t('Spending')));
     const ceiling = ceilingOf({ kind: 'project', pool: project.pool });
-    const line = ceilingsView ? tokensSpendLine(ceiling) : { text: t('Reading the ceiling…'), reached: false };
+    if (!ceilingsView && ceilingsError) {
+      const failed = el('p', 'account-meta usage-error'); failed.append(`${t('Daily ceiling: not read')} `, button(t('Retry'), () => void loadCeilings(true), 'text-button', `tokens-ceiling-retry-${project.pool}`));
+      spending.append(failed);
+      return [people, repos, spending];
+    }
+    const line = ceilingsView ? tokensSpendLine(ceiling, !project.off) : { text: t('Reading the ceiling…'), reached: false };
     const p = el('p', line.reached ? 'account-meta usage-error tokens-reached' : 'account-meta'); p.append(`${line.text} `, button(ceiling ? t('Change the ceiling…') : t('Set a daily ceiling…'), () => ceilingDialog({ kind: 'project', pool: project.pool }, ceiling, `tokens-ceiling-${project.pool}`), 'text-button', `tokens-ceiling-${project.pool}`));
     spending.append(p, el('p', 'form-note', t('Counted at Anthropic\'s list price from the tokens each answer reports. A price marked ≈ is an estimate.')));
     return [people, repos, spending];
@@ -1137,6 +1148,8 @@ function projectDialog(existing?: Project, organization?: string) {
   for (const account of usable) {
     const owner = projectOf(account.pool);
     const option = el('label', 'appearance-option login-option'); const box = el('input'); box.type = 'checkbox'; box.value = account.id; box.checked = existing ? servesPool(snapshot!, account, existing.pool) : !!organization && placementAdmits(snapshot!, organization, account) && !inCli(account);
+    // SB-401: a key of the pay-per-token group stays there; its box is checked and locked.
+    if (tokens && account.pool === existing!.pool) { box.disabled = true; box.dataset.locked = 'true'; }
     const note = owner && owner.pool !== existing?.pool ? t(' · in {name}, also serves this group', { name: owner.name }) : '';
     const why = el('span', '', `${account.label} · ${providerName(account.provider)}${note}`);
     option.append(box, why); picker.append(option);
@@ -1163,6 +1176,7 @@ function projectDialog(existing?: Project, organization?: string) {
   context.form.addEventListener('submit', (event) => {
     event.preventDefault();
     const accountIds = [...picker.querySelectorAll<HTMLInputElement>('input[type=checkbox]:checked')].map((box) => box.value);
+    // A locked box is the group's own key: it stays listed.
     const list = tokens ? folders.value() : folders.require(); if (!list) return;
     // SB-401: the pay-per-token group's default name, shown translated, is saved as it was.
     const typed = name.value.trim(); const saved = existing && typed === groupDisplayName(existing) ? existing.name : typed;
@@ -1611,7 +1625,8 @@ function projectKeysPanel() {
   const section = el('div', 'fold-content');
   section.append(el('p', 'form-note', t('Give a group its own key, for example a client\'s, and agents started in its folders spend that key; the others keep the machine\'s.')));
   if (!openrouterKeys) { section.append(el('p', 'form-note', t('Reading the OpenRouter key…'))); return section; }
-  const projects = openrouterKeys.projects;
+  // SB-401: the pay-per-token group runs on its Claude keys, never on an OpenRouter key.
+  const projects = openrouterKeys.projects.filter((p) => !projectOf(p.pool)?.tokens);
   if (!projects.length) { section.append(el('p', 'form-note', t('There are no groups yet. Create one under Groups, then give it a key here.'))); return section; }
   const ceilingPools = (ceilingsView?.ceilings ?? []).flatMap((c) => c.scope.kind === 'project' ? [c.scope.pool] : []);
   const { listed, rest } = groupKeyBlocks(projects, openrouterKeys.keys.map((k) => k.pool), ceilingPools);
@@ -1703,12 +1718,12 @@ function ceilingBanners(main: HTMLElement) {
   for (const q of ceilingsView?.questions ?? []) main.append(ceilingBanner(q));
 }
 function ceilingBanner(q: CeilingQuestionView) {
-  const question = ceilingQuestion({ value: q.usd, double: q.double_usd, kind: q.scope.kind, scope: q.scope.kind === 'machine' ? undefined : q.scope.kind === 'workflow' ? shortWorkflow(q.scope.id) : scopeLabel(q.scope) });
+  const question = ceilingQuestion({ value: q.usd, double: q.double_usd, kind: q.scope.kind, scope: q.scope.kind === 'machine' ? undefined : q.scope.kind === 'workflow' ? shortWorkflow(q.scope.id) : scopeLabel(q.scope), tokens: q.scope.kind === 'project' && !!projectOf(q.scope.pool)?.tokens });
   const banner = el('section', 'login-banner ceiling-banner'); const id = `ceiling-question-${q.id}`;
   banner.setAttribute('role', 'group'); banner.setAttribute('aria-labelledby', id);
   const copy = el('div', 'login-copy'); const lead = el('strong', '', question.text); lead.id = id;
   const tokens = q.scope.kind === 'project' && !!projectOf(q.scope.pool)?.tokens;
-  copy.append(lead, el('span', '', tokens ? t('Reached {time}. This group serves no request until the next UTC day, unless you double the ceiling.', { time: date(q.reached_at) }) : t('Reached {time}. No paid agent starts past it until you answer.', { time: date(q.reached_at) })));
+  copy.append(lead, el('span', '', tokens ? t('Reached {time}. This group serves no request until the next UTC day, unless you raise the ceiling.', { time: date(q.reached_at) }) : t('Reached {time}. No paid agent starts past it until you answer.', { time: date(q.reached_at) })));
   if (question.note) copy.append(el('span', '', question.note));
   const actions = el('div', 'login-actions ceiling-actions');
   for (const action of question.actions) {
@@ -1724,7 +1739,7 @@ function answerCeiling(q: CeilingQuestionView, answer: 'keep' | 'double') {
   const group = scopeLabel(q.scope); const task = q.scope.kind === 'workflow' ? shortWorkflow(q.scope.id) : '';
   const success = answer === 'double'
     ? (q.scope.kind === 'machine' ? t('This computer\'s daily ceiling is now {usd}.', { usd }) : q.scope.kind === 'project' ? t('The daily ceiling of {group} is now {usd}.', { group, usd }) : t('The ceiling of task {id} is now {usd}.', { id: task, usd }))
-    : (q.scope.kind === 'machine' ? t('This computer\'s daily ceiling stays {usd}. Paid agents wait until it resets.', { usd }) : q.scope.kind === 'project' ? t('The daily ceiling of {group} stays {usd}. Paid agents wait until it resets.', { group, usd }) : t('The ceiling of task {id} stays {usd}.', { id: task, usd }));
+    : (q.scope.kind === 'machine' ? t('This computer\'s daily ceiling stays {usd}. Paid agents wait until it resets.', { usd }) : q.scope.kind === 'project' && projectOf(q.scope.pool)?.tokens ? t('The daily ceiling of {group} stays {usd}. The group serves no request until the next UTC day.', { group, usd }) : q.scope.kind === 'project' ? t('The daily ceiling of {group} stays {usd}. Paid agents wait until it resets.', { group, usd }) : t('The ceiling of task {id} stays {usd}.', { id: task, usd }));
   // SB-230: the answer is the action; its banner goes with it, and the ceilings are read again after.
   void mutate(async () => { await adapter.answerCeiling(q.id, answer); if (ceilingsView) ceilingsView = { ...ceilingsView, questions: ceilingsView.questions.filter((open) => open.id !== q.id) }; }, success, 'page-title').then(() => loadCeilings(true));
 }
@@ -1769,20 +1784,27 @@ function ceilingDialog(scope: ChainScope, current: CeilingView | null, returnFoc
   const amount = input(current ? current.usd.toFixed(2) : '', 'number'); amount.min = '0.01'; amount.max = '1000'; amount.step = '0.01'; amount.inputMode = 'decimal';
   const grid = el('div', 'form-grid');
   grid.append(field(t('Dollars per UTC day'), amount, tokens ? t('From $0.01 to $1,000. Turn the group on once it is set.') : t('From $0.01 to $1,000. When it is reached, no paid agent starts until you answer.')));
+  // SB-401: the pay-per-token group switched off is offered on with its first ceiling.
+  const group = scope.kind === 'project' ? projectOf(scope.pool) : undefined;
+  const turnOn = input('', 'checkbox'); turnOn.required = false; turnOn.checked = true;
+  if (tokens && group?.off) { const box = el('label', 'checkbox-field'); box.append(turnOn, el('span', '', t('Turn the group on now'))); grid.append(box); }
   context.body.append(grid); context.actions.append(submit(t('Save ceiling')));
   context.form.addEventListener('submit', (event) => {
     event.preventDefault();
     const value = Number(amount.value);
     if (!Number.isFinite(value) || value < 0.01 || value > 1000) { context.error.textContent = t('Enter an amount from $0.01 to $1,000.'); amount.focus(); return; }
     const usd = dollars(Math.round(value * 100) / 100);
-    void dialogSave(context, () => adapter.setCeiling(scope, Math.round(value * 100) / 100), scope.kind === 'machine' ? t('Daily ceiling for this computer: {usd}.', { usd }) : t('Daily ceiling for {group}: {usd}.', { group: name, usd })).then(() => loadCeilings(true));
+    const on = tokens && !!group?.off && turnOn.checked && scope.kind === 'project';
+    const saved = scope.kind === 'machine' ? t('Daily ceiling for this computer: {usd}.', { usd }) : on ? t('Daily ceiling for {group}: {usd}. The group is on.', { group: name, usd }) : t('Daily ceiling for {group}: {usd}.', { group: name, usd });
+    void dialogSave(context, async () => { await adapter.setCeiling(scope, Math.round(value * 100) / 100); if (on && scope.kind === 'project') await adapter.projectSwitch(scope.pool, true); }, saved).then(() => loadCeilings(true));
   });
   amount.focus();
 }
 function clearCeilingDialog(scope: ChainScope, ceiling: CeilingView, returnFocus: string) {
   const name = scopeLabel(scope); const usd = dollars(ceiling.usd);
   const question = scope.kind === 'machine' ? t('Remove this computer\'s daily ceiling of {usd}?', { usd }) : scope.kind === 'project' ? t('Remove the daily ceiling of {group}, {usd}?', { group: name, usd }) : t('Remove the ceiling of task {id}, {usd}?', { id: shortWorkflow(scope.id), usd });
-  const context = openDialog(question, t('Paid agents are then bound only by the key\'s own limit.'), returnFocus);
+  const tokens = scope.kind === 'project' && !!projectOf(scope.pool)?.tokens;
+  const context = openDialog(question, tokens ? t('The pay-per-token group then serves no request until you set a ceiling again.') : t('Paid agents are then bound only by the key\'s own limit.'), returnFocus);
   const confirm = submit(t('Remove ceiling')); confirm.className = 'button danger'; context.actions.append(confirm);
   context.form.addEventListener('submit', (event) => { event.preventDefault(); void dialogSave(context, () => adapter.setCeiling(scope, null), t('Ceiling removed.')).then(() => loadCeilings(true)); });
   context.actions.querySelector('button')?.focus();
@@ -2149,7 +2171,7 @@ async function receiveHandover() {
     plan = await adapter.receiveHandover(record, null, false);
   } catch (error) { showNotice(safeError(error), true); render(); return; }
   const context = openDialog(t('Receive {label}', { label: plan.label }), t('A {provider} sign-in handed over to {to}. You sign in to it here; the giver no longer uses it.', { provider: providerName(plan.provider), to: plan.to }));
-  context.body.append(el('p', 'form-note', plan.group ? t('It joins group “{name}”.', { name: plan.group.name }) : t('It joins the default group.')));
+  context.body.append(el('p', 'form-note', plan.group ? t('It joins group “{name}”.', { name: projectOf(plan.pool) ? groupDisplayName(projectOf(plan.pool)!) : plan.group.name }) : t('It joins the default group.')));
   for (const o of plan.organizations.filter((x) => !x.here)) context.body.append(el('p', 'form-note', t('Organization “{name}” is not on this computer; the account stays personal until you assign it.', { name: o.name })));
   if (plan.held) context.body.append(el('p', 'form-note', t('This computer already holds this sign-in. There is nothing to receive.')));
   const key = input(''); key.required = true; key.maxLength = 200;
@@ -2812,7 +2834,7 @@ function addDialog() {
     credentialSlot.append(field(method.value === 'oauth' ? t('OAuth credential JSON') : t('Credential'), secret, demo ? t('Use synthetic input only. Nothing is stored after reload.') : t('Sent only to native credential storage. Cleared on submit or cancel.')));
     if (method.value === 'oauth') credentialSlot.append(el('p', 'form-note', t('Imported OAuth is a snapshot. Sign in again when it expires. Imported identity is not independently verified.')));
     // SB-401: a Claude key never lands in the default group.
-    if (provider.value === 'claude' && method.value === 'api_key') credentialSlot.append(el('p', 'form-note', t('A Claude API key left in the default group goes to the pay-per-token group, which starts off. Turn it on there with a daily ceiling.')));
+    if (provider.value === 'claude' && method.value === 'api_key') credentialSlot.append(el('p', 'form-note', t('A Claude API key always goes to the pay-per-token group, which starts off. Turn it on there with a daily ceiling.')));
   };
   provider.addEventListener('change', update); method.addEventListener('change', update); update();
   context.form.addEventListener('submit', (event) => {
@@ -2820,8 +2842,11 @@ function addDialog() {
     if (!label.value.trim()) { label.setCustomValidity(t('Enter an account label.')); label.reportValidity(); label.addEventListener('input', () => label.setCustomValidity(''), { once: true }); return; }
     const value = secret!.value; secret!.value = '';
     // SB-401: a Claude key left in the default group lands in the pay-per-token group, which starts off.
-    const toTokens = provider.value === 'claude' && method.value === 'api_key' && (pool.value() === 'default' || !!projectOf(pool.value())?.tokens);
-    void dialogSave(context, () => adapter.add({ provider: provider.value as Provider, label: label.value.trim(), pool: pool.value(), kind: method.value as AuthKind, secret: value }), toTokens ? t('Added to Pay-per-token keys. Turn it on there with a daily ceiling.') : t('Account added. Select it when you are ready.'));
+    // DEC-0023 D-10: every Claude API key lands there, whatever group was chosen.
+    const toTokens = provider.value === 'claude' && method.value === 'api_key';
+    const tokensGroup = snapshot?.projects?.find((p) => p.tokens);
+    const landed = tokensGroup ? groupDisplayName(tokensGroup) : t('Pay-per-token keys');
+    void dialogSave(context, () => adapter.add({ provider: provider.value as Provider, label: label.value.trim(), pool: pool.value(), kind: method.value as AuthKind, secret: value }), toTokens ? (tokensGroup && !tokensGroup.off ? t('Added to {name}.', { name: landed }) : t('Added to {name}. Turn it on there with a daily ceiling.', { name: landed })) : t('Account added. Select it when you are ready.'));
   });
   provider.focus();
 }
@@ -3170,7 +3195,7 @@ function renderStats(main: HTMLElement) {
       );
     }
     page.append(tiles);
-    const groupName = (pool: string, name: string | null) => name ?? poolName(pool);
+    const groupName = (pool: string, name: string | null) => { const here = projectOf(pool); return here ? groupDisplayName(here) : name ?? poolName(pool); };
     const projectName = (name: string | null) => name ?? t('No folder recorded');
     const accountName = (label: string | null) => label ?? t('Removed account');
     const tables = [
@@ -3937,22 +3962,28 @@ function launchDialog(account: Account) {
   const context = openDialog(t('Launch {label}', { label: account.label }), t('{provider} · {group}', { provider: providerName(account.provider), group: poolName(account.pool, snapshot?.projects) }));
   const folder = folderPicker(context, lastWorkingDirectory, `launch-folder-${account.id}`);
   const isolated = input('', 'checkbox'); isolated.required = false; isolated.checked = choice.isolatedByDefault;
-  if (!choice.managed) { isolated.disabled = true; isolated.dataset.locked = 'true'; }
+  // SB-401: a Claude API key never runs in its own home, where it would spend past its ceiling.
+  const claudeKey = account.provider === 'claude' && account.kind === 'api_key';
+  if (claudeKey) isolated.checked = false;
+  if (!choice.managed || claudeKey) { isolated.disabled = true; isolated.dataset.locked = 'true'; }
   const box = el('label', 'checkbox-field'); box.append(isolated, el('span', '', t('Isolated session')));
   const note = el('p', 'form-note');
   const explain = () => { note.textContent = demo ? t('Synthetic launch only. The demo does not open a terminal.') : isolated.checked ? t('Runs in this account’s own home and keeps this account; automatic switching does not move it. Existing clients are not changed.') : t('Goes through the local proxy: new requests use the selected account of its group, and automatic switching can move it. In-progress responses keep their account.'); };
   isolated.addEventListener('change', explain); explain();
   context.body.append(groupField(t('Folder'), folder.node), box);
-  if (!choice.managed) context.body.append(el('p', 'form-note', runtimeError ? t('The local proxy is not running, so this session is isolated.') : t('Only the account selected {where} launches through the proxy, so this session is isolated.', { where: inGroup(account.pool, snapshot?.projects) })));
+  if (claudeKey) context.body.append(el('p', 'form-note', runtimeError ? t('The local proxy is not running, so this key cannot launch now.') : choice.managed ? t('A Claude API key launches only through Switchboard, from a folder of its group.') : t('A Claude API key launches only through Switchboard, as the selected key {where}, from a folder of its group. Launching selects it.', { where: inGroup(account.pool, snapshot?.projects) })));
+  else if (!choice.managed) context.body.append(el('p', 'form-note', runtimeError ? t('The local proxy is not running, so this session is isolated.') : t('Only the account selected {where} launches through the proxy, so this session is isolated.', { where: inGroup(account.pool, snapshot?.projects) })));
   context.body.append(note);
-  context.actions.append(submit(t('Launch')));
+  const go = submit(t('Launch')); if (claudeKey && runtimeError) go.disabled = true;
+  context.actions.append(go);
   context.form.addEventListener('submit', (event) => {
     event.preventDefault();
     const workingDirectory = folder.require(); if (!workingDirectory) return;
-    const mode = isolated.checked ? 'isolated' : 'managed';
+    const mode = isolated.checked && !claudeKey ? 'isolated' : 'managed';
+    const selectFirst = claudeKey && !choice.managed;
     let tools = true;
     const noTools = t(' Agents in this session have no Switchboard tools: link the command-line tool under Agents, then launch again.');
-    void dialogSave(context, async () => { const result = await adapter.launch(account.id, mode, workingDirectory); tools = result.agent_tools !== false; }, demo ? mode === 'managed' ? t('Synthetic managed launch recorded. No terminal was opened.') : t('Synthetic isolated launch recorded. No terminal was opened.') : mode === 'managed' ? t('Terminal launch requested in your folder through the local proxy. Selection takes effect on the next request.') : t('Terminal launch requested in your folder with this account’s private home. Provider acceptance is not yet observed.'), 'launch').then(() => { if (!tools && !noticeError) { showNotice(notice + noTools); render(); } });
+    void dialogSave(context, async () => { if (selectFirst) await adapter.select(account); const result = await adapter.launch(account.id, mode, workingDirectory); tools = result.agent_tools !== false; }, demo ? mode === 'managed' ? t('Synthetic managed launch recorded. No terminal was opened.') : t('Synthetic isolated launch recorded. No terminal was opened.') : mode === 'managed' ? t('Terminal launch requested in your folder through the local proxy. Selection takes effect on the next request.') : t('Terminal launch requested in your folder with this account’s private home. Provider acceptance is not yet observed.'), 'launch').then(() => { if (!tools && !noticeError) { showNotice(notice + noTools); render(); } });
   });
   folder.focus();
 }
@@ -3969,7 +4000,7 @@ function moveDialog(account: Account, inCli: boolean) {
   const context = openDialog(t('Move to another group'), t('Choose where “{label}” is used. A group’s accounts work only in its folders; the default group works in every other folder.', { label: account.label }));
   const group = el('fieldset', 'appearance-options move-options'); group.append(el('legend', 'sr-only', t('Group')));
   const projects = snapshot?.projects ?? [];
-  const targets = moveTargets(account.pool, projects, inCli, (pool) => placementAdmits(snapshot!, groupOrganizations(projects.find((p) => p.pool === pool)), account));
+  const targets = moveTargets(account.pool, projects, inCli, (pool) => placementAdmits(snapshot!, groupOrganizations(projects.find((p) => p.pool === pool)), account), account.provider === 'claude' && account.kind === 'api_key');
   const radios: HTMLInputElement[] = [];
   for (const target of targets) {
     const option = el('label', 'appearance-option'); const radio = el('input'); radio.type = 'radio'; radio.name = 'move-pool'; radio.value = target.pool; radio.checked = target.current; radio.disabled = target.blocked; radio.required = true;
@@ -3979,6 +4010,8 @@ function moveDialog(account: Account, inCli: boolean) {
   }
   context.body.append(group);
   if (targets.some((x) => x.refused)) context.body.append(el('p', 'form-note', t('Some groups are unavailable: their organization does not take this account. Change its organization first.')));
+  // SB-401: a Claude API key goes only to the pay-per-token group, nothing else goes there, and its keys stay.
+  if (targets.some((x) => x.keys)) context.body.append(el('p', 'form-note', projectOf(account.pool)?.tokens ? t('A key in the pay-per-token group stays there. Remove the account to take it out.') : account.provider === 'claude' && account.kind === 'api_key' ? t('A Claude API key moves only to the pay-per-token group, where its daily ceiling holds it.') : t('Only a Claude API key can be in the pay-per-token group.')));
   if (inCli) context.body.append(el('p', 'form-note', t('This account is signed in to Claude Code or Codex, which every folder uses, so it cannot join a group. Switch the CLI to another account first.')));
   if (!snapshot?.projects?.length) context.body.append(el('p', 'form-note', t('There are no groups yet. Create one under Groups, then move accounts into it.')));
   const confirm = submit(t('Move')); context.actions.append(confirm);
@@ -4337,9 +4370,9 @@ async function addTokensFolders(project: Project) {
   void mutate(() => adapter.saveProject({ pool: project.pool, name: project.name, folders: withFolders(project.folders, chosen), accountIds: own, baseFolders: project.folders }), plural(chosen.length, { one: 'Added one folder to {name}.', other: 'Added {n} folders to {name}.' }, { name: groupDisplayName(project) }), `menu-group-${project.pool}`);
 }
 function deleteProjectDialog(project: Project) {
-  const context = openDialog(t('Delete group?'), t('Delete “{name}”. Its accounts stay saved and are no longer reserved for it; sessions in its folders use the usual selection again.', { name: project.name }));
+  const context = openDialog(t('Delete group?'), t('Delete “{name}”. Its accounts stay saved and are no longer reserved for it; sessions in its folders use the usual selection again.', { name: groupDisplayName(project) }));
   const confirm = submit(t('Delete group')); confirm.className = 'button danger'; context.actions.append(confirm);
-  context.form.addEventListener('submit', (event) => { event.preventDefault(); void dialogSave(context, () => adapter.removeProject(project.pool), t('Group “{name}” deleted. Its accounts stay saved and are no longer reserved for it.', { name: project.name })); });
+  context.form.addEventListener('submit', (event) => { event.preventDefault(); void dialogSave(context, () => adapter.removeProject(project.pool), t('Group “{name}” deleted. Its accounts stay saved and are no longer reserved for it.', { name: groupDisplayName(project) })); });
   context.actions.querySelector('button')?.focus();
 }
 /** SB-69: removing a project rule asks first; pausing it is the reversible choice (SCN-042). */
@@ -4418,7 +4451,7 @@ function backgroundRefresh() {
     if (page === 'projects') shellHookKey = '';
     snapshot = data; applyContext(context); backgroundRender();
     // B-8, SB-104, C-7, SB-227: what the page on screen shows is read again with the list.
-    const reads = backgroundReads(page);
+    const reads = backgroundReads(page, !!snapshot?.projects?.some((p) => p.tokens));
     if (reads.includes('onboarding')) loadOnboarding();
     if (reads.includes('sessions')) void loadSessions();
     if (reads.includes('session_rows')) void loadSessionRows();

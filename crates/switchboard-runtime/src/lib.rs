@@ -14235,6 +14235,18 @@ mod tokens_group_tests {
         );
         // Balancing never names the pay-per-token group.
         assert!(!balancing::pools(&snapshot).contains(&"tokens".to_owned()));
+        // A managed launch of a key runs only from a folder of its group (SCN-100).
+        let mut paid = switchboard_core::Project::tokens_group("tokens".into(), 1);
+        paid.folders = vec!["/w/paid".into()];
+        let mut only = switchboard_core::Snapshot::default();
+        only.projects.push(paid);
+        key.pool = "tokens".into();
+        key.kind = AuthKind::ApiKey;
+        assert_eq!(
+            launch::project_allows(&only, &key, std::path::Path::new("/w/other")).unwrap_err(),
+            launch::PROJECT_ACCOUNT_OUTSIDE
+        );
+        assert!(launch::project_allows(&only, &key, std::path::Path::new("/w/paid/sub")).is_ok());
     }
 
     /// SB-401: the owner's proxy knows the day's pay-per-token spend before its first request,

@@ -423,7 +423,9 @@ export function groupSeatsEndedText(snapshot: OrgSnapshot, group: { name: string
  * `spend.json`), and the PassionCode.ai status on Organizations (SB-227: a local file read, so a
  * mark a background read made shows without reopening the page). */
 export type BackgroundRead = 'onboarding' | 'sessions' | 'ceilings' | 'passioncode' | 'session_rows';
-export function backgroundReads(page: string): BackgroundRead[] {
+export function backgroundReads(page: string, tokensGroup = false): BackgroundRead[] {
+  // SB-401: Groups reads the ceilings again while the pay-per-token group shows its spending.
+  if (page === 'projects') return tokensGroup ? ['ceilings'] : [];
   if (page === 'orgs') return ['onboarding', 'passioncode'];
   if (page === 'accounts') return ['onboarding'];
   if (page === 'activity') return ['sessions'];
@@ -1051,13 +1053,17 @@ export function replaceFolder(folders: string[], old: string, folder: string): s
 }
 /** SB-122: where an account can move. The default pool first, then each project by name; `current` marks where it is, `blocked` a project the CLI's own account cannot join. An account left in a deleted project's pool has no current option. */
 /** `refused`: SB-314, a group whose organization does not take the account (the move would be refused). */
-export interface MoveTarget { pool: string; name: string | null; current: boolean; blocked: boolean; refused: boolean }
-export function moveTargets(currentPool: string, projects: { pool: string; name: string }[], inCli: boolean, admits: (pool: string) => boolean = () => true): MoveTarget[] {
+/** `keys`: SB-401, a move the pay-per-token group's rule refuses: a Claude API key goes only there, nothing else goes there, and nothing leaves it. */
+export interface MoveTarget { pool: string; name: string | null; current: boolean; blocked: boolean; refused: boolean; keys: boolean }
+export function moveTargets(currentPool: string, projects: { pool: string; name: string; tokens?: boolean }[], inCli: boolean, admits: (pool: string) => boolean = () => true, claudeKey = false): MoveTarget[] {
   const sorted = [...projects].sort((a, b) => a.name.localeCompare(b.name));
-  return [{ pool: 'default', name: null }, ...sorted.map((p) => ({ pool: p.pool, name: p.name }))].map((target) => {
+  const tokensPool = projects.find((p) => p.tokens)?.pool ?? null;
+  return [{ pool: 'default', name: null }, ...sorted.map((p) => ({ pool: p.pool, name: groupDisplayName(p) }))].map((target) => {
     const current = target.pool === currentPool;
     const refused = target.pool !== 'default' && !current && !admits(target.pool);
-    return { ...target, current, refused, blocked: refused || (inCli && target.pool !== 'default' && !current) };
+    const toTokens = target.pool === tokensPool;
+    const keys = !current && (currentPool === tokensPool || (claudeKey ? !toTokens : toTokens));
+    return { ...target, current, refused, keys, blocked: refused || keys || (inCli && target.pool !== 'default' && !current) };
   });
 }
 /** SB-135: a project's folders as Git sees them: each root with its worktrees and clones. */
@@ -1514,8 +1520,8 @@ export interface PoolChoice { pool: string; name: string; group: boolean }
  * UX-17: the pools a group field offers: Default first, then each group by name, then any other pool
  * an account already uses (and `current`), so a typo never makes a pool nothing else uses.
  */
-export function poolChoices(accounts: Pick<Account, 'pool'>[], projects: { pool: string; name: string }[], current?: string): PoolChoice[] {
-  const groups = [...projects].sort((a, b) => a.name.localeCompare(b.name)).map((p) => ({ pool: p.pool, name: p.name, group: true }));
+export function poolChoices(accounts: Pick<Account, 'pool'>[], projects: { pool: string; name: string; tokens?: boolean }[], current?: string): PoolChoice[] {
+  const groups = [...projects].sort((a, b) => a.name.localeCompare(b.name)).map((p) => ({ pool: p.pool, name: groupDisplayName(p), group: true }));
   const known = new Set(['default', ...groups.map((g) => g.pool)]);
   const others = [...new Set([...accounts.map((a) => a.pool), ...(current ? [current] : [])])].filter((pool) => !known.has(pool) && !pool.startsWith(MACHINE_POOL_PREFIX)).sort().map((pool) => ({ pool, name: pool, group: false }));
   return [{ pool: 'default', name: t('Default group'), group: false }, ...groups, ...others];
@@ -1828,10 +1834,12 @@ export interface CeilingAction { answer: 'double' | 'keep'; label: string; class
 /** The question a reached ceiling asks: its sentence and its two answers of equal weight, in a
  * fixed order (double, then keep). `double` is the core's doubled value, `null` when doubling
  * would pass $1,000 (that button stays, unavailable, and `note` says why). */
-export function ceilingQuestion(q: { value: number; double?: number | null; kind?: 'machine' | 'project' | 'workflow'; scope?: string }): { text: string; actions: CeilingAction[]; note: string | null } {
+export function ceilingQuestion(q: { value: number; double?: number | null; kind?: 'machine' | 'project' | 'workflow'; scope?: string; tokens?: boolean }): { text: string; actions: CeilingAction[]; note: string | null } {
   const usd = dollars(q.value);
   const doubled = q.double === undefined ? q.value * 2 : q.double;
-  const text = q.kind === 'project' ? t('{group}\'s daily ceiling of {usd} is reached.', { group: q.scope ?? '', usd })
+  // SB-401: a group name ending in s reads badly with 's: the pay-per-token group's sentence names it after.
+  const text = q.kind === 'project' && q.tokens ? t('The daily ceiling of {group}, {usd}, is reached.', { group: q.scope ?? '', usd })
+    : q.kind === 'project' ? t('{group}\'s daily ceiling of {usd} is reached.', { group: q.scope ?? '', usd })
     : q.kind === 'workflow' ? t('The ceiling of task {id}, {usd}, is reached.', { id: q.scope ?? '', usd })
       : t('This computer\'s daily ceiling of {usd} is reached.', { usd });
   // One class for both: the same size, weight and contrast.
@@ -1862,7 +1870,9 @@ export function ceilingWarning(ceiling: number | null, credit: Pick<OpenrouterCr
   return null;
 }
 /** SB-401: the pay-per-token group's spending on its card: its ceiling, what its keys cost today at the list price, and whether that reached it. */
-export function tokensSpendLine(ceiling: { usd: number; spent_today_usd?: number | null; reached?: boolean | null } | null): { text: string; reached: boolean } {
+export function tokensSpendLine(ceiling: { usd: number; spent_today_usd?: number | null; reached?: boolean | null } | null, on = false): { text: string; reached: boolean } {
+  // A ceiling cleared after the group was turned on: on, but every request is refused.
+  if (!ceiling && on) return { text: t('On, but refusing every request: it has no daily ceiling. Set one to serve again.'), reached: true };
   if (!ceiling) return { text: t('No daily ceiling. Set one before you turn this group on.'), reached: false };
   const spent = ceiling.spent_today_usd;
   if (spent === null || spent === undefined) return { text: t('Daily ceiling {usd} · spent today not read', { usd: dollars(ceiling.usd) }), reached: false };
