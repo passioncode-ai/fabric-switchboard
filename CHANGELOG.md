@@ -8,6 +8,7 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- A limit stop whose session was already continued elsewhere (a hand-over, or a later launch of the same session) is no longer offered as ready to continue: `recovery` marks it `continued` and the Sessions page reads it ended, moved on.
 ## 0.7.111
 
 - 0.7.110 was tagged but never published: its Windows build failed, because a session module meant for macOS and Linux was compiled for Windows too. This release carries its changes, listed below, with that fixed.
