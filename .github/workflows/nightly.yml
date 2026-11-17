@@ -82,9 +82,18 @@ jobs:
           rustup default stable
           rustup target add ${{ matrix.target }}
       - run: npm ci
+      # The proxy's and the desktop crate's tests run here too (SB-406 item 7: the proxy's tests
+      # did not build on Windows and nothing noticed). The desktop crate's Windows configuration
+      # bundles the release CLI, built only later; its tests do not need it, so TAURI_CONFIG takes
+      # the resources out for this step (the build below keeps them). The crate embeds the window
+      # (`dist/`, ignored by Git), so the window is built first.
       - name: Native storage and runtime fixtures
+        env:
+          TAURI_CONFIG: '{"bundle":{"resources":null}}'
         run: |
-          cargo test -p switchboard-core -p switchboard-runtime -p switchboard-cli -p fabric-sessions-core -p fabric-sessions --locked --no-fail-fast
+          npm run build
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo test -p switchboard-core -p switchboard-proxy -p switchboard-runtime -p switchboard-cli -p fabric-switchboard -p fabric-sessions-core -p fabric-sessions --locked --no-fail-fast
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: The fixtures leave the source tree as checked out
         run: |

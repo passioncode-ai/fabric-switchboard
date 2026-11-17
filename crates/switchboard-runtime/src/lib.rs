@@ -1845,7 +1845,7 @@ impl Runtime {
                 // owner transaction between two gates never leaves the second with nothing.
                 let budget = fallback::by_hand_budget();
                 let gate = || async {
-                    let started = tokio::time::Instant::now();
+                    let started = budget.start();
                     let pin = fallback::gate_pinned(
                         &self.store,
                         &self.root,
@@ -1855,7 +1855,7 @@ impl Runtime {
                         budget.limit(fallback::SPEND_READ_TIMEOUT),
                     )
                     .await;
-                    budget.charge(started.elapsed());
+                    budget.charge_since(started);
                     pin
                 };
                 let mut pin = gate().await?;
