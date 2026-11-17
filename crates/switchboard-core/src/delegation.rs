@@ -181,6 +181,7 @@ impl crate::Store {
     /// SB-403: saves a sign-in another machine delegated (`ssh-serve`): a new account of a
     /// subscription, in a group of this computer with folders, carrying the sender's key and a
     /// lease of `lease_hours` from now. The account and its record are published together.
+    #[allow(clippy::too_many_arguments)]
     pub fn add_delegated(
         &self,
         label: String,

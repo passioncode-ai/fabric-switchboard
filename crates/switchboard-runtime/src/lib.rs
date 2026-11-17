@@ -11579,6 +11579,145 @@ mod owner_tests {
             .all(|p| p.shared_accounts.is_empty()));
     }
 
+    /// SB-403 (DEC-0024): the operations of a delegated seat and of the own sign-in switch.
+    #[tokio::test]
+    async fn a_delegated_seat_and_the_own_sign_in_switch_through_the_operations() {
+        use switchboard_core::delegation;
+        const KEY: &str = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=";
+        let root = tempfile::tempdir().unwrap();
+        let runtime = fixtures::runtime(root.path(), signed_out, activates).await;
+        // The own sign-in switch: on until turned off; off, the ordinary sign-in is not read.
+        let own = |on| Operation::OwnSignIn { on };
+        assert_eq!(
+            runtime.execute(own(None)).await.unwrap()["own_sign_in"],
+            "on"
+        );
+        assert_eq!(
+            runtime.execute(own(Some(false))).await.unwrap()["own_sign_in"],
+            "off"
+        );
+        assert_eq!(
+            (runtime.native().current)(Provider::Claude)
+                .err()
+                .as_deref(),
+            Some(own_sign_in::OFF_LIMITS)
+        );
+        runtime.execute(own(Some(true))).await.unwrap();
+        assert!(!own_sign_in::is_off(root.path()));
+        // A delegated move is refused before anything travels.
+        let one = fixtures::save(&runtime.store, "synthetic-one", "default").id;
+        let send = |pool: &str, delegate: bool, lease_hours: Option<u32>| Operation::SendAccount {
+            id: one.clone(),
+            to: "studio.local".into(),
+            pool: Some(pool.into()),
+            program: None,
+            remote_data_dir: None,
+            decision: None,
+            delegate,
+            lease_hours,
+        };
+        assert_eq!(
+            runtime
+                .execute(send("default", true, None))
+                .await
+                .unwrap_err(),
+            account_send::DELEGATE_INTO_GROUP
+        );
+        assert_eq!(
+            runtime
+                .execute(send("org", true, Some(0)))
+                .await
+                .unwrap_err(),
+            delegation::LEASE_INVALID
+        );
+        assert_eq!(
+            runtime
+                .execute(send("org", false, Some(4)))
+                .await
+                .unwrap_err(),
+            SEND_LEASE_WITHOUT_DELEGATE
+        );
+        // A seat delegated here, as `ssh-serve` saves it.
+        let work = tempfile::tempdir().unwrap();
+        let work = work.path().canonicalize().unwrap();
+        let group = runtime
+            .execute(Operation::SaveProject {
+                organizations: None,
+                move_accounts: false,
+                pool: None,
+                name: "Org".into(),
+                folders: vec![work.clone()],
+                account_ids: vec![],
+                base_folders: None,
+                organization: None,
+            })
+            .await
+            .unwrap();
+        let pool = group["pool"]
+            .as_str()
+            .or_else(|| group["project"]["pool"].as_str())
+            .unwrap()
+            .to_owned();
+        let seat = runtime
+            .execute(Operation::AddDelegated {
+                label: "seat".into(),
+                provider: Provider::Claude,
+                pool: pool.clone(),
+                secret: r#"{"claudeAiOauth":{"accessToken":"a-seat","refreshToken":"r-seat","expiresAt":4102444800000}}"#.into(),
+                sender_key: KEY.into(),
+                from: Some("administrator".into()),
+                lease_hours: 48,
+            })
+            .await
+            .unwrap();
+        let id = seat["id"].as_str().unwrap().to_owned();
+        assert_eq!(
+            runtime
+                .execute(Operation::Remove { id: id.clone() })
+                .await
+                .unwrap_err(),
+            delegation::DELEGATED_NOT_REMOVED
+        );
+        assert_eq!(
+            runtime
+                .execute(Operation::Assign {
+                    id: id.clone(),
+                    to: Some("an agent".into()),
+                    force: false,
+                })
+                .await
+                .unwrap_err(),
+            delegation::DELEGATED_NOT_GIVEN
+        );
+        assert_eq!(
+            runtime
+                .execute(Operation::ActivateNative {
+                    id: id.clone(),
+                    force: false,
+                })
+                .await
+                .unwrap_err(),
+            delegation::DELEGATED_NOT_NATIVE
+        );
+        let lease = runtime
+            .execute(Operation::LeaseDelegated {
+                id: id.clone(),
+                sender_key: KEY.into(),
+                hours: 2,
+            })
+            .await
+            .unwrap();
+        assert!(lease["lease_until"].as_i64().unwrap() > 0);
+        runtime
+            .execute(Operation::RemoveDelegated {
+                id: id.clone(),
+                sender_key: KEY.into(),
+            })
+            .await
+            .unwrap();
+        assert!(!runtime.store.snapshot().unwrap().is_delegated(&id));
+    }
+
     #[tokio::test]
     async fn an_account_moves_between_projects_and_back_to_default() {
         // SB-122: «аккаунты между пулами перемещать через UI, три точки, добавить в пул, выбор».

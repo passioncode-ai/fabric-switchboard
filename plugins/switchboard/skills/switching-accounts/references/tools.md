@@ -51,6 +51,9 @@ Annotations: `readOnlyHint: true`.
 
 ### `switchboard_accounts`: `provider?: "claude" | "codex"`, `machine?: "here" | "elsewhere"`
 
+A seat another machine delegated here (SB-403) also carries `delegated` (`from`, `sender_key`,
+`lease_until`, `lease_ended`): it serves its group only, and only that machine calls it back.
+
 `accounts[]`: `id`, `label`, `provider`, `kind` (`oauth`, `api_key`, `setup_token`), `pool` (the group id),
 `groups` (every group it serves, its own first), `enabled`, `selected_for_next_request`,
 `signed_in_cli`, `lowest_remaining_percent`, `usage_fresh`, `organization`, `also_organizations`

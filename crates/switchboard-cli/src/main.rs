@@ -3826,6 +3826,10 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                 a["location"] = value["locations"].get(&id).cloned().unwrap_or(Value::Null);
                 // SB-322: the agent it was given to, null when none.
                 a["assigned_to"] = value["assigned_to"].get(&id).cloned().unwrap_or(Value::Null);
+                // SB-403: a seat another machine delegated here, with its lease.
+                if let Some(d) = value["delegated"].get(&id) {
+                    a["delegated"] = d.clone();
+                }
                 // SB-328: its organizations, as `switchboard_accounts` gives them.
                 let view = mcp::account_organizations(&value, organizations.as_ref(), &id);
                 a["organization"] = view.0;
