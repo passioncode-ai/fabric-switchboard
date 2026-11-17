@@ -164,7 +164,8 @@ wave table at the end. Decision: [DEC-0022](../../DECISIONS.md#dec-0022-an-organ
   credential is removed. The sender does not pull tokens at each read (one live copy, fewer
   tokens on the wire).
 - **D-33 (P1-4).** The receiver's seat operations have no local CLI command and are refused unless
-  `ssh-serve` sent them (`served`). Threat model stated in DEC-0025 and ORGANIZATION.md: the
+  they say `ssh-serve` sent them (`served`); a process holding the control token can say so too
+  (round 2, P2-A, and D-40). Threat model stated in DEC-0025 and ORGANIZATION.md: the
   teammate owns the machine; the provider sign-out is the revocation against an uncooperative one.
 - **D-34 (P2-1).** A delegated seat launches only in managed mode (`DELEGATED_ISOLATED`); its
   isolated home is cleaned at lease end.
@@ -178,13 +179,25 @@ wave table at the end. Decision: [DEC-0022](../../DECISIONS.md#dec-0022-an-organ
   (`Snapshot::delegated_out`), carried by backups; `seats.jsonl` is only the fallback.
 - **D-38 (P2-6).** Deleting a group that holds a guest answers `GROUP_HOLDS_GUEST`.
 - **D-39.** The decision is DEC-0025 (DEC-0024 is SB-404's, PR #809).
+- **D-40 (round 2, P2-A).** `ssh-serve` gets no separate proof of its own. It runs as the teammate's
+  user, so any secret it held to prove itself to the owner would sit beside `control.json`,
+  readable by the same processes; it would add a file and a check without a trust boundary.
+  The docs say instead what holds: the local CLI, MCP and window never send the receiver's seat
+  operations; a process holding the control token can, with the same trust as the person's own
+  Keychain; against an uncooperative teammate the revocation is signing the subscription out at
+  the provider.
+- **D-41 (round 2, P2-B).** A delegated move whose check failed and whose copy there could not be
+  removed records the seat in `delegated_out` and a granted seat line (account there, lease, key),
+  so `accounts recall` takes the sign-in back under its key. The account is not placed in the
+  machine's group, so the background read does not extend its lease: left alone, the copy there
+  switches off when the lease runs out. The answer says to call it back with `accounts recall`.
 
 ## Waves
 
 | Wave | What | State |
 |---|---|---|
 | S1 | Seats and onboarding: accounts that also work for the organization count; domains optional; the seat step's next steps; an organization never refuses a person's act (DEC-0022); the team follows only on request; moves and call backs place with a warning | done on branch `org-seats` (gate on the Mac Studio, see the backlog row) |
-| S2 | `ssh-serve` restricted entry, `delegated` account kind and its refusals, lease and its renewal by the sender | done on branch `org-delegation` ([DEC-0025](../../DECISIONS.md#dec-0025-a-subscription-is-delegated-to-a-teammates-machine-as-a-guest-under-a-lease); review round 1 fixed) |
+| S2 | `ssh-serve` restricted entry, `delegated` account kind and its refusals, lease and its renewal by the sender | done on branch `org-delegation` ([DEC-0025](../../DECISIONS.md#dec-0025-a-subscription-is-delegated-to-a-teammates-machine-as-a-guest-under-a-lease); review rounds 1 and 2 fixed) |
 | S3 | "Own sign-in off" switch; proof that Claude Desktop and `~/.claude` are untouched (synthetic Keychain tests) | done on branch `org-delegation` |
 | S4 | Teammate setup guide ([ORGANIZATION.md](../../ORGANIZATION.md#a-teammates-computer)), window and MCP for delegate and revoke, CONTRACTS | done on branch `org-delegation` |
 | S5 | Live: a teammate's machine on the tailnet, one organization subscription delegated, a console session on it, Claude Desktop checked untouched, recall | needs the teammate's machine (human step: install, tailnet, ssh key) |

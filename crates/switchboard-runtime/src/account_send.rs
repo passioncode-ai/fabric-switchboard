@@ -72,7 +72,9 @@ pub const OUTCOME_UNKNOWN: &str = "The other machine's answer was lost. This mac
 pub const LEFT_THERE: &str = "The copy on the other machine could not be removed. This machine no longer uses the account; remove that copy there, then mark the account used here.";
 /// SB-403: the delegated copy there could not be removed after a failed check. It is switched
 /// off there once its lease runs out; the guest cannot be removed by the person there.
-pub const LEFT_THERE_DELEGATED: &str = "The delegated copy on the other machine could not be removed. This machine no longer uses the account; the copy there switches off when its lease runs out. Then mark the account used here.";
+/// The seat is recorded under its key (review round 2, P2-B), so a call back takes it back; the
+/// account is not placed in the machine's group, so its lease there is not extended.
+pub const LEFT_THERE_DELEGATED: &str = "The delegated copy on the other machine could not be removed. This machine no longer uses the account, and its lease there is no longer extended. Call it back with accounts recall.";
 /// The location a surrender writes; `--undo` takes back only this mark.
 pub const CALLED_BACK: &str = "called back";
 /// SB-377: the mark of a surrender whose account was off here; `--undo` turns it off again.
@@ -449,12 +451,23 @@ pub fn send_as(
         .is_some_and(|c| c.refresh_token != sent);
     if !verified || renewed_here {
         if !remove_there(&remote_id) {
-            return Err(if delegate.is_some() {
-                LEFT_THERE_DELEGATED
-            } else {
-                LEFT_THERE
+            let Some(d) = delegate else {
+                return Err(LEFT_THERE.into());
+            };
+            // Review round 2, P2-B: the seat there is recorded under its key, so `accounts recall`
+            // finds it and takes the sign-in back; the account stays marked used there.
+            let out = switchboard_core::DelegatedOut {
+                remote_id: remote_id.clone(),
+                lease_hours: d.lease_hours,
+                sender_key: d.sender_key.to_owned(),
+            };
+            if store.record_delegated_out(id, out).is_err() {
+                crate::oplog::event(
+                    "delegation_record",
+                    &[("result", crate::oplog::Field::Code("unwritten"))],
+                );
             }
-            .into());
+            return Err(LEFT_THERE_DELEGATED.into());
         }
         undo_here()?;
         return Err(if renewed_here {
@@ -2416,11 +2429,16 @@ mod tests {
             .iter()
             .any(|(c, _)| c.contains("'accounts' 'remove' 'remote-1' '--sender-key' 'K'")));
         assert!(!store.snapshot().unwrap().elsewhere.contains_key(&id));
-        // When the removal there fails too, the answer says the copy switches off by its lease.
+        // Review round 2, P2-B: when the removal there fails too, the seat is recorded under its
+        // key, so a call back finds it and takes the sign-in back.
+        const KEY: &str = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=";
         let calls: Calls = Default::default();
         let failing = |args: &[String], stdin: Option<&[u8]>| {
             if args[2].contains("'accounts' 'remove'") {
                 return Err("ssh failed.".to_string());
+            }
+            if args[2].contains("'accounts' 'add'") {
+                return Ok(r#"{"ok":true,"data":{"id":"0a1b2c3d"}}"#.to_string());
             }
             fake(&calls, true, false)(args, stdin)
         };
@@ -2435,13 +2453,20 @@ mod tests {
                 &failing,
                 &|_| {},
                 Some(Delegate {
-                    sender_key: "K",
+                    sender_key: KEY,
                     lease_hours: 48,
                 }),
             )
             .unwrap_err(),
             LEFT_THERE_DELEGATED
         );
+        assert!(LEFT_THERE_DELEGATED.contains("accounts recall"));
+        let snapshot = store.snapshot().unwrap();
+        assert!(snapshot.elsewhere.contains_key(&id));
+        let out = &snapshot.delegated_out[&id];
+        assert_eq!(out.remote_id, "0a1b2c3d");
+        assert_eq!(out.lease_hours, 48);
+        assert_eq!(out.sender_key, KEY);
     }
 
     /// SB-403: a seat whose lease ran out there answers no sign-in; the one kept here is asked.

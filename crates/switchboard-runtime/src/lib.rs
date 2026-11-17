@@ -4739,6 +4739,47 @@ fn record_lost_move(
         );
     }
 }
+/// SB-403 (review round 2, P2-B): a delegated move whose check failed and whose copy there could
+/// not be removed (`LEFT_THERE_DELEGATED`) recorded the seat in the store; a granted seat line with
+/// its account there, lease and key lets `accounts recall` name the machine. The account is not
+/// placed in the machine's group, so the background read does not extend its lease there.
+#[allow(clippy::too_many_arguments)]
+fn record_left_delegated(
+    root: &Path,
+    store: &Store,
+    moved: &Result<Value, String>,
+    id: &str,
+    to: &str,
+    pool: &str,
+    decision: Option<&spend::Decision>,
+    remote: &account_send::Program<'_>,
+) {
+    if !moved
+        .as_ref()
+        .is_err_and(|e| e == account_send::LEFT_THERE_DELEGATED)
+    {
+        return;
+    }
+    let Some(out) = store
+        .snapshot()
+        .ok()
+        .and_then(|s| s.delegated_out.get(id).cloned())
+    else {
+        return;
+    };
+    record_seat_leased(
+        root,
+        "granted",
+        id,
+        to,
+        pool,
+        decision,
+        Some(&out.remote_id),
+        None,
+        Some(remote),
+        Some((out.lease_hours, &out.sender_key)),
+    );
+}
 /// SB-292: a seat granted to another machine, which the operator's words order and
 /// `seats.jsonl` records.
 fn seat_operation(operation: &Operation) -> bool {
@@ -6797,6 +6838,16 @@ async fn execute(
             // SB-365: a lost answer leaves the account marked here and its copy there unknown;
             // the line lets Attention list it until it is called back.
             record_lost_move(root, &moved, &id, &to, &pool, decision.as_ref(), &remote);
+            record_left_delegated(
+                root,
+                &store,
+                &moved,
+                &id,
+                &to,
+                &pool,
+                decision.as_ref(),
+                &remote,
+            );
             let moved = moved?;
             record_seat_leased(
                 root,
@@ -12780,6 +12831,64 @@ mod owner_tests {
         assert_eq!(lines[0].remote_account, None);
         // A lost move is not a grant: a call back still finds no outstanding move.
         assert!(seats::outstanding(root.path(), "a").is_none());
+    }
+    /// SB-403 (review round 2, P2-B): a delegated move whose check failed and whose copy there
+    /// could not be removed leaves a granted seat line under its key, so `accounts recall` finds
+    /// the machine, the account there and the key to take it back with. Any other answer writes
+    /// nothing.
+    #[tokio::test]
+    async fn a_delegated_copy_left_there_is_recorded_so_it_can_be_called_back() {
+        const KEY: &str = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=";
+        let root = tempfile::tempdir().unwrap();
+        let runtime = fixtures::runtime(root.path(), signed_out, activates).await;
+        let id = fixtures::save(&runtime.store, "synthetic-left", "default").id;
+        let remote = account_send::Program {
+            path: account_send::REMOTE_DEFAULT,
+            data_dir: None,
+        };
+        let refused: Result<Value, String> = Err(account_send::NOT_VERIFIED.into());
+        record_left_delegated(
+            root.path(),
+            &runtime.store,
+            &refused,
+            &id,
+            "studio.local",
+            "agents",
+            None,
+            &remote,
+        );
+        assert!(seats::recent(root.path(), 10).is_empty());
+        // The send recorded the seat in the store before answering.
+        runtime
+            .store
+            .record_delegated_out(
+                &id,
+                switchboard_core::DelegatedOut {
+                    remote_id: "0a1b2c3d".into(),
+                    lease_hours: 48,
+                    sender_key: KEY.into(),
+                },
+            )
+            .unwrap();
+        let left: Result<Value, String> = Err(account_send::LEFT_THERE_DELEGATED.into());
+        record_left_delegated(
+            root.path(),
+            &runtime.store,
+            &left,
+            &id,
+            "studio.local",
+            "agents",
+            None,
+            &remote,
+        );
+        let seat = seats::outstanding(root.path(), &id).expect("a granted seat line");
+        assert_eq!(seat.event, "granted");
+        assert_eq!(seat.machine, "studio.local");
+        assert_eq!(seat.remote_account.as_deref(), Some("0a1b2c3d"));
+        assert_eq!(seat.lease_hours, Some(48));
+        assert_eq!(seat.sender_key.as_deref(), Some(KEY));
+        // Not placed in the machine's group: its lease there is not extended.
+        assert!(runtime.store.snapshot().unwrap().machine_of(&id).is_none());
     }
     /// SB-365 (WF-3.3, DEC-0015): an account Attention lists for a sign-in is in its group the
     /// whole time; signed in again it leaves the list on the next pass and keeps its group, its

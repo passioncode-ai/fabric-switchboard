@@ -588,9 +588,12 @@ research notes); the ones still in force that the board cites are seeded below w
     --sender-key KEY --pool GROUP` (the path quoted, `restrict`, replacing any older line for that
     key), which answers exactly the calls a delegation into that one group needs (save, prove,
     lists cut to the caller's seats, that group and its organizations, usage, lease, call back,
-    removal), never a shell, and refuses a plain move. The receiver's seat operations exist only
-    behind it: the local CLI has no command for them and the owner refuses them from any other
-    caller.
+    removal), never a shell, and refuses a plain move. The receiver's seat operations are sent
+    only by it: the local CLI, MCP and window never send them; a process holding the control token
+    can, with the same trust as the person's own Keychain; against an uncooperative teammate the
+    real revocation is signing the subscription out at the provider. `ssh-serve` carries no proof
+    of its own beyond that token, since any secret it held would be readable by the same
+    processes.
   - The saved account is a guest: it carries the sender's settings signing key and its group; it
     stays in that group, never `default`; it is never sent on, handed over, given to an agent,
     lent, shared, marked elsewhere or made the ordinary sign-in; only a call naming that key

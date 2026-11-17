@@ -184,9 +184,10 @@ switchboard accounts recall ACCOUNT_UUID    # take it back, a seat whose lease r
 id, name, organizations; no folder), `org list` (that group's organizations), `org assign` of a
 seat (to those organizations or personal), and the delegation calls `accounts add --delegated`,
 `usage`, `accounts surrender`, `accounts lease` and `accounts remove` with `--sender-key KEY`,
-read from `SSH_ORIGINAL_COMMAND` without a shell. These delegation calls exist only there: the
-local `switchboard` has no command for them, and the owner refuses them from anyone but
-`ssh-serve`. A plain move there is refused with “That machine takes seats only as delegated ones.
+read from `SSH_ORIGINAL_COMMAND` without a shell. Only `ssh-serve` sends these delegation calls:
+the local CLI, MCP and window never send them; a process holding the control token can, with the
+same trust as the person's own Keychain; against an uncooperative teammate the real revocation is
+signing the subscription out at the provider. A plain move there is refused with “That machine takes seats only as delegated ones.
 Move it again as a delegated seat (accounts send --delegate).”. The seat is a guest there (never
 moved on, lent, given to an agent, made the ordinary sign-in, launched in an isolated home, or
 removed before its sign-in is); this machine's background read extends its lease every 15

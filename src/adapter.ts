@@ -256,7 +256,7 @@ const safeErrors = new Set([
   "This seat's sign-in was removed from this computer 30 days after its lease ran out. The machine that delegated it signs in to the account again and delegates it again.",
   "This group holds a seat another machine delegated to this computer. Ask that machine to call the seat back before deleting the group.",
   "A seat another machine delegated runs only through Switchboard, in its group's folders. Launch it in managed mode.",
-  "The delegated copy on the other machine could not be removed. This machine no longer uses the account; the copy there switches off when its lease runs out. Then mark the account used here.",
+  "The delegated copy on the other machine could not be removed. This machine no longer uses the account, and its lease there is no longer extended. Call it back with accounts recall.",
   "This seat was delegated to this computer by another machine. It stays in the group it was delegated to and is used only here; only that machine calls it back.",
   "This seat was delegated to this computer by another machine, so it cannot be moved or handed on. Only that machine calls it back.",
   "This seat was delegated to this computer by another machine, so it is not given to an agent.",
