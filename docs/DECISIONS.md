@@ -620,10 +620,17 @@ research notes); the ones still in force that the board cites are seeded below w
   - O-6: `launch_keys` lists the pay-per-token group's keys for Claude Code and Hermes
     (`kind: group`), usable only when the group is on, has a ceiling, holds the folder and has the
     key selected; otherwise `why_not` says which.
+  - O-7 (review round 1, 2026-11-17): a key Observatory records as expired is listed and not
+    added (`KEY_EXPIRED`); a model goes only with a named key (`MODEL_FOR_ACCOUNT`); the shell
+    turns tracing off before it expands the value, and shell start-up variables are not passed on;
+    Observatory's own refusal line is passed on bounded; a duplicate account after a lost record is
+    refused by the store's own same-key check; Hermes's side tasks are pinned to the metered
+    provider with no fallback, and provider key variables are unset for that launch; the window
+    reads Observatory once and again only on *Read again*, within 30 s of the backend's 20 s.
 - **Consequences:** an agent (or the operator over MCP) adds a key Observatory holds without a
   person typing it; a Hermes launch on the pay-per-token group no longer needs `agents connect`
   and leaves `~/.hermes` alone, while one on an ordinary group starts as before. Open: a rotation
   in Observatory is not followed yet, and a key Observatory marks leaked is not refused yet (K4);
   OpenAI keys wait for OpenAI prices in the proxy.
-- **Source:** the operator's words above (session 4c635d5e); branch `observatory-keys`.
+- **Source:** the operator's words above (2026-11-17); branch `observatory-keys`.
 

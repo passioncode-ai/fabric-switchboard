@@ -1671,17 +1671,120 @@ pub const HERMES_TOKENS_MODEL_NEEDED: &str =
 /// config file: the launch writes one in a Hermes home of its own, pointing a provider named
 /// `switchboard` at the group's route with the agents' capability (never a provider key), and
 /// leaves `~/.hermes` alone. The person's own sign-ins are not adopted.
-fn hermes_tokens_home(home: &Path, base: &str) -> Result<PathBuf, String> {
+fn hermes_tokens_home(home: &Path, base: &str, model: &str) -> Result<PathBuf, String> {
     let own = home.join("agent-home");
     private_dir(&own)?;
-    let config = format!(
+    let mut config = format!(
         "# Written by Fabric Switchboard for this launch: Hermes on the pay-per-token group, through its proxy.\n\
 providers:\n  switchboard:\n    api: \"{base}\"\n    key_env: {HERMES_KEY_ENV}\n    transport: anthropic_messages\n\
-auth:\n  adopt_external_logins: false\n"
+fallback_providers: []\n\
+auth:\n  adopt_external_logins: false\n\
+auxiliary:\n  free_only: true\n"
     );
+    // Review round 1, P2-10: Hermes's side tasks (titles, compression, vision, approval and the
+    // rest) pick their own provider; each is pinned to this launch's provider and model, so none
+    // falls through to OpenRouter, Nous or a direct key past the meter.
+    for task in HERMES_AUX_TASKS {
+        config.push_str(&format!(
+            "  {task}:\n    provider: switchboard\n    model: \"{model}\"\n"
+        ));
+    }
     switchboard_core::private_fs::private_write(&own.join("config.yaml"), config.as_bytes())
         .map_err(|_| "Managed home unavailable.".to_string())?;
     Ok(own)
+}
+/// Hermes's side tasks with a provider of their own (`hermes_cli/config_defaults.py`
+/// `auxiliary`, Hermes 0.22.2).
+const HERMES_AUX_TASKS: &[&str] = &[
+    "vision",
+    "compression",
+    "skills_hub",
+    "approval",
+    "review",
+    "mcp",
+    "title_generation",
+    "memory_query_rewrite",
+    "tts_audio_tags",
+    "voice_chat",
+    "triage_specifier",
+    "kanban_decomposer",
+    "profile_describer",
+    "goal_judge",
+    "curator",
+    "monitor",
+];
+/// Provider keys Hermes would find in the environment and use past the meter (its auxiliary
+/// chain tries OpenRouter, Nous and direct API-key providers): unset for a metered launch. Keys a
+/// session's own tools use (`GH_TOKEN`, `GITHUB_TOKEN`, `HF_TOKEN`) stay.
+pub(crate) const HERMES_PROVIDER_KEYS: &[&str] = &[
+    "OPENROUTER_API_KEY",
+    "NOUS_API_KEY",
+    "NOUS_BASE_URL",
+    "NOUS_INFERENCE_BASE_URL",
+    "NOUS_PORTAL_BASE_URL",
+    "ANTHROPIC_TOKEN",
+    "AI_GATEWAY_API_KEY",
+    "ALIBABA_CODING_PLAN_API_KEY",
+    "ARCEEAI_API_KEY",
+    "AZURE_FOUNDRY_API_KEY",
+    "COPILOT_GITHUB_TOKEN",
+    "DASHSCOPE_API_KEY",
+    "DEEPSEEK_API_KEY",
+    "GEMINI_API_KEY",
+    "GOOGLE_API_KEY",
+    "GLM_API_KEY",
+    "GMI_API_KEY",
+    "KILOCODE_API_KEY",
+    "KIMI_API_KEY",
+    "KIMI_CN_API_KEY",
+    "KIMI_CODING_API_KEY",
+    "LM_API_KEY",
+    "MINIMAX_API_KEY",
+    "MINIMAX_CN_API_KEY",
+    "NVIDIA_API_KEY",
+    "OLLAMA_API_KEY",
+    "OPENCODE_GO_API_KEY",
+    "OPENCODE_ZEN_API_KEY",
+    "STEPFUN_API_KEY",
+    "TOKENHUB_API_KEY",
+    "TOKENPLAN_API_KEY",
+    "XAI_API_KEY",
+    "XIAOMI_API_KEY",
+    "Z_AI_API_KEY",
+    "ZAI_API_KEY",
+    "GROQ_API_KEY",
+    "MISTRAL_API_KEY",
+    "TOGETHER_API_KEY",
+    "FIREWORKS_API_KEY",
+    "CEREBRAS_API_KEY",
+    "PERPLEXITY_API_KEY",
+];
+/// A launch script that also clears `names` before anything runs (as it clears `CONFLICTS`).
+fn with_unset(content: String, names: &[&str]) -> String {
+    if names.is_empty() {
+        return content;
+    }
+    #[cfg(not(windows))]
+    {
+        content.replacen("\nunset ", &format!("\nunset {} ", names.join(" ")), 1)
+    }
+    #[cfg(windows)]
+    {
+        let lines: String = names
+            .iter()
+            .map(|n| {
+                format!(
+                    "[Environment]::SetEnvironmentVariable({}, $null, 'Process')\n",
+                    powershell_quote(n)
+                )
+            })
+            .collect();
+        content.replacen(
+            "Set-PSDebug -Off\n",
+            &format!("Set-PSDebug -Off\n{lines}"),
+            1,
+        )
+    }
 }
 /// The variable the Hermes home's provider reads the agents' capability from.
 const HERMES_KEY_ENV: &str = "SWITCHBOARD_AGENT_KEY";
@@ -1742,11 +1845,13 @@ fn launch_agent_with(
     }
     env.extend(profile.extra_env.clone());
     let mut args: Vec<String> = profile.args.clone();
+    let mut unset: Vec<&str> = Vec::new();
     // SB-404 K3: Hermes on the pay-per-token group runs through the proxy, in a home of its own.
     let tokens = snapshot.project_of_pool(pool).is_some_and(|g| g.tokens);
     if profile.id == "hermes" && tokens {
         let model = model.ok_or(HERMES_TOKENS_MODEL_NEEDED)?;
-        let own = hermes_tokens_home(&home, &base)?;
+        let own = hermes_tokens_home(&home, &base, model)?;
+        unset.extend_from_slice(HERMES_PROVIDER_KEYS);
         env.insert("HERMES_HOME".into(), own.to_string_lossy().into_owned());
         env.insert(HERMES_KEY_ENV.into(), proxy.agent_token().to_owned());
         args.extend([
@@ -1766,7 +1871,10 @@ fn launch_agent_with(
     let launch_id = crate::launches::new_id();
     env.insert(crate::launches::ENV.into(), launch_id.clone());
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
-    let content = script(&home, &program, &args, &env, false, &working_directory);
+    let content = with_unset(
+        script(&home, &program, &args, &env, false, &working_directory),
+        &unset,
+    );
     let path = write_launch_script(&home, &content)?;
     // Listed under Sessions like any launch (`sessions`): ids, folder and times only.
     // `provider` is the provider the proxy route serves (the agent speaks Claude's protocol on
@@ -5193,6 +5301,12 @@ mod tests {
             .contains("'-m' 'deepseek/deepseek-v4-pro-0813'"));
         let config = fs::read_to_string(base.join("agent-home/config.yaml")).unwrap();
         assert!(config.contains("adopt_external_logins: false"));
+        // Review round 1, P2-10: side tasks pinned to the metered provider, no fallback.
+        assert!(config.contains("fallback_providers: []"));
+        assert!(config.contains(
+            "  title_generation:\n    provider: switchboard\n    model: \"claude-fable-5-2\""
+        ));
+        assert!(config.contains("  compression:\n    provider: switchboard"));
         assert!(config.contains("command: \"/opt/Engine \\\"Tools\\\"/python\""));
         assert!(config.contains("args: [\"/opt/engine/mcp/server.py\", \"--home\", \"/opt/h\"]"));
         {
@@ -5652,6 +5766,9 @@ mod tests {
         assert!(script.contains("--provider") && script.contains("switchboard"));
         assert!(script.contains("claude-fable-5-2"));
         assert!(script.contains("HERMES_HOME"));
+        // Provider keys in the caller's environment are cleared before Hermes starts.
+        #[cfg(not(windows))]
+        assert!(script.contains("unset OPENROUTER_API_KEY NOUS_API_KEY"));
         assert!(!script.contains("synthetic-tokens-key"));
         let record = recorded(&home);
         assert_eq!(record["pool"], "tokens");

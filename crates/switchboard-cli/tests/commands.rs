@@ -2018,6 +2018,25 @@ fn a_key_observatory_holds_is_added_by_name_through_a_pipe() {
     ]);
     assert!(!again.status.success());
     assert!(String::from_utf8_lossy(&again.stderr).contains("already an account"));
+    // Review round 1, P2-6: with its record lost (a save that timed out, a record that could not
+    // be written), adding it again still makes no second account: the store refuses the same key
+    // in the same group.
+    std::fs::remove_file(data.join("observatory-keys.json")).unwrap();
+    let again = run(&[
+        "keys",
+        "observatory",
+        "add",
+        "alpha-web/prod/ANTHROPIC_API_KEY",
+    ]);
+    assert!(!again.status.success());
+    let accounts = json(&run(&["accounts", "list"]));
+    let claude_keys = accounts["accounts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|a| a["provider"] == "claude" && a["kind"] == "api_key")
+        .count();
+    assert_eq!(claude_keys, 1, "{accounts}");
     // An OpenRouter key becomes this computer's key; an OpenAI key is refused for now.
     let openrouter = json(&run(&[
         "keys",

@@ -7,6 +7,8 @@
  */
 export const FORMATTED_ERRORS: readonly string[] = [
   '{name} is not installed. Install it first, then launch it again.',
+  // SB-404 review round 1, P2-7: Observatory's own refusal, already scrubbed by it.
+  'Project Observatory refused the key: {name}',
   '{name} cannot take over a workflow: an agent in a chain loads MCP servers and takes a prompt without a person (switchboard agents list).',
 ];
 

@@ -30,8 +30,10 @@ use std::time::{Duration, Instant};
 use switchboard_core::Store;
 
 pub const FILE: &str = "observatory-keys.json";
-const LIST_TIMEOUT: Duration = Duration::from_secs(20);
-const PATH_TIMEOUT: Duration = Duration::from_secs(10);
+/// `full-path` and `vault.py list` together stay well under the window's 30 s read deadline
+/// (`src/adapter.ts` `observatoryKeys`), so a slow Observatory ends as an answer, never a stall.
+const LIST_TIMEOUT: Duration = Duration::from_secs(15);
+const PATH_TIMEOUT: Duration = Duration::from_secs(5);
 const SAVE_TIMEOUT: Duration = Duration::from_secs(60);
 const OUTPUT_LIMIT: usize = 4 * 1024 * 1024;
 const MAX_RECORDS: usize = 256;
@@ -45,13 +47,16 @@ pub const NOT_LISTED: &str = "Project Observatory holds no provider key under th
 pub const OPENAI_NOT_YET: &str = "An OpenAI key cannot be added yet: no spending ceiling counts one in Switchboard. Run Codex on a ChatGPT sign-in, or an agent on an OpenRouter key.";
 pub const TARGET_INVALID: &str = "An Anthropic key goes to an account in the pay-per-token group, a named key for Hermes, or both; an OpenRouter key goes to the agents' key.";
 pub const NAME_NEEDED: &str =
-    "Give the key a name: 1 to 32 lowercase letters, digits and hyphens, such as appvillis.";
+    "Give the key a name: 1 to 32 lowercase letters, digits and hyphens, such as team-a.";
 pub const NAME_TAKEN: &str = "An Anthropic key is already saved under that name. Choose another name, or replace the saved key.";
 pub const OPENROUTER_TAKEN: &str =
     "An OpenRouter key is already saved there. Replace it, or choose a group for this one.";
 pub const ALREADY_ACCOUNT: &str = "This key is already an account in the pay-per-token group. Remove that account first to add it again.";
 pub const POOL_NOT_FOR_ANTHROPIC: &str =
     "A Claude API key always goes to the pay-per-token group; choose no group for it.";
+pub const KEY_EXPIRED: &str =
+    "Project Observatory records this key as expired. Rotate it there, then add it.";
+pub const MODEL_FOR_ACCOUNT: &str = "A model belongs to a named key. An account in the pay-per-token group takes its model at launch: leave out the model, or add a named key too.";
 pub const UNIX_ONLY: &str = "Adding a key from Observatory runs on macOS and Linux for now.";
 pub const SAVE_FAILED: &str = "The key could not be saved from Observatory. Check the slot with project-observatory, then try again.";
 pub const SAVE_TIMED_OUT: &str = "Saving the key from Observatory took longer than a minute and was stopped. Nothing was recorded; try again.";
@@ -164,6 +169,8 @@ pub struct Listed {
     pub expires: Option<String>,
     /// The last rotation's day (`rotated 2026-11-14×1`).
     pub rotated: Option<String>,
+    /// Observatory records the expiry as past (`EXPIRED 2026-01-01`, `key_expiry.describe`).
+    pub expired: bool,
 }
 
 /// The provider keys in `vault.py list`'s text. A line that is not a slot, or a slot that holds
@@ -187,6 +194,7 @@ pub fn parse_list(text: &str) -> Vec<Listed> {
         }
         let mut expires = None;
         let mut rotated = None;
+        let mut expired = false;
         for note in notes.split(", ") {
             let day = |prefix: &str| {
                 note.strip_prefix(prefix)
@@ -195,6 +203,10 @@ pub fn parse_list(text: &str) -> Vec<Listed> {
             };
             if let Some(d) = day("expires ") {
                 expires = Some(d);
+            }
+            if let Some(d) = day("EXPIRED ") {
+                expires = Some(d);
+                expired = true;
             }
             if let Some(d) = day("rotated ") {
                 rotated = Some(d);
@@ -205,6 +217,7 @@ pub fn parse_list(text: &str) -> Vec<Listed> {
             kind,
             expires,
             rotated,
+            expired,
         });
     }
     keys
@@ -484,8 +497,13 @@ fn list_from(
                 "kind": k.kind,
                 "expires": k.expires,
                 "rotated": k.rotated,
-                "can_add": k.kind != Kind::Openai,
-                "why_not": (k.kind == Kind::Openai).then_some(OPENAI_NOT_YET),
+                "expired": k.expired,
+                "can_add": k.kind != Kind::Openai && !k.expired,
+                "why_not": if k.kind == Kind::Openai {
+                    Some(OPENAI_NOT_YET)
+                } else {
+                    k.expired.then_some(KEY_EXPIRED)
+                },
                 "added": added,
             })
         })
@@ -520,7 +538,7 @@ pub struct AddRequest {
     pub replace: bool,
 }
 
-/// A name for a named key from the project's folder name (`appvillis-bot` from `Appvillis_Bot`).
+/// A name for a named key from the project's folder name (`team-a-bot` from `Team_A_Bot`).
 fn derived_name(project: &str) -> Option<String> {
     let mut name = String::new();
     for c in project.chars() {
@@ -558,6 +576,9 @@ fn plan_from(
     let snapshot = store.snapshot()?;
     let saved = records(root)?;
     let mut steps = Vec::new();
+    if key.expired && key.kind != Kind::Openai {
+        return Err(KEY_EXPIRED.into());
+    }
     match key.kind {
         Kind::Openai => return Err(OPENAI_NOT_YET.into()),
         Kind::Anthropic => {
@@ -569,6 +590,10 @@ fn plan_from(
             };
             if request.pool.is_some() {
                 return Err(POOL_NOT_FOR_ANTHROPIC.into());
+            }
+            // A model is a named key's default; an account takes its model at launch.
+            if request.model.is_some() && !agent {
+                return Err(MODEL_FOR_ACCOUNT.into());
             }
             if let Some(model) = &request.model {
                 if !crate::anthropic_keys::model_valid(model) {
@@ -592,8 +617,9 @@ fn plan_from(
                 };
                 steps.push(json!({
                     "target": "account",
+                    // `--label=…` in one argument, so a label that starts with `-` stays a label.
                     "args": ["accounts", "add", "--provider", "claude", "--kind", "api-key",
-                             "--label", label, "--pool", "default", "--secret-stdin"],
+                             format!("--label={label}"), "--pool", "default", "--secret-stdin"],
                 }));
             }
             if agent {
@@ -669,8 +695,19 @@ fn plan_from(
 /// into an unexported one, leaves the environment, and goes to the save command's stdin. `$0` is
 /// the switchboard program, `$@` its arguments. `name` is a checked slot NAME (upper-case
 /// letters, digits and `_`), so it cannot change the script.
+/// Tracing is switched off first: a shell started with `xtrace` or `verbose` (an inherited
+/// `SHELLOPTS`) would print the expanded value to stderr.
 fn pipe_script(name: &str) -> String {
-    format!("k=\"${{{name}}}\"; unset {name}; printf '%s' \"$k\" | \"$0\" \"$@\"")
+    format!("set +xv; k=\"${{{name}}}\"; unset {name}; printf '%s' \"$k\" | \"$0\" \"$@\"")
+}
+
+/// Variables that would make the shell trace or run another file before the script: never passed
+/// on to the save's shell.
+const SHELL_ENV: &[&str] = &["SHELLOPTS", "BASHOPTS", "ENV", "BASH_ENV", "PS4"];
+fn scrub_shell_env(command: &mut Command) {
+    for name in SHELL_ENV {
+        command.env_remove(name);
+    }
 }
 
 /// One save of a planned add: Observatory's `use_secret.py run --vault-only` gives the slot's value
@@ -705,6 +742,7 @@ pub fn save_step(
         .arg("--json")
         .args(args)
         .env("OBSERVATORY_VAULT_ONLY", "1");
+    scrub_shell_env(&mut command);
     let output = match bounded(command, SAVE_TIMEOUT) {
         Ok(output) => output,
         Err(true) => return Err(SAVE_TIMED_OUT.into()),
@@ -733,7 +771,23 @@ pub fn save_step(
                 .and_then(|v| v["error"].as_str().map(str::to_owned))
         })
         .filter(|e| !e.contains("sk-") && e.len() <= 400);
-    Err(refusal.unwrap_or_else(|| SAVE_FAILED.into()))
+    Err(refusal
+        .or_else(|| observatory_refusal(&output.stderr))
+        .unwrap_or_else(|| SAVE_FAILED.into()))
+}
+
+/// Observatory's own refusal (`use_secret: refused: …`, a slot it does not hold, a grant it
+/// lacks): its line, already scrubbed by the engine, one line and bounded; never a text holding a
+/// key's shape.
+fn observatory_refusal(stderr: &str) -> Option<String> {
+    let line = stderr
+        .lines()
+        .rev()
+        .find_map(|l| l.trim().strip_prefix("use_secret: "))?;
+    let reason: String = line.chars().filter(|c| !c.is_control()).take(300).collect();
+    let reason = reason.trim();
+    (!reason.is_empty() && !reason.contains("sk-"))
+        .then(|| format!("Project Observatory refused the key: {}", reason))
 }
 
 /// The target a step's answer saved.
@@ -861,6 +915,7 @@ mod tests {
   beta/prod/OPENAI_BASE_URL  (30B)
   beta/prod/DATABASE_URL  (145B)
   beta/prod/OPENROUTER_FLAG_KEY  (1B, not a credential: it does not expire)
+  gamma/prod/OPENROUTER_API_KEY  (73B, EXPIRED 2026-01-01)
   nothing matches
 ";
 
@@ -889,8 +944,12 @@ mod tests {
                 "alpha-web/prod/ANTHROPIC_API_KEY",
                 "alpha-web/stage/OPENAI_API_KEY",
                 "beta/local/OPENROUTER_KEY",
+                "gamma/prod/OPENROUTER_API_KEY",
             ]
         );
+        // Observatory's `EXPIRED <day>` marks a key past its recorded expiry.
+        assert!(keys[4].expired && keys[4].expires.as_deref() == Some("2026-01-01"));
+        assert!(!keys[0].expired);
         assert_eq!(keys[0].kind, Kind::Openrouter);
         assert_eq!(keys[0].expires.as_deref(), Some("2027-11-13"));
         assert_eq!(keys[1].kind, Kind::Anthropic);
@@ -916,8 +975,58 @@ mod tests {
         }
         assert_eq!(
             pipe_script("ANTHROPIC_API_KEY"),
-            "k=\"${ANTHROPIC_API_KEY}\"; unset ANTHROPIC_API_KEY; printf '%s' \"$k\" | \"$0\" \"$@\""
+            "set +xv; k=\"${ANTHROPIC_API_KEY}\"; unset ANTHROPIC_API_KEY; printf '%s' \"$k\" | \"$0\" \"$@\""
         );
+        // The shell variables that would trace or run a file first are not passed on.
+        let mut command = Command::new("/bin/sh");
+        command.env("SHELLOPTS", "xtrace").env("BASH_ENV", "/x");
+        scrub_shell_env(&mut command);
+        let removed: Vec<_> = command
+            .get_envs()
+            .filter(|(_, v)| v.is_none())
+            .map(|(k, _)| k.to_string_lossy().into_owned())
+            .collect();
+        for name in SHELL_ENV {
+            assert!(removed.contains(&(*name).to_string()), "{name}");
+        }
+    }
+
+    /// Review round 1, P2-2: a shell that inherits `SHELLOPTS=xtrace` traces each command; the
+    /// script switches tracing off before the value is expanded, so stderr never holds it.
+    #[cfg(unix)]
+    #[test]
+    fn a_traced_shell_never_prints_the_value() {
+        let value = "sk-ant-api03-synthetic-trace-fixture";
+        let output = Command::new("/bin/sh")
+            .args(["-c", &pipe_script("FIXTURE_KEY"), "/bin/cat"])
+            .env("FIXTURE_KEY", value)
+            .env("SHELLOPTS", "xtrace")
+            .stdin(Stdio::null())
+            .output()
+            .unwrap();
+        assert_eq!(String::from_utf8_lossy(&output.stdout), value);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(!stderr.contains("synthetic-trace"), "{stderr}");
+    }
+
+    #[test]
+    fn observatorys_own_refusal_is_passed_on_bounded() {
+        assert_eq!(
+            observatory_refusal(
+                "noise\nuse_secret: refused: no grant names alpha-web/prod/X_KEY\n"
+            )
+            .as_deref(),
+            Some(
+                "Project Observatory refused the key: refused: no grant names alpha-web/prod/X_KEY"
+            )
+        );
+        assert_eq!(
+            observatory_refusal("use_secret: leaked sk-ant-api03-x"),
+            None
+        );
+        assert_eq!(observatory_refusal("other text"), None);
+        let long = format!("use_secret: {}", "a".repeat(1000));
+        assert!(observatory_refusal(&long).unwrap().len() < 400);
     }
 
     #[test]
@@ -948,6 +1057,9 @@ mod tests {
         assert_eq!(key["added"][0]["kind"], "anthropic");
         assert_eq!(key["added"][0]["name"], "alpha");
         assert_eq!(listed["keys"][2]["can_add"], false);
+        assert_eq!(listed["keys"][4]["can_add"], false);
+        assert_eq!(listed["keys"][4]["why_not"], KEY_EXPIRED);
+        assert_eq!(listed["keys"][4]["expired"], true);
         assert!(!listed.to_string().contains("sk-ant"));
         crate::anthropic_keys::remove(dir.path(), &store, "alpha").unwrap();
         let listed = list_from(dir.path(), &store, Ok(parse_list(LIST))).unwrap();
@@ -975,8 +1087,27 @@ mod tests {
         let steps = plan(anthropic(None)).unwrap()["steps"].clone();
         assert_eq!(steps.as_array().unwrap().len(), 1);
         assert_eq!(steps[0]["target"], "account");
-        assert_eq!(steps[0]["args"][7], "alpha-web (prod)");
-        assert_eq!(steps[0]["args"][10], "--secret-stdin");
+        assert_eq!(steps[0]["args"][6], "--label=alpha-web (prod)");
+        assert_eq!(steps[0]["args"][9], "--secret-stdin");
+        // A label that starts with a hyphen stays one argument, never an option.
+        let mut dashed = anthropic(None);
+        dashed.name = Some("-x".into());
+        assert_eq!(plan(dashed).unwrap()["steps"][0]["args"][6], "--label=-x");
+        // A model is a named key's: refused for an account alone, taken with both.
+        let mut modelled = anthropic(None);
+        modelled.model = Some("claude-sonnet-5-5".into());
+        assert_eq!(plan(modelled.clone()).unwrap_err(), MODEL_FOR_ACCOUNT);
+        modelled.to = Some("both".into());
+        assert_eq!(
+            plan(modelled).unwrap()["steps"][1]["args"][6],
+            "claude-sonnet-5-5"
+        );
+        // An expired key is listed but not added.
+        let expired = AddRequest {
+            slot: "gamma/prod/OPENROUTER_API_KEY".into(),
+            ..Default::default()
+        };
+        assert_eq!(plan(expired).unwrap_err(), KEY_EXPIRED);
         // Both: an account and a named key, named from the project.
         let both = plan(anthropic(Some("both"))).unwrap();
         assert_eq!(both["steps"][1]["target"], "anthropic");
@@ -1047,10 +1178,7 @@ mod tests {
             saved_target(&json!({"target": "openrouter", "pool": null}), &json!({})),
             Some(Target::Openrouter { pool: None })
         );
-        assert_eq!(
-            derived_name("Appvillis_Bot").as_deref(),
-            Some("appvillis-bot")
-        );
+        assert_eq!(derived_name("Team_A_Bot").as_deref(), Some("team-a-bot"));
         assert_eq!(derived_name("0xDEV").as_deref(), Some("0xdev"));
         assert_eq!(derived_name("___"), None);
     }

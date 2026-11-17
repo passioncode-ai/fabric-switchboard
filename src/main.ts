@@ -1615,7 +1615,8 @@ function renderTokens(main: HTMLElement) {
   const own = projects.filter((p) => openrouterKeys?.keys.some((k) => k.pool === p.pool)).length;
   main.append(foldSection({ key: 'keys-groups', title: t('Group keys'), state: openrouterKeys ? plural(own, { one: '{n} with its own key', other: '{n} with their own key' }) : undefined, open: true, className: 'keys-fold', body: () => [projectKeysPanel()] }));
   // SB-404 K1: the provider keys Project Observatory holds, by name, each with an Add.
-  if (!observatoryKeys && !observatoryLoading) void loadObservatoryKeys();
+  // Review round 1, P1-1: a failed read stays failed until *Read again*, never re-read on each render.
+  if (!observatoryKeys && !observatoryLoading && !observatoryError) void loadObservatoryKeys();
   const fromObservatory = observatoryKeys?.state === 'ok' ? plural(observatoryKeys.keys.length, { one: '{n} key', other: '{n} keys' }) : observatoryKeys ? t('Not available') : undefined;
   main.append(foldSection({ key: 'keys-observatory', title: t('From Project Observatory'), state: fromObservatory, open: true, className: 'keys-fold', body: () => [observatoryPanel()] }));
   const tasks = (ceilingsView?.ceilings ?? []).filter((c) => c.scope.kind === 'workflow');
@@ -1632,7 +1633,7 @@ async function loadObservatoryKeys() {
 function observatoryPanel() {
   const section = el('div', 'fold-content');
   section.append(el('p', 'form-note', t('Keys Project Observatory holds for Anthropic, OpenAI and OpenRouter, by name. Adding one moves its value into Switchboard\'s store without showing it anywhere.')));
-  if (observatoryError) { section.append(el('p', 'usage-error', t(observatoryError))); return section; }
+  if (observatoryError) { section.append(el('p', 'usage-error', t(observatoryError)), button(t('Read again'), () => { observatoryError = ''; void loadObservatoryKeys(); }, 'text-button', 'observatory-retry')); return section; }
   if (!observatoryKeys) { section.append(el('p', 'form-note', t('Reading Project Observatory…'))); return section; }
   if (observatoryKeys.state !== 'ok') { section.append(el('p', 'form-note', t(observatoryKeys.why ?? 'Project Observatory is not available.'))); return section; }
   if (!observatoryKeys.keys.length) { section.append(el('p', 'form-note', t('Project Observatory holds no Anthropic, OpenAI or OpenRouter key an agent can run on.'))); return section; }
@@ -1642,11 +1643,11 @@ function observatoryPanel() {
     const kind = key.kind === 'anthropic' ? 'Anthropic' : key.kind === 'openai' ? 'OpenAI' : 'OpenRouter';
     const where = key.added.map((target) => target.kind === 'account' ? t('account {label}', { label: target.label ?? '' }) : target.kind === 'anthropic' ? t('named key {name}', { name: target.name ?? '' }) : target.pool ? t('OpenRouter key {where}', { where: inGroup(target.pool, snapshot?.projects) }) : t('this computer\'s OpenRouter key'));
     const state = where.length ? t('saved as {where}', { where: where.join(', ') }) : key.can_add ? '' : t(key.why_not ?? '');
-    item.append(el('span', 'folder-note', ` · ${kind}${key.expires ? ` · ${t('expires {day}', { day: key.expires })}` : ''}${state ? ` · ${state}` : ''}`));
+    item.append(el('span', 'folder-note', ` · ${kind}${key.expires ? ` · ${key.expired ? t('expired {day}', { day: key.expires }) : t('expires {day}', { day: key.expires })}` : ''}${state ? ` · ${state}` : ''}`));
     if (key.can_add) item.append(' ', button(where.length ? t('Add again') : t('Add'), () => observatoryAddDialog(key), 'text-button', `observatory-add-${key.slot}`));
     list.append(item);
   }
-  section.append(list, button(t('Read again'), () => { observatoryKeys = null; void loadObservatoryKeys(); }, 'text-button', 'observatory-refresh'));
+  section.append(list, button(t('Read again'), () => { observatoryKeys = null; observatoryError = ''; void loadObservatoryKeys(); }, 'text-button', 'observatory-refresh'));
   return section;
 }
 /** SB-404 K2: where a key from Observatory goes; the value never passes through the window. */
@@ -1663,11 +1664,15 @@ function observatoryAddDialog(key: ObservatoryKey) {
   const replaceLabel = el('label', 'appearance-option login-option'); replaceLabel.append(replace, ` ${t('Replace a key already saved there')}`);
   if (anthropic) grid.append(field(t('Where'), to), field(t('Name'), name, t('Optional. The account\'s name, or the named key\'s (lowercase letters, digits, hyphens).')), field(t('Model'), model, t('Optional. The named key\'s default model.')));
   else grid.append(field(t('Used by'), pool), field(t('Model'), model, t('Optional. The model agents start on.')));
+  // Review round 1, P2-4: a model is a named key's; an account takes its model at launch.
+  const modelField = model.closest('label');
+  const showModel = () => { if (anthropic && modelField) modelField.hidden = to.value === 'account'; };
+  to.addEventListener('change', showModel); showModel();
   context.body.append(grid, replaceLabel);
   context.actions.append(submit(t('Add')));
   context.form.addEventListener('submit', (event) => {
     event.preventDefault();
-    const request = { slot: key.slot, to: anthropic ? to.value as 'account' | 'agent' | 'both' : null, name: name.value.trim() || null, pool: anthropic ? null : pool.value || null, model: model.value.trim() || null, replace: replace.checked };
+    const request = { slot: key.slot, to: anthropic ? to.value as 'account' | 'agent' | 'both' : null, name: name.value.trim() || null, pool: anthropic ? null : pool.value || null, model: anthropic && to.value === 'account' ? null : model.value.trim() || null, replace: replace.checked };
     void dialogSave(context, async () => { const added = await adapter.observatoryKeyAdd(request); observatoryKeys = null; void loadObservatoryKeys(); void loadOpenrouter(); if (added.failed) throw new Error(added.failed); }, anthropic && request.to !== 'agent' ? t('{slot} is in the pay-per-token group. Set its daily ceiling and turn it on under Groups to launch on it.', { slot: key.slot }) : t('{slot} is saved. Agents can start on it now.', { slot: key.slot }));
   });
 }

@@ -358,7 +358,7 @@ export interface LaunchKey { kind: 'openrouter' | 'anthropic' | 'group'; scope?:
 /** SB-404: where a key from Observatory was saved here. */
 export interface ObservatoryTarget { kind: 'account' | 'anthropic' | 'openrouter'; account_id?: string; label?: string | null; pool?: string | null; name?: string; metered: boolean }
 /** SB-404 K1: one provider key Project Observatory holds, by name; never a value. */
-export interface ObservatoryKey { slot: string; project: string; env: string; name: string; kind: 'anthropic' | 'openai' | 'openrouter'; expires: string | null; rotated: string | null; can_add: boolean; why_not: string | null; added: ObservatoryTarget[] }
+export interface ObservatoryKey { slot: string; project: string; env: string; name: string; kind: 'anthropic' | 'openai' | 'openrouter'; expires: string | null; rotated: string | null; /** Review round 1: Observatory records the expiry as past. */ expired?: boolean; can_add: boolean; why_not: string | null; added: ObservatoryTarget[] }
 export interface ObservatoryKeys { state: 'ok' | 'absent' | 'unreadable'; why: string | null; keys: ObservatoryKey[]; degraded: { source: string; reason: string }[] }
 /** SB-404 K2: what adding a key from Observatory asks for. */
 export interface ObservatoryAddRequest { slot: string; to: 'account' | 'agent' | 'both' | null; name: string | null; pool: string | null; model: string | null; replace: boolean }

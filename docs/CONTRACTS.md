@@ -3756,13 +3756,13 @@ Plan: [2026-11-17-observatory-keys](plans/2026-11-17-observatory-keys/README.md)
 [DEC-0024](DECISIONS.md#dec-0024-provider-keys-come-from-observatory-by-name-through-a-pipe-and-every-launch-on-one-is-counted).
 
 - **The engine.** `observatory_keys::engine` runs `project-observatory full-path` (found as
-  continuations find it: `SWITCHBOARD_OBSERVATORY_BIN`, then the usual folders; 10 s) and takes
+  continuations find it: `SWITCHBOARD_OBSERVATORY_BIN`, then the usual folders; 5 s) and takes
   the Python beside that executable (its virtual environment), else the one whose environment
   holds the engine folder, else `python3` on the PATH. The folder must hold `tools/vault.py`.
   Every call is bounded (both pipes read on threads, 4 MiB each, the child's process group
   killed and reaped at the deadline).
 - **K1, the list.** `Operation::ObservatoryKeys` (`observatory_keys::list`, run off the async
-  workers) reads `vault.py list` (20 s) and keeps the provider keys (`classify`: `ANTHROPIC_`,
+  workers) reads `vault.py list` (15 s) and keeps the provider keys (`classify`: `ANTHROPIC_`,
   `OPENAI_` or `OPENROUTER_`, a `KEY` or `TOKEN` part, none of `ADMIN`, `MANAGEMENT`, `MGMT`,
   `BYOK`, `PROVISIONING`, `PREVIOUS`; not "not a credential"). Each row: `slot`
   (`project/env/NAME`), `project`, `env`, `name`, `kind`, `expires` and `rotated` (days, when
@@ -3792,7 +3792,7 @@ Plan: [2026-11-17-observatory-keys](plans/2026-11-17-observatory-keys/README.md)
   `pool` (an OpenRouter key's group, `KEY_POOL_INVALID`; refused for an Anthropic key,
   `POOL_NOT_FOR_ANTHROPIC`), `model` (checked as an Anthropic or OpenRouter id), `replace` (a
   named key, `NAME_TAKEN`, or an OpenRouter key, `OPENROUTER_TAKEN`, already saved there). The
-  steps: an account is `accounts add --provider claude --kind api-key --label L --pool default
+  steps: an account is `accounts add --provider claude --kind api-key --label=L --pool default
   --secret-stdin` (DEC-0023 routes it to the pay-per-token group); a named key is `agents
   anthropic set N --key-stdin [--model M]`; an OpenRouter key is `agents openrouter set
   --key-stdin [--pool P] [--model M]`. A slot recorded as an account that still exists is refused
@@ -3817,6 +3817,23 @@ Plan: [2026-11-17-observatory-keys](plans/2026-11-17-observatory-keys/README.md)
   `kind: group` with `pool`, `group`, `account_id`, `name` (its label), `selected`, `usable` and
   `why_not`: disabled, `GROUP_OFF`, `TOKENS_NO_CEILING`, `FOLDER_OUTSIDE` (with a folder outside
   the group) or `NOT_SELECTED`. The answer's `group_keys` says whether the agent takes them.
+- **Review round 1 (2026-11-17).** The two engine calls take at most 20 s together, under the
+  window's 30 s read deadline, and a read that failed is shown with *Read again* and never read
+  again by itself. A key Observatory lists as `EXPIRED <day>` carries `expired: true`, `can_add:
+  false` and `why_not: KEY_EXPIRED`, and adding it is refused. A `model` goes with a named key or
+  an OpenRouter key and is refused for an account alone (`MODEL_FOR_ACCOUNT`). The account's label
+  travels as one argument, `--label=L`. `pipe_script` starts with `set +xv;`, and the engine's and
+  the shell's environment loses `SHELLOPTS`, `BASHOPTS`, `ENV`, `BASH_ENV` and `PS4`, so a traced
+  shell never prints the value. A save's refusal is its own sentence, else Observatory's own
+  `use_secret: …` line as `Project Observatory refused the key: <reason>` (one line, at most 300
+  characters, never one holding `sk-`). With the record lost (a save that timed out, a record not
+  written), adding the slot again as an account is refused by the store's own same-key check in
+  the pay-per-token group, so no second account is made. Hermes on the pay-per-token group: its
+  `config.yaml` also sets `fallback_providers: []`, `auxiliary.free_only: true` and pins every side
+  task of Hermes 0.22.2 (`HERMES_AUX_TASKS`) to `provider: switchboard` with the launch's model,
+  and the session script unsets the provider key variables Hermes would find
+  (`HERMES_PROVIDER_KEYS`: `OPENROUTER_API_KEY`, `NOUS_*` and the rest; `GH_TOKEN`, `GITHUB_TOKEN`
+  and `HF_TOKEN` stay for the session's own tools), so no helper call passes the meter.
 - **Tests:** `observatory_keys::tests::*` (the list, slots and the pipe script, the record, the
   plan and its refusals, saved targets), `launch_keys::tests::the_pay_per_token_groups_keys_are_offered_with_why_not`,
   `launch::tests::hermes_on_the_pay_per_token_group_runs_through_the_proxy`, and

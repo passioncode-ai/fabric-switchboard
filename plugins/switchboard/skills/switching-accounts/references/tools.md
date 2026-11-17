@@ -134,7 +134,7 @@ and has this key selected, else `why_not` says which.
 
 The provider keys Project Observatory holds that an agent can run on (SB-404), by `slot`
 (`project/env/NAME`) and never a value: `kind` (`anthropic`, `openai`, `openrouter`), `expires`,
-`rotated`, `can_add` with `why_not`, and `added`: where each is saved here already (an `account`
+`rotated`, `expired` (an expired key is not addable), `can_add` with `why_not`, and `added`: where each is saved here already (an `account`
 in the pay-per-token group, a named `anthropic` key, an `openrouter` key), each with `metered`.
 Admin, management, provisioning, BYOK and archived `_PREVIOUS` keys are left out. `state` is
 `ok`, `absent` (Observatory is not installed; `why`) or `unreadable`; `degraded` names a record
@@ -148,7 +148,7 @@ goes from Observatory's vault to Switchboard's through a pipe (Observatory's `us
 file, a log or the answer. An Anthropic key becomes an account in the pay-per-token group (`to:
 account`, the default), counted against that group's daily ceiling; `agent` or `both` also saves
 it as a named key Hermes runs on directly, which no ceiling counts. An OpenRouter key becomes this
-computer's key, or `pool`'s. An OpenAI key is refused for now (no ceiling counts one). A name or
+computer's key, or `pool`'s. An OpenAI key is refused for now (no ceiling counts one), and so is an expired key; a `model` goes with a named key or an OpenRouter key, never an account alone. A name or
 key already saved is kept unless `replace`; a slot already added as an account is refused. The
 answer lists `saved` (each save's own answer), `failed` and `next` (turning the pay-per-token group
 on, the launch command).

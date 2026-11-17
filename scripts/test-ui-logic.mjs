@@ -1032,6 +1032,17 @@ check(() => {
   assert.doesNotMatch(ru, /группе Группа|группы Группа|в Группа/, 'a group phrase, not a group label, after a preposition');
   assert.doesNotMatch(ru, /в группе \{group\}|группы \{group\}/, 'sentences take {where} (inGroup), not {group}');
 });
+// SB-404 review round 1, P1-1: a failed Observatory read is not read again on every render, and
+// the window waits longer than the backend's own bounded calls (5 s + 15 s).
+check(() => {
+  const main = readFileSync(new URL('../src/main.ts', import.meta.url), 'utf8');
+  assert.match(main, /if \(!observatoryKeys && !observatoryLoading && !observatoryError\) void loadObservatoryKeys\(\);/, 'a failed read waits for Read again');
+  const adapterSource = readFileSync(new URL('../src/adapter.ts', import.meta.url), 'utf8');
+  const deadline = Number(/observatoryKeys: \(\) => readWithDeadline\(invoke\('observatory_keys'\), (\d+)_?(\d*)\)/.exec(adapterSource)?.slice(1).join(''));
+  const rust = readFileSync(new URL('../crates/switchboard-runtime/src/observatory_keys.rs', import.meta.url), 'utf8');
+  const secs = (name) => Number(new RegExp(`const ${name}: Duration = Duration::from_secs\\((\\d+)\\)`).exec(rust)?.[1]);
+  assert.ok(deadline >= (secs('PATH_TIMEOUT') + secs('LIST_TIMEOUT') + 5) * 1000, `window deadline ${deadline} ms over the backend's calls`);
+});
 // Round 2: N5's window fixes keep their regression checks (unit tier A to D, G).
 check(() => {
   const main = readFileSync(new URL('../src/main.ts', import.meta.url), 'utf8');
