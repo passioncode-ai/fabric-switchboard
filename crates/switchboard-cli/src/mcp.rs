@@ -737,6 +737,18 @@ impl Server {
     }
     /// SB-314: the window's *Delete group*; the operator's words open a group with its own key
     /// or ceiling (SB-299).
+    /// SB-401: a group switched off or on.
+    async fn project_switch(&self, args: &Map<String, Value>) -> Result<Value, String> {
+        let on = args
+            .get("on")
+            .and_then(Value::as_bool)
+            .ok_or("Say on: true or false.")?;
+        self.call(Operation::GroupSwitch {
+            pool: required(args, "pool")?.into(),
+            on,
+        })
+        .await
+    }
     async fn project_delete(&self, args: &Map<String, Value>) -> Result<Value, String> {
         let delete = Operation::RemoveProject {
             pool: required(args, "pool")?.into(),
@@ -1655,17 +1667,7 @@ impl Server {
             "switchboard_backup_now" => self.call(Operation::BackupNow).await,
             "switchboard_backup_restore" => self.backup_restore(args).await,
             "switchboard_project_delete" => self.project_delete(args).await,
-            "switchboard_project_switch" => {
-                let on = args
-                    .get("on")
-                    .and_then(Value::as_bool)
-                    .ok_or("Say on: true or false.")?;
-                self.call(Operation::GroupSwitch {
-                    pool: required(args, "pool")?.into(),
-                    on,
-                })
-                .await
-            }
+            "switchboard_project_switch" => self.project_switch(args).await,
             "switchboard_settings_import" => self.settings_import(args).await,
             "switchboard_settings_sync" => self.settings_sync(args).await,
             "switchboard_recovery" => self.call(Operation::Recovery).await,
