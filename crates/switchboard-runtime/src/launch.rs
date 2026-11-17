@@ -2977,6 +2977,189 @@ pub(crate) fn bypass_args(root: &Path, provider: Provider, extra: &[String]) -> 
     }
     args.to_vec()
 }
+/// SB-405: a hand-over taken with `--ask` continues only on Claude Code or Codex.
+pub const ASK_AGENT: &str = "Only a Claude Code or Codex hand-over can start with permission prompts on, and this one continues on another agent. It is still waiting: take it without --ask, or leave it for Terminal.";
+/// SB-405: the prepared session could not be read as Switchboard wrote it.
+pub const ASK_UNREADABLE: &str = "Switchboard could not prepare this hand-over's session with permission prompts on. It is still waiting: take it without --ask, or leave it for Terminal.";
+/// SB-405: the script a hand-over taken with `--ask` runs, beside the prepared one.
+#[cfg(unix)]
+pub(crate) const ASK_SCRIPT: &str = "launch-ask.command";
+/// SB-405: the agent's arguments with its permission prompts on, whatever the prepared session
+/// said. Claude Code loses Switchboard's bypass flags and runs in `--permission-mode manual` (an
+/// explicit mode, since the person's settings, carried into the home, may default to bypassing);
+/// a mode already named becomes `manual`. Codex loses Switchboard's `approval_policy="never"` and
+/// `sandbox_mode="danger-full-access"` overrides and the bypass flags, and asks on request; a
+/// sandbox the prepared session names otherwise (a person's `read-only`) is kept, and none is
+/// added.
+#[cfg(unix)]
+pub(crate) fn ask_args(agent: &str, args: &[String]) -> Result<Vec<String>, String> {
+    let mut out: Vec<String> = Vec::with_capacity(args.len() + 2);
+    match agent {
+        "claude-code" => {
+            let mut named = false;
+            let mut i = 0;
+            while i < args.len() {
+                let a = args[i].as_str();
+                if matches!(
+                    a,
+                    "--dangerously-skip-permissions" | "--allow-dangerously-skip-permissions"
+                ) {
+                    i += 1;
+                    continue;
+                }
+                if a == "--permission-mode" {
+                    named = true;
+                    out.extend(["--permission-mode".into(), "manual".into()]);
+                    i += 2;
+                    continue;
+                }
+                if a.starts_with("--permission-mode=") {
+                    named = true;
+                    out.push("--permission-mode=manual".into());
+                    i += 1;
+                    continue;
+                }
+                out.push(args[i].clone());
+                i += 1;
+            }
+            if !named {
+                out.splice(0..0, ["--permission-mode".into(), "manual".into()]);
+            }
+        }
+        "codex" => {
+            const ASKS: &str = "approval_policy=\"on-request\"";
+            let mut named = false;
+            let mut i = 0;
+            while i < args.len() {
+                let a = args[i].as_str();
+                if matches!(a, "--dangerously-bypass-approvals-and-sandbox" | "--yolo") {
+                    i += 1;
+                    continue;
+                }
+                if a == "-c" {
+                    let Some(value) = args.get(i + 1) else {
+                        return Err(ASK_UNREADABLE.into());
+                    };
+                    let key = value.split('=').next().unwrap_or_default().trim();
+                    if value == "sandbox_mode=\"danger-full-access\"" {
+                        i += 2;
+                        continue;
+                    }
+                    if key == "approval_policy" {
+                        named = true;
+                        out.extend(["-c".into(), ASKS.into()]);
+                        i += 2;
+                        continue;
+                    }
+                }
+                if matches!(a, "-a" | "--ask-for-approval") {
+                    named = true;
+                    out.extend([a.to_owned(), "on-request".into()]);
+                    i += 2;
+                    continue;
+                }
+                if a.starts_with("--ask-for-approval=") {
+                    named = true;
+                    out.push("--ask-for-approval=on-request".into());
+                    i += 1;
+                    continue;
+                }
+                out.push(args[i].clone());
+                i += 1;
+            }
+            if !named {
+                out.splice(0..0, ["-c".into(), ASKS.into()]);
+            }
+        }
+        _ => return Err(ASK_AGENT.into()),
+    }
+    Ok(out)
+}
+/// SB-405: the words of a line written by `quote`: each a run of `'...'` and `\'` pieces, one
+/// space apart. Anything else is not a line Switchboard wrote: None.
+#[cfg(unix)]
+fn shell_words(line: &str) -> Option<Vec<String>> {
+    let bytes = line.as_bytes();
+    let mut words = Vec::new();
+    let mut i = 0;
+    loop {
+        let mut word = String::new();
+        let start = i;
+        while i < bytes.len() && bytes[i] != b' ' {
+            match bytes[i] {
+                b'\'' => {
+                    let end = line[i + 1..].find('\'')? + i + 1;
+                    word.push_str(&line[i + 1..end]);
+                    i = end + 1;
+                }
+                b'\\' if bytes.get(i + 1) == Some(&b'\'') => {
+                    word.push('\'');
+                    i += 2;
+                }
+                _ => return None,
+            }
+        }
+        if i == start {
+            return None;
+        }
+        words.push(word);
+        if i == bytes.len() {
+            return Some(words);
+        }
+        i += 1;
+    }
+}
+/// SB-405: a prepared session script (`script_with`, not a sign-in) with the agent's permission
+/// prompts on: its `exec` command (after the home's reservation is released, to the end, a first
+/// message's line breaks included) rewritten through `ask_args`, everything before it kept.
+#[cfg(unix)]
+pub(crate) fn ask_script_text(text: &str, agent: &str) -> Result<String, String> {
+    const RELEASED: &str = "rm -f .launch-pending\n";
+    if !matches!(agent, "claude-code" | "codex") {
+        return Err(ASK_AGENT.into());
+    }
+    let after = text.find(RELEASED).ok_or(ASK_UNREADABLE)? + RELEASED.len();
+    let exec = text[after..].find("\nexec ").ok_or(ASK_UNREADABLE)? + after + 1;
+    let command = text[exec + "exec ".len()..]
+        .strip_suffix('\n')
+        .ok_or(ASK_UNREADABLE)?;
+    let words = shell_words(command).ok_or(ASK_UNREADABLE)?;
+    let (program, args) = words.split_first().ok_or(ASK_UNREADABLE)?;
+    let mut out = text[..exec].to_owned();
+    out.push_str("exec ");
+    out.push_str(&quote(program));
+    for arg in ask_args(agent, args)? {
+        out.push(' ');
+        out.push_str(&quote(&arg));
+    }
+    out.push('\n');
+    Ok(out)
+}
+/// SB-405: writes the hand-over's session with permission prompts on beside its prepared script
+/// (`launch-ask.command`, 0700) and answers its path; the prepared script is left as it was. Read
+/// and rewritten before the hand-over is taken, so a script that cannot be read leaves it waiting.
+#[cfg(unix)]
+pub(crate) fn write_ask_script(script: &Path, agent: &str) -> Result<PathBuf, String> {
+    if !matches!(agent, "claude-code" | "codex") {
+        return Err(ASK_AGENT.into());
+    }
+    let bytes = switchboard_core::private_fs::read_private(script, 256 * 1024)
+        .map_err(|_| ASK_UNREADABLE.to_string())?;
+    let text = String::from_utf8(bytes).map_err(|_| ASK_UNREADABLE.to_string())?;
+    let rewritten = ask_script_text(&text, agent)?;
+    let path = script.with_file_name(ASK_SCRIPT);
+    private_write(&path, rewritten.as_bytes(), true).map_err(|_| ASK_UNREADABLE.to_string())?;
+    Ok(path)
+}
+/// SB-405: a hand-over runs in place on macOS and Linux only, so none is prepared with prompts on
+/// elsewhere.
+#[cfg(not(unix))]
+pub(crate) fn write_ask_script(_: &Path, agent: &str) -> Result<PathBuf, String> {
+    if !matches!(agent, "claude-code" | "codex") {
+        return Err(ASK_AGENT.into());
+    }
+    Err(ASK_UNREADABLE.into())
+}
 /// SB-247: how much a dispatched run may do without asking (`--permissions`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -5615,6 +5798,168 @@ mod tests {
                     );
                 }
             }
+        }
+    }
+    /// SB-405: a prepared session as `script` wrote it, with the provider's bypass, and the same
+    /// script rewritten for a hand-over taken with `--ask`.
+    #[cfg(unix)]
+    fn prepared(args: &[&str]) -> String {
+        let env = BTreeMap::from([(
+            crate::launches::ENV.to_string(),
+            "6f1c2d3e-0000-4000-8000-000000000001".to_string(),
+        )]);
+        script(
+            Path::new("/data/runtimes/claude-default"),
+            Path::new("/opt/Provider Tools/o'cli"),
+            args,
+            &env,
+            false,
+            Path::new("/work/it's here"),
+        )
+    }
+    #[cfg(unix)]
+    #[test]
+    fn a_hand_over_taken_with_ask_runs_claude_code_in_manual_mode_without_the_bypass() {
+        let first = "Continue the workflow.\nIt's line two.";
+        let before = prepared(&[
+            "--mcp-config=/data/runtimes/claude-default/switchboard-mcp.json",
+            "--dangerously-skip-permissions",
+            first,
+        ]);
+        let after = ask_script_text(&before, "claude-code").unwrap();
+        let exec = before.find("\nexec ").unwrap() + 1;
+        assert_eq!(
+            after[..exec],
+            before[..exec],
+            "everything before the command is kept"
+        );
+        assert!(!after.contains("dangerously"), "{after}");
+        let words = shell_words(after[exec + 5..].strip_suffix('\n').unwrap()).unwrap();
+        assert_eq!(
+            words,
+            [
+                "/opt/Provider Tools/o'cli",
+                "--permission-mode",
+                "manual",
+                "--mcp-config=/data/runtimes/claude-default/switchboard-mcp.json",
+                first,
+            ],
+            "the mode comes first, the first message (line breaks and all) stays last"
+        );
+        // The person's own `ask` left no bypass: the mode is still named, since the settings the
+        // home carries may default to bypassing. A mode already named becomes manual.
+        let own = |a: &[&str]| a.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert_eq!(
+            ask_args("claude-code", &own(&["--resume", "s-1"])).unwrap(),
+            own(&["--permission-mode", "manual", "--resume", "s-1"])
+        );
+        assert_eq!(
+            ask_args("claude-code", &own(&["--permission-mode", "plan", "x"])).unwrap(),
+            own(&["--permission-mode", "manual", "x"])
+        );
+        assert_eq!(
+            ask_args(
+                "claude-code",
+                &own(&[
+                    "--allow-dangerously-skip-permissions",
+                    "--permission-mode=bypassPermissions"
+                ])
+            )
+            .unwrap(),
+            own(&["--permission-mode=manual"])
+        );
+    }
+    #[cfg(unix)]
+    #[test]
+    fn a_hand_over_taken_with_ask_runs_codex_asking_and_keeps_a_sandbox_the_person_set() {
+        let before = prepared(&[
+            "-c",
+            "approval_policy=\"never\"",
+            "-c",
+            "sandbox_mode=\"danger-full-access\"",
+            "resume",
+            "--last",
+        ]);
+        let after = ask_script_text(&before, "codex").unwrap();
+        let exec = after.find("\nexec ").unwrap() + 1;
+        let words = shell_words(after[exec + 5..].strip_suffix('\n').unwrap()).unwrap();
+        assert_eq!(
+            words[1..],
+            ["-c", "approval_policy=\"on-request\"", "resume", "--last"],
+            "Switchboard's overrides go, asking comes before the subcommand"
+        );
+        let own = |a: &[&str]| a.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert_eq!(
+            ask_args(
+                "codex",
+                &own(&[
+                    "--dangerously-bypass-approvals-and-sandbox",
+                    "-s",
+                    "read-only",
+                    "x"
+                ])
+            )
+            .unwrap(),
+            own(&[
+                "-c",
+                "approval_policy=\"on-request\"",
+                "-s",
+                "read-only",
+                "x"
+            ]),
+            "a read-only sandbox stays; none is added"
+        );
+        assert_eq!(
+            ask_args("codex", &own(&["-a", "never", "--yolo"])).unwrap(),
+            own(&["-a", "on-request"])
+        );
+        assert_eq!(
+            ask_args("codex", &own(&["-c", "sandbox_mode=\"read-only\""])).unwrap(),
+            own(&[
+                "-c",
+                "approval_policy=\"on-request\"",
+                "-c",
+                "sandbox_mode=\"read-only\""
+            ])
+        );
+    }
+    #[cfg(unix)]
+    #[test]
+    fn ask_is_refused_for_another_agent_or_a_script_switchboard_did_not_write() {
+        let before = prepared(&["--dangerously-skip-permissions"]);
+        for agent in ["hermes", "kimi-code", "opencode", "unknown"] {
+            assert_eq!(ask_script_text(&before, agent).unwrap_err(), ASK_AGENT);
+        }
+        let sign_in = script(
+            Path::new("/data/homes/a"),
+            Path::new("/bin/claude"),
+            &["auth", "login"],
+            &BTreeMap::new(),
+            true,
+            Path::new("/data/homes/a"),
+        );
+        assert_eq!(
+            ask_script_text(&sign_in, "claude-code").unwrap_err(),
+            ASK_UNREADABLE
+        );
+        assert_eq!(
+            ask_script_text("#!/bin/sh\nexec claude\n", "claude-code").unwrap_err(),
+            ASK_UNREADABLE
+        );
+        let unquoted = before.replace("'--dangerously-skip-permissions'", "--x");
+        assert_eq!(
+            ask_script_text(&unquoted, "claude-code").unwrap_err(),
+            ASK_UNREADABLE
+        );
+        for words in [
+            vec!["a b", "it's", "", "line\nbreak", "'"],
+            vec!["--dangerously-skip-permissions"],
+        ] {
+            let line = words.iter().map(|w| quote(w)).collect::<Vec<_>>().join(" ");
+            assert_eq!(shell_words(&line).unwrap(), words);
+        }
+        for bad in ["", "'a' ", " 'a'", "'a'  'b'", "'a", "a"] {
+            assert!(shell_words(bad).is_none(), "{bad:?}");
         }
     }
     /// SB-298: a session Switchboard starts bypasses its permission prompts unless the person

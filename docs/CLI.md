@@ -874,6 +874,7 @@ that is not ready says why in `reason`: `billing`, `account_removed`, `no_accoun
 switchboard handovers --json
 switchboard handovers set on
 switchboard handovers run ho-0123456789ab
+switchboard handovers run ho-0123456789ab --ask
 switchboard handovers set off
 switchboard continue wf_0123456789abcdef --account opencode --dir ~/src/app --to-console
 ```
@@ -888,3 +889,18 @@ The private queue stores no credential or prompt. Fabric Dashboards' consumer
 (FD-62) is separate from this CLI producer; an available command is not evidence
 that the installed console has consumed it. Checks: `handovers::tests` and
 `hand_overs_are_listed_and_set_offline_and_run_only_in_a_terminal`.
+
+`run --ask` (SB-405, asked by Fabric Dashboards for a console that holds its folder) starts the
+session with the agent's permission prompts on, whatever `agents permissions` says: Claude Code
+runs with `--permission-mode manual` and without `--dangerously-skip-permissions`; Codex runs
+without Switchboard's `approval_policy="never"` and `sandbox_mode="danger-full-access"` overrides
+(or `--dangerously-bypass-approvals-and-sandbox`) and with `-c approval_policy="on-request"`, and
+a sandbox the prepared session names otherwise (a person's `read-only`) is kept, none added. The
+session runs from `launch-ask.command` beside the prepared script, which is left as it was, and its
+launch record and its `sessions --all` row carry `"permissions": "ask"`. Only a Claude Code or Codex
+hand-over can be taken this way: another (Kimi Code, Hermes, OpenCode) is refused and stays
+waiting, as is one whose script cannot be read as Switchboard wrote it. Without `--ask` nothing
+changes. Checks: `a_hand_over_taken_with_ask_starts_with_prompts_on_and_its_record_says_so`,
+`launch::tests::a_hand_over_taken_with_ask_runs_claude_code_in_manual_mode_without_the_bypass`,
+`a_hand_over_taken_with_ask_runs_codex_asking_and_keeps_a_sandbox_the_person_set`,
+`ask_is_refused_for_another_agent_or_a_script_switchboard_did_not_write`.

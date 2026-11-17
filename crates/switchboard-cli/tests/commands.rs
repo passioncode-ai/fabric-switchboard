@@ -91,6 +91,15 @@ fn hand_overs_are_listed_and_set_offline_and_run_only_in_a_terminal() {
     let refused = run(&["handovers", "run", "ho-0123456789ab"]);
     assert_eq!(refused.status.code(), Some(1));
     assert!(String::from_utf8_lossy(&refused.stderr).contains("needs a terminal"));
+    // SB-405: Fabric Dashboards detects the option from the help, never guesses it.
+    let help = run(&["handovers", "run", "--help"]);
+    let help = String::from_utf8_lossy(&help.stdout);
+    assert!(help.contains("--ask"), "{help}");
+    assert!(help.contains("permission prompts on"), "{help}");
+    assert!(!help.contains('\u{2014}'), "no em dash in help: {help}");
+    let refused = run(&["handovers", "run", "ho-0123456789ab", "--ask"]);
+    assert_eq!(refused.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&refused.stderr).contains("needs a terminal"));
     let set: serde_json::Value =
         serde_json::from_slice(&run(&["handovers", "set", "off"]).stdout).unwrap();
     assert_eq!(set["data"]["enabled"], false);
