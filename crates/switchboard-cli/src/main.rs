@@ -4649,7 +4649,7 @@ fn print_result(value: &Value, cli: &Cli) {
                 .cloned()
                 .unwrap_or_default();
             if organizations.is_empty() {
-                println!("No organization. Add one: switchboard org add NAME --domain example.com");
+                println!("No organization. Add one: switchboard org add NAME (--domain example.com is optional)");
                 return;
             }
             for o in &organizations {
@@ -4678,11 +4678,21 @@ fn print_result(value: &Value, cli: &Cli) {
                     Some(name) => format!("{by}; its address suggests {name}"),
                     None => by,
                 };
+                // SB-403: the organizations it also works for, after its own.
+                let mut contexts = vec![a["organization_name"]
+                    .as_str()
+                    .unwrap_or("personal")
+                    .to_owned()];
+                for id in a["also"].as_array().cloned().unwrap_or_default() {
+                    if let Some(o) = organizations.iter().find(|o| o["id"] == id) {
+                        contexts.push(text(&o["name"]));
+                    }
+                }
                 println!(
                     "{}  {:7}  {:24}  {}",
                     text(&a["id"]),
                     text(&a["provider"]),
-                    a["organization_name"].as_str().unwrap_or("personal"),
+                    contexts.join(" + "),
                     if note.is_empty() {
                         text(&a["label"])
                     } else {
