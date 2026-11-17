@@ -59,7 +59,7 @@ pub const KEY_EXPIRED: &str =
 pub const MODEL_FOR_ACCOUNT: &str = "A model belongs to a named key. An account in the pay-per-token group takes its model at launch: leave out the model, or add a named key too.";
 pub const UNIX_ONLY: &str = "Adding a key from Observatory runs on macOS and Linux for now.";
 pub const SAVE_FAILED: &str = "The key could not be saved from Observatory. Check the slot with project-observatory, then try again.";
-pub const SAVE_TIMED_OUT: &str = "Saving the key from Observatory took longer than a minute and was stopped. Nothing was recorded; try again.";
+pub const SAVE_TIMED_OUT: &str = "Saving the key from Observatory took longer than a minute and was stopped. It may have been saved: check the accounts and agent keys before adding it again.";
 pub const RECORDS_UNREADABLE: &str =
     "The record of keys added from Observatory (observatory-keys.json) could not be read. Remove it to start a new one.";
 pub const RECORDS_UNSAVED: &str =
@@ -698,16 +698,50 @@ fn plan_from(
 /// Tracing is switched off first: a shell started with `xtrace` or `verbose` (an inherited
 /// `SHELLOPTS`) would print the expanded value to stderr.
 fn pipe_script(name: &str) -> String {
-    format!("set +xv; k=\"${{{name}}}\"; unset {name}; printf '%s' \"$k\" | \"$0\" \"$@\"")
+    format!("set +xv; k=\"${{{name}}}\"; unset {name}; command printf '%s' \"$k\" | \"$0\" \"$@\"")
 }
 
 /// Variables that would make the shell trace or run another file before the script: never passed
-/// on to the save's shell.
+/// on to the save's shell. Every exported bash function (`BASH_FUNC_<name>%%`) goes too: bash
+/// imports one as a function that shadows a builtin such as `printf` (review round 2).
 const SHELL_ENV: &[&str] = &["SHELLOPTS", "BASHOPTS", "ENV", "BASH_ENV", "PS4"];
+const BASH_FUNC: &str = "BASH_FUNC_";
 fn scrub_shell_env(command: &mut Command) {
+    let inherited: Vec<std::ffi::OsString> = std::env::vars_os().map(|(k, _)| k).collect();
+    scrub_shell_env_from(command, inherited);
+}
+/// [`scrub_shell_env`] with the inherited variable names given, so a test needs no change to its
+/// own process environment.
+fn scrub_shell_env_from(command: &mut Command, inherited: Vec<std::ffi::OsString>) {
     for name in SHELL_ENV {
         command.env_remove(name);
     }
+    let set: Vec<std::ffi::OsString> = command.get_envs().map(|(k, _)| k.to_owned()).collect();
+    for name in inherited.into_iter().chain(set) {
+        if name.to_string_lossy().starts_with(BASH_FUNC) {
+            command.env_remove(name);
+        }
+    }
+}
+
+/// Whether a refusal may carry a key: `sk-` in any case, or a run of 24 or more characters a key
+/// is written in. Such a text is never shown; the plain `SAVE_FAILED` is.
+fn may_hold_key(text: &str) -> bool {
+    if text.to_ascii_lowercase().contains("sk-") {
+        return true;
+    }
+    let mut run = 0;
+    for c in text.chars() {
+        if c.is_ascii_alphanumeric() || matches!(c, '_' | '+' | '/' | '=' | '-') {
+            run += 1;
+            if run >= 24 {
+                return true;
+            }
+        } else {
+            run = 0;
+        }
+    }
+    false
 }
 
 /// One save of a planned add: Observatory's `use_secret.py run --vault-only` gives the slot's value
@@ -770,15 +804,16 @@ pub fn save_step(
                 .ok()
                 .and_then(|v| v["error"].as_str().map(str::to_owned))
         })
-        .filter(|e| !e.contains("sk-") && e.len() <= 400);
+        .filter(|e| !may_hold_key(e) && e.len() <= 400);
     Err(refusal
         .or_else(|| observatory_refusal(&output.stderr))
         .unwrap_or_else(|| SAVE_FAILED.into()))
 }
 
-/// Observatory's own refusal (`use_secret: refused: …`, a slot it does not hold, a grant it
-/// lacks): its line, already scrubbed by the engine, one line and bounded; never a text holding a
-/// key's shape.
+/// Observatory's own refusal: a `use_secret: …` line (a grant it lacks, a refused slot), already
+/// scrubbed by the engine, one line and bounded, never a text that may hold a key
+/// ([`may_hold_key`]). Any other failure (a slot it does not hold prints its own error without the
+/// prefix) ends as `SAVE_FAILED`.
 fn observatory_refusal(stderr: &str) -> Option<String> {
     let line = stderr
         .lines()
@@ -786,7 +821,7 @@ fn observatory_refusal(stderr: &str) -> Option<String> {
         .find_map(|l| l.trim().strip_prefix("use_secret: "))?;
     let reason: String = line.chars().filter(|c| !c.is_control()).take(300).collect();
     let reason = reason.trim();
-    (!reason.is_empty() && !reason.contains("sk-"))
+    (!reason.is_empty() && !may_hold_key(reason))
         .then(|| format!("Project Observatory refused the key: {}", reason))
 }
 
@@ -858,24 +893,45 @@ pub async fn add(root: &Path, cli: &Path, request: AddRequest) -> Result<Value, 
             }
         }
     }
+    // Review round 2: a key saved is never reported as not saved. A record that cannot be
+    // written is named in `failed`, beside what was saved.
     if !targets.is_empty() {
-        crate::call(
+        let recorded = crate::call(
             root,
             crate::Operation::ObservatoryKeyRecord {
                 slot: slot.text(),
                 targets: targets.clone(),
             },
         )
-        .await?;
+        .await;
+        failure = after_record(failure, recorded.is_ok());
     }
+    answer(slot.text(), &plan["kind"], saved, failure, &targets)
+}
+
+/// The failure an add reports once its record was or was not written: a save's own failure
+/// first, else `RECORDS_UNSAVED` when the record was not written.
+fn after_record(failure: Option<String>, recorded: bool) -> Option<String> {
+    failure.or_else(|| (!recorded).then(|| RECORDS_UNSAVED.to_string()))
+}
+
+/// An add's answer: an error only when nothing was saved; otherwise what was saved, with what
+/// failed after it.
+fn answer(
+    slot: String,
+    kind: &Value,
+    saved: Vec<Value>,
+    failure: Option<String>,
+    targets: &[Target],
+) -> Result<Value, String> {
     match failure {
         Some(error) if saved.is_empty() => Err(error),
         failure => Ok(json!({
-            "slot": slot.text(),
-            "kind": plan["kind"],
+            "slot": slot,
+            "kind": kind,
             "saved": saved,
             "failed": failure,
-            "next": next_steps(&plan["kind"], &targets),
+            "next": next_steps(kind, targets),
         })),
     }
 }
@@ -975,20 +1031,102 @@ mod tests {
         }
         assert_eq!(
             pipe_script("ANTHROPIC_API_KEY"),
-            "set +xv; k=\"${ANTHROPIC_API_KEY}\"; unset ANTHROPIC_API_KEY; printf '%s' \"$k\" | \"$0\" \"$@\""
+            "set +xv; k=\"${ANTHROPIC_API_KEY}\"; unset ANTHROPIC_API_KEY; command printf '%s' \"$k\" | \"$0\" \"$@\""
         );
         // The shell variables that would trace or run a file first are not passed on.
         let mut command = Command::new("/bin/sh");
-        command.env("SHELLOPTS", "xtrace").env("BASH_ENV", "/x");
-        scrub_shell_env(&mut command);
+        command
+            .env("SHELLOPTS", "xtrace")
+            .env("BASH_ENV", "/x")
+            .env("BASH_FUNC_printf%%", "() { :; }");
+        scrub_shell_env_from(&mut command, vec!["BASH_FUNC_cat%%".into(), "PATH".into()]);
         let removed: Vec<_> = command
             .get_envs()
             .filter(|(_, v)| v.is_none())
             .map(|(k, _)| k.to_string_lossy().into_owned())
             .collect();
-        for name in SHELL_ENV {
-            assert!(removed.contains(&(*name).to_string()), "{name}");
+        for name in SHELL_ENV
+            .iter()
+            .copied()
+            .chain(["BASH_FUNC_printf%%", "BASH_FUNC_cat%%"])
+        {
+            assert!(removed.contains(&name.to_string()), "{name}");
         }
+        assert!(!removed.contains(&"PATH".to_string()));
+    }
+
+    /// Review round 2: an exported bash function named `printf` would receive the value; the
+    /// shell gets none, and `command printf` passes over a function anyway.
+    #[cfg(unix)]
+    #[test]
+    fn an_exported_bash_function_never_sees_the_value() {
+        let value = "synthetic-function-fixture";
+        let mut command = Command::new("/bin/sh");
+        command
+            .args(["-c", &pipe_script("FIXTURE_KEY"), "/bin/cat"])
+            .env("FIXTURE_KEY", value)
+            .env("BASH_FUNC_printf%%", "() { echo \"leaked:$2\" >&2; }")
+            .stdin(Stdio::null());
+        scrub_shell_env(&mut command);
+        let output = command.output().unwrap();
+        assert_eq!(String::from_utf8_lossy(&output.stdout), value);
+        assert!(!String::from_utf8_lossy(&output.stderr).contains("leaked"));
+        // Even with the function passed on, `command printf` is the builtin.
+        let output = Command::new("/bin/sh")
+            .args(["-c", &pipe_script("FIXTURE_KEY"), "/bin/cat"])
+            .env("FIXTURE_KEY", value)
+            .env("BASH_FUNC_printf%%", "() { echo \"leaked:$2\" >&2; }")
+            .stdin(Stdio::null())
+            .output()
+            .unwrap();
+        assert!(!String::from_utf8_lossy(&output.stderr).contains("leaked"));
+    }
+
+    /// Review round 2: a key saved is answered as saved even when its record was not written.
+    #[test]
+    fn a_record_not_written_never_hides_a_saved_key() {
+        let target = Target::Openrouter { pool: None };
+        let saved = vec![json!({"target": "openrouter", "answer": {}})];
+        let failure = after_record(None, false);
+        assert_eq!(failure.as_deref(), Some(RECORDS_UNSAVED));
+        let answered = answer(
+            "a/prod/OPENROUTER_API_KEY".into(),
+            &json!("openrouter"),
+            saved,
+            failure,
+            &[target],
+        )
+        .unwrap();
+        assert_eq!(answered["saved"].as_array().unwrap().len(), 1);
+        assert_eq!(answered["failed"], RECORDS_UNSAVED);
+        // A save's own failure stays the one named; a written record adds nothing.
+        assert_eq!(after_record(Some("x".into()), false).as_deref(), Some("x"));
+        assert_eq!(after_record(None, true), None);
+        assert_eq!(
+            answer(
+                "s".into(),
+                &json!("openrouter"),
+                vec![],
+                Some("x".into()),
+                &[]
+            )
+            .unwrap_err(),
+            "x"
+        );
+    }
+
+    #[test]
+    fn a_text_that_may_hold_a_key_is_never_passed_on() {
+        assert!(may_hold_key("refused: SK-ANT-x"));
+        assert!(may_hold_key(&format!("value {}", "A".repeat(24))));
+        assert!(!may_hold_key(&format!("value {}", "A".repeat(23))));
+        assert!(!may_hold_key(
+            "refused: no grant names alpha-web/prod/X_KEY"
+        ));
+        assert_eq!(
+            observatory_refusal(&format!("use_secret: refused {}", "Zz9+".repeat(8))),
+            None
+        );
     }
 
     /// Review round 1, P2-2: a shell that inherits `SHELLOPTS=xtrace` traces each command; the
@@ -1025,7 +1163,7 @@ mod tests {
             None
         );
         assert_eq!(observatory_refusal("other text"), None);
-        let long = format!("use_secret: {}", "a".repeat(1000));
+        let long = format!("use_secret: {}", "word ".repeat(200));
         assert!(observatory_refusal(&long).unwrap().len() < 400);
     }
 

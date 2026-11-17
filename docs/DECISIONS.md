@@ -627,6 +627,14 @@ research notes); the ones still in force that the board cites are seeded below w
     refused by the store's own same-key check; Hermes's side tasks are pinned to the metered
     provider with no fallback, and provider key variables are unset for that launch; the window
     reads Observatory once and again only on *Read again*, within 30 s of the backend's 20 s.
+  - O-8 (review round 2, 2026-11-17): exported bash functions never reach the pipe shell, which
+    writes with `command printf`; a refusal that may hold a key (`sk-` in any case, or 24 or more
+    key characters in a row) is never shown; a record not written after a save is reported beside
+    the save, not as a failure of it; the metered Hermes home has an empty `.env` of its own, and
+    more provider and cloud variables are unset. An API key added beside an unreadable saved API
+    key of the same provider and group fails closed (`SAVED_KEY_UNREADABLE`), narrowing the
+    2026-11-08 rule (an unreadable row never blocks a new account) to sign-ins, which have an
+    identity of their own.
 - **Consequences:** an agent (or the operator over MCP) adds a key Observatory holds without a
   person typing it; a Hermes launch on the pay-per-token group no longer needs `agents connect`
   and leaves `~/.hermes` alone, while one on an ordinary group starts as before. Open: a rotation

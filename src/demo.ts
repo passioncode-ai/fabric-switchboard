@@ -953,7 +953,7 @@ export function createDemoAdapter(): Adapter {
       return { agent, folder, openrouter: true, anthropic, none_usable: false, keys: [
         { kind: 'openrouter' as const, scope: 'machine' as const, pool: null, name: 'This computer', model: 'moonshotai/kimi-k2', usable: true, default: true, why_not: null },
         { kind: 'openrouter' as const, scope: 'group' as const, pool: 'passioncode', name: 'PassionCode', model: null, usable: false, default: false, why_not: 'Used in the folders of PassionCode.' },
-        ...(anthropic ? [{ kind: 'anthropic' as const, name: 'appvillis', model: 'claude-sonnet-5-5', usable: true, default: false, why_not: null }] : []),
+        ...(anthropic ? [{ kind: 'anthropic' as const, name: 'team-a', model: 'claude-sonnet-5-5', usable: true, default: false, why_not: null }] : []),
       ] };
     },
     async observatoryKeys() {
@@ -965,7 +965,7 @@ export function createDemoAdapter(): Adapter {
       ] };
     },
     async observatoryKeyAdd() { await pause(); throw new Error('The browser demo cannot read Project Observatory.'); },
-    async anthropicKeys() { await pause(); return { keys: [{ name: 'appvillis', saved_at: now() - 3600, model: 'claude-sonnet-5-5' }, { name: 'personal', saved_at: now() - 7200, model: null }] }; },
+    async anthropicKeys() { await pause(); return { keys: [{ name: 'team-a', saved_at: now() - 3600, model: 'claude-sonnet-5-5' }, { name: 'personal', saved_at: now() - 7200, model: null }] }; },
     async launchOnAnthropic() { await pause(); throw new Error('The browser demo cannot open a terminal.'); },
     async loginItem() { return { ...loginItem }; },
     async shellHookNotice() { return shellNotice ? { organization: 'Northwind', group: 'Northwind web' } : null; },

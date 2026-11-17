@@ -1670,7 +1670,7 @@ enum AgentsCommand {
         #[command(subcommand)]
         command: OpenrouterCommand,
     },
-    /// Anthropic API keys agents run on directly, each under a name you choose (`appvillis`,
+    /// Anthropic API keys agents run on directly, each under a name you choose (`team-a`,
     /// `personal`); `agents launch hermes --anthropic <name>` picks one.
     Anthropic {
         #[command(subcommand)]
@@ -1708,7 +1708,7 @@ enum AgentsCommand {
         #[arg(long, conflicts_with = "anthropic")]
         openrouter: bool,
         /// Run on the Anthropic key saved under this name (`switchboard agents anthropic set
-        /// <name>`), such as `appvillis` or `personal`.
+        /// <name>`), such as `team-a` or `personal`.
         #[arg(long, value_name = "NAME")]
         anthropic: Option<String>,
         /// The model for this launch: an OpenRouter id such as `moonshotai/kimi-k2`, or with
@@ -1875,7 +1875,7 @@ enum AnthropicCommand {
     /// Save the key piped on stdin (`sk-ant-api…`) under a name; it goes to the OS vault, never to
     /// a file. Saving again under the same name replaces it.
     Set {
-        /// The key's name, such as `appvillis` or `personal`.
+        /// The key's name, such as `team-a` or `personal`.
         name: String,
         /// The model agents start on, an Anthropic id such as `claude-sonnet-5-5`.
         #[arg(long)]

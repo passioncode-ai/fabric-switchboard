@@ -3833,7 +3833,22 @@ Plan: [2026-11-17-observatory-keys](plans/2026-11-17-observatory-keys/README.md)
   task of Hermes 0.22.2 (`HERMES_AUX_TASKS`) to `provider: switchboard` with the launch's model,
   and the session script unsets the provider key variables Hermes would find
   (`HERMES_PROVIDER_KEYS`: `OPENROUTER_API_KEY`, `NOUS_*` and the rest; `GH_TOKEN`, `GITHUB_TOKEN`
-  and `HF_TOKEN` stay for the session's own tools), so no helper call passes the meter.
+  and `HF_TOKEN` stay for the session's own tools), so helper calls stay on the metered provider
+  as far as the side tasks and provider variables Hermes 0.22.2 is known to read go; a newer
+  Hermes may add others.
+- **Review round 2 (2026-11-17).** `pipe_script` writes with `command printf`, and every
+  `BASH_FUNC_*` variable (an exported bash function, which bash 3.2 imports as `/bin/sh` on
+  macOS and which could shadow `printf`) is removed from the environment with the others. A
+  refusal is never shown when it may hold a key (`may_hold_key`: `sk-` in any case, or a run of 24
+  or more of `A-Za-z0-9_+/=-`), the save's own and Observatory's alike; Observatory's error for a
+  slot it does not hold has no `use_secret:` prefix and ends as `SAVE_FAILED`. `SAVE_TIMED_OUT`
+  now says the key may have been saved. A record that cannot be written after a save answers the
+  saves with `failed: RECORDS_UNSAVED`, never an error that reads as nothing saved. The metered
+  Hermes home holds an empty `.env` (0600), so Hermes never loads its install folder's `.env`, and
+  the unset list adds the AWS, Google application credentials, Nebius, Upstage, Actual, MoA and
+  LM Studio variables. In the store, an API key added beside an API-key row of the same provider
+  and group whose stored value cannot be read is refused (`SAVED_KEY_UNREADABLE`): it may be that
+  very key; a sign-in beside an unreadable sign-in is still added (its identity tells it apart).
 - **Tests:** `observatory_keys::tests::*` (the list, slots and the pipe script, the record, the
   plan and its refusals, saved targets), `launch_keys::tests::the_pay_per_token_groups_keys_are_offered_with_why_not`,
   `launch::tests::hermes_on_the_pay_per_token_group_runs_through_the_proxy`, and

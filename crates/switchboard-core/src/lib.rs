@@ -732,6 +732,9 @@ const SAVE_ATTEMPTS: usize = 4;
 /// H-2: a save that planned `SAVE_ATTEMPTS` times and found the account's group changed under
 /// each write. Nothing is saved; the old credential is back in place.
 const SAVE_CONTENDED: &str = "Account groups kept changing while the account was saved";
+/// SB-404 review round 2: an API key is added beside an API key of the same provider and group
+/// whose stored value cannot be read, so whether it is the same key is unknown.
+pub const SAVED_KEY_UNREADABLE: &str = "An API key already saved in this group cannot be read, so Switchboard cannot tell whether this is the same key. Remove that account or save its key again, then add this one.";
 /// One `save_account` call, planned against the metadata without touching the vault.
 struct SaveRequest<'a> {
     label: &'a str,
@@ -809,9 +812,20 @@ impl SaveRequest<'_> {
             let token_match = if !self.upsert || !both_known {
                 match read(&a.id) {
                     Ok(stored) => stored.access_token == self.credential.access_token,
+                    // SB-404 review round 2: an API key beside an API-key row this store cannot
+                    // read fails closed. The key itself is the only identity it has, so the
+                    // unread row may be this very key; adding it would make a second account.
+                    Err(_)
+                        if !self.upsert
+                            && self.kind == AuthKind::ApiKey
+                            && a.kind == AuthKind::ApiKey =>
+                    {
+                        return Err(SAVED_KEY_UNREADABLE.into());
+                    }
                     // A row whose sign-in this store cannot read (left in a keychain a moved
                     // data folder no longer opens) cannot be the one being added, and a new
-                    // account must not fail on it (Mac Studio, 2026-11-08).
+                    // account must not fail on it (Mac Studio, 2026-11-08): a sign-in has an
+                    // identity of its own, which tells it apart.
                     Err(_) if !self.upsert => false,
                     Err(error) => return Err(error),
                 }
@@ -2777,6 +2791,35 @@ mod published_tests {
             .unwrap()
             .id;
         (root, store, id)
+    }
+
+    /// SB-404 review round 2: an API key added beside an API-key row whose value cannot be read
+    /// is refused (it may be that very key), while a sign-in beside an unreadable sign-in is
+    /// still added (the Mac Studio case of 2026-11-08).
+    #[test]
+    fn an_api_key_beside_an_unreadable_saved_key_fails_closed() {
+        let root = tempfile::tempdir().unwrap();
+        let vault = Arc::new(MemoryVault::default());
+        let store = Store::open(root.path().to_owned(), vault.clone()).unwrap();
+        let add = |kind: AuthKind, value: &str| {
+            store.add(
+                "synthetic".into(),
+                Provider::Claude,
+                kind,
+                "default".into(),
+                Credential::parse(Provider::Claude, kind, value).unwrap(),
+            )
+        };
+        let first = add(AuthKind::ApiKey, "synthetic-key-one").unwrap().id;
+        vault.delete(&first).unwrap();
+        assert_eq!(
+            add(AuthKind::ApiKey, "synthetic-key-one").unwrap_err(),
+            SAVED_KEY_UNREADABLE
+        );
+        assert_eq!(store.snapshot().unwrap().accounts.len(), 1);
+        let token = add(AuthKind::SetupToken, "synthetic-setup-one").unwrap().id;
+        vault.delete(&token).unwrap();
+        add(AuthKind::SetupToken, "synthetic-setup-two").unwrap();
     }
 
     /// SB-296: a writer holds the metadata lock across its write (an `fsync` that took minutes

@@ -1633,10 +1633,12 @@ async function loadObservatoryKeys() {
 function observatoryPanel() {
   const section = el('div', 'fold-content');
   section.append(el('p', 'form-note', t('Keys Project Observatory holds for Anthropic, OpenAI and OpenRouter, by name. Adding one moves its value into Switchboard\'s store without showing it anywhere.')));
-  if (observatoryError) { section.append(el('p', 'usage-error', t(observatoryError)), button(t('Read again'), () => { observatoryError = ''; void loadObservatoryKeys(); }, 'text-button', 'observatory-retry')); return section; }
+  // Review rounds 1 and 2: every state that is not a list of keys offers *Read again*; nothing is read again by itself.
+  const readAgain = () => button(t('Read again'), () => { observatoryKeys = null; observatoryError = ''; void loadObservatoryKeys(); }, 'text-button', 'observatory-retry');
+  if (observatoryError) { section.append(el('p', 'usage-error', t(observatoryError)), readAgain()); return section; }
   if (!observatoryKeys) { section.append(el('p', 'form-note', t('Reading Project Observatory…'))); return section; }
-  if (observatoryKeys.state !== 'ok') { section.append(el('p', 'form-note', t(observatoryKeys.why ?? 'Project Observatory is not available.'))); return section; }
-  if (!observatoryKeys.keys.length) { section.append(el('p', 'form-note', t('Project Observatory holds no Anthropic, OpenAI or OpenRouter key an agent can run on.'))); return section; }
+  if (observatoryKeys.state !== 'ok') { section.append(el('p', 'form-note', t(observatoryKeys.why ?? 'Project Observatory is not available.')), readAgain()); return section; }
+  if (!observatoryKeys.keys.length) { section.append(el('p', 'form-note', t('Project Observatory holds no Anthropic, OpenAI or OpenRouter key an agent can run on.')), readAgain()); return section; }
   const list = el('ul', 'key-list');
   for (const key of observatoryKeys.keys) {
     const item = el('li', 'key-item', key.slot);
@@ -2023,7 +2025,7 @@ async function agentDialog(agent: AgentInfo) {
   // SB-392 K-1: which keys this agent can start on here, and which one a launch in the folder spends.
   if (viaKey || agent.id === 'hermes' || agent.id === 'claude-code') context.body.append(launchKeysPart(agent, () => dir.value() || null));
   if (viaKey) context.body.append(viaKey.part);
-  // SB-390: Hermes on an Anthropic key the person saved by name (Appvillis's, their own).
+  // SB-390: Hermes on an Anthropic key the person saved by name (a team's, their own).
   if (agent.id === 'hermes') context.body.append(anthropicLaunch(agent, context, folder));
   const throughProxy = () => { const value = folder(); if (value) void dialogSave(context, () => adapter.launchAgent(agent.id, pool.value, value, modelField.hidden ? null : proxyModel.value.trim() || null), t('Terminal launch requested for {agent}.', { agent: agent.name }), 'launch'); };
   if (keyFirst) {

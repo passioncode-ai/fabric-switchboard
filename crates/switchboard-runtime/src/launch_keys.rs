@@ -168,7 +168,7 @@ mod tests {
                 Some("moonshotai/kimi-k2".into()),
             )
             .unwrap();
-        crate::anthropic_keys::set(root, &store, "appvillis", "sk-ant-api03-x", None, 1).unwrap();
+        crate::anthropic_keys::set(root, &store, "team-a", "sk-ant-api03-x", None, 1).unwrap();
         let answer = list(root, &store, "hermes", None).unwrap();
         let keys = answer["keys"].as_array().unwrap();
         assert_eq!(keys.len(), 2);
@@ -176,7 +176,7 @@ mod tests {
         assert_eq!(keys[0]["name"], "This computer");
         assert_eq!(keys[0]["default"], true);
         assert_eq!(keys[1]["kind"], "anthropic");
-        assert_eq!(keys[1]["name"], "appvillis");
+        assert_eq!(keys[1]["name"], "team-a");
         // An agent with no Anthropic route never lists an Anthropic key.
         let other = list(root, &store, "opencode", None).unwrap();
         assert!(other["keys"]

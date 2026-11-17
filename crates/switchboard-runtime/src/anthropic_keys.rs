@@ -1,6 +1,6 @@
 //! SB-390 (operator, 2026-11-16: «добавить возможность запустить гермеса на антропик токене
 //! апвиллис и моем на выбор тоже как опция»): Anthropic API keys agents can run on directly, each
-//! under a name the person picks (`appvillis`, `personal`), chosen at launch.
+//! under a name the person picks (`team-a`, `personal`), chosen at launch.
 //!
 //! The value lives only in the vault (`Store::put_secret`); `anthropic-keys.json` (0600) holds
 //! each key's name, its vault item, when it was saved and its default model, never the value. It
@@ -18,7 +18,7 @@ const MAX_KEYS: usize = 16;
 const MAX_KEY: usize = 512;
 
 pub const NAME_INVALID: &str =
-    "A key's name is 1 to 32 lowercase letters, digits and hyphens, such as appvillis or personal.";
+    "A key's name is 1 to 32 lowercase letters, digits and hyphens, such as team-a or personal.";
 pub const KEY_INVALID: &str = "That is not an Anthropic API key: it starts with sk-ant-api.";
 /// SB-392 K-3: an Admin key (`sk-ant-admin`) manages an organization and cannot run a model.
 pub const ADMIN_KEY: &str = "That is an Anthropic Admin key: it manages an organization and cannot run a model. Create an API key in Claude Console (platform.claude.com, Settings, API keys) and save that one.";
@@ -214,8 +214,8 @@ mod tests {
 
     #[test]
     fn names_keys_and_models_are_checked() {
-        assert!(name_valid("appvillis") && name_valid("personal") && name_valid("team-2"));
-        assert!(!name_valid("") && !name_valid("Appvillis") && !name_valid("-x"));
+        assert!(name_valid("team-a") && name_valid("personal") && name_valid("team-2"));
+        assert!(!name_valid("") && !name_valid("Team-A") && !name_valid("-x"));
         assert!(!name_valid(&"a".repeat(33)) && !name_valid("a b") && !name_valid("a/b"));
         assert!(key_valid("sk-ant-api03-abcDEF_123"));
         assert!(
@@ -241,35 +241,32 @@ mod tests {
         .unwrap();
         let root = dir.path();
         assert_eq!(
-            set(root, &store, "appvillis", "sk-ant-admin01-x", None, 1).unwrap_err(),
+            set(root, &store, "team-a", "sk-ant-admin01-x", None, 1).unwrap_err(),
             ADMIN_KEY
         );
         assert_eq!(
-            set(root, &store, "appvillis", "sk-or-v1-x", None, 1).unwrap_err(),
+            set(root, &store, "team-a", "sk-or-v1-x", None, 1).unwrap_err(),
             KEY_INVALID
         );
         set(
             root,
             &store,
-            "appvillis",
+            "team-a",
             " sk-ant-api03-first ",
             Some("claude-sonnet-5-5"),
             1,
         )
         .unwrap();
         set(root, &store, "personal", "sk-ant-api03-mine", None, 2).unwrap();
-        assert_eq!(
-            value(root, &store, "appvillis").unwrap(),
-            "sk-ant-api03-first"
-        );
-        let item = find(root, "appvillis").unwrap().item;
+        assert_eq!(value(root, &store, "team-a").unwrap(), "sk-ant-api03-first");
+        let item = find(root, "team-a").unwrap().item;
         // Saved again under the same name: the same vault item, the model kept.
-        set(root, &store, "appvillis", "sk-ant-api03-second", None, 3).unwrap();
-        let again = find(root, "appvillis").unwrap();
+        set(root, &store, "team-a", "sk-ant-api03-second", None, 3).unwrap();
+        let again = find(root, "team-a").unwrap();
         assert_eq!(again.item, item);
         assert_eq!(again.model.as_deref(), Some("claude-sonnet-5-5"));
         assert_eq!(
-            value(root, &store, "appvillis").unwrap(),
+            value(root, &store, "team-a").unwrap(),
             "sk-ant-api03-second"
         );
         assert_eq!(list(root).unwrap()["keys"].as_array().unwrap().len(), 2);
@@ -283,7 +280,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let keys = Keys {
             keys: vec![Key {
-                name: "appvillis".into(),
+                name: "team-a".into(),
                 item: "00000000-0000-4000-8000-000000000001".into(),
                 saved_at: 10,
                 model: Some("claude-sonnet-5-5".into()),
@@ -293,7 +290,7 @@ mod tests {
         let text = std::fs::read_to_string(dir.path().join(FILE)).unwrap();
         assert!(!text.contains("sk-ant"));
         let listed = list(dir.path()).unwrap();
-        assert_eq!(listed["keys"][0]["name"], "appvillis");
+        assert_eq!(listed["keys"][0]["name"], "team-a");
         assert_eq!(listed["keys"][0]["model"], "claude-sonnet-5-5");
         assert!(
             listed["keys"][0].get("item").is_none(),
@@ -301,7 +298,7 @@ mod tests {
         );
         assert_eq!(find(dir.path(), "personal").unwrap_err(), NO_KEY);
         assert_eq!(
-            set_model(dir.path(), "appvillis", "claude-opus-5-5").unwrap()["model"],
+            set_model(dir.path(), "team-a", "claude-opus-5-5").unwrap()["model"],
             "claude-opus-5-5"
         );
         std::fs::write(dir.path().join(FILE), b"{oops").unwrap();

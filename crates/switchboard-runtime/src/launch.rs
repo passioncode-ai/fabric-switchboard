@@ -1691,6 +1691,10 @@ auxiliary:\n  free_only: true\n"
     }
     switchboard_core::private_fs::private_write(&own.join("config.yaml"), config.as_bytes())
         .map_err(|_| "Managed home unavailable.".to_string())?;
+    // Review round 2: an empty `.env` of its own, so Hermes never falls back to its install
+    // folder's `.env`, which overrides the environment when the home has none.
+    switchboard_core::private_fs::private_write(&own.join(".env"), b"")
+        .map_err(|_| "Managed home unavailable.".to_string())?;
     Ok(own)
 }
 /// Hermes's side tasks with a provider of their own (`hermes_cli/config_defaults.py`
@@ -1758,6 +1762,19 @@ pub(crate) const HERMES_PROVIDER_KEYS: &[&str] = &[
     "FIREWORKS_API_KEY",
     "CEREBRAS_API_KEY",
     "PERPLEXITY_API_KEY",
+    // Review round 2: cloud credentials and the remaining providers Hermes 0.22.2 reads.
+    "AWS_ACCESS_KEY_ID",
+    "AWS_SECRET_ACCESS_KEY",
+    "AWS_SESSION_TOKEN",
+    "AWS_PROFILE",
+    "AWS_BEARER_TOKEN_BEDROCK",
+    "GOOGLE_APPLICATION_CREDENTIALS",
+    "NEBIUS_API_KEY",
+    "NEBIUS_TOKEN_FACTORY_API_KEY",
+    "UPSTAGE_API_KEY",
+    "ACTUAL_API_KEY",
+    "MOA_API_KEY",
+    "HERMES_CUSTOM_LMSTUDIO_API_KEY",
 ];
 /// A launch script that also clears `names` before anything runs (as it clears `CONFLICTS`).
 fn with_unset(content: String, names: &[&str]) -> String {
@@ -1953,7 +1970,7 @@ pub const ANTHROPIC_AGENT_UNSUPPORTED: &str =
     "Only Hermes runs on an Anthropic key for now. Choose Hermes, or its OpenRouter key.";
 pub const ANTHROPIC_MODEL_NEEDED: &str =
     "Choose a model for this launch, or set the key's default model with switchboard agents anthropic model.";
-/// SB-390: starts Hermes in a folder on the Anthropic key saved under `key` (`appvillis`,
+/// SB-390: starts Hermes in a folder on the Anthropic key saved under `key` (`team-a`,
 /// `personal`) and `model` (default: the key's model), as `hermes --provider anthropic -m
 /// <model>`. Like an OpenRouter launch (`launch_agent_openrouter`), it runs in a Hermes home of
 /// its own (`HERMES_HOME`, so `~/.hermes`'s own sign-ins do not win over the key), and the key is
@@ -5769,6 +5786,16 @@ mod tests {
         // Provider keys in the caller's environment are cleared before Hermes starts.
         #[cfg(not(windows))]
         assert!(script.contains("unset OPENROUTER_API_KEY NOUS_API_KEY"));
+        #[cfg(not(windows))]
+        for name in [
+            "AWS_SECRET_ACCESS_KEY",
+            "GOOGLE_APPLICATION_CREDENTIALS",
+            "MOA_API_KEY",
+        ] {
+            assert!(script.contains(&format!(" {name} ")), "{name}");
+        }
+        // An empty `.env` of its own: Hermes never reads its install folder's.
+        assert_eq!(fs::read(home.join("agent-home/.env")).unwrap(), b"");
         assert!(!script.contains("synthetic-tokens-key"));
         let record = recorded(&home);
         assert_eq!(record["pool"], "tokens");

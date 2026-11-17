@@ -745,12 +745,12 @@ fn an_openrouter_launch_runs_without_an_owner_and_needs_a_saved_key() {
     );
     // SB-390: one key source at a time, and an Anthropic launch names a saved key.
     assert_eq!(
-        launch(&["--openrouter", "--anthropic", "appvillis"])
+        launch(&["--openrouter", "--anthropic", "team-a"])
             .status
             .code(),
         Some(2)
     );
-    let output = launch(&["--anthropic", "appvillis", "--model", "claude-sonnet-5-5"]);
+    let output = launch(&["--anthropic", "team-a", "--model", "claude-sonnet-5-5"]);
     assert_eq!(output.status.code(), Some(1));
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(

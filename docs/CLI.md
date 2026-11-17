@@ -45,10 +45,10 @@ switchboard accounts receive handover.json --signer KEY [--apply] [--headless]  
 switchboard accounts recall ACCOUNT_UUID --from member@vm   # SB-292: take a moved sign-in back; its copy there is removed and proved gone (Claude and Codex)
 switchboard accounts send ACCOUNT_UUID --to user@studio.local --remote /usr/local/bin/switchboard --remote-data-dir /srv/switchboard   # SB-315: a Switchboard there that runs with --data-dir; a recall uses the same by default
 switchboard accounts seats [--limit 50]                     # SB-312: the moves, hand-overs and call backs recorded here, with the id there
-switchboard agents anthropic set appvillis --key-stdin --model claude-sonnet-5-5   # SB-390: an Anthropic API key under a name (piped, never echoed); list | model | remove | key
+switchboard agents anthropic set team-a --key-stdin --model claude-sonnet-5-5   # SB-390: an Anthropic API key under a name (piped, never echoed); list | model | remove | key
 switchboard agents launch hermes --anthropic personal --dir /abs/folder     # SB-390: Hermes on the Anthropic key saved as personal
 switchboard agents launch-keys hermes --folder /abs/folder   # SB-392: the keys this agent can start on, by name: the folder's OpenRouter key first, then the others and the Anthropic keys
-use_secret.py run --vault-only --env prod appvillis ANTHROPIC_API_KEY -- sh -c 'printf %s "$ANTHROPIC_API_KEY" | switchboard agents anthropic set appvillis --key-stdin'   # SB-392 K-0: save a key from Observatory without seeing it (an Admin key is refused)
+use_secret.py run --vault-only --env prod team-a ANTHROPIC_API_KEY -- sh -c 'printf %s "$ANTHROPIC_API_KEY" | switchboard agents anthropic set team-a --key-stdin'   # SB-392 K-0: save a key from Observatory without seeing it (an Admin key is refused)
 switchboard keys observatory                          # SB-404 K1: the Anthropic, OpenAI and OpenRouter keys Project Observatory holds, by project/env/NAME, and where each is saved here; never a value
 switchboard keys observatory add alpha-web/prod/ANTHROPIC_API_KEY [--to account|agent|both] [--as NAME] [--model M]   # SB-404 K2: an Anthropic key into the pay-per-token group (and/or a named key for Hermes); the value moves through a pipe
 switchboard keys observatory add alpha-web/prod/OPENROUTER_API_KEY [--pool POOL] [--model M] [--replace]   # SB-404 K2: an OpenRouter key as this computer's (or a group's) agents' key; an OpenAI key is refused for now

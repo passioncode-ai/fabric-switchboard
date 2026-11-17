@@ -1037,6 +1037,12 @@ check(() => {
 check(() => {
   const main = readFileSync(new URL('../src/main.ts', import.meta.url), 'utf8');
   assert.match(main, /if \(!observatoryKeys && !observatoryLoading && !observatoryError\) void loadObservatoryKeys\(\);/, 'a failed read waits for Read again');
+  // Round 2: the error, absent or unreadable, and empty states each offer Read again.
+  const panel = main.slice(main.indexOf('function observatoryPanel()'), main.indexOf('function observatoryAddDialog('));
+  for (const state of ['if (observatoryError)', "if (observatoryKeys.state !== 'ok')", 'if (!observatoryKeys.keys.length)']) {
+    const line = panel.split('\n').find((l) => l.includes(state));
+    assert.ok(line && line.includes('readAgain()'), `${state} offers Read again`);
+  }
   const adapterSource = readFileSync(new URL('../src/adapter.ts', import.meta.url), 'utf8');
   const deadline = Number(/observatoryKeys: \(\) => readWithDeadline\(invoke\('observatory_keys'\), (\d+)_?(\d*)\)/.exec(adapterSource)?.slice(1).join(''));
   const rust = readFileSync(new URL('../crates/switchboard-runtime/src/observatory_keys.rs', import.meta.url), 'utf8');
