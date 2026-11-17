@@ -1871,6 +1871,7 @@ check(() => {
   assert.equal(logic.restartStateText('failed', 'not_back'), 'Not back five minutes after it ended');
   assert.equal(logic.restartStateText('failed', 'something new'), 'Not back');
   assert.equal(logic.restartStateText('skipped', 'still_busy'), 'Left as it was: busy for a day');
+  assert.equal(logic.restartSkipText('host_busy'), 'its window did not answer; plan again');
   assert.equal(logic.restartTone('continuing'), 'ok');
   assert.equal(logic.restartTone('failed'), 'danger');
   assert.equal(logic.restartTone('pending'), 'muted');

@@ -69,11 +69,27 @@ const MAX_VIEWERS: usize = 8;
 /// A viewer that cannot take output this long is dropped, so it never holds the session up.
 const VIEWER_WRITE: Duration = Duration::from_secs(2);
 const MAX_DESCRIPTOR: u64 = 4096;
+/// How long a viewer waits for the host's answer to its `HELLO` (SB-413).
+const HELLO_WAIT: Duration = Duration::from_secs(15);
+/// SB-413: the output reader's first pause after an end of output, and its longest. A restart in
+/// place brings the terminal's other end back within the first pauses; a process that closed its
+/// terminal and goes on running is looked at about once a second, not twenty times.
+const READER_PAUSE_FIRST: Duration = Duration::from_millis(50);
+const READER_PAUSE_MAX: Duration = Duration::from_secs(1);
+
+/// The reader's pause after `pause`: doubled, at most `READER_PAUSE_MAX`.
+fn next_reader_pause(pause: Duration) -> Duration {
+    (pause * 2).min(READER_PAUSE_MAX)
+}
 
 /// The frame protocol's version, in both `HELLO`s: a viewer refuses a host that speaks another.
 pub const PROTOCOL: u64 = 1;
 
 pub const NOT_FOUND: &str = crate::launches::NO_SUCH_LAUNCH;
+/// SB-413: the host took the connection and did not answer its `HELLO` in time: it is there but
+/// busy, which is not "no session".
+pub const HOST_BUSY: &str =
+    "The session's host did not answer within 15 seconds; it may be busy. Try again.";
 pub const TOO_MANY_VIEWERS: &str = "This session already has eight viewers.";
 
 /// Writes one frame.
@@ -253,10 +269,9 @@ struct Inner {
     reason: Option<&'static str>,
     /// SB-397 R1: the program to start once the running process exits (a restart in place).
     restart: Option<PathBuf>,
-    /// SB-397 R1: a restart is under way; the terminal's other end is briefly gone, which is not
-    /// the session's end.
-    respawning: bool,
-    /// SB-397 R1: the last process exited with no restart waiting; the session is ending.
+    /// SB-397 R1: the last process exited with no restart waiting; the session is ending. Only
+    /// then does the output reader stop: an end of output it read before (a restart in place
+    /// closes the terminal's other end for a moment) is not the session's end (SB-413).
     finished: bool,
 }
 
@@ -284,6 +299,10 @@ impl Session {
     }
     fn output(&self, bytes: &[u8]) {
         let mut inner = self.lock();
+        self.output_locked(&mut inner, bytes);
+    }
+    /// `output` under a lock the caller already holds.
+    fn output_locked(&self, inner: &mut Inner, bytes: &[u8]) {
         inner.screen.process(bytes);
         inner.last_activity = std::time::Instant::now();
         inner.scrollback.extend(bytes);
@@ -361,7 +380,6 @@ impl Session {
                 return false;
             }
             inner.restart = Some(program);
-            inner.respawning = true;
             self.pid()
         };
         unsafe { libc::kill(-pid, libc::SIGHUP) };
@@ -390,6 +408,48 @@ impl Session {
     }
 }
 
+/// SB-413: on Linux both ends are opened close-on-exec from the start, so a process another
+/// thread forks meanwhile never keeps this terminal's other end; one that did kept the session's
+/// end of output (EIO) from ever being read (`openpty` sets nothing, and the flag set after it
+/// came too late for such a fork, as the tests running beside each other showed).
+#[cfg(target_os = "linux")]
+fn open_pty(rows: u16, cols: u16) -> io::Result<(OwnedFd, OwnedFd)> {
+    let master = unsafe { libc::posix_openpt(libc::O_RDWR | libc::O_NOCTTY | libc::O_CLOEXEC) };
+    if master < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    let master = unsafe { OwnedFd::from_raw_fd(master) };
+    if unsafe { libc::grantpt(master.as_raw_fd()) } != 0
+        || unsafe { libc::unlockpt(master.as_raw_fd()) } != 0
+    {
+        return Err(io::Error::last_os_error());
+    }
+    let mut name = [0 as libc::c_char; 128];
+    let r = unsafe { libc::ptsname_r(master.as_raw_fd(), name.as_mut_ptr(), name.len()) };
+    if r != 0 {
+        return Err(io::Error::from_raw_os_error(r));
+    }
+    let slave = unsafe {
+        libc::open(
+            name.as_ptr(),
+            libc::O_RDWR | libc::O_NOCTTY | libc::O_CLOEXEC,
+        )
+    };
+    if slave < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    let slave = unsafe { OwnedFd::from_raw_fd(slave) };
+    let size = libc::winsize {
+        ws_row: rows.max(1),
+        ws_col: cols.max(1),
+        ws_xpixel: 0,
+        ws_ypixel: 0,
+    };
+    unsafe { libc::ioctl(master.as_raw_fd(), libc::TIOCSWINSZ as _, &size) };
+    Ok((master, slave))
+}
+
+#[cfg(not(target_os = "linux"))]
 fn open_pty(rows: u16, cols: u16) -> io::Result<(OwnedFd, OwnedFd)> {
     let mut master: libc::c_int = -1;
     let mut slave: libc::c_int = -1;
@@ -539,7 +599,6 @@ pub fn serve(start: Start<'_>, ready: impl FnOnce()) -> Result<Ended, String> {
             last_activity: std::time::Instant::now(),
             reason: None,
             restart: None,
-            respawning: false,
             finished: false,
         }),
     });
@@ -595,16 +654,30 @@ pub fn serve(start: Start<'_>, ready: impl FnOnce()) -> Result<Ended, String> {
         std::thread::spawn(move || {
             let mut reader = reader;
             let mut buf = [0u8; 16 * 1024];
+            let mut pause = READER_PAUSE_FIRST;
             loop {
                 match reader.read(&mut buf) {
-                    Ok(n) if n > 0 => session.output(&buf[..n]),
-                    Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
-                    // End of output or EIO once every holder of the terminal's other end is gone;
-                    // during a restart in place it comes back with the next process.
-                    _ if session.lock().respawning => {
-                        std::thread::sleep(Duration::from_millis(50));
+                    Ok(n) if n > 0 => {
+                        pause = READER_PAUSE_FIRST;
+                        session.output(&buf[..n]);
                     }
-                    _ => break,
+                    Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
+                    // End of output or EIO once every holder of the terminal's other end is gone.
+                    // It ends the reader only once the host says the session is finished: during
+                    // a restart in place the other end comes back with the next process, and an
+                    // EIO read just before the next process started must not end the reader after
+                    // it started (SB-413: on Linux the reader waited for the session's lock while
+                    // the next process was spawned under it, then read the restart as over and
+                    // stopped, and the viewers saw nothing of the next process).
+                    _ => {
+                        #[cfg(test)]
+                        tests::pause_reader(&session.launch_id);
+                        if session.lock().finished {
+                            break;
+                        }
+                        std::thread::sleep(pause);
+                        pause = next_reader_pause(pause);
+                    }
                 }
             }
             let _ = drained_tx.send(());
@@ -622,9 +695,10 @@ pub fn serve(start: Start<'_>, ready: impl FnOnce()) -> Result<Ended, String> {
     ready();
 
     let status = loop {
-        let status = child
-            .wait()
-            .map_err(|_| "The session could not be watched.")?;
+        let status = child.wait().map_err(|_| {
+            session.lock().finished = true;
+            "The session could not be watched."
+        })?;
         // SB-397 R1: a restart in place starts the session's next process on the same terminal;
         // the viewers stay. One that cannot start ends the session as it would have.
         let program = {
@@ -655,20 +729,24 @@ pub fn serve(start: Start<'_>, ready: impl FnOnce()) -> Result<Ended, String> {
         // macOS revokes every open end of the terminal when its session leader exits: the next
         // process gets the terminal opened again by name. Opened before the session's lock, so a
         // viewer's write held on the terminal never keeps an end waiting behind it.
+        #[cfg(test)]
+        tests::hold_respawn(&session.launch_id);
         let slave = reopen_slave(&session);
         let started = {
             let mut inner = session.lock();
             if inner.reason.is_some() {
-                inner.respawning = false;
                 inner.finished = true;
                 None
             } else {
                 let next = slave.and_then(|slave| spawn_on(&program, &slave));
-                inner.respawning = false;
                 if let Ok(next) = &next {
                     session
                         .pid
                         .store(next.id() as i32, std::sync::atomic::Ordering::SeqCst);
+                    // Under the lock the reader needs for the next process's output, so the
+                    // viewers read this line before anything the next process writes (SB-413).
+                    session
+                        .output_locked(&mut inner, b"\r\n[Switchboard restarted this session]\r\n");
                 } else {
                     inner.finished = true;
                 }
@@ -677,7 +755,6 @@ pub fn serve(start: Start<'_>, ready: impl FnOnce()) -> Result<Ended, String> {
         };
         match started {
             Some(Ok(next)) => {
-                session.output(b"\r\n[Switchboard restarted this session]\r\n");
                 child = next;
             }
             _ => break status,
@@ -900,15 +977,31 @@ pub fn attach(root: &Path, launch_id: &str, rows: u16, cols: u16) -> Result<Atta
     connect(root, launch_id, Some((rows, cols)))
 }
 
-/// H-1d: ends the hosted session of `launch_id` and waits (up to 15 s) for its exit:
+/// H-1d: ends the hosted session of `launch_id` and waits for its exit:
 /// `{launch_id, exit_code, reason}`. Connects as a viewer with no size, so the session's size
-/// stays the one its viewers set.
+/// stays the one its viewers set. One 15 s deadline covers the host's `HELLO` answer and the exit
+/// both (SB-413): `HOST_BUSY` when the host did not answer (nothing was sent), `END_UNCONFIRMED`
+/// when the end was sent and no exit came in what was left.
 pub fn end(root: &Path, launch_id: &str) -> Result<Value, String> {
-    let attached = connect(root, launch_id, None)?;
+    end_within(root, launch_id, END_WAIT)
+}
+
+/// How long `end` waits in all, for the host's answer and the session's exit.
+const END_WAIT: Duration = Duration::from_secs(15);
+
+fn end_within(root: &Path, launch_id: &str, wait: Duration) -> Result<Value, String> {
+    let deadline = std::time::Instant::now() + wait;
+    let attached = connect_within(root, launch_id, None, wait)?;
     let mut stream = attached.stream;
-    let _ = stream.set_read_timeout(Some(Duration::from_secs(15)));
     write_frame(&mut stream, END, b"").map_err(|_| NOT_FOUND.to_string())?;
     loop {
+        let left = deadline.saturating_duration_since(std::time::Instant::now());
+        if left.is_zero() {
+            return Err(END_UNCONFIRMED.into());
+        }
+        // macOS refuses the option on a socket the host already shut down; its EXIT, if sent,
+        // is still read.
+        let _ = stream.set_read_timeout(Some(left));
         match read_frame(&mut stream) {
             Ok((EXIT, body)) => {
                 let exit: Value = serde_json::from_slice(&body).unwrap_or(Value::Null);
@@ -951,12 +1044,11 @@ fn restart_program_allowed(root: &Path, program: &Path) -> bool {
 
 /// SB-397 R1: whether the host of `launch_id` restarts its session in place (its `HELLO` answer
 /// lists `restart`). Attaches with no size, so the session's size stays its viewers', and detaches.
-pub fn offers_restart(root: &Path, launch_id: &str) -> bool {
-    let Ok(mut attached) = connect(root, launch_id, None) else {
-        return false;
-    };
+/// `Err` is why no answer came: `HOST_BUSY` for a host that did not answer in time (SB-413).
+pub fn offers_restart(root: &Path, launch_id: &str) -> Result<bool, String> {
+    let mut attached = connect(root, launch_id, None)?;
     let _ = write_frame(&mut attached.stream, DETACH, b"");
-    attached.can.iter().any(|c| c == "restart")
+    Ok(attached.can.iter().any(|c| c == "restart"))
 }
 
 /// How a host answered a restart request.
@@ -999,6 +1091,15 @@ pub fn restart(root: &Path, launch_id: &str, program: &Path) -> Result<Restart, 
 }
 
 fn connect(root: &Path, launch_id: &str, size: Option<(u16, u16)>) -> Result<Attached, String> {
+    connect_within(root, launch_id, size, HELLO_WAIT)
+}
+
+fn connect_within(
+    root: &Path,
+    launch_id: &str,
+    size: Option<(u16, u16)>,
+    hello_wait: Duration,
+) -> Result<Attached, String> {
     if !crate::launches::valid_id(launch_id) {
         return Err(NOT_FOUND.into());
     }
@@ -1011,7 +1112,20 @@ fn connect(root: &Path, launch_id: &str, size: Option<(u16, u16)>) -> Result<Att
     }
     write_frame(&mut stream, HELLO, hello.to_string().as_bytes())
         .map_err(|_| NOT_FOUND.to_string())?;
-    match read_frame(&mut stream) {
+    // A host that takes the connection and never answers is not waited for forever (SB-413);
+    // the stream is handed on with no timeout, as before.
+    let _ = stream.set_read_timeout(Some(hello_wait));
+    let answer = read_frame(&mut stream);
+    let _ = stream.set_read_timeout(None);
+    match answer {
+        Err(e)
+            if matches!(
+                e.kind(),
+                io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
+            ) =>
+        {
+            Err(HOST_BUSY.into())
+        }
         Ok((HELLO, ack)) => {
             let ack: Value = serde_json::from_slice(&ack).unwrap_or(Value::Null);
             if ack["protocol"].as_u64() != Some(PROTOCOL) {
@@ -1043,6 +1157,57 @@ fn connect(root: &Path, launch_id: &str, size: Option<(u16, u16)>) -> Result<Att
 mod tests {
     use super::*;
 
+    /// SB-413: the launch id whose output reader pauses after an end of output, and for how
+    /// long, so a test can make the reader see a restart's EIO late, as a loaded machine does.
+    static READER_PAUSE: Mutex<Option<(String, Duration)>> = Mutex::new(None);
+
+    /// SB-413: how many ends of output each launch's reader met, so a test proves the pause path
+    /// ran (on every OS) and how often.
+    static READER_PAUSES: Mutex<Vec<(String, usize)>> = Mutex::new(Vec::new());
+
+    fn reader_pauses(launch_id: &str) -> usize {
+        READER_PAUSES
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .iter()
+            .find(|(id, _)| id == launch_id)
+            .map_or(0, |(_, n)| *n)
+    }
+
+    /// SB-413: for a launch whose reader pauses, the restart waits (at most 5 s) until the reader
+    /// has met the old process's end, so the test always takes the path the race took: on Linux
+    /// a fast restart can reopen the terminal before the reader ever sees the end.
+    pub(super) fn hold_respawn(launch_id: &str) {
+        let held = READER_PAUSE
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .as_ref()
+            .is_some_and(|(id, _)| id == launch_id);
+        let until = std::time::Instant::now() + Duration::from_secs(5);
+        while held && reader_pauses(launch_id) == 0 && std::time::Instant::now() < until {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    pub(super) fn pause_reader(launch_id: &str) {
+        {
+            let mut counts = READER_PAUSES.lock().unwrap_or_else(|p| p.into_inner());
+            match counts.iter_mut().find(|(id, _)| id == launch_id) {
+                Some((_, n)) => *n += 1,
+                None => counts.push((launch_id.to_owned(), 1)),
+            }
+        }
+        let pause = READER_PAUSE
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .as_ref()
+            .filter(|(id, _)| id == launch_id)
+            .map(|(_, d)| *d);
+        if let Some(pause) = pause {
+            std::thread::sleep(pause);
+        }
+    }
+
     fn script(dir: &Path, body: &str) -> PathBuf {
         let path = dir.join("launch.command");
         std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
@@ -1050,7 +1215,24 @@ mod tests {
         path
     }
 
+    /// How long a test waits for anything a session should show: long enough for a loaded CI
+    /// runner, short enough that a stuck session fails its test instead of hanging the job
+    /// (SB-413).
+    const WAIT: Duration = Duration::from_secs(30);
+
+    /// A test viewer: attached, with a read timeout so no read waits past `WAIT`.
+    fn watch(root: &Path, id: &str, rows: u16, cols: u16) -> Attached {
+        let attached = attach(root, id, rows, cols).unwrap();
+        attached.stream.set_read_timeout(Some(WAIT)).unwrap();
+        attached
+    }
+
+    /// Reads until `needle` is seen, the session's exit arrives, the stream closes or `WAIT`
+    /// passes; answers what was seen and the exit code, if one came.
     fn until(stream: &mut UnixStream, needle: &str) -> (String, Option<i32>) {
+        // macOS refuses the option (EINVAL) on a socket the host already shut down; reads then
+        // end at once anyway.
+        let _ = stream.set_read_timeout(Some(WAIT));
         let mut seen = String::new();
         loop {
             match read_frame(stream) {
@@ -1068,6 +1250,22 @@ mod tests {
                 Err(_) => return (seen, None),
             }
         }
+    }
+
+    /// `until`, failing with what was seen when `needle` did not come.
+    fn saw(stream: &mut UnixStream, needle: &str) -> String {
+        let (seen, exit) = until(stream, needle);
+        assert!(
+            seen.contains(needle),
+            "waited {WAIT:?} for {needle:?}; saw {seen:?}, exit {exit:?}"
+        );
+        seen
+    }
+
+    /// The session's exit code, failing with what was seen when no exit came within `WAIT`.
+    fn exit_of(stream: &mut UnixStream) -> i32 {
+        let (seen, exit) = until(stream, "");
+        exit.unwrap_or_else(|| panic!("no exit within {WAIT:?}; saw {seen:?}"))
     }
 
     #[test]
@@ -1097,25 +1295,25 @@ mod tests {
         let host = start_host(&root, &id, &program, None);
         assert_eq!(attachable(&root, &id).unwrap()["viewers"], 0);
 
-        let mut first = attach(&root, &id, 24, 80).unwrap();
+        let mut first = watch(&root, &id, 24, 80);
         assert_eq!(first.viewers, 1);
-        until(&mut first.stream, "ready");
+        saw(&mut first.stream, "ready");
         write_frame(&mut first.stream, INPUT, b"one\n").unwrap();
-        until(&mut first.stream, "got one");
+        saw(&mut first.stream, "got one");
         write_frame(&mut first.stream, DETACH, b"").unwrap();
         drop(first);
 
         // A viewer that detached left the session running; a new one gets what came before.
-        let mut second = attach(&root, &id, 30, 100).unwrap();
-        let (replay, _) = until(&mut second.stream, "got one");
-        assert!(replay.contains("ready"));
-        let mut third = attach(&root, &id, 30, 100).unwrap();
+        let mut second = watch(&root, &id, 30, 100);
+        let replay = saw(&mut second.stream, "got one");
+        assert!(replay.contains("ready"), "{replay:?}");
+        let mut third = watch(&root, &id, 30, 100);
         assert_eq!(third.viewers, 2);
         write_frame(&mut third.stream, INPUT, b"two\n").unwrap();
-        assert_eq!(until(&mut second.stream, "").1, Some(7));
-        assert_eq!(until(&mut third.stream, "").1, Some(7));
+        assert_eq!(exit_of(&mut second.stream), 7);
+        assert_eq!(exit_of(&mut third.stream), 7);
         assert_eq!(
-            host.join().unwrap().unwrap(),
+            host.join().unwrap(),
             Ended {
                 exit_code: 7,
                 reason: "exited"
@@ -1140,9 +1338,9 @@ mod tests {
         let program = script(&root, "echo first; read line; exit 0");
         let id = crate::launches::new_id();
         let host = start_host(&root, &id, &program, None);
-        let mut viewer = attach(&root, &id, 24, 80).unwrap();
+        let mut viewer = watch(&root, &id, 24, 80);
         assert!(viewer.can.iter().any(|c| c == "restart"));
-        until(&mut viewer.stream, "first");
+        saw(&mut viewer.stream, "first");
 
         // Only a program of this user under `restarts/` is started.
         let outside = script(&root, "echo never");
@@ -1154,6 +1352,10 @@ mod tests {
         std::fs::set_permissions(&next, std::fs::Permissions::from_mode(0o700)).unwrap();
         assert_eq!(restart(&root, &id, &next), Ok(Restart::Accepted));
         let (seen, exit) = until(&mut viewer.stream, "second");
+        assert!(
+            seen.contains("second"),
+            "the next program's output reached the viewer within {WAIT:?}; saw {seen:?}, exit {exit:?}"
+        );
         assert_eq!(
             exit, None,
             "no exit reached the viewer between the two processes"
@@ -1165,8 +1367,164 @@ mod tests {
         );
 
         write_frame(&mut viewer.stream, INPUT, b"done\n").unwrap();
-        assert_eq!(until(&mut viewer.stream, "").1, Some(3));
-        assert_eq!(host.join().unwrap().unwrap().exit_code, 3);
+        assert_eq!(exit_of(&mut viewer.stream), 3);
+        assert_eq!(host.join().unwrap().exit_code, 3);
+    }
+
+    #[test]
+    fn a_restart_in_place_keeps_its_output_when_the_reader_sees_the_old_end_late() {
+        // SB-413: the output reader read the old process's end (EIO) just before the next
+        // process started, and acted on it only after: it took the restart as over and stopped,
+        // so the viewers never saw the next process (Linux CI, run 44076842446). The restart waits
+        // until the reader met the old end, and the pause holds the reader past the next
+        // process's start, as a loaded machine did.
+        let data = tempfile::tempdir().unwrap();
+        let root = data.path().canonicalize().unwrap();
+        let program = script(&root, "echo first; read line; exit 0");
+        let id = crate::launches::new_id();
+        *READER_PAUSE.lock().unwrap_or_else(|p| p.into_inner()) =
+            Some((id.clone(), Duration::from_millis(600)));
+        let host = start_host(&root, &id, &program, None);
+        let mut viewer = watch(&root, &id, 24, 80);
+        saw(&mut viewer.stream, "first");
+        let dir = root.join(RESTART_DIR);
+        std::fs::create_dir_all(&dir).unwrap();
+        let next = dir.join("next.command");
+        std::fs::write(&next, "#!/bin/sh\necho second; read line; exit 3\n").unwrap();
+        std::fs::set_permissions(&next, std::fs::Permissions::from_mode(0o700)).unwrap();
+        assert_eq!(restart(&root, &id, &next), Ok(Restart::Accepted));
+        saw(&mut viewer.stream, "second");
+        assert!(
+            reader_pauses(&id) > 0,
+            "the reader met the old process's end and paused"
+        );
+        write_frame(&mut viewer.stream, INPUT, b"done\n").unwrap();
+        assert_eq!(exit_of(&mut viewer.stream), 3);
+        assert_eq!(host.join().unwrap().exit_code, 3);
+        *READER_PAUSE.lock().unwrap_or_else(|p| p.into_inner()) = None;
+    }
+
+    #[test]
+    fn both_ends_of_a_new_terminal_are_closed_on_exec() {
+        let (master, slave) = open_pty(24, 80).unwrap();
+        for fd in [&master, &slave] {
+            let flags = unsafe { libc::fcntl(fd.as_raw_fd(), libc::F_GETFD) };
+            assert!(flags >= 0 && flags & libc::FD_CLOEXEC != 0);
+        }
+    }
+
+    #[test]
+    fn the_reader_backs_off_from_fifty_milliseconds_to_a_second() {
+        let mut pause = READER_PAUSE_FIRST;
+        let mut seen = vec![pause.as_millis()];
+        for _ in 0..6 {
+            pause = next_reader_pause(pause);
+            seen.push(pause.as_millis());
+        }
+        assert_eq!(seen, [50, 100, 200, 400, 800, 1000, 1000]);
+    }
+
+    #[test]
+    fn a_process_that_closed_its_terminal_is_not_polled_twenty_times_a_second() {
+        // SB-413 review: a session's process that closes the terminal and goes on running ends
+        // the output (EIO on Linux at once); the reader looks again about once a second, not
+        // every 50 ms for the session's whole life, and the session still ends as usual.
+        let data = tempfile::tempdir().unwrap();
+        let root = data.path().canonicalize().unwrap();
+        let program = script(&root, "echo up; exec 0<&- 1>&- 2>&-; sleep 3; exit 4");
+        let id = crate::launches::new_id();
+        let host = start_host(&root, &id, &program, None);
+        let mut viewer = watch(&root, &id, 24, 80);
+        saw(&mut viewer.stream, "up");
+        assert_eq!(exit_of(&mut viewer.stream), 4);
+        assert_eq!(host.join().unwrap().exit_code, 4);
+        // Three seconds at 50 ms would be about sixty looks; backing off to a second, under ten.
+        let looks = reader_pauses(&id);
+        assert!(
+            looks <= 12,
+            "the reader looked {looks} times in three seconds"
+        );
+    }
+
+    /// A host that answers `HELLO` after `delay` and then never sends `EXIT`.
+    fn slow_host(root: &Path, id: &str, delay: Duration) -> PathBuf {
+        let socket = socket_path(root, id).unwrap();
+        let _ = std::fs::remove_file(&socket);
+        let listener = UnixListener::bind(&socket).unwrap();
+        let id = id.to_owned();
+        std::thread::spawn(move || {
+            let Some(Ok(mut stream)) = listener.incoming().next() else {
+                return;
+            };
+            let _ = read_frame(&mut stream);
+            std::thread::sleep(delay);
+            let ack = json!({"protocol": PROTOCOL, "launch_id": id, "viewers": 1});
+            let _ = write_frame(&mut stream, HELLO, ack.to_string().as_bytes());
+            // Takes the END and keeps the connection, answering nothing.
+            while read_frame(&mut stream).is_ok() {}
+        });
+        socket
+    }
+
+    #[test]
+    fn ending_waits_once_for_the_answer_and_the_exit_together() {
+        // SB-413 review 2: `sessions end` waited up to 15 s for the HELLO answer and 15 s more
+        // for the exit; one deadline covers both, as CONTRACTS and Fabric Dashboards expect.
+        let data = tempfile::tempdir().unwrap();
+        let root = data.path().canonicalize().unwrap();
+        let id = crate::launches::new_id();
+        let socket = slow_host(&root, &id, Duration::from_millis(600));
+        let started = std::time::Instant::now();
+        assert_eq!(
+            end_within(&root, &id, Duration::from_secs(1)).unwrap_err(),
+            END_UNCONFIRMED
+        );
+        let took = started.elapsed();
+        assert!(
+            took >= Duration::from_millis(900) && took < Duration::from_secs(5),
+            "the end took {took:?}, not one second in all"
+        );
+        let _ = std::fs::remove_file(&socket);
+        // A host that does not answer within the whole wait is busy, and nothing was sent.
+        let id = crate::launches::new_id();
+        let socket = slow_host(&root, &id, Duration::from_secs(5));
+        assert_eq!(
+            end_within(&root, &id, Duration::from_millis(300)).unwrap_err(),
+            HOST_BUSY
+        );
+        let _ = std::fs::remove_file(&socket);
+    }
+
+    #[test]
+    fn a_host_that_does_not_answer_its_hello_is_busy_and_one_that_closes_is_not_found() {
+        // SB-413 review: a live host slow to answer is not "no session" (`sessions end`, MCP
+        // `switchboard_session_end`, a restart wave's `host_gone`).
+        let data = tempfile::tempdir().unwrap();
+        let root = data.path().canonicalize().unwrap();
+        let id = crate::launches::new_id();
+        let socket = socket_path(&root, &id).unwrap();
+        let _ = std::fs::remove_file(&socket);
+        let listener = UnixListener::bind(&socket).unwrap();
+        let (silent_tx, silent_rx) = std::sync::mpsc::channel::<UnixStream>();
+        std::thread::spawn(move || {
+            // The first connection is held and never answered; the second is closed at once.
+            if let Some(Ok(held)) = listener.incoming().next() {
+                let _ = silent_tx.send(held);
+            }
+            if let Some(Ok(closed)) = listener.incoming().next() {
+                drop(closed);
+            }
+        });
+        assert_eq!(
+            connect_within(&root, &id, None, Duration::from_millis(300)).unwrap_err(),
+            HOST_BUSY
+        );
+        let _held = silent_rx.recv_timeout(WAIT).unwrap();
+        assert_eq!(
+            connect_within(&root, &id, None, Duration::from_millis(300)).unwrap_err(),
+            NOT_FOUND
+        );
+        let _ = std::fs::remove_file(&socket);
     }
 
     #[test]
@@ -1180,8 +1538,8 @@ mod tests {
         );
         let id = crate::launches::new_id();
         let host = start_host(&root, &id, &program, None);
-        let mut viewer = attach(&root, &id, 24, 80).unwrap();
-        until(&mut viewer.stream, "up");
+        let mut viewer = watch(&root, &id, 24, 80);
+        saw(&mut viewer.stream, "up");
         let dir = root.join(RESTART_DIR);
         std::fs::create_dir_all(&dir).unwrap();
         let next = dir.join("next.command");
@@ -1190,12 +1548,12 @@ mod tests {
         assert_eq!(restart(&root, &id, &next), Ok(Restart::Accepted));
         write_frame(&mut viewer.stream, END, b"").unwrap();
         let (seen, exit) = until(&mut viewer.stream, "");
-        assert!(exit.is_some(), "the end reached the viewer");
+        assert!(exit.is_some(), "the end reached the viewer; saw {seen:?}");
         assert!(
             !seen.contains("second"),
             "the restart did not run after the end: {seen}"
         );
-        assert_eq!(host.join().unwrap().unwrap().reason, "ended");
+        assert_eq!(host.join().unwrap().reason, "ended");
         // A script that is not executable is never started.
         let id = crate::launches::new_id();
         let program = script(&root, "echo up; read line");
@@ -1205,19 +1563,15 @@ mod tests {
         std::fs::set_permissions(&plain, std::fs::Permissions::from_mode(0o600)).unwrap();
         assert_eq!(restart(&root, &id, &plain), Ok(Restart::Refused));
         end(&root, &id).unwrap();
-        host.join().unwrap().unwrap();
+        host.join().unwrap();
     }
 
-    fn start_host(
-        root: &Path,
-        id: &str,
-        program: &Path,
-        idle: Option<Duration>,
-    ) -> std::thread::JoinHandle<Result<Ended, String>> {
+    fn start_host(root: &Path, id: &str, program: &Path, idle: Option<Duration>) -> Host {
         let (tx, rx) = std::sync::mpsc::channel();
+        let (done_tx, done) = std::sync::mpsc::channel();
         let (root, id, program) = (root.to_owned(), id.to_owned(), program.to_owned());
-        let host = std::thread::spawn(move || {
-            serve(
+        std::thread::spawn(move || {
+            let ended = serve(
                 Start {
                     root: &root,
                     launch_id: &id,
@@ -1227,10 +1581,32 @@ mod tests {
                     idle,
                 },
                 move || tx.send(()).unwrap(),
-            )
+            );
+            let _ = done_tx.send(ended);
         });
-        rx.recv_timeout(Duration::from_secs(10)).unwrap();
-        host
+        rx.recv_timeout(Duration::from_secs(10))
+            .expect("the host listens within 10 s");
+        Host { done }
+    }
+
+    /// A host running on a thread of the test; `join` waits for its end at most `WAIT`, so a
+    /// session that never ends fails its test instead of hanging the job (SB-413).
+    struct Host {
+        done: std::sync::mpsc::Receiver<Result<Ended, String>>,
+    }
+
+    impl Host {
+        fn join(self) -> Result<Ended, String> {
+            match self.done.recv_timeout(WAIT) {
+                Ok(ended) => ended,
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                    panic!("the host did not end within {WAIT:?}")
+                }
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                    panic!("the host's thread panicked")
+                }
+            }
+        }
     }
 
     #[test]
@@ -1246,9 +1622,9 @@ mod tests {
         );
         let id = crate::launches::new_id();
         let host = start_host(&root, &id, &program, None);
-        let mut first = attach(&root, &id, 24, 80).unwrap();
-        until(&mut first.stream, "FULLSCREEN");
-        let mut second = attach(&root, &id, 24, 80).unwrap();
+        let mut first = watch(&root, &id, 24, 80);
+        saw(&mut first.stream, "FULLSCREEN");
+        let mut second = watch(&root, &id, 24, 80);
         let Ok((OUTPUT, screen)) = read_frame(&mut second.stream) else {
             panic!("no screen");
         };
@@ -1266,7 +1642,7 @@ mod tests {
             }
         }
         write_frame(&mut first.stream, INPUT, b"x\n").unwrap();
-        assert_eq!(host.join().unwrap().unwrap().reason, "exited");
+        assert_eq!(host.join().unwrap().reason, "exited");
     }
 
     #[test]
@@ -1277,7 +1653,7 @@ mod tests {
         let id = crate::launches::new_id();
         let started = std::time::Instant::now();
         let host = start_host(&root, &id, &program, Some(Duration::from_millis(300)));
-        let ended = host.join().unwrap().unwrap();
+        let ended = host.join().unwrap();
         assert_eq!(ended.reason, "idle");
         assert!(started.elapsed() < Duration::from_secs(20));
         assert!(attachable(&root, &id).is_none());
@@ -1291,15 +1667,15 @@ mod tests {
         let program = script(&root, "echo up; sleep 60");
         let id = crate::launches::new_id();
         let host = start_host(&root, &id, &program, None);
-        let mut viewer = attach(&root, &id, 24, 80).unwrap();
-        until(&mut viewer.stream, "up");
+        let mut viewer = watch(&root, &id, 24, 80);
+        saw(&mut viewer.stream, "up");
         let ended = end(&root, &id).unwrap();
         assert_eq!(ended["reason"], "ended");
         assert_eq!(
-            until(&mut viewer.stream, "").1,
-            Some(ended["exit_code"].as_i64().unwrap() as i32)
+            exit_of(&mut viewer.stream),
+            ended["exit_code"].as_i64().unwrap() as i32
         );
-        assert_eq!(host.join().unwrap().unwrap().reason, "ended");
+        assert_eq!(host.join().unwrap().reason, "ended");
         assert_eq!(end(&root, &id).unwrap_err(), NOT_FOUND);
     }
 
@@ -1313,8 +1689,8 @@ mod tests {
         );
         let id = crate::launches::new_id();
         let host = start_host(&root, &id, &program, None);
-        let mut viewer = attach(&root, &id, 24, 80).unwrap();
-        until(&mut viewer.stream, "line60");
+        let mut viewer = watch(&root, &id, 24, 80);
+        saw(&mut viewer.stream, "line60");
         write_frame(&mut viewer.stream, HISTORY, b"").unwrap();
         loop {
             match read_frame(&mut viewer.stream).unwrap() {
@@ -1326,7 +1702,7 @@ mod tests {
             }
         }
         write_frame(&mut viewer.stream, INPUT, b"x\n").unwrap();
-        host.join().unwrap().unwrap();
+        host.join().unwrap();
     }
 
     #[test]
