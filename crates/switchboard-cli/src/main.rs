@@ -991,13 +991,22 @@ enum Org {
     },
     /// Say where one account belongs: an organization's id, `personal`, or `auto` to let the
     /// rules decide again. Name several for an account that works for more than one: the first
-    /// is its own, the rest it also works for.
+    /// is its own, the rest it also works for. `--also` adds organizations and keeps the ones it
+    /// has. Groups that hold the account keep it whatever its organizations; the answer names
+    /// them under `outside`.
     Assign {
         /// The account id (`switchboard accounts list`).
         account: String,
         /// An organization's id or name, `personal`, or `auto`; several are allowed.
-        #[arg(required = true, num_args = 1..)]
+        #[arg(num_args = 0.., required_unless_present = "also")]
         organization: Vec<String>,
+        /// An organization it also works for, added to the ones it has; repeat for several.
+        #[arg(long = "also", conflicts_with = "organization")]
+        also: Vec<String>,
+        /// Also place the other seats of its Claude Team or ChatGPT workspace there; without it
+        /// only this account is placed.
+        #[arg(long)]
+        team: bool,
     },
 }
 
@@ -2690,16 +2699,29 @@ async fn run(cli: &Cli) -> Result<Value, String> {
             Org::Assign {
                 account,
                 organization,
+                also,
+                team,
             } => match organization.as_slice() {
+                [] => Operation::OrganizationAssign {
+                    account: account.clone(),
+                    choice: None,
+                    organizations: None,
+                    also: also.clone(),
+                    team: *team,
+                },
                 [one] => Operation::OrganizationAssign {
                     account: account.clone(),
                     choice: (one != "auto").then(|| one.clone()),
                     organizations: None,
+                    also: Vec::new(),
+                    team: *team,
                 },
                 several => Operation::OrganizationAssign {
                     account: account.clone(),
                     choice: None,
                     organizations: Some(several.to_vec()),
+                    also: Vec::new(),
+                    team: *team,
                 },
             },
         },

@@ -1863,10 +1863,11 @@ fn a_project_has_no_folder_limit_and_all_projects_hold_1024() {
     assert_eq!(project.sources, vec!["github.com/example".to_string()]);
 }
 
-/// SB-109: a seat that left its group's organization is never a rotation candidate, not even as
-/// SB-98's guess on last known usage (the switch would be refused and spend an attempt).
+/// SB-109, DEC-0022 (SB-403): a seat that left its group's organization still serves the group:
+/// automatic switching prefers the group's own organizations, and takes the outside seat when it
+/// is the only one with room.
 #[test]
-fn a_seat_outside_its_groups_organization_is_never_guessed() {
+fn a_seat_outside_its_groups_organization_comes_after_the_groups_own() {
     use std::collections::HashSet;
     let (root, _vault, store) = setup();
     let now = clock();
@@ -1901,6 +1902,12 @@ fn a_seat_outside_its_groups_organization_is_never_guessed() {
         .rotation_decision_with(&p, Some(&a), now, &limited)
         .unwrap();
     assert_eq!(decision.candidate_id.as_deref(), Some(b.as_str()));
+    // With the group's own seat full too, the outside one is taken rather than none.
+    let limited: HashSet<String> = [a.clone(), b.clone()].into();
+    let decision = store
+        .rotation_decision_with(&p, Some(&a), now, &limited)
+        .unwrap();
+    assert_eq!(decision.candidate_id.as_deref(), Some(c.as_str()));
 }
 
 /// SB-310 (operator, 2026-11-08): automatic switching of managed sessions is on by default for

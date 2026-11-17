@@ -177,7 +177,7 @@ pub(crate) fn tools() -> Vec<(bool, Value)> {
         (true, json!({"name":"switchboard_account_hand_over","title":"Hand an account over","description":"Only when the operator asks. Hand an account over to another machine or a colleague's Switchboard: answers a signed record without its credential and marks the account here as used elsewhere, with to as where it works. The receiver passes the record to switchboard_account_receive and signs in there. Hand a personal subscription only to the operator's own machines unless the operator says otherwise.","inputSchema":{"type":"object","properties":{"account_id":account,"to":{"type":"string","minLength":1,"maxLength":80,"description":"Who receives it: a machine and its user, or a colleague."},"decision":{"type":"object","properties":{"by":{"type":"string","enum":["operator"]},"instruction":{"type":"string","minLength":1,"maxLength":500},"at":{"type":"string"},"source":{"type":"string","minLength":1,"maxLength":200}},"required":["by","instruction","at","source"],"additionalProperties":false,"description":"The operator's words that ordered it, recorded with the seat in seats.jsonl."}},"required":["account_id","to"],"additionalProperties":false}})),
         (true, json!({"name":"switchboard_account_receive","title":"Receive a handed-over account","description":"Receive an account handed over: answers whose sign-in, into which group (the record's pool when this machine has it, else default), whether the signature holds and whether this machine already holds that sign-in. apply starts the sign-in (the person signs in; headless gives the URL in switchboard_login status and takes the code), only with signer and never for a sign-in this machine already holds; nothing travels but the record.","inputSchema":{"type":"object","properties":{"record":{"type":"object"},"signer":{"type":"string","description":"The giver's published key: the record must be signed by it. Required with apply."},"apply":{"type":"boolean"},"headless":{"type":"boolean"}},"required":["record"],"additionalProperties":false}})),
         (false, json!({"name":"switchboard_organizations","title":"Organizations","description":"The organizations accounts belong to: each with its e-mail domains and account count, then every account with its organization (null: personal), what decided it: person (the operator's word) or provider (its Claude Team or ChatGPT workspace is the organization's), and suggested with suggested_name: the organization its address's domain suggests (null when none or already settled). A domain only suggests; the operator confirms with switchboard_organization_set assign. Empty until the operator adds one. Reads only.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}})),
-        (true, json!({"name":"switchboard_organization_set","title":"Change organizations","description":"Only when the operator asks. action add (name, domains), edit (id, name and/or domains, which replaces the list), remove (id; its accounts are attributed again by the other rules) or assign (account_id, organization: an organization's id, personal, or auto to let the rules decide; or organizations: every context of an account that works for several, the first its own, the rest it also works for, empty to let the rules decide; personal can only be first). The answer's refused_by names the groups that no longer use the account after the word. Assigning one Claude Team or ChatGPT workspace seat brings that team's other seats along. passioncode_read reads the person's PassionCode.ai organizations again now, when PassionCode.ai is connected (connecting is the person's: switchboard org connect); passioncode_cancel stops a connection waiting for the browser; passioncode_disconnect deletes the PassionCode.ai token and keeps the organizations as local ones.","inputSchema":{"type":"object","properties":{"action":{"type":"string","enum":["add","edit","remove","assign","passioncode_read","passioncode_cancel","passioncode_disconnect"]},"id":{"type":"string","description":"An organization's id from switchboard_organizations."},"name":{"type":"string","minLength":1,"maxLength":80},"domains":{"type":"array","maxItems":16,"items":{"type":"string","minLength":3}},"account_id":account,"organization":{"type":"string","description":"An organization's id, personal, or auto."},"organizations":{"type":"array","maxItems":16,"items":{"type":"string","maxLength":200},"description":"Every context of the account in order: organization ids or names, or personal."}},"required":["action"],"additionalProperties":false}})),
+        (true, json!({"name":"switchboard_organization_set","title":"Change organizations","description":"Only when the operator asks. action add (name, domains), edit (id, name and/or domains, which replaces the list), remove (id; its accounts are attributed again by the other rules) or assign (account_id, organization: an organization's id, personal, or auto to let the rules decide; or organizations: every context of an account that works for several, the first its own, the rest it also works for, empty to let the rules decide; personal can only be first; or also: organizations added to the ones it has). An organization is a label: groups that hold the account keep it, and the answer's outside and warnings name the groups whose organizations it does not hold. Only this account is placed; team: true also places the other seats of its Claude Team or ChatGPT workspace, and the answer's team says claimed or not_claimed with teammates. passioncode_read reads the person's PassionCode.ai organizations again now, when PassionCode.ai is connected (connecting is the person's: switchboard org connect); passioncode_cancel stops a connection waiting for the browser; passioncode_disconnect deletes the PassionCode.ai token and keeps the organizations as local ones.","inputSchema":{"type":"object","properties":{"action":{"type":"string","enum":["add","edit","remove","assign","passioncode_read","passioncode_cancel","passioncode_disconnect"]},"id":{"type":"string","description":"An organization's id from switchboard_organizations."},"name":{"type":"string","minLength":1,"maxLength":80},"domains":{"type":"array","maxItems":16,"items":{"type":"string","minLength":3}},"account_id":account,"organization":{"type":"string","description":"An organization's id, personal, or auto."},"organizations":{"type":"array","maxItems":16,"items":{"type":"string","maxLength":200},"description":"Every context of the account in order: organization ids or names, or personal."},"also":{"type":"array","maxItems":16,"items":{"type":"string","maxLength":200},"description":"Organizations (ids or names) the account also works for, added to the ones it has; used without organization and organizations."},"team":{"type":"boolean","description":"Also place the other seats of its Claude Team or ChatGPT workspace; default false: only this account."}},"required":["action"],"additionalProperties":false}})),
         (false, json!({"name":"switchboard_rotation","title":"Automatic switching","description":"The automatic switching settings per provider, group (pool) and target (enabled, threshold, headroom as hysteresis, cooldown, freshness) and what the background monitor decided last.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}})),
         (true, json!({"name":"switchboard_rotation_set","title":"Set automatic switching","description":"Change automatic switching for one provider, group (pool) and target: switch it on or off, or change its threshold, headroom (hysteresis), cooldown or freshness. What is left out keeps its saved value. Only when the operator asks.","inputSchema":{"type":"object","properties":{"provider":{"type":"string","enum":["claude","codex"]},"pool":{"type":"string","default":"default"},"target":{"type":"string","enum":["managed","claude_cli"],"default":"managed"},"enabled":{"type":"boolean"},"threshold_percent":{"type":"number","minimum":1,"maximum":100},"hysteresis_percent":{"type":"number","minimum":0,"maximum":99},"cooldown_seconds":{"type":"integer","minimum":0},"max_age_seconds":{"type":"integer","minimum":30}},"required":["provider"],"additionalProperties":false}})),
         (false, json!({"name":"switchboard_backups","title":"Backups","description":"Encrypted backups of accounts, groups, rules and settings: the folder, whether they run, the newest backups and the last error. Never their contents.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}})),
@@ -989,6 +989,27 @@ impl Server {
                     .collect()
             })
         };
+        let strings = |args: &Map<String, Value>, key: &str| -> Result<Vec<String>, String> {
+            match args.get(key) {
+                None => Ok(Vec::new()),
+                Some(Value::Array(items)) => items
+                    .iter()
+                    .map(|v| {
+                        v.as_str()
+                            .map(str::to_owned)
+                            .ok_or(format!("{key} must list strings."))
+                    })
+                    .collect(),
+                Some(_) => Err(format!("{key} must be a list.")),
+            }
+        };
+        let team = |args: &Map<String, Value>| -> Result<bool, String> {
+            match args.get("team") {
+                None => Ok(false),
+                Some(Value::Bool(b)) => Ok(*b),
+                Some(_) => Err("team must be true or false.".into()),
+            }
+        };
         let operation = match required(args, "action")? {
             "add" => Operation::OrganizationAdd {
                 name: required(args, "name")?.into(),
@@ -1003,9 +1024,23 @@ impl Server {
                 id: required(args, "id")?.into(),
             },
             "assign" => match args.get("organizations") {
+                _ if args.get("also").is_some()
+                    && args.get("organizations").is_none()
+                    && args.get("organization").is_none() =>
+                {
+                    Operation::OrganizationAssign {
+                        account: required(args, "account_id")?.into(),
+                        choice: None,
+                        organizations: None,
+                        also: strings(args, "also")?,
+                        team: team(args)?,
+                    }
+                }
                 Some(Value::Array(items)) => Operation::OrganizationAssign {
                     account: required(args, "account_id")?.into(),
                     choice: None,
+                    also: Vec::new(),
+                    team: team(args)?,
                     organizations: Some(
                         items
                             .iter()
@@ -1024,6 +1059,8 @@ impl Server {
                         .filter(|c| *c != "auto")
                         .map(str::to_owned),
                     organizations: None,
+                    also: Vec::new(),
+                    team: team(args)?,
                 },
             },
             // SB-159: read the PassionCode.ai organizations again now (connecting is the person's).

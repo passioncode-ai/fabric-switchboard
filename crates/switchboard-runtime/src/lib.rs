@@ -722,6 +722,15 @@ pub enum Operation {
         /// lets the rules decide. Wins over `choice`.
         #[serde(default)]
         organizations: Option<Vec<String>>,
+        /// DEC-0022 (SB-403): organizations (ids or names) added to the ones the account works
+        /// for, after them; its first context and the rest stay. Used without `choice` and
+        /// `organizations`.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        also: Vec<String>,
+        /// DEC-0022 (SB-403): also place the account's provider team (its Claude Team or
+        /// ChatGPT workspace): its other seats follow the first context. Off: this account only.
+        #[serde(default)]
+        team: bool,
     },
     /// SB-159: the PassionCode.ai connection (no token in the answer).
     VestaStatus,
@@ -3842,7 +3851,9 @@ fn remote_program(
 }
 
 /// SB-323: an organization word that left an account out of a group it serves.
-pub const GROUPS_REFUSE_NOW: &str = "These groups no longer use this account: each takes only accounts of its own organizations. Name personal first to keep it in a personal group, or bind the group to the organization.";
+/// SB-323, DEC-0022 (SB-403): the note beside `outside` after a word on an account's
+/// organizations. Information only: the groups keep using it.
+pub const GROUPS_OUTSIDE_NOW: &str = "These groups serve organizations this account does not work for. They keep using it; assign it their organization too if it works for it.";
 
 /// How long a folder added by Switchboard stays in `ProjectSuggestions`' `added`, for the app's
 /// one notification (SB-121).
@@ -4225,8 +4236,10 @@ pub fn organizations_view(snapshot: &switchboard_core::Snapshot) -> Value {
                 .and_then(|id| snapshot.organization(id))
                 .map(|o| o.name.clone());
             let suggested = snapshot.domain_suggestion(a);
+            // SB-403: the organizations it also works for, beyond its first context.
             json!({"id": a.id, "label": a.label, "provider": a.provider, "pool": a.pool,
                 "organization": at.organization, "organization_name": name, "by": at.by,
+                "also": at.also,
                 "suggested": suggested.map(|o| &o.id), "suggested_name": suggested.map(|o| &o.name)})
         })
         .collect();
@@ -4234,9 +4247,11 @@ pub fn organizations_view(snapshot: &switchboard_core::Snapshot) -> Value {
         .organizations
         .iter()
         .map(|o| {
-            let count = accounts
+            // SB-403: an account counts for every organization it works for, first or also.
+            let count = snapshot
+                .accounts
                 .iter()
-                .filter(|a| a["organization"].as_str() == Some(o.id.as_str()))
+                .filter(|a| snapshot.attribution(a).holds(Some(&o.id)))
                 .count();
             json!({"id": o.id, "name": o.name, "domains": o.domains,
                 "provider_organizations": o.provider_organizations.len(), "accounts": count,
@@ -4248,7 +4263,8 @@ pub fn organizations_view(snapshot: &switchboard_core::Snapshot) -> Value {
 }
 /// SB-381 (Vesta's request `a7325ed3` G2): each organization's AI seats as data Observatory
 /// sends on: provider, class (`subscription` or `api_key`), who placed the seat with the
-/// organization (`person`, or `provider` for its team there), whether it lives here or on another
+/// organization (`person`, or `provider` for its team there), `context` (`first` when it is the
+/// account's own organization, `also` when it works for it beside another, SB-403), whether it lives here or on another
 /// machine, and an opaque `seat` id (a digest of the organization and the account, the same on
 /// every read, never the account's id). No personal account, label, e-mail, token or machine name.
 fn organization_seats(snapshot: &switchboard_core::Snapshot) -> Value {
@@ -4262,9 +4278,16 @@ fn organization_seats(snapshot: &switchboard_core::Snapshot) -> Value {
                 .iter()
                 .filter_map(|a| {
                     let at = snapshot.attribution(a);
-                    if at.organization.as_deref() != Some(o.id.as_str()) {
+                    // SB-403: a seat is any account that works for the organization, as its
+                    // first context or one it also works for.
+                    if !at.holds(Some(&o.id)) {
                         return None;
                     }
+                    let context = if at.organization.as_deref() == Some(o.id.as_str()) {
+                        "first"
+                    } else {
+                        "also"
+                    };
                     let digest = Sha256::digest(format!("{}:{}", o.id, a.id).as_bytes());
                     let seat: String = digest.iter().take(8).map(|b| format!("{b:02x}")).collect();
                     let class = match a.kind {
@@ -4275,7 +4298,7 @@ fn organization_seats(snapshot: &switchboard_core::Snapshot) -> Value {
                         || a.pool
                             .starts_with(switchboard_core::machines::MACHINE_POOL_PREFIX);
                     Some(json!({"seat": seat, "provider": a.provider, "class": class,
-                        "placed_by": at.by, "enabled": a.enabled,
+                        "placed_by": at.by, "enabled": a.enabled, "context": context,
                         "where": if elsewhere { "elsewhere" } else { "here" }}))
                 })
                 .collect();
@@ -7670,8 +7693,38 @@ async fn execute(
             account,
             choice,
             organizations,
+            also,
+            team,
         } => {
-            let attribution = match organizations {
+            // DEC-0022 (SB-403): `also` keeps the account's contexts and adds to them.
+            let organizations = if also.is_empty() || organizations.is_some() || choice.is_some() {
+                organizations
+            } else {
+                let snapshot = store.snapshot()?;
+                let held = snapshot
+                    .accounts
+                    .iter()
+                    .find(|a| a.id == account)
+                    .ok_or("Account not found")?;
+                let at = snapshot.attribution(held);
+                let first = match (at.by, at.organization.as_deref()) {
+                    (Some(switchboard_core::By::Person), Some(id)) => id.to_owned(),
+                    (Some(switchboard_core::By::Person), None) => {
+                        switchboard_core::organizations::PERSONAL.to_owned()
+                    }
+                    _ => switchboard_core::organizations::AUTO.to_owned(),
+                };
+                let mut list = vec![first];
+                list.extend(at.also.iter().cloned());
+                for named in &also {
+                    let id = organization_id(&snapshot, named.trim())?;
+                    if !at.holds(Some(&id)) && !list.contains(&id) {
+                        list.push(id);
+                    }
+                }
+                Some(list)
+            };
+            let assigned = match organizations {
                 Some(list) => {
                     let snapshot = store.snapshot()?;
                     let mut ids = Vec::new();
@@ -7687,7 +7740,7 @@ async fn execute(
                             ids.push(organization_id(&snapshot, named)?);
                         }
                     }
-                    store.assign_organizations(&account, &ids)?
+                    store.assign_organizations_team(&account, &ids, team)?
                 }
                 // One choice takes an id or a name too, as `org assign` says (SB-285: confirming
                 // a suggestion names the organization `org list` showed).
@@ -7709,28 +7762,33 @@ async fn execute(
                         Some(named) => Some(organization_id(&store.snapshot()?, named)?),
                         None => None,
                     };
-                    store.assign_organization(&account, choice.as_deref())?
+                    store.assign_organization_team(&account, choice.as_deref(), team)?
                 }
             };
-            // SB-323: the groups this word left the account out of, so the person learns that
-            // their sessions no longer use it.
+            // SB-323, DEC-0022 (SB-403): the groups the account serves outside its organizations
+            // now, as information: they keep using it.
             let snapshot = store.snapshot()?;
-            let refused_by: Vec<Value> = snapshot
-                .accounts
-                .iter()
-                .find(|a| a.id == account)
+            let held = snapshot.accounts.iter().find(|a| a.id == account);
+            let outside: Vec<Value> = held
                 .map(|a| {
                     snapshot
-                        .groups_refusing(a)
+                        .groups_outside(a)
                         .iter()
                         .map(|p| json!({"pool": p.pool, "name": p.name}))
                         .collect()
                 })
                 .unwrap_or_default();
-            let note = (!refused_by.is_empty()).then_some(GROUPS_REFUSE_NOW);
-            Ok(
-                json!({"account": account, "organization": attribution.organization, "by": attribution.by, "also": attribution.also, "refused_by": refused_by, "note": note}),
-            )
+            let warnings = held.map_or_else(Vec::new, |a| snapshot.outside_warnings(a));
+            let note = (!outside.is_empty()).then_some(GROUPS_OUTSIDE_NOW);
+            let attribution = &assigned.attribution;
+            let mut answer = json!({"account": account, "organization": attribution.organization,
+                "by": attribution.by, "also": attribution.also, "outside": outside,
+                "warnings": warnings, "note": note});
+            if let Some(team) = assigned.team {
+                answer["team"] = json!(team);
+                answer["teammates"] = json!(assigned.teammates);
+            }
+            Ok(answer)
         }
         Operation::MoveAccount { id, pool } => {
             let snapshot = store.snapshot()?;
@@ -9056,6 +9114,50 @@ mod owner_tests {
         }
     }
 
+    #[test]
+    fn an_account_that_also_works_for_an_organization_counts_as_its_seat() {
+        // SB-403: investor.relations@ on the operator's Mac works for Appvillis beside its
+        // personal context (`organizations: [personal, Appvillis]`). Organizations counted only
+        // first contexts, so Appvillis read as having no account.
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::open(root.path().to_owned(), Arc::new(MemoryVault::default())).unwrap();
+        let both = save(&store, "synthetic-both", "default");
+        let own = save(&store, "synthetic-own", "default");
+        let acme = store.add_organization("Acme", &[]).unwrap();
+        store
+            .assign_organizations(
+                &both.id,
+                &[
+                    switchboard_core::organizations::PERSONAL.to_owned(),
+                    acme.id.clone(),
+                ],
+            )
+            .unwrap();
+        store.assign_organization(&own.id, Some(&acme.id)).unwrap();
+        let view = organizations_view(&store.snapshot().unwrap());
+        assert_eq!(view["organizations"][0]["accounts"], 2);
+        let row = view["accounts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["id"] == both.id.as_str())
+            .unwrap()
+            .clone();
+        assert_eq!(row["organization"], Value::Null);
+        assert_eq!(row["also"], json!([acme.id]));
+        let seats = view["seats"]["organizations"][0]["seats"]
+            .as_array()
+            .unwrap()
+            .clone();
+        assert_eq!(seats.len(), 2);
+        let mut contexts: Vec<&str> = seats
+            .iter()
+            .map(|s| s["context"].as_str().unwrap())
+            .collect();
+        contexts.sort_unstable();
+        assert_eq!(contexts, ["also", "first"]);
+    }
+
     #[tokio::test]
     async fn a_new_seat_of_an_organization_outside_its_only_group_is_offered_it() {
         // SB-160 (B-4, SCN-077): a seat of an organization that has one group (SB-285: or one
@@ -10236,10 +10338,6 @@ mod owner_tests {
         // A change (the group turns personal) is written: the map loses its row, the home stays.
         std::fs::write(&map_file, &written).unwrap();
         let pool = found.pool.clone();
-        runtime
-            .store
-            .set_project_organization(&pool, None)
-            .unwrap_err();
         runtime
             .store
             .assign_organization(

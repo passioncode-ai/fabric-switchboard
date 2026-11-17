@@ -1546,38 +1546,20 @@ pub(crate) fn project_allows(
     account: &switchboard_core::Account,
     folder: &Path,
 ) -> Result<(), String> {
-    // SB-109: a group runs only on accounts of its own organizations (or personal ones).
-    // SB-282: an account several groups share starts in the folders of any of them that takes
-    // its context.
+    // DEC-0022 (SB-403): an account runs in the folders of any group that holds it, whatever
+    // its organizations; the session's context (`context_of`) keeps personal and organization
+    // data apart.
     let groups: Vec<&switchboard_core::Project> = snapshot
         .pools_of(account)
         .into_iter()
         .filter_map(|p| snapshot.project_of_pool(p))
         .collect();
-    if groups.is_empty() {
-        if !snapshot.context_admits(&account.pool, account) {
-            return Err(switchboard_core::organizations::SEAT_OUTSIDE.into());
-        }
-    } else {
-        let serving: Vec<&&switchboard_core::Project> = groups
+    if !groups.is_empty()
+        && !groups
             .iter()
-            .filter(|g| g.folders.iter().any(|f| folder.starts_with(Path::new(f))))
-            .collect();
-        if !groups
-            .iter()
-            .any(|g| snapshot.context_admits(&g.pool, account))
-        {
-            return Err(switchboard_core::organizations::SEAT_OUTSIDE.into());
-        }
-        if serving.is_empty() {
-            return Err(PROJECT_ACCOUNT_OUTSIDE.into());
-        }
-        if !serving
-            .iter()
-            .any(|g| snapshot.context_admits(&g.pool, account))
-        {
-            return Err(switchboard_core::organizations::SEAT_OUTSIDE.into());
-        }
+            .any(|g| g.folders.iter().any(|f| folder.starts_with(Path::new(f))))
+    {
+        return Err(PROJECT_ACCOUNT_OUTSIDE.into());
     }
     // SB-146: a folder in several groups may run on any of them; another account is refused
     // only while one of its groups has its own account for the provider.
@@ -3450,7 +3432,7 @@ mod tests {
         assert!(project_allows(&snapshot, &a(1), Path::new("/elsewhere")).is_ok());
         // `/work/webapp` is not inside `/work/web`.
         assert!(project_allows(&snapshot, &a(1), Path::new("/work/webapp")).is_ok());
-        // SB-109: once an organization exists, the personal group refuses its seat of Acme's.
+        // SB-109: an organization exists and the personal group holds a seat of Acme's.
         let mut with_org = snapshot.clone();
         with_org.organizations.push(switchboard_core::Organization {
             id: "00000000-0000-4000-8000-000000000001".into(),
@@ -3463,10 +3445,8 @@ mod tests {
         with_org
             .memberships
             .insert("own".into(), "00000000-0000-4000-8000-000000000001".into());
-        assert_eq!(
-            project_allows(&with_org, &with_org.accounts[0], Path::new("/work/web")).unwrap_err(),
-            switchboard_core::organizations::SEAT_OUTSIDE
-        );
+        // DEC-0022 (SB-403): an account of another organization runs there all the same.
+        assert!(project_allows(&with_org, &with_org.accounts[0], Path::new("/work/web")).is_ok());
         with_org.projects[0].organizations = vec!["00000000-0000-4000-8000-000000000001".into()];
         assert!(project_allows(&with_org, &with_org.accounts[0], Path::new("/work/web")).is_ok());
     }

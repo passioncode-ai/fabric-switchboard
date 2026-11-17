@@ -879,12 +879,9 @@ impl SaveRequest<'_> {
                 .project_of_pool(self.pool)
                 .map(|p| p.organizations.clone())
             {
+                // DEC-0022 (SB-403): a sign-in into a group of another organization is kept and
+                // serves it; the person sees the warning (`Snapshot::outside_warnings`).
                 candidate.confirm_placement(&account.id, self.pool, &organizations);
-                // SB-314: a group of another organization refuses it here, as a move into it
-                // does, instead of keeping a sign-in every request of that group would refuse.
-                if !candidate.placement_admits(&organizations, &account) {
-                    return Err(candidate.seat_chosen(&account));
-                }
             }
         }
         validate_snapshot(&candidate)?;
@@ -2331,9 +2328,7 @@ impl Store {
             .iter()
             .find(|a| a.id == id && a.provider == provider && state.serves(a, pool) && a.enabled)
             .ok_or("Account is unavailable in this provider and pool")?;
-        if !state.context_admits(pool, a) {
-            return Err(organizations::SEAT_OUTSIDE.into());
-        }
+        // DEC-0022 (SB-403): an account in the group serves it whatever its organizations.
         self.checked_credential(a)?;
         let mut candidate = state.clone();
         candidate
@@ -2393,9 +2388,8 @@ impl Store {
             .iter()
             .find(|a| a.id == *id && a.provider == provider && state.serves(a, pool))
             .ok_or("Selected account unavailable")?;
-        if !state.context_admits(pool, a) {
-            return Err(organizations::SEAT_OUTSIDE.into());
-        }
+        // DEC-0022 (SB-403): the proxy serves the group's account whatever its organizations;
+        // the session's context (`context_of`) still keeps personal and organization data apart.
         Ok((a.clone(), self.checked_credential(a)?))
     }
     pub fn credential(&self, id: &str) -> Result<Credential, String> {

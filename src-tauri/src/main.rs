@@ -860,6 +860,8 @@ async fn organization_assign(
     account: String,
     choice: Option<String>,
     organizations: Option<Vec<String>>,
+    also: Option<Vec<String>>,
+    team: Option<bool>,
     state: State<'_, Slot>,
 ) -> Result<Value, String> {
     state
@@ -869,6 +871,8 @@ async fn organization_assign(
             account,
             choice,
             organizations,
+            also: also.unwrap_or_default(),
+            team: team.unwrap_or(false),
         })
         .await
 }
