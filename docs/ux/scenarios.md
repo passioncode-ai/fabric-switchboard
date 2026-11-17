@@ -49,7 +49,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 | SCN-039 | Choose which agents take over a task, and in what order | draft |
 | SCN-040 | Work moves on by itself when an agent's accounts run out | draft |
 | SCN-041 | Use Switchboard in Russian | draft |
-| SCN-042 | Delete a project or remove a rule only after confirming | draft |
+| SCN-042 | Delete or turn off a group, or remove a rule, only after confirming | draft |
 | SCN-043 | Recover when a read or a refresh after an action fails | draft |
 | SCN-044 | Turn usage analytics off or on | draft |
 | SCN-045 | Save one OpenRouter key for agents | draft |
