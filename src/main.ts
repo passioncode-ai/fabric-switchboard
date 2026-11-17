@@ -12,7 +12,7 @@ import { demo, demoFirstRun, native, nativeAdapter, onProjectSuggestions, onShel
 import type { CardState, AccountGroup } from './ui-logic';
 import { statAlert, ceilingQuestion, ceilingWarning, ceilingLine, keyLimitLine, dollars, POOL_PATTERN, poolChoices, poolName, inGroup, tourPlacement, usableWhileBusy, APPEARANCE_KEY, attribution, placementAdmits, domainSuggestion, groupSeatsElsewhere, passioncodeLine, seatEndedText, groupSeatsEndedText, organizationReleasedAt, inOrganizationFilter, domainList, type AttributedBy, sortStatRows, nextStatSort, type StatRow, type StatSort, statCacheShare, statTokensPerRequest, chartSeries, niceMax, groupProjectRows, type ChartMetric, groupProjects, compactCount, statTokens, statTrouble, statTroubleText, statAgentName, type Statistics, EXPIRY_CHOICES, folderName, folderRows, withoutFolder, type ProjectRoot, moveTargets, mapRows, rootTargets, storedMapFolders, MAP_FOLDERS_KEY, type MapFilter, type MapRow, type RepositoryMap, sortAgents, defaultAgentChoices, backgroundReads, clockedRead, chainScopeKey, afterRead, ceilingRemovalNote, modelMeta, modelUse, ordinaryKimiNote, kimiLimitUntil, limitReasonText, limitTitle, agentSetupFacts, sessionHow, sessionAgentName, sessionStateLabel, kimiWindowsLine, kimiWindowsLines, openrouterCreditLine, eventAction, eventDetail, MutationClock, activeRules, autoSwitchPool, autoSwitchPossible, launchChoice, withFolders, githubDefaultSelection, githubPlan, githubSource, replaceFolder, storedFolder, LAST_FOLDER_KEY, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, signInNotice, signInMove, organizationMoveNote, dismissTermsNotice, termsNoticeDismissed, termsNoticeOn, termsNoticeText, tourWaits, orgSetups, releasedOrganizations, releasedSummary, orgSetupAction, orgSetupShown, orgSetupCaveat, orgSetupLeads, orgSetupPrimary, accountsOrgActionLeads, firstPrimary, orgSetupUnread, orgSetupStateLabel, orgSetupTitle, hiddenOrgSetups, ORG_SETUP_HIDDEN_KEY, accountsEmptyKey, type OrgSetup, usageAnswerText, usageNotice, usageFreshness, windowReset, type Appearance, shellHookView, balancingView, balancingNotice, shellHookToggleNotice, shellHookNoticeText, codexHookLine, moveStep, accountsForStep, chainSummary, stepReasonText, handoverOutcomeText, handoverSkipped, shortWorkflow, TAKEOVER_ORDER, seatChoices, assignNotice, placementNotice, providerOrganization, groupOrganizations, servesPool, sharedGroups, holdsContext, accountOrganizations, machineOf, remoteUsageLine, unplacedAccounts, foldlessGroups, repositoriesUnder, contextLines, machineAliasesLine, machineLiveLine, machineCopyLine, foldOpen, accountSections, accountMatches, attentionAccounts, attentionReasonText, duplicateOffer, attentionActionLabel, dutyReasonText, dutyOutcomeText, surfaceLabel, sessionTreeRows, SESSION_GROUPS, sessionGroupTitle, sessionWhyText, machineReadText, givenFacts, switchingLine, MACHINE_FOLD_LIMIT, EVENT_FILTER_KINDS, eventKindLabel, filterEvents, eventsByDay, relativeDay, EVENTS_PAGE, eventPage, sortSessions, statRowsShown, STAT_TOP, spendShare, groupKeyBlocks, keyTail, groupStateLine, type EventKind, type EventFilter, restartSkipText, sessionTone, sessionDegradedText, restartStateText, restartTone, statCost, groupDisplayName, tokensSpendLine, keyLaunch, keyOutsideTokens, movePool } from './ui-logic';
 import agentCatalog from '../catalog/agents.json';
-import type { AnalyticsStatus, Ceilings, CeilingView, CeilingQuestionView, OpenrouterCredit, BackupInfo, PassioncodeStatus, Account, Adapter, AgentConnection, AgentInfo, AgentRow, AgentsOverview, OpenrouterModels, HermesModel, KimiAccounts, KimiRegion, KimiStatus, OpenrouterStatus, OpenrouterKeys, CodexRoute, BalanceStatus, CapacityStatus, DutyStatus, DutyLine, SessionTree, WatchFinding, ShellHookStatus, AgentSetup, AuthKind, BackupStatus, KimiAccount, CurrentAccounts, LoginItem, Project, Restored, HandoverPlan, ExternalIdentity, MonitorStatus, ProjectRule, Provider, RotationPolicy, RuntimeStatus, SessionInfo, Snapshot, UpdateStatus, Onboarding, Chains, ChainExecutor, ChainScope, ChainStepView, GithubRepository, Machine, MachinesLive, MachinesList, Attention, AttentionItem, Event, GivenAccount, SessionsEverywhere, SessionRow, MachineReadStatus, RestartPlan, RestartWave, OrganizationAssigned, Placement } from './types';
+import type { AnalyticsStatus, Ceilings, CeilingView, CeilingQuestionView, OpenrouterCredit, BackupInfo, PassioncodeStatus, Account, Adapter, AgentConnection, AgentInfo, AgentRow, AgentsOverview, OpenrouterModels, HermesModel, KimiAccounts, KimiRegion, KimiStatus, OpenrouterStatus, OpenrouterKeys, CodexRoute, BalanceStatus, CapacityStatus, DutyStatus, DutyLine, SessionTree, WatchFinding, ShellHookStatus, AgentSetup, AuthKind, BackupStatus, KimiAccount, CurrentAccounts, LoginItem, Project, Restored, HandoverPlan, ExternalIdentity, MonitorStatus, ProjectRule, Provider, RotationPolicy, RuntimeStatus, SessionInfo, Snapshot, UpdateStatus, Onboarding, Chains, ChainExecutor, ChainScope, ChainStepView, GithubRepository, Machine, MachinesLive, MachinesList, Attention, AttentionItem, Event, GivenAccount, SessionsEverywhere, SessionRow, MachineReadStatus, RestartPlan, RestartWave, OrganizationAssigned, Placement, ObservatoryKeys, ObservatoryKey } from './types';
 
 const root = document.querySelector<HTMLDivElement>('#app')!;
 const announcements = document.querySelector<HTMLDivElement>('#announcements')!;
@@ -1614,8 +1614,62 @@ function renderTokens(main: HTMLElement) {
   const projects = openrouterKeys?.projects ?? [];
   const own = projects.filter((p) => openrouterKeys?.keys.some((k) => k.pool === p.pool)).length;
   main.append(foldSection({ key: 'keys-groups', title: t('Group keys'), state: openrouterKeys ? plural(own, { one: '{n} with its own key', other: '{n} with their own key' }) : undefined, open: true, className: 'keys-fold', body: () => [projectKeysPanel()] }));
+  // SB-404 K1: the provider keys Project Observatory holds, by name, each with an Add.
+  if (!observatoryKeys && !observatoryLoading) void loadObservatoryKeys();
+  const fromObservatory = observatoryKeys?.state === 'ok' ? plural(observatoryKeys.keys.length, { one: '{n} key', other: '{n} keys' }) : observatoryKeys ? t('Not available') : undefined;
+  main.append(foldSection({ key: 'keys-observatory', title: t('From Project Observatory'), state: fromObservatory, open: true, className: 'keys-fold', body: () => [observatoryPanel()] }));
   const tasks = (ceilingsView?.ceilings ?? []).filter((c) => c.scope.kind === 'workflow');
   if (tasks.length) main.append(foldSection({ key: 'keys-tasks', title: t('Task ceilings'), state: plural(tasks.length, { one: '{n} task', other: '{n} tasks' }), open: true, className: 'keys-fold', body: () => [taskCeilingsPanel(tasks)] }));
+}
+/** SB-404 K1: the keys Observatory holds, read when the API keys page opens; never a value. */
+let observatoryKeys: ObservatoryKeys | null = null; let observatoryLoading = false; let observatoryError = '';
+async function loadObservatoryKeys() {
+  observatoryLoading = true;
+  try { observatoryKeys = await adapter.observatoryKeys(); observatoryError = ''; } catch (error) { observatoryError = safeError(error, 'read'); } finally { observatoryLoading = false; }
+  backgroundRender();
+}
+/** SB-404 K1, K2: one row per key Observatory holds, with where it is saved here or an Add. */
+function observatoryPanel() {
+  const section = el('div', 'fold-content');
+  section.append(el('p', 'form-note', t('Keys Project Observatory holds for Anthropic, OpenAI and OpenRouter, by name. Adding one moves its value into Switchboard\'s store without showing it anywhere.')));
+  if (observatoryError) { section.append(el('p', 'usage-error', t(observatoryError))); return section; }
+  if (!observatoryKeys) { section.append(el('p', 'form-note', t('Reading Project Observatory…'))); return section; }
+  if (observatoryKeys.state !== 'ok') { section.append(el('p', 'form-note', t(observatoryKeys.why ?? 'Project Observatory is not available.'))); return section; }
+  if (!observatoryKeys.keys.length) { section.append(el('p', 'form-note', t('Project Observatory holds no Anthropic, OpenAI or OpenRouter key an agent can run on.'))); return section; }
+  const list = el('ul', 'key-list');
+  for (const key of observatoryKeys.keys) {
+    const item = el('li', 'key-item', key.slot);
+    const kind = key.kind === 'anthropic' ? 'Anthropic' : key.kind === 'openai' ? 'OpenAI' : 'OpenRouter';
+    const where = key.added.map((target) => target.kind === 'account' ? t('account {label}', { label: target.label ?? '' }) : target.kind === 'anthropic' ? t('named key {name}', { name: target.name ?? '' }) : target.pool ? t('OpenRouter key of {group}', { group: poolName(target.pool, snapshot?.projects) }) : t('this computer\'s OpenRouter key'));
+    const state = where.length ? t('saved as {where}', { where: where.join(', ') }) : key.can_add ? '' : t(key.why_not ?? '');
+    item.append(el('span', 'folder-note', ` · ${kind}${key.expires ? ` · ${t('expires {day}', { day: key.expires })}` : ''}${state ? ` · ${state}` : ''}`));
+    if (key.can_add) item.append(' ', button(where.length ? t('Add again') : t('Add'), () => observatoryAddDialog(key), 'text-button', `observatory-add-${key.slot}`));
+    list.append(item);
+  }
+  section.append(list, button(t('Read again'), () => { observatoryKeys = null; void loadObservatoryKeys(); }, 'text-button', 'observatory-refresh'));
+  return section;
+}
+/** SB-404 K2: where a key from Observatory goes; the value never passes through the window. */
+function observatoryAddDialog(key: ObservatoryKey) {
+  const anthropic = key.kind === 'anthropic';
+  const context = openDialog(t('Add {slot}', { slot: key.slot }), anthropic ? t('An Anthropic key becomes an account in the pay-per-token group, which counts it against its daily ceiling. It can also be a named key Hermes runs on directly, which no ceiling counts.') : t('An OpenRouter key becomes the key agents run on, on this computer or in one group\'s folders, under its spending ceiling.'));
+  const grid = el('div', 'form-grid');
+  const to = select([['account', t('Account in the pay-per-token group')], ['both', t('Account and a named key for Hermes')], ['agent', t('Named key for Hermes only')]]);
+  const name = input(''); name.required = false; name.maxLength = 80; name.placeholder = key.project.toLowerCase();
+  const model = input(''); model.required = false; model.placeholder = anthropic ? 'claude-sonnet-5-5' : 'moonshotai/kimi-k2';
+  const groups = (openrouterKeys?.projects ?? []).filter((p) => !projectOf(p.pool)?.tokens);
+  const pool = select([['', t('This computer')], ...groups.map((p): [string, string] => [p.pool, p.name])]);
+  const replace = el('input'); replace.type = 'checkbox'; replace.id = `observatory-replace-${key.slot}`;
+  const replaceLabel = el('label', 'appearance-option login-option'); replaceLabel.append(replace, ` ${t('Replace a key already saved there')}`);
+  if (anthropic) grid.append(field(t('Where'), to), field(t('Name'), name, t('Optional. The account\'s name, or the named key\'s (lowercase letters, digits, hyphens).')), field(t('Model'), model, t('Optional. The named key\'s default model.')));
+  else grid.append(field(t('Used by'), pool), field(t('Model'), model, t('Optional. The model agents start on.')));
+  context.body.append(grid, replaceLabel);
+  context.actions.append(submit(t('Add')));
+  context.form.addEventListener('submit', (event) => {
+    event.preventDefault();
+    const request = { slot: key.slot, to: anthropic ? to.value as 'account' | 'agent' | 'both' : null, name: name.value.trim() || null, pool: anthropic ? null : pool.value || null, model: model.value.trim() || null, replace: replace.checked };
+    void dialogSave(context, async () => { const added = await adapter.observatoryKeyAdd(request); observatoryKeys = null; void loadObservatoryKeys(); void loadOpenrouter(); if (added.failed) throw new Error(added.failed); }, anthropic && request.to !== 'agent' ? t('{slot} is in the pay-per-token group. Set its daily ceiling and turn it on under Groups to launch on it.', { slot: key.slot }) : t('{slot} is saved. Agents can start on it now.', { slot: key.slot }));
+  });
 }
 /** WF-7.2: a key in one phrase: its tail when OpenRouter labels it, and its model. */
 function keyStateText(label: string | null | undefined, model: string | null | undefined) {
@@ -1944,8 +1998,14 @@ async function agentDialog(agent: AgentInfo) {
     for (const line of [info.requires, info.warning, info.notes]) if (line) out.append(el('p', 'form-note', line));
     if (info.launch) out.append(copyable(t('Launch from the command line'), info.launch, `launch-cmd-${agent.id}`));
   };
-  pool.addEventListener('change', () => void show());
-  const grid = el('div', 'form-grid'); grid.append(field(t('Group'), pool, t('The group whose selected API-key account this agent uses.')));
+  // SB-404 K3: on the pay-per-token group, Claude Code and Hermes take the model at launch.
+  const proxyModel = input(''); proxyModel.required = false; proxyModel.placeholder = 'claude-sonnet-5-5'; proxyModel.id = `proxy-model-${agent.id}`;
+  const takesModel = agent.id === 'claude-code' || agent.id === 'hermes';
+  const modelField = field(t('Model'), proxyModel, agent.id === 'hermes' ? t('An Anthropic id. Hermes on the pay-per-token group needs one.') : t('Optional. An Anthropic id.'));
+  const showModel = () => { modelField.hidden = !(takesModel && !!projectOf(pool.value)?.tokens); };
+  pool.addEventListener('change', () => { showModel(); void show(); });
+  const grid = el('div', 'form-grid'); grid.append(field(t('Group'), pool, t('The group whose selected API-key account this agent uses.')), modelField);
+  showModel();
   context.body.append(grid, out);
   const launches = agent.level !== 'mcp' && !!agent.binary;
   const dir = folderPicker(context, lastWorkingDirectory, `agent-folder-${agent.id}`);
@@ -1956,11 +2016,11 @@ async function agentDialog(agent: AgentInfo) {
   const keyFirst = !!viaKey?.run && agent.openrouter?.default !== false;
   if (launches || viaKey) context.body.append(groupField(t('Launch in folder'), dir.node, launches && !keyFirst ? t('Starts the agent in Terminal in this folder, on the group\'s API-key account.') : t('Starts the agent in Terminal in this folder.')));
   // SB-392 K-1: which keys this agent can start on here, and which one a launch in the folder spends.
-  if (viaKey || agent.id === 'hermes') context.body.append(launchKeysPart(agent, () => dir.value() || null));
+  if (viaKey || agent.id === 'hermes' || agent.id === 'claude-code') context.body.append(launchKeysPart(agent, () => dir.value() || null));
   if (viaKey) context.body.append(viaKey.part);
   // SB-390: Hermes on an Anthropic key the person saved by name (Appvillis's, their own).
   if (agent.id === 'hermes') context.body.append(anthropicLaunch(agent, context, folder));
-  const throughProxy = () => { const value = folder(); if (value) void dialogSave(context, () => adapter.launchAgent(agent.id, pool.value, value), t('Terminal launch requested for {agent}.', { agent: agent.name }), 'launch'); };
+  const throughProxy = () => { const value = folder(); if (value) void dialogSave(context, () => adapter.launchAgent(agent.id, pool.value, value, modelField.hidden ? null : proxyModel.value.trim() || null), t('Terminal launch requested for {agent}.', { agent: agent.name }), 'launch'); };
   if (keyFirst) {
     if (launches) context.actions.append(button(t('Launch through the proxy'), throughProxy, 'button', `proxy-launch-${agent.id}`));
     context.actions.append(submit(t('Launch on OpenRouter')));
@@ -2007,8 +2067,8 @@ function launchKeysPart(agent: AgentInfo, folder: () => string | null): HTMLElem
       if (!answer.keys.length) { body.append(el('p', 'form-note', t('No key is saved that {agent} can start on.', { agent: agent.name }))); return; }
       const list = el('ul', 'key-list');
       for (const key of answer.keys) {
-        const kind = key.kind === 'anthropic' ? 'Anthropic' : 'OpenRouter';
-        const state = key.default ? t('a launch in this folder uses it') : key.kind === 'anthropic' ? t('choose it below') : key.scope === 'group' ? t('used {where}', { where: inGroup(key.pool ?? '', snapshot?.projects) }) : t('this folder\'s group has an OpenRouter key of its own');
+        const kind = key.kind === 'anthropic' ? t('Anthropic, no ceiling') : key.kind === 'group' ? t('Pay-per-token group') : 'OpenRouter';
+        const state = key.default ? t('a launch in this folder uses it') : key.kind === 'group' ? (key.usable ? t('a launch through the proxy on {group} uses it', { group: key.group ?? '' }) : t(key.why_not ?? '')) : key.kind === 'anthropic' ? t('choose it below') : key.scope === 'group' ? t('used {where}', { where: inGroup(key.pool ?? '', snapshot?.projects) }) : t('this folder\'s group has an OpenRouter key of its own');
         const item = el('li', key.default ? 'key-item is-default' : 'key-item', `${kind}: ${key.scope === 'machine' ? t('This computer') : key.name}`);
         item.append(el('span', 'folder-note', ` · ${key.model ?? t('no default model')} · ${state}`));
         list.append(item);

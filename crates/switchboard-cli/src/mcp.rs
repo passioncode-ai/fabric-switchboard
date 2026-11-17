@@ -350,7 +350,10 @@ impl Server {
                 name: text("as"),
                 pool: text("pool"),
                 model: text("model"),
-                replace: args.get("replace").and_then(Value::as_bool).unwrap_or(false),
+                replace: args
+                    .get("replace")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
             },
         )
         .await

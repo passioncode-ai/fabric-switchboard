@@ -179,7 +179,8 @@ export interface Adapter {
   acceptProjectSuggestion(folder: string): Promise<unknown>;
   dismissProjectSuggestion(folder: string): Promise<unknown>;
   agentConnect(agent: string, pool: string): Promise<AgentConnection>;
-  launchAgent(agent: string, pool: string, workingDirectory: string): Promise<unknown>;
+  /** SB-404 K3: `model`, an Anthropic id, for Claude Code and for Hermes on the pay-per-token group. */
+  launchAgent(agent: string, pool: string, workingDirectory: string, model?: string | null): Promise<unknown>;
   /** The OpenRouter key agents run on (SB-79): metadata and what it may still spend, never the key. */
   openrouterStatus(): Promise<OpenrouterStatus>;
   /** SB-156: one saved key's status with its spend: the machine's (`null`) or a group's. */
@@ -227,6 +228,10 @@ export interface Adapter {
   anthropicKeys(): Promise<{ keys: { name: string; saved_at: number; model: string | null }[] }>;
   /** SB-392 K-1: every key an agent can start on here, the folder's OpenRouter key first. */
   launchKeys(agent: string, folder: string | null): Promise<LaunchKeys>;
+  /** SB-404 K1: the provider keys Project Observatory holds, by name; never a value. */
+  observatoryKeys(): Promise<ObservatoryKeys>;
+  /** SB-404 K2: saves one by its slot; the value moves through a pipe, never through the window. */
+  observatoryKeyAdd(request: ObservatoryAddRequest): Promise<ObservatoryAdded>;
   /** SB-390: Hermes on the Anthropic key saved under `key`, with this launch's model (null: the key's). */
   launchOnAnthropic(agent: string, key: string, model: string | null, workingDirectory: string): Promise<unknown>;
   launchOnOpenrouter(agent: string, model: string | null, workingDirectory: string): Promise<{ model: string | null; model_choice: 'launch' | 'agent' }>;
@@ -349,7 +354,15 @@ export interface SessionsEverywhere { here: SessionRows; machines: MachineSessio
 export interface DutySettings { on: boolean; stuck_minutes: number; waiting_minutes: number; idle_minutes: number; max_age_hours: number }
 export interface DutyLine { at?: number; action: 'restart' | 'close'; reason: string; outcome?: string; session: string; folder: string; pid: number; host?: string }
 /** SB-392 K-1: one key an agent can start on, by name; never a value. */
-export interface LaunchKey { kind: 'openrouter' | 'anthropic'; scope?: 'machine' | 'group'; pool?: string | null; name: string; model: string | null; usable: boolean; default: boolean; why_not: string | null }
+export interface LaunchKey { kind: 'openrouter' | 'anthropic' | 'group'; scope?: 'machine' | 'group'; pool?: string | null; name: string; model: string | null; usable: boolean; default: boolean; why_not: string | null; /** SB-404: whether a ceiling counts this key. */ metered?: boolean; /** SB-404 K3, kind group: the pay-per-token group's name, the key's account and whether it is the group's selected key. */ group?: string; account_id?: string; selected?: boolean }
+/** SB-404: where a key from Observatory was saved here. */
+export interface ObservatoryTarget { kind: 'account' | 'anthropic' | 'openrouter'; account_id?: string; label?: string | null; pool?: string | null; name?: string; metered: boolean }
+/** SB-404 K1: one provider key Project Observatory holds, by name; never a value. */
+export interface ObservatoryKey { slot: string; project: string; env: string; name: string; kind: 'anthropic' | 'openai' | 'openrouter'; expires: string | null; rotated: string | null; can_add: boolean; why_not: string | null; added: ObservatoryTarget[] }
+export interface ObservatoryKeys { state: 'ok' | 'absent' | 'unreadable'; why: string | null; keys: ObservatoryKey[]; degraded: { source: string; reason: string }[] }
+/** SB-404 K2: what adding a key from Observatory asks for. */
+export interface ObservatoryAddRequest { slot: string; to: 'account' | 'agent' | 'both' | null; name: string | null; pool: string | null; model: string | null; replace: boolean }
+export interface ObservatoryAdded { slot: string; kind: string; saved: { target: string; answer: unknown }[]; failed: string | null; next: string[] }
 export interface LaunchKeys { agent: string; folder: string | null; openrouter: boolean; anthropic: boolean; keys: LaunchKey[]; none_usable: boolean }
 export interface DutyStatus { settings: DutySettings; check_seconds: number; /** SB-392: minutes after which a finished session is closed: `idle_minutes`, at least 65 (a wake-up a session set itself is at most an hour). */ idle_closes_after_minutes?: number; watched: number; left_to_dashboards: number; /** Sessions waiting for the person's answer and sessions running a command of their own: never acted on. */ waiting_for_person?: number; running_commands?: number; due: DutyLine[]; recent: DutyLine[]; supported: boolean }
 export interface CapacityStatus { cap: number | null; used: number; free: number | null; at_capacity: boolean; total: number; quiet: number; quiet_after_minutes: number }

@@ -49,8 +49,40 @@ ceiling code.
 
 | Wave | What | State |
 |---|---|---|
-| K1 | Read Observatory's key names (CLI `keys observatory`, MCP, window list) | after SB-401 |
-| K2 | Add by name: Claude key to the pay-per-token group, Anthropic/OpenAI/OpenRouter to agent keys, through a pipe; record the slot | after K1 |
-| K3 | Launch on a key from the window and the CLI; Hermes on an Anthropic key metered against a ceiling | after K2 |
+| K1 | Read Observatory's key names (CLI `keys observatory`, MCP, window list) | built on `observatory-keys` (2026-11-17) |
+| K2 | Add by name: Claude key to the pay-per-token group, Anthropic/OpenAI/OpenRouter to agent keys, through a pipe; record the slot | built (Anthropic, OpenRouter); OpenAI deferred, K-6 |
+| K3 | Launch on a key from the window and the CLI; Hermes on an Anthropic key metered against a ceiling | built: Hermes through the proxy on the pay-per-token group, K-7 |
 | K4 | Follow a rotation in Observatory; refuse a key Observatory marks leaked | after K2 |
 | Live | An Appvillis Anthropic key in the pay-per-token group with three of the operator's private project folders, model `claude-fable-5-2`, running a full audit of one of them | waits for the key (person) and SB-401's release |
+
+## Decisions taken while building K1 to K3 (2026-11-17, recorded as DEC-0024)
+
+- **K-6. OpenAI keys are listed, not added.** No ceiling in Switchboard counts an OpenAI key: the
+  proxy prices Anthropic's models only (`switchboard-proxy` `prices.rs`), and a Codex API-key
+  account has no ceiling of its own. Adding one would let an agent spend it unchecked, against
+  K-4. The list shows it with `why_not`; adding it waits for OpenAI prices in the proxy and a
+  Codex key in the pay-per-token group (board row).
+- **K-7. Hermes is metered through the proxy, not by a ceiling of a named key.** Hermes reads its
+  provider from its own config file, and its named providers take `api`, `key_env` and
+  `transport: anthropic_messages` (checked in Hermes 0.22.2's `runtime_provider_custom.py`). A
+  launch on the pay-per-token group writes a Hermes home of its own pointing a provider
+  `switchboard` at the group's route with the agents' capability and runs `hermes --provider
+  switchboard -m <model>`, so every answer is priced at list price against the group's daily
+  ceiling, as Claude Code's are. A named Anthropic key's direct launch (SB-390) stays unmetered
+  and is labelled so (`metered: false`); an Anthropic key added from Observatory goes to the
+  pay-per-token group by default.
+- **K-8. The value never passes through Switchboard's own arguments or environment.** Observatory
+  only places a value in a command's environment, so the command it runs is `/bin/sh -c`, which
+  moves it into an unexported variable, unsets it and pipes it into the ordinary save's stdin.
+  macOS and Linux only for now.
+- **K-9. Nothing replaces a saved key by surprise.** A named key or an OpenRouter key already
+  saved where the add would go is kept unless `--replace`; a slot already added as an account is
+  refused (one key, one account).
+- **K-10. Hermes on an ordinary group starts as before.** Only the pay-per-token group's launch
+  writes the home of its own; elsewhere Hermes keeps its `~/.hermes` set up by `agents connect`.
+
+## Deferred
+
+- K4 (rotation and leaks), the live run with an Appvillis key (waits for the key), OpenAI keys
+  (K-6). A real Hermes run through the proxy was not observed in this change.
+

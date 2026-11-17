@@ -1737,7 +1737,7 @@ fn launch_agent_with(
         ("SWITCHBOARD_CONTEXT".to_string(), context.clone()),
     ]);
     if let (Some(base_env), Some(key_env)) = (&profile.base_env, &profile.key_env) {
-        env.insert(base_env.clone(), base);
+        env.insert(base_env.clone(), base.clone());
         env.insert(key_env.clone(), proxy.agent_token().to_owned());
     }
     env.extend(profile.extra_env.clone());
@@ -1749,7 +1749,12 @@ fn launch_agent_with(
         let own = hermes_tokens_home(&home, &base)?;
         env.insert("HERMES_HOME".into(), own.to_string_lossy().into_owned());
         env.insert(HERMES_KEY_ENV.into(), proxy.agent_token().to_owned());
-        args.extend(["--provider".into(), "switchboard".into(), "-m".into(), model.to_owned()]);
+        args.extend([
+            "--provider".into(),
+            "switchboard".into(),
+            "-m".into(),
+            model.to_owned(),
+        ]);
     } else if let Some(model) = model {
         // Claude Code takes the model as `--model`; another agent picks it in its own config.
         if profile.id != "claude-code" {
@@ -5564,6 +5569,135 @@ mod tests {
         let record = recorded(&f.root.join("runtimes/agent-goose-acme"));
         assert_eq!(record["context"], format!("org:{acme}"));
         assert_eq!(record["pool"], "acme");
+    }
+    /// SB-404 K3: Hermes on the pay-per-token group goes through the proxy, in a home of its own
+    /// whose provider points at the group's route with the agents' capability, never a key; it
+    /// needs a model. Claude Code takes a model as `--model`; another agent refuses one.
+    #[tokio::test]
+    async fn hermes_on_the_pay_per_token_group_runs_through_the_proxy() {
+        let f = fixture();
+        let proxy = ProxyHandle::start(f.store.clone()).await.unwrap();
+        let credential =
+            Credential::parse(Provider::Claude, AuthKind::ApiKey, "synthetic-tokens-key").unwrap();
+        let key = f
+            .store
+            .add_routed(
+                "Team key".into(),
+                Provider::Claude,
+                AuthKind::ApiKey,
+                "default".into(),
+                credential,
+            )
+            .unwrap();
+        assert_eq!(key.pool, "tokens");
+        let folder = f.project.canonicalize().unwrap();
+        f.store
+            .save_project(
+                Some("tokens"),
+                "Pay-per-token keys",
+                std::slice::from_ref(&folder),
+                std::slice::from_ref(&key.id),
+            )
+            .unwrap();
+        f.store.select(Provider::Claude, "tokens", &key.id).unwrap();
+        crate::spend::set_ceiling(
+            &f.root,
+            &f.store.snapshot().unwrap(),
+            switchboard_core::ChainScope::Project {
+                pool: "tokens".into(),
+            },
+            Some(5.0),
+            crate::spend::Surface::Window,
+            1,
+        )
+        .unwrap();
+        f.store.set_group_off("tokens", false).unwrap();
+        let hermes = |model: Option<&str>| {
+            launch_agent_with(
+                &f.root,
+                &f.store,
+                &proxy,
+                "hermes",
+                "tokens",
+                &f.project,
+                model,
+                goose_installed,
+                terminal_opens,
+            )
+        };
+        assert_eq!(hermes(None).unwrap_err(), HERMES_TOKENS_MODEL_NEEDED);
+        assert_eq!(
+            hermes(Some("anthropic/claude-sonnet-5.5")).unwrap_err(),
+            crate::anthropic_keys::MODEL_INVALID
+        );
+        let answer = hermes(Some("claude-fable-5-2")).unwrap();
+        assert_eq!(answer["metered"], true);
+        assert_eq!(answer["model"], "claude-fable-5-2");
+        let home = f.root.join("runtimes/agent-hermes-tokens");
+        let config = fs::read_to_string(home.join("agent-home/config.yaml")).unwrap();
+        assert!(config.contains(&format!(
+            "api: \"http://{}/claude/tokens\"",
+            proxy.address()
+        )));
+        assert!(config.contains("key_env: SWITCHBOARD_AGENT_KEY"));
+        assert!(config.contains("transport: anthropic_messages"));
+        assert!(config.contains("adopt_external_logins: false"));
+        assert!(!config.contains("synthetic-tokens-key"));
+        let script = fs::read_to_string(home.join(if cfg!(windows) {
+            "launch.ps1"
+        } else {
+            "launch.command"
+        }))
+        .unwrap();
+        assert!(script.contains("--provider") && script.contains("switchboard"));
+        assert!(script.contains("claude-fable-5-2"));
+        assert!(script.contains("HERMES_HOME"));
+        assert!(!script.contains("synthetic-tokens-key"));
+        let record = recorded(&home);
+        assert_eq!(record["pool"], "tokens");
+        assert_eq!(record["mode"], "managed");
+        assert_eq!(record["label"], "claude-fable-5-2");
+        // Claude Code takes the model as its own flag; an agent that picks its model refuses one.
+        launch_agent_with(
+            &f.root,
+            &f.store,
+            &proxy,
+            "claude-code",
+            "tokens",
+            &f.project,
+            Some("claude-fable-5-2"),
+            goose_installed,
+            terminal_opens,
+        )
+        .unwrap();
+        let script = fs::read_to_string(f.root.join(if cfg!(windows) {
+            "runtimes/agent-claude-code-tokens/launch.ps1"
+        } else {
+            "runtimes/agent-claude-code-tokens/launch.command"
+        }))
+        .unwrap();
+        assert!(script.contains("--model") && script.contains("claude-fable-5-2"));
+        assert_eq!(
+            launch_agent_with(
+                &f.root,
+                &f.store,
+                &proxy,
+                "goose",
+                "tokens",
+                &f.project,
+                Some("claude-fable-5-2"),
+                goose_installed,
+                terminal_opens,
+            )
+            .unwrap_err(),
+            MODEL_NOT_TAKEN
+        );
+        // A group switched off launches nothing on its key.
+        f.store.set_group_off("tokens", true).unwrap();
+        assert_eq!(
+            hermes(Some("claude-fable-5-2")).unwrap_err(),
+            switchboard_core::GROUP_OFF
+        );
     }
     #[test]
     fn a_windows_session_reads_the_key_by_command_and_exits_when_it_cannot() {

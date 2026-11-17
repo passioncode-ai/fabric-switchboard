@@ -15,8 +15,7 @@ pub const NOT_SELECTED: &str =
 /// SB-404 K3: whether `agent` can run on the pay-per-token group's key through the proxy: one
 /// configured by its environment (Claude Code), or Hermes, which the launch configures itself.
 pub fn takes_group_key(agent: &str) -> bool {
-    agent == "hermes"
-        || crate::agent_catalog::launchable(agent).is_ok_and(|p| p.base_env.is_some())
+    agent == "hermes" || crate::agent_catalog::launchable(agent).is_ok_and(|p| p.base_env.is_some())
 }
 
 pub fn list(
@@ -95,12 +94,8 @@ pub fn list(
         if let Some(group) = snapshot.tokens_group() {
             let selected = snapshot.routes.get(&format!("claude:{}", group.pool));
             let ceiling = crate::spend::group_ceiling(root, &group.pool);
-            let in_group = folder.is_none_or(|f| {
-                group
-                    .folders
-                    .iter()
-                    .any(|g| f.starts_with(Path::new(g)))
-            });
+            let in_group =
+                folder.is_none_or(|f| group.folders.iter().any(|g| f.starts_with(Path::new(g))));
             for account in snapshot
                 .accounts
                 .iter()
@@ -191,5 +186,92 @@ mod tests {
             .all(|k| k["kind"] == "openrouter"));
         // No value anywhere in the answer.
         assert!(!answer.to_string().contains("sk-"));
+        assert_eq!(keys[1]["metered"], false);
+    }
+
+    /// SB-404 K3: the pay-per-token group's keys are offered to Claude Code and Hermes, metered;
+    /// each says why it cannot be launched on yet.
+    #[test]
+    fn the_pay_per_token_groups_keys_are_offered_with_why_not() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let store = Store::open(
+            root.into(),
+            Arc::new(switchboard_core::MemoryVault::default()),
+        )
+        .unwrap();
+        let folder = root.join("work");
+        std::fs::create_dir(&folder).unwrap();
+        let credential = switchboard_core::Credential::parse(
+            switchboard_core::Provider::Claude,
+            switchboard_core::AuthKind::ApiKey,
+            "synthetic-key",
+        )
+        .unwrap();
+        let key = store
+            .add_routed(
+                "Team key".into(),
+                switchboard_core::Provider::Claude,
+                switchboard_core::AuthKind::ApiKey,
+                "default".into(),
+                credential,
+            )
+            .unwrap();
+        let why = |agent: &str, folder: Option<&Path>| {
+            let answer = list(root, &store, agent, folder).unwrap();
+            answer["keys"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|k| k["kind"] == "group")
+                .cloned()
+        };
+        let group = why("hermes", None).expect("Hermes is offered the group's key");
+        assert_eq!(group["name"], "Team key");
+        assert_eq!(group["metered"], true);
+        assert_eq!(group["why_not"], switchboard_core::GROUP_OFF);
+        assert!(why("claude-code", None).is_some());
+        assert!(
+            why("opencode", None).is_none(),
+            "configured in its own file"
+        );
+        store.set_group_off("tokens", false).unwrap();
+        assert_eq!(
+            why("hermes", None).unwrap()["why_not"],
+            switchboard_core::TOKENS_NO_CEILING
+        );
+        crate::spend::set_ceiling(
+            root,
+            &store.snapshot().unwrap(),
+            switchboard_core::ChainScope::Project {
+                pool: "tokens".into(),
+            },
+            Some(5.0),
+            crate::spend::Surface::Window,
+            1,
+        )
+        .unwrap();
+        assert_eq!(
+            why("hermes", Some(&folder)).unwrap()["why_not"],
+            FOLDER_OUTSIDE
+        );
+        store
+            .save_project(
+                Some("tokens"),
+                "Pay-per-token keys",
+                &[folder.canonicalize().unwrap()],
+                std::slice::from_ref(&key.id),
+            )
+            .unwrap();
+        assert_eq!(
+            why("hermes", Some(&folder.canonicalize().unwrap())).unwrap()["why_not"],
+            NOT_SELECTED
+        );
+        store
+            .select(switchboard_core::Provider::Claude, "tokens", &key.id)
+            .unwrap();
+        let ready = why("hermes", Some(&folder.canonicalize().unwrap())).unwrap();
+        assert_eq!(ready["usable"], true);
+        assert_eq!(ready["selected"], true);
     }
 }

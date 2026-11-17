@@ -41,16 +41,17 @@ pub const UNREADABLE: &str =
     "Project Observatory did not list its keys. Check it with project-observatory full-path, then try again.";
 pub const SLOT_INVALID: &str =
     "Name the key as Observatory does: project/env/NAME, with env local, stage or prod.";
-pub const NOT_LISTED: &str = "Observatory holds no provider key under that name. switchboard keys observatory lists the ones it holds.";
+pub const NOT_LISTED: &str = "Project Observatory holds no provider key under that name. switchboard keys observatory lists the ones it holds.";
 pub const OPENAI_NOT_YET: &str = "An OpenAI key cannot be added yet: no spending ceiling counts one in Switchboard. Run Codex on a ChatGPT sign-in, or an agent on an OpenRouter key.";
-pub const TARGET_INVALID: &str = "An Anthropic key goes to account (the pay-per-token group), agent (a named key for Hermes) or both; an OpenRouter key goes to agent.";
+pub const TARGET_INVALID: &str = "An Anthropic key goes to an account in the pay-per-token group, a named key for Hermes, or both; an OpenRouter key goes to the agents' key.";
 pub const NAME_NEEDED: &str =
-    "Name the key with --as: 1 to 32 lowercase letters, digits and hyphens, such as appvillis.";
-pub const NAME_TAKEN: &str = "An Anthropic key is already saved under that name. Choose another with --as, or replace it with --replace.";
-pub const OPENROUTER_TAKEN: &str = "An OpenRouter key is already saved there. Replace it with --replace, or name a group with --pool.";
+    "Give the key a name: 1 to 32 lowercase letters, digits and hyphens, such as appvillis.";
+pub const NAME_TAKEN: &str = "An Anthropic key is already saved under that name. Choose another name, or replace the saved key.";
+pub const OPENROUTER_TAKEN: &str =
+    "An OpenRouter key is already saved there. Replace it, or choose a group for this one.";
 pub const ALREADY_ACCOUNT: &str = "This key is already an account in the pay-per-token group. Remove that account first to add it again.";
 pub const POOL_NOT_FOR_ANTHROPIC: &str =
-    "A Claude API key always goes to the pay-per-token group; leave out --pool.";
+    "A Claude API key always goes to the pay-per-token group; choose no group for it.";
 pub const UNIX_ONLY: &str = "Adding a key from Observatory runs on macOS and Linux for now.";
 pub const SAVE_FAILED: &str = "The key could not be saved from Observatory. Check the slot with project-observatory, then try again.";
 pub const SAVE_TIMED_OUT: &str = "Saving the key from Observatory took longer than a minute and was stopped. Nothing was recorded; try again.";
@@ -190,9 +191,7 @@ pub fn parse_list(text: &str) -> Vec<Listed> {
             let day = |prefix: &str| {
                 note.strip_prefix(prefix)
                     .map(|d| d.chars().take(10).collect::<String>())
-                    .filter(|d| {
-                        d.len() == 10 && d.bytes().all(|b| b.is_ascii_digit() || b == b'-')
-                    })
+                    .filter(|d| d.len() == 10 && d.bytes().all(|b| b.is_ascii_digit() || b == b'-'))
             };
             if let Some(d) = day("expires ") {
                 expires = Some(d);
@@ -409,9 +408,7 @@ pub fn record(
         target: target.clone(),
         added_at: now,
     }));
-    records
-        .keys
-        .retain(|r| present(root, &snapshot, &r.target));
+    records.keys.retain(|r| present(root, &snapshot, &r.target));
     if records.keys.len() > MAX_RECORDS {
         let extra = records.keys.len() - MAX_RECORDS;
         records.keys.drain(..extra);
@@ -552,10 +549,7 @@ fn plan_from(
     listed: &[Listed],
 ) -> Result<Value, String> {
     let slot = Slot::parse(&request.slot)?;
-    let key = listed
-        .iter()
-        .find(|k| k.slot == slot)
-        .ok_or(NOT_LISTED)?;
+    let key = listed.iter().find(|k| k.slot == slot).ok_or(NOT_LISTED)?;
     let snapshot = store.snapshot()?;
     let saved = records(root)?;
     let mut steps = Vec::new();
@@ -690,7 +684,14 @@ pub fn save_step(
     let mut command = Command::new(&engine.python);
     command
         .arg(engine.dir.join("tools").join("use_secret.py"))
-        .args(["run", "--vault-only", "--env", &slot.env, &slot.project, &slot.name])
+        .args([
+            "run",
+            "--vault-only",
+            "--env",
+            &slot.env,
+            &slot.project,
+            &slot.name,
+        ])
         .arg("--")
         .args(["/bin/sh", "-c", &pipe_script(&slot.name)])
         .arg(cli)
@@ -752,8 +753,14 @@ fn saved_target(step: &Value, answer: &Value) -> Option<Target> {
 pub async fn add(root: &Path, cli: &Path, request: AddRequest) -> Result<Value, String> {
     let plan = crate::call(root, crate::Operation::ObservatoryKeyPlan { request }).await?;
     let engine = Engine {
-        dir: plan["engine"].as_str().map(PathBuf::from).ok_or(SAVE_FAILED)?,
-        python: plan["python"].as_str().map(PathBuf::from).ok_or(SAVE_FAILED)?,
+        dir: plan["engine"]
+            .as_str()
+            .map(PathBuf::from)
+            .ok_or(SAVE_FAILED)?,
+        python: plan["python"]
+            .as_str()
+            .map(PathBuf::from)
+            .ok_or(SAVE_FAILED)?,
     };
     let slot = Slot::parse(plan["slot"].as_str().unwrap_or_default())?;
     let steps = plan["steps"].as_array().cloned().unwrap_or_default();
@@ -763,12 +770,22 @@ pub async fn add(root: &Path, cli: &Path, request: AddRequest) -> Result<Value, 
     for step in &steps {
         let args: Vec<String> = step["args"]
             .as_array()
-            .map(|a| a.iter().filter_map(|x| x.as_str().map(str::to_owned)).collect())
+            .map(|a| {
+                a.iter()
+                    .filter_map(|x| x.as_str().map(str::to_owned))
+                    .collect()
+            })
             .unwrap_or_default();
-        let (engine, slot, cli, root) = (engine.clone(), slot.clone(), cli.to_owned(), root.to_owned());
-        let answer = tokio::task::spawn_blocking(move || save_step(&engine, &slot, &cli, &root, &args))
-            .await
-            .map_err(|_| SAVE_FAILED.to_string())?;
+        let (engine, slot, cli, root) = (
+            engine.clone(),
+            slot.clone(),
+            cli.to_owned(),
+            root.to_owned(),
+        );
+        let answer =
+            tokio::task::spawn_blocking(move || save_step(&engine, &slot, &cli, &root, &args))
+                .await
+                .map_err(|_| SAVE_FAILED.to_string())?;
         match answer {
             Ok(answer) => {
                 if let Some(target) = saved_target(step, &answer) {
@@ -810,8 +827,9 @@ fn next_steps(kind: &Value, targets: &[Target]) -> Vec<String> {
     if targets.iter().any(|t| matches!(t, Target::Account { .. })) {
         next.push("The key is in the pay-per-token group, which starts off: set its daily ceiling, turn it on and add the folders it serves (switchboard project edit). Then switchboard agents launch claude-code or hermes --pool <its id> --model <model>.".into());
     }
-    if let Some(Target::Anthropic { name }) =
-        targets.iter().find(|t| matches!(t, Target::Anthropic { .. }))
+    if let Some(Target::Anthropic { name }) = targets
+        .iter()
+        .find(|t| matches!(t, Target::Anthropic { .. }))
     {
         next.push(format!("Hermes starts on it with switchboard agents launch hermes --anthropic {name}; no ceiling counts that launch."));
     }
@@ -958,7 +976,10 @@ mod tests {
         let both = plan(anthropic(Some("both"))).unwrap();
         assert_eq!(both["steps"][1]["target"], "anthropic");
         assert_eq!(both["steps"][1]["name"], "alpha-web");
-        assert_eq!(plan(anthropic(Some("everywhere"))).unwrap_err(), TARGET_INVALID);
+        assert_eq!(
+            plan(anthropic(Some("everywhere"))).unwrap_err(),
+            TARGET_INVALID
+        );
         let mut pooled = anthropic(None);
         pooled.pool = Some("team".into());
         assert_eq!(plan(pooled).unwrap_err(), POOL_NOT_FOR_ANTHROPIC);
@@ -986,7 +1007,17 @@ mod tests {
             ..Default::default()
         };
         let planned = plan(openrouter.clone()).unwrap();
-        assert_eq!(planned["steps"][0]["args"], json!(["agents", "openrouter", "set", "--key-stdin", "--model", "moonshotai/kimi-k2"]));
+        assert_eq!(
+            planned["steps"][0]["args"],
+            json!([
+                "agents",
+                "openrouter",
+                "set",
+                "--key-stdin",
+                "--model",
+                "moonshotai/kimi-k2"
+            ])
+        );
         store
             .set_agent_key("openrouter", "sk-or-v1-fixture", None)
             .unwrap();
@@ -1011,7 +1042,10 @@ mod tests {
             saved_target(&json!({"target": "openrouter", "pool": null}), &json!({})),
             Some(Target::Openrouter { pool: None })
         );
-        assert_eq!(derived_name("Appvillis_Bot").as_deref(), Some("appvillis-bot"));
+        assert_eq!(
+            derived_name("Appvillis_Bot").as_deref(),
+            Some("appvillis-bot")
+        );
         assert_eq!(derived_name("0xDEV").as_deref(), Some("0xdev"));
         assert_eq!(derived_name("___"), None);
     }

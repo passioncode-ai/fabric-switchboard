@@ -5675,7 +5675,10 @@ fn print_observatory_keys(value: &Value) {
         let state = if !added.is_empty() {
             format!("saved as {}", added.join(", "))
         } else if key["can_add"] == true {
-            format!("add with: switchboard keys observatory add {}", text(&key["slot"]))
+            format!(
+                "add with: switchboard keys observatory add {}",
+                text(&key["slot"])
+            )
         } else {
             text(&key["why_not"])
         };

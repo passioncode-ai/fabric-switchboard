@@ -125,6 +125,33 @@ launch in the folder spends, marked `default` (the folder's group's own, else th
 other OpenRouter keys with `why_not` (the group whose folders use them), then the Anthropic keys
 for an agent that takes one (Hermes). `none_usable` says no saved key can start it. OpenRouter is
 the default; an Anthropic Admin key (`sk-ant-admin`) cannot run a model and is refused when saved.
+Since SB-404 every key carries `metered` (whether a ceiling counts it), and for Claude Code and
+Hermes the pay-per-token group's Claude API keys follow as `kind: group` (`pool`, `group`,
+`account_id`, `selected`): `usable` once the group is on, has a daily ceiling, holds the folder
+and has this key selected, else `why_not` says which.
+
+### `switchboard_observatory_keys`
+
+The provider keys Project Observatory holds that an agent can run on (SB-404), by `slot`
+(`project/env/NAME`) and never a value: `kind` (`anthropic`, `openai`, `openrouter`), `expires`,
+`rotated`, `can_add` with `why_not`, and `added`: where each is saved here already (an `account`
+in the pay-per-token group, a named `anthropic` key, an `openrouter` key), each with `metered`.
+Admin, management, provisioning, BYOK and archived `_PREVIOUS` keys are left out. `state` is
+`ok`, `absent` (Observatory is not installed; `why`) or `unreadable`; `degraded` names a record
+file that could not be read. Read-only.
+
+### `switchboard_observatory_key_add`: `slot` (string), `to?` (`account`, `agent`, `both`), `as?` (string), `pool?` (string), `model?` (string), `replace?` (boolean)
+
+Saves a key Observatory holds by its slot, so an agent starts on it at once (SB-404). The value
+goes from Observatory's vault to Switchboard's through a pipe (Observatory's `use_secret.py run
+--vault-only` into a `switchboard` save that reads stdin): it never appears in an argument, a
+file, a log or the answer. An Anthropic key becomes an account in the pay-per-token group (`to:
+account`, the default), counted against that group's daily ceiling; `agent` or `both` also saves
+it as a named key Hermes runs on directly, which no ceiling counts. An OpenRouter key becomes this
+computer's key, or `pool`'s. An OpenAI key is refused for now (no ceiling counts one). A name or
+key already saved is kept unless `replace`; a slot already added as an account is refused. The
+answer lists `saved` (each save's own answer), `failed` and `next` (turning the pay-per-token group
+on, the launch command).
 
 ### `switchboard_session_close_copy`: `session_id` (string), `pid?` (integer)
 

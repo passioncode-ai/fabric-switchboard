@@ -1894,3 +1894,146 @@ fn a_short_command_writing_to_a_closed_pipe_ends_quietly() {
         output.status
     );
 }
+
+/// SB-404: a stand-in Project Observatory: `project-observatory full-path` names an engine whose
+/// `vault.py list` prints slots and whose `use_secret.py run` puts a synthetic value in the
+/// command's environment, as the real one does. Nothing here reads a real credential.
+#[cfg(unix)]
+fn fake_observatory(dir: &std::path::Path) -> std::path::PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+    let engine = dir.join("engine");
+    std::fs::create_dir_all(engine.join("tools")).unwrap();
+    std::fs::write(
+        engine.join("tools/vault.py"),
+        "print('  alpha-web/prod/ANTHROPIC_API_KEY  (108B)')\n\
+         print('  alpha-web/prod/ANTHROPIC_ADMIN_KEY  (110B)')\n\
+         print('  beta/prod/OPENROUTER_API_KEY  (73B, expires 2027-11-13)')\n\
+         print('  beta/prod/OPENAI_API_KEY  (164B)')\n",
+    )
+    .unwrap();
+    std::fs::write(
+        engine.join("tools/use_secret.py"),
+        "import os, sys\n\
+         args = sys.argv[1:]\n\
+         cut = args.index('--')\n\
+         head, command = args[:cut], args[cut + 1:]\n\
+         assert head[:2] == ['run', '--vault-only'], head\n\
+         assert os.environ.get('OBSERVATORY_VAULT_ONLY') == '1'\n\
+         env, project, name = head[3], head[4], head[5]\n\
+         values = {'ANTHROPIC_API_KEY': 'sk-ant-api03-synthetic-fixture', 'OPENROUTER_API_KEY': 'sk-or-v1-synthetic-fixture'}\n\
+         os.environ[name] = values[name]\n\
+         os.execvp(command[0], command)\n",
+    )
+    .unwrap();
+    let bin = dir.join("project-observatory");
+    std::fs::write(&bin, format!("#!/bin/sh\necho '{}'\n", engine.display())).unwrap();
+    std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
+    bin
+}
+
+#[cfg(unix)]
+#[test]
+fn a_key_observatory_holds_is_added_by_name_through_a_pipe() {
+    let tmp = tempfile::tempdir().unwrap();
+    let data = tmp.path().join("data");
+    std::fs::create_dir(&data).unwrap();
+    // A file store in the data folder: the test never touches this computer's keychain.
+    switchboard_core::set_vault_kind(&data, switchboard_core::VaultKind::File).unwrap();
+    let bin = fake_observatory(tmp.path());
+    let run = |args: &[&str]| {
+        binary()
+            .arg("--data-dir")
+            .arg(&data)
+            .arg("--json")
+            .args(args)
+            .env("SWITCHBOARD_OBSERVATORY_BIN", &bin)
+            .stdin(Stdio::null())
+            .output()
+            .unwrap()
+    };
+    let json = |output: &std::process::Output| -> serde_json::Value {
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        serde_json::from_slice::<serde_json::Value>(&output.stdout).unwrap()["data"].clone()
+    };
+    // K1: names only; the admin key is left out.
+    let listed = json(&run(&["keys", "observatory"]));
+    assert_eq!(listed["state"], "ok");
+    let slots: Vec<&str> = listed["keys"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|k| k["slot"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        slots,
+        [
+            "alpha-web/prod/ANTHROPIC_API_KEY",
+            "beta/prod/OPENROUTER_API_KEY",
+            "beta/prod/OPENAI_API_KEY"
+        ]
+    );
+    // K2: an Anthropic key becomes an account in the pay-per-token group and a named key.
+    let output = run(&[
+        "keys",
+        "observatory",
+        "add",
+        "alpha-web/prod/ANTHROPIC_API_KEY",
+        "--to",
+        "both",
+        "--model",
+        "claude-fable-5-2",
+    ]);
+    let everything = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(!everything.contains("synthetic-fixture"), "{everything}");
+    let added = json(&output);
+    assert_eq!(added["saved"][0]["target"], "account");
+    assert_eq!(added["saved"][0]["answer"]["pool"], "tokens");
+    assert_eq!(added["saved"][1]["target"], "anthropic");
+    assert_eq!(added["saved"][1]["answer"]["name"], "alpha-web");
+    // The value reached the vault: the named key reads back (as a session script reads it).
+    let key = run(&["agents", "anthropic", "key", "alpha-web"]);
+    assert_eq!(json(&key)["key"], "sk-ant-api03-synthetic-fixture");
+    // The record names the slot, never the value; the list shows where it went.
+    let record = std::fs::read_to_string(data.join("observatory-keys.json")).unwrap();
+    assert!(record.contains("alpha-web/prod/ANTHROPIC_API_KEY"));
+    assert!(!record.contains("synthetic-fixture"));
+    let listed = json(&run(&["keys", "observatory"]));
+    assert_eq!(listed["keys"][0]["added"].as_array().unwrap().len(), 2);
+    // Added again as an account: refused, nothing saved twice.
+    let again = run(&[
+        "keys",
+        "observatory",
+        "add",
+        "alpha-web/prod/ANTHROPIC_API_KEY",
+    ]);
+    assert!(!again.status.success());
+    assert!(String::from_utf8_lossy(&again.stderr).contains("already an account"));
+    // An OpenRouter key becomes this computer's key; an OpenAI key is refused for now.
+    let openrouter = json(&run(&[
+        "keys",
+        "observatory",
+        "add",
+        "beta/prod/OPENROUTER_API_KEY",
+    ]));
+    assert_eq!(openrouter["saved"][0]["target"], "openrouter");
+    let openai = run(&["keys", "observatory", "add", "beta/prod/OPENAI_API_KEY"]);
+    assert!(!openai.status.success());
+    assert!(String::from_utf8_lossy(&openai.stderr).contains("OpenAI key cannot be added yet"));
+    // Without Observatory the list says so and nothing fails.
+    let absent = binary()
+        .arg("--data-dir")
+        .arg(&data)
+        .args(["--json", "keys", "observatory"])
+        .env("SWITCHBOARD_OBSERVATORY_BIN", tmp.path().join("missing"))
+        .output()
+        .unwrap();
+    assert_eq!(json(&absent)["state"], "absent");
+}
