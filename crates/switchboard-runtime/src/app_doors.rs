@@ -34,12 +34,21 @@ pub enum AppAction {
     LoginItem,
 }
 
+/// `without_app` answers the update state where no app owns the data folder (SB-414): who
+/// does, its version and the window beside it (`copies::not_app_view`). Every other action, and
+/// a switch, still needs the app (`APP_ONLY`).
 pub(crate) async fn answer(
     doors: Option<std::sync::Arc<dyn AppDoors>>,
     action: AppAction,
     enabled: Option<bool>,
+    without_app: impl FnOnce() -> Value,
 ) -> Result<Value, String> {
-    let doors = doors.ok_or(APP_ONLY)?;
+    let Some(doors) = doors else {
+        return match (action, enabled) {
+            (AppAction::Updates, None) => Ok(without_app()),
+            _ => Err(APP_ONLY.into()),
+        };
+    };
     match (action, enabled) {
         (AppAction::Updates, None) => Ok(doors.updates()),
         (AppAction::Updates, Some(on)) => doors.set_auto_update(on),
@@ -90,36 +99,65 @@ mod tests {
         let fake = Arc::new(Fake::default());
         let doors: Option<Arc<dyn AppDoors>> = Some(fake.clone());
         assert_eq!(
-            answer(doors.clone(), AppAction::Updates, None)
+            answer(doors.clone(), AppAction::Updates, None, || json!(null))
                 .await
                 .unwrap()["available"],
             true
         );
-        answer(doors.clone(), AppAction::Updates, Some(false))
-            .await
-            .unwrap();
-        answer(doors.clone(), AppAction::CheckForUpdates, None)
-            .await
-            .unwrap();
-        answer(doors.clone(), AppAction::RestartToUpdate, None)
-            .await
-            .unwrap();
+        answer(doors.clone(), AppAction::Updates, Some(false), || {
+            json!(null)
+        })
+        .await
+        .unwrap();
+        answer(doors.clone(), AppAction::CheckForUpdates, None, || {
+            json!(null)
+        })
+        .await
+        .unwrap();
+        answer(doors.clone(), AppAction::RestartToUpdate, None, || {
+            json!(null)
+        })
+        .await
+        .unwrap();
         assert_eq!(
-            answer(doors.clone(), AppAction::LoginItem, None)
+            answer(doors.clone(), AppAction::LoginItem, None, || json!(null))
                 .await
                 .unwrap()["enabled"],
             false
         );
-        answer(doors, AppAction::LoginItem, Some(true))
+        answer(doors, AppAction::LoginItem, Some(true), || json!(null))
             .await
             .unwrap();
         assert_eq!(
             *fake.calls.lock().unwrap(),
             ["auto false", "check", "restart", "login true"]
         );
+        // SB-414: without the app the update state says who owns the data folder; every
+        // action and the switch still need the app.
         assert_eq!(
-            answer(None, AppAction::Updates, None).await.unwrap_err(),
-            APP_ONLY
+            answer(
+                None,
+                AppAction::Updates,
+                None,
+                || json!({"reason": "not_owner"})
+            )
+            .await
+            .unwrap()["reason"],
+            "not_owner"
         );
+        for (action, enabled) in [
+            (AppAction::Updates, Some(true)),
+            (AppAction::CheckForUpdates, None),
+            (AppAction::RestartToUpdate, None),
+            (AppAction::LoginItem, None),
+            (AppAction::LoginItem, Some(false)),
+        ] {
+            assert_eq!(
+                answer(None, action, enabled, || json!(null))
+                    .await
+                    .unwrap_err(),
+                APP_ONLY
+            );
+        }
     }
 }

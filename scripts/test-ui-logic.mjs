@@ -448,6 +448,65 @@ check(() => {
   assert.doesNotMatch(logic.updateLine({ ...base, state: 'ready', version: '0.7.0', restart_after: null }).text, /after/);
 });
 
+// SB-414: a window that does not own the data folder says which copy does and its version.
+check(() => {
+  const base = { available: true, reason: null, enabled: true, state: 'idle', current: '0.7.111', version: null, error: null, needs_permission: false, restart_after: null };
+  const owner = { kind: 'serve', version: '0.7.112', copy: '/Applications/Fabric Switchboard.app', same_copy: false, older: true, updates_copy: true };
+  const other = logic.updateLine({ ...base, owner });
+  assert.match(other.text, /^Switchboard runs in the background as version 0\.7\.112 from \/Applications\/Fabric Switchboard\.app; this window is an older copy, version 0\.7\.111\. Quit it and open Switchboard from \/Applications\/Fabric Switchboard\.app\. Version 0\.7\.111 is the latest/);
+  assert.equal(other.owned, undefined);
+  // Its own copy: the owner keeps it current, this window installs nothing and offers no button.
+  const same = logic.updateLine({ ...base, owner: { ...owner, same_copy: true } });
+  assert.deepEqual(same, { text: 'Switchboard runs in the background as version 0.7.112 from this copy; this window is still version 0.7.111. Quit this window and open Switchboard again to use version 0.7.112.', restart: false, owned: true });
+  // Review round 1, P1-1: an owner that does not keep the copy current (a serve on Windows, with
+  // updates off, or without write access) leaves the window its own line and buttons.
+  const notKept = logic.updateLine({ ...base, enabled: false, state: 'available', version: '0.7.113', owner: { ...owner, same_copy: true, updates_copy: false } });
+  assert.equal(notKept.owned, undefined); assert.equal(notKept.install, true);
+  assert.match(notKept.text, /Press Update to install it\.$/);
+  const plain = logic.updateLine({ ...base, owner: { ...owner, older: false, version: '0.7.111', updates_copy: false } }).text;
+  assert.match(plain, /^Switchboard runs in the background as switchboard serve, version 0\.7\.111; this window is version 0\.7\.111\./);
+  assert.doesNotMatch(plain, /keeps itself current/);
+  assert.match(logic.updateLine({ ...base, owner: { ...owner, copy: '/usr/bin' } }).text, /Quit it and open the installed Switchboard\./);
+  assert.match(logic.updateLine({ ...base, owner: { ...owner, older: false, version: '0.7.111' } }).text, /^Switchboard runs in the background as switchboard serve, version 0\.7\.111, which keeps itself current; this window is version 0\.7\.111\./);
+  assert.match(logic.updateLine({ ...base, owner: { ...owner, kind: 'app', older: false, version: '0.7.110' } }).text, /^Another Switchboard runs in the background, version 0\.7\.110/);
+  // Review round 2: the owner holds the data folder and did not answer: said, never silence,
+  // and Check for updates stays.
+  const unanswered = logic.updateLine({ ...base, owner: { unanswered: true } });
+  assert.deepEqual(unanswered, { text: 'Switchboard already runs in the background but did not answer, so this window did not check for updates. Try again in a minute, or quit Switchboard and open it again.', restart: false, check: true });
+  // Review round 3: a ready update keeps its Restart to update, its own line first.
+  const readyUnanswered = logic.updateLine({ ...base, state: 'ready', version: '0.7.113', owner: { unanswered: true } });
+  assert.equal(readyUnanswered.restart, true);
+  assert.match(readyUnanswered.text, /^Version 0\.7\.113 is ready\. .* Switchboard already runs in the background but did not answer/);
+  const offeredUnanswered = logic.updateLine({ ...base, enabled: false, state: 'available', version: '0.7.113', owner: { unanswered: true } });
+  assert.equal(offeredUnanswered.install, true);
+  // Nothing answered: the line is the window's own.
+  assert.deepEqual(logic.updateLine({ ...base, owner: null }), logic.updateLine(base));
+  for (const line of [other.text, same.text]) assert.doesNotMatch(line, /\u2014/);
+});
+
+// SB-408: a .deb install is told the latest version and the commands that install it.
+check(() => {
+  const base = { available: false, reason: 'This copy was installed from the .deb package. Install the newer .deb from the releases page to update it.', enabled: false, state: 'idle', current: '0.7.114', version: null, error: null, needs_permission: false, restart_after: null };
+  const command = 'gpgv … && \\\nsha256sum -c SHA256SUMS --ignore-missing && \\\nsudo apt install ./Fabric-Switchboard-0.7.115-linux-x64.deb';
+  const fingerprint = '63B30DC324BD697487AA31944FAFB8AEC803B6A7';
+  const out = logic.updateLine({ ...base, deb: { package: 'deb', current: '0.7.114', latest: '0.7.115', action: 'available', command, release_key_fingerprint: fingerprint, prerequisites: ['curl', 'gpgv'] } });
+  assert.deepEqual(out.needs, ['curl', 'gpgv']);
+  assert.equal(out.text, 'Version 0.7.115 is out; this copy is version 0.7.114. It was installed from the .deb package, which does not update itself: download, verify and install the newer one with this command.');
+  // Review round 1, P1-2: one command whose steps are joined with &&, never a list of lines.
+  assert.equal(out.command, command); assert.equal(out.fingerprint, fingerprint); assert.equal(out.check, true); assert.equal(out.restart, false);
+  assert.match(logic.updateLine({ ...base, deb: { package: 'deb', current: '0.7.114', latest: '0.7.115', action: 'available', command, needs_migration: 'x' } }).text, /needs a step by a person first/);
+  // Review round 1, P2-3: apt replaced the program since the window started.
+  const installed = logic.updateLine({ ...base, deb: { package: 'deb', current: '0.7.114', action: 'installed' } });
+  assert.equal(installed.text, 'A newer version was installed from the .deb package. Quit Switchboard and open it again to use it.');
+  assert.equal(installed.command, undefined); assert.equal(installed.check, false);
+  const current = logic.updateLine({ ...base, deb: { package: 'deb', current: '0.7.114', latest: '0.7.114', action: 'up_to_date' } });
+  assert.equal(current.text, 'Version 0.7.114 is the latest. Switchboard checks again every five minutes; this copy came from the .deb package, so a newer version is installed with apt.');
+  assert.equal(current.command, undefined);
+  assert.equal(logic.updateLine({ ...base, deb: { package: 'deb', current: '0.7.114', action: 'failed', error: 'Could not check for updates. Switchboard tries again within the hour.' } }).text, 'Could not check for updates. Switchboard tries again within the hour.');
+  // Not read yet: the copy's reason, as before.
+  assert.deepEqual(logic.updateLine({ ...base, deb: null }), { text: base.reason, restart: false });
+});
+
 // SB-62: a sign-in of an identity already saved is announced as signed in again, never as added.
 check(() => {
   assert.equal(logic.signInNotice({ label: 'Work A', pool: 'work' }, 'Claude Code'), 'Work A added to Claude Code in group work (no folders).');

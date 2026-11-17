@@ -118,6 +118,8 @@ h1:focus { outline: none; }
 .address { display: inline-block; margin-top: var(--space-1); font-family: var(--font-data); font-size: var(--t-chip); color: var(--ink); overflow-wrap: anywhere; user-select: all; -webkit-user-select: all; }
 /* VIS-26: only a real link takes the link colour; a path or a command is ink in the data face. */
 a.address { color: var(--link); text-decoration: underline; text-underline-offset: 3px; user-select: auto; -webkit-user-select: auto; }
+/* SB-408: the commands that install a newer .deb, as typed in a terminal. */
+.deb-commands { margin: var(--space-2) 0; padding: var(--space-2); font-family: var(--font-data); font-size: var(--t-chip); color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; user-select: all; -webkit-user-select: all; border: 1px solid var(--border); border-radius: var(--r-control); }
 .dialog { width: min(540px, calc(100vw - 32px)); border: 1px solid var(--border-strong); background: var(--panel); color: var(--ink); border-radius: var(--r-card); padding: 0; box-shadow: var(--shadow-1); max-height: calc(100vh - 40px); }
 .dialog::backdrop { background: var(--bg); opacity: .8; }
 .dialog-header { padding: var(--space-5) var(--space-5) 0; }

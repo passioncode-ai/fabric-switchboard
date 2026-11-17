@@ -68,7 +68,7 @@ structure: refactors A1 to A7, B1 to B3 and the splits).
 
 | Item | What | Row | State |
 |---|---|---|---|
-| W1.1 | The session pool keeps a share for board work; counting per session (quiet, limit-stopped, waiting and held sessions count out); a refused board start's wait and reason visible without the one-hour cutoff (03 §16) | SB-417 | building |
+| W1.1 | The session pool keeps a share for board work; counting per session (quiet, limit-stopped, waiting and held sessions count out); a refused board start's wait and reason visible without the one-hour cutoff (03 §16) | SB-417 | in review: PR #818 |
 | W1.2 | Turning an account off: a person's switch no automatic process clears; six leaks closed (Claude Code renewal, elsewhere mark, recall, lease, call-back undo, restore); Kimi accounts too; "off since" on every surface (01 §3, 04 §3) | SB-418, DEC-0027 | building |
 | W1.3 | A restore saves every managed switching policy as off, against DEC-0008 (`core/backup.rs:722-727`; SCN-030) (01) | new row | next |
 | W1.4 | Money paths without a ceiling: Hermes on a named Anthropic key, a chain pinning another group's key (SB-96), a folder moved out of a capped group (SB-216), the machine ceiling and the pay-per-token meter (02) | SB-96, SB-216, new row | next |
@@ -85,7 +85,7 @@ run on a teammate's machine (SB-403 S5) needs the person: install, tailnet, firs
 ### W3. The test suite holds under load (05 A1 to A6)
 
 A1 step durations and a test-name list, A2 Windows builds of the proxy tests and `src-tauri` in
-both Windows checks (SB-406 item 7), A3 SB-416 at its cause (an injectable clock): building.
+both Windows checks (SB-406 item 7), A3 SB-416 at its cause (an injectable clock): in review (PR #817).
 Then A4 and A5 (29 wall-time assertions to paused time, a nightly stress run under load), A6
 golden answers for every read surface on the CLI and MCP.
 
@@ -125,11 +125,11 @@ prepared to the last step a person must take and named with its link.
 
 | Wave | Items | State |
 |---|---|---|
-| W0 | in flight before this plan: PR #815 (SB-414, SB-408), 0.7.115 with SB-410 and SB-415 | in progress |
-| W1 | W1.1, W1.2 building; W1.3 to W1.5 next | in progress |
+| W0 | in flight before this plan: PR #815 (SB-414, SB-408), 0.7.115 with SB-410 and SB-415 | done: #815 `737e070d` and #816 `f5e2c77e` merged, 0.7.115 cut (release PR #820 `48cacbe5`, tag `v0.7.115`; its release run was in progress at 19:15 UTC, no GitHub release yet); AGENTS.md R33 O10 merged (#819 `942e9a59`) |
+| W1 | W1.1 in review (PR #818, SB-417); W1.2 building; W1.3 to W1.5 next | in progress |
 | W2 | devices of an organization | planned |
-| W3 | A1 to A3 building | in progress |
+| W3 | A1 to A3 in review (PR #817) | in progress |
 | W4 | structure | planned |
 | W5 | Fabric Sessions | planned |
-| W6 | docs and board | done on branch `target-state` (2026-11-17), not merged: SPEC §2, §5, §6, §8, §9, §14 against CONTRACTS and DEC-0002, DEC-0008; DEC-0007 amended for SB-171 and the `suggest.rs` module doc; DEC-0012 status; DEC-0018 and DEC-0020 written; the group dialog note, the organization badge's hint and ORGANIZATION.md (and its Russian twin) against DEC-0022; the terminal hook notice points to Settings; SCN-096 and SCN-097 in the index; 15 board rows brought up to their PRs and releases. Left as findings: the MCP server instructions (`crates/switchboard-cli/src/mcp.rs` `INSTRUCTIONS`) and the onboarding sentence (`crates/switchboard-runtime/src/onboarding.rs:215`) still say a repository a group's agents work in joins it (text output, not changed here) |
+| W6 | docs and board | done on branch `target-state` (2026-11-17), not merged (no PR yet): SPEC §2, §5, §6, §8, §9, §14 against CONTRACTS and DEC-0002, DEC-0008; DEC-0007 amended for SB-171 and the `suggest.rs` module doc; DEC-0012 status; DEC-0018 and DEC-0020 written; the group dialog note, the organization badge's hint and ORGANIZATION.md (and its Russian twin) against DEC-0022; the terminal hook notice points to Settings; SCN-096 and SCN-097 in the index; 17 board rows brought up to their PRs and release tags (SB-243, SB-352, SB-357, SB-367, SB-385, SB-391, SB-401, SB-403 to SB-405, SB-407, SB-408, SB-410, SB-411, SB-413 to SB-415), SB-414 with PR #815's review round 4 follow-ups; duty officer comments cite DEC-0021. Left as findings: the MCP server instructions (`crates/switchboard-cli/src/mcp.rs` `INSTRUCTIONS`) and the onboarding sentence (`crates/switchboard-runtime/src/onboarding.rs:215`) still say a repository a group's agents work in joins it (text output, not changed here) |
 | W7 | acceptance by the person | planned |
