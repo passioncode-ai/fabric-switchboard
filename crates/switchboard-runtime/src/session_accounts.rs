@@ -46,6 +46,12 @@ impl Accounts for Homes<'_> {
                 found.insert(pid, launch);
             }
         }
+        // SB-400: a session host's own pid names its launch, so a hosted continue (no home of
+        // its own) is found through its process's ancestors (R4 review).
+        #[cfg(unix)]
+        for (launch, pid) in crate::session_host::live_hosts(self.root) {
+            found.entry(pid).or_insert(launch);
+        }
         found
     }
     fn open_terminal(&self, script: &Path) -> Result<(), String> {

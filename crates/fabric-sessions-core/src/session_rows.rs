@@ -63,6 +63,24 @@ fn row(group: &str, why: &str, id: String, fields: Value, acts: Vec<&str>) -> Va
     row
 }
 
+/// FD-291: how long after a stop its own transcript may still be written (the stop's error line,
+/// the hook) before a later write means the session was taken up again.
+pub const STOP_SLACK_SECONDS: i64 = 120;
+
+/// FD-291: a stop the session went past: its transcript was written after it, or its live process
+/// reports itself busy well after it (the limit reset and the same process went on).
+fn moved_on(s: &Value, now: Option<i64>) -> bool {
+    let Some(stopped) = s["stop"]["stopped_at"].as_i64() else {
+        return false;
+    };
+    let written = s["transcript_at"]
+        .as_i64()
+        .is_some_and(|at| at > stopped + STOP_SLACK_SECONDS);
+    let busy =
+        s["live"]["status"] == "busy" && now.is_some_and(|now| now > stopped + STOP_SLACK_SECONDS);
+    written || busy
+}
+
 pub fn build(sources: &Sources) -> Value {
     let tree = sources.tree;
     let findings: Vec<&Value> = tree["findings"]
@@ -98,10 +116,13 @@ pub fn build(sources: &Sources) -> Value {
         .flatten()
         .filter(|s| s["stop"]["state"] == "waiting")
         .collect();
+    let now = tree["observed_at"].as_i64();
+    // FD-291: a live session past its stop is running again, not waiting.
     let stopped_live: HashMap<&str, &Value> = stops
         .iter()
         .filter_map(|s| s["stop"]["session"].as_str().map(|id| (id, *s)))
         .filter(|(id, _)| live_sessions.contains(id))
+        .filter(|(_, s)| !moved_on(s, now))
         .collect();
     let mut listed: HashSet<String> = live_sessions.iter().map(|s| (*s).to_owned()).collect();
 
@@ -166,11 +187,20 @@ pub fn build(sources: &Sources) -> Value {
         if !listed.insert(session.to_owned()) {
             continue;
         }
-        let (group, why, acts) = if s["ready"] == true {
-            ("needs_you", "ready_to_continue", vec!["continue"])
-        } else {
-            ("waiting", "limit", Vec::new())
-        };
+        // FD-291: a stop is taken up only from a transcript still where it stopped; one with no
+        // transcript in any folder cannot be continued, and one whose session went past it ended
+        // somewhere else and is continued as itself.
+        let claude = stop["provider"] == "claude";
+        let (group, why, acts) =
+            if claude && s.get("transcript_at").is_some() && s["transcript_at"].is_null() {
+                ("ended", "no_transcript", Vec::new())
+            } else if moved_on(s, now) {
+                ("ended", "moved_on", vec!["continue"])
+            } else if s["ready"] == true {
+                ("needs_you", "ready_to_continue", vec!["continue"])
+            } else {
+                ("waiting", "limit", Vec::new())
+            };
         rows.push(row(
             group,
             why,
@@ -223,6 +253,10 @@ pub fn build(sources: &Sources) -> Value {
         let Some(session) = r["session"].as_str() else {
             continue;
         };
+        // A restart wave's session that came back: nothing Switchboard closed is left (R3 review).
+        if r["reason"] == "restart_back" {
+            continue;
+        }
         if !listed.insert(session.to_owned()) {
             continue;
         }
@@ -528,6 +562,79 @@ mod tests {
                 json!({"until": 5000})
             )
         );
+    }
+
+    #[test]
+    fn a_stop_the_session_went_past_or_whose_transcript_is_gone_is_not_waiting() {
+        // FD-291, read on 2026-11-16: live processes working again after their limit stop read
+        // `waiting`, and stops with no transcript anywhere read `ready_to_continue`.
+        let stop = |event: &str, session: &str, ready: bool, at: Value, live: Value| {
+            json!({"ready": ready, "probe_at": 2000, "transcript_at": at, "live": live,
+                   "stop": {"state": "waiting", "event": event, "provider": "claude", "directory": "/w/x",
+                            "session": session, "account": "A1", "pool": "default", "stopped_at": 600}})
+        };
+        let answer = rows(&json!({"sessions": [
+            // Live in pid 14, busy well after its stop (the transcript stamp is within the slack).
+            stop("E1", "S3", false, json!(610), json!({"pid": 14, "status": "busy"})),
+            stop("E2", "S20", true, Value::Null, Value::Null),
+            stop("E3", "S21", true, json!(800), Value::Null),
+            stop("E4", "S22", true, json!(650), Value::Null),
+        ]}));
+        let by = |id: &str| {
+            answer["rows"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|r| r["id"] == id)
+                .cloned()
+                .unwrap()
+        };
+        assert_eq!(
+            (by("pid:14")["group"].clone(), by("pid:14")["why"].clone()),
+            (json!("running"), json!("working"))
+        );
+        assert!(by("pid:14")["probe_at"].is_null());
+        assert_eq!(
+            (
+                by("stop:E2")["group"].clone(),
+                by("stop:E2")["why"].clone(),
+                by("stop:E2")["acts"].clone()
+            ),
+            (json!("ended"), json!("no_transcript"), json!([]))
+        );
+        assert_eq!(
+            (
+                by("stop:E3")["group"].clone(),
+                by("stop:E3")["why"].clone(),
+                by("stop:E3")["acts"].clone()
+            ),
+            (json!("ended"), json!("moved_on"), json!(["continue"]))
+        );
+        assert_eq!(by("stop:E4")["why"], "ready_to_continue");
+    }
+
+    #[test]
+    fn a_restart_session_that_came_back_leaves_no_ended_row() {
+        let labels = HashMap::new();
+        let resumable = [
+            json!({"session": "S40", "reason": "restart_back", "cwd": "/w/r", "at": 900}),
+            json!({"session": "S41", "reason": "restart", "cwd": "/w/q", "at": 900}),
+        ];
+        let answer = build(&Sources {
+            tree: &json!({"observed_at": 1000, "live": [], "launches": [], "findings": []}),
+            recovery: &json!({"sessions": []}),
+            labels: &labels,
+            attachable: &HashSet::new(),
+            resumable: &resumable,
+            monitors: &HashMap::new(),
+        });
+        let ids: Vec<&str> = answer["rows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|r| r["id"].as_str())
+            .collect();
+        assert_eq!(ids, vec!["closed:S41"]);
     }
 
     #[test]

@@ -3373,11 +3373,26 @@ a restart after the last process exited is refused. Any other session is stopped
 stops it and resumed in a Terminal window from `restarts/<wave>/<session>/resume.command`. `back`:
 a process other than the old one holds the session id; not back five minutes after the end:
 `failed: not_back`. The caller restarts last (the others settled, or 15 minutes after `apply`) with
-a prompt naming the wave and is `continuing` once its transcript is written after the resume. A
-session still mid-turn a day after `apply` is `skipped: still_busy`. Scripts are removed once their
-session is settled. The duty officer leaves a session in a running wave alone. Log event
+a prompt naming the wave and is `continuing` once its transcript is written after its end. The plan
+and `apply` answer `caller_restarts`: false when the caller's own session is skipped, with the
+warning `WARNING_CALLER_STAYS` (keep working; the wave does not resume it) instead of `WARNING`. A
+session still mid-turn a day after `apply` is `skipped: still_busy`; one that runs in another process
+than the plan's before its turn is `skipped: changed_since_plan`, never signalled (round 3). Each act
+reads its session again just before it ends it (still the plan's pid, still between turns), and the
+wave's lock is let go for the act and the wave read again after it, so a cancel or a status read is
+not held behind it. A host that took the request but gave no clear answer leaves the session
+`resuming` (its return decides); one an owner's quit cut in a Terminal window gets 60 s to start
+before another window opens. On Linux with no terminal (no `$TERMINAL`, no known emulator) a session
+that would come back in a new window is `cannot_resume`. Failed reasons: `not_back`, `gone` (it ended
+before its turn), `cannot_resume`, `not_written`, `host_refused`, `host_gone`, `still_running`,
+`not_started`. Scripts are removed once the wave is done or their session's end is older than five
+minutes. A session the wave ended in a Terminal window and that came back gets a `resumable.jsonl`
+line `reason: restart_back`, so a later close by the person never reads as ended by the restart. The
+duty officer leaves a session in a running wave alone. Log event
 `restart_wave` (`phase` `started` or `done`, counts). `SessionsRestartStatus {wave}`,
-`SessionsRestartCancel {wave}` (pending sessions `cancelled`). Tests: `restarts::tests`,
+`SessionsRestartCancel {wave}` answers `{wave, cancelled}`: pending sessions `cancelled`; one already
+`ending` or `resuming` finishes its restart and the wave stays open for it. The status answer's
+`counts` include `ending`. `apply` needs the owner (`RESTART_NEEDS_OWNER`: its watch runs the wave). Tests: `restarts::tests`,
 `session_host::tests::a_restart_in_place_keeps_the_viewers_and_runs_the_next_program_on_the_same_terminal`,
 `an_end_wins_over_a_restart_and_a_restart_after_the_end_is_refused`.
 
@@ -3385,21 +3400,33 @@ session is settled. The duty officer leaves a session in a running wave alone. L
 1000 lines, ids and paths only; every append under an exclusive lock on `resumable.lock`, 0600,
 because the owner and each session host write it, SB-397 W0.2) gets one line per end Switchboard
 causes: the duty officer's close
-(`{session, config, cwd, reason, at, by: duty}`) and a session host's idle close (`{session,
-launch_id, reason: host_idle, at, by: host}`). `Operation::SessionContinue {session_id}` (CLI
+(`{session, config, cwd, reason, at, by: duty}`), a session host's idle close (`{session,
+launch_id, reason: host_idle, at, by: host}`) and a restart wave's end in a Terminal window
+(`{session, config, cwd, reason: restart, at, by: wave}`, then `reason: restart_back` once it is back). `Operation::SessionContinue {session_id}` (CLI
 `sessions continue <id>`, MCP `switchboard_session_continue`, the window's `session_continue`)
 locates the session (`resumable::locate`: the newest line with its config folder, else the launch
 record naming it as `provider_session_id`, its home or the person's Claude folder, else a limit stop
 in the person's folder) and resumes it as itself: `duty::resume_script_for` writes
 `<data>/duty/continue-<id>.command` (`claude --resume <id>` in its folder, `CLAUDE_CONFIG_DIR` its
 config folder when it is not the person's, the prompt `resumable::CONTINUE_PROMPT`) and opens it in a
-Terminal window. Refused with `LIVE` while a process holds the session
+Terminal window. SB-400: `--in-place` (CLI only) writes the same script and runs it in the calling
+terminal; with `--hosted` the session runs under a launch of its own (`launches::record_resume`: the
+record in `launches/` only, `mode: resume`, `provider_session_id`, the `launched_by` of the caller and
+its `--surface`; the person's Claude folder is never written) in a session host the command attaches
+to, its script exporting `SWITCHBOARD_LAUNCH_ID` after its `unset` line so its hooks report to it.
+The operation carries `in_place` and `hosted` only when true, so a plain continue still reaches an
+owner of 0.7.109. Refused with `LIVE` while a process holds the session
 (`machine_sessions::live_sessions`), `UNKNOWN` without a record, `NO_FOLDER` and `NO_TRANSCRIPT`
 when its folder or `<config>/projects/<folder>/<id>.jsonl` is gone: never a fresh session in its
 place. On the Sessions page (SP-2) a session is one row: a live process with a waiting stop is
 `waiting` (`limit`, with `probe_at`) and no stop row; a ready stop not live, an ended Claude launch
 with its session id and every ledger line carry `continue` (ledger rows read `closed_idle`,
-`closed_idle_window`, `closed_duplicate`, `closed_stuck`); `ended` written as a word by an older path
+`closed_idle_window`, `closed_duplicate`, `closed_stuck`, `closed_restart`; a `restart_back` line hides
+its session's ledger row). FD-291: each open stop carries `transcript_at`, the newest write of its
+transcript in any config folder it may live in (`machine_sessions::transcript_at`); a live session
+whose transcript was written more than 120 s after its stop, or whose process is `busy` 120 s after
+it, is `running`, not waiting; a stop row with `transcript_at` null is `ended: no_transcript` (no
+act), and one written past its stop is `ended: moved_on` with `continue`; `ended` written as a word by an older path
 (`"limit"`, `"not_started"`) reads as that word (D11). Tests `resumable::tests::*`,
 `session_rows::tests::one_row_per_session_and_every_ended_one_can_be_continued_as_itself`.
 
@@ -3433,8 +3460,8 @@ renews it with the claim. While it holds, `monitors::holds` is true whatever the
 time, so the duty officer, a duplicate close and a session host's idle close leave it alone, and a
 restart wave skips it; rows show it as `{until, held: true}`. A hook that writes later keeps it.
 Test: `monitors::tests::a_hold_keeps_its_session_until_its_end_and_is_released_with_zero` (and below).
-`--reason <slug>` (0.7.110; Fabric passes `fabric_claim`): one short word (lowercase letters,
-digits, underscores, at most 40), echoed as `reason` in the answer and logged as the
+`--reason <slug>` (0.7.110; Fabric passes `fabric_claim`): one short word (a lowercase letter first, then
+lowercase letters, digits, underscores, at most 40), echoed as `reason` in the answer and logged as the
 `monitor_hold` event's code (`fabric_claim`, `other` for any other word, `none` without one); the
 file does not keep it. The file's reader no longer refuses fields it does not know, so a field a
 later version adds never hides a hold from a session host of an earlier one (hosts outlive

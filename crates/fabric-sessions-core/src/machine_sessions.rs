@@ -234,6 +234,28 @@ pub fn session_last_write(config: &Path, cwd: &str, session: &str) -> Option<i64
     newest
 }
 
+/// FD-291: the newest write of a session's transcript in any config folder Claude Code may have
+/// run it in (the person's `~/.claude` and each home an app launches sessions in), or `None` when
+/// no folder holds it. A stop whose transcript was written after it was taken up again.
+pub fn transcript_at(accounts: &dyn Accounts, cwd: &str, session: &str) -> Option<i64> {
+    // Beside the transcript roots: the app's terminal homes (an organization's terminal writes
+    // its transcripts there) and the folder `CLAUDE_CONFIG_DIR` names (R4 review).
+    let mut configs: Vec<PathBuf> = transcript_roots(accounts)
+        .iter()
+        .filter_map(|projects| projects.parent().map(Path::to_path_buf))
+        .collect();
+    configs.extend(accounts.shell_homes());
+    configs.extend(
+        std::env::var_os("CLAUDE_CONFIG_DIR")
+            .filter(|d| !d.is_empty())
+            .map(PathBuf::from),
+    );
+    configs
+        .iter()
+        .filter_map(|config| session_last_write(config, cwd, session))
+        .max()
+}
+
 /// SB-384: the executables of a process's ancestors, nearest first, at most eight.
 #[cfg(target_os = "macos")]
 pub fn ancestor_paths(pid: u32) -> Vec<String> {
@@ -581,6 +603,26 @@ mod tests {
             agent_of("/Applications/Claude.app/Contents/MacOS/Claude"),
             None
         );
+    }
+
+    #[test]
+    fn a_transcript_is_found_in_any_home_and_its_newest_write_wins() {
+        struct Home(PathBuf);
+        impl Accounts for Home {
+            fn launched_homes(&self) -> Vec<PathBuf> {
+                vec![self.0.clone()]
+            }
+        }
+        let home = tempfile::tempdir().unwrap();
+        let accounts = Home(home.path().to_owned());
+        assert_eq!(transcript_at(&accounts, "/w/f", "S-none"), None);
+        let dir = home.path().join("projects").join(projects_dir_name("/w/f"));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("S1.jsonl"), b"{}").unwrap();
+        let at = transcript_at(&accounts, "/w/f", "S1").expect("found in the launched home");
+        assert!(at > 1_700_000_000);
+        // Another folder's transcript of the same id is not this session's.
+        assert_eq!(transcript_at(&accounts, "/w/g", "S1"), None);
     }
 
     #[test]

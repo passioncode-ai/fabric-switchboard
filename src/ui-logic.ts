@@ -2013,6 +2013,9 @@ export function sessionWhyText(row: Pick<SessionRow, 'why' | 'quiet_minutes' | '
     case 'closed_duplicate': return t('Closed as a second copy');
     case 'closed_stuck': return t('Closed after it stopped making progress');
     case 'closed_restart': return t('Ended by a restart and not back, can continue');
+    // FD-291: a stop the session went past, and one whose history no folder holds any more.
+    case 'moved_on': return t('Went on after its limit stop and ended, can continue');
+    case 'no_transcript': return t('Stopped on a limit, its history is gone');
     case 'not_started': return t('Did not start');
     case 'exited': case 'ended': return t('Ended');
     case 'stopped': return t('Stopped');
@@ -2073,6 +2076,7 @@ function restartFailureText(reason: string | null): string {
     case 'host_refused': case 'host_gone': return t('Not back: its window could not restart it');
     case 'not_started': case 'not_written': return t('Not back: the Terminal window did not open');
     case 'cannot_resume': return t('Not back: its folder or history is gone');
+    case 'gone': return t('Not back: it ended before its turn did');
     default: return t('Not back');
   }
 }
