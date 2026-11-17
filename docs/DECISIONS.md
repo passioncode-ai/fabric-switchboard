@@ -6,7 +6,7 @@ never renumber, never delete. The doc map ([DOCMAP.md](DOCMAP.md)) names this fi
 register. Decisions made before 2026-11-08 live where they were made (plans' `D-<n>`, board rows,
 research notes); the ones still in force that the board cites are seeded below with their source.
 
-**Next free ID:** `DEC-0022` (`DEC-0018` and `DEC-0020` are held for the window and fleet plan's modules)
+**Next free ID:** `DEC-0023` (`DEC-0018` and `DEC-0020` are held for the window and fleet plan's modules)
 
 ## Format
 
@@ -407,3 +407,43 @@ research notes); the ones still in force that the board cites are seeded below w
   смотрит, не стоят ли они … закрыть предыдущую сессию и переоткрыть ее в новом сессии … сессий,
   которые … висят больше … 2-3-4 часов … просим ее остановиться, перезагружаем и продолжаем … если
   сессия уже закончила работа, она все еще висит, мы ее уводим»).
+
+### DEC-0022: Claude API keys go to a pay-per-token group that starts off and runs only under a daily ceiling
+
+- **Date:** 2026-11-17
+- **Status:** Accepted (built on branch `token-group`: SB-401; plan
+  [2026-11-17-token-group](plans/2026-11-17-token-group/README.md))
+- **Context:** a Claude API key is charged per token and has no limit of its own in Switchboard;
+  in the default group every folder in no group ran on it. The operator, 2026-11-17: «Такие сессии
+  за токены они сразу добавляются в отдельную папку, в которой нету никаких проектов … Изначально
+  она выключена. И обязательно, когда при включении контролируем usage».
+- **Decision:**
+  - D-1: one reserved group, made on first need with the `tokens` flag (pool `tokens`, or the
+    first free `tokens-<n>`), named *Pay-per-token keys*. It may hold no folder and holds only
+    Claude API-key accounts.
+  - D-2: a Claude API key added to the default group (or to `tokens` before the group exists)
+    lands there; an explicit other group is still allowed; existing keys stay where they are.
+  - D-3: the group starts off. A group switched off routes no folder (bindings), and the proxy,
+    launches and the fallback refuse its accounts; nothing joins the pay-per-token group by itself
+    (sources, found worktrees, settings import), and it is not deleted while it holds a key.
+  - D-4: turning it on needs a daily ceiling (`spend.json`, scope `project:<pool>`, no OpenRouter
+    key of the group's own needed). The proxy checks it before every request a key of the group
+    serves, against its own day counter (never drained, seeded at owner start from
+    `statistics.json`); reached, it refuses and the owner opens the ceiling's question once per
+    group and UTC day.
+  - D-5: money is Anthropic's list price of the tokens each answer reports (`prices.rs`, source
+    and read date beside the table); an unknown model, an answer with no model, or counts that
+    were cut are priced at the dearest family and marked estimated, never free.
+  - D-6: folders join the group one by one, by the person.
+  - D-7 (review, 2026-11-17): a key of the pay-per-token group never leaves it nor serves another
+    group: no share, no loan (balancing never names the group), no move by a save or a restore;
+    the person removes the account to take it out. A key launches only in managed mode (an
+    isolated home would hold its credential and reach the provider past the ceiling). The proxy
+    also checks the chosen account's home group after route selection and before an SB-98 move.
+  - D-8 (review): the proxy fails closed: an unreadable store refuses (`STORE_UNREADABLE`), an
+    unreadable `spend.json` is no ceiling, and the day counter takes over a poisoned lock rather
+    than read as zero.
+- **Consequences:** a key in the default group from before stays there (naming it under Needs
+  attention is still open, see the plan); turning a group off stops its sessions at their next request; the reached question
+  is the same one paid hand-overs use, and *Double* raises the ceiling at once.
+

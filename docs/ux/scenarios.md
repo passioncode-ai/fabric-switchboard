@@ -104,6 +104,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 | SCN-095 | Follow every coding session on this computer and what the watch found | draft |
 | SCN-098 | See and manage every session here and on other machines on one page | draft |
 | SCN-099 | Restart every running session so it loads new skills, and watch each come back | draft |
+| SCN-100 | Run Claude Code on an API key only in the folders I choose, under a daily ceiling | draft |
 ### SCN-001: First run
 **Persona:** P-01
 **Goal:** Deliberately control which account a coding session uses.
@@ -901,26 +902,27 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Product:** unobserved
 **Traces:** SB-76, SB-66, RM-25 (fabric-workspace roadmap), L10N-01…06
 
-### SCN-042: Delete a group or remove a rule only after confirming
+### SCN-042: Delete or turn off a group, or remove a rule, only after confirming
 
 **Persona:** P-01
 **Goal:** Never lose a project or a project rule to a stray click.
 **Preconditions:** at least one group or rule (Groups screen).
-**Entry point:** Groups → a group's *Delete*, or a rule's *Remove*.
+**Entry point:** Groups → a group's *Delete* or *Turn off…*, or a rule's *Remove*.
 **Steps:**
+0. Press *Turn off…* in a group's menu → a dialog “Turn off {name}?” says what happens: “Sessions in its folders stop being served: each request gets a refusal until you turn the group on again. Its accounts and folders stay.”, with *Cancel* (focused) and *Turn off* (danger) → “{name} is off.”; the card shows the badge *Switched off* and the line “Switched off: no folder runs on this group's accounts while it is off. Turn it on from its menu.” *Turn on* in the same menu needs no confirmation (SB-401).
 1. Press *Delete* on a group → a dialog “Delete group?” says what happens: “Delete “{name}”. Its accounts stay saved and are no longer reserved for it; sessions in its folders use the usual selection again.”, with *Cancel* (focused) and *Delete group*.
 2. Press *Delete group* → the group goes; notice “Group “{name}” deleted. Its accounts stay saved and are no longer reserved for it.” (0.6.82, D-1: no pool id in the sentence.)
 3. Press *Remove* on a rule → “Remove rule?”: “Remove the {provider} rule for {path}. Sessions there use the usual selection again. To stop it for a while, pause it instead.”, with *Cancel* (focused) and *Remove rule* → “Rule removed.”
 **Alt paths:** *Cancel* or Escape closes the dialog and changes nothing; a refusal from the backend stays in the dialog with its text, the dialog open.
 **Expected result:** a group or rule disappears only after the second, explicit press; *Pause* stays the one-step reversible choice for a rule.
-**UI elements:** dialogs “Delete group?” / “Remove rule?”, buttons *Delete group*, *Remove rule* (danger), *Cancel*.
+**UI elements:** dialogs “Turn off {name}?” / “Delete group?” / “Remove rule?”, buttons *Turn off*, *Delete group*, *Remove rule* (danger), *Cancel*.
 **States covered:** asking, cancelled, deleted / removed, refused (error in the dialog).
 **Errors & recovery:** the dialog keeps the error and the person can retry or cancel.
 **Status:** draft
 **Meaning:** UX audit 2026-10-06 (SB-69): both acted on one click while removing an account asked first.
-**Coverage:** demo walk-through 2026-10-07 (Russian: project created, *Delete* asked, deleted; rule *Remove* asked); `deleteProjectDialog`, `removeRuleDialog` in src/main.ts.
+**Coverage:** demo walk-through 2026-10-07 (Russian: project created, *Delete* asked, deleted; rule *Remove* asked); `deleteProjectDialog`, `removeRuleDialog`, `turnOffDialog` (SB-401) in src/main.ts.
 **Product:** unobserved
-**Traces:** SB-69, SCN-034
+**Traces:** SB-69, SCN-034, SB-401
 
 ### SCN-043: Recover when a read or a refresh after an action fails
 
@@ -2156,3 +2158,28 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Coverage:** `restarts::tests::*`, `session_host::tests::a_restart_in_place_*`, `test-ui-logic` restart state texts; WebKit demo (`?demo=1`, Sessions → *Restart all sessions…*).
 **Product:** unobserved
 **Traces:** SB-397, SCN-098, SB-342
+
+### SCN-100: Run Claude Code on an API key only in the folders I choose, under a daily ceiling
+**Persona:** P-01
+**Goal:** A Claude key charged per token never spends by accident: it runs only in folders the person added, only while its group is on, and never past the day's ceiling.
+**Preconditions:** the window runs; the person has a Claude API key.
+**Entry point:** Accounts → *+ Add account* → *Add an API key or token* (provider Claude Code, type API key); then Groups → *Pay-per-token keys*. An agent: CLI `switchboard accounts add --kind api-key`, `switchboard ceiling set --scope project:tokens`, `switchboard project switch --pool tokens on`; MCP `switchboard_ceiling_set`, `switchboard_project_switch`.
+**Steps:**
+1. In the add dialog the form note says “A Claude API key left in the default group goes to the pay-per-token group, which starts off. Turn it on there with a daily ceiling.” *Add account* → “Added to Pay-per-token keys. Turn it on there with a daily ceiling.”
+2. Groups shows the card *Pay-per-token keys* with the badge *Switched off*, the note “Claude API keys, charged per token. Folders join only when you add them, and the group runs only while it is on, under its daily ceiling.”, no folder, and under *Spending* “No daily ceiling. Set one before you turn this group on.” with *Set a daily ceiling…*.
+3. Its menu → *Add folder…* → the folder picker; each folder chosen joins (“Added {n} folders to {name}.”). Nothing joins by itself: no worktree, clone, source or settings file adds one.
+4. *Daily ceiling…* (or *Set a daily ceiling…*) → “Daily ceiling for Pay-per-token keys” with “Counts this group's Claude keys at Anthropic's list price, per UTC day. When it is reached, the group serves no request until the next day.” and the field note “From $0.01 to $1,000. Turn the group on once it is set.” → saved.
+5. Its menu → *Turn on* → “{name} is on.”; sessions in its folders run on its keys through Switchboard. *Spending* reads “{spent} of {usd} spent today”, at the list price (“A price marked ≈ is an estimate.”); Statistics show the same as *List price* per row.
+6. When today's spend reaches the ceiling, the next request of the group is refused with “The pay-per-token group reached its daily spending ceiling. Raise it in Switchboard, or wait for the next UTC day.”; the card reads “Ceiling reached: {spent} of {usd} today. …”, and Groups and Agents show the question “Pay-per-token keys's daily ceiling of {usd} is reached.” with “Reached {time}. This group serves no request until the next UTC day, unless you double the ceiling.” and *Double to {usd}* / *Keep {usd}*.
+**Alt paths:** *Turn on* with no ceiling opens the ceiling dialog first (the backend refuses with “Set a daily spending ceiling for the pay-per-token group first: …”); *Turn off…* asks first (SCN-042); a session in a folder of the group while it is off is refused with “This group is switched off in Switchboard, so it serves no request. …”; launching a key in an isolated home is refused with “A pay-per-token key runs only through Switchboard, where its daily ceiling is checked. Launch it in managed mode.”; adding the key to another group, sharing it, or saving the group without it is refused with “A key in the pay-per-token group stays there, under its daily ceiling, and serves no other group. Remove the account to take it out.”; its edit dialog lists only Claude API keys and allows no folder (“Add the folders whose sessions may run on these keys, one by one. With no folder, nothing runs on them.”).
+**Expected result:** the key spends only in the folders the person added, only while the group is on, and never past the day's ceiling at the list price.
+**UI elements:** the add dialog's note and notice; the group card's badge, note, *Spending* part and menu (*Edit*, *Add folder…*, *Daily ceiling…*, *Turn on* / *Turn off…*, *Delete*); the ceiling dialog; the reached question; Statistics' *List price* column.
+**States covered:** off with no ceiling, off with a ceiling, on, spend not read, reached, question kept or doubled, refused (each refusal above).
+**Errors & recovery:** an unreadable store refuses the request (“Switchboard could not read its accounts. Retry in a moment.”), an unreadable `spend.json` is no ceiling; a restart keeps the day's spend (seeded from `statistics.json`).
+**Status:** draft
+**Meaning:** SB-401, DEC-0022 (operator 2026-11-17: «Такие сессии за токены они сразу добавляются в отдельную папку, в которой нету никаких проектов … Изначально она выключена. И обязательно, когда при включении контролируем usage»).
+**Copy:** checked with Copylot, register ui; report ids in [strings](../brand/strings.md).
+**Coverage:** `tests::the_pay_per_token_group_serves_nothing_while_off_or_without_a_ceiling`, `tests::a_reached_ceiling_refuses_even_after_the_owner_took_the_statistics_and_after_a_restart` (switchboard-proxy); `a_pay_per_token_key_stays_in_its_group_and_serves_no_other` (core); `tokens_group_tests::*` (runtime); `test-ui-logic` SB-401 block. Window walk-through: NOT_RUN (no display session in this run).
+**Product:** unobserved
+**Traces:** SB-401, SCN-042, SCN-083, SB-72
+

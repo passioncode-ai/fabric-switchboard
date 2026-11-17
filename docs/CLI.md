@@ -23,6 +23,7 @@ A refusal prints the sentence the window shows for it (SB-189): what happened an
 ```sh
 switchboard accounts list
 switchboard accounts add --provider claude --kind api-key --label Work --pool work --secret-stdin < /private/path/to/credential
+# SB-401: a Claude API key added without --pool (or to default) lands in the pay-per-token group, which starts off
 switchboard accounts select ACCOUNT_UUID --provider claude --pool work
 switchboard accounts update ACCOUNT_UUID --label Work                  # or --enabled false, or both
 switchboard accounts update ACCOUNT_UUID --elsewhere true              # used on another machine: never renewed, rotated to or switched to here (SB-175); false: used here again
@@ -521,6 +522,9 @@ switchboard project map [--under ~/DATA]   # SB-135: Git repositories on disk, e
 switchboard project move-root --folder /work/bot --pool client-beta   # SB-135: a repository with its worktrees and clones into another group, in one step
 switchboard project move-root --folder /work/bot --pool tools --also   # SB-146: into one more group; it stays in its others (--from <group> picks the one it leaves)
 switchboard project delete --pool client-alpha  # its accounts go back to the default group (SB-314)
+switchboard project switch --pool client-alpha off   # SB-401: no folder is routed to it and its accounts serve no request; `on` again
+switchboard ceiling set --scope project:tokens --usd 5 && switchboard project switch --pool tokens on   # SB-401: the pay-per-token group turns on only with a daily ceiling
+switchboard project edit --pool tokens --add-folder /work/paid   # SB-401: its folders are added one by one; nothing joins it by itself
 # a group holding a spending ceiling is deleted only in the window (its ceiling goes with it)
 switchboard project show --path /path/to/project
 switchboard project set --path /path/to/project --account ACCOUNT_UUID --expires-in-hours 8

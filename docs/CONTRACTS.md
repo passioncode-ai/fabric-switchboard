@@ -3571,3 +3571,75 @@ the item offered *Close the quiet copy* and the press was refused. Tests
 quiet copy* on the item). Tests `duty::tests::a_person_closes_the_copy_quiet_longest_and_never_a_working_one`,
 `session_watch::tests::a_copy_of_a_live_session_a_quiet_board_run_and_a_vanished_launch_are_found`,
 `attention::tests::a_copy_of_a_live_session_and_a_quiet_board_run_come_first`.
+
+## Pay-per-token group (SB-401, DEC-0022)
+
+Plan: [2026-11-17-token-group](plans/2026-11-17-token-group/README.md); decision
+[DEC-0022](DECISIONS.md#dec-0022-claude-api-keys-go-to-a-pay-per-token-group-that-starts-off-and-runs-only-under-a-daily-ceiling).
+
+- **Store.** `Project` carries `tokens` (the reserved group of Claude API keys) and `off`
+  (switched off); both are absent from `accounts.json` when false, and the file is written at
+  schema 15 while either is set (a 0.7.110 or older reader refuses it rather than route folders to
+  a key). `Project::tokens_group(pool, at)` makes it empty and off, named `TOKENS_NAME`
+  (*Pay-per-token keys*); `Store::ensure_tokens_group` makes it once (pool `TOKENS_POOL`, or the
+  first free `tokens-<n>`) and answers its pool; `Snapshot::tokens_group` finds it by its flag.
+  `Store::set_group_off(pool, off)` switches any group; `Store::pool_flags(pool)` answers
+  `(off, tokens)` from the published state, an unreadable store an error.
+- **Validation** (`validate_projects`, every publish): only the pay-per-token group may hold no
+  folder; at most one exists; it holds Claude API-key accounts only (`TOKENS_ONLY_KEYS`) and no
+  `shared_accounts`; no group's `shared_accounts`, `default_shared` or `default_lent` names one of
+  its keys (`TOKENS_KEEPS_KEYS`). Every publish and hold also refuses a change that moves one of its
+  keys to another pool (`tokens_keys_stay`), so a save, a move, a loan or a restore cannot take a
+  key out; removing the account can. A save of the pay-per-token group moves a listed key in and
+  never shares it; sources are refused (`TOKENS_BY_HAND`); deleting it is refused while it holds a
+  key (`TOKENS_KEEPS_KEYS`). `set_shared` (balancing) answers false for its keys, and
+  `restore_account_pool` and `restore_shared_accounts` leave them.
+- **Adding a key.** `Operation::Add` with a Claude API key and pool `default`, or pool `tokens`
+  while no such group exists, makes the group and adds the key there.
+- **Switch.** `Operation::GroupSwitch { pool, on }` (CLI `switchboard project switch --pool <id>
+  on|off`, MCP `switchboard_project_switch {pool, on}`, Tauri `project_switch`) answers the group.
+  Turning the pay-per-token group on without a daily ceiling is refused with `TOKENS_NO_CEILING`;
+  off is never refused. It is reported to analytics as a group change and has the 180 s control
+  timeout of the other group changes.
+- **A group switched off.** Its folders get no binding (`bindings::desired` skips it; the
+  bindings fingerprint covers `off` and `tokens`, so a switch re-runs the sync); its accounts are
+  no fallback candidate; a launch of one of its accounts is refused with `GROUP_OFF`
+  (`launch::group_allows_launch`, called by every Claude Code and Codex launch, a continuation, a
+  dispatch and a third-party agent).
+- **Launch of a pay-per-token key.** Managed mode only (`TOKENS_ISOLATED`: an isolated home would
+  hold the key and reach the provider past the ceiling), while the group is on and has a ceiling
+  (`TOKENS_NO_CEILING`; an unreadable `spend.json` is no ceiling).
+- **Proxy refusals**, each `403` with a `switchboard_error` body and never sent upstream, checked
+  for the route's pool before route selection, for the chosen account's home pool when it differs
+  (a shared or lent account), and for an SB-98 move's next account (a refused one is not moved
+  to): `GROUP_OFF` (the group is switched off), `TOKENS_NO_CEILING` (the pay-per-token group with
+  no daily ceiling in `spend.json`, or a file that cannot be read), `TOKENS_CEILING_REACHED` (its
+  spend today at the list price has reached the ceiling). A store that cannot be read answers
+  `503` `STORE_UNREADABLE`. The ceiling is read through `tokens::Ceilings`, kept per path while
+  the file's modification time, length and inode stay the same.
+- **The day counter.** `tokens::Spend` adds each priced answer to its account's home pool for the
+  UTC day of its end, saturating, and is never drained by `take_statistics`; the owner seeds it at
+  start with `Statistics::day_cost(today)` (`ProxyHandle::seed_spend`), so a restart forgets
+  nothing. `ProxyHandle::spent_today(pool)` reads it. A ceiling found reached is noted once per
+  pool and UTC day (`take_reached`); the owner's background pass opens the ceiling's question
+  (`spend::open_question_once_a_day`: not again that day once one of the scope was asked, answered
+  or not), logged as `tokens_ceiling_reached` with `asked`, `asked_today` or `unwritten`.
+- **Prices** (`switchboard-proxy/src/prices.rs`): Anthropic's list price per million tokens by
+  model family (base input, 5-minute and 1-hour cache writes, cache reads, output; Haiku 5.5 by
+  prompt size), from https://platform.claude.com/docs/en/about-claude/pricing read 2026-11-17. A
+  cache write the answer does not split is priced at the 1-hour rate. An unknown model, a Claude
+  answer naming no model, or counts that were cut (a line or a body past its bound, a stream ended
+  before its closing counts: an output of a token per four bytes at least) are priced at the
+  dearest family and marked estimated. An answer with no counts (`count_tokens`) costs nothing;
+  another provider's answers are not priced.
+- **Statistics.** Each tally adds `cost_micros` (micro-dollars) and `cost_estimated` (answers
+  priced as an estimate), both absent when zero, in `statistics.json` and in every row of
+  `Statistics`; the window shows them as *List price* (≈ when part is an estimate).
+- **Ceilings view.** The pay-per-token group's ceiling is `active` without an OpenRouter key of
+  the group's own (and `set_ceiling` accepts it), and carries `tokens: true`,
+  `spent_today_usd` (the proxy's day counter, or `statistics.json` when no owner runs) and
+  `reached`. Its question is the one `spend::answer` takes: *Keep* holds it for the day,
+  *Double* raises it at once.
+- **Balancing** never names the pay-per-token group (`balancing::pools`, `plan`).
+- **Not carried:** a settings file never carries the pay-per-token group, and the SB-117 scanner
+  finds no folder for it.
