@@ -845,11 +845,16 @@ impl Store {
             let next = candidate
                 .pool_accounts(&pool)
                 .into_iter()
+                // The usual checks of a selection: on, not given to an agent, not used elsewhere,
+                // and taken by the group's organizations.
                 .find(|b| {
                     b.id != left.id
                         && b.provider == left.provider
                         && b.kind == left.kind
                         && b.enabled
+                        && !candidate.is_assigned(&b.id)
+                        && !candidate.elsewhere.contains_key(&b.id)
+                        && candidate.context_admits(&pool, b)
                 })
                 .map(|b| b.id.clone());
             match next {

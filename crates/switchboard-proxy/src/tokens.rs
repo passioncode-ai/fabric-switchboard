@@ -3,11 +3,14 @@
 //! and the day's list-price spend the proxy counted itself (`Spend`, priced by `prices`).
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, MutexGuard};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex, MutexGuard};
 
 /// The pay-per-token group's spend today, written after every priced answer of its keys (0600):
 /// `{version: 1, day, pools: {pool: micro-dollars}}`.
 pub const SPEND_FILE: &str = "tokens-spend.json";
+/// Seconds between two tries of a failed spend file write.
+const RETRY: i64 = 5;
 /// What `statistics.json` may weigh at most (as the owner reads it).
 const STATISTICS_LIMIT: u64 = 8 * 1024 * 1024;
 
@@ -19,9 +22,21 @@ const STATISTICS_LIMIT: u64 = 8 * 1024 * 1024;
 #[derive(Default)]
 pub struct Spend {
     days: Mutex<Days>,
+    /// One write of `tokens-spend.json` at a time, the newest only (its sequence number).
+    writer: Mutex<u64>,
+    /// Writes handed to a blocking thread and not finished yet.
+    pending: AtomicUsize,
 }
 #[derive(Default)]
 struct Days {
+    /// The last write of `tokens-spend.json` failed: the day's spend is not on disk, so the
+    /// pay-per-token group serves no request until a write succeeds (retried at most every
+    /// `RETRY` seconds, at the check).
+    write_failed: bool,
+    retried_at: i64,
+    root: Option<PathBuf>,
+    /// The newest state of the file, by sequence number.
+    seq: u64,
     /// The UTC day whose spend could not be read at start (a file that exists and cannot be
     /// read): the pay-per-token group serves no request that day.
     unknown: Option<String>,
@@ -108,34 +123,99 @@ impl Spend {
     }
     /// Whether today's spend could not be read at start.
     pub fn unknown_today(&self, now: i64) -> bool {
-        self.days().unknown.as_deref() == Some(crate::stats::day_of(now).as_str())
-    }
-    /// Adds one answer's cost to `pool`'s day and writes the day of every pay-per-token pool to
-    /// `<root>/tokens-spend.json` (`root` given for a pay-per-token key's answer), under the
-    /// counter's lock so an older total never lands after a newer one.
-    pub fn add_and_write(&self, pool: &str, now: i64, micros: u64, root: Option<&Path>) {
-        let day = crate::stats::day_of(now);
-        let mut days = self.days();
-        Self::add_to(&mut days, pool, &day, micros);
-        let Some(root) = root else {
-            return;
+        let (failed, retry) = {
+            let mut days = self.days();
+            if days.unknown.as_deref() == Some(crate::stats::day_of(now).as_str()) {
+                return true;
+            }
+            let retry = days.write_failed && now - days.retried_at >= RETRY;
+            if retry {
+                days.retried_at = now;
+            }
+            (days.write_failed, retry)
         };
-        days.written.insert(pool.to_owned());
+        if retry {
+            // The check itself tries the write again; it serves only once one succeeded.
+            self.write_newest();
+            return self.days().write_failed;
+        }
+        failed
+    }
+    /// The day's spend of every pay-per-token pool as the file holds it, with its sequence.
+    fn body(days: &Days, day: &str) -> serde_json::Value {
         let pools: serde_json::Map<String, serde_json::Value> = days
             .written
             .iter()
             .filter_map(|p| {
                 days.pools
                     .get(p)
-                    .filter(|(d, _)| *d == day)
+                    .filter(|(d, _)| d == day)
                     .map(|(_, m)| (p.clone(), serde_json::json!(m)))
             })
             .collect();
-        let body = serde_json::json!({"version": 1, "day": day, "pools": pools});
-        let _ = switchboard_core::private_fs::private_write(
+        serde_json::json!({"version": 1, "day": day, "pools": pools})
+    }
+    /// Writes the newest state, unless a newer one was already written; a failure marks the day.
+    fn write_newest(&self) {
+        let mut written = self.writer.lock().unwrap_or_else(|p| p.into_inner());
+        let (seq, root, body) = {
+            let days = self.days();
+            let day = days
+                .pools
+                .values()
+                .map(|(d, _)| d.clone())
+                .max()
+                .unwrap_or_default();
+            (days.seq, days.root.clone(), Self::body(&days, &day))
+        };
+        let Some(root) = root else {
+            return;
+        };
+        if seq <= *written && !self.days().write_failed {
+            return;
+        }
+        let ok = switchboard_core::private_fs::private_write(
             &root.join(SPEND_FILE),
             body.to_string().as_bytes(),
-        );
+        )
+        .is_ok();
+        if ok {
+            *written = seq;
+        }
+        self.days().write_failed = !ok;
+    }
+    /// Writes still running on a blocking thread.
+    pub fn pending(&self) -> usize {
+        self.pending.load(Ordering::SeqCst)
+    }
+    /// Adds one answer's cost to `pool`'s day and, with `root` (a pay-per-token key's answer),
+    /// writes the day of every pay-per-token pool to `<root>/tokens-spend.json`. The write runs off
+    /// the counter's lock, on a blocking thread when a runtime runs, so a ceiling check never
+    /// waits on the disk; an older state never lands after a newer one.
+    pub fn add_and_write(self: &Arc<Self>, pool: &str, now: i64, micros: u64, root: Option<&Path>) {
+        let day = crate::stats::day_of(now);
+        {
+            let mut days = self.days();
+            Self::add_to(&mut days, pool, &day, micros);
+            let Some(root) = root else {
+                return;
+            };
+            days.written.insert(pool.to_owned());
+            days.root = Some(root.to_owned());
+            days.seq = days.seq.saturating_add(1);
+        }
+        let spend = Arc::clone(self);
+        self.pending.fetch_add(1, Ordering::SeqCst);
+        let job = move || {
+            spend.write_newest();
+            spend.pending.fetch_sub(1, Ordering::SeqCst);
+        };
+        match tokio::runtime::Handle::try_current() {
+            Ok(handle) => {
+                handle.spawn_blocking(job);
+            }
+            Err(_) => job(),
+        }
     }
     fn add_to(days: &mut Days, pool: &str, day: &str, micros: u64) {
         let entry = days
@@ -153,7 +233,8 @@ impl Spend {
     }
     /// Adds one answer's cost to `pool`'s day.
     pub fn add(&self, pool: &str, now: i64, micros: u64) {
-        self.add_and_write(pool, now, micros, None);
+        let day = crate::stats::day_of(now);
+        Self::add_to(&mut self.days(), pool, &day, micros);
     }
     /// What `pool`'s answers cost so far this UTC day.
     pub fn today(&self, pool: &str, now: i64) -> u64 {
@@ -253,7 +334,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let today = crate::stats::day_of(NOW);
         // Nothing on disk: nothing spent, nothing unknown.
-        let empty = Spend::load(root.path(), NOW);
+        let empty = Arc::new(Spend::load(root.path(), NOW));
         assert_eq!(
             (empty.today("tokens", NOW), empty.unknown_today(NOW)),
             (0, false)
@@ -299,6 +380,24 @@ mod tests {
         switchboard_core::private_fs::private_write(&root.path().join("statistics.json"), b"[1,")
             .unwrap();
         assert!(Spend::load(root.path(), NOW).unknown_today(NOW));
+    }
+
+    #[test]
+    fn a_spend_file_that_cannot_be_written_refuses_until_a_write_succeeds() {
+        let root = tempfile::tempdir().unwrap();
+        let spend = Arc::new(Spend::load(root.path(), NOW));
+        // A folder where the file should be: the write fails.
+        std::fs::create_dir(root.path().join(SPEND_FILE)).unwrap();
+        spend.add_and_write("tokens", NOW, 10, Some(root.path()));
+        assert!(spend.unknown_today(NOW));
+        // The next try is a retry interval later; it succeeds once the way is clear.
+        std::fs::remove_dir(root.path().join(SPEND_FILE)).unwrap();
+        assert!(
+            spend.unknown_today(NOW + 1),
+            "not retried before its interval"
+        );
+        assert!(!spend.unknown_today(NOW + RETRY + 1));
+        assert_eq!(Spend::load(root.path(), NOW).today("tokens", NOW), 10);
     }
 
     #[test]

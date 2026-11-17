@@ -457,14 +457,21 @@ impl ProxyHandle {
         let Some(mut task) = self.task.lock().ok().and_then(|mut t| t.take()) else {
             return true;
         };
-        match tokio::time::timeout(deadline, &mut task).await {
+        let stopped = match tokio::time::timeout(deadline, &mut task).await {
             Ok(_) => true,
             Err(_) => {
                 task.abort();
                 let _ = task.await;
                 false
             }
+        };
+        // SB-401: the pay-per-token spend of the last answers reaches its file before the owner
+        // goes (a write runs on a blocking thread; at most a second more).
+        let until = tokio::time::Instant::now() + Duration::from_secs(1);
+        while self.spend.pending() > 0 && tokio::time::Instant::now() < until {
+            tokio::time::sleep(Duration::from_millis(10)).await;
         }
+        stopped
     }
     pub async fn shutdown(self) {
         self.stop(Duration::from_secs(2)).await;

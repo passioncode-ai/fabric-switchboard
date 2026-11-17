@@ -1538,6 +1538,36 @@ pub(crate) fn serving_pool(
 /// SB-401: a pay-per-token key launched with its credential in the session's own home would
 /// reach the provider directly, past the daily ceiling the proxy checks.
 pub(crate) const TOKENS_ISOLATED: &str = "A pay-per-token key runs only through Switchboard, where its daily ceiling is checked. Launch it in managed mode.";
+/// SB-401: a Claude API key from before the pay-per-token group, outside it: no ceiling holds it.
+pub(crate) const KEY_OUTSIDE_TOKENS: &str = "This Claude API key is outside the pay-per-token group, so no daily ceiling holds it, and it never runs in a home of its own. Move it to the pay-per-token group, then launch it there.";
+/// SB-401: removes a Claude API key from its own home's `settings.json` (an isolated launch of
+/// 0.7.111 or older wrote it there): the key launches managed only now, through the proxy. The
+/// person's other settings stay. Answers how many homes changed.
+pub(crate) fn scrub_key_homes(root: &Path, snapshot: &switchboard_core::Snapshot) -> usize {
+    let mut changed = 0;
+    for account in snapshot
+        .accounts
+        .iter()
+        .filter(|a| switchboard_core::Snapshot::is_claude_key(a))
+    {
+        let path = root.join("homes").join(&account.id).join("settings.json");
+        let Ok(bytes) = switchboard_core::private_fs::read_private(&path, 1024 * 1024) else {
+            continue;
+        };
+        let Ok(mut settings) = serde_json::from_slice::<Value>(&bytes) else {
+            continue;
+        };
+        let removed = settings
+            .get_mut("env")
+            .and_then(Value::as_object_mut)
+            .and_then(|env| env.remove("ANTHROPIC_API_KEY"))
+            .is_some();
+        if removed && private_write(&path, settings.to_string().as_bytes(), false).is_ok() {
+            changed += 1;
+        }
+    }
+    changed
+}
 /// SB-401: an account of a group switched off starts nothing; a Claude API key, wherever it
 /// is, starts only in managed mode (its credential never lands in a session's home), and one in
 /// the pay-per-token group only while that group is on and has a daily ceiling. Fails closed: a
@@ -1549,7 +1579,15 @@ pub(crate) fn group_allows_launch(
     mode: &str,
 ) -> Result<(), String> {
     if switchboard_core::Snapshot::is_claude_key(account) && mode != "managed" {
-        return Err(TOKENS_ISOLATED.into());
+        let in_tokens = snapshot
+            .tokens_group()
+            .is_some_and(|g| g.pool == account.pool);
+        return Err(if in_tokens {
+            TOKENS_ISOLATED
+        } else {
+            KEY_OUTSIDE_TOKENS
+        }
+        .into());
     }
     let Some(group) = snapshot.project_of_pool(&account.pool) else {
         return Ok(());
@@ -5487,10 +5525,11 @@ mod tests {
         );
         let before = f.files();
         assert!(!f.launch(&proxy, &oauth, "isolated", &TEST_HOST).unwrap());
-        // SB-401: a Claude API key never lands in a session's own home: managed only.
+        // SB-401: a Claude API key never lands in a session's own home: managed only. One from
+        // before the pay-per-token group, outside it, is told so.
         assert_eq!(
             f.launch(&proxy, &api, "isolated", &TEST_HOST).unwrap_err(),
-            TOKENS_ISOLATED
+            KEY_OUTSIDE_TOKENS
         );
         assert!(!f
             .root

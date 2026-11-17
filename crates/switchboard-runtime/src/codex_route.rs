@@ -30,11 +30,12 @@ pub(crate) fn folders(snapshot: &switchboard_core::Snapshot) -> Vec<(String, Str
     if !snapshot.organizations.is_empty() {
         projects.sort_by_key(|p| !p.organizations.is_empty());
     }
+    // SB-401 (DEC-0023 D-15): a group switched off keeps its folders, so the proxy refuses their
+    // requests (never the person's own sign-in), but comes last: a folder another group holds as
+    // well runs on that group.
+    projects.sort_by_key(|p| p.off);
     projects
         .into_iter()
-        // SB-401: a group switched off routes nothing; its folder falls through to the next group
-        // that holds it.
-        .filter(|p| !p.off)
         .filter(|p| {
             snapshot.accounts.iter().any(|a| {
                 snapshot.serves(a, &p.pool)
@@ -363,5 +364,31 @@ mod tests {
         });
         shared.projects[0].organizations = vec!["00000000-0000-4000-8000-000000000001".into()];
         assert_eq!(folders(&shared), [("/w/s".to_owned(), "own".to_owned())]);
+        // SB-401: a group switched off keeps its folder (the proxy refuses it), but a folder it
+        // shares with another group runs on that one.
+        let mut off = Snapshot {
+            projects: vec![
+                project("first", "/w/s"),
+                project("second", "/w/s"),
+                project("alone", "/w/o"),
+            ],
+            accounts: vec![
+                account("first", Provider::Codex),
+                account("second", Provider::Codex),
+                account("alone", Provider::Codex),
+            ],
+            ..Default::default()
+        };
+        off.projects[0].off = true;
+        off.projects[2].off = true;
+        let mut routed = folders(&off);
+        routed.sort();
+        assert_eq!(
+            routed,
+            [
+                ("/w/o".to_owned(), "alone".to_owned()),
+                ("/w/s".to_owned(), "second".to_owned())
+            ]
+        );
     }
 }

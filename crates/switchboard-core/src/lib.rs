@@ -1501,6 +1501,16 @@ impl Store {
             return Err(machines::MACHINE_POOL_REFUSED.into());
         }
         credential.validate(provider, kind)?;
+        // SB-401 (DEC-0023 D-10): a Claude API key saved by any import (a Claude Swap import, a
+        // capture, a restore, a source sync: every `upsert`) is saved in the pay-per-token group,
+        // made when needed. `add` is the primitive whose one caller, the add command, routes the
+        // key there itself (`Operation::Add`). A key from before in another group is matched there
+        // no more: saved again, it is saved once more in the pay-per-token group.
+        let pool = if upsert && provider == Provider::Claude && kind == AuthKind::ApiKey {
+            self.ensure_tokens_group()?
+        } else {
+            pool
+        };
         if credential
             .account_id
             .as_ref()

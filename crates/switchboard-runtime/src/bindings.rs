@@ -215,15 +215,18 @@ pub(crate) fn desired(snapshot: &Snapshot) -> Vec<(PathBuf, String)> {
     // default group, as a repository in no group uses it (DEC-0007); its folders come after every
     // group's own, so a folder two groups hold keeps the group that has an account.
     let mut fallback: Vec<(PathBuf, String)> = Vec::new();
+    // SB-401 (DEC-0023 D-15): a group switched off keeps its folders' route, so the proxy answers
+    // their sessions that it is off (closed) rather than the folder falling back to the ordinary
+    // login (open, which SB-109 forbids for an organization's folders). Its folders come last: a
+    // folder another group holds as well runs on that group.
+    let mut off: Vec<(PathBuf, String)> = Vec::new();
     for project in projects {
-        // SB-401: a group switched off routes nothing; its folders run as if it did not hold them.
-        if project.off {
-            continue;
-        }
         // A group whose seats left its organization keeps its folders: the proxy refuses the seat
         // (closed), rather than the folder falling back to the ordinary login (open). SB-109.
         // A group bound to an organization never falls back to the default group either.
-        let route = if has_claude(&project.pool) {
+        let route = if project.off {
+            project.pool.clone()
+        } else if has_claude(&project.pool) {
             project.pool.clone()
         } else if project.organizations.is_empty()
             && project.pool != DEFAULT_POOL
@@ -233,7 +236,9 @@ pub(crate) fn desired(snapshot: &Snapshot) -> Vec<(PathBuf, String)> {
         } else {
             continue;
         };
-        let out = if route == project.pool {
+        let out = if project.off {
+            &mut off
+        } else if route == project.pool {
             &mut out
         } else {
             &mut fallback
@@ -274,6 +279,7 @@ pub(crate) fn desired(snapshot: &Snapshot) -> Vec<(PathBuf, String)> {
         }
     }
     out.extend(fallback);
+    out.extend(off);
     // SB-146: a folder in several groups is written for the first group with a Claude account
     // (creation order), the one `Snapshot::project_for` names.
     let mut seen = std::collections::HashSet::new();
@@ -923,23 +929,45 @@ mod tests {
         );
     }
 
-    /// SB-401: a group switched off routes none of its folders; switching it re-runs the sync.
+    /// SB-401 (D-15): a group switched off keeps its folders' route, so the proxy refuses them
+    /// (an organization's folders never fall back to the ordinary login); a folder another group
+    /// holds as well runs on that group; switching re-runs the sync.
     #[test]
-    fn a_group_switched_off_binds_no_folder_and_its_switch_changes_the_fingerprint() {
+    fn a_group_switched_off_keeps_its_route_and_its_switch_changes_the_fingerprint() {
         let tmp = tempfile::tempdir().unwrap();
         let data = tmp.path().canonicalize().unwrap();
         let app = data.join("app");
+        let both = data.join("both");
         git(&app);
+        git(&both);
         let mut s = Snapshot {
-            projects: vec![project("pc", &[&app])],
-            accounts: vec![account("pc")],
+            projects: vec![project("pc", &[&app, &both]), project("other", &[&both])],
+            accounts: vec![account("pc"), account("other")],
             ..Default::default()
         };
-        assert_eq!(desired(&s).len(), 1);
+        let route = |s: &Snapshot, f: &Path| {
+            desired(s)
+                .into_iter()
+                .find(|(d, _)| d == f)
+                .map(|(_, pool)| pool)
+        };
+        assert_eq!(route(&s, &both).as_deref(), Some("pc"));
         let mut repos = RepoCache::default();
         let on = key(&s, "127.0.0.1:4000", &mut repos);
         s.projects[0].off = true;
-        assert!(desired(&s).is_empty(), "an off group routes nothing");
+        assert_eq!(
+            route(&s, &app).as_deref(),
+            Some("pc"),
+            "kept: the proxy refuses it"
+        );
+        assert_eq!(
+            route(&s, &both).as_deref(),
+            Some("other"),
+            "a shared folder falls through"
+        );
+        // With no Claude account of its own, an off group still keeps its folder closed.
+        s.accounts.retain(|a| a.pool != "pc");
+        assert_eq!(route(&s, &app).as_deref(), Some("pc"));
         assert_ne!(key(&s, "127.0.0.1:4000", &mut repos), on);
         s.projects[0].off = false;
         s.projects[0].tokens = true;

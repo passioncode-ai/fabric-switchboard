@@ -1905,6 +1905,19 @@ impl Runtime {
         let Ok(snapshot) = self.store.snapshot() else {
             return;
         };
+        // SB-401: a Claude API key's own home (an isolated launch of 0.7.111 or older) keeps no
+        // copy of the key; it launches managed only now.
+        let root = self.root.clone();
+        let scrubbed = blocking::run(|| launch::scrub_key_homes(&root, &snapshot));
+        if scrubbed > 0 {
+            oplog::event(
+                "key_homes_scrubbed",
+                &[(
+                    "count",
+                    oplog::Field::Number(i64::try_from(scrubbed).unwrap_or(i64::MAX)),
+                )],
+            );
+        }
         let salts = read_pool_salts(&self.root);
         let synced = blocking::run(|| {
             bindings::sync_salted(
@@ -7816,14 +7829,27 @@ async fn execute(
             if from == pool {
                 return Ok(json!({"id": id, "from": from, "pool": pool, "moved": false}));
             }
-            // SB-401 (DEC-0023 D-10): a Claude API key moves only into the pay-per-token group.
+            // SB-401 (DEC-0023 D-10): a Claude API key moves only into the pay-per-token group,
+            // made when it does not exist yet (`tokens` names it then).
             let key = snapshot
                 .accounts
                 .iter()
                 .any(|a| a.id == id && switchboard_core::Snapshot::is_claude_key(a));
-            if key && snapshot.tokens_group().is_none_or(|g| g.pool != pool) {
-                return Err(switchboard_core::CLAUDE_KEY_STAYS.into());
-            }
+            let (pool, snapshot) = if key {
+                let named = snapshot
+                    .tokens_group()
+                    .map_or(pool == switchboard_core::TOKENS_POOL, |g| g.pool == pool);
+                if !named {
+                    return Err(switchboard_core::CLAUDE_KEY_STAYS.into());
+                }
+                let pool = store.ensure_tokens_group()?;
+                if from == pool {
+                    return Ok(json!({"id": id, "from": from, "pool": pool, "moved": false}));
+                }
+                (pool, store.snapshot()?)
+            } else {
+                (pool, snapshot)
+            };
             let edit =
                 |pool: String, add: Vec<String>, remove: Vec<String>| Operation::ProjectEdit {
                     pool,
@@ -14346,5 +14372,84 @@ mod tokens_group_tests {
         );
         proxy.shutdown().await;
         served.abort();
+    }
+
+    /// SB-401 (P1-2): a Claude API key a Claude Swap import brings in lands in the pay-per-token
+    /// group, made when needed, whatever group the import named.
+    #[test]
+    fn a_claude_swap_key_lands_in_the_pay_per_token_group() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::open(
+            root.path().to_owned(),
+            Arc::new(switchboard_core::MemoryVault::default()),
+        )
+        .unwrap();
+        let profile = external::CapturedProfile {
+            provider: Provider::Claude,
+            kind: AuthKind::ApiKey,
+            credential: Credential::parse(
+                Provider::Claude,
+                AuthKind::ApiKey,
+                "sk-ant-api-synthetic",
+            )
+            .unwrap(),
+            identity: switchboard_core::ExternalIdentity {
+                account_id: None,
+                organization_id: None,
+                email: None,
+            },
+            label: "Swap key".into(),
+        };
+        let (imported, failed, _) = import_profiles(
+            &store,
+            &refresh::RefreshState::default(),
+            "default",
+            vec![profile],
+        );
+        assert_eq!((imported.len(), failed), (1, 0));
+        let tokens = store.snapshot().unwrap().tokens_group().cloned().unwrap();
+        assert_eq!(imported[0].pool, tokens.pool);
+        assert!(tokens.off);
+    }
+
+    /// SB-401: a key from before the pay-per-token group moves into it (made now), never into
+    /// another group; its own home from an older isolated launch loses its copy of the key.
+    #[tokio::test]
+    async fn a_key_from_before_moves_into_the_pay_per_token_group_and_its_home_forgets_it() {
+        let root = tempfile::tempdir().unwrap();
+        let runtime = fixtures::runtime(root.path(), signed_out, activates).await;
+        let key = runtime
+            .store
+            .add(
+                "Old key".into(),
+                Provider::Claude,
+                AuthKind::ApiKey,
+                "default".into(),
+                Credential::parse(Provider::Claude, AuthKind::ApiKey, "synthetic-old").unwrap(),
+            )
+            .unwrap();
+        let home = root.path().join("homes").join(&key.id);
+        std::fs::create_dir_all(&home).unwrap();
+        switchboard_core::private_fs::private_write(
+            &home.join("settings.json"),
+            br#"{"env":{"ANTHROPIC_API_KEY":"synthetic-old","KEEP":"1"},"permissions":{}}"#,
+        )
+        .unwrap();
+        assert!(runtime.store.snapshot().unwrap().tokens_group().is_none());
+        let moved = runtime
+            .execute(Operation::MoveAccount {
+                id: key.id.clone(),
+                pool: switchboard_core::TOKENS_POOL.into(),
+            })
+            .await
+            .unwrap();
+        assert_eq!(moved["pool"], switchboard_core::TOKENS_POOL);
+        assert_eq!(moved["moved"], true);
+        let snapshot = runtime.store.snapshot().unwrap();
+        assert_eq!(launch::scrub_key_homes(root.path(), &snapshot), 1);
+        let kept: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(home.join("settings.json")).unwrap()).unwrap();
+        assert_eq!(kept, json!({"env": {"KEEP": "1"}, "permissions": {}}));
+        assert_eq!(launch::scrub_key_homes(root.path(), &snapshot), 0, "once");
     }
 }
