@@ -42,6 +42,39 @@ struct State {
 }
 
 static LOCK: Mutex<()> = Mutex::new(());
+/// Review round 1, P1-C: the file's writers are the owner (a refusal, the watch, an admitted
+/// dispatch) and the CLI (an admitted hosted start Fabric asked for), two processes: each read,
+/// change and write holds this lock as well as `LOCK`.
+pub const LOCK_FILE: &str = "dispatch-refusals.lock";
+
+/// Both locks, held for one read, change and write. A file lock that cannot be taken still lets
+/// the write happen, as `monitors` and `resumable` do.
+struct Held {
+    _mutex: std::sync::MutexGuard<'static, ()>,
+    _file: Option<std::fs::File>,
+}
+fn held(root: &Path) -> Held {
+    let mutex = LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    let file = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(root.join(LOCK_FILE))
+        .ok()
+        .and_then(|file| {
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let _ = file.set_permissions(std::fs::Permissions::from_mode(0o600));
+            }
+            file.lock().ok().map(|()| file)
+        });
+    Held {
+        _mutex: mutex,
+        _file: file,
+    }
+}
 
 fn read(root: &Path) -> State {
     switchboard_core::private_fs::read_private(&root.join(FILE), MAX_BYTES)
@@ -67,7 +100,7 @@ fn plain(request: &str) -> Option<String> {
 
 /// Counts one `at_capacity` refusal of `request` at `now`.
 pub fn record(root: &Path, request: Option<&str>, now: i64) {
-    let _held = LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    let _held = held(root);
     let mut state = read(root);
     state.refused.retain(|t| now - t < KEEP_SECONDS);
     state.refused.push(now);
@@ -94,7 +127,7 @@ pub fn observe(root: &Path, scan: &Value, now: i64) {
     if std::fs::symlink_metadata(root.join(FILE)).is_err() {
         return;
     }
-    let _held = LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    let _held = held(root);
     let mut state = read(root);
     let Some(last) = state.refused.last().copied().or(state.waiting_since) else {
         return;
@@ -110,13 +143,13 @@ pub fn observe(root: &Path, scan: &Value, now: i64) {
     }
 }
 
-/// SB-417: the pool admitted a board start at `now`: the board starts it refused before no
-/// longer wait. Reads nothing without a refusal file, writes nothing while none waits.
+/// SB-417: a board start the pool admitted was recorded as running at `now` (a dispatch watched,
+/// a hosted start Fabric asked for recorded): the board starts refused before no longer wait. Reads nothing without a refusal file, writes nothing while none waits.
 pub fn admitted(root: &Path, now: i64) {
     if std::fs::symlink_metadata(root.join(FILE)).is_err() {
         return;
     }
-    let _held = LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    let _held = held(root);
     let mut state = read(root);
     if state.waiting == 0 && state.waiting_since.is_none() {
         return;
@@ -239,7 +272,7 @@ mod tests {
     fn room_in_the_pool_after_a_refusal_is_recorded_once_and_a_new_refusal_clears_it() {
         let root = tempfile::tempdir().unwrap();
         // SB-417: a share of 0, so only room in the pool admits a board start.
-        crate::capacity::set_board(root.path(), Some(1), 0).unwrap();
+        crate::capacity::set_pool(root.path(), Some(1), crate::capacity::Share::Set(0)).unwrap();
         let pool = |working: usize, degraded: bool| {
             let rows: Vec<Value> = (0..working).map(|_| json!({"quiet": false})).collect();
             let degraded = if degraded {

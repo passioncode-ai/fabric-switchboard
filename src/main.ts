@@ -673,7 +673,7 @@ function capacityDialog() {
     if (!Number.isInteger(value) || value < 1 || value > 500) { context.error.textContent = t('Give the session limit as a whole number from 1 to 500.'); limit.focus(); return; }
     const board = share.value.trim() === '' ? undefined : Number(share.value);
     if (board !== undefined && (!Number.isInteger(board) || board < 0 || board > value)) { context.error.textContent = t("Give the board's share as a whole number from 0 to the session limit, with a limit set."); share.focus(); return; }
-    void dialogSave(context, async () => { capacityState = await adapter.capacity(board === undefined ? { cap: value } : { cap: value, board }); }, t('Limit saved: {cap} working sessions.', { cap: value }));
+    void dialogSave(context, async () => { capacityState = await adapter.capacity(board === undefined ? { cap: value, boardDefault: true } : { cap: value, board }); }, t('Limit saved: {cap} working sessions.', { cap: value }));
   });
   limit.focus();
 }

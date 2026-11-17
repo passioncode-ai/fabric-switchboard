@@ -1070,12 +1070,18 @@ async fn capacity(
     cap: Option<u32>,
     clear: bool,
     board: Option<u32>,
+    board_default: Option<bool>,
     state: State<'_, Slot>,
 ) -> Result<Value, String> {
     state
         .runtime()
         .await?
-        .execute(Operation::Capacity { cap, clear, board })
+        .execute(Operation::Capacity {
+            cap,
+            clear,
+            board,
+            board_default: board_default.unwrap_or(false),
+        })
         .await
 }
 /// SB-388: Needs attention's *Close the newer copy* on a session running in two processes.

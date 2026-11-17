@@ -40,6 +40,8 @@ pub const AT_CAPACITY: &str = "At capacity: this computer runs as many coding se
 pub const CAP_INVALID: &str = "Give the session limit as a whole number from 1 to 500.";
 pub const BOARD_INVALID: &str =
     "Give the board's share as a whole number from 0 to the session limit, with a limit set.";
+pub const CLEAR_INVALID: &str =
+    "Clearing removes the session limit and the board's share together: give no limit or share with it.";
 pub const UNREADABLE: &str =
     "The session limit (capacity.json) could not be read. Set it again, or clear it.";
 pub const NOT_SAVED: &str = "The session limit could not be saved.";
@@ -99,32 +101,53 @@ pub fn cap(root: &Path) -> Result<Option<u32>, String> {
     Ok(read(root)?.cap)
 }
 
-/// Sets the cap with the default board share, or clears the pool with `None`. The file is then
-/// `{"cap":N}`, as every earlier version wrote and reads it.
-pub fn set(root: &Path, cap: Option<u32>) -> Result<(), String> {
-    save(root, Pool { cap, board: None })
+/// What a change does with the board's share.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Share {
+    /// Keeps the share the person set, clamped to the new cap.
+    Keep,
+    /// Back to the default share (a quarter of the cap, at least 2).
+    Default,
+    /// This many board runs, from 0 to the cap.
+    Set(u32),
 }
 
-/// SB-417: saves the pool with a board share: `board` from 0 to the cap. `cap: None` keeps the
-/// cap already set.
-pub fn set_board(root: &Path, cap: Option<u32>, board: u32) -> Result<(), String> {
-    let cap = match cap {
-        Some(cap) => Some(cap),
-        None => read(root)?.cap,
-    };
+/// Sets the cap, keeping a share the person set (clamped to the cap), or clears the pool with
+/// `None`. A file without a share is `{"cap":N}`, as every earlier version wrote and reads it.
+pub fn set(root: &Path, cap: Option<u32>) -> Result<(), String> {
+    match cap {
+        Some(_) => set_pool(root, cap, Share::Keep).map(|_| ()),
+        None => save(root, Pool::default()),
+    }
+}
+
+/// SB-417: changes the cap (`None` keeps the cap already set) and the board's share. Answers
+/// whether a kept share was larger than the new cap and so was clamped to it.
+pub fn set_pool(root: &Path, cap: Option<u32>, share: Share) -> Result<bool, String> {
     if cap.is_some_and(|c| !(1..=MAX_CAP).contains(&c)) {
         return Err(CAP_INVALID.into());
     }
-    if !cap.is_some_and(|c| board <= c) {
-        return Err(BOARD_INVALID.into());
+    let saved = read(root).unwrap_or_default();
+    let cap = cap.or(saved.cap);
+    let mut clamped = false;
+    let board = match share {
+        Share::Keep => saved.board.zip(cap).map(|(b, c)| {
+            clamped = b > c;
+            b.min(c)
+        }),
+        Share::Default => None,
+        Share::Set(board) => {
+            if !cap.is_some_and(|c| board <= c) {
+                return Err(BOARD_INVALID.into());
+            }
+            Some(board)
+        }
+    };
+    if cap.is_none() {
+        return Ok(false);
     }
-    save(
-        root,
-        Pool {
-            cap,
-            board: Some(board),
-        },
-    )
+    save(root, Pool { cap, board })?;
+    Ok(clamped)
 }
 
 fn save(root: &Path, pool: Pool) -> Result<(), String> {
@@ -162,6 +185,9 @@ pub struct Facts {
     pub waiting: HashSet<String>,
     /// Board runs live now, by launch id (`Accounts::board_launches`).
     pub board: HashSet<String>,
+    /// Admitted starts not yet recorded as running: board starts and others.
+    pub pending_board: usize,
+    pub pending_other: usize,
 }
 
 /// Why a live process counts against the pool or not.
@@ -189,15 +215,17 @@ pub fn classify(row: &Value, facts: &Facts, now: i64) -> Counted {
             Counted::Working
         };
     };
+    // In a turn (the model or a command of its own runs): working, however long it is silent,
+    // and whatever it waits on besides (a busy session that armed a monitor, or one a Fabric claim
+    // holds, still works; review round 1, P1-A).
+    if matches!(own.status.as_str(), "busy" | "shell") {
+        return Counted::Working;
+    }
     if facts.stopped.contains(&own.session) {
         return Counted::LimitStop;
     }
     if facts.waiting.contains(&own.session) {
         return Counted::Waits;
-    }
-    // In a turn (the model or a command of its own runs): working, however long it is silent.
-    if matches!(own.status.as_str(), "busy" | "shell") {
-        return Counted::Working;
     }
     match own.activity {
         Some(at) if now - at >= crate::machine_sessions::QUIET_MINUTES * 60 => Counted::Quiet,
@@ -215,6 +243,8 @@ pub struct Count {
     pub limit_stops: usize,
     pub waits: usize,
     pub board_used: usize,
+    /// Starts the pool admitted that have not been recorded as running yet (`board-pending.json`).
+    pub pending: usize,
     pub total: usize,
     /// Whether the process table was read; an unread table admits every start.
     pub read: bool,
@@ -223,7 +253,9 @@ pub struct Count {
 /// Counts a scan with its facts.
 pub fn count(scan: &Value, facts: &Facts, now: i64) -> Count {
     let mut c = Count {
-        board_used: facts.board.len(),
+        board_used: facts.board.len() + facts.pending_board,
+        used: facts.pending_board + facts.pending_other,
+        pending: facts.pending_board + facts.pending_other,
         read: !scan["degraded"].as_array().is_some_and(|d| !d.is_empty()),
         ..Count::default()
     };
@@ -287,6 +319,7 @@ pub fn view(pool: &Pool, count: &Count, scan: &Value) -> Value {
         "quiet": count.quiet,
         "on_limit_stop": count.limit_stops,
         "on_waits": count.waits,
+        "pending": count.pending,
         "counted": "live Claude Code and Codex sessions doing work: a session quiet for 30 minutes outside a turn, on a limit stop or on a wait of its own is not counted",
         "quiet_after_minutes": crate::machine_sessions::QUIET_MINUTES,
         "observed_at": scan["observed_at"],
@@ -298,9 +331,12 @@ pub fn view(pool: &Pool, count: &Count, scan: &Value) -> Value {
 /// waits and limit stops, and the board runs the app answers for. Reads nothing without rows.
 pub fn facts(root: &Path, accounts: &dyn Accounts, scan: &Value, now: i64) -> Facts {
     let rows: Vec<&Value> = scan["sessions"].as_array().into_iter().flatten().collect();
+    let (pending_board, pending_other) = pending_counts(&pending_read(root, now));
     if rows.is_empty() {
         return Facts {
             board: accounts.board_launches(&[]),
+            pending_board,
+            pending_other,
             ..Facts::default()
         };
     }
@@ -356,6 +392,8 @@ pub fn facts(root: &Path, accounts: &dyn Accounts, scan: &Value, now: i64) -> Fa
         .filter_map(|r| r["launch_id"].as_str().map(str::to_owned))
         .collect();
     facts.board = accounts.board_launches(&live);
+    facts.pending_board = pending_board;
+    facts.pending_other = pending_other;
     facts
 }
 
@@ -382,23 +420,137 @@ pub fn status(root: &Path, accounts: &dyn Accounts) -> Result<Value, String> {
     Ok(view(&pool, &count, &scan))
 }
 
-/// The gate `launch --hosted` calls before a start. Without a cap nothing is read.
-pub fn admit(root: &Path, accounts: &dyn Accounts, start: Start) -> Result<(), String> {
-    match full(root, accounts, start) {
-        Some(_) => Err(AT_CAPACITY.into()),
-        None => Ok(()),
+/// SB-417 (review round 1, P1-B): starts the pool admitted and nobody has recorded as running yet,
+/// `<data>/board-pending.json` (0600). The gate decides and writes its entry under one lock on
+/// `board-pool.lock`, so two starts asked at once never both take the last slot; the entry goes
+/// when its `Reservation` is dropped (after the start is recorded, or when it fails), and an entry
+/// older than `PENDING_SECONDS` (a launcher that died) is dropped by the next read.
+pub const PENDING: &str = "board-pending.json";
+pub const POOL_LOCK: &str = "board-pool.lock";
+pub const PENDING_SECONDS: i64 = 300;
+const MAX_PENDING_BYTES: u64 = 64 * 1024;
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+struct Pending {
+    id: String,
+    at: i64,
+    #[serde(default)]
+    board: bool,
+}
+
+fn pending_read(root: &Path, now: i64) -> Vec<Pending> {
+    if std::fs::symlink_metadata(root.join(PENDING)).is_err() {
+        return Vec::new();
+    }
+    let mut rows: Vec<Pending> =
+        crate::private_fs::read_private(&root.join(PENDING), MAX_PENDING_BYTES)
+            .ok()
+            .and_then(|b| serde_json::from_slice(&b).ok())
+            .unwrap_or_default();
+    rows.retain(|p| (0..PENDING_SECONDS).contains(&(now - p.at)));
+    rows
+}
+
+fn pending_write(root: &Path, rows: &[Pending]) {
+    let path = root.join(PENDING);
+    if rows.is_empty() {
+        let _ = std::fs::remove_file(path);
+        return;
+    }
+    if let Ok(bytes) = serde_json::to_vec(rows) {
+        let _ = crate::private_fs::private_write(&path, &bytes);
     }
 }
 
-/// The pool's view when it refuses `start`, else none; `dispatch` answers it with its refusal.
-/// Without a cap nothing is read; a file that cannot be read is no cap (`status` names it).
-pub fn full(root: &Path, accounts: &dyn Accounts, start: Start) -> Option<Value> {
-    let pool = read(root).ok()?;
-    pool.cap?;
-    let scan = crate::machine_sessions::scan(accounts);
+fn pending_counts(rows: &[Pending]) -> (usize, usize) {
+    let board = rows.iter().filter(|p| p.board).count();
+    (board, rows.len() - board)
+}
+
+/// The pool's lock, held while a start is decided and its entry written. A lock that cannot be
+/// taken still lets the start be decided, as `monitors` does.
+fn pool_lock(root: &Path) -> Option<std::fs::File> {
+    let file = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(root.join(POOL_LOCK))
+        .ok()?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = file.set_permissions(std::fs::Permissions::from_mode(0o600));
+    }
+    file.lock().ok().map(|()| file)
+}
+
+/// A start the pool admitted, counted until it is dropped.
+#[derive(Debug)]
+pub struct Reservation {
+    root: std::path::PathBuf,
+    id: String,
+    pub start: Start,
+}
+impl Drop for Reservation {
+    fn drop(&mut self) {
+        let _held = pool_lock(&self.root);
+        let mut rows = pending_read(&self.root, crate::clock::now());
+        let before = rows.len();
+        rows.retain(|p| p.id != self.id);
+        if rows.len() != before {
+            pending_write(&self.root, &rows);
+        }
+    }
+}
+
+/// The gate before a start: `Ok(None)` without a cap (nothing is read; a file that cannot be read
+/// is no cap, `status` names it), `Ok(Some(_))` admitted and counted until the reservation is
+/// dropped, `Err(view)` refused. `dispatch` answers the view with its refusal.
+pub fn reserve(
+    root: &Path,
+    accounts: &dyn Accounts,
+    start: Start,
+) -> Result<Option<Reservation>, Value> {
+    reserve_with(root, start, |now| {
+        let scan = crate::machine_sessions::scan(accounts);
+        let facts = facts(root, accounts, &scan, now);
+        (scan, facts)
+    })
+}
+
+/// `reserve` with the scan and its facts read by `read`, under the pool's lock.
+pub fn reserve_with(
+    root: &Path,
+    start: Start,
+    read_pool: impl FnOnce(i64) -> (Value, Facts),
+) -> Result<Option<Reservation>, Value> {
+    let pool = match read(root) {
+        Ok(pool) if pool.cap.is_some() => pool,
+        _ => return Ok(None),
+    };
+    let _held = pool_lock(root);
     let now = crate::clock::now();
-    let count = count(&scan, &facts(root, accounts, &scan, now), now);
-    (!admits(&pool, &count, start)).then(|| view(&pool, &count, &scan))
+    let (scan, mut facts) = read_pool(now);
+    // The entries read under the lock, whatever the reader saw before it was taken.
+    let mut rows = pending_read(root, now);
+    (facts.pending_board, facts.pending_other) = pending_counts(&rows);
+    let count = count(&scan, &facts, now);
+    if !admits(&pool, &count, start) {
+        return Err(view(&pool, &count, &scan));
+    }
+    let id = uuid::Uuid::new_v4().to_string();
+    rows.push(Pending {
+        id: id.clone(),
+        at: now,
+        board: start == Start::Board,
+    });
+    pending_write(root, &rows);
+    Ok(Some(Reservation {
+        root: root.to_owned(),
+        id,
+        start,
+    }))
 }
 
 #[cfg(test)]
@@ -515,7 +667,7 @@ mod tests {
         let rows = json!({"sessions": [
             row(1, "claude-code"), row(2, "claude-code"), row(3, "claude-code"),
             row(4, "claude-code"), row(5, "claude-code"), row(6, "codex"),
-            row(7, "claude-code"),
+            row(7, "claude-code"), row(8, "claude-code"), row(9, "claude-code"),
         ], "degraded": []});
         let own = |session: &str, status: &str, minutes_ago: Option<i64>| Own {
             session: session.into(),
@@ -528,8 +680,16 @@ mod tests {
         facts.own.insert(3, own("s-turn", "busy", Some(90)));
         facts.own.insert(4, own("s-stop", "idle", Some(1)));
         facts.own.insert(5, own("s-wait", "idle", Some(1)));
+        // Review round 1, P1-A: in a turn, a Fabric claim's hold or a monitor it armed does not
+        // count it out.
+        facts.own.insert(8, own("s-busy-held", "busy", Some(1)));
+        facts
+            .own
+            .insert(9, own("s-shell-monitor", "shell", Some(45)));
         facts.stopped.insert("s-stop".into());
         facts.waiting.insert("s-wait".into());
+        facts.waiting.insert("s-busy-held".into());
+        facts.waiting.insert("s-shell-monitor".into());
         let kinds: Vec<Counted> = rows["sessions"]
             .as_array()
             .unwrap()
@@ -546,13 +706,15 @@ mod tests {
                 Counted::Waits,
                 Counted::Working,
                 Counted::Working,
+                Counted::Working,
+                Counted::Working,
             ],
-            "its own quiet, recent, in a turn, on a limit stop, on a wait, Codex by its folder, no session file by its folder"
+            "its own quiet, recent, in a turn, on a limit stop, on a wait, Codex by its folder, no session file by its folder, busy with a hold, in a command with a monitor"
         );
         let c = count(&rows, &facts, now);
         assert_eq!(
             (c.used, c.quiet, c.limit_stops, c.waits, c.total),
-            (4, 1, 1, 1, 7)
+            (6, 1, 1, 1, 9)
         );
     }
 
@@ -583,19 +745,32 @@ mod tests {
         );
         assert_eq!(cap(root.path()).unwrap(), Some(20));
         // A share: from 0 to the cap.
-        set_board(root.path(), None, 6).unwrap();
+        assert!(!set_pool(root.path(), None, Share::Set(6)).unwrap());
         assert_eq!(read(root.path()).unwrap(), pool(Some(20), Some(6)));
-        assert_eq!(set_board(root.path(), None, 21).unwrap_err(), BOARD_INVALID);
-        set_board(root.path(), Some(30), 0).unwrap();
+        assert_eq!(
+            set_pool(root.path(), None, Share::Set(21)).unwrap_err(),
+            BOARD_INVALID
+        );
+        set_pool(root.path(), Some(30), Share::Set(0)).unwrap();
         assert_eq!(read(root.path()).unwrap(), pool(Some(30), Some(0)));
-        // A cap set alone goes back to the default share.
-        set_board(root.path(), Some(30), 10).unwrap();
-        set(root.path(), Some(12)).unwrap();
-        assert_eq!(read(root.path()).unwrap(), pool(Some(12), None));
+        // Review round 1, P2-2: a new cap keeps the share, clamped to the cap and said so.
+        set_pool(root.path(), Some(30), Share::Set(10)).unwrap();
+        assert!(!set_pool(root.path(), Some(12), Share::Keep).unwrap());
+        assert_eq!(read(root.path()).unwrap(), pool(Some(12), Some(10)));
+        assert!(
+            set_pool(root.path(), Some(8), Share::Keep).unwrap(),
+            "clamped"
+        );
+        assert_eq!(read(root.path()).unwrap(), pool(Some(8), Some(8)));
+        set(root.path(), Some(9)).unwrap();
+        assert_eq!(read(root.path()).unwrap(), pool(Some(9), Some(8)));
+        // Back to the default only when asked.
+        set_pool(root.path(), None, Share::Default).unwrap();
+        assert_eq!(read(root.path()).unwrap(), pool(Some(9), None));
         set(root.path(), None).unwrap();
         assert_eq!(cap(root.path()).unwrap(), None);
         assert_eq!(
-            set_board(root.path(), None, 2).unwrap_err(),
+            set_pool(root.path(), None, Share::Set(2)).unwrap_err(),
             BOARD_INVALID,
             "no share without a cap"
         );
@@ -618,5 +793,66 @@ mod tests {
         crate::private_fs::private_write(&root.path().join(FILE), br#"{"cap":3,"board":9}"#)
             .unwrap();
         assert_eq!(read(root.path()).unwrap(), pool(Some(3), None));
+    }
+
+    #[test]
+    fn a_burst_of_board_starts_takes_only_the_slots_the_share_has() {
+        // Review round 1, P1-B: eight board starts asked at once while the pool is full and the
+        // share has two slots: two are admitted, six refused, and a dropped reservation frees its
+        // slot.
+        let root = tempfile::tempdir().unwrap();
+        set_pool(root.path(), Some(1), Share::Set(2)).unwrap();
+        let path = root.path().to_owned();
+        let full = || {
+            (
+                json!({"sessions": [{"pid": 1, "agent": "codex", "quiet": false}], "degraded": []}),
+                Facts::default(),
+            )
+        };
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(8));
+        let handles: Vec<_> = (0..8)
+            .map(|_| {
+                let (path, barrier) = (path.clone(), barrier.clone());
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    reserve_with(&path, Start::Board, |_| full())
+                })
+            })
+            .collect();
+        let answers: Vec<_> = handles.into_iter().map(|h| h.join().unwrap()).collect();
+        let admitted: Vec<Reservation> = answers
+            .into_iter()
+            .filter_map(|a| a.ok().flatten())
+            .collect();
+        assert_eq!(admitted.len(), 2, "only the share's two slots");
+        let refused = reserve_with(&path, Start::Board, |_| full()).unwrap_err();
+        assert_eq!(
+            (refused["board_used"].clone(), refused["pending"].clone()),
+            (json!(2), json!(2))
+        );
+        // An interactive start waits too: the pending starts count against the cap.
+        assert!(reserve_with(&path, Start::Interactive, |_| full()).is_err());
+        drop(admitted);
+        assert!(
+            !path.join(PENDING).exists(),
+            "every entry gone with its reservation"
+        );
+        assert!(reserve_with(&path, Start::Board, |_| full())
+            .unwrap()
+            .is_some());
+        // An entry left by a launcher that died is dropped after PENDING_SECONDS.
+        let old = json!([{"id": "x", "at": crate::clock::now() - PENDING_SECONDS, "board": true},
+            {"id": "y", "at": crate::clock::now() - PENDING_SECONDS, "board": true}]);
+        crate::private_fs::private_write(&path.join(PENDING), old.to_string().as_bytes()).unwrap();
+        assert!(reserve_with(&path, Start::Board, |_| full())
+            .unwrap()
+            .is_some());
+        // Without a cap nothing is reserved or written.
+        set(&path, None).unwrap();
+        let _ = std::fs::remove_file(path.join(PENDING));
+        assert!(reserve_with(&path, Start::Board, |_| full())
+            .unwrap()
+            .is_none());
+        assert!(!path.join(PENDING).exists());
     }
 }

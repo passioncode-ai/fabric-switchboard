@@ -773,7 +773,7 @@ export function createDemoAdapter(): Adapter {
       else if (typeof change?.cap === 'number') {
         if (!Number.isInteger(change.cap) || change.cap < 1 || change.cap > 500) throw new Error('Give the session limit as a whole number from 1 to 500.');
         if (typeof change.board === 'number' && (!Number.isInteger(change.board) || change.board < 0 || change.board > change.cap)) throw new Error("Give the board's share as a whole number from 0 to the session limit, with a limit set.");
-        demoCap = change.cap; demoBoard = typeof change.board === 'number' ? change.board : null;
+        demoCap = change.cap; demoBoard = typeof change.board === 'number' ? change.board : change.boardDefault ? null : (demoBoard === null ? null : Math.min(demoBoard, change.cap));
       }
       // The same two working sessions the demo's session tree shows; one of them is a board run.
       const used = 2;
