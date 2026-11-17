@@ -121,6 +121,10 @@ const ALLOWLIST = {
   // literally (the MCP tools and the Agents panel); only the CLI accepts another --service, and
   // its errors print to the terminal.
   'Unknown key service.': 'only the CLI can name a service other than openrouter',
+  // runtime launch.rs ASK_AGENT and ASK_UNREADABLE (SB-405): only `switchboard handovers run
+  // --ask` takes a hand-over with prompts on; no renderer or MCP request sends `ask`.
+  "Only a Claude Code or Codex hand-over can start with permission prompts on, and this one continues on another agent. It is still waiting: take it without --ask, or leave it for Terminal.": 'SB-405: handovers run --ask is CLI only',
+  "Switchboard could not prepare this hand-over's session with permission prompts on. It is still waiting: take it without --ask, or leave it for Terminal.": 'SB-405: handovers run --ask is CLI only',
   // core projects.rs restore_project(): called only by backup::restore, which counts a refusal
   // as a project not put back and never returns the message.
   'Project already here.': 'swallowed by backup restore',
