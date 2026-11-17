@@ -10402,13 +10402,31 @@ mod owner_tests {
         assert!(settings.is_file());
         // Nothing of the real person's folder in a synthetic owner's home.
         assert!(!home.join("CLAUDE.md").exists());
-        // Idle: the files taken away stay away.
+        // Idle: the files taken away stay away. The pass's key reads the process-wide Claude
+        // sign-in state (`external::claude_signed_out`), which other tests in this process flip;
+        // a pass that saw it move rewrites by design, so the idle check is repeated until all
+        // its passes ran on one state (SB-403: the gate on a loaded machine met that race twice).
         let written = std::fs::read(&map_file).unwrap();
-        std::fs::remove_file(&map_file).unwrap();
-        std::fs::remove_file(&settings).unwrap();
-        for _ in 0..5 {
+        let mut steady = false;
+        for _ in 0..20 {
+            let state = external::claude_signed_out();
             runtime.bindings_pass().await;
+            let _ = std::fs::remove_file(&map_file);
+            let _ = std::fs::remove_file(&settings);
+            let mut moved = external::claude_signed_out() != state;
+            for _ in 0..5 {
+                runtime.bindings_pass().await;
+                moved |= external::claude_signed_out() != state;
+            }
+            if !moved {
+                steady = true;
+                break;
+            }
         }
+        assert!(
+            steady,
+            "the Claude sign-in state never held still for one idle check"
+        );
         assert!(!map_file.exists(), "an idle pass wrote the map");
         assert!(!settings.exists(), "an idle pass wrote a shell home");
         // A change (the group turns personal) is written: the map loses its row, the home stays.
