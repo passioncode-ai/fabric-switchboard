@@ -7242,7 +7242,15 @@ mod tests {
             refuse(&f.project, &Uuid::new_v4().to_string(), "isolated"),
             "Account not found."
         );
+        // W1.2 (DEC-0027): turned off by the person, it says so.
         f.store.update(&id, "Synthetic".into(), false).unwrap();
+        assert_eq!(
+            refuse(&f.project, &id, "isolated"),
+            switchboard_core::off::ACCOUNT_OFF
+        );
+        // Off because it is used on another machine: the older sentence.
+        f.store.update(&id, "Synthetic".into(), true).unwrap();
+        f.store.mark_elsewhere(&id, true, 1).unwrap();
         assert_eq!(
             refuse(&f.project, &id, "isolated"),
             "Enable the account before launch."
