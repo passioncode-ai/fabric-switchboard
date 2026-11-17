@@ -8,6 +8,17 @@ use serde_json::{json, Value};
 use std::path::Path;
 use switchboard_core::Store;
 
+pub const FOLDER_OUTSIDE: &str = "This folder is not in the pay-per-token group. Add it to the group first, then launch on its key.";
+pub const NOT_SELECTED: &str =
+    "The group's selected key serves its launches. Select this key in the group to launch on it.";
+
+/// SB-404 K3: whether `agent` can run on the pay-per-token group's key through the proxy: one
+/// configured by its environment (Claude Code), or Hermes, which the launch configures itself.
+pub fn takes_group_key(agent: &str) -> bool {
+    agent == "hermes"
+        || crate::agent_catalog::launchable(agent).is_ok_and(|p| p.base_env.is_some())
+}
+
 pub fn list(
     root: &Path,
     store: &Store,
@@ -58,6 +69,7 @@ pub fn list(
                 "usable": here,
                 "default": here,
                 "why_not": why_not,
+                "metered": true,
             }));
         }
     }
@@ -70,7 +82,58 @@ pub fn list(
                 "usable": true,
                 "default": false,
                 "why_not": null,
+                // SB-390: no ceiling counts a launch on a named Anthropic key.
+                "metered": false,
             }));
+        }
+    }
+    // SB-404 K3: the pay-per-token group's Claude API keys, for an agent that runs through the
+    // proxy on them (Claude Code by its environment, Hermes in a home of its own): metered at
+    // list price against the group's daily ceiling (DEC-0023). The proxy serves the group's
+    // selected key, so that one is the launch's; the others say how to choose them.
+    if takes_group_key(agent) {
+        if let Some(group) = snapshot.tokens_group() {
+            let selected = snapshot.routes.get(&format!("claude:{}", group.pool));
+            let ceiling = crate::spend::group_ceiling(root, &group.pool);
+            let in_group = folder.is_none_or(|f| {
+                group
+                    .folders
+                    .iter()
+                    .any(|g| f.starts_with(Path::new(g)))
+            });
+            for account in snapshot
+                .accounts
+                .iter()
+                .filter(|a| a.pool == group.pool && switchboard_core::Snapshot::is_claude_key(a))
+            {
+                let chosen = selected == Some(&account.id);
+                let why_not = if !account.enabled {
+                    Some("This key is disabled. Enable it to launch on it.")
+                } else if group.off {
+                    Some(switchboard_core::GROUP_OFF)
+                } else if ceiling.is_none() {
+                    Some(switchboard_core::TOKENS_NO_CEILING)
+                } else if !in_group {
+                    Some(FOLDER_OUTSIDE)
+                } else if !chosen {
+                    Some(NOT_SELECTED)
+                } else {
+                    None
+                };
+                keys.push(json!({
+                    "kind": "group",
+                    "pool": group.pool,
+                    "group": group.name,
+                    "account_id": account.id,
+                    "name": account.label,
+                    "model": null,
+                    "selected": chosen,
+                    "usable": why_not.is_none(),
+                    "default": false,
+                    "why_not": why_not,
+                    "metered": true,
+                }));
+            }
         }
     }
     let usable = keys.iter().any(|k| k["usable"] == true);
@@ -79,6 +142,7 @@ pub fn list(
         "folder": folder.map(|f| f.to_string_lossy().into_owned()),
         "openrouter": openrouter,
         "anthropic": crate::launch::takes_anthropic(agent),
+        "group_keys": takes_group_key(agent),
         "keys": keys,
         "none_usable": !usable,
     }))

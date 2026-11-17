@@ -1596,6 +1596,8 @@ pub(crate) fn group_allows_launch(
     }
     Ok(())
 }
+pub const MODEL_NOT_TAKEN: &str =
+    "Only Claude Code, and Hermes on the pay-per-token group, take a model at launch through the proxy. Leave out the model, or choose it in the agent itself.";
 pub(crate) const PROJECT_ACCOUNT_OUTSIDE: &str =
     "This account belongs to a group. Launch it from one of the group's folders.";
 pub(crate) const PROJECT_FOLDER_FOREIGN: &str =
@@ -1648,6 +1650,7 @@ pub fn launch_agent(
     agent: &str,
     pool: &str,
     working_directory: &Path,
+    model: Option<&str>,
 ) -> Result<Value, String> {
     launch_agent_with(
         root,
@@ -1656,10 +1659,32 @@ pub fn launch_agent(
         agent,
         pool,
         working_directory,
+        model,
         find_program,
         start_terminal,
     )
 }
+pub const HERMES_TOKENS_MODEL_NEEDED: &str =
+    "Name the model for Hermes, an Anthropic id such as claude-sonnet-5-5: Hermes on the pay-per-token group starts on the model you name.";
+/// SB-404 K3: Hermes on the pay-per-token group, through the proxy, so every answer is priced and
+/// counted against the group's daily ceiling (DEC-0023). Hermes reads its provider from its own
+/// config file: the launch writes one in a Hermes home of its own, pointing a provider named
+/// `switchboard` at the group's route with the agents' capability (never a provider key), and
+/// leaves `~/.hermes` alone. The person's own sign-ins are not adopted.
+fn hermes_tokens_home(home: &Path, base: &str) -> Result<PathBuf, String> {
+    let own = home.join("agent-home");
+    private_dir(&own)?;
+    let config = format!(
+        "# Written by Fabric Switchboard for this launch: Hermes on the pay-per-token group, through its proxy.\n\
+providers:\n  switchboard:\n    api: \"{base}\"\n    key_env: {HERMES_KEY_ENV}\n    transport: anthropic_messages\n\
+auth:\n  adopt_external_logins: false\n"
+    );
+    switchboard_core::private_fs::private_write(&own.join("config.yaml"), config.as_bytes())
+        .map_err(|_| "Managed home unavailable.".to_string())?;
+    Ok(own)
+}
+/// The variable the Hermes home's provider reads the agents' capability from.
+const HERMES_KEY_ENV: &str = "SWITCHBOARD_AGENT_KEY";
 /// `launch_agent` with the agent's program found by `find` and Terminal started by `start`, so
 /// tests need neither an installed agent nor Terminal.
 #[allow(clippy::too_many_arguments)]
@@ -1670,10 +1695,15 @@ fn launch_agent_with(
     agent: &str,
     pool: &str,
     working_directory: &Path,
+    model: Option<&str>,
     find: fn(&str) -> Option<PathBuf>,
     start: fn(&Path) -> Result<(), String>,
 ) -> Result<Value, String> {
     let profile = crate::agent_catalog::launchable(agent)?;
+    // SB-404 K3: a model named for the launch is an Anthropic id (the route speaks Claude's API).
+    if model.is_some_and(|m| !crate::anthropic_keys::model_valid(m)) {
+        return Err(crate::anthropic_keys::MODEL_INVALID.into());
+    }
     let working_directory = agent_folder(root, working_directory)?;
     let (account, _) = store
         .route(Provider::Claude, pool)
@@ -1711,10 +1741,26 @@ fn launch_agent_with(
         env.insert(key_env.clone(), proxy.agent_token().to_owned());
     }
     env.extend(profile.extra_env.clone());
+    let mut args: Vec<String> = profile.args.clone();
+    // SB-404 K3: Hermes on the pay-per-token group runs through the proxy, in a home of its own.
+    let tokens = snapshot.project_of_pool(pool).is_some_and(|g| g.tokens);
+    if profile.id == "hermes" && tokens {
+        let model = model.ok_or(HERMES_TOKENS_MODEL_NEEDED)?;
+        let own = hermes_tokens_home(&home, &base)?;
+        env.insert("HERMES_HOME".into(), own.to_string_lossy().into_owned());
+        env.insert(HERMES_KEY_ENV.into(), proxy.agent_token().to_owned());
+        args.extend(["--provider".into(), "switchboard".into(), "-m".into(), model.to_owned()]);
+    } else if let Some(model) = model {
+        // Claude Code takes the model as `--model`; another agent picks it in its own config.
+        if profile.id != "claude-code" {
+            return Err(MODEL_NOT_TAKEN.into());
+        }
+        args.extend(["--model".into(), model.to_owned()]);
+    }
     // SB-212: the session's own launch id, for the record and for what it launches.
     let launch_id = crate::launches::new_id();
     env.insert(crate::launches::ENV.into(), launch_id.clone());
-    let args: Vec<&str> = profile.args.iter().map(String::as_str).collect();
+    let args: Vec<&str> = args.iter().map(String::as_str).collect();
     let content = script(&home, &program, &args, &env, false, &working_directory);
     let path = write_launch_script(&home, &content)?;
     // Listed under Sessions like any launch (`sessions`): ids, folder and times only.
@@ -1726,11 +1772,12 @@ fn launch_agent_with(
         "pool": pool, "context": context,
         "mode": "managed", "working_directory": working_directory, "in_place": false,
         "launched_at": switchboard_proxy::now(), "continues": null,
+        "label": model,
     });
     crate::launches::record(root, &home, record, &launch_id)?;
     start(&path)?;
     Ok(
-        json!({"launched": true, "agent": profile.id, "name": profile.name, "pool": pool, "account": account.label}),
+        json!({"launched": true, "agent": profile.id, "name": profile.name, "pool": pool, "account": account.label, "model": model, "metered": tokens}),
     )
 }
 /// The folder a third-party agent starts in: an existing absolute folder outside Switchboard's
@@ -5450,6 +5497,7 @@ mod tests {
             "goose",
             "default",
             &f.project,
+            None,
             goose_installed,
             terminal_opens,
         )
@@ -5490,6 +5538,7 @@ mod tests {
             "codex",
             "default",
             &f.project,
+            None,
             goose_installed,
             terminal_opens,
         )
@@ -5507,6 +5556,7 @@ mod tests {
             "goose",
             "acme",
             &f.project,
+            None,
             goose_installed,
             terminal_opens,
         )

@@ -101,6 +101,8 @@ const PARITY: &[(&str, Over)] = &[
     ("hermes_model", Tool("switchboard_hermes_status")),
     ("anthropic_keys", Tool("switchboard_anthropic_keys")),
     ("launch_keys", Tool("switchboard_launch_keys")),
+    ("observatory_keys", Tool("switchboard_observatory_keys")),
+    ("observatory_key_add", Tool("switchboard_observatory_key_add")),
     ("hermes_set_model", Tool("switchboard_hermes_set")),
     ("kimi_login_begin", Tool("switchboard_kimi_login")),
     ("kimi_login_status", Tool("switchboard_kimi_login")),
