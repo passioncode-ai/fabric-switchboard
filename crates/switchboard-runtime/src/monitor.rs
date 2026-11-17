@@ -369,17 +369,36 @@ impl Pass {
         // thread of their own; nothing at all without a machine group.
         if let Ok(snapshot) = runtime.store.snapshot() {
             crate::remote_usage::tick(&runtime.root, &snapshot, time);
-            // SB-403 (DEC-0024): a seat another machine delegated here whose lease ran out is
-            // switched off and its credential removed (a vault delete, off the async worker).
-            let due = snapshot.leases_due(time);
-            if !due.is_empty() {
-                let store = runtime.store.clone();
-                let ended = crate::blocking::run(move || {
-                    due.iter().filter(|id| store.end_lease(id).is_ok()).count()
+            // SB-403 (DEC-0025): a seat another machine delegated here whose lease ran out, once
+            // this owner ran a full read interval past it, is switched off and its home cleaned;
+            // its credential is kept 30 days for the sender's call back, then removed (a vault
+            // delete, off the async worker).
+            let due = snapshot.leases_due(time, runtime.opened_at);
+            let purge = snapshot.purges_due(time);
+            if !due.is_empty() || !purge.is_empty() {
+                let (store, root) = (runtime.store.clone(), runtime.root.clone());
+                let (ended, purged) = crate::blocking::run(move || {
+                    let ended = due
+                        .iter()
+                        .filter(|id| {
+                            let done = store.end_lease(id).is_ok();
+                            // A home it was launched in (an earlier version) holds its token.
+                            let _ = crate::launch::clean_account(&root, id);
+                            done
+                        })
+                        .count();
+                    let purged = purge
+                        .iter()
+                        .filter(|id| store.purge_lease(id).is_ok())
+                        .count();
+                    (ended, purged)
                 });
                 crate::oplog::event(
                     "delegation_ended",
-                    &[("ended", crate::oplog::Field::Number(ended as i64))],
+                    &[
+                        ("ended", crate::oplog::Field::Number(ended as i64)),
+                        ("purged", crate::oplog::Field::Number(purged as i64)),
+                    ],
                 );
             }
         }

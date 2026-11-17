@@ -347,7 +347,7 @@ export type MachineReadStatus = 'read' | 'unreachable' | 'no_switchboard' | 'too
 export interface MachineSessions { machine: string; status: MachineReadStatus; rows?: SessionRow[]; counts?: Record<SessionGroup, number>; read_at: number }
 export interface SessionsEverywhere { here: SessionRows; machines: MachineSessions[] }
 /** SB-378: `switchboard capacity`, this computer's cap on working coding sessions. */
-/** SB-403 S3 (DEC-0024): the person's own sign-in, read and changed by Switchboard or off limits. */
+/** SB-403 S3 (DEC-0025): the person's own sign-in, read and changed by Switchboard or off limits. */
 export interface OwnSignIn { own_sign_in: 'on' | 'off'; on: boolean }
 /** SB-384 (DEC-0018): the session duty officer. */
 export interface DutySettings { on: boolean; stuck_minutes: number; waiting_minutes: number; idle_minutes: number; max_age_hours: number }

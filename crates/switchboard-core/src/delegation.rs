@@ -1,4 +1,4 @@
-//! SB-403 S2 (DEC-0024): a subscription sign-in another machine delegated to this one.
+//! SB-403 S2 (DEC-0025): a subscription sign-in another machine delegated to this one.
 //!
 //! The sender moves a sign-in here with `accounts send --delegate` through this machine's
 //! restricted ssh entry (`switchboard ssh-serve`, a forced command that names the sender's key).
@@ -7,7 +7,15 @@
 //! sent on, given to an agent, lent or shared, moved to another group (the default one included),
 //! marked as used elsewhere or made the ordinary login, and only the sender calls it back or
 //! removes it. A lease bounds it: the sender's background read of this machine extends it (by
-//! default to 48 hours ahead); past it, the copy is switched off and its credential removed.
+//! default to 48 hours ahead); past it (and only once this machine's owner has run a full read
+//! interval past it), the copy is switched off and never renewed, but its credential is kept, so
+//! the sender can still call the live sign-in back, or revive the seat by extending its lease.
+//! Thirty days after that, the credential is removed.
+//!
+//! Threat model: the teammate owns this machine. These rules keep an honest teammate's Switchboard
+//! from passing a guest on by mistake and let the sender take it back; they do not stop a teammate
+//! who reads their own Keychain. Against an uncooperative teammate the revocation is signing the
+//! subscription out at the provider.
 //!
 //! The rules are checked on every publication of the store (`stays`), so a path that forgets
 //! them fails closed with [`DELEGATED_STAYS`] instead of passing a guest's sign-in on.
@@ -18,16 +26,24 @@ use serde::{Deserialize, Serialize};
 pub const DEFAULT_LEASE_HOURS: u32 = 48;
 /// The longest lease a sender may give at once: 30 days.
 pub const MAX_LEASE_HOURS: u32 = 720;
+/// A lease ends only once this machine's owner has run this long past it (and past its own
+/// start): one background read interval of the sender, so a sender that just came back online
+/// extends it first.
+pub const LEASE_GRACE_SECONDS: i64 = 15 * 60;
+/// How long the credential of a seat whose lease ended is kept, off, for the sender to call back.
+pub const KEEP_AFTER_LEASE_SECONDS: i64 = 30 * 86_400;
 
 pub const DELEGATED_STAYS: &str = "This seat was delegated to this computer by another machine. It stays in the group it was delegated to and is used only here; only that machine calls it back.";
 pub const DELEGATED_NOT_SENT: &str = "This seat was delegated to this computer by another machine, so it cannot be moved or handed on. Only that machine calls it back.";
 pub const DELEGATED_NOT_GIVEN: &str =
     "This seat was delegated to this computer by another machine, so it is not given to an agent.";
-pub const DELEGATED_NOT_REMOVED: &str = "This seat was delegated to this computer by another machine. Ask that machine to call it back; it can be removed here once its lease has run out.";
+pub const DELEGATED_NOT_REMOVED: &str = "This seat was delegated to this computer by another machine. Ask that machine to call it back; it can be removed here 30 days after its lease ran out.";
 pub const DELEGATED_NOT_NATIVE: &str = "This seat was delegated to this computer by another machine. It serves its group's sessions only and never becomes the ordinary Claude Code or Codex sign-in.";
 pub const NOT_DELEGATED_BY_YOU: &str =
     "This computer holds no seat with that id that the calling machine delegated.";
-pub const LEASE_ENDED: &str = "This seat's lease ran out, so its sign-in was removed from this computer. The machine that delegated it calls it back, then delegates it again.";
+pub const LEASE_ENDED: &str = "This seat's lease ran out, so it is switched off here. The machine that delegated it extends its lease to use it again, or calls it back.";
+pub const SIGN_IN_REMOVED: &str = "This seat's sign-in was removed from this computer 30 days after its lease ran out. The machine that delegated it signs in to the account again and delegates it again.";
+pub const GROUP_HOLDS_GUEST: &str = "This group holds a seat another machine delegated to this computer. Ask that machine to call the seat back before deleting the group.";
 pub const LEASE_INVALID: &str = "Give the lease in whole hours, from 1 to 720.";
 pub const KEY_INVALID: &str = "That is not a machine's key. Give the key switchboard settings signer printed on the machine that delegates.";
 pub const DELEGATE_GROUP: &str = "A delegated seat joins one of this computer's groups, never the default group. Name a group this computer has.";
@@ -49,15 +65,34 @@ pub struct Delegation {
     pub granted_at: i64,
     /// Until when it may be renewed and used here (Unix seconds).
     pub lease_until: i64,
-    /// When its lease ran out and its credential was removed here.
+    /// When its lease ran out here: switched off and never renewed, its credential kept.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ended_at: Option<i64>,
+    /// When its credential was removed, `KEEP_AFTER_LEASE_SECONDS` after it ended.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub purged_at: Option<i64>,
+}
+
+/// SB-403 (P2-5): on the machine that delegated a seat, what it needs to extend and call it back:
+/// the seat's id there, its lease and the key it was delegated under (this machine's public key).
+/// Kept in the store with the account's machine group (`Snapshot::delegated_out`), so it survives
+/// `seats.jsonl` rotation, backups and restores.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DelegatedOut {
+    pub remote_id: String,
+    pub lease_hours: u32,
+    pub sender_key: String,
 }
 
 impl Delegation {
     /// The lease is over (by its time, or marked so).
     pub fn ended(&self, now: i64) -> bool {
         self.ended_at.is_some() || now >= self.lease_until
+    }
+    /// Its credential is gone from this machine.
+    pub fn purged(&self) -> bool {
+        self.purged_at.is_some()
     }
 }
 
@@ -93,9 +128,30 @@ pub(crate) fn validate(s: &Snapshot) -> Result<(), String> {
             || d.granted_at <= 0
             || d.lease_until <= d.granted_at
             || d.ended_at.is_some_and(|t| t < d.granted_at)
+            || d.purged_at
+                .is_some_and(|t| d.ended_at.is_none_or(|e| t < e))
         {
             return invalid();
         }
+    }
+    Ok(())
+}
+
+fn remote_id_valid(id: &str) -> bool {
+    !id.is_empty() && id.len() <= 64 && id.bytes().all(|b| b.is_ascii_hexdigit() || b == b'-')
+}
+
+/// The shape of the sender's records.
+pub(crate) fn validate_out(s: &Snapshot) -> Result<(), String> {
+    if s.delegated_out.len() > MAX_ACCOUNTS
+        || s.delegated_out.iter().any(|(id, o)| {
+            !s.accounts.iter().any(|a| &a.id == id)
+                || !remote_id_valid(&o.remote_id)
+                || !lease_valid(o.lease_hours)
+                || !key_valid(&o.sender_key)
+        })
+    {
+        return Err("Invalid account metadata".into());
     }
     Ok(())
 }
@@ -129,12 +185,19 @@ pub(crate) fn stays(old: &Snapshot, new: &Snapshot) -> Result<(), String> {
         }
         match old.delegated.get(id) {
             Some(o) => {
+                // A seat may come back from an ended lease (the sender extended it) while its
+                // credential is still here; once removed, never.
                 if o.sender_key != d.sender_key
                     || o.pool != d.pool
                     || o.granted_at != d.granted_at
-                    || (o.ended_at.is_some() && d.ended_at.is_none())
+                    || (o.purged() && (!d.purged() || d.ended_at.is_none()))
                 {
-                    return Err(DELEGATED_STAYS.into());
+                    return Err(if o.purged() {
+                        SIGN_IN_REMOVED
+                    } else {
+                        DELEGATED_STAYS
+                    }
+                    .into());
                 }
             }
             // A delegation is born with its account, never put on one already here.
@@ -159,11 +222,27 @@ impl Snapshot {
     pub fn is_delegated(&self, id: &str) -> bool {
         self.delegated.contains_key(id)
     }
-    /// The delegated seats whose lease is over at `now` but not yet ended here.
-    pub fn leases_due(&self, now: i64) -> Vec<String> {
+    /// The delegated seats to end at `now`: lease over, and this machine's owner (running since
+    /// `owner_since`) has run `LEASE_GRACE_SECONDS` past both the lease and its own start, so the
+    /// sender's background read had its chance to extend it.
+    pub fn leases_due(&self, now: i64, owner_since: i64) -> Vec<String> {
         self.delegated
             .iter()
-            .filter(|(_, d)| d.ended_at.is_none() && now >= d.lease_until)
+            .filter(|(_, d)| {
+                d.ended_at.is_none() && now >= d.lease_until.max(owner_since) + LEASE_GRACE_SECONDS
+            })
+            .map(|(id, _)| id.clone())
+            .collect()
+    }
+    /// The ended seats whose kept credential is due for removal at `now`.
+    pub fn purges_due(&self, now: i64) -> Vec<String> {
+        self.delegated
+            .iter()
+            .filter(|(_, d)| {
+                !d.purged()
+                    && d.ended_at
+                        .is_some_and(|e| now >= e + KEEP_AFTER_LEASE_SECONDS)
+            })
             .map(|(id, _)| id.clone())
             .collect()
     }
@@ -218,11 +297,13 @@ impl crate::Store {
             granted_at: time,
             lease_until: time + i64::from(lease_hours) * 3600,
             ended_at: None,
+            purged_at: None,
         };
         self.save_delegated(label, provider, pool, credential, delegation)
     }
-    /// The sender extends a seat's lease to `hours` from now (shorter or longer). An ended lease
-    /// is not revived: the sender calls the seat back and delegates it again.
+    /// The sender extends a seat's lease to `hours` from now (shorter or longer). A seat whose
+    /// lease ended comes back on while its credential is still here (a sender that was offline
+    /// over a weekend); once its credential is removed it does not.
     pub fn extend_lease(&self, id: &str, sender_key: &str, hours: u32) -> Result<i64, String> {
         if !lease_valid(hours) {
             return Err(LEASE_INVALID.into());
@@ -230,35 +311,37 @@ impl crate::Store {
         let time = now();
         let mut state = self.lock()?;
         let d = owned(&state, id, sender_key)?;
-        if d.ended(time) {
-            return Err(LEASE_ENDED.into());
+        if d.purged() {
+            return Err(SIGN_IN_REMOVED.into());
         }
+        let revived = d.ended_at.is_some();
         let until = time + i64::from(hours) * 3600;
         let mut candidate = state.clone();
         if let Some(d) = candidate.delegated.get_mut(id) {
             d.lease_until = until.max(d.granted_at + 1);
+            d.ended_at = None;
+        }
+        if revived {
+            if let Some(a) = candidate.accounts.iter_mut().find(|a| a.id == id) {
+                a.enabled = true;
+            }
+            crate::append_event(&mut candidate, "delegation", Some(id), "restored");
         }
         // A lease's time is not worth a write of its own every 15 minutes, but a lease is what
         // keeps the seat working: it is written, as any other change.
         self.publish(&mut state, candidate)?;
         Ok(until)
     }
-    /// A seat whose lease is over: its credential is removed, then the account is switched off
-    /// and marked ended. A crash in between leaves the record to end again on the next pass.
+    /// A seat whose lease is over: switched off (never renewed or routed) and marked ended. Its
+    /// credential stays, for the sender's call back or a later extension (`purge_lease` removes
+    /// it 30 days on). The caller picks the seats with `Snapshot::leases_due`.
     pub fn end_lease(&self, id: &str) -> Result<(), String> {
         let time = now();
-        let _writes = self.credential_lock()?;
-        {
-            let state = self.lock()?;
-            let d = state.delegated.get(id).ok_or(NOT_DELEGATED_BY_YOU)?;
-            if d.ended_at.is_some() || time < d.lease_until {
-                return Ok(());
-            }
-        }
-        self.vault
-            .delete(id)
-            .map_err(crate::vault::surface("Credential storage unavailable"))?;
         let mut state = self.lock()?;
+        let d = state.delegated.get(id).ok_or(NOT_DELEGATED_BY_YOU)?;
+        if d.ended_at.is_some() || time < d.lease_until {
+            return Ok(());
+        }
         let mut candidate = state.clone();
         if let Some(a) = candidate.accounts.iter_mut().find(|a| a.id == id) {
             a.enabled = false;
@@ -272,21 +355,50 @@ impl crate::Store {
         self.changed();
         Ok(())
     }
+    /// A seat ended `KEEP_AFTER_LEASE_SECONDS` ago: its credential is removed, then the record
+    /// says so. A crash in between removes it again on the next pass.
+    pub fn purge_lease(&self, id: &str) -> Result<(), String> {
+        let time = now();
+        let _writes = self.credential_lock()?;
+        {
+            let state = self.lock()?;
+            let d = state.delegated.get(id).ok_or(NOT_DELEGATED_BY_YOU)?;
+            if d.purged()
+                || d.ended_at
+                    .is_none_or(|e| time < e + KEEP_AFTER_LEASE_SECONDS)
+            {
+                return Ok(());
+            }
+        }
+        self.vault
+            .delete(id)
+            .map_err(crate::vault::surface("Credential storage unavailable"))?;
+        let mut state = self.lock()?;
+        let mut candidate = state.clone();
+        if let Some(d) = candidate.delegated.get_mut(id) {
+            d.purged_at = Some(time);
+        }
+        crate::append_event(&mut candidate, "delegation", Some(id), "purged");
+        self.publish(&mut state, candidate)?;
+        self.changed();
+        Ok(())
+    }
     /// The sender calls a seat back: it is switched off here (never renewed again) and its
-    /// tokens are answered; `undo` switches it on again when the sender could not take them.
-    /// Answers None for a seat whose lease ended: its sign-in is no longer here.
+    /// tokens are answered, a seat whose lease ended included; `undo` switches it on again when
+    /// the sender could not take them (an ended one stays off). Answers None once the seat's
+    /// credential was removed (`purge_lease`): its sign-in is no longer here.
     pub fn surrender_delegated(
         &self,
         id: &str,
         sender_key: &str,
         undo: bool,
     ) -> Result<Option<crate::Credential>, String> {
-        let time = now();
-        let ended = {
+        let (purged, ended) = {
             let state = self.lock()?;
-            owned(&state, id, sender_key)?.ended(time)
+            let d = owned(&state, id, sender_key)?;
+            (d.purged(), d.ended_at.is_some())
         };
-        if ended {
+        if purged {
             return Ok(None);
         }
         {
@@ -297,7 +409,7 @@ impl crate::Store {
                 .iter_mut()
                 .find(|a| a.id == id)
                 .ok_or(NOT_DELEGATED_BY_YOU)?;
-            a.enabled = undo;
+            a.enabled = undo && !ended;
             if !undo {
                 candidate.routes.retain(|_, v| v != id);
             }
@@ -314,6 +426,16 @@ impl crate::Store {
             return Ok(None);
         }
         self.stored_credential(id).map(Some)
+    }
+    /// SB-403 (P2-5): on the sender, records that `id`, which just joined its machine's group,
+    /// is a seat delegated there (its id there, lease and the key named).
+    pub fn record_delegated_out(&self, id: &str, out: DelegatedOut) -> Result<(), String> {
+        let mut state = self.lock()?;
+        let mut candidate = state.clone();
+        candidate.delegated_out.insert(id.to_owned(), out);
+        self.publish(&mut state, candidate)?;
+        self.changed();
+        Ok(())
     }
     /// The sender removes a seat it delegated (after a call back), its credential with it.
     pub fn remove_delegated(&self, id: &str, sender_key: &str) -> Result<(), String> {
@@ -492,7 +614,7 @@ mod tests {
     }
 
     #[test]
-    fn past_its_lease_a_seat_is_switched_off_and_its_credential_removed() {
+    fn past_its_lease_a_seat_is_switched_off_kept_and_removed_30_days_later() {
         let (_r, _f, store) = store_with_group();
         let a = store
             .add_delegated(
@@ -508,37 +630,121 @@ mod tests {
         // Not due: nothing happens.
         store.end_lease(&a.id).unwrap();
         assert!(store.stored_credential(&a.id).is_ok());
-        // Due: the lease is set in the past by hand, as time passing would.
-        {
+        let set = |lease_until: i64, ended_at: Option<i64>| {
             let mut state = store.lock().unwrap();
             let mut candidate = state.clone();
             let d = candidate.delegated.get_mut(&a.id).unwrap();
-            d.granted_at -= 100 * 3600;
-            d.lease_until = now() - 1;
+            d.granted_at = now() - 100 * 86_400;
+            d.lease_until = lease_until;
+            d.ended_at = ended_at;
             *state = candidate;
             store.republish(&state);
-        }
-        assert_eq!(
-            store.snapshot().unwrap().leases_due(now()),
-            vec![a.id.clone()]
+        };
+        // The lease ran out a minute ago: not due until the owner ran a full read interval past
+        // it and past its own start.
+        set(now() - 60, None);
+        let s = store.snapshot().unwrap();
+        assert!(s.leases_due(now(), now() - 3600).is_empty());
+        set(now() - LEASE_GRACE_SECONDS - 1, None);
+        let s = store.snapshot().unwrap();
+        assert!(
+            s.leases_due(now(), now()).is_empty(),
+            "the owner just started"
         );
+        assert_eq!(s.leases_due(now(), now() - 3600), vec![a.id.clone()]);
         store.end_lease(&a.id).unwrap();
         let s = store.snapshot().unwrap();
         assert!(!s.accounts[0].enabled);
         assert!(s.delegated[&a.id].ended_at.is_some());
-        assert!(store.stored_credential(&a.id).is_err());
-        // Switching it on again is refused; extending it too; the sender's call back answers
-        // that the sign-in is gone, and it may be removed here now.
+        // The credential stays: the sender can still call the live sign-in back.
+        assert!(store.stored_credential(&a.id).is_ok());
         assert_eq!(
             store.update_fields(&a.id, None, Some(true)).unwrap_err(),
             LEASE_ENDED
         );
-        assert_eq!(store.extend_lease(&a.id, KEY, 48).unwrap_err(), LEASE_ENDED);
+        assert_eq!(store.remove(&a.id).unwrap_err(), DELEGATED_NOT_REMOVED);
+        // The sender comes back online and extends it: the seat is on again.
+        store.extend_lease(&a.id, KEY, 48).unwrap();
+        let s = store.snapshot().unwrap();
+        assert!(s.accounts[0].enabled && s.delegated[&a.id].ended_at.is_none());
+        // Ended for 30 days: the credential is removed, and nothing brings the seat back.
+        set(
+            now() - 31 * 86_400,
+            Some(now() - KEEP_AFTER_LEASE_SECONDS - 1),
+        );
+        {
+            let mut state = store.lock().unwrap();
+            state.accounts[0].enabled = false;
+            store.republish(&state);
+        }
+        assert_eq!(
+            store.snapshot().unwrap().purges_due(now()),
+            vec![a.id.clone()]
+        );
+        store.purge_lease(&a.id).unwrap();
+        assert!(store.stored_credential(&a.id).is_err());
+        assert!(store.snapshot().unwrap().delegated[&a.id].purged());
+        assert_eq!(
+            store.extend_lease(&a.id, KEY, 48).unwrap_err(),
+            SIGN_IN_REMOVED
+        );
         assert!(store
             .surrender_delegated(&a.id, KEY, false)
             .unwrap()
             .is_none());
         store.remove(&a.id).unwrap();
+    }
+
+    #[test]
+    fn a_seat_whose_lease_ended_is_still_given_back_with_its_live_sign_in() {
+        let (_r, _f, store) = store_with_group();
+        let a = store
+            .add_delegated(
+                "seat".into(),
+                Provider::Claude,
+                pool(&store),
+                oauth("7"),
+                KEY,
+                None,
+                48,
+            )
+            .unwrap();
+        {
+            let mut state = store.lock().unwrap();
+            let d = state.delegated.get_mut(&a.id).unwrap();
+            d.granted_at = now() - 100 * 3600;
+            d.lease_until = now() - 1;
+            store.republish(&state);
+        }
+        store.end_lease(&a.id).unwrap();
+        let tokens = store
+            .surrender_delegated(&a.id, KEY, false)
+            .unwrap()
+            .unwrap();
+        assert_eq!(tokens.refresh_token.as_deref(), Some("r-7"));
+        // An undo leaves an ended seat off.
+        store.surrender_delegated(&a.id, KEY, true).unwrap();
+        assert!(!store.snapshot().unwrap().accounts[0].enabled);
+    }
+
+    #[test]
+    fn a_group_holding_a_guest_is_not_deleted() {
+        let (_r, _f, store) = store_with_group();
+        store
+            .add_delegated(
+                "seat".into(),
+                Provider::Claude,
+                pool(&store),
+                oauth("8"),
+                KEY,
+                None,
+                48,
+            )
+            .unwrap();
+        assert_eq!(
+            store.remove_project(&pool(&store)).unwrap_err(),
+            GROUP_HOLDS_GUEST
+        );
     }
 
     #[test]
@@ -565,6 +771,7 @@ mod tests {
                 granted_at: now(),
                 lease_until: now() + 10,
                 ended_at: None,
+                purged_at: None,
             },
         );
         assert_eq!(

@@ -174,7 +174,8 @@ export function eventDetail(detail: string): string {
     case 'left': return t('back on this computer');
     // SB-403: a delegated seat saved here, its lease run out, called back, or in use again.
     case 'granted': return t('delegated here');
-    case 'ended': return t('lease ran out, sign-in removed');
+    case 'ended': return t('lease ran out, switched off');
+    case 'purged': return t('sign-in removed');
     case 'surrendered': return t('given back to the machine that delegated it');
     case 'restored': return t('in use again here');
     default: return /^[2-5]xx$/.test(detail) ? t('HTTP {status}', { status: detail }) : detail.replaceAll('_', ' ');

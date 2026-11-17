@@ -70,6 +70,9 @@ pub const POOL_MISSING: &str =
 pub const RENEWED_DURING: &str = "This machine renewed the sign-in while it moved, so the copy sent was no longer valid. It was removed there and stays here; move it again.";
 pub const OUTCOME_UNKNOWN: &str = "The other machine's answer was lost. This machine no longer uses the account; look at the other machine's accounts and call it back or remove its copy there.";
 pub const LEFT_THERE: &str = "The copy on the other machine could not be removed. This machine no longer uses the account; remove that copy there, then mark the account used here.";
+/// SB-403: the delegated copy there could not be removed after a failed check. It is switched
+/// off there once its lease runs out; the guest cannot be removed by the person there.
+pub const LEFT_THERE_DELEGATED: &str = "The delegated copy on the other machine could not be removed. This machine no longer uses the account; the copy there switches off when its lease runs out. Then mark the account used here.";
 /// The location a surrender writes; `--undo` takes back only this mark.
 pub const CALLED_BACK: &str = "called back";
 /// SB-377: the mark of a surrender whose account was off here; `--undo` turns it off again.
@@ -205,7 +208,7 @@ pub(crate) fn next_for_cli<'a>(
         .min_by_key(|a| next_rank(a, now))
 }
 
-/// SB-403 (DEC-0024): a move that delegates the seat: the other machine saves it as a guest
+/// SB-403 (DEC-0025): a move that delegates the seat: the other machine saves it as a guest
 /// pinned to `sender_key` (this machine's settings signing key) with a lease of `lease_hours`,
 /// which this machine's background read of it extends.
 #[derive(Clone, Copy, Debug)]
@@ -361,7 +364,11 @@ pub fn send_as(
         run(
             &ssh(remote(
                 program,
-                &["--json", "accounts", "remove", remote_id],
+                // SB-403: a delegated copy is removed only under the key it was delegated under.
+                &as_sender(
+                    &["--json", "accounts", "remove", remote_id],
+                    delegate.map(|d| d.sender_key),
+                ),
             )),
             None,
         )
@@ -442,7 +449,12 @@ pub fn send_as(
         .is_some_and(|c| c.refresh_token != sent);
     if !verified || renewed_here {
         if !remove_there(&remote_id) {
-            return Err(LEFT_THERE.into());
+            return Err(if delegate.is_some() {
+                LEFT_THERE_DELEGATED
+            } else {
+                LEFT_THERE
+            }
+            .into());
         }
         undo_here()?;
         return Err(if renewed_here {
@@ -473,7 +485,7 @@ pub const DELEGATE_INTO_GROUP: &str = "A delegated seat joins one of the other m
 pub const DELEGATE_ONLY: &str = "That machine takes seats only as delegated ones. Move it again as a delegated seat (accounts send --delegate).";
 /// SB-403: the seat's lease had run out there: its copy was removed, and the sign-in this machine
 /// kept since the move did not answer here.
-pub const LEASE_ENDED_SIGN_IN: &str = "The seat's lease had run out on the other machine, which removed its copy. The sign-in kept here did not answer; sign in to this account again.";
+pub const LEASE_ENDED_SIGN_IN: &str = "The other machine removed the seat's sign-in 30 days after its lease ran out. The sign-in kept here did not answer; sign in to this account again.";
 /// SB-403: a lease extension the other machine refused or did not answer; the read goes on.
 pub const LEASE_NOT_EXTENDED: &str = "The other machine did not extend the seat's lease.";
 
@@ -670,7 +682,7 @@ pub fn surrender(
     )
 }
 
-/// SB-403 (DEC-0024), on the machine a seat was delegated to, through `ssh-serve`: gives the
+/// SB-403 (DEC-0025), on the machine a seat was delegated to, through `ssh-serve`: gives the
 /// seat's sign-in back to the machine whose key delegated it. The seat is switched off first, so
 /// this machine never renews it again; a seat whose lease ran out answers `lease_ended` and no
 /// sign-in. `undo` switches it on again when the caller could not take it.
@@ -2203,7 +2215,7 @@ mod tests {
         words.get(at + 1).map(String::as_str)
     }
 
-    /// SB-403 (DEC-0024): a delegated seat goes to the other machine as a guest pinned to this
+    /// SB-403 (DEC-0025): a delegated seat goes to the other machine as a guest pinned to this
     /// machine's key, and comes back only to that key. The other machine is a second store, which
     /// the fake ssh drives as that machine's `ssh-serve` would.
     #[test]
@@ -2372,6 +2384,63 @@ mod tests {
                 .iter()
                 .any(|(c, _)| c
                     .contains(&format!("'surrender' '{remote_id}' '--sender-key' '{KEY}'")))
+        );
+    }
+
+    /// SB-403 (review P1-2): a delegated move whose check fails there removes the copy there
+    /// under the key it was delegated under (the restricted entry refuses a removal without it),
+    /// so no guest is left running there for its lease.
+    #[test]
+    fn a_delegated_move_that_fails_its_check_removes_the_copy_there_under_its_key() {
+        let (_root, store, id) = store_with(AuthKind::OAuth);
+        let calls: Calls = Default::default();
+        let err = send_as(
+            &store,
+            &id,
+            "studio.local",
+            "agents",
+            &DEFAULT_APP,
+            100,
+            &fake(&calls, true, false),
+            &|_| {},
+            Some(Delegate {
+                sender_key: "K",
+                lease_hours: 48,
+            }),
+        )
+        .unwrap_err();
+        assert_eq!(err, NOT_VERIFIED);
+        assert!(calls
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|(c, _)| c.contains("'accounts' 'remove' 'remote-1' '--sender-key' 'K'")));
+        assert!(!store.snapshot().unwrap().elsewhere.contains_key(&id));
+        // When the removal there fails too, the answer says the copy switches off by its lease.
+        let calls: Calls = Default::default();
+        let failing = |args: &[String], stdin: Option<&[u8]>| {
+            if args[2].contains("'accounts' 'remove'") {
+                return Err("ssh failed.".to_string());
+            }
+            fake(&calls, true, false)(args, stdin)
+        };
+        assert_eq!(
+            send_as(
+                &store,
+                &id,
+                "studio.local",
+                "agents",
+                &DEFAULT_APP,
+                100,
+                &failing,
+                &|_| {},
+                Some(Delegate {
+                    sender_key: "K",
+                    lease_hours: 48,
+                }),
+            )
+            .unwrap_err(),
+            LEFT_THERE_DELEGATED
         );
     }
 

@@ -38,7 +38,7 @@ pub mod windows;
 
 pub use chains::{provider_agent, workflow_id_valid, Chain, ChainScope, Executor, MAX_EXECUTORS};
 pub use credential::Credential;
-pub use delegation::Delegation;
+pub use delegation::{DelegatedOut, Delegation};
 pub use machines::{is_machine_pool, Machine, MachineRef};
 pub use organizations::{Attribution, By, Organization};
 pub use projects::{
@@ -331,10 +331,14 @@ pub struct Snapshot {
     /// person's word once (`Snapshot::retire_domain_rule`). Omitted while false.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub domain_rule_retired: bool,
-    /// SB-403 (DEC-0024): accounts another machine delegated to this one, by account id: the
+    /// SB-403 (DEC-0025): accounts another machine delegated to this one, by account id: the
     /// sender's key, the group it stays in and its lease (`delegation`). Omitted when empty.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub delegated: BTreeMap<String, delegation::Delegation>,
+    /// SB-403 (P2-5): on the sender, the seats it delegated to another machine, by account id
+    /// here (each lives in that machine's group). Omitted when empty.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub delegated_out: BTreeMap<String, delegation::DelegatedOut>,
 }
 
 /// A process-lifetime exclusive owner of one private metadata directory.
@@ -479,7 +483,10 @@ pub(crate) fn event_valid(action: &str, detail: &str) -> bool {
         "machine" => matches!(detail, "joined" | "left"),
         // SB-403: a seat another machine delegated here: saved, its lease over, called back or
         // used again after a call back that did not take it.
-        "delegation" => matches!(detail, "granted" | "ended" | "surrendered" | "restored"),
+        "delegation" => matches!(
+            detail,
+            "granted" | "ended" | "purged" | "surrendered" | "restored"
+        ),
         "account_added" | "account_updated" | "account_removed" | "account_selected" => {
             detail == "success"
         }
@@ -601,6 +608,7 @@ pub(crate) fn validate_snapshot(s: &Snapshot) -> Result<(), String> {
     kimi_accounts::validate_kimi_accounts(s)?;
     machines::validate_machines(s)?;
     delegation::validate(s)?;
+    delegation::validate_out(s)?;
     if s.locations.len() > MAX_ACCOUNTS
         || s.locations
             .iter()
@@ -2341,12 +2349,7 @@ impl Store {
     pub fn remove(&self, id: &str) -> Result<(), String> {
         // SB-403: a seat another machine delegated goes only by that machine's word, or once its
         // lease has run out (its credential already gone).
-        if self
-            .lock()?
-            .delegated
-            .get(id)
-            .is_some_and(|d| d.ended_at.is_none())
-        {
+        if self.lock()?.delegated.get(id).is_some_and(|d| !d.purged()) {
             return Err(delegation::DELEGATED_NOT_REMOVED.into());
         }
         self.remove_any(id)
@@ -2379,6 +2382,7 @@ impl Store {
         candidate.assigned_to.remove(id);
         candidate.returns_to.remove(id);
         candidate.delegated.remove(id);
+        candidate.delegated_out.remove(id);
         chains::prune(&mut candidate);
         append_event(&mut candidate, "account_removed", Some(id), "success");
         self.publish(&mut state, candidate)?;

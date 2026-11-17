@@ -1,4 +1,4 @@
-//! SB-403 S3 (DEC-0024): the person's own Claude Code and Codex sign-ins, off limits.
+//! SB-403 S3 (DEC-0025): the person's own Claude Code and Codex sign-ins, off limits.
 //!
 //! On a teammate's computer Switchboard serves seats an organization delegated to it, and the
 //! person keeps their own subscription in Claude Desktop and in the ordinary Claude Code. With

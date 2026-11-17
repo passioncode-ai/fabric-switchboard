@@ -202,6 +202,10 @@ pub fn delegated_to(root: &Path, snapshot: &Snapshot, machine: &str) -> Vec<(Str
         .iter()
         .filter(|a| a.pool == pool)
         .filter_map(|a| {
+            // The store's record (review P2-5), else the move's `seats.jsonl` line.
+            if let Some(o) = snapshot.delegated_out.get(&a.id) {
+                return Some((o.remote_id.clone(), o.lease_hours, o.sender_key.clone()));
+            }
             let seat = crate::seats::outstanding(root, &a.id)?;
             Some((seat.remote_account?, seat.lease_hours?, seat.sender_key?))
         })
@@ -305,7 +309,7 @@ pub fn tick(root: &Path, snapshot: &Snapshot, now: i64) {
                     )
                 };
                 let read = read_accounts(target, program, run);
-                // SB-403 (DEC-0024): a machine that answered gets its delegated seats' leases
+                // SB-403 (DEC-0025): a machine that answered gets its delegated seats' leases
                 // extended in the same pass, so a seat lapses only after its lease of silence.
                 if read.is_ok() {
                     extend_leases(&root, &snapshot, target, program, run);
@@ -388,6 +392,29 @@ mod tests {
             json!({"label": "here@", "provider": "claude", "enabled": true,
                    "usage": {"used_percent": 99.0}}),
         ]
+    }
+
+    #[test]
+    fn the_stores_record_of_a_delegated_seat_outlives_seats_jsonl() {
+        // SB-403 (review P2-5): a rotated or rewritten `seats.jsonl` loses nothing.
+        let root = tempfile::tempdir().unwrap();
+        let mut s = snapshot();
+        s.delegated_out.insert(
+            "a2".into(),
+            switchboard_core::DelegatedOut {
+                remote_id: "0b1edeee-4125-403c-9c12-44c6aadaeb2b".into(),
+                lease_hours: 24,
+                sender_key: "KEY".into(),
+            },
+        );
+        assert_eq!(
+            delegated_to(root.path(), &s, "studio"),
+            vec![(
+                "0b1edeee-4125-403c-9c12-44c6aadaeb2b".to_owned(),
+                24,
+                "KEY".to_owned()
+            )]
+        );
     }
 
     #[test]

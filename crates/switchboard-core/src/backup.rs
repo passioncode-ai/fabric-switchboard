@@ -177,6 +177,9 @@ struct Payload {
     machines: Vec<crate::Machine>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     machine_members: BTreeMap<String, String>,
+    /// SB-403 (P2-5): the seats this machine delegated to another, by account id.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    delegated_out: BTreeMap<String, crate::DelegatedOut>,
 }
 /// One agent key inside the sealed payload. Never Debug: it carries the value.
 #[derive(Serialize, Deserialize)]
@@ -266,7 +269,7 @@ pub fn write(
     now: i64,
 ) -> Result<Option<Info>, String> {
     let (mut snapshot, mut credentials) = store.export()?;
-    // SB-403 (DEC-0024): a seat another machine delegated here is that machine's: a backup never
+    // SB-403 (DEC-0025): a seat another machine delegated here is that machine's: a backup never
     // carries it, so a restore cannot bring back a seat its sender called back or let lapse.
     let guests: Vec<String> = snapshot.delegated.keys().cloned().collect();
     for id in &guests {
@@ -387,6 +390,7 @@ pub fn write(
         domain_rule_retired: true,
         machines: snapshot.machines,
         machine_members,
+        delegated_out: snapshot.delegated_out.clone(),
     })
     .map_err(|_| UNAVAILABLE)?;
     let (key, key_id) = key(keys, true)?;
@@ -827,6 +831,12 @@ pub fn restore(
         };
         let _ = store.join_machine(id, &at, machine.created_at);
     }
+    // SB-403: and what it needs to extend and call back the seats it delegated there.
+    for (old, out) in &payload.delegated_out {
+        if let Some(id) = ids.get(old) {
+            let _ = store.record_delegated_out(id, out.clone());
+        }
+    }
     // SB-322: and what the person gave to an agent.
     for (old, to) in &payload.assigned_to {
         if let Some(id) = ids.get(old) {
@@ -1199,6 +1209,7 @@ mod tests {
             domain_rule_retired: true,
             machines: vec![],
             machine_members: BTreeMap::new(),
+            delegated_out: BTreeMap::new(),
         };
         let json = serde_json::to_vec(&payload).unwrap();
         let old: OldPayload = serde_json::from_slice(&json).expect("an older build reads it");
@@ -1475,6 +1486,36 @@ mod tests {
             Some("default")
         );
         assert_eq!(snap.machines, [machine]);
+    }
+    #[test]
+    fn a_restore_keeps_what_extends_and_calls_back_a_seat_delegated_to_another_machine() {
+        // SB-403 (review P2-5): the sender's record travels with the backup.
+        let temp = tempfile::tempdir().unwrap();
+        let backups = temp.path().join("backups");
+        let keys = Keys::default();
+        let original = store(&temp.path().join("one"));
+        let a = save(&original, "synthetic-a", "token-a-secret");
+        let at = crate::MachineRef {
+            target: "me@studio.local".into(),
+            identity: None,
+            aliases: vec![],
+        };
+        original.join_machine(&a.id, &at, 900).unwrap();
+        let out = crate::DelegatedOut {
+            remote_id: "0b1edeee-4125-403c-9c12-44c6aadaeb2b".into(),
+            lease_hours: 48,
+            sender_key: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=".into(),
+        };
+        original.record_delegated_out(&a.id, out.clone()).unwrap();
+        let info = write(&original, &backups, &keys, 1_000).unwrap().unwrap();
+        let fresh = store(&temp.path().join("two"));
+        restore(&fresh, &backups, &info.file, &keys).unwrap();
+        let snap = fresh.snapshot().unwrap();
+        assert_eq!(snap.delegated_out.get(&snap.accounts[0].id), Some(&out));
+        // Called back home, it is delegated nowhere.
+        let id = snap.accounts[0].id.clone();
+        fresh.mark_elsewhere(&id, false, 2_000).unwrap();
+        assert!(fresh.snapshot().unwrap().delegated_out.is_empty());
     }
     #[test]
     fn a_reinstall_gets_organizations_their_accounts_and_groups_back() {

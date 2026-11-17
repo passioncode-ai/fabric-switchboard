@@ -252,16 +252,20 @@ const safeErrors = new Set([
   "This computer already holds this sign-in. There is nothing to receive.",
   // Using a moved sign-in here again by a mark (SB-315).
   "This account's sign-in was moved to another machine. Call it back to use it here, so only one machine renews it.",
-  // SB-403 (DEC-0024): seats delegated to a teammate's machine and the own sign-in switch.
+  // SB-403 (DEC-0025): seats delegated to a teammate's machine and the own sign-in switch.
+  "This seat's sign-in was removed from this computer 30 days after its lease ran out. The machine that delegated it signs in to the account again and delegates it again.",
+  "This group holds a seat another machine delegated to this computer. Ask that machine to call the seat back before deleting the group.",
+  "A seat another machine delegated runs only through Switchboard, in its group's folders. Launch it in managed mode.",
+  "The delegated copy on the other machine could not be removed. This machine no longer uses the account; the copy there switches off when its lease runs out. Then mark the account used here.",
   "This seat was delegated to this computer by another machine. It stays in the group it was delegated to and is used only here; only that machine calls it back.",
   "This seat was delegated to this computer by another machine, so it cannot be moved or handed on. Only that machine calls it back.",
   "This seat was delegated to this computer by another machine, so it is not given to an agent.",
-  "This seat was delegated to this computer by another machine. Ask that machine to call it back; it can be removed here once its lease has run out.",
+  "This seat was delegated to this computer by another machine. Ask that machine to call it back; it can be removed here 30 days after its lease ran out.",
   "This seat was delegated to this computer by another machine. It serves its group's sessions only and never becomes the ordinary Claude Code or Codex sign-in.",
-  "This seat's lease ran out, so its sign-in was removed from this computer. The machine that delegated it calls it back, then delegates it again.",
+  "This seat's lease ran out, so it is switched off here. The machine that delegated it extends its lease to use it again, or calls it back.",
   "Give the lease in whole hours, from 1 to 720.",
   "A delegated seat joins one of the other machine's groups. Name that group; the default group takes none.",
-  "The seat's lease had run out on the other machine, which removed its copy. The sign-in kept here did not answer; sign in to this account again.",
+  "The other machine removed the seat's sign-in 30 days after its lease ran out. The sign-in kept here did not answer; sign in to this account again.",
   "Switchboard does not read or change your own Claude Code or Codex sign-in on this computer (own sign-in is off). Turn it on with switchboard own-sign-in on to use it here.",
   "The own sign-in setting could not be saved. Check Switchboard's data folder, then retry.",
   // Safe moves and call backs between machines (SB-312).

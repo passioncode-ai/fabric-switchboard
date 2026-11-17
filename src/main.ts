@@ -602,12 +602,12 @@ function bringHereDialog(account: Account, machine: Machine) {
   });
   group.focus();
 }
-/** SB-403 (DEC-0024, SCN-094): the choice to delegate a seat to a teammate's machine instead of moving it, with its lease. */
+/** SB-403 (DEC-0025, SCN-094): the choice to delegate a seat to a teammate's machine instead of moving it, with its lease. */
 function delegateFields(context: ReturnType<typeof openDialog>) {
   const option = el('label', 'appearance-option login-option'); const box = el('input'); box.type = 'checkbox'; box.dataset.focus = 'send-delegate';
   option.append(box, el('span', '', t('Delegate to a teammate')));
   const hours = input('48'); hours.type = 'number'; hours.min = '1'; hours.max = '720'; hours.step = '1';
-  const lease = field(t('Lease, hours'), hours, t('This computer extends it each time it reads that machine. If it cannot reach it for this long, the seat there is switched off and its sign-in removed.'));
+  const lease = field(t('Lease, hours'), hours, t('This computer extends it each time it reads that machine. If it cannot reach it for this long, the seat there is switched off; its sign-in is kept 30 days for a call back, then removed.'));
   const note = el('p', 'form-note', t('A delegated seat stays a guest there: it serves the group you name, is never moved on, lent or made its own sign-in, and only this computer calls it back. The teammate never signs in with it.'));
   const sync = () => { lease.hidden = !box.checked; note.hidden = !box.checked; };
   box.addEventListener('change', sync); sync();
@@ -702,7 +702,7 @@ function dutySection() {
   section.append(actions);
   return section;
 }
-/** SB-403 S3 (DEC-0024, SCN-095): whether Switchboard reads or changes the person's own Claude Code and Codex sign-in here. */
+/** SB-403 S3 (DEC-0025, SCN-095): whether Switchboard reads or changes the person's own Claude Code and Codex sign-in here. */
 let ownSignInState: OwnSignIn | null = null; let ownSignInLoading = false; let ownSignInError = '';
 function loadOwnSignIn() {
   if (ownSignInLoading) return;

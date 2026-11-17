@@ -147,7 +147,7 @@ moves an account without you.
 
 An administrator can give a teammate one of the organization's subscriptions for console sessions
 on the teammate's own computer, without the teammate ever signing in with it, and take it back at
-any time (SB-403, [DEC-0024](DECISIONS.md#dec-0024-a-subscription-is-delegated-to-a-teammates-machine-as-a-guest-under-a-lease)).
+any time (SB-403, [DEC-0025](DECISIONS.md#dec-0025-a-subscription-is-delegated-to-a-teammates-machine-as-a-guest-under-a-lease)).
 More seats are added the same way. The teammate keeps their own subscription in Claude Desktop and
 in the ordinary Claude Code: Switchboard never touches either.
 
@@ -165,18 +165,22 @@ On the teammate's computer:
    switchboard own-sign-in off
    ```
 
-4. Admit the administrator's computer only through Switchboard's restricted entry: add one line
-   to `~/.ssh/authorized_keys` with its ssh public key and the key `switchboard settings signer`
-   prints on the administrator's computer:
+4. Admit the administrator's computer only through Switchboard's restricted entry: one line in
+   `~/.ssh/authorized_keys` with its ssh public key, the key `switchboard settings signer` prints on
+   the administrator's computer, and the id of the group from step 1:
 
    ```text
-   command="/Applications/Fabric Switchboard.app/Contents/MacOS/switchboard ssh-serve --sender-key <its settings signer key>",restrict ssh-ed25519 AAAA… administrator
+   command="'/Applications/Fabric Switchboard.app/Contents/MacOS/switchboard' ssh-serve --sender-key <its settings signer key> --pool <group id>",restrict ssh-ed25519 AAAA… administrator
    ```
 
-   On Linux use the installed `switchboard` path. That key line runs only `switchboard ssh-serve`,
-   which answers the calls a delegation needs (save the seat, its usage, its lease, the call back)
-   and refuses everything else: no shell, no other account, no folder is shown to the other
-   computer.
+   Keep the single quotes around the program: sshd runs the line through your shell, and the
+   app's path holds a space. On Linux use the installed `switchboard` path. If the file already
+   has a line for the same ssh key, replace it: sshd uses the first line that matches, and an older
+   line without `command=` would still give that key a full shell. `restrict` turns off a
+   terminal, port and agent forwarding. That line runs only `switchboard ssh-serve`, which answers
+   the calls a delegation into that one group needs (save the seat, its usage, its lease, the call
+   back) and refuses everything else: no shell, no other account, group or folder is shown to the
+   other computer.
 
 On the administrator's computer:
 
@@ -191,8 +195,15 @@ The teammate runs `claude` (or `codex`) in one of the group's folders; the reque
 Switchboard to the delegated seat.
 
 The lease keeps it honest: each read of the teammate's computer (every 15 minutes) extends it to
-48 hours ahead. If the administrator's computer cannot reach it for that long, the seat there is
-switched off and its sign-in removed.
+48 hours ahead. If the administrator's computer cannot reach it for that long (and the teammate's
+Switchboard has run 15 minutes past it), the seat there is switched off and no longer renewed, but
+its sign-in is kept: the next read turns it on again, and a call back still takes the live
+sign-in. Thirty days after the lease ran out, the sign-in there is removed.
+
+What this protects, and what it does not: the teammate owns their computer. Switchboard there will
+not pass the seat on, use it outside its group or keep it after a call back, but a teammate can
+read their own Keychain. If a teammate stops cooperating, sign the subscription out at the
+provider (or change its password): that ends every copy.
 
 To take it back:
 

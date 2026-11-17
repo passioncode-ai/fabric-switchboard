@@ -1,15 +1,17 @@
 #![cfg_attr(not(unix), allow(dead_code))]
-//! SB-403 S2 (DEC-0024): `switchboard ssh-serve`, the restricted entry another machine reaches
+//! SB-403 S2 (DEC-0025): `switchboard ssh-serve`, the restricted entry another machine reaches
 //! over ssh to delegate a seat here.
 //!
 //! The person puts it in that machine's key line in `~/.ssh/authorized_keys` as a forced command:
 //!
 //! ```text
-//! command="/Applications/Fabric Switchboard.app/Contents/MacOS/switchboard ssh-serve --sender-key KEY",restrict ssh-ed25519 AAAA… other-machine
+//! command="'/Applications/Fabric Switchboard.app/Contents/MacOS/switchboard' ssh-serve --sender-key KEY --pool GROUP",restrict ssh-ed25519 AAAA… other-machine
 //! ```
 //!
-//! sshd then runs it whatever the other machine asked, with the asked command in
-//! `SSH_ORIGINAL_COMMAND`. That command is read here as words (the single-quoted words
+//! sshd runs the forced command through the user's shell (`$SHELL -c`), so the program's path,
+//! which holds a space, is single-quoted inside the double quotes (`forced_command`). It runs it
+//! whatever the other machine asked, with the asked command in `SSH_ORIGINAL_COMMAND`. `--pool`
+//! pins the one group of this computer the other machine may delegate into and see. That command is read here as words (the single-quoted words
 //! `account_send::remote` writes), never given to a shell, and answered only when it is one of the
 //! calls a delegation needs: the machine's proof, the account, group and organization lists (each
 //! cut to the delegated seats and to names, no folder), saving a delegated seat, its usage check,
@@ -24,6 +26,8 @@ pub const KEY_MISMATCH: &str =
     "That call names another key than the one this machine accepts from the calling machine.";
 pub const DATA_DIR_MISMATCH: &str =
     "That call names another data folder than the one this machine serves.";
+pub const POOL_NOT_ALLOWED: &str = "This computer takes seats from the calling machine only into the group its ssh key line names.";
+pub const ORGANIZATION_NOT_ALLOWED: &str = "That names an organization the group this computer opened to the calling machine does not work for.";
 #[cfg_attr(unix, allow(dead_code))]
 pub const UNIX_ONLY: &str = "switchboard ssh-serve runs on macOS and Linux.";
 /// The longest command read; a delegation's longest call is a few hundred characters.
@@ -148,12 +152,25 @@ fn flags<'a>(
     Ok(seen)
 }
 
+/// The forced command for the other machine's key line in `~/.ssh/authorized_keys`: `program`
+/// single-quoted (sshd hands the line to `$SHELL -c`, and the macOS app's path holds a space),
+/// then `ssh-serve` with the key and the group.
+// The line the guides document; their test runs it through a shell.
+#[cfg_attr(not(test), allow(dead_code))]
+pub fn forced_command(program: &str, sender_key: &str, pool: &str) -> String {
+    format!(
+        "{} ssh-serve --sender-key {sender_key} --pool {pool}",
+        switchboard_runtime::account_send::quoted(program)
+    )
+}
+
 /// The asked command as one allowed call. `root` is the data folder this entry serves: a call
 /// naming another one with `--data-dir` is refused; `sender_key` the key the forced command
 /// names, which every call naming a seat must name too.
 pub fn parse(
     words: &[String],
     sender_key: &str,
+    pool: &str,
     root: &std::path::Path,
 ) -> Result<Request, String> {
     // The first word is the program the other machine names; this one answers instead.
@@ -223,6 +240,9 @@ pub fn parse(
                 ),
                 None => None,
             };
+            if f.get("--pool").copied().flatten() != Some(pool) {
+                return Err(POOL_NOT_ALLOWED.into());
+            }
             Request::Add {
                 provider: provider.to_owned(),
                 label: f
@@ -273,13 +293,49 @@ pub fn parse(
     })
 }
 
-/// The seats `sender_key` delegated here, by id.
-fn seats_of(snapshot: &Value, sender_key: &str) -> Vec<String> {
+/// The organization ids of group `pool`.
+pub fn group_organizations(snapshot: &Value, pool: &str) -> Vec<String> {
+    snapshot["projects"]
+        .as_array()
+        .and_then(|list| list.iter().find(|p| p["pool"] == pool))
+        .and_then(|p| p["organizations"].as_array())
+        .map(|o| {
+            o.iter()
+                .filter_map(|v| v.as_str().map(str::to_owned))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Whether every context an `org assign` names is `personal`, `auto` or one of `allowed` (the
+/// group's organizations, by id or name as `organizations` lists them).
+pub fn contexts_allowed(contexts: &[String], organizations: &Value, allowed: &[String]) -> bool {
+    let names: Vec<(String, String)> = organizations["organizations"]
+        .as_array()
+        .map(|list| {
+            list.iter()
+                .filter_map(|o| {
+                    Some((o["id"].as_str()?.to_owned(), o["name"].as_str()?.to_owned()))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    contexts.iter().all(|c| {
+        c == "personal"
+            || c == "auto"
+            || names
+                .iter()
+                .any(|(id, name)| allowed.contains(id) && (c == id || c.eq_ignore_ascii_case(name)))
+    })
+}
+
+/// The seats `sender_key` delegated here into `pool`, by id.
+pub fn seats_of(snapshot: &Value, sender_key: &str, pool: &str) -> Vec<String> {
     snapshot["delegated"]
         .as_object()
         .map(|d| {
             d.iter()
-                .filter(|(_, v)| v["sender_key"] == sender_key)
+                .filter(|(_, v)| v["sender_key"] == sender_key && v["pool"] == pool)
                 .map(|(id, _)| id.clone())
                 .collect()
         })
@@ -287,8 +343,8 @@ fn seats_of(snapshot: &Value, sender_key: &str) -> Vec<String> {
 }
 
 /// The account list another machine sees: only the seats it delegated, with their lease.
-pub fn accounts_view(snapshot: &Value, sender_key: &str) -> Value {
-    let ours = seats_of(snapshot, sender_key);
+pub fn accounts_view(snapshot: &Value, sender_key: &str, pool: &str) -> Value {
+    let ours = seats_of(snapshot, sender_key, pool);
     let accounts: Vec<Value> = snapshot["accounts"]
         .as_array()
         .map(|list| {
@@ -313,13 +369,14 @@ pub fn accounts_view(snapshot: &Value, sender_key: &str) -> Value {
     json!({"accounts": accounts})
 }
 
-/// The groups another machine sees: id, name and organizations; never a folder or an account.
-pub fn projects_view(snapshot: &Value) -> Value {
+/// The group another machine sees: only the one its key line names, with its id, name and
+/// organizations; never a folder, an account or another group.
+pub fn projects_view(snapshot: &Value, pool: &str) -> Value {
     let projects: Vec<Value> = snapshot["projects"]
         .as_array()
         .map(|list| {
             list.iter()
-                .filter(|p| p["tokens"] != true)
+                .filter(|p| p["pool"] == pool && p["tokens"] != true)
                 .map(|p| json!({"pool": p["pool"], "name": p["name"], "organizations": p["organizations"]}))
                 .collect()
         })
@@ -327,12 +384,17 @@ pub fn projects_view(snapshot: &Value) -> Value {
     json!({"projects": projects})
 }
 
-/// The organizations another machine sees: ids and names only.
-pub fn organizations_view(organizations: &Value) -> Value {
+/// The organizations of the group the key line names (`allowed`, their ids): ids and names only.
+pub fn organizations_view(organizations: &Value, allowed: &[String]) -> Value {
     let list: Vec<Value> = organizations["organizations"]
         .as_array()
         .map(|list| {
             list.iter()
+                .filter(|o| {
+                    o["id"]
+                        .as_str()
+                        .is_some_and(|id| allowed.iter().any(|a| a == id))
+                })
                 .map(|o| json!({"id": o["id"], "name": o["name"]}))
                 .collect()
         })
@@ -383,7 +445,7 @@ mod tests {
     #[test]
     fn only_the_calls_a_delegation_needs_are_answered() {
         let root = root();
-        let ok = |args: &[&str]| parse(&asked(args), KEY, &root);
+        let ok = |args: &[&str]| parse(&asked(args), KEY, "org", &root);
         assert_eq!(
             ok(&["--json", "accounts", "list"]).unwrap(),
             Request::AccountsList
@@ -497,8 +559,29 @@ mod tests {
     #[test]
     fn a_seat_is_saved_or_touched_only_delegated_and_under_the_forced_key() {
         let root = root();
-        let ok = |args: &[&str]| parse(&asked(args), KEY, &root);
+        let ok = |args: &[&str]| parse(&asked(args), KEY, "org", &root);
         let other = "HxweHRwbGhkYFxYVFBMSERAPDg0MCwoJCAcGBQQDAgE=";
+        assert_eq!(
+            ok(&[
+                "--json",
+                "accounts",
+                "add",
+                "--provider",
+                "claude",
+                "--kind",
+                "oauth",
+                "--label",
+                "seat",
+                "--pool",
+                "elsewhere",
+                "--secret-stdin",
+                "--delegated",
+                "--sender-key",
+                KEY,
+            ])
+            .unwrap_err(),
+            POOL_NOT_ALLOWED
+        );
         assert_eq!(
             ok(&[
                 "--json",
@@ -558,7 +641,7 @@ mod tests {
         let line =
             switchboard_runtime::account_send::remote(&program, &["--json", "accounts", "list"]);
         assert_eq!(
-            parse(&words(&line).unwrap(), KEY, &root).unwrap_err(),
+            parse(&words(&line).unwrap(), KEY, "org", &root).unwrap_err(),
             DATA_DIR_MISMATCH
         );
         let program = switchboard_runtime::account_send::Program {
@@ -568,7 +651,7 @@ mod tests {
         let line =
             switchboard_runtime::account_send::remote(&program, &["--json", "accounts", "list"]);
         assert_eq!(
-            parse(&words(&line).unwrap(), KEY, &root).unwrap(),
+            parse(&words(&line).unwrap(), KEY, "org", &root).unwrap(),
             Request::AccountsList
         );
     }
@@ -585,14 +668,103 @@ mod tests {
                 "b": {"sender_key": KEY, "pool": "org", "granted_at": 1, "lease_until": 9},
                 "c": {"sender_key": "x", "pool": "org", "granted_at": 1, "lease_until": 9}
             },
-            "projects": [{"pool": "org", "name": "Org", "folders": ["/Users/someone/work"], "organizations": ["o1"]}]
+            "projects": [
+                {"pool": "org", "name": "Org", "folders": ["/Users/someone/work"], "organizations": ["o1"]},
+                {"pool": "mine", "name": "Mine", "folders": ["/Users/someone/own"], "organizations": []}
+            ]
         });
-        let accounts = accounts_view(&snapshot, KEY);
+        let accounts = accounts_view(&snapshot, KEY, "org");
         let list = accounts["accounts"].as_array().unwrap();
         assert_eq!(list.len(), 1);
         assert_eq!(list[0]["label"], "seat");
         assert_eq!(list[0]["lease_until"], 9);
-        let projects = projects_view(&snapshot).to_string();
+        let projects = projects_view(&snapshot, "org").to_string();
         assert!(projects.contains("\"org\"") && !projects.contains("/Users/"));
+        assert!(
+            !projects.contains("Mine"),
+            "only the group the key line names"
+        );
+        let organizations =
+            json!({"organizations": [{"id": "o1", "name": "Acme"}, {"id": "o2", "name": "Other"}]});
+        let allowed = group_organizations(&snapshot, "org");
+        assert_eq!(allowed, vec!["o1".to_owned()]);
+        let seen = organizations_view(&organizations, &allowed).to_string();
+        assert!(seen.contains("Acme") && !seen.contains("Other") && !seen.contains("o2"));
+        assert!(contexts_allowed(
+            &["personal".into(), "acme".into()],
+            &organizations,
+            &allowed
+        ));
+        assert!(!contexts_allowed(
+            &["Other".into()],
+            &organizations,
+            &allowed
+        ));
+    }
+
+    /// Review P1-1: the documented key line survives sshd's `$SHELL -c`: the program's path with
+    /// its space stays one word, and `ssh-serve` gets exactly the key and the group.
+    #[cfg(unix)]
+    #[test]
+    fn the_documented_key_line_runs_through_a_shell_as_one_program() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = tempfile::tempdir().unwrap();
+        let bin = tmp.path().join("Fabric Switchboard.app/Contents/MacOS");
+        std::fs::create_dir_all(&bin).unwrap();
+        let program = bin.join("switchboard");
+        std::fs::write(
+            &program,
+            "#!/bin/sh\nfor a in \"$@\"; do printf '%s\\n' \"$a\"; done\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let run = |command: &str| {
+            let out = std::process::Command::new("/bin/sh")
+                .args(["-c", command])
+                .output()
+                .unwrap();
+            assert!(out.status.success(), "{command}");
+            String::from_utf8(out.stdout).unwrap()
+        };
+        let expected = format!("ssh-serve\n--sender-key\n{KEY}\n--pool\norg\n");
+        assert_eq!(
+            run(&forced_command(program.to_str().unwrap(), KEY, "org")),
+            expected
+        );
+        for (doc, text) in [
+            (
+                "ORGANIZATION.md",
+                include_str!("../../../docs/ORGANIZATION.md"),
+            ),
+            (
+                "ORGANIZATION.ru.md",
+                include_str!("../../../docs/ORGANIZATION.ru.md"),
+            ),
+            ("CLI.md", include_str!("../../../docs/CLI.md")),
+        ] {
+            let line = text
+                .lines()
+                .find_map(|l| l.trim_start_matches(['#', ' ']).strip_prefix("command=\""))
+                .unwrap_or_else(|| panic!("{doc} documents the key line"));
+            let end = line.find("\",").unwrap_or_else(|| panic!("{doc}"));
+            let command = &line[..end];
+            assert!(
+                line[end..].starts_with("\",restrict "),
+                "{doc}: the line restricts the key"
+            );
+            // The person's placeholders, then this test's copy of the app for /Applications.
+            let mut filled = String::new();
+            let mut values = [KEY, "org"].into_iter();
+            let mut rest = command;
+            while let Some(open) = rest.find('<') {
+                let close = rest[open..].find('>').unwrap() + open;
+                filled.push_str(&rest[..open]);
+                filled.push_str(values.next().unwrap());
+                rest = &rest[close + 1..];
+            }
+            filled.push_str(rest);
+            let filled = filled.replace("'/Applications/", &format!("'{}/", tmp.path().display()));
+            assert_eq!(run(&filled), expected, "{doc}: {command}");
+        }
     }
 }

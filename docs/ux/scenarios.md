@@ -2187,30 +2187,30 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 
 ### SCN-101: Delegate an organization's subscription to a teammate's machine and call it back
 **Persona:** P-01
-**Goal:** The operator lets a teammate use one of the organization's subscriptions in console sessions on the teammate's own computer, without the teammate ever signing in with it, and can take it back at any time; more seats can be added the same way (SB-403 S2 to S4, DEC-0024).
+**Goal:** The operator lets a teammate use one of the organization's subscriptions in console sessions on the teammate's own computer, without the teammate ever signing in with it, and can take it back at any time; more seats can be added the same way (SB-403 S2 to S4, DEC-0025).
 **Preconditions:** the teammate's computer runs Switchboard, has a group (in the organization) for the folders the seat serves, is reachable over ssh without a prompt, and its `~/.ssh/authorized_keys` holds this computer's key line with the forced command `switchboard ssh-serve --sender-key <this computer's key>` ([ORGANIZATION.md](../ORGANIZATION.md#a-teammates-computer)); the account is a Claude or Codex subscription sign-in used here.
 **Entry point:** Accounts → the account's ⋯ → *Move to another machine…*, or Accounts → the machine's section → *Move an account here…*. An agent: CLI `switchboard accounts send ID --to MACHINE --pool GROUP --delegate [--lease-hours N]`, MCP `switchboard_account_send` with `delegate: true`.
 **Steps:**
 1. The dialog “Move {label} to another machine” (or “Move an account to {machine}”) → *Machine*, *Group there* (its group on the teammate's computer), and the box *Delegate to a teammate*.
-2. Check *Delegate to a teammate* → the note “A delegated seat stays a guest there: it serves the group you name, is never moved on, lent or made its own sign-in, and only this computer calls it back. The teammate never signs in with it.” and the field *Lease, hours* (48) with “This computer extends it each time it reads that machine. If it cannot reach it for this long, the seat there is switched off and its sign-in removed.”
+2. Check *Delegate to a teammate* → the note “A delegated seat stays a guest there: it serves the group you name, is never moved on, lent or made its own sign-in, and only this computer calls it back. The teammate never signs in with it.” and the field *Lease, hours* (48) with “This computer extends it each time it reads that machine. If it cannot reach it for this long, the seat there is switched off; its sign-in is kept 30 days for a call back, then removed.”
 3. *Move* → “{label} is delegated to {machine}. This computer calls it back when you ask.”; the account is in the machine's section (SCN-092), and the teammate's sessions in that group's folders run on it through Switchboard.
 4. Every background read of that machine (15 minutes) extends the lease to its hours from then.
 5. *Call back* on its row (SCN-092) → the teammate's machine switches the seat off and gives its sign-in back over ssh, the provider is checked here, then the copy there is removed and its list read to prove it (“{label} is back on this computer.”).
-**Alt paths:** *Group there* left as `default` with the box checked → “A delegated seat joins one of the other machine's groups. Name that group; the default group takes none.”; a lease out of range → “Give the lease in whole hours, from 1 to 720.”; the teammate's machine only takes delegated seats, so a plain move there is refused with “That machine takes seats only as delegated ones. Move it again as a delegated seat (accounts send --delegate).”; this computer could not reach the teammate's for the whole lease → the seat there is switched off and its sign-in removed; a later *Call back* takes the sign-in kept here, and when it does not answer the account stays here with “The seat's lease had run out on the other machine, which removed its copy. The sign-in kept here did not answer; sign in to this account again.”
+**Alt paths:** *Group there* left as `default` with the box checked → “A delegated seat joins one of the other machine's groups. Name that group; the default group takes none.”; a lease out of range → “Give the lease in whole hours, from 1 to 720.”; the teammate's machine only takes delegated seats, so a plain move there is refused with “That machine takes seats only as delegated ones. Move it again as a delegated seat (accounts send --delegate).”; this computer could not reach the teammate's for the whole lease → the seat there is switched off, its sign-in kept: the next read turns it on again and *Call back* takes the live sign-in; 30 days later the sign-in there is removed, and a *Call back* then takes the sign-in kept here; when that does not answer the account stays here with “The other machine removed the seat's sign-in 30 days after its lease ran out. The sign-in kept here did not answer; sign in to this account again.”; on the teammate's computer deleting the seat's group is refused with “This group holds a seat another machine delegated to this computer. Ask that machine to call the seat back before deleting the group.”, and launching it in an isolated home with “A seat another machine delegated runs only through Switchboard, in its group's folders. Launch it in managed mode.”
 **Expected result:** the seat works only in the teammate's group folders, only the operator's computer calls it back, and it lapses by itself when the operator's computer stops extending it.
 **UI elements:** the box *Delegate to a teammate*, its note and the *Lease, hours* field in both move dialogs; the notice after the move; *Call back* on the account's row.
 **States covered:** plain move, delegated move, refused into the default group, lease out of range, lease extended, lease ran out, called back.
 **Errors & recovery:** a failed step leaves the account here, as a plain move does (SCN-087); on the teammate's computer, acts on the seat that would pass it on are refused with a sentence that names who calls it back (“This seat was delegated to this computer by another machine. …”).
 **Status:** draft
 **Meaning:** SB-403 (operator 2026-11-17: «подключим у него … подписки организации, которые делегированы ему … и отзыв этой подписки … чтобы [a teammate] на своей машине мог ей пользоваться, но по факту авторизоваться он типа не будет с ней»).
-**Copy:** checked with Copylot, register ui, en-US and ru-RU; report ids in [strings](../brand/strings.md#delegated-seats-scn-101-scn-102-sb-403-dec-0024).
+**Copy:** checked with Copylot, register ui, en-US and ru-RU; report ids in [strings](../brand/strings.md#delegated-seats-scn-101-scn-102-sb-403-dec-0025).
 **Coverage:** `delegation::tests::*` (switchboard-core), `account_send::tests::a_delegated_seat_goes_there_as_a_guest_and_comes_back_only_to_its_sender`, `account_send::tests::a_call_back_after_the_lease_ran_out_keeps_the_sign_in_kept_here`, `remote_usage::tests::a_read_extends_the_leases_of_the_seats_delegated_there_and_only_those`, `ssh_serve::tests::*` (switchboard-cli). No walk with a teammate's real machine yet (S5).
 **Product:** unobserved
-**Traces:** SB-403, DEC-0024, DEC-0013, SCN-087, SCN-092
+**Traces:** SB-403, DEC-0025, DEC-0013, SCN-087, SCN-092
 
 ### SCN-102: Keep Switchboard away from my own sign-in on a teammate's computer
 **Persona:** P-01
-**Goal:** A teammate whose Switchboard serves only seats an organization delegated keeps their own subscription in Claude Desktop and in the ordinary Claude Code, and Switchboard never reads or changes it (SB-403 S3, DEC-0024).
+**Goal:** A teammate whose Switchboard serves only seats an organization delegated keeps their own subscription in Claude Desktop and in the ordinary Claude Code, and Switchboard never reads or changes it (SB-403 S3, DEC-0025).
 **Preconditions:** the desktop app runs on the teammate's computer.
 **Entry point:** Settings → *Your own sign-in*. An agent: CLI `switchboard own-sign-in off`, MCP `switchboard_own_sign_in` with `on: false`.
 **Steps:**
@@ -2224,7 +2224,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Errors & recovery:** a setting that cannot be read is treated as on, as every earlier version behaved; the window shows the read error with the section.
 **Status:** draft
 **Meaning:** SB-403 (operator 2026-11-17: «[a teammate] может использовать Claude Desktop для своей обычной стандартной подписки … убедиться, что мы не трогаем сессии для десктопного Claude Code, и он будет работать никак не связанно со свитчбордом»).
-**Copy:** checked with Copylot, register ui, en-US and ru-RU; report ids in [strings](../brand/strings.md#delegated-seats-scn-101-scn-102-sb-403-dec-0024).
+**Copy:** checked with Copylot, register ui, en-US and ru-RU; report ids in [strings](../brand/strings.md#delegated-seats-scn-101-scn-102-sb-403-dec-0025).
 **Coverage:** `own_sign_in::tests::*`, `launch::tests::with_own_sign_in_off_a_launch_carries_no_mcp_sign_in`, `duty::tests::with_own_sign_in_off_only_switchboards_own_sessions_are_looked_at`, `own_sign_in::tests::no_code_names_claude_desktop`. No walk on a teammate's computer yet (S5).
 **Product:** unobserved
-**Traces:** SB-403, DEC-0024, SCN-093, SCN-096
+**Traces:** SB-403, DEC-0025, SCN-093, SCN-096

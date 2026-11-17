@@ -39,7 +39,7 @@ pub struct Seat {
     pub program: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub data_dir: Option<String>,
-    /// SB-403 (DEC-0024): the seat was delegated there, with a lease of this many hours that
+    /// SB-403 (DEC-0025): the seat was delegated there, with a lease of this many hours that
     /// this machine's background read of that machine extends.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lease_hours: Option<u32>,
