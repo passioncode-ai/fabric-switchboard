@@ -4550,6 +4550,7 @@ mod tests {
                 test_read(spend(40.0, 1.0, 1.0), &count),
                 runtime.execute(Operation::HandoverTake {
                     id: handover.id.clone(),
+                    ask: false,
                 }),
             )
             .await
@@ -4591,6 +4592,7 @@ mod tests {
                 read,
                 runtime.execute(Operation::HandoverTake {
                     id: handover.id.clone(),
+                    ask: false,
                 }),
             )
             .await
@@ -5077,6 +5079,7 @@ mod tests {
                 test_read(spend(40.0, 30.0, 6.0), &count),
                 runtime.execute(Operation::HandoverTake {
                     id: handover.id.clone(),
+                    ask: false,
                 }),
             )
             .await
@@ -5094,6 +5097,7 @@ mod tests {
                 test_read(spend(40.0, 30.0, 1.0), &count),
                 runtime.execute(Operation::HandoverTake {
                     id: handover.id.clone(),
+                    ask: false,
                 }),
             )
             .await
@@ -5131,6 +5135,7 @@ mod tests {
                 std::time::Duration::from_millis(300),
                 runtime.execute(Operation::HandoverTake {
                     id: handover.id.clone(),
+                    ask: false,
                 }),
             )
             .await
@@ -5169,6 +5174,7 @@ mod tests {
                 test_read(spend(40.0, 30.0, 6.0), &count),
                 runtime.execute(Operation::HandoverTake {
                     id: handover.id.clone(),
+                    ask: false,
                 }),
             )
             .await
@@ -5316,6 +5322,7 @@ mod tests {
                 read,
                 runtime.execute(Operation::HandoverTake {
                     id: queued.id.clone(),
+                    ask: false,
                 }),
             )
             .await

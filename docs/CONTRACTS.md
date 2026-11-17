@@ -1992,6 +1992,29 @@ know is ignored, not refused (SB-215,
 0.7.0 refuse unknown fields, and every record 0.7.0 queues carries `account`, so after a downgrade
 to 0.6.x every queued record reads as unparseable and is removed by the sweep, its offer lost (an older build cannot be
 fixed from here).
+**Taking one with prompts on (SB-405, Fabric Dashboards request `98195435`).**
+`Operation::HandoverTake { id, ask }` (`ask` absent reads false, and is left out of the request
+when false, so an earlier owner reads a plain take) with `ask: true` first reads the waiting
+record: an agent other than `claude-code` or `codex` answers `launch::ASK_AGENT`, a script not
+shaped as `script_with` writes it (one `exec` command after `rm -f .launch-pending`, every word
+`quote`d) answers `launch::ASK_UNREADABLE`, and either leaves the hand-over waiting with nothing
+gated. Otherwise `launch::ask_script_text` rewrites the command's arguments (`launch::ask_args`:
+Claude Code without `--dangerously-skip-permissions` and `--allow-dangerously-skip-permissions`,
+with `--permission-mode manual` first or in place of a mode it named; Codex without the
+`approval_policy="never"` and `sandbox_mode="danger-full-access"` overrides,
+`--dangerously-bypass-approvals-and-sandbox` and `--yolo`, with `-c approval_policy="on-request"`
+first or in place of an approval it named, any other sandbox kept) into `launch-ask.command` (0700)
+beside the prepared script, which is not changed. Then the paid gate and the take run as without
+it; a refusal there removes the file. The answer is `{handover, script: <launch-ask.command>,
+permissions: "ask"}`, and the launch the script names (`SWITCHBOARD_LAUNCH_ID`) gets
+`permissions: "ask"` in its record and in its home's `.session.json` while that still names it
+(`launches::mark_permissions`), so `sessions --all` and the history show it. Without `ask` the
+answer and the records are as before. macOS and Linux only, like `handovers run`. Evidence:
+`a_hand_over_taken_with_ask_starts_with_prompts_on_and_its_record_says_so`,
+`launch::tests::a_hand_over_taken_with_ask_runs_claude_code_in_manual_mode_without_the_bypass`,
+`a_hand_over_taken_with_ask_runs_codex_asking_and_keeps_a_sandbox_the_person_set`,
+`ask_is_refused_for_another_agent_or_a_script_switchboard_did_not_write`.
+
 `fabric-handovers` absent means off. Pending/taken records and recovery state are
 operational state, excluded from account backups and removed by uninstall. A queue
 record never contains a prompt or credential. Evidence: `handovers::tests`,

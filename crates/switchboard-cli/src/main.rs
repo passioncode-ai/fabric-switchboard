@@ -1449,6 +1449,12 @@ enum HandoversCommand {
     Run {
         /// The hand-over's id, `ho-` and 12 hex digits (`switchboard handovers`).
         id: String,
+        /// Start the session with the agent's permission prompts on, whatever Switchboard's own
+        /// setting: Claude Code in `--permission-mode manual`, Codex asking on request with no
+        /// bypass (a sandbox the person set stays). Only for a Claude Code or Codex hand-over;
+        /// another stays waiting. Its launch record says `permissions: ask`.
+        #[arg(long)]
+        ask: bool,
     },
     /// Turn "Open hand-overs in Fabric" on or off.
     Set {
@@ -3133,7 +3139,7 @@ async fn run(cli: &Cli) -> Result<Value, String> {
             Some(HandoversCommand::Set { state }) => Operation::HandoverSetting {
                 on: Some(matches!(state, OnOff::On)),
             },
-            Some(HandoversCommand::Run { id }) => return run_handover(&root, id).await,
+            Some(HandoversCommand::Run { id, ask }) => return run_handover(&root, id, *ask).await,
         },
         Command::Chain { command } => match command {
             ChainCommand::List {
@@ -3967,13 +3973,21 @@ fn exec_ssh(args: &[String]) -> Result<Value, String> {
     std::process::exit(status.code().unwrap_or(1));
 }
 /// `switchboard handovers run <id>`: takes the hand-over (once) and runs its session here.
-async fn run_handover(root: &std::path::Path, id: &str) -> Result<Value, String> {
+/// With `ask` (`--ask`) its session starts with the agent's permission prompts on.
+async fn run_handover(root: &std::path::Path, id: &str, ask: bool) -> Result<Value, String> {
     use std::io::IsTerminal;
     // Checked before it is taken: a hand-over taken by a caller with no terminal would be lost.
     if !(std::io::stdin().is_terminal() && std::io::stdout().is_terminal()) {
         return Err("Running a hand-over needs a terminal on stdin and stdout.".into());
     }
-    let value = call(root, Operation::HandoverTake { id: id.to_owned() }).await?;
+    let value = call(
+        root,
+        Operation::HandoverTake {
+            id: id.to_owned(),
+            ask,
+        },
+    )
+    .await?;
     let script = value["script"]
         .as_str()
         .ok_or("The session script is missing.")?;
