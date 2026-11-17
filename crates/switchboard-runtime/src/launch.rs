@@ -3783,6 +3783,16 @@ pub fn sessions(root: &Path, all: bool) -> Vec<serde_json::Value> {
             found.push(record);
         }
     }
+    let listed: std::collections::HashSet<String> = found
+        .iter()
+        .filter_map(|r| r["launch_id"].as_str().map(str::to_owned))
+        .collect();
+    found.extend(crate::launches::homeless(
+        root,
+        all,
+        &listed,
+        crate::monitor::now(),
+    ));
     found.sort_by_key(|r| std::cmp::Reverse(r["launched_at"].as_i64().unwrap_or(0)));
     found
 }

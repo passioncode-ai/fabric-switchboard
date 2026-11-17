@@ -95,7 +95,8 @@ pub fn report(inputs: &Inputs) -> Value {
         "sessions",
         if stuck > 0 { "warn" } else { "ok" },
         stuck,
-        (stuck > 0).then_some("switchboard_duty"),
+        // SB-407: a stuck board run is stopped with `dispatch stop`.
+        (stuck > 0).then_some("switchboard_dispatch_stop"),
     ));
     let duplicate = count(&["session_duplicate"]);
     checks.push(check(
@@ -105,9 +106,16 @@ pub fn report(inputs: &Inputs) -> Value {
         duplicate,
         (duplicate > 0).then_some("switchboard_session_close_copy"),
     ));
-    // A session whose process ended with no end recorded: history, not an incident.
+    // A board run whose process ended with no end recorded (SB-407): history, not an incident;
+    // stopping it records the end.
     let gone = count(&["session_gone"]);
-    checks.push(check("sessions_gone", "sessions", "ok", gone, None));
+    checks.push(check(
+        "sessions_gone",
+        "sessions",
+        "ok",
+        gone,
+        (gone > 0).then_some("switchboard_dispatch_stop"),
+    ));
     let crashes: Vec<i64> = inputs.bugs["crashes"]
         .as_array()
         .map(|a| a.iter().filter_map(|c| c["at"].as_i64()).collect())

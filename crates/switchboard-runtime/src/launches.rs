@@ -736,7 +736,117 @@ pub(crate) fn record_resume(
     record["launched_by"] = by.stored();
     record["home_path"] = Value::Null;
     let _writing = writing();
+    // SB-411: indexed first, so a session list that reads these records by id only never misses
+    // one (a marker whose record was never written is skipped).
+    homeless_ids(root);
+    // Review round 3: a marker that could not be written fails the resume before its record, so
+    // no record exists that the list cannot find.
+    mark_homeless(root, id)?;
     write(root, id, &record)
+}
+/// SB-411: `launches/homeless/<launch_id>`, an empty marker per launch with no home of its own (a
+/// session resumed as itself), so `sessions` reads only those records. `.complete` in it, written
+/// last, says the index is complete: without it (records from before the index, or a build cut
+/// short), one scan of the records' 90 days builds it again.
+const HOMELESS: &str = "homeless";
+const HOMELESS_COMPLETE: &str = ".complete";
+fn mark_homeless(root: &Path, id: &str) -> Result<(), String> {
+    let folder = root.join(DIR).join(HOMELESS);
+    switchboard_core::private_fs::private_dir(&folder)?;
+    switchboard_core::private_fs::private_write(&folder.join(id), b"")
+}
+/// The launches with no home of their own, from the index (seeded once when absent).
+pub(crate) fn homeless_ids(root: &Path) -> Vec<String> {
+    let folder = root.join(DIR).join(HOMELESS);
+    if fs::symlink_metadata(folder.join(HOMELESS_COMPLETE)).is_err() {
+        let since = crate::monitor::now() - KEEP_SECONDS;
+        let ids: Vec<String> = recent_records(root, since)
+            .into_iter()
+            .filter(|r| r.get("home_path") == Some(&Value::Null))
+            .filter_map(|r| r["launch_id"].as_str().map(str::to_owned))
+            .filter(|id| valid_id(id))
+            .collect();
+        if switchboard_core::private_fs::private_dir(&folder).is_err() {
+            return ids;
+        }
+        // A marker that could not be written leaves the index unbuilt: the next list scans again.
+        if ids.iter().any(|id| mark_homeless(root, id).is_err()) {
+            return ids;
+        }
+        // Markers a cut build or a resume wrote before stay; the list is what the folder holds.
+        let _ = switchboard_core::private_fs::private_write(&folder.join(HOMELESS_COMPLETE), b"");
+        return list_homeless(&folder);
+    }
+    list_homeless(&folder)
+}
+fn list_homeless(folder: &Path) -> Vec<String> {
+    fs::read_dir(folder)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|e| e.file_name().to_str().map(str::to_owned))
+        .filter(|id| valid_id(id))
+        .collect()
+}
+/// SB-411 (Fabric Dashboards' finding ddeece6e): the session list's rows for launches with no
+/// home of their own, read by id from the index (`homeless_ids`) and from the records' memory
+/// (`read`). Without `all`, those whose host runs (`session_host::attachable`) or, for a record
+/// active in the last day with no end, whose Claude Code process holds its session (read only
+/// then, once); with `all`, also the ended ones. A home row's fields with `home: null`; a launch
+/// in `listed` is never repeated.
+pub(crate) fn homeless(
+    root: &Path,
+    all: bool,
+    listed: &std::collections::HashSet<String>,
+    now: i64,
+) -> Vec<Value> {
+    let mut live: Option<std::collections::HashMap<String, (u32, String)>> = None;
+    let mut rows = Vec::new();
+    for id in homeless_ids(root) {
+        if listed.contains(&id) {
+            continue;
+        }
+        let Some(mut record) = read(root, &id) else {
+            continue;
+        };
+        if record.get("home_path") != Some(&Value::Null) {
+            continue;
+        }
+        #[cfg(unix)]
+        let hosted = crate::session_host::attachable(root, &id).is_some();
+        #[cfg(not(unix))]
+        let hosted = false;
+        let active = record["last_turn_at"]
+            .as_i64()
+            .or_else(|| record["launched_at"].as_i64())
+            .is_some_and(|at| now - at <= crate::session_watch::WINDOW_SECONDS);
+        let running = hosted
+            || (record["ended"].is_null()
+                && active
+                && record["provider_session_id"]
+                    .as_str()
+                    .is_some_and(|session| {
+                        live.get_or_insert_with(|| crate::machine_sessions::live_sessions(root))
+                            .contains_key(session)
+                    }));
+        if !all && !running {
+            continue;
+        }
+        if let Some(map) = record.as_object_mut() {
+            map.remove("home_path");
+        }
+        record["state"] = if running { "running" } else { "ended" }.into();
+        if record["started_at"].is_null() {
+            record["started_at"] = record["session_started_at"].clone();
+        }
+        record["home"] = Value::Null;
+        if record.get("home_dir").is_none() {
+            record["home_dir"] = Value::Null;
+        }
+        add_host(root, &mut record);
+        rows.push(record);
+    }
+    rows
 }
 /// `record` with `launched_by.dispatch` (SB-247): the dispatch that started the launch,
 /// `{id, request, thread, project, workflow}`, set by the owner, never by the caller.
@@ -1366,9 +1476,22 @@ pub fn prune(root: &Path, now: std::time::SystemTime) -> usize {
     }
     // SB-219: a workflow's index not written for as long goes too; it names no kept record.
     // SB-247: so does a dispatched run's log.
-    for folder in [BY_WORKFLOW, LOGS] {
+    for folder in [BY_WORKFLOW, LOGS, HOMELESS] {
         if let Ok(entries) = fs::read_dir(root.join(DIR).join(folder)) {
             for entry in entries.flatten() {
+                // Review round 3: a homeless marker goes with its record, never by its own age
+                // (a record is rewritten while it lives); the completion mark is never old.
+                if folder == HOMELESS {
+                    let name = entry.file_name();
+                    let gone = name
+                        .to_str()
+                        .filter(|id| valid_id(id))
+                        .is_some_and(|id| fs::symlink_metadata(path(root, id)).is_err());
+                    if gone {
+                        let _ = fs::remove_file(entry.path());
+                    }
+                    continue;
+                }
                 let old = fs::symlink_metadata(entry.path()).is_ok_and(|meta| {
                     meta.file_type().is_file()
                         && meta
@@ -1551,6 +1674,147 @@ mod tests {
         fs::remove_file(path(&root, &id)).unwrap();
         let row = crate::launch::sessions(&root, true).remove(0);
         assert!(row["ended"].is_null() && row["transcript"].is_null());
+    }
+    /// SB-411 (Fabric Dashboards' finding ddeece6e): a session resumed as itself has a launch
+    /// record and no home; the session list names it like a home row, with `home: null`, once.
+    #[test]
+    fn a_resume_with_no_home_is_listed_while_it_runs_and_with_all_after() {
+        let (_temp, root, home_launch) = fixture();
+        let by = LaunchedBy::surface(Surface::Dashboards);
+        let resume = |session: &str| {
+            let id = new_id();
+            let record = json!({"provider": "claude", "mode": "resume",
+                "working_directory": "/work/app", "in_place": true, "hosted": true,
+                "launched_at": 300, "provider_session_id": session, "home_dir": null});
+            record_resume(&root, &id, record, &by).unwrap();
+            id
+        };
+        let hosted = resume("s-hosted");
+        let ended = resume("s-ended");
+        // Review round 1: each is indexed, so the list reads these records by id only.
+        let mut indexed = homeless_ids(&root);
+        indexed.sort();
+        let mut both = vec![hosted.clone(), ended.clone()];
+        both.sort();
+        assert_eq!(indexed, both);
+        assert!(end_once(
+            &root,
+            &ended,
+            crate::dispatch::EXITED,
+            400,
+            Some(0)
+        ));
+        // The host of `hosted` runs: a descriptor with a live pid (this test's own).
+        #[cfg(unix)]
+        {
+            switchboard_core::private_fs::private_dir(&root.join("sessions")).unwrap();
+            switchboard_core::private_fs::private_write(
+                &root.join("sessions").join(format!("{hosted}.json")),
+                json!({"pid": std::process::id(), "viewers": 1})
+                    .to_string()
+                    .as_bytes(),
+            )
+            .unwrap();
+        }
+        let ids = |rows: &[Value]| -> Vec<String> {
+            let mut ids: Vec<String> = rows
+                .iter()
+                .map(|r| r["launch_id"].as_str().unwrap().to_owned())
+                .collect();
+            ids.sort();
+            ids
+        };
+        let running = crate::launch::sessions(&root, false);
+        #[cfg(unix)]
+        {
+            assert_eq!(ids(&running), std::slice::from_ref(&hosted));
+            let row = &running[0];
+            assert_eq!(row["state"], "running");
+            assert_eq!(row["attachable"], true);
+            assert_eq!(row["hosted"], true);
+            assert_eq!(row["in_place"], true);
+            assert_eq!(row["home"], Value::Null);
+            assert_eq!(row["provider_session_id"], "s-hosted");
+            assert_eq!(row["working_directory"], "/work/app");
+            assert_eq!(row["launched_by"]["surface"], "dashboards");
+            assert!(row.get("home_path").is_none());
+        }
+        #[cfg(not(unix))]
+        assert!(running.is_empty(), "no host on this system");
+        let everything = crate::launch::sessions(&root, true);
+        let mut expected = vec![home_launch.clone(), hosted.clone(), ended.clone()];
+        expected.sort();
+        assert_eq!(ids(&everything), expected, "each launch once");
+        let row = everything
+            .iter()
+            .find(|r| r["launch_id"] == ended.as_str())
+            .unwrap();
+        assert_eq!(row["state"], "ended");
+        assert_eq!(row["ended"]["kind"], crate::dispatch::EXITED);
+        // The launch a home lists is that home's row, never a second one.
+        let home_row = everything
+            .iter()
+            .find(|r| r["launch_id"] == home_launch.as_str())
+            .unwrap();
+        assert_eq!(home_row["home"], "runtimes");
+        // Records from before the index: one scan seeds it, the home's launch left out.
+        let folder = root.join(DIR).join(HOMELESS);
+        fs::remove_dir_all(&folder).unwrap();
+        let mut seeded = homeless_ids(&root);
+        seeded.sort();
+        assert_eq!(seeded, both);
+        assert!(
+            folder.join(HOMELESS_COMPLETE).is_file(),
+            "marked complete last"
+        );
+        // Review round 2: a build cut short (no `.complete`) is built again, and a marker whose
+        // record was never written (the marker is written first) is skipped by the list.
+        fs::remove_file(folder.join(HOMELESS_COMPLETE)).unwrap();
+        fs::remove_file(folder.join(&ended)).unwrap();
+        let orphan = new_id();
+        mark_homeless(&root, &orphan).unwrap();
+        let mut rebuilt = homeless_ids(&root);
+        rebuilt.sort();
+        let mut with_orphan = vec![hosted.clone(), ended.clone(), orphan.clone()];
+        with_orphan.sort();
+        assert_eq!(rebuilt, with_orphan);
+        assert!(folder.join(HOMELESS_COMPLETE).is_file());
+        let listed = crate::launch::sessions(&root, true);
+        assert!(listed.iter().all(|r| r["launch_id"] != orphan.as_str()));
+        assert_eq!(listed.len(), 3);
+        // Review round 3: a marker goes with its record, never by its own age: an old marker of
+        // a live record stays, an orphan's goes, and the completion mark stays.
+        let long_ago = std::time::SystemTime::now() - std::time::Duration::from_secs(100 * 86_400);
+        for name in [hosted.as_str(), HOMELESS_COMPLETE] {
+            fs::File::options()
+                .write(true)
+                .open(folder.join(name))
+                .unwrap()
+                .set_modified(long_ago)
+                .unwrap();
+        }
+        prune(&root, std::time::SystemTime::now());
+        assert!(folder.join(&hosted).is_file(), "its record lives");
+        assert!(!folder.join(&orphan).exists(), "no record");
+        assert!(folder.join(HOMELESS_COMPLETE).is_file());
+        fs::remove_file(path(&root, &hosted)).unwrap();
+        prune(&root, std::time::SystemTime::now());
+        assert!(!folder.join(&hosted).exists(), "its record is gone");
+    }
+
+    #[test]
+    fn a_resume_whose_marker_cannot_be_written_records_nothing() {
+        // Review round 3: the marker comes first; when it fails, so does the resume.
+        let (_temp, root, _) = fixture();
+        fs::write(root.join(DIR).join(HOMELESS), b"not a folder").unwrap();
+        let id = new_id();
+        let by = LaunchedBy::surface(Surface::Dashboards);
+        let record = json!({"provider": "claude", "mode": "resume", "launched_at": 1});
+        assert!(record_resume(&root, &id, record, &by).is_err());
+        assert!(!path(&root, &id).exists(), "no record without its marker");
+        assert!(crate::launch::sessions(&root, true)
+            .iter()
+            .all(|r| r["launch_id"] != id.as_str()));
     }
     /// Windows: Claude Code names its transcript with a drive (`C:\Users\...\.claude\projects\...`,
     /// also with `/` separators); a path without a drive is not absolute there and is not

@@ -22,6 +22,18 @@ pub const GONE_MINUTES: i64 = 10;
 /// The launches the tree and the watch look at: the last day.
 pub const WINDOW_SECONDS: i64 = 24 * 3600;
 
+/// SB-407: the field `read` adds to a dispatched run's record: when its log was last written
+/// (Unix seconds), so a run that writes its log is never read as stuck.
+pub const LOG_WRITTEN_AT: &str = "log_written_at";
+/// Review round 1: the field `read` adds to a dispatched run that has not ended when its home's
+/// process runs (`launches::own_home`, `launch::session_running`), so it is never read as gone.
+pub const HOME_RUNNING: &str = "home_running";
+
+/// Whether a scan read the process table: its `degraded` names no source.
+pub fn table_read(scan: &Value) -> bool {
+    scan["degraded"].as_array().is_none_or(|d| d.is_empty())
+}
+
 pub const DUPLICATE: &str = "duplicate";
 pub const STUCK: &str = "stuck";
 pub const GONE: &str = "gone";
@@ -70,12 +82,16 @@ fn task(record: &Value) -> Value {
 }
 
 /// The pure watch: what needs a person now. `rows` are `machine_sessions::scan`'s sessions,
-/// `records` the launches of the window, `pairs` the live (session id, pid) pairs.
+/// `records` the launches of the window, `pairs` the live (session id, pid) pairs. `table_read`
+/// says the process table was read (SB-375: a scan that could not read it, and every scan on a
+/// system whose table is not read, names it in `degraded`): without it no launch reads as gone,
+/// since every process is missing from it.
 pub fn findings(
     rows: &[Value],
     records: &[Value],
     pairs: &[(String, u32)],
     now: i64,
+    table_read: bool,
 ) -> Vec<Value> {
     let mut out = Vec::new();
     let mut by_session: BTreeMap<&str, Vec<u32>> = BTreeMap::new();
@@ -105,23 +121,33 @@ pub fn findings(
             continue;
         };
         let started = record["launched_at"].as_i64().unwrap_or(now);
+        let dispatched = record["dispatch"].is_object();
         match live.get(id) {
-            Some(row) if !record["dispatch"].is_null() => {
-                let quiet = row["quiet_minutes"].as_i64().unwrap_or(0);
+            Some(row) if dispatched => {
+                // SB-407: a run that writes its log is working, whatever its folder says.
+                let mut quiet = row["quiet_minutes"].as_i64().unwrap_or(0);
+                if let Some(written) = record[LOG_WRITTEN_AT].as_i64() {
+                    quiet = quiet.min((now - written).max(0) / 60);
+                }
                 if quiet >= STUCK_MINUTES {
                     out.push(json!({
                         "kind": STUCK, "launch_id": id, "pids": [row["pid"]],
                         "folder": record["working_directory"], "quiet_minutes": quiet,
-                        "task": task(record),
+                        "task": task(record), "dispatch": true,
                     }));
                 }
             }
             Some(_) => {}
+            // SB-407: a run on another machine has no process here; `dispatch status` reads it.
+            None if dispatched && !record["dispatch"]["target"].is_null() => {}
+            // Review round 1 (P1): no process table, no gone; and a dispatched run whose home
+            // says its process runs is not gone, whatever the scan missed.
+            None if !table_read || record[HOME_RUNNING] == true => {}
             None if record["ended"].is_null() && now - started >= GONE_MINUTES * 60 => {
                 out.push(json!({
                     "kind": GONE, "launch_id": id, "folder": record["working_directory"],
                     "since": record["last_turn_at"].as_i64().unwrap_or(started),
-                    "surface": surface(record), "task": task(record),
+                    "surface": surface(record), "task": task(record), "dispatch": dispatched,
                 }));
             }
             None => {}
@@ -205,7 +231,7 @@ pub fn assemble(scan: &Value, records: &[Value], pairs: &[(String, u32)], now: i
             "managed": rows.iter().filter(|r| r["managed"] == true).count(),
             "by_pool": by_pool, "by_surface": by_surface,
         },
-        "findings": findings(&rows, records, pairs, now),
+        "findings": findings(&rows, records, pairs, now, table_read(scan)),
         "observed_at": scan["observed_at"],
         "degraded": scan["degraded"],
     })
@@ -255,9 +281,38 @@ fn read_fresh(root: &Path, now: i64) -> Read {
 /// What the live processes and records read now give.
 fn read(root: &Path, now: i64) -> Read {
     let (scan, pairs) = crate::machine_sessions::scan_and_pairs(root);
-    let records = crate::launches::recent_records(root, now - WINDOW_SECONDS);
+    let mut records = crate::launches::recent_records(root, now - WINDOW_SECONDS);
+    for record in records.iter_mut().filter(|r| r["dispatch"].is_object()) {
+        if let Some(at) = log_written_at(root, record) {
+            record[LOG_WRITTEN_AT] = at.into();
+        }
+        if record["ended"].is_null()
+            && record["dispatch"]["target"].is_null()
+            && crate::launches::own_home(root, record)
+                .is_some_and(|home| crate::launch::session_running(&home).unwrap_or(true))
+        {
+            record[HOME_RUNNING] = true.into();
+        }
+    }
     let pairs = pairs.into_iter().map(|(s, p, _)| (s, p)).collect();
     (scan, records, pairs)
+}
+
+/// SB-407: when a dispatched run's log (`launches/logs/<id>.log`) was last written; a stat only.
+fn log_written_at(root: &Path, record: &Value) -> Option<i64> {
+    let id = record["launch_id"].as_str()?;
+    if !crate::launches::valid_id(id) {
+        return None;
+    }
+    let path = root
+        .join(crate::launches::DIR)
+        .join(crate::launches::LOGS)
+        .join(format!("{id}.log"));
+    let modified = std::fs::symlink_metadata(path).ok()?.modified().ok()?;
+    modified
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()
+        .map(|d| d.as_secs() as i64)
 }
 
 /// `switchboard sessions --tree` and MCP `switchboard_sessions` with `tree`.
@@ -390,8 +445,10 @@ fn watch(root: &Path, now: i64) {
     // SB-397 R1: a restart wave advances every minute.
     crate::restarts::tick(root, now);
     let (scan, records, pairs) = read_fresh(root, now);
+    // SB-412: room in the pool after a refused dispatch is noted once.
+    crate::dispatch_refusals::observe(root, &scan, now);
     let rows: Vec<Value> = scan["sessions"].as_array().cloned().unwrap_or_default();
-    let mut found = findings(&rows, &records, &pairs, now);
+    let mut found = findings(&rows, &records, &pairs, now, table_read(&scan));
     describe_duplicates(root, &mut found);
     let before = last_keys(root);
     for f in &found {
@@ -527,7 +584,7 @@ mod tests {
             ("s-1".to_owned(), 12),
             ("s-2".to_owned(), 11),
         ];
-        let found = findings(&rows, &records, &pairs, now);
+        let found = findings(&rows, &records, &pairs, now, true);
         let kinds: Vec<(&str, &str)> = found
             .iter()
             .map(|f| {
@@ -559,6 +616,60 @@ mod tests {
         let left: Vec<String> = last(root.path()).iter().map(key).collect();
         assert_eq!(left, ["stuck:L-run", "gone:L-gone"]);
         assert_eq!(found[1]["task"]["request"], "r-1");
+    }
+
+    #[test]
+    fn a_board_run_writing_its_log_is_not_stuck_and_a_run_elsewhere_is_never_gone() {
+        // SB-407: its folder quiet 45 minutes, its log written five minutes ago: working.
+        let now = 100_000;
+        let rows = vec![row(10, Some("L-log"), 45), row(11, Some("L-quiet"), 45)];
+        let records = vec![
+            json!({"launch_id": "L-log", "launched_at": now - 3600, "dispatch": {"workflow": "wf_1"},
+                LOG_WRITTEN_AT: now - 300}),
+            json!({"launch_id": "L-quiet", "launched_at": now - 3600, "dispatch": {"workflow": "wf_2"},
+                LOG_WRITTEN_AT: now - 40 * 60}),
+            json!({"launch_id": "L-remote", "launched_at": now - 3600,
+                "dispatch": {"target": "studio"}}),
+            json!({"launch_id": "L-gone", "launched_at": now - 3600, "dispatch": {"workflow": "wf_3"}}),
+        ];
+        let found = findings(&rows, &records, &[], now, true);
+        let keys: Vec<String> = found.iter().map(key).collect();
+        assert_eq!(keys, ["stuck:L-quiet", "gone:L-gone"]);
+        assert_eq!(
+            found[0]["quiet_minutes"], 40,
+            "the log's quiet, the shorter one"
+        );
+        assert_eq!(found[0]["dispatch"], true);
+        assert_eq!(found[1]["dispatch"], true);
+        // Review round 1 (P1): with the process table unread (Windows, or a failed read), no
+        // launch is gone; and a dispatched run whose home says it runs is never gone.
+        let keys_of = |found: Vec<Value>| found.iter().map(key).collect::<Vec<_>>();
+        assert_eq!(
+            keys_of(findings(&rows, &records, &[], now, false)),
+            ["stuck:L-quiet"]
+        );
+        let mut running = records.clone();
+        running[3][HOME_RUNNING] = true.into();
+        assert_eq!(
+            keys_of(findings(&rows, &running, &[], now, true)),
+            ["stuck:L-quiet"]
+        );
+        assert!(table_read(&json!({"degraded": []})));
+        assert!(!table_read(&json!({"degraded": [
+            {"source": "process_table", "reason": "not_read_on_this_platform"}
+        ]})));
+        // The log's time is read from the file, a stat only.
+        let root = tempfile::tempdir().unwrap();
+        let id = crate::launches::new_id();
+        let logs = root
+            .path()
+            .join(crate::launches::DIR)
+            .join(crate::launches::LOGS);
+        std::fs::create_dir_all(&logs).unwrap();
+        std::fs::write(logs.join(format!("{id}.log")), "x").unwrap();
+        let at = log_written_at(root.path(), &json!({"launch_id": id})).unwrap();
+        assert!((super::now() - at).abs() < 60);
+        assert!(log_written_at(root.path(), &json!({"launch_id": "../x"})).is_none());
     }
 
     #[test]
