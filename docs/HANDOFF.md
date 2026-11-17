@@ -2,6 +2,16 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-11-17: SB-420 Keychain writes keep values off the command line; credential printing guarded, on branch `secret-argv`
+
+- **Asked.** Two findings of a private leak audit (kept outside the repository): a long Keychain write through `/usr/bin/security` passed the value as an argument, and CLI commands printed provider keys and sign-ins to any caller.
+- **Built.** `security_cli::add_line` sends one `security -i` line on stdin: hex, else quoted text (printable ASCII, escaped), else `TOO_LARGE`; the tool's only argument is `-i` (`ADD_ARGS`). Activation and renewal answer `CREDENTIAL_TOO_LARGE`; a launch's MCP sign-in copy logs `mcp_sign_ins error too_large`. CLI: `value_output` in `main.rs` (a named hand-over and a pipe or socket on stdout); `agents key --service openrouter` and `agents anthropic key NAME` need `--to-pipe` (launch scripts pass it); `accounts surrender` needs `SWITCHBOARD_TRANSFER=surrender`, which `account_send::remote_transfer` puts on the call back's ssh command (not on a delegated seat's, which `ssh-serve` reads). The `Operation` comment names the value operations; `mcp::no_values` checks MCP names none.
+- **Decisions.** The variable rather than a flag for `surrender`, so a newer machine calling an older one still works (the older one ignores it); an older caller calling a newer one is refused with a sentence until it updates. Quoted text on the same line rather than the Security framework: an item created by `/usr/bin/security` would ask for consent if written from another program.
+- **Checks.** Build machine: focused tests (`security_cli`, `keychain_macos` with a throwaway keychain, `account_send::`, `launch::`, `mcp_homes`, the CLI tests) passed; the gate and the Windows check: see the PR.
+- **Left open** (backlog SB-420): `agents key` without `--service`; value operations over the control door; `served` settable over the control door; an item larger than one quoted line cannot be written.
+
+**Exact next task.** Review and merge the `secret-argv` pull request once its gate reads EXIT 0 on the merged head; the next release carries SB-420.
+
 ## 2026-11-17: plan 2026-11-17 steps A1 to A3 (gate step times, the test inventory, SB-406 item 7, SB-416), on branch `suite-hardening-1`
 
 - **Asked.** Harden the tests before the refactors of the target-state plan (`docs/plans/2026-11-17-target-state/05-code-structure.md` §11, phase A, on its own branch): A1 the gate prints each step's time and fails when a Rust test disappears; A2 the proxy's tests build on Windows and the proxy and the desktop crate join the Windows checks (SB-406 item 7); A3 SB-416 fixed at its cause.
