@@ -512,19 +512,30 @@ pub(crate) fn status(
                 .map_or((None, None), |(l, t)| (Some(l), t));
             // FD-291: when the session's transcript was last written, from its launch's own path
             // or any config folder that may hold it; a stop already settled costs no stat.
-            let transcript_at = open.contains(r.session.as_str()).then(|| {
-                let stamp = |p: &str| {
-                    std::fs::metadata(p).ok()?.modified().ok()?
-                        .duration_since(std::time::UNIX_EPOCH).ok()
-                        .map(|d| d.as_secs() as i64)
-                };
-                transcript
-                    .as_deref()
-                    .and_then(stamp)
-                    .into_iter()
-                    .chain(crate::machine_sessions::transcript_at(root, &r.directory.to_string_lossy(), &r.session))
-                    .max()
-            }).flatten();
+            let transcript_at = open
+                .contains(r.session.as_str())
+                .then(|| {
+                    let stamp = |p: &str| {
+                        std::fs::metadata(p)
+                            .ok()?
+                            .modified()
+                            .ok()?
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .ok()
+                            .map(|d| d.as_secs() as i64)
+                    };
+                    transcript
+                        .as_deref()
+                        .and_then(stamp)
+                        .into_iter()
+                        .chain(crate::machine_sessions::transcript_at(
+                            root,
+                            &r.directory.to_string_lossy(),
+                            &r.session,
+                        ))
+                        .max()
+                })
+                .flatten();
             serde_json::json!({"stop": r, "ready": ready.mode.is_some(), "mode": ready.mode,
                 "candidates": ready.accounts, "probe_at": ready.probe_at, "reason": ready.reason,
                 "launch_id": launch_id, "transcript": transcript, "transcript_at": transcript_at,

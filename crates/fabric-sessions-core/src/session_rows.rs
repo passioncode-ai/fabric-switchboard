@@ -76,8 +76,8 @@ fn moved_on(s: &Value, now: Option<i64>) -> bool {
     let written = s["transcript_at"]
         .as_i64()
         .is_some_and(|at| at > stopped + STOP_SLACK_SECONDS);
-    let busy = s["live"]["status"] == "busy"
-        && now.is_some_and(|now| now > stopped + STOP_SLACK_SECONDS);
+    let busy =
+        s["live"]["status"] == "busy" && now.is_some_and(|now| now > stopped + STOP_SLACK_SECONDS);
     written || busy
 }
 
@@ -190,7 +190,8 @@ pub fn build(sources: &Sources) -> Value {
         // FD-291: a stop is taken up only from a transcript still where it stopped; one with no
         // transcript in any folder cannot be continued, and one whose session went past it ended
         // somewhere else and is continued as itself.
-        let (group, why, acts) = if s.get("transcript_at").is_some() && s["transcript_at"].is_null() {
+        let (group, why, acts) = if s.get("transcript_at").is_some() && s["transcript_at"].is_null()
+        {
             ("ended", "no_transcript", Vec::new())
         } else if moved_on(s, now) {
             ("ended", "moved_on", vec!["continue"])
@@ -579,16 +580,33 @@ mod tests {
             stop("E4", "S22", true, json!(650), Value::Null),
         ]}));
         let by = |id: &str| {
-            answer["rows"].as_array().unwrap().iter().find(|r| r["id"] == id).cloned().unwrap()
+            answer["rows"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|r| r["id"] == id)
+                .cloned()
+                .unwrap()
         };
-        assert_eq!((by("pid:14")["group"].clone(), by("pid:14")["why"].clone()), (json!("running"), json!("working")));
+        assert_eq!(
+            (by("pid:14")["group"].clone(), by("pid:14")["why"].clone()),
+            (json!("running"), json!("working"))
+        );
         assert!(by("pid:14")["probe_at"].is_null());
         assert_eq!(
-            (by("stop:E2")["group"].clone(), by("stop:E2")["why"].clone(), by("stop:E2")["acts"].clone()),
+            (
+                by("stop:E2")["group"].clone(),
+                by("stop:E2")["why"].clone(),
+                by("stop:E2")["acts"].clone()
+            ),
             (json!("ended"), json!("no_transcript"), json!([]))
         );
         assert_eq!(
-            (by("stop:E3")["group"].clone(), by("stop:E3")["why"].clone(), by("stop:E3")["acts"].clone()),
+            (
+                by("stop:E3")["group"].clone(),
+                by("stop:E3")["why"].clone(),
+                by("stop:E3")["acts"].clone()
+            ),
             (json!("ended"), json!("moved_on"), json!(["continue"]))
         );
         assert_eq!(by("stop:E4")["why"], "ready_to_continue");

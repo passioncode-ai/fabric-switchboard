@@ -54,7 +54,14 @@ pub const WARNING_CALLER_STAYS: &str = "Every session listed under restart ends 
 /// Whether the caller's session is among the sessions that restart, and the warning that says so.
 fn caller_restarts(restart: &[Entry]) -> (bool, &'static str) {
     let restarts = restart.iter().any(|e| e.caller);
-    (restarts, if restarts { WARNING } else { WARNING_CALLER_STAYS })
+    (
+        restarts,
+        if restarts {
+            WARNING
+        } else {
+            WARNING_CALLER_STAYS
+        },
+    )
 }
 
 /// One session of a wave.
@@ -722,7 +729,10 @@ pub fn tick(root: &Path, now: i64) {
         // Read again just before the act: earlier acts of this pass can take seconds each, and a
         // session that went busy meanwhile, or now runs in another process, is not ended (R3 review).
         let fresh = view_of(&crate::duty::observe(root), now);
-        if !fresh.get(&session).is_some_and(|v| v.pid == Some(e.pid) && v.between_turns) {
+        if !fresh
+            .get(&session)
+            .is_some_and(|v| v.pid == Some(e.pid) && v.between_turns)
+        {
             continue;
         }
         // Checked again at the act: the plan may be hours old (SL-5, MON-2).
@@ -757,8 +767,7 @@ pub fn tick(root: &Path, now: i64) {
     // for its return (R3 review).
     for e in &wave.sessions {
         let settled = !matches!(e.state.as_str(), "pending" | "ending" | "resuming");
-        if settled
-            && (wave.done_at.is_some() || e.ended_at.is_none_or(|t| now - t >= BACK_SECONDS))
+        if settled && (wave.done_at.is_some() || e.ended_at.is_none_or(|t| now - t >= BACK_SECONDS))
         {
             remove_scripts(root, &wave.id, &e.session);
         }
@@ -1143,7 +1152,10 @@ mod tests {
         let view: HashMap<String, Now> = [("B".to_string(), now(7, true))].into();
         assert!(advance(&mut w, &view, 1000).is_empty());
         assert_eq!(
-            (w.sessions[0].state.as_str(), w.sessions[0].reason.as_deref()),
+            (
+                w.sessions[0].state.as_str(),
+                w.sessions[0].reason.as_deref()
+            ),
             ("skipped", Some("changed_since_plan"))
         );
     }
