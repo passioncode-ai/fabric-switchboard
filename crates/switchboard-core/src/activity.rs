@@ -176,6 +176,7 @@ mod tests {
                 "failed",
                 "switched_on_limit",
                 "failover",
+                "failover_outside",
                 "unusable",
             ],
         ),

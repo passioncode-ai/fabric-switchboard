@@ -1030,15 +1030,21 @@ impl Server {
                 id: required(args, "id")?.into(),
             },
             "assign" => match args.get("organizations") {
-                _ if args.get("also").is_some()
-                    && args.get("organizations").is_none()
-                    && args.get("organization").is_none() =>
-                {
+                // SB-403 (round 1): `also` adds to what the account has; with a first context
+                // named, or empty (which would let the rules decide again), it is refused.
+                _ if args.get("also").is_some() => {
+                    if args.get("organizations").is_some() || args.get("organization").is_some() {
+                        return Err(switchboard_runtime::ALSO_ALONE.into());
+                    }
+                    let also = strings(args, "also")?;
+                    if also.is_empty() {
+                        return Err(switchboard_runtime::ALSO_EMPTY.into());
+                    }
                     Operation::OrganizationAssign {
                         account: required(args, "account_id")?.into(),
                         choice: None,
                         organizations: None,
-                        also: strings(args, "also")?,
+                        also,
                         team: team(args)?,
                     }
                 }

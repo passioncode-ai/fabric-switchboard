@@ -22,9 +22,9 @@ complete, `data.complete` is `true`.
 
 **What you need first**
 
-- An invitation to your organization's team at the provider (Claude Team, or a ChatGPT
-  workspace), sent to your organization address. It reaches your own mailbox if your
-  organization forwards that address to you.
+- An account to work with for the organization: a seat in its team at the provider (Claude Team,
+  or a ChatGPT workspace) at whatever address it invited, or any subscription you already have.
+  An organization may have several e-mail domains or none; none is required (SB-403).
 - Claude Code or Codex installed. Switchboard does not include a subscription.
 - For step 3, either a settings file from your organization's administrator, or the folders
   where you keep the organization's code.

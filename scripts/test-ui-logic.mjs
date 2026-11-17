@@ -919,7 +919,14 @@ check(() => {
   assert.deepEqual(choices.map((c) => [c.account.id, c.suggested, c.holds]), [['a', true, false], ['b', false, true], ['z', false, false]]);
   snap.organizations[0].domains = [];
   assert.deepEqual(logic.seatChoices(snap, 'o1', 'acme-work').map((c) => c.suggested), [false, false, false], 'no domain: nothing suggested, every account offered');
-  assert.equal(logic.assignNotice('dev', { outside: [{ name: 'Mine' }], team: 'not_claimed', teammates: 2 }), 'Saved for dev. Mine keep using it; their organizations are not among its own. The 2 other seats of its team stay where they were.');
+  assert.equal(logic.assignNotice('dev', { outside: [{ name: 'Mine' }], team: 'not_claimed', teammates: 2 }), 'Saved for dev. These groups keep using it: Mine. Their organizations are not among its own. The 2 other seats of its team stay where they were.');
+  // The ordinary Claude Code's account cannot join a group, so it is never offered.
+  assert.deepEqual(logic.seatChoices(snap, 'o1', 'acme-work', (a) => a.id === 'b').map((c) => c.account.id), ['a', 'z']);
+  // SB-403 (round 1): a move or a call back says what its answer says.
+  const name = (pool) => ({ default: 'in the default group', mine: 'in group “Mine”' })[pool] ?? pool;
+  assert.equal(logic.placementNotice('dev', 'dev moved to group “Mine”.', { pool: 'mine', warnings: [{ code: 'outside_organization', pool: 'mine', group: 'Mine' }] }, name), 'dev moved to group “Mine”. These groups use it, though its organizations are not theirs: Mine.');
+  assert.equal(logic.placementNotice('dev', 'dev is back on this computer, in Mine.', { pool: 'default', placed_error: 'Project not found.' }, name), 'dev is back on this computer, in the default group. It could not join the group you chose: Project not found.');
+  assert.equal(logic.placementNotice('dev', 'dev moved.', undefined, name), 'dev moved.');
   assert.equal(logic.assignNotice('dev', { outside: [], team: 'claimed', teammates: 1 }), 'Saved for dev. The other seat of its team followed.');
   assert.equal(logic.assignNotice('dev', undefined), 'Saved for dev.');
 });

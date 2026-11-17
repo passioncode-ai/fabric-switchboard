@@ -407,8 +407,9 @@ impl Snapshot {
     /// whatever pays for it (an account, a key; none is personal), `pool` the pool it serves,
     /// `folder` where it works. The group of the pool decides, else the group holding the folder,
     /// else `own` (a folder in no group is a session without a project, CX-26); when a group and
-    /// `own` disagree, the more private wins. `personal` while no organization exists. A group
-    /// of several organizations (SB-282) runs in the one `own` names when it is among them.
+    /// `own` disagree, the group's wins (DEC-0022, SB-403: the group owns the data, the payer
+    /// only pays). `personal` while no organization exists. A group of several organizations
+    /// (SB-282) runs in the one `own` names when it is among them, else in its first.
     pub fn context_for(
         &self,
         own: Option<&str>,
@@ -418,8 +419,9 @@ impl Snapshot {
         self.context_of(&[own], pool, folder)
     }
     /// [`Snapshot::context_for`] with every context the payer holds, its first first (SB-282):
-    /// the group's first context the payer also holds, else personal; with no group, the
-    /// payer's first.
+    /// the group's first context the payer also holds, else the group's first context
+    /// (DEC-0022, SB-403; it was personal, so a shell started in a group's folder and a launch
+    /// there disagreed); with no group, the payer's first.
     pub fn context_of(
         &self,
         own: &[Option<&str>],
@@ -433,11 +435,15 @@ impl Snapshot {
             .and_then(|p| self.project_of_pool(p))
             .or_else(|| folder.and_then(|f| self.project_for(f)));
         let context = match group {
-            Some(group) => group
-                .contexts()
-                .into_iter()
-                .find(|c| own.contains(c))
-                .flatten(),
+            Some(group) => {
+                let contexts = group.contexts();
+                contexts
+                    .iter()
+                    .find(|c| own.contains(c))
+                    .or_else(|| contexts.first())
+                    .copied()
+                    .flatten()
+            }
             None => own.first().copied().flatten(),
         };
         context.map_or_else(|| PERSONAL.into(), |id| format!("org:{id}"))
@@ -1233,30 +1239,32 @@ mod tests {
             s.session_context(&acme, Some("/work/acme/app".as_ref())),
             org1
         );
-        // The folder's group is personal or another organization's: the more private wins.
+        // DEC-0022 (SB-403): the folder's group decides, whatever the account holds: a
+        // personal group is personal, another organization's group is that organization's.
         assert_eq!(
             s.session_context(&acme, Some("/work/own".as_ref())),
             "personal"
         );
         assert_eq!(
             s.session_context(&acme, Some("/work/beta".as_ref())),
-            "personal"
+            format!("org:{O2}")
         );
         // The account's pool belongs to a group: that group decides, wherever the folder is.
         acme.pool = "acme-pool".into();
         assert_eq!(s.session_context(&acme, Some("/elsewhere".as_ref())), org1);
-        // A personal account is personal everywhere.
+        // A personal account in an organization's folder runs in the organization's context:
+        // the group owns the data, the account only pays (DEC-0022).
         let me = account(B, Provider::Claude, "me@example.com", None);
+        assert_eq!(s.session_context(&me, Some("/work/acme".as_ref())), org1);
         assert_eq!(
-            s.session_context(&me, Some("/work/acme".as_ref())),
+            s.session_context(&me, Some("/elsewhere".as_ref())),
             "personal"
         );
     }
 
     /// SB-201: a session that runs on no account (Kimi Code, an agent on a saved OpenRouter key)
-    /// follows the same rule with its key's group as its own: the group's key gives the group's
-    /// context, the machine's key or no key gives the folder's group only when that agrees, so
-    /// an organization's folder on a personal key reads personal.
+    /// follows the same rule with its key's group as its own. DEC-0022 (SB-403): the folder's
+    /// group decides, so an organization's folder on a personal key reads the organization's.
     #[test]
     fn a_session_without_an_account_takes_its_keys_group_else_personal() {
         use crate::Project;
@@ -1283,16 +1291,16 @@ mod tests {
         assert_eq!(s.key_context(Some("acme-pool"), acme), org1);
         assert_eq!(s.key_context(Some("acme-pool"), None), org1);
         assert_eq!(s.key_context(Some("own-pool"), acme), "personal");
-        // The machine's key, or no key at all (Kimi Code): personal, also in the
-        // organization's folder (the more private wins, A-Q6).
-        assert_eq!(s.key_context(None, acme), "personal");
+        // The machine's key, or no key at all (Kimi Code): the folder's group decides
+        // (DEC-0022, SB-403; before, the more private won, A-Q6).
+        assert_eq!(s.key_context(None, acme), org1);
         assert_eq!(s.key_context(None, Some("/work/own".as_ref())), "personal");
         assert_eq!(s.key_context(None, None), "personal");
-        assert_eq!(s.context_for(None, None, acme), "personal");
+        assert_eq!(s.context_for(None, None, acme), org1);
         // A pool no group reserves decides nothing: the folder's group does.
         assert_eq!(s.context_for(Some(O1), Some("default"), acme), org1);
         assert_eq!(s.context_for(Some(O1), None, None), org1);
-        assert_eq!(s.context_for(Some(O2), None, acme), "personal");
+        assert_eq!(s.context_for(Some(O2), None, acme), org1);
     }
 
     /// SB-202: the one group bound to an organization, and its seats there.
@@ -1434,7 +1442,11 @@ mod tests {
         assert_eq!(s.session_context(&acme, None), format!("org:{O1}"));
         assert_eq!(s.session_context(&beta, None), format!("org:{O2}"));
         let folder = Some("/work/shared/app".as_ref());
-        assert_eq!(s.session_context(&gamma, folder), "personal");
+        // DEC-0022: an account of none of the group's organizations runs in the group's first.
+        assert_eq!(
+            s.session_context(&gamma, folder),
+            s.key_context(Some("shared"), None)
+        );
         assert_eq!(s.key_context(Some("shared"), None), format!("org:{O2}"));
         // Both organizations count the group as theirs.
         assert_eq!(

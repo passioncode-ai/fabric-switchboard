@@ -284,6 +284,7 @@ const safeErrors = new Set([
   'The PassionCode.ai connection could not be read. Disconnect and connect again.',
   'The browser could not be opened.',
   // A group's organization (SB-109). DEC-0022 (SB-403): an organization refuses no placement.
+  'Name organizations to add with also, or every context with organization or organizations, not both.',
   "This account is in use on another machine. Use one of this machine's accounts, or clear the mark if it moved here.",
   // Project suggestions (SB-117).
   'No such suggestion. Read the suggestions again.',

@@ -41,11 +41,16 @@ impl RotationPolicy {
 pub struct RotationDecision {
     pub candidate_id: Option<String>,
     pub reason: String,
+    /// DEC-0022 (SB-403): the candidate holds none of the group's organizations (taken only
+    /// when no account of them had room), so the pass's decision says so.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub outside: bool,
 }
 fn hold(reason: &str) -> RotationDecision {
     RotationDecision {
         candidate_id: None,
         reason: reason.into(),
+        outside: false,
     }
 }
 /// The figures a managed policy starts with when nobody saved one (the initial UI/CLI settings).
@@ -322,6 +327,7 @@ impl Store {
         });
         Ok(match candidate {
             Some((a, _)) => RotationDecision {
+                outside: outside(a),
                 candidate_id: Some(a.id.clone()),
                 reason: if current_limited {
                     "limit_reached"
@@ -458,10 +464,10 @@ pub struct FailoverTally {
     pub held: u64,
     /// Accounts of another kind than the request's (subscription and API key never mix).
     pub kind: u64,
-    /// Accounts of another organization than the group's. Always 0 since DEC-0022 (SB-403): an
-    /// account the group holds serves it whatever its organizations. Kept so `proxy_failover`
-    /// lines keep their fields.
-    pub context: u64,
+    /// DEC-0022 (SB-403): of `moved`, requests moved to an account that holds none of the
+    /// group's organizations (taken only when none of theirs had room). Was `context`, the
+    /// accounts left out for another organization, before nothing was left out for it.
+    pub outside: u64,
     /// Accounts disabled, given to an agent (SB-322), or whose stored credential is missing,
     /// invalid or expired.
     pub credential: u64,

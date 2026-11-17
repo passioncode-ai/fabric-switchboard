@@ -10,9 +10,9 @@ if (native) watchProblems(reportProblem);
 import { LOCALE_KEY, dateLocale, locale, parseLocaleChoice, plural, saveLocaleChoice, t, type LocaleChoice } from './i18n';
 import { demo, demoFirstRun, native, nativeAdapter, onProjectSuggestions, onShellHook, onSpendChanged, safeError, reportFrontendReady, reportLanguage, reportProblem, type Operation } from './adapter';
 import type { CardState, AccountGroup } from './ui-logic';
-import { statAlert, ceilingQuestion, ceilingWarning, ceilingLine, keyLimitLine, dollars, POOL_PATTERN, poolChoices, poolName, inGroup, tourPlacement, usableWhileBusy, APPEARANCE_KEY, attribution, placementAdmits, domainSuggestion, groupSeatsElsewhere, passioncodeLine, seatEndedText, groupSeatsEndedText, organizationReleasedAt, inOrganizationFilter, domainList, type AttributedBy, sortStatRows, nextStatSort, type StatRow, type StatSort, statCacheShare, statTokensPerRequest, chartSeries, niceMax, groupProjectRows, type ChartMetric, groupProjects, compactCount, statTokens, statTrouble, statTroubleText, statAgentName, type Statistics, EXPIRY_CHOICES, folderName, folderRows, withoutFolder, type ProjectRoot, moveTargets, mapRows, rootTargets, storedMapFolders, MAP_FOLDERS_KEY, type MapFilter, type MapRow, type RepositoryMap, sortAgents, defaultAgentChoices, backgroundReads, clockedRead, chainScopeKey, afterRead, ceilingRemovalNote, modelMeta, modelUse, ordinaryKimiNote, kimiLimitUntil, limitReasonText, limitTitle, agentSetupFacts, sessionHow, sessionAgentName, sessionStateLabel, kimiWindowsLine, kimiWindowsLines, openrouterCreditLine, eventAction, eventDetail, MutationClock, activeRules, autoSwitchPool, autoSwitchPossible, launchChoice, withFolders, githubDefaultSelection, githubPlan, githubSource, replaceFolder, storedFolder, LAST_FOLDER_KEY, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, signInNotice, signInMove, organizationMoveNote, dismissTermsNotice, termsNoticeDismissed, termsNoticeOn, termsNoticeText, tourWaits, orgSetups, releasedOrganizations, releasedSummary, orgSetupAction, orgSetupShown, orgSetupCaveat, orgSetupLeads, orgSetupPrimary, accountsOrgActionLeads, firstPrimary, orgSetupUnread, orgSetupStateLabel, orgSetupTitle, hiddenOrgSetups, ORG_SETUP_HIDDEN_KEY, accountsEmptyKey, type OrgSetup, usageAnswerText, usageNotice, usageFreshness, windowReset, type Appearance, shellHookView, balancingView, balancingNotice, shellHookToggleNotice, shellHookNoticeText, codexHookLine, moveStep, accountsForStep, chainSummary, stepReasonText, handoverOutcomeText, handoverSkipped, shortWorkflow, TAKEOVER_ORDER, seatChoices, assignNotice, providerOrganization, groupOrganizations, servesPool, sharedGroups, holdsContext, accountOrganizations, machineOf, remoteUsageLine, unplacedAccounts, foldlessGroups, repositoriesUnder, contextLines, machineAliasesLine, machineLiveLine, machineCopyLine, foldOpen, accountSections, accountMatches, attentionAccounts, attentionReasonText, duplicateOffer, attentionActionLabel, dutyReasonText, dutyOutcomeText, surfaceLabel, sessionTreeRows, SESSION_GROUPS, sessionGroupTitle, sessionWhyText, machineReadText, givenFacts, switchingLine, MACHINE_FOLD_LIMIT, EVENT_FILTER_KINDS, eventKindLabel, filterEvents, eventsByDay, relativeDay, EVENTS_PAGE, eventPage, sortSessions, statRowsShown, STAT_TOP, spendShare, groupKeyBlocks, keyTail, groupStateLine, type EventKind, type EventFilter, restartSkipText, sessionTone, sessionDegradedText, restartStateText, restartTone } from './ui-logic';
+import { statAlert, ceilingQuestion, ceilingWarning, ceilingLine, keyLimitLine, dollars, POOL_PATTERN, poolChoices, poolName, inGroup, tourPlacement, usableWhileBusy, APPEARANCE_KEY, attribution, placementAdmits, domainSuggestion, groupSeatsElsewhere, passioncodeLine, seatEndedText, groupSeatsEndedText, organizationReleasedAt, inOrganizationFilter, domainList, type AttributedBy, sortStatRows, nextStatSort, type StatRow, type StatSort, statCacheShare, statTokensPerRequest, chartSeries, niceMax, groupProjectRows, type ChartMetric, groupProjects, compactCount, statTokens, statTrouble, statTroubleText, statAgentName, type Statistics, EXPIRY_CHOICES, folderName, folderRows, withoutFolder, type ProjectRoot, moveTargets, mapRows, rootTargets, storedMapFolders, MAP_FOLDERS_KEY, type MapFilter, type MapRow, type RepositoryMap, sortAgents, defaultAgentChoices, backgroundReads, clockedRead, chainScopeKey, afterRead, ceilingRemovalNote, modelMeta, modelUse, ordinaryKimiNote, kimiLimitUntil, limitReasonText, limitTitle, agentSetupFacts, sessionHow, sessionAgentName, sessionStateLabel, kimiWindowsLine, kimiWindowsLines, openrouterCreditLine, eventAction, eventDetail, MutationClock, activeRules, autoSwitchPool, autoSwitchPossible, launchChoice, withFolders, githubDefaultSelection, githubPlan, githubSource, replaceFolder, storedFolder, LAST_FOLDER_KEY, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, signInNotice, signInMove, organizationMoveNote, dismissTermsNotice, termsNoticeDismissed, termsNoticeOn, termsNoticeText, tourWaits, orgSetups, releasedOrganizations, releasedSummary, orgSetupAction, orgSetupShown, orgSetupCaveat, orgSetupLeads, orgSetupPrimary, accountsOrgActionLeads, firstPrimary, orgSetupUnread, orgSetupStateLabel, orgSetupTitle, hiddenOrgSetups, ORG_SETUP_HIDDEN_KEY, accountsEmptyKey, type OrgSetup, usageAnswerText, usageNotice, usageFreshness, windowReset, type Appearance, shellHookView, balancingView, balancingNotice, shellHookToggleNotice, shellHookNoticeText, codexHookLine, moveStep, accountsForStep, chainSummary, stepReasonText, handoverOutcomeText, handoverSkipped, shortWorkflow, TAKEOVER_ORDER, seatChoices, assignNotice, placementNotice, providerOrganization, groupOrganizations, servesPool, sharedGroups, holdsContext, accountOrganizations, machineOf, remoteUsageLine, unplacedAccounts, foldlessGroups, repositoriesUnder, contextLines, machineAliasesLine, machineLiveLine, machineCopyLine, foldOpen, accountSections, accountMatches, attentionAccounts, attentionReasonText, duplicateOffer, attentionActionLabel, dutyReasonText, dutyOutcomeText, surfaceLabel, sessionTreeRows, SESSION_GROUPS, sessionGroupTitle, sessionWhyText, machineReadText, givenFacts, switchingLine, MACHINE_FOLD_LIMIT, EVENT_FILTER_KINDS, eventKindLabel, filterEvents, eventsByDay, relativeDay, EVENTS_PAGE, eventPage, sortSessions, statRowsShown, STAT_TOP, spendShare, groupKeyBlocks, keyTail, groupStateLine, type EventKind, type EventFilter, restartSkipText, sessionTone, sessionDegradedText, restartStateText, restartTone } from './ui-logic';
 import agentCatalog from '../catalog/agents.json';
-import type { AnalyticsStatus, Ceilings, CeilingView, CeilingQuestionView, OpenrouterCredit, BackupInfo, PassioncodeStatus, Account, Adapter, AgentConnection, AgentInfo, AgentRow, AgentsOverview, OpenrouterModels, HermesModel, KimiAccounts, KimiRegion, KimiStatus, OpenrouterStatus, OpenrouterKeys, CodexRoute, BalanceStatus, CapacityStatus, DutyStatus, DutyLine, SessionTree, WatchFinding, ShellHookStatus, AgentSetup, AuthKind, BackupStatus, KimiAccount, CurrentAccounts, LoginItem, Project, Restored, HandoverPlan, ExternalIdentity, MonitorStatus, ProjectRule, Provider, RotationPolicy, RuntimeStatus, SessionInfo, Snapshot, UpdateStatus, Onboarding, Chains, ChainExecutor, ChainScope, ChainStepView, GithubRepository, Machine, MachinesLive, MachinesList, Attention, AttentionItem, Event, GivenAccount, SessionsEverywhere, SessionRow, MachineReadStatus, RestartPlan, RestartWave, OrganizationAssigned } from './types';
+import type { AnalyticsStatus, Ceilings, CeilingView, CeilingQuestionView, OpenrouterCredit, BackupInfo, PassioncodeStatus, Account, Adapter, AgentConnection, AgentInfo, AgentRow, AgentsOverview, OpenrouterModels, HermesModel, KimiAccounts, KimiRegion, KimiStatus, OpenrouterStatus, OpenrouterKeys, CodexRoute, BalanceStatus, CapacityStatus, DutyStatus, DutyLine, SessionTree, WatchFinding, ShellHookStatus, AgentSetup, AuthKind, BackupStatus, KimiAccount, CurrentAccounts, LoginItem, Project, Restored, HandoverPlan, ExternalIdentity, MonitorStatus, ProjectRule, Provider, RotationPolicy, RuntimeStatus, SessionInfo, Snapshot, UpdateStatus, Onboarding, Chains, ChainExecutor, ChainScope, ChainStepView, GithubRepository, Machine, MachinesLive, MachinesList, Attention, AttentionItem, Event, GivenAccount, SessionsEverywhere, SessionRow, MachineReadStatus, RestartPlan, RestartWave, OrganizationAssigned, Placement } from './types';
 
 const root = document.querySelector<HTMLDivElement>('#app')!;
 const announcements = document.querySelector<HTMLDivElement>('#announcements')!;
@@ -594,7 +594,9 @@ function bringHereDialog(account: Account, machine: Machine) {
   context.form.addEventListener('submit', (event) => {
     event.preventDefault();
     const name = choices.find(([v]) => v === group.value)?.[1] ?? group.value;
-    void dialogSave(context, () => adapter.recallAccount(account.id, null, group.value), t('{label} is back on this computer, in {group}.', { label: account.label, group: name }));
+    // SB-403: the notice comes from the answer: a group outside its organizations, or one it could not join.
+    let answer: Placement | void = undefined;
+    void dialogSave(context, async () => { answer = await adapter.recallAccount(account.id, null, group.value); }, () => placementNotice(account.label, t('{label} is back on this computer, in {group}.', { label: account.label, group: name }), answer, (pool) => inGroup(pool, snapshot?.projects)));
   });
   group.focus();
 }
@@ -1100,7 +1102,7 @@ function projectDialog(existing?: Project, organization?: string) {
   let chosen = [...startOrgs];
   const chosenOrgs = () => { const on = orgBoxes.filter((b) => b.checked).map((b) => b.value); chosen = [...chosen.filter((id) => on.includes(id)), ...on.filter((id) => !chosen.includes(id))]; return chosen; };
   if (!usable.length) picker.append(el('p', 'form-note', t('No accounts yet. Add accounts first, or save the group now and add them later.')));
-  // SB-314: `wanted` is the person's own check, kept while an organization change disables the box, so checking that organization again gives it back.
+  // SB-314: `wanted` is the person's own check; an organization change never unchecks it (DEC-0022, SB-403: no box is disabled).
   const rows: { account: Account; box: HTMLInputElement; why: HTMLElement; text: string; wanted: boolean }[] = [];
   for (const account of usable) {
     const owner = projectOf(account.pool);
@@ -1109,7 +1111,7 @@ function projectDialog(existing?: Project, organization?: string) {
     const why = el('span', '', `${account.label} · ${providerName(account.provider)}${note}`);
     option.append(box, why); picker.append(option);
     const row = { account, box, why, text: why.textContent ?? '', wanted: box.checked };
-    box.addEventListener('change', () => { row.wanted = box.checked; });
+    box.addEventListener('change', () => { row.wanted = box.checked; syncAccounts(); });
     rows.push(row);
   }
   const syncAccounts = () => {
@@ -1119,7 +1121,9 @@ function projectDialog(existing?: Project, organization?: string) {
       const fits = placementAdmits(snapshot!, orgs, account);
       box.checked = wanted;
       const own = accountOrganizations(attribution(snapshot!, account)).map((id) => organizations.find((o) => o.id === id)?.name ?? '').filter(Boolean);
-      why.textContent = fits ? text : `${text} · ${own.length ? t('Works for {name}; serves this group anyway.', { name: own.join(', ') }) : t('Personal account; serves this group anyway.')}`;
+      // Said only of an account ticked for the group: one left out serves nothing here.
+      const outside = own.length ? (box.checked ? t('Works for {name}; serves this group anyway.', { name: own.join(', ') }) : t('Works for {name}.', { name: own.join(', ') })) : (box.checked ? t('Personal account; serves this group anyway.') : t('Personal account.'));
+      why.textContent = fits ? text : `${text} · ${outside}`;
     }
   };
   for (const box of orgBoxes) box.addEventListener('change', syncAccounts);
@@ -2236,7 +2240,8 @@ async function pollLogin() {
   try {
     const account = await adapter.finishLogin(login.id);
     // Saved either way; a pending cleanup is reported, never a failed sign-in (SB-42).
-    await loginSaved(signInNotice(account, providerName(account.provider), snapshot?.projects));
+    // SB-403: a sign-in into a group of another organization is kept there; the notice says so.
+    await loginSaved(placementNotice(account.label, signInNotice(account, providerName(account.provider), snapshot?.projects), account, (pool) => inGroup(pool, snapshot?.projects)));
     // SB-160 (SCN-077): a seat outside its organization's one group is offered it; nothing moves until pressed.
     const move = signInMove(account);
     if (move) noticeAction = { label: move.label, run: () => void mutate(() => adapter.moveAccount(move.id, move.pool), move.done, 'notice-action') };
@@ -2616,7 +2621,7 @@ function primaryButton(account: Account, state: { current: boolean; selected: bo
   else if (action === 'select') slot.append(button(t('Select'), () => void mutate(() => adapter.select(account), t('{label} selected for the next managed request {where}.', { label: account.label, where: inGroup(account.pool, snapshot?.projects) }), key), 'button row-button', key));
   else if (action === 'sign_in') slot.append(button(t('Sign in again'), () => void startLogin(account.provider, account.label, account.pool), 'button row-button', key));
   else if (machineOf(snapshot!, account)) { const machine = machineOf(snapshot!, account)!; slot.append(button(t('Call back'), () => bringHereDialog(account, machine), 'button row-button quiet', key)); }
-  else if (snapshot?.elsewhere?.[account.id] !== undefined && sshTarget(snapshot?.locations?.[account.id])) { const from = snapshot!.locations![account.id]!; slot.append(button(t('Call back'), () => void mutate(() => adapter.recallAccount(account.id, from), t('{label} is back on this computer.', { label: account.label }), key), 'button row-button quiet', key)); }
+  else if (snapshot?.elsewhere?.[account.id] !== undefined && sshTarget(snapshot?.locations?.[account.id])) { const from = snapshot!.locations![account.id]!; let answer: Placement | void = undefined; slot.append(button(t('Call back'), () => void mutate(async () => { answer = await adapter.recallAccount(account.id, from); }, () => placementNotice(account.label, t('{label} is back on this computer.', { label: account.label }), answer, (pool) => inGroup(pool, snapshot?.projects)), key), 'button row-button quiet', key)); }
   else if (snapshot?.elsewhere?.[account.id] !== undefined) slot.append(button(t('Use here'), () => void mutate(() => adapter.markElsewhere(account.id, false), t('{label} is used on this computer again.', { label: account.label }), key), 'button row-button quiet', key));
   else slot.append(button(t('Enable'), () => void mutate(() => adapter.update(account.id, account.label, true), t('{label} enabled.', { label: account.label }), key), 'button row-button quiet', key));
   return slot;
@@ -3948,7 +3953,8 @@ function moveDialog(account: Account, inCli: boolean) {
     const chosen = radios.find((r) => r.checked); if (!chosen || chosen.value === account.pool) return;
     const target = targets.find((x) => x.pool === chosen.value)!;
     const success = target.name === null ? t('{label} moved to the default group.', { label: account.label }) : t('{label} moved to group “{name}”.', { label: account.label, name: target.name });
-    void dialogSave(context, () => adapter.moveAccount(account.id, chosen.value), success);
+    let answer: Placement | void = undefined;
+    void dialogSave(context, async () => { answer = await adapter.moveAccount(account.id, chosen.value); }, () => placementNotice(account.label, success, answer, (pool) => inGroup(pool, snapshot?.projects)));
   });
   (radios.find((r) => r.checked && !r.disabled) ?? radios.find((r) => !r.disabled))?.focus();
 }
@@ -4223,7 +4229,8 @@ function teamOf(account: Account): number {
  * for the organization too, or a sign-in with any address goes to the group. An organization may
  * have several domains or none; a domain only suggests. */
 function seatDialog(target: { pool: string; group: string; organization: { id: string; name: string } }) {
-  const choices = seatChoices(snapshot ?? {}, target.organization.id, target.pool);
+  // The account the ordinary Claude Code or Codex is signed in to cannot join a group.
+  const choices = seatChoices(snapshot ?? {}, target.organization.id, target.pool, inCli);
   if (!choices.length) { void startLogin('claude', '', target.pool); return; }
   const context = openDialog(t('Add a seat for {organization}', { organization: target.organization.name }), t('A seat is any account the group “{group}” uses: one already on this computer, or a sign-in with any address.', { group: target.group }));
   const options = el('fieldset', 'appearance-options seat-options'); options.append(el('legend', 'sr-only', t('Seat')));
@@ -4233,10 +4240,14 @@ function seatDialog(target: { pool: string; group: string; organization: { id: s
     const words = el('span', '', text); if (sub) words.append(el('span', 'row-sub', ` · ${sub}`));
     option.append(input, words); options.append(option); radios.push(input);
   };
-  for (const choice of choices) radio(choice.account.id, `${choice.account.label} · ${providerName(choice.account.provider)}`, choice.suggested ? t('suggested by its address') : null);
+  // SB-403 (round 1): an account at home in another group is shared and keeps it; one in the
+  // default group moves into this group (the default group lends to no group by a person's
+  // word), so its line says so.
+  const moves = (a: Account) => !(snapshot?.projects ?? []).some((p) => p.pool === a.pool);
+  for (const choice of choices) radio(choice.account.id, `${choice.account.label} · ${providerName(choice.account.provider)}`, [choice.suggested ? t('suggested by its address') : null, moves(choice.account) ? t('moves here from the default group') : null].filter(Boolean).join(' · ') || null);
   radio('sign-in', t('Sign in with any address'), null);
   radios[0].checked = true;
-  context.body.append(options, el('p', 'form-note', t('An account already here keeps its own group and serves this one too.')));
+  context.body.append(options, el('p', 'form-note', t('An account of another group keeps its group and serves this one too. One in the default group moves here and then works only in this group\'s folders.')));
   context.actions.append(submit(t('Add seat')));
   context.form.addEventListener('submit', (event) => {
     event.preventDefault();
@@ -4246,10 +4257,12 @@ function seatDialog(target: { pool: string; group: string; organization: { id: s
     const choice = choices.find((c) => c.account.id === value); if (!choice) return;
     const project = (snapshot?.projects ?? []).find((p) => p.pool === target.pool); if (!project) return;
     const serving = (snapshot?.accounts ?? []).filter((a) => servesPool(snapshot!, a, target.pool)).map((a) => a.id);
+    const moved = moves(choice.account);
+    // The group first: a refused save leaves the account's organizations as they were.
     void dialogSave(context, async () => {
-      if (!choice.holds) await adapter.organizationAssign(choice.account.id, null, undefined, { also: [target.organization.id] });
       await adapter.saveProject({ pool: project.pool, name: project.name, folders: project.folders, accountIds: [...serving, choice.account.id] });
-    }, t('{label} now serves “{group}” for {organization}.', { label: choice.account.label, group: target.group, organization: target.organization.name }));
+      if (!choice.holds) await adapter.organizationAssign(choice.account.id, null, undefined, { also: [target.organization.id] });
+    }, () => moved ? t('{label} moved to “{group}” and works for {organization} there.', { label: choice.account.label, group: target.group, organization: target.organization.name }) : t('{label} now serves “{group}” for {organization}.', { label: choice.account.label, group: target.group, organization: target.organization.name }));
   });
   radios[0].focus();
 }
@@ -4286,7 +4299,7 @@ function assignDialog(account: Account) {
   const syncLeaving = () => {
     const left = groupsLeft();
     leaving.hidden = !left.length;
-    leaving.textContent = left.length ? t('{groups} keep using this account, though their organizations would not be among its own.', { groups: left.map((p) => p.name).join(', ') }) : '';
+    leaving.textContent = left.length ? t('These groups keep using this account, though their organizations would not be among its own: {groups}.', { groups: left.map((p) => p.name).join(', ') }) : '';
   };
   const syncOthers = () => { for (const box of boxes) { const first = box.value === picker.value || (picker.value === 'auto' && box.value === automatic.organization); box.disabled = first; if (first) box.checked = false; } syncLeaving(); };
   picker.addEventListener('change', syncOthers); for (const box of boxes) box.addEventListener('change', syncLeaving); syncOthers();
@@ -4296,9 +4309,11 @@ function assignDialog(account: Account) {
   // SB-403: one seat of a provider team is placed alone unless the person asks for its team.
   const teammates = teamOf(account);
   const team = el('input'); team.type = 'checkbox';
-  if (teammates > 0) {
+  // SB-403 (round 1): any account with a team at the provider may claim it, alone included: a
+  // seat of the team signed in later follows only a claimed team.
+  if (providerOrganization(account)) {
     const option = el('label', 'appearance-option login-option');
-    option.append(team, el('span', '', plural(teammates, { one: 'Place the other seat of its team at the provider too', other: 'Place the {n} other seats of its team at the provider too' })));
+    option.append(team, el('span', '', teammates > 0 ? plural(teammates, { one: 'Place the other seat of its team at the provider too', other: 'Place the {n} other seats of its team at the provider too' }) : t('Place its team at the provider too, so seats signed in later follow it')));
     context.body.append(option);
   }
   context.actions.append(submit(t('Save')));

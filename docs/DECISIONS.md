@@ -431,8 +431,13 @@ research notes); the ones still in force that the board cites are seeded below w
   switching and the SB-98 move choose the group's own organizations' accounts first and take
   another when none has room; balancing (DEC-0012) still lends nothing across an organization's
   boundary. Assigning one seat of a provider team places that seat only; its team follows only
-  when the person asks (`team`). Data stays apart: a session's context is still the first context
-  its group and account share, else personal. Supersedes the refusing parts of SB-109, SB-282,
+  when the person asks (`team`); a seat of the team signed in later is attributed by its team only
+  after the team is claimed. The group owns the data, the account only pays: a session in a group's
+  folder runs in the group's context whatever account (or key) serves it, the first of the group's
+  contexts the account holds, else the group's first (round 1 of the review, 2026-11-17: before,
+  such a launch ran personal while a terminal in the same folder ran in the organization). Automatic
+  picks outside the group's organizations are recorded (`failover_outside`, `outside`). Statistics
+  count an account under its first context once. Supersedes the refusing parts of SB-109, SB-282,
   SB-313 and SB-314 and the domain-only seat step of SB-202; DEC-0009 (a domain only suggests)
   stands, and an organization may have several domains or none.
 - **Consequences / affects:** [CONTRACTS](CONTRACTS.md#an-organization-is-a-label-sb-403-dec-0022-2026-11-17),

@@ -1559,6 +1559,60 @@ fn failover_moves_the_pool_off_a_refused_account_and_holds_it() {
     assert_eq!(store.route(Provider::Claude, "default").unwrap().0.id, b);
 }
 
+/// DEC-0022 (SB-403, round 1): a failover onto an account of none of the group's organizations
+/// is taken only when none of theirs has room, journaled as `failover_outside` and counted.
+#[test]
+fn a_failover_outside_the_groups_organizations_is_recorded() {
+    let (root, _vault, store) = setup();
+    let now = clock();
+    let a = account(&store, "org-a", now);
+    let b = account(&store, "org-b", now);
+    let c = account(&store, "org-c", now);
+    let acme = store.add_organization("Acme", &[]).unwrap();
+    for id in [&a, &b] {
+        store.assign_organization(id, Some(&acme.id)).unwrap();
+    }
+    let dir = root.path().join("work");
+    std::fs::create_dir_all(&dir).unwrap();
+    let group = store
+        .save_project_in(
+            None,
+            "Work",
+            std::slice::from_ref(&dir),
+            &[a.clone(), b.clone(), c.clone()],
+            Some(Some(&acme.id)),
+        )
+        .unwrap();
+    observe(&store, &a, 20., now);
+    observe(&store, &b, 100., now);
+    observe(&store, &c, 10., now);
+    store.select(Provider::Claude, &group.pool, &a).unwrap();
+    let (moved, _) = store
+        .failover(Provider::Claude, &group.pool, &a, OAUTH, now)
+        .unwrap()
+        .unwrap();
+    assert_eq!(moved.id, c, "the only one with room");
+    let tally = store.take_failover_tally();
+    assert_eq!((tally.moved, tally.outside), (1, 1));
+    let snapshot = store.snapshot().unwrap();
+    assert!(snapshot
+        .events
+        .iter()
+        .any(|e| e.action == "rotation" && e.detail == "failover_outside"));
+    // Automatic switching names an outside candidate too.
+    let p = RotationPolicy {
+        pool: group.pool.clone(),
+        ..policy()
+    };
+    let limited: std::collections::HashSet<String> = [c.clone(), b.clone()].into();
+    store.select(Provider::Claude, &group.pool, &c).unwrap();
+    let decision = store
+        .rotation_decision_with(&p, Some(&c), now, &limited)
+        .unwrap();
+    assert_eq!(decision.candidate_id.as_deref(), Some(a.as_str()));
+    assert!(!decision.outside, "an account of the group's organization");
+}
+
 /// SB-237: the proxy's failovers are counted, and a failover that found nothing says, per
 /// account of the pool, which rule left it out, so a group that stops at once is explained.
 #[test]
@@ -1908,6 +1962,7 @@ fn a_seat_outside_its_groups_organization_comes_after_the_groups_own() {
         .rotation_decision_with(&p, Some(&a), now, &limited)
         .unwrap();
     assert_eq!(decision.candidate_id.as_deref(), Some(c.as_str()));
+    assert!(decision.outside, "the outside seat is named");
 }
 
 /// SB-310 (operator, 2026-11-08): automatic switching of managed sessions is on by default for

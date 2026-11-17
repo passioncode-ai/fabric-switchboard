@@ -1416,6 +1416,25 @@ async fn accounts_rotation_activity_and_queues_are_reachable_over_mcp() {
         json!({"action": "assign", "account_id": ids[2], "organization": "personal"}),
     );
     assert!(!error && personal["organization"].is_null(), "{personal}");
+    // SB-403: `also` adds to what it has; empty, or beside a first context, it is refused and
+    // nothing changes (an empty one would let the rules decide again).
+    let (error, refused) = agent.tool(
+        "switchboard_organization_set",
+        json!({"action": "assign", "account_id": ids[2], "also": []}),
+    );
+    assert!(error, "{refused}");
+    let (error, refused) = agent.tool(
+        "switchboard_organization_set",
+        json!({"action": "assign", "account_id": ids[2], "organization": "personal", "also": [org]}),
+    );
+    assert!(error, "{refused}");
+    let (error, added) = agent.tool(
+        "switchboard_organization_set",
+        json!({"action": "assign", "account_id": ids[2], "also": [org]}),
+    );
+    assert!(!error, "{added}");
+    assert!(added["organization"].is_null(), "personal kept: {added}");
+    assert_eq!(added["also"], json!([org]), "{added}");
     let (error, set) = agent.tool(
         "switchboard_rotation_set",
         json!({"provider": "claude", "pool": "work", "threshold_percent": 80}),

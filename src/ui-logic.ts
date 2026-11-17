@@ -1,6 +1,6 @@
 // Pure interface rules, kept free of DOM access so scripts/test-ui-logic.mjs can
 // exercise them directly. main.ts owns rendering; these functions own decisions.
-import type { BalanceStatus, ShellHookNotice, ShellHookStatus, Onboarding, OnboardStep, ChainExecutor, ChainScope, ChainStepView } from './types';
+import type { BalanceStatus, ShellHookNotice, ShellHookStatus, Onboarding, OnboardStep, ChainExecutor, ChainScope, ChainStepView, Placement } from './types';
 import type { SessionGroup, SessionRow, MachineReadStatus } from './types';
 import type { Machine, MachineCopy, RemoteRead, Attention, AttentionItem, AttentionReason, AttentionWindow, Event, EventsPage, GivenAccount } from './types';
 import type { Account, AccountLimit, Organization, OrganizationGroupOffer, Project, AgentRow, AgentSetup, OpenrouterCredit, RecommendedModel, SessionInfo, ProjectRule, RotationPolicy, UpdateStatus, Usage, UsageWindow } from './types';
@@ -159,6 +159,7 @@ export function eventDetail(detail: string): string {
     // SB-47: the cause of a move, journaled for provenance.
     case 'switched_on_limit': return t('switched on a limit');
     case 'failover': return t('moved after a refusal');
+    case 'failover_outside': return t('moved after a refusal, to an account outside the group\'s organizations');
     case 'unusable': return t('moved off an unusable account');
     case 'cancelled': return t('cancelled');
     case 'isolated': return t('isolated session');
@@ -1666,7 +1667,7 @@ function orgSetupLine(step: OnboardStep, organization: string, group: { pool: st
       if (step.away) return step.away.length ? t('{organization}\'s accounts work on {machines}, so its sessions run there. Make a group here only to work on this computer.', { organization, machines: step.away.join(', ') }) : t('{organization}\'s accounts work on another machine, so its sessions run there. Make a group here only to work on this computer.', { organization });
       return t('{organization} has no group on this computer yet.', { organization });
     case 'seat':
-      if (step.state === 'done') return group ? t('Your {organization} account in “{group}” is signed in.', { organization, group: group.name }) : t('Your {organization} account is signed in.', { organization });
+      if (step.state === 'done') return group ? t('An account of “{group}” is signed in.', { group: group.name }) : t('An account that works for {organization} is signed in.', { organization });
       // SB-403: its accounts work on other machines; nothing is needed here.
       if (step.away) return step.away.length ? t('Its accounts work on {machines}. Call one back on Accounts to work here.', { machines: step.away.join(', ') }) : t('Its accounts are on another machine. Call one back on Accounts to work here.');
       if (!group) return t('Sign in once the group exists.');
@@ -1731,19 +1732,30 @@ export function orgSetupAction(setup: OrgSetup): OrgSetupAction | null {
 /** SB-403: the accounts *Add a seat* offers for a group: enabled, on this computer (not used
  * elsewhere, not in a machine group), not already serving the group. Those an address on one of the
  * organization's domains suggests come first and say so; a domain never decides. */
-export function seatChoices(snapshot: OrgSnapshot & { accounts?: Account[]; elsewhere?: Record<string, unknown>; projects?: { pool: string; shared_accounts?: string[] }[] }, organization: string, pool: string): { account: Account; suggested: boolean; holds: boolean }[] {
+export function seatChoices(snapshot: OrgSnapshot & { accounts?: Account[]; elsewhere?: Record<string, unknown>; projects?: { pool: string; shared_accounts?: string[] }[] }, organization: string, pool: string, inCli: (account: Account) => boolean = () => false): { account: Account; suggested: boolean; holds: boolean }[] {
   const domainOf = (a: Account) => domainOrganization(snapshot, a)?.id === organization;
   return (snapshot.accounts ?? [])
-    .filter((a) => a.enabled && !(snapshot.elsewhere ?? {})[a.id] && !a.pool.startsWith('machine_') && a.pool !== pool && !(snapshot.projects ?? []).some((p) => p.pool === pool && (p.shared_accounts ?? []).includes(a.id)))
+    .filter((a) => a.enabled && !inCli(a) && !(snapshot.elsewhere ?? {})[a.id] && !a.pool.startsWith('machine_') && a.pool !== pool && !(snapshot.projects ?? []).some((p) => p.pool === pool && (p.shared_accounts ?? []).includes(a.id)))
     .map((account) => ({ account, suggested: domainOf(account), holds: holdsContext(attribution(snapshot, account), organization) }))
     .sort((x, y) => Number(y.suggested) - Number(x.suggested) || x.account.label.localeCompare(y.account.label));
+}
+/** SB-403 (round 1): the notice after a move or a call back, from its answer: `base` names where
+ * it went; a group it serves outside its organizations is said, and a call back that could not
+ * join the group asked for says where it is instead (`placed_error`, `pool`). */
+export function placementNotice(label: string, base: string, answer: Placement | void | null | undefined, where: (pool: string) => string): string {
+  const parts: string[] = [];
+  if (answer && answer.placed_error) parts.push(t('{label} is back on this computer, {where}. It could not join the group you chose: {reason}', { label, where: where(answer.pool ?? 'default'), reason: answer.placed_error }));
+  else parts.push(base);
+  const groups = [...new Set((answer?.warnings ?? []).filter((w) => w.code === 'outside_organization').map((w) => w.group))];
+  if (groups.length) parts.push(t('These groups use it, though its organizations are not theirs: {groups}.', { groups: groups.join(', ') }));
+  return parts.join(' ');
 }
 /** SB-403: the notice after a word on an account's organizations: the groups it serves outside
  * them (they keep it), and whether the team's other seats followed. */
 export function assignNotice(label: string, answer: { outside?: { name: string }[]; team?: 'claimed' | 'not_claimed'; teammates?: number } | null | undefined): string {
   const parts = [t('Saved for {label}.', { label })];
   const outside = answer?.outside ?? [];
-  if (outside.length) parts.push(t('{groups} keep using it; their organizations are not among its own.', { groups: outside.map((g) => g.name).join(', ') }));
+  if (outside.length) parts.push(t('These groups keep using it: {groups}. Their organizations are not among its own.', { groups: outside.map((g) => g.name).join(', ') }));
   if (answer?.team === 'not_claimed' && (answer.teammates ?? 0) > 0) parts.push(plural(answer.teammates ?? 0, { one: 'The other seat of its team stays where it was.', other: 'The {n} other seats of its team stay where they were.' }));
   if (answer?.team === 'claimed' && (answer.teammates ?? 0) > 0) parts.push(plural(answer.teammates ?? 0, { one: 'The other seat of its team followed.', other: 'The {n} other seats of its team followed.' }));
   return parts.join(' ');

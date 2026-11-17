@@ -2525,6 +2525,14 @@ impl Runtime {
                 }
                 value["organization_group"] = offer;
             }
+            // DEC-0022 (SB-403): a sign-in into a group of another organization is kept there,
+            // and the receipt says so.
+            if let Some(s) = snapshot.as_ref() {
+                let warnings = s.outside_warnings(stored);
+                if !warnings.is_empty() {
+                    value["warnings"] = json!(warnings);
+                }
+            }
             value
         };
         let mut logins = self
@@ -3851,6 +3859,10 @@ fn remote_program(
 }
 
 /// SB-323: an organization word that left an account out of a group it serves.
+/// SB-403 (round 1): `also` adds to the account's organizations; it never goes with a first
+/// context named, and an empty one is not a word at all (it would let the rules decide again).
+pub const ALSO_ALONE: &str = "Name organizations to add with also, or every context with organization or organizations, not both.";
+pub const ALSO_EMPTY: &str = "Name at least one organization to add with also.";
 /// SB-323, DEC-0022 (SB-403): the note beside `outside` after a word on an account's
 /// organizations. Information only: the groups keep using it.
 pub const GROUPS_OUTSIDE_NOW: &str = "These groups serve organizations this account does not work for. They keep using it; assign it their organization too if it works for it.";
@@ -4297,8 +4309,14 @@ fn organization_seats(snapshot: &switchboard_core::Snapshot) -> Value {
                     let elsewhere = snapshot.elsewhere.contains_key(&a.id)
                         || a.pool
                             .starts_with(switchboard_core::machines::MACHINE_POOL_PREFIX);
+                    // An organization the account also works for is always the person's word.
+                    let placed_by = if context == "also" {
+                        Some(switchboard_core::By::Person)
+                    } else {
+                        at.by
+                    };
                     Some(json!({"seat": seat, "provider": a.provider, "class": class,
-                        "placed_by": at.by, "enabled": a.enabled, "context": context,
+                        "placed_by": placed_by, "enabled": a.enabled, "context": context,
                         "where": if elsewhere { "elsewhere" } else { "here" }}))
                 })
                 .collect();
@@ -7714,6 +7732,9 @@ async fn execute(
             team,
         } => {
             // DEC-0022 (SB-403): `also` keeps the account's contexts and adds to them.
+            if !also.is_empty() && (organizations.is_some() || choice.is_some()) {
+                return Err(ALSO_ALONE.into());
+            }
             let organizations = if also.is_empty() || organizations.is_some() || choice.is_some() {
                 organizations
             } else {
@@ -9232,6 +9253,43 @@ mod owner_tests {
             .collect();
         contexts.sort_unstable();
         assert_eq!(contexts, ["also", "first"]);
+        assert!(
+            seats.iter().all(|s| s["placed_by"] == "person"),
+            "{seats:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_sign_in_into_another_organizations_group_says_so_in_its_receipt() {
+        // DEC-0022 (SB-403, round 1): the sign-in is kept in the group and serves it; the
+        // receipt names it as outside the group's organizations.
+        let root = tempfile::tempdir().unwrap();
+        let runtime = fixtures::runtime(root.path(), signed_in, activates).await;
+        let beta = runtime.store.add_organization("Beta", &[]).unwrap();
+        let folder = tempfile::tempdir().unwrap();
+        let group = runtime
+            .store
+            .save_project_in(
+                None,
+                "Beta work",
+                &[folder.path().to_path_buf()],
+                &[],
+                Some(Some(&beta.id)),
+            )
+            .unwrap();
+        let inside = save(&runtime.store, "synthetic-in", &group.pool);
+        let home = root.path().join(format!("staging-{}", inside.id));
+        std::fs::create_dir_all(&home).unwrap();
+        let login = launch::fixture_login(home, inside.clone());
+        let id = login.id.clone();
+        runtime.logins.lock().unwrap().insert(id.clone(), login);
+        let receipt = runtime.finish_login(&id).unwrap();
+        assert_eq!(receipt["pool"], group.pool.as_str(), "{receipt}");
+        assert_eq!(
+            receipt["warnings"][0]["code"], "outside_organization",
+            "{receipt}"
+        );
+        assert_eq!(receipt["warnings"][0]["group"], "Beta work", "{receipt}");
     }
 
     #[tokio::test]

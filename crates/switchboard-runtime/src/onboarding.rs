@@ -500,24 +500,38 @@ fn organization_steps(probe: &Probe, cli: &str) -> Vec<Value> {
             !snapshot.elsewhere.contains_key(&a.id)
                 && !switchboard_core::machines::is_machine_pool(&a.pool)
         };
+        let holds =
+            |a: &switchboard_core::Account| snapshot.attribution(a).holds(Some(&organization.id));
+        let serving =
+            |a: &switchboard_core::Account| groups.iter().any(|g| snapshot.serves(a, &g.pool));
+        let usable = |a: &switchboard_core::Account| {
+            a.enabled && here(a) && !probe.sign_in_required.contains(&a.id)
+        };
+        // With a group, a seat is an account one of its groups holds: only those route there
+        // (`bindings::desired`). With none, any account that works for the organization.
         let seats: Vec<&switchboard_core::Account> = snapshot
             .accounts
             .iter()
             .filter(|a| {
-                groups.iter().any(|g| snapshot.serves(a, &g.pool))
-                    || snapshot.attribution(a).holds(Some(&organization.id))
+                if groups.is_empty() {
+                    holds(a)
+                } else {
+                    serving(a)
+                }
             })
             .collect();
-        let signed_in = seats
-            .iter()
-            .any(|a| a.enabled && here(a) && !probe.sign_in_required.contains(&a.id));
+        let signed_in = seats.iter().any(|a| usable(a));
         let ended = seats
             .iter()
             .filter(|a| here(a) && probe.sign_in_required.contains(&a.id))
             .count();
         let mut seats_away: Vec<String> = Vec::new();
         let mut away_ids: Vec<&str> = Vec::new();
-        for a in seats.iter().filter(|a| !here(a)) {
+        for a in snapshot
+            .accounts
+            .iter()
+            .filter(|a| (serving(a) || holds(a)) && !here(a))
+        {
             away_ids.push(&a.id);
             let machine = snapshot
                 .machine_of(&a.id)
@@ -528,32 +542,46 @@ fn organization_steps(probe: &Probe, cli: &str) -> Vec<Value> {
                 seats_away.push(machine);
             }
         }
-        // Accounts its domains suggest (an organization may have several domains, or none):
-        // only suggested, never required.
-        let suggested: Vec<Value> = snapshot
-            .accounts
+        // An account here that works for the organization and is signed in, but that none of
+        // its groups holds: it serves the group once added there.
+        let holders_here: Vec<&switchboard_core::Account> = if groups.is_empty() {
+            Vec::new()
+        } else {
+            snapshot
+                .accounts
+                .iter()
+                .filter(|a| holds(a) && !serving(a) && usable(a))
+                .collect()
+        };
+        // Then the accounts its domains suggest (an organization may have several domains, or
+        // none): only suggested, never required.
+        let suggested: Vec<Value> = holders_here
             .iter()
-            .filter(|a| here(a) && a.enabled && !seats.iter().any(|s| s.id == a.id))
-            .filter(|a| {
+            .map(|a| json!({"id": a.id, "label": a.label, "works_for": true}))
+            .chain(
                 snapshot
-                    .domain_organization(a)
-                    .is_some_and(|o| o.id == organization.id)
-            })
-            .map(|a| json!({"id": a.id, "label": a.label}))
+                    .accounts
+                    .iter()
+                    .filter(|a| here(a) && a.enabled && !seats.iter().any(|s| s.id == a.id))
+                    .filter(|a| !holders_here.iter().any(|h| h.id == a.id))
+                    .filter(|a| {
+                        snapshot
+                            .domain_organization(a)
+                            .is_some_and(|o| o.id == organization.id)
+                    })
+                    .map(|a| json!({"id": a.id, "label": a.label})),
+            )
             .collect();
         let unread = if degraded("sign_ins") {
             " Whether a sign-in ended could not be read."
         } else {
             ""
         };
+        // Only the accounts that live elsewhere: nothing to call back, no line.
         let recall = |ids: &[&str]| -> Vec<String> {
-            if ids.is_empty() {
-                vec![format!("{cli} accounts recall <account id>")]
-            } else {
-                ids.iter()
-                    .map(|id| format!("{cli} accounts recall {}", shell_word(id)))
-                    .collect()
-            }
+            ids.iter()
+                .map(|id| format!("{cli} accounts recall {}", shell_word(id)))
+                .collect()
         };
         let machines_text = |away: &[String]| {
             if away.is_empty() {
@@ -576,7 +604,7 @@ fn organization_steps(probe: &Probe, cli: &str) -> Vec<Value> {
                 Value::Null,
             ),
             // Its accounts work on other machines: nothing is needed here.
-            _ if ended == 0 && !away_ids.is_empty() => with(
+            _ if ended == 0 && holders_here.is_empty() && !away_ids.is_empty() => with(
                 "away",
                 json!(seats_away),
                 step(
@@ -598,19 +626,32 @@ fn organization_steps(probe: &Probe, cli: &str) -> Vec<Value> {
                     format!(
                         "{name}'s accounts are on another machine; call one back to work here."
                     ),
-                    json!({"alternatives": recall(&[])}),
+                    json!({"alternatives": if away_ids.is_empty() {
+                        vec![format!("{cli} accounts recall <account id>")]
+                    } else {
+                        recall(&away_ids)
+                    }}),
                 ),
             ),
             Some(group) => {
                 let pool = shell_word(&group.pool);
-                let mut alternatives = vec![
+                let mut alternatives: Vec<String> = holders_here
+                    .iter()
+                    .map(|a| {
+                        format!(
+                            "{cli} project edit --pool {pool} --add-account {}",
+                            shell_word(&a.id)
+                        )
+                    })
+                    .collect();
+                alternatives.extend([
                     format!(
                         "{cli} org assign <account id> --also {}",
                         shell_word(&organization.id)
                     ),
                     format!("{cli} project edit --pool {pool} --add-account <account id>"),
                     format!("{cli} login begin --provider {provider} --pool {pool}"),
-                ];
+                ]);
                 alternatives.extend(recall(&away_ids));
                 with(
                     "ended",
@@ -1372,11 +1413,21 @@ mod tests {
             "Add a seat for Acme: give it an account already on this computer, or sign in with any address."
         );
         assert_eq!(answer["complete"], false);
-        // SB-403: an account of Acme's at home in another group is a seat all the same.
+        // SB-403 (round 1): an account of Acme's that no group of Acme holds serves none of its
+        // folders, so the seat still needs adding it there: offered first, by its id.
         let mut probe = acme();
         probe.snapshot.as_mut().unwrap().accounts[0].pool = "default".into();
         let answer = steps(&probe);
-        assert_eq!(by_id(&answer, "seat")["state"], "done");
+        let seat = by_id(&answer, "seat");
+        assert_eq!(seat["state"], "needs_person");
+        assert_eq!(
+            seat["suggested"],
+            json!([{"id": "a-1", "label": "me@acme.com", "works_for": true}])
+        );
+        assert_eq!(
+            seat["next"]["alternatives"][0],
+            "switchboard project edit --pool acme-work --add-account a-1"
+        );
 
         // No group for the organization: to do, with the commands that make one.
         let mut probe = acme();
@@ -1569,6 +1620,13 @@ mod tests {
         let read = read.unwrap();
         assert_eq!(read.also_organizations, also);
         probe.snapshot = Some(read);
+        // It works for Acme but Acme's group does not hold it yet: offered first.
+        let answer = steps(&probe);
+        let seat = by_id(&answer, "seat");
+        assert_eq!(seat["state"], "needs_person", "{seat}");
+        assert_eq!(seat["suggested"][0]["works_for"], true, "{seat}");
+        // Once the group holds it, the seat is done.
+        probe.snapshot.as_mut().unwrap().accounts[0].pool = "acme-work".into();
         let answer = steps(&probe);
         let seat = by_id(&answer, "seat");
         assert_eq!(seat["state"], "done", "{seat}");
@@ -1620,8 +1678,8 @@ mod tests {
                 "switchboard org assign <account id> --also o-acme",
                 "switchboard project edit --pool acme-work --add-account <account id>",
                 "switchboard login begin --provider claude --pool acme-work",
-                "switchboard accounts recall <account id>",
-            ])
+            ]),
+            "no call back offered when nothing lives elsewhere"
         );
         assert!(seat["suggested"].is_null(), "no domain suggests anything");
     }

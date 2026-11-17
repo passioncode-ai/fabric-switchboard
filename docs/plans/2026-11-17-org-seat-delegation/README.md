@@ -88,6 +88,19 @@ wave table at the end. Decision: [DEC-0022](../../DECISIONS.md#dec-0022-an-organ
   own; it is the window's *Add a seat* for an account already here, followed by sharing it into
   the group.
 
+- **D-12 (S1 round 1).** The group owns the data, the account only pays: a session in a group's
+  folder runs in the group's context whatever account or key serves it, so a launch and a terminal
+  there agree.
+- **D-13 (S1 round 1).** With a group, the seat step is done only when an account one of its groups
+  holds is signed in (only those route there); an account that works for the organization in none
+  of its groups is offered first with `project edit --add-account`.
+- **D-14 (S1 round 1).** *Add a seat* saves the group first, then adds the organization. An account
+  of the default group moves into the group (a person's word cannot lend from the default group
+  without balancing taking it back), and the dialog says so before it happens.
+- **D-15 (S1 round 1).** Automatic picks outside the group's organizations are journaled
+  (`failover_outside`) and counted (`FailoverTally.outside`, `outside` on a rotation decision);
+  statistics count an account once, under its first context.
+
 ## Waves
 
 | Wave | What | State |

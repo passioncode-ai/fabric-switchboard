@@ -499,7 +499,12 @@ pub(crate) fn event_valid(action: &str, detail: &str) -> bool {
         // SB-47: the cause of a move, for provenance: a limit, a 429 failover, an unusable account.
         "rotation" => matches!(
             detail,
-            "switched" | "failed" | "switched_on_limit" | "failover" | "unusable"
+            "switched"
+                | "failed"
+                | "switched_on_limit"
+                | "failover"
+                | "failover_outside"
+                | "unusable"
         ),
         "launch" | "login" => matches!(
             detail,
@@ -873,7 +878,8 @@ impl SaveRequest<'_> {
             "success",
         );
         // SB-285: a new sign-in into a group of the organization its address suggests is the
-        // person placing it there (*Sign in with your … address*): recorded as their word.
+        // person placing it there (*Add a seat* → *Sign in with any address*): recorded as
+        // their word.
         if old.is_none() {
             if let Some(organizations) = candidate
                 .project_of_pool(self.pool)
@@ -1280,10 +1286,27 @@ impl Store {
             return Ok(None);
         };
         // Compare and move: only a route still on `from` changes.
+        // DEC-0022 (SB-403): an account of none of the group's organizations is taken only when
+        // none of theirs has room; the journal and the tally say so.
+        let outside = self.lock().is_ok_and(|state| {
+            state
+                .accounts
+                .iter()
+                .find(|a| a.id == id)
+                .is_some_and(|a| !state.context_admits(pool, a))
+        });
         if self.select_transaction(provider, pool, &id, Some(now), Some(from), false)? {
+            let cause = if outside && cause == "failover" {
+                "failover_outside"
+            } else {
+                cause
+            };
             let _ = self.record("rotation", Some(&id), cause);
             if let Ok(mut tally) = self.failover_tally.lock() {
                 tally.moved += 1;
+                if outside {
+                    tally.outside += 1;
+                }
             }
         }
         Ok(self
