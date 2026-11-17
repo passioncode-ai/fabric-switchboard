@@ -3718,8 +3718,11 @@ async fn continue_in_place(
         let ran = run_hosted(root, launch_id, std::path::Path::new(script));
         // Only a host that never came up ends the record here; one that runs (attaching failed)
         // ends it itself when its session ends (R4, R5 review).
-        if ran.is_err() && switchboard_runtime::session_host::attachable(root, launch_id).is_none()
-        {
+        #[cfg(unix)]
+        let host_up = switchboard_runtime::session_host::attachable(root, launch_id).is_some();
+        #[cfg(not(unix))]
+        let host_up = false;
+        if ran.is_err() && !host_up {
             let _ = call(
                 root,
                 Operation::SessionEnded {

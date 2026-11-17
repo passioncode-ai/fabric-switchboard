@@ -63,8 +63,8 @@ pub mod roots;
 pub mod seats;
 pub mod self_update;
 pub mod serve_update;
-#[cfg(unix)]
 pub mod session_accounts;
+#[cfg(unix)]
 pub mod session_host;
 pub mod session_rows;
 pub mod session_watch;
