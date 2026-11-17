@@ -135,7 +135,7 @@ export interface Adapter {
   projectSources(pool: string, sources: string[]): Promise<unknown>;
   organizationEdit(id: string, name: string | null, domains: string[] | null): Promise<unknown>;
   organizationRemove(id: string): Promise<unknown>;
-  /** SB-282: `organizations` names every context of the account in order and wins over `choice`. */ organizationAssign(account: string, choice: string | null, organizations?: string[]): Promise<unknown>;
+  /** SB-282: `organizations` names every context of the account in order and wins over `choice`. SB-403: `options.also` adds organizations to the ones it has; `options.team` places its provider team's other seats too. The answer names the groups it serves outside them (`outside`). */ organizationAssign(account: string, choice: string | null, organizations?: string[], options?: { also?: string[]; team?: boolean }): Promise<OrganizationAssigned>;
   passioncode(action: 'status' | 'connect' | 'cancel' | 'read' | 'disconnect'): Promise<PassioncodeStatus>;
   /** SB-146: `also` adds it to one more group; `from` names the group it leaves when it is in several. */
   moveRoot(folder: string, pool: string, also?: boolean, from?: string | null): Promise<unknown>;
@@ -290,6 +290,8 @@ export interface ShellHookNotice { organization: string; group: string }
 export interface ShellHookFile { shell: string; path: string; state: string }
 /** What `switchboard shell status` reads, for the window: `hook` is on, off, default_on (a group belongs to an organization) or default_off; `can_change` is false outside the installed app. */
 /** SB-202 (B-8): one step of `switchboard onboard`, as the window reads it through the Tauri `onboard` command. */
+/** SB-403: the answer of a word on an account's organizations. */
+export interface OrganizationAssigned { account?: string; organization?: string | null; also?: string[]; outside?: { pool: string; name: string }[]; team?: 'claimed' | 'not_claimed'; teammates?: number }
 export interface OnboardStep { id: string; state: 'done' | 'todo' | 'needs_person' | 'optional'; summary: string; next?: unknown; organization?: { id: string; name: string }; group?: { pool: string; name: string }; groups?: string[]; ended?: number; terminals?: 'active' | 'pending' | 'off' | 'waiting' | 'unread'; /** org_group, seat: the machines where all of the organization's accounts live, when none is here. */ away?: string[] }
 export interface Onboarding { complete: boolean; degraded: string[]; steps: OnboardStep[] }
 export interface ShellHookStatus { hook: 'on' | 'off' | 'default_on' | 'default_off'; choice: 'on' | 'off' | 'default'; map: string; files: ShellHookFile[]; organizations: string[]; /** Organizations whose folder map rows carry a Codex account. */ codex_organizations?: string[]; /** SB-222: organization groups the folder map holds no row for, and why. */ unmapped?: { organization: string; group: string; reason: 'held' | 'missing' | 'no_folder'; held_by: string | null }[]; can_change: boolean; home: string | null }

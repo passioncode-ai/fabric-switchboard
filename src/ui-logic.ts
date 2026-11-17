@@ -389,9 +389,8 @@ export function groupAdmits(snapshot: OrgSnapshot, organizations: string | strin
   const at = attribution(snapshot, account);
   return list.length ? list.some((o) => holdsContext(at, o)) : holdsContext(at, null);
 }
-/** SB-170: a group bound to an organization whose accounts all belong elsewhere now (their
- * team moved, or the person placed them): its folders keep the group's route and every
- * request is refused (fail closed), so its card says why. */
+/** SB-170, DEC-0022 (SB-403): a group bound to an organization none of whose accounts works for
+ * it (their team moved, or the person placed them): they serve it anyway, and its card says so. */
 export function groupSeatsElsewhere(snapshot: OrgSnapshot, organizations: string | string[] | null, accounts: Pick<Account, 'id' | 'label' | 'provider' | 'external_identity'>[]): boolean {
   const list = organizations === null ? [] : typeof organizations === 'string' ? [organizations] : organizations;
   if (!list.length || !accounts.length) return false;
@@ -410,11 +409,11 @@ export function seatEndedText(snapshot: OrgSnapshot, account: Pick<Account, 'id'
 /** SB-160 (B-6, SCN-078): a group bound to an organization whose seats (its accounts of that
  * organization) have all ended says so; a group whose accounts all belong elsewhere keeps
  * SB-170's line instead, and an empty group its own note. */
-export function groupSeatsEndedText(snapshot: OrgSnapshot, group: { name: string; organization?: string | null; organizations?: string[] }, accounts: Pick<Account, 'id' | 'label' | 'provider' | 'external_identity'>[], signInRequired: string[] | undefined): string | null {
+export function groupSeatsEndedText(_snapshot: OrgSnapshot, group: { name: string; organization?: string | null; organizations?: string[] }, accounts: Pick<Account, 'id' | 'label' | 'provider' | 'external_identity'>[], signInRequired: string[] | undefined): string | null {
   const organizations = groupOrganizations(group);
   if (!organizations.length || !signInRequired) return null;
-  const seats = accounts.filter((a) => groupAdmits(snapshot, organizations, a));
-  if (!seats.length || !seats.every((a) => signInRequired.includes(a.id))) return null;
+  // DEC-0022 (SB-403): every account the group holds serves it, whatever its organizations.
+  if (!accounts.length || !accounts.every((a) => signInRequired.includes(a.id))) return null;
   return t("None of {group}'s accounts is signed in. Sessions in its folders are refused until one is.", { group: group.name });
 }
 /** What the window's minute-by-minute background pass reads again besides the account list, by
@@ -1644,7 +1643,7 @@ export function codexHookLine(status: ShellHookStatus | null): string | null {
 export type OrgSetupStepId = 'organization' | 'org_group' | 'seat' | 'hook' | 'launch';
 export interface OrgSetupLine { id: OrgSetupStepId; state: OnboardStep['state']; title: string; line: string; /** org_group: the groups bound to the organization when more than one. */ groups?: string[]; /** SB-228: a command the line names, shown as code after it. */ command?: string }
 export interface OrgSetup { organization: { id: string; name: string }; group: { pool: string; name: string } | null; lines: OrgSetupLine[]; complete: boolean }
-export type OrgSetupAction = { kind: 'group'; organization: string; label: string } | { kind: 'sign_in'; pool: string; label: string };
+export type OrgSetupAction = { kind: 'group'; organization: string; label: string } | { kind: 'seat'; pool: string; group: string; organization: { id: string; name: string }; label: string };
 export const ORG_SETUP_HIDDEN_KEY = 'switchboard.orgSetupHidden';
 export function orgSetupStateLabel(state: OnboardStep['state']): string {
   return ({ done: t('Done'), todo: t('To do'), needs_person: t('Needs you'), optional: t('Optional') })[state];
@@ -1652,8 +1651,10 @@ export function orgSetupStateLabel(state: OnboardStep['state']): string {
 export function orgSetupTitle(setup: Pick<OrgSetup, 'organization'>): string {
   return t('Set up {organization} on this computer', { organization: setup.organization.name });
 }
-const seatLeadLine = (organization: string, group: string) => t('Sign in with your {organization} address. It goes to the group “{group}”.', { organization, group });
-const seatLabel = (organization: string) => t('Sign in with your {organization} address', { organization });
+/** SB-403: an organization may have several domains or none, so its seat is any account: one
+ * already on this computer, or a sign-in with any address. Never "your {organization} address". */
+const seatLeadLine = (organization: string, group: string) => t('Give {organization} a seat in the group “{group}”: an account already on this computer, or a sign-in with any address.', { organization, group });
+const seatLabel = () => t('Add a seat');
 /** Words one step in the window's language from the checklist's fields, never from its English summary. */
 function orgSetupLine(step: OnboardStep, organization: string, group: { pool: string; name: string } | null): string {
   switch (step.id) {
@@ -1666,7 +1667,8 @@ function orgSetupLine(step: OnboardStep, organization: string, group: { pool: st
       return t('{organization} has no group on this computer yet.', { organization });
     case 'seat':
       if (step.state === 'done') return group ? t('Your {organization} account in “{group}” is signed in.', { organization, group: group.name }) : t('Your {organization} account is signed in.', { organization });
-      if (!group && step.away) return t('Its accounts are on another machine. Call one back on Accounts to work here.');
+      // SB-403: its accounts work on other machines; nothing is needed here.
+      if (step.away) return step.away.length ? t('Its accounts work on {machines}. Call one back on Accounts to work here.', { machines: step.away.join(', ') }) : t('Its accounts are on another machine. Call one back on Accounts to work here.');
       if (!group) return t('Sign in once the group exists.');
       return (step.ended ?? 0) > 0 ? t('Your {organization} accounts in “{group}” must sign in again. If {organization} removed your seat, ask its administrator.', { organization, group: group.name }) : seatLeadLine(organization, group.name);
     case 'hook':
@@ -1723,8 +1725,28 @@ export function orgSetupAction(setup: OrgSetup): OrgSetupAction | null {
   const first = setup.lines.find((l) => l.state === 'todo' || l.state === 'needs_person');
   if (!first) return null;
   if (first.id === 'org_group') return !first.groups ? { kind: 'group', organization: setup.organization.id, label: t('+ Group for {organization}', { organization: setup.organization.name }) } : null;
-  if (first.id === 'seat' && setup.group) return { kind: 'sign_in', pool: setup.group.pool, label: seatLabel(setup.organization.name) };
+  if (first.id === 'seat' && setup.group) return { kind: 'seat', pool: setup.group.pool, group: setup.group.name, organization: setup.organization, label: seatLabel() };
   return null;
+}
+/** SB-403: the accounts *Add a seat* offers for a group: enabled, on this computer (not used
+ * elsewhere, not in a machine group), not already serving the group. Those an address on one of the
+ * organization's domains suggests come first and say so; a domain never decides. */
+export function seatChoices(snapshot: OrgSnapshot & { accounts?: Account[]; elsewhere?: Record<string, unknown>; projects?: { pool: string; shared_accounts?: string[] }[] }, organization: string, pool: string): { account: Account; suggested: boolean; holds: boolean }[] {
+  const domainOf = (a: Account) => domainOrganization(snapshot, a)?.id === organization;
+  return (snapshot.accounts ?? [])
+    .filter((a) => a.enabled && !(snapshot.elsewhere ?? {})[a.id] && !a.pool.startsWith('machine_') && a.pool !== pool && !(snapshot.projects ?? []).some((p) => p.pool === pool && (p.shared_accounts ?? []).includes(a.id)))
+    .map((account) => ({ account, suggested: domainOf(account), holds: holdsContext(attribution(snapshot, account), organization) }))
+    .sort((x, y) => Number(y.suggested) - Number(x.suggested) || x.account.label.localeCompare(y.account.label));
+}
+/** SB-403: the notice after a word on an account's organizations: the groups it serves outside
+ * them (they keep it), and whether the team's other seats followed. */
+export function assignNotice(label: string, answer: { outside?: { name: string }[]; team?: 'claimed' | 'not_claimed'; teammates?: number } | null | undefined): string {
+  const parts = [t('Saved for {label}.', { label })];
+  const outside = answer?.outside ?? [];
+  if (outside.length) parts.push(t('{groups} keep using it; their organizations are not among its own.', { groups: outside.map((g) => g.name).join(', ') }));
+  if (answer?.team === 'not_claimed' && (answer.teammates ?? 0) > 0) parts.push(plural(answer.teammates ?? 0, { one: 'The other seat of its team stays where it was.', other: 'The {n} other seats of its team stay where they were.' }));
+  if (answer?.team === 'claimed' && (answer.teammates ?? 0) > 0) parts.push(plural(answer.teammates ?? 0, { one: 'The other seat of its team followed.', other: 'The {n} other seats of its team followed.' }));
+  return parts.join(' ');
 }
 /** One first-run card at a time: the usage notice, then the tour, then this card; on Accounts and on top of Organizations, and after Hide on Organizations only. */
 export function orgSetupShown(input: { page: string; organization: string; hidden: string[]; usage: UsageStatus | null | undefined; usageFailed: boolean; tourStep: number | null }): boolean {
@@ -1776,13 +1798,13 @@ export function orgSetupUnread(input: OrgSetupScreen & { onboarding: Onboarding 
 export function hiddenOrgSetups(store: Pick<Storage, 'getItem'> | null): string[] {
   try { const value: unknown = JSON.parse(store?.getItem(ORG_SETUP_HIDDEN_KEY) ?? '[]'); return Array.isArray(value) ? value.filter((v): v is string => typeof v === 'string') : []; } catch { return []; }
 }
-export type AccountsEmptyKey = { lead: 'backup' } | { lead: 'org_seat'; organization: string; group: string; pool: string; line: string; label: string } | { lead: 'reading' | 'add_current' | 'sign_in' };
+export type AccountsEmptyKey = { lead: 'backup' } | { lead: 'org_seat'; organization: string; organization_id: string; group: string; pool: string; line: string; label: string } | { lead: 'reading' | 'add_current' | 'sign_in' };
 /** What the empty Accounts page leads with: a backup to restore, then an organization's seat (its group exists, no seat yet), then today's first-account line. */
 export function accountsEmptyKey(input: { backup: boolean; onboarding: Onboarding | null | undefined; current: Parameters<typeof firstRunHint>[0]; released?: readonly string[] }): AccountsEmptyKey {
   if (input.backup) return { lead: 'backup' };
   for (const setup of orgSetups(input.onboarding, input.released)) {
     const action = orgSetupAction(setup);
-    if (action?.kind === 'sign_in' && setup.group) return { lead: 'org_seat', organization: setup.organization.name, group: setup.group.name, pool: setup.group.pool, line: seatLeadLine(setup.organization.name, setup.group.name), label: action.label };
+    if (action?.kind === 'seat' && setup.group) return { lead: 'org_seat', organization: setup.organization.name, organization_id: setup.organization.id, group: setup.group.name, pool: setup.group.pool, line: seatLeadLine(setup.organization.name, setup.group.name), label: action.label };
   }
   return { lead: firstRunHint(input.current) };
 }

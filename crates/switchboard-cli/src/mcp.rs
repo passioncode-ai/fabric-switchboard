@@ -646,9 +646,12 @@ impl Server {
                     .map(str::to_owned),
             })
             .await?;
-        Ok(
-            json!({"project": project, "message": "Group saved. It is visible in the Switchboard app under Groups."}),
-        )
+        // DEC-0022 (SB-403): accounts it holds outside its organizations, said beside the group.
+        let mut answer = json!({"project": project, "message": "Group saved. It is visible in the Switchboard app under Groups."});
+        if let Some(warnings) = project.get("warnings") {
+            answer["warnings"] = warnings.clone();
+        }
+        Ok(answer)
     }
     /// SB-299: the window's *New group*, with its organizations, as one call.
     async fn project_create(&self, args: &Map<String, Value>) -> Result<Value, String> {
@@ -674,9 +677,12 @@ impl Server {
                     .unwrap_or(false),
             })
             .await?;
-        Ok(
-            json!({"project": project, "message": "Group created. It is visible in the Switchboard app under Groups."}),
-        )
+        // DEC-0022 (SB-403): accounts it holds outside its organizations, said beside the group.
+        let mut answer = json!({"project": project, "message": "Group created. It is visible in the Switchboard app under Groups."});
+        if let Some(warnings) = project.get("warnings") {
+            answer["warnings"] = warnings.clone();
+        }
+        Ok(answer)
     }
     async fn account_update(&self, args: &Map<String, Value>) -> Result<Value, String> {
         let label = args.get("label").and_then(Value::as_str).map(str::to_owned);

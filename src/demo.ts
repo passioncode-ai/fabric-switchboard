@@ -508,7 +508,7 @@ export function createDemoAdapter(): Adapter {
       // SB-282: the whole list wins; one choice is a list of one; left out, the group keeps its own.
       const organizations = input.organizations !== undefined ? input.organizations.filter((o) => o && o !== 'personal') : input.organization === undefined ? groupOrganizations(existing) : input.organization === 'personal' ? [] : [input.organization];
       if (organizations.some((id) => !(state.organizations ?? []).some((o) => o.id === id))) throw new Error('Organization not found.');
-      for (const account of state.accounts.filter((a) => input.accountIds.includes(a.id))) if (!placementAdmits(state, organizations, account)) throw new Error("An account chosen for this group belongs to another organization. Choose accounts of the group's organization, or change it.");
+      // DEC-0022 (SB-403): an account of another organization joins all the same.
       // SB-282: an account at home in another group is shared, not moved.
       const groupPools = new Set(projects.map((p) => p.pool));
       const shared = input.accountIds.filter((id) => { const a = state.accounts.find((x) => x.id === id); return !!a && a.pool !== pool && groupPools.has(a.pool); });
@@ -595,9 +595,15 @@ export function createDemoAdapter(): Adapter {
       } else if (action === 'read') throw new Error('PassionCode.ai is not connected.');
       return structuredClone(passioncode);
     },
-    async organizationAssign(accountId, choiceIn, organizations) {
+    async organizationAssign(accountId, choiceIn, organizationsIn, options) {
       await pause();
       const account = state.accounts.find((a) => a.id === accountId); if (!account) throw new Error('Account not found');
+      // SB-403: `also` keeps the account's contexts and adds to them.
+      let organizations = organizationsIn;
+      if (!organizations && choiceIn === null && options?.also?.length) {
+        const first = state.memberships?.[accountId] ?? 'auto';
+        organizations = [first, ...(state.also_organizations?.[accountId] ?? []), ...options.also.filter((o) => o !== first && !(state.also_organizations?.[accountId] ?? []).includes(o))];
+      }
       // SB-282: every context in order: the first as `choice`, the rest it also works for.
       const choice = organizations ? (organizations[0] && organizations[0] !== 'auto' ? organizations[0] : null) : choiceIn;
       const also = organizations ? [...new Set(organizations.slice(1).filter((o) => o !== 'personal' && o !== choice))] : null;
@@ -609,12 +615,16 @@ export function createDemoAdapter(): Adapter {
       else {
         if (choice !== 'personal' && !state.organizations?.some((o) => o.id === choice)) throw new Error('Organization not found.');
         memberships[accountId] = choice;
-        for (const o of state.organizations ?? []) {
+        // SB-403: the team's other seats follow only when asked.
+        if (options?.team) for (const o of state.organizations ?? []) {
           o.provider_organizations = (o.provider_organizations ?? []).filter((k) => k !== key);
           if (key && o.id === choice) o.provider_organizations.push(key);
         }
       }
       log('organization', accountId, 'assigned');
+      const teammates = key ? state.accounts.filter((b) => b.id !== accountId && providerOrganization(b) === key).length : 0;
+      const outside = (state.projects ?? []).filter((p) => (p.pool === account.pool || (p.shared_accounts ?? []).includes(accountId)) && !groupAdmits(state, groupOrganizations(p), account)).map((p) => ({ pool: p.pool, name: p.name }));
+      return { account: accountId, outside, ...(key && choice !== null ? { team: options?.team ? 'claimed' as const : 'not_claimed' as const, teammates } : {}) };
     },
     async moveAccount(id, pool) {
       await pause();

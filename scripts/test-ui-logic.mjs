@@ -900,11 +900,28 @@ check(() => {
   const group = { name: 'Acme web', organization: 'o1' };
   assert.equal(logic.groupSeatsEndedText(snap, group, [a, b], ['a', 'b']), "None of Acme web's accounts is signed in. Sessions in its folders are refused until one is.", 'a group whose seats all ended says so');
   assert.equal(logic.groupSeatsEndedText(snap, group, [a, b], ['a']), null, 'one seat still signed in');
-  assert.equal(logic.groupSeatsEndedText(snap, group, [a, b, home], ['a', 'b']), "None of Acme web's accounts is signed in. Sessions in its folders are refused until one is.", 'an account of another context is refused anyway');
-  assert.equal(logic.groupSeatsEndedText(snap, group, [home], ['h']), null, 'every account elsewhere: SB-170\'s line instead');
+  // DEC-0022 (SB-403): an account of another context serves the group too.
+  assert.equal(logic.groupSeatsEndedText(snap, group, [a, b, home], ['a', 'b']), null, 'an account of another context still serves it');
+  assert.equal(logic.groupSeatsEndedText(snap, group, [a, b, home], ['a', 'b', 'h']), "None of Acme web's accounts is signed in. Sessions in its folders are refused until one is.");
   assert.equal(logic.groupSeatsEndedText(snap, group, [], []), null, 'an empty group has its own note');
   assert.equal(logic.groupSeatsEndedText(snap, { name: 'Mine', organization: null }, [home], ['h']), null, 'a personal group: no seats');
   assert.equal(logic.groupSeatsEndedText(snap, group, [a, b], undefined), null);
+});
+// SB-403: Add a seat offers the accounts here, suggested ones first; a domain never decides.
+check(() => {
+  const account = (id, email, pool = 'default', extra = {}) => ({ id, label: email, provider: 'claude', pool, enabled: true, external_identity: { account_id: id, organization_id: null, email }, ...extra });
+  const snap = {
+    organizations: [{ id: 'o1', name: 'Acme', domains: ['acme.example', 'acme.io'] }], memberships: {}, also_organizations: { b: ['o1'] },
+    accounts: [account('z', 'zed@home.example'), account('a', 'ops@acme.io'), account('b', 'both@home.example'), account('g', 'in@home.example', 'acme-work'), account('off', 'off@acme.io', 'default', { enabled: false }), account('m', 'm@acme.io', 'machine_studio'), account('e', 'e@acme.io')],
+    elsewhere: { e: 1 }, projects: [{ pool: 'acme-work', shared_accounts: [] }],
+  };
+  const choices = logic.seatChoices(snap, 'o1', 'acme-work');
+  assert.deepEqual(choices.map((c) => [c.account.id, c.suggested, c.holds]), [['a', true, false], ['b', false, true], ['z', false, false]]);
+  snap.organizations[0].domains = [];
+  assert.deepEqual(logic.seatChoices(snap, 'o1', 'acme-work').map((c) => c.suggested), [false, false, false], 'no domain: nothing suggested, every account offered');
+  assert.equal(logic.assignNotice('dev', { outside: [{ name: 'Mine' }], team: 'not_claimed', teammates: 2 }), 'Saved for dev. Mine keep using it; their organizations are not among its own. The 2 other seats of its team stay where they were.');
+  assert.equal(logic.assignNotice('dev', { outside: [], team: 'claimed', teammates: 1 }), 'Saved for dev. The other seat of its team followed.');
+  assert.equal(logic.assignNotice('dev', undefined), 'Saved for dev.');
 });
 // SB-160 (B-7, SCN-079): an organization left on PassionCode.ai is marked with its date until it is linked again.
 check(() => {
@@ -1181,8 +1198,13 @@ check(() => {
     const away = withOrg([{ id: 'org_group', state: 'optional', away: ['studio'] }, { id: 'seat', state: 'optional', away: ['studio'] }, { id: 'hook', state: 'optional', terminals: 'waiting' }, { id: 'launch', state: 'optional' }]);
     assert.deepEqual(logic.orgSetups(away), [], 'no card: nothing needs the person on this computer');
     const [seat] = logic.orgSetups(noSeat);
-    assert.deepEqual(logic.orgSetupAction(seat), { kind: 'sign_in', pool: 'acme-work', label: 'Sign in with your Acme address' });
-    assert.equal(seat.lines[2].line, 'Sign in with your Acme address. It goes to the group “Acme work”.');
+    // SB-403: an organization may have several domains or none; the seat is any account, never "your Acme address".
+    assert.deepEqual(logic.orgSetupAction(seat), { kind: 'seat', pool: 'acme-work', group: 'Acme work', organization: { id: 'o-acme', name: 'Acme' }, label: 'Add a seat' });
+    assert.equal(seat.lines[2].line, 'Give Acme a seat in the group “Acme work”: an account already on this computer, or a sign-in with any address.');
+    assert.ok(!seat.lines[2].line.includes('your Acme address'));
+    // SB-403: a group here, its accounts on another machine: optional, named, no card.
+    const awaySeat = logic.orgSetups(withOrg([{ id: 'org_group', state: 'done', group }, { id: 'seat', state: 'optional', away: ['studio'] }, { id: 'hook', state: 'optional', terminals: 'active' }, { id: 'launch', state: 'optional' }]));
+    assert.deepEqual(awaySeat, [], 'nothing needs the person here');
     // SB-228: the command is code of its own, not words in the line.
     assert.equal(seat.lines[3].line, "Terminals in Acme's folders work in its context. To turn this off:");
     assert.equal(seat.lines[3].command, 'switchboard shell off');
@@ -1193,7 +1215,7 @@ check(() => {
     // SB-282: an organization may have several groups; the first is the one the card signs in to.
     const two = logic.orgSetups(withOrg([{ id: 'org_group', state: 'done', group, groups: ['Acme web', 'Acme two'] }, { id: 'seat', state: 'needs_person' }]))[0];
     assert.equal(two.lines[1].line, 'Its groups are “Acme web”, “Acme two”.');
-    assert.equal(logic.orgSetupAction(two)?.kind, 'sign_in', 'several groups need no choice');
+    assert.equal(logic.orgSetupAction(two)?.kind, 'seat', 'several groups need no choice');
     // SB-282: many-to-many links, as switchboard-core decides them.
     {
       const orgs = [{ id: 'o-a', name: 'A', domains: ['a.example'], created_at: 1 }, { id: 'o-b', name: 'B', domains: ['b.example'], created_at: 1 }];
@@ -1257,7 +1279,7 @@ check(() => {
   // the empty Accounts page on an organization machine leads with the seat
   check(() => {
     const signedIn = { claude: { status: 'available' }, codex: null };
-    assert.deepEqual(logic.accountsEmptyKey({ backup: false, onboarding: noSeat, current: signedIn }), { lead: 'org_seat', organization: 'Acme', group: 'Acme work', pool: 'acme-work', line: 'Sign in with your Acme address. It goes to the group “Acme work”.', label: 'Sign in with your Acme address' });
+    assert.deepEqual(logic.accountsEmptyKey({ backup: false, onboarding: noSeat, current: signedIn }), { lead: 'org_seat', organization: 'Acme', organization_id: 'o-acme', group: 'Acme work', pool: 'acme-work', line: 'Give Acme a seat in the group “Acme work”: an account already on this computer, or a sign-in with any address.', label: 'Add a seat' });
     assert.equal(logic.accountsEmptyKey({ backup: true, onboarding: noSeat, current: signedIn }).lead, 'backup', 'a backup to restore still comes first');
     assert.equal(logic.accountsEmptyKey({ backup: false, onboarding: noGroup, current: signedIn }).lead, 'add_current', 'no group yet: the card asks for it, the page keeps its line');
   });

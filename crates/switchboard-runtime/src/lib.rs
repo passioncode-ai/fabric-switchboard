@@ -7105,8 +7105,25 @@ async fn execute(
                 ))
                 .await
                 {
-                    Ok(_) => pool = home,
+                    Ok(moved) => {
+                        pool = home;
+                        // DEC-0022 (SB-403): placed whatever its organizations; said, not refused.
+                        if let Some(warnings) = moved.get("warnings") {
+                            finished["warnings"] = warnings.clone();
+                        }
+                    }
                     Err(error) => finished["placed_error"] = json!(error),
+                }
+            } else if let Ok(snapshot) = store.snapshot() {
+                if let Some(account) = snapshot.accounts.iter().find(|a| a.id == id) {
+                    let warnings: Vec<Value> = snapshot
+                        .outside_warnings(account)
+                        .into_iter()
+                        .filter(|w| w["pool"] == pool.as_str())
+                        .collect();
+                    if !warnings.is_empty() {
+                        finished["warnings"] = json!(warnings);
+                    }
                 }
             }
             finished["pool"] = json!(pool);
@@ -7836,7 +7853,21 @@ async fn execute(
             } else {
                 store.return_to_default(&id)?;
             }
-            Ok(json!({"id": id, "from": from, "pool": pool, "moved": true}))
+            // DEC-0022 (SB-403): the group takes it whatever its organizations; the answer says
+            // when they are not among its own.
+            let mut answer = json!({"id": id, "from": from, "pool": pool, "moved": true});
+            let snapshot = store.snapshot()?;
+            if let Some(account) = snapshot.accounts.iter().find(|a| a.id == id) {
+                let warnings: Vec<Value> = snapshot
+                    .outside_warnings(account)
+                    .into_iter()
+                    .filter(|w| w["pool"] == pool.as_str())
+                    .collect();
+                if !warnings.is_empty() {
+                    answer["warnings"] = json!(warnings);
+                }
+            }
+            Ok(answer)
         }
         Operation::App { action, enabled } => {
             app_doors::answer(runtime.and_then(|r| r.app_doors()), action, enabled).await
@@ -9112,6 +9143,51 @@ mod owner_tests {
         ] {
             assert!(!text.contains(private), "{private} must not appear: {text}");
         }
+    }
+
+    #[tokio::test]
+    async fn an_organizations_account_moves_into_a_personal_group_with_a_warning() {
+        // SB-403 (2026-11-17 03:40 UTC, the operator's Mac): a call back of vibecoder2@ into the
+        // personal group `passioncode` answered `placed_error` "… belongs to another
+        // organization than this group" and left it in `default`. An organization never blocks
+        // a move: the account is placed, and the answer warns.
+        let root = tempfile::tempdir().unwrap();
+        let store = Arc::new(
+            Store::open(root.path().to_owned(), Arc::new(MemoryVault::default())).unwrap(),
+        );
+        let seat = save(&store, "synthetic-seat", "default");
+        let org = store.add_organization("PassionCode.ai", &[]).unwrap();
+        store.assign_organization(&seat.id, Some(&org.id)).unwrap();
+        let folder = tempfile::tempdir().unwrap();
+        let group = store
+            .save_project_in(
+                None,
+                "PassionCode",
+                &[folder.path().to_path_buf()],
+                &[],
+                None,
+            )
+            .unwrap();
+        let moved = execute(
+            store.clone(),
+            root.path(),
+            None,
+            Operation::MoveAccount {
+                id: seat.id.clone(),
+                pool: group.pool.clone(),
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(moved["moved"], true, "{moved}");
+        assert_eq!(
+            moved["warnings"][0]["code"], "outside_organization",
+            "{moved}"
+        );
+        assert_eq!(moved["warnings"][0]["pool"], group.pool.as_str(), "{moved}");
+        let snapshot = store.snapshot().unwrap();
+        let placed = snapshot.accounts.iter().find(|a| a.id == seat.id).unwrap();
+        assert_eq!(placed.pool, group.pool);
     }
 
     #[test]
