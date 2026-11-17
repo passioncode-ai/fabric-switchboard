@@ -151,11 +151,12 @@ pub fn run_script(
         .collect();
     format!(
         "#!/bin/sh\n{exports}export FABRIC_DISPATCH_REQUEST_FILE=\"$2/request.json\"\nexport FABRIC_DISPATCH_RESULT=\"$2/result.txt\"\nexport FABRIC_DISPATCH_PROMPT_FILE=\"$2/prompt.txt\"\n\
-cd \"$1\" || {{ echo 97 >\"$2/exit\"; exit 97; }}\n\
+cd \"$1\" || {{ echo 97 >\"$2/exit.tmp\"; mv \"$2/exit.tmp\" \"$2/exit\"; exit 97; }}\n\
 ( sleep {timeout_seconds}; [ -f \"$2/exit\" ] || {{ touch \"$2/timed_out\"; kill -TERM -- \"-$$\" 2>/dev/null; sleep 5; kill -KILL -- \"-$$\" 2>/dev/null; }} ) &\n\
 timer=$!\n\
 {launch} --provider {provider} --working-directory \"$1\" --headless --by fabric-dispatch -- -p {prompt} >\"$2/log\" 2>&1\n\
-echo $? >\"$2/exit\"\n\
+echo $? >\"$2/exit.tmp\"\n\
+mv \"$2/exit.tmp\" \"$2/exit\"\n\
 kill \"$timer\" 2>/dev/null\n",
         launch = remote(program, &["launch"]),
         provider = provider.as_str(),
@@ -293,6 +294,9 @@ echo $! >\"$d/pid\"; echo started"
 /// D-7: the run's state there: `running`, `exited` (with `exit_code`), `stopped`, `lost` (no exit
 /// written and no process: it was killed or the machine restarted) or `unknown` (ssh did not
 /// answer), and `result`, the result file's text (up to `RESULT_MAX`) or null.
+/// SB-415: the run writes its exit code before it ends, through a rename, so the code is never
+/// read half written; and a run found gone is asked for that code once more, since it may have
+/// written it and ended between the two looks (a finished run read `lost` under load).
 pub fn status(target: &str, launch_id: &str, run: &Run<'_>) -> Value {
     let (d, wt) = (dir(launch_id), worktree(launch_id));
     let script = format!(
@@ -302,6 +306,7 @@ if [ -f \"$d/stopped\" ]; then echo state=stopped; \
 elif [ -f \"$d/timed_out\" ]; then echo state=timed_out; \
 elif [ -f \"$d/exit\" ]; then echo state=exited; echo \"exit=$(cat \"$d/exit\")\"; \
 elif [ -f \"$d/pid\" ] && kill -0 \"$(cat \"$d/pid\")\" 2>/dev/null; then echo state=running; ended=0; \
+elif [ -f \"$d/exit\" ]; then echo state=exited; echo \"exit=$(cat \"$d/exit\")\"; \
 else echo state=lost; fi; \
 wt={wt}; if [ $ended = 1 ] && [ -d \"$wt\" ]; then \
 if [ -z \"$(git -C \"$wt\" status --porcelain 2>/dev/null)\" ] && [ -n \"$(git -C \"$wt\" branch -r --contains HEAD 2>/dev/null)\" ]; then \
@@ -484,6 +489,49 @@ exit 3\n",
     const H: &str = "handoff:0123456789abcdef";
     const REQ: &str = "11111111-2222-3333-4444-555555555555";
 
+    /// SB-415: a run whose process is gone reads its exit code when one was written, and a code
+    /// still being written (only the temporary file) is not read as one.
+    #[test]
+    fn a_gone_run_reads_its_exit_code_and_never_a_half_written_one() {
+        let home = tempfile::tempdir().unwrap();
+        let run = local(home.path());
+        let launch = crate::launches::new_id();
+        let d = home.path().join(DIR).join(&launch);
+        std::fs::create_dir_all(&d).unwrap();
+        // A pid no process can hold (above every system's pid_max), so `kill -0` always fails.
+        std::fs::write(d.join("pid"), "2147483647").unwrap();
+        std::fs::write(d.join("exit.tmp"), "3\n").unwrap();
+        assert_eq!(status("studio.local", &launch, &run)["state"], "lost");
+        std::fs::rename(d.join("exit.tmp"), d.join("exit")).unwrap();
+        let answer = status("studio.local", &launch, &run);
+        assert_eq!(answer["state"], "exited", "{answer}");
+        assert_eq!(answer["exit_code"], 3);
+        // The run writes its code beside the final name and renames it, never in place.
+        let script = run_script(
+            &Program {
+                path: "/x/switchboard",
+                data_dir: None,
+            },
+            Provider::Claude,
+            WF,
+            H,
+            REQ,
+            &launch,
+            None,
+            60,
+        );
+        let written = script
+            .find("echo $? >\"$2/exit.tmp\"")
+            .expect("the code goes to exit.tmp");
+        let renamed = script
+            .rfind("mv \"$2/exit.tmp\" \"$2/exit\"")
+            .expect("then is renamed");
+        assert!(written < renamed, "{script}");
+        assert!(
+            !script.contains(">\"$2/exit\""),
+            "never written in place: {script}"
+        );
+    }
     #[test]
     fn a_run_there_starts_in_a_fresh_worktree_and_its_result_comes_back() {
         let (home, path) = fixture();
