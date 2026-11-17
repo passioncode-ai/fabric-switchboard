@@ -65,7 +65,9 @@ enum Command {
     Link,
     /// Update a computer that runs only `switchboard serve` (no window, so the app never checks):
     /// reads the release feed, checks the package's signature and installs a newer version into
-    /// the app. Run it as the account that owns the app, then restart `serve`.
+    /// the app. Run it as the account that owns the app, then restart `serve`. A copy installed
+    /// from the .deb package is never replaced: it prints the latest version and one command that
+    /// verifies and installs it (it needs curl and gpgv).
     Update {
         /// Only say whether a newer version exists; install nothing.
         #[arg(long)]
@@ -2539,24 +2541,38 @@ async fn run(cli: &Cli) -> Result<Value, String> {
         // account replaced; a restart asks its supervisor to start it again on the new binary.
         let updates = async {
             use switchboard_runtime::serve_update as su;
-            let Some(program) = su::program() else {
+            // SB-408: a .deb install never replaces its own files; it says once per newer version
+            // that one is out (`update --check` prints the commands), and follows a program apt
+            // replaced.
+            let deb = switchboard_runtime::deb::this_install();
+            let program = if deb {
+                switchboard_runtime::copies::this_program()
+            } else {
+                su::program()
+            };
+            let Some(program) = program else {
                 return std::future::pending::<&'static str>().await;
             };
             let Some(at_start) = su::stamp(&program) else {
                 return std::future::pending::<&'static str>().await;
             };
-            let mut told = None;
+            let mut told = su::Told::default();
+            // A `serve` whose program was replaced exits only when a supervisor starts it again;
+            // started by hand it says so once and keeps running on the old program.
+            let supervised = su::supervised_now();
+            if !deb {
+                // Until its first pass, a window from this copy holds back (SB-414).
+                su::note_started();
+            }
             tokio::time::sleep(su::FIRST_AFTER).await;
             loop {
-                if let su::Pass::Restart(why) = su::pass(
-                    &data,
-                    &program,
-                    &at_start,
-                    env!("CARGO_PKG_VERSION"),
-                    &mut told,
-                )
-                .await
-                {
+                let version = env!("CARGO_PKG_VERSION");
+                let pass = if deb {
+                    su::deb_pass(&program, &at_start, version, supervised, &mut told).await
+                } else {
+                    su::pass(&data, &program, &at_start, version, supervised, &mut told).await
+                };
+                if let su::Pass::Restart(why) = pass {
                     // A managed session between two requests is still working: wait for a quiet
                     // spell (drain anyway after half an hour, as the app does).
                     let runtime = owner.runtime.clone();
