@@ -224,6 +224,34 @@ pub struct Project {
     /// SB-282: accounts whose home is another pool that serve this group too, in the person's
     /// order. Their credential and quota record stay one; only their home pool holds them.
     pub shared_accounts: Vec<String>,
+    /// SB-401: the reserved group of pay-per-token keys (`TOKENS_POOL`): it may hold no folder,
+    /// holds only Claude API-key accounts, and nothing joins it by itself.
+    pub tokens: bool,
+    /// SB-401: switched off by the person: no folder is routed to it and its accounts serve no
+    /// request. The pay-per-token group starts off.
+    pub off: bool,
+}
+/// SB-401: the pool the reserved group of pay-per-token keys is first made with (`tokens`, or
+/// `tokens-2` and on when a group of the person's already has it). The group is found by its
+/// `tokens` flag, never by this id.
+pub const TOKENS_POOL: &str = "tokens";
+/// SB-401: the reserved group's name as the window shows it until the person renames it.
+pub const TOKENS_NAME: &str = "Pay-per-token keys";
+/// SB-401: only a Claude API-key account may be in the pay-per-token group.
+pub const TOKENS_ONLY_KEYS: &str =
+    "Only a Claude API key can be in the pay-per-token group. Put this account in another group.";
+impl Project {
+    /// SB-401: the pay-per-token group as it is first made: no folder, switched off.
+    pub fn tokens_group(pool: String, created_at: i64) -> Self {
+        Project {
+            pool,
+            name: TOKENS_NAME.into(),
+            created_at,
+            tokens: true,
+            off: true,
+            ..Project::default()
+        }
+    }
 }
 /// Most organizations one group is bound to (SB-282).
 pub const MAX_GROUP_ORGANIZATIONS: usize = 16;
@@ -244,6 +272,10 @@ struct ProjectWire {
     organizations: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     shared_accounts: Vec<String>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    tokens: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    off: bool,
 }
 impl From<ProjectWire> for Project {
     fn from(w: ProjectWire) -> Self {
@@ -261,6 +293,8 @@ impl From<ProjectWire> for Project {
             sources: w.sources,
             organizations,
             shared_accounts: w.shared_accounts,
+            tokens: w.tokens,
+            off: w.off,
         }
     }
 }
@@ -280,6 +314,8 @@ impl From<Project> for ProjectWire {
             organization,
             organizations,
             shared_accounts: p.shared_accounts,
+            tokens: p.tokens,
+            off: p.off,
         }
     }
 }
@@ -436,13 +472,27 @@ pub(crate) fn validate_projects(s: &Snapshot) -> Result<(), String> {
     if s.projects.len() > MAX_PROJECTS {
         return Err("Invalid metadata bounds".into());
     }
+    // SB-401: the pay-per-token group holds Claude API keys only, so a subscription is never
+    // routed through it and a key never through another kind of account.
+    if let Some(tokens) = s.projects.iter().find(|p| p.tokens) {
+        if s.accounts.iter().any(|a| {
+            a.pool == tokens.pool
+                && !(a.provider == crate::Provider::Claude && a.kind == crate::AuthKind::ApiKey)
+        }) {
+            return Err(TOKENS_ONLY_KEYS.into());
+        }
+    }
     let mut pools = std::collections::HashSet::new();
     let mut all: Vec<(&str, &str)> = Vec::new();
     for p in &s.projects {
         if !crate::pool_valid(&p.pool)
             || !pools.insert(p.pool.as_str())
             || !crate::label_valid(&p.name)
-            || p.folders.is_empty()
+            // SB-401: only the pay-per-token group may hold no folder; it is the reserved pool.
+            || (p.folders.is_empty() && !p.tokens)
+            || (p.tokens
+                && (!p.shared_accounts.is_empty()
+                    || s.projects.iter().filter(|q| q.tokens).count() > 1))
             || p.sources.len() > MAX_SOURCES
             || p.sources.iter().any(|s| !source_valid(s))
             || p.folders.iter().any(|f| !path_valid(f))
@@ -520,6 +570,25 @@ impl Snapshot {
     /// The project that reserves `pool`, if any.
     pub fn project_of_pool(&self, pool: &str) -> Option<&Project> {
         self.projects.iter().find(|p| p.pool == pool)
+    }
+    /// SB-401: the pay-per-token group, when it was made.
+    pub fn tokens_group(&self) -> Option<&Project> {
+        self.projects.iter().find(|p| p.tokens)
+    }
+    /// SB-401: the pool a Claude API key goes to: the pay-per-token group's, else the id it will
+    /// be made with (`tokens`, or the first free `tokens-<n>`).
+    pub fn tokens_pool(&self) -> String {
+        if let Some(group) = self.tokens_group() {
+            return group.pool.clone();
+        }
+        let taken = |pool: &str| {
+            self.projects.iter().any(|p| p.pool == pool)
+                || self.accounts.iter().any(|a| a.pool == pool)
+        };
+        std::iter::once(TOKENS_POOL.to_owned())
+            .chain((2..).map(|n| format!("{TOKENS_POOL}-{n}")))
+            .find(|pool| !taken(pool))
+            .unwrap_or_else(|| TOKENS_POOL.into())
     }
     /// The accounts shared with `pool` from another home (SB-282), the default group's loans
     /// included (SB-352 wave 2).

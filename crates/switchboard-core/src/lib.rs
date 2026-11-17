@@ -734,6 +734,9 @@ struct SaveRequest<'a> {
     /// The id a new row takes, the same in every plan of this save.
     new_id: String,
     created_at: i64,
+    /// SB-401: a Claude API key sent to the default group goes to the pay-per-token group,
+    /// which this save makes when it does not exist yet.
+    tokens_group: bool,
 }
 /// What a save does against one state of the metadata. A plan lives for one step of one save,
 /// so its size does not matter.
@@ -857,6 +860,11 @@ impl SaveRequest<'_> {
             )
         };
         let mut candidate = state.clone();
+        if self.tokens_group && candidate.tokens_group().is_none() {
+            candidate
+                .projects
+                .push(Project::tokens_group(self.pool.into(), self.created_at));
+        }
         if let Some(a) = candidate.accounts.iter_mut().find(|a| a.id == account.id) {
             *a = account.clone();
         } else {
@@ -1514,7 +1522,19 @@ impl Store {
         // lock, so the reads stay true; a group change can still land meanwhile, and then the
         // first write is put back and the save planned again.
         let _writes = self.credential_lock()?;
+        // SB-401: a Claude API key never lands in the default group, where every folder in no
+        // group would run on it: it goes to the pay-per-token group, switched off until the
+        // person turns it on with a ceiling.
+        let tokens_group = provider == Provider::Claude
+            && kind == AuthKind::ApiKey
+            && pool == projects::DEFAULT_POOL;
+        let pool = if tokens_group {
+            self.snapshot()?.tokens_pool()
+        } else {
+            pool
+        };
         let save = SaveRequest {
+            tokens_group,
             label: label.trim(),
             provider,
             kind,
