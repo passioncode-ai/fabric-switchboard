@@ -400,6 +400,11 @@ pub fn record(
     now: i64,
 ) -> Result<Value, String> {
     let slot = Slot::parse(slot)?.text();
+    // One writer at a time in this process: two adds finishing together keep both records.
+    static WRITES: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _writing = WRITES
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let snapshot = store.snapshot()?;
     let mut records = records(root)?;
     records.keys.retain(|r| !targets.contains(&r.target));

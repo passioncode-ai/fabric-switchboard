@@ -1640,7 +1640,7 @@ function observatoryPanel() {
   for (const key of observatoryKeys.keys) {
     const item = el('li', 'key-item', key.slot);
     const kind = key.kind === 'anthropic' ? 'Anthropic' : key.kind === 'openai' ? 'OpenAI' : 'OpenRouter';
-    const where = key.added.map((target) => target.kind === 'account' ? t('account {label}', { label: target.label ?? '' }) : target.kind === 'anthropic' ? t('named key {name}', { name: target.name ?? '' }) : target.pool ? t('OpenRouter key of {group}', { group: poolName(target.pool, snapshot?.projects) }) : t('this computer\'s OpenRouter key'));
+    const where = key.added.map((target) => target.kind === 'account' ? t('account {label}', { label: target.label ?? '' }) : target.kind === 'anthropic' ? t('named key {name}', { name: target.name ?? '' }) : target.pool ? t('OpenRouter key {where}', { where: inGroup(target.pool, snapshot?.projects) }) : t('this computer\'s OpenRouter key'));
     const state = where.length ? t('saved as {where}', { where: where.join(', ') }) : key.can_add ? '' : t(key.why_not ?? '');
     item.append(el('span', 'folder-note', ` · ${kind}${key.expires ? ` · ${t('expires {day}', { day: key.expires })}` : ''}${state ? ` · ${state}` : ''}`));
     if (key.can_add) item.append(' ', button(where.length ? t('Add again') : t('Add'), () => observatoryAddDialog(key), 'text-button', `observatory-add-${key.slot}`));
@@ -2068,7 +2068,7 @@ function launchKeysPart(agent: AgentInfo, folder: () => string | null): HTMLElem
       const list = el('ul', 'key-list');
       for (const key of answer.keys) {
         const kind = key.kind === 'anthropic' ? t('Anthropic, no ceiling') : key.kind === 'group' ? t('Pay-per-token group') : 'OpenRouter';
-        const state = key.default ? t('a launch in this folder uses it') : key.kind === 'group' ? (key.usable ? t('a launch through the proxy on {group} uses it', { group: key.group ?? '' }) : t(key.why_not ?? '')) : key.kind === 'anthropic' ? t('choose it below') : key.scope === 'group' ? t('used {where}', { where: inGroup(key.pool ?? '', snapshot?.projects) }) : t('this folder\'s group has an OpenRouter key of its own');
+        const state = key.default ? t('a launch in this folder uses it') : key.kind === 'group' ? (key.usable ? t('a launch through the proxy {where} uses it', { where: inGroup(key.pool ?? '', snapshot?.projects) }) : t(key.why_not ?? '')) : key.kind === 'anthropic' ? t('choose it below') : key.scope === 'group' ? t('used {where}', { where: inGroup(key.pool ?? '', snapshot?.projects) }) : t('this folder\'s group has an OpenRouter key of its own');
         const item = el('li', key.default ? 'key-item is-default' : 'key-item', `${kind}: ${key.scope === 'machine' ? t('This computer') : key.name}`);
         item.append(el('span', 'folder-note', ` · ${key.model ?? t('no default model')} · ${state}`));
         list.append(item);

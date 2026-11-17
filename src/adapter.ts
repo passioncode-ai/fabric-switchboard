@@ -367,11 +367,10 @@ const safeErrors = new Set([
   "Only Hermes runs on an Anthropic key for now. Choose Hermes, or its OpenRouter key.",
   "Choose a model for this launch, or set the key's default model with switchboard agents anthropic model.",
   "Anthropic keys could not be saved.",
-  // SB-404: keys from Project Observatory and launches on the pay-per-token group; each names the fix.
   // SB-404 K3: why a pay-per-token key cannot start yet (`launch_keys` why_not), shown verbatim.
   "This folder is not in the pay-per-token group. Add it to the group first, then launch on its key.",
   "The group's selected key serves its launches. Select this key in the group to launch on it.",
-  "OpenRouter key of {group}",
+  // SB-404: keys from Project Observatory and launches on the pay-per-token group; each names the fix.
   "Adding a key from Observatory runs on macOS and Linux for now.",
   "Name the model for Hermes, an Anthropic id such as claude-sonnet-5-5: Hermes on the pay-per-token group starts on the model you name.",
   "Only Claude Code, and Hermes on the pay-per-token group, take a model at launch through the proxy. Leave out the model, or choose it in the agent itself.",
