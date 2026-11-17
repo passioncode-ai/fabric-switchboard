@@ -47,6 +47,21 @@ windows_check() (
   if [ -d /opt/homebrew/opt/llvm/bin ]; then
     PATH="/opt/homebrew/opt/llvm/bin:$PATH"
   fi
+  # `ring`'s build needs `llvm-lib`: on PATH, or rustup's `llvm-tools` (its `llvm-ar`), which
+  # cargo-xwin finds by itself. Without either the check could only fail, so it is skipped.
+  if ! command -v llvm-lib >/dev/null 2>&1; then
+    sysroot=$(rustc --print sysroot 2>/dev/null) || sysroot=""
+    found=""
+    for tool in "$sysroot"/lib/rustlib/*/bin/llvm-lib "$sysroot"/lib/rustlib/*/bin/llvm-ar; do
+      if [ -n "$sysroot" ] && [ -x "$tool" ]; then
+        found=yes
+      fi
+    done
+    if [ -z "$found" ]; then
+      echo "Windows check skipped: llvm-lib is not installed (rustup component add llvm-tools, or Homebrew's llvm; docs/DISTRIBUTION.md)."
+      exit 0
+    fi
+  fi
   desktop="-p fabric-switchboard"
   if ! command -v llvm-rc >/dev/null 2>&1; then
     desktop=""

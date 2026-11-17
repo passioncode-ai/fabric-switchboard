@@ -24,8 +24,10 @@ commercial license too. There is no checkbox to tick.
    script unit tests, the third-party notices check and `git diff --check` (the list is
    `scripts/check.sh` itself). Each step prints its wall time (`step <name> <seconds>s`).
    The gate also fails when a Rust test listed in `scripts/test-names.txt` is gone: a pull
-   request that removes or renames a test runs `python3 scripts/test_names.py --write` and
-   commits the list with it, so the removal shows in the diff.
+   request that removes or renames a test runs `python3 scripts/test_names.py --write` on
+   macOS (the list is macOS's, where the gate runs) and commits the list with it, so the
+   removal shows in the diff. Two open pull requests that rename or remove tests near each
+   other conflict in that file: rebase the second and run `--write` again.
 2. A change to dependencies (`Cargo.lock`, `package-lock.json`) regenerates the notices:
    `python3 scripts/third_party_notices.py`, and commits `THIRD_PARTY_NOTICES.md` with it.
 3. Follow [AGENTS.md](AGENTS.md): tests use synthetic Vault and upstream fixtures only; never

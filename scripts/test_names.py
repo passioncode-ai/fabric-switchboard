@@ -7,9 +7,10 @@
 test lands only with the list updated in the same change (`--write`), so the removal shows in the
 diff. A name the list does not hold yet is reported and does not fail; `--write` records it.
 
-The names are those of the machine the list was made on (`# os:`): tests behind
+The names are those of the machine the list was made on (`# os:`, macOS, where the gate runs): tests behind
 `#[cfg(target_os = ...)]` differ between systems, so on another system `--check` says it was
-skipped. Doc tests are not listed.
+skipped, and `--write` refuses there unless `--other-system` is given. Doc tests are not
+listed.
 """
 from __future__ import annotations
 
@@ -144,7 +145,14 @@ def check() -> int:
     return 0
 
 
-def write() -> int:
+def write(other_system: bool = False) -> int:
+    if system() != "darwin" and not other_system:
+        print(
+            f"The list is made on macOS, where the gate runs; this is {system()}. "
+            "--other-system writes a list for this system instead.",
+            file=sys.stderr,
+        )
+        return 1
     current = current_names()
     LIST.write_text(render(system(), current), encoding="utf-8")
     print(f"{LIST.relative_to(ROOT)}: {len(current)} tests ({system()}).")
@@ -155,9 +163,14 @@ def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--check", action="store_true", help="fail when a recorded test is gone")
-    mode.add_argument("--write", action="store_true", help="record the current tests")
+    mode.add_argument("--write", action="store_true", help="record the current tests (on macOS)")
+    parser.add_argument(
+        "--other-system",
+        action="store_true",
+        help="with --write: write the list on a system other than macOS",
+    )
     args = parser.parse_args(argv)
-    return check() if args.check else write()
+    return check() if args.check else write(args.other_system)
 
 
 if __name__ == "__main__":

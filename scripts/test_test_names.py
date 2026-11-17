@@ -30,8 +30,16 @@ class TestNames(unittest.TestCase):
 
     def test_the_committed_list_names_its_system(self):
         os_name, names = test_names.parse_file(test_names.LIST.read_text(encoding="utf-8"))
-        self.assertIsNotNone(os_name)
+        self.assertEqual(os_name, "darwin", "the list is made on macOS, where the gate runs")
         self.assertGreater(len(names), 1000)
+
+    def test_writing_on_another_system_is_refused_without_the_flag(self):
+        real = test_names.system
+        test_names.system = lambda: "linux"
+        try:
+            self.assertEqual(test_names.write(), 1)
+        finally:
+            test_names.system = real
 
 
 if __name__ == "__main__":
