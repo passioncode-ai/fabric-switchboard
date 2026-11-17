@@ -131,7 +131,7 @@ login*). Anywhere the installed app does not run the actions and the switches an
 `app updates` alone answers what it knows instead (SB-414): `{available: false, reason: not_owner|no_owner, owner:
 serve|null, owner_version, owner_updates_copy, window_version, window_older, windows, serve_update?, message}`, where
 `owner_version` is the `serve` that owns the data folder, `owner_updates_copy` whether it keeps its copy current (an
-installed copy with automatic updates on and write access to the app; never on Windows), `serve_update` its own update
+installed copy with automatic updates on whose update check succeeded within 15 minutes; never on Windows), `serve_update` its own update
 loop's last pass (`{state, latest, reason, checked_at, auto_update}`) and `window_version` the oldest app window open
 beside it that does not own the data folder (it says the same in Settings → Updates, and when it runs from the same
 copy as a `serve` that keeps that copy current it leaves updating the copy to `serve`).
@@ -318,8 +318,11 @@ switchboard --json update --check   # {package: deb, current, latest, action: up
 ```
 
 `command` is one command for version X.Y.Z on x64 (`arm64` on ARM): each step runs only when the one before
-succeeded, the key goes into a keyring of its own, and the checksums count only with a good signature whose primary
-key is the PassionCode.ai release key `63B30DC324BD697487AA31944FAFB8AEC803B6A7` (`release_key_fingerprint`):
+succeeded, the key goes into a keyring of its own (its armour taken off with `sed` and `base64`, so no `gpg` is
+needed), and the checksums count only with a good signature whose primary key is the PassionCode.ai release key
+`63B30DC324BD697487AA31944FAFB8AEC803B6A7` (`release_key_fingerprint`). It needs `curl` and `gpgv` besides coreutils
+and apt (`prerequisites`); `gpgv` comes with apt, and a minimal Debian may lack `curl`: `sudo apt install curl gpgv`
+adds whichever is missing.
 
 ```sh
 mkdir -p ~/Downloads/fabric-switchboard-X.Y.Z && cd ~/Downloads/fabric-switchboard-X.Y.Z && \
@@ -327,14 +330,16 @@ curl -fLO https://github.com/passioncode-ai/fabric-switchboard/releases/download
 curl -fLO https://github.com/passioncode-ai/fabric-switchboard/releases/download/vX.Y.Z/SHA256SUMS && \
 curl -fLO https://github.com/passioncode-ai/fabric-switchboard/releases/download/vX.Y.Z/SHA256SUMS.asc && \
 curl -fsSL https://raw.githubusercontent.com/passioncode-ai/.github/main/release-signing/passioncode-release-signing.asc -o release-key.asc && \
-gpg --dearmor < release-key.asc > release.gpg && \
+sed -e '1,/^$/d' -e '/^=/,$d' release-key.asc | base64 -d > release.gpg && \
 gpgv --status-fd 1 --keyring ./release.gpg SHA256SUMS.asc SHA256SUMS | grep -Eq '^\[GNUPG:\] VALIDSIG .* 63B30DC324BD697487AA31944FAFB8AEC803B6A7$' && \
 sha256sum -c SHA256SUMS --ignore-missing && \
 sudo apt install ./Fabric-Switchboard-X.Y.Z-linux-x64.deb
 ```
 
-A `serve` from the .deb logs `update_waiting deb` once per newer version, and once apt replaced its program it
-restarts onto it (exit status 75, as an updated `serve` does).
+A `serve` from the .deb logs `update_waiting deb` once per newer version. Once apt replaced its program it restarts
+onto it (exit status 75, as an updated `serve` does) only under a supervisor that starts it again: systemd
+(`INVOCATION_ID`), launchd (`XPC_SERVICE_NAME`) or init as its parent. Started by hand from a shell it logs
+`update_restart unsupervised` once and keeps running on the old program until you restart it.
 
 ## Uninstall
 

@@ -1893,17 +1893,8 @@ impl switchboard_runtime::app_doors::AppDoors for WindowDoors {
 /// window that does not own the data folder, also `owner` (SB-414): which copy owns it and its
 /// version.
 #[tauri::command]
-async fn update_status(
-    updates: State<'_, updates::Updates>,
-    slot: State<'_, Slot>,
-) -> Result<Value, String> {
-    let mut status = updates.status();
-    if !slot.smoke && slot.running().await.is_none() {
-        if let Ok(root) = default_root() {
-            status["owner"] = updates::owner_view(&root).await;
-        }
-    }
-    Ok(status)
+async fn update_status(app: tauri::AppHandle) -> Result<Value, String> {
+    Ok(updates::status_with_owner(&app).await)
 }
 #[tauri::command]
 fn set_auto_update(

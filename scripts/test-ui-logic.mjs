@@ -469,6 +469,10 @@ check(() => {
   assert.match(logic.updateLine({ ...base, owner: { ...owner, copy: '/usr/bin' } }).text, /Quit it and open the installed Switchboard\./);
   assert.match(logic.updateLine({ ...base, owner: { ...owner, older: false, version: '0.7.111' } }).text, /^Switchboard runs in the background as switchboard serve, version 0\.7\.111, which keeps itself current; this window is version 0\.7\.111\./);
   assert.match(logic.updateLine({ ...base, owner: { ...owner, kind: 'app', older: false, version: '0.7.110' } }).text, /^Another Switchboard runs in the background, version 0\.7\.110/);
+  // Review round 2: the owner holds the data folder and did not answer: said, never silence,
+  // and Check for updates stays.
+  const unanswered = logic.updateLine({ ...base, owner: { unanswered: true } });
+  assert.deepEqual(unanswered, { text: 'Switchboard already runs in the background but did not answer, so this window did not check for updates. Try again in a minute, or quit Switchboard and open it again.', restart: false, check: true });
   // Nothing answered: the line is the window's own.
   assert.deepEqual(logic.updateLine({ ...base, owner: null }), logic.updateLine(base));
   for (const line of [other.text, same.text]) assert.doesNotMatch(line, /\u2014/);
@@ -479,7 +483,8 @@ check(() => {
   const base = { available: false, reason: 'This copy was installed from the .deb package. Install the newer .deb from the releases page to update it.', enabled: false, state: 'idle', current: '0.7.114', version: null, error: null, needs_permission: false, restart_after: null };
   const command = 'gpgv … && \\\nsha256sum -c SHA256SUMS --ignore-missing && \\\nsudo apt install ./Fabric-Switchboard-0.7.115-linux-x64.deb';
   const fingerprint = '63B30DC324BD697487AA31944FAFB8AEC803B6A7';
-  const out = logic.updateLine({ ...base, deb: { package: 'deb', current: '0.7.114', latest: '0.7.115', action: 'available', command, release_key_fingerprint: fingerprint } });
+  const out = logic.updateLine({ ...base, deb: { package: 'deb', current: '0.7.114', latest: '0.7.115', action: 'available', command, release_key_fingerprint: fingerprint, prerequisites: ['curl', 'gpgv'] } });
+  assert.deepEqual(out.needs, ['curl', 'gpgv']);
   assert.equal(out.text, 'Version 0.7.115 is out; this copy is version 0.7.114. It was installed from the .deb package, which does not update itself: download, verify and install the newer one with this command.');
   // Review round 1, P1-2: one command whose steps are joined with &&, never a list of lines.
   assert.equal(out.command, command); assert.equal(out.fingerprint, fingerprint); assert.equal(out.check, true); assert.equal(out.restart, false);

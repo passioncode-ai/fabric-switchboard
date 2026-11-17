@@ -2305,4 +2305,6 @@ export const RU: Record<string, string> = {
   "It accepts the checksums only when they are signed by the PassionCode.ai release key {fingerprint}.": "Команда принимает контрольные суммы, только если их подписал ключ выпусков PassionCode.ai {fingerprint}.",
   "Version {version} is the latest. Switchboard checks again every five minutes; this copy came from the .deb package, so a newer version is installed with apt.": "Версия {version} последняя. Switchboard проверяет снова каждые пять минут; эта копия установлена из пакета .deb, поэтому новую версию устанавливают через apt.",
   "Install the newer .deb": "Установить новый .deb",
+  "Switchboard already runs in the background but did not answer, so this window did not check for updates. Try again in a minute, or quit Switchboard and open it again.": "Switchboard уже работает в фоне, но не ответил, поэтому это окно не проверило обновления. Повторите через минуту или завершите Switchboard и откройте его снова.",
+  "The command needs curl and gpgv; where one is missing, install it first with sudo apt install curl gpgv.": "Команде нужны curl и gpgv; если чего-то нет, сначала установите это командой sudo apt install curl gpgv.",
 };

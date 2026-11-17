@@ -3871,6 +3871,8 @@ function updateControls(panel: HTMLElement) {
     const copy = button(t('Copy'), () => copyText(copy, command, t('Install the newer .deb')), 'text-button', 'deb-commands-copy');
     panel.append(block, copy);
     if (line.fingerprint) panel.append(el('p', 'form-note', t('It accepts the checksums only when they are signed by the PassionCode.ai release key {fingerprint}.', { fingerprint: line.fingerprint })));
+    // Review round 2: a minimal Debian has gpgv (apt needs it) but may lack curl.
+    if (line.needs?.length) panel.append(el('p', 'form-note', t('The command needs curl and gpgv; where one is missing, install it first with sudo apt install curl gpgv.')));
   }
   // SB-414: the copy that owns the data folder updates this one; nothing to press here.
   if (line.owned) return;

@@ -66,8 +66,8 @@ enum Command {
     /// Update a computer that runs only `switchboard serve` (no window, so the app never checks):
     /// reads the release feed, checks the package's signature and installs a newer version into
     /// the app. Run it as the account that owns the app, then restart `serve`. A copy installed
-    /// from the .deb package is never replaced: it prints the latest version and the commands
-    /// that verify and install it.
+    /// from the .deb package is never replaced: it prints the latest version and one command that
+    /// verifies and installs it (it needs curl and gpgv).
     Update {
         /// Only say whether a newer version exists; install nothing.
         #[arg(long)]
@@ -2557,11 +2557,14 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                 return std::future::pending::<&'static str>().await;
             };
             let mut told = None;
+            let mut deb_told = su::DebTold::default();
+            // A .deb `serve` replaced on disk exits only when a supervisor starts it again.
+            let supervised = su::supervised_now();
             tokio::time::sleep(su::FIRST_AFTER).await;
             loop {
                 let version = env!("CARGO_PKG_VERSION");
                 let pass = if deb {
-                    su::deb_pass(&program, &at_start, version, &mut told).await
+                    su::deb_pass(&program, &at_start, version, supervised, &mut deb_told).await
                 } else {
                     su::pass(&data, &program, &at_start, version, &mut told).await
                 };

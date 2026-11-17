@@ -67,6 +67,10 @@ pub fn arch() -> &'static str {
 /// signature names this primary key (gpg's `VALIDSIG` status line ends with it).
 pub const RELEASE_KEY_FINGERPRINT: &str = "63B30DC324BD697487AA31944FAFB8AEC803B6A7";
 
+/// What the steps run besides coreutils and apt: `curl` (absent from a minimal Debian) and
+/// `gpgv` (installed with apt itself). `sudo apt install curl gpgv` adds them.
+pub const PREREQUISITES: [&str; 2] = ["curl", "gpgv"];
+
 /// The steps that fetch, verify and install `version`'s .deb for `arch`, in an empty folder: the
 /// key goes into a keyring of its own (never the person's), the checksums count only with a good
 /// signature by the pinned key, the package only with its checksum, then apt installs it.
@@ -79,7 +83,9 @@ pub fn commands(version: &str, arch: &str) -> Vec<String> {
         format!("curl -fLO {base}/SHA256SUMS"),
         format!("curl -fLO {base}/SHA256SUMS.asc"),
         format!("curl -fsSL {RELEASE_KEY} -o release-key.asc"),
-        "gpg --dearmor < release-key.asc > release.gpg".to_owned(),
+        // The armour taken off with sed and base64 (byte for byte what `gpg --dearmor` writes), so
+        // a minimal Debian needs no gpg: gpgv comes with apt.
+        "sed -e '1,/^$/d' -e '/^=/,$d' release-key.asc | base64 -d > release.gpg".to_owned(),
         format!("gpgv --status-fd 1 --keyring ./release.gpg SHA256SUMS.asc SHA256SUMS | grep -Eq '^\\[GNUPG:\\] VALIDSIG .* {RELEASE_KEY_FINGERPRINT}$'"),
         "sha256sum -c SHA256SUMS --ignore-missing".to_owned(),
         format!("sudo apt install ./{package}"),
@@ -112,6 +118,7 @@ pub fn notice(feed: &Value, current: &str, arch: &str) -> Result<Value, String> 
         "commands": commands(&latest, arch),
         "command": command(&commands(&latest, arch)),
         "release_key_fingerprint": RELEASE_KEY_FINGERPRINT,
+        "prerequisites": PREREQUISITES,
     });
     // LC-16: a release that needs a person first says so; its notes name the step.
     if let Some(steps) = feed["needs_migration"]
@@ -204,6 +211,10 @@ mod tests {
         }
         assert!(one.lines().last().unwrap().starts_with("sudo apt install"));
         assert!(!one.contains("set -e"));
+        // No gpg: gpgv alone, which apt itself depends on.
+        assert!(!one.contains("gpg --"), "{one}");
+        assert!(one.contains("| base64 -d > release.gpg"));
+        assert_eq!(answer["prerequisites"], json!(["curl", "gpgv"]));
         assert_eq!(
             commands.last(),
             Some(&"sudo apt install ./Fabric-Switchboard-0.7.115-linux-x64.deb")

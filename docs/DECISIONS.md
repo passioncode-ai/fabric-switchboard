@@ -726,11 +726,13 @@ research notes); the ones still in force that the board cites are seeded below w
   - A window that does not own the data folder and runs from the owner's copy installs nothing into
     it when the owner keeps that copy current (the owner says so: `owner_updates_copy`, true for the
     app, and for a `serve` only when it is an installed copy that updates itself, so never on
-    Windows, with `<data>/auto-update` on and write access to the app); the window's check ends
+    Windows, with `<data>/auto-update` on and an update pass that succeeded within 15 minutes,
+    review round 2); the window's check ends
     at once (`update_check owner_updates`, once) and Settings offers no update button. When the
     owner does not keep it current, the window checks and installs as before (review round 1,
     P1-1). A pass where the store is held and the owner does not answer installs nothing
-    (`owner_unanswered`).
+    (`owner_unanswered`), and the window says so in Settings and in the answer to *Check for
+    updates*.
   - A window from another copy of its own keeps checking, downloading and installing into that copy,
     which only it writes. It does not restart into it on its own (there is no owner to drain);
     *Restart to update* stays the person's, and the window says to use the owner's copy instead.

@@ -1002,8 +1002,19 @@ pub fn owner_fields(status: &Value) -> Value {
 const OWNER_VIEW_FOR: Duration = Duration::from_secs(2);
 static OWNER_VIEW: Mutex<Option<(std::time::Instant, Value)>> = Mutex::new(None);
 
-/// SB-414: for a window that does not own the data folder, the owner as `owner_fields` shows it;
-/// null when nothing answers. Kept for `OWNER_VIEW_FOR`.
+/// The owner as a window shows it from its `Status` answer: null when nothing owns the data
+/// folder, `{unanswered: true}` when the owner holds it and did not answer (review round 2: the
+/// window says so instead of saying nothing).
+pub fn owner_view_of(answer: &Result<Option<Value>, ()>) -> Value {
+    match answer {
+        Ok(Some(status)) => owner_fields(status),
+        Ok(None) => Value::Null,
+        Err(()) => json!({"unanswered": true}),
+    }
+}
+
+/// SB-414: for a window that does not own the data folder, the owner as `owner_view_of` shows it.
+/// Kept for `OWNER_VIEW_FOR`.
 pub async fn owner_view(root: &Path) -> Value {
     if let Ok(cached) = OWNER_VIEW.lock() {
         if let Some((_, view)) = cached
@@ -1013,13 +1024,8 @@ pub async fn owner_view(root: &Path) -> Value {
             return view.clone();
         }
     }
-    let view = match owner_status(root).await {
-        Ok(Some(status)) => owner_fields(&status),
-        _ => Value::Null,
-    };
-    if let Ok(mut cached) = OWNER_VIEW.lock() {
-        *cached = Some((std::time::Instant::now(), view.clone()));
-    }
+    let view = owner_view_of(&owner_status(root).await);
+    remember_owner_view(view.clone());
     view
 }
 
@@ -1045,7 +1051,31 @@ async fn owner_skip(app: &AppHandle) -> Option<&'static str> {
         return None;
     }
     let root = app.state::<Updates>().root.clone()?;
-    owner_skip_code(&owner_status(&root).await)
+    let answer = owner_status(&root).await;
+    // What this check learned is what Settings shows right after it.
+    remember_owner_view(owner_view_of(&answer));
+    owner_skip_code(&answer)
+}
+
+fn remember_owner_view(view: Value) {
+    if let Ok(mut cached) = OWNER_VIEW.lock() {
+        *cached = Some((std::time::Instant::now(), view));
+    }
+}
+
+/// `Updates::status`, with `owner` for a window that does not own the data folder (SB-414).
+pub async fn status_with_owner(app: &AppHandle) -> Value {
+    let mut status = app.state::<Updates>().status();
+    let Some(slot) = app.try_state::<crate::Slot>() else {
+        return status;
+    };
+    if slot.smoke || slot.running().await.is_some() {
+        return status;
+    }
+    if let Some(root) = app.state::<Updates>().root.clone() {
+        status["owner"] = owner_view(&root).await;
+    }
+    status
 }
 
 fn busy(inner: &Inner) -> bool {
@@ -1058,7 +1088,7 @@ pub async fn check_now(app: AppHandle) -> Result<Value, String> {
     // SB-408: a .deb install reads the feed now and says what is out.
     if state.deb {
         deb_check(&app).await;
-        return Ok(app.state::<Updates>().status());
+        return Ok(status_with_owner(&app).await);
     }
     state.available.map_err(str::to_string)?;
     // SB-351: the check runs on a task of its own, so a caller that stops waiting (a control
@@ -1068,7 +1098,9 @@ pub async fn check_now(app: AppHandle) -> Result<Value, String> {
         check(&checking, true).await;
     })
     .await;
-    Ok(app.state::<Updates>().status())
+    // Review round 2: a check the owner held back (`owner_updates`, `owner_unanswered`) answers
+    // with the owner's line, never silence.
+    Ok(status_with_owner(&app).await)
 }
 
 /// SB-351: runs `work` on a task of its own and waits for it; dropping the wait leaves the task
@@ -2501,6 +2533,13 @@ mod tests {
         );
         assert_eq!(owner_skip_code(&Ok(None)), None);
         assert_eq!(owner_skip_code(&Err(())), Some("owner_unanswered"));
+        // The window says the owner did not answer, rather than nothing.
+        assert_eq!(owner_view_of(&Err(())), json!({"unanswered": true}));
+        assert_eq!(owner_view_of(&Ok(None)), Value::Null);
+        assert_eq!(
+            owner_view_of(&Ok(Some(status(&here, Some(true)))))["updates_copy"],
+            true
+        );
         let fields = owner_fields(&status(&here, Some(true)));
         assert_eq!(fields["older"], true);
         assert_eq!(fields["same_copy"], true);
