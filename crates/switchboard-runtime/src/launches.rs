@@ -896,6 +896,33 @@ pub(crate) fn link_handover(root: &Path, id: &str, handover: &str) {
     })
 }
 
+/// SB-405: a hand-over taken with `--ask` runs launch `id` with the agent's permission prompts
+/// on: its record and its home's `.session.json` (when it still names this launch) say
+/// `permissions: "ask"`, so `sessions --all` and the history show it. Best effort, like every
+/// record write: the session runs either way.
+pub(crate) fn mark_permissions(root: &Path, home: &Path, id: &str, permissions: &str) {
+    if !valid_id(id) {
+        return;
+    }
+    crate::blocking::run(|| {
+        let _writing = writing();
+        update(root, id, |r| {
+            r["permissions"] = permissions.into();
+            true
+        });
+        let session = home.join(crate::launch::SESSION_RECORD);
+        let Some(mut record) = switchboard_core::private_fs::read_private(&session, MAX_RECORD)
+            .ok()
+            .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
+            .filter(|r| r["launch_id"].as_str() == Some(id))
+        else {
+            return;
+        };
+        record["permissions"] = permissions.into();
+        let _ = crate::launch::private_write(&session, record.to_string().as_bytes(), false);
+    })
+}
+
 /// What a session's own hook reports about its launch.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
