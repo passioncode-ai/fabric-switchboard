@@ -927,6 +927,8 @@ check(() => {
   assert.equal(logic.placementNotice('dev', 'dev moved to group “Mine”.', { pool: 'mine', warnings: [{ code: 'outside_organization', pool: 'mine', group: 'Mine' }] }, name), 'dev moved to group “Mine”. These groups use it, though its organizations are not theirs: Mine.');
   assert.equal(logic.placementNotice('dev', 'dev is back on this computer, in Mine.', { pool: 'default', placed_error: 'Project not found.' }, name), 'dev is back on this computer, in the default group. It could not join the group you chose: Project not found.');
   assert.equal(logic.placementNotice('dev', 'dev moved.', undefined, name), 'dev moved.');
+  // Round 2: a personal group holding an organization's account says so plainly.
+  assert.equal(logic.placementNotice('dev', 'dev moved to group “Mine”.', { pool: 'mine', warnings: [{ code: 'outside_organization', pool: 'mine', group: 'Mine', group_personal: true }] }, name), 'dev moved to group “Mine”. It works for an organization; these personal groups use it anyway: Mine.');
   assert.equal(logic.assignNotice('dev', { outside: [], team: 'claimed', teammates: 1 }), 'Saved for dev. The other seat of its team followed.');
   assert.equal(logic.assignNotice('dev', undefined), 'Saved for dev.');
 });
@@ -1218,7 +1220,7 @@ check(() => {
     assert.equal(seat.lines[2].command, undefined);
     const ended = logic.orgSetups(withOrg([{ id: 'org_group', state: 'done', group }, { id: 'seat', state: 'needs_person', ended: 2 }]))[0];
     // Note 6 of the wave 4 design pass: the card gives the account card's way out too.
-    assert.equal(ended.lines[2].line, 'Your Acme accounts in “Acme work” must sign in again. If Acme removed your seat, ask its administrator.');
+    assert.equal(ended.lines[2].line, 'Accounts in “Acme work” must sign in again. If Acme removed a seat, ask its administrator.');
     // SB-282: an organization may have several groups; the first is the one the card signs in to.
     const two = logic.orgSetups(withOrg([{ id: 'org_group', state: 'done', group, groups: ['Acme web', 'Acme two'] }, { id: 'seat', state: 'needs_person' }]))[0];
     assert.equal(two.lines[1].line, 'Its groups are “Acme web”, “Acme two”.');

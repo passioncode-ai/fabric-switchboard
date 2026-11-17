@@ -233,7 +233,7 @@ export function createDemoAdapter(): Adapter {
       steps.push(group ? { id: 'org_group', state: 'done', summary: '', organization, group, ...(bound.length > 1 ? { groups: bound.map((p) => p.name) } : {}) } : { id: 'org_group', state: 'needs_person', summary: '', organization });
       // SB-403: as `onboarding.rs` counts: with a group, any account it holds whatever its
       // organizations; with none, any account that works for the organization; an account on
-      // another machine makes the step optional.
+      // another machine makes the step optional only while no group is here (round 2).
       const here = (a: Account) => !a.pool.startsWith('machine_') && !state.elsewhere?.[a.id];
       const holds = (a: Account) => groupAdmits(state, o.id, a);
       const seats = state.accounts.filter((a) => (bound.length ? bound.some((p) => servesPool(state, a, p.pool)) : holds(a)));
@@ -241,7 +241,7 @@ export function createDemoAdapter(): Adapter {
       const ended = seats.filter((a) => here(a) && signInRequired.has(a.id)).length;
       const signedIn = seats.some((a) => here(a) && a.enabled && !signInRequired.has(a.id));
       const machines = [...new Set(away.map((a) => (state.machines ?? []).find((m) => m.pool === a.pool)?.name).filter((n): n is string => !!n))];
-      steps.push(signedIn ? { id: 'seat', state: 'done', summary: '', organization } : !ended && away.length ? { id: 'seat', state: 'optional', summary: '', organization, away: machines } : { id: 'seat', state: 'needs_person', summary: '', organization, ended });
+      steps.push(signedIn ? { id: 'seat', state: 'done', summary: '', organization } : !bound.length && !ended && away.length ? { id: 'seat', state: 'optional', summary: '', organization, away: machines } : { id: 'seat', state: 'needs_person', summary: '', organization, ended, ...(machines.length ? { away: machines } : {}) });
       steps.push({ id: 'hook', state: 'optional', summary: '', organization, terminals: group && bound[0].folders.length ? 'active' : 'waiting' });
       steps.push({ id: 'launch', state: 'optional', summary: '', organization });
     }
@@ -658,8 +658,20 @@ export function createDemoAdapter(): Adapter {
       account.pool = pool; log('project', '', 'updated');
       // SB-403: a group of another organization takes it; the answer warns, as the owner's does.
       const project = (state.projects ?? []).find((p) => p.pool === pool);
-      if (project && groupOrganizations(project).length && !groupAdmits(state, groupOrganizations(project), account)) return { pool, warnings: [{ code: 'outside_organization', pool, group: project.name }] };
+      if (project && (state.organizations ?? []).length && !groupAdmits(state, groupOrganizations(project), account)) return { pool, warnings: [{ code: 'outside_organization', pool, group: project.name, group_personal: !groupOrganizations(project).length }] };
       return { pool };
+    },
+    async projectAddAccounts(pool, ids) {
+      await pause();
+      const project = (state.projects ?? []).find((p) => p.pool === pool); if (!project) throw new Error('Project not found.');
+      const groupPools = new Set((state.projects ?? []).map((p) => p.pool));
+      for (const id of ids) {
+        const account = state.accounts.find((a) => a.id === id); if (!account) throw new Error('Account not found.');
+        if (account.pool === pool) continue;
+        if (groupPools.has(account.pool)) { const shared = (project.shared_accounts ??= []); if (!shared.includes(id)) shared.push(id); }
+        else account.pool = pool;
+      }
+      log('project', '', 'updated');
     },
     async moveRoot(folder, pool, also, leave) {
       await pause();

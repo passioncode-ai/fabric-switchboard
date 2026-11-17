@@ -31,10 +31,10 @@ wave table at the end. Decision: [DEC-0022](../../DECISIONS.md#dec-0022-an-organ
 
 ## Done on the operator's Mac (2026-11-17, through MCP)
 
-- Organization **Appvillis** created (one domain).
+- An organization created (one domain).
 - Four accounts on another machine's user (in its machine group) and one account here (moved home
-  into the group bound to Appvillis, 7 folders) work for Appvillis. Each keeps the personal
-  context first (`organizations: [personal, Appvillis]`): assigning Appvillis alone was refused
+  into the group bound to the organization, 7 folders) work for it. Each keeps the personal
+  context first (`organizations: [personal, <organization>]`): assigning the organization alone was refused
   then ("a group this account or its provider team serves would then refuse it"), and the groups
   that use them kept working. S1 removed that refusal.
 - Every Claude account here was at 0 % of its weekly window (resets 2026-11-20) except three that
@@ -100,6 +100,19 @@ wave table at the end. Decision: [DEC-0022](../../DECISIONS.md#dec-0022-an-organ
 - **D-15 (S1 round 1).** Automatic picks outside the group's organizations are journaled
   (`failover_outside`) and counted (`FailoverTally.outside`, `outside` on a rotation decision);
   statistics count an account once, under its first context.
+- **D-16 (S1 round 2).** *Add a seat* adds one account to the group as a delta (`project_add_accounts`,
+  the window's door to `ProjectEdit { add_accounts }`), never a save of the whole group from the
+  window's last read, which could drop a folder or account found meanwhile.
+- **D-17 (S1 round 2).** The account the ordinary Claude Code or Codex is signed in to cannot join a
+  group: the seat step never suggests it (`left_out`, `reason: in_cli`) and the dialog says why.
+- **D-18 (S1 round 2).** With a group here and every seat on another machine, the seat step needs the
+  person (a seat elsewhere does not work here) and offers the call back among its alternatives; it is
+  optional only when no group exists here.
+- **D-19 (S1 round 2).** An account placed in a personal group while it works for an organization gets
+  its own warning wording ("the personal group … uses it anyway").
+- **D-20 (S1 round 2).** Isolated homes (`homes/<account id>`) stay one per account, not per context:
+  re-keying would move every existing home and sign-in. Managed launches run in each group's runtime
+  and are not affected. Recorded as a known limitation in DEC-0022 and CONTRACTS; a board row follows.
 
 ## Waves
 
@@ -109,7 +122,7 @@ wave table at the end. Decision: [DEC-0022](../../DECISIONS.md#dec-0022-an-organ
 | S2 | `ssh-serve` restricted entry, `delegated` account kind and its refusals, lease and its renewal by the sender | next |
 | S3 | "Own sign-in off" switch; proof that Claude Desktop and `~/.claude` are untouched (synthetic Keychain tests) | with S2 |
 | S4 | Teammate setup guide (`docs/ORGANIZATION.md` §4b), window and MCP for delegate and revoke, CONTRACTS | after S2 |
-| S5 | Live: a teammate's machine on the tailnet, one Appvillis subscription delegated, a console session on it, Claude Desktop checked untouched, recall | needs the teammate's machine (human step: install, tailnet, ssh key) |
+| S5 | Live: a teammate's machine on the tailnet, one organization subscription delegated, a console session on it, Claude Desktop checked untouched, recall | needs the teammate's machine (human step: install, tailnet, ssh key) |
 
 ### S1 evidence
 
@@ -123,5 +136,5 @@ wave table at the end. Decision: [DEC-0022](../../DECISIONS.md#dec-0022-an-organ
 - Contract: [CONTRACTS](../../CONTRACTS.md#an-organization-is-a-label-sb-403-dec-0022-2026-11-17).
 - Scenarios: SCN-062, SCN-069, SCN-070, SCN-076, SCN-077 in [ux/scenarios.md](../../ux/scenarios.md).
 - Deferred to later waves or rows: a live check on the operator's Mac after the release (the
-  Appvillis card should read *Done*); the Statistics *By organization* table still attributes a
+  organization's card should read *Done*); the Statistics *By organization* table still attributes a
   request to the account's first organization (unchanged by S1).

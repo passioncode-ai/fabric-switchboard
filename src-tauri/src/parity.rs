@@ -112,6 +112,7 @@ const PARITY: &[(&str, Over)] = &[
     ("remove_project", Tool("switchboard_project_delete")),
     ("project_roots", Tool("switchboard_projects")),
     ("move_root", Tool("switchboard_project_move_root")),
+    ("project_add_accounts", Tool("switchboard_project_edit")),
     ("codex_route", Tool("switchboard_codex_route")),
     ("balance", Tool("switchboard_balance")),
     ("capacity", Tool("switchboard_capacity")),

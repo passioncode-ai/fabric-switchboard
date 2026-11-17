@@ -4278,7 +4278,8 @@ pub fn organizations_view(snapshot: &switchboard_core::Snapshot) -> Value {
 /// organization (`person`, or `provider` for its team there), `context` (`first` when it is the
 /// account's own organization, `also` when it works for it beside another, SB-403), whether it lives here or on another
 /// machine, and an opaque `seat` id (a digest of the organization and the account, the same on
-/// every read, never the account's id). No personal account, label, e-mail, token or machine name.
+/// every read, never the account's id). No account that does not work for it, label, e-mail,
+/// token or machine name: a personal account that also works for it is a seat (`also`).
 fn organization_seats(snapshot: &switchboard_core::Snapshot) -> Value {
     use sha2::{Digest, Sha256};
     let seats: Vec<Value> = snapshot
@@ -5323,6 +5324,9 @@ async fn execute(
             "claude_swap_accounts": refresh::swap_held(refresh_state),
             "renewal_blocked": refresh_state.renewal_blocked(),
             "claude_swap_switching": refresh_state.swap_switching(),
+            // SB-403 (round 2): the accounts the ordinary CLI is signed in to, which no group
+            // takes (the setup checklist leaves them out of its seat suggestions).
+            "in_cli": store.in_use_ids(),
         })),
         Operation::Add {
             label,
@@ -9213,9 +9217,9 @@ mod owner_tests {
 
     #[test]
     fn an_account_that_also_works_for_an_organization_counts_as_its_seat() {
-        // SB-403: an account on the operator's Mac works for Appvillis beside its personal
-        // context (`organizations: [personal, Appvillis]`). Organizations counted only
-        // first contexts, so Appvillis read as having no account.
+        // SB-403: an account works for an organization beside its personal context
+        // (`organizations: [personal, <organization>]`). Organizations counted only first
+        // contexts, so the organization read as having no account.
         let root = tempfile::tempdir().unwrap();
         let store = Store::open(root.path().to_owned(), Arc::new(MemoryVault::default())).unwrap();
         let both = save(&store, "synthetic-both", "default");

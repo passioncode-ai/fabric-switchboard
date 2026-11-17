@@ -4248,6 +4248,8 @@ function seatDialog(target: { pool: string; group: string; organization: { id: s
   radio('sign-in', t('Sign in with any address'), null);
   radios[0].checked = true;
   context.body.append(options, el('p', 'form-note', t('An account of another group keeps its group and serves this one too. One in the default group moves here and then works only in this group\'s folders.')));
+  // Round 2: say why the CLI's own account is missing from the list.
+  for (const account of (snapshot?.accounts ?? []).filter((a) => a.enabled && a.pool !== target.pool && inCli(a))) context.body.append(el('p', 'form-note', t('{label} is not offered: Claude Code or Codex is signed in to it, so it cannot join a group. Switch the CLI to another account first.', { label: account.label })));
   context.actions.append(submit(t('Add seat')));
   context.form.addEventListener('submit', (event) => {
     event.preventDefault();
@@ -4255,12 +4257,12 @@ function seatDialog(target: { pool: string; group: string; organization: { id: s
     if (!value) return;
     if (value === 'sign-in') { context.close(); void startLogin('claude', '', target.pool); return; }
     const choice = choices.find((c) => c.account.id === value); if (!choice) return;
-    const project = (snapshot?.projects ?? []).find((p) => p.pool === target.pool); if (!project) return;
-    const serving = (snapshot?.accounts ?? []).filter((a) => servesPool(snapshot!, a, target.pool)).map((a) => a.id);
     const moved = moves(choice.account);
-    // The group first: a refused save leaves the account's organizations as they were.
+    // The group first, by delta (round 2: never a whole save from this window's last snapshot,
+    // which would drop a folder found meanwhile); a refused add leaves the account's
+    // organizations as they were. A group deleted meanwhile is the add's own refusal.
     void dialogSave(context, async () => {
-      await adapter.saveProject({ pool: project.pool, name: project.name, folders: project.folders, accountIds: [...serving, choice.account.id] });
+      await adapter.projectAddAccounts(target.pool, [choice.account.id]);
       if (!choice.holds) await adapter.organizationAssign(choice.account.id, null, undefined, { also: [target.organization.id] });
     }, () => moved ? t('{label} moved to “{group}” and works for {organization} there.', { label: choice.account.label, group: target.group, organization: target.organization.name }) : t('{label} now serves “{group}” for {organization}.', { label: choice.account.label, group: target.group, organization: target.organization.name }));
   });

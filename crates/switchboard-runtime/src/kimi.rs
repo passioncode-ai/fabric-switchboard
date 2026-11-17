@@ -741,8 +741,8 @@ pub fn cancel_login(root: &Path, store: &Store, id: &str) -> Result<(), String> 
 }
 
 /// SB-201: a Kimi session's context, fixed for the session as Claude Code's and Codex's. A Kimi
-/// account belongs to no organization and serves no group's pool, so it is personal, also in an
-/// organization's folder (the more private wins; A-Q6: launched, not refused).
+/// account belongs to no organization and serves no group's pool: personal outside a group, the
+/// folder's group's context inside one (DEC-0022, SB-403 round 1; launched, not refused).
 fn context(store: &Store, folder: &Path) -> Result<String, String> {
     Ok(store.snapshot()?.context_for(None, None, Some(folder)))
 }

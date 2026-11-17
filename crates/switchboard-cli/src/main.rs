@@ -4209,12 +4209,16 @@ pub(crate) async fn onboard_status(
             // A failed read leaves its list empty and is named in the step it touches.
             match call(root, Operation::MonitorStatus).await {
                 Ok(monitor) => {
-                    probe.sign_in_required = monitor["sign_in_required"]
-                        .as_array()
-                        .into_iter()
-                        .flatten()
-                        .filter_map(|id| id.as_str().map(str::to_owned))
-                        .collect()
+                    let list = |key: &str| -> Vec<String> {
+                        monitor[key]
+                            .as_array()
+                            .into_iter()
+                            .flatten()
+                            .filter_map(|id| id.as_str().map(str::to_owned))
+                            .collect()
+                    };
+                    probe.sign_in_required = list("sign_in_required");
+                    probe.in_cli = list("in_cli");
                 }
                 Err(_) => probe.degraded.push("sign_ins".into()),
             }

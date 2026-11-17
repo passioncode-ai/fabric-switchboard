@@ -73,6 +73,7 @@ export const nativeAdapter: Adapter = {
   saveProject: (input) => invoke('save_project', { pool: input.pool ?? null, name: input.name, folders: input.folders, accountIds: input.accountIds, baseFolders: input.baseFolders ?? null, organization: input.organization ?? null, organizations: input.organizations ?? null }),
   removeProject: (pool) => invoke('remove_project', { pool }),
   projectRoots: () => invoke('project_roots'),
+  projectAddAccounts: (pool, accounts) => invoke('project_add_accounts', { pool, accounts }),
   moveRoot: (folder, pool, also, from) => invoke('move_root', { folder, pool, also: also ?? false, from: from ?? null }),
   codexRoute: (enabled) => invoke('codex_route', { enabled: enabled ?? null }),
   sessionTree: () => invoke('session_tree'),

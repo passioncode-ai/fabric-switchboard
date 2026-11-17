@@ -451,7 +451,8 @@ impl Snapshot {
     /// SB-201: the context of a session that runs on no account, on a saved key of `key_pool`
     /// (a group's own key; none: the machine's key, or no key at all as Kimi Code): the key's
     /// group's organization is its own (SB-282: its first, of several). The machine's key
-    /// belongs to no organization, so in an organization's folder it reads personal.
+    /// belongs to no organization: outside a group it reads personal, in a group's folder the
+    /// group's context (DEC-0022, SB-403 round 1: the group owns the data).
     pub fn key_context(&self, key_pool: Option<&str>, folder: Option<&std::path::Path>) -> String {
         let own = key_pool
             .and_then(|p| self.project_of_pool(p))
@@ -487,14 +488,18 @@ impl Snapshot {
             .into_iter()
             .map(|p| {
                 let name = shown_name(account);
-                let message = if personal {
+                // Round 2: a personal group holding an organization's account says so plainly.
+                let group_personal = p.organizations.is_empty();
+                let message = if group_personal {
+                    format!("{name} works for an organization; the personal group “{}” uses it anyway.", p.name)
+                } else if personal {
                     format!("{name} is a personal account and the group “{}” serves an organization. It serves the group anyway; assign it the organization if it works for it.", p.name)
                 } else {
                     format!("{name} works for another organization than the group “{}”. It serves the group anyway; assign it the group's organization too if it works for it.", p.name)
                 };
                 serde_json::json!({"code": "outside_organization", "account": account.id,
                     "label": account.label, "pool": p.pool, "group": p.name,
-                    "personal": personal, "message": message})
+                    "personal": personal, "group_personal": group_personal, "message": message})
             })
             .collect()
     }

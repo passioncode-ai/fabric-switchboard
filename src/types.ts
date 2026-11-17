@@ -138,6 +138,8 @@ export interface Adapter {
   /** SB-282: `organizations` names every context of the account in order and wins over `choice`. SB-403: `options.also` adds organizations to the ones it has; `options.team` places its provider team's other seats too. The answer names the groups it serves outside them (`outside`). */ organizationAssign(account: string, choice: string | null, organizations?: string[], options?: { also?: string[]; team?: boolean }): Promise<OrganizationAssigned>;
   passioncode(action: 'status' | 'connect' | 'cancel' | 'read' | 'disconnect'): Promise<PassioncodeStatus>;
   /** SB-146: `also` adds it to one more group; `from` names the group it leaves when it is in several. */
+  /** SB-403 (round 2): accounts into a group by delta (`ProjectEdit { add_accounts }`); one at home in another group is shared, one in the default group moves. */
+  projectAddAccounts(pool: string, accounts: string[]): Promise<unknown>;
   moveRoot(folder: string, pool: string, also?: boolean, from?: string | null): Promise<unknown>;
   /** SB-143: Codex in project folders. */
   codexRoute(enabled?: boolean | null): Promise<CodexRoute>;
@@ -291,7 +293,7 @@ export interface ShellHookFile { shell: string; path: string; state: string }
 /** What `switchboard shell status` reads, for the window: `hook` is on, off, default_on (a group belongs to an organization) or default_off; `can_change` is false outside the installed app. */
 /** SB-202 (B-8): one step of `switchboard onboard`, as the window reads it through the Tauri `onboard` command. */
 /** SB-403: what a move or a call back answers about where the account landed: the group (`pool`), `warnings` for a group whose organizations it does not hold, and `placed_error` when it could not join the group asked for. */
-export interface Placement { pool?: string; warnings?: { code: string; pool: string; group: string }[]; placed_error?: string }
+export interface Placement { pool?: string; warnings?: { code: string; pool: string; group: string; group_personal?: boolean }[]; placed_error?: string }
 /** SB-403: the answer of a word on an account's organizations. */
 export interface OrganizationAssigned { account?: string; organization?: string | null; also?: string[]; outside?: { pool: string; name: string }[]; team?: 'claimed' | 'not_claimed'; teammates?: number }
 export interface OnboardStep { id: string; state: 'done' | 'todo' | 'needs_person' | 'optional'; summary: string; next?: unknown; organization?: { id: string; name: string }; group?: { pool: string; name: string }; groups?: string[]; ended?: number; terminals?: 'active' | 'pending' | 'off' | 'waiting' | 'unread'; /** org_group, seat: the machines where all of the organization's accounts live, when none is here. */ away?: string[] }

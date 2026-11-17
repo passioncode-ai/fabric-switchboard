@@ -218,7 +218,8 @@ pub(crate) fn desired(snapshot: &Snapshot) -> Vec<(PathBuf, String)> {
     for project in projects {
         // A group routes its folders to its own accounts whatever their organizations
         // (DEC-0022, SB-403). A group bound to an organization with no enabled Claude account
-        // gets no route (its folders stay closed) and never falls back to the default group.
+        // gets no binding (nothing is written for its folders) and never falls back to the
+        // default group's accounts.
         let route = if has_claude(&project.pool) {
             project.pool.clone()
         } else if project.organizations.is_empty()

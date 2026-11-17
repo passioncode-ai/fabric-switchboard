@@ -417,11 +417,11 @@ research notes); the ones still in force that the board cites are seeded below w
   a binding, `SEAT_OUTSIDE` a selection and every request on the proxy, `ASSIGN_OUTSIDE` a word on
   an account whose team a group served (SB-109, SB-282, SB-313, SB-314). On 2026-11-17 the
   operator's Mac showed the cost: `accounts recall` of two organization accounts into personal
-  groups answered `placed_error` and left them in `default`; assigning Appvillis alone to an
-  account a personal group used was refused; one Claude Team seat placed in an organization pulled about 33
-  teammates the person never named; and Appvillis's checklist read "no signed-in account" while
-  one worked for it, and asked for "your Appvillis address" although an organization may have
-  several domains or none.
+  groups answered `placed_error` and left them in `default`; assigning an organization alone to an
+  account a personal group used was refused; one Claude Team seat placed in an organization pulled
+  its teammates the person never named; and an organization's checklist read "no signed-in account"
+  while one worked for it, and asked for "your {organization} address" although an organization may
+  have several domains or none.
 - **Decision:** an organization is a label on an account (whose work it does, what it is delegated
   for), never a lock. A person's act (assigning an organization, adding one, placing, moving,
   sharing, binding a group, signing in into a group, calling an account back) is never refused
@@ -437,7 +437,12 @@ research notes); the ones still in force that the board cites are seeded below w
   contexts the account holds, else the group's first (round 1 of the review, 2026-11-17: before,
   such a launch ran personal while a terminal in the same folder ran in the organization). Automatic
   picks outside the group's organizations are recorded (`failover_outside`, `outside`). Statistics
-  count an account under its first context once. Supersedes the refusing parts of SB-109, SB-282,
+  count an account under its first context once. Known limitation (round 2 of the review): a launch
+  outside a group's managed route uses the account's isolated home `homes/<account id>`, one per
+  account, so an account serving a personal group and an organization's group keeps both groups'
+  Claude state there; managed launches run in each group's own runtime and are not affected. Keying
+  that home by account and context would move every existing home and sign-in, so it is left to a
+  board row. Supersedes the refusing parts of SB-109, SB-282,
   SB-313 and SB-314 and the domain-only seat step of SB-202; DEC-0009 (a domain only suggests)
   stands, and an organization may have several domains or none.
 - **Consequences / affects:** [CONTRACTS](CONTRACTS.md#an-organization-is-a-label-sb-403-dec-0022-2026-11-17),

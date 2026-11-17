@@ -1089,6 +1089,31 @@ async fn duty(
         })
         .await
 }
+/// SB-403 (round 2): accounts added to a group by delta, as `switchboard project edit
+/// --add-account` does: the group's folders and other accounts are read when it runs, never from
+/// the window's last snapshot. An account at home in another group is shared.
+#[tauri::command]
+async fn project_add_accounts(
+    pool: String,
+    accounts: Vec<String>,
+    state: State<'_, Slot>,
+) -> Result<Value, String> {
+    state
+        .runtime()
+        .await?
+        .execute(Operation::ProjectEdit {
+            pool,
+            name: None,
+            add_accounts: accounts,
+            remove_accounts: Vec::new(),
+            add_folders: Vec::new(),
+            remove_folders: Vec::new(),
+            organization: None,
+            organizations: None,
+            move_accounts: false,
+        })
+        .await
+}
 /// SB-135: a repository with its worktrees and clones into another project, in one step.
 #[tauri::command]
 async fn move_root(
@@ -1642,6 +1667,7 @@ fn onboard_probe(reads: OnboardReads<'_>) -> switchboard_runtime::onboarding::Pr
             Some(list) => probe.sign_in_required = list,
             None => probe.degraded.push("sign_ins".into()),
         }
+        probe.in_cli = ids(reads.monitor, "in_cli", None).unwrap_or_default();
         match ids(reads.sessions, "sessions", Some("context")) {
             Some(list) => probe.contexts = list,
             None => probe.degraded.push("sessions".into()),
@@ -2045,6 +2071,7 @@ fn main() {
             remove_project,
             project_roots,
             move_root,
+            project_add_accounts,
             codex_route,
             balance,
             capacity,

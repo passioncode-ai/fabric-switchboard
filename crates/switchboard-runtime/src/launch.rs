@@ -2201,7 +2201,8 @@ fn carry_pi(own: &Path) -> Result<(), String> {
     Ok(())
 }
 /// SB-201: the context of an agent on a saved key: the group's own key gives that group's
-/// context, the machine's key is personal (also in an organization's folder).
+/// context; the machine's key is personal outside a group and the folder's group's context
+/// inside one (DEC-0022, SB-403 round 1).
 fn key_context(
     store: &Store,
     key: &switchboard_core::agent_keys::AgentKey,

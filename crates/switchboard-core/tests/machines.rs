@@ -279,6 +279,13 @@ fn an_organizations_account_comes_home_to_a_personal_group_named() {
     let back = snapshot.accounts.iter().find(|a| a.id == seat).unwrap();
     assert_eq!(back.pool, personal.pool);
     assert_eq!(snapshot.groups_outside(back).len(), 1);
+    // Round 2: the warning names a personal group as one.
+    let warnings = snapshot.outside_warnings(back);
+    assert_eq!(warnings[0]["group_personal"], true);
+    assert_eq!(
+        warnings[0]["message"],
+        "seat@example.com works for an organization; the personal group “PassionCode” uses it anyway."
+    );
 }
 
 #[test]

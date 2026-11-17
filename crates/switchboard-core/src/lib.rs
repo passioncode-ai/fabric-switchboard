@@ -1330,6 +1330,15 @@ impl Store {
             }
         }
     }
+    /// SB-403 (round 2): the accounts the ordinary CLI was signed in to at the monitor's last
+    /// look, by id; empty before the first look.
+    pub fn in_use_ids(&self) -> Vec<String> {
+        self.in_use
+            .lock()
+            .ok()
+            .and_then(|set| set.as_ref().map(|ids| ids.iter().cloned().collect()))
+            .unwrap_or_default()
+    }
     pub fn set_in_use(&self, ids: std::collections::BTreeSet<String>) -> Result<(), String> {
         let added: Vec<String> = {
             let mut set = self

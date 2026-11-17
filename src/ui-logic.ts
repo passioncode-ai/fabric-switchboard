@@ -1668,10 +1668,11 @@ function orgSetupLine(step: OnboardStep, organization: string, group: { pool: st
       return t('{organization} has no group on this computer yet.', { organization });
     case 'seat':
       if (step.state === 'done') return group ? t('An account of “{group}” is signed in.', { group: group.name }) : t('An account that works for {organization} is signed in.', { organization });
-      // SB-403: its accounts work on other machines; nothing is needed here.
+      // SB-403: its accounts work on other machines. With a group here the step still needs
+      // you (round 2): the line says where they are and *Add a seat* stays the card's action.
       if (step.away) return step.away.length ? t('Its accounts work on {machines}. Call one back on Accounts to work here.', { machines: step.away.join(', ') }) : t('Its accounts are on another machine. Call one back on Accounts to work here.');
       if (!group) return t('Sign in once the group exists.');
-      return (step.ended ?? 0) > 0 ? t('Your {organization} accounts in “{group}” must sign in again. If {organization} removed your seat, ask its administrator.', { organization, group: group.name }) : seatLeadLine(organization, group.name);
+      return (step.ended ?? 0) > 0 ? t('Accounts in “{group}” must sign in again. If {organization} removed a seat, ask its administrator.', { organization, group: group.name }) : seatLeadLine(organization, group.name);
     case 'hook':
       return ({
         active: t("Terminals in {organization}'s folders work in its context. To turn this off:", { organization }),
@@ -1746,8 +1747,12 @@ export function placementNotice(label: string, base: string, answer: Placement |
   const parts: string[] = [];
   if (answer && answer.placed_error) parts.push(t('{label} is back on this computer, {where}. It could not join the group you chose: {reason}', { label, where: where(answer.pool ?? 'default'), reason: answer.placed_error }));
   else parts.push(base);
-  const groups = [...new Set((answer?.warnings ?? []).filter((w) => w.code === 'outside_organization').map((w) => w.group))];
+  const outside = (answer?.warnings ?? []).filter((w) => w.code === 'outside_organization');
+  const groups = [...new Set(outside.filter((w) => !w.group_personal).map((w) => w.group))];
+  const personal = [...new Set(outside.filter((w) => w.group_personal).map((w) => w.group))];
   if (groups.length) parts.push(t('These groups use it, though its organizations are not theirs: {groups}.', { groups: groups.join(', ') }));
+  // Round 2: a personal group holding an organization's account.
+  if (personal.length) parts.push(t('It works for an organization; these personal groups use it anyway: {groups}.', { groups: personal.join(', ') }));
   return parts.join(' ');
 }
 /** SB-403: the notice after a word on an account's organizations: the groups it serves outside

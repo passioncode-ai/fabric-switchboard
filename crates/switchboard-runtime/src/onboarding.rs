@@ -58,6 +58,10 @@ pub struct Probe {
     pub snapshot: Option<switchboard_core::Snapshot>,
     /// SB-202: accounts whose sign-in ended (the monitor's `sign_in_required`).
     pub sign_in_required: Vec<String>,
+    /// SB-403 (round 2): accounts the ordinary Claude Code or Codex is signed in to (the
+    /// monitor's `in_cli`): no group takes them (`PROJECT_ACCOUNT_IN_CLI`), so the seat step never
+    /// suggests adding one.
+    pub in_cli: Vec<String>,
     /// SB-202: the contexts of recorded sessions (`personal`, `org:<id>`).
     pub contexts: Vec<String>,
     /// SB-202: `switchboard shell status` (SB-183, node A-1), when it was read.
@@ -507,6 +511,8 @@ fn organization_steps(probe: &Probe, cli: &str) -> Vec<Value> {
         let usable = |a: &switchboard_core::Account| {
             a.enabled && here(a) && !probe.sign_in_required.contains(&a.id)
         };
+        // Round 2: the ordinary CLI's account cannot join a group, so it is never suggested.
+        let in_cli = |a: &switchboard_core::Account| probe.in_cli.contains(&a.id);
         // With a group, a seat is an account one of its groups holds: only those route there
         // (`bindings::desired`). With none, any account that works for the organization.
         let seats: Vec<&switchboard_core::Account> = snapshot
@@ -550,7 +556,7 @@ fn organization_steps(probe: &Probe, cli: &str) -> Vec<Value> {
             snapshot
                 .accounts
                 .iter()
-                .filter(|a| holds(a) && !serving(a) && usable(a))
+                .filter(|a| holds(a) && !serving(a) && usable(a) && !in_cli(a))
                 .collect()
         };
         // Then the accounts its domains suggest (an organization may have several domains, or
@@ -562,7 +568,9 @@ fn organization_steps(probe: &Probe, cli: &str) -> Vec<Value> {
                 snapshot
                     .accounts
                     .iter()
-                    .filter(|a| here(a) && a.enabled && !seats.iter().any(|s| s.id == a.id))
+                    .filter(|a| {
+                        here(a) && a.enabled && !in_cli(a) && !seats.iter().any(|s| s.id == a.id)
+                    })
                     .filter(|a| !holders_here.iter().any(|h| h.id == a.id))
                     .filter(|a| {
                         snapshot
@@ -571,6 +579,20 @@ fn organization_steps(probe: &Probe, cli: &str) -> Vec<Value> {
                     })
                     .map(|a| json!({"id": a.id, "label": a.label})),
             )
+            .collect();
+        // An account that would have been suggested but that the ordinary CLI uses: named, so
+        // the person learns why it is missing (switch the CLI first).
+        let left_out: Vec<Value> = snapshot
+            .accounts
+            .iter()
+            .filter(|a| here(a) && a.enabled && in_cli(a) && !serving(a))
+            .filter(|a| {
+                holds(a)
+                    || snapshot
+                        .domain_organization(a)
+                        .is_some_and(|o| o.id == organization.id)
+            })
+            .map(|a| json!({"id": a.id, "label": a.label, "reason": "in_cli"}))
             .collect();
         let unread = if degraded("sign_ins") {
             " Whether a sign-in ended could not be read."
@@ -604,7 +626,8 @@ fn organization_steps(probe: &Probe, cli: &str) -> Vec<Value> {
                 Value::Null,
             ),
             // Its accounts work on other machines: nothing is needed here.
-            _ if ended == 0 && holders_here.is_empty() && !away_ids.is_empty() => with(
+            // With a group here it still needs an account here; calling one back is an alternative.
+            None if ended == 0 && !away_ids.is_empty() => with(
                 "away",
                 json!(seats_away),
                 step(
@@ -661,7 +684,7 @@ fn organization_steps(probe: &Probe, cli: &str) -> Vec<Value> {
                         "needs_person",
                         if ended > 0 {
                             format!(
-                                "None of {name}'s accounts in {} is signed in: {ended} must sign in again.",
+                                "None of the accounts in “{}” is signed in: {ended} must sign in again.",
                                 group.name
                             )
                         } else {
@@ -682,11 +705,22 @@ fn organization_steps(probe: &Probe, cli: &str) -> Vec<Value> {
                 json!({"person": format!("Once {name} has a group, give it an account already on this computer, or sign in with any address.")}),
             ),
         };
-        push(if suggested.is_empty() {
+        let seat_step = if suggested.is_empty() {
             seat_step
         } else {
             with("suggested", json!(suggested), seat_step)
-        });
+        };
+        let seat_step = if left_out.is_empty() || seat_step["state"] == "done" {
+            seat_step
+        } else {
+            with("left_out", json!(left_out), seat_step)
+        };
+        let seat_step = if seat_step["state"] == "needs_person" && !seats_away.is_empty() {
+            with("away", json!(seats_away), seat_step)
+        } else {
+            seat_step
+        };
+        push(seat_step);
         let place = group.map_or_else(|| format!("{name}'s"), |g| format!("{}'s", g.name));
         let hook = probe
             .shell
@@ -1560,11 +1594,11 @@ mod tests {
         assert_eq!(seat["state"], "needs_person");
         assert_eq!(
             seat["summary"],
-            "None of Acme's accounts in Acme work is signed in: 1 must sign in again."
+            "None of the accounts in “Acme work” is signed in: 1 must sign in again."
         );
         assert_eq!(answer["complete"], false);
-        // A switched-off seat does not count either; one used on another machine makes the
-        // step optional: the organization works there (SB-403).
+        // A switched-off seat does not count either, nor one used on another machine: the
+        // group here still has no account here (SB-403 round 2).
         let mut probe = acme();
         probe.snapshot.as_mut().unwrap().accounts[0].enabled = false;
         assert_eq!(by_id(&steps(&probe), "seat")["state"], "needs_person");
@@ -1575,7 +1609,7 @@ mod tests {
             .unwrap()
             .elsewhere
             .insert("a-1".into(), 1);
-        assert_eq!(by_id(&steps(&probe), "seat")["state"], "optional");
+        assert_eq!(by_id(&steps(&probe), "seat")["state"], "needs_person");
         // SB-403: an account the group holds serves it whatever its organizations, so a personal
         // account in the group, or one only its domain suggests for Acme, is its seat.
         let mut probe = acme();
@@ -1601,9 +1635,9 @@ mod tests {
 
     #[test]
     fn a_seat_held_as_also_counts_through_read_snapshot() {
-        // SB-403: an account works for Appvillis beside its personal context. The
+        // SB-403: an account works for an organization beside its personal context. The
         // owner's snapshot went through `read_snapshot`, which dropped `also_organizations`, so
-        // Appvillis read "no signed-in account".
+        // the organization read "no signed-in account".
         let mut probe = acme_without_a_seat();
         let snapshot = probe.snapshot.as_mut().unwrap();
         snapshot.memberships.insert(
@@ -1686,10 +1720,12 @@ mod tests {
 
     #[test]
     fn seat_is_optional_when_seats_are_away() {
-        // The group exists here, but Acme's one account lives on the Studio: nothing is needed
-        // here; calling it back is offered.
+        // Without a group here, Acme's one account on the Studio makes the step optional.
+        // Round 2: with a group here, that group still has no account, so the step needs the
+        // person, and calling the account back is one of its alternatives.
         let mut probe = acme();
         let snapshot = probe.snapshot.as_mut().unwrap();
+        snapshot.projects.clear();
         snapshot.accounts[0].pool = "machine_studio".into();
         snapshot.machines.push(switchboard_core::Machine {
             pool: "machine_studio".into(),
@@ -1706,7 +1742,49 @@ mod tests {
             seat["summary"],
             "Acme's accounts work on studio. Call one back to work here."
         );
-        assert_eq!(answer["complete"], true);
+        let mut probe = acme();
+        let snapshot = probe.snapshot.as_mut().unwrap();
+        snapshot.accounts[0].pool = "machine_studio".into();
+        snapshot.machines.push(switchboard_core::Machine {
+            pool: "machine_studio".into(),
+            name: "studio".into(),
+            identity: None,
+            aliases: Vec::new(),
+            created_at: 1,
+        });
+        let answer = steps(&probe);
+        let seat = by_id(&answer, "seat");
+        assert_eq!(seat["state"], "needs_person", "{seat}");
+        assert_eq!(seat["away"], json!(["studio"]));
+        let alternatives = seat["next"]["alternatives"].as_array().unwrap();
+        assert!(
+            alternatives.contains(&json!("switchboard accounts recall a-1")),
+            "{seat}"
+        );
+        assert_eq!(answer["complete"], false);
+    }
+
+    #[test]
+    fn the_ordinary_clis_account_is_never_suggested_and_is_named() {
+        // Round 2: `project edit --add-account` refuses the ordinary CLI's account
+        // (`PROJECT_ACCOUNT_IN_CLI`), so it is never suggested; it is named under `left_out`.
+        let mut probe = acme();
+        probe.snapshot.as_mut().unwrap().accounts[0].pool = "default".into();
+        probe.in_cli = vec!["a-1".into()];
+        let answer = steps(&probe);
+        let seat = by_id(&answer, "seat");
+        assert_eq!(seat["state"], "needs_person", "{seat}");
+        assert!(seat["suggested"].is_null(), "{seat}");
+        assert_eq!(
+            seat["left_out"],
+            json!([{"id": "a-1", "label": "me@acme.com", "reason": "in_cli"}])
+        );
+        assert!(!seat["next"]["alternatives"]
+            .as_array()
+            .unwrap()
+            .contains(&json!(
+                "switchboard project edit --pool acme-work --add-account a-1"
+            )));
     }
 
     #[test]
