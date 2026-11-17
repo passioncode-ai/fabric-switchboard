@@ -8,6 +8,11 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- An organization is a label, never a lock on where an account works (SB-403, DEC-0022). Assigning an organization, adding one, placing, moving or sharing an account, binding a group, signing in into a group and calling an account back are no longer refused because of organizations: the group keeps the account and serves its folders, and the answer warns (`warnings`, `outside`). Automatic switching prefers the group's own organizations' accounts; balancing still lends nothing across an organization's boundary. A session's context is unchanged, so personal and organization records stay apart.
+- Placing one seat of a Claude Team or ChatGPT workspace places that seat only; its team follows only when asked (`org assign --team`, MCP `team`, the window's box), and the answer says `team: claimed` or `not_claimed` with the number of teammates.
+- `org assign ID --also ORG` (MCP `also`) adds an organization to the ones an account works for and keeps its own. An organization needs no domain, or may have several.
+- An account that also works for an organization counts as its seat: in the Organizations counts, in each account row (`also`) and in the org-seats data (`context: first|also`). The setup checklist reads every field it needs (an account that also worked for the organization, or lived on another machine, used to read as none), and *Your seat* no longer asks for "your {organization} address": *Add a seat* gives the organization's group an account already on this computer or a sign-in with any address, and the step is optional when the organization's accounts all work on other machines.
+
 ## 0.7.111
 
 - 0.7.110 was tagged but never published: its Windows build failed, because a session module meant for macOS and Linux was compiled for Windows too. This release carries its changes, listed below, with that fixed.
