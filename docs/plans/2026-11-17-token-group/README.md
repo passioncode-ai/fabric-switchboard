@@ -61,13 +61,111 @@ wave table at the end.
 - **D-6. Folders are added one by one,** by the person (window, CLI `project edit --add-folders`,
   MCP) and never by a found worktree or clone.
 
+- **D-7 (review fixes, 2026-11-17).** A key of the pay-per-token group never leaves it nor serves
+  another group: no share, no loan, no move by a save or a restore (one check in `publish` and
+  `hold`, plus validation of `shared_accounts`, `default_shared`, `default_lent`); the person
+  removes the account to take it out. A save of the group moves a listed key in, never shares it.
+  A key launches only in managed mode. The proxy also checks the chosen account's home group after
+  route selection and before an SB-98 move. Reason: two reviewers showed a shared key and an
+  isolated launch spending outside the ceiling; the instruction was to refuse every move out.
+- **D-8 (review fixes).** The proxy fails closed: an unreadable store refuses, an unreadable
+  `spend.json` is no ceiling, and the day counter takes over a poisoned lock (its numbers stay
+  right) instead of reading zero. The counter is the proxy's own and is never drained; the owner
+  seeds it at start from `statistics.json`. A Claude answer with no model or with cut counts is
+  priced at the dearest family and marked estimated.
+- **D-9 (review fixes).** A reached ceiling opens the existing "double or keep" question once per
+  group and UTC day (answered or not), from the owner's background pass.
+
 ## Waves
 
 | Wave | What | State |
 |---|---|---|
-| T1 | Core: group kind `tokens`, zero folders allowed for it, `enabled` on groups (absent = on for every other group), new keys land there, `default` refused for a key; migration none | next |
-| T2 | Safety: bindings skip an off group, proxy refuses an off group, rules and switches refused, no auto-join, delete refused, Needs attention for a key in `default` | after T1 |
-| T3 | Money: model per request in `statistics.json`, price table, spend per account and group per day, `switchboard usage --money`, MCP | after T1 |
-| T4 | Ceiling: turning on requires a daily ceiling; the proxy checks it per request; reached → refuse + question | after T2, T3 |
-| T5 | Window: the group card with its switch, ceiling, today's spend and *Add folder*; the add-key dialog says where the key goes; scenarios, Copylot | after T4 |
-| T6 | Docs (CONTRACTS, CLI, ANALYTICS if a count is added), DEC record, release | last |
+| T1 | Core: group kind `tokens`, zero folders allowed for it, `off` on groups, new keys land there, `default` refused for a key | done |
+| T2 | Safety: bindings skip an off group, proxy refuses an off group, launches and fallback refuse, no auto-join, delete refused | done; Needs attention for a key left in `default` is open (board row to file) |
+| T3 | Money: model per request, price table, cost per account and group per day in `statistics.json`, Statistics *List price* | done; `switchboard usage --money` not built (the Statistics report carries the cost) |
+| T4 | Ceiling: turning on requires a daily ceiling; the proxy checks it per request against its own day counter; reached: refuse and ask once a day | done |
+| T5 | Window: the group card with its switch, *Spending*, *Add folder…*; turn-off confirmation; the add-key dialog says where the key goes; scenarios SCN-042, SCN-100; Copylot | done; a window walk-through on a display is NOT_RUN |
+| T6 | Docs (CONTRACTS, CLI, CHANGELOG, DEC-0023, terminology, strings) | done; release after merge |
+
+## Review fixes (2026-11-17)
+
+Two reviews of `token-group` found P0 to P2 defects; all P0 and P1 and the listed P2 are fixed on
+this branch: the day counter (P0-1), a shared key (P0-2), the isolated launch and fallback (P1-3),
+the bindings fingerprint (P1-4), fail-open reads (P1-5), the inactive ceiling, today's spend, the
+reached question and its card state, the edit dialog, *Add folder…*, the turn-off confirmation,
+the field note, the translated name and the add notice (P1-6 to P1-10), saturating sums, the
+ceiling cache by path, balancing, `GroupSwitch` reporting, two doc comments, an explicit `tokens`
+pool, the badge and terminology (P2). Tests: `switchboard-proxy` `tests::the_pay_per_token_group_*`,
+`tests::a_reached_ceiling_*`, `tests::a_claude_answer_whose_counts_were_cut_is_never_free`,
+`tokens::tests::*`, `prices::tests::*`; core `a_pay_per_token_key_stays_in_its_group_and_serves_no_other`,
+`pool_flags_name_*`; runtime `tokens_group_tests::*`, `bindings::tests::a_group_switched_off_*`;
+`scripts/test-ui-logic.mjs` SB-401 block.
+
+## Review fixes, round 2 (2026-11-17)
+
+The second review found no P0. Fixed on this branch: core P1-1 (every Claude API key in the
+pay-per-token group, D-10 in [DEC-0023](../../DECISIONS.md#dec-0023-claude-api-keys-go-to-a-pay-per-token-group-that-starts-off-and-runs-only-under-a-daily-ceiling)),
+P1-2 (an account switched off at home, D-11), and the P2 items (the spend file and its load before
+listening, D-12; premiums and any model priced, D-13; the overshoot written down, D-14; settings
+import, the Codex route, the fallback). Window P1-1 to P1-5 and its P2 items: the demo
+(`?tokens=reached`), API keys, clearing the ceiling, launching a key, the translated name in every
+picker, the move and edit locks, Retry, the background read, the reached copy, the add notice, turn
+on with the ceiling, an empty Repositories part. The decision record was renumbered DEC-0023
+(DEC-0022 is SB-403's). First real use (operator, 2026-11-17): one Claude API key (Claude Fable
+5.2, priced) in three folders: add it (it lands in the group), *Add folder…* three times, set the
+daily ceiling with "Turn the group on now", and sessions there run on it.
+
+## Review fixes, round 3 (2026-11-17)
+
+The third review found no P0, three P1 and seven P2, all fixed here (D-15 to D-17 in DEC-0023):
+
+- P1-1: a group switched off keeps its folders' routes, closed, in the Claude bindings, the Codex
+  route and the shell map, so an off group bound to an organization never lets its sessions fall
+  back to the ordinary sign-in (`bindings::tests::a_group_switched_off_keeps_its_route_and_its_switch_changes_the_fingerprint`,
+  the Codex route test). One rule for every group.
+- P1-2: the save path in the store routes a Claude API key to the pay-per-token group, so Claude
+  Swap's import does too (`a_claude_swap_key_lands_in_the_pay_per_token_group`).
+- P1-3: the window never selects or launches a key from before outside the group; it says why and
+  offers *Move to Pay-per-token keys* (`keyLaunch` in `scripts/test-ui-logic.mjs`); the runtime
+  answers `KEY_OUTSIDE_TOKENS` for such a key.
+- P2: a move to `tokens` makes the group (runtime and the window's move dialog); a key is never
+  placed in a machine group and comes home by `leaving_pool`; the spend file is written off the
+  counter's lock and a failed write refuses until one succeeds
+  (`a_spend_file_that_cannot_be_written_refuses_until_a_write_succeeds`); an ordinary group's
+  edit dialog lists no Claude API key it does not already hold; an earlier isolated home's
+  `ANTHROPIC_API_KEY` is removed once its key is in the group
+  (`a_key_from_before_moves_into_the_pay_per_token_group_and_its_home_forgets_it`); switching a
+  group off moves a route only to an account the usual checks allow.
+
+## Review fixes, round 4 (2026-11-17)
+
+Merged `origin/main` with SB-403 S1 (`c03f8287`, DEC-0022) first, keeping both rules: an
+organization mismatch never refuses (warnings), and a Claude API key never leaves the
+pay-per-token group (`a_pay_per_token_group_bound_to_an_organization_warns_but_keeps_its_key`).
+The fourth review found no P0, one P1 and five P2, fixed here as D-18:
+
+- P1: a key from before, outside the group, is never newly selected, rotated or failed over to,
+  or launched in any mode (`a_claude_key_outside_the_pay_per_token_group_is_never_newly_selected`);
+  its row offers *Move to Pay-per-token keys*, and Attention lists it (`key_outside_tokens`,
+  `a_claude_key_outside_the_pay_per_token_group_is_listed_with_the_move`). This builds the Needs
+  attention item the earlier rounds left open.
+- P2: `TOKENS_SPEND_UNSAVED` for a day that could not be saved, its retry off the request's
+  thread; the bindings leave an off group's folder to an on group that also holds it
+  (`an_off_groups_folder_an_on_group_holds_is_the_on_groups_even_with_no_route`); the group is
+  made in the key's own publish (`a_claude_key_save_that_fails_leaves_no_pay_per_token_group`)
+  and a restore goes on past a key it could not save; the move dialog's target for a group not
+  made yet is `TOKENS_TARGET`, apart from an ordinary group whose pool id is `tokens`.
+
+## Review fixes, round 5 (2026-11-17)
+
+No P0 or P1; four P2 fixed (D-19): the add command and a move make the group in the key's own
+publish (`an_add_that_fails_leaves_no_pay_per_token_group`,
+`a_key_moves_into_the_pay_per_token_group_in_one_save`); `tokens` names the group whatever its
+pool id (`tokens_names_the_pay_per_token_group_whatever_its_pool_id`) and Attention carries the
+group's own id; a restore brings the groups back before the keys and moves no key on
+(`a_restore_brings_every_group_back_before_its_claude_keys`). The CLI and MCP without an owner
+before its first start are written down as a known limit in D-19.
+
+Next task for the next agent: merge `token-group` through the repository's policy and release.
+Former next task (done in round 4): file the board row for Needs attention naming a Claude key left in
+the default group, then merge `token-group` through the repository's policy and release.

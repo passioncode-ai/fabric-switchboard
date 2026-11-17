@@ -258,6 +258,14 @@ pub(crate) fn machine_for(s: &mut Snapshot, at: &MachineRef, now: i64) -> Result
 /// no selection, given to no agent), its home becomes the machine's pool, the group it left is
 /// kept to come back to, and every share or loan of it ends. Answers whether it moved.
 pub(crate) fn place(s: &mut Snapshot, id: &str, pool: &str, now: i64, location: &str) -> bool {
+    // SB-401: a Claude API key never lives on another machine's group: it stays in the
+    // pay-per-token group here, and a start's adopt pass leaves it as it is.
+    if s.accounts
+        .iter()
+        .any(|a| a.id == id && Snapshot::is_claude_key(a))
+    {
+        return false;
+    }
     let Some(account) = s.accounts.iter_mut().find(|a| a.id == id) else {
         return false;
     };
@@ -305,7 +313,12 @@ pub(crate) fn come_home(s: &mut Snapshot, id: &str, to: Option<&str>) -> Option<
                         .is_some_and(|(x, y)| x.matches(y))
             })
     };
-    let home = if takes(&wanted) {
+    // SB-401: a Claude API key comes home to the pay-per-token group, never the default one.
+    let home = if Snapshot::is_claude_key(&account) {
+        let pool = s.leaving_pool(&account);
+        s.projects.sort_by(|a, b| a.name.cmp(&b.name));
+        pool
+    } else if takes(&wanted) {
         wanted
     } else {
         DEFAULT_POOL.to_owned()
@@ -390,6 +403,40 @@ impl Store {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// SB-401: a Claude API key is never placed on another machine's group (a start's adopt pass
+    /// leaves it), and one coming home lands in the pay-per-token group, not the default one.
+    #[test]
+    fn a_claude_key_is_never_placed_on_a_machine_and_comes_home_to_the_pay_per_token_group() {
+        let account = |id: &str, kind: crate::AuthKind, pool: &str| crate::Account {
+            id: id.into(),
+            label: id.into(),
+            provider: crate::Provider::Claude,
+            kind,
+            pool: pool.into(),
+            enabled: true,
+            created_at: 1,
+            identity: None,
+            usage: None,
+            external_identity: None,
+            usage_health: None,
+        };
+        let mut s = Snapshot {
+            accounts: vec![
+                account("key", crate::AuthKind::ApiKey, "default"),
+                account("away", crate::AuthKind::ApiKey, "machine_studio"),
+            ],
+            ..Default::default()
+        };
+        assert!(!place(&mut s, "key", "machine_studio", 10, "Studio"));
+        assert_eq!(s.accounts[0].pool, "default");
+        assert!(s.accounts[0].enabled && !s.elsewhere.contains_key("key"));
+        let home = come_home(&mut s, "away", None).unwrap();
+        assert_eq!(
+            Some(home.as_str()),
+            s.tokens_group().map(|g| g.pool.as_str())
+        );
+    }
 
     #[test]
     fn a_new_machine_takes_its_alias_as_name_and_a_pool_no_group_takes() {

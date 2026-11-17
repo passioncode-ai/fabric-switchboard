@@ -262,6 +262,8 @@ pub(crate) fn project_repos(snapshot: &Snapshot) -> Vec<(String, Repo)> {
     snapshot
         .projects
         .iter()
+        // SB-401: no folder joins the pay-per-token group by itself, so its folders find none.
+        .filter(|p| !p.tokens)
         .flat_map(|p| p.folders.iter().map(move |f| (p.pool.clone(), f)))
         .filter_map(|(pool, f)| repo(Path::new(f)).map(|r| (pool, r)))
         .collect()
@@ -1332,6 +1334,7 @@ mod tests {
                     created_at: 1,
                     sources: sources.iter().map(|s| (*s).into()).collect(),
                     organizations: Vec::new(),
+                    ..Project::default()
                 })
                 .collect(),
             ..Default::default()

@@ -224,6 +224,131 @@ pub struct Project {
     /// SB-282: accounts whose home is another pool that serve this group too, in the person's
     /// order. Their credential and quota record stay one; only their home pool holds them.
     pub shared_accounts: Vec<String>,
+    /// SB-401: the reserved group of pay-per-token keys (`TOKENS_POOL`): it may hold no folder,
+    /// holds only Claude API-key accounts, and nothing joins it by itself.
+    pub tokens: bool,
+    /// SB-401: switched off by the person: no folder is routed to it and its accounts serve no
+    /// request. The pay-per-token group starts off.
+    pub off: bool,
+}
+/// SB-401: the pool the reserved group of pay-per-token keys is first made with (`tokens`, or
+/// `tokens-2` and on when a group of the person's already has it). The group is found by its
+/// `tokens` flag, never by this id.
+pub const TOKENS_POOL: &str = "tokens";
+/// SB-401: the reserved group's name as the window shows it until the person renames it.
+pub const TOKENS_NAME: &str = "Pay-per-token keys";
+/// SB-401: a key of the pay-per-token group never leaves it, nor serves another group from it
+/// (shared, lent, moved, or sent to the default group by a save or a delete): elsewhere no
+/// switch or daily ceiling would stop it.
+pub const TOKENS_KEEPS_KEYS: &str = "A key in the pay-per-token group stays there, under its daily ceiling, and serves no other group. Remove the account to take it out.";
+/// SB-401 (DEC-0023 D-10): a Claude API key moves only into the pay-per-token group and is
+/// shared with no group once that group exists (a key from before it, in another group, stays
+/// where it is and may still be moved there).
+pub const CLAUDE_KEY_STAYS: &str = "A Claude API key is never moved or shared into another group: it belongs in the pay-per-token group, under its daily ceiling. Move it there, or remove the account.";
+/// SB-401: refuses a change that takes a key out of the pay-per-token group, moves a Claude API
+/// key anywhere but into it, or newly shares or lends one (`old` is the state before it, `new`
+/// the candidate). A key removed is not taken out: it is gone.
+pub(crate) fn tokens_keys_stay(old: &Snapshot, new: &Snapshot) -> Result<(), String> {
+    // D-18: no route newly names a Claude API key outside the pay-per-token group.
+    for (key, id) in &new.routes {
+        if old.routes.get(key) != Some(id)
+            && new
+                .accounts
+                .iter()
+                .any(|a| &a.id == id && new.key_outside_tokens(a))
+        {
+            return Err(KEY_OUTSIDE_TOKENS.into());
+        }
+    }
+    if let Some(group) = old.tokens_group() {
+        let moved = old
+            .accounts
+            .iter()
+            .filter(|a| a.pool == group.pool)
+            .any(|a| {
+                new.accounts
+                    .iter()
+                    .any(|b| b.id == a.id && b.pool != a.pool)
+            });
+        if moved {
+            return Err(TOKENS_KEEPS_KEYS.into());
+        }
+    }
+    let Some(group) = new.tokens_group() else {
+        return Ok(());
+    };
+    for b in new.accounts.iter().filter(|b| Snapshot::is_claude_key(b)) {
+        if old
+            .accounts
+            .iter()
+            .any(|a| a.id == b.id && a.pool != b.pool && b.pool != group.pool)
+        {
+            return Err(CLAUDE_KEY_STAYS.into());
+        }
+    }
+    let shares = |s: &Snapshot| -> std::collections::HashSet<(String, String)> {
+        s.projects
+            .iter()
+            .flat_map(|p| {
+                p.shared_accounts
+                    .iter()
+                    .map(|id| (p.pool.clone(), id.clone()))
+            })
+            .chain(
+                s.default_shared
+                    .iter()
+                    .map(|id| (DEFAULT_POOL.into(), id.clone())),
+            )
+            .chain(s.default_lent.iter().map(|id| ("lent".into(), id.clone())))
+            .collect()
+    };
+    let before = shares(old);
+    let key = |id: &str| {
+        new.accounts
+            .iter()
+            .any(|a| a.id == id && Snapshot::is_claude_key(a))
+    };
+    if shares(new)
+        .iter()
+        .any(|share| !before.contains(share) && key(&share.1))
+    {
+        return Err(CLAUDE_KEY_STAYS.into());
+    }
+    Ok(())
+}
+/// SB-401: sources, a found worktree or clone never join the pay-per-token group.
+pub const TOKENS_BY_HAND: &str =
+    "Folders join the pay-per-token group only one by one, by hand. Add the folder to it yourself.";
+/// SB-401: the pay-per-token group is on with no daily ceiling (it was cleared after it was
+/// turned on): nothing would stop its keys, so it serves no request.
+pub const TOKENS_NO_CEILING: &str = "Set a daily spending ceiling for the pay-per-token group first: its keys are charged per token, and the ceiling is what stops them.";
+/// SB-401: the pay-per-token group spent its daily ceiling.
+pub const TOKENS_CEILING_REACHED: &str = "The pay-per-token group reached its daily spending ceiling. Raise it in Switchboard, or wait for the next UTC day.";
+/// SB-401: what the pay-per-token group spent today could not be read at start.
+pub const TOKENS_SPEND_UNKNOWN: &str = "Switchboard could not read what the pay-per-token group spent today, so its keys serve no request until the next UTC day.";
+/// SB-401: the day's spend of the pay-per-token group could not be saved; it serves again once
+/// a save succeeds, which Switchboard tries every few seconds.
+pub const TOKENS_SPEND_UNSAVED: &str = "Switchboard could not save what the pay-per-token group spent today, so its keys serve no request until it can. It tries again every few seconds.";
+/// SB-401: a Claude API key from before the pay-per-token group, outside it: no ceiling holds
+/// it, so nothing selects or launches it (a route selected before stays).
+pub const KEY_OUTSIDE_TOKENS: &str = "This Claude API key is outside the pay-per-token group, so no daily ceiling holds it, and Switchboard never selects or launches it there. Move it to the pay-per-token group first.";
+/// SB-401: a request to a group switched off.
+pub const GROUP_OFF: &str = "This group is switched off in Switchboard, so it serves no request. Turn it on in Switchboard, or work in a folder of another group.";
+/// SB-401: only a Claude API-key account may be in the pay-per-token group.
+pub const TOKENS_ONLY_KEYS: &str =
+    "Only a Claude API key can be in the pay-per-token group. Put this account in another group.";
+impl Project {
+    /// SB-401: the pay-per-token group as it is first made: no folder, switched off.
+    pub fn tokens_group(pool: String, created_at: i64) -> Self {
+        Project {
+            pool,
+            name: TOKENS_NAME.into(),
+            created_at,
+            tokens: true,
+            off: true,
+            ..Project::default()
+        }
+    }
 }
 /// Most organizations one group is bound to (SB-282).
 pub const MAX_GROUP_ORGANIZATIONS: usize = 16;
@@ -244,6 +369,10 @@ struct ProjectWire {
     organizations: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     shared_accounts: Vec<String>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    tokens: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    off: bool,
 }
 impl From<ProjectWire> for Project {
     fn from(w: ProjectWire) -> Self {
@@ -261,6 +390,8 @@ impl From<ProjectWire> for Project {
             sources: w.sources,
             organizations,
             shared_accounts: w.shared_accounts,
+            tokens: w.tokens,
+            off: w.off,
         }
     }
 }
@@ -280,6 +411,8 @@ impl From<Project> for ProjectWire {
             organization,
             organizations,
             shared_accounts: p.shared_accounts,
+            tokens: p.tokens,
+            off: p.off,
         }
     }
 }
@@ -436,13 +569,44 @@ pub(crate) fn validate_projects(s: &Snapshot) -> Result<(), String> {
     if s.projects.len() > MAX_PROJECTS {
         return Err("Invalid metadata bounds".into());
     }
+    // SB-401: the pay-per-token group holds Claude API keys only, so a subscription is never
+    // routed through it and a key never through another kind of account.
+    if let Some(tokens) = s.projects.iter().find(|p| p.tokens) {
+        if s.accounts.iter().any(|a| {
+            a.pool == tokens.pool
+                && !(a.provider == crate::Provider::Claude && a.kind == crate::AuthKind::ApiKey)
+        }) {
+            return Err(TOKENS_ONLY_KEYS.into());
+        }
+        // SB-401: its keys serve that group alone, under its switch and daily ceiling: no other
+        // group shares one, and balancing never lends one to the default group.
+        let keys: std::collections::HashSet<&str> = s
+            .accounts
+            .iter()
+            .filter(|a| a.pool == tokens.pool)
+            .map(|a| a.id.as_str())
+            .collect();
+        if s.projects
+            .iter()
+            .flat_map(|p| p.shared_accounts.iter())
+            .chain(s.default_shared.iter())
+            .chain(s.default_lent.iter())
+            .any(|id| keys.contains(id.as_str()))
+        {
+            return Err(TOKENS_KEEPS_KEYS.into());
+        }
+    }
     let mut pools = std::collections::HashSet::new();
     let mut all: Vec<(&str, &str)> = Vec::new();
     for p in &s.projects {
         if !crate::pool_valid(&p.pool)
             || !pools.insert(p.pool.as_str())
             || !crate::label_valid(&p.name)
-            || p.folders.is_empty()
+            // SB-401: only the pay-per-token group may hold no folder; it is the reserved pool.
+            || (p.folders.is_empty() && !p.tokens)
+            || (p.tokens
+                && (!p.shared_accounts.is_empty()
+                    || s.projects.iter().filter(|q| q.tokens).count() > 1))
             || p.sources.len() > MAX_SOURCES
             || p.sources.iter().any(|s| !source_valid(s))
             || p.folders.iter().any(|f| !path_valid(f))
@@ -499,11 +663,16 @@ impl Snapshot {
     /// The group a session in `path` works in (SB-146): of the groups holding the folder, the
     /// first (in creation order) with an enabled account, else the first.
     /// With organizations defined, a personal group comes first: the more private wins (SB-109,
-    /// RM-28 CX-26).
+    /// RM-28 CX-26). SB-401 D-15: while a group switched on holds the folder, no group switched
+    /// off is chosen; a folder only off groups hold stays in its group, closed.
     pub fn project_for(&self, path: &Path) -> Option<&Project> {
         let mut all = self.projects_for(path);
         if !self.organizations.is_empty() {
             all.sort_by_key(|p| !p.organizations.is_empty());
+        }
+        all.sort_by_key(|p| p.off);
+        if all.iter().any(|p| !p.off) {
+            all.retain(|p| !p.off);
         }
         all.iter()
             .find(|p| self.accounts.iter().any(|a| a.pool == p.pool && a.enabled))
@@ -521,6 +690,67 @@ impl Snapshot {
     pub fn project_of_pool(&self, pool: &str) -> Option<&Project> {
         self.projects.iter().find(|p| p.pool == pool)
     }
+    /// SB-401: the pay-per-token group, when it was made.
+    pub fn tokens_group(&self) -> Option<&Project> {
+        self.projects.iter().find(|p| p.tokens)
+    }
+    /// SB-401: a Claude API key, charged per token.
+    pub fn is_claude_key(account: &crate::Account) -> bool {
+        account.provider == crate::Provider::Claude && account.kind == crate::AuthKind::ApiKey
+    }
+    /// SB-401 (D-18): a Claude API key outside the pay-per-token group (one from before it):
+    /// no daily ceiling holds it, so nothing newly selects, rotates to or launches it. Read once
+    /// the group exists: the owner makes it at start when a Claude API key is saved without it
+    /// (`Store::ensure_tokens_group_for_keys`), and every later save of a key makes it.
+    pub fn key_outside_tokens(&self, account: &crate::Account) -> bool {
+        Self::is_claude_key(account) && self.tokens_group().is_some_and(|g| g.pool != account.pool)
+    }
+    /// SB-401 (D-18): whether `account` may be newly chosen for `pool`: it serves it and is not a
+    /// Claude API key outside the pay-per-token group.
+    pub fn chooses(&self, account: &crate::Account, pool: &str) -> bool {
+        self.serves(account, pool) && !self.key_outside_tokens(account)
+    }
+    /// SB-401: the group `account` calls home is switched off: it serves no other group.
+    pub fn home_off(&self, account: &crate::Account) -> bool {
+        self.project_of_pool(&account.pool).is_some_and(|p| p.off)
+    }
+    /// SB-401: the pay-per-token group's pool, the group made in this state (no folder, switched
+    /// off) when it does not exist yet. A new group goes last, so an index into `projects` held
+    /// by the caller stays right; the caller sorts before it publishes.
+    pub(crate) fn tokens_pool_made(&mut self) -> String {
+        if let Some(group) = self.tokens_group() {
+            return group.pool.clone();
+        }
+        let pool = self.tokens_pool();
+        self.projects
+            .push(Project::tokens_group(pool.clone(), now()));
+        pool
+    }
+    /// SB-401: where an account goes when its group lets it go: the default group, or the
+    /// pay-per-token group for a Claude API key (made when needed), never the default group,
+    /// where every folder in no group would run on it.
+    pub(crate) fn leaving_pool(&mut self, account: &crate::Account) -> String {
+        if Self::is_claude_key(account) {
+            self.tokens_pool_made()
+        } else {
+            DEFAULT_POOL.into()
+        }
+    }
+    /// SB-401: the pool a Claude API key goes to: the pay-per-token group's, else the id it will
+    /// be made with (`tokens`, or the first free `tokens-<n>`).
+    pub fn tokens_pool(&self) -> String {
+        if let Some(group) = self.tokens_group() {
+            return group.pool.clone();
+        }
+        let taken = |pool: &str| {
+            self.projects.iter().any(|p| p.pool == pool)
+                || self.accounts.iter().any(|a| a.pool == pool)
+        };
+        std::iter::once(TOKENS_POOL.to_owned())
+            .chain((2..).map(|n| format!("{TOKENS_POOL}-{n}")))
+            .find(|pool| !taken(pool))
+            .unwrap_or_else(|| TOKENS_POOL.into())
+    }
     /// The accounts shared with `pool` from another home (SB-282), the default group's loans
     /// included (SB-352 wave 2).
     fn shared_with(&self, pool: &str) -> &[String] {
@@ -533,15 +763,22 @@ impl Snapshot {
     }
     /// Whether `account` serves `pool` (SB-282): its home pool, or a group that shares it
     /// (the default group by a loan, SB-352 wave 2).
+    /// SB-401: an account whose home group is switched off serves no other group.
     pub fn serves(&self, account: &crate::Account, pool: &str) -> bool {
-        account.pool == pool || self.shared_with(pool).iter().any(|id| id == &account.id)
+        account.pool == pool
+            || (!self.home_off(account)
+                && self.shared_with(pool).iter().any(|id| id == &account.id))
     }
     /// The accounts that serve `pool`: its own, then those other groups share with it.
     pub fn pool_accounts(&self, pool: &str) -> Vec<&crate::Account> {
         let mut out: Vec<&crate::Account> =
             self.accounts.iter().filter(|a| a.pool == pool).collect();
         for id in self.shared_with(pool) {
-            if let Some(a) = self.accounts.iter().find(|a| &a.id == id && a.pool != pool) {
+            if let Some(a) = self
+                .accounts
+                .iter()
+                .find(|a| &a.id == id && a.pool != pool && !self.home_off(a))
+            {
                 out.push(a);
             }
         }
@@ -550,6 +787,10 @@ impl Snapshot {
     /// The pools an account serves: its home, then each group sharing it (SB-282), then
     /// `default` when it is lent there (SB-352 wave 2).
     pub fn pools_of<'a>(&'a self, account: &'a crate::Account) -> Vec<&'a str> {
+        // SB-401: switched off at home, it serves no group sharing it.
+        if self.home_off(account) {
+            return vec![account.pool.as_str()];
+        }
         std::iter::once(account.pool.as_str())
             .chain(
                 self.projects
@@ -602,6 +843,110 @@ impl Store {
         let organizations = organization.map(|o| o.map(str::to_owned).into_iter().collect());
         self.save_project_with(pool, name, folders, accounts, organizations, true)
     }
+    /// SB-401: switches a group off (no folder routed to it, the proxy refuses its requests) or
+    /// on again. The checks that must hold before a group is turned on are the caller's.
+    pub fn set_group_off(&self, pool: &str, off: bool) -> Result<Project, String> {
+        let mut state = self.lock()?;
+        let mut candidate = state.clone();
+        let group = candidate
+            .projects
+            .iter_mut()
+            .find(|p| p.pool == pool)
+            .ok_or("Project not found.")?;
+        group.off = off;
+        let project = group.clone();
+        // An account at home here no longer serves the groups sharing it: their selection moves
+        // to another of their accounts of the same kind, or goes when they have none.
+        let stale: Vec<(String, String)> = candidate
+            .routes
+            .iter()
+            .filter(|(key, id)| {
+                candidate.accounts.iter().any(|a| {
+                    &&a.id == id
+                        && !candidate
+                            .pools_of(a)
+                            .iter()
+                            .any(|p| **key == format!("{}:{}", a.provider.as_str(), p))
+                })
+            })
+            .map(|(k, id)| (k.clone(), id.clone()))
+            .collect();
+        for (key, id) in stale {
+            let Some(left) = candidate.accounts.iter().find(|a| a.id == id).cloned() else {
+                continue;
+            };
+            let pool = key.split_once(':').map_or("", |(_, p)| p).to_owned();
+            // The usual checks of a selection: on, not given to an agent, not used elsewhere.
+            // An account of the group's own organizations comes first; one outside them still
+            // serves (DEC-0022: an organization is a label, never a lock).
+            let usable: Vec<_> = candidate
+                .pool_accounts(&pool)
+                .into_iter()
+                .filter(|b| {
+                    b.id != left.id
+                        && !candidate.key_outside_tokens(b)
+                        && b.provider == left.provider
+                        && b.kind == left.kind
+                        && b.enabled
+                        && !candidate.is_assigned(&b.id)
+                        && !candidate.elsewhere.contains_key(&b.id)
+                })
+                .collect();
+            let next = usable
+                .iter()
+                .find(|b| candidate.context_admits(&pool, b))
+                .or(usable.first())
+                .map(|b| b.id.clone());
+            match next {
+                Some(next) => {
+                    candidate.routes.insert(key, next);
+                }
+                None => {
+                    candidate.routes.remove(&key);
+                }
+            }
+        }
+        append_event(&mut candidate, "project", None, "updated");
+        self.publish(&mut state, candidate)?;
+        self.changed();
+        Ok(project)
+    }
+    /// SB-401: whether `pool` is a group switched off, and whether it is the pay-per-token
+    /// group, read from the published metadata (no lock): the proxy asks it for every request.
+    /// An unreadable store is an error, never "on" or "not the pay-per-token group".
+    pub fn pool_flags(&self, pool: &str) -> Result<(bool, bool), String> {
+        let s = self.published()?;
+        Ok(s.project_of_pool(pool)
+            .map_or((false, false), |p| (p.off, p.tokens)))
+    }
+    /// SB-401: the pay-per-token group's pool, the group made (no folder, switched off) when it
+    /// does not exist yet. A Claude API key the person adds without naming another group goes
+    /// here, never to the default group, where every folder in no group would run on it.
+    /// SB-401 (D-18): makes the pay-per-token group when a Claude API key is saved and the group
+    /// is not there yet (a key from before it), so the rule for keys outside it applies. Answers
+    /// whether it made the group.
+    pub fn ensure_tokens_group_for_keys(&self) -> Result<bool, String> {
+        let snapshot = self.snapshot()?;
+        if snapshot.tokens_group().is_some()
+            || !snapshot.accounts.iter().any(Snapshot::is_claude_key)
+        {
+            return Ok(false);
+        }
+        self.ensure_tokens_group().map(|_| true)
+    }
+    pub fn ensure_tokens_group(&self) -> Result<String, String> {
+        let mut state = self.lock()?;
+        if let Some(group) = state.tokens_group() {
+            return Ok(group.pool.clone());
+        }
+        let mut candidate = state.clone();
+        let pool = candidate.tokens_pool_made();
+        candidate.projects.sort_by(|a, b| a.name.cmp(&b.name));
+        append_event(&mut candidate, "project", None, "created");
+        self.publish(&mut state, candidate)?;
+        self.changed();
+        Ok(pool)
+    }
     /// [`Store::save_project`], also setting the group's organizations when given (SB-282: an
     /// empty list makes it personal); left out, a saved group keeps its own. With `share`, a
     /// listed account whose home is another group serves this one too and keeps its home
@@ -620,7 +965,10 @@ impl Store {
         if !crate::label_valid(name) {
             return Err("Name the project.".into());
         }
-        if folders.is_empty() {
+        // SB-401: the pay-per-token group may hold no folder; it is checked below, once it is
+        // known which group this is.
+        let maybe_tokens = pool.is_some();
+        if folders.is_empty() && !maybe_tokens {
             return Err("Add at least one project folder.".into());
         }
         let mut folder_list: Vec<String> = Vec::new();
@@ -637,6 +985,15 @@ impl Store {
         let mut state = self.lock()?;
         let mut candidate = state.clone();
         let existing = pool.and_then(|p| candidate.projects.iter().position(|x| x.pool == p));
+        let (tokens, off) = existing.map_or((false, false), |i| {
+            (candidate.projects[i].tokens, candidate.projects[i].off)
+        });
+        if folders.is_empty() && !tokens {
+            return Err("Add at least one project folder.".into());
+        }
+        // SB-401: the pay-per-token group shares nothing in: a key listed for it moves there,
+        // where its switch and ceiling hold it.
+        let share = share && !tokens;
         if pool.is_some() && existing.is_none() {
             return Err("Project not found.".into());
         }
@@ -737,19 +1094,32 @@ impl Store {
             }
         }
         // Membership: listed accounts in (or shared), the project's others out to `default`.
-        let moves: Vec<(String, String)> = candidate
+        // SB-401: a key the pay-per-token group leaves out would leave it: refused.
+        if tokens
+            && candidate
+                .accounts
+                .iter()
+                .any(|a| a.pool == pool && !accounts.contains(&a.id))
+        {
+            return Err(TOKENS_KEEPS_KEYS.into());
+        }
+        let leaving: Vec<crate::Account> = candidate
             .accounts
             .iter()
-            .filter_map(|a| {
-                if accounts.contains(&a.id) && a.pool != pool && !shared.contains(&a.id) {
-                    Some((a.id.clone(), pool.clone()))
-                } else if !accounts.contains(&a.id) && a.pool == pool {
-                    Some((a.id.clone(), "default".to_string()))
-                } else {
-                    None
-                }
-            })
+            .filter(|a| !accounts.contains(&a.id) && a.pool == pool)
+            .cloned()
             .collect();
+        let mut moves: Vec<(String, String)> = candidate
+            .accounts
+            .iter()
+            .filter(|a| accounts.contains(&a.id) && a.pool != pool && !shared.contains(&a.id))
+            .map(|a| (a.id.clone(), pool.clone()))
+            .collect();
+        // Left out: back to the default group, a Claude API key to the pay-per-token group.
+        for a in &leaving {
+            let to = candidate.leaving_pool(a);
+            moves.push((a.id.clone(), to));
+        }
         for (id, to) in &moves {
             let account = candidate
                 .accounts
@@ -830,6 +1200,8 @@ impl Store {
             sources,
             organizations,
             shared_accounts: shared,
+            tokens,
+            off,
         };
         match existing {
             Some(i) => candidate.projects[i] = project.clone(),
@@ -942,7 +1314,12 @@ impl Store {
                         .zip(account.external_identity.as_ref())
                         .is_some_and(|(x, y)| x.matches(y))
             });
+            // SB-401: a pay-per-token key is never lent.
+            let tokens_key = candidate
+                .tokens_group()
+                .is_some_and(|g| g.pool == account.pool);
             if held
+                || tokens_key
                 || account.pool == pool
                 || !home_lends
                 || !candidate.loan_admits(pool, &account)
@@ -988,6 +1365,8 @@ impl Store {
         let mut state = self.lock()?;
         let mut candidate = state.clone();
         let accounts = candidate.accounts.clone();
+        // SB-401: a pay-per-token key serves no other group, whatever a backup says.
+        let tokens_pool = candidate.tokens_group().map(|g| g.pool.clone());
         let project = candidate
             .projects
             .iter_mut()
@@ -997,8 +1376,9 @@ impl Store {
             return Err("Nothing to restore.".into());
         }
         for id in ids {
-            if accounts.iter().any(|a| &a.id == id && a.pool != pool)
-                && !project.shared_accounts.contains(id)
+            if accounts.iter().any(|a| {
+                &a.id == id && a.pool != pool && Some(a.pool.as_str()) != tokens_pool.as_deref()
+            }) && !project.shared_accounts.contains(id)
             {
                 project.shared_accounts.push(id.clone());
             }
@@ -1013,6 +1393,50 @@ impl Store {
     /// SB-314: a restore puts `id` back in `pool` (`default` included) when that pool holds no
     /// other copy of its identity; nothing else. DEC-0022 (SB-403): whatever its organizations. True when it moved. Its route in the
     /// pool it leaves goes, and shares that no longer apply are pruned.
+    /// SB-401 (round 5): moves a Claude API key into the pay-per-token group in one publish,
+    /// making the group when it is missing, so a move that fails leaves no empty group. The key
+    /// stops being shared or lent anywhere and no route keeps naming it outside the group.
+    /// Answers the group's pool and whether the key moved.
+    pub fn move_key_to_tokens(&self, id: &str) -> Result<(String, bool), String> {
+        let mut state = self.lock()?;
+        let mut candidate = state.clone();
+        let account = candidate
+            .accounts
+            .iter()
+            .find(|a| a.id == id)
+            .cloned()
+            .ok_or("Account not found.")?;
+        if !Snapshot::is_claude_key(&account) {
+            return Err(TOKENS_ONLY_KEYS.into());
+        }
+        let made = candidate.tokens_group().is_none();
+        let pool = candidate.tokens_pool();
+        if account.pool == pool && !made {
+            return Ok((pool, false));
+        }
+        if made {
+            candidate
+                .projects
+                .push(Project::tokens_group(pool.clone(), now()));
+            candidate.projects.sort_by(|a, b| a.name.cmp(&b.name));
+            append_event(&mut candidate, "project", None, "created");
+        }
+        candidate.routes.retain(|_, value| value != id);
+        for p in candidate.projects.iter_mut() {
+            p.shared_accounts.retain(|s| s != id);
+        }
+        candidate.default_shared.retain(|s| s != id);
+        candidate.default_lent.retain(|s| s != id);
+        if let Some(a) = candidate.accounts.iter_mut().find(|a| a.id == id) {
+            a.pool = pool.clone();
+        }
+        stale_shares_prune(&mut candidate);
+        shared_routes_prune(&mut candidate);
+        append_event(&mut candidate, "account_updated", Some(id), "success");
+        self.publish(&mut state, candidate)?;
+        self.changed();
+        Ok((pool, true))
+    }
     pub(crate) fn restore_account_pool(&self, id: &str, pool: &str) -> Result<bool, String> {
         let mut state = self.lock()?;
         let mut candidate = state.clone();
@@ -1020,6 +1444,13 @@ impl Store {
             return Ok(false);
         };
         if account.pool == pool {
+            return Ok(false);
+        }
+        // SB-401: a key in the pay-per-token group stays there; a restore leaves it.
+        if candidate
+            .tokens_group()
+            .is_some_and(|g| g.pool == account.pool)
+        {
             return Ok(false);
         }
         let clash = candidate.accounts.iter().any(|b| {
@@ -1052,7 +1483,8 @@ impl Store {
         Ok(true)
     }
     /// SB-122: moves an account whose pool no project reserves (a deleted project leaves its
-    /// accounts there) back to `default`. A project's account leaves through `save_project`.
+    /// accounts there) back to `default`, a Claude API key to the pay-per-token group (SB-401).
+    /// A project's account leaves through `save_project`.
     pub fn return_to_default(&self, id: &str) -> Result<(), String> {
         let mut state = self.lock()?;
         let mut candidate = state.clone();
@@ -1062,7 +1494,9 @@ impl Store {
             .find(|a| a.id == id)
             .ok_or("Account not found")?
             .clone();
-        if account.pool == "default" {
+        // SB-401: a Claude API key goes to the pay-per-token group instead (made when needed).
+        let to = candidate.leaving_pool(&account);
+        if account.pool == to {
             return Ok(());
         }
         if crate::machines::is_machine_pool(&account.pool) {
@@ -1074,7 +1508,7 @@ impl Store {
         let clash = candidate.accounts.iter().any(|b| {
             b.id != account.id
                 && b.provider == account.provider
-                && b.pool == "default"
+                && b.pool == to
                 && b.external_identity
                     .as_ref()
                     .zip(account.external_identity.as_ref())
@@ -1090,8 +1524,9 @@ impl Store {
             candidate.routes.remove(&old);
         }
         if let Some(a) = candidate.accounts.iter_mut().find(|a| a.id == id) {
-            a.pool = "default".into();
+            a.pool = to;
         }
+        candidate.projects.sort_by(|a, b| a.name.cmp(&b.name));
         stale_shares_prune(&mut candidate);
         shared_routes_prune(&mut candidate);
         append_event(&mut candidate, "account_updated", Some(id), "success");
@@ -1143,6 +1578,10 @@ impl Store {
             .iter_mut()
             .find(|p| p.pool == pool)
             .ok_or("Project not found.")?;
+        // SB-401: nothing joins the pay-per-token group by itself; its folders are added by hand.
+        if project.tokens && !list.is_empty() {
+            return Err(TOKENS_BY_HAND.into());
+        }
         project.sources = list;
         let project = project.clone();
         // Journaled as "updated", a word every 0.6 build accepts (SB-117 seam review).
@@ -1164,6 +1603,10 @@ impl Store {
             .iter()
             .position(|p| p.pool == pool)
             .ok_or("Project not found.")?;
+        // SB-401: deleting the pay-per-token group would send its keys to the default group.
+        if candidate.projects[index].tokens && candidate.accounts.iter().any(|a| a.pool == pool) {
+            return Err(TOKENS_KEEPS_KEYS.into());
+        }
         let project = candidate.projects.remove(index);
         crate::chains::prune(&mut candidate);
         let leaving: Vec<String> = candidate
@@ -1179,10 +1622,12 @@ impl Store {
                 .find(|a| a.id == id)
                 .unwrap()
                 .clone();
+            // SB-401: a Claude API key goes to the pay-per-token group, not the default one.
+            let to = candidate.leaving_pool(&account);
             let clash = candidate.accounts.iter().any(|b| {
                 b.id != account.id
                     && b.provider == account.provider
-                    && b.pool == "default"
+                    && b.pool == to
                     && b.external_identity
                         .as_ref()
                         .zip(account.external_identity.as_ref())
@@ -1196,9 +1641,10 @@ impl Store {
                 candidate.routes.remove(&old);
             }
             if let Some(a) = candidate.accounts.iter_mut().find(|a| a.id == id) {
-                a.pool = "default".into();
+                a.pool = to;
             }
         }
+        candidate.projects.sort_by(|a, b| a.name.cmp(&b.name));
         stale_shares_prune(&mut candidate);
         shared_routes_prune(&mut candidate);
         // SB-144: the project's own agent keys go with it, so a later project of the same pool

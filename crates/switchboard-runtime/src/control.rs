@@ -457,6 +457,7 @@ fn limit_secs(operation: &Operation) -> u64 {
         Operation::SaveProject { .. }
         | Operation::ProjectEdit { .. }
         | Operation::RemoveProject { .. }
+        | Operation::GroupSwitch { .. }
         | Operation::MoveRoot { .. }
         | Operation::MoveAccount { .. }
         | Operation::RepositoryMap { .. } => 180,
@@ -1071,11 +1072,13 @@ mod tests {
         assert_eq!(result["label"], "Fixture");
         assert!(!result.to_string().contains("fixture-secret-only"));
         let id = result["id"].as_str().unwrap();
+        // SB-401: a Claude API key lands in the pay-per-token group, whatever pool was named.
+        assert_eq!(result["pool"], "tokens");
         request(
             tmp.path(),
             &Operation::Select {
                 provider: Provider::Claude,
-                pool: "work".into(),
+                pool: "tokens".into(),
                 id: id.into(),
                 force: false,
             },
@@ -1083,7 +1086,7 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(
-            owner.runtime.store.snapshot().unwrap().routes["claude:work"],
+            owner.runtime.store.snapshot().unwrap().routes["claude:tokens"],
             id
         );
         assert!(Store::open(tmp.path().to_owned(), Arc::new(MemoryVault::default())).is_err());
@@ -1689,7 +1692,13 @@ mod tests {
             .save_project(None, "alpha", std::slice::from_ref(&folder), &[])
             .unwrap();
         assert_eq!(again.pool, alpha.pool, "the same id comes back");
-        let view = crate::spend::view(tmp.path(), &store.snapshot().unwrap(), now).unwrap();
+        let view = crate::spend::view(
+            tmp.path(),
+            &store.snapshot().unwrap(),
+            now,
+            &Default::default(),
+        )
+        .unwrap();
         assert!(view["ceilings"].as_array().unwrap().is_empty());
         // A group without a ceiling is deleted from the CLI as before.
         request(tmp.path(), &remove(Surface::Cli))

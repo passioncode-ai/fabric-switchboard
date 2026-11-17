@@ -14,6 +14,7 @@
 //! the baselines and the last hand-over is `fallback::spend_gate` (C-5).
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use std::collections::BTreeMap;
 use std::path::Path;
 use switchboard_core::{workflow_id_valid, ChainScope, Snapshot};
 
@@ -58,6 +59,8 @@ pub const GROUP_CEILINGS_FULL: &str =
 pub const GROUP_HOLDS_CEILING: &str = "This group has a spending ceiling. Delete the group in the Switchboard window, where its ceiling goes with it.";
 pub const OUT_OF_RANGE: &str = "Enter an amount from $0.01 to $1,000.";
 pub const NO_OWN_KEY: &str = "Give this group its own key under API keys first.";
+/// SB-401: turning the pay-per-token group on without a ceiling.
+pub const TOKENS_NEED_CEILING: &str = switchboard_core::TOKENS_NO_CEILING;
 pub const NO_GROUP: &str = "That group id names no group.";
 pub const DOUBLE_IN_WINDOW: &str = "Doubling a ceiling is answered in the Switchboard window.";
 pub const DOUBLE_TOO_HIGH: &str =
@@ -501,7 +504,20 @@ fn write_bytes(root: &Path, bytes: &[u8]) -> Result<(), String> {
     switchboard_core::private_fs::private_write(&root.join(FILE), bytes)
 }
 
-/// Whether a group has its own OpenRouter key (SB-144): only such a group takes a daily ceiling.
+/// SB-401: a group's daily ceiling in cents, when one is set; none too when `spend.json` cannot
+/// be read, so a caller that needs a ceiling refuses.
+pub fn group_ceiling(root: &Path, pool: &str) -> Option<u32> {
+    read(root)
+        .ok()?
+        .ceilings
+        .iter()
+        .find_map(|c| match &c.scope {
+            ChainScope::Project { pool: p } if p == pool => Some(c.cents),
+            _ => None,
+        })
+}
+/// Whether a group has its own OpenRouter key (SB-144): only such a group takes a daily ceiling,
+/// besides the pay-per-token group (SB-401), whose ceiling counts its own Claude keys.
 pub fn group_has_own_key(snapshot: &Snapshot, pool: &str) -> bool {
     snapshot
         .agent_keys
@@ -743,7 +759,10 @@ pub fn set_ceiling(
         if !snapshot.projects.iter().any(|p| &p.pool == pool) {
             return Err(NO_GROUP.into());
         }
-        if !group_has_own_key(snapshot, pool) {
+        // SB-401: the pay-per-token group's ceiling counts its own keys' spend, so it needs no
+        // OpenRouter key of its own.
+        let tokens = snapshot.project_of_pool(pool).is_some_and(|p| p.tokens);
+        if !tokens && !group_has_own_key(snapshot, pool) {
             return Err(NO_OWN_KEY.into());
         }
     }
@@ -865,6 +884,29 @@ pub fn open_question(
     Ok(opened.0)
 }
 
+/// SB-401: opens the question of a pay-per-token ceiling the proxy found reached, unless one of
+/// that scope was already asked this UTC day (answered or not): a *keep* holds for the day, and
+/// a restart of the owner does not ask again.
+pub fn open_question_once_a_day(
+    root: &Path,
+    snapshot: &Snapshot,
+    scope: &ChainScope,
+    cents: u32,
+    spent: f64,
+    now: i64,
+) -> Result<Option<String>, String> {
+    let file = read(root)?;
+    let today = now.div_euclid(DAY);
+    if file
+        .questions
+        .iter()
+        .any(|q| &q.scope == scope && q.reached_at.div_euclid(DAY) == today)
+    {
+        return Ok(None);
+    }
+    open_question(root, snapshot, scope, cents, spent, now)
+}
+
 /// Answers an open question: *keep* from any surface, *double* only from the window.
 pub fn answer(
     root: &Path,
@@ -915,15 +957,24 @@ pub fn answer(
         },
         &scope,
     );
-    Ok(json!({"answer": answer, "ceiling": ceiling_view(snapshot, &ceiling)}))
+    Ok(json!({"answer": answer, "ceiling": ceiling_view(snapshot, &ceiling, &BTreeMap::new())}))
 }
 
-fn ceiling_view(snapshot: &Snapshot, c: &Ceiling) -> Value {
+/// One ceiling for the window, CLI and MCP. The pay-per-token group's (SB-401) is active with no
+/// OpenRouter key of the group's own, and carries `tokens`, what its keys cost today
+/// (`spent_today_usd`, from `spent`, by pool in micro-dollars) and whether that reached it.
+fn ceiling_view(snapshot: &Snapshot, c: &Ceiling, spent: &BTreeMap<String, u64>) -> Value {
+    let tokens = match &c.scope {
+        ChainScope::Project { pool } => snapshot.project_of_pool(pool).is_some_and(|p| p.tokens),
+        _ => false,
+    };
     let inactive = match &c.scope {
-        ChainScope::Project { pool } if !group_has_own_key(snapshot, pool) => Some("no_own_key"),
+        ChainScope::Project { pool } if !tokens && !group_has_own_key(snapshot, pool) => {
+            Some("no_own_key")
+        }
         _ => None,
     };
-    json!({
+    let mut view = json!({
         "scope": c.scope,
         "cents": c.cents,
         "usd": usd(c.cents),
@@ -931,11 +982,24 @@ fn ceiling_view(snapshot: &Snapshot, c: &Ceiling) -> Value {
         "doubled_from": c.doubled_from.map(usd),
         "active": inactive.is_none(),
         "inactive_reason": inactive,
-    })
+    });
+    if let (true, ChainScope::Project { pool }) = (tokens, &c.scope) {
+        let micros = spent.get(pool).copied();
+        view["tokens"] = json!(true);
+        view["spent_today_usd"] = json!(micros.map(|m| m as f64 / 1_000_000.0));
+        view["reached"] = json!(micros.map(|m| m >= u64::from(c.cents) * 10_000));
+    }
+    view
 }
 
-/// The ceilings, open questions and last hand-over, for the window, CLI and MCP.
-pub fn view(root: &Path, snapshot: &Snapshot, now: i64) -> Result<Value, String> {
+/// The ceilings, open questions and last hand-over, for the window, CLI and MCP. `spent` is the
+/// pay-per-token group's spend today, by pool in micro-dollars (SB-401); empty elsewhere.
+pub fn view(
+    root: &Path,
+    snapshot: &Snapshot,
+    now: i64,
+    spent: &BTreeMap<String, u64>,
+) -> Result<Value, String> {
     let mut file = read(root)?;
     prune(&mut file, Some(snapshot), now);
     let mut open: Vec<&Question> = file
@@ -945,7 +1009,7 @@ pub fn view(root: &Path, snapshot: &Snapshot, now: i64) -> Result<Value, String>
         .collect();
     open.sort_by_key(|q| q.reached_at);
     Ok(json!({
-        "ceilings": file.ceilings.iter().map(|c| ceiling_view(snapshot, c)).collect::<Vec<_>>(),
+        "ceilings": file.ceilings.iter().map(|c| ceiling_view(snapshot, c, spent)).collect::<Vec<_>>(),
         "questions": open.iter().map(|q| json!({
             "id": q.id,
             "scope": q.scope,
@@ -1197,6 +1261,7 @@ mod tests {
             created_at: 1,
             sources: vec![],
             organizations: Vec::new(),
+            ..Project::default()
         }
     }
     fn key(pool: Option<&str>) -> AgentKey {
@@ -1359,7 +1424,7 @@ mod tests {
         // With its own key it takes one; when the key goes, the ceiling stays, shown inactive.
         set_ceiling(root.path(), &s, alpha(), Some(5.0), Surface::Window, T).unwrap();
         s.agent_keys.retain(|k| k.pool.is_none());
-        let shown = view(root.path(), &s, T).unwrap();
+        let shown = view(root.path(), &s, T, &BTreeMap::new()).unwrap();
         assert_eq!(shown["ceilings"][0]["active"], false);
         assert_eq!(shown["ceilings"][0]["inactive_reason"], "no_own_key");
         assert_eq!(
@@ -1457,7 +1522,10 @@ mod tests {
         );
         std::fs::write(root.path().join(FILE), b"{not json").unwrap();
         assert_eq!(read(root.path()).unwrap_err(), UNREADABLE);
-        assert_eq!(view(root.path(), &snapshot(), T).unwrap_err(), UNREADABLE);
+        assert_eq!(
+            view(root.path(), &snapshot(), T, &BTreeMap::new()).unwrap_err(),
+            UNREADABLE
+        );
         assert_eq!(
             check(root.path(), &snapshot(), &step(KeySlot::Machine), &reads()),
             Verdict::Skip {
@@ -1749,7 +1817,7 @@ mod tests {
         assert!(f.questions.is_empty());
         assert!(f.baselines.is_empty());
         // The view prunes in memory only; the next write prunes on disk.
-        let shown = view(root.path(), &s, T).unwrap();
+        let shown = view(root.path(), &s, T, &BTreeMap::new()).unwrap();
         assert_eq!(shown["ceilings"].as_array().unwrap().len(), 1);
         set_ceiling(
             root.path(),

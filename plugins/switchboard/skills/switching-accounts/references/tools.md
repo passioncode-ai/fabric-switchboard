@@ -734,6 +734,14 @@ Only when the operator asks. Deletes a group as the window's *Delete group* does
 routing to its accounts and its own accounts go to the default group (nothing is signed out). A
 group with its own key or spending ceiling needs `decision`, the operator's words.
 
+### `switchboard_project_switch`: `pool`, `on`
+
+Only when the operator asks. Switches a group off (no folder is routed to it and the proxy refuses
+its requests) or on again. The pay-per-token group, where Claude API keys go (SB-401), starts off
+and turns on only while it has a daily spending ceiling (`switchboard_ceiling_set` with scope
+`project:<pool>`); the proxy checks that ceiling against the day's list-price spend before every
+request of the group.
+
 ### `switchboard_settings_import`: `file`, `under?`, `apply?`, `clone?`, `signer?`
 
 Reads a `switchboard-settings/1` file (`switchboard settings export` on another machine; `file`

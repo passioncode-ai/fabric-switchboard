@@ -537,6 +537,10 @@ pub fn restore(
     let mut ids: BTreeMap<String, String> = BTreeMap::new();
     // SB-285: the accounts this restore added, as they are here.
     let mut added: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    // SB-401 (round 5): Claude API keys are saved after the groups come back, so the
+    // pay-per-token group is the backup's own (with its folders), and a pool an ordinary group
+    // of the backup holds (`tokens`) is never taken by a group made for a key first.
+    let mut keys_later: Vec<(crate::Account, crate::Credential)> = Vec::new();
     for account in payload.accounts {
         let token = payload
             .credentials
@@ -553,8 +557,11 @@ pub fn restore(
                     .is_some()
             })
             || existing.accounts.iter().any(|a| {
+                // SB-401: a Claude API key restored earlier sits in the pay-per-token group.
+                let tokens_home = crate::Snapshot::is_claude_key(&account)
+                    && existing.tokens_group().is_some_and(|g| g.pool == a.pool);
                 a.provider == account.provider
-                    && a.pool == account.pool
+                    && (a.pool == account.pool || tokens_home)
                     && token.is_some_and(|t| {
                         store
                             .stored_credential(&a.id)
@@ -665,6 +672,10 @@ pub fn restore(
         } else {
             account.pool.clone()
         };
+        if crate::Snapshot::is_claude_key(&account) {
+            keys_later.push((account, credential));
+            continue;
+        }
         match store.upsert(
             account.label.clone(),
             account.provider,
@@ -674,7 +685,7 @@ pub fn restore(
             account.external_identity.clone(),
         ) {
             Ok(saved) => {
-                if pool != account.pool {
+                if saved.pool != account.pool {
                     deferred.insert(saved.id.clone(), account.pool.clone());
                 }
                 if !account.enabled {
@@ -756,6 +767,30 @@ pub fn restore(
         project.organizations = organizations;
         if store.restore_project(project).is_ok() {
             result.projects += 1;
+        }
+    }
+    // SB-401 (DEC-0023 D-10): a Claude API key a restore brings back lands in the pay-per-token
+    // group (`upsert` puts it there, making the group in the same save when the backup had none),
+    // never in the default group or a pool no group holds, and it is never moved on from there
+    // (no deferred move); a key that cannot be saved is counted failed and the restore goes on.
+    for (account, credential) in keys_later {
+        match store.upsert(
+            account.label.clone(),
+            account.provider,
+            account.kind,
+            account.pool.clone(),
+            credential,
+            account.external_identity.clone(),
+        ) {
+            Ok(saved) => {
+                if !account.enabled {
+                    let _ = store.update(&saved.id, saved.label.clone(), false);
+                }
+                ids.insert(account.id.clone(), saved.id.clone());
+                added.insert(saved.id.clone());
+                result.added += 1;
+            }
+            Err(_) => result.failed += 1,
         }
     }
     // SB-175: a restore on this machine keeps what the person marked as used elsewhere.
@@ -1113,6 +1148,7 @@ mod tests {
                 created_at: 1,
                 sources: vec!["github.com/example".into()],
                 organizations: Vec::new(),
+                ..Project::default()
             }],
             ..Default::default()
         };
@@ -2225,6 +2261,15 @@ mod tests {
             1
         );
         let restored = fresh.snapshot().unwrap().accounts.remove(0);
+        // SB-401: a Claude API key comes back in the pay-per-token group, not the default one.
+        assert_eq!(
+            Some(restored.pool.as_str()),
+            fresh
+                .snapshot()
+                .unwrap()
+                .tokens_group()
+                .map(|g| g.pool.as_str())
+        );
         fresh.update(&restored.id, "Renamed".into(), true).unwrap();
         let again = restore(&fresh, &backups, &info.file, &keys).unwrap();
         assert_eq!(
@@ -2238,6 +2283,88 @@ mod tests {
         );
         let after = fresh.snapshot().unwrap().accounts.remove(0);
         assert_eq!((after.label.as_str(), after.enabled), ("Renamed", true));
+    }
+    /// SB-401 (round 5): keys come back after the groups, so an ordinary group whose pool id is
+    /// `tokens` keeps it, the backup's own pay-per-token group (`tokens-2` there, or `tokens`)
+    /// comes back with its folders, and no key is counted as returned to the default group.
+    #[test]
+    fn a_restore_brings_every_group_back_before_its_claude_keys() {
+        let temp = tempfile::tempdir().unwrap();
+        let keys = Keys::default();
+        let folder = |name: &str| {
+            let dir = temp.path().join("folders").join(name);
+            std::fs::create_dir_all(&dir).unwrap();
+            dir.canonicalize().unwrap()
+        };
+        let key = |store: &Store, secret: &str| {
+            store
+                .add_routed(
+                    "Key".into(),
+                    Provider::Claude,
+                    AuthKind::ApiKey,
+                    "default".into(),
+                    Credential::parse(Provider::Claude, AuthKind::ApiKey, secret).unwrap(),
+                )
+                .unwrap()
+        };
+        // An ordinary group took `tokens`, so the pay-per-token group is `tokens-2`.
+        let original = store(&temp.path().join("one"));
+        let plain = original
+            .save_project(None, "Tokens", &[folder("plain")], &[])
+            .unwrap();
+        assert_eq!(plain.pool, "tokens");
+        let k = key(&original, "synthetic-one");
+        assert_eq!(k.pool, "tokens-2");
+        original
+            .save_project(
+                Some("tokens-2"),
+                crate::TOKENS_NAME,
+                &[folder("paid")],
+                std::slice::from_ref(&k.id),
+            )
+            .unwrap();
+        let backups = temp.path().join("backups-one");
+        let info = write(&original, &backups, &keys, 100).unwrap().unwrap();
+        let fresh = store(&temp.path().join("two"));
+        let restored = restore(&fresh, &backups, &info.file, &keys).unwrap();
+        assert_eq!(
+            (
+                restored.added,
+                restored.failed,
+                restored.returned_to_default
+            ),
+            (1, 0, 0)
+        );
+        let here = fresh.snapshot().unwrap();
+        let plain = here.project_of_pool("tokens").unwrap();
+        assert!(!plain.tokens, "the ordinary group keeps its pool id");
+        assert_eq!(plain.folders, [folder("plain").to_str().unwrap()]);
+        let paid = here.tokens_group().unwrap();
+        assert_eq!(paid.pool, "tokens-2");
+        assert_eq!(paid.folders, [folder("paid").to_str().unwrap()]);
+        assert!(here.accounts.iter().all(|a| a.pool == "tokens-2"));
+        // The pay-per-token group `tokens` comes back with its folder, its key in it.
+        let second = store(&temp.path().join("three"));
+        let k = key(&second, "synthetic-two");
+        assert_eq!(k.pool, "tokens");
+        second
+            .save_project(
+                Some("tokens"),
+                crate::TOKENS_NAME,
+                &[folder("kept")],
+                std::slice::from_ref(&k.id),
+            )
+            .unwrap();
+        let backups = temp.path().join("backups-two");
+        let info = write(&second, &backups, &keys, 100).unwrap().unwrap();
+        let fresh = store(&temp.path().join("four"));
+        let restored = restore(&fresh, &backups, &info.file, &keys).unwrap();
+        assert_eq!((restored.added, restored.returned_to_default), (1, 0));
+        let here = fresh.snapshot().unwrap();
+        let paid = here.tokens_group().unwrap();
+        assert_eq!(paid.pool, "tokens");
+        assert_eq!(paid.folders, [folder("kept").to_str().unwrap()]);
+        assert_eq!(here.accounts[0].pool, "tokens");
     }
     #[test]
     fn key_text_is_exactly_64_hex_characters() {

@@ -879,6 +879,7 @@ mod tests {
                 created_at: 1,
                 sources: vec![],
                 organizations: Vec::new(),
+                ..switchboard_core::Project::default()
             }],
             ..Default::default()
         };
@@ -948,6 +949,7 @@ mod tests {
                 created_at: 1,
                 sources: vec![],
                 organizations: Vec::new(),
+                ..switchboard_core::Project::default()
             }],
             ..Default::default()
         };

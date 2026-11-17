@@ -54,6 +54,8 @@ const OWNED: &[&str] = &[
     "owner-run.json",
     "bugs.jsonl",
     "statistics.json",
+    // The pay-per-token group's spend today (SB-401).
+    "tokens-spend.json",
     // Usage analytics' own state, Switchboard's switch and the notice's acknowledgement included
     // (SB-246): uninstalling forgets both, and the notice returns at the next first start.
     "analytics-state.json",
@@ -692,6 +694,7 @@ mod tests {
                 created_at: 1,
                 sources: vec![],
                 organizations: Vec::new(),
+                ..switchboard_core::Project::default()
             }],
             accounts: vec![switchboard_core::Account {
                 id: "id-pc".into(),

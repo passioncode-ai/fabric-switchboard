@@ -1706,7 +1706,7 @@ check(() => {
   assert.deepEqual(view.items.map((i) => i.reason), ['sign_in', 'ceiling_question']);
   assert.deepEqual([...logic.attentionAccounts(view, ['a9', 'a1'])].sort(), ['a1', 'a9']);
   assert.deepEqual([...logic.attentionAccounts(null)], []);
-  for (const reason of ['sign_in', 'seat_ended', 'renewal_refused', 'usage_failing', 'move_unknown', 'refused_there', 'ceiling_question']) {
+  for (const reason of ['sign_in', 'seat_ended', 'renewal_refused', 'usage_failing', 'move_unknown', 'refused_there', 'key_outside_tokens', 'ceiling_question']) {
     const line = logic.attentionReasonText(reason);
     assert.ok(line && !line.includes('\u2014'), reason);
   }
@@ -1842,6 +1842,73 @@ check(() => {
   i18n.setLocale('ru');
   assert.equal(logic.restartStateText('back', null), 'Вернулась', 'never the navigation «Назад»');
   assert.equal(logic.sessionGroupTitle('waiting'), 'Ждут');
+  i18n.setLocale('en');
+});
+// SB-401: the pay-per-token group: its name, its spending line, and the list-price column.
+check(() => {
+  i18n.setLocale('en');
+  assert.equal(logic.groupDisplayName({ name: 'Pay-per-token keys', tokens: true }), 'Pay-per-token keys');
+  assert.equal(logic.poolName('tokens', [{ pool: 'tokens', name: 'Pay-per-token keys', tokens: true }]), 'Pay-per-token keys');
+  assert.equal(logic.tokensSpendLine(null).text, 'No daily ceiling. Set one before you turn this group on.');
+  assert.equal(logic.tokensSpendLine({ usd: 5, spent_today_usd: 1.25, reached: false }).text, '$1.25 of $5.00 spent today');
+  const reached = logic.tokensSpendLine({ usd: 5, spent_today_usd: 5.1, reached: true });
+  assert.equal(reached.reached, true);
+  assert.ok(reached.text.startsWith('Ceiling reached: $5.10 of $5.00 today.'));
+  assert.equal(logic.tokensSpendLine({ usd: 5, spent_today_usd: null }).text, 'Daily ceiling $5.00 · spent today not read');
+  assert.equal(logic.statCost({}), '–');
+  assert.equal(logic.statCost({ cost_micros: 1_234_000 }), '$1.23');
+  assert.equal(logic.statCost({ cost_micros: 1_234_000, cost_estimated: 1 }), '≈$1.23');
+  const z = { requests: 1, ok: 1, limited: 0, failed: 0, input_tokens: 0, output_tokens: 0, cache_read_tokens: 0, cache_write_tokens: 0 };
+  const rows = [{ cells: ['a'], counts: { ...z, cost_micros: 10 } }, { cells: ['b'], counts: { ...z } }, { cells: ['c'], counts: { ...z, cost_micros: 99 } }];
+  assert.deepEqual(logic.sortStatRows(rows, { column: 4, descending: true }, true).map((r) => r.cells[0]), ['c', 'a', 'b'], 'by list price, the last column');
+  assert.deepEqual(logic.sortStatRows(rows, { column: 6, descending: true }, false).map((r) => r.cells[0]), ['c', 'a', 'b']);
+  // Round 2: on with no ceiling refuses, and says so; the reached question names the group after.
+  assert.equal(logic.tokensSpendLine(null, true).reached, true);
+  assert.ok(logic.tokensSpendLine(null, true).text.startsWith('On, but refusing every request'));
+  assert.equal(logic.ceilingQuestion({ value: 5, kind: 'project', scope: 'Pay-per-token keys', tokens: true }).text, 'The daily ceiling of Pay-per-token keys, $5.00, is reached.');
+  // Groups reads the ceilings again only while the pay-per-token group shows its spending.
+  assert.deepEqual(logic.backgroundReads('projects'), []);
+  assert.deepEqual(logic.backgroundReads('projects', true), ['ceilings']);
+  // A move the pay-per-token rule refuses is locked: a key goes only there, nothing else goes there, its keys stay.
+  const groups = [{ pool: 'apps', name: 'Apps' }, { pool: 'tokens', name: 'Pay-per-token keys', tokens: true }];
+  const pick = (targets) => Object.fromEntries(targets.map((x) => [x.pool, x.blocked]));
+  assert.deepEqual(pick(logic.moveTargets('default', groups, false, () => true, true)), { default: false, apps: true, tokens: false }, 'a key in default (now) goes only to the pay-per-token group');
+  assert.deepEqual(pick(logic.moveTargets('default', groups, false, () => true, false)), { default: false, apps: false, tokens: true }, 'nothing else goes there');
+  assert.deepEqual(pick(logic.moveTargets('tokens', groups, false, () => true, true)), { default: true, apps: true, tokens: false });
+  // A key from before, with no pay-per-token group yet: the move offers it, and the move makes it.
+  assert.deepEqual(pick(logic.moveTargets('default', [groups[0]], false, () => true, true)), { default: false, apps: true, [logic.TOKENS_TARGET]: false }, 'the move to a missing pay-per-token group is offered');
+  assert.equal(logic.movePool(logic.TOKENS_TARGET), 'tokens', 'the move names tokens, which makes the group');
+  assert.equal(logic.movePool('apps'), 'apps');
+  // An ordinary group whose pool id is `tokens` is one row, and the made group another.
+  const named = logic.moveTargets('default', [{ pool: 'tokens', name: 'Tokens' }], false, () => true, true);
+  assert.deepEqual(named.map((x) => [x.pool, x.blocked]), [['default', false], ['tokens', true], [logic.TOKENS_TARGET, false]]);
+  // A key from before, outside the group, offers the move and never Select; one already selected stays selected.
+  const old = { provider: 'claude', kind: 'api_key', enabled: true, external_identity: null };
+  assert.equal(logic.primaryAction(old, { current: false, selected: false, signIn: false, project: false, outsideTokens: true }), 'move_tokens');
+  assert.equal(logic.primaryAction(old, { current: false, selected: true, signIn: false, project: false, outsideTokens: true }), 'selected');
+  assert.equal(logic.primaryAction(old, { current: false, selected: false, signIn: false, project: true, outsideTokens: false }), 'select');
+  assert.equal(logic.keyOutsideTokens({ provider: 'claude', kind: 'api_key', pool: 'default' }, 'tokens'), true);
+  assert.equal(logic.keyOutsideTokens({ provider: 'claude', kind: 'api_key', pool: 'tokens' }, 'tokens'), false);
+  assert.equal(logic.keyOutsideTokens({ provider: 'claude', kind: 'api_key', pool: 'default' }, null), true);
+  assert.equal(logic.keyOutsideTokens({ provider: 'codex', kind: 'api_key', pool: 'default' }, null), false);
+  const outside = logic.attentionView({ items: [{ account_id: 'k', label: 'Old key', provider: 'claude', pool: 'default', reason: 'key_outside_tokens', detail: '', action: { tool: 'switchboard_account_move', window: 'move_tokens' } }] });
+  assert.equal(outside.count, 1);
+  assert.equal(logic.attentionActionLabel(outside.items[0].action.window), 'Move to Pay-per-token keys');
+  assert.deepEqual(pick(logic.moveTargets('default', [groups[0]], false, () => true, false)), { default: false, apps: false }, 'no synthetic target for anything else');
+  // The window never selects or launches a Claude API key outside the pay-per-token group.
+  const key = (pool) => ({ provider: 'claude', kind: 'api_key', pool });
+  assert.equal(logic.keyLaunch(key('default'), 'tokens', true, true), 'outside', 'a key from before is never launched from the default group');
+  assert.equal(logic.keyLaunch(key('default'), null, false, true), 'outside');
+  assert.equal(logic.keyLaunch(key('tokens'), 'tokens', false, true), 'select');
+  assert.equal(logic.keyLaunch(key('tokens'), 'tokens', true, true), 'managed');
+  assert.equal(logic.keyLaunch(key('tokens'), 'tokens', true, false), 'down');
+  assert.equal(logic.keyLaunch({ provider: 'claude', kind: 'oauth', pool: 'default' }, 'tokens', false, true), null);
+  assert.equal(logic.keyLaunch({ provider: 'codex', kind: 'api_key', pool: 'default' }, 'tokens', false, true), null);
+  assert.equal(logic.poolChoices([], groups).find((c) => c.pool === 'tokens').name, 'Pay-per-token keys');
+  i18n.setLocale('ru');
+  assert.equal(logic.groupDisplayName({ name: 'Pay-per-token keys', tokens: true }), 'Ключи с оплатой за токены');
+  assert.equal(logic.poolChoices([], groups).find((c) => c.pool === 'tokens').name, 'Ключи с оплатой за токены');
+  assert.equal(logic.groupDisplayName({ name: 'Pay-per-token keys' }), 'Pay-per-token keys', 'a group the person named so stays as typed');
   i18n.setLocale('en');
 });
 console.log(`${cases} ui-logic cases passed, including quota priority and wall-clock countdowns.`);

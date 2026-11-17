@@ -1197,6 +1197,15 @@ async fn remove_project(pool: String, state: State<'_, Slot>) -> Result<Value, S
         })
         .await
 }
+/// SB-401: switch a group off or on.
+#[tauri::command]
+async fn project_switch(pool: String, on: bool, state: State<'_, Slot>) -> Result<Value, String> {
+    state
+        .runtime()
+        .await?
+        .execute(Operation::GroupSwitch { pool, on })
+        .await
+}
 /// SB-390: the saved Anthropic keys by name, never a value.
 #[tauri::command]
 async fn anthropic_keys(state: State<'_, Slot>) -> Result<Value, String> {
@@ -2069,6 +2078,7 @@ fn main() {
             kimi_launch,
             kimi_remove,
             remove_project,
+            project_switch,
             project_roots,
             move_root,
             project_add_accounts,

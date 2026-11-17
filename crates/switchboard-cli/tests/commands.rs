@@ -982,13 +982,16 @@ async fn separate_cli_process_mutates_live_owner_without_touching_native_vault()
             "--provider",
             "claude",
             "--pool",
-            "team",
+            "tokens",
         ])
         .output()
         .unwrap();
     assert!(output.status.success());
+    // SB-401 (DEC-0023 D-10): a Claude API key lands in the pay-per-token group, whatever pool
+    // was named.
+    assert_eq!(added["data"]["pool"], "tokens");
     assert_eq!(
-        owner.runtime.store.snapshot().unwrap().routes["claude:team"],
+        owner.runtime.store.snapshot().unwrap().routes["claude:tokens"],
         id
     );
     let output = binary()

@@ -2,6 +2,14 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-11-17: SB-401 pay-per-token group, review rounds 1 to 4 fixed on `token-group`
+
+- **Asked.** The operator: Claude Code sessions on an Anthropic API key in a group of their own, with no folders until added one by one, off by default, and usage controlled by a daily ceiling when on (SB-401, [DEC-0023](DECISIONS.md#dec-0023-claude-api-keys-go-to-a-pay-per-token-group-that-starts-off-and-runs-only-under-a-daily-ceiling), [plan](plans/2026-11-17-token-group/README.md)).
+- **Done.** Branch `token-group`: the group, the switch, the ceiling checked by the proxy at list price, spend kept across restarts, every Claude API key routed there (D-1 to D-18); four review rounds fixed (the plan lists each). Merged `origin/main` with SB-403 S1 (DEC-0022) keeping both rules: an organization never refuses, and a Claude API key never leaves the pay-per-token group.
+- **Checks.** `./scripts/check.sh` EXIT 0 on the Studio worktree `~/DATA/_worktrees/sb401-fix` after each round; the window walk-through NOT_RUN (no display session).
+
+**Exact next task.** Merge `token-group` into `main` through a pull request once its gate reads EXIT 0 on the merged head, then release; on the operator's Mac move the Appvillis key into *Pay-per-token keys* if it was saved before (Needs attention names it), add the three folders and set the daily ceiling.
+
 ## 2026-11-17: SB-403 S1, an organization is a label (DEC-0022), on branch `org-seats`
 
 - **Asked.** The operator: several e-mail domains per organization or none, never a blocker; subscriptions tied to an organization must never block moving them between groups or giving them another organization; local work is bounded by folders only.

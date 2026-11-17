@@ -43,7 +43,7 @@ export interface ProjectRule { path: string; provider: Provider; account_id: str
 export interface ProjectRuleInput { path: string; accountId: string; target: ProjectRule['target']; enabled: boolean; expiresAt: number | null }
 export interface AgentSetup { cli_path: string | null; bundled_cli: string | null; linked_cli: string | null; can_link: boolean; translocated?: boolean; commands: { claude_code: string; codex: string; claude_plugin: string }; connected?: { claude_code: boolean; codex: boolean }; agent_prompt?: string; proved?: { client: string | null; at: number } | null }
 /** A project's folders and the pool of accounts reserved for them (0.6). */
-export interface Project { pool: string; name: string; folders: string[]; created_at: number; sources?: string[]; /** SB-109: the organization the group runs on; none is personal. One organization arrives here. */ organization?: string | null; /** SB-282: a group of several organizations arrives as this list instead (`groupOrganizations` reads both). */ organizations?: string[]; /** SB-282: accounts at home in another group that serve this one too. */ shared_accounts?: string[] }
+export interface Project { pool: string; name: string; folders: string[]; created_at: number; sources?: string[]; /** SB-109: the organization the group runs on; none is personal. One organization arrives here. */ organization?: string | null; /** SB-282: a group of several organizations arrives as this list instead (`groupOrganizations` reads both). */ organizations?: string[]; /** SB-282: accounts at home in another group that serve this one too. */ shared_accounts?: string[]; /** SB-401: the reserved group of pay-per-token Claude keys. */ tokens?: boolean; /** SB-401: switched off: no folder routes to it, its accounts serve no request. */ off?: boolean }
 /** A folder Switchboard found that looks like a project's (SB-117); it joins only on Add. */
 export interface ProjectSuggestion { folder: string; name: string; pool: string; project: string | null; reason: 'worktree' | 'same_repository' | 'ecosystem' | 'worked'; repository: string; first_seen: number }
 export interface ProjectInput { pool?: string; name: string; folders: string[]; accountIds: string[]; /** SB-131: the folders the dialog opened with. */ baseFolders?: string[]; /** SB-109: an organization's id or `personal`; left out, the group keeps its own. */ organization?: string; /** SB-282: every organization of the group in order (empty: personal); wins over `organization`. */ organizations?: string[] }
@@ -63,9 +63,9 @@ export interface MachinesList { machines: { pool: string; name: string; read?: {
 /** SB-355: `machines --live`: each machine group, read over ssh. */
 export interface MachinesLive { machines: { pool: string; name: string; accounts: { id: string; there?: MachineCopy | null }[]; live?: { reachable: boolean; error?: string } }[] }
 /** WF-3 (SB-365, DEC-0015): why an account (or a ceiling) needs a person; the Tauri command `attention`, the same list as MCP `switchboard_attention`. */
-export type AttentionReason = 'session_duplicate' | 'session_stuck' | 'sign_in' | 'seat_ended' | 'renewal_refused' | 'usage_failing' | 'move_unknown' | 'refused_there' | 'ceiling_question';
+export type AttentionReason = 'session_duplicate' | 'session_stuck' | 'sign_in' | 'seat_ended' | 'renewal_refused' | 'usage_failing' | 'move_unknown' | 'refused_there' | 'key_outside_tokens' | 'ceiling_question';
 /** WF-3: the window flow that fixes an item; `tool` is the MCP tool that does the same. */
-export type AttentionWindow = 'sign_in' | 'answer_ceiling' | 'check_usage' | 'open_machines' | 'open_sessions' | 'close_copy';
+export type AttentionWindow = 'sign_in' | 'answer_ceiling' | 'check_usage' | 'open_machines' | 'open_sessions' | 'close_copy' | 'move_tokens';
 export interface AttentionItem { account_id: string | null; label: string | null; provider: Provider | null; pool: string | null; reason: AttentionReason; detail: string; since: number | null; action: { tool: string; window: AttentionWindow }; /** SB-388: a duplicate's session id, for *Close the quiet copy*. */ session_id?: string | null; /** SB-389: the copy offered: a quiet one, or the older one when every copy works; null when every copy is answering. */ close?: { pid: number; why: 'quiet' | 'older'; command_age: number | null } | null }
 export interface Attention { count: number; items: AttentionItem[] }
 export interface RuntimeStatus { proxy_address: string; platform: string; live_mode: string }
@@ -119,6 +119,8 @@ export interface Adapter {
   /** Create or update a project; the listed accounts are its whole set (core `save_project`). */
   saveProject(input: ProjectInput): Promise<unknown>;
   removeProject(pool: string): Promise<unknown>;
+  /** SB-401: switch a group off or on; the pay-per-token group turns on only with a daily ceiling. */
+  projectSwitch(pool: string, on: boolean): Promise<unknown>;
   /** SB-135: each project's folders as roots with their worktrees and clones, by pool. */
   projectRoots(): Promise<Record<string, import('./ui-logic').ProjectRoot[]>>;
   /** SB-122: an account into a project's pool, or back to `default`. */
@@ -281,7 +283,7 @@ export interface ChainPreset { id: string; agents: { agent: string; name: string
 /** `readiness` is keyed `machine`, `project:<pool>` or `workflow:<id>`. */
 export interface Chains { chains: Chain[]; effective: Chain | null; presets: ChainPreset[]; readiness: Record<string, ChainStepView[]>; last_handover: LastHandover | null; ceilings_unreadable: boolean; limits_known: boolean }
 /** One spending ceiling as `spend::view` gives it: machine and group per UTC day, a task since its first paid hand-over. */
-export interface CeilingView { scope: ChainScope; cents: number; usd: number; set_at: number; doubled_from: number | null; active: boolean; inactive_reason: 'no_own_key' | null }
+export interface CeilingView { scope: ChainScope; cents: number; usd: number; set_at: number; doubled_from: number | null; active: boolean; inactive_reason: 'no_own_key' | null; /** SB-401: the pay-per-token group's ceiling. */ tokens?: boolean; /** SB-401: what its keys cost today at the list price; null when it could not be read. */ spent_today_usd?: number | null; /** SB-401: whether today's spend reached it. */ reached?: boolean | null }
 /** An open question of a reached ceiling; `double_usd` is null when doubling would pass $1,000. */
 export interface CeilingQuestionView { id: string; scope: ChainScope; cents: number; usd: number; double_usd: number | null; spent: number; reached_at: number }
 export interface Ceilings { ceilings: CeilingView[]; questions: CeilingQuestionView[]; last_handover: LastHandover | null; limits: { min_usd: number; max_usd: number; min_remaining_usd: number } }

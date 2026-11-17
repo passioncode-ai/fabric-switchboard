@@ -2966,7 +2966,7 @@ shared it), keeps `default_shared` only for accounts at home in a group, and for
 its loan from `default` listed keeps it a loan, never a move. Native rotation of the ordinary
 Claude Code (`claude_cli`) takes only an account at home in its pool, never one lent to `default`.
 `balancing::forced_return` also returns a loan whose account the person moved to another home
-since (`not_lendable`). Each loan and return is one activity entry, `balancing` with `lent` or
+since (`not_lendable`), and one to or from a group switched off (`group_off`, SB-401). Each loan and return is one activity entry, `balancing` with `lent` or
 `returned` and the account's id (`event_valid`; before wave 2 a loan was journaled as `project
 updated`); `switchboard_events` and the window's Activity show it. The window's Groups page has
 *Balancing between groups* (SCN-090): one switch per group (`Balance` with one group added or
@@ -3211,6 +3211,7 @@ WF-3.1). Code: [attention.rs](../crates/switchboard-runtime/src/attention.rs).
   | `renewal_refused` | as `sign_in`, and the token endpoint refused its lineage (`invalid_grant`, `RefreshState::lineages_refused`) | `switchboard_login` | `sign_in` |
   | `move_unknown` | marked used elsewhere, and its newest `seats.jsonl` line of `granted`, `recalled` or `unknown` is `unknown`; `since` is that line's time | `switchboard_remote` | `open_machines` |
   | `usage_failing` | enabled, not used elsewhere, not already listed, `usage_health.status` `failed`, and no observation for over `USAGE_FAILING_SECONDS` (3600); `since` is the last observation (else when it was added) | `switchboard_usage` | `check_usage` |
+  | `key_outside_tokens` | an enabled Claude API key outside the pay-per-token group, not used elsewhere and not already listed for a sign-in (SB-401 D-18); no `since`; `action.pool` is the group's own id | `switchboard_account_move` | `move_tokens` |
   | `ceiling_question` | an unanswered question in `spend.json`, pruned as its readers prune; `since` is `reached_at` | `switchboard_ceiling_answer` | `answer_ceiling` |
 
   An account is listed once: a sign-in reason wins over failing usage. `refused_there` (a copy
@@ -3615,3 +3616,136 @@ the item offered *Close the quiet copy* and the press was refused. Tests
 quiet copy* on the item). Tests `duty::tests::a_person_closes_the_copy_quiet_longest_and_never_a_working_one`,
 `session_watch::tests::a_copy_of_a_live_session_a_quiet_board_run_and_a_vanished_launch_are_found`,
 `attention::tests::a_copy_of_a_live_session_and_a_quiet_board_run_come_first`.
+
+## Pay-per-token group (SB-401, DEC-0023)
+
+Plan: [2026-11-17-token-group](plans/2026-11-17-token-group/README.md); decision
+[DEC-0023](DECISIONS.md#dec-0023-claude-api-keys-go-to-a-pay-per-token-group-that-starts-off-and-runs-only-under-a-daily-ceiling).
+
+- **Store.** `Project` carries `tokens` (the reserved group of Claude API keys) and `off`
+  (switched off); both are absent from `accounts.json` when false, and the file is written at
+  schema 15 while either is set (a 0.7.111 or older reader refuses it rather than route folders to
+  a key). `Project::tokens_group(pool, at)` makes it empty and off, named `TOKENS_NAME`
+  (*Pay-per-token keys*); `Store::ensure_tokens_group` makes it once (pool `TOKENS_POOL`, or the
+  first free `tokens-<n>`) and answers its pool; `Snapshot::tokens_group` finds it by its flag.
+  `Store::set_group_off(pool, off)` switches any group; `Store::pool_flags(pool)` answers
+  `(off, tokens)` from the published state, an unreadable store an error.
+- **Validation** (`validate_projects`, every publish): only the pay-per-token group may hold no
+  folder; at most one exists; it holds Claude API-key accounts only (`TOKENS_ONLY_KEYS`) and no
+  `shared_accounts`; no group's `shared_accounts`, `default_shared` or `default_lent` names one of
+  its keys (`TOKENS_KEEPS_KEYS`). Every publish and hold also refuses a change that moves one of its
+  keys to another pool (`tokens_keys_stay`), so a save, a move, a loan or a restore cannot take a
+  key out; removing the account can. A save of the pay-per-token group moves a listed key in and
+  never shares it; sources are refused (`TOKENS_BY_HAND`); deleting it is refused while it holds a
+  key (`TOKENS_KEEPS_KEYS`). `set_shared` (balancing) answers false for its keys, and
+  `restore_account_pool` and `restore_shared_accounts` leave them.
+- **Adding a key** (D-10, D-16). The store's save path (`Store::save_account` with upsert, used
+  by Claude Swap's import and every capture) puts a Claude API key in the pay-per-token group,
+  made when needed; `Operation::Add` puts every Claude API key in the pay-per-token group
+  (made when needed), whatever pool was named; a backup restore brings one back there; a group that
+  lets one go (left out of a save, the group deleted, `return_to_default` from a pool no group
+  holds) sends it there instead of the default group (`Snapshot::leaving_pool`). Once the group
+  exists, every publish refuses a Claude API key moved anywhere but into it, or newly shared or
+  lent (`CLAUDE_KEY_STAYS`); `accounts move` (`Operation::MoveAccount`) refuses one to any other
+  group even before; a move to `tokens` makes the group when it is missing. A key is never placed
+  in a machine group (`machines::place` answers false), and one that comes home goes to
+  `leaving_pool`. A key in another group from before stays there, and is never newly selected,
+  rotated or failed over to, launched in any mode, or named by a new route (D-17, D-18,
+  `KEY_OUTSIDE_TOKENS`: `Store::select` and every publish refuse it, `Snapshot::chooses` leaves it
+  out of rotation and failover, `launch::group_allows_launch` refuses it). It reads the group: the
+  owner makes it at start, before the proxy listens, when a Claude API key is saved without it
+  (`Store::ensure_tokens_group_for_keys`, oplog `tokens_group_made`); the CLI and MCP without an
+  owner read no group until an owner has started once. A route that already named it before the
+  upgrade keeps serving. Every way in makes the group in the key's own publish (D-19): the add
+  command (`Store::add_routed`), `upsert` and a move (`Store::move_key_to_tokens`, which also
+  clears the key's routes, shares and loans). For a Claude API key, `accounts move --pool tokens`
+  names the pay-per-token group whatever its pool id; Attention's action carries the group's own
+  id (`action.pool`). A restore saves Claude API keys after the groups, so an ordinary group's
+  `tokens` and the backup's own pay-per-token group with its folders both come back, and no key
+  is moved on to the backup's pool (`returned_to_default` never counts one). Attention lists it (`key_outside_tokens`) and its
+  account row offers *Move to Pay-per-token keys* (the move dialog's `TOKENS_TARGET` when the
+  group is not made yet, never an ordinary group's pool id). The group a saved key needs is made
+  in the same publish as the key (`save_account`), so a save that fails leaves none; a restore
+  counts such a key failed and goes on.
+  Once a key is in the pay-per-token group, the bindings pass removes `env.ANTHROPIC_API_KEY`
+  from an isolated home an earlier version wrote for it (`launch::scrub_key_homes`, oplog
+  `key_homes_scrubbed`).
+- **Switch.** `Operation::GroupSwitch { pool, on }` (CLI `switchboard project switch --pool <id>
+  on|off`, MCP `switchboard_project_switch {pool, on}`, Tauri `project_switch`) answers the group.
+  Turning the pay-per-token group on without a daily ceiling is refused with `TOKENS_NO_CEILING`;
+  off is never refused. It is reported to analytics as a group change and has the 180 s control
+  timeout of the other group changes.
+- **A group switched off.** An account at home there serves no group sharing it
+  (`Snapshot::serves`, `pool_accounts` and `pools_of` leave it out, so route selection, rotation
+  and failover pass over it); switching it moves the routes such an account held in other groups
+  to another of their accounts of the same kind, or drops them. Balancing leaves an off group out
+  and returns its loans (`group_off`). Its folders keep their route, closed (D-15): the Claude
+  bindings (`bindings::desired`), the Codex route and the shell map keep pointing them at the off
+  group, so a session there gets the proxy's `GROUP_OFF` and never falls through to the ordinary
+  sign-in; only a folder an on group also holds is served by that group (an off group is listed
+  last, and `Snapshot::project_for` chooses no off group while an on group holds the folder; the
+  Claude bindings leave such a folder to that on group even when it writes no route there). The bindings fingerprint covers `off` and `tokens`, so a switch re-runs the sync.
+  Switching a group off moves a route only to an account the usual checks allow (enabled, not
+  given to an agent, not used elsewhere), one of the group's own organizations first and one
+  outside them after it (DEC-0022). Its accounts are
+  no fallback candidate; a launch of one of its accounts is refused with `GROUP_OFF`
+  (`launch::group_allows_launch`, called by every Claude Code and Codex launch, a continuation, a
+  dispatch and a third-party agent).
+- **Launch of a Claude API key.** Managed mode only, from the pay-per-token group (an isolated
+  launch answers `TOKENS_ISOLATED` for a key there and `KEY_OUTSIDE_TOKENS` for one outside it:
+  an isolated home would hold the key and reach the provider past any ceiling), from a folder of
+  its group (`project_allows`); the fallback and dispatch pass a Claude API key over. A key of the
+  pay-per-token group also only while the group is on and has a ceiling
+  (`TOKENS_NO_CEILING`; an unreadable `spend.json` is no ceiling).
+- **Proxy refusals**, each `403` with a `switchboard_error` body and never sent upstream, checked
+  for the route's pool before route selection, for the chosen account's home pool when it differs
+  (a shared or lent account), and for an SB-98 move's next account (a refused one is not moved
+  to): `GROUP_OFF` (the group is switched off), `TOKENS_NO_CEILING` (the pay-per-token group with
+  no daily ceiling in `spend.json`, or a file that cannot be read), `TOKENS_CEILING_REACHED` (its
+  spend today at the list price has reached the ceiling). A store that cannot be read answers
+  `503` `STORE_UNREADABLE`. The ceiling is read through `tokens::Ceilings`, kept per path while
+  the file's modification time, length and inode stay the same.
+- **The day counter.** `tokens::Spend` adds each priced answer to its account's home pool for the
+  UTC day of its end, saturating, and is never drained by `take_statistics`. After each answer of
+  a pay-per-token key it writes `<data>/tokens-spend.json` (0600, `{version: 1, day, pools}`)
+  off the counter's lock (on a blocking thread, newest snapshot first, older ones skipped). A write
+  that fails refuses the group with `TOKENS_SPEND_UNSAVED` until a write succeeds; the refusal
+  path starts a new try at most every 5 s, on a blocking thread, and answers from the state it
+  finds (`Spend::refusal_today`). The proxy's stop waits up to 1 s
+  for writes in flight. The proxy loads it before it listens (`Spend::load`): the larger of that file and
+  today's `cost_micros` in `statistics.json`, per pool. A file that exists and cannot be read (not
+  JSON, past 64 KiB or 8 MiB) leaves the day unknown, unless the spend file holds today, and the
+  pay-per-token group refuses that UTC day with `TOKENS_SPEND_UNKNOWN`. `ProxyHandle::spent_today(pool)`
+  reads the counter. A ceiling found reached is noted once per pool and UTC day (`take_reached`);
+  the owner's background pass opens the ceiling's question (`spend::open_question_once_a_day`: not
+  again that day once one of the scope was asked, answered or not), logged as
+  `tokens_ceiling_reached` with `asked`, `asked_today` or `unwritten`.
+- **Overshoot.** The ceiling is checked before each request. Requests already in flight when the
+  day's spend crosses it still finish and are counted, so the day can pass the ceiling by what
+  those requests cost (at most as many as the proxy's 64 slots, each one answer); no request starts
+  after it is crossed.
+- **Prices** (`switchboard-proxy/src/prices.rs`): Anthropic's list price per million tokens by
+  model family (base input, 5-minute and 1-hour cache writes, cache reads, output; Haiku 5.5 by
+  prompt size; Claude Fable 5.2 among them), from https://platform.claude.com/docs/en/about-claude/pricing
+  read 2026-11-17. A cache write the answer does not split is priced at the 1-hour rate. Every
+  answer of a Claude route is priced, whatever model it names. Premiums (`prices::cost_with`):
+  server web searches at $10 per thousand; a prompt past 200,000 tokens at the long-context
+  premium (input x2, output x1.5) and the faster tier (`service_tier: priority`, `speed: fast`) at
+  six times the price, both marked estimated. An unknown model, a Claude answer naming no model,
+  or counts that were cut (a line or a body past its bound, a stream ended
+  before its closing counts: an output of a token per four bytes at least) are priced at the
+  dearest family and marked estimated. An answer with no counts (`count_tokens`) costs nothing;
+  another provider's answers are not priced.
+- **Statistics.** Each tally adds `cost_micros` (micro-dollars) and `cost_estimated` (answers
+  priced as an estimate), both absent when zero, in `statistics.json` and in every row of
+  `Statistics`; the window shows them as *List price* (≈ when part is an estimate).
+- **Ceilings view.** The pay-per-token group's ceiling is `active` without an OpenRouter key of
+  the group's own (and `set_ceiling` accepts it), and carries `tokens: true`,
+  `spent_today_usd` (the proxy's day counter, or `statistics.json` when no owner runs) and
+  `reached`. Its question is the one `spend::answer` takes: *Keep* holds it for the day,
+  *Double* raises it at once.
+- **Balancing** never names the pay-per-token group (`balancing::pools`, `plan`).
+- **Group keys.** The OpenRouter keys view (`agent_keys`, the window's API keys page) leaves the
+  pay-per-token group out: it runs on its Claude keys.
+- **Not carried:** a settings file never carries the pay-per-token group, a settings import never
+  matches it (`settings_bundle::matched`), and the SB-117 scanner finds no folder for it.

@@ -1535,6 +1535,67 @@ pub(crate) fn serving_pool(
         .unwrap_or(&account.pool)
         .to_owned()
 }
+/// SB-401: a pay-per-token key launched with its credential in the session's own home would
+/// reach the provider directly, past the daily ceiling the proxy checks.
+pub(crate) const TOKENS_ISOLATED: &str = "A pay-per-token key runs only through Switchboard, where its daily ceiling is checked. Launch it in managed mode.";
+/// SB-401: a Claude API key from before the pay-per-token group, outside it: no ceiling holds it.
+pub(crate) use switchboard_core::KEY_OUTSIDE_TOKENS;
+/// SB-401: removes a Claude API key from its own home's `settings.json` (an isolated launch of
+/// 0.7.111 or older wrote it there): the key launches managed only now, through the proxy. The
+/// person's other settings stay. Answers how many homes changed.
+pub(crate) fn scrub_key_homes(root: &Path, snapshot: &switchboard_core::Snapshot) -> usize {
+    let mut changed = 0;
+    for account in snapshot
+        .accounts
+        .iter()
+        .filter(|a| switchboard_core::Snapshot::is_claude_key(a))
+    {
+        let path = root.join("homes").join(&account.id).join("settings.json");
+        let Ok(bytes) = switchboard_core::private_fs::read_private(&path, 1024 * 1024) else {
+            continue;
+        };
+        let Ok(mut settings) = serde_json::from_slice::<Value>(&bytes) else {
+            continue;
+        };
+        let removed = settings
+            .get_mut("env")
+            .and_then(Value::as_object_mut)
+            .and_then(|env| env.remove("ANTHROPIC_API_KEY"))
+            .is_some();
+        if removed && private_write(&path, settings.to_string().as_bytes(), false).is_ok() {
+            changed += 1;
+        }
+    }
+    changed
+}
+/// SB-401: an account of a group switched off starts nothing; a Claude API key outside the
+/// pay-per-token group starts in no mode; one in it starts only in managed mode (its credential never lands in a session's home), and one in
+/// the pay-per-token group only while that group is on and has a daily ceiling. Fails closed: a
+/// ceiling file that cannot be read is no ceiling.
+pub(crate) fn group_allows_launch(
+    root: &Path,
+    snapshot: &switchboard_core::Snapshot,
+    account: &switchboard_core::Account,
+    mode: &str,
+) -> Result<(), String> {
+    // D-18: a key outside the pay-per-token group launches in no mode.
+    if snapshot.key_outside_tokens(account) {
+        return Err(KEY_OUTSIDE_TOKENS.into());
+    }
+    if switchboard_core::Snapshot::is_claude_key(account) && mode != "managed" {
+        return Err(TOKENS_ISOLATED.into());
+    }
+    let Some(group) = snapshot.project_of_pool(&account.pool) else {
+        return Ok(());
+    };
+    if group.off {
+        return Err(switchboard_core::GROUP_OFF.into());
+    }
+    if group.tokens && crate::spend::group_ceiling(root, &group.pool).is_none() {
+        return Err(switchboard_core::TOKENS_NO_CEILING.into());
+    }
+    Ok(())
+}
 pub(crate) const PROJECT_ACCOUNT_OUTSIDE: &str =
     "This account belongs to a group. Launch it from one of the group's folders.";
 pub(crate) const PROJECT_FOLDER_FOREIGN: &str =
@@ -1620,7 +1681,9 @@ fn launch_agent_with(
     if account.kind != AuthKind::ApiKey {
         return Err(switchboard_proxy::AGENT_SUBSCRIPTION_REFUSED.into());
     }
-    project_allows(&store.snapshot()?, &account, &working_directory)?;
+    let snapshot = store.snapshot()?;
+    group_allows_launch(root, &snapshot, &account, "managed")?;
+    project_allows(&snapshot, &account, &working_directory)?;
     let program = find(&profile.binary).ok_or_else(|| {
         format!(
             "{} is not installed. Install it first, then launch it again.",
@@ -2506,6 +2569,7 @@ fn validate(
     {
         return Err(switchboard_core::ASSIGNED.into());
     }
+    group_allows_launch(root, &snapshot, &account, mode)?;
     project_allows(&snapshot, &account, &working_directory)?;
     Ok((working_directory, account))
 }
@@ -3595,6 +3659,7 @@ mod tests {
                 created_at: 1,
                 sources: vec![],
                 organizations: Vec::new(),
+                ..Project::default()
             }],
             ..Default::default()
         };
@@ -5623,7 +5688,27 @@ mod tests {
         );
         let before = f.files();
         assert!(!f.launch(&proxy, &oauth, "isolated", &TEST_HOST).unwrap());
-        assert!(!f.launch(&proxy, &api, "isolated", &TEST_HOST).unwrap());
+        // SB-401: a Claude API key never lands in a session's own home: managed only. Once the
+        // pay-per-token group exists (the owner makes it at start), one from before, outside
+        // it, launches in no mode.
+        assert_eq!(
+            f.launch(&proxy, &api, "isolated", &TEST_HOST).unwrap_err(),
+            TOKENS_ISOLATED
+        );
+        assert!(f.store.ensure_tokens_group_for_keys().unwrap());
+        for mode in ["isolated", "managed"] {
+            assert_eq!(
+                f.launch(&proxy, &api, mode, &TEST_HOST).unwrap_err(),
+                KEY_OUTSIDE_TOKENS,
+                "{mode}"
+            );
+        }
+        assert!(!f
+            .root
+            .join("homes")
+            .join(&api)
+            .join("settings.json")
+            .exists());
 
         let home = f.root.join("homes").join(&oauth);
         let settings: serde_json::Value =
@@ -5631,14 +5716,6 @@ mod tests {
         assert_eq!(
             settings,
             json!({"env": {"CLAUDE_CODE_OAUTH_TOKEN": "synthetic-access"}})
-        );
-        let settings: serde_json::Value = serde_json::from_slice(
-            &fs::read(f.root.join("homes").join(&api).join("settings.json")).unwrap(),
-        )
-        .unwrap();
-        assert_eq!(
-            settings,
-            json!({"env": {"ANTHROPIC_API_KEY": "synthetic-api-key"}})
         );
         // The reservation stays until the script itself removes it.
         assert!(home.join(".launch-pending").exists());
@@ -5659,7 +5736,7 @@ mod tests {
         }
         assert_eq!(fs::read_dir(&f.project).unwrap().count(), 0);
         let events = f.store.snapshot().unwrap().events;
-        assert_eq!(events.iter().filter(|e| e.action == "launch").count(), 2);
+        assert_eq!(events.iter().filter(|e| e.action == "launch").count(), 1);
     }
     #[cfg(not(windows))]
     #[tokio::test]

@@ -215,12 +215,18 @@ pub(crate) fn desired(snapshot: &Snapshot) -> Vec<(PathBuf, String)> {
     // default group, as a repository in no group uses it (DEC-0007); its folders come after every
     // group's own, so a folder two groups hold keeps the group that has an account.
     let mut fallback: Vec<(PathBuf, String)> = Vec::new();
+    // SB-401 (DEC-0023 D-15): a group switched off keeps its folders' route, so the proxy answers
+    // their sessions that it is off (closed) rather than the folder falling back to the ordinary
+    // login (open, which SB-109 forbids for an organization's folders). Its folders come last: a
+    // folder another group holds as well runs on that group.
+    let mut off: Vec<(PathBuf, String)> = Vec::new();
     for project in projects {
         // A group routes its folders to its own accounts whatever their organizations
         // (DEC-0022, SB-403). A group bound to an organization with no enabled Claude account
         // gets no binding (nothing is written for its folders) and never falls back to the
-        // default group's accounts.
-        let route = if has_claude(&project.pool) {
+        // default group's accounts. SB-401 D-15: a group switched off keeps its route, closed
+        // (the proxy refuses it with GROUP_OFF).
+        let route = if project.off || has_claude(&project.pool) {
             project.pool.clone()
         } else if project.organizations.is_empty()
             && project.pool != DEFAULT_POOL
@@ -230,13 +236,24 @@ pub(crate) fn desired(snapshot: &Snapshot) -> Vec<(PathBuf, String)> {
         } else {
             continue;
         };
-        let out = if route == project.pool {
+        let out = if project.off {
+            &mut off
+        } else if route == project.pool {
             &mut out
         } else {
             &mut fallback
         };
         for folder in &project.folders {
             let folder = PathBuf::from(folder);
+            // D-15: a folder a group switched on also holds is that group's, as `project_for`
+            // and the shell map say, even when that group writes no route there.
+            if project.off
+                && snapshot
+                    .project_for(&folder)
+                    .is_some_and(|p| p.pool != project.pool)
+            {
+                continue;
+            }
             if folder.is_dir() {
                 out.push((folder.clone(), route.clone()));
             }
@@ -271,6 +288,7 @@ pub(crate) fn desired(snapshot: &Snapshot) -> Vec<(PathBuf, String)> {
         }
     }
     out.extend(fallback);
+    out.extend(off);
     // SB-146: a folder in several groups is written for the first group with a Claude account
     // (creation order), the one `Snapshot::project_for` names.
     let mut seen = std::collections::HashSet::new();
@@ -787,6 +805,8 @@ pub(crate) fn key(snapshot: &Snapshot, address: &str, repos: &mut RepoCache) -> 
         // SB-325: a personal group falls back to the default group; one bound to an
         // organization does not.
         p.organizations.hash(&mut h);
+        // SB-401: a group switched off or on binds its folders again.
+        (p.off, p.tokens).hash(&mut h);
         for f in &p.folders {
             let worktrees = repos.common(Path::new(f)).map(|c| c.join("worktrees"));
             let stamp =
@@ -839,6 +859,7 @@ mod tests {
             created_at: 1,
             sources: vec![],
             organizations: Vec::new(),
+            ..Project::default()
         }
     }
     fn env(folder: &Path) -> Option<Map<String, Value>> {
@@ -914,6 +935,85 @@ mod tests {
         assert!(
             !settings_path(&fresh).exists(),
             "a file Switchboard created is removed"
+        );
+    }
+
+    /// SB-401 (D-15): a group switched off keeps its folders' route, so the proxy refuses them
+    /// (an organization's folders never fall back to the ordinary login); a folder another group
+    /// holds as well runs on that group; switching re-runs the sync.
+    #[test]
+    fn a_group_switched_off_keeps_its_route_and_its_switch_changes_the_fingerprint() {
+        let tmp = tempfile::tempdir().unwrap();
+        let data = tmp.path().canonicalize().unwrap();
+        let app = data.join("app");
+        let both = data.join("both");
+        git(&app);
+        git(&both);
+        let mut s = Snapshot {
+            projects: vec![project("pc", &[&app, &both]), project("other", &[&both])],
+            accounts: vec![account("pc"), account("other")],
+            ..Default::default()
+        };
+        let route = |s: &Snapshot, f: &Path| {
+            desired(s)
+                .into_iter()
+                .find(|(d, _)| d == f)
+                .map(|(_, pool)| pool)
+        };
+        assert_eq!(route(&s, &both).as_deref(), Some("pc"));
+        let mut repos = RepoCache::default();
+        let on = key(&s, "127.0.0.1:4000", &mut repos);
+        s.projects[0].off = true;
+        assert_eq!(
+            route(&s, &app).as_deref(),
+            Some("pc"),
+            "kept: the proxy refuses it"
+        );
+        assert_eq!(
+            route(&s, &both).as_deref(),
+            Some("other"),
+            "a shared folder falls through"
+        );
+        // With no Claude account of its own, an off group still keeps its folder closed.
+        s.accounts.retain(|a| a.pool != "pc");
+        assert_eq!(route(&s, &app).as_deref(), Some("pc"));
+        assert_ne!(key(&s, "127.0.0.1:4000", &mut repos), on);
+        s.projects[0].off = false;
+        s.projects[0].tokens = true;
+        assert_ne!(key(&s, "127.0.0.1:4000", &mut repos), on);
+    }
+
+    #[test]
+    fn an_off_groups_folder_an_on_group_holds_is_the_on_groups_even_with_no_route() {
+        // Round 4: the on group, bound to an organization, has no Claude account, so it writes no
+        // route; the off group's folder is still the on group's (`project_for`), never bound to
+        // the off group.
+        let tmp = tempfile::tempdir().unwrap();
+        let data = tmp.path().canonicalize().unwrap();
+        let (shared, alone) = (data.join("shared"), data.join("alone"));
+        git(&shared);
+        git(&alone);
+        let mut off = project("off", &[&shared, &alone]);
+        off.off = true;
+        let mut on = project("on", &[&shared]);
+        on.organizations = vec!["acme".into()];
+        let s = Snapshot {
+            projects: vec![off, on],
+            accounts: vec![account("off")],
+            ..Default::default()
+        };
+        assert_eq!(s.project_for(&shared).map(|p| p.pool.as_str()), Some("on"));
+        let want = desired(&s);
+        let pool_of = |f: &Path| want.iter().find(|(w, _)| w == f).map(|(_, p)| p.as_str());
+        assert_eq!(
+            pool_of(&shared),
+            None,
+            "the on group's, which writes no route"
+        );
+        assert_eq!(
+            pool_of(&alone),
+            Some("off"),
+            "kept closed where only it holds"
         );
     }
 

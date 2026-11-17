@@ -1145,6 +1145,7 @@ mod tests {
             created_at: 1,
             sources: vec![],
             organizations: vec!["o-acme".into()],
+            ..switchboard_core::Project::default()
         });
         snapshot
             .accounts

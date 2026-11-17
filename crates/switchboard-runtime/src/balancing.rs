@@ -130,10 +130,18 @@ pub fn write(root: &Path, settings: &Settings) -> Result<(), String> {
         .map_err(|_| NOT_SAVED.into())
 }
 
-/// Every group balancing can name: `default`, then each group a person made.
+/// Every group balancing can name: `default`, then each group a person made, never the
+/// pay-per-token group (SB-401): its keys are lent to nobody and it borrows nothing.
 pub fn pools(snapshot: &Snapshot) -> Vec<String> {
     std::iter::once(DEFAULT_POOL.to_owned())
-        .chain(snapshot.projects.iter().map(|p| p.pool.clone()))
+        .chain(
+            snapshot
+                .projects
+                .iter()
+                // SB-401: nor a group switched off, which lends and borrows nothing.
+                .filter(|p| !p.tokens && !p.off)
+                .map(|p| p.pool.clone()),
+        )
         .collect()
 }
 
@@ -418,6 +426,11 @@ fn forced_return(view: &View<'_>, lend: &Lend) -> Option<(&'static str, bool)> {
     if !view.settings.chosen(&lend.from) || !view.settings.chosen(&lend.to) {
         return Some(("not_chosen", true));
     }
+    // SB-401: a loan to or from a group switched off goes home.
+    let off = |pool: &str| snapshot.project_of_pool(pool).is_some_and(|p| p.off);
+    if off(&lend.from) || off(&lend.to) {
+        return Some(("group_off", true));
+    }
     // Wave 2: an account the person moved to another home since is no loan of `from` any more.
     if account.pool != lend.from
         || !usable(snapshot, account)
@@ -534,7 +547,12 @@ pub fn plan(
         .groups
         .iter()
         .map(String::as_str)
-        .filter(|g| *g == DEFAULT_POOL || snapshot.project_of_pool(g).is_some())
+        .filter(|g| {
+            *g == DEFAULT_POOL
+                || snapshot
+                    .project_of_pool(g)
+                    .is_some_and(|p| !p.tokens && !p.off)
+        })
         .collect();
     let mut needy: Vec<(&str, Provider, Signal)> = Vec::new();
     for g in &groups {
@@ -886,6 +904,27 @@ pub fn summary(
 
 #[cfg(test)]
 mod tests {
+    /// SB-401: a group switched off, and the pay-per-token group, are never named.
+    #[test]
+    fn a_group_switched_off_and_the_pay_per_token_group_take_no_part() {
+        let group = |pool: &str, off: bool, tokens: bool| switchboard_core::Project {
+            pool: pool.into(),
+            name: pool.into(),
+            folders: vec![format!("/w/{pool}")],
+            off,
+            tokens,
+            ..switchboard_core::Project::default()
+        };
+        let snapshot = Snapshot {
+            projects: vec![
+                group("apps", false, false),
+                group("paused", true, false),
+                group("tokens", true, true),
+            ],
+            ..Default::default()
+        };
+        assert_eq!(pools(&snapshot), ["default", "apps"]);
+    }
     #[test]
     fn a_group_out_of_room_brings_the_next_pass_forward_to_a_minute() {
         // The first pass always runs; then every 15 minutes.

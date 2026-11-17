@@ -647,6 +647,12 @@ pub enum Operation {
         #[serde(default = "spend::agent_surface")]
         by: spend::Surface,
     },
+    /// SB-401: switches a group off or on. The pay-per-token group turns on only with a daily
+    /// spending ceiling set.
+    GroupSwitch {
+        pool: String,
+        on: bool,
+    },
     /// Makes a pool's folder capability worthless and writes a new one into its folders (an
     /// exposure, 2026-10-18). Other pools and managed sessions keep theirs.
     RotatePoolCapability {
@@ -1912,6 +1918,19 @@ impl Runtime {
         let Ok(snapshot) = self.store.snapshot() else {
             return;
         };
+        // SB-401: a Claude API key's own home (an isolated launch of 0.7.111 or older) keeps no
+        // copy of the key; it launches managed only now.
+        let root = self.root.clone();
+        let scrubbed = blocking::run(|| launch::scrub_key_homes(&root, &snapshot));
+        if scrubbed > 0 {
+            oplog::event(
+                "key_homes_scrubbed",
+                &[(
+                    "count",
+                    oplog::Field::Number(i64::try_from(scrubbed).unwrap_or(i64::MAX)),
+                )],
+            );
+        }
         let salts = read_pool_salts(&self.root);
         let synced = blocking::run(|| {
             bindings::sync_salted(
@@ -2288,6 +2307,40 @@ impl Runtime {
     /// project keeps its last folder.
     /// SB-156: hands the proxy's counts to the statistics with each folder already resolved to
     /// its project, so a count outlives the checkout it came from.
+    /// SB-401: a pay-per-token ceiling the proxy found reached opens the ceiling's question
+    /// (double or keep), once per group and UTC day; the window announces it as any other.
+    pub(crate) fn ask_reached_ceilings(&self) {
+        let reached = self.proxy.take_reached();
+        if reached.is_empty() {
+            return;
+        }
+        let Ok(snapshot) = self.store.snapshot() else {
+            return;
+        };
+        for r in reached {
+            let scope = switchboard_core::ChainScope::Project { pool: r.pool };
+            let spent = r.micros as f64 / 1_000_000.0;
+            let outcome = spend::open_question_once_a_day(
+                &self.root,
+                &snapshot,
+                &scope,
+                r.cents,
+                spent,
+                monitor::now(),
+            );
+            oplog::event(
+                "tokens_ceiling_reached",
+                &[(
+                    "outcome",
+                    oplog::Field::Code(match outcome {
+                        Ok(Some(_)) => "asked",
+                        Ok(None) => "asked_today",
+                        Err(_) => "unwritten",
+                    }),
+                )],
+            );
+        }
+    }
     pub(crate) fn absorb_statistics(&self) {
         // SB-273: connections the proxy closed because another account's process opened them.
         let foreign = self.proxy.take_foreign_refused();
@@ -3302,10 +3355,25 @@ fn load_proxy_record(root: &Path) -> Option<ProxyRecord> {
         && record.token.bytes().all(|b| b.is_ascii_hexdigit()))
     .then_some(record)
 }
+/// SB-401 (D-18): makes the pay-per-token group while a Claude API key is saved without it;
+/// codes only in the log.
+pub(crate) fn tokens_group_for_keys(store: &Store) {
+    match store.ensure_tokens_group_for_keys() {
+        Ok(false) => {}
+        Ok(true) => crate::oplog::event("tokens_group_made", &[]),
+        Err(_) => crate::oplog::event(
+            "tokens_group_made",
+            &[("error", crate::oplog::Field::Code("store"))],
+        ),
+    }
+}
 /// Starts the proxy on its recorded port and token. When another program holds that port it
 /// starts on a fresh one, keeps the token, and points the managed homes' generated files at
 /// the new port, so a session launched from them again reaches the proxy.
 async fn start_proxy(root: &Path, store: Arc<Store>) -> Result<ProxyHandle, String> {
+    // SB-401 (D-18): a Claude API key from before the pay-per-token group gets the group before
+    // the proxy takes a request, so no new route names a key outside it.
+    tokens_group_for_keys(&store);
     let proxy_store = store.clone();
     let record = load_proxy_record(root);
     let mut proxy = ProxyHandle::start_on(
@@ -4025,6 +4093,25 @@ pub const PROJECT_EDIT_NO_ACCOUNT: &str =
     "This account is not in the project. List the project's accounts and name one of them.";
 /// A path with its nearest existing ancestor resolved (symlinks, `/tmp` → `/private/tmp`) and the
 /// missing rest joined back (SB-131).
+/// SB-401: what the pay-per-token group's keys cost so far this UTC day at the list price, in
+/// micro-dollars, by pool: from the owner's proxy, which counts it for its ceiling, else (no
+/// owner runs) from `tokens-spend.json` and `statistics.json`, as the proxy reads them at start.
+fn tokens_spent_today(
+    root: &Path,
+    runtime: Option<&Runtime>,
+    snapshot: &switchboard_core::Snapshot,
+) -> std::collections::BTreeMap<String, u64> {
+    let Some(group) = snapshot.tokens_group() else {
+        return std::collections::BTreeMap::new();
+    };
+    let micros = match runtime {
+        Some(rt) => rt.proxy.spent_today(&group.pool),
+        // The same read the proxy makes before it listens: the spend file and the statistics.
+        None => switchboard_proxy::tokens::Spend::load(root, monitor::now())
+            .today(&group.pool, monitor::now()),
+    };
+    std::collections::BTreeMap::from([(group.pool.clone(), micros)])
+}
 fn canonical_near(path: &Path) -> PathBuf {
     let mut rest: Vec<&std::ffi::OsStr> = Vec::new();
     let mut at = Some(path);
@@ -4216,6 +4303,7 @@ impl Reported {
             }
             Operation::RemoveProject { .. } => Self::Project("removed"),
             Operation::ProjectEdit { .. } => Self::Project("updated"),
+            Operation::GroupSwitch { .. } => Self::Project("updated"),
             Operation::MoveAccount { .. } => Self::Project("updated"),
             Operation::MoveRoot { .. } => Self::Project("updated"),
             Operation::ProjectSuggestionAccept { .. } => Self::Project("updated"),
@@ -5380,7 +5468,14 @@ async fn execute(
             secret,
         } => {
             let credential = Credential::parse(provider, kind, &secret)?;
-            Ok(json!(store.add(label, provider, kind, pool, credential)?))
+            // SB-401 (DEC-0023 D-10): a Claude API key goes to the pay-per-token group (made when
+            // needed, switched off), whatever group was named: never to the default group, where
+            // every folder in no group would run on it, nor to a group with no daily ceiling.
+            // Round 5: the group is made in the add's own publish (`Store::add_routed`), so an add
+            // that fails leaves no empty group.
+            Ok(json!(
+                store.add_routed(label, provider, kind, pool, credential)?
+            ))
         }
         Operation::Update {
             id,
@@ -5809,7 +5904,11 @@ async fn execute(
             }
             Ok(json!({"chain": store.set_chain(scope, executors)?}))
         }
-        Operation::Ceilings => spend::view(root, &store.snapshot()?, monitor::now()),
+        Operation::Ceilings => {
+            let snapshot = store.snapshot()?;
+            let spent = tokens_spent_today(root, runtime, &snapshot);
+            spend::view(root, &snapshot, monitor::now(), &spent)
+        }
         Operation::SetCeiling { scope, usd, by } => {
             let ceiling =
                 spend::set_ceiling(root, &store.snapshot()?, scope, usd, by, monitor::now())?;
@@ -7878,9 +7977,35 @@ async fn execute(
                 .ok_or("Account not found.")?
                 .pool
                 .clone();
-            if from == pool {
+            // SB-401 (DEC-0023 D-10): a Claude API key moves only into the pay-per-token group,
+            // made when it does not exist yet (`tokens` names it then, even while the key sits in
+            // an ordinary group whose pool id is `tokens`).
+            let key = snapshot
+                .accounts
+                .iter()
+                .any(|a| a.id == id && switchboard_core::Snapshot::is_claude_key(a));
+            // `tokens` for a key is the pay-per-token group, even while the key sits in an
+            // ordinary group whose pool id is `tokens`.
+            if from == pool && !(key && pool == switchboard_core::TOKENS_POOL) {
                 return Ok(json!({"id": id, "from": from, "pool": pool, "moved": false}));
             }
+            // Round 5: `tokens` names the pay-per-token group whatever its pool id (`tokens-2`
+            // when an ordinary group took `tokens`), and the group is made in the move's own
+            // publish (`Store::move_key_to_tokens`).
+            let pool = if key {
+                let named = pool == switchboard_core::TOKENS_POOL
+                    || snapshot.tokens_group().is_some_and(|g| g.pool == pool);
+                if !named {
+                    return Err(switchboard_core::CLAUDE_KEY_STAYS.into());
+                }
+                let (pool, moved) = store.move_key_to_tokens(&id)?;
+                if !moved {
+                    return Ok(json!({"id": id, "from": from, "pool": pool, "moved": false}));
+                }
+                pool
+            } else {
+                pool
+            };
             let edit =
                 |pool: String, add: Vec<String>, remove: Vec<String>| Operation::ProjectEdit {
                     pool,
@@ -7893,7 +8018,9 @@ async fn execute(
                     organizations: None,
                     move_accounts: true,
                 };
-            if pool != "default" {
+            if key {
+                // Moved above, in one publish.
+            } else if pool != "default" {
                 if snapshot.project_of_pool(&pool).is_none() {
                     return Err(MOVE_ACCOUNT_NO_PROJECT.into());
                 }
@@ -8218,6 +8345,18 @@ async fn execute(
             };
             let map = blocking::run(|| roots::disk_map(&under, &snapshot));
             serde_json::to_value(map).map_err(|_| "Repositories could not be listed.".into())
+        }
+        Operation::GroupSwitch { pool, on } => {
+            let snapshot = store.snapshot()?;
+            let group = snapshot
+                .project_of_pool(&pool)
+                .ok_or("Project not found.")?;
+            // SB-401: the pay-per-token group's keys spend money on every request: on only with a
+            // ceiling that stops them.
+            if on && group.tokens && spend::group_ceiling(root, &pool).is_none() {
+                return Err(spend::TOKENS_NEED_CEILING.into());
+            }
+            Ok(json!(store.set_group_off(&pool, !on)?))
         }
         Operation::RemoveProject { pool, by } => {
             // C-Q7: a group's ceiling goes with it, so spend.json is pruned under its lock. C-Q9:
@@ -14335,5 +14474,508 @@ mod operators_word_tests {
             );
         }
         assert!(spend::read(root.path()).unwrap().loosened.is_empty());
+    }
+}
+
+/// SB-401: the pay-per-token group from the runtime's side: where a key lands, turning it on,
+/// the ceiling view, the reached question, launches and the groups balancing names.
+#[cfg(test)]
+mod tokens_group_tests {
+    use super::*;
+    use fixtures::*;
+
+    fn add_key(pool: &str) -> Operation {
+        Operation::Add {
+            label: "Key".into(),
+            provider: Provider::Claude,
+            kind: AuthKind::ApiKey,
+            pool: pool.into(),
+            secret: format!("synthetic-key-{pool}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn a_claude_key_lands_in_the_pay_per_token_group_which_turns_on_only_with_a_ceiling() {
+        let root = tempfile::tempdir().unwrap();
+        let runtime = fixtures::runtime(root.path(), signed_out, activates).await;
+        let key = runtime.execute(add_key("default")).await.unwrap();
+        let snapshot = runtime.store.snapshot().unwrap();
+        let group = snapshot.tokens_group().cloned().unwrap();
+        assert_eq!(key["pool"], json!(group.pool));
+        assert!(group.off && group.folders.is_empty());
+        // A key named for `tokens` before any such group lands there too, the group made.
+        let other = tempfile::tempdir().unwrap();
+        let fresh = fixtures::runtime(other.path(), signed_out, activates).await;
+        let named = fresh
+            .execute(add_key(switchboard_core::TOKENS_POOL))
+            .await
+            .unwrap();
+        assert!(fresh.store.snapshot().unwrap().tokens_group().is_some());
+        assert_eq!(named["pool"], switchboard_core::TOKENS_POOL);
+        // DEC-0023 D-10: a key named for an ordinary group lands there all the same.
+        let elsewhere = fresh.execute(add_key("work")).await.unwrap();
+        assert_eq!(elsewhere["pool"], switchboard_core::TOKENS_POOL);
+        // And it moves to no other group: not back to default, not into an ordinary one.
+        let refused = fresh
+            .execute(Operation::MoveAccount {
+                id: elsewhere["id"].as_str().unwrap().into(),
+                pool: "default".into(),
+            })
+            .await
+            .unwrap_err();
+        assert_eq!(refused, switchboard_core::CLAUDE_KEY_STAYS);
+        // On only with a daily ceiling.
+        let on = || Operation::GroupSwitch {
+            pool: group.pool.clone(),
+            on: true,
+        };
+        assert_eq!(
+            runtime.execute(on()).await.unwrap_err(),
+            switchboard_core::TOKENS_NO_CEILING
+        );
+        runtime
+            .execute(Operation::SetCeiling {
+                scope: switchboard_core::ChainScope::Project {
+                    pool: group.pool.clone(),
+                },
+                usd: Some(5.0),
+                by: spend::Surface::Window,
+            })
+            .await
+            .expect("a ceiling needs no OpenRouter key of the group's own");
+        runtime.execute(on()).await.unwrap();
+        assert!(!runtime.store.pool_flags(&group.pool).unwrap().0);
+        // The ceiling reads active, with today's spend.
+        let view = runtime.execute(Operation::Ceilings).await.unwrap();
+        let ceiling = &view["ceilings"][0];
+        assert_eq!(ceiling["active"], true);
+        assert_eq!(ceiling["tokens"], true);
+        assert_eq!(ceiling["spent_today_usd"], 0.0);
+        assert_eq!(ceiling["reached"], false);
+        // Off again, without conditions.
+        runtime
+            .execute(Operation::GroupSwitch {
+                pool: group.pool.clone(),
+                on: false,
+            })
+            .await
+            .unwrap();
+        assert!(runtime.store.pool_flags(&group.pool).unwrap().0);
+    }
+
+    #[test]
+    fn a_reached_ceiling_asks_once_a_day() {
+        let root = tempfile::tempdir().unwrap();
+        let snapshot = switchboard_core::Snapshot::default();
+        let scope = switchboard_core::ChainScope::Project {
+            pool: "tokens".into(),
+        };
+        let now = 1_794_880_000;
+        let first =
+            spend::open_question_once_a_day(root.path(), &snapshot, &scope, 500, 5.1, now).unwrap();
+        assert!(first.is_some());
+        spend::answer(
+            root.path(),
+            &snapshot,
+            first.as_deref().unwrap(),
+            spend::Answer::Keep,
+            spend::Surface::Window,
+            now + 5,
+        )
+        .ok();
+        assert_eq!(
+            spend::open_question_once_a_day(root.path(), &snapshot, &scope, 500, 5.3, now + 60)
+                .unwrap(),
+            None,
+            "kept for the day: not asked again"
+        );
+        assert!(spend::open_question_once_a_day(
+            root.path(),
+            &snapshot,
+            &scope,
+            500,
+            5.0,
+            now + 86_400
+        )
+        .unwrap()
+        .is_some());
+    }
+
+    #[test]
+    fn a_pay_per_token_key_launches_only_managed_while_its_group_is_on_with_a_ceiling() {
+        let root = tempfile::tempdir().unwrap();
+        let mut group = switchboard_core::Project::tokens_group("tokens".into(), 1);
+        let mut snapshot = switchboard_core::Snapshot::default();
+        let mut key = switchboard_core::Account {
+            id: "key".into(),
+            label: "Key".into(),
+            provider: Provider::Claude,
+            kind: AuthKind::ApiKey,
+            pool: "tokens".into(),
+            enabled: true,
+            created_at: 1,
+            identity: None,
+            usage: None,
+            external_identity: None,
+            usage_health: None,
+        };
+        snapshot.projects.push(group.clone());
+        let allows = |s: &switchboard_core::Snapshot, a: &Account, mode| {
+            launch::group_allows_launch(root.path(), s, a, mode)
+        };
+        assert_eq!(
+            allows(&snapshot, &key, "isolated").unwrap_err(),
+            launch::TOKENS_ISOLATED
+        );
+        assert_eq!(
+            allows(&snapshot, &key, "managed").unwrap_err(),
+            switchboard_core::GROUP_OFF
+        );
+        group.off = false;
+        snapshot.projects[0] = group.clone();
+        assert_eq!(
+            allows(&snapshot, &key, "managed").unwrap_err(),
+            switchboard_core::TOKENS_NO_CEILING
+        );
+        spend::set_ceiling(
+            root.path(),
+            &snapshot,
+            switchboard_core::ChainScope::Project {
+                pool: "tokens".into(),
+            },
+            Some(5.0),
+            spend::Surface::Window,
+            1,
+        )
+        .unwrap();
+        assert!(allows(&snapshot, &key, "managed").is_ok());
+        // An account of any group switched off starts nothing.
+        key.pool = "apps".into();
+        key.kind = AuthKind::OAuth;
+        snapshot.projects.push(switchboard_core::Project {
+            pool: "apps".into(),
+            name: "Apps".into(),
+            folders: vec!["/w/apps".into()],
+            off: true,
+            ..Default::default()
+        });
+        assert_eq!(
+            allows(&snapshot, &key, "isolated").unwrap_err(),
+            switchboard_core::GROUP_OFF
+        );
+        // Balancing never names the pay-per-token group.
+        assert!(!balancing::pools(&snapshot).contains(&"tokens".to_owned()));
+        // A managed launch of a key runs only from a folder of its group (SCN-100).
+        let mut paid = switchboard_core::Project::tokens_group("tokens".into(), 1);
+        paid.folders = vec!["/w/paid".into()];
+        let mut only = switchboard_core::Snapshot::default();
+        only.projects.push(paid);
+        key.pool = "tokens".into();
+        key.kind = AuthKind::ApiKey;
+        assert_eq!(
+            launch::project_allows(&only, &key, std::path::Path::new("/w/other")).unwrap_err(),
+            launch::PROJECT_ACCOUNT_OUTSIDE
+        );
+        assert!(launch::project_allows(&only, &key, std::path::Path::new("/w/paid/sub")).is_ok());
+    }
+
+    /// SB-401: the owner's proxy knows the day's pay-per-token spend before its first request,
+    /// from `statistics.json` (and `tokens-spend.json`) a previous owner left.
+    #[tokio::test]
+    async fn an_owner_starts_with_the_days_spend_the_files_hold() {
+        let root = tempfile::tempdir().unwrap();
+        let today = switchboard_proxy::stats::day_of(monitor::now());
+        let key = switchboard_proxy::stats::key(&today, "a", "tokens", "claude-code", "/w");
+        switchboard_core::private_fs::private_write(
+            &root.path().join("statistics.json"),
+            json!({"version": 1, "tallies": {key: {"requests": 1, "cost_micros": 1_250_000}}})
+                .to_string()
+                .as_bytes(),
+        )
+        .unwrap();
+        let runtime = fixtures::runtime(root.path(), signed_out, activates).await;
+        assert_eq!(runtime.proxy.spent_today("tokens"), 1_250_000);
+        let view = {
+            runtime.execute(add_key("default")).await.unwrap();
+            runtime
+                .execute(Operation::SetCeiling {
+                    scope: switchboard_core::ChainScope::Project {
+                        pool: "tokens".into(),
+                    },
+                    usd: Some(1.0),
+                    by: spend::Surface::Window,
+                })
+                .await
+                .unwrap();
+            runtime.execute(Operation::Ceilings).await.unwrap()
+        };
+        assert_eq!(view["ceilings"][0]["spent_today_usd"], 1.25);
+        assert_eq!(view["ceilings"][0]["reached"], true);
+    }
+
+    /// SB-401, end to end: the ceiling the window sets (`spend::set_ceiling`) is the one the
+    /// proxy refuses by, for a key added and a group turned on the way the window does it.
+    #[tokio::test]
+    async fn the_ceiling_the_window_sets_is_the_one_the_proxy_refuses_by() {
+        use axum::{routing::post, Router};
+        let root = tempfile::tempdir().unwrap();
+        let runtime = fixtures::runtime(root.path(), signed_out, activates).await;
+        let key = runtime.execute(add_key("default")).await.unwrap();
+        let pool = key["pool"].as_str().unwrap().to_owned();
+        let id = key["id"].as_str().unwrap().to_owned();
+        runtime.store.select(Provider::Claude, &pool, &id).unwrap();
+        runtime
+            .execute(Operation::SetCeiling {
+                scope: switchboard_core::ChainScope::Project { pool: pool.clone() },
+                usd: Some(0.01),
+                by: spend::Surface::Window,
+            })
+            .await
+            .unwrap();
+        runtime
+            .execute(Operation::GroupSwitch {
+                pool: pool.clone(),
+                on: true,
+            })
+            .await
+            .unwrap();
+        // Claude Fable 5.2: 1,000 in and 1,000 out, $0.048 at the list price.
+        let router = Router::new().route(
+            "/v1/messages",
+            post(|| async {
+                axum::Json(json!({"model": "claude-fable-5-2",
+                    "usage": {"input_tokens": 1000, "output_tokens": 1000}}))
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let upstream = format!("http://{}", listener.local_addr().unwrap());
+        let served = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
+        let proxy = switchboard_proxy::start_at_upstream(runtime.store.clone(), &upstream)
+            .await
+            .unwrap();
+        let ask = || {
+            reqwest::Client::new()
+                .post(format!(
+                    "http://{}/claude/{pool}/v1/messages",
+                    proxy.address()
+                ))
+                .bearer_auth(proxy.token())
+                .body("{}")
+                .send()
+        };
+        let first = ask().await.unwrap();
+        assert!(first.status().is_success(), "{}", first.status());
+        let _ = first.bytes().await;
+        assert_eq!(proxy.spent_today(&pool), 48_000);
+        let second = ask().await.unwrap();
+        assert_eq!(second.status(), 403);
+        let body = second.text().await.unwrap();
+        assert!(
+            body.contains(switchboard_core::TOKENS_CEILING_REACHED),
+            "{body}"
+        );
+        proxy.shutdown().await;
+        served.abort();
+    }
+
+    /// SB-401 (P1-2): a Claude API key a Claude Swap import brings in lands in the pay-per-token
+    /// group, made when needed, whatever group the import named.
+    #[test]
+    fn a_claude_swap_key_lands_in_the_pay_per_token_group() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::open(
+            root.path().to_owned(),
+            Arc::new(switchboard_core::MemoryVault::default()),
+        )
+        .unwrap();
+        let profile = external::CapturedProfile {
+            provider: Provider::Claude,
+            kind: AuthKind::ApiKey,
+            credential: Credential::parse(
+                Provider::Claude,
+                AuthKind::ApiKey,
+                "sk-ant-api-synthetic",
+            )
+            .unwrap(),
+            identity: switchboard_core::ExternalIdentity {
+                account_id: None,
+                organization_id: None,
+                email: None,
+            },
+            label: "Swap key".into(),
+        };
+        let (imported, failed, _) = import_profiles(
+            &store,
+            &refresh::RefreshState::default(),
+            "default",
+            vec![profile],
+        );
+        assert_eq!((imported.len(), failed), (1, 0));
+        let tokens = store.snapshot().unwrap().tokens_group().cloned().unwrap();
+        assert_eq!(imported[0].pool, tokens.pool);
+        assert!(tokens.off);
+    }
+
+    /// SB-401: a key from before the pay-per-token group moves into it (made now), never into
+    /// another group; its own home from an older isolated launch loses its copy of the key.
+    #[tokio::test]
+    async fn a_key_from_before_moves_into_the_pay_per_token_group_and_its_home_forgets_it() {
+        let root = tempfile::tempdir().unwrap();
+        let runtime = fixtures::runtime(root.path(), signed_out, activates).await;
+        let key = runtime
+            .store
+            .add(
+                "Old key".into(),
+                Provider::Claude,
+                AuthKind::ApiKey,
+                "default".into(),
+                Credential::parse(Provider::Claude, AuthKind::ApiKey, "synthetic-old").unwrap(),
+            )
+            .unwrap();
+        let home = root.path().join("homes").join(&key.id);
+        std::fs::create_dir_all(&home).unwrap();
+        switchboard_core::private_fs::private_write(
+            &home.join("settings.json"),
+            br#"{"env":{"ANTHROPIC_API_KEY":"synthetic-old","KEEP":"1"},"permissions":{}}"#,
+        )
+        .unwrap();
+        assert!(runtime.store.snapshot().unwrap().tokens_group().is_none());
+        let moved = runtime
+            .execute(Operation::MoveAccount {
+                id: key.id.clone(),
+                pool: switchboard_core::TOKENS_POOL.into(),
+            })
+            .await
+            .unwrap();
+        assert_eq!(moved["pool"], switchboard_core::TOKENS_POOL);
+        assert_eq!(moved["moved"], true);
+        let snapshot = runtime.store.snapshot().unwrap();
+        assert_eq!(launch::scrub_key_homes(root.path(), &snapshot), 1);
+        let kept: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(home.join("settings.json")).unwrap()).unwrap();
+        assert_eq!(kept, json!({"env": {"KEEP": "1"}, "permissions": {}}));
+        assert_eq!(launch::scrub_key_homes(root.path(), &snapshot), 0, "once");
+    }
+    /// SB-401 round 5: `tokens` names the pay-per-token group whatever its pool id, even for a
+    /// key sitting in an ordinary group whose pool id is `tokens`; the add command makes the group
+    /// with the key.
+    #[tokio::test]
+    async fn tokens_names_the_pay_per_token_group_whatever_its_pool_id() {
+        let root = tempfile::tempdir().unwrap();
+        let runtime = fixtures::runtime(root.path(), signed_out, activates).await;
+        let store = &runtime.store;
+        let folder = tempfile::tempdir().unwrap();
+        let plain = store
+            .save_project_in(None, "Tokens", &[folder.path().to_path_buf()], &[], None)
+            .unwrap();
+        assert_eq!(plain.pool, "tokens");
+        let old = store
+            .add(
+                "Old key".into(),
+                Provider::Claude,
+                AuthKind::ApiKey,
+                "tokens".into(),
+                Credential::parse(Provider::Claude, AuthKind::ApiKey, "synthetic-old").unwrap(),
+            )
+            .unwrap();
+        let moved = runtime
+            .execute(Operation::MoveAccount {
+                id: old.id.clone(),
+                pool: "tokens".into(),
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            (moved["moved"].clone(), moved["pool"].clone()),
+            (json!(true), json!("tokens-2")),
+            "{moved}"
+        );
+        let added = runtime
+            .execute(Operation::Add {
+                label: "New key".into(),
+                provider: Provider::Claude,
+                kind: AuthKind::ApiKey,
+                pool: "tokens".into(),
+                secret: "synthetic-new".into(),
+            })
+            .await
+            .unwrap();
+        assert_eq!(added["pool"], "tokens-2");
+        let again = runtime
+            .execute(Operation::MoveAccount {
+                id: old.id.clone(),
+                pool: "tokens".into(),
+            })
+            .await
+            .unwrap();
+        assert_eq!(again["moved"], false, "{again}");
+        let snapshot = store.snapshot().unwrap();
+        assert!(!snapshot.project_of_pool("tokens").unwrap().tokens);
+        assert_eq!(snapshot.tokens_group().unwrap().pool, "tokens-2");
+    }
+
+    #[tokio::test]
+    async fn a_pay_per_token_group_bound_to_an_organization_warns_but_keeps_its_key() {
+        // DEC-0022 and DEC-0023 together: an organization never refuses the move into the
+        // pay-per-token group (the answer warns), and the key still never leaves that group.
+        let root = tempfile::tempdir().unwrap();
+        let runtime = fixtures::runtime(root.path(), signed_out, activates).await;
+        let store = &runtime.store;
+        let org = store.add_organization("Acme", &[]).unwrap();
+        let tokens = store.ensure_tokens_group().unwrap();
+        store
+            .set_project_organizations(&tokens, vec![org.id.clone()])
+            .unwrap();
+        let key = store
+            .add(
+                "Personal key".into(),
+                Provider::Claude,
+                AuthKind::ApiKey,
+                "default".into(),
+                Credential::parse(Provider::Claude, AuthKind::ApiKey, "synthetic-personal")
+                    .unwrap(),
+            )
+            .unwrap();
+        let moved = runtime
+            .execute(Operation::MoveAccount {
+                id: key.id.clone(),
+                pool: tokens.clone(),
+            })
+            .await
+            .unwrap();
+        assert_eq!(moved["moved"], true, "{moved}");
+        assert_eq!(
+            moved["warnings"][0]["code"], "outside_organization",
+            "{moved}"
+        );
+        assert_eq!(moved["warnings"][0]["pool"], tokens.as_str(), "{moved}");
+        let folder = tempfile::tempdir().unwrap();
+        let apps = store
+            .save_project_in(None, "Apps", &[folder.path().to_path_buf()], &[], None)
+            .unwrap();
+        for pool in [apps.pool.clone(), "default".to_owned()] {
+            let refused = runtime
+                .execute(Operation::MoveAccount {
+                    id: key.id.clone(),
+                    pool: pool.clone(),
+                })
+                .await
+                .unwrap_err();
+            assert_eq!(refused, switchboard_core::CLAUDE_KEY_STAYS, "to {pool}");
+        }
+        assert!(store
+            .save_project(
+                Some(&apps.pool),
+                "Apps",
+                &[folder.path().to_path_buf()],
+                std::slice::from_ref(&key.id),
+            )
+            .is_err());
+        let snapshot = store.snapshot().unwrap();
+        let kept = snapshot.accounts.iter().find(|a| a.id == key.id).unwrap();
+        assert_eq!(
+            kept.pool, tokens,
+            "the key stays in the pay-per-token group"
+        );
     }
 }

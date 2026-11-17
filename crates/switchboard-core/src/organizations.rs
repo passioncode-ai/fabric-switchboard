@@ -1222,6 +1222,7 @@ mod tests {
             created_at: 1,
             sources: Vec::new(),
             organizations: organization.map(str::to_owned).into_iter().collect(),
+            ..Project::default()
         };
         let mut s = Snapshot::default();
         let mut acme = account(A, Provider::Claude, "dev@acme.example", None);
@@ -1281,6 +1282,7 @@ mod tests {
             created_at: 1,
             sources: Vec::new(),
             organizations: organization.map(str::to_owned).into_iter().collect(),
+            ..Project::default()
         };
         let mut s = Snapshot::default();
         let acme = Some("/work/acme".as_ref());
@@ -1320,6 +1322,7 @@ mod tests {
             created_at: 1,
             sources: Vec::new(),
             organizations: organization.map(str::to_owned).into_iter().collect(),
+            ..Project::default()
         };
         let mut s = Snapshot {
             organizations: vec![org(O1, "Acme", &["acme.example"]), org(O2, "Beta", &[])],
@@ -1413,6 +1416,7 @@ mod tests {
                 created_at: 1,
                 sources: Vec::new(),
                 organizations: vec![O2.into(), O1.into()],
+                ..Project::default()
             }],
             ..Default::default()
         };
@@ -1617,6 +1621,7 @@ mod tests {
             created_at: 1,
             sources: Vec::new(),
             organizations: organization.map(str::to_owned).into_iter().collect(),
+            ..Project::default()
         };
         let id = |n: u8| format!("00000000-0000-4000-8000-0000000000{n:02x}");
         let mut in_default = account(&id(1), Provider::Claude, "a@acme.example", None);

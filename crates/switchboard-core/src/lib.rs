@@ -39,7 +39,12 @@ pub use chains::{provider_agent, workflow_id_valid, Chain, ChainScope, Executor,
 pub use credential::Credential;
 pub use machines::{is_machine_pool, Machine, MachineRef};
 pub use organizations::{Attribution, By, Organization};
-pub use projects::{pool_from_name, Project, ProjectRule, RuleResolution, FOLDER_NESTED, KEY_POOL};
+pub use projects::{
+    pool_from_name, Project, ProjectRule, RuleResolution, CLAUDE_KEY_STAYS, FOLDER_NESTED,
+    GROUP_OFF, KEY_OUTSIDE_TOKENS, KEY_POOL, TOKENS_BY_HAND, TOKENS_CEILING_REACHED,
+    TOKENS_KEEPS_KEYS, TOKENS_NAME, TOKENS_NO_CEILING, TOKENS_ONLY_KEYS, TOKENS_POOL,
+    TOKENS_SPEND_UNKNOWN, TOKENS_SPEND_UNSAVED,
+};
 pub use rotation::{
     default_managed_policy, free_at, FailoverTally, Fits, RotationDecision, RotationPolicy,
 };
@@ -1012,6 +1017,7 @@ impl Store {
         // restored sets it; the last one removed clears it).
         candidate.domain_rule_retired = !candidate.organizations.is_empty();
         validate_snapshot(&candidate)?;
+        projects::tokens_keys_stay(state, &candidate)?;
         let started = std::time::Instant::now();
         let written = persistence::write(&self.root, &candidate);
         self.slowest_write.fetch_max(
@@ -1032,6 +1038,7 @@ impl Store {
     fn hold(&self, state: &mut Snapshot, mut candidate: Snapshot) -> Result<(), String> {
         candidate.domain_rule_retired = !candidate.organizations.is_empty();
         validate_snapshot(&candidate)?;
+        projects::tokens_keys_stay(state, &candidate)?;
         *state = candidate;
         self.republish(state);
         let _ = self.pending_since.compare_exchange(
@@ -1483,6 +1490,18 @@ impl Store {
     ) -> Result<Account, String> {
         self.save_account(label, provider, kind, pool, credential, None, false)
     }
+    /// SB-401: `add` for the add command: a Claude API key goes to the pay-per-token group,
+    /// made in the same publish as the account, whatever pool was named.
+    pub fn add_routed(
+        &self,
+        label: String,
+        provider: Provider,
+        kind: AuthKind,
+        pool: String,
+        credential: Credential,
+    ) -> Result<Account, String> {
+        self.save_account_routed(label, provider, kind, pool, credential, None, false, true)
+    }
     pub fn upsert(
         &self,
         label: String,
@@ -1513,6 +1532,29 @@ impl Store {
         external_identity: Option<ExternalIdentity>,
         upsert: bool,
     ) -> Result<Account, String> {
+        self.save_account_routed(
+            label,
+            provider,
+            kind,
+            pool,
+            credential,
+            external_identity,
+            upsert,
+            upsert,
+        )
+    }
+    #[allow(clippy::too_many_arguments)]
+    fn save_account_routed(
+        &self,
+        label: String,
+        provider: Provider,
+        kind: AuthKind,
+        pool: String,
+        credential: Credential,
+        external_identity: Option<ExternalIdentity>,
+        upsert: bool,
+        route_key: bool,
+    ) -> Result<Account, String> {
         if !label_valid(&label)
             || !pool_valid(&pool)
             || external_identity.as_ref().is_some_and(|i| !i.valid())
@@ -1524,6 +1566,19 @@ impl Store {
             return Err(machines::MACHINE_POOL_REFUSED.into());
         }
         credential.validate(provider, kind)?;
+        // SB-401 (DEC-0023 D-10): a Claude API key saved by any import (a Claude Swap import, a
+        // capture, a restore, a source sync: every `upsert`) is saved in the pay-per-token group,
+        // made when needed. `add` is the primitive whose one caller, the add command, routes the
+        // key there itself (`Operation::Add`). A key from before in another group is matched there
+        // no more: saved again, it is saved once more in the pay-per-token group.
+        // The group is made in the same publish as the account (round 4): a save that fails
+        // leaves no empty group behind.
+        let tokens = route_key && provider == Provider::Claude && kind == AuthKind::ApiKey;
+        let pool = if tokens {
+            self.lock()?.tokens_pool()
+        } else {
+            pool
+        };
         if credential
             .account_id
             .as_ref()
@@ -1572,8 +1627,23 @@ impl Store {
             let mut state = self.lock()?;
             match save.plan(&state, &reads) {
                 Ok(SavePlan::Ready {
-                    account, candidate, ..
-                }) if account.id == id => {
+                    account,
+                    mut candidate,
+                    ..
+                }) if account.id == id
+                    && (!tokens
+                        || candidate.tokens_group().map_or_else(
+                            || candidate.projects.iter().all(|p| p.pool != pool),
+                            |g| g.pool == pool,
+                        )) =>
+                {
+                    if tokens && candidate.tokens_group().is_none() {
+                        candidate
+                            .projects
+                            .push(projects::Project::tokens_group(pool.clone(), now()));
+                        candidate.projects.sort_by(|a, b| a.name.cmp(&b.name));
+                        append_event(&mut candidate, "project", None, "created");
+                    }
                     let published = self.publish(&mut state, candidate);
                     drop(state);
                     if published.is_err() {
@@ -2361,6 +2431,12 @@ impl Store {
             .find(|a| a.id == id && a.provider == provider && state.serves(a, pool) && a.enabled)
             .ok_or("Account is unavailable in this provider and pool")?;
         // DEC-0022 (SB-403): an account in the group serves it whatever its organizations.
+        // SB-401 (DEC-0023 D-18): a Claude API key outside the pay-per-token group is never newly
+        // selected; a route that already names it stays.
+        let key = format!("{}:{}", provider.as_str(), pool);
+        if state.key_outside_tokens(a) && state.routes.get(&key).map(String::as_str) != Some(id) {
+            return Err(KEY_OUTSIDE_TOKENS.into());
+        }
         self.checked_credential(a)?;
         let mut candidate = state.clone();
         candidate

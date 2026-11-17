@@ -72,6 +72,7 @@ export const nativeAdapter: Adapter = {
   linkCli: () => invoke('link_cli'),
   saveProject: (input) => invoke('save_project', { pool: input.pool ?? null, name: input.name, folders: input.folders, accountIds: input.accountIds, baseFolders: input.baseFolders ?? null, organization: input.organization ?? null, organizations: input.organizations ?? null }),
   removeProject: (pool) => invoke('remove_project', { pool }),
+  projectSwitch: (pool, on) => invoke('project_switch', { pool, on }),
   projectRoots: () => invoke('project_roots'),
   projectAddAccounts: (pool, accounts) => invoke('project_add_accounts', { pool, accounts }),
   moveRoot: (folder, pool, also, from) => invoke('move_root', { folder, pool, also: also ?? false, from: from ?? null }),
@@ -166,6 +167,18 @@ export const nativeAdapter: Adapter = {
 // Only exact, fixed backend vocabulary is surfaced. Unknown failures never print
 // raw provider output, credentials, filesystem paths, or serialized error objects.
 const safeErrors = new Set([
+  // SB-401: the pay-per-token group's refusals.
+  "Set a daily spending ceiling for the pay-per-token group first: its keys are charged per token, and the ceiling is what stops them.",
+  "A key in the pay-per-token group stays there, under its daily ceiling, and serves no other group. Remove the account to take it out.",
+  "A pay-per-token key runs only through Switchboard, where its daily ceiling is checked. Launch it in managed mode.",
+  "This Claude API key is outside the pay-per-token group, so no daily ceiling holds it, and Switchboard never selects or launches it there. Move it to the pay-per-token group first.",
+  "Switchboard could not save what the pay-per-token group spent today, so its keys serve no request until it can. It tries again every few seconds.",
+  "A Claude API key is never moved or shared into another group: it belongs in the pay-per-token group, under its daily ceiling. Move it there, or remove the account.",
+  "Switchboard could not read what the pay-per-token group spent today, so its keys serve no request until the next UTC day.",
+  "This group is switched off in Switchboard, so it serves no request. Turn it on in Switchboard, or work in a folder of another group.",
+  "The pay-per-token group reached its daily spending ceiling. Raise it in Switchboard, or wait for the next UTC day.",
+  "Folders join the pay-per-token group only one by one, by hand. Add the folder to it yourself.",
+  "Only a Claude API key can be in the pay-per-token group. Put this account in another group.",
   // SB-395, SB-396: the Sessions page's acts.
   // SB-397 R1: refusals of a restart the window shows (the stale plan is answered with a new one).
   "The sessions changed since that plan was made. Make a new plan, check it, then apply it.",

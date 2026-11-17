@@ -6,7 +6,7 @@ never renumber, never delete. The doc map ([DOCMAP.md](DOCMAP.md)) names this fi
 register. Decisions made before 2026-11-08 live where they were made (plans' `D-<n>`, board rows,
 research notes); the ones still in force that the board cites are seeded below with their source.
 
-**Next free ID:** `DEC-0023` (`DEC-0018` and `DEC-0020` are held for the window and fleet plan's modules)
+**Next free ID:** `DEC-0024` (`DEC-0018` and `DEC-0020` are held for the window and fleet plan's modules)
 
 ## Format
 
@@ -460,3 +460,113 @@ research notes); the ones still in force that the board cites are seeded below w
   избирать, а не ограничивая всю локальную работу. Локальную работу подписки на машине
   ограничивается папками и PassionCode-ами, которые там уже создают сами пользователи.»; the live
   call back of 2026-11-17 03:40 UTC relayed by the coordinating session.
+
+### DEC-0023: Claude API keys go to a pay-per-token group that starts off and runs only under a daily ceiling
+
+- **Date:** 2026-11-17
+- **Status:** Accepted (built on branch `token-group`: SB-401; plan
+  [2026-11-17-token-group](plans/2026-11-17-token-group/README.md))
+- **Context:** a Claude API key is charged per token and has no limit of its own in Switchboard;
+  in the default group every folder in no group ran on it. The operator, 2026-11-17: «Такие сессии
+  за токены они сразу добавляются в отдельную папку, в которой нету никаких проектов … Изначально
+  она выключена. И обязательно, когда при включении контролируем usage».
+- **Decision:**
+  - D-1: one reserved group, made on first need with the `tokens` flag (pool `tokens`, or the
+    first free `tokens-<n>`), named *Pay-per-token keys*. It may hold no folder and holds only
+    Claude API-key accounts.
+  - D-2: a Claude API key added to the default group (or to `tokens` before the group exists)
+    lands there; an explicit other group is still allowed; existing keys stay where they are.
+  - D-3: the group starts off. A group switched off routes no folder (bindings), and the proxy,
+    launches and the fallback refuse its accounts; nothing joins the pay-per-token group by itself
+    (sources, found worktrees, settings import), and it is not deleted while it holds a key.
+  - D-4: turning it on needs a daily ceiling (`spend.json`, scope `project:<pool>`, no OpenRouter
+    key of the group's own needed). The proxy checks it before every request a key of the group
+    serves, against its own day counter (never drained, seeded at owner start from
+    `statistics.json`); reached, it refuses and the owner opens the ceiling's question once per
+    group and UTC day.
+  - D-5: money is Anthropic's list price of the tokens each answer reports (`prices.rs`, source
+    and read date beside the table); an unknown model, an answer with no model, or counts that
+    were cut are priced at the dearest family and marked estimated, never free.
+  - D-6: folders join the group one by one, by the person.
+  - D-7 (review, 2026-11-17): a key of the pay-per-token group never leaves it nor serves another
+    group: no share, no loan (balancing never names the group), no move by a save or a restore;
+    the person removes the account to take it out. A key launches only in managed mode (an
+    isolated home would hold its credential and reach the provider past the ceiling). The proxy
+    also checks the chosen account's home group after route selection and before an SB-98 move.
+  - D-8 (review): the proxy fails closed: an unreadable store refuses (`STORE_UNREADABLE`), an
+    unreadable `spend.json` is no ceiling, and the day counter takes over a poisoned lock rather
+    than read as zero.
+  - D-10 (second review, 2026-11-17; supersedes D-2's "an explicit other group is still allowed"):
+    every Claude API key the person adds, restores or lets a group go lands in the pay-per-token
+    group, whatever group was named; once that group exists a Claude API key moves only into it
+    and is newly shared or lent to no group (`CLAUDE_KEY_STAYS`); `accounts move` refuses one to
+    any other group. A key in another group from before stays where it is (nothing that works is
+    broken) and may be moved in. Any Claude API key launches only in managed mode, so its
+    credential never lands in a session's home; the fallback and dispatch pass one over. Reason:
+    the simplest rule that leaves no unguarded key, as the reviewer recommended.
+  - D-11 (second review): an account whose home group is switched off serves no group sharing it
+    (route selection, rotation and failover pass over it; the routes it held move to another
+    account of the same kind there); balancing leaves an off group out and returns its loans. (Its
+    Codex route: see D-15.)
+  - D-12 (second review): the proxy loads the day's spend before it listens, from
+    `tokens-spend.json` (written after each answer of a pay-per-token key) and
+    `statistics.json`, the larger winning; a file that exists and cannot be read leaves the day
+    unknown, and the group refuses until the next UTC day (`TOKENS_SPEND_UNKNOWN`).
+  - D-13 (second review): any model a Claude route answers with is priced (an unknown one at the
+    dearest family); web searches at $10 per thousand; a prompt past 200,000 tokens at the
+    long-context premium (input x2, output x1.5) and the faster tier at six times the price, both
+    marked estimated, so a ceiling never reads less than was spent.
+  - D-14 (second review): the ceiling is checked before each request, so requests already in
+    flight when it is crossed still finish; the day can pass the ceiling by what those requests
+    cost (documented in CONTRACTS), never by a request started after.
+  - D-15 (third review, 2026-11-17; supersedes D-3's "routes no folder" and D-11's Codex line): a
+    group switched off keeps its folders' routes, closed, so a session there gets the proxy's
+    `GROUP_OFF` refusal and never falls through to the ordinary sign-in. One rule for every group,
+    ordinary, organization-bound or pay-per-token: Claude bindings, the Codex route and the shell
+    map keep an off group's folder pointed at it; only a folder an on group also holds is served
+    by that on group (an off group is listed last). Reason: before, an off group bound to an
+    organization dropped out of the bindings and its sessions ran on the person's own sign-in,
+    which is what switching it off was meant to stop.
+  - D-16 (third review): the rule that a Claude API key lands in the pay-per-token group lives in
+    the store's save path (`save_account` with upsert), so every way in (the add dialog, the CLI,
+    Claude Swap's import, a restore) goes through it; the plain `add` stays a primitive that the
+    operation layer routes itself. A key is never placed in a machine group, and one that comes
+    home goes to the group it left by `leaving_pool` (the pay-per-token group).
+  - D-17 (third review): a Claude API key from before, outside the pay-per-token group, is never
+    selected or launched by the window, the CLI or the fallback (`KEY_OUTSIDE_TOKENS`); the
+    window offers *Move to Pay-per-token keys*, and a move to `tokens` makes the group when it is
+    missing. When a key enters that group, the background pass removes `ANTHROPIC_API_KEY` from
+    the isolated home an earlier version wrote for it (`homes/<id>/settings.json`). The day's
+    spend file is written off the counter's lock, newest first; a write that fails leaves the day
+    unknown (the group refuses) until a write succeeds, retried at most every 5 s. Switching a
+    group off moves its routes only to an account the usual checks allow (enabled, not given to
+    an agent, not used elsewhere), one of the group's own organizations first and one outside
+    them after it (DEC-0022: an organization never refuses).
+  - D-18 (fourth review, 2026-11-17; sharpens D-10 and D-17): a Claude API key outside the
+    pay-per-token group is never newly selected, rotated or failed over to, launched in any mode,
+    or named by a new route (`KEY_OUTSIDE_TOKENS`, in the store's select and at every publish).
+    The rule reads the group: the owner makes it at start, before the proxy listens, when a
+    Claude API key is saved without it, and every later save of a key makes it. A route that
+    already named it before the upgrade keeps serving (nothing that works is broken),
+    and Attention lists the key (`key_outside_tokens`) with *Move to Pay-per-token keys*; its
+    account row offers the same move instead of *Select*. A spend file that could not be saved
+    refuses with its own sentence (`TOKENS_SPEND_UNSAVED`, until a save succeeds, tried every
+    5 s off the request's thread), apart from a day that could not be read
+    (`TOKENS_SPEND_UNKNOWN`, the whole UTC day). The group a saved key needs is made in the same
+    publish as the key, so a save that fails leaves none, and a restore counts such a key failed
+    and goes on. A switched-off group's folder that a group switched on also holds is that
+    group's in the Claude bindings too, even when it writes no route there.
+  - D-19 (fifth review, 2026-11-17): every way a key reaches the group makes it in the same
+    publish as the key: the add command (`Store::add_routed`), a save (`upsert`) and a move
+    (`Store::move_key_to_tokens`), so nothing that fails leaves an empty group. For a Claude API
+    key, `tokens` names the pay-per-token group whatever its pool id (`tokens-2` when an ordinary
+    group holds `tokens`), and Attention gives the group's own id in its action. A restore brings
+    the groups back before the keys, so an ordinary group's `tokens` and the backup's own
+    pay-per-token group (with its folders) both return, and a key is never counted as returned
+    to the default group. Known limit: the CLI and MCP without an owner read no group until an
+    owner has started once, so until then they may still select a key from before; the owner's
+    start makes the group before its proxy takes a request.
+- **Consequences:** a key in the default group from before stays there, named under Attention
+  until it is moved (D-18); turning a group off stops its sessions at their next request; the reached question
+  is the same one paid hand-overs use, and *Double* raises the ceiling at once.
+

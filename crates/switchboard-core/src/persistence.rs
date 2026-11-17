@@ -43,7 +43,11 @@ fn schema_version(snapshot: &Snapshot) -> u32 {
     // Version 14 only while a machine group, a group to come back to, or a journal entry of
     // either exists (SB-355, DEC-0013): a 0.7.75 or older reader refuses the unknown fields and
     // the unknown activity, rather than put an account on another machine back in a group here.
-    if !snapshot.machines.is_empty()
+    // Version 15 only while the pay-per-token group exists or a group is switched off (SB-401):
+    // a 0.7.111 or older reader refuses the unknown fields rather than route folders to a key.
+    if snapshot.projects.iter().any(|p| p.tokens || p.off) {
+        15
+    } else if !snapshot.machines.is_empty()
         || !snapshot.returns_to.is_empty()
         || snapshot.events.iter().any(|e| e.action == "machine")
     {
@@ -165,7 +169,7 @@ pub(crate) fn open(root: &Path) -> Result<(File, Snapshot), String> {
             }
             let disk: Disk = serde_json::from_slice(&bytes)
                 .map_err(|_| "Account metadata is corrupt; restore a known-good backup")?;
-            if !matches!(disk.schema_version, 1..=14) {
+            if !matches!(disk.schema_version, 1..=15) {
                 return Err("Unsupported account metadata version".into());
             }
             validate_snapshot(&disk.snapshot)?;
@@ -247,7 +251,7 @@ pub(crate) fn open(root: &Path) -> Result<(File, Snapshot), String> {
         let bytes = read_private(&path, MAX_FILE)?;
         let disk: Disk = serde_json::from_slice(&bytes)
             .map_err(|_| "Account metadata is corrupt; restore a known-good backup")?;
-        if !matches!(disk.schema_version, 1..=14) {
+        if !matches!(disk.schema_version, 1..=15) {
             return Err("Unsupported account metadata version".into());
         }
         validate_snapshot(&disk.snapshot)?;

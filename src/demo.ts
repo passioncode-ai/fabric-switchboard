@@ -63,6 +63,16 @@ export function createDemoAdapter(): Adapter {
     { id: 'q_0123456789abcdef', scope: { kind: 'machine' }, cents: 1000, usd: 10, double_usd: 20, spent: 10.04, reached_at: now() - 1500 },
     { id: 'q_fedcba9876543210', scope: { kind: 'project', pool: 'alpha-web' }, cents: 300, usd: 3, double_usd: 6, spent: 3.1, reached_at: now() - 600 },
   ];
+  // SB-401: the pay-per-token group with one Claude key: off with a $5.00 ceiling by default;
+  // `?tokens=reached` turns it on with one folder and its ceiling reached (the question open).
+  const tokensParam = new URLSearchParams(location.search).get('tokens');
+  const tokensReached = tokensParam === 'reached';
+  let tokensSpent = tokensReached ? 5.04 : 0.62;
+  (state.projects ??= []).push({ pool: 'tokens', name: 'Pay-per-token keys', folders: tokensReached ? ['/srv/projects/sound-engine'] : [], created_at: now() - 3600, tokens: true, off: !tokensReached });
+  state.accounts.push({ id: 'demo-claude-key', label: 'Studio key', provider: 'claude', kind: 'api_key', pool: 'tokens', enabled: true, created_at: now() - 3600, identity: null, usage: null });
+  demoCeilings.push(ceilingView({ kind: 'project', pool: 'tokens' }, 500));
+  if (tokensReached) demoQuestions.push({ id: 'q_7070707070707070', scope: { kind: 'project', pool: 'tokens' }, cents: 500, usd: 5, double_usd: 10, spent: 5.04, reached_at: now() - 300 });
+  const tokensPool = (pool: string) => !!state.projects?.find((p) => p.pool === pool)?.tokens;
   const setup: AgentSetup = { cli_path: null, bundled_cli: '/Applications/Fabric Switchboard.app/Contents/MacOS/switchboard', linked_cli: null, can_link: true, commands: { claude_code: 'claude mcp add --scope user switchboard -- switchboard mcp', codex: 'codex mcp add switchboard -- switchboard mcp', claude_plugin: 'claude plugin marketplace add passioncode-ai/fabric-switchboard && claude plugin install switchboard@switchboard' }, connected: { claude_code: true, codex: false }, agent_prompt: 'Set up Fabric Switchboard on this computer: run `switchboard onboard` and follow it.', proved: { client: 'claude-code', at: now() - 3600 } };
   state.accounts[0].external_identity = studio;
   state.accounts[1].external_identity = codexIdentity;
@@ -444,7 +454,14 @@ export function createDemoAdapter(): Adapter {
         try { const data: unknown = JSON.parse(input.secret); if (!data || typeof data !== 'object' || Array.isArray(data)) throw new Error(); }
         catch { throw new Error('Enter valid credential JSON for the selected provider.'); }
       }
-      const item: Account = { id: crypto.randomUUID(), label: input.label, provider: input.provider, kind: input.kind, pool: input.pool, enabled: true, created_at: now(), identity: null, usage: null };
+      // SB-401 (DEC-0023 D-10): a Claude API key lands in the pay-per-token group, made when needed.
+      let pool = input.pool;
+      if (input.provider === 'claude' && input.kind === 'api_key') {
+        let group = state.projects?.find((p) => p.tokens);
+        if (!group) { group = { pool: 'tokens', name: 'Pay-per-token keys', folders: [], created_at: now(), tokens: true, off: true }; (state.projects ??= []).push(group); }
+        pool = group.pool;
+      }
+      const item: Account = { id: crypto.randomUUID(), label: input.label, provider: input.provider, kind: input.kind, pool, enabled: true, created_at: now(), identity: null, usage: null };
       state.accounts.push(item); log('account_added', item.id, 'success'); return structuredClone(item);
     },
     // SB-355: a move puts the account in the machine's group, a call back into a group here.
@@ -813,6 +830,12 @@ export function createDemoAdapter(): Adapter {
       }
       return out;
     },
+    async projectSwitch(pool, on) {
+      await pause(); const p = (state.projects ?? []).find((x) => x.pool === pool); if (!p) throw new Error('Project not found.');
+      // SB-401: the pay-per-token group turns on only with a daily ceiling.
+      if (on && p.tokens && !demoCeilings.some((c) => c.scope.kind === 'project' && c.scope.pool === pool)) throw new Error('Set a daily spending ceiling for the pay-per-token group first: its keys are charged per token, and the ceiling is what stops them.');
+      p.off = !on; log('project', '', 'updated');
+    },
     async removeProject(pool) { await pause(); const before = state.projects?.length ?? 0; state.projects = (state.projects ?? []).filter((p) => p.pool !== pool); if (state.projects.length === before) throw new Error('Project not found.'); log('project', '', 'removed'); },
     async projectSuggestions() { return { suggestions: structuredClone(suggestions.filter((s) => (state.projects ?? []).some((p) => p.pool === s.pool))) }; },
     async acceptProjectSuggestion(folder) { await pause(); const s = suggestions.find((x) => x.folder === folder); if (!s) throw new Error('No such suggestion. Read the suggestions again.'); const project = (state.projects ?? []).find((p) => p.pool === s.pool); if (!project) throw new Error('Project not found.'); project.folders.push(folder); suggestions = suggestions.filter((x) => x.folder !== folder); log('project', '', 'updated'); },
@@ -861,7 +884,11 @@ export function createDemoAdapter(): Adapter {
     async ceilings() {
       await pause();
       if (ceilingsParam === 'failed') throw new Error('Spending ceilings (spend.json) could not be read, so no paid agent is handed work until they are. Delete spend.json, then restore a backup to get the ceilings back, or leave it deleted to start over with no ceilings.');
-      for (const c of demoCeilings) { const own = c.scope.kind !== 'project' || projectKeys.has(c.scope.pool); c.active = own; c.inactive_reason = own ? null : 'no_own_key'; }
+      for (const c of demoCeilings) {
+        const tokens = c.scope.kind === 'project' && tokensPool(c.scope.pool);
+        const own = c.scope.kind !== 'project' || projectKeys.has(c.scope.pool) || tokens; c.active = own; c.inactive_reason = own ? null : 'no_own_key';
+        if (tokens) Object.assign(c, { tokens: true, spent_today_usd: tokensSpent, reached: tokensSpent >= c.usd });
+      }
       const view: Ceilings = { ceilings: demoCeilings, questions: demoQuestions, last_handover: lastHandover, limits: { min_usd: 0.01, max_usd: 1000, min_remaining_usd: 0.5 } };
       return structuredClone(view);
     },
@@ -869,7 +896,7 @@ export function createDemoAdapter(): Adapter {
       await pause();
       const cents = usd === null ? null : Math.round(usd * 100);
       if (cents !== null && (!Number.isFinite(cents) || cents < 1 || cents > 100_000)) throw new Error('Enter an amount from $0.01 to $1,000.');
-      if (cents !== null && scope.kind === 'project' && !projectKeys.has(scope.pool)) throw new Error('Give this group its own key under API keys first.');
+      if (cents !== null && scope.kind === 'project' && !projectKeys.has(scope.pool) && !tokensPool(scope.pool)) throw new Error('Give this group its own key under API keys first.');
       demoCeilings = demoCeilings.filter((c) => scopeKey(c.scope) !== scopeKey(scope));
       demoQuestions = demoQuestions.filter((q) => scopeKey(q.scope) !== scopeKey(scope));
       if (cents !== null) demoCeilings.push(ceilingView(structuredClone(scope), cents));
@@ -881,6 +908,7 @@ export function createDemoAdapter(): Adapter {
       const c = q && demoCeilings.find((x) => scopeKey(x.scope) === scopeKey(q.scope) && x.cents === q.cents);
       if (!q || !c) throw new Error('No open question with that id: it was answered, or its ceiling changed or was removed.');
       if (answer === 'double') {
+        if (q.scope.kind === 'project' && tokensPool(q.scope.pool)) tokensSpent = Math.min(tokensSpent, q.usd * 2 - 0.01);
         if (q.cents * 2 > 100_000) throw new Error('Doubling would pass $1,000, the most a ceiling may be. Set a ceiling of up to $1,000 instead.');
         Object.assign(c, { cents: q.cents * 2, usd: (q.cents * 2) / 100, doubled_from: q.usd, set_at: now() });
       }
@@ -967,11 +995,12 @@ function demoStatistics(state: Snapshot, days: number): Statistics {
   const counts = (seed: number): StatCounts => {
     const requests = 40 + ((seed * 37) % 260);
     const limited = seed % 5 === 0 ? 3 : 0; const failed = seed % 7 === 0 ? 1 : 0;
-    return { requests, ok: requests - limited - failed, limited, failed, input_tokens: requests * (900 + (seed % 9) * 120), output_tokens: requests * (300 + (seed % 4) * 90), cache_read_tokens: requests * 14_000, cache_write_tokens: requests * 400 };
+    // SB-401: each row priced at the list price, one in seven of its answers an estimate.
+    return { requests, ok: requests - limited - failed, limited, failed, input_tokens: requests * (900 + (seed % 9) * 120), output_tokens: requests * (300 + (seed % 4) * 90), cache_read_tokens: requests * 14_000, cache_write_tokens: requests * 400, cost_micros: requests * (9_000 + (seed % 5) * 1_500), cost_estimated: seed % 7 === 0 ? 1 : 0 };
   };
-  const zero = (): StatCounts => ({ requests: 0, ok: 0, limited: 0, failed: 0, input_tokens: 0, output_tokens: 0, cache_read_tokens: 0, cache_write_tokens: 0 });
+  const zero = (): StatCounts => ({ requests: 0, ok: 0, limited: 0, failed: 0, input_tokens: 0, output_tokens: 0, cache_read_tokens: 0, cache_write_tokens: 0, cost_micros: 0, cost_estimated: 0 });
   const keys = Object.keys(zero()) as (keyof StatCounts)[];
-  const add = (into: StatCounts, c: StatCounts) => { for (const k of keys) into[k] += c[k]; };
+  const add = (into: StatCounts, c: StatCounts) => { for (const k of keys) into[k] = (into[k] ?? 0) + (c[k] ?? 0); };
   const tokens = (c: StatCounts) => c.input_tokens + c.output_tokens + c.cache_read_tokens + c.cache_write_tokens;
   const groupName = (pool: string) => (state.projects ?? []).find((p) => p.pool === pool)?.name ?? null;
   const base = [

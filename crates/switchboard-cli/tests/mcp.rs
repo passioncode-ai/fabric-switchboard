@@ -110,18 +110,22 @@ async fn fixture() -> (tempfile::TempDir, tempfile::TempDir, Owner, Vec<String>)
         ("Work B", "work"),
         ("Personal", "personal"),
     ] {
+        // Saved straight into the store: the fixture wants keys in ordinary pools, which the
+        // add command no longer makes (a Claude API key lands in the pay-per-token group, SB-401).
+        let secret = format!("fixture-mcp-secret-{}", label.replace(' ', "-"));
         let account = owner
             .runtime
-            .execute(Operation::Add {
-                label: label.into(),
-                provider: Provider::Claude,
-                kind: AuthKind::ApiKey,
-                pool: pool.into(),
-                secret: format!("fixture-mcp-secret-{}", label.replace(' ', "-")),
-            })
-            .await
+            .store
+            .add(
+                label.into(),
+                Provider::Claude,
+                AuthKind::ApiKey,
+                pool.into(),
+                switchboard_core::Credential::parse(Provider::Claude, AuthKind::ApiKey, &secret)
+                    .unwrap(),
+            )
             .unwrap();
-        ids.push(account["id"].as_str().unwrap().to_owned());
+        ids.push(account.id);
     }
     owner
         .runtime
@@ -220,6 +224,7 @@ async fn handshake_lists_tools_and_rejects_malformed_messages() {
             "switchboard_backups",
             "switchboard_backup_now",
             "switchboard_backup_restore",
+            "switchboard_project_switch",
             "switchboard_project_delete",
             "switchboard_settings_sync",
             "switchboard_settings_import",
@@ -1356,16 +1361,14 @@ async fn accounts_rotation_activity_and_queues_are_reachable_over_mcp() {
         .iter()
         .all(|a| a["assigned_to"].is_null()));
     // SB-122: an account in a pool no project uses goes back to default; elsewhere only a
-    // project's pool is accepted.
+    // project's pool is accepted. SB-401: a Claude API key moves only into the pay-per-token
+    // group, never to default.
     let (error, moved) = agent.tool(
         "switchboard_account_move",
         json!({"account_id": ids[2], "pool": "default"}),
     );
-    assert!(!error, "{moved}");
-    assert_eq!(
-        (moved["from"].as_str(), moved["pool"].as_str()),
-        (Some("personal"), Some("default"))
-    );
+    assert!(error, "{moved}");
+    assert!(moved.to_string().contains("pay-per-token group"), "{moved}");
     let (error, refused) = agent.tool(
         "switchboard_account_move",
         json!({"account_id": ids[2], "pool": "nowhere"}),

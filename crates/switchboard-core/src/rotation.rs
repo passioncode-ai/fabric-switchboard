@@ -234,7 +234,7 @@ impl Store {
             .filter(|a| {
                 a.id != current.id
                     && a.provider == policy.provider
-                    && state.serves(a, &policy.pool)
+                    && state.chooses(a, &policy.pool)
                     && !limited.contains(&a.id)
                     && !state.is_assigned(&a.id)
                     // SB-217 (the architect's judged audit): the kind of account the sessions
@@ -276,7 +276,7 @@ impl Store {
                 .filter(|a| {
                     a.id != current.id
                         && a.provider == policy.provider
-                        && state.serves(a, &policy.pool)
+                        && state.chooses(a, &policy.pool)
                         && !limited.contains(&a.id)
                         && !state.is_assigned(&a.id)
                         && a.kind == current.kind
@@ -308,7 +308,7 @@ impl Store {
                 .filter(|a| {
                     a.id != current.id
                         && a.provider == policy.provider
-                        && state.serves(a, &policy.pool)
+                        && state.chooses(a, &policy.pool)
                         && !state.is_assigned(&a.id)
                         && a.kind == current.kind
                         && self.rotation_credential_eligible(a, policy, now)
@@ -417,7 +417,7 @@ impl Store {
             .iter()
             .filter(|a| {
                 a.provider == policy.provider
-                    && state.serves(a, &policy.pool)
+                    && state.chooses(a, &policy.pool)
                     && !held.contains(&a.id)
                     && !state.is_assigned(&a.id)
                     && fits.admits(a)
