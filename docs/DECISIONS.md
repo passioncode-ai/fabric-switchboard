@@ -724,15 +724,20 @@ research notes); the ones still in force that the board cites are seeded below w
     not the owner reads it over the control channel and shows its own version beside the owner's,
     with what to do when it is older (reopen it, or open the owner's copy).
   - A window that does not own the data folder and runs from the owner's copy installs nothing into
-    it: the owner keeps that copy current, and the window's check ends at once (`update_check
-    owner_updates`, once). Its About offers no update button.
+    it when the owner keeps that copy current (the owner says so: `owner_updates_copy`, true for the
+    app, and for a `serve` only when it is an installed copy that updates itself, so never on
+    Windows, with `<data>/auto-update` on and write access to the app); the window's check ends
+    at once (`update_check owner_updates`, once) and Settings offers no update button. When the
+    owner does not keep it current, the window checks and installs as before (review round 1,
+    P1-1). A pass where the store is held and the owner does not answer installs nothing
+    (`owner_unanswered`).
   - A window from another copy of its own keeps checking, downloading and installing into that copy,
     which only it writes. It does not restart into it on its own (there is no owner to drain);
     *Restart to update* stays the person's, and the window says to use the owner's copy instead.
   - `switchboard app updates` without the app (a `serve` owns the data folder, or nothing does)
     answers the owner, its version, its own update loop's last pass and the non-owner window's
-    version (`window-run.json`) instead of a refusal; every action and every switch still needs the
-    app (`APP_ONLY`).
+    version (`window-run.json`, one record per window, matched to its process by the process's
+    start) instead of a refusal; every action and every switch still needs the app (`APP_ONLY`).
 - **Consequences / affects:** [CONTRACTS](CONTRACTS.md#a-window-that-does-not-own-the-data-folder-sb-414-2026-11-17),
   [CLI](CLI.md), `src-tauri/src/updates.rs`, `crates/switchboard-runtime/src/copies.rs`,
   [AGENTS.md lifecycle](../AGENTS.md#lifecycle) (`window-run.json`).

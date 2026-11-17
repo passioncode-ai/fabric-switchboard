@@ -129,6 +129,21 @@ pub fn last(data: &std::path::Path) -> serde_json::Value {
     value
 }
 
+/// SB-414: whether this `serve` keeps the copy it runs from current: it updates itself at all
+/// (`program`: an installed copy, never on Windows), `<data>/auto-update` is not `off`, and its last
+/// pass did not find the app unwritable for this account. A window from the same copy installs
+/// updates itself only when this is false.
+pub fn updates_copy(data: &Path) -> bool {
+    program().is_some() && auto_update_on(data) && !last_said_not_writable()
+}
+
+fn last_said_not_writable() -> bool {
+    LAST.lock()
+        .ok()
+        .and_then(|last| last.clone())
+        .is_some_and(|last| last["reason"] == "not_writable")
+}
+
 /// One pass: follow a replaced program, else check and install. `version` is this binary's.
 pub async fn pass(
     data: &Path,
@@ -242,9 +257,24 @@ pub fn deb_tell(notice: &Result<serde_json::Value, String>, told: &mut Option<St
 }
 
 /// SB-408: one pass of a `serve` installed from the .deb package, which never replaces its own
-/// files: it reads the feed and logs `update_waiting deb` once per newer version; the person
-/// installs it with the commands `switchboard update --check` prints.
-pub async fn deb_pass(version: &str, told: &mut Option<String>) {
+/// files: a program apt replaced since `at_start` (the person installed the newer .deb) restarts
+/// `serve` onto it, as a replaced app does; else it reads the feed and logs `update_waiting deb`
+/// once per newer version; the person installs it with the commands `switchboard update --check`
+/// prints.
+pub async fn deb_pass(
+    program: &Path,
+    at_start: &Stamp,
+    version: &str,
+    told: &mut Option<String>,
+) -> Pass {
+    if replaced(program, at_start) {
+        crate::oplog::event(
+            "update_restart",
+            &[("outcome", crate::oplog::Field::Code("replaced"))],
+        );
+        note("restarting", None, Some("replaced"));
+        return Pass::Restart("replaced");
+    }
     let notice = crate::deb::check(version).await;
     match &notice {
         Ok(v) if v["action"] == "available" => note("available", v["latest"].as_str(), Some("deb")),
@@ -257,6 +287,7 @@ pub async fn deb_pass(version: &str, told: &mut Option<String>) {
             &[("reason", crate::oplog::Field::Code("deb"))],
         );
     }
+    Pass::Stay
 }
 
 /// Whether this account may replace `app` by rename: write access to the folder that holds it
@@ -290,7 +321,9 @@ pub fn auto_update_on(data: &Path) -> bool {
 /// an app bundle on macOS, an AppImage on Linux); a development build or a test's binary never
 /// updates itself, as the app's own check never runs there.
 pub fn program() -> Option<PathBuf> {
-    let exe = std::env::current_exe().ok()?;
+    // Resolved, so a `serve` started through a link (`~/.local/bin/switchboard`) watches and
+    // names the program inside its bundle (SB-414).
+    let exe = crate::copies::this_program()?;
     let installed = if cfg!(target_os = "macos") {
         crate::self_update::bundle_of(&exe).is_some()
     } else if cfg!(target_os = "linux") {
@@ -383,6 +416,30 @@ mod tests {
         assert!(!deb_tell(&Err("feed".to_owned()), &mut told));
         assert!(deb_tell(&available("0.7.116"), &mut told));
         assert_eq!(told.as_deref(), Some("0.7.116"));
+    }
+
+    #[tokio::test]
+    async fn a_deb_program_apt_replaced_restarts_serve_before_any_feed_is_read() {
+        let dir = tempfile::tempdir().unwrap();
+        let program = dir.path().join("switchboard");
+        std::fs::write(&program, b"old").unwrap();
+        let at_start = stamp(&program).unwrap();
+        let next = dir.path().join("n");
+        std::fs::write(&next, b"newer").unwrap();
+        std::fs::rename(&next, &program).unwrap();
+        let mut told = None;
+        assert_eq!(
+            deb_pass(&program, &at_start, "0.0.1", &mut told).await,
+            Pass::Restart("replaced")
+        );
+    }
+
+    #[test]
+    fn a_serve_that_is_not_an_installed_copy_does_not_keep_one_current() {
+        // A test's binary is no installed copy: a window beside it updates its copy itself.
+        let dir = tempfile::tempdir().unwrap();
+        assert!(program().is_none());
+        assert!(!updates_copy(dir.path()));
     }
 
     #[test]

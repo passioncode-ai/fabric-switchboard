@@ -2541,17 +2541,16 @@ async fn run(cli: &Cli) -> Result<Value, String> {
         // account replaced; a restart asks its supervisor to start it again on the new binary.
         let updates = async {
             use switchboard_runtime::serve_update as su;
-            let Some(program) = su::program() else {
-                // SB-408: a .deb install never replaces its own files; it says once per newer
-                // version that one is out (`update --check` prints the commands).
-                if switchboard_runtime::deb::this_install() {
-                    let mut told = None;
-                    tokio::time::sleep(su::FIRST_AFTER).await;
-                    loop {
-                        su::deb_pass(env!("CARGO_PKG_VERSION"), &mut told).await;
-                        tokio::time::sleep(su::EVERY).await;
-                    }
-                }
+            // SB-408: a .deb install never replaces its own files; it says once per newer version
+            // that one is out (`update --check` prints the commands), and follows a program apt
+            // replaced.
+            let deb = switchboard_runtime::deb::this_install();
+            let program = if deb {
+                switchboard_runtime::copies::this_program()
+            } else {
+                su::program()
+            };
+            let Some(program) = program else {
                 return std::future::pending::<&'static str>().await;
             };
             let Some(at_start) = su::stamp(&program) else {
@@ -2560,15 +2559,13 @@ async fn run(cli: &Cli) -> Result<Value, String> {
             let mut told = None;
             tokio::time::sleep(su::FIRST_AFTER).await;
             loop {
-                if let su::Pass::Restart(why) = su::pass(
-                    &data,
-                    &program,
-                    &at_start,
-                    env!("CARGO_PKG_VERSION"),
-                    &mut told,
-                )
-                .await
-                {
+                let version = env!("CARGO_PKG_VERSION");
+                let pass = if deb {
+                    su::deb_pass(&program, &at_start, version, &mut told).await
+                } else {
+                    su::pass(&data, &program, &at_start, version, &mut told).await
+                };
+                if let su::Pass::Restart(why) = pass {
                     // A managed session between two requests is still working: wait for a quiet
                     // spell (drain anyway after half an hour, as the app does).
                     let runtime = owner.runtime.clone();

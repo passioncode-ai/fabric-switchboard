@@ -3913,33 +3913,50 @@ Plan: [2026-11-17-observatory-keys](plans/2026-11-17-observatory-keys/README.md)
 
 Decision: [DEC-0026](DECISIONS.md#dec-0026-a-window-that-does-not-own-the-data-folder-never-updates-the-owners-copy).
 Code: `crates/switchboard-runtime/src/copies.rs`, `app_doors::answer`, `Operation::Status`,
-`src-tauri/src/updates.rs` (`owner_view`, `owner_updates_this_copy`), `src/ui-logic.ts`
-(`ownerLine`).
+`serve_update::updates_copy`, `src-tauri/src/updates.rs` (`owner_view`, `owner_skip_code`),
+`src/ui-logic.ts` (`ownerLine`).
 
 - `Operation::Status` also answers `owner_kind` (`app` when the owner holds the app's doors, else
-  `serve`) and `owner_copy` (`copies::copy_of`: the `.app` bundle on macOS, `$APPIMAGE` on Linux,
-  otherwise the folder holding the program). Both are null without an owner.
-- A window whose owner did not start (the store is busy) writes `<data>/window-run.json` (0600:
-  `pid`, `version`, `started_at`, `copy`) once, and removes it when it becomes the owner or exits
-  (only a record with its own pid). `copies::window` reads it only while that process runs
-  (`kill(pid, 0)` on Unix, `OpenProcess` and `GetExitCodeProcess` on Windows).
+  `serve`), `owner_copy` (`copies::copy_of` of the resolved program, `copies::this_program`: the
+  `.app` bundle on macOS, `$APPIMAGE` on Linux, otherwise the folder holding the program; a
+  `serve` started through `~/.local/bin/switchboard` names its bundle) and `owner_updates_copy`:
+  true for the app, and for a `serve` only when `serve_update::updates_copy` holds (it is an
+  installed copy, `serve_update::program`, so never on Windows; `<data>/auto-update` is not `off`;
+  its last pass did not find the app unwritable). All three are null without an owner; an owner
+  before 0.7.115 sends none, read as not keeping the copy current.
+- A window whose owner did not start (the store is busy) adds its record to
+  `<data>/window-run.json` (0600, `{windows: [{pid, token, version, started_at, copy}]}`: one
+  record per window, its own replaced when it notes again), and takes its record away when it
+  becomes the owner or exits. `copies::windows` reads only records whose process runs and is the
+  same process: `token` is the process's start (`copies::process_token`: macOS `proc_pidinfo`
+  microseconds, Linux `/proc/<pid>/stat` field 22, Windows `GetProcessTimes` creation time), so a
+  pid the system gave to a later process is not a window.
 - IPC `update_status` adds, for a window that is not the owner, `owner: {kind, version, copy,
-  same_copy, older} | null` (`updates::owner_view`, one `Status` request over the control channel;
-  null when nothing answers). Settings → Updates leads with it (`ownerLine`); when `same_copy`, the
-  line is the only one and no button is offered.
-- The window's check (`updates::check`, automatic and *Check for updates*) ends at once when it is
-  not the owner and the owner's copy is its own (`copies::same_copy`, both resolved): `update_check
-  owner_updates`, logged once. A window from another copy checks, downloads and installs into it as
-  before; its idle restart stays blocked by `owner_unavailable`.
+  same_copy, updates_copy, older} | null` (`updates::owner_view`, one `Status` request over the
+  control channel, kept 2 s so Settings reads in a row ask once; null when nothing answers).
+  Settings → Updates leads with it (`ownerLine`; "keeps itself current" only with
+  `updates_copy`). When `same_copy` and `updates_copy`, the line is the only one and no button is
+  offered; otherwise the window's own line and buttons follow (SB-249's *Update* included).
+- The window's check (`updates::check`, automatic and *Check for updates*) installs nothing on a
+  pass where `updates::owner_skip_code` answers: `owner_updates` when it is not the owner and the
+  owner runs from its copy (`copies::same_copy`, both resolved) and keeps it current;
+  `owner_unanswered` when the store is held but the owner's `Status` did not answer. Each is
+  logged once (`update_check`). In every other case (another copy, an owner that does not keep
+  this copy current, nothing owning the data folder) it checks, downloads and installs as before;
+  its idle restart stays blocked by `owner_unavailable`.
 - `switchboard app updates` and MCP `switchboard_app {action: updates}` without the app's doors
   answer `copies::not_app_view`: `{available: false, enabled: false, reason: not_owner|no_owner,
-  owner: serve|null, owner_version, window_version, window_older, serve_update?, message}`, where
+  owner: serve|null, owner_version, owner_updates_copy, window_version, window_older, windows:
+  [{pid, version}], serve_update?, message}`, where `window_version` is the oldest window's and
   `serve_update` is `serve_update::last` (`{state, latest, reason, checked_at, auto_update}`) of the
-  owning `serve`. `app updates on|off`, `app check-updates`, `app restart-to-update` and `app
-  login-item` still refuse with `APP_ONLY`.
+  owning `serve`; the message says "keeps itself current" only with `owner_updates_copy`, and
+  otherwise names `switchboard update`. `app updates on|off`, `app check-updates`, `app
+  restart-to-update` and `app login-item` still refuse with `APP_ONLY`.
 - Tests: `copies::tests::*`, `app_doors::tests::each_action_reaches_the_apps_door_and_none_answers_without_the_app`,
-  `serve_update::tests::the_last_pass_is_reported_with_the_switch`, `scripts/test-ui-logic.mjs`
-  (SB-414 block).
+  `serve_update::tests::the_last_pass_is_reported_with_the_switch`,
+  `a_serve_that_is_not_an_installed_copy_does_not_keep_one_current`,
+  `updates::tests::a_window_skips_its_update_only_when_the_owner_keeps_this_copy_current`,
+  `scripts/test-ui-logic.mjs` (SB-414 block).
 
 ## A .deb install says when it is behind (SB-408, 2026-11-17)
 
@@ -3950,15 +3967,26 @@ Code: `crates/switchboard-runtime/src/deb.rs`, `self_update::run`, `serve_update
   or resolved) is a whole line of `/var/lib/dpkg/info/fabric-switchboard.list` or
   `fabric-switchboard:<arch>.list`, the list `dpkg -S` reads; no root, no `dpkg` process.
 - `deb::notice(feed, current, arch)`: `up_to_date` when the feed's version is not newer; else
-  `available` with `release` and `commands` (`deb::commands`): download the package,
-  `SHA256SUMS` and `SHA256SUMS.asc` from the release, import the organization's release key
-  (`deb::RELEASE_KEY`), `gpg --verify SHA256SUMS.asc SHA256SUMS`, `sha256sum -c SHA256SUMS
-  --ignore-missing`, `sudo apt install ./Fabric-Switchboard-X.Y.Z-linux-<x64|arm64>.deb`; a release
+  `available` with `release`, `commands` (`deb::commands`, the steps), `command` (`deb::command`:
+  the steps joined with ` && \` and a line break, so a failed step stops the rest; no `set -e`)
+  and `release_key_fingerprint` (`deb::RELEASE_KEY_FINGERPRINT`,
+  `63B30DC324BD697487AA31944FAFB8AEC803B6A7`). The steps: download the package, `SHA256SUMS` and
+  `SHA256SUMS.asc`; download the release key (`deb::RELEASE_KEY`) and `gpg --dearmor` it into
+  `./release.gpg`, a keyring of its own; `gpgv --status-fd 1 --keyring ./release.gpg
+  SHA256SUMS.asc SHA256SUMS` piped to `grep -Eq` for a `VALIDSIG` line ending with the pinned
+  fingerprint (the primary key of the good signature); `sha256sum -c SHA256SUMS
+  --ignore-missing`; `sudo apt install ./Fabric-Switchboard-X.Y.Z-linux-<x64|arm64>.deb`. A release
   marked `needs_migration` carries it. Nothing is downloaded or installed by Switchboard.
 - The window on a .deb install reads the feed 90 s after start and every 5 min (`deb_check`),
-  and *Check for updates* reads it at once; IPC `update_status` adds `deb` (the notice, or
-  `{action: failed, error}`). Settings → Updates shows the line, the commands and *Copy*.
-- The window and `serve` log `update_waiting` with `reason` `deb` once per newer version
-  (`serve_update::deb_tell`).
+  and *Check for updates* reads it at once; IPC `update_status` adds `deb` (the notice, `{action:
+  failed, error}`, or `{action: installed}` once the program apt manages changed since the window
+  started: `serve_update::replaced` on its stamp). Settings → Updates shows the line, the one
+  command with *Copy* and the key's fingerprint.
+- A `serve` from the .deb stamps its resolved program at start and, when apt replaced it, logs
+  `update_restart replaced` and exits with 75 after a quiet moment, as SB-333's `serve` does;
+  otherwise the window and `serve` log `update_waiting` with `reason` `deb` once per newer
+  version (`serve_update::deb_tell`).
 - Tests: `deb::tests::*`, `serve_update::tests::a_deb_install_says_each_newer_version_once`,
-  `scripts/test-ui-logic.mjs` (SB-408 block).
+  `a_deb_program_apt_replaced_restarts_serve_before_any_feed_is_read`, `scripts/test-ui-logic.mjs`
+  (SB-408 block). The command was run on 2026-11-17 against v0.7.113's `SHA256SUMS`: the pinned
+  check passed, and a changed `SHA256SUMS` was refused.

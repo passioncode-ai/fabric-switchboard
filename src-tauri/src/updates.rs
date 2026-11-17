@@ -439,6 +439,8 @@ pub struct Updates {
     available: Result<(), &'static str>,
     /// SB-408: this copy was installed from the .deb package.
     deb: bool,
+    /// SB-408: a .deb install's program and its stamp at start, to notice apt replaced it.
+    deb_program: Option<(PathBuf, switchboard_runtime::serve_update::Stamp)>,
     root: Option<PathBuf>,
     inner: Mutex<Inner>,
     wake: tokio::sync::Notify,
@@ -469,6 +471,7 @@ impl Updates {
         Updates {
             available,
             deb: false,
+            deb_program: None,
             root,
             inner: Mutex::new(Inner {
                 phase: Phase::Idle,
@@ -494,6 +497,10 @@ impl Updates {
     /// SB-408: marks a copy installed from the .deb package.
     pub fn with_deb(mut self, deb: bool) -> Self {
         self.deb = deb;
+        self.deb_program = deb
+            .then(switchboard_runtime::copies::this_program)
+            .flatten()
+            .and_then(|p| switchboard_runtime::serve_update::stamp(&p).map(|s| (p, s)));
         self
     }
 
@@ -678,10 +685,11 @@ async fn check_once(app: &AppHandle) -> Phase {
 /// what it finds is downloaded and verified like any update (LC-16).
 async fn check(app: &AppHandle, manual: bool) -> Phase {
     let state = app.state::<Updates>();
-    // SB-414: the owner of the data folder runs from this copy and keeps it current.
-    if owner_updates_this_copy(app).await {
-        if logs_check("owner_updates") {
-            event("update_check", &[("outcome", Field::Code("owner_updates"))]);
+    // SB-414: another process owns the data folder and keeps this copy current, or holds the
+    // store without answering: this pass installs nothing.
+    if let Some(code) = owner_skip(app).await {
+        if logs_check(code) {
+            event("update_check", &[("outcome", Field::Code(code))]);
         }
         return state.lock().phase;
     }
@@ -761,7 +769,10 @@ fn logs_check(code: &'static str) -> bool {
     let Ok(mut last) = LAST_LOGGED.lock() else {
         return true;
     };
-    let repeat = matches!(code, "current" | "available" | "owner_updates") && *last == Some(code);
+    let repeat = matches!(
+        code,
+        "current" | "available" | "owner_updates" | "owner_unanswered"
+    ) && *last == Some(code);
     *last = Some(code);
     !repeat
 }
@@ -927,9 +938,21 @@ impl Drop for Fetching<'_> {
 }
 
 /// SB-408: one feed read of a .deb install: the notice About shows, and `update_waiting deb`
-/// once per newer version.
+/// once per newer version. A program apt replaced since this window started reads `installed`:
+/// the newer version runs once Switchboard is opened again.
 async fn deb_check(app: &AppHandle) {
-    let notice = switchboard_runtime::deb::check(env!("CARGO_PKG_VERSION")).await;
+    let replaced =
+        app.state::<Updates>()
+            .deb_program
+            .as_ref()
+            .is_some_and(|(program, at_start)| {
+                switchboard_runtime::serve_update::replaced(program, at_start)
+            });
+    let notice = if replaced {
+        Ok(json!({"package": "deb", "current": env!("CARGO_PKG_VERSION"), "action": "installed"}))
+    } else {
+        switchboard_runtime::deb::check(env!("CARGO_PKG_VERSION")).await
+    };
     let state = app.state::<Updates>();
     let mut inner = state.lock();
     inner.checked_at = Some(now());
@@ -945,16 +968,18 @@ async fn deb_check(app: &AppHandle) {
     }
 }
 
-/// SB-414: for a window that does not own the data folder, the owner as it answers over the
-/// control channel: `{kind: app|serve|null, version, copy, same_copy, older}` (`older`: this
-/// window's version is below the owner's); null when nothing owns it.
-pub async fn owner_view(root: &Path) -> Value {
+/// SB-414: the owner's answer over the control channel: `Ok(None)` when nothing owns the data
+/// folder, `Err` when the owner holds it and did not answer.
+async fn owner_status(root: &Path) -> Result<Option<Value>, ()> {
+    switchboard_runtime::control::request(root, &switchboard_runtime::Operation::Status)
+        .await
+        .map_err(|_| ())
+}
+
+/// SB-414: the owner's status as a window shows it: `{kind: app|serve|null, version, copy,
+/// same_copy, updates_copy, older}` (`older`: this window's version is below the owner's).
+pub fn owner_fields(status: &Value) -> Value {
     use switchboard_runtime::copies;
-    let Ok(Some(status)) =
-        switchboard_runtime::control::request(root, &switchboard_runtime::Operation::Status).await
-    else {
-        return Value::Null;
-    };
     let version = status["owner_version"].as_str();
     let copy = status["owner_copy"].as_str();
     let same_copy = match (copy, copies::this_copy()) {
@@ -966,23 +991,61 @@ pub async fn owner_view(root: &Path) -> Value {
         "version": version,
         "copy": copy,
         "same_copy": same_copy,
+        // An owner from before 0.7.115 does not say: the window updates its copy as before.
+        "updates_copy": status["owner_updates_copy"].as_bool().unwrap_or(false),
         "older": version.is_some_and(|v| copies::older(env!("CARGO_PKG_VERSION"), v)),
     })
 }
 
-/// SB-414 (DEC-0026): another process owns the data folder and runs from this window's own copy,
-/// so that process updates the copy and this window installs nothing into it.
-async fn owner_updates_this_copy(app: &AppHandle) -> bool {
-    let Some(slot) = app.try_state::<crate::Slot>() else {
-        return false;
-    };
-    if slot.smoke || slot.running().await.is_some() {
-        return false;
+/// How long the window keeps the owner's answer for Settings (SB-414): a Settings read every
+/// minute, or several in a row, asks the owner at most once in this long.
+const OWNER_VIEW_FOR: Duration = Duration::from_secs(2);
+static OWNER_VIEW: Mutex<Option<(std::time::Instant, Value)>> = Mutex::new(None);
+
+/// SB-414: for a window that does not own the data folder, the owner as `owner_fields` shows it;
+/// null when nothing answers. Kept for `OWNER_VIEW_FOR`.
+pub async fn owner_view(root: &Path) -> Value {
+    if let Ok(cached) = OWNER_VIEW.lock() {
+        if let Some((_, view)) = cached
+            .as_ref()
+            .filter(|(at, _)| at.elapsed() < OWNER_VIEW_FOR)
+        {
+            return view.clone();
+        }
     }
-    let Some(root) = app.state::<Updates>().root.clone() else {
-        return false;
+    let view = match owner_status(root).await {
+        Ok(Some(status)) => owner_fields(&status),
+        _ => Value::Null,
     };
-    owner_view(&root).await["same_copy"] == true
+    if let Ok(mut cached) = OWNER_VIEW.lock() {
+        *cached = Some((std::time::Instant::now(), view.clone()));
+    }
+    view
+}
+
+/// What a non-owner window's check does with the owner (SB-414, DEC-0026): skip with
+/// `owner_updates` when the owner runs from this copy and keeps it current, `owner_unanswered`
+/// when the store is held but the owner did not answer (a pass that cannot tell installs
+/// nothing); none when this window is the owner, nothing owns the data folder, or the owner does
+/// not keep this copy current.
+pub fn owner_skip_code(answer: &Result<Option<Value>, ()>) -> Option<&'static str> {
+    match answer {
+        Err(()) => Some("owner_unanswered"),
+        Ok(None) => None,
+        Ok(Some(status)) => {
+            let owner = owner_fields(status);
+            (owner["same_copy"] == true && owner["updates_copy"] == true).then_some("owner_updates")
+        }
+    }
+}
+
+async fn owner_skip(app: &AppHandle) -> Option<&'static str> {
+    let slot = app.try_state::<crate::Slot>()?;
+    if slot.smoke || slot.running().await.is_some() {
+        return None;
+    }
+    let root = app.state::<Updates>().root.clone()?;
+    owner_skip_code(&owner_status(&root).await)
 }
 
 fn busy(inner: &Inner) -> bool {
@@ -2402,6 +2465,46 @@ mod tests {
         assert!(enabled(Some("garbage")));
         assert!(!enabled(Some("off\n")));
         assert!(!enabled(Some("  off  ")));
+    }
+
+    /// SB-414 (DEC-0026, review round 1): a non-owner window skips installing only when the
+    /// owner runs from this copy and keeps it current, or holds the store without answering.
+    #[test]
+    fn a_window_skips_its_update_only_when_the_owner_keeps_this_copy_current() {
+        let here = switchboard_runtime::copies::this_copy()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        let status = |copy: &str, updates: Option<bool>| {
+            let mut s =
+                json!({"owner_version": "0.7.200", "owner_kind": "serve", "owner_copy": copy});
+            if let Some(u) = updates {
+                s["owner_updates_copy"] = json!(u);
+            }
+            s
+        };
+        assert_eq!(
+            owner_skip_code(&Ok(Some(status(&here, Some(true))))),
+            Some("owner_updates")
+        );
+        // Windows, updates off, an app this account cannot write: the window updates as before.
+        assert_eq!(owner_skip_code(&Ok(Some(status(&here, Some(false))))), None);
+        // An owner before 0.7.115 does not say.
+        assert_eq!(owner_skip_code(&Ok(Some(status(&here, None)))), None);
+        // Another copy: the window's own.
+        assert_eq!(
+            owner_skip_code(&Ok(Some(status(
+                "/elsewhere/Fabric Switchboard.app",
+                Some(true)
+            )))),
+            None
+        );
+        assert_eq!(owner_skip_code(&Ok(None)), None);
+        assert_eq!(owner_skip_code(&Err(())), Some("owner_unanswered"));
+        let fields = owner_fields(&status(&here, Some(true)));
+        assert_eq!(fields["older"], true);
+        assert_eq!(fields["same_copy"], true);
+        assert_eq!(fields["updates_copy"], true);
     }
 
     #[test]

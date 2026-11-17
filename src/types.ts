@@ -402,8 +402,8 @@ export interface UpdateStatus {
   /** SB-408: a copy installed from the .deb package: what the release feed offers and how to install it. */
   deb?: DebNotice | null;
 }
-export interface UpdateOwner { kind: 'app' | 'serve' | null; version: string | null; copy: string | null; same_copy: boolean; older: boolean }
-export interface DebNotice { package: 'deb'; current: string; latest?: string; action: 'up_to_date' | 'available' | 'failed'; release?: string; commands?: string[]; needs_migration?: string; error?: string }
+export interface UpdateOwner { kind: 'app' | 'serve' | null; version: string | null; copy: string | null; same_copy: boolean; older: boolean; /** Whether the owner keeps its copy current; false from an owner before 0.7.115. */ updates_copy: boolean }
+export interface DebNotice { package: 'deb'; current: string; latest?: string; action: 'up_to_date' | 'available' | 'failed' | 'installed'; release?: string; commands?: string[]; /** The steps joined with &&, so a failed check never reaches apt. */ command?: string; release_key_fingerprint?: string; needs_migration?: string; error?: string }
 
 /** SB-265: what `gh` can see: the person's login, then their organizations. */
 export interface GithubOwners { available: boolean; reason: 'missing' | 'signed_out' | null; owners: { login: string; kind: 'user' | 'organization' }[] }

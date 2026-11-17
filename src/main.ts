@@ -3865,11 +3865,12 @@ function updateControls(panel: HTMLElement) {
   option.append(box, el('span', '', t('Install updates automatically')));
   const line = updateLine(status, date);
   panel.append(option, el('p', 'form-note', line.text));
-  // SB-408: a .deb install's commands, to copy into a terminal.
-  if (line.commands?.length) {
-    const commands = line.commands.join('\n'); const block = el('pre', 'deb-commands', commands); block.tabIndex = 0;
-    const copy = button(t('Copy'), () => copyText(copy, commands, t('Install the newer .deb')), 'text-button', 'deb-commands-copy');
+  // SB-408: a .deb install's one command (its steps joined with &&), to copy into a terminal.
+  if (line.command) {
+    const command = line.command; const block = el('pre', 'deb-commands', command); block.tabIndex = 0;
+    const copy = button(t('Copy'), () => copyText(copy, command, t('Install the newer .deb')), 'text-button', 'deb-commands-copy');
     panel.append(block, copy);
+    if (line.fingerprint) panel.append(el('p', 'form-note', t('It accepts the checksums only when they are signed by the PassionCode.ai release key {fingerprint}.', { fingerprint: line.fingerprint })));
   }
   // SB-414: the copy that owns the data folder updates this one; nothing to press here.
   if (line.owned) return;

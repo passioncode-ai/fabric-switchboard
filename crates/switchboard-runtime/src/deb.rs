@@ -63,9 +63,13 @@ pub fn arch() -> &'static str {
     }
 }
 
-/// The commands that fetch, verify and install `version`'s .deb for `arch`, run in an empty
-/// folder: the checksums are verified with the organization's release key, the package with the
-/// checksums, then apt installs it.
+/// The PassionCode.ai release key's fingerprint: `SHA256SUMS.asc` counts only when a good
+/// signature names this primary key (gpg's `VALIDSIG` status line ends with it).
+pub const RELEASE_KEY_FINGERPRINT: &str = "63B30DC324BD697487AA31944FAFB8AEC803B6A7";
+
+/// The steps that fetch, verify and install `version`'s .deb for `arch`, in an empty folder: the
+/// key goes into a keyring of its own (never the person's), the checksums count only with a good
+/// signature by the pinned key, the package only with its checksum, then apt installs it.
 pub fn commands(version: &str, arch: &str) -> Vec<String> {
     let base = format!("{RELEASES}/download/v{version}");
     let package = format!("Fabric-Switchboard-{version}-linux-{arch}.deb");
@@ -74,11 +78,18 @@ pub fn commands(version: &str, arch: &str) -> Vec<String> {
         format!("curl -fLO {base}/{package}"),
         format!("curl -fLO {base}/SHA256SUMS"),
         format!("curl -fLO {base}/SHA256SUMS.asc"),
-        format!("curl -fsSL {RELEASE_KEY} | gpg --import"),
-        "gpg --verify SHA256SUMS.asc SHA256SUMS".to_owned(),
+        format!("curl -fsSL {RELEASE_KEY} -o release-key.asc"),
+        "gpg --dearmor < release-key.asc > release.gpg".to_owned(),
+        format!("gpgv --status-fd 1 --keyring ./release.gpg SHA256SUMS.asc SHA256SUMS | grep -Eq '^\\[GNUPG:\\] VALIDSIG .* {RELEASE_KEY_FINGERPRINT}$'"),
         "sha256sum -c SHA256SUMS --ignore-missing".to_owned(),
         format!("sudo apt install ./{package}"),
     ]
+}
+
+/// The steps as one command for a terminal: each runs only when the one before succeeded, so a
+/// signature or checksum that fails never reaches `apt install`.
+pub fn command(steps: &[String]) -> String {
+    steps.join(" && \\\n")
 }
 
 /// What a .deb install is told, from the release feed: `{package: deb, current, latest, action:
@@ -99,6 +110,8 @@ pub fn notice(feed: &Value, current: &str, arch: &str) -> Result<Value, String> 
         "package": "deb", "current": current, "latest": latest, "action": "available",
         "release": format!("{RELEASES}/tag/v{latest}"),
         "commands": commands(&latest, arch),
+        "command": command(&commands(&latest, arch)),
+        "release_key_fingerprint": RELEASE_KEY_FINGERPRINT,
     });
     // LC-16: a release that needs a person first says so; its notes name the step.
     if let Some(steps) = feed["needs_migration"]
@@ -175,14 +188,28 @@ mod tests {
             .map(|c| c.as_str().unwrap())
             .collect();
         assert!(commands.contains(&"curl -fLO https://github.com/passioncode-ai/fabric-switchboard/releases/download/v0.7.115/Fabric-Switchboard-0.7.115-linux-x64.deb"));
-        assert!(commands.contains(&"gpg --verify SHA256SUMS.asc SHA256SUMS"));
+        assert!(commands.contains(
+            &"gpgv --status-fd 1 --keyring ./release.gpg SHA256SUMS.asc SHA256SUMS | grep -Eq '^\\[GNUPG:\\] VALIDSIG .* 63B30DC324BD697487AA31944FAFB8AEC803B6A7$'"
+        ));
         assert!(commands.contains(&"sha256sum -c SHA256SUMS --ignore-missing"));
+        assert_eq!(
+            answer["release_key_fingerprint"],
+            "63B30DC324BD697487AA31944FAFB8AEC803B6A7"
+        );
+        // One command: every step joined with &&, so a failed check never reaches apt.
+        let one = answer["command"].as_str().unwrap();
+        assert_eq!(one.lines().count(), commands.len());
+        for line in one.lines().take(commands.len() - 1) {
+            assert!(line.ends_with(" && \\"), "{line}");
+        }
+        assert!(one.lines().last().unwrap().starts_with("sudo apt install"));
+        assert!(!one.contains("set -e"));
         assert_eq!(
             commands.last(),
             Some(&"sudo apt install ./Fabric-Switchboard-0.7.115-linux-x64.deb")
         );
         // The checksums are verified before the package is checked against them.
-        let verify = commands.iter().position(|c| c.starts_with("gpg --verify"));
+        let verify = commands.iter().position(|c| c.starts_with("gpgv "));
         let sums = commands.iter().position(|c| c.starts_with("sha256sum"));
         assert!(verify < sums);
         assert!(answer.get("needs_migration").is_none());

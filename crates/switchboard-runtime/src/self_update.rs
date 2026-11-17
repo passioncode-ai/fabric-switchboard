@@ -320,7 +320,9 @@ pub async fn run(
     let target = match app {
         Some(path) => path,
         None => {
-            let exe = std::env::current_exe().map_err(|_| NOT_AN_APP.to_string())?;
+            // Resolved: run through a link (`~/.local/bin/switchboard`), it is still the program
+            // inside its bundle (SB-414).
+            let exe = crate::copies::this_program().ok_or(NOT_AN_APP)?;
             if cfg!(target_os = "macos") {
                 bundle_of(&exe).ok_or(NOT_AN_APP)?
             } else {

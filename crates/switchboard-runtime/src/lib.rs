@@ -5493,7 +5493,7 @@ async fn execute(
         // null offline, where no owner answered) and `online` says whether an owner runs,
         // beside the display string `live_mode`.
         Operation::Status => Ok(
-            json!({"proxy_address": runtime.map(|r| r.proxy.address().to_string()), "platform": std::env::consts::OS, "live_mode": if runtime.is_some() { "Next request · HTTP/SSE" } else { "Offline" }, "owner_version": runtime.map(|_| env!("CARGO_PKG_VERSION")), "owner_kind": runtime.map(|r| if r.app_doors().is_some() { "app" } else { "serve" }), "owner_copy": runtime.and_then(|_| copies::this_copy()).map(|c| c.to_string_lossy().into_owned()), "online": runtime.is_some(), "vault": switchboard_core::vault_kind(root).ok()}),
+            json!({"proxy_address": runtime.map(|r| r.proxy.address().to_string()), "platform": std::env::consts::OS, "live_mode": if runtime.is_some() { "Next request · HTTP/SSE" } else { "Offline" }, "owner_version": runtime.map(|_| env!("CARGO_PKG_VERSION")), "owner_kind": runtime.map(|r| if r.app_doors().is_some() { "app" } else { "serve" }), "owner_copy": runtime.and_then(|_| copies::this_copy()).map(|c| c.to_string_lossy().into_owned()), "owner_updates_copy": runtime.map(|r| r.app_doors().is_some() || serve_update::updates_copy(root)), "online": runtime.is_some(), "vault": switchboard_core::vault_kind(root).ok()}),
         ),
         Operation::CurrentAccounts => match runtime {
             Some(runtime) => runtime.current_accounts(),
@@ -8508,7 +8508,8 @@ async fn execute(
                 || {
                     copies::not_app_view(
                         runtime.map(|_| env!("CARGO_PKG_VERSION")),
-                        copies::window(root).as_ref(),
+                        runtime.is_some() && serve_update::updates_copy(root),
+                        &copies::windows(root),
                         serve_update::last(root),
                     )
                 },

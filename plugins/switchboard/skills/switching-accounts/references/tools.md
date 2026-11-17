@@ -325,9 +325,9 @@ installed app answers this."). `updates` reads the update state, or with `enable
 updates automatically* on or off; `check_for_updates` checks now; `restart_to_update` installs a
 downloaded update and restarts through the drain; `login_item` reads *Open at login*, or with
 `enabled` sets it. Where `switchboard serve` owns the data folder, or nothing runs, `updates` alone
-still answers (`reason: not_owner` or `no_owner`): the owner, its version, its own update check
-(`serve_update`) and the version of an app window open beside it (`window_version`,
-`window_older`). Changing anything only when the operator asks.
+still answers (`reason: not_owner` or `no_owner`): the owner, its version, whether it keeps its
+copy current (`owner_updates_copy`), its own update check (`serve_update`) and the oldest app
+window open beside it (`window_version`, `window_older`, `windows`). Changing anything only when the operator asks.
 
 ### `switchboard_link_cli`
 
