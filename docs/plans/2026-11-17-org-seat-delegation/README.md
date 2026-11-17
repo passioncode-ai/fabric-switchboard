@@ -191,13 +191,20 @@ wave table at the end. Decision: [DEC-0022](../../DECISIONS.md#dec-0022-an-organ
   so `accounts recall` takes the sign-in back under its key. The account is not placed in the
   machine's group, so the background read does not extend its lease: left alone, the copy there
   switches off when the lease runs out. The answer says to call it back with `accounts recall`.
+- **D-42 (round 3).** The record of a seat left there carries `sent`, the print of the token sent,
+  so a call back after a renewal here keeps the live sign-in aside (P2-3). The adoption pass skips
+  an account with a `delegated_out` record or a leased seat line outside a machine's group (P2-2;
+  no distinct seat event, since five readers of `granted` would each need it). Using an account
+  here again clears its `delegated_out` record whatever its group, and a call back that gives the
+  sign-in back restores it, outside the machine's group when it was outside (P2-1). The seat line
+  is written from the move's own answer (`SendError::left`), not from a read of the store.
 
 ## Waves
 
 | Wave | What | State |
 |---|---|---|
 | S1 | Seats and onboarding: accounts that also work for the organization count; domains optional; the seat step's next steps; an organization never refuses a person's act (DEC-0022); the team follows only on request; moves and call backs place with a warning | done on branch `org-seats` (gate on the Mac Studio, see the backlog row) |
-| S2 | `ssh-serve` restricted entry, `delegated` account kind and its refusals, lease and its renewal by the sender | done on branch `org-delegation` ([DEC-0025](../../DECISIONS.md#dec-0025-a-subscription-is-delegated-to-a-teammates-machine-as-a-guest-under-a-lease); review rounds 1 and 2 fixed) |
+| S2 | `ssh-serve` restricted entry, `delegated` account kind and its refusals, lease and its renewal by the sender | done on branch `org-delegation` ([DEC-0025](../../DECISIONS.md#dec-0025-a-subscription-is-delegated-to-a-teammates-machine-as-a-guest-under-a-lease); review rounds 1 to 3 fixed) |
 | S3 | "Own sign-in off" switch; proof that Claude Desktop and `~/.claude` are untouched (synthetic Keychain tests) | done on branch `org-delegation` |
 | S4 | Teammate setup guide ([ORGANIZATION.md](../../ORGANIZATION.md#a-teammates-computer)), window and MCP for delegate and revoke, CONTRACTS | done on branch `org-delegation` |
 | S5 | Live: a teammate's machine on the tailnet, one organization subscription delegated, a console session on it, Claude Desktop checked untouched, recall | needs the teammate's machine (human step: install, tailnet, ssh key) |

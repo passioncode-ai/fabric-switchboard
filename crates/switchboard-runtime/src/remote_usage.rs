@@ -405,6 +405,7 @@ mod tests {
                 remote_id: "0b1edeee-4125-403c-9c12-44c6aadaeb2b".into(),
                 lease_hours: 24,
                 sender_key: "KEY".into(),
+                sent: None,
             },
         );
         assert_eq!(

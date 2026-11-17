@@ -248,6 +248,42 @@ pub fn send_as(
     settle: &dyn Fn(&str),
     delegate: Option<Delegate<'_>>,
 ) -> Result<Value, String> {
+    send_with(store, id, target, pool, program, now, run, settle, delegate).map_err(|e| e.message)
+}
+/// A refused move: the person's sentence, and the delegated seat left on the other machine when
+/// its copy failed its check and could not be removed (`LEFT_THERE_DELEGATED`).
+#[derive(Debug)]
+pub struct SendError {
+    pub message: String,
+    pub left: Option<switchboard_core::DelegatedOut>,
+}
+impl From<String> for SendError {
+    fn from(message: String) -> Self {
+        Self {
+            message,
+            left: None,
+        }
+    }
+}
+impl From<&str> for SendError {
+    fn from(message: &str) -> Self {
+        message.to_owned().into()
+    }
+}
+/// [`send_as`], answering what a delegated seat left there was (review round 3, minor), so the
+/// caller records it from what the move knew rather than from the store.
+#[allow(clippy::too_many_arguments)]
+pub fn send_with(
+    store: &Store,
+    id: &str,
+    target: &str,
+    pool: &str,
+    program: &Program<'_>,
+    now: i64,
+    run: &Run<'_>,
+    settle: &dyn Fn(&str),
+    delegate: Option<Delegate<'_>>,
+) -> Result<Value, SendError> {
     if !target_valid(target) {
         return Err(TARGET_INVALID.into());
     }
@@ -358,7 +394,7 @@ pub fn send_as(
         Ok(c) => c,
         Err(e) => {
             undo_here()?;
-            return Err(e);
+            return Err(e.into());
         }
     };
     let sent = credential.refresh_token.clone();
@@ -456,18 +492,24 @@ pub fn send_as(
             };
             // Review round 2, P2-B: the seat there is recorded under its key, so `accounts recall`
             // finds it and takes the sign-in back; the account stays marked used there.
+            // The print of what was sent goes with it (review round 3, P2-3): a sign-in renewed
+            // here since is kept aside by the call back, never replaced by the spent copy there.
             let out = switchboard_core::DelegatedOut {
                 remote_id: remote_id.clone(),
                 lease_hours: d.lease_hours,
                 sender_key: d.sender_key.to_owned(),
+                sent: sent.as_deref().map(token_print),
             };
-            if store.record_delegated_out(id, out).is_err() {
+            if store.record_delegated_out(id, out.clone()).is_err() {
                 crate::oplog::event(
                     "delegation_record",
                     &[("result", crate::oplog::Field::Code("unwritten"))],
                 );
             }
-            return Err(LEFT_THERE_DELEGATED.into());
+            return Err(SendError {
+                message: LEFT_THERE_DELEGATED.into(),
+                left: Some(out),
+            });
         }
         undo_here()?;
         return Err(if renewed_here {
@@ -2467,6 +2509,103 @@ mod tests {
         assert_eq!(out.remote_id, "0a1b2c3d");
         assert_eq!(out.lease_hours, 48);
         assert_eq!(out.sender_key, KEY);
+        assert_eq!(
+            out.sent.as_deref(),
+            Some(token_print("synthetic-refresh").as_str())
+        );
+    }
+
+    /// Review round 3: a delegated copy left there after this machine renewed the sign-in while
+    /// it moved (P2-3) carries the print of the token sent, so the call back keeps the live
+    /// sign-in renewed here aside instead of losing it to the spent copy there; taking it back
+    /// clears the record (P2-1).
+    #[test]
+    fn a_copy_left_there_after_a_renewal_here_is_called_back_keeping_the_live_sign_in() {
+        const KEY: &str = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=";
+        let (_root, store, id) = store_with(AuthKind::OAuth);
+        let calls: Calls = Default::default();
+        let spent = Credential {
+            access_token: "synthetic-access".into(),
+            refresh_token: Some("synthetic-refresh".into()),
+            id_token: None,
+            native_context: None,
+            expires_at: Some(2_000_000_000),
+            account_id: Some("synthetic-account".into()),
+        };
+        let renewing = studio(&calls, None, |command| {
+            if command.contains("'accounts' 'add'") {
+                let successor = Credential {
+                    access_token: "synthetic-access-2".into(),
+                    refresh_token: Some("synthetic-refresh-2".into()),
+                    id_token: None,
+                    native_context: None,
+                    expires_at: Some(2_000_000_100),
+                    account_id: Some("synthetic-account".into()),
+                };
+                store
+                    .adopt_refreshed(Provider::Claude, "synthetic-refresh", &successor)
+                    .unwrap();
+                return Ok(r#"{"ok":true,"data":{"id":"0a1b2c3d"}}"#.into());
+            }
+            if command.contains("'accounts' 'remove'") {
+                return Err("ssh failed.".into());
+            }
+            Ok(r#"{"ok":true,"data":{}}"#.into())
+        });
+        let err = send_with(
+            &store,
+            &id,
+            "studio.local",
+            "agents",
+            &DEFAULT_APP,
+            1,
+            &renewing,
+            &|_| {},
+            Some(Delegate {
+                sender_key: KEY,
+                lease_hours: 48,
+            }),
+        )
+        .unwrap_err();
+        assert_eq!(err.message, LEFT_THERE_DELEGATED);
+        let left = err.left.expect("the seat left there");
+        assert_eq!(left.remote_id, "0a1b2c3d");
+        assert_eq!(
+            left.sent.as_deref(),
+            Some(token_print("synthetic-refresh").as_str())
+        );
+        assert_eq!(store.snapshot().unwrap().delegated_out[&id], left);
+        // The call back: the copy there is the spent one; the live one here is kept aside.
+        let tokens = spent.to_oauth_json(Provider::Claude);
+        let give = |args: &[String], _: Option<&[u8]>| -> Result<String, String> {
+            assert!(
+                args[2].contains(&format!("'--sender-key' '{KEY}'")),
+                "{}",
+                args[2]
+            );
+            Ok(format!(
+                r#"{{"ok":true,"data":{{"provider":"claude","credential":{tokens}}}}}"#
+            ))
+        };
+        let taken = recall_take_as(
+            &store,
+            &id,
+            "studio.local",
+            &left.remote_id,
+            &DEFAULT_APP,
+            2,
+            &give,
+            left.sent.as_deref(),
+            Some(KEY),
+        )
+        .unwrap();
+        assert_eq!(
+            taken.kept.and_then(|c| c.refresh_token).as_deref(),
+            Some("synthetic-refresh-2")
+        );
+        let snapshot = store.snapshot().unwrap();
+        assert!(!snapshot.elsewhere.contains_key(&id));
+        assert!(snapshot.delegated_out.is_empty());
     }
 
     /// SB-403: a seat whose lease ran out there answers no sign-in; the one kept here is asked.

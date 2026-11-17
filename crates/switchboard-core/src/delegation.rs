@@ -83,6 +83,10 @@ pub struct DelegatedOut {
     pub remote_id: String,
     pub lease_hours: u32,
     pub sender_key: String,
+    /// The print of the refresh token sent (16 hex), so a call back keeps a sign-in renewed here
+    /// since (review round 3, P2-3). Absent in records written before it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sent: Option<String>,
 }
 
 impl Delegation {
@@ -149,6 +153,9 @@ pub(crate) fn validate_out(s: &Snapshot) -> Result<(), String> {
                 || !remote_id_valid(&o.remote_id)
                 || !lease_valid(o.lease_hours)
                 || !key_valid(&o.sender_key)
+                || o.sent
+                    .as_deref()
+                    .is_some_and(|p| p.len() != 16 || !p.bytes().all(|b| b.is_ascii_hexdigit()))
         })
     {
         return Err("Invalid account metadata".into());
@@ -475,6 +482,43 @@ mod tests {
 
     fn pool(store: &Store) -> String {
         store.snapshot().unwrap().projects[0].pool.clone()
+    }
+
+    /// Review round 3, P2-1: a seat left on another machine outside a machine group (its copy
+    /// there failed its check and could not be removed) loses its record when the account is
+    /// used here again, so a later plain move is not called back or extended under its key.
+    #[test]
+    fn the_record_of_a_seat_left_outside_a_machine_group_goes_when_the_account_is_used_here() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::open(root.path().into(), Arc::new(MemoryVault::default())).unwrap();
+        let a = store
+            .add(
+                "one".into(),
+                Provider::Claude,
+                AuthKind::OAuth,
+                "default".into(),
+                oauth("1"),
+            )
+            .unwrap();
+        store
+            .mark_elsewhere_at(&a.id, true, 10, Some("studio.local"))
+            .unwrap();
+        let out = DelegatedOut {
+            remote_id: "0a1b2c3d".into(),
+            lease_hours: 48,
+            sender_key: KEY.into(),
+            sent: Some("0011223344556677".into()),
+        };
+        store.record_delegated_out(&a.id, out.clone()).unwrap();
+        assert_eq!(store.snapshot().unwrap().delegated_out[&a.id], out);
+        // A print that is not one is refused.
+        let bad = DelegatedOut {
+            sent: Some("not a print".into()),
+            ..out
+        };
+        assert!(store.record_delegated_out(&a.id, bad).is_err());
+        store.mark_elsewhere(&a.id, false, 20).unwrap();
+        assert!(store.snapshot().unwrap().delegated_out.is_empty());
     }
 
     #[test]

@@ -1505,6 +1505,7 @@ mod tests {
             remote_id: "0b1edeee-4125-403c-9c12-44c6aadaeb2b".into(),
             lease_hours: 48,
             sender_key: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=".into(),
+            sent: Some("0011223344556677".into()),
         };
         original.record_delegated_out(&a.id, out.clone()).unwrap();
         let info = write(&original, &backups, &keys, 1_000).unwrap().unwrap();

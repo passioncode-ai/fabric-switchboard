@@ -2243,6 +2243,9 @@ impl Store {
             candidate.locations.remove(id);
             // SB-355: used here again, it comes home from its machine's group.
             machines::come_home(&mut candidate, id, None);
+            // SB-403 (review round 3, P2-1): and it is delegated nowhere, in a machine's group or
+            // not (a seat left there outside one after a failed check).
+            candidate.delegated_out.remove(id);
         }
         append_event(&mut candidate, "account_updated", Some(id), "success");
         self.publish(&mut state, candidate)?;
