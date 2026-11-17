@@ -4763,13 +4763,14 @@ mod tests {
             .join("runtimes/opencode-continue/agent-home")
             .exists());
         // SB-201: the hand-over records and exports its context. The machine's key is
-        // personal, also in an organization's folder; the group's own key is the group's.
+        // personal outside a group; in an organization's folder, the group's (DEC-0022).
         let folder = base.join("wf_00112233445566aa");
         assert_eq!(recorded(&folder)["context"], "personal");
         assert!(text.contains("export SWITCHBOARD_CONTEXT='personal'"));
         let acme = acme_group(&f, &[]);
         session(&f).unwrap();
-        assert_eq!(recorded(&folder)["context"], "personal");
+        // DEC-0022 (SB-403 round 1): the group owns the data, whatever key pays.
+        assert_eq!(recorded(&folder)["context"], format!("org:{acme}"));
         f.store
             .set_agent_key_for(
                 "openrouter",
@@ -4924,7 +4925,7 @@ mod tests {
         )
         .is_err());
         // SB-201: the hand-over records and exports its context. The machine's key is
-        // personal, also in an organization's folder; the group's own key is the group's.
+        // personal outside a group; in an organization's folder, the group's (DEC-0022).
         let folder = base.join("wf_0123456789abcdef");
         assert_eq!(recorded(&folder)["context"], "personal");
         assert!(fs::read_to_string(&path)
@@ -4932,7 +4933,8 @@ mod tests {
             .contains("export SWITCHBOARD_CONTEXT='personal'"));
         let acme = acme_group(&f, &[]);
         session(&f).unwrap();
-        assert_eq!(recorded(&folder)["context"], "personal");
+        // DEC-0022 (SB-403 round 1): the group owns the data, whatever key pays.
+        assert_eq!(recorded(&folder)["context"], format!("org:{acme}"));
         f.store
             .set_agent_key_for(
                 "openrouter",
@@ -5152,10 +5154,11 @@ mod tests {
         // An agent that picks its model itself has no model to show.
         openrouter_launch(&f, "crush", None).unwrap();
         assert!(recorded(&f.root.join("runtimes/agent-crush-openrouter"))["label"].is_null());
-        // In an organization's folder: the machine's key is personal, the group's key the group's.
+        // In an organization's folder: the group's context on the machine's key and on the
+        // group's own key alike (DEC-0022, SB-403 round 1).
         let acme = acme_group(&f, &[]);
         openrouter_launch(&f, "goose", None).unwrap();
-        assert_eq!(recorded(&home)["context"], "personal");
+        assert_eq!(recorded(&home)["context"], format!("org:{acme}"));
         f.store
             .set_agent_key_for(
                 "openrouter",

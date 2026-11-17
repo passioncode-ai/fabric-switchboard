@@ -1704,8 +1704,8 @@ mod tests {
 
         // The session ended (its script ran and exited): the folder is free again.
         fs::remove_file(session.join(".launch-pending")).unwrap();
-        // A-Q6: in an organization's folder a Kimi session is launched and reads personal (the
-        // more private wins), never the folder's organization.
+        // In an organization's folder a Kimi session is launched and reads the folder's
+        // organization: the group owns the data (DEC-0022, SB-403 round 1; A-Q6 read personal).
         let acme = store.add_organization("Acme", &[]).unwrap();
         store
             .save_project_in(
@@ -1717,7 +1717,7 @@ mod tests {
             )
             .unwrap();
         launch_with(&root, &store, &id, folder.path(), program, started).unwrap();
-        assert_eq!(context(&session), "personal");
+        assert_eq!(context(&session), format!("org:{}", acme.id));
         fs::remove_file(session.join(".launch-pending")).unwrap();
         assert!(remove(&root, &store, &id).unwrap());
         assert!(!home.exists());
