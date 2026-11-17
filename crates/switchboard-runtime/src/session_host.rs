@@ -299,6 +299,10 @@ impl Session {
     }
     fn output(&self, bytes: &[u8]) {
         let mut inner = self.lock();
+        self.output_locked(&mut inner, bytes);
+    }
+    /// `output` under a lock the caller already holds.
+    fn output_locked(&self, inner: &mut Inner, bytes: &[u8]) {
         inner.screen.process(bytes);
         inner.last_activity = std::time::Instant::now();
         inner.scrollback.extend(bytes);
@@ -739,6 +743,10 @@ pub fn serve(start: Start<'_>, ready: impl FnOnce()) -> Result<Ended, String> {
                     session
                         .pid
                         .store(next.id() as i32, std::sync::atomic::Ordering::SeqCst);
+                    // Under the lock the reader needs for the next process's output, so the
+                    // viewers read this line before anything the next process writes (SB-413).
+                    session
+                        .output_locked(&mut inner, b"\r\n[Switchboard restarted this session]\r\n");
                 } else {
                     inner.finished = true;
                 }
@@ -747,7 +755,6 @@ pub fn serve(start: Start<'_>, ready: impl FnOnce()) -> Result<Ended, String> {
         };
         match started {
             Some(Ok(next)) => {
-                session.output(b"\r\n[Switchboard restarted this session]\r\n");
                 child = next;
             }
             _ => break status,
