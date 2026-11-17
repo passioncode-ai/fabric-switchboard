@@ -388,7 +388,7 @@ const safeErrors = new Set([
   "An Anthropic key is already saved under that name. Choose another name, or replace the saved key.",
   "An OpenRouter key is already saved there. Replace it, or choose a group for this one.",
   "Saving the key from Observatory took longer than a minute and was stopped. It may have been saved: check the accounts and agent keys before adding it again.",
-  "An API key already saved in this group cannot be read, so Switchboard cannot tell whether this is the same key. Remove that account or save its key again, then add this one.",
+  "Switchboard could not read the saved Claude API keys now, so it cannot tell whether this key is already saved. Try again in a moment.",
   "The key could not be saved from Observatory. Check the slot with project-observatory, then try again.",
   "Project Observatory records this key as expired. Rotate it there, then add it.",
   "A model belongs to a named key. An account in the pay-per-token group takes its model at launch: leave out the model, or add a named key too.",

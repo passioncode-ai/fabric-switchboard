@@ -3840,17 +3840,28 @@ Plan: [2026-11-17-observatory-keys](plans/2026-11-17-observatory-keys/README.md)
   `BASH_FUNC_*` variable (an exported bash function, which bash 3.2 imports as `/bin/sh` on
   macOS and which could shadow `printf`) is removed from the environment with the others. A
   refusal is never shown when it may hold a key (`may_hold_key`: `sk-` in any case, or a run of 24
-  or more of `A-Za-z0-9_+/=-`), the save's own and Observatory's alike; Observatory's error for a
+  or more key characters; the run rule: review round 3), the save's own and Observatory's alike; Observatory's error for a
   slot it does not hold has no `use_secret:` prefix and ends as `SAVE_FAILED`. `SAVE_TIMED_OUT`
   now says the key may have been saved. A record that cannot be written after a save answers the
   saves with `failed: RECORDS_UNSAVED`, never an error that reads as nothing saved. The metered
-  Hermes home holds an empty `.env` (0600), so Hermes never loads its install folder's `.env`, and
+  Hermes home holds a `.env` (0600) of its own (what it holds: review round 3), and
   the unset list adds the AWS, Google application credentials, Nebius, Upstage, Actual, MoA and
   LM Studio variables. Adding a key from Observatory as an account is refused while a saved
-  Claude API key's value cannot be read (`SAVED_KEY_UNREADABLE`): it may be that very key, which
+  Claude API key's value cannot be read (the answers: review round 3): it may be that very key, which
   the store's same-key check cannot see. The store itself still adds beside an unreadable row (the
   2026-11-08 rule, `an_account_whose_sign_in_cannot_be_read_does_not_stop_a_new_one_in_its_group`),
   so `accounts add` and the window are unchanged.
+- **Review round 3 (2026-11-17).** The metered Hermes home's `.env` names every entry of
+  `HERMES_PROVIDER_KEYS` empty (`NAME=`): Hermes 0.22.2 loads it first, overriding, then its install
+  folder's `.env`, which fills only names not set yet, so none of those keys comes back from
+  there. `may_hold_key` counts runs of `A-Za-z0-9_+=-` (`/` and `:` end a run, so a slot path, an
+  absolute path or a time splits) and flags one of 24 or more only when it mixes upper case, lower
+  case and digits or is 40 or more long; a run of short `UPPER_SNAKE` or `lower-hyphen` parts (a
+  slot name, a uuid) is a name. Adding from Observatory as an account fails closed only when a
+  saved Claude API key's item is definitely absent (`Store::stored_credential_present`, false only
+  for the vault's absent answer), naming it by its label: "The saved Claude API key <label> has no
+  stored value, …"; a read that failed for now (a locked keychain, a refused prompt) answers
+  `SAVED_KEYS_UNREADABLE_NOW`, try again in a moment, and names nothing to remove.
 - **Tests:** `observatory_keys::tests::*` (the list, slots and the pipe script, the record, the
   plan and its refusals, saved targets), `launch_keys::tests::the_pay_per_token_groups_keys_are_offered_with_why_not`,
   `launch::tests::hermes_on_the_pay_per_token_group_runs_through_the_proxy`, and

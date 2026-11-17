@@ -57,7 +57,15 @@ pub const POOL_NOT_FOR_ANTHROPIC: &str =
 pub const KEY_EXPIRED: &str =
     "Project Observatory records this key as expired. Rotate it there, then add it.";
 pub const MODEL_FOR_ACCOUNT: &str = "A model belongs to a named key. An account in the pay-per-token group takes its model at launch: leave out the model, or add a named key too.";
-pub const SAVED_KEY_UNREADABLE: &str = "An API key already saved in this group cannot be read, so Switchboard cannot tell whether this is the same key. Remove that account or save its key again, then add this one.";
+/// Review round 3: the saves' keys could not be read now (a locked keychain, a refused prompt).
+pub const SAVED_KEYS_UNREADABLE_NOW: &str = "Switchboard could not read the saved Claude API keys now, so it cannot tell whether this key is already saved. Try again in a moment.";
+/// Review round 3: a saved Claude API key whose stored value is gone, named by its label.
+fn saved_key_missing(label: &str) -> String {
+    format!(
+        "The saved Claude API key {} has no stored value, so Switchboard cannot tell whether this is the same key. Remove that account or add its key again, then add this one.",
+        label
+    )
+}
 pub const UNIX_ONLY: &str = "Adding a key from Observatory runs on macOS and Linux for now.";
 pub const SAVE_FAILED: &str = "The key could not be saved from Observatory. Check the slot with project-observatory, then try again.";
 pub const SAVE_TIMED_OUT: &str = "Saving the key from Observatory took longer than a minute and was stopped. It may have been saved: check the accounts and agent keys before adding it again.";
@@ -606,13 +614,22 @@ fn plan_from(
                 // this very key (a retry after a lost record), and the store's same-key check
                 // cannot see it; this add fails closed. The store itself keeps adding beside an
                 // unreadable row (the 2026-11-08 rule), so other ways in are unchanged.
-                if snapshot
+                // Review round 3: only an item the vault says is absent fails closed with the
+                // account's name; a read that failed for now asks to try again.
+                let mut transient = false;
+                for a in snapshot
                     .accounts
                     .iter()
                     .filter(|a| switchboard_core::Snapshot::is_claude_key(a))
-                    .any(|a| store.credential(&a.id).is_err())
                 {
-                    return Err(SAVED_KEY_UNREADABLE.into());
+                    match store.stored_credential_present(&a.id) {
+                        Ok(true) => {}
+                        Ok(false) => return Err(saved_key_missing(&a.label)),
+                        Err(_) => transient = true,
+                    }
+                }
+                if transient {
+                    return Err(SAVED_KEYS_UNREADABLE_NOW.into());
                 }
                 if saved.keys.iter().any(|r| {
                     r.slot == slot.text()
@@ -737,24 +754,38 @@ fn scrub_shell_env_from(command: &mut Command, inherited: Vec<std::ffi::OsString
     }
 }
 
-/// Whether a refusal may carry a key: `sk-` in any case, or a run of 24 or more characters a key
-/// is written in. Such a text is never shown; the plain `SAVE_FAILED` is.
+/// Whether a refusal may carry a key (review rounds 2 and 3): `sk-` in any case, or a run of 24
+/// or more key characters (`A-Za-z0-9_+=-`; `/` and `:` end a run, so a slot path, an absolute
+/// path or a time splits) that looks like a key: it mixes upper case, lower case and digits, or
+/// is 40 or more long. A run of only `UPPER_SNAKE` or only `lower-hyphen` words is a name, not a
+/// key. Such a text is never shown; the plain `SAVE_FAILED` is.
 fn may_hold_key(text: &str) -> bool {
     if text.to_ascii_lowercase().contains("sk-") {
         return true;
     }
-    let mut run = 0;
-    for c in text.chars() {
-        if c.is_ascii_alphanumeric() || matches!(c, '_' | '+' | '/' | '=' | '-') {
-            run += 1;
-            if run >= 24 {
-                return true;
-            }
-        } else {
-            run = 0;
-        }
+    text.split(|c: char| !(c.is_ascii_alphanumeric() || matches!(c, '_' | '+' | '=' | '-')))
+        .any(key_like)
+}
+fn key_like(run: &str) -> bool {
+    if run.len() < 24 {
+        return false;
     }
-    false
+    let upper = run.bytes().any(|b| b.is_ascii_uppercase());
+    let lower = run.bytes().any(|b| b.is_ascii_lowercase());
+    let digit = run.bytes().any(|b| b.is_ascii_digit());
+    // Words joined by `_` or `-`, each part short: a name (`ANTHROPIC_FOUNDRY_API_KEY`, a uuid),
+    // never one long part (a hex token has no separator).
+    let joined = |sep: u8, part: fn(u8) -> bool| {
+        run.bytes().all(|b| b == sep || part(b))
+            && run.as_bytes().contains(&sep)
+            && run.split(sep as char).all(|w| w.len() <= 16)
+    };
+    let snake = joined(b'_', |b| b.is_ascii_uppercase() || b.is_ascii_digit());
+    let words = joined(b'-', |b| b.is_ascii_lowercase() || b.is_ascii_digit());
+    if snake || words {
+        return false;
+    }
+    (upper && lower && digit) || run.len() >= 40
 }
 
 /// One save of a planned add: Observatory's `use_secret.py run --vault-only` gives the slot's value
@@ -1131,8 +1162,22 @@ mod tests {
     #[test]
     fn a_text_that_may_hold_a_key_is_never_passed_on() {
         assert!(may_hold_key("refused: SK-ANT-x"));
-        assert!(may_hold_key(&format!("value {}", "A".repeat(24))));
-        assert!(!may_hold_key(&format!("value {}", "A".repeat(23))));
+        // A synthetic mixed 32-character token is refused, and so is a 40-character run.
+        assert!(may_hold_key(
+            "refused: value Ab3dEf7hIj1kLm9nOp2qRs4tUv6wXy8z"
+        ));
+        assert!(may_hold_key(&format!("value {}", "ab3d".repeat(10))));
+        assert!(may_hold_key(&format!("hex {}", "0f".repeat(32))));
+        // Names pass through: a real-length slot path, a uuid, an absolute path, a time.
+        for text in [
+            "refused: no grant names project-observatory/prod/OPENROUTER_API_KEY",
+            "refused: no grant names project-observatory/prod/ANTHROPIC_FOUNDRY_API_KEY_SECONDARY",
+            "refused: workflow 0b7f3a6e-2c4d-4f8a-9b1e-5d6c7a8b9c0d is not the lease holder",
+            "refused: /Users/someone/.local/share/project-observatory-venv/lib/python3.14/x",
+            "refused: at 2026-11-17T10:00:00Z",
+        ] {
+            assert!(!may_hold_key(text), "{text}");
+        }
         assert!(!may_hold_key(
             "refused: no grant names alpha-web/prod/X_KEY"
         ));
@@ -1317,13 +1362,34 @@ mod tests {
         );
     }
 
-    /// Review round 2: adding a key as an account beside a saved Claude API key whose value cannot
-    /// be read fails closed; it may be the same key.
+    /// A vault whose reads of one item fail as a locked keychain's do.
+    #[derive(Default)]
+    struct Flaky {
+        inner: switchboard_core::MemoryVault,
+        failing: std::sync::Mutex<Option<String>>,
+    }
+    impl switchboard_core::Vault for Flaky {
+        fn get(&self, id: &str) -> Result<switchboard_core::Credential, String> {
+            if self.failing.lock().unwrap().as_deref() == Some(id) {
+                return Err("Native credential storage unavailable".into());
+            }
+            self.inner.get(id)
+        }
+        fn put(&self, id: &str, value: &switchboard_core::Credential) -> Result<(), String> {
+            self.inner.put(id, value)
+        }
+        fn delete(&self, id: &str) -> Result<(), String> {
+            self.inner.delete(id)
+        }
+    }
+
+    /// Review rounds 2 and 3: adding a key as an account beside a saved Claude API key whose
+    /// stored value is gone fails closed, naming it; one that could not be read now asks to retry.
     #[test]
     fn an_account_beside_an_unreadable_saved_key_is_refused() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
-        let vault = Arc::new(switchboard_core::MemoryVault::default());
+        let vault = Arc::new(Flaky::default());
         let store = Store::open(root.into(), vault.clone()).unwrap();
         let listed = parse_list(LIST);
         let request = AddRequest {
@@ -1346,11 +1412,18 @@ mod tests {
             .unwrap();
         assert!(plan_from(root, &store, &request, &engine(), &listed).is_ok());
         use switchboard_core::Vault;
-        vault.delete(&saved.id).unwrap();
+        // A read that fails for now (a locked keychain) asks to try again, naming nothing.
+        *vault.failing.lock().unwrap() = Some(saved.id.clone());
         assert_eq!(
             plan_from(root, &store, &request, &engine(), &listed).unwrap_err(),
-            SAVED_KEY_UNREADABLE
+            SAVED_KEYS_UNREADABLE_NOW
         );
+        *vault.failing.lock().unwrap() = None;
+        // An item the vault says is gone fails closed, naming the account by its label.
+        vault.delete(&saved.id).unwrap();
+        let refused = plan_from(root, &store, &request, &engine(), &listed).unwrap_err();
+        assert_eq!(refused, saved_key_missing("earlier"));
+        assert!(refused.contains("The saved Claude API key earlier has no stored value"));
         // A named key only is not an account: it is planned as before.
         let mut named = request;
         named.to = Some("agent".into());

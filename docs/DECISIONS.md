@@ -632,7 +632,8 @@ research notes); the ones still in force that the board cites are seeded below w
     key characters in a row) is never shown; a record not written after a save is reported beside
     the save, not as a failure of it; the metered Hermes home has an empty `.env` of its own, and
     more provider and cloud variables are unset. Adding a key from Observatory as an account fails closed
-    while a saved Claude API key cannot be read (`SAVED_KEY_UNREADABLE`): the retry the review
+    while a saved Claude API key's stored value is gone, naming it by its label, and asks to try
+    again when a read failed only for now (`SAVED_KEYS_UNREADABLE_NOW`, review round 3): the retry the review
     feared is that path's. The store's own add keeps the 2026-11-08 rule (an unreadable row never
     blocks a new account, an incident on the Mac Studio with exactly such API keys), so a person's
     add is not broken again.

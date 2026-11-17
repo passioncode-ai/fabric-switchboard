@@ -1691,9 +1691,15 @@ auxiliary:\n  free_only: true\n"
     }
     switchboard_core::private_fs::private_write(&own.join("config.yaml"), config.as_bytes())
         .map_err(|_| "Managed home unavailable.".to_string())?;
-    // Review round 2: an empty `.env` of its own, so Hermes never falls back to its install
-    // folder's `.env`, which overrides the environment when the home has none.
-    switchboard_core::private_fs::private_write(&own.join(".env"), b"")
+    // Review round 3: Hermes 0.22.2 loads the home's `.env` first (overriding) and then its
+    // install folder's `.env`, which fills only names not set yet (`env_loader.py`). The home's
+    // `.env` names every provider key empty, so each is set, empty, and the install folder's
+    // value is skipped: an unset key cannot come back from there.
+    let dotenv: String = HERMES_PROVIDER_KEYS
+        .iter()
+        .map(|name| format!("{name}=\n"))
+        .collect();
+    switchboard_core::private_fs::private_write(&own.join(".env"), dotenv.as_bytes())
         .map_err(|_| "Managed home unavailable.".to_string())?;
     Ok(own)
 }
@@ -5794,8 +5800,13 @@ mod tests {
         ] {
             assert!(script.contains(&format!(" {name} ")), "{name}");
         }
-        // An empty `.env` of its own: Hermes never reads its install folder's.
-        assert_eq!(fs::read(home.join("agent-home/.env")).unwrap(), b"");
+        // Its own `.env` names every provider key empty, so the install folder's `.env` fills
+        // none of them.
+        let dotenv = fs::read_to_string(home.join("agent-home/.env")).unwrap();
+        for name in HERMES_PROVIDER_KEYS {
+            assert!(dotenv.lines().any(|l| l == format!("{name}=")), "{name}");
+        }
+        assert_eq!(dotenv.lines().count(), HERMES_PROVIDER_KEYS.len());
         assert!(!script.contains("synthetic-tokens-key"));
         let record = recorded(&home);
         assert_eq!(record["pool"], "tokens");
