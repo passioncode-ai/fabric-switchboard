@@ -23,6 +23,8 @@ separate data folder; leave it out unless the operator named one.
 | `switchboard_project_remove` | `switchboard project remove --path /path/to/project --provider claude` |
 | `switchboard_project_apply` | `switchboard project apply --path /path/to/project` (`--global` only after the operator's OK) |
 | `switchboard_projects` | `switchboard project list`: groups (id, folders, reserved accounts) and every folder rule with its state: active, paused or expired |
+| `switchboard_account_send` with `delegate` | `switchboard accounts send ACCOUNT_ID --to user@host --pool GROUP_THERE --delegate [--lease-hours 48]` (a teammate's machine; only when the operator asks) |
+| `switchboard_own_sign_in` | `switchboard --json own-sign-in` reads it; `own-sign-in off` / `on` (only when the operator asks) |
 
 `project show`, `set`, `remove` and `apply` default to the current folder when `--path` is
 left out; a relative `--path` is refused.
