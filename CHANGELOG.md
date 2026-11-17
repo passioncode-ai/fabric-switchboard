@@ -8,6 +8,10 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+## 0.7.116
+
+- 0.7.116 carries 0.7.115's changes, which were tagged but never published: a test of the .deb check could not write its multi-architecture file list on Windows (an NTFS stream, not a file), so the Windows tests failed and the release stopped. The test now runs only where a .deb exists; nothing a person runs changed.
+
 ## 0.7.115
 
 - Requests that only read (`recovery`, `monitor status`, Needs attention, the readiness of fallback chains) no longer wait on a slow Keychain read after a usage check or a renewal changed what Switchboard knows about an account: they answer from what it knows and the next background pass settles it with the vault. With no answer yet, as when no owner runs, they read the vault as before (SB-410).
