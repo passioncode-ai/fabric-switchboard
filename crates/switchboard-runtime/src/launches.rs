@@ -1665,9 +1665,15 @@ mod tests {
             )
             .unwrap();
         };
-        put("l-handed", json!({"launch_id": "l-handed", "launched_at": 500,
-            "continued_as": {"kind": "handover", "id": "ho-1"}}));
-        put("l-later", json!({"launch_id": "l-later", "launched_at": 900}));
+        put(
+            "l-handed",
+            json!({"launch_id": "l-handed", "launched_at": 500,
+            "continued_as": {"kind": "handover", "id": "ho-1"}}),
+        );
+        put(
+            "l-later",
+            json!({"launch_id": "l-later", "launched_at": 900}),
+        );
         put("l-same", json!({"launch_id": "l-same", "launched_at": 500}));
         assert!(continued_after(root, "l-handed", 600));
         assert!(continued_after(root, "l-later", 600));

@@ -577,18 +577,16 @@ mod tests {
                    "stop": {"state": "waiting", "event": event, "provider": "claude", "directory": "/w/x",
                             "session": session, "account": "A1", "pool": "default", "stopped_at": 600}})
         };
+        // Its launch was continued as a hand-over (FD-291, 2026-11-17): ready no more.
+        let mut continued = stop("E5", "S23", true, json!(650), Value::Null);
+        continued["continued"] = json!(true);
         let answer = rows(&json!({"sessions": [
             // Live in pid 14, busy well after its stop (the transcript stamp is within the slack).
             stop("E1", "S3", false, json!(610), json!({"pid": 14, "status": "busy"})),
             stop("E2", "S20", true, Value::Null, Value::Null),
             stop("E3", "S21", true, json!(800), Value::Null),
             stop("E4", "S22", true, json!(650), Value::Null),
-            // Its launch was continued as a hand-over (FD-291, 2026-11-17): ready no more.
-            {
-                let mut s = stop("E5", "S23", true, json!(650), Value::Null);
-                s["continued"] = json!(true);
-                s
-            },
+            continued,
         ]}));
         let by = |id: &str| {
             answer["rows"]
