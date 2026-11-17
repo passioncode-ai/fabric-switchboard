@@ -735,8 +735,10 @@ fn an_openrouter_launch_runs_without_an_owner_and_needs_a_saved_key() {
     assert_eq!(output.status.code(), Some(1));
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("No OpenRouter key is saved"), "{stderr}");
-    // A model belongs to an OpenRouter launch, and a pool to a proxy launch.
-    assert_eq!(launch(&["--model", "a/b"]).status.code(), Some(2));
+    // A pool belongs to a proxy launch. SB-404: a model without a key source goes to the
+    // proxy launch (an Anthropic id for Claude Code or Hermes on the pay-per-token group), which
+    // refuses it at run time, here for want of an owner, never as an argument error.
+    assert_eq!(launch(&["--model", "a/b"]).status.code(), Some(1));
     assert_eq!(
         launch(&["--openrouter", "--pool", "agents"]).status.code(),
         Some(2)
