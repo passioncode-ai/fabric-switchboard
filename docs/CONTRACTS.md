@@ -3211,7 +3211,7 @@ WF-3.1). Code: [attention.rs](../crates/switchboard-runtime/src/attention.rs).
   | `renewal_refused` | as `sign_in`, and the token endpoint refused its lineage (`invalid_grant`, `RefreshState::lineages_refused`) | `switchboard_login` | `sign_in` |
   | `move_unknown` | marked used elsewhere, and its newest `seats.jsonl` line of `granted`, `recalled` or `unknown` is `unknown`; `since` is that line's time | `switchboard_remote` | `open_machines` |
   | `usage_failing` | enabled, not used elsewhere, not already listed, `usage_health.status` `failed`, and no observation for over `USAGE_FAILING_SECONDS` (3600); `since` is the last observation (else when it was added) | `switchboard_usage` | `check_usage` |
-  | `key_outside_tokens` | an enabled Claude API key outside the pay-per-token group, not used elsewhere and not already listed for a sign-in (SB-401 D-18); no `since` | `switchboard_account_move` | `move_tokens` |
+  | `key_outside_tokens` | an enabled Claude API key outside the pay-per-token group, not used elsewhere and not already listed for a sign-in (SB-401 D-18); no `since`; `action.pool` is the group's own id | `switchboard_account_move` | `move_tokens` |
   | `ceiling_question` | an unanswered question in `spend.json`, pruned as its readers prune; `since` is `reached_at` | `switchboard_ceiling_answer` | `answer_ceiling` |
 
   An account is listed once: a sign-in reason wins over failing usage. `refused_there` (a copy
@@ -3654,8 +3654,15 @@ Plan: [2026-11-17-token-group](plans/2026-11-17-token-group/README.md); decision
   `KEY_OUTSIDE_TOKENS`: `Store::select` and every publish refuse it, `Snapshot::chooses` leaves it
   out of rotation and failover, `launch::group_allows_launch` refuses it). It reads the group: the
   owner makes it at start, before the proxy listens, when a Claude API key is saved without it
-  (`Store::ensure_tokens_group_for_keys`, oplog `tokens_group_made`). A route that already
-  named it before the upgrade keeps serving. Attention lists it (`key_outside_tokens`) and its
+  (`Store::ensure_tokens_group_for_keys`, oplog `tokens_group_made`); the CLI and MCP without an
+  owner read no group until an owner has started once. A route that already named it before the
+  upgrade keeps serving. Every way in makes the group in the key's own publish (D-19): the add
+  command (`Store::add_routed`), `upsert` and a move (`Store::move_key_to_tokens`, which also
+  clears the key's routes, shares and loans). For a Claude API key, `accounts move --pool tokens`
+  names the pay-per-token group whatever its pool id; Attention's action carries the group's own
+  id (`action.pool`). A restore saves Claude API keys after the groups, so an ordinary group's
+  `tokens` and the backup's own pay-per-token group with its folders both come back, and no key
+  is moved on to the backup's pool (`returned_to_default` never counts one). Attention lists it (`key_outside_tokens`) and its
   account row offers *Move to Pay-per-token keys* (the move dialog's `TOKENS_TARGET` when the
   group is not made yet, never an ordinary group's pool id). The group a saved key needs is made
   in the same publish as the key (`save_account`), so a save that fails leaves none; a restore

@@ -1490,6 +1490,18 @@ impl Store {
     ) -> Result<Account, String> {
         self.save_account(label, provider, kind, pool, credential, None, false)
     }
+    /// SB-401: `add` for the add command: a Claude API key goes to the pay-per-token group,
+    /// made in the same publish as the account, whatever pool was named.
+    pub fn add_routed(
+        &self,
+        label: String,
+        provider: Provider,
+        kind: AuthKind,
+        pool: String,
+        credential: Credential,
+    ) -> Result<Account, String> {
+        self.save_account_routed(label, provider, kind, pool, credential, None, false, true)
+    }
     pub fn upsert(
         &self,
         label: String,
@@ -1520,6 +1532,29 @@ impl Store {
         external_identity: Option<ExternalIdentity>,
         upsert: bool,
     ) -> Result<Account, String> {
+        self.save_account_routed(
+            label,
+            provider,
+            kind,
+            pool,
+            credential,
+            external_identity,
+            upsert,
+            upsert,
+        )
+    }
+    #[allow(clippy::too_many_arguments)]
+    fn save_account_routed(
+        &self,
+        label: String,
+        provider: Provider,
+        kind: AuthKind,
+        pool: String,
+        credential: Credential,
+        external_identity: Option<ExternalIdentity>,
+        upsert: bool,
+        route_key: bool,
+    ) -> Result<Account, String> {
         if !label_valid(&label)
             || !pool_valid(&pool)
             || external_identity.as_ref().is_some_and(|i| !i.valid())
@@ -1538,7 +1573,7 @@ impl Store {
         // no more: saved again, it is saved once more in the pay-per-token group.
         // The group is made in the same publish as the account (round 4): a save that fails
         // leaves no empty group behind.
-        let tokens = upsert && provider == Provider::Claude && kind == AuthKind::ApiKey;
+        let tokens = route_key && provider == Provider::Claude && kind == AuthKind::ApiKey;
         let pool = if tokens {
             self.lock()?.tokens_pool()
         } else {

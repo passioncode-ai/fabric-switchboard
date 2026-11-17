@@ -1393,6 +1393,50 @@ impl Store {
     /// SB-314: a restore puts `id` back in `pool` (`default` included) when that pool holds no
     /// other copy of its identity; nothing else. DEC-0022 (SB-403): whatever its organizations. True when it moved. Its route in the
     /// pool it leaves goes, and shares that no longer apply are pruned.
+    /// SB-401 (round 5): moves a Claude API key into the pay-per-token group in one publish,
+    /// making the group when it is missing, so a move that fails leaves no empty group. The key
+    /// stops being shared or lent anywhere and no route keeps naming it outside the group.
+    /// Answers the group's pool and whether the key moved.
+    pub fn move_key_to_tokens(&self, id: &str) -> Result<(String, bool), String> {
+        let mut state = self.lock()?;
+        let mut candidate = state.clone();
+        let account = candidate
+            .accounts
+            .iter()
+            .find(|a| a.id == id)
+            .cloned()
+            .ok_or("Account not found.")?;
+        if !Snapshot::is_claude_key(&account) {
+            return Err(TOKENS_ONLY_KEYS.into());
+        }
+        let made = candidate.tokens_group().is_none();
+        let pool = candidate.tokens_pool();
+        if account.pool == pool && !made {
+            return Ok((pool, false));
+        }
+        if made {
+            candidate
+                .projects
+                .push(Project::tokens_group(pool.clone(), now()));
+            candidate.projects.sort_by(|a, b| a.name.cmp(&b.name));
+            append_event(&mut candidate, "project", None, "created");
+        }
+        candidate.routes.retain(|_, value| value != id);
+        for p in candidate.projects.iter_mut() {
+            p.shared_accounts.retain(|s| s != id);
+        }
+        candidate.default_shared.retain(|s| s != id);
+        candidate.default_lent.retain(|s| s != id);
+        if let Some(a) = candidate.accounts.iter_mut().find(|a| a.id == id) {
+            a.pool = pool.clone();
+        }
+        stale_shares_prune(&mut candidate);
+        shared_routes_prune(&mut candidate);
+        append_event(&mut candidate, "account_updated", Some(id), "success");
+        self.publish(&mut state, candidate)?;
+        self.changed();
+        Ok((pool, true))
+    }
     pub(crate) fn restore_account_pool(&self, id: &str, pool: &str) -> Result<bool, String> {
         let mut state = self.lock()?;
         let mut candidate = state.clone();

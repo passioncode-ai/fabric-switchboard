@@ -556,6 +556,16 @@ research notes); the ones still in force that the board cites are seeded below w
     publish as the key, so a save that fails leaves none, and a restore counts such a key failed
     and goes on. A switched-off group's folder that a group switched on also holds is that
     group's in the Claude bindings too, even when it writes no route there.
+  - D-19 (fifth review, 2026-11-17): every way a key reaches the group makes it in the same
+    publish as the key: the add command (`Store::add_routed`), a save (`upsert`) and a move
+    (`Store::move_key_to_tokens`), so nothing that fails leaves an empty group. For a Claude API
+    key, `tokens` names the pay-per-token group whatever its pool id (`tokens-2` when an ordinary
+    group holds `tokens`), and Attention gives the group's own id in its action. A restore brings
+    the groups back before the keys, so an ordinary group's `tokens` and the backup's own
+    pay-per-token group (with its folders) both return, and a key is never counted as returned
+    to the default group. Known limit: the CLI and MCP without an owner read no group until an
+    owner has started once, so until then they may still select a key from before; the owner's
+    start makes the group before its proxy takes a request.
 - **Consequences:** a key in the default group from before stays there, named under Attention
   until it is moved (D-18); turning a group off stops its sessions at their next request; the reached question
   is the same one paid hand-overs use, and *Double* raises the ceiling at once.

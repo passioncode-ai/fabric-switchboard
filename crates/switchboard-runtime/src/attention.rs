@@ -165,17 +165,16 @@ pub fn build(inputs: &Inputs) -> Value {
         // SB-401 D-18: a key from before, outside the pay-per-token group: nothing selects or
         // launches it, and a route that already names it keeps serving with no ceiling.
         if snapshot.key_outside_tokens(account) {
-            push(
+            let mut listed = item(
                 "key_outside_tokens",
-                account.label.clone(),
-                item(
-                    "key_outside_tokens",
-                    KEY_OUTSIDE_DETAIL,
-                    None,
-                    "switchboard_account_move",
-                    "move_tokens",
-                ),
+                KEY_OUTSIDE_DETAIL,
+                None,
+                "switchboard_account_move",
+                "move_tokens",
             );
+            // The pool to move it to, as the group's own id (`tokens` also names it).
+            listed["action"]["pool"] = json!(snapshot.tokens_pool());
+            push("key_outside_tokens", account.label.clone(), listed);
         }
         let Some(health) = account.usage_health.as_ref() else {
             continue;
@@ -567,7 +566,7 @@ mod tests {
         assert_eq!(reasons(&answer), ["key_outside_tokens"]);
         assert_eq!(
             answer["items"][0]["action"],
-            json!({"tool": "switchboard_account_move", "window": "move_tokens"})
+            json!({"tool": "switchboard_account_move", "window": "move_tokens", "pool": "tokens"})
         );
         assert_eq!(answer["items"][0]["detail"], KEY_OUTSIDE_DETAIL);
     }

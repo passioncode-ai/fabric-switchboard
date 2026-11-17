@@ -4503,3 +4503,77 @@ fn a_claude_key_outside_the_pay_per_token_group_is_never_newly_selected() {
     );
     assert!(store.snapshot().unwrap().routes.is_empty());
 }
+
+#[test]
+fn an_add_that_fails_leaves_no_pay_per_token_group() {
+    // SB-401 round 5: the add command's group is made in the add's own publish.
+    let root = TempDir::new().unwrap();
+    let vault = Arc::new(FaultVault::default());
+    let store = Store::open(root.path().into(), vault.clone()).unwrap();
+    vault.fail_put.store(true, Ordering::SeqCst);
+    assert!(store
+        .add_routed(
+            "Key".into(),
+            Provider::Claude,
+            AuthKind::ApiKey,
+            "work".into(),
+            token("synthetic-key"),
+        )
+        .is_err());
+    assert!(store.snapshot().unwrap().tokens_group().is_none());
+    vault.fail_put.store(false, Ordering::SeqCst);
+    let saved = store
+        .add_routed(
+            "Key".into(),
+            Provider::Claude,
+            AuthKind::ApiKey,
+            "work".into(),
+            token("synthetic-key"),
+        )
+        .unwrap();
+    assert_eq!(
+        Some(saved.pool.as_str()),
+        store
+            .snapshot()
+            .unwrap()
+            .tokens_group()
+            .map(|g| g.pool.as_str())
+    );
+    // A Codex key keeps the pool it names.
+    let codex = store
+        .add_routed(
+            "Codex".into(),
+            Provider::Codex,
+            AuthKind::ApiKey,
+            "default".into(),
+            Credential::parse(Provider::Codex, AuthKind::ApiKey, "synthetic-codex").unwrap(),
+        )
+        .unwrap();
+    assert_eq!(codex.pool, "default");
+}
+
+#[test]
+fn a_key_moves_into_the_pay_per_token_group_in_one_save() {
+    // SB-401 round 5: the group is made with the move; the key's old route goes.
+    let root = TempDir::new().unwrap();
+    let store = Store::open(root.path().into(), Arc::new(MemoryVault::default())).unwrap();
+    let key = store
+        .add(
+            "Old".into(),
+            Provider::Claude,
+            AuthKind::ApiKey,
+            "default".into(),
+            token("synthetic-old"),
+        )
+        .unwrap();
+    store.select(Provider::Claude, "default", &key.id).unwrap();
+    let (pool, moved) = store.move_key_to_tokens(&key.id).unwrap();
+    assert!(moved);
+    let snapshot = store.snapshot().unwrap();
+    assert_eq!(
+        snapshot.tokens_group().map(|g| g.pool.clone()),
+        Some(pool.clone())
+    );
+    assert!(snapshot.routes.is_empty());
+    assert_eq!(store.move_key_to_tokens(&key.id).unwrap(), (pool, false));
+}

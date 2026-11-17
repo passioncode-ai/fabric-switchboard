@@ -156,6 +156,16 @@ The fourth review found no P0, one P1 and five P2, fixed here as D-18:
   and a restore goes on past a key it could not save; the move dialog's target for a group not
   made yet is `TOKENS_TARGET`, apart from an ordinary group whose pool id is `tokens`.
 
+## Review fixes, round 5 (2026-11-17)
+
+No P0 or P1; four P2 fixed (D-19): the add command and a move make the group in the key's own
+publish (`an_add_that_fails_leaves_no_pay_per_token_group`,
+`a_key_moves_into_the_pay_per_token_group_in_one_save`); `tokens` names the group whatever its
+pool id (`tokens_names_the_pay_per_token_group_whatever_its_pool_id`) and Attention carries the
+group's own id; a restore brings the groups back before the keys and moves no key on
+(`a_restore_brings_every_group_back_before_its_claude_keys`). The CLI and MCP without an owner
+before its first start are written down as a known limit in D-19.
+
 Next task for the next agent: merge `token-group` through the repository's policy and release.
 Former next task (done in round 4): file the board row for Needs attention naming a Claude key left in
 the default group, then merge `token-group` through the repository's policy and release.

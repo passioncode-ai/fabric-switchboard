@@ -5471,12 +5471,11 @@ async fn execute(
             // SB-401 (DEC-0023 D-10): a Claude API key goes to the pay-per-token group (made when
             // needed, switched off), whatever group was named: never to the default group, where
             // every folder in no group would run on it, nor to a group with no daily ceiling.
-            let pool = if provider == Provider::Claude && kind == AuthKind::ApiKey {
-                store.ensure_tokens_group()?
-            } else {
-                pool
-            };
-            Ok(json!(store.add(label, provider, kind, pool, credential)?))
+            // Round 5: the group is made in the add's own publish (`Store::add_routed`), so an add
+            // that fails leaves no empty group.
+            Ok(json!(
+                store.add_routed(label, provider, kind, pool, credential)?
+            ))
         }
         Operation::Update {
             id,
@@ -7985,25 +7984,27 @@ async fn execute(
                 .accounts
                 .iter()
                 .any(|a| a.id == id && switchboard_core::Snapshot::is_claude_key(a));
-            let makes_tokens =
-                key && pool == switchboard_core::TOKENS_POOL && snapshot.tokens_group().is_none();
-            if from == pool && !makes_tokens {
+            // `tokens` for a key is the pay-per-token group, even while the key sits in an
+            // ordinary group whose pool id is `tokens`.
+            if from == pool && !(key && pool == switchboard_core::TOKENS_POOL) {
                 return Ok(json!({"id": id, "from": from, "pool": pool, "moved": false}));
             }
-            let (pool, snapshot) = if key {
-                let named = snapshot
-                    .tokens_group()
-                    .map_or(pool == switchboard_core::TOKENS_POOL, |g| g.pool == pool);
+            // Round 5: `tokens` names the pay-per-token group whatever its pool id (`tokens-2`
+            // when an ordinary group took `tokens`), and the group is made in the move's own
+            // publish (`Store::move_key_to_tokens`).
+            let pool = if key {
+                let named = pool == switchboard_core::TOKENS_POOL
+                    || snapshot.tokens_group().is_some_and(|g| g.pool == pool);
                 if !named {
                     return Err(switchboard_core::CLAUDE_KEY_STAYS.into());
                 }
-                let pool = store.ensure_tokens_group()?;
-                if from == pool {
+                let (pool, moved) = store.move_key_to_tokens(&id)?;
+                if !moved {
                     return Ok(json!({"id": id, "from": from, "pool": pool, "moved": false}));
                 }
-                (pool, store.snapshot()?)
+                pool
             } else {
-                (pool, snapshot)
+                pool
             };
             let edit =
                 |pool: String, add: Vec<String>, remove: Vec<String>| Operation::ProjectEdit {
@@ -8017,7 +8018,9 @@ async fn execute(
                     organizations: None,
                     move_accounts: true,
                 };
-            if pool != "default" {
+            if key {
+                // Moved above, in one publish.
+            } else if pool != "default" {
                 if snapshot.project_of_pool(&pool).is_none() {
                     return Err(MOVE_ACCOUNT_NO_PROJECT.into());
                 }
@@ -14853,6 +14856,64 @@ mod tokens_group_tests {
         assert_eq!(kept, json!({"env": {"KEEP": "1"}, "permissions": {}}));
         assert_eq!(launch::scrub_key_homes(root.path(), &snapshot), 0, "once");
     }
+    /// SB-401 round 5: `tokens` names the pay-per-token group whatever its pool id, even for a
+    /// key sitting in an ordinary group whose pool id is `tokens`; the add command makes the group
+    /// with the key.
+    #[tokio::test]
+    async fn tokens_names_the_pay_per_token_group_whatever_its_pool_id() {
+        let root = tempfile::tempdir().unwrap();
+        let runtime = fixtures::runtime(root.path(), signed_out, activates).await;
+        let store = &runtime.store;
+        let folder = tempfile::tempdir().unwrap();
+        let plain = store
+            .save_project_in(None, "Tokens", &[folder.path().to_path_buf()], &[], None)
+            .unwrap();
+        assert_eq!(plain.pool, "tokens");
+        let old = store
+            .add(
+                "Old key".into(),
+                Provider::Claude,
+                AuthKind::ApiKey,
+                "tokens".into(),
+                Credential::parse(Provider::Claude, AuthKind::ApiKey, "synthetic-old").unwrap(),
+            )
+            .unwrap();
+        let moved = runtime
+            .execute(Operation::MoveAccount {
+                id: old.id.clone(),
+                pool: "tokens".into(),
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            (moved["moved"].clone(), moved["pool"].clone()),
+            (json!(true), json!("tokens-2")),
+            "{moved}"
+        );
+        let added = runtime
+            .execute(Operation::Add {
+                label: "New key".into(),
+                provider: Provider::Claude,
+                kind: AuthKind::ApiKey,
+                pool: "tokens".into(),
+                secret: "synthetic-new".into(),
+            })
+            .await
+            .unwrap();
+        assert_eq!(added["pool"], "tokens-2");
+        let again = runtime
+            .execute(Operation::MoveAccount {
+                id: old.id.clone(),
+                pool: "tokens".into(),
+            })
+            .await
+            .unwrap();
+        assert_eq!(again["moved"], false, "{again}");
+        let snapshot = store.snapshot().unwrap();
+        assert!(!snapshot.project_of_pool("tokens").unwrap().tokens);
+        assert_eq!(snapshot.tokens_group().unwrap().pool, "tokens-2");
+    }
+
     #[tokio::test]
     async fn a_pay_per_token_group_bound_to_an_organization_warns_but_keeps_its_key() {
         // DEC-0022 and DEC-0023 together: an organization never refuses the move into the
