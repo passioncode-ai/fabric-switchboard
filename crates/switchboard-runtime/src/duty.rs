@@ -143,7 +143,7 @@ pub struct Seen {
     pub cpu_quiet: Option<bool>,
 }
 
-/// The terminal host of a session from its ancestors' executable paths (DEC-0018: an Orca or
+/// The terminal host of a session from its ancestors' executable paths (DEC-0021: an Orca or
 /// other host is acted on like Terminal and the resumed copy opens in Terminal).
 pub fn host_of(ancestors: &[String]) -> &'static str {
     let has = |needle: &str| ancestors.iter().any(|p| p.contains(needle));

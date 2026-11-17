@@ -2345,7 +2345,7 @@ organization's group, off by one command); A-Q3 assumed (a linked start file is 
   folder counter moves and at least every 5 minutes, posts one system notification
   (`shell_hook_text`, English or Russian as the menu) once per run while it waits, and emits
   `shell-hook`; the window reads it when the list is first read, on that event and when it is
-  shown, shows the same words as a notice with *Open Groups* (`shellHookNoticeText` in
+  shown, shows the same words as a notice with *Open Settings* (`shellHookNoticeText` in
   `src/ui-logic.ts`) and acknowledges it. A notice the window never showed is posted again at the
   next start. Test: `suggestions::tests::the_shell_hook_notice_names_the_organization_and_the_way_out`.
 - **CLI.** `switchboard shell on` saves `on` and writes now (a block the person took out

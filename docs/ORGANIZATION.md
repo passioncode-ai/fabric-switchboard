@@ -281,8 +281,10 @@ Or use *Launch…* on the seat's card in the window.
   it is no longer among your PassionCode.ai organizations. **Check:** `switchboard --json org
   passioncode` lists it under `released` with the date.
 - **What stays on your computer.** Switchboard deletes nothing when you leave: the organization,
-  its group (which still refuses your other accounts), the account, its statistics, and the
-  organization's homes with their history stay until you remove them.
+  its group (which keeps serving every account it holds: an organization is a label, never a lock,
+  [DEC-0022](DECISIONS.md#dec-0022-an-organization-is-a-label-never-a-lock-on-where-an-account-works)),
+  the account, its statistics, and the organization's homes with their history stay until you
+  remove them.
 - **Removing it.** *Organizations* → *Remove…* on its card (or `switchboard org remove
   <organization id>`): its groups become personal. `switchboard shell off` takes the terminal
   block out. `switchboard uninstall` shows what it would remove from the computer; add `--yes` to
