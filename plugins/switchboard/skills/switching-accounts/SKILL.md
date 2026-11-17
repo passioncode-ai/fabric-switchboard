@@ -75,6 +75,7 @@ the launch injected it with the session and data folder set explicitly.
 | `switchboard_rotation` / `switchboard_rotation_set` | no / yes | read or change automatic switching, the change only when the operator asks |
 | `switchboard_backups` / `switchboard_backup_now` / `switchboard_backup_restore` | no / yes / yes | encrypted backups; restore one by its file name when the operator asks |
 | `switchboard_project_delete` | yes | delete a group when the operator asks; its own accounts go to the default group |
+| `switchboard_project_switch` | yes | switch a group off or on when the operator asks; the pay-per-token group turns on only with a daily ceiling |
 | `switchboard_settings_import` | yes | preview, then with `apply` add, the groups and settings of a file exported on another machine |
 | `switchboard_settings_sync` | yes | carry this machine's groups, organizations and agents' settings to another machine over ssh: a preview there, or with `apply` the import, only when the operator asks |
 | `switchboard_recovery` / `switchboard_handovers` | no | stopped sessions, and hand-overs waiting for a console |
