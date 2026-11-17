@@ -32,7 +32,7 @@ pub const CEILING_GROUP: &str =
     "A group's daily spending ceiling was reached. Keep it or double it.";
 pub const CEILING_TASK: &str = "A task's spending ceiling was reached. Keep it or double it.";
 /// SB-401 (DEC-0023 D-18): a Claude API key from before the pay-per-token group, outside it.
-pub const KEY_OUTSIDE_TOKENS: &str =
+pub const KEY_OUTSIDE_DETAIL: &str =
     "This Claude API key is outside the pay-per-token group, so no daily ceiling holds it. Move it there.";
 /// SB-379: one Claude Code session runs in two processes (a resumed copy of a live session).
 pub const SESSION_DUPLICATE: &str =
@@ -170,7 +170,7 @@ pub fn build(inputs: &Inputs) -> Value {
                 account.label.clone(),
                 item(
                     "key_outside_tokens",
-                    KEY_OUTSIDE_TOKENS,
+                    KEY_OUTSIDE_DETAIL,
                     None,
                     "switchboard_account_move",
                     "move_tokens",
@@ -569,7 +569,7 @@ mod tests {
             answer["items"][0]["action"],
             json!({"tool": "switchboard_account_move", "window": "move_tokens"})
         );
-        assert_eq!(answer["items"][0]["detail"], KEY_OUTSIDE_TOKENS);
+        assert_eq!(answer["items"][0]["detail"], KEY_OUTSIDE_DETAIL);
     }
 
     #[test]
@@ -602,7 +602,7 @@ mod tests {
             CEILING_MACHINE,
             CEILING_GROUP,
             CEILING_TASK,
-            KEY_OUTSIDE_TOKENS,
+            KEY_OUTSIDE_DETAIL,
         ] {
             assert!(
                 !sentence.contains('\u{2014}') && !sentence.contains(" - "),
