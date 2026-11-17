@@ -309,7 +309,11 @@ pub fn send_with(
     if account.kind != AuthKind::OAuth {
         return Err(NOT_A_SIGN_IN.into());
     }
-    if !account.enabled || snapshot.elsewhere.contains_key(id) {
+    // W1.2 (DEC-0027): an account the person turned off is not sent anywhere.
+    if account.off.is_some() {
+        return Err(switchboard_core::off::ACCOUNT_OFF.into());
+    }
+    if !account.usable() || snapshot.elsewhere.contains_key(id) {
         return Err(NOT_HERE.into());
     }
     // SB-312: the ordinary Claude Code or Codex renews its own sign-in, and another saved copy
@@ -731,9 +735,11 @@ pub fn surrender(
     let credential = store.stored_credential(id)?;
     let tokens: Value =
         serde_json::from_str(&credential.to_oauth_json(account.provider)).unwrap_or(Value::Null);
+    // W1.2 (DEC-0027): the person's off goes with the sign-in, so the copy that comes home stays
+    // off (`recall_take_as`); null when it was on. An older Switchboard sends no such field.
     Ok(
         json!({"provider": account.provider.as_str(), "credential": tokens,
-        "groups_left_without_account": left_without}),
+        "groups_left_without_account": left_without, "off_since": account.off_since()}),
     )
 }
 
@@ -943,6 +949,14 @@ pub fn recall_take_as(
     {
         undo_there();
         return Err(SURRENDER_FAILED.into());
+    }
+    // W1.2 (DEC-0027): a copy the person turned off there comes home off, with its time, in
+    // place before the mark is cleared (`mark_elsewhere` leaves an account that is off off). A
+    // delegated seat's off is the teammate's word about their own use, not carried.
+    if sender_key.is_none() {
+        if let Some(since) = given["off_since"].as_i64().filter(|s| *s > 0) {
+            store.turn_off_since(id, since)?;
+        }
     }
     store.mark_elsewhere(id, false, now)?;
     Ok(Taken {
@@ -2126,6 +2140,48 @@ mod tests {
         assert_eq!(
             kept["proved"], false,
             "a copy still listed there is not proved gone"
+        );
+    }
+
+    /// W1.2 (DEC-0027), the leak: a copy the person turned off on the other machine came home
+    /// on. Its surrender answer now says since when it is off, and it comes home off.
+    #[test]
+    fn a_copy_turned_off_there_comes_home_off_with_its_time() {
+        // The other machine's side: turned off there, given back with its time.
+        let (_there_root, there, there_id) = store_with(AuthKind::OAuth);
+        there.update_fields(&there_id, None, Some(false)).unwrap();
+        let since = there.snapshot().unwrap().accounts[0].off_since().unwrap();
+        let given = surrender(&there, &there_id, false, 7, &|_| {}).unwrap();
+        assert_eq!(given["off_since"], since);
+        // This machine calls it back.
+        let (_root, store, id) = store_with(AuthKind::OAuth);
+        store
+            .mark_elsewhere_at(&id, true, 5, Some("studio.local"))
+            .unwrap();
+        let answer = json!({"ok": true, "data": {"provider": "claude",
+            "credential": serde_json::from_str::<Value>(RENEWED).unwrap(), "off_since": since}})
+        .to_string();
+        let run = move |args: &[String], _: Option<&[u8]>| -> Result<String, String> {
+            assert!(args[2].contains("'surrender'"));
+            Ok(answer.clone())
+        };
+        recall_take(
+            &store,
+            &id,
+            "studio.local",
+            "remote-1",
+            &DEFAULT_APP,
+            6,
+            &run,
+            None,
+        )
+        .unwrap();
+        let s = store.snapshot().unwrap();
+        let a = s.accounts.iter().find(|a| a.id == id).unwrap();
+        assert!(!s.elsewhere.contains_key(&id), "back here");
+        assert!(
+            !a.enabled && a.off_since() == Some(since),
+            "and off, as there"
         );
     }
 

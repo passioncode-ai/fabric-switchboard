@@ -48,7 +48,18 @@ fn schema_version(snapshot: &Snapshot) -> u32 {
     // Version 16 only while an account another machine delegated is here, or a journal entry
     // of one (SB-403, DEC-0025): a 0.7.112 or older reader refuses the unknown field rather
     // than treat a guest's sign-in as its own (send it on, give it to an agent, remove it).
-    if !snapshot.delegated.is_empty()
+    // Version 17 only while the person turned an account or a Kimi Code account off, or the
+    // journal holds such a turn (W1.2, DEC-0027): a 0.7.114 or older reader refuses the unknown
+    // field and action rather than read an account the person turned off as one it may turn on.
+    if snapshot.accounts.iter().any(|a| a.off.is_some())
+        || snapshot.kimi_accounts.iter().any(|k| k.off.is_some())
+        || snapshot
+            .events
+            .iter()
+            .any(|e| e.action == crate::off::TURNED_OFF || e.action == crate::off::TURNED_ON)
+    {
+        17
+    } else if !snapshot.delegated.is_empty()
         || !snapshot.delegated_out.is_empty()
         || snapshot.events.iter().any(|e| e.action == "delegation")
     {
@@ -177,7 +188,7 @@ pub(crate) fn open(root: &Path) -> Result<(File, Snapshot), String> {
             }
             let disk: Disk = serde_json::from_slice(&bytes)
                 .map_err(|_| "Account metadata is corrupt; restore a known-good backup")?;
-            if !matches!(disk.schema_version, 1..=16) {
+            if !matches!(disk.schema_version, 1..=17) {
                 return Err("Unsupported account metadata version".into());
             }
             validate_snapshot(&disk.snapshot)?;
@@ -259,7 +270,7 @@ pub(crate) fn open(root: &Path) -> Result<(File, Snapshot), String> {
         let bytes = read_private(&path, MAX_FILE)?;
         let disk: Disk = serde_json::from_slice(&bytes)
             .map_err(|_| "Account metadata is corrupt; restore a known-good backup")?;
-        if !matches!(disk.schema_version, 1..=16) {
+        if !matches!(disk.schema_version, 1..=17) {
             return Err("Unsupported account metadata version".into());
         }
         validate_snapshot(&disk.snapshot)?;

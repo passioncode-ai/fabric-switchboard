@@ -2644,13 +2644,16 @@ function watchKimiSignIn(id: string) {
 /** A Kimi Code account in the same row as Claude and Codex accounts: a small primary action and a menu. */
 function kimiRow(account: KimiAccount, status: KimiStatus) {
   const signedOut = !status.signed_in;
-  const row = el('article', `account-row kimi-account ${signedOut ? 'is-disabled' : ''}`); row.setAttribute('role', 'listitem');
+  // W1.2 (DEC-0027): a Kimi Code account the person turned off is not asked, launched or given work.
+  const off = account.off ?? null;
+  const row = el('article', `account-row kimi-account ${signedOut || off ? 'is-disabled' : ''}`); row.setAttribute('role', 'listitem');
   row.setAttribute('aria-label', t('{label}, Kimi Code', { label: account.label }));
   const limitedUntil = signedOut ? null : kimiLimitUntil(status.windows, Math.floor(Date.now() / 1000));
   row.dataset.state = signedOut ? 'sign_in' : limitedUntil !== null ? 'blocked' : status.error ? 'stale' : 'available';
   const icon = el('span', 'provider-icon kimi', 'K'); icon.setAttribute('aria-hidden', 'true');
   const name = el('div', 'row-name'); const title = el('div', 'row-title'); const labelNode = el('strong', '', account.label); labelNode.title = account.label; title.append(labelNode);
-  if (signedOut) title.append(el('span', 'badge danger-badge', t('Sign in again')));
+  if (off) { const badge = el('span', 'badge muted off-badge', t('Off since {date}', { date: date(off.since) })); badge.title = t('You turned it off. Nothing uses it, and nothing turns it on again until you do.'); title.append(badge); }
+  else if (signedOut) title.append(el('span', 'badge danger-badge', t('Sign in again')));
   else if (limitedUntil !== null) title.append(el('span', 'badge danger-badge', limitedUntil > 0 ? t('Limit reached · resets in {time}', { time: compactCountdown(limitedUntil, Math.floor(Date.now() / 1000)) }) : t('Limit reached')));
   name.append(title, el('span', 'row-sub', [account.tier, account.region === 'global' ? 'kimi.ai' : 'kimi.com'].filter(Boolean).join(' · ')));
   const usage = el('div', 'usage-cell kimi-usage');
@@ -2667,13 +2670,16 @@ function kimiRow(account: KimiAccount, status: KimiStatus) {
     }
     for (const line of lines) { const item = el('span', 'usage-sub usage-line', line); item.title = line; usage.append(item); }
     if (status.checked_at) usage.append(el('span', 'usage-sub usage-line', t('checked {time} ago', { time: compactCountdown(nowSeconds, Math.min(status.checked_at, nowSeconds)) })));
-  } else usage.append(kimiStatusLine(status));
+  } else if (off) usage.append(el('span', 'usage-sub usage-line', t('Not checked while turned off')));
+  else usage.append(kimiStatusLine(status));
   const unusable = signedOut || !!status.error;
   const relogin = () => void mutate(async () => { await adapter.kimiSignInAgain(account.id); if (unusable) watchKimiSignIn(account.id); }, unusable ? t('Sign in to {label} in Terminal. The row updates when you finish.', { label: account.label }) : t('Sign in to {label} in Terminal, then refresh.', { label: account.label }), `kimi-primary-${account.id}`, undefined, 'sign_in');
   const primary = el('div', 'row-primary');
-  primary.append(signedOut ? button(t('Sign in again'), relogin, 'button row-button', `kimi-primary-${account.id}`) : button(t('Launch…'), () => kimiLaunchDialog(account.id, account.label), 'button row-button', `kimi-primary-${account.id}`));
+  const turnOn = () => void mutate(async () => { await adapter.kimiSetEnabled(account.id, true); await loadKimi(); }, t('{label} is on again.', { label: account.label }), `kimi-primary-${account.id}`);
+  primary.append(off ? button(t('Turn on'), turnOn, 'button row-button quiet', `kimi-primary-${account.id}`) : signedOut ? button(t('Sign in again'), relogin, 'button row-button', `kimi-primary-${account.id}`) : button(t('Launch…'), () => kimiLaunchDialog(account.id, account.label), 'button row-button', `kimi-primary-${account.id}`));
   const items: ([string, () => void] | [string, () => void, string])[] = [];
-  if (!signedOut) items.push([t('Sign in again'), relogin]);
+  if (!signedOut && !off) items.push([t('Sign in again'), relogin]);
+  items.push(off ? [t('Turn on'), turnOn] : [t('Turn off'), () => void mutate(async () => { await adapter.kimiSetEnabled(account.id, false); await loadKimi(); }, t('{label} is off. Nothing uses it until you turn it on.', { label: account.label }), `menu-kimi-${account.id}`)]);
   items.push([t('Remove…'), () => kimiRemoveDialog(account.id, account.label), 'danger-text']);
   row.append(icon, name, usage, primary, menu(`kimi-${account.id}`, t('More actions for {label}', { label: account.label }), items));
   return row;
@@ -2752,7 +2758,9 @@ function accountRow(account: Account) {
   if (agent !== undefined) { const badge = el('span', 'badge muted', t('Given to {agent}', { agent })); badge.title = t('Switchboard checks its usage but never selects it or switches to it by itself.'); title.append(badge); }
   const onMachine = machineOf(snapshot!, account);
   if (elsewhere) { const badge = el('span', 'badge muted', onMachine ? t('On {location}', { location: onMachine.name }) : location ? t('On {location}', { location }) : t('On another machine')); badge.title = t('Marked as used on another machine: this computer never renews it or switches to it, by hand or automatically.'); title.append(badge); }
-  else if (!account.enabled) title.append(el('span', 'badge muted', t('Disabled')));
+  else if (!account.enabled && !account.off) title.append(el('span', 'badge muted', t('Disabled')));
+  // W1.2 (DEC-0027): turned off by the person, and since when; nothing turns it on but them.
+  if (account.off) { const badge = el('span', 'badge muted off-badge', t('Off since {date}', { date: date(account.off.since) })); badge.title = t('You turned it off. Nothing uses it, and nothing turns it on again until you do.'); title.append(badge); }
   const org = organizationOf(account);
   if (org) { const badge = el('span', 'badge org-badge', org.name); badge.title = org.why; title.append(badge); }
   for (const name of alsoOrganizationsOf(account)) { const badge = el('span', 'badge org-badge', name); badge.title = t('You said it also works for {name}.', { name }); title.append(badge); }
@@ -2797,6 +2805,7 @@ function primaryButton(account: Account, state: { current: boolean; selected: bo
   else if (machineOf(snapshot!, account)) { const machine = machineOf(snapshot!, account)!; slot.append(button(t('Call back'), () => bringHereDialog(account, machine), 'button row-button quiet', key)); }
   else if (snapshot?.elsewhere?.[account.id] !== undefined && sshTarget(snapshot?.locations?.[account.id])) { const from = snapshot!.locations![account.id]!; let answer: Placement | void = undefined; slot.append(button(t('Call back'), () => void mutate(async () => { answer = await adapter.recallAccount(account.id, from); }, () => placementNotice(account.label, t('{label} is back on this computer.', { label: account.label }), answer, (pool) => inGroup(pool, snapshot?.projects)), key), 'button row-button quiet', key)); }
   else if (snapshot?.elsewhere?.[account.id] !== undefined) slot.append(button(t('Use here'), () => void mutate(() => adapter.markElsewhere(account.id, false), t('{label} is used on this computer again.', { label: account.label }), key), 'button row-button quiet', key));
+  else if (account.off) slot.append(button(t('Turn on'), () => void mutate(() => adapter.update(account.id, account.label, true), t('{label} is on again.', { label: account.label }), key), 'button row-button quiet', key));
   else slot.append(button(t('Enable'), () => void mutate(() => adapter.update(account.id, account.label, true), t('{label} enabled.', { label: account.label }), key), 'button row-button quiet', key));
   return slot;
 }
@@ -2830,6 +2839,8 @@ function rowMenu(account: Account, state: { current: boolean; selected: boolean;
   if (account.kind === 'oauth' && (machine || (account.enabled && snapshot?.elsewhere?.[account.id] === undefined))) items.push([t('Move to another machine…'), () => sendDialog(account)]);
   // SB-318: for a colleague or a machine ssh does not reach: a signed record they sign in with.
   if (account.kind === 'oauth' && account.enabled && snapshot?.elsewhere?.[account.id] === undefined) items.push([t('Hand over…'), () => handOverDialog(account)]);
+  // W1.2 (DEC-0027): one switch takes it out of everything until the person turns it on.
+  items.push(account.off ? [t('Turn on'), () => void mutate(() => adapter.update(account.id, account.label, true), t('{label} is on again.', { label: account.label }), `menu-${account.id}`)] : [t('Turn off'), () => void mutate(() => adapter.update(account.id, account.label, false), t('{label} is off. Nothing uses it until you turn it on.', { label: account.label }), `menu-${account.id}`)]);
   items.push([t('Rename or disable…'), () => editDialog(account)], [t('Remove…'), () => removeDialog(account), 'danger-text']);
   return menu(account.id, t('More actions for {label}', { label: account.label }), items);
 }
@@ -2881,7 +2892,7 @@ function usageCell(account: Account) {
     if (reset) sub.append(compactWait(t('Resets in'), reset)); else sub.append(t('Reset time unavailable'));
   } else if (state === 'unknown') sub.append(monitorChecks(account) ? (health ? t('Next check {date}', { date: date(health.next_check_at) }) : t('Waiting for the first check')) : t('Not checked automatically'));
   else if (state === 'sign_in') sub.append(t('Sign in to check usage'));
-  else if (state === 'disabled') sub.append(remoteLine(account) ?? t('Not checked while disabled'));
+  else if (state === 'disabled') sub.append(remoteLine(account) ?? (account.off ? t('Not checked while turned off') : t('Not checked while disabled')));
   // SCN-021: API-key and setup-token rows have no subscription quota to check (SB-67).
   else if (state === 'no_quota') sub.append(t('Not checked automatically · Quota checks need OAuth'));
   const label = `${CARD_STATE[state]}${used !== null ? t(', {percent}% used', { percent: Math.round(used) }) : ''}. ${sub.textContent ?? ''}`;

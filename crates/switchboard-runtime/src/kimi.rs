@@ -430,9 +430,11 @@ pub(crate) async fn watch_with(
     if snapshot.chains.is_empty() || snapshot.kimi_accounts.is_empty() {
         return;
     }
+    // W1.2: an account the person turned off is not asked about its usage.
     let ids: Vec<String> = snapshot
         .kimi_accounts
         .iter()
+        .filter(|a| a.off.is_none())
         .map(|a| a.id.clone())
         .collect();
     let mut asked = tokio::task::JoinSet::new();
@@ -501,6 +503,13 @@ async fn accounts_with(
             account.region.clone()
         };
         let base = base(&region);
+        // W1.2 (DEC-0027): Kimi is not asked about an account the person turned off; its row
+        // says whether its home still holds a sign-in.
+        if account.off.is_some() {
+            let signed_in = credential_file(&folder, &region).is_some();
+            asked.spawn(async move { (index, json!({"signed_in": signed_in, "off": true})) });
+            continue;
+        }
         asked.spawn(async move { (index, home_status(&folder, &region, &base, now).await) });
     }
     // SB-103: one failed task leaves an error on its own row; the others are still read.
@@ -767,6 +776,10 @@ fn launch_with(
     start: fn(&Path) -> Result<(), String>,
 ) -> Result<Value, String> {
     let account: KimiAccount = store.kimi_account(id)?;
+    // W1.2 (DEC-0027): a Kimi Code account the person turned off is not launched.
+    if account.off.is_some() {
+        return Err(switchboard_core::off::KIMI_ACCOUNT_OFF.into());
+    }
     let folder = agent_folder(root, working_directory)?;
     let home = home(root, id)?;
     if credential_file(&home, &account.region).is_none() {
@@ -862,7 +875,9 @@ fn continuation_preflight_with(
     id: &str,
     program: Option<&Path>,
 ) -> Result<(), String> {
-    store.kimi_account(id)?;
+    if store.kimi_account(id)?.off.is_some() {
+        return Err(switchboard_core::off::KIMI_ACCOUNT_OFF.into());
+    }
     program.ok_or(KIMI_NOT_INSTALLED)?;
     if !signed_in(root, store, id) {
         return Err(KIMI_SIGNED_OUT.into());
@@ -1486,6 +1501,57 @@ mod tests {
         // A removed account is forgotten.
         watch.due(&["k1".to_string()], NOW);
         assert_eq!(watch.used("k0"), 1000.0);
+    }
+
+    /// W1.2 (DEC-0027): a Kimi Code account the person turned off is not asked about its usage,
+    /// launched or given a workflow; its row says so.
+    #[tokio::test]
+    async fn a_kimi_account_turned_off_is_not_asked_launched_or_continued() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let store = store(root);
+        let id = Uuid::new_v4().to_string();
+        store
+            .add_kimi_account(&id, "Work", "global", None, None)
+            .unwrap();
+        signed_in(&home(root, &id).unwrap(), "kimi-code.json", "t", NOW + 3600);
+        store.set_kimi_off(&id, true).unwrap();
+        let listed = accounts_with(root, &store, None, &|_| "http://127.0.0.1:9".into(), NOW)
+            .await
+            .unwrap();
+        let row = &listed["accounts"][0];
+        assert_eq!(row["status"], json!({"signed_in": true, "off": true}));
+        assert!(row["account"]["off"]["since"].as_i64().is_some());
+        assert_eq!(
+            continuation_preflight_with(root, &store, &id, None).unwrap_err(),
+            switchboard_core::off::KIMI_ACCOUNT_OFF
+        );
+        assert_eq!(
+            launch_with(root, &store, &id, root, Path::new("/bin/kimi"), started).unwrap_err(),
+            switchboard_core::off::KIMI_ACCOUNT_OFF
+        );
+        // With a chain set, the background view still skips it: nothing is due-marked, so it
+        // was never asked.
+        store
+            .set_chain(
+                switchboard_core::ChainScope::Machine,
+                vec![switchboard_core::Executor {
+                    agent: "kimi-code".into(),
+                    account_id: None,
+                    key: None,
+                }],
+            )
+            .unwrap();
+        let watch = KimiWatch::default();
+        watch_with(root, &store, &watch, &|_| "http://127.0.0.1:9".into(), NOW).await;
+        assert_eq!(watch.due(std::slice::from_ref(&id), NOW), vec![id.clone()]);
+        store.set_kimi_off(&id, false).unwrap();
+        let watch = KimiWatch::default();
+        watch_with(root, &store, &watch, &|_| "http://127.0.0.1:9".into(), NOW).await;
+        assert!(
+            watch.due(std::slice::from_ref(&id), NOW).is_empty(),
+            "on again, it was asked"
+        );
     }
 
     #[tokio::test]

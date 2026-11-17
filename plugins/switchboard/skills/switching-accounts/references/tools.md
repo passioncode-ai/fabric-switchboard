@@ -591,7 +591,10 @@ themselves. Without `add` or `remove`, reads them; changing them only when the o
 
 ### `switchboard_account_update`: `account_id`, `label?`, `enabled?`, `elsewhere?`, `location?`, `assigned_to?`, `force?`
 
-Only when the operator asks. Renames, enables or disables an account; `elsewhere: true`
+Only when the operator asks. Renames an account, or turns it off (`enabled: false`: nothing
+selects, switches to, renews, checks, launches, lends or sends it, and nothing turns it on again by
+itself, not a call back, a restore, a lease or a cleared mark, until the operator sends
+`enabled: true`; `switchboard_accounts` shows `off_since`, `off_by` and `availability`) or on; `elsewhere: true`
 disables it here because another machine uses it; `location` says where it works (a machine and
 its user, or a colleague, at most 80 characters) and marks it so; an empty one clears it.
 `assigned_to` gives the account to an agent or service that signs in with it now (its name, at
@@ -906,6 +909,12 @@ and `again` (sign a saved account in again) take `id`.
 ### `switchboard_kimi_rename`: `id`, `label`
 
 Only when the operator asks. Renames a saved Kimi Code account.
+
+### `switchboard_kimi_update`: `id`, `enabled`
+
+Only when the operator asks. `enabled: false` turns a saved Kimi Code account off: no fallback
+step, launch, continuation or usage question uses it, and nothing turns it on again until the
+operator does (`enabled: true`). `switchboard_kimi_accounts` shows `off.since`.
 
 ### `switchboard_handovers_set`: `on`
 

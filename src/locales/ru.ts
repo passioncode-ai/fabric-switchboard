@@ -4,6 +4,18 @@
  * `node scripts/check-locale.mjs` keeps it complete.
  */
 export const RU: Record<string, string> = {
+  // W1.2 (SB-418, DEC-0027, 2026-11-17): an account turned off by the person, and since when. Copylot en-US reports 490b9288…97c27c4b, ru-RU 16da3fb0…538d9c8b (pass; one suggestion on a trailing period, kept as in the English).
+  "Off since {date}": "Выключен с {date}",
+  "You turned it off. Nothing uses it, and nothing turns it on again until you do.": "Вы его выключили. Им ничто не пользуется, и ничто не включит его снова, пока вы сами его не включите.",
+  "{label} is on again.": "{label} снова включён.",
+  "{label} is off. Nothing uses it until you turn it on.": "{label} выключен. Им ничто не пользуется, пока вы его не включите.",
+  "Not checked while turned off": "Не проверяется, пока выключен",
+  "Account turned off": "Аккаунт выключен",
+  "Account turned on": "Аккаунт включён",
+  "its account is turned off": "его аккаунт выключен",
+  "by you": "вами",
+  "This account is turned off. Turn it on to use it again.": "Этот аккаунт выключен. Включите его, чтобы снова им пользоваться.",
+  "This Kimi Code account is turned off. Turn it on to use it again.": "Этот аккаунт Kimi Code выключен. Включите его, чтобы снова им пользоваться.",
   // SB-403 waves S2 to S4 (DEC-0025, 2026-11-17): delegated seats and the own sign-in switch. Copylot ru-RU reports f0080d06…cd533b73; review round 1: 2117bbe1…e9785338.
   "sign-in removed": "вход удалён",
   "This seat's sign-in was removed from this computer 30 days after its lease ran out. The machine that delegated it signs in to the account again and delegates it again.": "Вход этого места удалён с этого компьютера через 30 дней после конца аренды. Машина, которая его делегировала, снова войдёт в аккаунт и делегирует его заново.",

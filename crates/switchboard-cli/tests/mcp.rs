@@ -269,6 +269,7 @@ async fn handshake_lists_tools_and_rejects_malformed_messages() {
             "switchboard_kimi_accounts",
             "switchboard_kimi_login",
             "switchboard_kimi_rename",
+            "switchboard_kimi_update",
             "switchboard_handovers_set",
             "switchboard_openrouter_models",
             "switchboard_project_suggestions",

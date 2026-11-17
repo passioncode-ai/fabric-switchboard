@@ -710,6 +710,7 @@ mod tests {
                 external_identity: None,
                 usage: None,
                 usage_health: None,
+                off: None,
             }],
             ..Default::default()
         }

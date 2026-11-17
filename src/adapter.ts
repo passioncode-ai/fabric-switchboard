@@ -144,6 +144,7 @@ export const nativeAdapter: Adapter = {
   kimiLoginCancel: (id) => invoke('kimi_login_cancel', { id }),
   kimiSignInAgain: (id) => invoke('kimi_sign_in_again', { id }),
   kimiLaunch: (id, workingDirectory) => invoke('kimi_launch', { id, workingDirectory }),
+  kimiSetEnabled: (id, enabled) => invoke('kimi_set_enabled', { id, enabled }),
   kimiRemove: (id) => invoke('kimi_remove', { id }),
   anthropicKeys: () => invoke('anthropic_keys'),
   launchKeys: (agent, folder) => invoke('launch_keys', { agent, folder }),
@@ -547,6 +548,9 @@ const safeErrors = new Set([
   'Account home cleanup failed. Close its sessions and retry.',
   'Choose isolated or managed launch.',
   'Enable the account before launch.',
+  // W1.2 (DEC-0027): an account or a Kimi Code account the person turned off.
+  'This account is turned off. Turn it on to use it again.',
+  'This Kimi Code account is turned off. Turn it on to use it again.',
   'Usage unavailable. Check the account and retry later.',
 ]);
 /**

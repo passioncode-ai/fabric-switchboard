@@ -180,6 +180,11 @@ struct Payload {
     /// SB-403 (P2-5): the seats this machine delegated to another, by account id.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     delegated_out: BTreeMap<String, crate::DelegatedOut>,
+    /// W1.2 (DEC-0027): accounts the person turned off (old account id → since when and by
+    /// whom). Kept beside `accounts` (whose rows carry no `off`) so a 0.7.114 or older reader,
+    /// which refuses an unknown field inside an account, still restores them, off as before.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    off: BTreeMap<String, crate::TurnedOff>,
 }
 /// One agent key inside the sealed payload. Never Debug: it carries the value.
 #[derive(Serialize, Deserialize)]
@@ -294,11 +299,18 @@ pub fn write(
         .map(|a| (a.id.clone(), a.pool.clone()))
         .collect();
     let returns_to = snapshot.returns_to.clone();
+    let off: BTreeMap<String, crate::TurnedOff> = snapshot
+        .accounts
+        .iter()
+        .filter(|a| credentials.contains_key(&a.id))
+        .filter_map(|a| Some((a.id.clone(), a.off?)))
+        .collect();
     let accounts: Vec<Account> = snapshot
         .accounts
         .into_iter()
         .filter(|a| credentials.contains_key(&a.id))
         .map(|mut a| {
+            a.off = None;
             if crate::is_machine_pool(&a.pool) {
                 a.pool = returns_to
                     .get(&a.id)
@@ -391,6 +403,7 @@ pub fn write(
         machines: snapshot.machines,
         machine_members,
         delegated_out: snapshot.delegated_out.clone(),
+        off,
     })
     .map_err(|_| UNAVAILABLE)?;
     let (key, key_id) = key(keys, true)?;
@@ -557,7 +570,21 @@ pub fn restore(
     // pay-per-token group is the backup's own (with its folders), and a pool an ordinary group
     // of the backup holds (`tokens`) is never taken by a group made for a key first.
     let mut keys_later: Vec<(crate::Account, crate::Credential)> = Vec::new();
-    for account in payload.accounts {
+    // W1.2 (DEC-0027): how each new row starts, saved in one publish: off as the backup says
+    // (a backup from before W1.2 carries no `off`: an account off there for no reason it
+    // records, used elsewhere or on another machine, was the person's, since its time), on
+    // otherwise. Before, it was saved on and turned off by a second write whose result was
+    // ignored.
+    let start_of = |account: &crate::Account| crate::Start {
+        enabled: account.enabled,
+        off: payload.off.get(&account.id).copied().or_else(|| {
+            (!account.enabled
+                && !payload.elsewhere.contains_key(&account.id)
+                && !payload.machine_members.contains_key(&account.id))
+            .then(|| crate::TurnedOff::by_person(envelope.created_at.max(1)))
+        }),
+    };
+    for account in payload.accounts.iter().cloned() {
         let token = payload
             .credentials
             .get(&account.id)
@@ -692,20 +719,18 @@ pub fn restore(
             keys_later.push((account, credential));
             continue;
         }
-        match store.upsert(
+        match store.upsert_restored(
             account.label.clone(),
             account.provider,
             account.kind,
             pool.clone(),
             credential,
             account.external_identity.clone(),
+            start_of(&account),
         ) {
             Ok(saved) => {
                 if saved.pool != account.pool {
                     deferred.insert(saved.id.clone(), account.pool.clone());
-                }
-                if !account.enabled {
-                    let _ = store.update(&saved.id, saved.label.clone(), false);
                 }
                 ids.insert(account.id.clone(), saved.id.clone());
                 added.insert(saved.id.clone());
@@ -790,18 +815,16 @@ pub fn restore(
     // never in the default group or a pool no group holds, and it is never moved on from there
     // (no deferred move); a key that cannot be saved is counted failed and the restore goes on.
     for (account, credential) in keys_later {
-        match store.upsert(
+        match store.upsert_restored(
             account.label.clone(),
             account.provider,
             account.kind,
             account.pool.clone(),
             credential,
             account.external_identity.clone(),
+            start_of(&account),
         ) {
             Ok(saved) => {
-                if !account.enabled {
-                    let _ = store.update(&saved.id, saved.label.clone(), false);
-                }
                 ids.insert(account.id.clone(), saved.id.clone());
                 added.insert(saved.id.clone());
                 result.added += 1;
@@ -1210,6 +1233,7 @@ mod tests {
             machines: vec![],
             machine_members: BTreeMap::new(),
             delegated_out: BTreeMap::new(),
+            off: BTreeMap::new(),
         };
         let json = serde_json::to_vec(&payload).unwrap();
         let old: OldPayload = serde_json::from_slice(&json).expect("an older build reads it");
@@ -2018,6 +2042,42 @@ mod tests {
             fresh.stored_credential(&a.id).unwrap().access_token,
             "token-a-secret"
         );
+    }
+    /// W1.2 (DEC-0027): an account the person turned off comes back off, with its time, in the
+    /// save's one publish: never on for a moment, and never on when a second write fails.
+    #[test]
+    fn a_restore_brings_an_account_back_turned_off_in_one_save() {
+        let temp = tempfile::tempdir().unwrap();
+        let backups = temp.path().join("backups");
+        let keys = Keys::default();
+        let original = store(&temp.path().join("one"));
+        let b = save(&original, "synthetic-b", "token-b-secret");
+        original.update(&b.id, "synthetic-b".into(), false).unwrap();
+        let since = original.snapshot().unwrap().accounts[0]
+            .off_since()
+            .unwrap();
+        let info = write(&original, &backups, &keys, 1_000).unwrap().unwrap();
+        let fresh = store(&temp.path().join("two"));
+        restore(&fresh, &backups, &info.file, &keys).unwrap();
+        let snap = fresh.snapshot().unwrap();
+        let a = &snap.accounts[0];
+        assert!(!a.enabled && a.off_since() == Some(since));
+        let writes: Vec<&str> = snap
+            .events
+            .iter()
+            .filter(|e| e.account_id.as_deref() == Some(&a.id))
+            .map(|e| e.action.as_str())
+            .collect();
+        assert_eq!(writes, vec!["account_added"], "one publish, born off");
+        // A backup from before W1.2 (no `off` beside the accounts) still brings an account that
+        // was off for no recorded reason back as the person's off.
+        reseal(&backups, &info.file, &keys, |payload| {
+            payload.as_object_mut().unwrap().remove("off");
+        });
+        let older = store(&temp.path().join("three"));
+        restore(&older, &backups, &info.file, &keys).unwrap();
+        let a = older.snapshot().unwrap().accounts[0].clone();
+        assert!(!a.enabled && a.off_since() == Some(1_000));
     }
     #[test]
     fn restore_never_replaces_a_newer_sign_in() {

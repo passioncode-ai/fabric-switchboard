@@ -209,7 +209,7 @@ pub(crate) fn candidates(
         .accounts
         .iter()
         .filter(|a| {
-            a.enabled
+            a.usable()
                 // SB-322: an account given to an agent never continues a stopped session.
                 && !snapshot.is_assigned(&a.id)
                 && a.kind == AuthKind::OAuth
@@ -312,7 +312,7 @@ fn probe_accounts(
         .accounts
         .iter()
         .filter(|a| {
-            a.enabled
+            a.usable()
                 && !snapshot.is_assigned(&a.id)
                 && a.kind == AuthKind::OAuth
                 && a.provider == wait.provider
@@ -585,6 +585,7 @@ mod tests {
                 checked_at: 101,
                 next_check_at: 281,
             }),
+            off: None,
         }
     }
     fn snapshot() -> Snapshot {

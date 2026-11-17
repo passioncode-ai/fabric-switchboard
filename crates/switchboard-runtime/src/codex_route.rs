@@ -39,7 +39,7 @@ pub(crate) fn folders(snapshot: &switchboard_core::Snapshot) -> Vec<(String, Str
         .filter(|p| {
             snapshot.accounts.iter().any(|a| {
                 snapshot.serves(a, &p.pool)
-                    && a.enabled
+                    && a.usable()
                     && a.provider == switchboard_core::Provider::Codex
             })
         })

@@ -1193,6 +1193,7 @@ mod tests {
                 email: Some(email.into()),
             }),
             usage_health: None,
+            off: None,
         }
     }
     fn org(id: &str, name: &str, domains: &[&str]) -> Organization {

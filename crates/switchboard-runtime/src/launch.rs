@@ -2744,7 +2744,10 @@ fn validate(
         .into_iter()
         .find(|a| a.id == id)
         .ok_or("Account not found.")?;
-    if !account.enabled {
+    if account.off.is_some() {
+        return Err(switchboard_core::off::ACCOUNT_OFF.into());
+    }
+    if !account.usable() {
         return Err("Enable the account before launch.".into());
     }
     let snapshot = store.snapshot()?;
@@ -3846,6 +3849,7 @@ mod tests {
             usage: None,
             external_identity: None,
             usage_health: None,
+            off: None,
         };
         let snapshot = Snapshot {
             accounts: vec![
@@ -4391,6 +4395,7 @@ mod tests {
             usage: None,
             external_identity: None,
             usage_health: None,
+            off: None,
         };
         let login = fixture_login(home.clone(), account);
         assert_eq!(login_state(&login), "pending");
@@ -6049,6 +6054,7 @@ mod tests {
             usage: None,
             external_identity: None,
             usage_health: None,
+            off: None,
         };
         let mut snapshot = switchboard_core::Snapshot {
             accounts: vec![account.clone()],

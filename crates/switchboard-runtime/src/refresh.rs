@@ -933,7 +933,7 @@ fn reserve_due<'a>(
     // SB-293: an account turned off here, a seat used on another machine included
     // (`mark_elsewhere` turns it off), is never renewed here, by the background pass or a
     // person's check: its refresh token belongs to the machine that uses it.
-    if !account.enabled {
+    if !account.usable() {
         return Step::Done(Outcome::NotNeeded);
     }
     let Ok(credential) = store.stored_credential(id) else {
@@ -1409,12 +1409,15 @@ pub(crate) async fn renew_idle_live(
     let Ok(copies) = crate::matching_accounts(store, Provider::Claude, &live.identity) else {
         return Outcome::NotNeeded;
     };
+    // W1.2 (DEC-0027): Switchboard renews Claude Code's sign-in only for a copy it may use;
+    // when every saved copy is off (by the person, used elsewhere, a lease ended), the refresh
+    // token is left to Claude Code itself. A successor already spent (`kept`) is still written.
     if kept.is_none()
         && (live
             .credential
             .expires_at
             .is_none_or(|t| time - t < IDLE_EXPIRED_SECONDS)
-            || copies.is_empty()
+            || !copies.iter().any(Account::usable)
             || lineage(store, state, &live.identity, &live.credential) != Lineage::Own)
     {
         return Outcome::NotNeeded;
@@ -1904,7 +1907,7 @@ pub(crate) async fn learn_identity(store: &Store, state: &RefreshState, id: &str
     };
     if account.provider != Provider::Claude
         || account.kind != AuthKind::OAuth
-        || !account.enabled
+        || !account.usable()
         || account
             .external_identity
             .as_ref()
@@ -2041,7 +2044,8 @@ pub(crate) async fn learn_native_context(
     else {
         return "skipped";
     };
-    if account.provider != Provider::Claude || account.kind != AuthKind::OAuth || !account.enabled {
+    if account.provider != Provider::Claude || account.kind != AuthKind::OAuth || !account.usable()
+    {
         return "skipped";
     }
     let known = |state: &RefreshState| {
@@ -4522,6 +4526,41 @@ mod tests {
                 .unwrap();
             assert_eq!(c.refresh_token.as_deref(), Some("fresh-refresh"));
         }
+    }
+    /// W1.2 (DEC-0027), the leak: every saved copy of Claude Code's account is turned off, so
+    /// nothing here uses it; its refresh token is not spent on Switchboard's schedule.
+    #[tokio::test]
+    async fn an_idle_live_account_whose_every_copy_is_off_is_left_to_claude_code() {
+        let (url, calls) = endpoint((
+            200,
+            json!({"access_token":"fresh-access","expires_in":28800,"refresh_token":"fresh-refresh"}),
+        ))
+        .await;
+        let (_root, store) = idle_setup(IDLE_ITEM());
+        for pool in ["default", "work"] {
+            store
+                .update_fields(&id_of(&store, "synthetic-a", pool), None, Some(false))
+                .unwrap();
+        }
+        let state = RefreshState::at(url);
+        assert_eq!(
+            renew_idle_live(&store, IDLE_A, &state, None).await,
+            Outcome::NotNeeded
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), 0, "no grant spent");
+        assert_eq!(
+            live_item()["claudeAiOauth"]["refreshToken"],
+            "synthetic-a-refresh"
+        );
+        // One copy turned on again: renewed as before, every copy filed.
+        store
+            .update_fields(&id_of(&store, "synthetic-a", "work"), None, Some(true))
+            .unwrap();
+        assert_eq!(
+            renew_idle_live(&store, IDLE_A, &state, None).await,
+            Outcome::Refreshed
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
     }
     #[tokio::test]
     async fn an_idle_renewal_issued_to_another_account_stays_with_claude_code_only() {

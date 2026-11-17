@@ -88,6 +88,10 @@ pub(crate) struct KimiChoice<'a> {
     pub floor: crate::agent_catalog::Containment,
 }
 
+/// W1.2 (DEC-0027): the reason a step is passed over when its only accounts are ones the
+/// person turned off (a pinned account, or every saved Kimi Code account).
+pub(crate) const ACCOUNT_OFF: &str = "account_off";
+
 /// What `KimiChoice::used` answers for a Kimi Code account it has never seen.
 pub(crate) const KIMI_UNSEEN: f64 = 1000.0;
 
@@ -151,7 +155,7 @@ pub(crate) fn resolve_with(
     // project never serves a project's folder — decided here, before any renewal or launch.
     let usable = |a: &Account| {
         folder.is_none_or(|f| crate::launch::project_allows(snapshot, a, f).is_ok())
-            && a.enabled
+            && a.usable()
             // SB-401: an account of a group switched off takes no workflow over, nor a Claude API
             // key: a hand-over starts in the account's own home, where a key would be charged
             // past any ceiling, so it is passed over rather than refused at its launch.
@@ -197,6 +201,22 @@ pub(crate) fn resolve_with(
                     Some(id) => kimi.ids.iter().filter(|k| *k == id).collect(),
                     None => kimi.ids.iter().collect(),
                 };
+                // W1.2 (DEC-0027): a Kimi Code account the person turned off takes no workflow;
+                // a step left with none but off ones says so.
+                let kimi_off = |id: &str| {
+                    snapshot
+                        .kimi_accounts
+                        .iter()
+                        .any(|k| k.id == id && k.off.is_some())
+                };
+                if !candidates.is_empty() && candidates.iter().all(|id| kimi_off(id)) {
+                    return Step::Skip {
+                        agent: e.agent.clone(),
+                        reason: ACCOUNT_OFF,
+                    };
+                }
+                let candidates: Vec<&String> =
+                    candidates.into_iter().filter(|id| !kimi_off(id)).collect();
                 let usable: Vec<&String> = candidates
                     .into_iter()
                     .filter(|id| kimi_usable(id))
@@ -274,6 +294,18 @@ pub(crate) fn resolve_with(
                 return Step::Skip {
                     agent: e.agent.clone(),
                     reason: "not_installed",
+                };
+            }
+            // W1.2: a step pinned to an account the person turned off says so.
+            if e.account_id.as_ref().is_some_and(|id| {
+                snapshot
+                    .accounts
+                    .iter()
+                    .any(|a| &a.id == id && a.provider == provider && a.off.is_some())
+            }) {
+                return Step::Skip {
+                    agent: e.agent.clone(),
+                    reason: ACCOUNT_OFF,
                 };
             }
             let candidates: Vec<&Account> = snapshot
@@ -1737,6 +1769,7 @@ mod tests {
             }),
             external_identity: None,
             usage_health: None,
+            off: None,
         }
     }
     fn chain(agents: &[(&str, Option<&str>)]) -> Chain {
@@ -2029,6 +2062,72 @@ mod tests {
             NO_DEFAULT_ACCOUNT
         );
         assert!(executor_accounts(&json!({"provider": "hermes"}), &snapshot, &current).is_empty());
+    }
+    /// W1.2 (DEC-0027): a Kimi Code account the person turned off takes no workflow; a step
+    /// left with only off accounts is passed over as `account_off`, and so is a step pinned to a
+    /// saved account the person turned off.
+    #[test]
+    fn a_step_on_an_account_turned_off_is_skipped_with_its_reason() {
+        let kimi_account = |id: &str, off: bool| switchboard_core::kimi_accounts::KimiAccount {
+            id: id.into(),
+            label: id.into(),
+            region: "global".into(),
+            added_at: 1,
+            nickname: None,
+            tier: None,
+            off: off.then(|| switchboard_core::TurnedOff::by_person(5)),
+        };
+        let mut snapshot = Snapshot {
+            kimi_accounts: vec![kimi_account("kimi-a", true), kimi_account("kimi-b", false)],
+            ..Default::default()
+        };
+        let all = |_: &str| true;
+        let used = |id: &str| if id == "kimi-b" { 80.0 } else { 20.0 };
+        let kimi = KimiChoice {
+            ids: vec!["kimi-a".into(), "kimi-b".into()],
+            usable: &all,
+            used: &used,
+            hermes_ready: false,
+            opencode_ready: false,
+            disabled: HashSet::new(),
+            missing: HashSet::new(),
+            unattended: false,
+            floor: crate::agent_catalog::Containment::None,
+        };
+        let none = HashSet::new();
+        let off = |agent: &str| Step::Skip {
+            agent: agent.into(),
+            reason: ACCOUNT_OFF,
+        };
+        let steps = |snapshot: &Snapshot, chain: &Chain| {
+            resolve_with(snapshot, chain, None, &none, &none, None, &kimi)
+        };
+        // The less used one is off: the other runs.
+        assert_eq!(
+            steps(&snapshot, &chain(&[("kimi-code", None)])),
+            vec![Step::Run {
+                agent: "kimi-code".into(),
+                account_id: "kimi-b".into()
+            }]
+        );
+        assert_eq!(
+            steps(&snapshot, &chain(&[("kimi-code", Some("kimi-a"))])),
+            vec![off("kimi-code")]
+        );
+        snapshot.kimi_accounts[1].off = Some(switchboard_core::TurnedOff::by_person(6));
+        assert_eq!(
+            steps(&snapshot, &chain(&[("kimi-code", None)])),
+            vec![off("kimi-code")]
+        );
+        // A saved Claude account pinned and turned off.
+        let mut claude = account("claude-off", Provider::Claude, Some(10.0));
+        claude.enabled = false;
+        claude.off = Some(switchboard_core::TurnedOff::by_person(7));
+        snapshot.accounts.push(claude);
+        assert_eq!(
+            steps(&snapshot, &chain(&[("claude-code", Some("claude-off"))])),
+            vec![off("claude-code")]
+        );
     }
     #[test]
     fn a_kimi_step_runs_on_a_usable_kimi_account_pinned_or_least_used() {

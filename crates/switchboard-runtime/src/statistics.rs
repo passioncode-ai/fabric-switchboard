@@ -831,6 +831,7 @@ mod tests {
                 email: Some(email.into()),
             }),
             usage_health: None,
+            off: None,
         };
         let mut snapshot = Snapshot {
             accounts: vec![

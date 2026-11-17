@@ -31,7 +31,11 @@ export interface Account {
   id: string; label: string; provider: Provider; kind: AuthKind; pool: string;
   external_identity?: ExternalIdentity | null; usage_health?: UsageHealth | null;
   enabled: boolean; created_at: number; identity: string | null; usage: Usage | null;
+  /** W1.2 (DEC-0027): the person turned it off, and since when; absent while on. Only the person turns it on again. */
+  off?: TurnedOff | null;
 }
+/** W1.2 (DEC-0027): an account's off, by the person's word. */
+export interface TurnedOff { since: number; by: 'person' }
 export interface Event { at: number; action: string; account_id: string | null; detail: string }
 /** WF-11.1 (SB-373): one page of the journal from the `events` command, newest first; `next_before` pages on (null at the end); `kinds` are the filter kinds the owner knows. */
 export interface EventsPage { events: Event[]; next_before: number | null; kinds: string[] }
@@ -224,6 +228,8 @@ export interface Adapter {
   kimiLoginStatus(id: string): Promise<{ state: 'pending' | 'complete' | 'ended' }>;
   kimiLoginFinish(id: string): Promise<{ account: KimiAccount }>;
   kimiLoginCancel(id: string): Promise<unknown>;
+  /** W1.2 (DEC-0027): turns a Kimi Code account off (`enabled` false) or on. */
+  kimiSetEnabled(id: string, enabled: boolean): Promise<{ account: KimiAccount }>;
   kimiSignInAgain(id: string): Promise<unknown>;
   kimiLaunch(id: string, workingDirectory: string): Promise<unknown>;
   kimiRemove(id: string): Promise<unknown>;
@@ -318,9 +324,9 @@ export interface AgentInfo { id: string; name: string; maker?: string | null; ki
 export interface OpenrouterCredit { label: string | null; limit: number | null; limit_remaining: number | null; limit_reset: string | null; usage: number | null; usage_daily: number | null; is_free_tier: boolean | null }
 export interface HermesModel { installed: boolean; configured: boolean; model?: string | null; provider?: string | null; base_url?: string | null; api_mode?: string | null; providers: string[]; error: string | null }
 export type KimiRegion = 'mainland-cn' | 'global';
-export interface KimiAccount { id: string; label: string; region: KimiRegion; added_at: number; nickname?: string | null; tier?: string | null }
+export interface KimiAccount { id: string; label: string; region: KimiRegion; added_at: number; nickname?: string | null; tier?: string | null; /** W1.2: turned off by the person, and since when. */ off?: TurnedOff | null }
 /** A Kimi Code home's state at this read: the plan windows, or `error` naming why there are none. */
-export interface KimiStatus { signed_in: boolean; nickname?: string | null; tier?: string | null; windows?: { name: string; used_percent: number; resets_at: number | null }[]; error: string | null; region?: KimiRegion; checked_at?: number | null }
+export interface KimiStatus { /** W1.2: the account is turned off, so Kimi was not asked. */ off?: boolean; signed_in: boolean; nickname?: string | null; tier?: string | null; windows?: { name: string; used_percent: number; resets_at: number | null }[]; error: string | null; region?: KimiRegion; checked_at?: number | null }
 export interface KimiAccounts { accounts: { account: KimiAccount; status: KimiStatus }[]; current: KimiStatus | null; installed: boolean }
 /** SB-120: one catalog agent as this computer has it. */
 export interface AgentRow { id: string; name: string; maker?: string | null; url: string; install?: string | null; installed: boolean; switchable: boolean; enabled: boolean; disabled: boolean; default: boolean; openrouter: boolean; mcp: boolean; command: string; argv?: string[]; path?: string | null }

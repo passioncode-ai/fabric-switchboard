@@ -335,7 +335,7 @@ pub fn room(
 /// another machine, not given to an agent and not a seat another machine delegated here
 /// (SB-403: a guest is never lent).
 fn usable(snapshot: &Snapshot, account: &Account) -> bool {
-    account.enabled
+    account.usable()
         && account.kind == AuthKind::OAuth
         && !snapshot.elsewhere.contains_key(&account.id)
         && !snapshot.is_assigned(&account.id)
@@ -973,6 +973,7 @@ mod tests {
                 checked_at: NOW - 30,
                 next_check_at: NOW + 150,
             }),
+            off: None,
         }
     }
     fn group(pool: &str) -> Project {

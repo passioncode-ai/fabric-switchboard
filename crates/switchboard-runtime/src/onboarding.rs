@@ -1121,6 +1121,7 @@ mod tests {
             usage: None,
             external_identity: None,
             usage_health: None,
+            off: None,
         }
     }
     /// A set-up machine (the five steps done) with the organization Acme, its one group and

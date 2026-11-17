@@ -422,6 +422,7 @@ mod tests {
             usage: None,
             external_identity: None,
             usage_health: None,
+            off: None,
         };
         let mut s = Snapshot {
             accounts: vec![

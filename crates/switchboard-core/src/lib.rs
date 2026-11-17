@@ -23,6 +23,7 @@ mod chains;
 pub mod delegation;
 pub mod language;
 pub mod machines;
+pub mod off;
 pub mod organizations;
 mod persistence;
 pub mod private_fs;
@@ -40,6 +41,7 @@ pub use chains::{provider_agent, workflow_id_valid, Chain, ChainScope, Executor,
 pub use credential::Credential;
 pub use delegation::{DelegatedOut, Delegation};
 pub use machines::{is_machine_pool, Machine, MachineRef};
+pub use off::{OffBy, TurnedOff};
 pub use organizations::{Attribution, By, Organization};
 pub use projects::{
     pool_from_name, Project, ProjectRule, RuleResolution, CLAUDE_KEY_STAYS, FOLDER_NESTED,
@@ -249,6 +251,10 @@ pub struct Account {
     pub external_identity: Option<ExternalIdentity>,
     #[serde(default)]
     pub usage_health: Option<UsageHealth>,
+    /// W1.2 (DEC-0027): the person turned this account off, and since when. Set and cleared
+    /// only by the person; while it is set `enabled` is false and stays so (`off` module).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub off: Option<TurnedOff>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -490,6 +496,8 @@ pub(crate) fn event_valid(action: &str, detail: &str) -> bool {
         "account_added" | "account_updated" | "account_removed" | "account_selected" => {
             detail == "success"
         }
+        // W1.2 (DEC-0027): the person turned an account off or on.
+        off::TURNED_OFF | off::TURNED_ON => detail == "person",
         "usage" => matches!(detail, "observed" | "unavailable" | "failed"),
         "request" => matches!(
             detail,
@@ -579,6 +587,8 @@ pub(crate) fn validate_snapshot(s: &Snapshot) -> Result<(), String> {
             || a.usage.as_ref().is_some_and(|u| !usage_valid(u))
             || a.external_identity.as_ref().is_some_and(|i| !i.valid())
             || a.usage_health.as_ref().is_some_and(|h| !h.valid())
+            // W1.2: an account the person turned off is off, with a real time.
+            || a.off.is_some_and(|o| a.enabled || o.since <= 0)
         {
             return Err("Invalid account metadata".into());
         }
@@ -628,7 +638,7 @@ pub(crate) fn validate_snapshot(s: &Snapshot) -> Result<(), String> {
     for (key, id) in &s.routes {
         if !s.accounts.iter().any(|a| {
             a.id == *id
-                && a.enabled
+                && a.usable()
                 && s.pools_of(a)
                     .iter()
                     .any(|p| *key == format!("{}:{}", a.provider.as_str(), p))
@@ -762,6 +772,21 @@ struct SaveRequest<'a> {
     /// The id a new row takes, the same in every plan of this save.
     new_id: String,
     created_at: i64,
+    /// W1.2: how a NEW row starts (a restore's backed-up state, in the same publish); a row
+    /// already saved keeps its own.
+    start: Start,
+}
+/// How a new account starts: on (every save but a restore), or as a backup kept it.
+#[derive(Clone, Copy)]
+pub(crate) struct Start {
+    pub enabled: bool,
+    pub off: Option<TurnedOff>,
+}
+impl Start {
+    pub(crate) const ON: Start = Start {
+        enabled: true,
+        off: None,
+    };
 }
 /// What a save does against one state of the metadata. A plan lives for one step of one save,
 /// so its size does not matter.
@@ -874,12 +899,13 @@ impl SaveRequest<'_> {
                     provider: self.provider,
                     kind: self.kind,
                     pool: self.pool.into(),
-                    enabled: true,
+                    enabled: self.start.enabled && self.start.off.is_none(),
                     created_at: self.created_at,
                     identity: self.credential.account_id.clone(),
                     usage: None,
                     external_identity: self.external_identity.cloned(),
                     usage_health: None,
+                    off: self.start.off,
                 },
                 None,
             )
@@ -941,7 +967,9 @@ impl Store {
         // are dropped once, with the same write.
         let pruned = projects::stale_shares_prune(&mut migrated);
         let retired = migrated.retire_domain_rule();
-        let pending = if (retired || pruned) && validate_snapshot(&migrated).is_ok() {
+        // W1.2 (DEC-0027): an account off for no automatic reason is the person's off.
+        let turned_off = off::migrate(&mut migrated, now());
+        let pending = if (retired || pruned || turned_off) && validate_snapshot(&migrated).is_ok() {
             state = migrated;
             persistence::write(&root, &state).is_err()
         } else {
@@ -1521,7 +1549,16 @@ impl Store {
         credential: Credential,
     ) -> Result<Account, String> {
         self.save_account_routed(
-            label, provider, kind, pool, credential, None, false, true, None,
+            label,
+            provider,
+            kind,
+            pool,
+            credential,
+            None,
+            false,
+            true,
+            None,
+            Start::ON,
         )
     }
     /// SB-403: a new account another machine delegated, with its record, in one publish.
@@ -1543,6 +1580,7 @@ impl Store {
             false,
             false,
             Some(delegation),
+            Start::ON,
         )
     }
     pub fn upsert(
@@ -1585,6 +1623,34 @@ impl Store {
             upsert,
             upsert,
             None,
+            Start::ON,
+        )
+    }
+    /// W1.2 (DEC-0027): `upsert` for a restore: a new row starts as the backup kept it (off,
+    /// with the person's word and its time, or on), in the save's one publish. A row already
+    /// saved keeps its own state.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn upsert_restored(
+        &self,
+        label: String,
+        provider: Provider,
+        kind: AuthKind,
+        pool: String,
+        credential: Credential,
+        external_identity: Option<ExternalIdentity>,
+        start: Start,
+    ) -> Result<Account, String> {
+        self.save_account_routed(
+            label,
+            provider,
+            kind,
+            pool,
+            credential,
+            external_identity,
+            true,
+            true,
+            None,
+            start,
         )
     }
     #[allow(clippy::too_many_arguments)]
@@ -1599,6 +1665,7 @@ impl Store {
         upsert: bool,
         route_key: bool,
         delegation: Option<delegation::Delegation>,
+        start: Start,
     ) -> Result<Account, String> {
         if !label_valid(&label)
             || !pool_valid(&pool)
@@ -1653,6 +1720,7 @@ impl Store {
             upsert,
             new_id: uuid::Uuid::new_v4().to_string(),
             created_at: now(),
+            start,
         };
         let mut reads: BTreeMap<String, Result<Credential, String>> = BTreeMap::new();
         for _ in 0..SAVE_ATTEMPTS {
@@ -2178,18 +2246,26 @@ impl Store {
         if let Some(label) = label {
             a.label = label.trim().into();
         }
-        let enabled = enabled.unwrap_or(a.enabled);
-        a.enabled = enabled;
-        if !enabled {
-            candidate.routes.retain(|_, value| value != id);
-        } else {
-            // Enabling an account here says it is used here (SB-175), so it comes home from its
-            // machine's group (SB-355).
-            candidate.elsewhere.remove(id);
-            candidate.locations.remove(id);
-            machines::come_home(&mut candidate, id, None);
-        }
+        // W1.2 (DEC-0027): this is the person's switch. Off records their word and when (an
+        // account already off keeps its time); on clears it, and nothing else does.
+        let turned = match enabled {
+            Some(false) => off::turn_off(&mut candidate, id, now())?.then_some(off::TURNED_OFF),
+            Some(true) => {
+                let was_off = a.off.take().is_some();
+                a.enabled = true;
+                // Enabling an account here says it is used here (SB-175), so it comes home from
+                // its machine's group (SB-355).
+                candidate.elsewhere.remove(id);
+                candidate.locations.remove(id);
+                machines::come_home(&mut candidate, id, None);
+                was_off.then_some(off::TURNED_ON)
+            }
+            None => None,
+        };
         append_event(&mut candidate, "account_updated", Some(id), "success");
+        if let Some(action) = turned {
+            append_event(&mut candidate, action, Some(id), "person");
+        }
         self.publish(&mut state, candidate)?;
         self.changed();
         Ok(())
@@ -2221,7 +2297,9 @@ impl Store {
             .iter_mut()
             .find(|a| a.id == id)
             .ok_or("Account not found")?;
-        a.enabled = !on;
+        // W1.2: clearing the mark turns the account on again only when the person has not
+        // turned it off.
+        a.enabled = !on && a.off.is_none();
         if on {
             // A mark already there keeps its time: saying where does not move it.
             candidate.elsewhere.entry(id.to_owned()).or_insert(now);
@@ -2248,6 +2326,24 @@ impl Store {
             candidate.delegated_out.remove(id);
         }
         append_event(&mut candidate, "account_updated", Some(id), "success");
+        self.publish(&mut state, candidate)?;
+        self.changed();
+        Ok(())
+    }
+    /// W1.2 (DEC-0027): the person's off, carried from another machine (a call back brings a
+    /// copy home off when it was off there): turned off since `since`, unless it is already off
+    /// here. Nothing turns it on again but the person.
+    pub fn turn_off_since(&self, id: &str, since: i64) -> Result<(), String> {
+        // A time that is not one (an answer that names none) carries nothing.
+        if since <= 0 {
+            return Ok(());
+        }
+        let mut state = self.lock()?;
+        let mut candidate = state.clone();
+        if !off::turn_off(&mut candidate, id, since.min(now()))? {
+            return Ok(());
+        }
+        append_event(&mut candidate, off::TURNED_OFF, Some(id), "person");
         self.publish(&mut state, candidate)?;
         self.changed();
         Ok(())
@@ -2451,7 +2547,8 @@ impl Store {
         match to {
             Some(who) => {
                 if candidate.elsewhere.remove(id).is_some() {
-                    a.enabled = true;
+                    // W1.2: an account the person turned off stays off.
+                    a.enabled = a.off.is_none();
                 }
                 candidate.locations.remove(id);
                 candidate.routes.retain(|_, value| value != id);
@@ -2501,8 +2598,15 @@ impl Store {
         let a = state
             .accounts
             .iter()
-            .find(|a| a.id == id && a.provider == provider && state.serves(a, pool) && a.enabled)
-            .ok_or("Account is unavailable in this provider and pool")?;
+            .find(|a| a.id == id && a.provider == provider && state.serves(a, pool))
+            .filter(|a| a.usable())
+            .ok_or_else(|| {
+                if state.accounts.iter().any(|a| a.id == id && a.off.is_some()) {
+                    off::ACCOUNT_OFF
+                } else {
+                    "Account is unavailable in this provider and pool"
+                }
+            })?;
         // DEC-0022 (SB-403): an account in the group serves it whatever its organizations.
         // SB-401 (DEC-0023 D-18): a Claude API key outside the pay-per-token group is never newly
         // selected; a route that already names it stays.
@@ -2534,7 +2638,10 @@ impl Store {
         self.publish(&mut state, candidate).map(|()| true)
     }
     fn checked_credential(&self, a: &Account) -> Result<Credential, String> {
-        if !a.enabled {
+        if a.off.is_some() {
+            return Err(off::ACCOUNT_OFF.into());
+        }
+        if !a.usable() {
             return Err("Account is disabled".into());
         }
         let c = self.vault.get(&a.id).map_err(vault::surface(

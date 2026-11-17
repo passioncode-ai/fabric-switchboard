@@ -101,6 +101,9 @@ export function eventAction(action: string): string {
   switch (action) {
     case 'account_added': return t('Account added');
     case 'account_updated': return t('Account updated');
+    // W1.2 (DEC-0027): the person's switch.
+    case 'account_turned_off': return t('Account turned off');
+    case 'account_turned_on': return t('Account turned on');
     case 'account_removed': return t('Account removed');
     case 'account_selected': return t('Account selected');
     case 'usage': return t('Usage check');
@@ -168,6 +171,8 @@ export function eventDetail(detail: string): string {
     case 'managed': return t('managed session');
     // SB-322: an account given to an agent that the person used anyway.
     case 'override': return t('used anyway');
+    // W1.2: who turned an account off or on.
+    case 'person': return t('by you');
     case 'lent': return t('lent to another group');
     case 'returned': return t('back in its own group');
     case 'joined': return t('moved to its machine\'s group');
@@ -1333,6 +1338,8 @@ export function skipReasonText(reason: string | null | undefined, agent?: string
     case 'not_installed': return t('not installed');
     case 'quota_unknown': return t('remaining quota not seen yet');
     case 'permission_mode': return t('asks for less approval than the agent before it');
+    // W1.2 (DEC-0027): its account, or every Kimi Code account, is turned off.
+    case 'account_off': return t('its account is turned off');
     default: return null;
   }
 }

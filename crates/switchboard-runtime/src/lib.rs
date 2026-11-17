@@ -1213,6 +1213,11 @@ pub enum Operation {
         id: String,
         label: String,
     },
+    /// W1.2 (DEC-0027): the person turns a Kimi Code account off (`enabled: false`) or on.
+    KimiSetEnabled {
+        id: String,
+        enabled: bool,
+    },
     /// Forgets an account and deletes its home.
     KimiRemove {
         id: String,
@@ -4170,7 +4175,7 @@ fn project_stop_account(snapshot: &switchboard_core::Snapshot, pool: &str) -> Op
             .find(|a| {
                 snapshot.serves(a, pool)
                     && a.provider == Provider::Claude
-                    && a.enabled
+                    && a.usable()
                     && a.kind == AuthKind::OAuth
             })
             .map(|a| a.id.clone())
@@ -6234,6 +6239,9 @@ async fn execute(
         Operation::KimiRename { id, label } => Ok(json!({
             "account": store.update_kimi_account(&id, Some(&label), None, None)?
         })),
+        Operation::KimiSetEnabled { id, enabled } => Ok(json!({
+            "account": store.set_kimi_off(&id, !enabled)?
+        })),
         Operation::KimiRemove { id } => Ok(json!({"removed": kimi::remove(root, &store, &id)?})),
         Operation::AgentKey => {
             let token = match runtime {
@@ -6815,7 +6823,7 @@ async fn execute(
                     .ok_or("Account not found")?;
                 if account.provider == Provider::Claude
                     && account.kind == AuthKind::OAuth
-                    && account.enabled
+                    && account.usable()
                     && !snapshot.elsewhere.contains_key(&id)
                 {
                     let next = account_send::next_for_cli(&snapshot, account, monitor::now())
@@ -9275,7 +9283,10 @@ fn replace_native(
     native: NativeSources,
     refresh: Option<&refresh::RefreshState>,
 ) -> Result<(), String> {
-    if !account.enabled {
+    if account.off.is_some() {
+        return Err(switchboard_core::off::ACCOUNT_OFF.into());
+    }
+    if !account.usable() {
         return Err("Account is disabled".into());
     }
     // A switch is decided on what is signed in now, never on a remembered read: a stale one
@@ -15291,6 +15302,7 @@ mod tokens_group_tests {
             usage: None,
             external_identity: None,
             usage_health: None,
+            off: None,
         };
         snapshot.projects.push(group.clone());
         let allows = |s: &switchboard_core::Snapshot, a: &Account, mode| {

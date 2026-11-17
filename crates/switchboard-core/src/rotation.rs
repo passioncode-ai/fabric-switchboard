@@ -351,7 +351,7 @@ impl Store {
     ) -> bool {
         // SB-352 wave 2: native rotation of the ordinary Claude Code takes only an account at
         // home in its pool, never one a group lent to `default`.
-        if !account.enabled
+        if !account.usable()
             || (policy.target == "claude_cli"
                 && (account.provider != Provider::Claude
                     || account.pool != policy.pool
@@ -537,7 +537,7 @@ impl Store {
             .filter(|a| {
                 a.provider == policy.provider
                     && state.serves(a, &policy.pool)
-                    && a.enabled
+                    && a.usable()
                     && !state.is_assigned(&a.id)
                     && a.kind == AuthKind::OAuth
                     && !held.contains(&a.id)

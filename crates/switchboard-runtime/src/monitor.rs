@@ -578,7 +578,7 @@ fn primed_or_read(
 
 /// A schedule stamped ahead of a clock that was set back would otherwise stall probes.
 fn due(a: &Account, time: i64) -> bool {
-    a.enabled
+    a.usable()
         && a.kind == AuthKind::OAuth
         && a.usage_health
             .as_ref()
@@ -806,7 +806,7 @@ async fn check_as(
         .snapshot()?
         .accounts
         .iter()
-        .any(|a| a.id == id && !a.enabled)
+        .any(|a| a.id == id && !a.usable())
     {
         crate::oplog::event(
             "usage_check",
@@ -954,7 +954,7 @@ async fn renew_due(runtime: &Runtime, time: i64, schedule: &mut RenewSchedule) {
                 .accounts
                 .iter()
                 .filter(|a| {
-                    a.enabled
+                    a.usable()
                         && a.provider == Provider::Claude
                         && a.kind == AuthKind::OAuth
                         && !ended.contains(&a.id)
@@ -1839,6 +1839,7 @@ mod tests {
                 checked_at,
                 next_check_at,
             }),
+            off: None,
         };
         let time = now();
         assert!(!due(&account(time, time + 180), time));
@@ -2657,6 +2658,7 @@ mod tests {
                 checked_at: 100_000,
                 next_check_at: 100_900,
             }),
+            off: None,
         };
         assert!(due_now(&account, 10_000, &gate));
         gate.hold(

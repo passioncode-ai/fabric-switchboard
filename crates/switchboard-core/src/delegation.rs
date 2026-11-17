@@ -330,7 +330,9 @@ impl crate::Store {
         }
         if revived {
             if let Some(a) = candidate.accounts.iter_mut().find(|a| a.id == id) {
-                a.enabled = true;
+                // W1.2 (DEC-0027): a seat the person here turned off stays off; the lease is
+                // extended all the same.
+                a.enabled = a.off.is_none();
             }
             crate::append_event(&mut candidate, "delegation", Some(id), "restored");
         }
@@ -416,7 +418,8 @@ impl crate::Store {
                 .iter_mut()
                 .find(|a| a.id == id)
                 .ok_or(NOT_DELEGATED_BY_YOU)?;
-            a.enabled = undo && !ended;
+            // W1.2: an undo never turns on a seat the person here turned off.
+            a.enabled = undo && !ended && a.off.is_none();
             if !undo {
                 candidate.routes.retain(|_, v| v != id);
             }
@@ -769,6 +772,50 @@ mod tests {
         // An undo leaves an ended seat off.
         store.surrender_delegated(&a.id, KEY, true).unwrap();
         assert!(!store.snapshot().unwrap().accounts[0].enabled);
+    }
+
+    /// W1.2 (DEC-0027): the person here turned the seat off; the sender's extension of an ended
+    /// lease and the undo of a call back keep it off (before, both turned it on).
+    #[test]
+    fn a_seat_turned_off_here_stays_off_when_its_lease_is_extended_or_a_call_back_undone() {
+        let (_r, _f, store) = store_with_group();
+        let a = store
+            .add_delegated(
+                "seat".into(),
+                Provider::Claude,
+                pool(&store),
+                oauth("9"),
+                KEY,
+                None,
+                48,
+            )
+            .unwrap();
+        store.update_fields(&a.id, None, Some(false)).unwrap();
+        let since = store.snapshot().unwrap().accounts[0].off_since().unwrap();
+        // The undo of a call back.
+        store.surrender_delegated(&a.id, KEY, false).unwrap();
+        store.surrender_delegated(&a.id, KEY, true).unwrap();
+        let s = store.snapshot().unwrap();
+        assert!(!s.accounts[0].enabled && s.accounts[0].off_since() == Some(since));
+        // A lease that ran out, then extended by the sender.
+        {
+            let mut state = store.lock().unwrap();
+            let d = state.delegated.get_mut(&a.id).unwrap();
+            d.granted_at = now() - 100 * 3600;
+            d.lease_until = now() - 1;
+            store.republish(&state);
+        }
+        store.end_lease(&a.id).unwrap();
+        store.extend_lease(&a.id, KEY, 48).unwrap();
+        let s = store.snapshot().unwrap();
+        assert!(
+            s.delegated[&a.id].ended_at.is_none(),
+            "the lease is extended"
+        );
+        assert!(!s.accounts[0].usable() && s.accounts[0].off_since() == Some(since));
+        // Only the person turns it on.
+        store.update_fields(&a.id, None, Some(true)).unwrap();
+        assert!(store.snapshot().unwrap().accounts[0].usable());
     }
 
     #[test]

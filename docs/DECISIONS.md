@@ -6,7 +6,7 @@ never renumber, never delete. The doc map ([DOCMAP.md](DOCMAP.md)) names this fi
 register. Decisions made before 2026-11-08 live where they were made (plans' `D-<n>`, board rows,
 research notes); the ones still in force that the board cites are seeded below with their source.
 
-**Next free ID:** `DEC-0026` (`DEC-0018` and `DEC-0020` are held for the window and fleet plan's modules)
+**Next free ID:** `DEC-0028` (`DEC-0018` and `DEC-0020` are held for the window and fleet plan's modules; `DEC-0026` is taken on the open `update-notices` branch)
 
 ## Format
 
@@ -705,3 +705,69 @@ research notes); the ones still in force that the board cites are seeded below w
   пользоваться, но по факту авторизоваться он типа не будет с ней»; «[a teammate] может
   использовать Claude Desktop для своей обычной стандартной подписки … убедиться, что мы не
   трогаем сессии для десктопного Claude Code».
+
+### DEC-0027: An account the person turns off stays off until the person turns it on
+
+- **Date:** 2026-11-17
+- **Status:** Accepted
+- **Context:** `Account.enabled` was one bit written by the person and by four automatic processes
+  (used on another machine, a delegated lease that ran out, a seat called back, a copy given
+  back), with no time recorded. The target-state plan (`docs/plans/2026-11-17-target-state`,
+  01 section 3, 04 section 3) found six paths that turned an account the person had turned off
+  back on, or used it: the idle renewal of Claude Code's live sign-in (`matching_accounts` has
+  no enabled filter), clearing the elsewhere mark (`mark_elsewhere_at` set `enabled = true`), a
+  call back (the other machine's answer carried no off), a lease extended by the sender
+  (`extend_lease`), the undo of a call back (`surrender_delegated`), and a restore (saved on,
+  then turned off by a second write whose result was ignored). Kimi Code accounts had no off at
+  all, and no surface could say since when an account was off.
+- **Decision:**
+  - The person's switch is its own field, `Account.off` and `KimiAccount.off`
+    (`{since, by: "person"}`, `crates/switchboard-core/src/off.rs`), beside `enabled`, which stays
+    the one effective bit every path reads. Only the person sets and clears it:
+    `accounts update --enabled false|true`, MCP `switchboard_account_update enabled`, the window's
+    *Turn off* / *Turn on*; for Kimi Code `kimi off|on`, MCP `switchboard_kimi_update`, the
+    window's Kimi row. Turning off an account already off keeps its time. Each turn is journalled
+    as `account_turned_off` / `account_turned_on` (detail `person`).
+  - While `off` is set, `enabled` is false: `validate_snapshot` refuses a store that says
+    otherwise, so no publication can carry an account both off and on. Every automatic writer that
+    turns an account on (clearing elsewhere, giving it to an agent, extending a lease, undoing a
+    call back, a restore) keeps it off while `off` is set. `Account::usable()` (`enabled` and no
+    `off`) is the one check the selection, route, failover, rotation, balancing, renewal, usage
+    check, launch, continuation, recovery, fallback, send and native switch paths ask.
+  - The idle renewal of Claude Code's live sign-in runs only when some saved copy of that
+    account is usable; with every copy off, the refresh token is left to Claude Code. A successor
+    already spent is still written, and copies that are off keep receiving newer generations of
+    their own sign-in (a credential write, not a use), so a copy turned on later is not left
+    holding a spent token.
+  - A call back carries the off: the other machine's surrender answer has `off_since` (null when
+    on), and the copy comes home off with that time. A delegated seat's off is the teammate's
+    word about their own use and is not carried. An older Switchboard sends no `off_since`; such
+    a copy comes home as before.
+  - A backup carries the off beside the accounts (`off`, old account id to `{since, by}`), so a
+    0.7.114 or older reader still restores them (off, as before); a restore saves each new account
+    in its backed-up state in the save's one publication. A backup from before carries none: an
+    account it holds off for no reason it records (not used elsewhere, not on another machine) is
+    restored as the person's off since the backup's time. Settings exports never carry it (they
+    carry no accounts). Kimi Code accounts are not in backups.
+  - Migration: a store written before reads every account that is off for no reason the store
+    records (used elsewhere, a delegated lease that ran out, a delegated seat called back) as the
+    person's off. The code cannot tell the person's off from an older automatic one that left no
+    record, so it takes the safe reading: nothing automatic may turn such an account on. Its time
+    is the account's newest `account_updated` journal entry, else the time of the migration. The
+    store is written once, at schema version 17, which a 0.7.114 or older reader refuses.
+  - A Kimi Code account that is off is not asked about its usage (the background view and the
+    list skip it), launched or continued; a fallback step whose only accounts are off, a pinned
+    one included, is passed over as `account_off` (contract probe `refused`).
+  - Every surface says it: the window (*Off since* badge, *Turn on*), `switchboard accounts list`
+    (`STATE` `off`, a `SINCE` column), `--json` and MCP `switchboard_accounts` (`off_since`,
+    `off_by`, `availability`: `on`, `off`, `elsewhere`, `lease_ended`, `called_back`,
+    `disabled`). An account off because it works on another machine reads as `elsewhere`, never as
+    the person's off.
+- **Consequences / affects:** [CONTRACTS](CONTRACTS.md#an-account-turned-off-w12-dec-0027-2026-11-17),
+  [ACCOUNTS-AND-ROTATION](ACCOUNTS-AND-ROTATION.md#turning-an-account-off), [CLI.md](CLI.md)
+  (`accounts update`, `accounts list`, `kimi off|on`), [ux/scenarios.md](ux/scenarios.md)
+  (SCN-009), `AGENTS.md` Lifecycle (the Writes row, schema 17), [CHANGELOG](../CHANGELOG.md),
+  [evidence/backlog.md](evidence/backlog.md) (SB-418).
+- **Source:** operator 2026-11-17, quoted in the target-state plan README (addition 1): it must be
+  possible to turn an account off temporarily, take it out of everything, and not turn it on
+  until the person does; wave item W1.2.
