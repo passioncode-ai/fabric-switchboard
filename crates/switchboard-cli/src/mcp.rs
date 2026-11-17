@@ -2421,3 +2421,33 @@ mod views {
         assert_eq!(two["organization_names"], json!(["Acme", "Beta"]));
     }
 }
+
+#[cfg(test)]
+mod no_values {
+    /// SB-420: no MCP tool reaches an operation that answers a credential or key value. Reads
+    /// this file's own source: every `Operation::` it names is outside that set.
+    #[test]
+    fn no_tool_reaches_an_operation_that_answers_a_value() {
+        let source = include_str!("mcp.rs");
+        let named: std::collections::BTreeSet<&str> = source
+            .match_indices("Operation::")
+            .map(|(at, prefix)| {
+                let rest = &source[at + prefix.len()..];
+                let end = rest
+                    .find(|c: char| !c.is_ascii_alphanumeric() && c != '_')
+                    .unwrap_or(rest.len());
+                &rest[..end]
+            })
+            .collect();
+        assert!(named.len() > 20, "the tools' operations were read");
+        for value in [
+            "AgentKey",
+            "AgentKeyValue",
+            "AnthropicKeyValue",
+            "SurrenderAccount",
+            "SurrenderDelegated",
+        ] {
+            assert!(!named.contains(value), "{value}");
+        }
+    }
+}

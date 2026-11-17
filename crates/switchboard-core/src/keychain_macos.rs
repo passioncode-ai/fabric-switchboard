@@ -887,6 +887,66 @@ mod tests {
         assert_eq!(code, 0, "update={update}");
     }
 
+    /// SB-420: a value too long for hex on one `security -i` line goes as quoted text, and reads
+    /// back byte for byte through the tool, quotes, backslashes and apostrophes included; one
+    /// too long for either form is refused and never reaches the keychain.
+    #[test]
+    fn a_long_write_through_the_security_tool_round_trips() {
+        let kc = Throwaway::new();
+        let read = |service: &str| {
+            let (code, mut out) = crate::security_cli::run(
+                std::process::Command::new("/usr/bin/security")
+                    .args(["find-generic-password", "-a", ID, "-s", service, "-w"])
+                    .arg(&kc.path),
+                None,
+                std::time::Duration::from_secs(5),
+            )
+            .unwrap();
+            if out.last() == Some(&b'\n') {
+                out.pop();
+            }
+            (code, out)
+        };
+        let mut long = br#"{"claudeAiOauth":{"accessToken":"fixture-only"},"mcpOAuth":{"a\"b":"c'd\\e \n","pad":""#.to_vec();
+        long.resize(3200, b'x');
+        long.extend_from_slice(br#""}}"#);
+        for (service, value, update) in [
+            ("svc-short", b"fixture-only".to_vec(), false),
+            ("svc-long", long.clone(), false),
+            (
+                "svc-long",
+                [&long[..100], b"-updated", &long[100..]].concat(),
+                true,
+            ),
+        ] {
+            assert_eq!(
+                crate::security_cli::add_via(
+                    "/usr/bin/security",
+                    Some(&kc.path),
+                    service,
+                    ID,
+                    &value,
+                    update
+                ),
+                Ok(crate::security_cli::Added::Stored),
+                "{service} update={update}"
+            );
+            assert_eq!(read(service), (0, value), "{service} update={update}");
+        }
+        assert_eq!(
+            crate::security_cli::add_via(
+                "/usr/bin/security",
+                Some(&kc.path),
+                "svc-huge",
+                ID,
+                &vec![b'x'; 5000],
+                false
+            ),
+            Err(crate::security_cli::TOO_LARGE.to_string())
+        );
+        assert_eq!(read("svc-huge").0, 44, "nothing was written");
+    }
+
     #[test]
     fn a_probe_reads_no_secret_and_tells_absent_trusted_untrusted_and_locked() {
         let kc = Throwaway::new();

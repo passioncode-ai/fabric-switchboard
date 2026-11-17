@@ -550,6 +550,17 @@ pub(crate) fn ordinary_for(root: &Path) -> Option<(PathBuf, String)> {
     ordinary()
 }
 
+/// SB-420: an item too large to write without the value on the command line is left as it was
+/// (the launch goes on without the copy) and logged by its own code.
+fn too_large_or_write(error: &str) -> &'static str {
+    #[cfg(unix)]
+    if error == switchboard_core::security_cli::TOO_LARGE {
+        return "too_large";
+    }
+    let _ = error;
+    "write"
+}
+
 static CACHE: std::sync::OnceLock<Cache> = std::sync::OnceLock::new();
 
 /// SB-358 at a launch: carries the other homes' sign-ins into `folder`, a Claude home Switchboard
@@ -582,9 +593,12 @@ pub(crate) fn carry_into(root: &Path, folder: &Path) {
             "mcp_sign_ins",
             &[("carried", crate::oplog::Field::Number(carried as i64))],
         ),
-        Err(_) => crate::oplog::event(
+        Err(error) => crate::oplog::event(
             "mcp_sign_ins",
-            &[("error", crate::oplog::Field::Code("write"))],
+            &[(
+                "error",
+                crate::oplog::Field::Code(too_large_or_write(&error)),
+            )],
         ),
     }
 }

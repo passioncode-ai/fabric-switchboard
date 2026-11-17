@@ -8,6 +8,9 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- A long Keychain write no longer passes the value on the command line: it goes on standard input as text when hex does not fit, and an item too large for that is refused with a sentence that names it; nothing is written (SB-420).
+- Commands that print a credential print it only where it was asked for by name: `agents key --service openrouter` and `agents anthropic key NAME` need `--to-pipe` and a pipe, as Switchboard's session scripts give them, and `accounts surrender` prints a sign-in only for the ssh call of `accounts recall` from the calling machine. To a terminal or into a file they refuse and print nothing. A Hermes or OpenCode session script an earlier version wrote is written again at its next launch (SB-420).
+
 ## 0.7.116
 
 - 0.7.116 carries 0.7.115's changes, which were tagged but never published: a test of the .deb check could not write its multi-architecture file list on Windows (an NTFS stream, not a file), so the Windows tests failed and the release stopped. The test now runs only where a .deb exists; nothing a person runs changed.

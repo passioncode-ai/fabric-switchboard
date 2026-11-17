@@ -117,7 +117,12 @@ pub fn rfc3339(seconds: i64) -> Option<String> {
         .ok()
 }
 
-/// No credential retrieval operation exists. Never derive Debug on this type.
+/// Never derive Debug on this type. Five operations answer a credential or key value:
+/// `AgentKey` (the agents' proxy key), `AgentKeyValue` and `AnthropicKeyValue` (a saved
+/// provider key), `SurrenderAccount` and `SurrenderDelegated` (a sign-in handed back to the
+/// machine that moved it). No MCP tool and no window command maps to any of them; the CLI prints
+/// a provider key or a sign-in only into a pipe its caller named for the hand-over (SB-420), and
+/// any holder of the control token can still ask for them over the control door.
 #[derive(Serialize, Deserialize)]
 #[serde(tag = "operation", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Operation {

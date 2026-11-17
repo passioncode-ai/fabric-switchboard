@@ -777,6 +777,10 @@ fn report(slot: &mut Slot, provider: Provider, code: &'static str) {
         );
     }
 }
+/// SB-420: Claude Code's item (its sign-in with every MCP sign-in) no longer fits one write
+/// that keeps the value off the command line. Nothing was written.
+#[cfg(target_os = "macos")]
+const CREDENTIAL_TOO_LARGE: &str = "Claude Code's Keychain item is too large to write safely. Sign out of MCP servers you no longer use in Claude Code, then retry.";
 /// The keychain is locked: the background waits for it to be unlocked rather than asking.
 #[cfg(unix)]
 const LOCKED: &str = switchboard_core::security_cli::UNAVAILABLE;
@@ -1442,8 +1446,15 @@ impl Writer for Native {
             // Claude Code creates and reads this item with /usr/bin/security; writing it
             // from any other executable would make macOS ask for consent (PLAN-0.5 C-2).
             return match value {
-                Some(bytes) => crate::external_keychain::write(&c.service, &c.user, bytes)
-                    .map_err(|_| "Claude credential write needs Keychain access.".into()),
+                Some(bytes) => {
+                    crate::external_keychain::write(&c.service, &c.user, bytes).map_err(|e| {
+                        if e == switchboard_core::security_cli::TOO_LARGE {
+                            CREDENTIAL_TOO_LARGE.into()
+                        } else {
+                            "Claude credential write needs Keychain access.".into()
+                        }
+                    })
+                }
                 None => crate::external_keychain::delete(&c.service, &c.user)
                     .map_err(|_| "Claude credential rollback needs Keychain access.".into()),
             };
