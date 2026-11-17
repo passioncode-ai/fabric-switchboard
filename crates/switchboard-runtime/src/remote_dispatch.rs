@@ -498,16 +498,39 @@ exit 3\n",
         let launch = crate::launches::new_id();
         let d = home.path().join(DIR).join(&launch);
         std::fs::create_dir_all(&d).unwrap();
-        let mut gone = Command::new("true").spawn().unwrap();
-        let pid = gone.id();
-        gone.wait().unwrap();
-        std::fs::write(d.join("pid"), pid.to_string()).unwrap();
+        // A pid no process can hold (above every system's pid_max), so `kill -0` always fails.
+        std::fs::write(d.join("pid"), "2147483647").unwrap();
         std::fs::write(d.join("exit.tmp"), "3\n").unwrap();
         assert_eq!(status("studio.local", &launch, &run)["state"], "lost");
         std::fs::rename(d.join("exit.tmp"), d.join("exit")).unwrap();
         let answer = status("studio.local", &launch, &run);
         assert_eq!(answer["state"], "exited", "{answer}");
         assert_eq!(answer["exit_code"], 3);
+        // The run writes its code beside the final name and renames it, never in place.
+        let script = run_script(
+            &Program {
+                path: "/x/switchboard",
+                data_dir: None,
+            },
+            Provider::Claude,
+            WF,
+            H,
+            REQ,
+            &launch,
+            None,
+            60,
+        );
+        let written = script
+            .find("echo $? >\"$2/exit.tmp\"")
+            .expect("the code goes to exit.tmp");
+        let renamed = script
+            .rfind("mv \"$2/exit.tmp\" \"$2/exit\"")
+            .expect("then is renamed");
+        assert!(written < renamed, "{script}");
+        assert!(
+            !script.contains(">\"$2/exit\""),
+            "never written in place: {script}"
+        );
     }
     #[test]
     fn a_run_there_starts_in_a_fresh_worktree_and_its_result_comes_back() {
