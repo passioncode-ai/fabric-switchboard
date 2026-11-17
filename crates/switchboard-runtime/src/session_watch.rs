@@ -627,7 +627,7 @@ mod tests {
         std::fs::create_dir_all(&logs).unwrap();
         std::fs::write(logs.join(format!("{id}.log")), "x").unwrap();
         let at = log_written_at(root.path(), &json!({"launch_id": id})).unwrap();
-        assert!((now() - at).abs() < 60);
+        assert!((super::now() - at).abs() < 60);
         assert!(log_written_at(root.path(), &json!({"launch_id": "../x"})).is_none());
     }
 

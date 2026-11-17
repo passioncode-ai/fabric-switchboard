@@ -2036,18 +2036,19 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 2. *Sign in again* → the official sign-in for that account starts as from its row (SCN-003); once it finishes, the next read leaves the item out and the account is where it was, with its label and group.
 3. *Check again* → a usage check of that account (SCN-008); a check that answers takes it off the list.
 4. *Answer* → the Agents page, where the ceiling's question waits (SCN-084). *Open Other machines* → Groups → *Other machines* (SCN-092). *Move to Pay-per-token keys* → the key moves into that group, made when missing (SCN-100).
+4a. A board run (a session `dispatch` started for a Fabric board request) quiet for 30 minutes, its folder and its log both, reads “A board run has been quiet for 30 minutes. Look at it, or stop it.”; one whose process is gone with no end recorded reads “A board run's process is gone, but its end was not recorded. Stop the run to record it.”. Both are named by the run's folder and offer *Stop the run* (SB-407): the run is stopped as `switchboard dispatch stop --launch-id` stops it, its end is recorded (`stopped`, or `exited` when its process had gone) and the stop is written to the duty officer's recent actions → “Stopped the board run.” (or “The board run had already ended. Its end is recorded now.”); the item leaves at the watch's next minute. A run is never stopped by Switchboard before its own deadline; *Stop the run* is the person's.
 5. The account also stays in its group: a sign-in row as before (the *Sign in again* mark and button), any other reason with the badge “Needs attention” and its reason on hover. *Needs attention only* in the filter row lists only these accounts.
 **Alt paths:** nothing needs a person → no section at all; the command is missing or its read fails → no section, nothing else changes; an item whose account is no longer saved reads “An account no longer saved” and its *Check again* is unavailable; an item with an unknown reason is left out.
 **Expected result:** what needs a person is the first thing on Accounts, each with the action that fixes it; nothing moves an account out of its group.
 **UI elements:** the section, its rows and actions, the “Needs attention” badge, *Needs attention only*.
-**States covered:** none, one, several, sign-in, check, ceiling, machines, missing command, account gone.
+**States covered:** none, one, several, sign-in, check, ceiling, machines, board run stuck or gone, missing command, account gone.
 **Errors & recovery:** each action fails as its own flow does (SCN-003, SCN-008, SCN-084) and the item stays.
 **Status:** draft
 **Meaning:** WF-3 (operator 2026-11-14: «Подписки, которые у нас с ошибками, нужно залогиниться, их сразу поднимаем вверх, в отдельную категорию ... В той группе они тоже видны»).
 **Copy:** checked with Copylot, register ui; report ids in [strings](../brand/strings.md#accounts-by-machine-one-filter-row-needs-attention-scn-001-scn-089-scn-092-scn-094-wf-2-wf-3-sb-364-sb-365-dec-0015).
 **Coverage:** ui-logic `attentionView`, `attentionAccounts`, reason and action cases (`scripts/test-ui-logic.mjs`); WebKit demo (`?demo=1`: two items, *Check again* takes one off; `&ceilings=reached` adds the ceiling's items). The runtime's own list and its tests belong to the backend change that adds the `attention` command. No walk in the installed app yet.
 **Product:** unobserved
-**Traces:** SB-365, DEC-0015, SCN-003, SCN-008, SCN-084, SCN-092
+**Traces:** SB-365, DEC-0015, SCN-003, SCN-008, SCN-084, SCN-092, SB-407
 
 ### SCN-095: Follow every coding session on this computer and what the watch found
 **Persona:** P-01
@@ -2057,7 +2058,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Steps:**
 1. Open Activity → “Sessions on this computer”: “{live} live: {working} working, {quiet} quiet, {managed} started by Switchboard.”, “By group: {list}.”, then one row per live Claude Code or Codex process, a session another started indented under it, each with its folder, “Working” or “Quiet {n} min”, how it started (Fabric board, Fabric Dashboards, command line, an agent through MCP, this window, a hand-over, a continuation after a limit, or not started by Switchboard), its group, its task (“Board request {id}” or “Task {id}”) and pid.
 1a. With organizations (SB-382, 2026-11-15) → one line each: “{name}: {live} in its folders, {managed} launched by Switchboard in its group”, then either “{n} from a terminal, which takes the context through the terminal hook.” or, with the hook off, “{n} without its context: the terminal hook is off.” `switchboard sessions --tree` and MCP `tree` carry the same as `context {hook, map, organizations: [{context, live, managed, other}]}`, read from the hook's folder map, never from a session's environment.
-2. The watch found something → its lines above the rows: a session in two processes, a board run quiet for 30 minutes, a launch that stopped without recording how it ended. The first two are also in *Needs attention* on Accounts with *Open sessions*.
+2. The watch found something → its lines above the rows: a session in two processes, a board run quiet for 30 minutes, a launch that stopped without recording how it ended. The copy is also in *Needs attention* on Accounts with *Close the quiet copy*; a stuck board run, and a board run gone without an end, with *Stop the run* (SB-407, SCN-094 step 4a).
 3. Open “Launches of the last day” → each launch with its time, state (Running, Ended, Stopped, end not recorded), how it started, group and task.
 4. The panel reads again at most once a minute while Activity is on screen.
 **Alt paths:** no session runs → “No session runs now.”; the read fails → “The sessions could not be read. Refresh to retry.” and the rest of Activity stays.
