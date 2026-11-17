@@ -505,11 +505,16 @@ pub(crate) fn status(
     let sessions: Vec<_> = rows
         .iter()
         .map(|r| {
-            let ready = readiness(r, snapshot, limited, capped, sign_in, now);
             let (launch_id, transcript) = launched
                 .get(&r.session)
                 .cloned()
                 .map_or((None, None), |(l, t)| (Some(l), t));
+            // FD-291 (2026-11-17): a stop whose launch was continued (a hand-over, or a later
+            // launch of the session) was taken up elsewhere: it is not ready to continue again.
+            let continued = launch_id
+                .as_deref()
+                .is_some_and(|l| crate::launches::continued_after(root, l, r.stopped_at));
+            let ready = readiness(r, snapshot, limited, capped, sign_in, now);
             // FD-291: when the session's transcript was last written, from its launch's own path
             // or any config folder that may hold it; a stop already settled costs no stat.
             // Claude Code's transcripts only: another agent's stop is not judged by them.
@@ -537,7 +542,8 @@ pub(crate) fn status(
                         .max()
                 })
                 .flatten();
-            serde_json::json!({"stop": r, "ready": ready.mode.is_some(), "mode": ready.mode,
+            serde_json::json!({"stop": r, "ready": ready.mode.is_some() && !continued,
+                "continued": continued, "mode": ready.mode,
                 "candidates": ready.accounts, "probe_at": ready.probe_at, "reason": ready.reason,
                 "launch_id": launch_id, "transcript": transcript, "transcript_at": transcript_at,
                 "live": open.contains(r.session.as_str()).then(|| live.get(&r.session)).flatten()

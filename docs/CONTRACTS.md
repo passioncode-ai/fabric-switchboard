@@ -3441,7 +3441,11 @@ its session's ledger row). FD-291: each open stop carries `transcript_at`, the n
 transcript in any config folder it may live in (`machine_sessions::transcript_at`); a live session
 whose transcript was written more than 120 s after its stop, or whose process is `busy` 120 s after
 it, is `running`, not waiting; a stop row with `transcript_at` null is `ended: no_transcript` (no
-act), and one written past its stop is `ended: moved_on` with `continue`; `ended` written as a word by an older path
+act), and one written past its stop is `ended: moved_on` with `continue`. A stop whose launch was continued
+(its record names `continued_as`, a hand-over or a later launch, or the session's newest launch started
+more than 120 s after the stop) carries `continued: true`, is not `ready`, and its row is `ended: moved_on`
+too (`launches::continued_after`, test `a_launch_continued_or_started_after_its_stop_takes_the_stop_with_it`).
+`ended` written as a word by an older path
 (`"limit"`, `"not_started"`) reads as that word (D11). Tests `resumable::tests::*`,
 `session_rows::tests::one_row_per_session_and_every_ended_one_can_be_continued_as_itself`.
 
