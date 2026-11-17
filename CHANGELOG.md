@@ -13,6 +13,7 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 - `org assign ID --also ORG` (MCP `also`) adds an organization to the ones an account works for and keeps its own. An organization needs no domain, or may have several.
 - An account that also works for an organization counts as its seat: in the Organizations counts, in each account row (`also`) and in the org-seats data (`context: first|also`). The setup checklist reads every field it needs (an account that also worked for the organization, or lived on another machine, used to read as none), and *Your seat* no longer asks for "your {organization} address": *Add a seat* gives the organization's group an account already on this computer or a sign-in with any address, and the step is optional when the organization's accounts all work on other machines. With a group, the step is done only when an account the group holds is signed in; an account that works for the organization in no group of it is offered first.
 - A limit stop whose session was already continued elsewhere (a hand-over, or a later launch of the same session) is no longer offered as ready to continue: `recovery` marks it `continued` and the Sessions page reads it ended, moved on.
+
 ## 0.7.111
 
 - 0.7.110 was tagged but never published: its Windows build failed, because a session module meant for macOS and Linux was compiled for Windows too. This release carries its changes, listed below, with that fixed.
