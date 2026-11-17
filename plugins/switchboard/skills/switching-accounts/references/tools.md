@@ -106,6 +106,9 @@ What needs a person, one item per account or question:
 | `move_unknown` | a move to another machine lost its answer | `switchboard_remote` `check`, then `switchboard_account_recall` |
 | `usage_failing` | no usage check succeeded for over an hour | `switchboard_usage` with `refresh` |
 | `ceiling_question` | a reached spending ceiling waits for keep or double | `switchboard_ceiling_answer` (`account_id`, `label`, `provider` null; `pool` the group's, or null) |
+| `session_duplicate` | one Claude Code session runs in two processes | `switchboard_session_close_copy` with the item's `session_id` |
+| `session_stuck` | a board run quiet for 30 minutes, its log included | `switchboard_dispatch_stop` with the item's `launch_id` (`action.command` is the CLI act) |
+| `session_gone` | a board run whose process ended with no end recorded | `switchboard_dispatch_stop` with the item's `launch_id` |
 
 A view: every account listed stays in its group with its selection, and nothing moves; once
 fixed it leaves the list on the next background pass. Read-only, also on a read-only server.
@@ -170,6 +173,17 @@ answering; SB-389), and `pid` closes that copy, refused while it is answering; a
 still running ends with it. `close: null` means every copy is answering. Refused when the session
 no longer runs in two processes. macOS and Linux.
 
+
+### `switchboard_dispatch_stop`: `launch_id` (string)
+
+Stops a run `switchboard dispatch` started for a Fabric board request, as `switchboard dispatch stop
+--launch-id` and Needs attention's *Stop the run* do (SB-407): `SIGTERM` to its process group,
+`SIGKILL` after 5 seconds; a run on another machine is stopped there. Its launch record ends
+`stopped` (`exited` when its process had already gone), and the stop is journalled in the duty
+officer's `duty.jsonl` with `by: person`. Answers `{launch_id, state: stopped | already_ended}`;
+a launch that is not a dispatched run is refused. For a `session_stuck` or `session_gone` item, or
+when the operator asks: a run is otherwise stopped at its own deadline (its time limit, or the
+board request's deadline when earlier), never before.
 
 ### `switchboard_session_continue`: `session_id` (string)
 
