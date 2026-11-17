@@ -539,26 +539,39 @@ impl RefreshState {
     /// within a pass. Before, each `recovery` call read every ended account's credential: on a
     /// swapping machine a read took up to 9 s behind the process-wide Keychain lock, and an
     /// uncertain read cached nothing, so every call read again (median 20.5 s, 2026-11-13).
+    /// SB-410: a verdict given since that answer (a usage check's rejection, a renewal refused)
+    /// no longer sends the request to the Keychain either: it answers from the verdicts alone,
+    /// each account keeping the answer it had for its lineage and one with none needing a
+    /// sign-in, as when a read fails, and caches nothing; the next background pass reads the
+    /// vault and settles it. With no answer yet (no owner runs, or its first pass has not run)
+    /// it reads the vault as before: the refused lineages are a journal kept across restarts,
+    /// and only a read tells one the person has signed in again since.
     pub(crate) fn sign_in_known(&self, store: &Store) -> Vec<String> {
         let generation = self.verdict_generation();
-        if let Ok(last) = self.sign_in_last.lock() {
-            if let Some((at, ids)) = last.as_ref() {
-                if *at == generation {
-                    return ids.clone();
-                }
-            }
+        let answered = match self.sign_in_last.lock() {
+            Ok(last) => match last.as_ref() {
+                Some((at, ids)) if *at == generation => return ids.clone(),
+                Some(_) => true,
+                None => false,
+            },
+            Err(_) => false,
+        };
+        if answered {
+            self.sign_in_computed(store, false)
+        } else {
+            self.sign_in_required(store)
         }
-        self.sign_in_required(store)
     }
     pub(crate) fn sign_in_required(&self, store: &Store) -> Vec<String> {
         let generation = self.verdict_generation();
-        let ids = self.sign_in_computed(store);
+        let ids = self.sign_in_computed(store, true);
         if let Ok(mut last) = self.sign_in_last.lock() {
             *last = Some((generation, ids.clone()));
         }
         ids
     }
-    fn sign_in_computed(&self, store: &Store) -> Vec<String> {
+    /// `vault`: false answers without reading a stored credential (SB-410, `sign_in_known`).
+    fn sign_in_computed(&self, store: &Store, vault: bool) -> Vec<String> {
         let mut dead: Vec<(String, String)> = match self.dead.lock() {
             Ok(dead) => dead.iter().map(|(i, h)| (i.clone(), h.clone())).collect(),
             Err(_) => return vec![],
@@ -596,6 +609,24 @@ impl RefreshState {
                         .then(|| ids.contains(id))
                 })
         };
+        if !vault {
+            // SB-410: every read counted as uncertain; an account the store no longer holds
+            // reads as not found, as the vault would answer.
+            let held: Option<std::collections::HashSet<String>> = store
+                .snapshot()
+                .ok()
+                .map(|snapshot| snapshot.accounts.into_iter().map(|a| a.id).collect());
+            let mut ids: Vec<String> = dead
+                .iter()
+                .filter(|(id, hash)| {
+                    held.as_ref().is_none_or(|held| held.contains(id))
+                        && kept(id, hash).unwrap_or(true)
+                })
+                .map(|(id, _)| id.clone())
+                .collect();
+            ids.dedup();
+            return ids;
+        }
         // PRD-01: each read may wait seconds on the Keychain; off the async worker it shares.
         // N1 round 1: a read that failed (a `security` timeout, a locked keychain) says nothing
         // about the lineage: the account keeps the answer it had for that lineage, and nothing
@@ -2825,6 +2856,84 @@ mod tests {
         *vault.failures.lock().unwrap() = 1;
         assert_eq!(state.sign_in_required(&store), vec![a.clone()]);
         assert_eq!(state.sign_in_required(&store), vec![a.clone()]);
+    }
+    /// SB-410: a verdict given after the last answer sent `recovery`, `monitor status` and the
+    /// attention list to the vault, so a request waited behind a slow Keychain read (5 s under
+    /// load on a build machine, 2026-11-17). A read-only request now answers from the verdicts
+    /// alone: each account keeps the answer computed for its lineage, a new one needs a sign-in,
+    /// an account the store no longer holds is left out, and no read happens.
+    #[test]
+    fn a_read_only_answer_after_a_new_verdict_reads_no_credential() {
+        let root = tempfile::tempdir().unwrap();
+        let vault = Arc::new(CountingVault::default());
+        let store = Store::open(root.path().to_owned(), vault.clone()).unwrap();
+        for account in ["synthetic-a", "synthetic-b", "synthetic-c", "synthetic-d"] {
+            store
+                .upsert(
+                    account.into(),
+                    Provider::Claude,
+                    AuthKind::OAuth,
+                    "default".into(),
+                    expired(account),
+                    Some(identity(account)),
+                )
+                .unwrap();
+        }
+        let (a, b, c) = (
+            id_of(&store, "synthetic-a", "default"),
+            id_of(&store, "synthetic-b", "default"),
+            id_of(&store, "synthetic-c", "default"),
+        );
+        let state = RefreshState::default();
+        remember_dead(&state, &a, "synthetic-a-refresh");
+        // A lineage replaced since its refusal: the background pass reads it as signed in.
+        remember_dead(&state, &c, "synthetic-c-old");
+        assert_eq!(state.sign_in_required(&store), vec![a.clone()]);
+        let reads = vault.gets.load(Ordering::SeqCst);
+        assert_eq!(state.sign_in_known(&store), vec![a.clone()]);
+        // New verdicts after that answer: b refused, and an account removed meanwhile.
+        remember_dead(&state, &b, "synthetic-b-refresh");
+        let gone = id_of(&store, "synthetic-d", "default");
+        store.remove(&gone).unwrap();
+        remember_dead(&state, &gone, "synthetic-d-refresh");
+        let mut known = state.sign_in_known(&store);
+        known.sort();
+        let mut expected = vec![a.clone(), b.clone()];
+        expected.sort();
+        assert_eq!(known, expected);
+        assert_eq!(
+            vault.gets.load(Ordering::SeqCst),
+            reads,
+            "a read-only answer reads no credential"
+        );
+        // The background pass settles it with the vault.
+        let mut settled = state.sign_in_required(&store);
+        settled.sort();
+        assert_eq!(settled, expected);
+        assert!(vault.gets.load(Ordering::SeqCst) > reads);
+    }
+    /// SB-410 review round 1: with no answer yet (no owner runs, so a fresh state over the
+    /// journal of refused lineages) a lineage the person replaced since reads as signed in.
+    #[test]
+    fn with_no_answer_yet_a_replaced_lineage_is_read_from_the_vault() {
+        let root = tempfile::tempdir().unwrap();
+        let vault = Arc::new(CountingVault::default());
+        let store = Store::open(root.path().to_owned(), vault.clone()).unwrap();
+        store
+            .upsert(
+                "synthetic-a".into(),
+                Provider::Claude,
+                AuthKind::OAuth,
+                "default".into(),
+                expired("synthetic-a"),
+                Some(identity("synthetic-a")),
+            )
+            .unwrap();
+        let a = id_of(&store, "synthetic-a", "default");
+        let state = RefreshState::default();
+        remember_dead(&state, &a, "synthetic-a-replaced-since");
+        assert!(state.sign_in_known(&store).is_empty());
+        assert!(vault.gets.load(Ordering::SeqCst) > 0);
     }
     /// N1 round 3 (adversarial): a failed read while the token holder map is built must not leave
     /// the holder unknown until a credential is written (attribution Unresolved for a stored
