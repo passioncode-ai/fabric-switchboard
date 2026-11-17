@@ -60,10 +60,76 @@ These are part of the target state and come first in the waves:
 
 ## Waves
 
-Filled in from the sections once they are complete.
+Sections: 01 (19 capabilities: 10 done, 8 partial, 1 broken), 02 (20: 6 done, 13 partial, 1
+missing), 03 (19: 4 done, 14 partial, 1 broken), 04 (22: 5 done, 17 partial), 05 (code
+structure: refactors A1 to A7, B1 to B3 and the splits).
+
+### W1. What the operator named today, and the P1s next to it
+
+| Item | What | Row | State |
+|---|---|---|---|
+| W1.1 | The session pool keeps a share for board work; counting per session (quiet, limit-stopped, waiting and held sessions count out); a refused board start's wait and reason visible without the one-hour cutoff (03 §16) | SB-417 | building |
+| W1.2 | Turning an account off: a person's switch no automatic process clears; six leaks closed (Claude Code renewal, elsewhere mark, recall, lease, call-back undo, restore); Kimi accounts too; "off since" on every surface (01 §3, 04 §3) | SB-418, DEC-0027 | building |
+| W1.3 | A restore saves every managed switching policy as off, against DEC-0008 (`core/backup.rs:722-727`; SCN-030) (01) | new row | next |
+| W1.4 | Money paths without a ceiling: Hermes on a named Anthropic key, a chain pinning another group's key (SB-96), a folder moved out of a capped group (SB-216), the machine ceiling and the pay-per-token meter (02) | SB-96, SB-216, new row | next |
+| W1.5 | MCP annotations: `switchboard_account_remove` not destructive, write tools idempotent, network tools `openWorldHint: false` (`mcp.rs:226-246`); plugin hooks silent without `switchboard` on PATH (04) | new row | next |
+
+### W2. Devices of an organization (02, 04 §7)
+
+Signed invitation (the envelope settings files use), `switchboard org join` writing the restricted
+key line itself, machine groups tagged with their organization, a device registry and the
+Machines page (SB-374), one act to move a seat between devices, leave and remove calling every
+seat back, a Windows transport for `ssh-serve`, the end-to-end organization walk (SB-371). The live
+run on a teammate's machine (SB-403 S5) needs the person: install, tailnet, first join.
+
+### W3. The test suite holds under load (05 A1 to A6)
+
+A1 step durations and a test-name list, A2 Windows builds of the proxy tests and `src-tauri` in
+both Windows checks (SB-406 item 7), A3 SB-416 at its cause (an injectable clock): building.
+Then A4 and A5 (29 wall-time assertions to paused time, a nightly stress run under load), A6
+golden answers for every read surface on the CLI and MCP.
+
+### W4. Structure (05 A7, B1 to B3 and the splits; 01, 02, 04 Refactor parts)
+
+A7 operation facts as one method naming every variant (the 92-entry `matches!` list), B1 one
+process-table module, B2 one remote-machine transport, B3 all operation facts in one place;
+then pure moves out of `lib.rs` (`operation.rs`, `owner.rs`, the long arms into their modules,
+tests into files), one placement record per account, the schema ladder as a table, the CLI's
+`main.rs` and the window's `src/main.ts` split by page with DOM tests, one registry generating
+the window, CLI and MCP parity table and a test that every window action has its twins, shared
+typed answers, errors as codes.
+
+### W5. Fabric Sessions leaves Switchboard (03, 05)
+
+The launch-record store and terminal helpers into `fabric-sessions-core` first, then
+`session_host`, `duty`, `restarts`, recovery's storage half, `session_watch` and `resumable`;
+Switchboard calls the core; the service binary runs them, so quitting or updating Switchboard
+no longer stops them (docs/plans/2026-11-16-session-service/plan.md).
+
+### W6. Docs and board say what is true (all sections)
+
+SPEC §2, §5, §8, §9, §14 against CONTRACTS and DEC-0008; DEC-0007 and `suggest.rs:10-12`
+against SB-171; `ORGANIZATION.md:284` and `src/main.ts:1179` (and SCN-070) against DEC-0022; the
+terminal-hook notice pointing at Groups (`src/ui-logic.ts:1705`, `suggestions.rs:107`); DEC-0018
+and DEC-0020 reserved but never written; SCN-096 and SCN-097 missing from the scenario index;
+rows whose status is behind what shipped (SB-352, SB-357, SB-367, SB-385, SB-391, SB-401, SB-403,
+SB-404, SB-405, SB-407, SB-411, SB-413, SB-415, SB-243).
+
+### W7. Acceptance that needs the person
+
+SB-01 live providers, SB-06 a running session picking up a switch, SB-178 renewal across two
+machines, Windows SB-02 and SB-243, R1.7 a live restart wave on this MacBook, SB-403 S5. Each is
+prepared to the last step a person must take and named with its link.
 
 ## State
 
 | Wave | Items | State |
 |---|---|---|
 | W0 | in flight before this plan: PR #815 (SB-414, SB-408), 0.7.115 with SB-410 and SB-415 | in progress |
+| W1 | W1.1, W1.2 building; W1.3 to W1.5 next | in progress |
+| W2 | devices of an organization | planned |
+| W3 | A1 to A3 building | in progress |
+| W4 | structure | planned |
+| W5 | Fabric Sessions | planned |
+| W6 | docs and board | next |
+| W7 | acceptance by the person | planned |
