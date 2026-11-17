@@ -1452,7 +1452,9 @@ mod runs {
         wait_for(&b.tools.path().join("args"));
         let record = crate::launches::get(b.root.path(), &id).unwrap();
         let due = record["dispatch"]["deadline"].as_i64().unwrap();
-        assert_eq!(due - record["launched_at"].as_i64().unwrap(), 3600);
+        // The deadline is taken a moment before the record's start, a second or more under load.
+        let limit = due - record["launched_at"].as_i64().unwrap();
+        assert!((3540..=3600).contains(&limit), "{limit}");
         let log = b
             .root
             .path()
