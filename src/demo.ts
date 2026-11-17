@@ -336,6 +336,7 @@ export function createDemoAdapter(): Adapter {
   // on, the demo shows one account lent between them.
   let demoCap: number | null = null;
   let demoDutyOn = true;
+  let demoOwnSignIn = true;
   let balanceGroups: string[] = []; let balanceAllNew = false; let balanceBackup: string[] = [];
   const balanceStatus = () => {
     const pools = ['default', ...(state.projects ?? []).map((p) => p.pool)];
@@ -769,6 +770,7 @@ export function createDemoAdapter(): Adapter {
       const used = 2;
       return { cap: demoCap, used, free: demoCap === null ? null : Math.max(0, demoCap - used), at_capacity: demoCap !== null && used >= demoCap, total: 5, quiet: 1, quiet_after_minutes: 30 };
     },
+    async ownSignIn(on) { await pause(); if (typeof on === 'boolean') demoOwnSignIn = on; return { own_sign_in: demoOwnSignIn ? 'on' : 'off', on: demoOwnSignIn }; },
     async duty(change) {
       await pause();
       if (typeof change?.on === 'boolean') demoDutyOn = change.on;

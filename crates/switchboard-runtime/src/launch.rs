@@ -2739,8 +2739,11 @@ fn launch_core(
     if account.provider == Provider::Claude {
         crate::carry::claude_state(&home, continuation.map(|_| working_directory.as_path()))?;
         // SB-358: the person's MCP sign-ins (Figma, Sentry...) from their other Claude homes, as
-        // access-token mirrors; never a failure of the launch.
-        (host.mcp_sign_ins)(root, &home);
+        // access-token mirrors; never a failure of the launch. SB-403 S3: not while the person's
+        // own sign-in is off limits, since they live in the ordinary home's credential item.
+        if !crate::own_sign_in::is_off(root) {
+            (host.mcp_sign_ins)(root, &home);
+        }
         let settings_path = home.join("settings.json");
         let settings = crate::carry::claude_settings(user.as_deref(), None);
         // Managed: the account comes through the proxy, so the file holds only the operator's
@@ -5796,6 +5799,44 @@ mod tests {
                 EXTRA_ARGS_INVALID
             );
         }
+    }
+    #[cfg(not(windows))]
+    #[tokio::test]
+    async fn with_own_sign_in_off_a_launch_carries_no_mcp_sign_in() {
+        // SB-403 S3: the person's MCP sign-ins live in the ordinary Claude home's credential
+        // item; with their own sign-in off limits, a launch never reads it.
+        fn must_not_carry(_: &Path, _: &Path) {
+            panic!("a launch read the ordinary home's MCP sign-ins");
+        }
+        fn terminal_must_not_open(_: &Path) -> Result<(), String> {
+            panic!("an in-place launch opened Terminal");
+        }
+        let f = fixture();
+        crate::own_sign_in::set(&f.root, false).unwrap();
+        let proxy = ProxyHandle::start(f.store.clone()).await.unwrap();
+        let id = f.add(Provider::Claude, AuthKind::OAuth, "default", CLAUDE_OAUTH);
+        let host = Host {
+            binary: synthetic_program,
+            agent_cli: synthetic_agent_cli,
+            board: no_board,
+            start_terminal: terminal_must_not_open,
+            user_scope: no_user_scope,
+            mcp_sign_ins: must_not_carry,
+        };
+        let (_, script) = launch_full(
+            &f.root,
+            &f.store,
+            &proxy,
+            &id,
+            "isolated",
+            &f.project,
+            &host,
+            None,
+            &[],
+            true,
+        )
+        .unwrap();
+        assert!(script.is_some());
     }
     /// Runs an in-place session script with the provider program replaced by a recorder, and
     /// returns the arguments and environment the agent would have started with.

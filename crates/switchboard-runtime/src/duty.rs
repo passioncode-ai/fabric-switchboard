@@ -273,6 +273,14 @@ pub fn observe(root: &Path) -> Vec<Seen> {
     seen
 }
 
+/// SB-403 S3: while `off` (own sign-in off limits), only the sessions whose Claude home is one of
+/// Switchboard's own (under its data folder) stay; the person's own sessions are left alone.
+pub(crate) fn keep_ours(root: &Path, seen: &mut Vec<Seen>, off: bool) {
+    if off {
+        seen.retain(|s| s.config.starts_with(root));
+    }
+}
+
 /// One process as `ps` reads it: parent, age and CPU time in seconds, command line.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Row {
@@ -566,6 +574,9 @@ fn restarts(lines: &[Value], session: &str, now: i64) -> usize {
 pub fn status(root: &Path, now: i64) -> Result<Value, String> {
     let set = settings(root)?;
     let mut seen = observe(root);
+    // SB-403 S3: with the person's own sign-in off limits, their own Claude Code sessions are
+    // theirs: only sessions in Switchboard's own homes are looked at.
+    keep_ours(root, &mut seen, crate::own_sign_in::is_off(root));
     compare_cpu(&mut seen, now, false);
     let copies = newer_copies(&seen, now);
     let stopped = crate::recovery::live_stop_sessions(root, now);
@@ -628,6 +639,9 @@ pub fn check(root: &Path, now: i64, dry_run: bool) -> Result<Value, String> {
     let begun = std::time::Instant::now();
     let set = settings(root)?;
     let mut seen = observe(root);
+    // SB-403 S3: with the person's own sign-in off limits, their own Claude Code sessions are
+    // theirs: only sessions in Switchboard's own homes are looked at.
+    keep_ours(root, &mut seen, crate::own_sign_in::is_off(root));
     // Only the five-minute checks keep their CPU samples: a stall is measured across them.
     compare_cpu(&mut seen, now, !dry_run);
     let copies = newer_copies(&seen, now);
@@ -1120,6 +1134,20 @@ mod tests {
             cpu: Some(10.0),
             cpu_quiet: Some(true),
         }
+    }
+
+    #[test]
+    fn with_own_sign_in_off_only_switchboards_own_sessions_are_looked_at() {
+        let root = Path::new("/data/switchboard");
+        let mut own = seen("idle", 600, 2, Some(600));
+        own.config = root.join("homes/a1");
+        let persons = seen("idle", 600, 2, Some(600));
+        let mut all = vec![own.clone(), persons];
+        keep_ours(root, &mut all, false);
+        assert_eq!(all.len(), 2);
+        keep_ours(root, &mut all, true);
+        assert_eq!(all.len(), 1);
+        assert_eq!(all[0].config, own.config);
     }
 
     #[test]

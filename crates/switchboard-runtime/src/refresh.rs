@@ -883,13 +883,19 @@ fn reserve_due<'a>(
     force: bool,
 ) -> Step<'a> {
     let time = now();
-    let Some(account) = store
-        .snapshot()
-        .ok()
-        .and_then(|s| s.accounts.into_iter().find(|a| a.id == id))
-    else {
+    let Some((account, lease_over)) = store.snapshot().ok().and_then(|s| {
+        // SB-403: a seat delegated here is renewed only inside its lease.
+        let lease_over = s.delegated.get(id).is_some_and(|d| d.ended(time));
+        s.accounts
+            .into_iter()
+            .find(|a| a.id == id)
+            .map(|a| (a, lease_over))
+    }) else {
         return Step::Done(Outcome::NotNeeded);
     };
+    if lease_over {
+        return Step::Done(Outcome::NotNeeded);
+    }
     if account.provider != Provider::Claude || account.kind != AuthKind::OAuth {
         return Step::Done(Outcome::NotNeeded);
     }

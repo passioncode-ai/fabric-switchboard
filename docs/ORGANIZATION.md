@@ -143,6 +143,73 @@ moves an account without you.
 
 **Check:** in `onboard --status` the step `seat` reads `done`.
 
+## A teammate's computer
+
+An administrator can give a teammate one of the organization's subscriptions for console sessions
+on the teammate's own computer, without the teammate ever signing in with it, and take it back at
+any time (SB-403, [DEC-0024](DECISIONS.md#dec-0024-a-subscription-is-delegated-to-a-teammates-machine-as-a-guest-under-a-lease)).
+More seats are added the same way. The teammate keeps their own subscription in Claude Desktop and
+in the ordinary Claude Code: Switchboard never touches either.
+
+On the teammate's computer:
+
+1. Install Switchboard (section 1) and make the organization's group with the folders the seat
+   serves (section 3). Note the group's id (`switchboard project list`).
+2. Make the computer reachable from the administrator's over ssh without a password prompt:
+   Remote Login on (macOS: System Settings → General → Sharing), both computers on one network or
+   tailnet. This is a person's step; nothing here changes the network.
+3. Turn your own sign-in off, so Switchboard never reads or changes it: Settings → *Your own
+   sign-in*, or in a terminal:
+
+   ```sh
+   switchboard own-sign-in off
+   ```
+
+4. Admit the administrator's computer only through Switchboard's restricted entry: add one line
+   to `~/.ssh/authorized_keys` with its ssh public key and the key `switchboard settings signer`
+   prints on the administrator's computer:
+
+   ```text
+   command="/Applications/Fabric Switchboard.app/Contents/MacOS/switchboard ssh-serve --sender-key <its settings signer key>",restrict ssh-ed25519 AAAA… administrator
+   ```
+
+   On Linux use the installed `switchboard` path. That key line runs only `switchboard ssh-serve`,
+   which answers the calls a delegation needs (save the seat, its usage, its lease, the call back)
+   and refuses everything else: no shell, no other account, no folder is shown to the other
+   computer.
+
+On the administrator's computer:
+
+```sh
+switchboard accounts send <account id> --to <teammate's user>@<host> --pool <group id there> --delegate --lease-hours 48
+```
+
+or in the window, the account's ⋯ → *Move to another machine…* → *Delegate to a teammate*. The
+seat lands in that group as a guest: the teammate's Switchboard serves it only in that group's
+folders and never moves it on, lends it, gives it to an agent or makes it the ordinary sign-in.
+The teammate runs `claude` (or `codex`) in one of the group's folders; the request goes through
+Switchboard to the delegated seat.
+
+The lease keeps it honest: each read of the teammate's computer (every 15 minutes) extends it to
+48 hours ahead. If the administrator's computer cannot reach it for that long, the seat there is
+switched off and its sign-in removed.
+
+To take it back:
+
+```sh
+switchboard accounts recall <account id>
+```
+
+or *Call back* on its row. The teammate's computer gives the sign-in back, its copy is removed and
+the removal is proved.
+
+**Check:** on the teammate's computer, `switchboard accounts list` shows the seat in its group;
+Claude Desktop and a `claude` started outside the group's folders run on the teammate's own
+subscription as before.
+
+The administrator's Sessions page, `machines --live` and settings sync do not reach a teammate's
+computer: its restricted entry refuses them.
+
 ## 5. Terminals in the organization's folders
 
 When a group belongs to an organization, the installed app adds one marked block to the start

@@ -265,7 +265,19 @@ pub fn write(
     keys: &dyn BackupKey,
     now: i64,
 ) -> Result<Option<Info>, String> {
-    let (snapshot, credentials) = store.export()?;
+    let (mut snapshot, mut credentials) = store.export()?;
+    // SB-403 (DEC-0024): a seat another machine delegated here is that machine's: a backup never
+    // carries it, so a restore cannot bring back a seat its sender called back or let lapse.
+    let guests: Vec<String> = snapshot.delegated.keys().cloned().collect();
+    for id in &guests {
+        credentials.remove(id);
+        snapshot.memberships.remove(id);
+        snapshot.also_organizations.remove(id);
+    }
+    snapshot.accounts.retain(|a| !guests.contains(&a.id));
+    snapshot.routes.retain(|_, id| !guests.contains(id));
+    snapshot.rules.retain(|r| !guests.contains(&r.account_id));
+    snapshot.delegated.clear();
     if credentials.is_empty() {
         return Ok(None);
     }

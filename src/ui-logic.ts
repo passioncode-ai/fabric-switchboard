@@ -122,6 +122,8 @@ export function eventAction(action: string): string {
     case 'balancing': return t('Balancing');
     // SB-355: an account joined its machine's group, or came back from it.
     case 'machine': return t('Machine group');
+    // SB-403: a seat another machine delegated here.
+    case 'delegation': return t('Delegated seat');
     // UX-26: a word this window does not know yet is framed in the interface language, never shown bare.
     default: return t('Other event ({code})', { code: action.replaceAll('.', ' · ').replaceAll('_', ' ') });
   }
@@ -170,6 +172,11 @@ export function eventDetail(detail: string): string {
     case 'returned': return t('back in its own group');
     case 'joined': return t('moved to its machine\'s group');
     case 'left': return t('back on this computer');
+    // SB-403: a delegated seat saved here, its lease run out, called back, or in use again.
+    case 'granted': return t('delegated here');
+    case 'ended': return t('lease ran out, sign-in removed');
+    case 'surrendered': return t('given back to the machine that delegated it');
+    case 'restored': return t('in use again here');
     default: return /^[2-5]xx$/.test(detail) ? t('HTTP {status}', { status: detail }) : detail.replaceAll('_', ' ');
   }
 }
@@ -692,7 +699,7 @@ const KIND_ACTIONS: Record<'switches' | 'sign_ins' | 'groups' | 'moves', readonl
   switches: ['account_selected', 'activation', 'rotation', 'fallback'],
   sign_ins: ['login', 'account_added', 'kimi_account'],
   groups: ['project', 'project_rule', 'balancing'],
-  moves: ['machine', 'assignment'],
+  moves: ['machine', 'assignment', 'delegation'],
 };
 const FAILURE_DETAILS = new Set(['failed', 'unauthorized', 'rate_limited', 'upstream_error', 'network_error', 'connection_failed', 'timeout', 'rejected', 'aborted', 'unavailable', '4xx', '5xx']);
 /** WF-11.1: every kind an event is of; `other` only when no action kind names it. */

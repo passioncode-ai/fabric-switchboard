@@ -276,7 +276,7 @@ impl Pass {
         for account in due.into_iter().take(CHECKS_PER_PASS) {
             let _ = check(
                 &runtime.store,
-                runtime.native,
+                runtime.native(),
                 &runtime.refresh,
                 &account.id,
                 Some(&runtime.mutations),
@@ -287,7 +287,7 @@ impl Pass {
         if claude && native_rotation_on(&runtime.store) {
             // A native switch files the live lineage under its account: know its owner
             // first (network, outside the lock; at most once a minute per lineage).
-            crate::refresh::learn_live_owner(&runtime.store, runtime.native, &runtime.refresh)
+            crate::refresh::learn_live_owner(&runtime.store, runtime.native(), &runtime.refresh)
                 .await;
         }
         // W4 items 2 and 14: Claude Code's sign-in and the accounts that need a new sign-in are
@@ -369,6 +369,19 @@ impl Pass {
         // thread of their own; nothing at all without a machine group.
         if let Ok(snapshot) = runtime.store.snapshot() {
             crate::remote_usage::tick(&runtime.root, &snapshot, time);
+            // SB-403 (DEC-0024): a seat another machine delegated here whose lease ran out is
+            // switched off and its credential removed (a vault delete, off the async worker).
+            let due = snapshot.leases_due(time);
+            if !due.is_empty() {
+                let store = runtime.store.clone();
+                let ended = crate::blocking::run(move || {
+                    due.iter().filter(|id| store.end_lease(id).is_ok()).count()
+                });
+                crate::oplog::event(
+                    "delegation_ended",
+                    &[("ended", crate::oplog::Field::Number(ended as i64))],
+                );
+            }
         }
         // SB-379: the one-minute watch of live sessions. It reads no account, so a snapshot that
         // could not be read never skips it (SB-397 W0.3).
@@ -396,14 +409,14 @@ impl Pass {
     async fn sync_sources(&mut self, runtime: &Runtime, claude: bool, time: i64) {
         // Network first, outside the lock: who owns a lineage not seen before.
         if claude {
-            crate::refresh::learn_live_owner(&runtime.store, runtime.native, &runtime.refresh)
+            crate::refresh::learn_live_owner(&runtime.store, runtime.native(), &runtime.refresh)
                 .await;
         }
         // Claude Swap's files are read outside the lock; adopting its newer generations
         // happens under it, with the live sync. Claude Swap only matters for saved Claude
         // accounts.
         let activity = if claude {
-            (runtime.native.swap_activity)()
+            (runtime.native().swap_activity)()
         } else {
             crate::external::SwapActivity::default()
         };
@@ -412,7 +425,7 @@ impl Pass {
             .refresh
             .set_swap_activity(activity.running, activity.switching);
         let signature = if claude {
-            (runtime.native.swap_signature)()
+            (runtime.native().swap_signature)()
         } else {
             None
         };
@@ -422,7 +435,7 @@ impl Pass {
             signature,
             self.swap_last_signature,
         );
-        let read = due.then(runtime.native.swap);
+        let read = due.then(runtime.native().swap);
         // After a stop, a row that could not be read may hold Swap's last renewal: read
         // again next pass rather than mark the files as seen.
         let partial = matches!(&read, Some(Ok(batch)) if !running && batch.failed > 0);
@@ -450,7 +463,7 @@ impl Pass {
         // waits on the Keychain (a `security` call on a swapping machine took up to 12 s) no
         // longer holds control writes behind it. Under the transaction the same calls answer
         // from the watch, or read again only if a source changed in between.
-        let current = runtime.native.current;
+        let current = runtime.native().current;
         let primed = crate::blocking::run(|| prime_live_sources(current, claude));
         // Claude Code left its token expired: renew it under Claude Code's locks so managed
         // sessions and quota checks on that account keep working. SB-163: the grant runs
@@ -460,7 +473,7 @@ impl Pass {
             && !matches!(
                 crate::refresh::renew_idle_live(
                     &runtime.store,
-                    runtime.native,
+                    runtime.native(),
                     &runtime.refresh,
                     Some(&runtime.mutations),
                 )
@@ -495,7 +508,7 @@ impl Pass {
             ),
             None => sync_live_sources_with(
                 &runtime.store,
-                &runtime.native.current,
+                &runtime.native().current,
                 &runtime.refresh,
                 SyncMode::Write(None),
             ),
@@ -955,7 +968,7 @@ async fn renew_due(runtime: &Runtime, time: i64, schedule: &mut RenewSchedule) {
         // is on the network, control writes go on.
         let outcome = crate::refresh::ensure_fresh_with(
             &runtime.store,
-            runtime.native,
+            runtime.native(),
             &runtime.refresh,
             &id,
             false,
@@ -1131,7 +1144,7 @@ fn scan_limits(runtime: &Runtime, native_sources: bool, time: i64) {
         return;
     };
     let profile = native_sources
-        .then(|| (runtime.native.current)(Provider::Claude).ok())
+        .then(|| (runtime.native().current)(Provider::Claude).ok())
         .flatten();
     let native = profile.as_ref().map(|p| {
         let ids = crate::matching_accounts(&runtime.store, Provider::Claude, &p.identity)
@@ -1201,7 +1214,7 @@ fn rotate_inputs(runtime: &Runtime, native_sources: bool) -> RotateInputs {
                 .any(|p| p.enabled && p.target == "claude_cli")
         });
     RotateInputs {
-        native: wants_native.then(|| (runtime.native.current)(Provider::Claude)),
+        native: wants_native.then(|| (runtime.native().current)(Provider::Claude)),
         sign_in: runtime.refresh.sign_in_required(&runtime.store),
     }
 }
@@ -1239,7 +1252,7 @@ fn rotate_with(
         } else if native_sources {
             // Read before the transaction; after a native switch in this pass, read again.
             native
-                .get_or_insert_with(|| (runtime.native.current)(Provider::Claude))
+                .get_or_insert_with(|| (runtime.native().current)(Provider::Claude))
                 .as_ref()
                 .ok()
                 .and_then(|profile| {
@@ -1300,7 +1313,7 @@ fn rotate_with(
                         &runtime.store,
                         id,
                         current.as_deref(),
-                        runtime.native,
+                        runtime.native(),
                         Some(&runtime.refresh),
                     )
                 } else {

@@ -20,6 +20,7 @@ pub mod external_keychain {
     };
 }
 mod chains;
+pub mod delegation;
 pub mod language;
 pub mod machines;
 pub mod organizations;
@@ -37,6 +38,7 @@ pub mod windows;
 
 pub use chains::{provider_agent, workflow_id_valid, Chain, ChainScope, Executor, MAX_EXECUTORS};
 pub use credential::Credential;
+pub use delegation::Delegation;
 pub use machines::{is_machine_pool, Machine, MachineRef};
 pub use organizations::{Attribution, By, Organization};
 pub use projects::{
@@ -329,6 +331,10 @@ pub struct Snapshot {
     /// person's word once (`Snapshot::retire_domain_rule`). Omitted while false.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub domain_rule_retired: bool,
+    /// SB-403 (DEC-0024): accounts another machine delegated to this one, by account id: the
+    /// sender's key, the group it stays in and its lease (`delegation`). Omitted when empty.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub delegated: BTreeMap<String, delegation::Delegation>,
 }
 
 /// A process-lifetime exclusive owner of one private metadata directory.
@@ -471,6 +477,9 @@ pub(crate) fn event_valid(action: &str, detail: &str) -> bool {
         "balancing" => matches!(detail, "lent" | "returned"),
         // SB-355: an account joined its machine's group, or came home from it.
         "machine" => matches!(detail, "joined" | "left"),
+        // SB-403: a seat another machine delegated here: saved, its lease over, called back or
+        // used again after a call back that did not take it.
+        "delegation" => matches!(detail, "granted" | "ended" | "surrendered" | "restored"),
         "account_added" | "account_updated" | "account_removed" | "account_selected" => {
             detail == "success"
         }
@@ -591,6 +600,7 @@ pub(crate) fn validate_snapshot(s: &Snapshot) -> Result<(), String> {
     agent_keys::validate_agent_keys(s)?;
     kimi_accounts::validate_kimi_accounts(s)?;
     machines::validate_machines(s)?;
+    delegation::validate(s)?;
     if s.locations.len() > MAX_ACCOUNTS
         || s.locations
             .iter()
@@ -1018,6 +1028,7 @@ impl Store {
         candidate.domain_rule_retired = !candidate.organizations.is_empty();
         validate_snapshot(&candidate)?;
         projects::tokens_keys_stay(state, &candidate)?;
+        delegation::stays(state, &candidate)?;
         let started = std::time::Instant::now();
         let written = persistence::write(&self.root, &candidate);
         self.slowest_write.fetch_max(
@@ -1039,6 +1050,7 @@ impl Store {
         candidate.domain_rule_retired = !candidate.organizations.is_empty();
         validate_snapshot(&candidate)?;
         projects::tokens_keys_stay(state, &candidate)?;
+        delegation::stays(state, &candidate)?;
         *state = candidate;
         self.republish(state);
         let _ = self.pending_since.compare_exchange(
@@ -1500,7 +1512,30 @@ impl Store {
         pool: String,
         credential: Credential,
     ) -> Result<Account, String> {
-        self.save_account_routed(label, provider, kind, pool, credential, None, false, true)
+        self.save_account_routed(
+            label, provider, kind, pool, credential, None, false, true, None,
+        )
+    }
+    /// SB-403: a new account another machine delegated, with its record, in one publish.
+    pub(crate) fn save_delegated(
+        &self,
+        label: String,
+        provider: Provider,
+        pool: String,
+        credential: Credential,
+        delegation: delegation::Delegation,
+    ) -> Result<Account, String> {
+        self.save_account_routed(
+            label,
+            provider,
+            AuthKind::OAuth,
+            pool,
+            credential,
+            None,
+            false,
+            false,
+            Some(delegation),
+        )
     }
     pub fn upsert(
         &self,
@@ -1541,6 +1576,7 @@ impl Store {
             external_identity,
             upsert,
             upsert,
+            None,
         )
     }
     #[allow(clippy::too_many_arguments)]
@@ -1554,6 +1590,7 @@ impl Store {
         external_identity: Option<ExternalIdentity>,
         upsert: bool,
         route_key: bool,
+        delegation: Option<delegation::Delegation>,
     ) -> Result<Account, String> {
         if !label_valid(&label)
             || !pool_valid(&pool)
@@ -1637,6 +1674,17 @@ impl Store {
                             |g| g.pool == pool,
                         )) =>
                 {
+                    if let Some(d) = &delegation {
+                        // A delegation is born with its account: a save that matched a row
+                        // already here is refused, and that row's credential put back.
+                        if account.id != save.new_id {
+                            drop(state);
+                            self.restore_credential(&id, old.as_ref())?;
+                            return Err(delegation::DELEGATED_STAYS.into());
+                        }
+                        candidate.delegated.insert(account.id.clone(), d.clone());
+                        append_event(&mut candidate, "delegation", Some(&account.id), "granted");
+                    }
                     if tokens && candidate.tokens_group().is_none() {
                         candidate
                             .projects
@@ -2291,6 +2339,20 @@ impl Store {
     /// deletes; the deletion itself still runs under the metadata lock, so a selection cannot
     /// route to the account between the route check and the deletion.
     pub fn remove(&self, id: &str) -> Result<(), String> {
+        // SB-403: a seat another machine delegated goes only by that machine's word, or once its
+        // lease has run out (its credential already gone).
+        if self
+            .lock()?
+            .delegated
+            .get(id)
+            .is_some_and(|d| d.ended_at.is_none())
+        {
+            return Err(delegation::DELEGATED_NOT_REMOVED.into());
+        }
+        self.remove_any(id)
+    }
+    /// [`Store::remove`] without the delegated seat's check (the sender's own removal).
+    pub(crate) fn remove_any(&self, id: &str) -> Result<(), String> {
         let _writes = self.credential_lock()?;
         let mut state = self.lock()?;
         if state.routes.values().any(|v| v == id) {
@@ -2316,6 +2378,7 @@ impl Store {
         candidate.locations.remove(id);
         candidate.assigned_to.remove(id);
         candidate.returns_to.remove(id);
+        candidate.delegated.remove(id);
         chains::prune(&mut candidate);
         append_event(&mut candidate, "account_removed", Some(id), "success");
         self.publish(&mut state, candidate)?;
@@ -2369,6 +2432,9 @@ impl Store {
             return Err(ASSIGNEE_INVALID.into());
         }
         let mut state = self.lock()?;
+        if to.is_some() && state.delegated.contains_key(id) {
+            return Err(delegation::DELEGATED_NOT_GIVEN.into());
+        }
         let mut candidate = state.clone();
         let a = candidate
             .accounts

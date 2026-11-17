@@ -86,7 +86,7 @@ export interface Adapter {
   /** SB-175: mark an account as used on another machine (disabled here), or clear the mark. */
   /** SB-284: `location` says where it works (blank clears it). */ markElsewhere(id: string, on: boolean, location?: string): Promise<void>;
   /** SB-322: gives an account to an agent (`to` names it), or takes it back (`to` null). */ assignAccount(id: string, to: string | null): Promise<void>;
-  /** SB-283: moves a sign-in to another machine over ssh; `pool` is its group there. */ sendAccount(id: string, to: string, pool: string): Promise<void>;
+  /** SB-283: moves a sign-in to another machine over ssh; `pool` is its group there. SB-403: `delegate` delegates it to a teammate's machine with a lease of `leaseHours` (48 by default). */ sendAccount(id: string, to: string, pool: string, delegate?: { leaseHours?: number } | null): Promise<void>;
   /** SB-315: takes a moved sign-in back from `from`, the machine the move named (null: its machine group's); SB-355: into group `pool` here (null: the one it left). */ recallAccount(id: string, from: string | null, pool?: string | null): Promise<Placement | void>;
   /** SB-355: the machine groups read over ssh, each with its accounts' copies there. */ machinesLive(): Promise<MachinesLive>;
   /** SB-366: the machine groups with their last background read, from a file (no ssh). */ machinesList(): Promise<MachinesList>;
@@ -171,6 +171,8 @@ export interface Adapter {
   capacity(change?: { cap?: number; clear?: boolean } | null): Promise<CapacityStatus>;
   /** SB-384: the session duty officer: its settings, what it did and what a check would do now. */
   duty(change?: { on?: boolean; run?: boolean } | null): Promise<DutyStatus>;
+  /** SB-403 S3: whether Switchboard reads or changes the person's own Claude Code and Codex sign-in here; `on` changes it. */
+  ownSignIn(on?: boolean | null): Promise<OwnSignIn>;
   repositoryMap(under: string[]): Promise<import('./ui-logic').RepositoryMap>;
   /** SB-145: what the proxy relayed in the last `days` days. */
   statistics(days: number): Promise<import('./ui-logic').Statistics>;
@@ -345,6 +347,8 @@ export type MachineReadStatus = 'read' | 'unreachable' | 'no_switchboard' | 'too
 export interface MachineSessions { machine: string; status: MachineReadStatus; rows?: SessionRow[]; counts?: Record<SessionGroup, number>; read_at: number }
 export interface SessionsEverywhere { here: SessionRows; machines: MachineSessions[] }
 /** SB-378: `switchboard capacity`, this computer's cap on working coding sessions. */
+/** SB-403 S3 (DEC-0024): the person's own sign-in, read and changed by Switchboard or off limits. */
+export interface OwnSignIn { own_sign_in: 'on' | 'off'; on: boolean }
 /** SB-384 (DEC-0018): the session duty officer. */
 export interface DutySettings { on: boolean; stuck_minutes: number; waiting_minutes: number; idle_minutes: number; max_age_hours: number }
 export interface DutyLine { at?: number; action: 'restart' | 'close'; reason: string; outcome?: string; session: string; folder: string; pid: number; host?: string }

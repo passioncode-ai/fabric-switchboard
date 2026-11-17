@@ -332,12 +332,14 @@ pub fn room(
         .filter(|used| used.is_finite() && *used < limit)
 }
 /// An account balancing may count or move at all: a subscription sign-in, enabled, not used on
-/// another machine and not given to an agent.
+/// another machine, not given to an agent and not a seat another machine delegated here
+/// (SB-403: a guest is never lent).
 fn usable(snapshot: &Snapshot, account: &Account) -> bool {
     account.enabled
         && account.kind == AuthKind::OAuth
         && !snapshot.elsewhere.contains_key(&account.id)
         && !snapshot.is_assigned(&account.id)
+        && !snapshot.is_delegated(&account.id)
 }
 /// The latest reset among the account's own windows, to prefer the one whose room lasts longer.
 fn latest_reset(account: &Account) -> i64 {

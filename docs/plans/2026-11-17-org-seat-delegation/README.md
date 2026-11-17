@@ -114,14 +114,50 @@ wave table at the end. Decision: [DEC-0022](../../DECISIONS.md#dec-0022-an-organ
   re-keying would move every existing home and sign-in. Managed launches run in each group's runtime
   and are not affected. Recorded as a known limitation in DEC-0022 and CONTRACTS; a board row follows.
 
+- **D-21 (S2).** `ssh-serve` answers exactly the calls `accounts send`, `accounts recall`, the
+  machine proof and the background read make, plus the lease: `machines prove`, `accounts list`,
+  `project list`, `org list`, `org assign` (a seat of the caller), `accounts add --delegated`,
+  `usage`, `accounts surrender`, `accounts lease`, `accounts remove`. Lists are cut to the caller's
+  seats and to ids and names (no folder, no other account). `status`, `sessions`, `launch`,
+  `settings import` and `org add` are refused, so the administrator's Sessions page,
+  `machines --live` and settings sync do not reach a teammate's computer. The command is read as
+  single-quoted words, never through a shell; anything a shell would expand is refused.
+- **D-22 (S2).** The sender's identity is its settings signing key (SB-272), named in the forced
+  command (`--sender-key`); every call that touches a seat names it too and must equal it. The same
+  words work over a plain ssh (the administrator's own second machine), where they are only a claim.
+  The receiving side proves itself as before (SB-357).
+- **D-23 (S2).** A guest stays in the group it was delegated into (not only "never the default
+  group"): no move, share or loan at all, so the rule is one line checked on every publication
+  (`delegation::stays`); a backup never carries a guest.
+- **D-24 (S2).** Past the lease the receiver deletes the credential first, then switches the seat off
+  (a crash between ends it again). A lease that ended is never revived; the sender calls the seat
+  back, which then asks the sign-in kept on the sender since the move. If the receiver had renewed it
+  meanwhile that copy is spent, and the account is signed in again on the sender
+  (`LEASE_ENDED_SIGN_IN`). Accepted: a revocation that works while the sender is offline cannot keep
+  a refresh token alive on the receiver.
+- **D-25 (S2).** A guest's call back switches it off on the receiver (it is never marked used
+  elsewhere, which would break D-23) and answers its tokens after any renewal in flight settles.
+- **D-26 (S2).** The lease is extended by the background read of machine groups (DEC-0017, every
+  15 minutes) after a read that answered; the lease's hours and the sender's public key are kept on
+  the move's `seats.jsonl` line. A failed extension is logged and tried at the next read.
+- **D-27 (S3).** "Own sign-in off" masks the ordinary-sign-in sources in the owner and offline
+  (`own_sign_in::mask`), skips the SB-358 MCP sign-in copy at launch, and limits the duty officer to
+  sessions in Switchboard's own homes (it would otherwise close the teammate's own Claude Code
+  sessions). Session transcripts (limit markers), Codex's routing file (opt-in SB-143) and the
+  person's explicit `switchboard mcp-homes` are unchanged.
+- **D-28 (S2).** `ssh-serve` runs on macOS and Linux; on Windows it answers `UNIX_ONLY`.
+- **D-29 (S4).** The window offers *Delegate to a teammate* in both move dialogs (an account's
+  *Move to another machine…* and a machine's *Move an account here…*), and *Your own sign-in* in
+  Settings (DEC-0019: MCP `switchboard_account_send` and `switchboard_own_sign_in` do the same).
+
 ## Waves
 
 | Wave | What | State |
 |---|---|---|
 | S1 | Seats and onboarding: accounts that also work for the organization count; domains optional; the seat step's next steps; an organization never refuses a person's act (DEC-0022); the team follows only on request; moves and call backs place with a warning | done on branch `org-seats` (gate on the Mac Studio, see the backlog row) |
-| S2 | `ssh-serve` restricted entry, `delegated` account kind and its refusals, lease and its renewal by the sender | next |
-| S3 | "Own sign-in off" switch; proof that Claude Desktop and `~/.claude` are untouched (synthetic Keychain tests) | with S2 |
-| S4 | Teammate setup guide (`docs/ORGANIZATION.md` §4b), window and MCP for delegate and revoke, CONTRACTS | after S2 |
+| S2 | `ssh-serve` restricted entry, `delegated` account kind and its refusals, lease and its renewal by the sender | done on branch `org-delegation` ([DEC-0024](../../DECISIONS.md#dec-0024-a-subscription-is-delegated-to-a-teammates-machine-as-a-guest-under-a-lease)) |
+| S3 | "Own sign-in off" switch; proof that Claude Desktop and `~/.claude` are untouched (synthetic Keychain tests) | done on branch `org-delegation` |
+| S4 | Teammate setup guide ([ORGANIZATION.md](../../ORGANIZATION.md#a-teammates-computer)), window and MCP for delegate and revoke, CONTRACTS | done on branch `org-delegation` |
 | S5 | Live: a teammate's machine on the tailnet, one organization subscription delegated, a console session on it, Claude Desktop checked untouched, recall | needs the teammate's machine (human step: install, tailnet, ssh key) |
 
 ### S1 evidence
@@ -138,3 +174,21 @@ wave table at the end. Decision: [DEC-0022](../../DECISIONS.md#dec-0022-an-organ
 - Deferred to later waves or rows: a live check on the operator's Mac after the release (the
   organization's card should read *Done*); the Statistics *By organization* table still attributes a
   request to the account's first organization (unchanged by S1).
+
+### S2 to S4 evidence
+
+- Code: core `delegation.rs` (`Delegation`, `stays`, `add_delegated`, `extend_lease`, `end_lease`,
+  `surrender_delegated`, `remove_delegated`), `lib.rs` (`Snapshot::delegated`, `remove` refusal,
+  `assign_to_agent` refusal), `persistence.rs` (schema 16), `backup.rs` (guests left out); runtime
+  `account_send.rs` (`send_as`, `Delegate`, `surrender_delegated`, `recall_take_as`,
+  `extend_lease`), `remote_usage.rs` (`extend_leases`), `monitor.rs` (lease end), `refresh.rs`,
+  `balancing.rs`, `own_sign_in.rs`, `duty.rs` (`keep_ours`), `launch.rs` (no MCP sign-in copy while
+  off), `lib.rs` (operations `AddDelegated`, `SurrenderDelegated`, `LeaseDelegated`,
+  `RemoveDelegated`, `OwnSignIn`, `SendAccount { delegate, lease_hours }`); CLI `ssh_serve.rs`,
+  `accounts send --delegate`, `accounts lease`, `own-sign-in`, `ssh-serve`; MCP
+  `switchboard_account_send` `delegate`/`lease_hours`, `switchboard_own_sign_in`; window
+  `delegateFields`, `ownSignInSection`, Tauri `own_sign_in`.
+- Contract: [CONTRACTS](../../CONTRACTS.md#delegated-seats-and-the-own-sign-in-switch-sb-403-s2-to-s4-dec-0024-2026-11-17).
+- Scenarios: SCN-101, SCN-102 in [ux/scenarios.md](../../ux/scenarios.md).
+- Deferred: S5, the live run on a teammate's computer (install, tailnet, the authorized_keys line
+  are a person's steps on that computer); a Windows `ssh-serve` (D-28).

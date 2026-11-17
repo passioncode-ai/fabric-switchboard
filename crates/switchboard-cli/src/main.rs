@@ -3,6 +3,7 @@
 mod hosted;
 mod mcp;
 mod shell;
+mod ssh_serve;
 use clap::{Parser, Subcommand, ValueEnum};
 use serde_json::{json, Value};
 use std::{
@@ -165,6 +166,27 @@ enum Command {
     Duty {
         #[command(subcommand)]
         command: Option<DutyCmd>,
+    },
+    /// Whether Switchboard reads or changes your own Claude Code and Codex sign-in on this
+    /// computer. Off on a teammate's computer that only serves seats an organization
+    /// delegated: nothing captures, activates, renews or copies from your own sign-in, and the
+    /// duty officer leaves your own sessions alone. Without a subcommand: the setting.
+    OwnSignIn {
+        #[command(subcommand)]
+        command: Option<OwnSignInCmd>,
+    },
+    /// The restricted entry another machine reaches over ssh: put it in that machine's
+    /// key line in ~/.ssh/authorized_keys as `command="switchboard ssh-serve --sender-key KEY"`.
+    /// It answers only the calls that move, read, extend and call back a delegated seat, reading
+    /// them from SSH_ORIGINAL_COMMAND; it never runs a shell.
+    SshServe {
+        /// The other machine's key, as `switchboard settings signer` prints it there. Seats it
+        /// delegates here carry it, and only calls naming it act on them.
+        #[arg(long)]
+        sender_key: String,
+        /// A name for that machine in your words (at most 80 characters), kept with its seats.
+        #[arg(long)]
+        from: Option<String>,
     },
     /// What needs a person: accounts to sign in to again, usage checks failing for over an hour,
     /// moves to another machine whose answer was lost and spending ceilings waiting for an answer,
@@ -1033,6 +1055,13 @@ enum CapacityCmd {
 }
 
 #[derive(Subcommand)]
+enum OwnSignInCmd {
+    /// Switchboard may read and change your own sign-in (the default).
+    On,
+    /// Switchboard never reads or changes your own sign-in on this computer.
+    Off,
+}
+#[derive(Subcommand)]
 enum DutyCmd {
     /// Turn the duty officer on (the default).
     On,
@@ -1183,6 +1212,17 @@ enum Accounts {
         /// Read one token or auth JSON from piped stdin, limited to 64 KiB.
         #[arg(long, required = true)]
         secret_stdin: bool,
+        /// Save it as a seat another machine delegates (with `--sender-key`): it stays a
+        /// guest in this group and only that machine calls it back. Sent by `accounts send
+        /// --delegate` over ssh.
+        #[arg(long, requires = "sender_key")]
+        delegated: bool,
+        /// With `--delegated`: the delegating machine's key (`switchboard settings signer` there).
+        #[arg(long)]
+        sender_key: Option<String>,
+        /// With `--delegated`: the lease in hours (1 to 720), 48 by default.
+        #[arg(long)]
+        lease_hours: Option<u32>,
     },
     /// Rename an account, enable or disable it, or both; what is left out stays as it is.
     Update {
@@ -1238,6 +1278,16 @@ enum Accounts {
         /// `--data-dir`.
         #[arg(long)]
         remote_data_dir: Option<String>,
+        /// Delegate the seat: the other machine keeps it as a guest in the group named
+        /// (never its default group), pinned to this machine's key; it cannot be moved on, given
+        /// to an agent or lent there, and only this machine calls it back (`accounts recall`).
+        #[arg(long)]
+        delegate: bool,
+        /// With `--delegate`: the lease in hours (1 to 720), 48 by default. This machine extends
+        /// it at each background read of the other machine; past it, the copy there is switched
+        /// off and its sign-in removed.
+        #[arg(long, requires = "delegate")]
+        lease_hours: Option<u32>,
     },
     /// Take back a sign-in this machine moved to another one: that machine stops using it and
     /// gives its tokens back over ssh, the provider is checked here, then its copy is removed
@@ -1304,6 +1354,21 @@ enum Accounts {
         /// Use the account here again: the calling machine could not take it.
         #[arg(long)]
         undo: bool,
+        /// The key a delegated seat was delegated under; only that machine calls it back.
+        #[arg(long)]
+        sender_key: Option<String>,
+    },
+    /// On the machine a seat was delegated to, extend its lease to HOURS from now. Run
+    /// by the delegating machine's background read over ssh.
+    Lease {
+        /// The account id on this machine.
+        id: String,
+        /// The lease from now, 1 to 720 hours.
+        #[arg(long)]
+        hours: u32,
+        /// The key the seat was delegated under.
+        #[arg(long)]
+        sender_key: String,
     },
     /// Receive an account handed over to you: shows whose sign-in and into which group;
     /// with `--apply`, starts that sign-in. Its credential never travels: you sign in here.
@@ -1335,6 +1400,10 @@ enum Accounts {
     Remove {
         /// The account id (`switchboard accounts list`).
         id: String,
+        /// The key a delegated seat was delegated under; a delegated seat is removed only
+        /// with it (by the machine that delegated it), or once its lease has run out.
+        #[arg(long)]
+        sender_key: Option<String>,
     },
     /// Make an account the one the group's managed sessions use, from their next request.
     Select {
@@ -2121,6 +2190,130 @@ fn read_secret() -> Result<String, String> {
     let input = String::from_utf8(input).map_err(|_| "Credential stdin must be UTF-8.")?;
     Ok(input.trim().to_owned())
 }
+/// SB-403 (DEC-0024): answers one call another machine made through `ssh-serve` (see
+/// `ssh_serve`): parsed from `SSH_ORIGINAL_COMMAND`, refused unless it is one a delegation needs,
+/// and acting only on the seats the forced command's key delegated here.
+#[cfg(unix)]
+async fn serve_ssh(
+    root: &std::path::Path,
+    sender_key: &str,
+    from: Option<&str>,
+) -> Result<Value, String> {
+    use switchboard_core::delegation;
+    if !delegation::key_valid(sender_key) {
+        return Err(delegation::KEY_INVALID.into());
+    }
+    if from.is_some_and(|f| !delegation::from_valid(f)) {
+        return Err(delegation::FROM_INVALID.into());
+    }
+    let command = std::env::var("SSH_ORIGINAL_COMMAND").map_err(|_| ssh_serve::NOT_THROUGH_SSH)?;
+    let request = ssh_serve::parse(&ssh_serve::words(&command)?, sender_key, root)?;
+    let key = sender_key.to_owned();
+    // A read that names a seat reads only one this key delegated.
+    let owned = |snapshot: &Value, id: &str| {
+        snapshot["delegated"][id]["sender_key"]
+            .as_str()
+            .filter(|k| *k == sender_key)
+            .map(|_| ())
+            .ok_or_else(|| delegation::NOT_DELEGATED_BY_YOU.to_string())
+    };
+    use ssh_serve::Request;
+    match request {
+        Request::Prove { nonce } => call(root, Operation::MachineProve { nonce }).await,
+        Request::AccountsList => Ok(ssh_serve::accounts_view(
+            &call(root, Operation::Snapshot).await?,
+            sender_key,
+        )),
+        Request::ProjectList => Ok(ssh_serve::projects_view(
+            &call(root, Operation::Snapshot).await?,
+        )),
+        Request::OrgList => Ok(ssh_serve::organizations_view(
+            &call(root, Operation::Organizations).await?,
+        )),
+        Request::OrgAssign { id, contexts } => {
+            owned(&call(root, Operation::Snapshot).await?, &id)?;
+            let (choice, organizations) = match contexts.as_slice() {
+                [one] => ((one != "auto").then(|| one.clone()), None),
+                several => (None, Some(several.to_vec())),
+            };
+            call(
+                root,
+                Operation::OrganizationAssign {
+                    account: id,
+                    choice,
+                    organizations,
+                    also: Vec::new(),
+                    team: false,
+                },
+            )
+            .await
+        }
+        Request::Add {
+            provider,
+            label,
+            pool,
+            lease_hours,
+        } => {
+            let provider = match provider.as_str() {
+                "codex" => Provider::Codex,
+                _ => Provider::Claude,
+            };
+            call(
+                root,
+                Operation::AddDelegated {
+                    label,
+                    provider,
+                    pool,
+                    secret: read_secret()?,
+                    sender_key: key,
+                    from: from.map(str::to_owned),
+                    lease_hours: lease_hours.unwrap_or(delegation::DEFAULT_LEASE_HOURS),
+                },
+            )
+            .await
+        }
+        Request::Usage { id } => {
+            owned(&call(root, Operation::Snapshot).await?, &id)?;
+            call(root, Operation::Usage { id }).await
+        }
+        Request::Surrender { id, undo } => {
+            call(
+                root,
+                Operation::SurrenderDelegated {
+                    id,
+                    sender_key: key,
+                    undo,
+                },
+            )
+            .await
+        }
+        Request::Lease { id, hours } => {
+            call(
+                root,
+                Operation::LeaseDelegated {
+                    id,
+                    sender_key: key,
+                    hours,
+                },
+            )
+            .await
+        }
+        Request::Remove { id } => {
+            call(
+                root,
+                Operation::RemoveDelegated {
+                    id,
+                    sender_key: key,
+                },
+            )
+            .await
+        }
+    }
+}
+#[cfg(not(unix))]
+async fn serve_ssh(_: &std::path::Path, _: &str, _: Option<&str>) -> Result<Value, String> {
+    Err(ssh_serve::UNIX_ONLY.into())
+}
 async fn run(cli: &Cli) -> Result<Value, String> {
     // Before the data folder is resolved: these read files only and never fail (SB-183). Every
     // `shell` command is answered here, so this match names each one: a new one fails to compile
@@ -2153,6 +2346,10 @@ async fn run(cli: &Cli) -> Result<Value, String> {
     }
     // W3 (SB-379): this command's own panics are counted for the error report, as the owner's.
     switchboard_runtime::errors::install_panic_counter_for_cli(&root);
+    // SB-403: another machine's call through the restricted entry; nothing else is run.
+    if let Command::SshServe { sender_key, from } = &cli.command {
+        return serve_ssh(&root, sender_key, from.as_deref()).await;
+    }
     // SB-380: a session read, ended or attached on another machine runs that machine's
     // Switchboard over ssh; nothing is asked of this machine's owner.
     if let Some((target, remote, remote_data_dir, words, tty)) = there(&cli.command) {
@@ -2373,6 +2570,30 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                 kind,
                 label,
                 pool,
+                delegated: true,
+                sender_key,
+                lease_hours,
+                ..
+            } => {
+                if !matches!(kind, Kind::Oauth) {
+                    return Err(switchboard_runtime::account_send::NOT_A_SIGN_IN.into());
+                }
+                Operation::AddDelegated {
+                    label: label.clone(),
+                    provider: (*provider).into(),
+                    pool: pool.clone(),
+                    secret: read_secret()?,
+                    sender_key: sender_key.clone().unwrap_or_default(),
+                    from: None,
+                    lease_hours: lease_hours
+                        .unwrap_or(switchboard_core::delegation::DEFAULT_LEASE_HOURS),
+                }
+            }
+            Accounts::Add {
+                provider,
+                kind,
+                label,
+                pool,
                 ..
             } => Operation::Add {
                 label: label.clone(),
@@ -2402,6 +2623,8 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                 pool,
                 remote,
                 remote_data_dir,
+                delegate,
+                lease_hours,
             } => Operation::SendAccount {
                 id: id.clone(),
                 to: to.clone(),
@@ -2409,6 +2632,8 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                 program: remote.clone(),
                 remote_data_dir: remote_data_dir.clone(),
                 decision: None,
+                delegate: *delegate,
+                lease_hours: *lease_hours,
             },
             Accounts::Recall {
                 id,
@@ -2447,15 +2672,35 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                 program: remote.clone(),
                 remote_data_dir: remote_data_dir.clone(),
             },
-            Accounts::Surrender { id, undo } => {
+            Accounts::Surrender {
+                id,
+                undo,
+                sender_key,
+            } => {
                 if !undo && io::stdout().is_terminal() {
                     return Err(switchboard_runtime::account_send::SURRENDER_TO_TERMINAL.into());
                 }
-                Operation::SurrenderAccount {
-                    id: id.clone(),
-                    undo: *undo,
+                match sender_key {
+                    Some(key) => Operation::SurrenderDelegated {
+                        id: id.clone(),
+                        sender_key: key.clone(),
+                        undo: *undo,
+                    },
+                    None => Operation::SurrenderAccount {
+                        id: id.clone(),
+                        undo: *undo,
+                    },
                 }
             }
+            Accounts::Lease {
+                id,
+                hours,
+                sender_key,
+            } => Operation::LeaseDelegated {
+                id: id.clone(),
+                sender_key: sender_key.clone(),
+                hours: *hours,
+            },
             Accounts::HandOver { id, to } => Operation::HandOver {
                 id: id.clone(),
                 to: to.clone(),
@@ -2481,7 +2726,17 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                 id: id.clone(),
                 pool: pool.clone(),
             },
-            Accounts::Remove { id } => Operation::Remove { id: id.clone() },
+            Accounts::Remove {
+                id,
+                sender_key: None,
+            } => Operation::Remove { id: id.clone() },
+            Accounts::Remove {
+                id,
+                sender_key: Some(key),
+            } => Operation::RemoveDelegated {
+                id: id.clone(),
+                sender_key: key.clone(),
+            },
             Accounts::Select {
                 id,
                 provider,
@@ -2526,6 +2781,11 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                 clear: true,
             },
         },
+        Command::OwnSignIn { command } => Operation::OwnSignIn {
+            on: command.as_ref().map(|c| matches!(c, OwnSignInCmd::On)),
+        },
+        // Answered before the owner is asked (`ssh_serve`); here only to keep this match whole.
+        Command::SshServe { .. } => return Err(ssh_serve::NOT_THROUGH_SSH.into()),
         Command::Duty { command } => {
             fn duty(
                 on: Option<bool>,
@@ -5617,7 +5877,7 @@ fn keeps_running(command: &Command) -> bool {
 async fn start() -> ExitCode {
     // Parse before resolving app data or creating any files. Even parsing failures
     // are generic: never reflect a user accidentally typing a secret as an argument.
-    let cli = match Cli::try_parse() {
+    let mut cli = match Cli::try_parse() {
         Ok(cli) => cli,
         Err(error)
             if matches!(
@@ -5672,6 +5932,10 @@ async fn start() -> ExitCode {
             return ExitCode::from(2);
         }
     };
+    // SB-403: the restricted entry always answers as the calls it serves ask, in JSON.
+    if matches!(cli.command, Command::SshServe { .. }) {
+        cli.json = true;
+    }
     // Printing to a closed pipe (`switchboard ... | head`) made `println!` panic: 25 `panic stdio`
     // counts on 2026-11-16. A short command ends quietly instead, by SIGPIPE as other command-line
     // tools do; the long-running ones keep SIGPIPE ignored so a viewer or client going away never
@@ -5921,6 +6185,16 @@ mod mcp_parity {
         ("accounts seats", Tool("switchboard_seats")),
         ("accounts remote", Tool("switchboard_remote")),
         ("accounts check", Tool("switchboard_remote")),
+        (
+            "accounts lease",
+            Not("run only by the delegating machine's background read over ssh, through this machine's restricted entry"),
+        ),
+        (
+            "ssh-serve",
+            Not("the forced command of another machine's ssh key; it answers that machine, never an agent here"),
+        ),
+        ("own-sign-in on", Tool("switchboard_own_sign_in")),
+        ("own-sign-in off", Tool("switchboard_own_sign_in")),
         (
             "accounts surrender",
             Not("SB-292: run only by the calling machine's accounts recall over ssh; it prints a sign-in"),

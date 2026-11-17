@@ -39,6 +39,14 @@ pub struct Seat {
     pub program: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub data_dir: Option<String>,
+    /// SB-403 (DEC-0024): the seat was delegated there, with a lease of this many hours that
+    /// this machine's background read of that machine extends.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lease_hours: Option<u32>,
+    /// SB-403: this machine's public key the seat was delegated under (`settings signer`), named
+    /// to the other machine whenever this machine acts on the seat there. A public key only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sender_key: Option<String>,
     /// `operator` when `decision` carries the operator's words, else `agent`.
     pub ordered_by: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -63,6 +71,8 @@ pub(crate) fn of(
         sent: None,
         program: None,
         data_dir: None,
+        lease_hours: None,
+        sender_key: None,
         ordered_by: if decision.is_some() {
             "operator"
         } else {
