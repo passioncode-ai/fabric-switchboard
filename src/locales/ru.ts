@@ -2309,7 +2309,7 @@ export const RU: Record<string, string> = {
   "The command needs curl and gpgv; where one is missing, install it first with sudo apt install curl gpgv.": "Команде нужны curl и gpgv; если чего-то нет, сначала установите это командой sudo apt install curl gpgv.",
   // SB-419 (DEC-0028, SCN-104): groups fed from the default group.
   "The feed from the default group could not be read.": "Не удалось прочитать подпитку из группы по умолчанию.",
-  "Reading the feed…": "Читаем подпитку…",
+  "Reading the feed…": "Загрузка подпитки…",
   "{n} groups are fed from the default group.": "Из группы по умолчанию подпитывается {n} группа.|Из группы по умолчанию подпитываются {n} группы.|Из группы по умолчанию подпитываются {n} групп.",
   "No group is fed from the default group.": "Ни одна группа не подпитывается из группы по умолчанию.",
   "A fed group keeps {n} ready accounts: its spent accounts rest in the default group, and accounts with room, or whose limit resets within {minutes} minutes, come from it.": "Подпитываемая группа держит {n} готовый аккаунт: исчерпанные отдыхают в группе по умолчанию, а оттуда приходят аккаунты с запасом или с лимитом, который сбросится в ближайшие {minutes} мин.|Подпитываемая группа держит {n} готовых аккаунта: исчерпанные отдыхают в группе по умолчанию, а оттуда приходят аккаунты с запасом или с лимитом, который сбросится в ближайшие {minutes} мин.|Подпитываемая группа держит {n} готовых аккаунтов: исчерпанные отдыхают в группе по умолчанию, а оттуда приходят аккаунты с запасом или с лимитом, который сбросится в ближайшие {minutes} мин.",
