@@ -3355,10 +3355,25 @@ fn load_proxy_record(root: &Path) -> Option<ProxyRecord> {
         && record.token.bytes().all(|b| b.is_ascii_hexdigit()))
     .then_some(record)
 }
+/// SB-401 (D-18): makes the pay-per-token group while a Claude API key is saved without it;
+/// codes only in the log.
+pub(crate) fn tokens_group_for_keys(store: &Store) {
+    match store.ensure_tokens_group_for_keys() {
+        Ok(false) => {}
+        Ok(true) => crate::oplog::event("tokens_group_made", &[]),
+        Err(_) => crate::oplog::event(
+            "tokens_group_made",
+            &[("error", crate::oplog::Field::Code("store"))],
+        ),
+    }
+}
 /// Starts the proxy on its recorded port and token. When another program holds that port it
 /// starts on a fresh one, keeps the token, and points the managed homes' generated files at
 /// the new port, so a session launched from them again reaches the proxy.
 async fn start_proxy(root: &Path, store: Arc<Store>) -> Result<ProxyHandle, String> {
+    // SB-401 (D-18): a Claude API key from before the pay-per-token group gets the group before
+    // the proxy takes a request, so no new route names a key outside it.
+    tokens_group_for_keys(&store);
     let proxy_store = store.clone();
     let record = load_proxy_record(root);
     let mut proxy = ProxyHandle::start_on(
@@ -7963,15 +7978,18 @@ async fn execute(
                 .ok_or("Account not found.")?
                 .pool
                 .clone();
-            if from == pool {
-                return Ok(json!({"id": id, "from": from, "pool": pool, "moved": false}));
-            }
             // SB-401 (DEC-0023 D-10): a Claude API key moves only into the pay-per-token group,
-            // made when it does not exist yet (`tokens` names it then).
+            // made when it does not exist yet (`tokens` names it then, even while the key sits in
+            // an ordinary group whose pool id is `tokens`).
             let key = snapshot
                 .accounts
                 .iter()
                 .any(|a| a.id == id && switchboard_core::Snapshot::is_claude_key(a));
+            let makes_tokens =
+                key && pool == switchboard_core::TOKENS_POOL && snapshot.tokens_group().is_none();
+            if from == pool && !makes_tokens {
+                return Ok(json!({"id": id, "from": from, "pool": pool, "moved": false}));
+            }
             let (pool, snapshot) = if key {
                 let named = snapshot
                     .tokens_group()

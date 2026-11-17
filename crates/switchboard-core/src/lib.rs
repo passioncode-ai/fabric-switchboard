@@ -41,8 +41,9 @@ pub use machines::{is_machine_pool, Machine, MachineRef};
 pub use organizations::{Attribution, By, Organization};
 pub use projects::{
     pool_from_name, Project, ProjectRule, RuleResolution, CLAUDE_KEY_STAYS, FOLDER_NESTED,
-    GROUP_OFF, KEY_POOL, TOKENS_BY_HAND, TOKENS_CEILING_REACHED, TOKENS_KEEPS_KEYS, TOKENS_NAME,
-    TOKENS_NO_CEILING, TOKENS_ONLY_KEYS, TOKENS_POOL, TOKENS_SPEND_UNKNOWN,
+    GROUP_OFF, KEY_OUTSIDE_TOKENS, KEY_POOL, TOKENS_BY_HAND, TOKENS_CEILING_REACHED,
+    TOKENS_KEEPS_KEYS, TOKENS_NAME, TOKENS_NO_CEILING, TOKENS_ONLY_KEYS, TOKENS_POOL,
+    TOKENS_SPEND_UNKNOWN, TOKENS_SPEND_UNSAVED,
 };
 pub use rotation::{
     default_managed_policy, free_at, FailoverTally, Fits, RotationDecision, RotationPolicy,
@@ -1535,8 +1536,11 @@ impl Store {
         // made when needed. `add` is the primitive whose one caller, the add command, routes the
         // key there itself (`Operation::Add`). A key from before in another group is matched there
         // no more: saved again, it is saved once more in the pay-per-token group.
-        let pool = if upsert && provider == Provider::Claude && kind == AuthKind::ApiKey {
-            self.ensure_tokens_group()?
+        // The group is made in the same publish as the account (round 4): a save that fails
+        // leaves no empty group behind.
+        let tokens = upsert && provider == Provider::Claude && kind == AuthKind::ApiKey;
+        let pool = if tokens {
+            self.lock()?.tokens_pool()
         } else {
             pool
         };
@@ -1588,8 +1592,23 @@ impl Store {
             let mut state = self.lock()?;
             match save.plan(&state, &reads) {
                 Ok(SavePlan::Ready {
-                    account, candidate, ..
-                }) if account.id == id => {
+                    account,
+                    mut candidate,
+                    ..
+                }) if account.id == id
+                    && (!tokens
+                        || candidate.tokens_group().map_or_else(
+                            || candidate.projects.iter().all(|p| p.pool != pool),
+                            |g| g.pool == pool,
+                        )) =>
+                {
+                    if tokens && candidate.tokens_group().is_none() {
+                        candidate
+                            .projects
+                            .push(projects::Project::tokens_group(pool.clone(), now()));
+                        candidate.projects.sort_by(|a, b| a.name.cmp(&b.name));
+                        append_event(&mut candidate, "project", None, "created");
+                    }
                     let published = self.publish(&mut state, candidate);
                     drop(state);
                     if published.is_err() {
@@ -2377,6 +2396,12 @@ impl Store {
             .find(|a| a.id == id && a.provider == provider && state.serves(a, pool) && a.enabled)
             .ok_or("Account is unavailable in this provider and pool")?;
         // DEC-0022 (SB-403): an account in the group serves it whatever its organizations.
+        // SB-401 (DEC-0023 D-18): a Claude API key outside the pay-per-token group is never newly
+        // selected; a route that already names it stays.
+        let key = format!("{}:{}", provider.as_str(), pool);
+        if state.key_outside_tokens(a) && state.routes.get(&key).map(String::as_str) != Some(id) {
+            return Err(KEY_OUTSIDE_TOKENS.into());
+        }
         self.checked_credential(a)?;
         let mut candidate = state.clone();
         candidate

@@ -519,8 +519,8 @@ export function accountMatches(account: Pick<Account, 'id' | 'label' | 'external
   return words.every((word) => text.includes(word));
 }
 
-const ATTENTION_REASONS: AttentionReason[] = ['session_duplicate', 'session_stuck', 'sign_in', 'seat_ended', 'renewal_refused', 'usage_failing', 'move_unknown', 'refused_there', 'ceiling_question'];
-const ATTENTION_WINDOWS: AttentionWindow[] = ['sign_in', 'answer_ceiling', 'check_usage', 'open_machines', 'open_sessions', 'close_copy'];
+const ATTENTION_REASONS: AttentionReason[] = ['session_duplicate', 'session_stuck', 'sign_in', 'seat_ended', 'renewal_refused', 'usage_failing', 'move_unknown', 'refused_there', 'key_outside_tokens', 'ceiling_question'];
+const ATTENTION_WINDOWS: AttentionWindow[] = ['sign_in', 'answer_ceiling', 'check_usage', 'open_machines', 'open_sessions', 'close_copy', 'move_tokens'];
 /**
  * WF-3 (SB-365): the answer of the `attention` command, kept to the fields the window knows. An
  * answer that is not one (an older owner without the command, a malformed item) is an empty list
@@ -603,6 +603,7 @@ export function attentionReasonText(reason: AttentionReason): string {
     case 'usage_failing': return t('Its usage check has failed for over an hour.');
     case 'move_unknown': return t('A move to another machine did not report how it ended. Check it under Other machines.');
     case 'refused_there': return t('The provider refused its copy on the other machine: it needs a sign-in there.');
+    case 'key_outside_tokens': return t('This Claude API key is outside the pay-per-token group, so no daily ceiling holds it. Move it there.');
     case 'ceiling_question': return t('A spending ceiling was reached and waits for your answer.');
   }
 }
@@ -615,6 +616,7 @@ export function attentionActionLabel(window: AttentionWindow): string {
     case 'open_machines': return t('Open Other machines');
     case 'open_sessions': return t('Open sessions');
     case 'close_copy': return t('Close the quiet copy');
+    case 'move_tokens': return t('Move to Pay-per-token keys');
   }
 }
 /** WF-2.4: the facts line of an account given to an agent; each part is said even when it is not recorded. */
@@ -834,11 +836,14 @@ type Switchable = Pick<Account, 'provider' | 'kind' | 'enabled' | 'external_iden
 export function canSwitchNative(account: Switchable): boolean {
   return account.provider === 'claude' && account.kind === 'oauth' && !!account.external_identity;
 }
-export type PrimaryAction = 'switch' | 'in_use' | 'select' | 'selected' | 'sign_in' | 'disabled';
+export type PrimaryAction = 'switch' | 'in_use' | 'select' | 'selected' | 'sign_in' | 'disabled' | 'move_tokens';
 /** The one button a row shows (PLAN-0.5 D-3); everything else lives in the row menu. */
-export function primaryAction(account: Switchable, state: { current: boolean; selected: boolean; signIn: boolean; project?: boolean }): PrimaryAction {
+export function primaryAction(account: Switchable, state: { current: boolean; selected: boolean; signIn: boolean; project?: boolean; outsideTokens?: boolean }): PrimaryAction {
   if (!account.enabled) return 'disabled';
   if (state.signIn) return 'sign_in';
+  // SB-401 (DEC-0023 D-18): a Claude API key outside the pay-per-token group is never newly
+  // selected; a route that names it already stays, and the row offers the move instead.
+  if (state.outsideTokens && !state.selected) return 'move_tokens';
   // A project's account never becomes the ordinary Claude Code's (core PROJECT_NOT_NATIVE).
   if (canSwitchNative(account) && !state.project) return state.current ? 'in_use' : 'switch';
   return state.selected ? 'selected' : 'select';
@@ -1034,6 +1039,10 @@ export function tourWaits(status: UsageStatus | null | undefined, statusFailed: 
  * the session is isolated and the box stays ticked.
  */
 /** SB-401: how the window launches a Claude API key: `managed` (selected in the pay-per-token group, proxy up), `select` (in that group, selected first), `outside` (a key from before, outside it: never selected or launched from here, offered the move), `down` (the proxy is not running). Null for any other account. */
+/** SB-401 (D-18): a Claude API key outside the pay-per-token group. */
+export function keyOutsideTokens(account: { provider: string; kind: string; pool: string }, tokensPool: string | null): boolean {
+  return account.provider === 'claude' && account.kind === 'api_key' && account.pool !== tokensPool;
+}
 export function keyLaunch(account: { provider: string; kind: string; pool: string }, tokensPool: string | null, selectedInPool: boolean, proxyRunning: boolean): 'managed' | 'select' | 'outside' | 'down' | null {
   if (account.provider !== 'claude' || account.kind !== 'api_key') return null;
   if (account.pool !== tokensPool) return 'outside';
@@ -1062,11 +1071,16 @@ export function replaceFolder(folders: string[], old: string, folder: string): s
 /** `refused`: SB-314, a group whose organization does not take the account (the move would be refused). */
 /** `keys`: SB-401, a move the pay-per-token group's rule refuses: a Claude API key goes only there, nothing else goes there, and nothing leaves it. */
 export interface MoveTarget { pool: string; name: string | null; current: boolean; blocked: boolean; refused: boolean; keys: boolean }
+/** SB-401: the move dialog's target for a pay-per-token group not made yet; no pool id takes a colon. The move sends `tokens`, which makes the group. */
+export const TOKENS_TARGET = ':tokens';
+/** SB-401: the pool a move to `target` names. */
+export function movePool(target: string): string { return target === TOKENS_TARGET ? 'tokens' : target; }
 export function moveTargets(currentPool: string, projects: { pool: string; name: string; tokens?: boolean }[], inCli: boolean, admits: (pool: string) => boolean = () => true, claudeKey = false): MoveTarget[] {
   const sorted = [...projects].sort((a, b) => a.name.localeCompare(b.name));
-  // SB-401: a Claude API key moves to the pay-per-token group, made by the move when it is missing.
-  const tokensPool = projects.find((p) => p.tokens)?.pool ?? (claudeKey ? 'tokens' : null);
-  const made = claudeKey && !projects.some((p) => p.tokens) ? [{ pool: 'tokens', name: t('Pay-per-token keys') }] : [];
+  // SB-401: a Claude API key moves to the pay-per-token group, made by the move when it is missing
+  // (`TOKENS_TARGET`, never an ordinary group's pool id, even one named `tokens`).
+  const tokensPool = projects.find((p) => p.tokens)?.pool ?? (claudeKey ? TOKENS_TARGET : null);
+  const made = claudeKey && !projects.some((p) => p.tokens) ? [{ pool: TOKENS_TARGET, name: t('Pay-per-token keys') }] : [];
   return [{ pool: 'default', name: null }, ...sorted.map((p) => ({ pool: p.pool, name: groupDisplayName(p) })), ...made].map((target) => {
     const current = target.pool === currentPool;
     const refused = target.pool !== 'default' && !current && !admits(target.pool);

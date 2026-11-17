@@ -1539,7 +1539,7 @@ pub(crate) fn serving_pool(
 /// reach the provider directly, past the daily ceiling the proxy checks.
 pub(crate) const TOKENS_ISOLATED: &str = "A pay-per-token key runs only through Switchboard, where its daily ceiling is checked. Launch it in managed mode.";
 /// SB-401: a Claude API key from before the pay-per-token group, outside it: no ceiling holds it.
-pub(crate) const KEY_OUTSIDE_TOKENS: &str = "This Claude API key is outside the pay-per-token group, so no daily ceiling holds it, and it never runs in a home of its own. Move it to the pay-per-token group, then launch it there.";
+pub(crate) use switchboard_core::KEY_OUTSIDE_TOKENS;
 /// SB-401: removes a Claude API key from its own home's `settings.json` (an isolated launch of
 /// 0.7.111 or older wrote it there): the key launches managed only now, through the proxy. The
 /// person's other settings stay. Answers how many homes changed.
@@ -1568,8 +1568,8 @@ pub(crate) fn scrub_key_homes(root: &Path, snapshot: &switchboard_core::Snapshot
     }
     changed
 }
-/// SB-401: an account of a group switched off starts nothing; a Claude API key, wherever it
-/// is, starts only in managed mode (its credential never lands in a session's home), and one in
+/// SB-401: an account of a group switched off starts nothing; a Claude API key outside the
+/// pay-per-token group starts in no mode; one in it starts only in managed mode (its credential never lands in a session's home), and one in
 /// the pay-per-token group only while that group is on and has a daily ceiling. Fails closed: a
 /// ceiling file that cannot be read is no ceiling.
 pub(crate) fn group_allows_launch(
@@ -1578,16 +1578,12 @@ pub(crate) fn group_allows_launch(
     account: &switchboard_core::Account,
     mode: &str,
 ) -> Result<(), String> {
+    // D-18: a key outside the pay-per-token group launches in no mode.
+    if snapshot.key_outside_tokens(account) {
+        return Err(KEY_OUTSIDE_TOKENS.into());
+    }
     if switchboard_core::Snapshot::is_claude_key(account) && mode != "managed" {
-        let in_tokens = snapshot
-            .tokens_group()
-            .is_some_and(|g| g.pool == account.pool);
-        return Err(if in_tokens {
-            TOKENS_ISOLATED
-        } else {
-            KEY_OUTSIDE_TOKENS
-        }
-        .into());
+        return Err(TOKENS_ISOLATED.into());
     }
     let Some(group) = snapshot.project_of_pool(&account.pool) else {
         return Ok(());
@@ -5692,12 +5688,21 @@ mod tests {
         );
         let before = f.files();
         assert!(!f.launch(&proxy, &oauth, "isolated", &TEST_HOST).unwrap());
-        // SB-401: a Claude API key never lands in a session's own home: managed only. One from
-        // before the pay-per-token group, outside it, is told so.
+        // SB-401: a Claude API key never lands in a session's own home: managed only. Once the
+        // pay-per-token group exists (the owner makes it at start), one from before, outside
+        // it, launches in no mode.
         assert_eq!(
             f.launch(&proxy, &api, "isolated", &TEST_HOST).unwrap_err(),
-            KEY_OUTSIDE_TOKENS
+            TOKENS_ISOLATED
         );
+        assert!(f.store.ensure_tokens_group_for_keys().unwrap());
+        for mode in ["isolated", "managed"] {
+            assert_eq!(
+                f.launch(&proxy, &api, mode, &TEST_HOST).unwrap_err(),
+                KEY_OUTSIDE_TOKENS,
+                "{mode}"
+            );
+        }
         assert!(!f
             .root
             .join("homes")

@@ -1706,7 +1706,7 @@ check(() => {
   assert.deepEqual(view.items.map((i) => i.reason), ['sign_in', 'ceiling_question']);
   assert.deepEqual([...logic.attentionAccounts(view, ['a9', 'a1'])].sort(), ['a1', 'a9']);
   assert.deepEqual([...logic.attentionAccounts(null)], []);
-  for (const reason of ['sign_in', 'seat_ended', 'renewal_refused', 'usage_failing', 'move_unknown', 'refused_there', 'ceiling_question']) {
+  for (const reason of ['sign_in', 'seat_ended', 'renewal_refused', 'usage_failing', 'move_unknown', 'refused_there', 'key_outside_tokens', 'ceiling_question']) {
     const line = logic.attentionReasonText(reason);
     assert.ok(line && !line.includes('\u2014'), reason);
   }
@@ -1876,7 +1876,24 @@ check(() => {
   assert.deepEqual(pick(logic.moveTargets('default', groups, false, () => true, false)), { default: false, apps: false, tokens: true }, 'nothing else goes there');
   assert.deepEqual(pick(logic.moveTargets('tokens', groups, false, () => true, true)), { default: true, apps: true, tokens: false });
   // A key from before, with no pay-per-token group yet: the move offers it, and the move makes it.
-  assert.deepEqual(pick(logic.moveTargets('default', [groups[0]], false, () => true, true)), { default: false, apps: true, tokens: false }, 'the move to a missing pay-per-token group is offered');
+  assert.deepEqual(pick(logic.moveTargets('default', [groups[0]], false, () => true, true)), { default: false, apps: true, [logic.TOKENS_TARGET]: false }, 'the move to a missing pay-per-token group is offered');
+  assert.equal(logic.movePool(logic.TOKENS_TARGET), 'tokens', 'the move names tokens, which makes the group');
+  assert.equal(logic.movePool('apps'), 'apps');
+  // An ordinary group whose pool id is `tokens` is one row, and the made group another.
+  const named = logic.moveTargets('default', [{ pool: 'tokens', name: 'Tokens' }], false, () => true, true);
+  assert.deepEqual(named.map((x) => [x.pool, x.blocked]), [['default', false], ['tokens', true], [logic.TOKENS_TARGET, false]]);
+  // A key from before, outside the group, offers the move and never Select; one already selected stays selected.
+  const old = { provider: 'claude', kind: 'api_key', enabled: true, external_identity: null };
+  assert.equal(logic.primaryAction(old, { current: false, selected: false, signIn: false, project: false, outsideTokens: true }), 'move_tokens');
+  assert.equal(logic.primaryAction(old, { current: false, selected: true, signIn: false, project: false, outsideTokens: true }), 'selected');
+  assert.equal(logic.primaryAction(old, { current: false, selected: false, signIn: false, project: true, outsideTokens: false }), 'select');
+  assert.equal(logic.keyOutsideTokens({ provider: 'claude', kind: 'api_key', pool: 'default' }, 'tokens'), true);
+  assert.equal(logic.keyOutsideTokens({ provider: 'claude', kind: 'api_key', pool: 'tokens' }, 'tokens'), false);
+  assert.equal(logic.keyOutsideTokens({ provider: 'claude', kind: 'api_key', pool: 'default' }, null), true);
+  assert.equal(logic.keyOutsideTokens({ provider: 'codex', kind: 'api_key', pool: 'default' }, null), false);
+  const outside = logic.attentionView({ items: [{ account_id: 'k', label: 'Old key', provider: 'claude', pool: 'default', reason: 'key_outside_tokens', detail: '', action: { tool: 'switchboard_account_move', window: 'move_tokens' } }] });
+  assert.equal(outside.count, 1);
+  assert.equal(logic.attentionActionLabel(outside.items[0].action.window), 'Move to Pay-per-token keys');
   assert.deepEqual(pick(logic.moveTargets('default', [groups[0]], false, () => true, false)), { default: false, apps: false }, 'no synthetic target for anything else');
   // The window never selects or launches a Claude API key outside the pay-per-token group.
   const key = (pool) => ({ provider: 'claude', kind: 'api_key', pool });

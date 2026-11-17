@@ -616,11 +616,8 @@ fn pool_refusal(g: &Gateway, pool: &str) -> Option<(StatusCode, &'static str)> {
             return Some((StatusCode::FORBIDDEN, switchboard_core::TOKENS_NO_CEILING));
         };
         let at = now();
-        if g.spend.unknown_today(at) {
-            return Some((
-                StatusCode::FORBIDDEN,
-                switchboard_core::TOKENS_SPEND_UNKNOWN,
-            ));
+        if let Some(refusal) = g.spend.refusal_today(at) {
+            return Some((StatusCode::FORBIDDEN, refusal));
         }
         let spent = g.spend.today(pool, at);
         if spent >= u64::from(cents).saturating_mul(10_000) {

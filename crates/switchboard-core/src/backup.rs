@@ -669,12 +669,9 @@ pub fn restore(
             account.pool.clone()
         };
         // SB-401 (DEC-0023 D-10): a Claude API key a restore brings back lands in the
-        // pay-per-token group, never in the default group or a pool no group holds.
-        let pool = if crate::Snapshot::is_claude_key(&account) {
-            store.ensure_tokens_group()?
-        } else {
-            pool
-        };
+        // pay-per-token group (`upsert` puts it there, making the group in the same save), never
+        // in the default group or a pool no group holds; a key that cannot be saved is counted
+        // failed and the restore goes on.
         match store.upsert(
             account.label.clone(),
             account.provider,
@@ -684,7 +681,7 @@ pub fn restore(
             account.external_identity.clone(),
         ) {
             Ok(saved) => {
-                if pool != account.pool {
+                if saved.pool != account.pool {
                     deferred.insert(saved.id.clone(), account.pool.clone());
                 }
                 if !account.enabled {

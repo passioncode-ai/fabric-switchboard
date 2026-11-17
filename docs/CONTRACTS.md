@@ -3211,6 +3211,7 @@ WF-3.1). Code: [attention.rs](../crates/switchboard-runtime/src/attention.rs).
   | `renewal_refused` | as `sign_in`, and the token endpoint refused its lineage (`invalid_grant`, `RefreshState::lineages_refused`) | `switchboard_login` | `sign_in` |
   | `move_unknown` | marked used elsewhere, and its newest `seats.jsonl` line of `granted`, `recalled` or `unknown` is `unknown`; `since` is that line's time | `switchboard_remote` | `open_machines` |
   | `usage_failing` | enabled, not used elsewhere, not already listed, `usage_health.status` `failed`, and no observation for over `USAGE_FAILING_SECONDS` (3600); `since` is the last observation (else when it was added) | `switchboard_usage` | `check_usage` |
+  | `key_outside_tokens` | an enabled Claude API key outside the pay-per-token group, not used elsewhere and not already listed for a sign-in (SB-401 D-18); no `since` | `switchboard_account_move` | `move_tokens` |
   | `ceiling_question` | an unanswered question in `spend.json`, pruned as its readers prune; `since` is `reached_at` | `switchboard_ceiling_answer` | `answer_ceiling` |
 
   An account is listed once: a sign-in reason wins over failing usage. `refused_there` (a copy
@@ -3648,8 +3649,17 @@ Plan: [2026-11-17-token-group](plans/2026-11-17-token-group/README.md); decision
   lent (`CLAUDE_KEY_STAYS`); `accounts move` (`Operation::MoveAccount`) refuses one to any other
   group even before; a move to `tokens` makes the group when it is missing. A key is never placed
   in a machine group (`machines::place` answers false), and one that comes home goes to
-  `leaving_pool`. A key in another group from before stays there, and is never selected or
-  launched there (D-17, `KEY_OUTSIDE_TOKENS`: the window offers *Move to Pay-per-token keys*).
+  `leaving_pool`. A key in another group from before stays there, and is never newly selected,
+  rotated or failed over to, launched in any mode, or named by a new route (D-17, D-18,
+  `KEY_OUTSIDE_TOKENS`: `Store::select` and every publish refuse it, `Snapshot::chooses` leaves it
+  out of rotation and failover, `launch::group_allows_launch` refuses it). It reads the group: the
+  owner makes it at start, before the proxy listens, when a Claude API key is saved without it
+  (`Store::ensure_tokens_group_for_keys`, oplog `tokens_group_made`). A route that already
+  named it before the upgrade keeps serving. Attention lists it (`key_outside_tokens`) and its
+  account row offers *Move to Pay-per-token keys* (the move dialog's `TOKENS_TARGET` when the
+  group is not made yet, never an ordinary group's pool id). The group a saved key needs is made
+  in the same publish as the key (`save_account`), so a save that fails leaves none; a restore
+  counts such a key failed and goes on.
   Once a key is in the pay-per-token group, the bindings pass removes `env.ANTHROPIC_API_KEY`
   from an isolated home an earlier version wrote for it (`launch::scrub_key_homes`, oplog
   `key_homes_scrubbed`).
@@ -3666,7 +3676,8 @@ Plan: [2026-11-17-token-group](plans/2026-11-17-token-group/README.md); decision
   bindings (`bindings::desired`), the Codex route and the shell map keep pointing them at the off
   group, so a session there gets the proxy's `GROUP_OFF` and never falls through to the ordinary
   sign-in; only a folder an on group also holds is served by that group (an off group is listed
-  last, and `Snapshot::project_for` chooses no off group while an on group holds the folder). The bindings fingerprint covers `off` and `tokens`, so a switch re-runs the sync.
+  last, and `Snapshot::project_for` chooses no off group while an on group holds the folder; the
+  Claude bindings leave such a folder to that on group even when it writes no route there). The bindings fingerprint covers `off` and `tokens`, so a switch re-runs the sync.
   Switching a group off moves a route only to an account the usual checks allow (enabled, not
   given to an agent, not used elsewhere), one of the group's own organizations first and one
   outside them after it (DEC-0022). Its accounts are
@@ -3691,8 +3702,9 @@ Plan: [2026-11-17-token-group](plans/2026-11-17-token-group/README.md); decision
   UTC day of its end, saturating, and is never drained by `take_statistics`. After each answer of
   a pay-per-token key it writes `<data>/tokens-spend.json` (0600, `{version: 1, day, pools}`)
   off the counter's lock (on a blocking thread, newest snapshot first, older ones skipped). A write
-  that fails leaves the day unknown, so the group refuses with `TOKENS_SPEND_UNKNOWN`, until a
-  write succeeds; the refusal path retries it at most every 5 s. The proxy's stop waits up to 1 s
+  that fails refuses the group with `TOKENS_SPEND_UNSAVED` until a write succeeds; the refusal
+  path starts a new try at most every 5 s, on a blocking thread, and answers from the state it
+  finds (`Spend::refusal_today`). The proxy's stop waits up to 1 s
   for writes in flight. The proxy loads it before it listens (`Spend::load`): the larger of that file and
   today's `cost_micros` in `statistics.json`, per pool. A file that exists and cannot be read (not
   JSON, past 64 KiB or 8 MiB) leaves the day unknown, unless the spend file holds today, and the

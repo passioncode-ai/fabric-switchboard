@@ -31,6 +31,9 @@ pub const CEILING_MACHINE: &str =
 pub const CEILING_GROUP: &str =
     "A group's daily spending ceiling was reached. Keep it or double it.";
 pub const CEILING_TASK: &str = "A task's spending ceiling was reached. Keep it or double it.";
+/// SB-401 (DEC-0023 D-18): a Claude API key from before the pay-per-token group, outside it.
+pub const KEY_OUTSIDE_TOKENS: &str =
+    "This Claude API key is outside the pay-per-token group, so no daily ceiling holds it. Move it there.";
 /// SB-379: one Claude Code session runs in two processes (a resumed copy of a live session).
 pub const SESSION_DUPLICATE: &str =
     "One session runs in two processes. Close the quiet copy so they do not work over each other.";
@@ -57,7 +60,7 @@ pub struct Inputs<'a> {
 }
 
 /// Reasons in the order they are listed.
-const ORDER: [&str; 9] = [
+const ORDER: [&str; 10] = [
     "session_duplicate",
     "session_stuck",
     "sign_in",
@@ -65,6 +68,7 @@ const ORDER: [&str; 9] = [
     "renewal_refused",
     "move_unknown",
     "refused_there",
+    "key_outside_tokens",
     "usage_failing",
     "ceiling_question",
 ];
@@ -157,6 +161,21 @@ pub fn build(inputs: &Inputs) -> Value {
         }
         if !account.enabled {
             continue;
+        }
+        // SB-401 D-18: a key from before, outside the pay-per-token group: nothing selects or
+        // launches it, and a route that already names it keeps serving with no ceiling.
+        if snapshot.key_outside_tokens(account) {
+            push(
+                "key_outside_tokens",
+                account.label.clone(),
+                item(
+                    "key_outside_tokens",
+                    KEY_OUTSIDE_TOKENS,
+                    None,
+                    "switchboard_account_move",
+                    "move_tokens",
+                ),
+            );
         }
         let Some(health) = account.usage_health.as_ref() else {
             continue;
@@ -535,6 +554,25 @@ mod tests {
     }
 
     #[test]
+    fn a_claude_key_outside_the_pay_per_token_group_is_listed_with_the_move() {
+        let mut snapshot = Snapshot::default();
+        let mut key = account("k", "Old key", "default");
+        key.kind = AuthKind::ApiKey;
+        let mut codex = account("c", "Codex key", "default");
+        codex.provider = Provider::Codex;
+        codex.kind = AuthKind::ApiKey;
+        snapshot.accounts = vec![key, codex];
+        snapshot.projects = vec![switchboard_core::Project::tokens_group("tokens".into(), 0)];
+        let answer = run(&snapshot, &[], &[], &[], &[]);
+        assert_eq!(reasons(&answer), ["key_outside_tokens"]);
+        assert_eq!(
+            answer["items"][0]["action"],
+            json!({"tool": "switchboard_account_move", "window": "move_tokens"})
+        );
+        assert_eq!(answer["items"][0]["detail"], KEY_OUTSIDE_TOKENS);
+    }
+
+    #[test]
     fn items_are_ordered_by_reason_then_label_and_carry_no_dash() {
         let mut snapshot = Snapshot {
             accounts: vec![
@@ -564,6 +602,7 @@ mod tests {
             CEILING_MACHINE,
             CEILING_GROUP,
             CEILING_TASK,
+            KEY_OUTSIDE_TOKENS,
         ] {
             assert!(
                 !sentence.contains('\u{2014}') && !sentence.contains(" - "),

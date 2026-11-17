@@ -249,6 +249,17 @@ pub const CLAUDE_KEY_STAYS: &str = "A Claude API key is never moved or shared in
 /// key anywhere but into it, or newly shares or lends one (`old` is the state before it, `new`
 /// the candidate). A key removed is not taken out: it is gone.
 pub(crate) fn tokens_keys_stay(old: &Snapshot, new: &Snapshot) -> Result<(), String> {
+    // D-18: no route newly names a Claude API key outside the pay-per-token group.
+    for (key, id) in &new.routes {
+        if old.routes.get(key) != Some(id)
+            && new
+                .accounts
+                .iter()
+                .any(|a| &a.id == id && new.key_outside_tokens(a))
+        {
+            return Err(KEY_OUTSIDE_TOKENS.into());
+        }
+    }
     if let Some(group) = old.tokens_group() {
         let moved = old
             .accounts
@@ -315,6 +326,12 @@ pub const TOKENS_NO_CEILING: &str = "Set a daily spending ceiling for the pay-pe
 pub const TOKENS_CEILING_REACHED: &str = "The pay-per-token group reached its daily spending ceiling. Raise it in Switchboard, or wait for the next UTC day.";
 /// SB-401: what the pay-per-token group spent today could not be read at start.
 pub const TOKENS_SPEND_UNKNOWN: &str = "Switchboard could not read what the pay-per-token group spent today, so its keys serve no request until the next UTC day.";
+/// SB-401: the day's spend of the pay-per-token group could not be saved; it serves again once
+/// a save succeeds, which Switchboard tries every few seconds.
+pub const TOKENS_SPEND_UNSAVED: &str = "Switchboard could not save what the pay-per-token group spent today, so its keys serve no request until it can. It tries again every few seconds.";
+/// SB-401: a Claude API key from before the pay-per-token group, outside it: no ceiling holds
+/// it, so nothing selects or launches it (a route selected before stays).
+pub const KEY_OUTSIDE_TOKENS: &str = "This Claude API key is outside the pay-per-token group, so no daily ceiling holds it, and Switchboard never selects or launches it there. Move it to the pay-per-token group first.";
 /// SB-401: a request to a group switched off.
 pub const GROUP_OFF: &str = "This group is switched off in Switchboard, so it serves no request. Turn it on in Switchboard, or work in a folder of another group.";
 /// SB-401: only a Claude API-key account may be in the pay-per-token group.
@@ -681,6 +698,18 @@ impl Snapshot {
     pub fn is_claude_key(account: &crate::Account) -> bool {
         account.provider == crate::Provider::Claude && account.kind == crate::AuthKind::ApiKey
     }
+    /// SB-401 (D-18): a Claude API key outside the pay-per-token group (one from before it):
+    /// no daily ceiling holds it, so nothing newly selects, rotates to or launches it. Read once
+    /// the group exists: the owner makes it at start when a Claude API key is saved without it
+    /// (`Store::ensure_tokens_group_for_keys`), and every later save of a key makes it.
+    pub fn key_outside_tokens(&self, account: &crate::Account) -> bool {
+        Self::is_claude_key(account) && self.tokens_group().is_some_and(|g| g.pool != account.pool)
+    }
+    /// SB-401 (D-18): whether `account` may be newly chosen for `pool`: it serves it and is not a
+    /// Claude API key outside the pay-per-token group.
+    pub fn chooses(&self, account: &crate::Account, pool: &str) -> bool {
+        self.serves(account, pool) && !self.key_outside_tokens(account)
+    }
     /// SB-401: the group `account` calls home is switched off: it serves no other group.
     pub fn home_off(&self, account: &crate::Account) -> bool {
         self.project_of_pool(&account.pool).is_some_and(|p| p.off)
@@ -855,6 +884,7 @@ impl Store {
                 .into_iter()
                 .filter(|b| {
                     b.id != left.id
+                        && !candidate.key_outside_tokens(b)
                         && b.provider == left.provider
                         && b.kind == left.kind
                         && b.enabled
@@ -892,6 +922,18 @@ impl Store {
     /// SB-401: the pay-per-token group's pool, the group made (no folder, switched off) when it
     /// does not exist yet. A Claude API key the person adds without naming another group goes
     /// here, never to the default group, where every folder in no group would run on it.
+    /// SB-401 (D-18): makes the pay-per-token group when a Claude API key is saved and the group
+    /// is not there yet (a key from before it), so the rule for keys outside it applies. Answers
+    /// whether it made the group.
+    pub fn ensure_tokens_group_for_keys(&self) -> Result<bool, String> {
+        let snapshot = self.snapshot()?;
+        if snapshot.tokens_group().is_some()
+            || !snapshot.accounts.iter().any(Snapshot::is_claude_key)
+        {
+            return Ok(false);
+        }
+        self.ensure_tokens_group().map(|_| true)
+    }
     pub fn ensure_tokens_group(&self) -> Result<String, String> {
         let mut state = self.lock()?;
         if let Some(group) = state.tokens_group() {

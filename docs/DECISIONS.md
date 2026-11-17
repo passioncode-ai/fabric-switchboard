@@ -542,7 +542,21 @@ research notes); the ones still in force that the board cites are seeded below w
     group off moves its routes only to an account the usual checks allow (enabled, not given to
     an agent, not used elsewhere), one of the group's own organizations first and one outside
     them after it (DEC-0022: an organization never refuses).
-- **Consequences:** a key in the default group from before stays there (naming it under Needs
-  attention is still open, see the plan); turning a group off stops its sessions at their next request; the reached question
+  - D-18 (fourth review, 2026-11-17; sharpens D-10 and D-17): a Claude API key outside the
+    pay-per-token group is never newly selected, rotated or failed over to, launched in any mode,
+    or named by a new route (`KEY_OUTSIDE_TOKENS`, in the store's select and at every publish).
+    The rule reads the group: the owner makes it at start, before the proxy listens, when a
+    Claude API key is saved without it, and every later save of a key makes it. A route that
+    already named it before the upgrade keeps serving (nothing that works is broken),
+    and Attention lists the key (`key_outside_tokens`) with *Move to Pay-per-token keys*; its
+    account row offers the same move instead of *Select*. A spend file that could not be saved
+    refuses with its own sentence (`TOKENS_SPEND_UNSAVED`, until a save succeeds, tried every
+    5 s off the request's thread), apart from a day that could not be read
+    (`TOKENS_SPEND_UNKNOWN`, the whole UTC day). The group a saved key needs is made in the same
+    publish as the key, so a save that fails leaves none, and a restore counts such a key failed
+    and goes on. A switched-off group's folder that a group switched on also holds is that
+    group's in the Claude bindings too, even when it writes no route there.
+- **Consequences:** a key in the default group from before stays there, named under Attention
+  until it is moved (D-18); turning a group off stops its sessions at their next request; the reached question
   is the same one paid hand-overs use, and *Double* raises the ceiling at once.
 

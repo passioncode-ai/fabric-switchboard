@@ -4441,3 +4441,65 @@ fn the_default_group_lends_and_borrows() {
     );
     assert!(snapshot.default_lent.is_empty());
 }
+
+#[test]
+fn a_claude_key_save_that_fails_leaves_no_pay_per_token_group() {
+    // SB-401 round 4: the group is made in the same publish as the key, never before it.
+    let root = TempDir::new().unwrap();
+    let vault = Arc::new(FaultVault::default());
+    let store = Store::open(root.path().into(), vault.clone()).unwrap();
+    vault.fail_put.store(true, Ordering::SeqCst);
+    assert!(store
+        .upsert(
+            "Key".into(),
+            Provider::Claude,
+            AuthKind::ApiKey,
+            "default".into(),
+            token("synthetic-key"),
+            None,
+        )
+        .is_err());
+    assert!(store.snapshot().unwrap().tokens_group().is_none());
+    vault.fail_put.store(false, Ordering::SeqCst);
+    let saved = store
+        .upsert(
+            "Key".into(),
+            Provider::Claude,
+            AuthKind::ApiKey,
+            "default".into(),
+            token("synthetic-key"),
+            None,
+        )
+        .unwrap();
+    let snapshot = store.snapshot().unwrap();
+    let group = snapshot.tokens_group().unwrap();
+    assert_eq!(saved.pool, group.pool);
+    assert!(group.off && group.folders.is_empty());
+}
+
+#[test]
+fn a_claude_key_outside_the_pay_per_token_group_is_never_newly_selected() {
+    // SB-401 round 4 (D-18): a key from before stays where it is; a route that already names it
+    // keeps serving, and no new route names it.
+    let root = TempDir::new().unwrap();
+    let store = Store::open(root.path().into(), Arc::new(MemoryVault::default())).unwrap();
+    let key = store
+        .add(
+            "Old".into(),
+            Provider::Claude,
+            AuthKind::ApiKey,
+            "default".into(),
+            token("synthetic-old"),
+        )
+        .unwrap();
+    // The owner makes the group once a Claude API key is saved; from then on the rule holds.
+    assert!(store.ensure_tokens_group_for_keys().unwrap());
+    assert!(!store.ensure_tokens_group_for_keys().unwrap(), "once");
+    assert_eq!(
+        store
+            .select(Provider::Claude, "default", &key.id)
+            .unwrap_err(),
+        switchboard_core::KEY_OUTSIDE_TOKENS
+    );
+    assert!(store.snapshot().unwrap().routes.is_empty());
+}

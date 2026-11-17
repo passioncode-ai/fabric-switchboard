@@ -137,5 +137,25 @@ The third review found no P0, three P1 and seven P2, all fixed here (D-15 to D-1
   (`a_key_from_before_moves_into_the_pay_per_token_group_and_its_home_forgets_it`); switching a
   group off moves a route only to an account the usual checks allow.
 
-Next task for the next agent: file the board row for Needs attention naming a Claude key left in
+## Review fixes, round 4 (2026-11-17)
+
+Merged `origin/main` with SB-403 S1 (`c03f8287`, DEC-0022) first, keeping both rules: an
+organization mismatch never refuses (warnings), and a Claude API key never leaves the
+pay-per-token group (`a_pay_per_token_group_bound_to_an_organization_warns_but_keeps_its_key`).
+The fourth review found no P0, one P1 and five P2, fixed here as D-18:
+
+- P1: a key from before, outside the group, is never newly selected, rotated or failed over to,
+  or launched in any mode (`a_claude_key_outside_the_pay_per_token_group_is_never_newly_selected`);
+  its row offers *Move to Pay-per-token keys*, and Attention lists it (`key_outside_tokens`,
+  `a_claude_key_outside_the_pay_per_token_group_is_listed_with_the_move`). This builds the Needs
+  attention item the earlier rounds left open.
+- P2: `TOKENS_SPEND_UNSAVED` for a day that could not be saved, its retry off the request's
+  thread; the bindings leave an off group's folder to an on group that also holds it
+  (`an_off_groups_folder_an_on_group_holds_is_the_on_groups_even_with_no_route`); the group is
+  made in the key's own publish (`a_claude_key_save_that_fails_leaves_no_pay_per_token_group`)
+  and a restore goes on past a key it could not save; the move dialog's target for a group not
+  made yet is `TOKENS_TARGET`, apart from an ordinary group whose pool id is `tokens`.
+
+Next task for the next agent: merge `token-group` through the repository's policy and release.
+Former next task (done in round 4): file the board row for Needs attention naming a Claude key left in
 the default group, then merge `token-group` through the repository's policy and release.

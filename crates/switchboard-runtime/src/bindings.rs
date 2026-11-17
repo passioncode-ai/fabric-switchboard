@@ -245,6 +245,15 @@ pub(crate) fn desired(snapshot: &Snapshot) -> Vec<(PathBuf, String)> {
         };
         for folder in &project.folders {
             let folder = PathBuf::from(folder);
+            // D-15: a folder a group switched on also holds is that group's, as `project_for`
+            // and the shell map say, even when that group writes no route there.
+            if project.off
+                && snapshot
+                    .project_for(&folder)
+                    .is_some_and(|p| p.pool != project.pool)
+            {
+                continue;
+            }
             if folder.is_dir() {
                 out.push((folder.clone(), route.clone()));
             }
@@ -972,6 +981,40 @@ mod tests {
         s.projects[0].off = false;
         s.projects[0].tokens = true;
         assert_ne!(key(&s, "127.0.0.1:4000", &mut repos), on);
+    }
+
+    #[test]
+    fn an_off_groups_folder_an_on_group_holds_is_the_on_groups_even_with_no_route() {
+        // Round 4: the on group, bound to an organization, has no Claude account, so it writes no
+        // route; the off group's folder is still the on group's (`project_for`), never bound to
+        // the off group.
+        let tmp = tempfile::tempdir().unwrap();
+        let data = tmp.path().canonicalize().unwrap();
+        let (shared, alone) = (data.join("shared"), data.join("alone"));
+        git(&shared);
+        git(&alone);
+        let mut off = project("off", &[&shared, &alone]);
+        off.off = true;
+        let mut on = project("on", &[&shared]);
+        on.organizations = vec!["acme".into()];
+        let s = Snapshot {
+            projects: vec![off, on],
+            accounts: vec![account("off")],
+            ..Default::default()
+        };
+        assert_eq!(s.project_for(&shared).map(|p| p.pool.as_str()), Some("on"));
+        let want = desired(&s);
+        let pool_of = |f: &Path| want.iter().find(|(w, _)| w == f).map(|(_, p)| p.as_str());
+        assert_eq!(
+            pool_of(&shared),
+            None,
+            "the on group's, which writes no route"
+        );
+        assert_eq!(
+            pool_of(&alone),
+            Some("off"),
+            "kept closed where only it holds"
+        );
     }
 
     #[test]

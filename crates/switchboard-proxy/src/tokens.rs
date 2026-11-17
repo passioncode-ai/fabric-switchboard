@@ -121,25 +121,32 @@ impl Spend {
         }
         spend
     }
-    /// Whether today's spend could not be read at start.
-    pub fn unknown_today(&self, now: i64) -> bool {
-        let (failed, retry) = {
+    /// Why the pay-per-token group refuses for its day's spend, or none: the day could not be
+    /// read at start (`TOKENS_SPEND_UNKNOWN`, the whole UTC day), or the last write of it failed
+    /// (`TOKENS_SPEND_UNSAVED`, until a write succeeds). The check starts a new try of a failed
+    /// write at most every `RETRY` seconds, on a blocking thread when a runtime runs, and answers
+    /// from the state it finds: it never waits on the disk.
+    pub fn refusal_today(self: &Arc<Self>, now: i64) -> Option<&'static str> {
+        let retry = {
             let mut days = self.days();
             if days.unknown.as_deref() == Some(crate::stats::day_of(now).as_str()) {
-                return true;
+                return Some(switchboard_core::TOKENS_SPEND_UNKNOWN);
             }
-            let retry = days.write_failed && now - days.retried_at >= RETRY;
+            if !days.write_failed {
+                return None;
+            }
+            let retry = now - days.retried_at >= RETRY;
             if retry {
                 days.retried_at = now;
             }
-            (days.write_failed, retry)
+            retry
         };
         if retry {
-            // The check itself tries the write again; it serves only once one succeeded.
-            self.write_newest();
-            return self.days().write_failed;
+            self.write_in_background();
         }
-        failed
+        self.days()
+            .write_failed
+            .then_some(switchboard_core::TOKENS_SPEND_UNSAVED)
     }
     /// The day's spend of every pay-per-token pool as the file holds it, with its sequence.
     fn body(days: &Days, day: &str) -> serde_json::Value {
@@ -204,6 +211,10 @@ impl Spend {
             days.root = Some(root.to_owned());
             days.seq = days.seq.saturating_add(1);
         }
+        self.write_in_background();
+    }
+    /// Runs `write_newest` on a blocking thread when a runtime runs, else here.
+    fn write_in_background(self: &Arc<Self>) {
         let spend = Arc::clone(self);
         self.pending.fetch_add(1, Ordering::SeqCst);
         let job = move || {
@@ -336,8 +347,8 @@ mod tests {
         // Nothing on disk: nothing spent, nothing unknown.
         let empty = Arc::new(Spend::load(root.path(), NOW));
         assert_eq!(
-            (empty.today("tokens", NOW), empty.unknown_today(NOW)),
-            (0, false)
+            (empty.today("tokens", NOW), empty.refusal_today(NOW)),
+            (0, None)
         );
         // An answer of a pay-per-token key writes the file; a restart reads it.
         empty.add_and_write("tokens", NOW, 700, Some(root.path()));
@@ -369,17 +380,23 @@ mod tests {
         assert_eq!(Spend::load(root.path(), NOW).today("tokens", NOW), 4_000);
         // A file that exists and cannot be read leaves the day unknown.
         std::fs::write(root.path().join(SPEND_FILE), b"{not json").unwrap();
-        let broken = Spend::load(root.path(), NOW);
-        assert!(broken.unknown_today(NOW));
-        assert!(
-            !broken.unknown_today(NOW + 86_400),
+        let broken = Arc::new(Spend::load(root.path(), NOW));
+        assert_eq!(
+            broken.refusal_today(NOW),
+            Some(switchboard_core::TOKENS_SPEND_UNKNOWN)
+        );
+        assert_eq!(
+            broken.refusal_today(NOW + 86_400),
+            None,
             "the next day starts clean"
         );
         // A statistics file past its bound, with no spend file of today: unknown too.
         std::fs::remove_file(root.path().join(SPEND_FILE)).unwrap();
         switchboard_core::private_fs::private_write(&root.path().join("statistics.json"), b"[1,")
             .unwrap();
-        assert!(Spend::load(root.path(), NOW).unknown_today(NOW));
+        assert!(Arc::new(Spend::load(root.path(), NOW))
+            .refusal_today(NOW)
+            .is_some());
     }
 
     #[test]
@@ -389,14 +406,19 @@ mod tests {
         // A folder where the file should be: the write fails.
         std::fs::create_dir(root.path().join(SPEND_FILE)).unwrap();
         spend.add_and_write("tokens", NOW, 10, Some(root.path()));
-        assert!(spend.unknown_today(NOW));
+        // Not the whole day: only until a write succeeds.
+        assert_eq!(
+            spend.refusal_today(NOW),
+            Some(switchboard_core::TOKENS_SPEND_UNSAVED)
+        );
         // The next try is a retry interval later; it succeeds once the way is clear.
         std::fs::remove_dir(root.path().join(SPEND_FILE)).unwrap();
         assert!(
-            spend.unknown_today(NOW + 1),
+            spend.refusal_today(NOW + 1).is_some(),
             "not retried before its interval"
         );
-        assert!(!spend.unknown_today(NOW + RETRY + 1));
+        // Outside a runtime the try runs here, so the answer already reads it.
+        assert_eq!(spend.refusal_today(NOW + RETRY + 1), None);
         assert_eq!(Spend::load(root.path(), NOW).today("tokens", NOW), 10);
     }
 
