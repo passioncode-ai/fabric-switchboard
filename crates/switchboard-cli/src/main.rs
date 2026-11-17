@@ -1352,7 +1352,7 @@ enum Accounts {
     /// On the machine an account was moved to: give its sign-in back to the machine that calls
     /// it back. Run only by `accounts recall` over ssh, which names the hand-over in its command
     /// (`SWITCHBOARD_TRANSFER=surrender`); it prints only into that pipe, never to a terminal or
-    /// a file (SB-420).
+    /// a file.
     Surrender {
         /// The account id on this machine.
         id: String,
@@ -1712,8 +1712,7 @@ enum AgentsCommand {
         #[arg(long, requires = "service", conflicts_with = "dir")]
         machine: bool,
         /// With --service: print the key into the pipe the caller reads it from (a session
-        /// script's `$(...)`). Required: without it, or to a terminal or a file, it is refused
-        /// (SB-420).
+        /// script's `$(...)`). Required: without it, or to a terminal or a file, it is refused.
         #[arg(long, requires = "service")]
         to_pipe: bool,
     },
@@ -1954,7 +1953,7 @@ enum AnthropicCommand {
         /// The key's name.
         name: String,
         /// Print the key into the pipe the caller reads it from (a session script's `$(...)`).
-        /// Required: without it, or to a terminal or a file, it is refused (SB-420).
+        /// Required: without it, or to a terminal or a file, it is refused.
         #[arg(long)]
         to_pipe: bool,
     },
