@@ -224,9 +224,8 @@ pub(crate) fn desired(snapshot: &Snapshot) -> Vec<(PathBuf, String)> {
         // A group whose seats left its organization keeps its folders: the proxy refuses the seat
         // (closed), rather than the folder falling back to the ordinary login (open). SB-109.
         // A group bound to an organization never falls back to the default group either.
-        let route = if project.off {
-            project.pool.clone()
-        } else if has_claude(&project.pool) {
+        // SB-401 D-15: a group switched off keeps its route, closed (the proxy refuses it).
+        let route = if project.off || has_claude(&project.pool) {
             project.pool.clone()
         } else if project.organizations.is_empty()
             && project.pool != DEFAULT_POOL
