@@ -59,7 +59,7 @@ pub const GROUP_HOLDS_CEILING: &str = "This group has a spending ceiling. Delete
 pub const OUT_OF_RANGE: &str = "Enter an amount from $0.01 to $1,000.";
 pub const NO_OWN_KEY: &str = "Give this group its own key under API keys first.";
 /// SB-401: turning the pay-per-token group on without a ceiling.
-pub const TOKENS_NEED_CEILING: &str = "Set a daily spending ceiling for the pay-per-token group first: its keys are charged per token, and the ceiling is what stops them.";
+pub const TOKENS_NEED_CEILING: &str = switchboard_core::TOKENS_NO_CEILING;
 pub const NO_GROUP: &str = "That group id names no group.";
 pub const DOUBLE_IN_WINDOW: &str = "Doubling a ceiling is answered in the Switchboard window.";
 pub const DOUBLE_TOO_HIGH: &str =

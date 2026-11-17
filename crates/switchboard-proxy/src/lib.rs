@@ -1,6 +1,7 @@
 //! Credential-injecting loopback gateway. A request owns its route snapshot until EOF.
 pub mod peer;
 pub mod prices;
+pub mod tokens;
 pub mod stats;
 use axum::{
     body::{to_bytes, Body},
@@ -709,6 +710,16 @@ async fn relay(
     // route written while it was on, an agent's pool): its keys never spend by accident.
     if g.store.pool_off(&pool) {
         return error(StatusCode::FORBIDDEN, switchboard_core::GROUP_OFF);
+    }
+    // SB-401: the pay-per-token group spends money on every request: it runs only under its
+    // daily ceiling, checked here against the day's list-price spend the proxy counted.
+    if g.store.pool_is_tokens(&pool) {
+        let Some(cents) = tokens::ceiling_cents(g.store.root(), &pool) else {
+            return error(StatusCode::FORBIDDEN, switchboard_core::TOKENS_NO_CEILING);
+        };
+        if tokens::spent_today(&g.stats, &pool, now()) >= u64::from(cents) * 10_000 {
+            return error(StatusCode::FORBIDDEN, switchboard_core::TOKENS_CEILING_REACHED);
+        }
     }
     let route = match g.store.route(provider, &pool) {
         Ok(route) => Some(route),
