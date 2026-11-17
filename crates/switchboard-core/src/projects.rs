@@ -689,7 +689,10 @@ impl Store {
         if !crate::label_valid(name) {
             return Err("Name the project.".into());
         }
-        if folders.is_empty() {
+        // SB-401: the pay-per-token group may hold no folder; it is checked below, once it is
+        // known which group this is.
+        let maybe_tokens = pool.is_some();
+        if folders.is_empty() && !maybe_tokens {
             return Err("Add at least one project folder.".into());
         }
         let mut folder_list: Vec<String> = Vec::new();
@@ -706,6 +709,12 @@ impl Store {
         let mut state = self.lock()?;
         let mut candidate = state.clone();
         let existing = pool.and_then(|p| candidate.projects.iter().position(|x| x.pool == p));
+        let (tokens, off) = existing.map_or((false, false), |i| {
+            (candidate.projects[i].tokens, candidate.projects[i].off)
+        });
+        if folders.is_empty() && !tokens {
+            return Err("Add at least one project folder.".into());
+        }
         if pool.is_some() && existing.is_none() {
             return Err("Project not found.".into());
         }
@@ -906,6 +915,8 @@ impl Store {
             sources,
             organizations,
             shared_accounts: shared,
+            tokens,
+            off,
         };
         match existing {
             Some(i) => candidate.projects[i] = project.clone(),

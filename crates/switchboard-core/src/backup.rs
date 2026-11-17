@@ -1124,6 +1124,7 @@ mod tests {
                 created_at: 1,
                 sources: vec!["github.com/example".into()],
                 organizations: Vec::new(),
+                ..Project::default()
             }],
             ..Default::default()
         };
