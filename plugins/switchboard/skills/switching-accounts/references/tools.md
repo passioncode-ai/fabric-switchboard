@@ -910,18 +910,22 @@ lookahead_minutes, pass_minutes, fed: [{pool, name, priority, off, providers: [{
 accounts}]}], available: [{pool, name, fed, priority}], reservoir: [{provider, accounts, placed,
 ready, parked}], moved: [{account_id, label, provider, kind, from, from_name, to, to_name, at}],
 recent, last_pass}`, where `recent` is the newest feed moves with their reason (`feed`, `park`,
-`spent`, `rested`, `priority`, `taken`, `feed_off`), outcome and figures (`feed: {priority, ready,
-want, used_percent?, resets_in?}`). `pool` with `on` turns a group's feed on or off (never
-`default`; off gives back every account the feed moved in or out of it at once); `priority` (1 is
-the highest, 1 to 99) sets it for a fed group; `ready` (1 to 10) and `lookahead_minutes` (0 to 720)
-set the targets for every fed group. Change it only when the operator asks. A fed group keeps
-`ready` ready accounts: room now, or a limit that resets within the look-ahead. Each pass rests its
-spent accounts in the default group and places the default group's accounts in it, higher priority
-first; a fed group with none may take a lower fed group's last ready account. A move is a loan (the
+`spent`, `rested`, `priority`, `taken`, `surplus`, `sign_in`, `feed_off`), outcome and figures
+(`feed: {priority, ready, want, used_percent?, resets_in?}`). `pool` with `on` turns a group's feed
+on or off (never `default`; off gives back every account the feed moved in or out of it at once,
+and takes no `priority`); `priority` (1 is the highest, 1 to 99; equal priorities go by group id)
+sets it for a fed group; `ready` (1 to 10) and `lookahead_minutes` (0 to 720) set the targets for
+every fed group. Change it only when the operator asks. A fed group keeps `ready` ready accounts:
+room now, or a limit that resets within the look-ahead. Each pass lends the default group's
+accounts to it, higher priority first, and takes back one that is out (a limit refusal or the
+switching threshold) once another ready account serves the group; its own account that is out is
+shared with the default group and keeps serving its group. A fed group with recent requests and no
+ready account may take a lower fed group's last ready account, though not one that served a request
+in the last 30 minutes unless it is refusing requests now; extra ready accounts beyond `ready` go
+back. A group with no account is fed only what its sessions asked for. A move is a loan (the
 account keeps its own group) and takes effect from the next request; each is also a `balancing`
 entry of `switchboard_events`. The ordinary CLI's account, one given to an agent, turned off,
-delegated, used on another machine or waiting for a sign-in is never moved; no account crosses an
-organization's boundary.
+delegated or used on another machine is never moved; no account crosses an organization's boundary.
 
 ### `switchboard_login`: `action`, `login_id?`, `provider?`, `label?`, `pool?`
 

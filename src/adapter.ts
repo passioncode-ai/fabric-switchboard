@@ -243,6 +243,7 @@ const safeErrors = new Set([
   'Give the number of ready accounts as a whole number from 1 to 10.',
   'Give the look-ahead in minutes, from 0 to 720.',
   'Name the group whose feed changes.',
+  'A group whose feed is turned off has no priority. Turn the feed off without one.',
   'Group not found.',
   // Moving a sign-in to another machine (SB-283).
   "Name the other machine as ssh knows it: letters, digits, dots, hyphens, @ and : only.",

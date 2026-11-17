@@ -2112,7 +2112,7 @@ export function feedView(status: FeedStatus | null, error: string | null = null)
   const groups = new Map(status.available.map((g) => [g.pool, { fed: g.fed, priority: g.priority }]));
   const arrows = [...status.fed].sort((a, b) => a.priority - b.priority || a.pool.localeCompare(b.pool)).map((f) => ({ pool: f.pool, label: f.name, priority: f.priority }));
   const line = status.on ? plural(arrows.length, { one: '{n} group is fed from the default group.', other: '{n} groups are fed from the default group.' }) : t('No group is fed from the default group.');
-  const rule = plural(status.ready, { one: 'A fed group keeps {n} ready account: its spent accounts rest in the default group, and accounts with room, or whose limit resets within {minutes} minutes, come from it.', other: 'A fed group keeps {n} ready accounts: its spent accounts rest in the default group, and accounts with room, or whose limit resets within {minutes} minutes, come from it.' }, { minutes: status.lookahead_minutes });
+  const rule = plural(status.ready, { one: 'A fed group keeps {n} ready account: the default group lends it accounts with room, or whose limit resets within {minutes} minutes, and takes back one that runs out once another serves the group.', other: 'A fed group keeps {n} ready accounts: the default group lends it accounts with room, or whose limit resets within {minutes} minutes, and takes back one that runs out once another serves the group.' }, { minutes: status.lookahead_minutes });
   return { state: status.on ? 'on' : 'off', line, error, retry: false, groups, arrows, rule };
 }
 /** The badge on a fed group's card. */
@@ -2128,9 +2128,11 @@ export function feedMoveLine(entry: Pick<FeedEntry, 'from' | 'to' | 'reason' | '
     case 'feed': return t('{account} was placed in {group} from the default group.', { account, group });
     case 'priority': return t('{account} moved to {group}, which has a higher priority and had no ready account.', { account, group });
     case 'taken': return t('{account} left {group} for a group with a higher priority.', { account, group });
-    case 'park': return t('{account} ran out in {group} and rests in the default group.', { account, group });
-    case 'spent': return t('{account} ran out in {group} and went back to the default group.', { account, group });
-    case 'rested': return t('{account} has room again and works only in {group}.', { account, group });
+    case 'park': return t('{account} ran out in {group} and is shared with the default group until its limit resets.', { account, group });
+    case 'spent': return t('{account} ran out in {group} and went back; another ready account serves the group.', { account, group });
+    case 'rested': return t('{account} has room again and is no longer shared with the default group.', { account });
+    case 'surplus': return t('{account} went back: {group} has more ready accounts than it keeps.', { account, group });
+    case 'sign_in': return t('{account} went back: it waits for a sign-in.', { account });
     case 'feed_off': return t('{account} went back: {group} is no longer fed.', { account, group });
     default: return t('{account} went back to its own group.', { account });
   }

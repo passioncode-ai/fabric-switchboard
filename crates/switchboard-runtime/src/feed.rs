@@ -1,8 +1,10 @@
 //! SB-419 (DEC-0028, operator 2026-11-17): groups fed from the default group. A person turns the
-//! feed on per group, with a priority (1 is the highest). The default group is the reservoir: an
-//! account of a fed group that runs out rests in `default` (a park), and accounts of the default
-//! group with room, or whose limit resets within the look-ahead, are placed into each fed group
-//! until it holds `ready` of them (default 2: the one in use and the next).
+//! feed on per group, with a priority (1 is the highest). The default group is the reservoir:
+//! accounts of the default group with room, or whose limit resets within the look-ahead, are lent
+//! to each fed group until it holds `ready` of them (default 2: the one in use and the next); one
+//! that runs out goes back once another account serves the group, and a fed group's own account
+//! that runs out is shared with `default` (a park: it keeps serving its own group too) so another
+//! fed group can take it once its limit resets.
 //!
 //! It is a second policy on balancing's pass and files (DEC-0012): the settings live in
 //! `balancing.json` (`fed`, `ready`, `lookahead_minutes`), each move is a `Lend` marked `feed`,
@@ -35,6 +37,52 @@ pub const PRIORITY_RANGE: &str = "Give the priority as a whole number from 1 (hi
 pub const READY_RANGE: &str = "Give the number of ready accounts as a whole number from 1 to 10.";
 pub const LOOKAHEAD_RANGE: &str = "Give the look-ahead in minutes, from 0 to 720.";
 pub const NO_GROUP: &str = "Name the group whose feed changes.";
+pub const OFF_PRIORITY: &str =
+    "A group whose feed is turned off has no priority. Turn the feed off without one.";
+/// An account that served a request in this stretch is in use: a priority move never takes it,
+/// unless the group that would take it is refusing requests now.
+pub const SERVING_SECONDS: i64 = 30 * 60;
+/// A group that had a limit refusal in this stretch is refusing requests now.
+pub const REFUSING_SECONDS: i64 = 15 * 60;
+
+/// What the proxy saw in the last minutes, beyond the 6-hour signals: the accounts that served a
+/// request in `SERVING_SECONDS` per group, and the groups with a limit refusal in
+/// `REFUSING_SECONDS`, per provider.
+#[derive(Clone, Debug, Default)]
+pub struct Activity {
+    /// `(pool, account)` that served a request.
+    pub serving: HashSet<(String, String)>,
+    /// `(pool, provider)` with a limit refusal.
+    pub refusing: HashSet<(String, &'static str)>,
+}
+impl Activity {
+    /// From the statistics' counts per group and account over the two stretches.
+    pub(crate) fn from_windows(
+        snapshot: &Snapshot,
+        serving: &crate::statistics::Window,
+        refusing: &crate::statistics::Window,
+    ) -> Self {
+        let provider = |id: &str| {
+            snapshot
+                .accounts
+                .iter()
+                .find(|a| a.id == id)
+                .map(|a| a.provider.as_str())
+        };
+        Activity {
+            serving: serving
+                .iter()
+                .filter(|(_, (requests, _))| *requests > 0)
+                .map(|((pool, account), _)| (pool.clone(), account.clone()))
+                .collect(),
+            refusing: refusing
+                .iter()
+                .filter(|(_, (_, limited))| *limited > 0)
+                .filter_map(|((pool, account), _)| provider(account).map(|p| (pool.clone(), p)))
+                .collect(),
+        }
+    }
+}
 
 /// One fed group.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -127,9 +175,23 @@ fn blocking(snapshot: &Snapshot, account: &Account, pool: &str) -> Option<Vec<Op
     )
 }
 
+/// The share at which automatic switching moves a group's sessions off an account: the group's
+/// managed policy's threshold, or the initial policy's (DEC-0008).
+fn switch_at(snapshot: &Snapshot, provider: Provider, pool: &str) -> f64 {
+    snapshot
+        .policies
+        .iter()
+        .find(|p| p.provider == provider && p.pool == pool && p.target == "managed")
+        .cloned()
+        .unwrap_or_else(|| switchboard_core::default_managed_policy(provider, pool))
+        .threshold_percent
+        .clamp(1.0, 100.0)
+}
+
 struct View<'a> {
     snapshot: &'a Snapshot,
     signals: &'a Signals,
+    activity: &'a Activity,
     held: &'a Held,
     settings: &'a Settings,
     now: i64,
@@ -157,13 +219,40 @@ impl View<'_> {
         }
         (at <= self.now + self.lookahead).then_some(Ready::Soon(at))
     }
-    /// Out for longer than the look-ahead: a limit refusal or a window at its threshold that
-    /// does not reset in time.
+    /// Truly out (review round 1): not ready, and either a limit refusal holds it or one of its
+    /// own windows is at or past the share automatic switching leaves it at (or 100 %), without
+    /// a reset within the look-ahead. An account between the room line and the switching line is
+    /// still in use and never out.
     fn exhausted(&self, account: &Account, pool: &str) -> bool {
-        self.readiness(account, pool).is_none()
-            && !self.held.sign_in.contains(&account.id)
-            && (self.held.limited.contains(&account.id)
-                || blocking(self.snapshot, account, pool).is_some_and(|w| !w.is_empty()))
+        if self.readiness(account, pool).is_some() || self.held.sign_in.contains(&account.id) {
+            return false;
+        }
+        if self.held.limited.contains(&account.id) {
+            return true;
+        }
+        let at = switch_at(self.snapshot, account.provider, pool);
+        account.usage.as_ref().is_some_and(|u| {
+            if u.windows.is_empty() {
+                u.used_percent >= at
+            } else {
+                u.windows
+                    .iter()
+                    .any(|w| !w.is_feature() && w.used_percent >= at)
+            }
+        })
+    }
+    /// The group asked for `provider` lately: requests in the last 6 hours, or a limit refusal
+    /// in the last minutes.
+    fn demand(&self, pool: &str, provider: Provider) -> bool {
+        self.signals
+            .get(&(pool.to_owned(), provider.as_str()))
+            .is_some_and(|s| s.requests_6h > 0 || s.refusals_6h > 0)
+            || self.refusing(pool, provider)
+    }
+    fn refusing(&self, pool: &str, provider: Provider) -> bool {
+        self.activity
+            .refusing
+            .contains(&(pool.to_owned(), provider.as_str()))
     }
     /// An account the feed may move at all (DEC-0028's never-moved list): balancing's rule
     /// (enabled, a subscription sign-in, not used elsewhere or on another machine's group, not
@@ -313,9 +402,11 @@ pub fn returns_owed(
     now: i64,
 ) -> Vec<Action> {
     let signals = Signals::new();
+    let activity = Activity::default();
     let view = View {
         snapshot,
         signals: &signals,
+        activity: &activity,
         held,
         settings,
         now,
@@ -332,25 +423,33 @@ pub fn returns_owed(
 /// The whole decision of one feed pass (DEC-0028), after balancing's own plan, leaving alone the
 /// accounts in `busy` (those balancing moves in the same pass).
 ///
-/// 1. Returns: a feed move owed back at once (`forced`); a placement whose account is spent in
-///    its fed group goes back to `default` (`spent`, never delayed); a park whose account has room
-///    again in its own group ends after its cooldown (`rested`).
-/// 2. Parks: each own account of a fed group that is spent rests in `default` (`park`, never
-///    delayed by the cooldown).
+/// 1. Returns: a feed move owed back at once (`forced`); a placement waiting for a sign-in
+///    (`sign_in`); a park whose account has room again in its own group ends after its cooldown
+///    (`rested`).
+/// 2. Parks: each own account of a fed group that is truly out is shared with `default` (`park`,
+///    never delayed by the cooldown); it keeps serving its own group.
 /// 3. Fill: highest priority first, each fed group is brought to one ready account, then all of
 ///    them to `ready`, from the reservoir (accounts at home in `default` that are not lent, and
 ///    parked accounts of other groups), room now first by the most room, then the soonest reset
-///    within the look-ahead (`feed`). A group is fed only the providers it works with (any, when
-///    it works with none yet).
-/// 4. Priority: a fed group still with no ready account takes one from the lowest fed group of a
-///    lower priority that has one, even its last: an account the feed placed there moves
-///    (`taken`, then `priority`); its own account is shared with it.
+///    within the look-ahead (`feed`). A group is fed only the providers it works with: an account
+///    of it serves the group or was fed to it, or it had requests on it in 6 hours.
+/// 4. Spent: a placement truly out in its fed group goes back (`spent`, never delayed), but only
+///    while another ready account serves the group, so a group never loses its last one and its
+///    sessions always have an account to go to (review round 1).
+/// 5. Priority: a fed group with demand (requests in 6 hours or a refusal now) and still no ready
+///    account takes one from the lowest fed group of a lower priority that has one, even its last:
+///    an account the feed placed there moves (`taken`, then `priority`); its own account is shared
+///    with it. An account that served the lower group in the last `SERVING_SECONDS` is taken only
+///    while the higher group is refusing requests now.
+/// 6. Surplus: a fed group holding more ready accounts than `ready` gives back the extra
+///    placements (never the one its sessions use now), after their cooldown (`surplus`).
 ///
 /// A placement or a priority move waits out the account's cooldown; nothing the person or an
 /// agent holds is moved (see `View::movable`), and nothing crosses an organization's boundary.
 pub fn plan(
     snapshot: &Snapshot,
     signals: &Signals,
+    activity: &Activity,
     held: &Held,
     settings: &Settings,
     now: i64,
@@ -359,6 +458,7 @@ pub fn plan(
     let view = View {
         snapshot,
         signals,
+        activity,
         held,
         settings,
         now,
@@ -368,8 +468,14 @@ pub fn plan(
     let mut moving: HashSet<String> = busy.clone();
     let mut leaving: HashSet<(String, String)> = HashSet::new();
     let account_of = |id: &str| snapshot.accounts.iter().find(|a| a.id == id);
+    let fed_now = |pool: &str| {
+        fed_order(snapshot, settings)
+            .into_iter()
+            .find(|f| f.pool == pool)
+    };
 
-    // 1. The feed's own moves.
+    // 1. The feed's own moves that end whatever the group holds.
+    let mut spent: Vec<&balancing::Lend> = Vec::new();
     for lend in settings.lent.iter().filter(|l| l.feed) {
         if moving.contains(&lend.account) {
             continue;
@@ -377,7 +483,13 @@ pub fn plan(
         let reason = forced(&view, lend).or_else(|| {
             let account = account_of(&lend.account)?;
             if lend.to != DEFAULT_POOL {
-                view.exhausted(account, &lend.to).then_some(("spent", true))
+                if held.sign_in.contains(&account.id) {
+                    return Some(("sign_in", true));
+                }
+                if view.exhausted(account, &lend.to) {
+                    spent.push(lend);
+                }
+                None
             } else {
                 (settings.cooled(&lend.account, now)
                     && matches!(view.readiness(account, &lend.from), Some(Ready::Room(_))))
@@ -396,9 +508,9 @@ pub fn plan(
     }
     let want = ready_target(settings);
 
-    // 2. Parks: a spent own account of a fed group rests in `default`.
+    // 2. Parks: an own account of a fed group that is truly out is shared with `default`.
     for fed in &order {
-        let spent: Vec<&Account> = snapshot
+        let parked: Vec<&Account> = snapshot
             .accounts
             .iter()
             .filter(|a| {
@@ -411,7 +523,7 @@ pub fn plan(
                     && view.exhausted(a, &fed.pool)
             })
             .collect();
-        for a in spent {
+        for a in parked {
             let figures = view.figures(fed, 0, want, None);
             out.push(action(
                 "lend",
@@ -446,10 +558,8 @@ pub fn plan(
     let mut counts: BTreeMap<(String, &'static str), usize> = BTreeMap::new();
     let mut wanted: Vec<(&Fed, Provider)> = Vec::new();
     for fed in &order {
-        let any = PROVIDERS.iter().any(|p| view.uses(&fed.pool, *p));
         for p in PROVIDERS {
-            let held_here = reservoir.iter().any(|a| a.provider == p);
-            if view.uses(&fed.pool, p) || (!any && held_here) {
+            if view.uses(&fed.pool, p) {
                 wanted.push((fed, p));
                 counts.insert(
                     (fed.pool.clone(), p.as_str()),
@@ -497,12 +607,34 @@ pub fn plan(
         }
     }
 
-    // 4. Priority: a fed group with none takes one from a lower fed group.
-    for (high, p) in &wanted {
-        let key = (high.pool.clone(), p.as_str());
-        if counts[&key] > 0 {
+    // 4. Spent placements go back only while another ready account serves their group.
+    for lend in spent {
+        let Some(account) = account_of(&lend.account) else {
+            continue;
+        };
+        let key = (lend.to.clone(), account.provider.as_str());
+        let others = counts.get(&key).copied().unwrap_or(0);
+        if others == 0 {
             continue;
         }
+        let ready = others;
+        let figures = fed_now(&lend.to)
+            .map(|f| view.figures(f, ready, want, None))
+            .unwrap_or_default();
+        out.push(action(
+            "return", account, &lend.from, &lend.to, "spent", true, figures,
+        ));
+        moving.insert(account.id.clone());
+        leaving.insert((lend.to.clone(), account.id.clone()));
+    }
+
+    // 5. Priority: a fed group with demand and none takes one from a lower fed group.
+    for (high, p) in &wanted {
+        let key = (high.pool.clone(), p.as_str());
+        if counts[&key] > 0 || !view.demand(&high.pool, *p) {
+            continue;
+        }
+        let refusing = view.refusing(&high.pool, *p);
         for low in order.iter().rev() {
             if low.priority <= high.priority {
                 break;
@@ -519,6 +651,7 @@ pub fn plan(
                     || !settings.cooled(&a.id, now)
                     || snapshot.serves(a, &high.pool)
                     || !snapshot.loan_admits(&high.pool, a)
+                    || (!refusing && activity.serving.contains(&(low.pool.clone(), a.id.clone())))
                 {
                     continue;
                 }
@@ -557,6 +690,7 @@ pub fn plan(
                     low_figures,
                 ));
                 *counts.get_mut(&low_key).expect("counted") -= 1;
+                leaving.insert((low.pool.clone(), account.id.clone()));
             }
             let figures = view.figures(high, 0, want, Some(ready));
             out.push(action(
@@ -571,6 +705,47 @@ pub fn plan(
             moving.insert(account.id.clone());
             *counts.get_mut(&key).expect("counted") += 1;
             break;
+        }
+    }
+
+    // 6. Surplus: the extra placements of a group holding more ready accounts than it keeps.
+    for (fed, p) in &wanted {
+        let key = (fed.pool.clone(), p.as_str());
+        let mut extra = counts[&key].saturating_sub(want);
+        if extra == 0 {
+            continue;
+        }
+        let route = snapshot.routes.get(&format!("{}:{}", p.as_str(), fed.pool));
+        let mut placed: Vec<(&balancing::Lend, &Account, Ready)> = settings
+            .lent
+            .iter()
+            .filter(|l| l.feed && l.to == fed.pool && l.provider == *p)
+            .filter(|l| !moving.contains(&l.account) && settings.cooled(&l.account, now))
+            .filter(|l| route != Some(&l.account))
+            .filter_map(|l| {
+                let a = account_of(&l.account)?;
+                Some((l, a, view.readiness(a, &fed.pool)?))
+            })
+            .collect();
+        // The least useful first: a reset before room, then the most used.
+        placed.sort_by(|x, y| {
+            if better((x.1, x.2), (y.1, y.2)) {
+                std::cmp::Ordering::Greater
+            } else {
+                std::cmp::Ordering::Less
+            }
+        });
+        for (lend, account, _) in placed {
+            if extra == 0 {
+                break;
+            }
+            let figures = view.figures(fed, counts[&key], want, None);
+            out.push(action(
+                "return", account, &lend.from, &lend.to, "surplus", true, figures,
+            ));
+            moving.insert(account.id.clone());
+            *counts.get_mut(&key).expect("counted") -= 1;
+            extra -= 1;
         }
     }
     out
@@ -599,6 +774,9 @@ pub fn change(
     }
     if (on.is_some() || priority.is_some()) && pool.is_none() {
         return Err(NO_GROUP.into());
+    }
+    if on == Some(false) && priority.is_some() {
+        return Err(OFF_PRIORITY.into());
     }
     let before = settings.clone();
     if let Some(pool) = pool {
@@ -662,9 +840,11 @@ pub fn status(
 ) -> Value {
     let held = Held::default();
     let signals = Signals::new();
+    let activity = Activity::default();
     let view = View {
         snapshot,
         signals: &signals,
+        activity: &activity,
         held: &held,
         settings,
         now,
@@ -834,7 +1014,46 @@ mod tests {
         }
     }
     fn run(s: &Snapshot, settings: &Settings, held: &Held) -> Vec<Action> {
-        plan(s, &Signals::new(), held, settings, NOW, &HashSet::new())
+        plan(
+            s,
+            &Signals::new(),
+            &Activity::default(),
+            held,
+            settings,
+            NOW,
+            &HashSet::new(),
+        )
+    }
+    /// Requests in the last 6 hours on Claude for each group named.
+    fn asked(pools: &[&str]) -> Signals {
+        pools
+            .iter()
+            .map(|p| {
+                (
+                    ((*p).to_owned(), "claude"),
+                    balancing::Signal {
+                        requests_6h: 10,
+                        ..balancing::Signal::default()
+                    },
+                )
+            })
+            .collect()
+    }
+    fn run_with(
+        s: &Snapshot,
+        settings: &Settings,
+        signals: &Signals,
+        activity: &Activity,
+    ) -> Vec<Action> {
+        plan(
+            s,
+            signals,
+            activity,
+            &Held::default(),
+            settings,
+            NOW,
+            &HashSet::new(),
+        )
     }
     fn moves(actions: &[Action]) -> Vec<(&str, &str, &str, &str, &str)> {
         actions
@@ -937,7 +1156,9 @@ mod tests {
             account("d-2", "default", 20.0, 3600),
             account("d-3", "default", 30.0, 3600),
         ];
-        let actions = run(&s, &fed(&[("apps", 2), ("agents", 1)]), &Held::default());
+        let both = asked(&["agents", "apps"]);
+        let none = Activity::default();
+        let actions = run_with(&s, &fed(&[("apps", 2), ("agents", 1)]), &both, &none);
         assert_eq!(
             moves(&actions),
             [
@@ -949,11 +1170,14 @@ mod tests {
         );
         // One account for two groups: the higher one has it.
         s.accounts.truncate(1);
-        let actions = run(&s, &fed(&[("apps", 2), ("agents", 1)]), &Held::default());
+        let actions = run_with(&s, &fed(&[("apps", 2), ("agents", 1)]), &both, &none);
         assert_eq!(
             moves(&actions),
             [("lend", "d-1", "default", "agents", "feed")]
         );
+        // Review round 1: a group with no account is fed only what its sessions asked for.
+        let actions = run(&s, &fed(&[("apps", 2), ("agents", 1)]), &Held::default());
+        assert!(actions.is_empty(), "{actions:?}");
     }
 
     #[test]
@@ -966,7 +1190,8 @@ mod tests {
         s.projects[1].shared_accounts.push("d-1".into());
         let mut settings = fed(&[("agents", 1), ("apps", 2)]);
         settings.lent = vec![lend("d-1", "default", "apps")];
-        let actions = run(&s, &settings, &Held::default());
+        let quiet = Activity::default();
+        let actions = run_with(&s, &settings, &asked(&["agents"]), &quiet);
         assert_eq!(
             moves(&actions),
             [
@@ -976,11 +1201,107 @@ mod tests {
             ],
             "{actions:?}"
         );
+        // Review round 1: no demand in the higher group, nothing is taken.
+        let actions = run_with(&s, &settings, &Signals::new(), &quiet);
+        assert!(actions.iter().all(|a| a.reason != "taken"), "{actions:?}");
+        // An account serving the lower group right now stays, unless the higher group is
+        // refusing requests now.
+        let serving = Activity {
+            serving: [("apps".to_owned(), "d-1".to_owned())].into(),
+            ..Activity::default()
+        };
+        let actions = run_with(&s, &settings, &asked(&["agents"]), &serving);
+        assert!(actions.iter().all(|a| a.reason != "taken"), "{actions:?}");
+        let refusing = Activity {
+            refusing: [("agents".to_owned(), "claude")].into(),
+            ..serving.clone()
+        };
+        let actions = run_with(&s, &settings, &Signals::new(), &refusing);
+        assert!(actions.iter().any(|a| a.reason == "taken"), "{actions:?}");
         // Never upwards: the lower group with none takes nothing from the higher one.
         let mut settings = fed(&[("agents", 2), ("apps", 1)]);
         settings.lent = vec![lend("d-1", "default", "apps")];
-        let actions = run(&s, &settings, &Held::default());
+        let actions = run_with(&s, &settings, &asked(&["agents", "apps"]), &quiet);
         assert!(actions.iter().all(|a| a.reason != "taken"), "{actions:?}");
+    }
+
+    /// Review round 1 (P1-1): a placement goes back only when truly out (at the switching
+    /// threshold or refused for a limit, not at the room line) and only once another ready
+    /// account serves the group; a group never loses its last account.
+    #[test]
+    fn a_placement_goes_back_only_when_truly_out_and_replaced() {
+        let mut s = estate();
+        s.accounts = vec![account("d-1", "default", 99.0, 5 * 3600)];
+        s.projects[0].shared_accounts.push("d-1".into());
+        let mut settings = fed(&[("agents", 1)]);
+        settings.lent = vec![lend("d-1", "default", "agents")];
+        // Out, and nothing to replace it: it stays, the group's last account.
+        assert!(run(&s, &settings, &Held::default()).is_empty());
+        // A replacement with room is placed first, then the spent one goes back.
+        s.accounts.push(account("d-2", "default", 10.0, 3600));
+        let actions = run(&s, &settings, &Held::default());
+        assert_eq!(
+            moves(&actions),
+            [
+                ("lend", "d-2", "default", "agents", "feed"),
+                ("return", "d-1", "default", "agents", "spent"),
+            ],
+            "{actions:?}"
+        );
+        // Between the room line (80) and the switching threshold (90) it is still in use:
+        // a replacement comes, the account stays.
+        s.accounts[0] = account("d-1", "default", 85.0, 5 * 3600);
+        let actions = run(&s, &settings, &Held::default());
+        assert_eq!(
+            moves(&actions),
+            [("lend", "d-2", "default", "agents", "feed")],
+            "{actions:?}"
+        );
+        // A limit refusal makes it out at any share.
+        s.accounts[0] = account("d-1", "default", 40.0, 5 * 3600);
+        let held = Held {
+            limited: ["d-1".to_owned()].into(),
+            ..Held::default()
+        };
+        let actions = run(&s, &settings, &held);
+        assert!(actions.iter().any(|a| a.reason == "spent"), "{actions:?}");
+    }
+
+    /// Review round 1: extra placements go back so lower groups do not starve (never the one the
+    /// group's sessions use now), and a placement waiting for a sign-in goes back at once.
+    #[test]
+    fn a_surplus_placement_and_one_waiting_for_a_sign_in_go_back() {
+        let mut s = estate();
+        s.accounts = vec![
+            account("agents-1", "agents", 10.0, 3600),
+            account("agents-2", "agents", 20.0, 3600),
+            account("d-1", "default", 30.0, 3600),
+            account("d-2", "default", 40.0, 3600),
+        ];
+        s.projects[0].shared_accounts = vec!["d-1".into(), "d-2".into()];
+        s.routes.insert("claude:agents".into(), "d-1".into());
+        let mut settings = fed(&[("agents", 1)]);
+        settings.lent = vec![
+            lend("d-1", "default", "agents"),
+            lend("d-2", "default", "agents"),
+        ];
+        let actions = run(&s, &settings, &Held::default());
+        assert_eq!(
+            moves(&actions),
+            [("return", "d-2", "default", "agents", "surplus")],
+            "{actions:?}"
+        );
+        let held = Held {
+            sign_in: ["d-1".to_owned()].into(),
+            ..Held::default()
+        };
+        let actions = run(&s, &settings, &held);
+        assert!(
+            actions
+                .iter()
+                .any(|a| a.account == "d-1" && a.reason == "sign_in"),
+            "{actions:?}"
+        );
     }
 
     #[test]
@@ -1002,8 +1323,8 @@ mod tests {
         assert_eq!(
             moves(&actions),
             [
-                ("return", "d-1", "default", "agents", "spent"),
                 ("return", "agents-1", "agents", "default", "rested"),
+                ("return", "d-1", "default", "agents", "spent"),
             ],
             "{actions:?}"
         );
@@ -1038,7 +1359,15 @@ mod tests {
         // Balancing moves d-3 in the same pass: the feed leaves it alone.
         s.accounts.truncate(3);
         let busy: HashSet<String> = ["agents-1".to_owned()].into();
-        let actions = plan(&s, &Signals::new(), &Held::default(), &settings, NOW, &busy);
+        let actions = plan(
+            &s,
+            &Signals::new(),
+            &Activity::default(),
+            &Held::default(),
+            &settings,
+            NOW,
+            &busy,
+        );
         assert!(actions.is_empty(), "{actions:?}");
     }
 
@@ -1204,7 +1533,7 @@ mod tests {
         s.projects[0].organizations = vec!["acme".into()];
         s.memberships.insert("agents-1".into(), "acme".into());
         // The default group's accounts are personal: Acme's group takes none, and Acme's spent
-        // account does not rest in the default group, which is no organization's.
+        // account is not shared with the default group, which is no organization's.
         let actions = run(&s, &fed(&[("agents", 1)]), &Held::default());
         assert!(actions.is_empty(), "{actions:?}");
         // Once they work for Acme too, they are placed.

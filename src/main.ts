@@ -788,7 +788,15 @@ function wantFeed() {
 const FEED_ROW = 32; const FEED_WIDTH = 56;
 function feedMapSection(): HTMLElement | null {
   const view = feedView(feedState, feedError || null);
-  if (!view.arrows.length) return null;
+  // Review round 1: a failed read is said once here, with Retry, never only inside folded cards.
+  if (view.state === 'failed') {
+    const box = el('div', 'feed-map-wrap'); const line = el('p', 'account-meta usage-error');
+    line.append(`${view.line} `, button(t('Retry'), () => { feedError = ''; loadFeed(); render(); }, 'text-button', 'feed-retry'));
+    box.append(line); if (view.error) box.append(el('p', 'form-error', view.error));
+    return box;
+  }
+  if (view.state === 'reading') return null;
+  if (!view.arrows.length) { const box = el('div', 'feed-map-wrap'); box.append(el('p', 'account-meta section-state', view.line)); return box; }
   const wrap = el('div', 'feed-map-wrap');
   const box = el('div', 'feed-map'); box.setAttribute('role', 'group'); box.setAttribute('aria-label', t('Fed from Default'));
   const svgNs = 'http://www.w3.org/2000/svg';
@@ -808,45 +816,54 @@ function feedMapSection(): HTMLElement | null {
     targets.append(item);
   }
   box.append(el('span', 'feed-node feed-source', t('Default group')), svg, targets);
-  wrap.append(el('p', 'account-meta section-state', view.line), box);
+  const setNote = el('p', 'form-note'); setNote.append(`${t('Groups with the same priority are served in the order of their ids. The number of ready accounts is set from the command line:')} `, el('code', 'address', 'switchboard feed set --ready <n>'));
+  wrap.append(el('p', 'account-meta section-state', view.line), box, el('p', 'form-note feed-rule', view.rule), setNote);
   return wrap;
 }
+/** Review round 1: a priority that did not parse stays in its field, marked, until it is fixed. */
+const feedPriorityTyped = new Map<string, string>();
 /** On a group's card: whether it is fed from the default group, and its priority. */
 function groupFeedRow(project: Project): HTMLElement | null {
   if (project.tokens) return null;
   wantFeed();
   const view = feedView(feedState, feedError || null);
+  // The state of the read is said once, at the top of the page (feedMapSection).
+  if (view.state === 'reading' || view.state === 'failed') return null;
   const row = el('div', 'group-feed');
-  if (view.state === 'reading' || view.state === 'failed') {
-    row.append(el('span', 'form-note', view.line));
-    if (view.retry) row.append(button(t('Retry'), () => { feedError = ''; loadFeed(); render(); }, 'text-button', `feed-retry-${project.pool}`));
-    return row;
-  }
   const entry = view.groups.get(project.pool) ?? { fed: false, priority: null };
   const shown = groupDisplayName(project);
   const option = el('label', 'appearance-option login-option'); const box = el('input'); box.type = 'checkbox'; box.checked = entry.fed; box.dataset.focus = `feed-${project.pool}`;
-  box.addEventListener('change', () => { const on = box.checked; void mutate(async () => { feedState = await adapter.feed({ pool: project.pool, on }); }, () => feedNotice({ group: shown, on, priority: feedState?.available.find((g) => g.pool === project.pool)?.priority ?? undefined }), `feed-${project.pool}`); });
+  box.setAttribute('aria-label', t('Fed from Default: {group}', { group: shown }));
+  box.addEventListener('change', () => { const on = box.checked; feedPriorityTyped.delete(project.pool); void mutate(async () => { feedState = await adapter.feed({ pool: project.pool, on }); }, () => feedNotice({ group: shown, on, priority: feedState?.available.find((g) => g.pool === project.pool)?.priority ?? undefined }), `feed-${project.pool}`); });
   option.append(box, el('span', '', t('Fed from Default')));
   const field = el('label', 'feed-priority-field'); const input = el('input'); input.type = 'number'; input.min = '1'; input.max = '99'; input.step = '1'; input.inputMode = 'numeric';
-  input.value = entry.priority ? String(entry.priority) : ''; input.disabled = !entry.fed; input.dataset.focus = `feed-priority-${project.pool}`;
+  const typed = feedPriorityTyped.get(project.pool);
+  input.value = typed ?? (entry.priority ? String(entry.priority) : ''); input.disabled = !entry.fed; input.dataset.focus = `feed-priority-${project.pool}`;
+  input.setAttribute('aria-label', t('Priority of {group}', { group: shown }));
+  const errorId = `feed-priority-error-${project.pool}`;
+  if (typed !== undefined) { input.setAttribute('aria-invalid', 'true'); input.setAttribute('aria-describedby', errorId); }
   input.addEventListener('change', () => {
     const n = feedPriority(input.value);
-    if (n === null) { showNotice('Give the priority as a whole number from 1 (highest) to 99.', true); render(); return; }
+    if (n === null) { feedPriorityTyped.set(project.pool, input.value); render(); restoreFocus(`feed-priority-${project.pool}`); return; }
+    feedPriorityTyped.delete(project.pool);
     void mutate(async () => { feedState = await adapter.feed({ pool: project.pool, priority: n }); }, feedNotice({ group: shown, priority: n }), `feed-priority-${project.pool}`);
   });
   field.append(el('span', '', t('Priority')), input);
   row.append(option, field);
-  if (entry.fed) row.append(el('p', 'form-note feed-rule', view.rule));
+  if (typed !== undefined) { const error = el('p', 'form-error feed-rule', t('Give the priority as a whole number from 1 (highest) to 99.')); error.id = errorId; row.append(error); }
+  if (!entry.fed) row.append(el('p', 'form-note feed-rule', t('Turn the feed on to set a priority.')));
   return row;
 }
 /** On Activity: the feed's newest moves, each with its reason. */
 function feedActivityPanel(): HTMLElement | null {
   wantFeed();
   const recent = feedState?.recent ?? [];
-  if (!recent.length) return null;
+  if (!recent.length && !feedState?.on) return null;
   const panel = el('section', 'about-panel feed-activity'); panel.setAttribute('aria-labelledby', 'feed-activity-heading');
   const heading = el('h2', '', t('Fed from Default')); heading.id = 'feed-activity-heading';
   const name = (pool: string) => pool === 'default' ? t('Default group') : (projectOf(pool) ? groupDisplayName(projectOf(pool)!) : poolName(pool, snapshot!.projects));
+  // Review round 1: the feed is on and has moved nothing yet: say so, so it reads as running.
+  if (!recent.length) { panel.append(heading, el('p', 'surface-note', t('The feed is on and has moved no account yet. A pass every 15 minutes keeps the fed groups ready.'))); return panel; }
   const list = el('ol', 'event-list');
   for (const e of recent.slice(0, 10)) {
     const row = el('li', 'event-row'); const line = el('div', 'event-title');

@@ -3021,67 +3021,73 @@ design target-state `06-default-feed.md`. A second policy on balancing's pass an
 
 - **Settings.** `balancing.json` carries `fed: [{pool, priority}]` (1 is the highest, 1 to 99),
   `ready` (absent: 2, 1 to 10) and `lookahead_minutes` (absent: 30, 0 to 720); a loan the feed made
-  carries `feed: true`. Each is absent until set, so a file without the feed keeps its bytes, and an
-  older reader ignores them (it reads a feed move as an ordinary loan). `feed::change` refuses
-  `default` (“The default group feeds the others, so it cannot be fed itself.”), a group that does
-  not exist or is the pay-per-token group (`NO_SUCH_GROUP`), a priority for a group not fed, and
-  values out of range; a group fed for the first time with no priority goes after the fed ones; the
-  defaults are stored as absent. `balancing::resolve` drops a fed group that was deleted; one
-  switched off keeps its place and is skipped while it is off.
+  carries `feed: true`. Each is absent until set, so a file without the feed keeps its bytes.
+  An older reader drops the three settings when it next writes and its balancing pass returns each
+  feed loan (`not_chosen`, or as its own loan when both groups are chosen for balancing), so a
+  downgrade turns the feed off and gives back what it moved. `feed::change` refuses `default`
+  (“The default group feeds the others, so it cannot be fed itself.”), a group that does not exist
+  or is the pay-per-token group (`NO_SUCH_GROUP`), a priority for a group not fed, a priority with
+  `on: false` (`OFF_PRIORITY`), and values out of range; a group fed for the first time with no
+  priority goes after the fed ones; the defaults are stored as absent. `balancing::resolve` drops a
+  fed group that was deleted; one switched off keeps its place and is skipped while it is off.
 - **The pass.** `Runtime::balance_pass` runs while groups are chosen, an account is still lent or a
-  group is fed. After `balancing::plan`, `feed::plan` decides on the accounts balancing did not move
-  in the same pass (`busy`), reading only the snapshot, the limit evidence, the ordinary CLI's
-  sign-in and the sign-ins waiting (`Held`) and the 6-hour request counts. Balancing's own plan and
-  `returns_owed` leave a `feed` loan alone; `balance status` lists none of them.
-- **Ready.** An account is ready in a group when `balancing::room` answers (fresh figures, below the
-  group's threshold less its hysteresis) or every own window at or past that line resets within the
-  look-ahead; a sign-in waiting is never ready. Spent: not ready, and held by a limit refusal or a
-  window at the line that resets later. A fed group is fed the providers it works with (an account
-  of it serves the group or was fed to it, or it had requests on it in 6 hours), every provider the
-  reservoir holds when it works with none yet.
-- **The plan**, in order: returns (`account_gone`, `share_gone`, `feed_off` for a move into or out
-  of a group not fed any more, `group_off`, `not_lendable`; `spent` for a placement spent in its
-  group, never delayed; `rested` for a park whose account has room again in its own group, after its
-  cooldown); parks (each spent own account of a fed group, lent nowhere, that `default` admits:
-  `lend` to `default`, reason `park`, never delayed); the fill, highest priority first, first to one
-  ready account per group and provider, then to `ready`, from the reservoir (accounts at home in
-  `default` lent nowhere, and parked accounts of other groups, cooled), ranked room now first by the
-  lowest used share then the latest reset, then the soonest reset, then the id (`lend`, reason
-  `feed`); priority (a fed group still with none takes one ready account of the lowest fed group of a
-  lower priority: an account the feed placed there is returned, `taken`, and lent, `priority`; its
-  own account lent nowhere is lent to it, `priority`). Never moved: an account balancing's `usable`
-  refuses (disabled, an API key, used elsewhere or on another machine's group, given to an agent, a
-  delegated seat; `TODO(SB-418)` marks where the person's own off switch replaces `enabled`), the
-  ordinary CLI's sign-in, a sign-in waiting; nothing crosses `loan_admits`.
+  group is fed; any change of the feed asks for a pass within a minute (`balance_soon`). After
+  `balancing::plan`, `feed::plan` decides on the accounts balancing did not move in the same pass
+  (`busy`), reading the snapshot, `Held` (limit evidence, the ordinary CLI's sign-in, sign-ins
+  waiting), the 6-hour signals and `feed::Activity` (the accounts that served a request per group
+  in the last 30 minutes, the groups with a limit refusal in the last 15, from the statistics'
+  quarter-hour counts). Balancing's own plan and `returns_owed` leave a `feed` loan alone;
+  `balance status` lists none of them.
+- **Ready and out.** Ready: `balancing::room` answers (fresh figures, below the group's threshold
+  less its hysteresis), or every own window at or past that line resets within the look-ahead; a
+  sign-in waiting is never ready. Out: not ready, and a limit refusal holds it or a window is at or
+  past the switching threshold itself (`threshold_percent`, 90 % initially). A group is fed the
+  providers it works with: an account of it serves the group or was fed to it, or it had requests
+  on it in 6 hours (a group with no account: only the latter).
+- **The plan**, in order: (1) returns owed at once (`account_gone`, `share_gone`, `feed_off`,
+  `group_off`, `not_lendable`), a placement waiting for a sign-in (`sign_in`), a park whose
+  account has room again in its own group after its cooldown (`rested`); (2) parks: each own
+  account of a fed group, lent nowhere, that is out and that `default` admits, `lend` to `default`
+  (`park`, never delayed); a park only shares it, so it keeps serving its own group; (3) fill,
+  highest priority first (then the group id), first to one ready account per group and provider,
+  then to `ready`, from the reservoir (accounts at home in `default` lent nowhere, and parked
+  accounts of other groups, cooled), ranked room now first by the lowest used share then the latest
+  reset, then the soonest reset, then the id (`lend`, `feed`); (4) a placement that is out goes
+  back (`spent`, never delayed) only while the group still has a ready account after the fill, so a
+  group never loses its last account; (5) priority: a fed group with demand (requests in 6 hours, or
+  a refusal in the last 15 minutes) and no ready account takes one ready account of the lowest fed
+  group of a lower priority (an account the feed placed there is returned, `taken`, and lent,
+  `priority`; its own account lent nowhere is lent to it), skipping an account that served that
+  group in the last 30 minutes unless the higher group is refusing now; (6) surplus: a group with
+  more ready accounts than `ready` returns the extra placements, the least useful first, never the
+  account its route names, after their cooldown (`surplus`). Never moved: an account balancing's
+  `usable` refuses (disabled, an API key, used elsewhere or on another machine's group, given to
+  an agent, a delegated seat; `TODO(SB-418)` marks where the person's own off switch replaces
+  `enabled`), the ordinary CLI's sign-in; nothing crosses `loan_admits`.
 - **Moves.** `balancing::apply` carries them out as loans (`Store::set_shared`: a share of the fed
   group or of `default`; no home changes), records each in `lent` with `feed: true` and in `moved`
   (the cooldown), and journals it in `balancing.jsonl` with `feed: {priority, ready, want,
   used_percent?, resets_in?}`. A move takes effect from the next request. Each is also a `balancing`
   activity entry (`lent`, `returned`); no new activity word, so an older Switchboard reads the store.
 - **Turning off.** `Operation::Feed` with `on: false` takes the group out and returns at once every
-  feed loan into or out of it (`feed::returns_owed`, `feed_off`); turning one on asks the owner for a
-  pass within a minute (`Runtime::balance_soon`).
+  feed loan into or out of it (`feed::returns_owed`, `feed_off`).
 - **Surfaces.** `Operation::Feed {pool, on, priority, ready, lookahead_minutes}` and
   `Operation::FeedStatus` (no owner transaction); CLI `switchboard project feed <group> on|off
-  [--priority N]`, `switchboard feed status [--ready N] [--lookahead M]`; MCP `switchboard_feed`
-  (without arguments the state, else the change; not read-only, idempotent for the same input);
-  the window's `feed` command. The state: `{on, ready, lookahead_minutes, pass_minutes, fed: [{pool,
-  name, priority, off, providers: [{provider, ready, accounts}]}], available: [{pool, name, fed,
-  priority}], reservoir: [{provider, accounts, placed, ready, parked}], moved: [{account_id, label,
-  provider, kind: placed|parked, from, from_name, to, to_name, at}], recent, last_pass, changed?}`;
-  its ready counts read the figures only.
-- **Evidence:** `feed::tests::no_group_fed_plans_nothing_and_writes_no_new_field`,
-  `a_fed_group_parks_its_spent_account_and_takes_the_reservoirs_best_two`,
-  `an_account_resetting_within_the_look_ahead_counts_as_ready`,
-  `higher_priority_is_served_first_and_each_gets_one_before_any_gets_two`,
-  `a_higher_group_with_none_takes_a_lower_groups_last_account`,
-  `a_spent_placement_goes_back_and_a_rested_park_comes_home`,
-  `a_park_is_never_delayed_and_a_placement_waits_its_cooldown`,
-  `accounts_that_must_never_be_moved_stay`, `turning_a_groups_feed_off_returns_every_move_in_and_out_of_it`,
-  `the_persons_change_is_checked`, `no_account_crosses_an_organizations_boundary`,
-  `status_lists_the_fed_groups_the_reservoir_and_the_moves`,
+  [--priority N]`, `switchboard feed status` (reads only), `switchboard feed set [--ready N]
+  [--lookahead M]`; MCP `switchboard_feed` (without arguments the state, else the change; not
+  read-only, idempotent for the same input); the window's `feed` command. The state: `{on, ready,
+  lookahead_minutes, pass_minutes, fed: [{pool, name, priority, off, providers: [{provider, ready,
+  accounts}]}], available: [{pool, name, fed, priority}], reservoir: [{provider, accounts, placed,
+  ready, parked}], moved: [{account_id, label, provider, kind: placed|parked, from, from_name, to,
+  to_name, at}], recent, last_pass, changed?}`; its ready counts read the figures only.
+- **Evidence:** `feed::tests::*`, among them `a_placement_goes_back_only_when_truly_out_and_replaced`,
+  `a_higher_group_with_none_takes_a_lower_groups_last_account` (demand, an account serving now, a
+  refusal now), `a_surplus_placement_and_one_waiting_for_a_sign_in_go_back`,
+  `higher_priority_is_served_first_and_each_gets_one_before_any_gets_two` (a group with no account
+  and no requests is fed nothing), `the_persons_change_is_checked`,
   `a_pass_feeds_a_group_and_turning_the_feed_off_gives_everything_back` (the owner's pass end to
   end); `tests/mcp.rs` (the tool); ui-logic `the_feed_reads_every_state`.
+
 ## Machine groups (SB-355)
 
 Decided in [DEC-0013](DECISIONS.md#dec-0013-an-account-on-another-machine-belongs-to-that-machines-group-and-to-no-group-here);

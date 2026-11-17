@@ -3373,8 +3373,13 @@ impl Runtime {
         let mut actions = balancing::plan(&snapshot, &signals, &held, &planned, time);
         // SB-419 (DEC-0028): the feed decides after balancing, on the accounts it left alone.
         let busy: HashSet<String> = actions.iter().map(|a| a.account.clone()).collect();
+        let activity = feed::Activity::from_windows(
+            &snapshot,
+            &self.statistics.window(feed::SERVING_SECONDS, time),
+            &self.statistics.window(feed::REFUSING_SECONDS, time),
+        );
         actions.extend(feed::plan(
-            &snapshot, &signals, &held, &planned, time, &busy,
+            &snapshot, &signals, &activity, &held, &planned, time, &busy,
         ));
         let summary = balancing::summary(&snapshot, &signals, &held, &planned, &actions, time);
         let _mutation = self.hold("balance").await;
@@ -8107,10 +8112,9 @@ async fn execute(
                     if let Ok(mut watch) = rt.balancing.lock() {
                         watch.settings = Some(settings.clone());
                     }
-                    // A group just fed is filled within a minute, not at the next quarter hour.
-                    if on == Some(true) {
-                        rt.balance_soon(now);
-                    }
+                    // Any change of the feed is decided on within a minute, not at the next
+                    // quarter hour.
+                    rt.balance_soon(now);
                 }
             }
             let last = runtime.and_then(|rt| rt.balancing.lock().ok().and_then(|w| w.last.clone()));

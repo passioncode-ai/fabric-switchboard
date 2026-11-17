@@ -532,9 +532,9 @@ enum Command {
         #[command(subcommand)]
         command: BalanceCommand,
     },
-    /// Groups fed from the default group: the fed groups with their priority and ready
-    /// accounts, the default group's accounts and the newest moves. Turn a group's feed on or
-    /// off with `switchboard project feed`.
+    /// Groups fed from the default group: `status` reads the fed groups, the default group's
+    /// accounts and the newest moves; `set` changes how many ready accounts a fed group keeps.
+    /// Turn a group's feed on or off with `switchboard project feed`.
     Feed {
         #[command(subcommand)]
         command: FeedCommand,
@@ -853,16 +853,17 @@ enum Project {
         folder: String,
     },
     /// Feed a group from the default group, or stop: Switchboard keeps the group's ready
-    /// accounts by placing accounts of the default group there and resting its spent ones in the
-    /// default group. Turning it off gives back every account the feed moved.
+    /// accounts by lending it accounts of the default group and taking back one that runs out
+    /// once another serves the group. Turning it off gives back every account the feed moved.
     Feed {
         /// The group id (`switchboard project list`).
         pool: String,
         /// on or off.
         #[arg(value_enum)]
         state: OnOff,
-        /// 1 is the highest: a higher group is served first when accounts run short. Without
-        /// it, a group fed for the first time goes after the others.
+        /// 1 is the highest: a higher group is served first when accounts run short; of two
+        /// with the same priority, the group id first in alphabetical order. Without it, a
+        /// group fed for the first time goes after the others. Not with off.
         #[arg(long, value_parser = clap::value_parser!(u32).range(1..=99))]
         priority: Option<u32>,
     },
@@ -1696,9 +1697,12 @@ enum BalanceCommand {
 }
 #[derive(Subcommand)]
 enum FeedCommand {
-    /// The fed groups, the default group's accounts, what the feed moved and why. With --ready
-    /// or --lookahead, changes them first.
-    Status {
+    /// The fed groups with their priority and ready accounts, the default group's accounts, what
+    /// the feed moved and why. Reads only.
+    Status,
+    /// How many ready accounts each fed group keeps and how far ahead a reset counts, for every
+    /// fed group.
+    Set {
         /// How many ready accounts each fed group keeps, 1 to 10 (2 until you change it).
         #[arg(long, value_parser = clap::value_parser!(u32).range(1..=10))]
         ready: Option<u32>,
@@ -3625,12 +3629,12 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                 backup_remove: backup_remove.clone(),
             },
         },
-        Command::Feed {
-            command: FeedCommand::Status { ready, lookahead },
-        } => {
-            if ready.is_none() && lookahead.is_none() {
-                Operation::FeedStatus
-            } else {
+        Command::Feed { command } => match command {
+            FeedCommand::Status => Operation::FeedStatus,
+            FeedCommand::Set { ready, lookahead } => {
+                if ready.is_none() && lookahead.is_none() {
+                    return Err("Give --ready, --lookahead or both.".into());
+                }
                 Operation::Feed {
                     pool: None,
                     on: None,
@@ -3639,7 +3643,7 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                     lookahead_minutes: *lookahead,
                 }
             }
-        }
+        },
         Command::Agents { command } => match command {
             AgentsCommand::List => Operation::AgentCatalog,
             AgentsCommand::Status => Operation::AgentsOverview,
@@ -6712,6 +6716,7 @@ mod mcp_parity {
         ("project source", Tool("switchboard_project_sources")),
         ("project feed", Tool("switchboard_feed")),
         ("feed status", Tool("switchboard_feed")),
+        ("feed set", Tool("switchboard_feed")),
         ("project apply", Tool("switchboard_project_apply")),
         ("backup list", Tool("switchboard_backups")),
         ("backup now", Tool("switchboard_backup_now")),
