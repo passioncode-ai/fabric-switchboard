@@ -14,6 +14,7 @@ and close everything in waves to the end, while taking up incoming tasks in para
    - [03 Sessions and work continuation](03-sessions.md)
    - [04 Surfaces and distribution](04-surfaces.md)
    - [05 Code structure and the test suite](05-code-structure.md)
+   - [06 Groups fed from the default group](06-default-feed.md) (the operator's order of 2026-11-17)
 2. Each capability carries **Target**, **Now**, **Gap** (P0 to P3, backlog ids) and **Refactor**.
 3. The gaps and refactors are ordered into waves below. Every wave item becomes a backlog row in
    [docs/evidence/backlog.md](../../evidence/backlog.md) (edited under the agent-sync lease) before
@@ -44,6 +45,12 @@ These are part of the target state and come first in the waves:
    board, interactive sessions past their quiet time counted out, the queue's wait and its
    reason visible in Needs attention, Fabric told when a slot frees).
 4. **Refactor everything that makes these fragile**, per section 05.
+5. **The main screen, the updates and the keys, checked through the interface** (operator,
+   2026-11-17 evening: «давай UI главный, где у нас сессии, укомпонуем по-новому. Плюс
+   отрефакторим все апдейты, проверим, что у нас там никуда ключи не утекают, что все корректно,
+   плюс все новые фичи что-то вписываются, проверим по интерфейсу»): the Sessions page laid out
+   anew (W4), the update code refactored (W4), a read-only audit of where keys flow (W1.7) and a
+   walk through the interface of every new feature (W7).
 
 ## Wave rules
 
@@ -73,6 +80,8 @@ structure: refactors A1 to A7, B1 to B3 and the splits).
 | W1.3 | A restore saves every managed switching policy as off, against DEC-0008 (`core/backup.rs:722-727`; SCN-030) (01) | new row | next |
 | W1.4 | Money paths without a ceiling: Hermes on a named Anthropic key, a chain pinning another group's key (SB-96), a folder moved out of a capped group (SB-216), the machine ceiling and the pay-per-token meter (02) | SB-96, SB-216, new row | next |
 | W1.5 | MCP annotations: `switchboard_account_remove` not destructive, write tools idempotent, network tools `openWorldHint: false` (`mcp.rs:226-246`); plugin hooks silent without `switchboard` on PATH (04) | new row | next |
+| W1.6 | Groups fed from the default group ([06](06-default-feed.md)) | SB-419, DEC-0028 | building |
+| W1.7 | Key-leak audit: where every key flows (vault, argv, environment, logs, files, answers), read-only, report in `docs/reports/2026-11-17-secret-flows/` | new row | next |
 
 ### W2. Devices of an organization (02, 04 §7)
 
@@ -99,6 +108,13 @@ tests into files), one placement record per account, the schema ladder as a tabl
 the window, CLI and MCP parity table and a test that every window action has its twins, shared
 typed answers, errors as codes.
 
+Also in W4 (operator's addition 5):
+
+- **Sessions page laid out anew (the main screen)**, after W1.1 and W1.6 land, through super-ux
+  scenarios and sheleg-design.
+- **Updates refactored:** the pure update rules shared by the app and `serve`
+  ([04](04-surfaces.md) §18, *Refactor*).
+
 ### W5. Fabric Sessions leaves Switchboard (03, 05)
 
 The launch-record store and terminal helpers into `fabric-sessions-core` first, then
@@ -119,14 +135,15 @@ SB-404, SB-405, SB-407, SB-411, SB-413, SB-415, SB-243).
 
 SB-01 live providers, SB-06 a running session picking up a switch, SB-178 renewal across two
 machines, Windows SB-02 and SB-243, R1.7 a live restart wave on this MacBook, SB-403 S5. Each is
-prepared to the last step a person must take and named with its link.
+prepared to the last step a person must take and named with its link. Also (operator's addition
+5): an interface walk of every new feature (design-tester).
 
 ## State
 
 | Wave | Items | State |
 |---|---|---|
 | W0 | in flight before this plan: PR #815 (SB-414, SB-408), 0.7.115 with SB-410 and SB-415 | done: #815 `737e070d` and #816 `f5e2c77e` merged, 0.7.115 cut (release PR #820 `48cacbe5`, tag `v0.7.115`; its release run was in progress at 19:15 UTC, no GitHub release yet); AGENTS.md R33 O10 merged (#819 `942e9a59`) |
-| W1 | W1.1 in review (PR #818, SB-417); W1.2 building; W1.3 to W1.5 next | in progress |
+| W1 | W1.1 in review (PR #818, SB-417); W1.2 and W1.6 building; W1.3 to W1.5 and W1.7 next | in progress |
 | W2 | devices of an organization | planned |
 | W3 | A1 to A3 in review (PR #817) | in progress |
 | W4 | structure | planned |
