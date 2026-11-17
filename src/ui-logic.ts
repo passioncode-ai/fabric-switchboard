@@ -1702,7 +1702,7 @@ export function shellHookToggleNotice(on: boolean): string {
 export function shellHookNoticeText(notice: ShellHookNotice): { title: string; body: string } {
   return {
     title: t('Terminals now work in {organization}\'s context in its folders', { organization: notice.organization }),
-    body: t('New terminals opened in {group}\'s folders run claude and codex on {organization}\'s accounts and history. Turn this off under Groups.', { group: notice.group, organization: notice.organization }),
+    body: t('New terminals opened in {group}\'s folders run claude and codex on {organization}\'s accounts and history. Turn this off in Settings.', { group: notice.group, organization: notice.organization }),
   };
 }
 /** SCN-066: under *Codex in group folders*, while the terminal hook is on in an organization's folders.

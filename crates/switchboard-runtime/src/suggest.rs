@@ -7,10 +7,12 @@
 //! again), `pending` (adding it failed — the person answers, as before) or `dismissed` (declined,
 //! never offered again). Only git
 //! metadata (`.git`, `commondir`, the `origin` url) is read; no file of the repository is.
-//! SB-131 (operator, 2026-10-15): a repository an agent of the project changes joins it too
-//! (`worked`, found by `activity`), nothing is ever asked, and a project folder deleted from disk
+//! SB-131 (operator, 2026-10-15): nothing is ever asked, and a project folder deleted from disk
 //! leaves its project by itself (`gone`: remembered only for the one notification, so a folder
-//! that comes back is found again).
+//! that comes back is found again). SB-131 also let a repository an agent of the project changed
+//! join it (`worked`); SB-171 (operator, 2026-10-22; DEC-0007, amended) removed that: the scan
+//! that found such folders is gone and a `worked` row never joins a project
+//! (`a_folder_never_joins_a_group_because_its_agent_worked_there`).
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet},

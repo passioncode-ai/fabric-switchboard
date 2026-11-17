@@ -669,7 +669,7 @@ function capacityDialog() {
   });
   limit.focus();
 }
-/** SB-384 (DEC-0018): the session duty officer, which restarts stalled sessions and closes finished ones. */
+/** SB-384 (DEC-0021): the session duty officer, which restarts stalled sessions and closes finished ones. */
 let dutyState: DutyStatus | null = null; let dutyLoading = false; let dutyError = '';
 function loadDuty() {
   if (dutyLoading) return;
@@ -1025,7 +1025,7 @@ function groupCard(project: Project, only: boolean) {
   const shown = groupDisplayName(project);
   const aside = () => {
     const parts: Node[] = [];
-    for (const org of groupOrgs) { const badge = el('span', 'badge org-badge', org.name); badge.title = groupOrgs.length > 1 ? t('Runs only on accounts of {names}.', { names: groupOrgs.map((o) => o.name).join(', ') }) : t('Runs only on accounts of {name}.', { name: org.name }); parts.push(badge); }
+    for (const org of groupOrgs) { const badge = el('span', 'badge org-badge', org.name); badge.title = groupOrgs.length > 1 ? t('This group works for {names}: its sessions run in their context on any account the group holds.', { names: groupOrgs.map((o) => o.name).join(', ') }) : t('This group works for {name}: its sessions run in that context on any account the group holds.', { name: org.name }); parts.push(badge); }
     // SB-401: a group switched off says so, and turns on from its menu; the pay-per-token group
     // sets its daily ceiling there, before it is turned on, and takes its folders one by one.
     if (project.off) { const off = el('span', 'badge off-badge', t('Switched off')); off.title = t('No folder runs on this group\'s accounts while it is off.'); parts.push(off); }
@@ -1176,7 +1176,7 @@ function projectDialog(existing?: Project, organization?: string) {
       const option = el('label', 'appearance-option login-option'); const box = el('input'); box.type = 'checkbox'; box.value = o.id; box.checked = startOrgs.includes(o.id);
       option.append(box, el('span', '', o.name)); orgPicker.append(option); orgBoxes.push(box);
     }
-    orgPicker.append(el('p', 'form-note', t('Sessions in this group\'s folders run only on accounts of the organizations you check, or only on personal accounts when you check none.')));
+    orgPicker.append(el('p', 'form-note', t('Sessions in this group\'s folders work in the context of the organizations you check, on any account the group holds; automatic switching tries their accounts first. With none checked, the group is personal.')));
   }
   // SB-202 (B-8): + Group for {organization} starts with its name and its seats already here.
   if (!existing && organization) name.value = organizations.find((o) => o.id === organization)?.name ?? '';

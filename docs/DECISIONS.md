@@ -6,7 +6,7 @@ never renumber, never delete. The doc map ([DOCMAP.md](DOCMAP.md)) names this fi
 register. Decisions made before 2026-11-08 live where they were made (plans' `D-<n>`, board rows,
 research notes); the ones still in force that the board cites are seeded below with their source.
 
-**Next free ID:** `DEC-0026` (`DEC-0018` and `DEC-0020` are held for the window and fleet plan's modules)
+**Next free ID:** `DEC-0026` (`DEC-0018` and `DEC-0020`, held for the window and fleet plan's modules, were written on 2026-11-17)
 
 ## Format
 
@@ -93,10 +93,18 @@ research notes); the ones still in force that the board cites are seeded below w
 ### DEC-0007: A repository in no group stays in the default group
 
 - **Date:** 2026-10-20
-- **Status:** Accepted
+- **Status:** Accepted; its "work in" half superseded on 2026-10-22 by SB-171 (see *Amended*)
 - **Context:** it replaces REQ-002, under which a new repository could become a group of its own.
 - **Decision:** a repository in no group stays in the default group and is never made a group of
   its own; a repository a group's agents create or work in joins that group by itself.
+- **Amended 2026-10-22 (SB-171, 0.6.68).** A folder never joins a group because a group's agent
+  worked in it: that join (SB-131's `worked` rows) had moved 83 folders nobody chose into three
+  groups. A folder joins a group by itself only as a worktree or clone of a repository the group
+  holds, or as a repository of a source the person set for the group (`github.com/<owner>`); a
+  deleted folder leaves by itself. The scan that found worked folders was removed and a `worked`
+  row is never added (test `a_folder_never_joins_a_group_because_its_agent_worked_there`,
+  [`suggest.rs`](../crates/switchboard-runtime/src/suggest.rs); PR #282 `dd4a85ef`; CHANGELOG
+  0.6.68). Operator 2026-10-22: «не может одна папка гулять … самостоятельно переноситься, нет».
 - **Consequences / affects:** `AGENTS.md` (Lifecycle, background monitor), [brand/terminology.md](brand/terminology.md)
 - **Source:** SB-146, recorded in `fc31426`
 
@@ -184,7 +192,7 @@ research notes); the ones still in force that the board cites are seeded below w
 ### DEC-0012: Accounts are lent between the groups the person chose, by their last hours and days
 
 - **Date:** 2026-11-13
-- **Status:** Accepted (not built yet: SB-352)
+- **Status:** Accepted (built in part: waves 1 and 2 released in tags `v0.7.73` and `v0.7.74`, PR #667 `02d960a2` and #671 `313596fd`, first published as release `v0.7.76`; the early pass of WF-5.2e in `v0.7.103`, PR #759; wave 3 open, SB-352)
 - **Context:** automatic switching and the one move of a refused request stay inside one group
   (DEC-0002, DEC-0008). On 2026-11-12 22:55Z twelve agents of one group stopped on their limit
   while another group held an account with room, and an agent shared it by hand.
@@ -326,6 +334,31 @@ research notes); the ones still in force that the board cites are seeded below w
   («чекинг подписок, который на другом устройстве, должен все равно сюда синхронизироваться как-то,
   продумать все это сетевое взаимодействие … чтобы не вылетали»).
 
+### DEC-0018: Switchboard is the machine's place for agent settings
+
+- **Date:** 2026-11-14
+- **Status:** Accepted (built in part: WF-10.1, the *Agent settings* block on Agents, released in
+  0.7.82, PR #688 `d310411e`, SB-372; WF-10.2 templates and WF-10.3 shared skills and plugins
+  open). Held in the window and fleet plan and written here on 2026-11-17 from that plan; nothing
+  was decided about it since.
+- **Context:** the settings every session Switchboard starts runs under (permissions, the default
+  agent, which agents take over work, fallback chains) were reachable over MCP and the CLI and
+  only partly in the window, and other products offered their own permission choices.
+- **Decision:** Switchboard is the machine's place for agent settings: permissions (bypass or
+  ask), the default agent, which agents take over work, fallback chains, versioned agent
+  templates (a change is a new copy beside the old one) and the skills and plugins the homes it
+  makes carry. Other products link to it instead of keeping their own copy. Every control has an
+  MCP tool (DEC-0019).
+- **Consequences / affects:** the Agents page's *Agent settings* block (`src/main.ts`, WF-10.1),
+  MCP `switchboard_agent_set` and `switchboard_chain_set`, the
+  [WF-10 module](plans/2026-11-14-window-and-fleet/WF-10-agents.md),
+  [evidence/backlog.md](evidence/backlog.md) (SB-372). Whether Fabric and Fabric Dashboards drop
+  their own permission choices was asked on the board (WF-10, *Questions*). Code comments of the
+  session duty officer cited this id by mistake until 2026-11-17; the duty officer is DEC-0021.
+- **Source:** operator 2026-11-14, the window review ([plan](plans/2026-11-14-window-and-fleet/WF-10-agents.md))
+  («это централизованное место switchboard … темплейты … скиллы, возможно, какие-нибудь
+  подгрузим, типа общие плагины»), recorded in the plan by #684 `fcac671c`.
+
 ### DEC-0019: Every window action has an MCP tool or a written reason
 
 - **Date:** 2026-11-14
@@ -347,6 +380,31 @@ research notes); the ones still in force that the board cites are seeded below w
 - **Source:** operator 2026-11-14, the window review ([plan](plans/2026-11-14-window-and-fleet/WF-01-foundations.md))
   («не должно быть никакой функции, которая работает в интерфейсе и не работает в MCP. Могут быть
   наоборот»).
+
+### DEC-0020: Routing between the person's own machines is opted in and moves a sign-in, never a request
+
+- **Date:** 2026-11-14
+- **Status:** Accepted under the operator's delegation, not built (SB-374, WF-12.3). It rests on
+  the window and fleet plan's assumed answer 3, asked once on the Fabric board with the plan's
+  other questions; no answer is recorded in this repository. Held in that plan and written here
+  on 2026-11-17 from it.
+- **Context:** an account on another machine belongs to that machine's group and is never routed
+  here ([DEC-0013](#dec-0013-an-account-on-another-machine-belongs-to-that-machines-group-and-to-no-group-here)); its
+  usage is read in the background, still with no routing (DEC-0017). The operator asked to think
+  about automatic routing between machines.
+- **Decision:** opted in per pair of the person's own machines, only those Switchboard already
+  moved accounts to: when a group here had no account with room for two passes and another of
+  the person's machines holds an account with room in its machine group there, Switchboard moves
+  that sign-in here (send and recall, recorded in `seats.jsonl`), at most once an hour per
+  account, and moves it back when that machine needs it. Requests are never relayed between
+  machines. This supersedes DEC-0013's "never routed" for that case only. An organization's
+  devices (target-state plan W2) and a seat delegated to a teammate (DEC-0025) are separate.
+- **Consequences / affects:** the [WF-12 module](plans/2026-11-14-window-and-fleet/WF-12-fleet.md)
+  (12.3), [evidence/backlog.md](evidence/backlog.md) (SB-374); when built, `switchboard_balance`
+  gains `machines`.
+- **Source:** operator 2026-11-14, the window review ([plan](plans/2026-11-14-window-and-fleet/WF-12-fleet.md))
+  («быстро иметь возможность перекинуть аккаунты между машинами, также подумать про
+  автоматический роутинг между машинами»), the plan's question 3, recorded by #684 `fcac671c`.
 
 ### DEC-0021: A duty officer restarts stalled Claude Code sessions and closes finished ones
 

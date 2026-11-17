@@ -131,5 +131,5 @@ prepared to the last step a person must take and named with its link.
 | W3 | A1 to A3 building | in progress |
 | W4 | structure | planned |
 | W5 | Fabric Sessions | planned |
-| W6 | docs and board | next |
+| W6 | docs and board | done on branch `target-state` (2026-11-17), not merged: SPEC §2, §5, §6, §8, §9, §14 against CONTRACTS and DEC-0002, DEC-0008; DEC-0007 amended for SB-171 and the `suggest.rs` module doc; DEC-0012 status; DEC-0018 and DEC-0020 written; the group dialog note, the organization badge's hint and ORGANIZATION.md (and its Russian twin) against DEC-0022; the terminal hook notice points to Settings; SCN-096 and SCN-097 in the index; 15 board rows brought up to their PRs and releases. Left as findings: the MCP server instructions (`crates/switchboard-cli/src/mcp.rs` `INSTRUCTIONS`) and the onboarding sentence (`crates/switchboard-runtime/src/onboarding.rs:215`) still say a repository a group's agents work in joins it (text output, not changed here) |
 | W7 | acceptance by the person | planned |

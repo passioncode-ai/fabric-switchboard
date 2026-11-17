@@ -1171,7 +1171,7 @@ check(() => {
   assert.equal(logic.shellHookToggleNotice(true), 'The terminal hook is on. New terminals in organization folders work in their context.');
   assert.deepEqual(logic.shellHookNoticeText({ organization: 'Acme', group: 'Acme web' }), {
     title: "Terminals now work in Acme's context in its folders",
-    body: "New terminals opened in Acme web's folders run claude and codex on Acme's accounts and history. Turn this off under Groups.",
+    body: "New terminals opened in Acme web's folders run claude and codex on Acme's accounts and history. Turn this off in Settings.",
   });
   // SCN-066: the Codex section says what the hook does to Codex in an organization's folders.
   assert.equal(logic.codexHookLine({ ...base, hook: 'default_on', files: written }), "In Acme's folders, new terminals use its Codex accounts whether this is on or off.");
