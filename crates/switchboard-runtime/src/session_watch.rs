@@ -22,6 +22,10 @@ pub const GONE_MINUTES: i64 = 10;
 /// The launches the tree and the watch look at: the last day.
 pub const WINDOW_SECONDS: i64 = 24 * 3600;
 
+/// SB-407: the field `read` adds to a dispatched run's record: when its log was last written
+/// (Unix seconds), so a run that writes its log is never read as stuck.
+pub const LOG_WRITTEN_AT: &str = "log_written_at";
+
 pub const DUPLICATE: &str = "duplicate";
 pub const STUCK: &str = "stuck";
 pub const GONE: &str = "gone";
@@ -105,23 +109,30 @@ pub fn findings(
             continue;
         };
         let started = record["launched_at"].as_i64().unwrap_or(now);
+        let dispatched = record["dispatch"].is_object();
         match live.get(id) {
-            Some(row) if !record["dispatch"].is_null() => {
-                let quiet = row["quiet_minutes"].as_i64().unwrap_or(0);
+            Some(row) if dispatched => {
+                // SB-407: a run that writes its log is working, whatever its folder says.
+                let mut quiet = row["quiet_minutes"].as_i64().unwrap_or(0);
+                if let Some(written) = record[LOG_WRITTEN_AT].as_i64() {
+                    quiet = quiet.min((now - written).max(0) / 60);
+                }
                 if quiet >= STUCK_MINUTES {
                     out.push(json!({
                         "kind": STUCK, "launch_id": id, "pids": [row["pid"]],
                         "folder": record["working_directory"], "quiet_minutes": quiet,
-                        "task": task(record),
+                        "task": task(record), "dispatch": true,
                     }));
                 }
             }
             Some(_) => {}
+            // SB-407: a run on another machine has no process here; `dispatch status` reads it.
+            None if dispatched && !record["dispatch"]["target"].is_null() => {}
             None if record["ended"].is_null() && now - started >= GONE_MINUTES * 60 => {
                 out.push(json!({
                     "kind": GONE, "launch_id": id, "folder": record["working_directory"],
                     "since": record["last_turn_at"].as_i64().unwrap_or(started),
-                    "surface": surface(record), "task": task(record),
+                    "surface": surface(record), "task": task(record), "dispatch": dispatched,
                 }));
             }
             None => {}
@@ -255,9 +266,31 @@ fn read_fresh(root: &Path, now: i64) -> Read {
 /// What the live processes and records read now give.
 fn read(root: &Path, now: i64) -> Read {
     let (scan, pairs) = crate::machine_sessions::scan_and_pairs(root);
-    let records = crate::launches::recent_records(root, now - WINDOW_SECONDS);
+    let mut records = crate::launches::recent_records(root, now - WINDOW_SECONDS);
+    for record in records.iter_mut().filter(|r| r["dispatch"].is_object()) {
+        if let Some(at) = log_written_at(root, record) {
+            record[LOG_WRITTEN_AT] = at.into();
+        }
+    }
     let pairs = pairs.into_iter().map(|(s, p, _)| (s, p)).collect();
     (scan, records, pairs)
+}
+
+/// SB-407: when a dispatched run's log (`launches/logs/<id>.log`) was last written; a stat only.
+fn log_written_at(root: &Path, record: &Value) -> Option<i64> {
+    let id = record["launch_id"].as_str()?;
+    if !crate::launches::valid_id(id) {
+        return None;
+    }
+    let path = root
+        .join(crate::launches::DIR)
+        .join(crate::launches::LOGS)
+        .join(format!("{id}.log"));
+    let modified = std::fs::symlink_metadata(path).ok()?.modified().ok()?;
+    modified
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()
+        .map(|d| d.as_secs() as i64)
 }
 
 /// `switchboard sessions --tree` and MCP `switchboard_sessions` with `tree`.
@@ -559,6 +592,43 @@ mod tests {
         let left: Vec<String> = last(root.path()).iter().map(key).collect();
         assert_eq!(left, ["stuck:L-run", "gone:L-gone"]);
         assert_eq!(found[1]["task"]["request"], "r-1");
+    }
+
+    #[test]
+    fn a_board_run_writing_its_log_is_not_stuck_and_a_run_elsewhere_is_never_gone() {
+        // SB-407: its folder quiet 45 minutes, its log written five minutes ago: working.
+        let now = 100_000;
+        let rows = vec![row(10, Some("L-log"), 45), row(11, Some("L-quiet"), 45)];
+        let records = vec![
+            json!({"launch_id": "L-log", "launched_at": now - 3600, "dispatch": {"workflow": "wf_1"},
+                LOG_WRITTEN_AT: now - 300}),
+            json!({"launch_id": "L-quiet", "launched_at": now - 3600, "dispatch": {"workflow": "wf_2"},
+                LOG_WRITTEN_AT: now - 40 * 60}),
+            json!({"launch_id": "L-remote", "launched_at": now - 3600,
+                "dispatch": {"target": "studio"}}),
+            json!({"launch_id": "L-gone", "launched_at": now - 3600, "dispatch": {"workflow": "wf_3"}}),
+        ];
+        let found = findings(&rows, &records, &[], now);
+        let keys: Vec<String> = found.iter().map(key).collect();
+        assert_eq!(keys, ["stuck:L-quiet", "gone:L-gone"]);
+        assert_eq!(
+            found[0]["quiet_minutes"], 40,
+            "the log's quiet, the shorter one"
+        );
+        assert_eq!(found[0]["dispatch"], true);
+        assert_eq!(found[1]["dispatch"], true);
+        // The log's time is read from the file, a stat only.
+        let root = tempfile::tempdir().unwrap();
+        let id = crate::launches::new_id();
+        let logs = root
+            .path()
+            .join(crate::launches::DIR)
+            .join(crate::launches::LOGS);
+        std::fs::create_dir_all(&logs).unwrap();
+        std::fs::write(logs.join(format!("{id}.log")), "x").unwrap();
+        let at = log_written_at(root.path(), &json!({"launch_id": id})).unwrap();
+        assert!((now() - at).abs() < 60);
+        assert!(log_written_at(root.path(), &json!({"launch_id": "../x"})).is_none());
     }
 
     #[test]

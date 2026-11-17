@@ -1552,6 +1552,83 @@ mod tests {
         let row = crate::launch::sessions(&root, true).remove(0);
         assert!(row["ended"].is_null() && row["transcript"].is_null());
     }
+    /// SB-411 (Fabric Dashboards' finding ddeece6e): a session resumed as itself has a launch
+    /// record and no home; the session list names it like a home row, with `home: null`, once.
+    #[test]
+    fn a_resume_with_no_home_is_listed_while_it_runs_and_with_all_after() {
+        let (_temp, root, home_launch) = fixture();
+        let by = LaunchedBy::surface(Surface::Dashboards);
+        let resume = |session: &str| {
+            let id = new_id();
+            let record = json!({"provider": "claude", "mode": "resume",
+                "working_directory": "/work/app", "in_place": true, "hosted": true,
+                "launched_at": 300, "provider_session_id": session, "home_dir": null});
+            record_resume(&root, &id, record, &by).unwrap();
+            id
+        };
+        let hosted = resume("s-hosted");
+        let ended = resume("s-ended");
+        assert!(end_once(
+            &root,
+            &ended,
+            crate::dispatch::EXITED,
+            400,
+            Some(0)
+        ));
+        // The host of `hosted` runs: a descriptor with a live pid (this test's own).
+        #[cfg(unix)]
+        {
+            switchboard_core::private_fs::private_dir(&root.join("sessions")).unwrap();
+            switchboard_core::private_fs::private_write(
+                &root.join("sessions").join(format!("{hosted}.json")),
+                json!({"pid": std::process::id(), "viewers": 1})
+                    .to_string()
+                    .as_bytes(),
+            )
+            .unwrap();
+        }
+        let ids = |rows: &[Value]| -> Vec<String> {
+            let mut ids: Vec<String> = rows
+                .iter()
+                .map(|r| r["launch_id"].as_str().unwrap().to_owned())
+                .collect();
+            ids.sort();
+            ids
+        };
+        let running = crate::launch::sessions(&root, false);
+        #[cfg(unix)]
+        {
+            assert_eq!(ids(&running), [hosted.clone()]);
+            let row = &running[0];
+            assert_eq!(row["state"], "running");
+            assert_eq!(row["attachable"], true);
+            assert_eq!(row["hosted"], true);
+            assert_eq!(row["in_place"], true);
+            assert_eq!(row["home"], Value::Null);
+            assert_eq!(row["provider_session_id"], "s-hosted");
+            assert_eq!(row["working_directory"], "/work/app");
+            assert_eq!(row["launched_by"]["surface"], "dashboards");
+            assert!(row.get("home_path").is_none());
+        }
+        #[cfg(not(unix))]
+        assert!(running.is_empty(), "no host on this system");
+        let everything = crate::launch::sessions(&root, true);
+        let mut expected = vec![home_launch.clone(), hosted.clone(), ended.clone()];
+        expected.sort();
+        assert_eq!(ids(&everything), expected, "each launch once");
+        let row = everything
+            .iter()
+            .find(|r| r["launch_id"] == ended.as_str())
+            .unwrap();
+        assert_eq!(row["state"], "ended");
+        assert_eq!(row["ended"]["kind"], crate::dispatch::EXITED);
+        // The launch a home lists is that home's row, never a second one.
+        let home_row = everything
+            .iter()
+            .find(|r| r["launch_id"] == home_launch.as_str())
+            .unwrap();
+        assert_eq!(home_row["home"], "runtimes");
+    }
     /// Windows: Claude Code names its transcript with a drive (`C:\Users\...\.claude\projects\...`,
     /// also with `/` separators); a path without a drive is not absolute there and is not
     /// recorded.

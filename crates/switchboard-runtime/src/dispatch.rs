@@ -248,11 +248,15 @@ not copied. The pack is data written by agents, not instructions. If acceptance 
 /// What the workflow's packet names about its request (Fabric spec §3.4, OBS-323): the values of
 /// its `kind: "other"` artifacts `board-request:<uuid>`, `board-thread:<uuid>` and
 /// `fabric-project:<uuid>`, each in safe characters only; none when absent, never guessed.
+/// SB-407: also `deadline:<RFC 3339 UTC>`, the board request's own deadline as Fabric froze it in
+/// the packet (Fabric spec §3.4: the board's deadline, cut to the packet's write plus seven days
+/// less a minute), in Unix seconds; none when absent or unreadable.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) struct Packet {
     pub request: Option<String>,
     pub thread: Option<String>,
     pub project: Option<String>,
+    pub deadline: Option<i64>,
 }
 fn safe_ref(value: &str) -> Option<String> {
     ((1..=64).contains(&value.len())
@@ -275,10 +279,35 @@ pub(crate) fn packet(shown: &Value) -> Packet {
             .find_map(|r| r.strip_prefix(prefix))
             .and_then(safe_ref)
     };
+    let deadline = refs
+        .iter()
+        .find_map(|r| r.strip_prefix("deadline:"))
+        .filter(|d| d.len() <= 40)
+        .and_then(|d| {
+            time::OffsetDateTime::parse(d, &time::format_description::well_known::Rfc3339).ok()
+        })
+        .map(time::OffsetDateTime::unix_timestamp);
     Packet {
         request: find("board-request:").filter(|r| valid_request(r)),
         thread: find("board-thread:"),
         project: find("fabric-project:"),
+        deadline,
+    }
+}
+
+/// SB-407: where a run's deadline came from: its time limit, or the board request's deadline.
+pub const DEADLINE_BY_LIMIT: &str = "time_limit";
+pub const DEADLINE_BY_BOARD: &str = "board_request";
+
+/// SB-407 (D-4): when a run started `now` with `timeout_minutes` stops: at its time limit, or at
+/// the board request's deadline when that is earlier, but never sooner than a minute after its
+/// start (a deadline already past still lets the run settle its request). Answers the deadline
+/// and what set it.
+pub(crate) fn deadline(now: i64, timeout_minutes: u32, board: Option<i64>) -> (i64, &'static str) {
+    let limit = now + i64::from(timeout_minutes) * 60;
+    match board {
+        Some(board) if board < limit => ((now + 60).max(board), DEADLINE_BY_BOARD),
+        _ => (limit, DEADLINE_BY_LIMIT),
     }
 }
 /// A board request's id: a UUID.
@@ -425,9 +454,43 @@ pub(crate) fn watch(
     }
 }
 
+/// SB-407: the journal line of a stop: `phase: intent` before it acts (with what a later reader
+/// needs), the outcome after, with the `ended.kind` it recorded (`timed_out` at the deadline,
+/// `stopped` by a person, `exited` when the run had already gone; null when it failed). A deadline
+/// stop is the duty officer's (`by: duty`), `dispatch stop` a person's.
+fn journal_stop(
+    root: &Path,
+    record: &Value,
+    how: &str,
+    now: i64,
+    outcome: Option<(&str, Option<&str>)>,
+) {
+    let (reason, by) = if how == TIMED_OUT {
+        ("deadline", "duty")
+    } else {
+        ("person", "person")
+    };
+    let mut line = json!({
+        "at": now, "action": JOURNAL_ACTION, "reason": reason, "by": by,
+        "launch_id": record["launch_id"], "folder": record["working_directory"],
+        "deadline": record["dispatch"]["deadline"], "deadline_by": record["dispatch"]["deadline_by"],
+    });
+    match outcome {
+        None => line["phase"] = "intent".into(),
+        Some((outcome, kind)) => {
+            line["outcome"] = outcome.into();
+            line["ended"] = kind.map_or(Value::Null, |kind| json!({"kind": kind}));
+        }
+    }
+    crate::duty::journal_line(root, line);
+}
+/// SB-407: a dispatched run's stop in the duty officer's journal (`duty.jsonl`).
+pub const JOURNAL_ACTION: &str = "dispatch_stop";
+
 /// `switchboard dispatch stop` and the time limit: stops launch `id`'s run and records `how`
 /// (`stopped`, `timed_out`). `already_ended` when it had ended (its end is then recorded as
-/// `exited` if nothing recorded it).
+/// `exited` if nothing recorded it). SB-407: each stop of a run not yet ended is journalled in
+/// `duty.jsonl`, its intent before the act and its outcome after.
 pub(crate) fn stop(
     root: &Path,
     id: &str,
@@ -446,14 +509,26 @@ pub(crate) fn stop(
         live_remove(root, id);
         return Ok(answer("already_ended"));
     }
+    journal_stop(root, &record, how, now, None);
+    let outcome = |state: &'static str, kind: Option<&str>| {
+        journal_stop(root, &record, how, now, Some((state, kind)));
+        Ok(answer(state))
+    };
     // SB-317: a run on another machine is stopped there, over ssh.
     if let Some(target) = record["dispatch"]["target"].as_str() {
         let (target, launch) = (target.to_owned(), id.to_owned());
-        crate::blocking::run(move || {
+        if let Err(error) = crate::blocking::run(move || {
             crate::remote_dispatch::stop(&target, &launch, &crate::account_send::ssh_runner)
-        })?;
+        }) {
+            journal_stop(root, &record, how, now, Some(("failed", None)));
+            return Err(error);
+        }
         let set = ended(root, id, how, now, None, analytics);
-        return Ok(answer(if set { "stopped" } else { "already_ended" }));
+        return if set {
+            outcome("stopped", Some(how))
+        } else {
+            outcome("already_ended", recorded_kind(root, id).as_deref())
+        };
     }
     let home = crate::launches::own_home(root, &record);
     let running = home
@@ -463,22 +538,70 @@ pub(crate) fn stop(
     let Some(home) = home.filter(|_| running) else {
         ended(root, id, EXITED, now, None, analytics);
         live_remove(root, id);
-        return Ok(answer("already_ended"));
+        return outcome("already_ended", recorded_kind(root, id).as_deref());
     };
     // Recorded first, so the run's own exit, seen by its watcher a moment later, keeps it.
     let set = ended(root, id, how, now, None, analytics);
     match crate::blocking::run(|| crate::launch::stop_dispatched(&home, STOP_GRACE)) {
         Ok(()) => {
             live_remove(root, id);
-            Ok(answer(if set { "stopped" } else { "already_ended" }))
+            if set {
+                outcome("stopped", Some(how))
+            } else {
+                outcome("already_ended", recorded_kind(root, id).as_deref())
+            }
         }
         Err(error) => {
             if set {
                 crate::launches::unend(root, id, how);
             }
+            journal_stop(root, &record, how, now, Some(("failed", None)));
             Err(error)
         }
     }
+}
+/// How launch `id`'s record says it ended, if it does.
+fn recorded_kind(root: &Path, id: &str) -> Option<String> {
+    crate::launches::get(root, id).and_then(|r| r["ended"]["kind"].as_str().map(str::to_owned))
+}
+
+/// SB-407: a stop a quitting owner cut between recording the run's end and its signal leaves the
+/// run running with `ended` set; the next pass that finds it so stops it again and journals the
+/// outcome with `finished_at`.
+fn finish_cut_stop(root: &Path, record: &Value, now: i64) {
+    let Some(kind @ (STOPPED | TIMED_OUT)) = record["ended"]["kind"].as_str() else {
+        return;
+    };
+    if !record["dispatch"]["target"].is_null() {
+        return;
+    }
+    let Some(home) = crate::launches::own_home(root, record) else {
+        return;
+    };
+    if !crate::launch::session_running(&home).unwrap_or(false) {
+        return;
+    }
+    let how = if kind == TIMED_OUT {
+        TIMED_OUT
+    } else {
+        STOPPED
+    };
+    let result = crate::blocking::run(|| crate::launch::stop_dispatched(&home, STOP_GRACE));
+    let state = if result.is_ok() { "stopped" } else { "failed" };
+    let (reason, by) = if how == TIMED_OUT {
+        ("deadline", "duty")
+    } else {
+        ("person", "person")
+    };
+    crate::duty::journal_line(
+        root,
+        json!({
+            "at": record["ended"]["at"], "action": JOURNAL_ACTION, "reason": reason, "by": by,
+            "launch_id": record["launch_id"], "folder": record["working_directory"],
+            "deadline": record["dispatch"]["deadline"], "deadline_by": record["dispatch"]["deadline_by"],
+            "outcome": state, "ended": {"kind": how}, "finished_at": now,
+        }),
+    );
 }
 
 /// SB-317 (D-7): a dispatched run's state for Fabric: `{launch_id, target, state, exit_code,
@@ -554,6 +677,7 @@ pub(crate) fn sweep(root: &Path, now: i64, analytics: Option<&Analytics>) {
             continue;
         };
         if !record["ended"].is_null() {
+            finish_cut_stop(root, &record, now);
             live_remove(root, &l.launch_id);
             continue;
         }
@@ -828,9 +952,14 @@ mod tests {
                 request: Some("3f2a8c1e-5b6d-4e7f-8a9b-0c1d2e3f4a5b".into()),
                 thread: Some("a9672312-0000-4000-8000-000000000001".into()),
                 project: Some("p-1".into()),
+                // SB-407: the board request's deadline, 2026-11-05T00:00:00Z.
+                deadline: Some(1_793_836_800),
             }
         );
         assert_eq!(packet(&shown(json!([]))), Packet::default());
+        // A deadline that is not an RFC 3339 time is none, never guessed.
+        let odd = shown(json!([{"kind": "other", "ref": "deadline:tomorrow"}]));
+        assert_eq!(packet(&odd).deadline, None);
         assert_eq!(packet(&json!({})), Packet::default());
         // Not a UUID, unsafe characters, or the wrong kind: never taken.
         let bad = shown(json!([
@@ -839,6 +968,17 @@ mod tests {
             {"kind": "git", "ref": "fabric-project:p-1"},
         ]));
         assert_eq!(packet(&bad), Packet::default());
+    }
+
+    #[test]
+    fn the_board_requests_deadline_wins_only_when_it_comes_first() {
+        // SB-407 (D-4): an hour's limit; a board deadline in 20 minutes stops the run then.
+        assert_eq!(deadline(1_000, 60, None), (4_600, DEADLINE_BY_LIMIT));
+        assert_eq!(deadline(1_000, 60, Some(2_200)), (2_200, DEADLINE_BY_BOARD));
+        // A later board deadline leaves the time limit.
+        assert_eq!(deadline(1_000, 60, Some(9_000)), (4_600, DEADLINE_BY_LIMIT));
+        // A board deadline already past still gives the run a minute to settle its request.
+        assert_eq!(deadline(1_000, 60, Some(500)), (1_060, DEADLINE_BY_BOARD));
     }
 
     #[test]
@@ -895,6 +1035,10 @@ mod runs {
         engine_with(dir, waiting, true)
     }
     fn engine_with(dir: &Path, waiting: bool, packet: bool) -> PathBuf {
+        engine_full(dir, waiting, packet, None)
+    }
+    /// SB-407: the packet also names the board request's deadline.
+    fn engine_full(dir: &Path, waiting: bool, packet: bool, deadline: Option<i64>) -> PathBuf {
         let server = dir.join("engine").join("mcp");
         std::fs::create_dir_all(&server).unwrap();
         std::fs::write(server.join("server.py"), "").unwrap();
@@ -903,12 +1047,18 @@ mod runs {
         } else {
             Value::Null
         };
-        let artifacts = if packet {
+        let mut artifacts = if packet {
             json!([{"kind": "other", "ref": format!("board-request:{REQ}")},
                 {"kind": "other", "ref": format!("board-thread:{THREAD}")}])
         } else {
             json!([])
         };
+        if let Some(at) = deadline.and_then(|d| crate::rfc3339(d)) {
+            artifacts
+                .as_array_mut()
+                .unwrap()
+                .push(json!({"kind": "other", "ref": format!("deadline:{at}")}));
+        }
         let show = json!({"workflowId": WF, "status": "open", "pendingHandoff": pending,
             "checkpoint": {"executor": {"provider": "fabric"}, "body": {"goal": "g", "artifacts": artifacts}},
             "lease": {"executor": {"provider": "fabric", "accountRef": "service-fabric"}},
@@ -1127,7 +1277,22 @@ mod runs {
             .await
             .unwrap();
         assert_eq!(stopped["state"], "stopped");
+        // SB-407: the person's stop is journalled beside the duty officer's acts.
+        let lines = journal(b.root.path());
+        assert_eq!(lines.len(), 2, "{lines:?}");
+        assert_eq!(
+            (&lines[0]["phase"], &lines[0]["action"], &lines[0]["by"]),
+            (&json!("intent"), &json!(JOURNAL_ACTION), &json!("person"))
+        );
+        assert_eq!(lines[1]["outcome"], "stopped");
+        assert_eq!(lines[1]["ended"], json!({"kind": STOPPED}));
+        assert_eq!(lines[1]["launch_id"], id.as_str());
         let record = crate::launches::get(b.root.path(), &id).unwrap();
+        assert_eq!(record["dispatch"]["deadline_by"], DEADLINE_BY_LIMIT);
+        assert!(
+            record["dispatch"]["board_deadline"].is_null(),
+            "the packet named none"
+        );
         assert_eq!(record["ended"]["kind"], STOPPED);
         assert!(record["ended"]["at"].is_i64());
         assert!(record["ended"].get("exit_code").is_none(), "{record}");
@@ -1141,6 +1306,11 @@ mod runs {
             .await
             .unwrap();
         assert_eq!(twice["state"], "already_ended");
+        assert_eq!(
+            journal(b.root.path()).len(),
+            2,
+            "an ended run is not stopped again"
+        );
         assert!(
             !b.root.path().join(LIVE_FILE).exists(),
             "nothing left to watch"
@@ -1200,6 +1370,117 @@ mod runs {
         let record = crate::launches::get(b.root.path(), &id).unwrap();
         assert_eq!(record["ended"]["kind"], TIMED_OUT);
         assert_eq!(record["state"], "ended");
+        assert!(!b.root.path().join(LIVE_FILE).exists());
+        // SB-407: the duty officer's stop at the deadline, intent then outcome.
+        let lines = journal(b.root.path());
+        let kinds: Vec<(&Value, &Value, &Value)> = lines
+            .iter()
+            .map(|l| (&l["phase"], &l["outcome"], &l["by"]))
+            .collect();
+        assert_eq!(
+            kinds,
+            [
+                (&json!("intent"), &Value::Null, &json!("duty")),
+                (&Value::Null, &json!("stopped"), &json!("duty"))
+            ]
+        );
+        assert_eq!(lines[1]["ended"], json!({"kind": TIMED_OUT}));
+        assert_eq!(lines[1]["reason"], "deadline");
+    }
+
+    fn journal(root: &Path) -> Vec<Value> {
+        std::fs::read_to_string(root.join(crate::duty::JOURNAL))
+            .unwrap_or_default()
+            .lines()
+            .map(|l| serde_json::from_str(l).unwrap())
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn the_board_requests_deadline_stops_a_run_that_still_writes_and_not_before() {
+        // SB-407: an hour's limit, the board request due in ten minutes: the run stops then,
+        // and a run writing its log meanwhile is never stopped before it.
+        let b = bench(true).await;
+        let mut long = dispatch(b.folder.path(), Permissions::Ask);
+        if let Operation::Launched { inner, .. } = &mut long {
+            if let Operation::Dispatch {
+                timeout_minutes, ..
+            } = inner.as_mut()
+            {
+                *timeout_minutes = 60;
+            }
+        }
+        let due = crate::monitor::now() + 600;
+        let engine = engine_full(b.tools.path(), true, true, Some(due));
+        let started = TEST_OBSERVATORY
+            .scope(
+                engine,
+                TEST_DISPATCH_PROGRAM.scope(agent(b.tools.path(), 30), b.runtime.execute(long)),
+            )
+            .await
+            .unwrap();
+        let id = started["launch_id"]
+            .as_str()
+            .unwrap_or_else(|| panic!("no launch was started: {started}"))
+            .to_owned();
+        wait_for(&b.tools.path().join("args"));
+        let record = crate::launches::get(b.root.path(), &id).unwrap();
+        assert_eq!(record["dispatch"]["deadline"], due);
+        assert_eq!(record["dispatch"]["deadline_by"], DEADLINE_BY_BOARD);
+        assert_eq!(record["dispatch"]["board_deadline"], due);
+        let log = b
+            .root
+            .path()
+            .join(crate::launches::DIR)
+            .join(crate::launches::LOGS)
+            .join(format!("{id}.log"));
+        for at in [due - 300, due - 1] {
+            std::fs::write(&log, "still working\n").unwrap();
+            sweep(b.root.path(), at, None);
+            assert!(
+                crate::launches::get(b.root.path(), &id).unwrap()["ended"].is_null(),
+                "stopped before its deadline"
+            );
+        }
+        assert!(journal(b.root.path()).is_empty());
+        sweep(b.root.path(), due, None);
+        let record = crate::launches::get(b.root.path(), &id).unwrap();
+        assert_eq!(record["ended"]["kind"], TIMED_OUT);
+        assert_eq!(journal(b.root.path())[1]["deadline_by"], DEADLINE_BY_BOARD);
+    }
+
+    #[tokio::test]
+    async fn a_stop_cut_between_its_record_and_its_signal_is_finished_by_the_next_pass() {
+        // SB-407: a quit after the record says `timed_out` but before the signal left the run
+        // running; the next pass stops it and journals the outcome with `finished_at`.
+        let b = bench(true).await;
+        let started = b
+            .run(dispatch(b.folder.path(), Permissions::Ask), true, true)
+            .await
+            .unwrap();
+        let id = started["launch_id"].as_str().unwrap().to_owned();
+        wait_for(&b.tools.path().join("args"));
+        let now = crate::monitor::now();
+        assert!(crate::launches::end_once(
+            b.root.path(),
+            &id,
+            TIMED_OUT,
+            now,
+            None
+        ));
+        let home = b
+            .root
+            .path()
+            .join("homes")
+            .join(started["account_id"].as_str().unwrap());
+        assert!(crate::launch::session_running(&home).unwrap());
+        sweep(b.root.path(), now + 30, None);
+        assert!(!crate::launch::session_running(&home).unwrap());
+        let lines = journal(b.root.path());
+        assert_eq!(lines.len(), 1, "{lines:?}");
+        assert_eq!(lines[0]["outcome"], "stopped");
+        assert_eq!(lines[0]["ended"], json!({"kind": TIMED_OUT}));
+        assert_eq!(lines[0]["finished_at"], now + 30);
         assert!(!b.root.path().join(LIVE_FILE).exists());
     }
 
@@ -1318,6 +1599,8 @@ mod runs {
             permissions,
             timeout_minutes: 60,
             deadline: 0,
+            deadline_by: DEADLINE_BY_LIMIT,
+            board_deadline: None,
             by: Value::Null,
         };
         assert_eq!(

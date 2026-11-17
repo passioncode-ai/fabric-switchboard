@@ -1742,8 +1742,20 @@ check(() => {
   assert.equal(logic.duplicateOffer(dup.items[0]).label, 'Close the quiet copy', 'an older owner sends no offer: the quiet copy as before');
   assert.ok(!logic.duplicateOffer(dup.items[0]).disabled, 'no offer is not "both answering"');
   assert.equal(logic.attentionView({ items: [{ reason: 'session_duplicate', session_id: 's', close: { pid: 'x', why: 'older' }, action: { tool: 't', window: 'close_copy' } }] }).items[0].close, null, 'a malformed offer is none');
+  // SB-407: a stuck or gone board run carries its launch id and offers *Stop the run*.
+  const gone = logic.attentionView({ items: [{ reason: 'session_gone', label: 'beta', launch_id: 'L-3', action: { tool: 'switchboard_dispatch_stop', window: 'dispatch_stop', command: 'switchboard dispatch stop --launch-id L-3' } }] }).items[0];
+  assert.equal(gone.launch_id, 'L-3'); assert.equal(gone.reason, 'session_gone');
+  assert.equal(logic.attentionActionLabel(gone.action.window), 'Stop the run');
+  assert.ok(!logic.attentionReasonText('session_gone').includes('\u2014'));
+  assert.equal(logic.dispatchStopNotice('stopped'), 'Stopped the board run.');
+  assert.equal(logic.dispatchStopNotice('already_ended'), 'The board run had already ended. Its end is recorded now.');
+  assert.equal(logic.dispatchStopLineText({ reason: 'deadline', folder: '/w/app' }, 'app'), 'Stopped a board run in app: it reached its deadline.');
+  assert.equal(logic.dispatchStopLineText({ reason: 'person', folder: '/w/app' }, 'app'), 'Stopped a board run in app at your request.');
+  assert.equal(logic.dutyOutcomeText('already_ended'), 'it had already ended');
+  assert.equal(logic.dutyOutcomeText('stopped'), null);
   i18nForShell.setLocale('ru');
   assert.equal(logic.attentionActionLabel('check_usage'), 'Проверить снова');
+  assert.equal(logic.attentionActionLabel('dispatch_stop'), 'Остановить запуск');
   i18nForShell.setLocale('en');
 });
 // SB-384: the duty officer's reasons and outcomes in words.

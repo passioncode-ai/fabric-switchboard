@@ -40,6 +40,9 @@ pub const SESSION_DUPLICATE: &str =
 /// SB-379: a board run whose folder has not been written for 30 minutes.
 pub const SESSION_STUCK: &str =
     "A board run has been quiet for 30 minutes. Look at it, or stop it.";
+/// SB-407: a board run whose process ended with no end recorded.
+pub const SESSION_GONE: &str =
+    "A board run's process is gone, but its end was not recorded. Stop the run to record it.";
 
 /// What the list is built from; every field is already in memory or one small file read.
 pub struct Inputs<'a> {
@@ -60,9 +63,10 @@ pub struct Inputs<'a> {
 }
 
 /// Reasons in the order they are listed.
-const ORDER: [&str; 10] = [
+const ORDER: [&str; 11] = [
     "session_duplicate",
     "session_stuck",
+    "session_gone",
     "sign_in",
     "seat_ended",
     "renewal_refused",
@@ -225,6 +229,11 @@ pub fn build(inputs: &Inputs) -> Value {
         let (reason, detail) = match finding["kind"].as_str() {
             Some(crate::session_watch::DUPLICATE) => ("session_duplicate", SESSION_DUPLICATE),
             Some(crate::session_watch::STUCK) => ("session_stuck", SESSION_STUCK),
+            // SB-407: only a dispatched run that is gone needs a person; any other launch that
+            // is gone is history, shown in the session tree.
+            Some(crate::session_watch::GONE) if finding["dispatch"] == true => {
+                ("session_gone", SESSION_GONE)
+            }
             _ => continue,
         };
         let label = finding["folder"]
@@ -252,11 +261,17 @@ pub fn build(inputs: &Inputs) -> Value {
                 // is answering).
                 "copies": finding["copies"],
                 "close": finding["close"],
-                // SB-388: a duplicate is fixed in one press: its quiet copy is closed.
-                "action": if reason == "session_duplicate" {
-                    json!({"tool": "switchboard_session_close_copy", "window": "close_copy"})
-                } else {
-                    json!({"tool": "switchboard_sessions", "window": "open_sessions"})
+                // SB-388: a duplicate is fixed in one press: its quiet copy is closed. SB-407: a
+                // stuck or gone board run is stopped (`dispatch stop`), which records its end.
+                "action": match (reason, finding["launch_id"].as_str()) {
+                    ("session_duplicate", _) => {
+                        json!({"tool": "switchboard_session_close_copy", "window": "close_copy"})
+                    }
+                    (_, Some(id)) if finding["dispatch"] == true => json!({
+                        "tool": "switchboard_dispatch_stop", "window": "dispatch_stop",
+                        "command": format!("switchboard dispatch stop --launch-id {id}"),
+                    }),
+                    _ => json!({"tool": "switchboard_sessions", "window": "open_sessions"}),
                 },
             }),
         );
@@ -325,9 +340,10 @@ mod tests {
     fn a_copy_of_a_live_session_and_a_quiet_board_run_come_first() {
         let snapshot = Snapshot::default();
         let watch = vec![
-            json!({"kind": "stuck", "launch_id": "L-1", "pids": [7], "folder": "/work/alpha"}),
+            json!({"kind": "stuck", "launch_id": "L-1", "pids": [7], "folder": "/work/alpha", "dispatch": true}),
             json!({"kind": "duplicate", "session_id": "s-1", "pids": [3, 4]}),
             json!({"kind": "gone", "launch_id": "L-2"}),
+            json!({"kind": "gone", "launch_id": "L-3", "folder": "/work/beta", "dispatch": true}),
         ];
         let answer = build(&Inputs {
             snapshot: &snapshot,
@@ -339,11 +355,23 @@ mod tests {
             watch: &watch,
             now: 10_000,
         });
-        // A launch that is gone is shown in the session tree, not here.
-        assert_eq!(reasons(&answer), ["session_duplicate", "session_stuck"]);
+        // A launch that is gone is shown in the session tree, not here, unless it is a board run
+        // (SB-407): then it is stopped, as a stuck one is, by `dispatch stop`.
+        assert_eq!(
+            reasons(&answer),
+            ["session_duplicate", "session_stuck", "session_gone"]
+        );
         assert_eq!(answer["items"][0]["pids"], json!([3, 4]));
         assert_eq!(answer["items"][1]["label"], "alpha");
-        assert_eq!(answer["items"][1]["action"]["window"], "open_sessions");
+        assert_eq!(
+            answer["items"][1]["action"],
+            json!({"tool": "switchboard_dispatch_stop", "window": "dispatch_stop",
+                "command": "switchboard dispatch stop --launch-id L-1"})
+        );
+        assert_eq!(answer["items"][1]["launch_id"], "L-1");
+        assert_eq!(answer["items"][2]["label"], "beta");
+        assert_eq!(answer["items"][2]["detail"], SESSION_GONE);
+        assert_eq!(answer["items"][2]["action"]["window"], "dispatch_stop");
         assert_eq!(answer["items"][0]["session_id"], "s-1");
         assert_eq!(answer["items"][0]["action"]["window"], "close_copy");
         assert_eq!(
@@ -602,6 +630,9 @@ mod tests {
             CEILING_GROUP,
             CEILING_TASK,
             KEY_OUTSIDE_DETAIL,
+            SESSION_DUPLICATE,
+            SESSION_STUCK,
+            SESSION_GONE,
         ] {
             assert!(
                 !sentence.contains('\u{2014}') && !sentence.contains(" - "),

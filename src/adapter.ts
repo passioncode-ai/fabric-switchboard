@@ -87,6 +87,7 @@ export const nativeAdapter: Adapter = {
   sessionsRestartStatus: () => readWithDeadline(invoke('sessions_restart_status')),
   sessionsRestartCancel: (wave) => invoke('sessions_restart_cancel', { wave }),
   sessionCloseCopy: (sessionId, pid) => invoke('session_close_copy', { sessionId, pid: pid ?? null }),
+  dispatchStop: (launchId) => invoke('dispatch_stop', { launchId }),
   capacity: (change) => invoke('capacity', { cap: change?.cap ?? null, clear: change?.clear ?? false }),
   duty: (change) => invoke('duty', { on: change?.on ?? null, run: change?.run ?? false }),
   ownSignIn: (on) => invoke('own_sign_in', { on: on ?? null }),

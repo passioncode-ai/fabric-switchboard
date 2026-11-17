@@ -63,10 +63,10 @@ export interface MachinesList { machines: { pool: string; name: string; read?: {
 /** SB-355: `machines --live`: each machine group, read over ssh. */
 export interface MachinesLive { machines: { pool: string; name: string; accounts: { id: string; there?: MachineCopy | null }[]; live?: { reachable: boolean; error?: string } }[] }
 /** WF-3 (SB-365, DEC-0015): why an account (or a ceiling) needs a person; the Tauri command `attention`, the same list as MCP `switchboard_attention`. */
-export type AttentionReason = 'session_duplicate' | 'session_stuck' | 'sign_in' | 'seat_ended' | 'renewal_refused' | 'usage_failing' | 'move_unknown' | 'refused_there' | 'key_outside_tokens' | 'ceiling_question';
+export type AttentionReason = 'session_duplicate' | 'session_stuck' | 'session_gone' | 'sign_in' | 'seat_ended' | 'renewal_refused' | 'usage_failing' | 'move_unknown' | 'refused_there' | 'key_outside_tokens' | 'ceiling_question';
 /** WF-3: the window flow that fixes an item; `tool` is the MCP tool that does the same. */
-export type AttentionWindow = 'sign_in' | 'answer_ceiling' | 'check_usage' | 'open_machines' | 'open_sessions' | 'close_copy' | 'move_tokens';
-export interface AttentionItem { account_id: string | null; label: string | null; provider: Provider | null; pool: string | null; reason: AttentionReason; detail: string; since: number | null; action: { tool: string; window: AttentionWindow }; /** SB-388: a duplicate's session id, for *Close the quiet copy*. */ session_id?: string | null; /** SB-389: the copy offered: a quiet one, or the older one when every copy works; null when every copy is answering. */ close?: { pid: number; why: 'quiet' | 'older'; command_age: number | null } | null }
+export type AttentionWindow = 'sign_in' | 'answer_ceiling' | 'check_usage' | 'open_machines' | 'open_sessions' | 'close_copy' | 'dispatch_stop' | 'move_tokens';
+export interface AttentionItem { account_id: string | null; label: string | null; provider: Provider | null; pool: string | null; reason: AttentionReason; detail: string; since: number | null; action: { tool: string; window: AttentionWindow }; /** SB-388: a duplicate's session id, for *Close the quiet copy*. */ session_id?: string | null; /** SB-407: a stuck or gone board run's launch id, for *Stop the run*. */ launch_id?: string | null; /** SB-389: the copy offered: a quiet one, or the older one when every copy works; null when every copy is answering. */ close?: { pid: number; why: 'quiet' | 'older'; command_age: number | null } | null }
 export interface Attention { count: number; items: AttentionItem[] }
 export interface RuntimeStatus { proxy_address: string; platform: string; live_mode: string }
 export interface AddInput { label: string; provider: Provider; kind: AuthKind; pool: string; secret: string }
@@ -167,6 +167,8 @@ export interface Adapter {
   sessionEnd(launchId: string, target?: string | null): Promise<unknown>;
   /** SB-388: close the quiet one of two processes holding one session, never a working one. */
   sessionCloseCopy(sessionId: string, pid?: number): Promise<{ session_id: string; closed_pid: number; kept_pids: number[] }>;
+  /** SB-407: Needs attention's *Stop the run* on a stuck or gone board run (`dispatch stop`). */
+  dispatchStop(launchId: string): Promise<{ launch_id: string; state: 'stopped' | 'already_ended' }>;
   /** SB-378: the session pool; `cap` sets it, `clear` removes it, neither reads. */
   capacity(change?: { cap?: number; clear?: boolean } | null): Promise<CapacityStatus>;
   /** SB-384: the session duty officer: its settings, what it did and what a check would do now. */
@@ -356,7 +358,7 @@ export interface SessionsEverywhere { here: SessionRows; machines: MachineSessio
 export interface OwnSignIn { own_sign_in: 'on' | 'off'; on: boolean }
 /** SB-384 (DEC-0018): the session duty officer. */
 export interface DutySettings { on: boolean; stuck_minutes: number; waiting_minutes: number; idle_minutes: number; max_age_hours: number }
-export interface DutyLine { at?: number; action: 'restart' | 'close'; reason: string; outcome?: string; session: string; folder: string; pid: number; host?: string }
+export interface DutyLine { at?: number; /** SB-407: `dispatch_stop`, a board run stopped at its deadline (`by: duty`) or by a person. */ action: 'restart' | 'close' | 'dispatch_stop'; reason: string; outcome?: string; session?: string; folder: string; pid?: number; host?: string; by?: string; launch_id?: string }
 /** SB-392 K-1: one key an agent can start on, by name; never a value. */
 export interface LaunchKey { kind: 'openrouter' | 'anthropic' | 'group'; scope?: 'machine' | 'group'; pool?: string | null; name: string; model: string | null; usable: boolean; default: boolean; why_not: string | null; /** SB-404: whether a ceiling counts this key. */ metered?: boolean; /** SB-404 K3, kind group: the pay-per-token group's name, the key's account and whether it is the group's selected key. */ group?: string; account_id?: string; selected?: boolean }
 /** SB-404: where a key from Observatory was saved here. */

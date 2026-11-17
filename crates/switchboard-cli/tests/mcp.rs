@@ -182,6 +182,7 @@ async fn handshake_lists_tools_and_rejects_malformed_messages() {
             "switchboard_health",
             "switchboard_switch",
             "switchboard_session_close_copy",
+            "switchboard_dispatch_stop",
             "switchboard_session_continue",
             "switchboard_sessions_restart_plan",
             "switchboard_sessions_restart_apply",

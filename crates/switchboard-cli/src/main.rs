@@ -6436,10 +6436,8 @@ mod mcp_parity {
         ),
         ("continue", Not(LAUNCH)),
         // `dispatch` itself starts a run as `sessions` lists them: one decision for both.
-        (
-            "dispatch stop",
-            Not("SB-247: Fabric's dispatcher starts and stops these runs with the CLI; an agent reads them with switchboard_sessions"),
-        ),
+        // SB-407: Needs attention's Stop the run on a stuck or gone board run.
+        ("dispatch stop", Tool("switchboard_dispatch_stop")),
         (
             "dispatch status",
             Not("SB-317: Fabric's dispatcher reads its runs' results with the CLI to relay them; an agent reads runs with switchboard_sessions"),

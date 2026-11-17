@@ -89,6 +89,21 @@ fn seed(root: &Path, home: &Path) {
     )
     .unwrap();
     switchboard_runtime::capacity::set(root, Some(12)).unwrap();
+    // SB-411: a session resumed as itself (no home of its own) that has ended.
+    let launches = root.join("launches");
+    switchboard_core::private_fs::private_dir(&launches).unwrap();
+    switchboard_core::private_fs::private_write(
+        &launches.join("golden-resume-ended.json"),
+        &serde_json::to_vec(&json!({
+            "launch_id": "golden-resume-ended", "provider": "claude", "mode": "resume",
+            "working_directory": folder, "in_place": true, "hosted": true,
+            "launched_at": now - 500, "provider_session_id": "resumed-session",
+            "home_dir": null, "home_path": null, "launched_by": {"surface": "dashboards"},
+            "ended": {"kind": "exited", "at": now - 100, "exit_code": 0}, "ended_at": now - 100,
+        }))
+        .unwrap(),
+    )
+    .unwrap();
 }
 
 /// Replaces each volatile value, RFC 3339 times and the scratch paths, recursively.
@@ -243,6 +258,8 @@ fn the_session_commands_answer_as_recorded() {
         normal(v, &label)
     };
     let cli_answers = json!({
+        "sessions": cli(&root, &home, &["sessions"]),
+        "sessions --all": cli(&root, &home, &["sessions", "--all"]),
         "sessions --rows": cli(&root, &home, &["sessions", "--rows"]),
         "sessions --tree": cli(&root, &home, &["sessions", "--tree"]),
         "duty": cli(&root, &home, &["duty"]),
@@ -257,6 +274,7 @@ fn the_session_commands_answer_as_recorded() {
         &root,
         &home,
         &[
+            ("switchboard_sessions", json!({"all": true})),
             ("switchboard_sessions", json!({"rows": true})),
             ("switchboard_sessions", json!({"tree": true})),
             ("switchboard_duty", json!({})),
