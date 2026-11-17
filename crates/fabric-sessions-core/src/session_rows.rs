@@ -67,9 +67,13 @@ fn row(group: &str, why: &str, id: String, fields: Value, acts: Vec<&str>) -> Va
 /// the hook) before a later write means the session was taken up again.
 pub const STOP_SLACK_SECONDS: i64 = 120;
 
-/// FD-291: a stop the session went past: its transcript was written after it, or its live process
-/// reports itself busy well after it (the limit reset and the same process went on).
+/// FD-291: a stop the session went past: its transcript was written after it, its live process
+/// reports itself busy well after it (the limit reset and the same process went on), or its launch
+/// was continued by another one (a hand-over, a later launch of the same session: `continued`).
 fn moved_on(s: &Value, now: Option<i64>) -> bool {
+    if s["continued"] == true {
+        return true;
+    }
     let Some(stopped) = s["stop"]["stopped_at"].as_i64() else {
         return false;
     };
@@ -579,6 +583,12 @@ mod tests {
             stop("E2", "S20", true, Value::Null, Value::Null),
             stop("E3", "S21", true, json!(800), Value::Null),
             stop("E4", "S22", true, json!(650), Value::Null),
+            // Its launch was continued as a hand-over (FD-291, 2026-11-17): ready no more.
+            {
+                let mut s = stop("E5", "S23", true, json!(650), Value::Null);
+                s["continued"] = json!(true);
+                s
+            },
         ]}));
         let by = |id: &str| {
             answer["rows"]
@@ -611,6 +621,10 @@ mod tests {
             (json!("ended"), json!("moved_on"), json!(["continue"]))
         );
         assert_eq!(by("stop:E4")["why"], "ready_to_continue");
+        assert_eq!(
+            (by("stop:E5")["group"].clone(), by("stop:E5")["why"].clone()),
+            (json!("ended"), json!("moved_on"))
+        );
     }
 
     #[test]

@@ -642,6 +642,22 @@ pub(crate) fn by_session(
         .collect()
 }
 
+/// FD-291 (2026-11-17): whether the launch `id` that ran a stopped session was taken further after
+/// the stop at `stopped_at`: its record names where its work went (`continued_as`, a hand-over or
+/// a later launch), or it was itself started after the stop (the session was continued by it).
+/// Either way the stop is no longer there to be continued. A missing record answers false.
+pub(crate) fn continued_after(root: &Path, id: &str, stopped_at: i64) -> bool {
+    read(root, id).is_some_and(|r| {
+        !r["continued_as"].is_null()
+            || r["launched_at"]
+                .as_i64()
+                .is_some_and(|at| at > stopped_at.saturating_add(STOP_SLACK_SECONDS))
+    })
+}
+/// The seconds after a stop a launch of the same session may still be the one that stopped
+/// (`fabric_sessions_core::session_rows::STOP_SLACK_SECONDS`, the same number).
+const STOP_SLACK_SECONDS: i64 = 120;
+
 /// SB-219: the launches that continued each workflow, `launches/by-workflow/<workflow>.json` (a
 /// list of launch ids, oldest first, at most `WORKFLOW_INDEX_MAX`), so linking a continuation
 /// reads those records instead of every record. A workflow with no index (records from before
@@ -1635,6 +1651,28 @@ mod tests {
             "a file last written before `since` is not read"
         );
         assert_eq!(by_session(root, &wanted, 0).len(), 2);
+    }
+
+    #[test]
+    fn a_launch_continued_or_started_after_its_stop_takes_the_stop_with_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join(DIR)).unwrap();
+        let put = |id: &str, body: Value| {
+            fs::write(
+                root.join(DIR).join(format!("{id}.json")),
+                serde_json::to_vec(&body).unwrap(),
+            )
+            .unwrap();
+        };
+        put("l-handed", json!({"launch_id": "l-handed", "launched_at": 500,
+            "continued_as": {"kind": "handover", "id": "ho-1"}}));
+        put("l-later", json!({"launch_id": "l-later", "launched_at": 900}));
+        put("l-same", json!({"launch_id": "l-same", "launched_at": 500}));
+        assert!(continued_after(root, "l-handed", 600));
+        assert!(continued_after(root, "l-later", 600));
+        assert!(!continued_after(root, "l-same", 600));
+        assert!(!continued_after(root, "l-missing", 600));
     }
 
     #[test]
