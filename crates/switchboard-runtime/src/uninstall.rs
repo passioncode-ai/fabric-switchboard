@@ -55,6 +55,8 @@ const OWNED: &[&str] = &[
     // The owner's run and the crashes found at its starts (SB-379 W3 part 2).
     "owner-run.json",
     "bugs.jsonl",
+    // A window that does not own the data folder (SB-414).
+    "window-run.json",
     "statistics.json",
     // The pay-per-token group's spend today (SB-401).
     "tokens-spend.json",

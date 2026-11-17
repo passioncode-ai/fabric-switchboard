@@ -1001,7 +1001,7 @@ pub(crate) async fn pass_with_reads<F, Fut, R, RFut>(
         let gate = |_agent: String, account: String| {
             let (snapshot, dir, read, gates, written) = (&snapshot, &dir, &read, &gates, &written);
             async move {
-                let started = tokio::time::Instant::now();
+                let started = gates.start();
                 let (gate, wrote) = spend_gate_written(
                     &runtime.root,
                     snapshot,
@@ -1013,7 +1013,7 @@ pub(crate) async fn pass_with_reads<F, Fut, R, RFut>(
                     gates.limit(SPEND_READ_TIMEOUT),
                 )
                 .await;
-                gates.charge(started.elapsed());
+                gates.charge_since(started);
                 *written.lock().unwrap_or_else(|p| p.into_inner()) = wrote;
                 gate
             }
@@ -1214,24 +1214,94 @@ pub(crate) const GATE_BUDGET: std::time::Duration = std::time::Duration::from_se
 /// What is left of one fallback pass's [`GATE_BUDGET`] (SB-214): only the time its gates take is
 /// charged, so the engine's reads, a wait for [`HAND_OVER`] and an earlier workflow's launch never
 /// leave a later paid step with nothing, its spend unknown and its workflow waiting a retry
-/// window. Each gate still gets at most what is left, so the gates together stay inside it.
+/// window. Each gate still gets at most what is left, so the gates together stay inside it. A
+/// gate's time is read on the budget's clock: tokio's in production, one the test drives in a
+/// test (SB-416), so what a test charges does not depend on how loaded the machine is.
 pub(crate) struct GateBudget {
     left: Mutex<std::time::Duration>,
+    clock: GateClock,
 }
+
+/// Where a [`GateBudget`] reads the time.
+enum GateClock {
+    Tokio,
+    #[cfg(test)]
+    Test(std::sync::Arc<TestClock>),
+}
+
+/// When one gate started, on its budget's clock ([`GateBudget::start`]).
+pub(crate) enum GateMark {
+    Tokio(tokio::time::Instant),
+    #[cfg(test)]
+    Test(std::time::Duration),
+}
+
 impl GateBudget {
     pub(crate) fn new(total: std::time::Duration) -> GateBudget {
         GateBudget {
             left: Mutex::new(total),
+            clock: GateClock::Tokio,
+        }
+    }
+    /// A budget charged on a clock the test drives (SB-416).
+    #[cfg(test)]
+    pub(crate) fn on(total: std::time::Duration, clock: std::sync::Arc<TestClock>) -> GateBudget {
+        GateBudget {
+            left: Mutex::new(total),
+            clock: GateClock::Test(clock),
         }
     }
     /// The read limit for a gate that starts now: at most `cap`, inside what is left.
     pub(crate) fn limit(&self, cap: std::time::Duration) -> std::time::Duration {
         cap.min(*self.left.lock().unwrap_or_else(|p| p.into_inner()))
     }
-    /// Takes the time one gate ran off what is left.
-    pub(crate) fn charge(&self, spent: std::time::Duration) {
+    /// Marks the start of one gate.
+    pub(crate) fn start(&self) -> GateMark {
+        match &self.clock {
+            GateClock::Tokio => GateMark::Tokio(tokio::time::Instant::now()),
+            #[cfg(test)]
+            GateClock::Test(clock) => GateMark::Test(clock.now()),
+        }
+    }
+    /// Takes the time one gate ran, from `started` to now, off what is left.
+    pub(crate) fn charge_since(&self, started: GateMark) {
+        let spent = match (started, &self.clock) {
+            (GateMark::Tokio(at), _) => at.elapsed(),
+            #[cfg(test)]
+            (GateMark::Test(at), GateClock::Test(clock)) => {
+                clock.charged();
+                clock.now().saturating_sub(at)
+            }
+            #[cfg(test)]
+            (GateMark::Test(_), GateClock::Tokio) => unreachable!("a mark of another budget"),
+        };
         let mut left = self.left.lock().unwrap_or_else(|p| p.into_inner());
         *left = left.saturating_sub(spent);
+    }
+}
+
+/// A clock only a test moves (SB-416), and a count of the gates charged on it.
+#[cfg(test)]
+#[derive(Default)]
+pub(crate) struct TestClock {
+    now: Mutex<std::time::Duration>,
+    charges: std::sync::atomic::AtomicUsize,
+}
+#[cfg(test)]
+impl TestClock {
+    pub(crate) fn now(&self) -> std::time::Duration {
+        *self.now.lock().unwrap_or_else(|p| p.into_inner())
+    }
+    pub(crate) fn advance(&self, by: std::time::Duration) {
+        *self.now.lock().unwrap_or_else(|p| p.into_inner()) += by;
+    }
+    fn charged(&self) {
+        self.charges
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    }
+    /// How many gates were charged on this clock.
+    pub(crate) fn charges(&self) -> usize {
+        self.charges.load(std::sync::atomic::Ordering::SeqCst)
     }
 }
 
@@ -1677,6 +1747,9 @@ tokio::task_local! {
     pub(crate) static TEST_READ_DELAY: std::time::Duration;
     /// A test's [`GATE_BUDGET`] for a start by hand.
     pub(crate) static TEST_GATE_BUDGET: std::time::Duration;
+    /// A test's clock for a start by hand's gates (SB-416): only what the test moves on it is
+    /// charged, never how long the machine took.
+    pub(crate) static TEST_GATE_CLOCK: std::sync::Arc<TestClock>;
 }
 
 /// The budget of a start by hand's gates together (`Runtime::execute`): [`GATE_BUDGET`], counted
@@ -1684,10 +1757,17 @@ tokio::task_local! {
 /// between two gates is not charged.
 pub(crate) fn by_hand_budget() -> GateBudget {
     #[cfg(test)]
-    if let Ok(budget) = TEST_GATE_BUDGET.try_with(|b| *b) {
-        return GateBudget::new(budget);
+    {
+        let total = TEST_GATE_BUDGET.try_with(|b| *b).unwrap_or(GATE_BUDGET);
+        match TEST_GATE_CLOCK.try_with(|c| c.clone()) {
+            Ok(clock) => GateBudget::on(total, clock),
+            Err(_) => GateBudget::new(total),
+        }
     }
-    GateBudget::new(GATE_BUDGET)
+    #[cfg(not(test))]
+    {
+        GateBudget::new(GATE_BUDGET)
+    }
 }
 
 /// The spend gate for a paid start by hand, answering the key it read and the task baseline it
@@ -3953,10 +4033,10 @@ mod tests {
             let (root, snapshot, dir, slow) = (root.path(), &snapshot, &dir, &slow);
             let (gates, inside) = (&gates, &inside);
             async move {
-                let started = tokio::time::Instant::now();
+                let (started, mark) = (tokio::time::Instant::now(), gates.start());
                 let gate =
                     spend_gate(root, snapshot, WF, dir, &account, T, slow, gates.limit(cap)).await;
-                gates.charge(started.elapsed());
+                gates.charge_since(mark);
                 *inside.lock().unwrap() += started.elapsed();
                 gate
             }
@@ -4849,46 +4929,67 @@ mod tests {
         // another operation holds the owner transaction longer than the whole gate budget. Counted
         // in wall time the second gate had nothing left, read nothing and refused the start as
         // unknown; counted inside the gates it reads the group's key and the start goes on.
+        //
+        // SB-416: the gates are charged on a clock this test drives, not in real seconds. Before,
+        // each gate's own file reads and writes were charged as they ran, so on a machine at load
+        // 1000 the first gate alone used the 3 s budget and the second gave up its read: the test
+        // measured the machine, not the code. Here each read takes 300 ms on that clock and the
+        // wait for the transaction 4 s, more than the whole budget; only the reads are charged.
         let (root, repo) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
         let dir = dir_of(&repo);
         let runtime = paid_runtime(root.path(), None).await;
         let reads = Arc::new(AtomicUsize::new(0));
-        // Another operation holds the owner transaction from before the start until 4 s after its
-        // first read, longer than the whole 3 s gate budget: the start's first gate runs without
-        // it, then waits for it.
+        let clock = Arc::new(TestClock::default());
+        // Another operation holds the owner transaction from before the start until the first
+        // gate was charged, then the wait passes: the start's first gate runs without it, then
+        // waits for it.
         let transaction = runtime.mutations.lock().await;
         let holder = async {
             let _transaction = transaction;
-            while reads.load(Ordering::SeqCst) == 0 {
+            let waited = std::time::Instant::now();
+            while clock.charges() == 0 {
+                // HAND_OVER is one lock per process and neighbouring tests hold it across 10 s
+                // reads (SB-221), so the start's turn may come late.
+                assert!(
+                    waited.elapsed() < std::time::Duration::from_secs(60),
+                    "the first gate never ended"
+                );
                 tokio::time::sleep(std::time::Duration::from_millis(5)).await;
             }
-            tokio::time::sleep(std::time::Duration::from_secs(4)).await;
+            clock.advance(std::time::Duration::from_secs(4));
         };
         let read: Arc<dyn Fn(Option<String>) -> Option<KeyRead> + Send + Sync> = {
-            let (runtime, reads, dir) = (runtime.clone(), reads.clone(), dir.clone());
+            let (runtime, reads, dir, clock) =
+                (runtime.clone(), reads.clone(), dir.clone(), clock.clone());
             let root = root.path().to_owned();
             Arc::new(move |_| {
                 if reads.load(Ordering::SeqCst) == 0 {
                     move_to_capped_group(&runtime, &root, &dir);
                 }
+                clock.advance(std::time::Duration::from_millis(300));
                 reads.fetch_add(1, Ordering::SeqCst);
                 spend(40.0, 1.0, 1.0)
             })
         };
-        let start = TEST_GATE_BUDGET.scope(
-            std::time::Duration::from_secs(3),
-            TEST_READ_DELAY.scope(
-                std::time::Duration::from_millis(300),
-                TEST_READ.scope(
-                    read,
-                    runtime.execute(Operation::LaunchAgent {
-                        agent: "no-such-agent".into(),
-                        pool: String::new(),
-                        working_directory: dir,
-                        via: crate::AgentVia::Openrouter,
-                        model: None,
-                        key: None,
-                    }),
+        // Each read also waits 300 ms of real time before it answers, so a gate left with no
+        // budget gives its read up (unknown) and the test fails were the wait charged.
+        let start = TEST_GATE_CLOCK.scope(
+            clock.clone(),
+            TEST_GATE_BUDGET.scope(
+                std::time::Duration::from_secs(3),
+                TEST_READ_DELAY.scope(
+                    std::time::Duration::from_millis(300),
+                    TEST_READ.scope(
+                        read,
+                        runtime.execute(Operation::LaunchAgent {
+                            agent: "no-such-agent".into(),
+                            pool: String::new(),
+                            working_directory: dir,
+                            via: crate::AgentVia::Openrouter,
+                            model: None,
+                            key: None,
+                        }),
+                    ),
                 ),
             ),
         );
@@ -4898,6 +4999,11 @@ mod tests {
             reads.load(Ordering::SeqCst),
             2,
             "gated again on the group's key"
+        );
+        assert_eq!(
+            clock.charges(),
+            2,
+            "both gates were charged on the test's clock"
         );
         assert_eq!(
             refused,

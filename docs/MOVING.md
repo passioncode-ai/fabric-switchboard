@@ -259,8 +259,10 @@ that user's own, and nothing is shared with the other user's copy.
 
 1. Either each user installs the app into `~/Applications` (the `Applications` folder in their own
    home), or one copy in `/Applications` serves every user, as on a Mac where each user runs
-   `switchboard serve` under its own LaunchAgent: a `serve` updates the shared app when its user
-   may replace it, and every other `serve` restarts onto the new program by itself
+   `switchboard serve` under its own LaunchAgent (with `KeepAlive {SuccessfulExit: false}`): a
+   `serve` updates the shared app when its user may replace it, and every other `serve` restarts
+   onto the new program by itself (a `serve` started by hand from Terminal keeps running on the
+   old program and logs `update_restart unsupervised` once)
    ([DEC-0011](DECISIONS.md#dec-0011-serve-keeps-itself-current-and-follows-an-app-another-account-replaced)).
 2. Continue with "Over ssh" above (the other user as ssh knows it, such as `other@localhost` with
    Remote Login on), or with "On the new computer" from step 2. Each user holds their own seats:
@@ -287,8 +289,11 @@ rather than moving the only account of a group the host still uses.
    switchboard vault use file
    ```
 
-2. Run `switchboard serve` as a systemd user service with `Restart=on-failure`: it checks for
-   updates every five minutes and restarts onto a new program by itself (DEC-0011);
+2. Run `switchboard serve` as a systemd user service with `Restart=on-failure` whose `ExecStart`
+   names the `switchboard` program itself (not `sh -c …`), on systemd 248 or later: it checks for
+   updates every five minutes and restarts onto a new program by itself (DEC-0011). Started any
+   other way it keeps running on the old program and logs `update_restart unsupervised` once, so
+   restart it yourself after an update;
    `switchboard update --app <path to the AppImage>` updates it by hand.
 3. On the host, in the user that holds the accounts: give the VM's work a group of its own there,
    then `settings sync --to user@vm --group <group id> --apply` and

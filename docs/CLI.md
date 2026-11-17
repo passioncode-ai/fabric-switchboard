@@ -129,7 +129,15 @@ switchboard org cancel         # stop a connection still waiting for the browser
 What About and the tray do, through the running app (SB-299): `switchboard app updates [on|off]`
 (the update state, or *Install updates automatically*), `app check-updates`, `app restart-to-update`
 (installs a downloaded update and restarts through the drain) and `app login-item [on|off]` (*Open at
-login*). Anywhere the installed app does not run they answer that only it can.
+login*). Anywhere the installed app does not run the actions and the switches answer that only it can;
+`app updates` alone answers what it knows instead (SB-414): `{available: false, reason: not_owner|no_owner, owner:
+serve|null, owner_version, owner_updates_copy, window_version, window_older, windows, serve_update?, message}`, where
+`owner_version` is the `serve` that owns the data folder, `owner_updates_copy` whether it keeps its copy current (an
+installed copy with automatic updates on whose update check succeeded within 15 minutes, or whose first check is still
+due within 15 minutes of its start; never on Windows), `serve_update` its own update
+loop's last pass (`{state, latest, reason, checked_at, auto_update}`) and `window_version` the oldest app window open
+beside it that does not own the data folder (it says the same in Settings → Updates, and when it runs from the same
+copy as a `serve` that keeps that copy current it leaves updating the copy to `serve`).
 
 `switchboard link` puts this `switchboard` into `~/.local/bin`, as the window's *Link the CLI* does
 (SB-299); run it by its full path, for example
@@ -303,6 +311,42 @@ It reads the release feed the app reads, offers only a newer version, refuses a 
 into it, and replaces the app with one rename (the old one is put back if the move fails). A `serve` already running
 keeps the old binary until it is restarted (`launchctl kickstart -k system/<label>` or the validator's `remove` and
 `apply`). Windows is not covered: there the app updates itself.
+
+A copy installed from the .deb package is never replaced (SB-408): the package manager owns its files. There
+`switchboard update`, with or without `--check`, reads the feed and answers the installed and the latest version and
+the commands that download, verify and install the newer package, installing nothing:
+
+```sh
+switchboard --json update --check   # {package: deb, current, latest, action: up_to_date|available, release, commands, command, release_key_fingerprint}
+```
+
+`command` is one command for version X.Y.Z on x64 (`arm64` on ARM): each step runs only when the one before
+succeeded, the key goes into a keyring of its own (its armour taken off with `sed` and `base64`, so no `gpg` is
+needed), and the checksums count only with a good signature whose primary key is the PassionCode.ai release key
+`63B30DC324BD697487AA31944FAFB8AEC803B6A7` (`release_key_fingerprint`). It needs `curl` and `gpgv` besides coreutils
+and apt (`prerequisites`); `gpgv` comes with apt, and a minimal Debian may lack `curl`: `sudo apt install curl gpgv`
+adds whichever is missing.
+
+```sh
+mkdir -p ~/Downloads/fabric-switchboard-X.Y.Z && cd ~/Downloads/fabric-switchboard-X.Y.Z && \
+curl -fLO https://github.com/passioncode-ai/fabric-switchboard/releases/download/vX.Y.Z/Fabric-Switchboard-X.Y.Z-linux-x64.deb && \
+curl -fLO https://github.com/passioncode-ai/fabric-switchboard/releases/download/vX.Y.Z/SHA256SUMS && \
+curl -fLO https://github.com/passioncode-ai/fabric-switchboard/releases/download/vX.Y.Z/SHA256SUMS.asc && \
+curl -fsSL https://raw.githubusercontent.com/passioncode-ai/.github/main/release-signing/passioncode-release-signing.asc -o release-key.asc && \
+sed -e '1,/^$/d' -e '/^=/,$d' release-key.asc | base64 -d > release.gpg && \
+gpgv --status-fd 1 --keyring ./release.gpg SHA256SUMS.asc SHA256SUMS | grep -Eq '^\[GNUPG:\] VALIDSIG .* 63B30DC324BD697487AA31944FAFB8AEC803B6A7$' && \
+sha256sum -c SHA256SUMS --ignore-missing && \
+sudo apt install ./Fabric-Switchboard-X.Y.Z-linux-x64.deb
+```
+
+A `serve` from the .deb logs `update_waiting deb` once per newer version. Once its program was replaced (by apt
+here; for an installed app or AppImage, by another account's update or `switchboard update`), any `serve` restarts
+onto it (exit status 75) only under a supervisor that starts it again: a systemd unit that runs `serve` itself, so
+`SYSTEMD_EXEC_PID` is its own pid (systemd 248 or later; set `Restart=on-failure`), or a launchd job, whose
+`XPC_SERVICE_NAME` is the job's label and whose parent is launchd (set `KeepAlive {SuccessfulExit: false}`). Started
+by hand (a shell, `nohup … &`, `setsid -f`, cron `@reboot`, a unit that runs it through `sh -c`), it logs
+`update_restart unsupervised` once and keeps running on the old program until you restart it; an inherited
+`INVOCATION_ID` or init as the parent does not count.
 
 ## Uninstall
 

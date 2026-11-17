@@ -15,10 +15,21 @@
 //!
 //! - **Linux (SB-88):** only the AppImage updates itself: the verified AppImage replaces the
 //!   running one's file at once (as macOS swaps its bundle) and starts at the next restart. A copy
-//!   installed from the .deb package never checks; the newer .deb updates it.
+//!   installed from the .deb package never downloads or installs anything; the newer .deb, which
+//!   the person installs with apt, updates it (SB-408: it says which one, below).
 //!
 //! No check runs in a development build, in the smoke check, from an app macOS is running
-//! from a translocated copy, or from a Linux copy that is not an AppImage.
+//! from a translocated copy, or from a Linux copy that is not an AppImage. A copy installed from
+//! the .deb package (SB-408) reads the release feed on the same cadence and says which version is
+//! out and the commands that install it; it installs nothing.
+//!
+//! A window that does not own the data folder (SB-414, DEC-0026) says which copy does and its
+//! version. When that owner runs from this same copy (`switchboard serve` from the app in
+//! `/Applications`, which keeps it current, DEC-0011), the window installs nothing into it: two
+//! processes would swap one bundle with no lock between them. A window from another copy of its
+//! own (a private `~/Applications` one) still checks, downloads and installs into that copy,
+//! which only it writes; it never restarts on its own there (no owner to drain), so *Restart to
+//! update* stays the person's.
 use serde_json::{json, Value};
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
@@ -419,10 +430,17 @@ struct Inner {
     /// one's phase instead of writing the same `.part` file at once: two writers, one truncating
     /// and one appending, made a package that failed its signature check (2026-11-09, 0.7.39).
     fetching: bool,
+    /// SB-408: the last feed read of a .deb install (`deb::notice`), and the version last said.
+    deb_notice: Option<Value>,
+    deb_told: Option<String>,
 }
 
 pub struct Updates {
     available: Result<(), &'static str>,
+    /// SB-408: this copy was installed from the .deb package.
+    deb: bool,
+    /// SB-408: a .deb install's program and its stamp at start, to notice apt replaced it.
+    deb_program: Option<(PathBuf, switchboard_runtime::serve_update::Stamp)>,
     root: Option<PathBuf>,
     inner: Mutex<Inner>,
     wake: tokio::sync::Notify,
@@ -452,6 +470,8 @@ impl Updates {
     pub fn new(available: Result<(), &'static str>, root: Option<PathBuf>) -> Self {
         Updates {
             available,
+            deb: false,
+            deb_program: None,
             root,
             inner: Mutex::new(Inner {
                 phase: Phase::Idle,
@@ -465,11 +485,23 @@ impl Updates {
                 watching: false,
                 rechecking: false,
                 fetching: false,
+                deb_notice: None,
+                deb_told: None,
             }),
             wake: tokio::sync::Notify::new(),
             swap: tokio::sync::Mutex::new(()),
             attention: std::sync::atomic::AtomicI64::new(now()),
         }
+    }
+
+    /// SB-408: marks a copy installed from the .deb package.
+    pub fn with_deb(mut self, deb: bool) -> Self {
+        self.deb = deb;
+        self.deb_program = deb
+            .then(switchboard_runtime::copies::this_program)
+            .flatten()
+            .and_then(|p| switchboard_runtime::serve_update::stamp(&p).map(|s| (p, s)));
+        self
     }
 
     fn lock(&self) -> MutexGuard<'_, Inner> {
@@ -514,7 +546,7 @@ impl Updates {
             .filter(|ready| ready_starts_alone(ready))
             .map(|ready| urgent(&ready.update.raw_json));
         let restart_after = restart_after(waiting, self.restarted_at(), now());
-        json!({
+        let mut status = json!({
             "available": self.available.is_ok(),
             "reason": self.available.err(),
             "enabled": self.available.is_ok() && self.is_enabled(),
@@ -526,7 +558,11 @@ impl Updates {
             "needs_permission": cfg!(target_os = "macos")
                 && inner.ready.as_ref().is_some_and(|ready| ready.bytes.is_some()),
             "restart_after": restart_after,
-        })
+        });
+        if self.deb {
+            status["deb"] = inner.deb_notice.clone().unwrap_or(Value::Null);
+        }
+        status
     }
 
     /// The person's switch: saved first; turning it on checks now.
@@ -607,6 +643,16 @@ pub fn start(app: &AppHandle) {
             _ => "unsupported_platform",
         };
         event("update_check", &[("outcome", Field::Code(code))]);
+        if app.state::<Updates>().deb {
+            let app = app.clone();
+            tauri::async_runtime::spawn(async move {
+                tokio::time::sleep(FIRST_CHECK_AFTER).await;
+                loop {
+                    deb_check(&app).await;
+                    tokio::time::sleep(CHECK_EVERY).await;
+                }
+            });
+        }
         return;
     }
     let app = app.clone();
@@ -639,6 +685,14 @@ async fn check_once(app: &AppHandle) -> Phase {
 /// what it finds is downloaded and verified like any update (LC-16).
 async fn check(app: &AppHandle, manual: bool) -> Phase {
     let state = app.state::<Updates>();
+    // SB-414: another process owns the data folder and keeps this copy current, or holds the
+    // store without answering: this pass installs nothing.
+    if let Some(code) = owner_skip(app).await {
+        if logs_check(code) {
+            event("update_check", &[("outcome", Field::Code(code))]);
+        }
+        return state.lock().phase;
+    }
     if !manual && !state.is_enabled() {
         return offer(app).await;
     }
@@ -715,7 +769,10 @@ fn logs_check(code: &'static str) -> bool {
     let Ok(mut last) = LAST_LOGGED.lock() else {
         return true;
     };
-    let repeat = matches!(code, "current" | "available") && *last == Some(code);
+    let repeat = matches!(
+        code,
+        "current" | "available" | "owner_updates" | "owner_unanswered"
+    ) && *last == Some(code);
     *last = Some(code);
     !repeat
 }
@@ -880,6 +937,147 @@ impl Drop for Fetching<'_> {
     }
 }
 
+/// SB-408: one feed read of a .deb install: the notice About shows, and `update_waiting deb`
+/// once per newer version. A program apt replaced since this window started reads `installed`:
+/// the newer version runs once Switchboard is opened again.
+async fn deb_check(app: &AppHandle) {
+    let replaced =
+        app.state::<Updates>()
+            .deb_program
+            .as_ref()
+            .is_some_and(|(program, at_start)| {
+                switchboard_runtime::serve_update::replaced(program, at_start)
+            });
+    let notice = if replaced {
+        Ok(json!({"package": "deb", "current": env!("CARGO_PKG_VERSION"), "action": "installed"}))
+    } else {
+        switchboard_runtime::deb::check(env!("CARGO_PKG_VERSION")).await
+    };
+    let state = app.state::<Updates>();
+    let mut inner = state.lock();
+    inner.checked_at = Some(now());
+    let tell = switchboard_runtime::serve_update::deb_tell(&notice, &mut inner.deb_told);
+    inner.deb_notice = Some(match notice {
+        Ok(notice) => notice,
+        Err(_) => json!({"package": "deb", "current": env!("CARGO_PKG_VERSION"),
+            "action": "failed", "error": CHECK_FAILED}),
+    });
+    drop(inner);
+    if tell {
+        event("update_waiting", &[("reason", Field::Code("deb"))]);
+    }
+}
+
+/// SB-414: the owner's answer over the control channel: `Ok(None)` when nothing owns the data
+/// folder, `Err` when the owner holds it and did not answer.
+async fn owner_status(root: &Path) -> Result<Option<Value>, ()> {
+    switchboard_runtime::control::request(root, &switchboard_runtime::Operation::Status)
+        .await
+        .map_err(|_| ())
+}
+
+/// SB-414: the owner's status as a window shows it: `{kind: app|serve|null, version, copy,
+/// same_copy, updates_copy, older}` (`older`: this window's version is below the owner's).
+pub fn owner_fields(status: &Value) -> Value {
+    use switchboard_runtime::copies;
+    let version = status["owner_version"].as_str();
+    let copy = status["owner_copy"].as_str();
+    let same_copy = match (copy, copies::this_copy()) {
+        (Some(copy), Some(mine)) => copies::same_copy(Path::new(copy), &mine),
+        _ => false,
+    };
+    json!({
+        "kind": status["owner_kind"],
+        "version": version,
+        "copy": copy,
+        "same_copy": same_copy,
+        // An owner from before 0.7.115 does not say: the window updates its copy as before.
+        "updates_copy": status["owner_updates_copy"].as_bool().unwrap_or(false),
+        "older": version.is_some_and(|v| copies::older(env!("CARGO_PKG_VERSION"), v)),
+    })
+}
+
+/// How long the window keeps the owner's answer for Settings (SB-414): a Settings read every
+/// minute, or several in a row, asks the owner at most once in this long.
+const OWNER_VIEW_FOR: Duration = Duration::from_secs(2);
+static OWNER_VIEW: Mutex<Option<(std::time::Instant, Value)>> = Mutex::new(None);
+
+/// The owner as a window shows it from its `Status` answer: null when nothing owns the data
+/// folder, `{unanswered: true}` when the owner holds it and did not answer (review round 2: the
+/// window says so instead of saying nothing).
+pub fn owner_view_of(answer: &Result<Option<Value>, ()>) -> Value {
+    match answer {
+        Ok(Some(status)) => owner_fields(status),
+        Ok(None) => Value::Null,
+        Err(()) => json!({"unanswered": true}),
+    }
+}
+
+/// SB-414: for a window that does not own the data folder, the owner as `owner_view_of` shows it.
+/// Kept for `OWNER_VIEW_FOR`.
+pub async fn owner_view(root: &Path) -> Value {
+    if let Ok(cached) = OWNER_VIEW.lock() {
+        if let Some((_, view)) = cached
+            .as_ref()
+            .filter(|(at, _)| at.elapsed() < OWNER_VIEW_FOR)
+        {
+            return view.clone();
+        }
+    }
+    let view = owner_view_of(&owner_status(root).await);
+    remember_owner_view(view.clone());
+    view
+}
+
+/// What a non-owner window's check does with the owner (SB-414, DEC-0026): skip with
+/// `owner_updates` when the owner runs from this copy and keeps it current, `owner_unanswered`
+/// when the store is held but the owner did not answer (a pass that cannot tell installs
+/// nothing); none when this window is the owner, nothing owns the data folder, or the owner does
+/// not keep this copy current.
+pub fn owner_skip_code(answer: &Result<Option<Value>, ()>) -> Option<&'static str> {
+    match answer {
+        Err(()) => Some("owner_unanswered"),
+        Ok(None) => None,
+        Ok(Some(status)) => {
+            let owner = owner_fields(status);
+            (owner["same_copy"] == true && owner["updates_copy"] == true).then_some("owner_updates")
+        }
+    }
+}
+
+async fn owner_skip(app: &AppHandle) -> Option<&'static str> {
+    let slot = app.try_state::<crate::Slot>()?;
+    if slot.smoke || slot.running().await.is_some() {
+        return None;
+    }
+    let root = app.state::<Updates>().root.clone()?;
+    let answer = owner_status(&root).await;
+    // What this check learned is what Settings shows right after it.
+    remember_owner_view(owner_view_of(&answer));
+    owner_skip_code(&answer)
+}
+
+fn remember_owner_view(view: Value) {
+    if let Ok(mut cached) = OWNER_VIEW.lock() {
+        *cached = Some((std::time::Instant::now(), view));
+    }
+}
+
+/// `Updates::status`, with `owner` for a window that does not own the data folder (SB-414).
+pub async fn status_with_owner(app: &AppHandle) -> Value {
+    let mut status = app.state::<Updates>().status();
+    let Some(slot) = app.try_state::<crate::Slot>() else {
+        return status;
+    };
+    if slot.smoke || slot.running().await.is_some() {
+        return status;
+    }
+    if let Some(root) = app.state::<Updates>().root.clone() {
+        status["owner"] = owner_view(&root).await;
+    }
+    status
+}
+
 fn busy(inner: &Inner) -> bool {
     inner.restart.is_some() || inner.stalled || inner.rechecking || inner.fetching
 }
@@ -887,6 +1085,11 @@ fn busy(inner: &Inner) -> bool {
 /// The person's *Check for updates*: works with the switch off; returns the status after.
 pub async fn check_now(app: AppHandle) -> Result<Value, String> {
     let state = app.state::<Updates>();
+    // SB-408: a .deb install reads the feed now and says what is out.
+    if state.deb {
+        deb_check(&app).await;
+        return Ok(status_with_owner(&app).await);
+    }
     state.available.map_err(str::to_string)?;
     // SB-351: the check runs on a task of its own, so a caller that stops waiting (a control
     // request whose client timed out) leaves the download and the install to finish.
@@ -895,7 +1098,9 @@ pub async fn check_now(app: AppHandle) -> Result<Value, String> {
         check(&checking, true).await;
     })
     .await;
-    Ok(app.state::<Updates>().status())
+    // Review round 2: a check the owner held back (`owner_updates`, `owner_unanswered`) answers
+    // with the owner's line, never silence.
+    Ok(status_with_owner(&app).await)
 }
 
 /// SB-351: runs `work` on a task of its own and waits for it; dropping the wait leaves the task
@@ -2292,6 +2497,53 @@ mod tests {
         assert!(enabled(Some("garbage")));
         assert!(!enabled(Some("off\n")));
         assert!(!enabled(Some("  off  ")));
+    }
+
+    /// SB-414 (DEC-0026, review round 1): a non-owner window skips installing only when the
+    /// owner runs from this copy and keeps it current, or holds the store without answering.
+    #[test]
+    fn a_window_skips_its_update_only_when_the_owner_keeps_this_copy_current() {
+        let here = switchboard_runtime::copies::this_copy()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        let status = |copy: &str, updates: Option<bool>| {
+            let mut s =
+                json!({"owner_version": "0.7.200", "owner_kind": "serve", "owner_copy": copy});
+            if let Some(u) = updates {
+                s["owner_updates_copy"] = json!(u);
+            }
+            s
+        };
+        assert_eq!(
+            owner_skip_code(&Ok(Some(status(&here, Some(true))))),
+            Some("owner_updates")
+        );
+        // Windows, updates off, an app this account cannot write: the window updates as before.
+        assert_eq!(owner_skip_code(&Ok(Some(status(&here, Some(false))))), None);
+        // An owner before 0.7.115 does not say.
+        assert_eq!(owner_skip_code(&Ok(Some(status(&here, None)))), None);
+        // Another copy: the window's own.
+        assert_eq!(
+            owner_skip_code(&Ok(Some(status(
+                "/elsewhere/Fabric Switchboard.app",
+                Some(true)
+            )))),
+            None
+        );
+        assert_eq!(owner_skip_code(&Ok(None)), None);
+        assert_eq!(owner_skip_code(&Err(())), Some("owner_unanswered"));
+        // The window says the owner did not answer, rather than nothing.
+        assert_eq!(owner_view_of(&Err(())), json!({"unanswered": true}));
+        assert_eq!(owner_view_of(&Ok(None)), Value::Null);
+        assert_eq!(
+            owner_view_of(&Ok(Some(status(&here, Some(true)))))["updates_copy"],
+            true
+        );
+        let fields = owner_fields(&status(&here, Some(true)));
+        assert_eq!(fields["older"], true);
+        assert_eq!(fields["same_copy"], true);
+        assert_eq!(fields["updates_copy"], true);
     }
 
     #[test]

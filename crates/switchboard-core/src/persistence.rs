@@ -49,7 +49,7 @@ fn schema_version(snapshot: &Snapshot) -> u32 {
     // of one (SB-403, DEC-0025): a 0.7.112 or older reader refuses the unknown field rather
     // than treat a guest's sign-in as its own (send it on, give it to an agent, remove it).
     // Version 17 only while the person turned an account or a Kimi Code account off, or the
-    // journal holds such a turn (W1.2, DEC-0027): a 0.7.114 or older reader refuses the unknown
+    // journal holds such a turn (W1.2, DEC-0027): a 0.7.115 or older reader refuses the unknown
     // field and action rather than read an account the person turned off as one it may turn on.
     if snapshot.accounts.iter().any(|a| a.off.is_some())
         || snapshot.kimi_accounts.iter().any(|k| k.off.is_some())

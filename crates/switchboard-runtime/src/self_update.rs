@@ -272,20 +272,42 @@ pub struct Local {
 pub const LOCAL_UNREADABLE: &str =
     "Could not read the release files given. Name the release's latest.json and its package.";
 
+fn client() -> Result<reqwest::Client, String> {
+    reqwest::Client::builder()
+        .user_agent("fabric-switchboard-cli-updater")
+        .connect_timeout(std::time::Duration::from_secs(15))
+        .build()
+        .map_err(|_| FEED_UNREADABLE.to_string())
+}
+
+/// The release feed, read from the network (SB-408: a .deb install reads only this).
+pub async fn feed() -> Result<Value, String> {
+    let bytes = fetch(&client()?, FEED, FEED_WITHIN, FEED_UNREADABLE).await?;
+    serde_json::from_slice(&bytes).map_err(|_| FEED_UNREADABLE.to_string())
+}
+
 /// `switchboard update`: what the feed offers this computer and, unless `check`, its install
-/// into `app` (default: the bundle or AppImage this binary runs from).
+/// into `app` (default: the bundle or AppImage this binary runs from). A copy installed from the
+/// .deb package (SB-408) is never replaced: with no `app` named, it answers the latest version
+/// and the commands that install it, `--check` or not (`deb::notice`).
 pub async fn run(
     app: Option<PathBuf>,
     check: bool,
     current: &str,
     local: Option<Local>,
 ) -> Result<Value, String> {
+    if app.is_none() && crate::deb::this_install() {
+        let feed = match &local {
+            Some(local) => serde_json::from_slice(
+                &std::fs::read(&local.feed).map_err(|_| LOCAL_UNREADABLE.to_string())?,
+            )
+            .map_err(|_| FEED_UNREADABLE.to_string())?,
+            None => feed().await?,
+        };
+        return crate::deb::notice(&feed, current, crate::deb::arch());
+    }
     let key = platform_key().ok_or(PLATFORM_UNSUPPORTED)?;
-    let client = reqwest::Client::builder()
-        .user_agent("fabric-switchboard-cli-updater")
-        .connect_timeout(std::time::Duration::from_secs(15))
-        .build()
-        .map_err(|_| FEED_UNREADABLE.to_string())?;
+    let client = client()?;
     let feed_bytes = match &local {
         Some(local) => std::fs::read(&local.feed).map_err(|_| LOCAL_UNREADABLE.to_string())?,
         None => fetch(&client, FEED, FEED_WITHIN, FEED_UNREADABLE).await?,
@@ -298,7 +320,9 @@ pub async fn run(
     let target = match app {
         Some(path) => path,
         None => {
-            let exe = std::env::current_exe().map_err(|_| NOT_AN_APP.to_string())?;
+            // Resolved: run through a link (`~/.local/bin/switchboard`), it is still the program
+            // inside its bundle (SB-414).
+            let exe = crate::copies::this_program().ok_or(NOT_AN_APP)?;
             if cfg!(target_os = "macos") {
                 bundle_of(&exe).ok_or(NOT_AN_APP)?
             } else {
