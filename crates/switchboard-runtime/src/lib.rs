@@ -22,6 +22,7 @@ pub mod continuation;
 pub mod control;
 mod digest;
 pub mod dispatch;
+pub mod dispatch_refusals;
 pub mod duty;
 pub mod errors;
 pub mod external;
@@ -302,6 +303,11 @@ pub enum Operation {
     /// SB-247: stops a dispatched run (`state`: `stopped`, `already_ended`).
     DispatchStop {
         launch_id: String,
+        /// SB-407: a run Needs attention read as gone: only its end is recorded, and a run whose
+        /// process is alive is refused (`dispatch::STILL_RUNNING`), never signalled. Sent only
+        /// when true, so a plain stop still reaches an older owner.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        if_gone: bool,
     },
     /// SB-342 H-1: a session host's process exited; records the launch's end (`exited` with its
     /// exit status) when nothing recorded it yet (`recorded`).
@@ -5149,6 +5155,10 @@ async fn dispatch_start(
         .or_else(|| packet.request.clone())
         .or_else(|| (reason == dispatch::Reason::Inbox).then(|| "inbox".to_owned()))
         .ok_or(dispatch::NO_REQUEST)?;
+    // SB-407: a board request whose deadline has passed starts nothing.
+    if let Err(code) = dispatch::deadline(monitor::now(), timeout_minutes, packet.deadline) {
+        return refuse(code);
+    }
     // D-9: `auto` runs where the accounts have the most room: here, or one of the candidates.
     let target = match target {
         Some(mut target) if target.machine == "auto" => {
@@ -5209,6 +5219,8 @@ async fn dispatch_start(
         let mut refusal = dispatch::refused(Some(&agent), dispatch::AT_CAPACITY);
         refusal["used"] = pool["used"].clone();
         refusal["cap"] = pool["cap"].clone();
+        // SB-412: counted, so Needs attention and `capacity` say runs are waiting.
+        blocking::run(|| dispatch_refusals::record(root, Some(&request), monitor::now()));
         return Ok(refusal);
     }
     let Ok(id) = fallback::account_for_default(
@@ -5250,7 +5262,10 @@ async fn dispatch_start(
     };
     // SB-407: the board request's deadline, when the packet names one and it comes first.
     let (deadline, deadline_by) =
-        dispatch::deadline(monitor::now(), timeout_minutes, packet.deadline);
+        match dispatch::deadline(monitor::now(), timeout_minutes, packet.deadline) {
+            Ok(found) => found,
+            Err(code) => return refuse(code),
+        };
     let headless = launch::Headless {
         program,
         workflow: workflow_id.to_owned(),
@@ -5328,7 +5343,10 @@ fn dispatch_remote(
         return refuse(remote_dispatch::NOT_ON_TARGET);
     };
     let now = monitor::now();
-    let (deadline, deadline_by) = dispatch::deadline(now, timeout_minutes, packet.deadline);
+    let (deadline, deadline_by) = match dispatch::deadline(now, timeout_minutes, packet.deadline) {
+        Ok(found) => found,
+        Err(code) => return refuse(code),
+    };
     let launch_id = launches::new_id();
     let body = shown
         .pointer("/checkpoint/body")
@@ -5351,7 +5369,7 @@ fn dispatch_remote(
         request,
         dispatch_id,
         // SB-407: the other machine stops it at the board request's deadline when that is first.
-        timeout_seconds: u64::try_from(deadline - now).unwrap_or(60).max(60),
+        timeout_seconds: u64::try_from(deadline - now).unwrap_or(1).max(1),
     };
     let started = blocking::run(|| {
         // SB-357: a request body goes only to the machine trusted for this name.
@@ -5447,6 +5465,7 @@ fn attention_report(
         questions: &questions,
         remote: &crate::remote_usage::read(root),
         watch: &session_watch::last(root),
+        refusals: dispatch_refusals::last_hour(root, now).as_ref(),
         now,
     }))
 }
@@ -6488,8 +6507,16 @@ async fn execute(
                 launches::end_once(root, &launch_id, kind, monitor::now(), Some(exit_code));
             Ok(json!({"launch_id": launch_id, "recorded": recorded}))
         }
-        Operation::DispatchStop { launch_id } => {
+        Operation::DispatchStop { launch_id, if_gone } => {
             let analytics = runtime.and_then(Runtime::analytics);
+            if if_gone {
+                return dispatch::record_gone(
+                    root,
+                    &launch_id,
+                    monitor::now(),
+                    analytics.as_deref(),
+                );
+            }
             dispatch::stop(
                 root,
                 &launch_id,
@@ -7151,7 +7178,13 @@ async fn execute(
                 capacity::set(root, cap)?;
             }
             let root = root.to_owned();
-            blocking::run(move || capacity::status(&root))
+            blocking::run(move || {
+                let mut status = capacity::status(&root)?;
+                // SB-412: the board runs this pool refused in the last hour, or null.
+                status["refused_last_hour"] =
+                    dispatch_refusals::last_hour(&root, monitor::now()).unwrap_or(Value::Null);
+                Ok(status)
+            })
         }
         Operation::Duty {
             on,

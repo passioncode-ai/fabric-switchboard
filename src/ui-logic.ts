@@ -527,8 +527,8 @@ export function accountMatches(account: Pick<Account, 'id' | 'label' | 'external
   return words.every((word) => text.includes(word));
 }
 
-const ATTENTION_REASONS: AttentionReason[] = ['session_duplicate', 'session_stuck', 'session_gone', 'sign_in', 'seat_ended', 'renewal_refused', 'usage_failing', 'move_unknown', 'refused_there', 'key_outside_tokens', 'ceiling_question'];
-const ATTENTION_WINDOWS: AttentionWindow[] = ['sign_in', 'answer_ceiling', 'check_usage', 'open_machines', 'open_sessions', 'close_copy', 'dispatch_stop', 'move_tokens'];
+const ATTENTION_REASONS: AttentionReason[] = ['session_duplicate', 'session_stuck', 'session_gone', 'dispatch_refused', 'sign_in', 'seat_ended', 'renewal_refused', 'usage_failing', 'move_unknown', 'refused_there', 'key_outside_tokens', 'ceiling_question'];
+const ATTENTION_WINDOWS: AttentionWindow[] = ['sign_in', 'answer_ceiling', 'check_usage', 'open_machines', 'open_sessions', 'close_copy', 'dispatch_stop', 'open_capacity', 'move_tokens'];
 /**
  * WF-3 (SB-365): the answer of the `attention` command, kept to the fields the window knows. An
  * answer that is not one (an older owner without the command, a malformed item) is an empty list
@@ -544,7 +544,7 @@ export function attentionView(raw: unknown): Attention {
     const action = e.action && typeof e.action === 'object' ? e.action as Record<string, unknown> : null;
     if (!ATTENTION_REASONS.includes(e.reason as AttentionReason) || !action || !ATTENTION_WINDOWS.includes(action.window as AttentionWindow)) continue;
     const provider = e.provider === 'claude' || e.provider === 'codex' ? e.provider : null;
-    items.push({ account_id: text(e.account_id), label: text(e.label), provider, pool: text(e.pool), reason: e.reason as AttentionReason, detail: text(e.detail) ?? '', since: typeof e.since === 'number' ? e.since : null, action: { tool: text(action.tool) ?? '', window: action.window as AttentionWindow }, session_id: text(e.session_id), ...(e.launch_id === undefined ? {} : { launch_id: text(e.launch_id) }), ...(e.close === undefined ? {} : { close: closeOffer(e.close) }) });
+    items.push({ account_id: text(e.account_id), label: text(e.label), provider, pool: text(e.pool), reason: e.reason as AttentionReason, detail: text(e.detail) ?? '', since: typeof e.since === 'number' ? e.since : null, action: { tool: text(action.tool) ?? '', window: action.window as AttentionWindow, ...(action.if_gone === true ? { if_gone: true } : {}) }, session_id: text(e.session_id), ...(e.launch_id === undefined ? {} : { launch_id: text(e.launch_id) }), ...(typeof e.count === 'number' ? { count: e.count } : {}), ...(typeof e.freed === 'boolean' ? { freed: e.freed } : {}), ...(e.close === undefined ? {} : { close: closeOffer(e.close) }) });
   }
   return { count: items.length, items };
 }
@@ -609,6 +609,14 @@ export function dispatchStopLineText(line: { reason: string; folder: string | nu
     ? t('Stopped a board run in {folder}: it reached its deadline.', { folder })
     : t('Stopped a board run in {folder} at your request.', { folder });
 }
+/** SB-412: the refused dispatches' line: how many in the last hour, and whether a session ended since. */
+export function dispatchRefusedLine(item: { count?: number; freed?: boolean }): string {
+  const n = item.count ?? 0;
+  const head = n > 0
+    ? plural(n, { one: "A board run was refused in the last hour: this computer's session limit was reached.", other: "{n} board runs were refused in the last hour: this computer's session limit was reached." })
+    : t("Board runs were refused in the last hour because this computer's session limit was reached.");
+  return `${head} ${item.freed ? t('A session has ended since, so the next run can start.') : t('No session has ended since.')}`;
+}
 /** SB-407: what *Stop the run* reports. */
 export function dispatchStopNotice(state: string): string {
   return state === 'already_ended' ? t('The board run had already ended. Its end is recorded now.') : t('Stopped the board run.');
@@ -618,6 +626,7 @@ export function attentionReasonText(reason: AttentionReason): string {
     case 'session_duplicate': return t('One session runs in two processes. Close the quiet copy so they do not work over each other.');
     case 'session_stuck': return t('A board run has been quiet for 30 minutes. Look at it, or stop it.');
     case 'session_gone': return t("A board run's process is gone, but its end was not recorded. Stop the run to record it.");
+    case 'dispatch_refused': return t("Board runs were refused in the last hour because this computer's session limit was reached.");
     case 'sign_in': return t('Its sign-in ended. Sign in again to use it and see its usage.');
     case 'seat_ended': return t('Its seat in the organization ended. Sign in again if the seat was given back.');
     case 'renewal_refused': return t('The provider refused to renew its sign-in. Sign in again.');
@@ -638,6 +647,7 @@ export function attentionActionLabel(window: AttentionWindow): string {
     case 'open_sessions': return t('Open sessions');
     case 'close_copy': return t('Close the quiet copy');
     case 'dispatch_stop': return t('Stop the run');
+    case 'open_capacity': return t('Open the session limit');
     case 'move_tokens': return t('Move to Pay-per-token keys');
   }
 }

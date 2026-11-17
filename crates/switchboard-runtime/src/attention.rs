@@ -59,14 +59,22 @@ pub struct Inputs<'a> {
     pub remote: &'a crate::remote_usage::State,
     /// SB-379: the one-minute watch's last findings (`session_watch::last`).
     pub watch: &'a [Value],
+    /// SB-412: the last hour's dispatches refused at the session limit
+    /// (`dispatch_refusals::last_hour`), or none.
+    pub refusals: Option<&'a Value>,
     pub now: i64,
 }
 
+/// SB-412: dispatches refused at this computer's session limit in the last hour.
+pub const DISPATCH_REFUSED: &str =
+    "Board runs were refused in the last hour because this computer's session limit was reached.";
+
 /// Reasons in the order they are listed.
-const ORDER: [&str; 11] = [
+const ORDER: [&str; 12] = [
     "session_duplicate",
     "session_stuck",
     "session_gone",
+    "dispatch_refused",
     "sign_in",
     "seat_ended",
     "renewal_refused",
@@ -267,12 +275,36 @@ pub fn build(inputs: &Inputs) -> Value {
                     ("session_duplicate", _) => {
                         json!({"tool": "switchboard_session_close_copy", "window": "close_copy"})
                     }
+                    // Review round 1 (P1): a gone run's act only records its end, and refuses a
+                    // run whose process turns out to run (`if_gone`).
+                    ("session_gone", Some(id)) if finding["dispatch"] == true => json!({
+                        "tool": "switchboard_dispatch_stop", "window": "dispatch_stop",
+                        "if_gone": true,
+                        "command": format!("switchboard dispatch stop --launch-id {id} --if-gone"),
+                    }),
                     (_, Some(id)) if finding["dispatch"] == true => json!({
                         "tool": "switchboard_dispatch_stop", "window": "dispatch_stop",
                         "command": format!("switchboard dispatch stop --launch-id {id}"),
                     }),
                     _ => json!({"tool": "switchboard_sessions", "window": "open_sessions"}),
                 },
+            }),
+        );
+    }
+    // SB-412: one item for the hour's refusals, however many.
+    if let Some(refused) = inputs.refusals {
+        push(
+            "dispatch_refused",
+            String::new(),
+            json!({
+                "account_id": null, "label": null, "provider": null, "pool": null,
+                "reason": "dispatch_refused", "detail": DISPATCH_REFUSED,
+                "since": refused["last_at"],
+                "count": refused["count"],
+                "newest_request": refused["newest_request"],
+                "freed": refused["freed"],
+                "freed_at": refused["freed_at"],
+                "action": {"tool": "switchboard_capacity", "window": "open_capacity"},
             }),
         );
     }
@@ -333,6 +365,7 @@ mod tests {
             questions,
             remote: &crate::remote_usage::State::default(),
             watch: &[],
+            refusals: None,
             now: 10_000,
         })
     }
@@ -353,6 +386,7 @@ mod tests {
             questions: &[],
             remote: &crate::remote_usage::State::default(),
             watch: &watch,
+            refusals: None,
             now: 10_000,
         });
         // A launch that is gone is shown in the session tree, not here, unless it is a board run
@@ -371,12 +405,48 @@ mod tests {
         assert_eq!(answer["items"][1]["launch_id"], "L-1");
         assert_eq!(answer["items"][2]["label"], "beta");
         assert_eq!(answer["items"][2]["detail"], SESSION_GONE);
-        assert_eq!(answer["items"][2]["action"]["window"], "dispatch_stop");
+        assert_eq!(
+            answer["items"][2]["action"],
+            json!({"tool": "switchboard_dispatch_stop", "window": "dispatch_stop", "if_gone": true,
+                "command": "switchboard dispatch stop --launch-id L-3 --if-gone"})
+        );
         assert_eq!(answer["items"][0]["session_id"], "s-1");
         assert_eq!(answer["items"][0]["action"]["window"], "close_copy");
         assert_eq!(
             answer["items"][0]["action"]["tool"],
             "switchboard_session_close_copy"
+        );
+    }
+    #[test]
+    fn dispatches_refused_at_the_session_limit_are_one_item_with_their_count() {
+        // SB-412: the hour's refusals, however many, are one item that opens the session limit.
+        let snapshot = Snapshot::default();
+        let refused = json!({"count": 3, "last_at": 9_900, "freed": true, "freed_at": 9_950,
+            "newest_request": "11111111-2222-4333-8444-555555555555", "per_hour": []});
+        let answer = build(&Inputs {
+            snapshot: &snapshot,
+            sign_in: &[],
+            renewal_refused: &[],
+            seats: &[],
+            questions: &[],
+            remote: &crate::remote_usage::State::default(),
+            watch: &[json!({"kind": "duplicate", "session_id": "s-1", "pids": [3, 4]})],
+            refusals: Some(&refused),
+            now: 10_000,
+        });
+        assert_eq!(reasons(&answer), ["session_duplicate", "dispatch_refused"]);
+        let item = &answer["items"][1];
+        assert_eq!(item["count"], 3);
+        assert_eq!(item["since"], 9_900);
+        assert_eq!(item["freed"], true);
+        assert_eq!(
+            item["newest_request"],
+            "11111111-2222-4333-8444-555555555555"
+        );
+        assert_eq!(item["detail"], DISPATCH_REFUSED);
+        assert_eq!(
+            item["action"],
+            json!({"tool": "switchboard_capacity", "window": "open_capacity"})
         );
     }
     fn reasons(answer: &Value) -> Vec<String> {
@@ -529,6 +599,7 @@ mod tests {
             questions: &[],
             remote: &remote,
             watch: &[],
+            refusals: None,
             now: 10_000,
         });
         assert_eq!(reasons(&answer), ["refused_there"]);
@@ -633,6 +704,7 @@ mod tests {
             SESSION_DUPLICATE,
             SESSION_STUCK,
             SESSION_GONE,
+            DISPATCH_REFUSED,
         ] {
             assert!(
                 !sentence.contains('\u{2014}') && !sentence.contains(" - "),

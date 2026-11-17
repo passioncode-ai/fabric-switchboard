@@ -32,7 +32,9 @@ pub const PERMISSION_MODE: &str = "permission_mode";
 pub const HANDOFF_REFUSED: &str = "handoff_refused";
 /// SB-378: this computer's session pool is full; a wait, not a failed run.
 pub const AT_CAPACITY: &str = "at_capacity";
-pub const REFUSALS: [&str; 11] = [
+/// SB-407: the board request's deadline in the workflow's packet has passed.
+pub const DEADLINE_PASSED: &str = "deadline_passed";
+pub const REFUSALS: [&str; 12] = [
     NO_AGENT,
     NOT_IN_GROUP,
     CEILING_REACHED,
@@ -41,6 +43,7 @@ pub const REFUSALS: [&str; 11] = [
     PERMISSION_MODE,
     HANDOFF_REFUSED,
     AT_CAPACITY,
+    DEADLINE_PASSED,
     crate::remote_dispatch::NOT_ON_TARGET,
     crate::remote_dispatch::TARGET_BUSY,
     crate::remote_dispatch::TARGET_UNREACHABLE,
@@ -94,6 +97,7 @@ pub fn sentence(reason: &str) -> &'static str {
         AGENT_NOT_INSTALLED => "The default agent is not installed on this computer. Install it, then try again.",
         PERMISSION_MODE => "Only Claude Code and Codex run a request with no person. Choose one of them as the default agent.",
         AT_CAPACITY => "This computer runs as many coding sessions as its limit allows. The run waits until one ends.",
+        DEADLINE_PASSED => "The board request's deadline has passed, so no session starts for it.",
         crate::remote_dispatch::NOT_ON_TARGET => "The other machine has no checkout of this folder's repository, so no session starts there.",
         crate::remote_dispatch::TARGET_BUSY => "The other machine already runs two dispatched sessions. Try again when one ends.",
         crate::remote_dispatch::TARGET_UNREACHABLE => "The other machine did not answer over ssh, so no session starts there.",
@@ -279,14 +283,27 @@ pub(crate) fn packet(shown: &Value) -> Packet {
             .find_map(|r| r.strip_prefix(prefix))
             .and_then(safe_ref)
     };
-    let deadline = refs
-        .iter()
-        .find_map(|r| r.strip_prefix("deadline:"))
-        .filter(|d| d.len() <= 40)
-        .and_then(|d| {
-            time::OffsetDateTime::parse(d, &time::format_description::well_known::Rfc3339).ok()
-        })
-        .map(time::OffsetDateTime::unix_timestamp);
+    let rfc3339 = |d: &str| {
+        (d.len() <= 40)
+            .then(|| {
+                time::OffsetDateTime::parse(d, &time::format_description::well_known::Rfc3339).ok()
+            })
+            .flatten()
+            .map(time::OffsetDateTime::unix_timestamp)
+    };
+    // SB-407 review: the deadline counts only from Fabric's own write (`writtenBy`
+    // `service:fabric`, the packet Observatory freezes at its opening write, so a later lease
+    // holder cannot change it) and only when it is not earlier than that write.
+    let checkpoint = &shown["checkpoint"];
+    let written_at = checkpoint["createdAt"].as_str().and_then(rfc3339);
+    let deadline = written_at
+        .filter(|_| checkpoint["writtenBy"].as_str() == Some(FABRIC_WRITER))
+        .and_then(|written| {
+            refs.iter()
+                .find_map(|r| r.strip_prefix("deadline:"))
+                .and_then(rfc3339)
+                .filter(|d| *d >= written)
+        });
     Packet {
         request: find("board-request:").filter(|r| valid_request(r)),
         thread: find("board-thread:"),
@@ -295,19 +312,27 @@ pub(crate) fn packet(shown: &Value) -> Packet {
     }
 }
 
+/// SB-407: the writer label Fabric's dispatcher writes a workflow's packet under
+/// (`FABRIC_OWNER`, fabric `observatoryMemory.ts`).
+pub const FABRIC_WRITER: &str = "service:fabric";
 /// SB-407: where a run's deadline came from: its time limit, or the board request's deadline.
 pub const DEADLINE_BY_LIMIT: &str = "time_limit";
 pub const DEADLINE_BY_BOARD: &str = "board_request";
 
 /// SB-407 (D-4): when a run started `now` with `timeout_minutes` stops: at its time limit, or at
-/// the board request's deadline when that is earlier, but never sooner than a minute after its
-/// start (a deadline already past still lets the run settle its request). Answers the deadline
-/// and what set it.
-pub(crate) fn deadline(now: i64, timeout_minutes: u32, board: Option<i64>) -> (i64, &'static str) {
+/// the board request's deadline when that is earlier. Answers the deadline and what set it; a
+/// board deadline already past refuses the start (`DEADLINE_PASSED`): the request expires on the
+/// board, and no run is started only to be stopped.
+pub(crate) fn deadline(
+    now: i64,
+    timeout_minutes: u32,
+    board: Option<i64>,
+) -> Result<(i64, &'static str), &'static str> {
     let limit = now + i64::from(timeout_minutes) * 60;
     match board {
-        Some(board) if board < limit => ((now + 60).max(board), DEADLINE_BY_BOARD),
-        _ => (limit, DEADLINE_BY_LIMIT),
+        Some(board) if board <= now => Err(DEADLINE_PASSED),
+        Some(board) if board < limit => Ok((board, DEADLINE_BY_BOARD)),
+        _ => Ok((limit, DEADLINE_BY_LIMIT)),
     }
 }
 /// A board request's id: a UUID.
@@ -509,6 +534,7 @@ pub(crate) fn stop(
         live_remove(root, id);
         return Ok(answer("already_ended"));
     }
+    let _stopping = Stopping::new(id);
     journal_stop(root, &record, how, now, None);
     let outcome = |state: &'static str, kind: Option<&str>| {
         journal_stop(root, &record, how, now, Some((state, kind)));
@@ -568,18 +594,30 @@ fn recorded_kind(root: &Path, id: &str) -> Option<String> {
 /// SB-407: a stop a quitting owner cut between recording the run's end and its signal leaves the
 /// run running with `ended` set; the next pass that finds it so stops it again and journals the
 /// outcome with `finished_at`.
-fn finish_cut_stop(root: &Path, record: &Value, now: i64) {
+fn finish_cut_stop(root: &Path, record: &Value, now: i64) -> bool {
     let Some(kind @ (STOPPED | TIMED_OUT)) = record["ended"]["kind"].as_str() else {
-        return;
+        return true;
     };
     if !record["dispatch"]["target"].is_null() {
-        return;
+        return true;
+    }
+    let Some(id) = record["launch_id"].as_str() else {
+        return true;
+    };
+    // Review round 1: a stop in flight in this process, or one recorded within the time a stop
+    // takes (its SIGTERM, then SIGKILL after `STOP_GRACE`), is still at work; the next pass looks
+    // again.
+    let recent = record["ended"]["at"]
+        .as_i64()
+        .is_some_and(|at| now - at < 2 * STOP_GRACE.as_secs() as i64);
+    if recent || stopping(id) {
+        return false;
     }
     let Some(home) = crate::launches::own_home(root, record) else {
-        return;
+        return true;
     };
     if !crate::launch::session_running(&home).unwrap_or(false) {
-        return;
+        return true;
     }
     let how = if kind == TIMED_OUT {
         TIMED_OUT
@@ -602,7 +640,83 @@ fn finish_cut_stop(root: &Path, record: &Value, now: i64) {
             "outcome": state, "ended": {"kind": how}, "finished_at": now,
         }),
     );
+    // A stop that failed keeps the run watched, so the next pass tries again.
+    result.is_ok()
 }
+
+/// Review round 1: the launches a stop in this process is acting on now (between its record and
+/// its signal's end), so the background pass never finishes a stop that is still under way.
+static STOPPING: Mutex<Vec<String>> = Mutex::new(Vec::new());
+fn stopping(id: &str) -> bool {
+    STOPPING
+        .lock()
+        .map(|s| s.iter().any(|x| x == id))
+        .unwrap_or(false)
+}
+/// Marks `id` as being stopped until the guard drops, however the stop ends.
+struct Stopping(String);
+impl Stopping {
+    fn new(id: &str) -> Self {
+        if let Ok(mut s) = STOPPING.lock() {
+            s.push(id.to_owned());
+        }
+        Stopping(id.to_owned())
+    }
+}
+impl Drop for Stopping {
+    fn drop(&mut self) {
+        if let Ok(mut s) = STOPPING.lock() {
+            if let Some(i) = s.iter().position(|x| *x == self.0) {
+                s.remove(i);
+            }
+        }
+    }
+}
+
+/// SB-407 review round 1: what Needs attention's *Stop the run* does for a run it read as gone:
+/// only the end is recorded (`exited`), and only while the run's process is not running. A run
+/// whose process is alive (the read that called it gone could not see it) is refused with
+/// `STILL_RUNNING` and never signalled; a run on another machine is never gone here.
+pub(crate) fn record_gone(
+    root: &Path,
+    id: &str,
+    now: i64,
+    analytics: Option<&Analytics>,
+) -> Result<Value, String> {
+    let Some(record) = crate::launches::get(root, id) else {
+        return Err(crate::launches::LAUNCH_NOT_FOUND.into());
+    };
+    if !record["dispatch"].is_object() {
+        return Err(NOT_A_DISPATCH.into());
+    }
+    let answer = |state: &str| json!({"launch_id": id, "state": state});
+    if !record["ended"].is_null() {
+        return Ok(answer("already_ended"));
+    }
+    if !record["dispatch"]["target"].is_null() {
+        return Err(STILL_RUNNING.into());
+    }
+    let alive = crate::launches::own_home(root, &record)
+        .map(|home| crate::launch::session_running(&home).unwrap_or(true))
+        .unwrap_or(false);
+    if alive {
+        return Err(STILL_RUNNING.into());
+    }
+    journal_stop(root, &record, STOPPED, now, None);
+    ended(root, id, EXITED, now, None, analytics);
+    live_remove(root, id);
+    journal_stop(
+        root,
+        &record,
+        STOPPED,
+        now,
+        Some(("already_ended", recorded_kind(root, id).as_deref())),
+    );
+    Ok(answer("already_ended"))
+}
+/// The refusal of `record_gone` for a run whose process still runs.
+pub const STILL_RUNNING: &str =
+    "This board run is still running, so it was left alone. Refresh to see it now.";
 
 /// SB-317 (D-7): a dispatched run's state for Fabric: `{launch_id, target, state, exit_code,
 /// result}`. A run here answers from its record; a run on another machine is read there over
@@ -677,8 +791,10 @@ pub(crate) fn sweep(root: &Path, now: i64, analytics: Option<&Analytics>) {
             continue;
         };
         if !record["ended"].is_null() {
-            finish_cut_stop(root, &record, now);
-            live_remove(root, &l.launch_id);
+            // A cut stop that could not be finished keeps the run watched.
+            if finish_cut_stop(root, &record, now) {
+                live_remove(root, &l.launch_id);
+            }
             continue;
         }
         if record["state"] == "ended" {
@@ -938,7 +1054,10 @@ mod tests {
 
     #[test]
     fn the_packet_names_its_request_thread_and_project_or_nothing() {
-        let shown = |artifacts: Value| json!({"checkpoint": {"body": {"artifacts": artifacts}}});
+        let shown = |artifacts: Value| {
+            json!({"checkpoint": {"writtenBy": FABRIC_WRITER, "createdAt": "2026-11-04T00:00:00Z",
+                "body": {"artifacts": artifacts}}})
+        };
         let full = shown(json!([
             {"kind": "file", "path": "/x"},
             {"kind": "other", "ref": "board-request:3f2a8c1e-5b6d-4e7f-8a9b-0c1d2e3f4a5b"},
@@ -961,6 +1080,22 @@ mod tests {
         let odd = shown(json!([{"kind": "other", "ref": "deadline:tomorrow"}]));
         assert_eq!(packet(&odd).deadline, None);
         assert_eq!(packet(&json!({})), Packet::default());
+        // SB-407 review: a deadline counts only from Fabric's own write, and never one earlier
+        // than that write.
+        let mut other = full.clone();
+        other["checkpoint"]["writtenBy"] = "agent:claude-code".into();
+        assert_eq!(packet(&other).deadline, None, "a lease holder's write");
+        let mut unstamped = full.clone();
+        unstamped["checkpoint"]["createdAt"] = Value::Null;
+        assert_eq!(
+            packet(&unstamped).deadline,
+            None,
+            "no write time to check it by"
+        );
+        let mut before = full.clone();
+        before["checkpoint"]["createdAt"] = "2026-11-06T00:00:00Z".into();
+        assert_eq!(packet(&before).deadline, None, "earlier than its own write");
+        assert_eq!(packet(&before).request, packet(&full).request);
         // Not a UUID, unsafe characters, or the wrong kind: never taken.
         let bad = shown(json!([
             {"kind": "other", "ref": "board-request:not-a-uuid"},
@@ -973,12 +1108,19 @@ mod tests {
     #[test]
     fn the_board_requests_deadline_wins_only_when_it_comes_first() {
         // SB-407 (D-4): an hour's limit; a board deadline in 20 minutes stops the run then.
-        assert_eq!(deadline(1_000, 60, None), (4_600, DEADLINE_BY_LIMIT));
-        assert_eq!(deadline(1_000, 60, Some(2_200)), (2_200, DEADLINE_BY_BOARD));
+        assert_eq!(deadline(1_000, 60, None), Ok((4_600, DEADLINE_BY_LIMIT)));
+        assert_eq!(
+            deadline(1_000, 60, Some(2_200)),
+            Ok((2_200, DEADLINE_BY_BOARD))
+        );
         // A later board deadline leaves the time limit.
-        assert_eq!(deadline(1_000, 60, Some(9_000)), (4_600, DEADLINE_BY_LIMIT));
-        // A board deadline already past still gives the run a minute to settle its request.
-        assert_eq!(deadline(1_000, 60, Some(500)), (1_060, DEADLINE_BY_BOARD));
+        assert_eq!(
+            deadline(1_000, 60, Some(9_000)),
+            Ok((4_600, DEADLINE_BY_LIMIT))
+        );
+        // A board deadline already past refuses the start (review round 1).
+        assert_eq!(deadline(1_000, 60, Some(500)), Err(DEADLINE_PASSED));
+        assert_eq!(deadline(1_000, 60, Some(1_000)), Err(DEADLINE_PASSED));
     }
 
     #[test]
@@ -1059,8 +1201,10 @@ mod runs {
                 .unwrap()
                 .push(json!({"kind": "other", "ref": format!("deadline:{at}")}));
         }
+        let written = crate::rfc3339(crate::monitor::now() - 60).unwrap();
         let show = json!({"workflowId": WF, "status": "open", "pendingHandoff": pending,
-            "checkpoint": {"executor": {"provider": "fabric"}, "body": {"goal": "g", "artifacts": artifacts}},
+            "checkpoint": {"executor": {"provider": "fabric"}, "writtenBy": FABRIC_WRITER,
+                "createdAt": written, "body": {"goal": "g", "artifacts": artifacts}},
             "lease": {"executor": {"provider": "fabric", "accountRef": "service-fabric"}},
             "credentials": []});
         let path = dir.join("project-observatory");
@@ -1273,6 +1417,7 @@ mod runs {
             .runtime
             .execute(Operation::DispatchStop {
                 launch_id: id.clone(),
+                if_gone: false,
             })
             .await
             .unwrap();
@@ -1302,6 +1447,7 @@ mod runs {
             .runtime
             .execute(Operation::DispatchStop {
                 launch_id: id.clone(),
+                if_gone: false,
             })
             .await
             .unwrap();
@@ -1320,6 +1466,7 @@ mod runs {
             .runtime
             .execute(Operation::DispatchStop {
                 launch_id: "no-such-launch".into(),
+                if_gone: false,
             })
             .await
             .unwrap_err();
@@ -1450,6 +1597,87 @@ mod runs {
     }
 
     #[tokio::test]
+    async fn a_run_read_as_gone_is_only_recorded_and_a_live_one_is_never_signalled() {
+        // SB-407 review round 1 (P1): *Stop the run* on a `session_gone` item records the end of
+        // a run whose process is gone, and refuses one whose process runs, leaving it running.
+        let b = bench(true).await;
+        let started = b
+            .run(dispatch(b.folder.path(), Permissions::Ask), true, true)
+            .await
+            .unwrap();
+        let id = started["launch_id"].as_str().unwrap().to_owned();
+        wait_for(&b.tools.path().join("args"));
+        let home = b
+            .root
+            .path()
+            .join("homes")
+            .join(started["account_id"].as_str().unwrap());
+        let gone = || {
+            b.runtime.execute(Operation::DispatchStop {
+                launch_id: id.clone(),
+                if_gone: true,
+            })
+        };
+        assert_eq!(gone().await.unwrap_err(), STILL_RUNNING);
+        assert!(
+            crate::launch::session_running(&home).unwrap(),
+            "left running"
+        );
+        assert!(crate::launches::get(b.root.path(), &id).unwrap()["ended"].is_null());
+        assert!(journal(b.root.path()).is_empty());
+        // A run whose process is gone with no end recorded (no owner reaped it): only its end
+        // is recorded, `exited`.
+        let dead = b.root.path().join("homes").join("gone-run");
+        switchboard_core::private_fs::private_dir(&dead).unwrap();
+        let dead_id = crate::launches::new_id();
+        crate::launches::record_by(
+            b.root.path(),
+            &dead,
+            json!({"provider": "claude", "launched_at": 1, "working_directory": "/work/app",
+                "dispatch": {"workflow": WF, "deadline": 99}}),
+            &dead_id,
+            None,
+        )
+        .unwrap();
+        let answer = b
+            .runtime
+            .execute(Operation::DispatchStop {
+                launch_id: dead_id.clone(),
+                if_gone: true,
+            })
+            .await
+            .unwrap();
+        assert_eq!(answer["state"], "already_ended");
+        let record = crate::launches::get(b.root.path(), &dead_id).unwrap();
+        assert_eq!(record["ended"]["kind"], EXITED);
+        let lines = journal(b.root.path());
+        assert_eq!(lines.len(), 2, "{lines:?}");
+        assert_eq!(lines[1]["ended"], json!({"kind": EXITED}));
+        assert_eq!(lines[1]["by"], "person");
+    }
+
+    #[tokio::test]
+    async fn a_request_whose_board_deadline_passed_starts_nothing() {
+        // SB-407 review round 1: refused `deadline_passed`, never a run started to be stopped.
+        let b = bench(true).await;
+        let engine = engine_full(b.tools.path(), true, true, Some(crate::monitor::now() - 30));
+        let answer = TEST_OBSERVATORY
+            .scope(
+                engine,
+                TEST_DISPATCH_PROGRAM.scope(
+                    agent(b.tools.path(), 30),
+                    b.runtime
+                        .execute(dispatch(b.folder.path(), Permissions::Ask)),
+                ),
+            )
+            .await
+            .unwrap();
+        assert_eq!(answer["state"], "refused", "{answer}");
+        assert_eq!(answer["reason"], DEADLINE_PASSED);
+        assert!(!b.tools.path().join("starts").exists(), "nothing started");
+    }
+
+    #[tokio::test]
     async fn a_stop_cut_between_its_record_and_its_signal_is_finished_by_the_next_pass() {
         // SB-407: a quit after the record says `timed_out` but before the signal left the run
         // running; the next pass stops it and journals the outcome with `finished_at`.
@@ -1474,6 +1702,18 @@ mod runs {
             .join("homes")
             .join(started["account_id"].as_str().unwrap());
         assert!(crate::launch::session_running(&home).unwrap());
+        // Review round 1: within the time a stop takes, it may still be under way: left alone,
+        // and the run stays watched.
+        sweep(b.root.path(), now + 5, None);
+        assert!(crate::launch::session_running(&home).unwrap());
+        assert!(b.root.path().join(LIVE_FILE).exists());
+        assert!(journal(b.root.path()).is_empty());
+        // So is a stop this process is making now, however old its record.
+        {
+            let _in_flight = Stopping::new(&id);
+            sweep(b.root.path(), now + 30, None);
+            assert!(crate::launch::session_running(&home).unwrap());
+        }
         sweep(b.root.path(), now + 30, None);
         assert!(!crate::launch::session_running(&home).unwrap());
         let lines = journal(b.root.path());

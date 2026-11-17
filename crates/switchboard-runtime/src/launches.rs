@@ -736,7 +736,109 @@ pub(crate) fn record_resume(
     record["launched_by"] = by.stored();
     record["home_path"] = Value::Null;
     let _writing = writing();
-    write(root, id, &record)
+    write(root, id, &record)?;
+    // SB-411 review round 1: indexed, so a session list reads these records by id only.
+    homeless_ids(root);
+    mark_homeless(root, id);
+    Ok(())
+}
+/// SB-411: `launches/homeless/<launch_id>`, an empty marker per launch with no home of its own (a
+/// session resumed as itself), so `sessions` reads only those records. The folder's presence
+/// says the index is complete: when it is absent (records from before it), one scan of the
+/// records' 90 days seeds it.
+const HOMELESS: &str = "homeless";
+fn mark_homeless(root: &Path, id: &str) {
+    let folder = root.join(DIR).join(HOMELESS);
+    if switchboard_core::private_fs::private_dir(&folder).is_ok() {
+        let _ = switchboard_core::private_fs::private_write(&folder.join(id), b"");
+    }
+}
+/// The launches with no home of their own, from the index (seeded once when absent).
+pub(crate) fn homeless_ids(root: &Path) -> Vec<String> {
+    let folder = root.join(DIR).join(HOMELESS);
+    if fs::symlink_metadata(&folder).is_err() {
+        let since = crate::monitor::now() - KEEP_SECONDS;
+        let ids: Vec<String> = recent_records(root, since)
+            .into_iter()
+            .filter(|r| r.get("home_path") == Some(&Value::Null))
+            .filter_map(|r| r["launch_id"].as_str().map(str::to_owned))
+            .filter(|id| valid_id(id))
+            .collect();
+        if switchboard_core::private_fs::private_dir(&folder).is_err() {
+            return ids;
+        }
+        for id in &ids {
+            mark_homeless(root, id);
+        }
+        return ids;
+    }
+    fs::read_dir(&folder)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|e| e.file_name().to_str().map(str::to_owned))
+        .filter(|id| valid_id(id))
+        .collect()
+}
+/// SB-411 (Fabric Dashboards' finding ddeece6e): the session list's rows for launches with no
+/// home of their own, read by id from the index (`homeless_ids`) and from the records' memory
+/// (`read`). Without `all`, those whose host runs (`session_host::attachable`) or, for a record
+/// active in the last day with no end, whose Claude Code process holds its session (read only
+/// then, once); with `all`, also the ended ones. A home row's fields with `home: null`; a launch
+/// in `listed` is never repeated.
+pub(crate) fn homeless(
+    root: &Path,
+    all: bool,
+    listed: &std::collections::HashSet<String>,
+    now: i64,
+) -> Vec<Value> {
+    let mut live: Option<std::collections::HashMap<String, (u32, String)>> = None;
+    let mut rows = Vec::new();
+    for id in homeless_ids(root) {
+        if listed.contains(&id) {
+            continue;
+        }
+        let Some(mut record) = read(root, &id) else {
+            continue;
+        };
+        if record.get("home_path") != Some(&Value::Null) {
+            continue;
+        }
+        #[cfg(unix)]
+        let hosted = crate::session_host::attachable(root, &id).is_some();
+        #[cfg(not(unix))]
+        let hosted = false;
+        let active = record["last_turn_at"]
+            .as_i64()
+            .or_else(|| record["launched_at"].as_i64())
+            .is_some_and(|at| now - at <= crate::session_watch::WINDOW_SECONDS);
+        let running = hosted
+            || (record["ended"].is_null()
+                && active
+                && record["provider_session_id"]
+                    .as_str()
+                    .is_some_and(|session| {
+                        live.get_or_insert_with(|| crate::machine_sessions::live_sessions(root))
+                            .contains_key(session)
+                    }));
+        if !all && !running {
+            continue;
+        }
+        if let Some(map) = record.as_object_mut() {
+            map.remove("home_path");
+        }
+        record["state"] = if running { "running" } else { "ended" }.into();
+        if record["started_at"].is_null() {
+            record["started_at"] = record["session_started_at"].clone();
+        }
+        record["home"] = Value::Null;
+        if record.get("home_dir").is_none() {
+            record["home_dir"] = Value::Null;
+        }
+        add_host(root, &mut record);
+        rows.push(record);
+    }
+    rows
 }
 /// `record` with `launched_by.dispatch` (SB-247): the dispatch that started the launch,
 /// `{id, request, thread, project, workflow}`, set by the owner, never by the caller.
@@ -1366,7 +1468,7 @@ pub fn prune(root: &Path, now: std::time::SystemTime) -> usize {
     }
     // SB-219: a workflow's index not written for as long goes too; it names no kept record.
     // SB-247: so does a dispatched run's log.
-    for folder in [BY_WORKFLOW, LOGS] {
+    for folder in [BY_WORKFLOW, LOGS, HOMELESS] {
         if let Ok(entries) = fs::read_dir(root.join(DIR).join(folder)) {
             for entry in entries.flatten() {
                 let old = fs::symlink_metadata(entry.path()).is_ok_and(|meta| {
@@ -1568,6 +1670,12 @@ mod tests {
         };
         let hosted = resume("s-hosted");
         let ended = resume("s-ended");
+        // Review round 1: each is indexed, so the list reads these records by id only.
+        let mut indexed = homeless_ids(&root);
+        indexed.sort();
+        let mut both = vec![hosted.clone(), ended.clone()];
+        both.sort();
+        assert_eq!(indexed, both);
         assert!(end_once(
             &root,
             &ended,
@@ -1628,6 +1736,12 @@ mod tests {
             .find(|r| r["launch_id"] == home_launch.as_str())
             .unwrap();
         assert_eq!(home_row["home"], "runtimes");
+        // Records from before the index: one scan seeds it, the home's launch left out.
+        fs::remove_dir_all(root.join(DIR).join(HOMELESS)).unwrap();
+        let mut seeded = homeless_ids(&root);
+        seeded.sort();
+        assert_eq!(seeded, both);
+        assert!(root.join(DIR).join(HOMELESS).is_dir());
     }
     /// Windows: Claude Code names its transcript with a drive (`C:\Users\...\.claude\projects\...`,
     /// also with `/` separators); a path without a drive is not absolute there and is not

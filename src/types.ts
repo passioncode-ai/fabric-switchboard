@@ -63,10 +63,10 @@ export interface MachinesList { machines: { pool: string; name: string; read?: {
 /** SB-355: `machines --live`: each machine group, read over ssh. */
 export interface MachinesLive { machines: { pool: string; name: string; accounts: { id: string; there?: MachineCopy | null }[]; live?: { reachable: boolean; error?: string } }[] }
 /** WF-3 (SB-365, DEC-0015): why an account (or a ceiling) needs a person; the Tauri command `attention`, the same list as MCP `switchboard_attention`. */
-export type AttentionReason = 'session_duplicate' | 'session_stuck' | 'session_gone' | 'sign_in' | 'seat_ended' | 'renewal_refused' | 'usage_failing' | 'move_unknown' | 'refused_there' | 'key_outside_tokens' | 'ceiling_question';
+export type AttentionReason = 'session_duplicate' | 'session_stuck' | 'session_gone' | 'dispatch_refused' | 'sign_in' | 'seat_ended' | 'renewal_refused' | 'usage_failing' | 'move_unknown' | 'refused_there' | 'key_outside_tokens' | 'ceiling_question';
 /** WF-3: the window flow that fixes an item; `tool` is the MCP tool that does the same. */
-export type AttentionWindow = 'sign_in' | 'answer_ceiling' | 'check_usage' | 'open_machines' | 'open_sessions' | 'close_copy' | 'dispatch_stop' | 'move_tokens';
-export interface AttentionItem { account_id: string | null; label: string | null; provider: Provider | null; pool: string | null; reason: AttentionReason; detail: string; since: number | null; action: { tool: string; window: AttentionWindow }; /** SB-388: a duplicate's session id, for *Close the quiet copy*. */ session_id?: string | null; /** SB-407: a stuck or gone board run's launch id, for *Stop the run*. */ launch_id?: string | null; /** SB-389: the copy offered: a quiet one, or the older one when every copy works; null when every copy is answering. */ close?: { pid: number; why: 'quiet' | 'older'; command_age: number | null } | null }
+export type AttentionWindow = 'sign_in' | 'answer_ceiling' | 'check_usage' | 'open_machines' | 'open_sessions' | 'close_copy' | 'dispatch_stop' | 'open_capacity' | 'move_tokens';
+export interface AttentionItem { account_id: string | null; label: string | null; provider: Provider | null; pool: string | null; reason: AttentionReason; detail: string; since: number | null; action: { tool: string; window: AttentionWindow; /** SB-407: a gone board run's act only records its end. */ if_gone?: boolean }; /** SB-388: a duplicate's session id, for *Close the quiet copy*. */ session_id?: string | null; /** SB-407: a stuck or gone board run's launch id, for *Stop the run*. */ launch_id?: string | null; /** SB-412: the dispatches refused at the session limit in the last hour, and whether a session ended since. */ count?: number; freed?: boolean; /** SB-389: the copy offered: a quiet one, or the older one when every copy works; null when every copy is answering. */ close?: { pid: number; why: 'quiet' | 'older'; command_age: number | null } | null }
 export interface Attention { count: number; items: AttentionItem[] }
 export interface RuntimeStatus { proxy_address: string; platform: string; live_mode: string }
 export interface AddInput { label: string; provider: Provider; kind: AuthKind; pool: string; secret: string }
@@ -168,7 +168,7 @@ export interface Adapter {
   /** SB-388: close the quiet one of two processes holding one session, never a working one. */
   sessionCloseCopy(sessionId: string, pid?: number): Promise<{ session_id: string; closed_pid: number; kept_pids: number[] }>;
   /** SB-407: Needs attention's *Stop the run* on a stuck or gone board run (`dispatch stop`). */
-  dispatchStop(launchId: string): Promise<{ launch_id: string; state: 'stopped' | 'already_ended' }>;
+  dispatchStop(launchId: string, ifGone?: boolean): Promise<{ launch_id: string; state: 'stopped' | 'already_ended' }>;
   /** SB-378: the session pool; `cap` sets it, `clear` removes it, neither reads. */
   capacity(change?: { cap?: number; clear?: boolean } | null): Promise<CapacityStatus>;
   /** SB-384: the session duty officer: its settings, what it did and what a check would do now. */
@@ -371,7 +371,7 @@ export interface ObservatoryAddRequest { slot: string; to: 'account' | 'agent' |
 export interface ObservatoryAdded { slot: string; kind: string; saved: { target: string; answer: unknown }[]; failed: string | null; next: string[] }
 export interface LaunchKeys { agent: string; folder: string | null; openrouter: boolean; anthropic: boolean; keys: LaunchKey[]; none_usable: boolean }
 export interface DutyStatus { settings: DutySettings; check_seconds: number; /** SB-392: minutes after which a finished session is closed: `idle_minutes`, at least 65 (a wake-up a session set itself is at most an hour). */ idle_closes_after_minutes?: number; watched: number; left_to_dashboards: number; /** Sessions waiting for the person's answer and sessions running a command of their own: never acted on. */ waiting_for_person?: number; running_commands?: number; due: DutyLine[]; recent: DutyLine[]; supported: boolean }
-export interface CapacityStatus { cap: number | null; used: number; free: number | null; at_capacity: boolean; total: number; quiet: number; quiet_after_minutes: number }
+export interface CapacityStatus { cap: number | null; used: number; free: number | null; at_capacity: boolean; total: number; quiet: number; quiet_after_minutes: number; /** SB-412: dispatches the limit refused in the last hour; null when none. */ refused_last_hour?: { count: number; last_at: number; freed: boolean } | null }
 /** SB-352: one loan in `balance status`. */
 export interface BalanceLoan { account_id: string; label: string | null; provider: Provider; from: string; from_name: string; to: string; to_name: string; at: number }
 /** SB-352: one journal line (`balancing.jsonl`): codes and ids only. */

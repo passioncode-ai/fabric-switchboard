@@ -162,6 +162,22 @@ async fn handshake_lists_tools_and_rejects_malformed_messages() {
         .unwrap();
     assert_eq!(agent.request("ping", json!({}))["result"], json!({}));
     let tools = agent.request("tools/list", json!({}));
+    // Review round 1 of SB-407: the tools that end a process say so.
+    let destructive: Vec<&str> = tools["result"]["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|t| t["annotations"]["destructiveHint"] == true)
+        .map(|t| t["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        destructive,
+        [
+            "switchboard_session_close_copy",
+            "switchboard_dispatch_stop",
+            "switchboard_session_end"
+        ]
+    );
     let names: Vec<&str> = tools["result"]["tools"]
         .as_array()
         .unwrap()

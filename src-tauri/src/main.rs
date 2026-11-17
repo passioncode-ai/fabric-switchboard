@@ -1084,11 +1084,18 @@ async fn session_close_copy(
 }
 /// SB-407: Needs attention's *Stop the run* on a stuck or gone board run (`dispatch stop`).
 #[tauri::command]
-async fn dispatch_stop(launch_id: String, state: State<'_, Slot>) -> Result<Value, String> {
+async fn dispatch_stop(
+    launch_id: String,
+    if_gone: Option<bool>,
+    state: State<'_, Slot>,
+) -> Result<Value, String> {
     state
         .runtime()
         .await?
-        .execute(Operation::DispatchStop { launch_id })
+        .execute(Operation::DispatchStop {
+            launch_id,
+            if_gone: if_gone.unwrap_or(false),
+        })
         .await
 }
 /// SB-384: the session duty officer; `on` turns it on or off, `run` checks now, nothing reads it.

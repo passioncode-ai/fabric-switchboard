@@ -3794,84 +3794,14 @@ pub fn sessions(root: &Path, all: bool) -> Vec<serde_json::Value> {
         .iter()
         .filter_map(|r| r["launch_id"].as_str().map(str::to_owned))
         .collect();
-    found.extend(homeless(root, all, &listed, crate::monitor::now()));
+    found.extend(crate::launches::homeless(
+        root,
+        all,
+        &listed,
+        crate::monitor::now(),
+    ));
     found.sort_by_key(|r| std::cmp::Reverse(r["launched_at"].as_i64().unwrap_or(0)));
     found
-}
-/// SB-411: launches with no home of their own, which no `.session.json` lists: a session resumed
-/// as itself (`sessions continue --in-place --hosted`, SB-400) has a launch record and a session
-/// host but no home. Without `all`, those whose host runs (`session_host::live_hosts`) or whose
-/// Claude Code process holds their session (records written in the last day, read only when one
-/// has no host and no end); with `all`, also the ended ones of the records' 90 days. Each is a row
-/// with a home row's fields and `home: null`; a launch a home lists is never listed twice.
-fn homeless(
-    root: &Path,
-    all: bool,
-    listed: &std::collections::HashSet<String>,
-    now: i64,
-) -> Vec<serde_json::Value> {
-    let since = if all {
-        now - crate::launches::KEEP_SECONDS
-    } else {
-        now - crate::session_watch::WINDOW_SECONDS
-    };
-    let mut records = crate::launches::recent_records(root, since);
-    #[cfg(unix)]
-    let hosts: std::collections::HashSet<String> = crate::session_host::live_hosts(root)
-        .into_iter()
-        .map(|(id, _)| id)
-        .collect();
-    #[cfg(not(unix))]
-    let hosts: std::collections::HashSet<String> = std::collections::HashSet::new();
-    // A host still running a session whose record was last written before the window.
-    for id in &hosts {
-        if !records.iter().any(|r| r["launch_id"].as_str() == Some(id)) {
-            if let Some(record) = crate::launches::get(root, id) {
-                records.push(record);
-            }
-        }
-    }
-    let mut live: Option<std::collections::HashMap<String, (u32, String)>> = None;
-    let mut rows = Vec::new();
-    for mut record in records {
-        let Some(id) = record["launch_id"].as_str().map(str::to_owned) else {
-            continue;
-        };
-        if !crate::launches::valid_id(&id)
-            || listed.contains(&id)
-            // Present and null: a record written before homes were recorded is not homeless.
-            || record.get("home_path") != Some(&serde_json::Value::Null)
-            || rows.iter().any(|r: &serde_json::Value| r["launch_id"] == id.as_str())
-        {
-            continue;
-        }
-        let running = hosts.contains(&id)
-            || (record["ended"].is_null()
-                && record["provider_session_id"]
-                    .as_str()
-                    .is_some_and(|session| {
-                        live.get_or_insert_with(|| crate::machine_sessions::live_sessions(root))
-                            .contains_key(session)
-                    }));
-        if !all && !running {
-            continue;
-        }
-        let state = if running { "running" } else { "ended" };
-        if let Some(map) = record.as_object_mut() {
-            map.remove("home_path");
-        }
-        record["state"] = state.into();
-        if record["started_at"].is_null() {
-            record["started_at"] = record["session_started_at"].clone();
-        }
-        record["home"] = serde_json::Value::Null;
-        if record.get("home_dir").is_none() {
-            record["home_dir"] = serde_json::Value::Null;
-        }
-        crate::launches::add_host(root, &mut record);
-        rows.push(record);
-    }
-    rows
 }
 /// A home's session state now (`starting`, `running`, `ended` or `unknown`, see `sessions`)
 /// and when its process started, from its marker.
