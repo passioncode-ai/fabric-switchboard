@@ -1060,6 +1060,14 @@ fn with_state_in(root: &Path, mut record: Value, homes: &mut Homes) -> Value {
                 ("ended", None)
             }
         }
+        // SB-400: a hosted continue has no home; while its host runs, it runs (R4 review).
+        #[cfg(unix)]
+        None if id
+            .as_deref()
+            .is_some_and(|id| crate::session_host::attachable(root, id).is_some()) =>
+        {
+            ("running", None)
+        }
         None => ("ended", None),
     };
     record["state"] = state.into();

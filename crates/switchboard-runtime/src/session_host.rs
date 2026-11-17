@@ -200,6 +200,28 @@ fn pid_alive(pid: i64) -> bool {
     pid > 0 && pid <= i32::MAX as i64 && unsafe { libc::kill(pid as i32, 0) } == 0
 }
 
+/// SB-400: every launch whose host runs now, with the host's pid. A hosted continue has no
+/// home of its own, so the session list, the watch and the rows find it here (R4 review).
+pub fn live_hosts(root: &Path) -> Vec<(String, u32)> {
+    let Ok(entries) = std::fs::read_dir(root.join("sessions")) else {
+        return Vec::new();
+    };
+    entries
+        .flatten()
+        .filter_map(|e| {
+            let name = e.file_name().to_string_lossy().into_owned();
+            let id = name.strip_suffix(".json")?.to_owned();
+            if !crate::launches::valid_id(&id) {
+                return None;
+            }
+            let bytes =
+                switchboard_core::private_fs::read_private(&e.path(), MAX_DESCRIPTOR).ok()?;
+            let pid = serde_json::from_slice::<Value>(&bytes).ok()?["pid"].as_i64()?;
+            pid_alive(pid).then_some((id, u32::try_from(pid).ok()?))
+        })
+        .collect()
+}
+
 /// What the session list says about a launch's host: `{attachable: true, viewers}` while its
 /// host runs; None when it has none (not hosted, or ended).
 pub fn attachable(root: &Path, launch_id: &str) -> Option<Value> {

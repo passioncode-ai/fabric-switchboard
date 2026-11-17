@@ -2778,6 +2778,16 @@ async fn run(cli: &Cli) -> Result<Value, String> {
             pid: *pid,
         },
         Command::Sessions {
+            command: Some(SessionsCommand::Continue { in_place: true, .. }),
+            target: Some(_),
+            ..
+        } => {
+            // A session continued in this terminal runs on this computer (R4 review).
+            return Err(
+                "Continue in place runs on this computer. Run it there, without --target.".into(),
+            );
+        }
+        Command::Sessions {
             command:
                 Some(SessionsCommand::Continue {
                     session_id,
@@ -3683,7 +3693,20 @@ async fn continue_in_place(
         .as_str()
         .ok_or("The session script is missing.")?;
     if let Some(launch_id) = value["launch_id"].as_str() {
-        return run_hosted(root, launch_id, std::path::Path::new(script));
+        let ran = run_hosted(root, launch_id, std::path::Path::new(script));
+        if ran.is_err() {
+            // The host never started: its launch record ends here, never reads as gone (R4 review).
+            let _ = call(
+                root,
+                Operation::SessionEnded {
+                    launch_id: launch_id.to_owned(),
+                    exit_code: 1,
+                    reason: Some("not_started".into()),
+                },
+            )
+            .await;
+        }
+        return ran;
     }
     run_in_place(std::path::Path::new(script))
 }

@@ -512,8 +512,9 @@ pub(crate) fn status(
                 .map_or((None, None), |(l, t)| (Some(l), t));
             // FD-291: when the session's transcript was last written, from its launch's own path
             // or any config folder that may hold it; a stop already settled costs no stat.
-            let transcript_at = open
-                .contains(r.session.as_str())
+            // Claude Code's transcripts only: another agent's stop is not judged by them.
+            let claude = r.provider == switchboard_core::Provider::Claude;
+            let transcript_at = (claude && open.contains(r.session.as_str()))
                 .then(|| {
                     let stamp = |p: &str| {
                         std::fs::metadata(p)

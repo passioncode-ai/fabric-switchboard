@@ -190,7 +190,10 @@ pub fn build(sources: &Sources) -> Value {
         // FD-291: a stop is taken up only from a transcript still where it stopped; one with no
         // transcript in any folder cannot be continued, and one whose session went past it ended
         // somewhere else and is continued as itself.
-        let (group, why, acts) = if s.get("transcript_at").is_some() && s["transcript_at"].is_null()
+        let claude = stop["provider"] == "claude";
+        let (group, why, acts) = if claude
+            && s.get("transcript_at").is_some()
+            && s["transcript_at"].is_null()
         {
             ("ended", "no_transcript", Vec::new())
         } else if moved_on(s, now) {
@@ -610,6 +613,30 @@ mod tests {
             (json!("ended"), json!("moved_on"), json!(["continue"]))
         );
         assert_eq!(by("stop:E4")["why"], "ready_to_continue");
+    }
+
+    #[test]
+    fn a_restart_session_that_came_back_leaves_no_ended_row() {
+        let labels = HashMap::new();
+        let resumable = [
+            json!({"session": "S40", "reason": "restart_back", "cwd": "/w/r", "at": 900}),
+            json!({"session": "S41", "reason": "restart", "cwd": "/w/q", "at": 900}),
+        ];
+        let answer = build(&Sources {
+            tree: &json!({"observed_at": 1000, "live": [], "launches": [], "findings": []}),
+            recovery: &json!({"sessions": []}),
+            labels: &labels,
+            attachable: &HashSet::new(),
+            resumable: &resumable,
+            monitors: &HashMap::new(),
+        });
+        let ids: Vec<&str> = answer["rows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|r| r["id"].as_str())
+            .collect();
+        assert_eq!(ids, vec!["closed:S41"]);
     }
 
     #[test]

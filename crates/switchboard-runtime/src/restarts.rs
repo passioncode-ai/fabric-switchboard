@@ -217,8 +217,8 @@ pub fn advance(wave: &mut Wave, view: &HashMap<String, Now>, now: i64) -> Vec<St
                 }
             }
             "back" if e.caller => {
-                // From its end: a caller that wrote before the pass that saw it back still counts.
-                if seen.last_write.zip(e.ended_at).is_some_and(|(w, t)| w > t) {
+                // From the pass that saw it back: its resume prompt itself is not work (R4 review).
+                if seen.last_write.zip(e.back_at).is_some_and(|(w, b)| w > b) {
                     e.state = "continuing".into();
                 }
             }
@@ -726,6 +726,10 @@ pub fn tick(root: &Path, now: i64) {
         let Some(e) = wave.sessions.iter().find(|e| e.session == session).cloned() else {
             continue;
         };
+        // A cancel while an earlier act of this pass ran leaves it as it is (R4 review).
+        if e.state != "pending" {
+            continue;
+        }
         // Read again just before the act: earlier acts of this pass can take seconds each, and a
         // session that went busy meanwhile, or now runs in another process, is not ended (R3 review).
         let fresh = view_of(&crate::duty::observe(root), now);
@@ -755,6 +759,12 @@ pub fn tick(root: &Path, now: i64) {
         drop(held);
         let (state, reason) = restart_one(root, &wave, &e);
         held = lock(root);
+        if held.is_none() {
+            crate::oplog::event(
+                "restart_wave",
+                &[("phase", crate::oplog::Field::Code("lock_unavailable"))],
+            );
+        }
         if let Some(again) = read(root, &wave.id) {
             wave = again;
         }
@@ -1169,14 +1179,18 @@ mod tests {
     }
 
     #[test]
-    fn a_resumed_caller_that_wrote_before_the_back_pass_reads_continuing() {
+    fn a_resumed_caller_reads_continuing_once_it_writes_after_it_is_back() {
         let mut e = entry("A", 1, true);
         e.state = "back".into();
         e.ended_at = Some(1000);
         e.back_at = Some(1100);
         let mut w = wave(vec![e]);
+        // Its resume prompt, written before the pass that saw it back, is not work.
         let mut seen = now(9, true);
         seen.last_write = Some(1050);
+        advance(&mut w, &[("A".to_string(), seen.clone())].into(), 1200);
+        assert_eq!(w.sessions[0].state, "back");
+        seen.last_write = Some(1150);
         advance(&mut w, &[("A".to_string(), seen)].into(), 1200);
         assert_eq!(w.sessions[0].state, "continuing");
     }

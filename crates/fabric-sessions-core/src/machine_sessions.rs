@@ -238,9 +238,20 @@ pub fn session_last_write(config: &Path, cwd: &str, session: &str) -> Option<i64
 /// run it in (the person's `~/.claude` and each home an app launches sessions in), or `None` when
 /// no folder holds it. A stop whose transcript was written after it was taken up again.
 pub fn transcript_at(accounts: &dyn Accounts, cwd: &str, session: &str) -> Option<i64> {
-    transcript_roots(accounts)
+    // Beside the transcript roots: the app's terminal homes (an organization's terminal writes
+    // its transcripts there) and the folder `CLAUDE_CONFIG_DIR` names (R4 review).
+    let mut configs: Vec<PathBuf> = transcript_roots(accounts)
         .iter()
-        .filter_map(|projects| projects.parent())
+        .filter_map(|projects| projects.parent().map(Path::to_path_buf))
+        .collect();
+    configs.extend(accounts.shell_homes());
+    configs.extend(
+        std::env::var_os("CLAUDE_CONFIG_DIR")
+            .filter(|d| !d.is_empty())
+            .map(PathBuf::from),
+    );
+    configs
+        .iter()
         .filter_map(|config| session_last_write(config, cwd, session))
         .max()
 }
