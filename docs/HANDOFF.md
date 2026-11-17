@@ -2,6 +2,16 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-11-17: SB-414 a window that does not own the data folder, SB-408 a .deb install that is behind, on branch `update-notices`
+
+- **Asked.** studio-agent's board requests `bc06a63d` (SB-414: a private `~/Applications` 0.7.111 window beside a 0.7.112 `serve` said nothing, and `switchboard app updates` answered a bare `APP_ONLY`) and `2b5ffe83` (SB-408: a .deb install never says it is behind).
+- **Built.** `crates/switchboard-runtime/src/copies.rs` (the copy a program runs from, `window-run.json` of a non-owner window, `not_app_view`), `Operation::Status` `owner_kind`/`owner_copy`, `app_doors::answer` answering the update state without the app, `serve_update::last` and `deb_pass`; `crates/switchboard-runtime/src/deb.rs` (dpkg file list, `notice`, `commands`), `self_update::run` answering a .deb install without installing; the window's `update_status` with `owner` and `deb`, the check that ends at once in the owner's copy (`owner_updates`), `deb_check`, Settings → Updates lines (`ownerLine`, `debLine`) with the commands and *Copy*.
+- **Decisions.** [DEC-0026](DECISIONS.md#dec-0026-a-window-that-does-not-own-the-data-folder-never-updates-the-owners-copy): a non-owner window never updates the owner's copy (two processes could swap one bundle with no lock between them); a non-owner window from a copy of its own still updates that copy and restarts only when the person asks. A .deb install is recognised from `/var/lib/dpkg/info/fabric-switchboard[:arch].list`, the list `dpkg -S` reads, with no root and no process.
+- **Checks.** See the PR for the head and the Studio gate (`./scripts/check.sh`, EXIT line); this MacBook: `cargo xwin check --target x86_64-pc-windows-msvc -p switchboard-runtime -p switchboard-cli --tests` EXIT 0; Copylot reports in [strings.md](brand/strings.md).
+- **Not done.** A live run: the Studio with a private window beside `serve` (the private copy was removed there, STU-80), and a .deb host for SB-408.
+
+**Exact next task.** Merge the `update-notices` pull request once its gate reads EXIT 0 on the merged head; the next release carries SB-414 and SB-408 (CHANGELOG Unreleased); then answer board threads `dca6e14d` and `00e5f6f2` with the release.
+
 ## 2026-11-17: SB-413 a restarted hosted session kept no output reader on Linux, on branch `session-host-test-hang`
 
 - **Asked.** The nightly at `0f1ffe6a` (run 44076842446, job `linux (ubuntu-24.04-arm)`) hung 70 minutes in `session_host::tests::a_restart_in_place_keeps_the_viewers_and_runs_the_next_program_on_the_same_terminal`: make no session host test able to hang, find the cause, fix it.
