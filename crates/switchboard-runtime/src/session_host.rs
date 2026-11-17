@@ -69,6 +69,8 @@ const MAX_VIEWERS: usize = 8;
 /// A viewer that cannot take output this long is dropped, so it never holds the session up.
 const VIEWER_WRITE: Duration = Duration::from_secs(2);
 const MAX_DESCRIPTOR: u64 = 4096;
+/// How long a viewer waits for the host's answer to its `HELLO` (SB-413).
+const HELLO_WAIT: Duration = Duration::from_secs(15);
 
 /// The frame protocol's version, in both `HELLO`s: a viewer refuses a host that speaks another.
 pub const PROTOCOL: u64 = 1;
@@ -1011,7 +1013,12 @@ fn connect(root: &Path, launch_id: &str, size: Option<(u16, u16)>) -> Result<Att
     }
     write_frame(&mut stream, HELLO, hello.to_string().as_bytes())
         .map_err(|_| NOT_FOUND.to_string())?;
-    match read_frame(&mut stream) {
+    // A host that takes the connection and never answers is not waited for forever (SB-413);
+    // the stream is handed on with no timeout, as before.
+    let _ = stream.set_read_timeout(Some(HELLO_WAIT));
+    let answer = read_frame(&mut stream);
+    let _ = stream.set_read_timeout(None);
+    match answer {
         Ok((HELLO, ack)) => {
             let ack: Value = serde_json::from_slice(&ack).unwrap_or(Value::Null);
             if ack["protocol"].as_u64() != Some(PROTOCOL) {
@@ -1050,7 +1057,22 @@ mod tests {
         path
     }
 
+    /// How long a test waits for anything a session should show: long enough for a loaded CI
+    /// runner, short enough that a stuck session fails its test instead of hanging the job
+    /// (SB-413).
+    const WAIT: Duration = Duration::from_secs(30);
+
+    /// A test viewer: attached, with a read timeout so no read waits past `WAIT`.
+    fn watch(root: &Path, id: &str, rows: u16, cols: u16) -> Attached {
+        let attached = attach(root, id, rows, cols).unwrap();
+        attached.stream.set_read_timeout(Some(WAIT)).unwrap();
+        attached
+    }
+
+    /// Reads until `needle` is seen, the session's exit arrives, the stream closes or `WAIT`
+    /// passes; answers what was seen and the exit code, if one came.
     fn until(stream: &mut UnixStream, needle: &str) -> (String, Option<i32>) {
+        stream.set_read_timeout(Some(WAIT)).unwrap();
         let mut seen = String::new();
         loop {
             match read_frame(stream) {
@@ -1068,6 +1090,22 @@ mod tests {
                 Err(_) => return (seen, None),
             }
         }
+    }
+
+    /// `until`, failing with what was seen when `needle` did not come.
+    fn saw(stream: &mut UnixStream, needle: &str) -> String {
+        let (seen, exit) = until(stream, needle);
+        assert!(
+            seen.contains(needle),
+            "waited {WAIT:?} for {needle:?}; saw {seen:?}, exit {exit:?}"
+        );
+        seen
+    }
+
+    /// The session's exit code, failing with what was seen when no exit came within `WAIT`.
+    fn exit_of(stream: &mut UnixStream) -> i32 {
+        let (seen, exit) = until(stream, "");
+        exit.unwrap_or_else(|| panic!("no exit within {WAIT:?}; saw {seen:?}"))
     }
 
     #[test]
@@ -1097,25 +1135,25 @@ mod tests {
         let host = start_host(&root, &id, &program, None);
         assert_eq!(attachable(&root, &id).unwrap()["viewers"], 0);
 
-        let mut first = attach(&root, &id, 24, 80).unwrap();
+        let mut first = watch(&root, &id, 24, 80);
         assert_eq!(first.viewers, 1);
-        until(&mut first.stream, "ready");
+        saw(&mut first.stream, "ready");
         write_frame(&mut first.stream, INPUT, b"one\n").unwrap();
-        until(&mut first.stream, "got one");
+        saw(&mut first.stream, "got one");
         write_frame(&mut first.stream, DETACH, b"").unwrap();
         drop(first);
 
         // A viewer that detached left the session running; a new one gets what came before.
-        let mut second = attach(&root, &id, 30, 100).unwrap();
-        let (replay, _) = until(&mut second.stream, "got one");
-        assert!(replay.contains("ready"));
-        let mut third = attach(&root, &id, 30, 100).unwrap();
+        let mut second = watch(&root, &id, 30, 100);
+        let replay = saw(&mut second.stream, "got one");
+        assert!(replay.contains("ready"), "{replay:?}");
+        let mut third = watch(&root, &id, 30, 100);
         assert_eq!(third.viewers, 2);
         write_frame(&mut third.stream, INPUT, b"two\n").unwrap();
-        assert_eq!(until(&mut second.stream, "").1, Some(7));
-        assert_eq!(until(&mut third.stream, "").1, Some(7));
+        assert_eq!(exit_of(&mut second.stream), 7);
+        assert_eq!(exit_of(&mut third.stream), 7);
         assert_eq!(
-            host.join().unwrap().unwrap(),
+            host.join().unwrap(),
             Ended {
                 exit_code: 7,
                 reason: "exited"
@@ -1140,9 +1178,9 @@ mod tests {
         let program = script(&root, "echo first; read line; exit 0");
         let id = crate::launches::new_id();
         let host = start_host(&root, &id, &program, None);
-        let mut viewer = attach(&root, &id, 24, 80).unwrap();
+        let mut viewer = watch(&root, &id, 24, 80);
         assert!(viewer.can.iter().any(|c| c == "restart"));
-        until(&mut viewer.stream, "first");
+        saw(&mut viewer.stream, "first");
 
         // Only a program of this user under `restarts/` is started.
         let outside = script(&root, "echo never");
@@ -1154,6 +1192,10 @@ mod tests {
         std::fs::set_permissions(&next, std::fs::Permissions::from_mode(0o700)).unwrap();
         assert_eq!(restart(&root, &id, &next), Ok(Restart::Accepted));
         let (seen, exit) = until(&mut viewer.stream, "second");
+        assert!(
+            seen.contains("second"),
+            "the next program's output reached the viewer within {WAIT:?}; saw {seen:?}, exit {exit:?}"
+        );
         assert_eq!(
             exit, None,
             "no exit reached the viewer between the two processes"
@@ -1165,8 +1207,8 @@ mod tests {
         );
 
         write_frame(&mut viewer.stream, INPUT, b"done\n").unwrap();
-        assert_eq!(until(&mut viewer.stream, "").1, Some(3));
-        assert_eq!(host.join().unwrap().unwrap().exit_code, 3);
+        assert_eq!(exit_of(&mut viewer.stream), 3);
+        assert_eq!(host.join().unwrap().exit_code, 3);
     }
 
     #[test]
@@ -1180,8 +1222,8 @@ mod tests {
         );
         let id = crate::launches::new_id();
         let host = start_host(&root, &id, &program, None);
-        let mut viewer = attach(&root, &id, 24, 80).unwrap();
-        until(&mut viewer.stream, "up");
+        let mut viewer = watch(&root, &id, 24, 80);
+        saw(&mut viewer.stream, "up");
         let dir = root.join(RESTART_DIR);
         std::fs::create_dir_all(&dir).unwrap();
         let next = dir.join("next.command");
@@ -1190,12 +1232,12 @@ mod tests {
         assert_eq!(restart(&root, &id, &next), Ok(Restart::Accepted));
         write_frame(&mut viewer.stream, END, b"").unwrap();
         let (seen, exit) = until(&mut viewer.stream, "");
-        assert!(exit.is_some(), "the end reached the viewer");
+        assert!(exit.is_some(), "the end reached the viewer; saw {seen:?}");
         assert!(
             !seen.contains("second"),
             "the restart did not run after the end: {seen}"
         );
-        assert_eq!(host.join().unwrap().unwrap().reason, "ended");
+        assert_eq!(host.join().unwrap().reason, "ended");
         // A script that is not executable is never started.
         let id = crate::launches::new_id();
         let program = script(&root, "echo up; read line");
@@ -1205,19 +1247,15 @@ mod tests {
         std::fs::set_permissions(&plain, std::fs::Permissions::from_mode(0o600)).unwrap();
         assert_eq!(restart(&root, &id, &plain), Ok(Restart::Refused));
         end(&root, &id).unwrap();
-        host.join().unwrap().unwrap();
+        host.join().unwrap();
     }
 
-    fn start_host(
-        root: &Path,
-        id: &str,
-        program: &Path,
-        idle: Option<Duration>,
-    ) -> std::thread::JoinHandle<Result<Ended, String>> {
+    fn start_host(root: &Path, id: &str, program: &Path, idle: Option<Duration>) -> Host {
         let (tx, rx) = std::sync::mpsc::channel();
+        let (done_tx, done) = std::sync::mpsc::channel();
         let (root, id, program) = (root.to_owned(), id.to_owned(), program.to_owned());
-        let host = std::thread::spawn(move || {
-            serve(
+        std::thread::spawn(move || {
+            let ended = serve(
                 Start {
                     root: &root,
                     launch_id: &id,
@@ -1227,10 +1265,32 @@ mod tests {
                     idle,
                 },
                 move || tx.send(()).unwrap(),
-            )
+            );
+            let _ = done_tx.send(ended);
         });
-        rx.recv_timeout(Duration::from_secs(10)).unwrap();
-        host
+        rx.recv_timeout(Duration::from_secs(10))
+            .expect("the host listens within 10 s");
+        Host { done }
+    }
+
+    /// A host running on a thread of the test; `join` waits for its end at most `WAIT`, so a
+    /// session that never ends fails its test instead of hanging the job (SB-413).
+    struct Host {
+        done: std::sync::mpsc::Receiver<Result<Ended, String>>,
+    }
+
+    impl Host {
+        fn join(self) -> Result<Ended, String> {
+            match self.done.recv_timeout(WAIT) {
+                Ok(ended) => ended,
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                    panic!("the host did not end within {WAIT:?}")
+                }
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                    panic!("the host's thread panicked")
+                }
+            }
+        }
     }
 
     #[test]
@@ -1246,9 +1306,9 @@ mod tests {
         );
         let id = crate::launches::new_id();
         let host = start_host(&root, &id, &program, None);
-        let mut first = attach(&root, &id, 24, 80).unwrap();
-        until(&mut first.stream, "FULLSCREEN");
-        let mut second = attach(&root, &id, 24, 80).unwrap();
+        let mut first = watch(&root, &id, 24, 80);
+        saw(&mut first.stream, "FULLSCREEN");
+        let mut second = watch(&root, &id, 24, 80);
         let Ok((OUTPUT, screen)) = read_frame(&mut second.stream) else {
             panic!("no screen");
         };
@@ -1266,7 +1326,7 @@ mod tests {
             }
         }
         write_frame(&mut first.stream, INPUT, b"x\n").unwrap();
-        assert_eq!(host.join().unwrap().unwrap().reason, "exited");
+        assert_eq!(host.join().unwrap().reason, "exited");
     }
 
     #[test]
@@ -1277,7 +1337,7 @@ mod tests {
         let id = crate::launches::new_id();
         let started = std::time::Instant::now();
         let host = start_host(&root, &id, &program, Some(Duration::from_millis(300)));
-        let ended = host.join().unwrap().unwrap();
+        let ended = host.join().unwrap();
         assert_eq!(ended.reason, "idle");
         assert!(started.elapsed() < Duration::from_secs(20));
         assert!(attachable(&root, &id).is_none());
@@ -1291,15 +1351,15 @@ mod tests {
         let program = script(&root, "echo up; sleep 60");
         let id = crate::launches::new_id();
         let host = start_host(&root, &id, &program, None);
-        let mut viewer = attach(&root, &id, 24, 80).unwrap();
-        until(&mut viewer.stream, "up");
+        let mut viewer = watch(&root, &id, 24, 80);
+        saw(&mut viewer.stream, "up");
         let ended = end(&root, &id).unwrap();
         assert_eq!(ended["reason"], "ended");
         assert_eq!(
-            until(&mut viewer.stream, "").1,
-            Some(ended["exit_code"].as_i64().unwrap() as i32)
+            exit_of(&mut viewer.stream),
+            ended["exit_code"].as_i64().unwrap() as i32
         );
-        assert_eq!(host.join().unwrap().unwrap().reason, "ended");
+        assert_eq!(host.join().unwrap().reason, "ended");
         assert_eq!(end(&root, &id).unwrap_err(), NOT_FOUND);
     }
 
@@ -1313,8 +1373,8 @@ mod tests {
         );
         let id = crate::launches::new_id();
         let host = start_host(&root, &id, &program, None);
-        let mut viewer = attach(&root, &id, 24, 80).unwrap();
-        until(&mut viewer.stream, "line60");
+        let mut viewer = watch(&root, &id, 24, 80);
+        saw(&mut viewer.stream, "line60");
         write_frame(&mut viewer.stream, HISTORY, b"").unwrap();
         loop {
             match read_frame(&mut viewer.stream).unwrap() {
@@ -1326,7 +1386,7 @@ mod tests {
             }
         }
         write_frame(&mut viewer.stream, INPUT, b"x\n").unwrap();
-        host.join().unwrap().unwrap();
+        host.join().unwrap();
     }
 
     #[test]
