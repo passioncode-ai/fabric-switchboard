@@ -16,6 +16,16 @@ pub struct Tally {
     pub output_tokens: u64,
     pub cache_read_tokens: u64,
     pub cache_write_tokens: u64,
+    /// SB-401: what these answers cost at Anthropic's list price, in micro-dollars
+    /// (`prices::cost`); answers of another provider add nothing.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub cost_micros: u64,
+    /// SB-401: answers whose model the price table did not know, priced at the dearest family.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub cost_estimated: u64,
+}
+fn is_zero(n: &u64) -> bool {
+    *n == 0
 }
 impl Tally {
     pub fn add(&mut self, other: &Tally) {
@@ -27,6 +37,8 @@ impl Tally {
         self.output_tokens += other.output_tokens;
         self.cache_read_tokens += other.cache_read_tokens;
         self.cache_write_tokens += other.cache_write_tokens;
+        self.cost_micros += other.cost_micros;
+        self.cost_estimated += other.cost_estimated;
     }
 }
 
@@ -164,6 +176,11 @@ pub struct UsageScanner {
     pub output_tokens: u64,
     pub cache_read_tokens: u64,
     pub cache_write_tokens: u64,
+    /// SB-401: the cache writes the answer split by cache (Anthropic's `cache_creation`).
+    pub cache_write_5m_tokens: u64,
+    pub cache_write_1h_tokens: u64,
+    /// SB-401: the model the answer names, for its price.
+    pub model: Option<String>,
 }
 const LINE_LIMIT: usize = 1024 * 1024;
 const BODY_LIMIT: usize = 4 * 1024 * 1024;
@@ -194,7 +211,10 @@ impl UsageScanner {
             return;
         };
         match v["type"].as_str() {
-            Some("message_start") => self.usage(&v["message"]["usage"]),
+            Some("message_start") => {
+                self.model_of(&v["message"]);
+                self.usage(&v["message"]["usage"]);
+            }
             Some("message_delta") => {
                 // Cumulative: the last one is the turn's output.
                 if let Some(out) = v["usage"]["output_tokens"].as_u64() {
@@ -222,6 +242,35 @@ impl UsageScanner {
         if let Some(c) = n("cache_creation_input_tokens") {
             self.cache_write_tokens = c;
         }
+        if let Some(c) = u["cache_creation"]["ephemeral_5m_input_tokens"].as_u64() {
+            self.cache_write_5m_tokens = c;
+        }
+        if let Some(c) = u["cache_creation"]["ephemeral_1h_input_tokens"].as_u64() {
+            self.cache_write_1h_tokens = c;
+        }
+    }
+    fn model_of(&mut self, message: &serde_json::Value) {
+        if let Some(m) = message["model"].as_str().filter(|m| m.len() <= 128) {
+            self.model = Some(m.to_owned());
+        }
+    }
+    /// SB-401: this answer's cost at the list price and whether its model was known; none for
+    /// an answer that names no Claude model.
+    pub fn cost(&self) -> Option<(u64, bool)> {
+        let model = self.model.as_deref().filter(|m| m.starts_with("claude"))?;
+        // A split names where each write went; what it does not cover is priced unsplit.
+        let split = self.cache_write_5m_tokens + self.cache_write_1h_tokens;
+        Some(crate::prices::cost(
+            model,
+            &crate::prices::Usage {
+                input: self.input_tokens,
+                output: self.output_tokens,
+                cache_read: self.cache_read_tokens,
+                cache_write: self.cache_write_tokens.saturating_sub(split),
+                cache_write_5m: self.cache_write_5m_tokens,
+                cache_write_1h: self.cache_write_1h_tokens,
+            },
+        ))
     }
     /// At the end of the body: a plain JSON answer (not a stream) gives its `usage` here.
     pub fn finish(&mut self) {
@@ -231,6 +280,7 @@ impl UsageScanner {
         }
         if !self.sse && self.body.first() != Some(&0) {
             if let Ok(v) = serde_json::from_slice::<serde_json::Value>(&self.body) {
+                self.model_of(&v);
                 self.usage(&v["usage"]);
             }
         }
@@ -284,6 +334,20 @@ mod tests {
         none.feed(b"not json at all");
         none.finish();
         assert_eq!((none.input_tokens, none.output_tokens), (0, 0));
+    }
+
+    #[test]
+    fn a_claude_answer_is_priced_by_its_model_and_its_split_cache_writes() {
+        let mut a = UsageScanner::default();
+        a.feed(b"data: {\"type\":\"message_start\",\"message\":{\"model\":\"claude-sonnet-5-5\",\"usage\":{\"input_tokens\":1000000,\"cache_creation_input_tokens\":2000000,\"cache_creation\":{\"ephemeral_5m_input_tokens\":1000000,\"ephemeral_1h_input_tokens\":0},\"output_tokens\":1}}}\n\ndata: {\"type\":\"message_delta\",\"usage\":{\"output_tokens\":1000000}}\n\n");
+        a.finish();
+        // Input $2, output $10, 1M at the 5m rate $2.50, the 1M the split leaves at the 1h rate $4.
+        assert_eq!(a.cost(), Some((18_500_000, true)));
+        // An answer of another provider is not priced.
+        let mut o = UsageScanner::default();
+        o.feed(br#"{"model":"gpt-5","usage":{"input_tokens":10,"output_tokens":5}}"#);
+        o.finish();
+        assert_eq!(o.cost(), None);
     }
 
     #[test]

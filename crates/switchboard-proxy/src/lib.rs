@@ -1,5 +1,6 @@
 //! Credential-injecting loopback gateway. A request owns its route snapshot until EOF.
 pub mod peer;
+pub mod prices;
 pub mod stats;
 use axum::{
     body::{to_bytes, Body},
@@ -499,6 +500,10 @@ impl AuditedStream {
             t.output_tokens += scan.output_tokens;
             t.cache_read_tokens += scan.cache_read_tokens;
             t.cache_write_tokens += scan.cache_write_tokens;
+            if let Some((micros, known)) = scan.cost() {
+                t.cost_micros += micros;
+                t.cost_estimated += u64::from(!known);
+            }
         }
     }
 }
