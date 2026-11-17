@@ -3099,8 +3099,6 @@ fn launch_core(
                 "permissions": h.permissions.as_str(),
                 "timeout_minutes": h.timeout_minutes,
                 "deadline": h.deadline,
-                "deadline_by": h.deadline_by,
-                "board_deadline": h.board_deadline,
                 "log": format!("{}/{}/{launch_id}.log", crate::launches::DIR, crate::launches::LOGS),
             },
         });
@@ -3438,13 +3436,8 @@ pub(crate) struct Headless {
     pub by: Value,
     pub permissions: Permissions,
     pub timeout_minutes: u32,
-    /// When the time limit stops it (Unix seconds): `timeout_minutes` from its start, or the
-    /// board request's deadline when that is earlier (SB-407).
+    /// When the time limit stops it (Unix seconds).
     pub deadline: i64,
-    /// SB-407: what set `deadline` (`dispatch::DEADLINE_BY_LIMIT` or `DEADLINE_BY_BOARD`).
-    pub deadline_by: &'static str,
-    /// SB-407: the board request's deadline the packet named; None when it named none.
-    pub board_deadline: Option<i64>,
 }
 /// SB-247: a dispatched run that started. The owner keeps `child` to reap it and record its end.
 pub(crate) struct Dispatched {

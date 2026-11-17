@@ -736,17 +736,18 @@ pub(crate) fn record_resume(
     record["launched_by"] = by.stored();
     record["home_path"] = Value::Null;
     let _writing = writing();
-    write(root, id, &record)?;
-    // SB-411 review round 1: indexed, so a session list reads these records by id only.
+    // SB-411: indexed first, so a session list that reads these records by id only never misses
+    // one (a marker whose record was never written is skipped).
     homeless_ids(root);
     mark_homeless(root, id);
-    Ok(())
+    write(root, id, &record)
 }
 /// SB-411: `launches/homeless/<launch_id>`, an empty marker per launch with no home of its own (a
-/// session resumed as itself), so `sessions` reads only those records. The folder's presence
-/// says the index is complete: when it is absent (records from before it), one scan of the
-/// records' 90 days seeds it.
+/// session resumed as itself), so `sessions` reads only those records. `.complete` in it, written
+/// last, says the index is complete: without it (records from before the index, or a build cut
+/// short), one scan of the records' 90 days builds it again.
 const HOMELESS: &str = "homeless";
+const HOMELESS_COMPLETE: &str = ".complete";
 fn mark_homeless(root: &Path, id: &str) {
     let folder = root.join(DIR).join(HOMELESS);
     if switchboard_core::private_fs::private_dir(&folder).is_ok() {
@@ -756,7 +757,7 @@ fn mark_homeless(root: &Path, id: &str) {
 /// The launches with no home of their own, from the index (seeded once when absent).
 pub(crate) fn homeless_ids(root: &Path) -> Vec<String> {
     let folder = root.join(DIR).join(HOMELESS);
-    if fs::symlink_metadata(&folder).is_err() {
+    if fs::symlink_metadata(folder.join(HOMELESS_COMPLETE)).is_err() {
         let since = crate::monitor::now() - KEEP_SECONDS;
         let ids: Vec<String> = recent_records(root, since)
             .into_iter()
@@ -770,9 +771,14 @@ pub(crate) fn homeless_ids(root: &Path) -> Vec<String> {
         for id in &ids {
             mark_homeless(root, id);
         }
-        return ids;
+        // Markers a cut build or a resume wrote before stay; the list is what the folder holds.
+        let _ = switchboard_core::private_fs::private_write(&folder.join(HOMELESS_COMPLETE), b"");
+        return list_homeless(&folder);
     }
-    fs::read_dir(&folder)
+    list_homeless(&folder)
+}
+fn list_homeless(folder: &Path) -> Vec<String> {
+    fs::read_dir(folder)
         .into_iter()
         .flatten()
         .flatten()
@@ -1471,6 +1477,10 @@ pub fn prune(root: &Path, now: std::time::SystemTime) -> usize {
     for folder in [BY_WORKFLOW, LOGS, HOMELESS] {
         if let Ok(entries) = fs::read_dir(root.join(DIR).join(folder)) {
             for entry in entries.flatten() {
+                // The homeless index's completion mark is never old.
+                if entry.file_name() == HOMELESS_COMPLETE {
+                    continue;
+                }
                 let old = fs::symlink_metadata(entry.path()).is_ok_and(|meta| {
                     meta.file_type().is_file()
                         && meta
@@ -1737,11 +1747,34 @@ mod tests {
             .unwrap();
         assert_eq!(home_row["home"], "runtimes");
         // Records from before the index: one scan seeds it, the home's launch left out.
-        fs::remove_dir_all(root.join(DIR).join(HOMELESS)).unwrap();
+        let folder = root.join(DIR).join(HOMELESS);
+        fs::remove_dir_all(&folder).unwrap();
         let mut seeded = homeless_ids(&root);
         seeded.sort();
         assert_eq!(seeded, both);
-        assert!(root.join(DIR).join(HOMELESS).is_dir());
+        assert!(
+            folder.join(HOMELESS_COMPLETE).is_file(),
+            "marked complete last"
+        );
+        // Review round 2: a build cut short (no `.complete`) is built again, and a marker whose
+        // record was never written (the marker is written first) is skipped by the list.
+        fs::remove_file(folder.join(HOMELESS_COMPLETE)).unwrap();
+        fs::remove_file(folder.join(&ended)).unwrap();
+        let orphan = new_id();
+        mark_homeless(&root, &orphan);
+        let mut rebuilt = homeless_ids(&root);
+        rebuilt.sort();
+        let mut with_orphan = vec![hosted.clone(), ended.clone(), orphan.clone()];
+        with_orphan.sort();
+        assert_eq!(rebuilt, with_orphan);
+        assert!(folder.join(HOMELESS_COMPLETE).is_file());
+        let listed = crate::launch::sessions(&root, true);
+        assert!(listed.iter().all(|r| r["launch_id"] != orphan.as_str()));
+        assert_eq!(listed.len(), 3);
+        // The completion mark outlives the markers' 90 days.
+        let later = std::time::SystemTime::now() + std::time::Duration::from_secs(91 * 86_400);
+        prune(&root, later);
+        assert!(folder.join(HOMELESS_COMPLETE).is_file());
     }
     /// Windows: Claude Code names its transcript with a drive (`C:\Users\...\.claude\projects\...`,
     /// also with `/` separators); a path without a drive is not absolute there and is not

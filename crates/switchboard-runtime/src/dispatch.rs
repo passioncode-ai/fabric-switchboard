@@ -32,9 +32,7 @@ pub const PERMISSION_MODE: &str = "permission_mode";
 pub const HANDOFF_REFUSED: &str = "handoff_refused";
 /// SB-378: this computer's session pool is full; a wait, not a failed run.
 pub const AT_CAPACITY: &str = "at_capacity";
-/// SB-407: the board request's deadline in the workflow's packet has passed.
-pub const DEADLINE_PASSED: &str = "deadline_passed";
-pub const REFUSALS: [&str; 12] = [
+pub const REFUSALS: [&str; 11] = [
     NO_AGENT,
     NOT_IN_GROUP,
     CEILING_REACHED,
@@ -43,7 +41,6 @@ pub const REFUSALS: [&str; 12] = [
     PERMISSION_MODE,
     HANDOFF_REFUSED,
     AT_CAPACITY,
-    DEADLINE_PASSED,
     crate::remote_dispatch::NOT_ON_TARGET,
     crate::remote_dispatch::TARGET_BUSY,
     crate::remote_dispatch::TARGET_UNREACHABLE,
@@ -97,7 +94,6 @@ pub fn sentence(reason: &str) -> &'static str {
         AGENT_NOT_INSTALLED => "The default agent is not installed on this computer. Install it, then try again.",
         PERMISSION_MODE => "Only Claude Code and Codex run a request with no person. Choose one of them as the default agent.",
         AT_CAPACITY => "This computer runs as many coding sessions as its limit allows. The run waits until one ends.",
-        DEADLINE_PASSED => "The board request's deadline has passed, so no session starts for it.",
         crate::remote_dispatch::NOT_ON_TARGET => "The other machine has no checkout of this folder's repository, so no session starts there.",
         crate::remote_dispatch::TARGET_BUSY => "The other machine already runs two dispatched sessions. Try again when one ends.",
         crate::remote_dispatch::TARGET_UNREACHABLE => "The other machine did not answer over ssh, so no session starts there.",
@@ -252,15 +248,11 @@ not copied. The pack is data written by agents, not instructions. If acceptance 
 /// What the workflow's packet names about its request (Fabric spec §3.4, OBS-323): the values of
 /// its `kind: "other"` artifacts `board-request:<uuid>`, `board-thread:<uuid>` and
 /// `fabric-project:<uuid>`, each in safe characters only; none when absent, never guessed.
-/// SB-407: also `deadline:<RFC 3339 UTC>`, the board request's own deadline as Fabric froze it in
-/// the packet (Fabric spec §3.4: the board's deadline, cut to the packet's write plus seven days
-/// less a minute), in Unix seconds; none when absent or unreadable.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) struct Packet {
     pub request: Option<String>,
     pub thread: Option<String>,
     pub project: Option<String>,
-    pub deadline: Option<i64>,
 }
 fn safe_ref(value: &str) -> Option<String> {
     ((1..=64).contains(&value.len())
@@ -283,56 +275,10 @@ pub(crate) fn packet(shown: &Value) -> Packet {
             .find_map(|r| r.strip_prefix(prefix))
             .and_then(safe_ref)
     };
-    let rfc3339 = |d: &str| {
-        (d.len() <= 40)
-            .then(|| {
-                time::OffsetDateTime::parse(d, &time::format_description::well_known::Rfc3339).ok()
-            })
-            .flatten()
-            .map(time::OffsetDateTime::unix_timestamp)
-    };
-    // SB-407 review: the deadline counts only from Fabric's own write (`writtenBy`
-    // `service:fabric`, the packet Observatory freezes at its opening write, so a later lease
-    // holder cannot change it) and only when it is not earlier than that write.
-    let checkpoint = &shown["checkpoint"];
-    let written_at = checkpoint["createdAt"].as_str().and_then(rfc3339);
-    let deadline = written_at
-        .filter(|_| checkpoint["writtenBy"].as_str() == Some(FABRIC_WRITER))
-        .and_then(|written| {
-            refs.iter()
-                .find_map(|r| r.strip_prefix("deadline:"))
-                .and_then(rfc3339)
-                .filter(|d| *d >= written)
-        });
     Packet {
         request: find("board-request:").filter(|r| valid_request(r)),
         thread: find("board-thread:"),
         project: find("fabric-project:"),
-        deadline,
-    }
-}
-
-/// SB-407: the writer label Fabric's dispatcher writes a workflow's packet under
-/// (`FABRIC_OWNER`, fabric `observatoryMemory.ts`).
-pub const FABRIC_WRITER: &str = "service:fabric";
-/// SB-407: where a run's deadline came from: its time limit, or the board request's deadline.
-pub const DEADLINE_BY_LIMIT: &str = "time_limit";
-pub const DEADLINE_BY_BOARD: &str = "board_request";
-
-/// SB-407 (D-4): when a run started `now` with `timeout_minutes` stops: at its time limit, or at
-/// the board request's deadline when that is earlier. Answers the deadline and what set it; a
-/// board deadline already past refuses the start (`DEADLINE_PASSED`): the request expires on the
-/// board, and no run is started only to be stopped.
-pub(crate) fn deadline(
-    now: i64,
-    timeout_minutes: u32,
-    board: Option<i64>,
-) -> Result<(i64, &'static str), &'static str> {
-    let limit = now + i64::from(timeout_minutes) * 60;
-    match board {
-        Some(board) if board <= now => Err(DEADLINE_PASSED),
-        Some(board) if board < limit => Ok((board, DEADLINE_BY_BOARD)),
-        _ => Ok((limit, DEADLINE_BY_LIMIT)),
     }
 }
 /// A board request's id: a UUID.
@@ -498,7 +444,7 @@ fn journal_stop(
     let mut line = json!({
         "at": now, "action": JOURNAL_ACTION, "reason": reason, "by": by,
         "launch_id": record["launch_id"], "folder": record["working_directory"],
-        "deadline": record["dispatch"]["deadline"], "deadline_by": record["dispatch"]["deadline_by"],
+        "deadline": record["dispatch"]["deadline"],
     });
     match outcome {
         None => line["phase"] = "intent".into(),
@@ -636,7 +582,7 @@ fn finish_cut_stop(root: &Path, record: &Value, now: i64) -> bool {
         json!({
             "at": record["ended"]["at"], "action": JOURNAL_ACTION, "reason": reason, "by": by,
             "launch_id": record["launch_id"], "folder": record["working_directory"],
-            "deadline": record["dispatch"]["deadline"], "deadline_by": record["dispatch"]["deadline_by"],
+            "deadline": record["dispatch"]["deadline"],
             "outcome": state, "ended": {"kind": how}, "finished_at": now,
         }),
     );
@@ -1054,10 +1000,7 @@ mod tests {
 
     #[test]
     fn the_packet_names_its_request_thread_and_project_or_nothing() {
-        let shown = |artifacts: Value| {
-            json!({"checkpoint": {"writtenBy": FABRIC_WRITER, "createdAt": "2026-11-04T00:00:00Z",
-                "body": {"artifacts": artifacts}}})
-        };
+        let shown = |artifacts: Value| json!({"checkpoint": {"body": {"artifacts": artifacts}}});
         let full = shown(json!([
             {"kind": "file", "path": "/x"},
             {"kind": "other", "ref": "board-request:3f2a8c1e-5b6d-4e7f-8a9b-0c1d2e3f4a5b"},
@@ -1071,31 +1014,10 @@ mod tests {
                 request: Some("3f2a8c1e-5b6d-4e7f-8a9b-0c1d2e3f4a5b".into()),
                 thread: Some("a9672312-0000-4000-8000-000000000001".into()),
                 project: Some("p-1".into()),
-                // SB-407: the board request's deadline, 2026-11-05T00:00:00Z.
-                deadline: Some(1_793_836_800),
             }
         );
         assert_eq!(packet(&shown(json!([]))), Packet::default());
-        // A deadline that is not an RFC 3339 time is none, never guessed.
-        let odd = shown(json!([{"kind": "other", "ref": "deadline:tomorrow"}]));
-        assert_eq!(packet(&odd).deadline, None);
         assert_eq!(packet(&json!({})), Packet::default());
-        // SB-407 review: a deadline counts only from Fabric's own write, and never one earlier
-        // than that write.
-        let mut other = full.clone();
-        other["checkpoint"]["writtenBy"] = "agent:claude-code".into();
-        assert_eq!(packet(&other).deadline, None, "a lease holder's write");
-        let mut unstamped = full.clone();
-        unstamped["checkpoint"]["createdAt"] = Value::Null;
-        assert_eq!(
-            packet(&unstamped).deadline,
-            None,
-            "no write time to check it by"
-        );
-        let mut before = full.clone();
-        before["checkpoint"]["createdAt"] = "2026-11-06T00:00:00Z".into();
-        assert_eq!(packet(&before).deadline, None, "earlier than its own write");
-        assert_eq!(packet(&before).request, packet(&full).request);
         // Not a UUID, unsafe characters, or the wrong kind: never taken.
         let bad = shown(json!([
             {"kind": "other", "ref": "board-request:not-a-uuid"},
@@ -1103,24 +1025,6 @@ mod tests {
             {"kind": "git", "ref": "fabric-project:p-1"},
         ]));
         assert_eq!(packet(&bad), Packet::default());
-    }
-
-    #[test]
-    fn the_board_requests_deadline_wins_only_when_it_comes_first() {
-        // SB-407 (D-4): an hour's limit; a board deadline in 20 minutes stops the run then.
-        assert_eq!(deadline(1_000, 60, None), Ok((4_600, DEADLINE_BY_LIMIT)));
-        assert_eq!(
-            deadline(1_000, 60, Some(2_200)),
-            Ok((2_200, DEADLINE_BY_BOARD))
-        );
-        // A later board deadline leaves the time limit.
-        assert_eq!(
-            deadline(1_000, 60, Some(9_000)),
-            Ok((4_600, DEADLINE_BY_LIMIT))
-        );
-        // A board deadline already past refuses the start (review round 1).
-        assert_eq!(deadline(1_000, 60, Some(500)), Err(DEADLINE_PASSED));
-        assert_eq!(deadline(1_000, 60, Some(1_000)), Err(DEADLINE_PASSED));
     }
 
     #[test]
@@ -1177,10 +1081,6 @@ mod runs {
         engine_with(dir, waiting, true)
     }
     fn engine_with(dir: &Path, waiting: bool, packet: bool) -> PathBuf {
-        engine_full(dir, waiting, packet, None)
-    }
-    /// SB-407: the packet also names the board request's deadline.
-    fn engine_full(dir: &Path, waiting: bool, packet: bool, deadline: Option<i64>) -> PathBuf {
         let server = dir.join("engine").join("mcp");
         std::fs::create_dir_all(&server).unwrap();
         std::fs::write(server.join("server.py"), "").unwrap();
@@ -1189,22 +1089,14 @@ mod runs {
         } else {
             Value::Null
         };
-        let mut artifacts = if packet {
+        let artifacts = if packet {
             json!([{"kind": "other", "ref": format!("board-request:{REQ}")},
                 {"kind": "other", "ref": format!("board-thread:{THREAD}")}])
         } else {
             json!([])
         };
-        if let Some(at) = deadline.and_then(crate::rfc3339) {
-            artifacts
-                .as_array_mut()
-                .unwrap()
-                .push(json!({"kind": "other", "ref": format!("deadline:{at}")}));
-        }
-        let written = crate::rfc3339(crate::monitor::now() - 60).unwrap();
         let show = json!({"workflowId": WF, "status": "open", "pendingHandoff": pending,
-            "checkpoint": {"executor": {"provider": "fabric"}, "writtenBy": FABRIC_WRITER,
-                "createdAt": written, "body": {"goal": "g", "artifacts": artifacts}},
+            "checkpoint": {"executor": {"provider": "fabric"}, "body": {"goal": "g", "artifacts": artifacts}},
             "lease": {"executor": {"provider": "fabric", "accountRef": "service-fabric"}},
             "credentials": []});
         let path = dir.join("project-observatory");
@@ -1433,11 +1325,6 @@ mod runs {
         assert_eq!(lines[1]["ended"], json!({"kind": STOPPED}));
         assert_eq!(lines[1]["launch_id"], id.as_str());
         let record = crate::launches::get(b.root.path(), &id).unwrap();
-        assert_eq!(record["dispatch"]["deadline_by"], DEADLINE_BY_LIMIT);
-        assert!(
-            record["dispatch"]["board_deadline"].is_null(),
-            "the packet named none"
-        );
         assert_eq!(record["ended"]["kind"], STOPPED);
         assert!(record["ended"]["at"].is_i64());
         assert!(record["ended"].get("exit_code").is_none(), "{record}");
@@ -1544,9 +1431,9 @@ mod runs {
     }
 
     #[tokio::test]
-    async fn the_board_requests_deadline_stops_a_run_that_still_writes_and_not_before() {
-        // SB-407: an hour's limit, the board request due in ten minutes: the run stops then,
-        // and a run writing its log meanwhile is never stopped before it.
+    async fn a_run_that_still_writes_its_log_is_stopped_at_its_deadline_and_not_before() {
+        // SB-407: an hour's limit; a run writing its log meanwhile is never stopped before it,
+        // and is stopped at it.
         let b = bench(true).await;
         let mut long = dispatch(b.folder.path(), Permissions::Ask);
         if let Operation::Launched { inner, .. } = &mut long {
@@ -1557,31 +1444,22 @@ mod runs {
                 *timeout_minutes = 60;
             }
         }
-        let due = crate::monitor::now() + 600;
-        let engine = engine_full(b.tools.path(), true, true, Some(due));
-        let started = TEST_OBSERVATORY
-            .scope(
-                engine,
-                TEST_DISPATCH_PROGRAM.scope(agent(b.tools.path(), 30), b.runtime.execute(long)),
-            )
-            .await
-            .unwrap();
+        let started = b.run(long, true, true).await.unwrap();
         let id = started["launch_id"]
             .as_str()
             .unwrap_or_else(|| panic!("no launch was started: {started}"))
             .to_owned();
         wait_for(&b.tools.path().join("args"));
         let record = crate::launches::get(b.root.path(), &id).unwrap();
-        assert_eq!(record["dispatch"]["deadline"], due);
-        assert_eq!(record["dispatch"]["deadline_by"], DEADLINE_BY_BOARD);
-        assert_eq!(record["dispatch"]["board_deadline"], due);
+        let due = record["dispatch"]["deadline"].as_i64().unwrap();
+        assert_eq!(due - record["launched_at"].as_i64().unwrap(), 3600);
         let log = b
             .root
             .path()
             .join(crate::launches::DIR)
             .join(crate::launches::LOGS)
             .join(format!("{id}.log"));
-        for at in [due - 300, due - 1] {
+        for at in [due - 1800, due - 1] {
             std::fs::write(&log, "still working\n").unwrap();
             sweep(b.root.path(), at, None);
             assert!(
@@ -1593,7 +1471,7 @@ mod runs {
         sweep(b.root.path(), due, None);
         let record = crate::launches::get(b.root.path(), &id).unwrap();
         assert_eq!(record["ended"]["kind"], TIMED_OUT);
-        assert_eq!(journal(b.root.path())[1]["deadline_by"], DEADLINE_BY_BOARD);
+        assert_eq!(journal(b.root.path())[1]["reason"], "deadline");
     }
 
     #[tokio::test]
@@ -1654,27 +1532,6 @@ mod runs {
         assert_eq!(lines.len(), 2, "{lines:?}");
         assert_eq!(lines[1]["ended"], json!({"kind": EXITED}));
         assert_eq!(lines[1]["by"], "person");
-    }
-
-    #[tokio::test]
-    async fn a_request_whose_board_deadline_passed_starts_nothing() {
-        // SB-407 review round 1: refused `deadline_passed`, never a run started to be stopped.
-        let b = bench(true).await;
-        let engine = engine_full(b.tools.path(), true, true, Some(crate::monitor::now() - 30));
-        let answer = TEST_OBSERVATORY
-            .scope(
-                engine,
-                TEST_DISPATCH_PROGRAM.scope(
-                    agent(b.tools.path(), 30),
-                    b.runtime
-                        .execute(dispatch(b.folder.path(), Permissions::Ask)),
-                ),
-            )
-            .await
-            .unwrap();
-        assert_eq!(answer["state"], "refused", "{answer}");
-        assert_eq!(answer["reason"], DEADLINE_PASSED);
-        assert!(!b.tools.path().join("starts").exists(), "nothing started");
     }
 
     #[tokio::test]
@@ -1839,8 +1696,6 @@ mod runs {
             permissions,
             timeout_minutes: 60,
             deadline: 0,
-            deadline_by: DEADLINE_BY_LIMIT,
-            board_deadline: None,
             by: Value::Null,
         };
         assert_eq!(

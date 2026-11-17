@@ -5155,10 +5155,6 @@ async fn dispatch_start(
         .or_else(|| packet.request.clone())
         .or_else(|| (reason == dispatch::Reason::Inbox).then(|| "inbox".to_owned()))
         .ok_or(dispatch::NO_REQUEST)?;
-    // SB-407: a board request whose deadline has passed starts nothing.
-    if let Err(code) = dispatch::deadline(monitor::now(), timeout_minutes, packet.deadline) {
-        return refuse(code);
-    }
     // D-9: `auto` runs where the accounts have the most room: here, or one of the candidates.
     let target = match target {
         Some(mut target) if target.machine == "auto" => {
@@ -5260,12 +5256,7 @@ async fn dispatch_start(
         observatory,
         previous_provider: None,
     };
-    // SB-407: the board request's deadline, when the packet names one and it comes first.
-    let (deadline, deadline_by) =
-        match dispatch::deadline(monitor::now(), timeout_minutes, packet.deadline) {
-            Ok(found) => found,
-            Err(code) => return refuse(code),
-        };
+    let deadline = monitor::now() + i64::from(timeout_minutes) * 60;
     let headless = launch::Headless {
         program,
         workflow: workflow_id.to_owned(),
@@ -5284,8 +5275,6 @@ async fn dispatch_start(
         permissions,
         timeout_minutes,
         deadline,
-        deadline_by,
-        board_deadline: packet.deadline,
     };
     let started = match launch::dispatch_session(
         root,
@@ -5342,11 +5331,6 @@ fn dispatch_remote(
     let Some(identity) = blocking::run(|| roots::checkout(folder).and_then(|c| c.remote)) else {
         return refuse(remote_dispatch::NOT_ON_TARGET);
     };
-    let now = monitor::now();
-    let (deadline, deadline_by) = match dispatch::deadline(now, timeout_minutes, packet.deadline) {
-        Ok(found) => found,
-        Err(code) => return refuse(code),
-    };
     let launch_id = launches::new_id();
     let body = shown
         .pointer("/checkpoint/body")
@@ -5368,8 +5352,7 @@ fn dispatch_remote(
         handoff: handoff_id,
         request,
         dispatch_id,
-        // SB-407: the other machine stops it at the board request's deadline when that is first.
-        timeout_seconds: u64::try_from(deadline - now).unwrap_or(1).max(1),
+        timeout_seconds: u64::from(timeout_minutes) * 60,
     };
     let started = blocking::run(|| {
         // SB-357: a request body goes only to the machine trusted for this name.
@@ -5403,9 +5386,6 @@ fn dispatch_remote(
             "worktree": started["worktree"],
             "permissions": permissions,
             "timeout_minutes": timeout_minutes,
-            "deadline": deadline,
-            "deadline_by": deadline_by,
-            "board_deadline": packet.deadline,
         },
     });
     launches::record_by(

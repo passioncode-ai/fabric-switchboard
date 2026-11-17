@@ -183,8 +183,8 @@ Stops a run `switchboard dispatch` started for a Fabric board request, as `switc
 `stopped` (`exited` when its process had already gone), and the stop is journalled in the duty
 officer's `duty.jsonl` with `by: person`. Answers `{launch_id, state: stopped | already_ended}`;
 a launch that is not a dispatched run is refused. For a `session_stuck` or `session_gone` item, or
-when the operator asks: a run is otherwise stopped at its own deadline (its time limit, or the
-board request's deadline when earlier), never before. With `if_gone` nothing is signalled: the
+when the operator asks: a run is otherwise stopped at its own deadline (its time limit), never
+before. With `if_gone` nothing is signalled: the
 end of a run whose process is gone is recorded, and a run whose process still runs is refused.
 
 ### `switchboard_session_continue`: `session_id` (string)
