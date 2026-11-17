@@ -458,6 +458,7 @@ async fn incomplete_stream_is_aborted_instead_of_success() {
         claude: true,
         spend: Arc::default(),
         spend_pool: String::new(),
+        spend_root: None,
         _permit: permit,
     };
     drop(stream);
@@ -2506,7 +2507,7 @@ fn tokens_ceiling(store: &Store, pool: &str, cents: u32) {
     .unwrap();
 }
 /// SB-401: the pay-per-token group with one key selected; an upstream that answers every
-/// request with a million Opus 5.5 input tokens ($4 at the list price) and counts its calls.
+/// request with 100,000 Opus 5.5 input tokens ($0.40 at the list price) and counts its calls.
 async fn tokens_fixture() -> (
     tempfile::TempDir,
     Arc<Store>,
@@ -2545,7 +2546,7 @@ async fn tokens_fixture() -> (
                 counted.fetch_add(1, Ordering::SeqCst);
                 axum::Json(serde_json::json!({
                     "model": "claude-opus-5-5",
-                    "usage": {"input_tokens": 1_000_000, "output_tokens": 0}
+                    "usage": {"input_tokens": 100_000, "output_tokens": 0}
                 }))
             }
         }),
@@ -2582,17 +2583,17 @@ async fn the_pay_per_token_group_serves_nothing_while_off_or_without_a_ceiling()
 async fn a_reached_ceiling_refuses_even_after_the_owner_took_the_statistics_and_after_a_restart() {
     let (_root, s, pool, hits, url, up) = tokens_fixture().await;
     s.set_group_off(&pool, false).unwrap();
-    // $5: the first answer ($4) fits, the second ($8 in all) passes it.
-    tokens_ceiling(&s, &pool, 500);
+    // $0.50: the first answer ($0.40) fits, the second ($0.80 in all) passes it.
+    tokens_ceiling(&s, &pool, 50);
     let p = start(s.clone(), url.clone()).await;
     for _ in 0..2 {
         let (status, _) = tokens_request(&p, &pool).await;
         assert!(status.is_success(), "{status}");
         // The background pass takes the tallies every 30 s; the ceiling must not forget them.
         let taken = p.take_statistics();
-        assert!(taken.values().any(|t| t.cost_micros == 4_000_000));
+        assert!(taken.values().any(|t| t.cost_micros == 400_000));
     }
-    assert_eq!(p.spent_today(&pool), 8_000_000);
+    assert_eq!(p.spent_today(&pool), 800_000);
     let (status, body) = tokens_request(&p, &pool).await;
     assert_eq!(status, 403);
     assert!(
@@ -2602,20 +2603,120 @@ async fn a_reached_ceiling_refuses_even_after_the_owner_took_the_statistics_and_
     assert_eq!(hits.load(Ordering::SeqCst), 2);
     let reached = p.take_reached();
     assert_eq!(reached.len(), 1);
-    assert_eq!((reached[0].cents, reached[0].micros), (500, 8_000_000));
+    assert_eq!((reached[0].cents, reached[0].micros), (50, 800_000));
     let _ = tokens_request(&p, &pool).await;
     assert!(p.take_reached().is_empty(), "asked once a day");
     p.shutdown().await;
-    // A restarted owner seeds the day's spend from statistics.json before serving.
+    // A restarted proxy reads the day from tokens-spend.json, written after each answer, before
+    // it takes a request: the statistics were taken and never saved, and it still refuses.
     let p = start(s.clone(), url).await;
-    let (status, _) = tokens_request(&p, &pool).await;
-    assert!(status.is_success(), "unseeded, the day reads zero");
-    p.seed_spend(&pool, &crate::stats::day_of(now()), 8_000_000);
+    assert_eq!(p.spent_today(&pool), 800_000);
     let (status, body) = tokens_request(&p, &pool).await;
     assert_eq!(status, 403);
     assert!(
         body.contains(switchboard_core::TOKENS_CEILING_REACHED),
         "{body}"
+    );
+    assert_eq!(hits.load(Ordering::SeqCst), 2);
+    p.shutdown().await;
+    // A spend file that cannot be read: the day is unknown, so the group serves nothing.
+    std::fs::write(s.root().join(tokens::SPEND_FILE), b"{not json").unwrap();
+    let p = start(s.clone(), String::from("http://127.0.0.1:9")).await;
+    let (status, body) = tokens_request(&p, &pool).await;
+    assert_eq!(status, 403);
+    assert!(
+        body.contains(switchboard_core::TOKENS_SPEND_UNKNOWN),
+        "{body}"
+    );
+    p.shutdown().await;
+    up.abort();
+}
+
+/// SB-401: an account whose home group is switched off is passed over in a group sharing it:
+/// the request runs on that group's own next account, and a limit move never lands on it.
+#[tokio::test]
+async fn an_account_switched_off_at_home_is_passed_over_by_the_group_sharing_it() {
+    let (root, s) = store();
+    let key = |token: &str| Credential {
+        access_token: token.into(),
+        refresh_token: None,
+        id_token: None,
+        native_context: None,
+        expires_at: None,
+        account_id: None,
+    };
+    let add_key = |label: &str| {
+        s.add(
+            label.into(),
+            Provider::Codex,
+            AuthKind::ApiKey,
+            "default".into(),
+            key(&format!("synthetic-{label}")),
+        )
+        .unwrap()
+    };
+    let (shared, own) = (add_key("shared"), add_key("own"));
+    let folder = |name: &str| {
+        let dir = root.path().join(name);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir.canonicalize().unwrap()
+    };
+    let home = s
+        .save_project(
+            None,
+            "Home",
+            &[folder("home")],
+            std::slice::from_ref(&shared.id),
+        )
+        .unwrap();
+    let group = s
+        .save_project(
+            None,
+            "Shares",
+            &[folder("shares")],
+            &[shared.id.clone(), own.id.clone()],
+        )
+        .unwrap();
+    s.select(Provider::Codex, &group.pool, &shared.id).unwrap();
+    let seen = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+    let log = seen.clone();
+    let router = Router::new().route(
+        "/v1/responses",
+        post(move |headers: HeaderMap| {
+            let log = log.clone();
+            async move {
+                let auth = headers["authorization"].to_str().unwrap().to_owned();
+                log.lock().unwrap().push(auth.clone());
+                if auth.ends_with("synthetic-own") {
+                    return (StatusCode::TOO_MANY_REQUESTS, "{}").into_response();
+                }
+                (StatusCode::OK, "{}").into_response()
+            }
+        }),
+    );
+    let (url, up) = fixture(router).await;
+    let p = start(s.clone(), url).await;
+    let ask = || {
+        reqwest::Client::new()
+            .post(format!(
+                "http://{}/codex/{}/v1/responses",
+                p.address(),
+                group.pool
+            ))
+            .bearer_auth(p.token())
+            .body("{}")
+            .send()
+    };
+    assert!(ask().await.unwrap().status().is_success());
+    s.set_group_off(&home.pool, true).unwrap();
+    // The shared account no longer serves: the request runs on the group's own account, whose
+    // 429 then has nowhere to move (the shared one is passed over), and comes back as it is.
+    assert_eq!(ask().await.unwrap().status(), 429);
+    let seen = seen.lock().unwrap().clone();
+    assert_eq!(
+        seen,
+        ["Bearer synthetic-shared", "Bearer synthetic-own"],
+        "never the shared account again"
     );
     p.shutdown().await;
     up.abort();
@@ -2633,9 +2734,9 @@ fn a_claude_answer_whose_counts_were_cut_is_never_free() {
     assert!(micros >= 1_000 * 20, "{micros}");
     // An answer with counts and no model is priced at the dearest family.
     let mut unnamed = stats::UsageScanner::default();
-    unnamed.feed(br#"{"usage":{"input_tokens":1000000,"output_tokens":0}}"#);
+    unnamed.feed(br#"{"usage":{"input_tokens":100000,"output_tokens":0}}"#);
     unnamed.finish();
-    assert_eq!(unnamed.cost(), Some((15_000_000, false)));
+    assert_eq!(unnamed.cost(), Some((1_500_000, false)));
     // A plain answer past the body bound: its counts were never read.
     let mut big = stats::UsageScanner::default();
     big.feed(&vec![b' '; 5 * 1024 * 1024]);

@@ -189,6 +189,9 @@ pub struct UsageScanner {
     /// SB-401: a Claude stream's `message_start` and its closing `message_delta`, read.
     started: bool,
     delta: bool,
+    /// SB-401: what changes the price beyond the token counts.
+    pub web_searches: u64,
+    pub fast: bool,
 }
 const LINE_LIMIT: usize = 1024 * 1024;
 const BODY_LIMIT: usize = 4 * 1024 * 1024;
@@ -236,6 +239,7 @@ impl UsageScanner {
                     self.output_tokens = out;
                     self.delta = true;
                 }
+                self.premiums(&v["usage"]);
             }
             Some("response.completed") => self.usage(&v["response"]["usage"]),
             _ => {}
@@ -264,30 +268,38 @@ impl UsageScanner {
         if let Some(c) = u["cache_creation"]["ephemeral_1h_input_tokens"].as_u64() {
             self.cache_write_1h_tokens = c;
         }
+        self.premiums(u);
+    }
+    /// SB-401: server web searches (cumulative, the last count wins) and a faster tier.
+    fn premiums(&mut self, u: &serde_json::Value) {
+        if let Some(n) = u["server_tool_use"]["web_search_requests"].as_u64() {
+            self.web_searches = n;
+        }
+        if u["service_tier"] == "priority" || u["speed"] == "fast" {
+            self.fast = true;
+        }
     }
     fn model_of(&mut self, message: &serde_json::Value) {
         if let Some(m) = message["model"].as_str().filter(|m| m.len() <= 128) {
             self.model = Some(m.to_owned());
         }
     }
-    /// SB-401: this answer's cost at the list price and whether it is exact; none for an answer
-    /// that names a model of another provider. A Claude answer is never free by accident: one
-    /// that names no model is priced at the dearest family, and one whose counts could not all
-    /// be read (a line or a body past its bound, a stream cut before its closing counts) takes an
-    /// output of a token per four bytes at least; both are marked estimated.
+    /// SB-401: this answer's cost at the list price and whether it is exact. Asked only of a
+    /// Claude answer (the proxy knows the route), so any model it names is priced: one the table
+    /// does not know, or none, at the dearest family. A Claude answer is never free by accident:
+    /// one whose counts could not all be read (a line or a body past its bound, a stream cut
+    /// before its closing counts) takes an output of a token per four bytes at least; premiums
+    /// (web searches, a long prompt, the faster tier) are added; all but web searches are marked
+    /// estimated. None only for an answer with nothing to pay for (`count_tokens`).
     pub fn cost(&self) -> Option<(u64, bool)> {
-        let model = match self.model.as_deref() {
-            Some(m) if !m.starts_with("claude") => return None,
-            Some(m) => m,
-            None => "",
-        };
+        let model = self.model.as_deref().unwrap_or("");
         let counted = self
             .input_tokens
             .saturating_add(self.output_tokens)
             .saturating_add(self.cache_read_tokens)
             .saturating_add(self.cache_write_tokens);
         let cut = self.gave_up || (self.started && !self.delta);
-        if counted == 0 && !cut {
+        if counted == 0 && !cut && self.web_searches == 0 {
             // Nothing was generated (`count_tokens`, an empty answer): nothing to pay.
             return None;
         }
@@ -300,7 +312,7 @@ impl UsageScanner {
         let split = self
             .cache_write_5m_tokens
             .saturating_add(self.cache_write_1h_tokens);
-        let (micros, known) = crate::prices::cost(
+        let (micros, known) = crate::prices::cost_with(
             model,
             &crate::prices::Usage {
                 input: self.input_tokens,
@@ -309,6 +321,11 @@ impl UsageScanner {
                 cache_write: self.cache_write_tokens.saturating_sub(split),
                 cache_write_5m: self.cache_write_5m_tokens,
                 cache_write_1h: self.cache_write_1h_tokens,
+            },
+            &crate::prices::Extras {
+                web_searches: self.web_searches,
+                long_context: false,
+                fast: self.fast,
             },
         );
         Some((micros, known && !cut))
@@ -380,15 +397,21 @@ mod tests {
     #[test]
     fn a_claude_answer_is_priced_by_its_model_and_its_split_cache_writes() {
         let mut a = UsageScanner::default();
-        a.feed(b"data: {\"type\":\"message_start\",\"message\":{\"model\":\"claude-sonnet-5-5\",\"usage\":{\"input_tokens\":1000000,\"cache_creation_input_tokens\":2000000,\"cache_creation\":{\"ephemeral_5m_input_tokens\":1000000,\"ephemeral_1h_input_tokens\":0},\"output_tokens\":1}}}\n\ndata: {\"type\":\"message_delta\",\"usage\":{\"output_tokens\":1000000}}\n\n");
+        a.feed(b"data: {\"type\":\"message_start\",\"message\":{\"model\":\"claude-sonnet-5-5\",\"usage\":{\"input_tokens\":100000,\"cache_creation_input_tokens\":100000,\"cache_creation\":{\"ephemeral_5m_input_tokens\":50000,\"ephemeral_1h_input_tokens\":0},\"output_tokens\":1}}}\n\ndata: {\"type\":\"message_delta\",\"usage\":{\"output_tokens\":100000,\"server_tool_use\":{\"web_search_requests\":2}}}\n\n");
         a.finish();
-        // Input $2, output $10, 1M at the 5m rate $2.50, the 1M the split leaves at the 1h rate $4.
-        assert_eq!(a.cost(), Some((18_500_000, true)));
-        // An answer of another provider is not priced.
+        // Input $0.20, output $1, 50k at the 5m rate $0.125, the 50k the split leaves at the 1h
+        // rate $0.20, two web searches $0.02.
+        assert_eq!(a.cost(), Some((1_545_000, true)));
+        // Any model a Claude route answers with is priced: an unknown one at the dearest family.
         let mut o = UsageScanner::default();
-        o.feed(br#"{"model":"gpt-5","usage":{"input_tokens":10,"output_tokens":5}}"#);
+        o.feed(br#"{"model":"gpt-5","usage":{"input_tokens":1000,"output_tokens":0}}"#);
         o.finish();
-        assert_eq!(o.cost(), None);
+        assert_eq!(o.cost(), Some((15_000, false)));
+        // The faster tier is priced high and marked estimated.
+        let mut f = UsageScanner::default();
+        f.feed(br#"{"model":"claude-sonnet-5-5","usage":{"input_tokens":1000,"output_tokens":0,"service_tier":"priority"}}"#);
+        f.finish();
+        assert_eq!(f.cost(), Some((12_000, false)));
     }
 
     #[test]

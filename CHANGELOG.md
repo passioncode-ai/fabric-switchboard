@@ -8,7 +8,7 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
-- Claude API keys, charged per token, now go to a group of their own, *Pay-per-token keys*: it holds no folder until you add one, starts switched off, and turns on only with a daily spending ceiling. Switchboard checks that ceiling before every request the group's keys serve, at Anthropic's list price of the tokens each answer reports, and refuses once it is reached until the next UTC day or until you double it; a key there serves no other group and launches only through Switchboard. Any group can be switched off and on (`switchboard project switch`, MCP `switchboard_project_switch`), and Statistics show each row's list price (SB-401, DEC-0022).
+- Claude API keys, charged per token, now go to a group of their own, *Pay-per-token keys*: it holds no folder until you add one, starts switched off, and turns on only with a daily spending ceiling. Switchboard checks that ceiling before every request the group's keys serve, at Anthropic's list price of the tokens each answer reports, and refuses once it is reached until the next UTC day or until you double it; a key there serves no other group and launches only through Switchboard. Any group can be switched off and on (`switchboard project switch`, MCP `switchboard_project_switch`), and Statistics show each row's list price (SB-401, DEC-0023).
 
 ## 0.7.111
 

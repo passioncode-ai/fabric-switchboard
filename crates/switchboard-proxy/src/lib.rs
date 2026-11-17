@@ -250,6 +250,8 @@ impl ProxyHandle {
         port: Option<u16>,
         token: Option<String>,
     ) -> Result<Self, String> {
+        // SB-401: the day's pay-per-token spend is known before the first request is taken.
+        let spend = Arc::new(tokens::Spend::load(store.root(), now()));
         let listener = Self::bind(port).await?;
         let address = listener
             .local_addr()
@@ -273,7 +275,6 @@ impl ProxyHandle {
         let draining = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let stats: stats::Stats = Arc::default();
         let stat_folders: StatFolders = Arc::default();
-        let spend: Arc<tokens::Spend> = Arc::default();
         let state = Gateway {
             store,
             token: token.clone(),
@@ -375,11 +376,6 @@ impl ProxyHandle {
             .lock()
             .map(|mut s| std::mem::take(&mut *s))
             .unwrap_or_default()
-    }
-    /// SB-401: adds what `statistics.json` already holds for a pool on a UTC day (the owner's
-    /// start), so the pay-per-token group's ceiling counts the whole day across a restart.
-    pub fn seed_spend(&self, pool: &str, day: &str, micros: u64) {
-        self.spend.seed(pool, day, micros);
     }
     /// SB-401: what a pool's answers cost this UTC day at the list price, in micro-dollars.
     pub fn spent_today(&self, pool: &str) -> u64 {
@@ -505,10 +501,12 @@ struct AuditedStream {
     stats: stats::Stats,
     key: String,
     scanner: Option<stats::UsageScanner>,
-    /// SB-401: a Claude answer, priced; the pool its account calls home, whose day it counts in.
+    /// SB-401: a Claude answer, priced; the pool its account calls home, whose day it counts in;
+    /// the data folder, for a pay-per-token key, whose day is written there after each answer.
     claude: bool,
     spend: Arc<tokens::Spend>,
     spend_pool: String,
+    spend_root: Option<std::path::PathBuf>,
     _permit: tokio::sync::OwnedSemaphorePermit,
 }
 impl AuditedStream {
@@ -527,7 +525,8 @@ impl AuditedStream {
             return;
         }
         if let Some((micros, _)) = cost {
-            self.spend.add(&self.spend_pool, now(), micros);
+            self.spend
+                .add_and_write(&self.spend_pool, now(), micros, self.spend_root.as_deref());
         }
         if let Ok(mut all) = self.stats.lock() {
             let t = all.entry(std::mem::take(&mut self.key)).or_default();
@@ -610,6 +609,12 @@ fn pool_refusal(g: &Gateway, pool: &str) -> Option<(StatusCode, &'static str)> {
             return Some((StatusCode::FORBIDDEN, switchboard_core::TOKENS_NO_CEILING));
         };
         let at = now();
+        if g.spend.unknown_today(at) {
+            return Some((
+                StatusCode::FORBIDDEN,
+                switchboard_core::TOKENS_SPEND_UNKNOWN,
+            ));
+        }
         let spent = g.spend.today(pool, at);
         if spent >= u64::from(cents).saturating_mul(10_000) {
             g.spend.note_reached(pool, at, cents, spent);
@@ -1035,6 +1040,11 @@ async fn relay(
             scanner: status.is_success().then(stats::UsageScanner::default),
             claude: provider == Provider::Claude,
             spend: g.spend.clone(),
+            spend_root: g
+                .store
+                .pool_flags(&account.pool)
+                .is_ok_and(|(_, tokens)| tokens)
+                .then(|| g.store.root().to_owned()),
             spend_pool: account.pool.clone(),
             _permit: permit,
         };
@@ -1381,6 +1391,21 @@ pub async fn probe_usage_detailed(
     credential: switchboard_core::Credential,
 ) -> Result<Usage, ProbeFailure> {
     probe_usage_from(store, id, USAGE_ORIGINS, Some(credential)).await
+}
+/// SB-401: the proxy relaying to a synthetic upstream (Claude, OpenAI and ChatGPT all at
+/// `upstream`), for tests of crates that depend on this one.
+#[cfg(feature = "synthetic-origins")]
+pub async fn start_at_upstream(store: Arc<Store>, upstream: &str) -> Result<ProxyHandle, String> {
+    ProxyHandle::start_at(
+        store,
+        upstream.to_owned(),
+        upstream.to_owned(),
+        upstream.to_owned(),
+        Timeouts::default(),
+        None,
+        None,
+    )
+    .await
 }
 /// The quota check against a synthetic upstream, for tests of crates that depend on this one.
 #[cfg(feature = "synthetic-origins")]

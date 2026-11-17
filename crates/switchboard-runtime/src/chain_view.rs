@@ -373,10 +373,9 @@ mod tests {
         assert_eq!(steps[0]["account_id"], "codex-alpha");
         assert_eq!(steps[0]["account_label"], "codex-alpha label");
         assert_eq!(steps[0]["paid"], false);
-        // An API-key account is paid (C-Q3); it spends no OpenRouter key.
-        assert_eq!(steps[1]["state"], "ready");
-        assert_eq!(steps[1]["paid"], true);
-        assert!(steps[1].get("key_scope").is_none_or(Value::is_null));
+        // SB-401: a Claude API key takes no workflow over (a hand-over starts in the account's
+        // own home, where a key would run past its ceiling): passed over, not refused at launch.
+        assert_ne!(steps[1]["state"], "ready", "{}", steps[1]);
         // Hermes in alpha's folder spends alpha's own key; its spend is not read by a view.
         assert_eq!(steps[2]["state"], "ready");
         assert_eq!(steps[2]["paid"], true);

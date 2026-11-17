@@ -1421,12 +1421,6 @@ impl Runtime {
             usage_gate::UsageGate::kept_in(root.join(usage_gate::HOLDS_FILE), monitor::now());
         let limits = limits::LimitState::kept_in(root.join(limits::EVIDENCE_FILE), monitor::now());
         let statistics = statistics::Statistics::load(&root);
-        // SB-401: the pay-per-token ceiling counts the whole UTC day, the part a previous owner
-        // counted included.
-        let today = switchboard_proxy::stats::day_of(monitor::now());
-        for (pool, micros) in statistics.day_cost(&today) {
-            proxy.seed_spend(&pool, &today, micros);
-        }
         Ok(Arc::new(Self {
             store,
             proxy,
@@ -4046,7 +4040,7 @@ pub const PROJECT_EDIT_NO_ACCOUNT: &str =
 /// missing rest joined back (SB-131).
 /// SB-401: what the pay-per-token group's keys cost so far this UTC day at the list price, in
 /// micro-dollars, by pool: from the owner's proxy, which counts it for its ceiling, else (no
-/// owner runs) from `statistics.json`, which then holds the whole day.
+/// owner runs) from `tokens-spend.json` and `statistics.json`, as the proxy reads them at start.
 fn tokens_spent_today(
     root: &Path,
     runtime: Option<&Runtime>,
@@ -4057,11 +4051,9 @@ fn tokens_spent_today(
     };
     let micros = match runtime {
         Some(rt) => rt.proxy.spent_today(&group.pool),
-        None => statistics::Statistics::load(root)
-            .day_cost(&switchboard_proxy::stats::day_of(monitor::now()))
-            .get(&group.pool)
-            .copied()
-            .unwrap_or(0),
+        // The same read the proxy makes before it listens: the spend file and the statistics.
+        None => switchboard_proxy::tokens::Spend::load(root, monitor::now())
+            .today(&group.pool, monitor::now()),
     };
     std::collections::BTreeMap::from([(group.pool.clone(), micros)])
 }
@@ -5359,20 +5351,11 @@ async fn execute(
             secret,
         } => {
             let credential = Credential::parse(provider, kind, &secret)?;
-            // SB-401: a Claude API key never lands in the default group, where every folder in
-            // no group would run on it: it goes to the pay-per-token group, which starts off. A
-            // key added to `tokens` before that group exists makes it too, rather than a pool no
-            // group holds.
+            // SB-401 (DEC-0023 D-10): a Claude API key goes to the pay-per-token group (made when
+            // needed, switched off), whatever group was named: never to the default group, where
+            // every folder in no group would run on it, nor to a group with no daily ceiling.
             let pool = if provider == Provider::Claude && kind == AuthKind::ApiKey {
-                let snapshot = store.snapshot()?;
-                let reserved = pool == switchboard_core::TOKENS_POOL
-                    && snapshot.tokens_group().is_none()
-                    && snapshot.project_of_pool(&pool).is_none();
-                if pool == "default" || reserved {
-                    store.ensure_tokens_group()?
-                } else {
-                    pool
-                }
+                store.ensure_tokens_group()?
             } else {
                 pool
             };
@@ -7832,6 +7815,14 @@ async fn execute(
                 .clone();
             if from == pool {
                 return Ok(json!({"id": id, "from": from, "pool": pool, "moved": false}));
+            }
+            // SB-401 (DEC-0023 D-10): a Claude API key moves only into the pay-per-token group.
+            let key = snapshot
+                .accounts
+                .iter()
+                .any(|a| a.id == id && switchboard_core::Snapshot::is_claude_key(a));
+            if key && snapshot.tokens_group().is_none_or(|g| g.pool != pool) {
+                return Err(switchboard_core::CLAUDE_KEY_STAYS.into());
             }
             let edit =
                 |pool: String, add: Vec<String>, remove: Vec<String>| Operation::ProjectEdit {
@@ -14069,7 +14060,7 @@ mod tokens_group_tests {
             provider: Provider::Claude,
             kind: AuthKind::ApiKey,
             pool: pool.into(),
-            secret: "synthetic-key".into(),
+            secret: format!("synthetic-key-{pool}"),
         }
     }
 
@@ -14091,6 +14082,18 @@ mod tokens_group_tests {
             .unwrap();
         assert!(fresh.store.snapshot().unwrap().tokens_group().is_some());
         assert_eq!(named["pool"], switchboard_core::TOKENS_POOL);
+        // DEC-0023 D-10: a key named for an ordinary group lands there all the same.
+        let elsewhere = fresh.execute(add_key("work")).await.unwrap();
+        assert_eq!(elsewhere["pool"], switchboard_core::TOKENS_POOL);
+        // And it moves to no other group: not back to default, not into an ordinary one.
+        let refused = fresh
+            .execute(Operation::MoveAccount {
+                id: elsewhere["id"].as_str().unwrap().into(),
+                pool: "default".into(),
+            })
+            .await
+            .unwrap_err();
+        assert_eq!(refused, switchboard_core::CLAUDE_KEY_STAYS);
         // On only with a daily ceiling.
         let on = || Operation::GroupSwitch {
             pool: group.pool.clone(),
@@ -14232,5 +14235,104 @@ mod tokens_group_tests {
         );
         // Balancing never names the pay-per-token group.
         assert!(!balancing::pools(&snapshot).contains(&"tokens".to_owned()));
+    }
+
+    /// SB-401: the owner's proxy knows the day's pay-per-token spend before its first request,
+    /// from `statistics.json` (and `tokens-spend.json`) a previous owner left.
+    #[tokio::test]
+    async fn an_owner_starts_with_the_days_spend_the_files_hold() {
+        let root = tempfile::tempdir().unwrap();
+        let today = switchboard_proxy::stats::day_of(monitor::now());
+        let key = switchboard_proxy::stats::key(&today, "a", "tokens", "claude-code", "/w");
+        switchboard_core::private_fs::private_write(
+            &root.path().join("statistics.json"),
+            json!({"version": 1, "tallies": {key: {"requests": 1, "cost_micros": 1_250_000}}})
+                .to_string()
+                .as_bytes(),
+        )
+        .unwrap();
+        let runtime = fixtures::runtime(root.path(), signed_out, activates).await;
+        assert_eq!(runtime.proxy.spent_today("tokens"), 1_250_000);
+        let view = {
+            runtime.execute(add_key("default")).await.unwrap();
+            runtime
+                .execute(Operation::SetCeiling {
+                    scope: switchboard_core::ChainScope::Project {
+                        pool: "tokens".into(),
+                    },
+                    usd: Some(1.0),
+                    by: spend::Surface::Window,
+                })
+                .await
+                .unwrap();
+            runtime.execute(Operation::Ceilings).await.unwrap()
+        };
+        assert_eq!(view["ceilings"][0]["spent_today_usd"], 1.25);
+        assert_eq!(view["ceilings"][0]["reached"], true);
+    }
+
+    /// SB-401, end to end: the ceiling the window sets (`spend::set_ceiling`) is the one the
+    /// proxy refuses by, for a key added and a group turned on the way the window does it.
+    #[tokio::test]
+    async fn the_ceiling_the_window_sets_is_the_one_the_proxy_refuses_by() {
+        use axum::{routing::post, Router};
+        let root = tempfile::tempdir().unwrap();
+        let runtime = fixtures::runtime(root.path(), signed_out, activates).await;
+        let key = runtime.execute(add_key("default")).await.unwrap();
+        let pool = key["pool"].as_str().unwrap().to_owned();
+        let id = key["id"].as_str().unwrap().to_owned();
+        runtime.store.select(Provider::Claude, &pool, &id).unwrap();
+        runtime
+            .execute(Operation::SetCeiling {
+                scope: switchboard_core::ChainScope::Project { pool: pool.clone() },
+                usd: Some(0.01),
+                by: spend::Surface::Window,
+            })
+            .await
+            .unwrap();
+        runtime
+            .execute(Operation::GroupSwitch {
+                pool: pool.clone(),
+                on: true,
+            })
+            .await
+            .unwrap();
+        // Claude Fable 5.2: 1,000 in and 1,000 out, $0.048 at the list price.
+        let router = Router::new().route(
+            "/v1/messages",
+            post(|| async {
+                axum::Json(json!({"model": "claude-fable-5-2",
+                    "usage": {"input_tokens": 1000, "output_tokens": 1000}}))
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let upstream = format!("http://{}", listener.local_addr().unwrap());
+        let served = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
+        let proxy = switchboard_proxy::start_at_upstream(runtime.store.clone(), &upstream)
+            .await
+            .unwrap();
+        let ask = || {
+            reqwest::Client::new()
+                .post(format!(
+                    "http://{}/claude/{pool}/v1/messages",
+                    proxy.address()
+                ))
+                .bearer_auth(proxy.token())
+                .body("{}")
+                .send()
+        };
+        let first = ask().await.unwrap();
+        assert!(first.status().is_success(), "{}", first.status());
+        let _ = first.bytes().await;
+        assert_eq!(proxy.spent_today(&pool), 48_000);
+        let second = ask().await.unwrap();
+        assert_eq!(second.status(), 403);
+        let body = second.text().await.unwrap();
+        assert!(
+            body.contains(switchboard_core::TOKENS_CEILING_REACHED),
+            "{body}"
+        );
+        proxy.shutdown().await;
+        served.abort();
     }
 }

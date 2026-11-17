@@ -1538,21 +1538,22 @@ pub(crate) fn serving_pool(
 /// SB-401: a pay-per-token key launched with its credential in the session's own home would
 /// reach the provider directly, past the daily ceiling the proxy checks.
 pub(crate) const TOKENS_ISOLATED: &str = "A pay-per-token key runs only through Switchboard, where its daily ceiling is checked. Launch it in managed mode.";
-/// SB-401: an account of a group switched off starts nothing; a pay-per-token key starts only in
-/// managed mode, while its group is on and has a daily ceiling. Fails closed: a ceiling file that
-/// cannot be read is no ceiling.
+/// SB-401: an account of a group switched off starts nothing; a Claude API key, wherever it
+/// is, starts only in managed mode (its credential never lands in a session's home), and one in
+/// the pay-per-token group only while that group is on and has a daily ceiling. Fails closed: a
+/// ceiling file that cannot be read is no ceiling.
 pub(crate) fn group_allows_launch(
     root: &Path,
     snapshot: &switchboard_core::Snapshot,
     account: &switchboard_core::Account,
     mode: &str,
 ) -> Result<(), String> {
+    if switchboard_core::Snapshot::is_claude_key(account) && mode != "managed" {
+        return Err(TOKENS_ISOLATED.into());
+    }
     let Some(group) = snapshot.project_of_pool(&account.pool) else {
         return Ok(());
     };
-    if group.tokens && mode != "managed" {
-        return Err(TOKENS_ISOLATED.into());
-    }
     if group.off {
         return Err(switchboard_core::GROUP_OFF.into());
     }
@@ -5486,7 +5487,17 @@ mod tests {
         );
         let before = f.files();
         assert!(!f.launch(&proxy, &oauth, "isolated", &TEST_HOST).unwrap());
-        assert!(!f.launch(&proxy, &api, "isolated", &TEST_HOST).unwrap());
+        // SB-401: a Claude API key never lands in a session's own home: managed only.
+        assert_eq!(
+            f.launch(&proxy, &api, "isolated", &TEST_HOST).unwrap_err(),
+            TOKENS_ISOLATED
+        );
+        assert!(!f
+            .root
+            .join("homes")
+            .join(&api)
+            .join("settings.json")
+            .exists());
 
         let home = f.root.join("homes").join(&oauth);
         let settings: serde_json::Value =
@@ -5494,14 +5505,6 @@ mod tests {
         assert_eq!(
             settings,
             json!({"env": {"CLAUDE_CODE_OAUTH_TOKEN": "synthetic-access"}})
-        );
-        let settings: serde_json::Value = serde_json::from_slice(
-            &fs::read(f.root.join("homes").join(&api).join("settings.json")).unwrap(),
-        )
-        .unwrap();
-        assert_eq!(
-            settings,
-            json!({"env": {"ANTHROPIC_API_KEY": "synthetic-api-key"}})
         );
         // The reservation stays until the script itself removes it.
         assert!(home.join(".launch-pending").exists());
@@ -5522,7 +5525,7 @@ mod tests {
         }
         assert_eq!(fs::read_dir(&f.project).unwrap().count(), 0);
         let events = f.store.snapshot().unwrap().events;
-        assert_eq!(events.iter().filter(|e| e.action == "launch").count(), 2);
+        assert_eq!(events.iter().filter(|e| e.action == "launch").count(), 1);
     }
     #[cfg(not(windows))]
     #[tokio::test]

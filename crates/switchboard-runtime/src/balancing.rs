@@ -138,7 +138,8 @@ pub fn pools(snapshot: &Snapshot) -> Vec<String> {
             snapshot
                 .projects
                 .iter()
-                .filter(|p| !p.tokens)
+                // SB-401: nor a group switched off, which lends and borrows nothing.
+                .filter(|p| !p.tokens && !p.off)
                 .map(|p| p.pool.clone()),
         )
         .collect()
@@ -425,6 +426,11 @@ fn forced_return(view: &View<'_>, lend: &Lend) -> Option<(&'static str, bool)> {
     if !view.settings.chosen(&lend.from) || !view.settings.chosen(&lend.to) {
         return Some(("not_chosen", true));
     }
+    // SB-401: a loan to or from a group switched off goes home.
+    let off = |pool: &str| snapshot.project_of_pool(pool).is_some_and(|p| p.off);
+    if off(&lend.from) || off(&lend.to) {
+        return Some(("group_off", true));
+    }
     // Wave 2: an account the person moved to another home since is no loan of `from` any more.
     if account.pool != lend.from
         || !usable(snapshot, account)
@@ -541,7 +547,12 @@ pub fn plan(
         .groups
         .iter()
         .map(String::as_str)
-        .filter(|g| *g == DEFAULT_POOL || snapshot.project_of_pool(g).is_some_and(|p| !p.tokens))
+        .filter(|g| {
+            *g == DEFAULT_POOL
+                || snapshot
+                    .project_of_pool(g)
+                    .is_some_and(|p| !p.tokens && !p.off)
+        })
         .collect();
     let mut needy: Vec<(&str, Provider, Signal)> = Vec::new();
     for g in &groups {

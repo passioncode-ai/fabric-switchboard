@@ -88,9 +88,35 @@ pub fn price(model: &str, prompt: u64) -> (Price, bool) {
         .map_or((DEAREST, false), |(_, p)| (*p, true))
 }
 
-/// What one answer cost, in micro-dollars, and whether its model was known (false: estimated at
-/// the dearest family).
+/// What one answer cost at the base rates, in micro-dollars, and whether its model was known
+/// (false: estimated at the dearest family).
 pub fn cost(model: &str, u: &Usage) -> (u64, bool) {
+    cost_with(model, u, &Extras::default())
+}
+
+/// What an answer reports beyond its token counts that changes its price.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Extras {
+    /// Server web searches (`usage.server_tool_use.web_search_requests`), $10 per thousand.
+    pub web_searches: u64,
+    /// Long prompts (past `LONG_CONTEXT` tokens) are priced at the long-context premium.
+    pub long_context: bool,
+    /// A faster or priority tier (`usage.service_tier: priority`, `usage.speed: fast`).
+    pub fast: bool,
+}
+/// Prompts past this many tokens take the long-context premium (Anthropic: input x2, output
+/// x1.5 past 200,000 tokens). Haiku 5.5 has its own two tiers instead.
+pub const LONG_CONTEXT: u64 = 200_000;
+/// Micro-dollars per server web search ($10 per 1,000 searches).
+pub const WEB_SEARCH: u64 = 10_000;
+/// The faster tier's price is not in the table: it is counted at six times the base price, the
+/// dearest multiplier Anthropic lists for it, and marked estimated.
+pub const FAST_FACTOR: u64 = 6;
+
+/// What one answer cost, premiums included, and whether that is exact. A long prompt and the
+/// faster tier are priced high and marked estimated, so a ceiling never reads less than was
+/// spent.
+pub fn cost_with(model: &str, u: &Usage, extras: &Extras) -> (u64, bool) {
     let prompt = u
         .input
         .saturating_add(u.cache_read)
@@ -101,15 +127,31 @@ pub fn cost(model: &str, u: &Usage) -> (u64, bool) {
     let part = |tokens: u64, per_million: u64| {
         u64::try_from(u128::from(tokens) * u128::from(per_million) / 1_000_000).unwrap_or(u64::MAX)
     };
-    let total = part(u.input, p.input)
-        .saturating_add(part(u.output, p.output))
+    let input = part(u.input, p.input)
         .saturating_add(part(u.cache_read, p.read))
         .saturating_add(part(u.cache_write_5m, p.write_5m))
         .saturating_add(part(
             u.cache_write_1h.saturating_add(u.cache_write),
             p.write_1h,
         ));
-    (total, known)
+    let output = part(u.output, p.output);
+    let tiered = model
+        .to_ascii_lowercase()
+        .replace('.', "-")
+        .contains("haiku-5-5");
+    let long = (extras.long_context || prompt > LONG_CONTEXT) && !tiered;
+    let (input, output) = if long {
+        (input.saturating_mul(2), output.saturating_mul(3) / 2)
+    } else {
+        (input, output)
+    };
+    let mut total = input
+        .saturating_add(output)
+        .saturating_add(extras.web_searches.saturating_mul(WEB_SEARCH));
+    if extras.fast {
+        total = total.saturating_mul(FAST_FACTOR);
+    }
+    (total, known && !long && !extras.fast)
 }
 
 #[cfg(test)]
@@ -118,29 +160,29 @@ mod tests {
 
     #[test]
     fn a_known_model_is_priced_from_the_table_and_an_unknown_one_at_the_dearest() {
-        // Opus 5.5: 1M input $4, 1M output $20.
+        // Opus 5.5: 100k input $0.40, 100k output $2.
         let u = Usage {
-            input: 1_000_000,
-            output: 1_000_000,
+            input: 100_000,
+            output: 100_000,
             ..Usage::default()
         };
-        assert_eq!(cost("claude-opus-5-5", &u), (24_000_000, true));
-        assert_eq!(cost("claude-opus-5-5-20261101", &u), (24_000_000, true));
+        assert_eq!(cost("claude-opus-5-5", &u), (2_400_000, true));
+        assert_eq!(cost("claude-opus-5-5-20261101", &u), (2_400_000, true));
         // Opus 5 is not Opus 5.5.
-        assert_eq!(cost("claude-opus-5", &u), (30_000_000, true));
-        assert_eq!(cost("claude-unknown-9", &u), (90_000_000, false));
+        assert_eq!(cost("claude-opus-5", &u), (3_000_000, true));
+        assert_eq!(cost("claude-unknown-9", &u), (9_000_000, false));
     }
 
     #[test]
     fn cache_reads_and_writes_take_their_own_rates() {
         let u = Usage {
-            cache_read: 1_000_000,
-            cache_write_5m: 1_000_000,
-            cache_write: 1_000_000,
+            cache_read: 50_000,
+            cache_write_5m: 50_000,
+            cache_write: 50_000,
             ..Usage::default()
         };
-        // Sonnet 5.5: read $0.10, 5m write $2.50, an unsplit write at the 1h rate $4.
-        assert_eq!(cost("claude-sonnet-5-5", &u), (6_600_000, true));
+        // Sonnet 5.5 per million: read $0.10, 5m write $2.50, an unsplit write at the 1h rate $4.
+        assert_eq!(cost("claude-sonnet-5-5", &u), (330_000, true));
     }
 
     #[test]
@@ -158,6 +200,55 @@ mod tests {
     }
 
     #[test]
+    fn fable_5_2_is_priced_from_the_table() {
+        let u = Usage {
+            input: 1_000,
+            output: 1_000,
+            ..Usage::default()
+        };
+        // $8 and $40 per million.
+        assert_eq!(cost("claude-fable-5-2", &u), (48_000, true));
+        assert_eq!(cost("claude-fable-5.2-20261101", &u), (48_000, true));
+    }
+
+    #[test]
+    fn premiums_are_priced_high_and_marked_estimated() {
+        let u = Usage {
+            input: 100_000,
+            output: 100_000,
+            ..Usage::default()
+        };
+        // Sonnet 5.5: $0.20 in, $1.00 out.
+        assert_eq!(cost("claude-sonnet-5-5", &u), (1_200_000, true));
+        let searches = Extras {
+            web_searches: 3,
+            ..Extras::default()
+        };
+        assert_eq!(
+            cost_with("claude-sonnet-5-5", &u, &searches),
+            (1_230_000, true)
+        );
+        let long = Usage {
+            input: 300_000,
+            output: 100_000,
+            ..Usage::default()
+        };
+        // Input x2 ($1.20), output x1.5 ($1.50), estimated.
+        assert_eq!(
+            cost_with("claude-sonnet-5-5", &long, &Extras::default()),
+            (2_700_000, false)
+        );
+        let fast = Extras {
+            fast: true,
+            ..Extras::default()
+        };
+        assert_eq!(
+            cost_with("claude-sonnet-5-5", &u, &fast),
+            (7_200_000, false)
+        );
+    }
+
+    #[test]
     fn counts_past_any_real_answer_saturate_instead_of_wrapping() {
         let u = Usage {
             input: u64::MAX,
@@ -167,6 +258,6 @@ mod tests {
             cache_write_5m: u64::MAX,
             cache_write_1h: u64::MAX,
         };
-        assert_eq!(cost("claude-opus-4", &u), (u64::MAX, true));
+        assert_eq!(cost("claude-opus-4", &u), (u64::MAX, false));
     }
 }

@@ -85,7 +85,7 @@ wave table at the end.
 | T3 | Money: model per request, price table, cost per account and group per day in `statistics.json`, Statistics *List price* | done; `switchboard usage --money` not built (the Statistics report carries the cost) |
 | T4 | Ceiling: turning on requires a daily ceiling; the proxy checks it per request against its own day counter; reached: refuse and ask once a day | done |
 | T5 | Window: the group card with its switch, *Spending*, *Add folder…*; turn-off confirmation; the add-key dialog says where the key goes; scenarios SCN-042, SCN-100; Copylot | done; a window walk-through on a display is NOT_RUN |
-| T6 | Docs (CONTRACTS, CLI, CHANGELOG, DEC-0022, terminology, strings) | done; release after merge |
+| T6 | Docs (CONTRACTS, CLI, CHANGELOG, DEC-0023, terminology, strings) | done; release after merge |
 
 ## Review fixes (2026-11-17)
 

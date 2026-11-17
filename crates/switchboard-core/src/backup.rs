@@ -668,7 +668,7 @@ pub fn restore(
         } else {
             account.pool.clone()
         };
-        // SB-401 (DEC-0022 D-10): a Claude API key a restore brings back lands in the
+        // SB-401 (DEC-0023 D-10): a Claude API key a restore brings back lands in the
         // pay-per-token group, never in the default group or a pool no group holds.
         let pool = if crate::Snapshot::is_claude_key(&account) {
             store.ensure_tokens_group()?

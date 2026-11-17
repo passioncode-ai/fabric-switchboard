@@ -42,7 +42,7 @@ pub use organizations::{Attribution, By, Organization};
 pub use projects::{
     pool_from_name, Project, ProjectRule, RuleResolution, CLAUDE_KEY_STAYS, FOLDER_NESTED,
     GROUP_OFF, KEY_POOL, TOKENS_BY_HAND, TOKENS_CEILING_REACHED, TOKENS_KEEPS_KEYS, TOKENS_NAME,
-    TOKENS_NO_CEILING, TOKENS_ONLY_KEYS, TOKENS_POOL,
+    TOKENS_NO_CEILING, TOKENS_ONLY_KEYS, TOKENS_POOL, TOKENS_SPEND_UNKNOWN,
 };
 pub use rotation::{
     default_managed_policy, free_at, FailoverTally, Fits, RotationDecision, RotationPolicy,

@@ -1072,11 +1072,13 @@ mod tests {
         assert_eq!(result["label"], "Fixture");
         assert!(!result.to_string().contains("fixture-secret-only"));
         let id = result["id"].as_str().unwrap();
+        // SB-401: a Claude API key lands in the pay-per-token group, whatever pool was named.
+        assert_eq!(result["pool"], "tokens");
         request(
             tmp.path(),
             &Operation::Select {
                 provider: Provider::Claude,
-                pool: "work".into(),
+                pool: "tokens".into(),
                 id: id.into(),
                 force: false,
             },
@@ -1084,7 +1086,7 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(
-            owner.runtime.store.snapshot().unwrap().routes["claude:work"],
+            owner.runtime.store.snapshot().unwrap().routes["claude:tokens"],
             id
         );
         assert!(Store::open(tmp.path().to_owned(), Arc::new(MemoryVault::default())).is_err());

@@ -6,7 +6,7 @@ never renumber, never delete. The doc map ([DOCMAP.md](DOCMAP.md)) names this fi
 register. Decisions made before 2026-11-08 live where they were made (plans' `D-<n>`, board rows,
 research notes); the ones still in force that the board cites are seeded below with their source.
 
-**Next free ID:** `DEC-0023` (`DEC-0018` and `DEC-0020` are held for the window and fleet plan's modules)
+**Next free ID:** `DEC-0024` (`DEC-0018` and `DEC-0020` are held for the window and fleet plan's modules)
 
 ## Format
 
@@ -408,7 +408,7 @@ research notes); the ones still in force that the board cites are seeded below w
   которые … висят больше … 2-3-4 часов … просим ее остановиться, перезагружаем и продолжаем … если
   сессия уже закончила работа, она все еще висит, мы ее уводим»).
 
-### DEC-0022: Claude API keys go to a pay-per-token group that starts off and runs only under a daily ceiling
+### DEC-0023: Claude API keys go to a pay-per-token group that starts off and runs only under a daily ceiling
 
 - **Date:** 2026-11-17
 - **Status:** Accepted (built on branch `token-group`: SB-401; plan

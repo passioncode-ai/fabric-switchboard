@@ -331,12 +331,20 @@ fn matched<'a>(
                 && p.folders.iter().any(|f| f == &r.folder)
         })
     };
-    snapshot.projects.iter().find(|p| holds(p)).or_else(|| {
-        snapshot
-            .projects
-            .iter()
-            .find(|p| p.name.trim().eq_ignore_ascii_case(g.name.trim()))
-    })
+    // SB-401: an imported group never matches the pay-per-token group, which takes folders only
+    // by the person's hand.
+    snapshot
+        .projects
+        .iter()
+        .filter(|p| !p.tokens)
+        .find(|p| holds(p))
+        .or_else(|| {
+            snapshot
+                .projects
+                .iter()
+                .filter(|p| !p.tokens)
+                .find(|p| p.name.trim().eq_ignore_ascii_case(g.name.trim()))
+        })
 }
 /// What importing `bundle` would do here, finding checkouts under `under`. Reads Git files, writes
 /// nothing.
@@ -590,10 +598,12 @@ pub fn apply_with(
         if planned.is_empty() {
             continue;
         }
-        let here = g
-            .here
-            .as_ref()
-            .and_then(|pool| snapshot.projects.iter().find(|p| &p.pool == pool));
+        let here = g.here.as_ref().and_then(|pool| {
+            snapshot
+                .projects
+                .iter()
+                .find(|p| &p.pool == pool && !p.tokens)
+        });
         let result = match here {
             Some(p) => {
                 let mut folders: Vec<PathBuf> = p.folders.iter().map(PathBuf::from).collect();

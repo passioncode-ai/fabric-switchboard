@@ -32,6 +32,9 @@ pub(crate) fn folders(snapshot: &switchboard_core::Snapshot) -> Vec<(String, Str
     }
     projects
         .into_iter()
+        // SB-401: a group switched off routes nothing; its folder falls through to the next group
+        // that holds it.
+        .filter(|p| !p.off)
         .filter(|p| {
             snapshot.accounts.iter().any(|a| {
                 snapshot.serves(a, &p.pool)

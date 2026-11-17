@@ -241,7 +241,7 @@ pub const TOKENS_NAME: &str = "Pay-per-token keys";
 /// (shared, lent, moved, or sent to the default group by a save or a delete): elsewhere no
 /// switch or daily ceiling would stop it.
 pub const TOKENS_KEEPS_KEYS: &str = "A key in the pay-per-token group stays there, under its daily ceiling, and serves no other group. Remove the account to take it out.";
-/// SB-401 (DEC-0022 D-10): a Claude API key moves only into the pay-per-token group and is
+/// SB-401 (DEC-0023 D-10): a Claude API key moves only into the pay-per-token group and is
 /// shared with no group once that group exists (a key from before it, in another group, stays
 /// where it is and may still be moved there).
 pub const CLAUDE_KEY_STAYS: &str = "A Claude API key is never moved or shared into another group: it belongs in the pay-per-token group, under its daily ceiling. Move it there, or remove the account.";
@@ -313,6 +313,8 @@ pub const TOKENS_BY_HAND: &str =
 pub const TOKENS_NO_CEILING: &str = "Set a daily spending ceiling for the pay-per-token group first: its keys are charged per token, and the ceiling is what stops them.";
 /// SB-401: the pay-per-token group spent its daily ceiling.
 pub const TOKENS_CEILING_REACHED: &str = "The pay-per-token group reached its daily spending ceiling. Raise it in Switchboard, or wait for the next UTC day.";
+/// SB-401: what the pay-per-token group spent today could not be read at start.
+pub const TOKENS_SPEND_UNKNOWN: &str = "Switchboard could not read what the pay-per-token group spent today, so its keys serve no request until the next UTC day.";
 /// SB-401: a request to a group switched off.
 pub const GROUP_OFF: &str = "This group is switched off in Switchboard, so it serves no request. Turn it on in Switchboard, or work in a folder of another group.";
 /// SB-401: only a Claude API-key account may be in the pay-per-token group.
@@ -819,9 +821,46 @@ impl Store {
             .ok_or("Project not found.")?;
         group.off = off;
         let project = group.clone();
-        // An account at home here no longer serves the groups sharing it: their selection of it
-        // goes, and their next request takes another of their accounts.
-        shared_routes_prune(&mut candidate);
+        // An account at home here no longer serves the groups sharing it: their selection moves
+        // to another of their accounts of the same kind, or goes when they have none.
+        let stale: Vec<(String, String)> = candidate
+            .routes
+            .iter()
+            .filter(|(key, id)| {
+                candidate.accounts.iter().any(|a| {
+                    &&a.id == id
+                        && !candidate
+                            .pools_of(a)
+                            .iter()
+                            .any(|p| **key == format!("{}:{}", a.provider.as_str(), p))
+                })
+            })
+            .map(|(k, id)| (k.clone(), id.clone()))
+            .collect();
+        for (key, id) in stale {
+            let Some(left) = candidate.accounts.iter().find(|a| a.id == id).cloned() else {
+                continue;
+            };
+            let pool = key.split_once(':').map_or("", |(_, p)| p).to_owned();
+            let next = candidate
+                .pool_accounts(&pool)
+                .into_iter()
+                .find(|b| {
+                    b.id != left.id
+                        && b.provider == left.provider
+                        && b.kind == left.kind
+                        && b.enabled
+                })
+                .map(|b| b.id.clone());
+            match next {
+                Some(next) => {
+                    candidate.routes.insert(key, next);
+                }
+                None => {
+                    candidate.routes.remove(&key);
+                }
+            }
+        }
         append_event(&mut candidate, "project", None, "updated");
         self.publish(&mut state, candidate)?;
         self.changed();

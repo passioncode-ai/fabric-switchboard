@@ -773,7 +773,7 @@ fn pool_flags_name_a_group_off_and_the_pay_per_token_group() {
     assert_eq!(store.pool_flags(&pool).unwrap(), (false, true));
 }
 
-/// SB-401 (DEC-0022 D-10): a Claude API key a group lets go (left out of a save, its group
+/// SB-401 (DEC-0023 D-10): a Claude API key a group lets go (left out of a save, its group
 /// deleted, sent back from a pool no group holds) goes to the pay-per-token group, never to the
 /// default one; once that group exists a key moves only into it and is shared with no group.
 #[test]
@@ -898,15 +898,7 @@ fn an_account_whose_home_group_is_off_serves_no_group_sharing_it() {
         .iter()
         .all(|a| a.id != x.id));
     assert_eq!(snapshot.pools_of(account), [home.pool.as_str()]);
-    // The selection no longer resolves; the group's next usable account takes over.
-    assert!(store.route(Provider::Codex, &shares.pool).is_err());
-    let fits = switchboard_core::Fits {
-        kind: Some(AuthKind::ApiKey),
-        api_key_only: false,
-    };
-    let (next, _) = store
-        .failover_unusable(Provider::Codex, &shares.pool, fits, now())
-        .unwrap()
-        .unwrap();
+    // The selection moves to the group's own account of the same kind.
+    let (next, _) = store.route(Provider::Codex, &shares.pool).unwrap();
     assert_eq!(next.id, y.id);
 }

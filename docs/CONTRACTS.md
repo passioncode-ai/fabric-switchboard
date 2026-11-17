@@ -3572,10 +3572,10 @@ quiet copy* on the item). Tests `duty::tests::a_person_closes_the_copy_quiet_lon
 `session_watch::tests::a_copy_of_a_live_session_a_quiet_board_run_and_a_vanished_launch_are_found`,
 `attention::tests::a_copy_of_a_live_session_and_a_quiet_board_run_come_first`.
 
-## Pay-per-token group (SB-401, DEC-0022)
+## Pay-per-token group (SB-401, DEC-0023)
 
 Plan: [2026-11-17-token-group](plans/2026-11-17-token-group/README.md); decision
-[DEC-0022](DECISIONS.md#dec-0022-claude-api-keys-go-to-a-pay-per-token-group-that-starts-off-and-runs-only-under-a-daily-ceiling).
+[DEC-0023](DECISIONS.md#dec-0023-claude-api-keys-go-to-a-pay-per-token-group-that-starts-off-and-runs-only-under-a-daily-ceiling).
 
 - **Store.** `Project` carries `tokens` (the reserved group of Claude API keys) and `off`
   (switched off); both are absent from `accounts.json` when false, and the file is written at

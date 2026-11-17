@@ -2177,7 +2177,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **States covered:** off with no ceiling, off with a ceiling, on, spend not read, reached, question kept or doubled, refused (each refusal above).
 **Errors & recovery:** an unreadable store refuses the request (“Switchboard could not read its accounts. Retry in a moment.”), an unreadable `spend.json` is no ceiling; a restart keeps the day's spend (seeded from `statistics.json`).
 **Status:** draft
-**Meaning:** SB-401, DEC-0022 (operator 2026-11-17: «Такие сессии за токены они сразу добавляются в отдельную папку, в которой нету никаких проектов … Изначально она выключена. И обязательно, когда при включении контролируем usage»).
+**Meaning:** SB-401, DEC-0023 (operator 2026-11-17: «Такие сессии за токены они сразу добавляются в отдельную папку, в которой нету никаких проектов … Изначально она выключена. И обязательно, когда при включении контролируем usage»).
 **Copy:** checked with Copylot, register ui; report ids in [strings](../brand/strings.md).
 **Coverage:** `tests::the_pay_per_token_group_serves_nothing_while_off_or_without_a_ceiling`, `tests::a_reached_ceiling_refuses_even_after_the_owner_took_the_statistics_and_after_a_restart` (switchboard-proxy); `a_pay_per_token_key_stays_in_its_group_and_serves_no_other` (core); `tokens_group_tests::*` (runtime); `test-ui-logic` SB-401 block. Window walk-through: NOT_RUN (no display session in this run).
 **Product:** unobserved

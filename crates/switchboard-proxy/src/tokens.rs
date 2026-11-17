@@ -5,16 +5,28 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard};
 
+/// The pay-per-token group's spend today, written after every priced answer of its keys (0600):
+/// `{version: 1, day, pools: {pool: micro-dollars}}`.
+pub const SPEND_FILE: &str = "tokens-spend.json";
+/// What `statistics.json` may weigh at most (as the owner reads it).
+const STATISTICS_LIMIT: u64 = 8 * 1024 * 1024;
+
 /// What each pool's answers cost this UTC day, in micro-dollars, counted by the proxy for its
 /// own check. Unlike the statistics tallies, which the owner takes away every background pass,
-/// it is never drained; the owner seeds it at start with what `statistics.json` already holds
-/// for the day, so a restart forgets nothing.
+/// it is never drained. The proxy loads it before it listens (`Spend::load`): the larger of
+/// `tokens-spend.json` (written after each answer of a pay-per-token key) and the day's cost in
+/// `statistics.json`, so a restart forgets nothing.
 #[derive(Default)]
 pub struct Spend {
     days: Mutex<Days>,
 }
 #[derive(Default)]
 struct Days {
+    /// The UTC day whose spend could not be read at start (a file that exists and cannot be
+    /// read): the pay-per-token group serves no request that day.
+    unknown: Option<String>,
+    /// Pools whose day is written to `tokens-spend.json`.
+    written: std::collections::BTreeSet<String>,
     /// Pool → (UTC day, micro-dollars spent that day).
     pools: HashMap<String, (String, u64)>,
     /// Pool → the UTC day its ceiling was last found reached.
@@ -29,37 +41,119 @@ pub struct Reached {
     pub micros: u64,
 }
 impl Spend {
+    /// The day's spend as the files under `root` hold it, read before the proxy listens. A file
+    /// that is missing adds nothing; one that exists and cannot be read (too large, not JSON)
+    /// leaves the day unknown unless the other file holds today's figures, and an unknown day
+    /// refuses the pay-per-token group (`unknown_today`).
+    pub fn load(root: &Path, now: i64) -> Self {
+        let today = crate::stats::day_of(now);
+        let spend = Spend::default();
+        let read = |name: &str, limit: u64| -> Result<Option<serde_json::Value>, ()> {
+            let path = root.join(name);
+            match std::fs::symlink_metadata(&path) {
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+                Err(_) => return Err(()),
+                Ok(_) => {}
+            }
+            let bytes = switchboard_core::private_fs::read_private(&path, limit).map_err(|_| ())?;
+            serde_json::from_slice(&bytes).map(Some).map_err(|_| ())
+        };
+        let mut written: HashMap<String, u64> = HashMap::new();
+        let file = read(SPEND_FILE, 64 * 1024);
+        let file_today = matches!(&file, Ok(Some(v)) if v["day"] == today.as_str());
+        if let Ok(Some(v)) = &file {
+            if file_today {
+                if let Some(pools) = v["pools"].as_object() {
+                    for (pool, micros) in pools {
+                        if let Some(m) = micros.as_u64() {
+                            written.insert(pool.clone(), m);
+                        }
+                    }
+                }
+            }
+        }
+        let statistics = read("statistics.json", STATISTICS_LIMIT);
+        let mut counted: HashMap<String, u64> = HashMap::new();
+        if let Ok(Some(v)) = &statistics {
+            if let Some(tallies) = v["tallies"].as_object() {
+                for (key, t) in tallies {
+                    let Some(p) = crate::stats::parts(key) else {
+                        continue;
+                    };
+                    if p.day != today {
+                        continue;
+                    }
+                    if let Some(m) = t["cost_micros"].as_u64() {
+                        let cell = counted.entry(p.pool.to_owned()).or_default();
+                        *cell = cell.saturating_add(m);
+                    }
+                }
+            }
+        }
+        {
+            let mut days = spend.days();
+            for (pool, micros) in written.iter().chain(counted.iter()) {
+                let entry = days
+                    .pools
+                    .entry(pool.clone())
+                    .or_insert_with(|| (today.clone(), 0));
+                entry.1 = entry.1.max(*micros);
+            }
+            days.written = written.keys().cloned().collect();
+            if file.is_err() || (statistics.is_err() && !file_today) {
+                days.unknown = Some(today);
+            }
+        }
+        spend
+    }
+    /// Whether today's spend could not be read at start.
+    pub fn unknown_today(&self, now: i64) -> bool {
+        self.days().unknown.as_deref() == Some(crate::stats::day_of(now).as_str())
+    }
+    /// Adds one answer's cost to `pool`'s day and writes the day of every pay-per-token pool to
+    /// `<root>/tokens-spend.json` (`root` given for a pay-per-token key's answer), under the
+    /// counter's lock so an older total never lands after a newer one.
+    pub fn add_and_write(&self, pool: &str, now: i64, micros: u64, root: Option<&Path>) {
+        let day = crate::stats::day_of(now);
+        let mut days = self.days();
+        Self::add_to(&mut days, pool, &day, micros);
+        let Some(root) = root else {
+            return;
+        };
+        days.written.insert(pool.to_owned());
+        let pools: serde_json::Map<String, serde_json::Value> = days
+            .written
+            .iter()
+            .filter_map(|p| {
+                days.pools
+                    .get(p)
+                    .filter(|(d, _)| *d == day)
+                    .map(|(_, m)| (p.clone(), serde_json::json!(m)))
+            })
+            .collect();
+        let body = serde_json::json!({"version": 1, "day": day, "pools": pools});
+        let _ = switchboard_core::private_fs::private_write(
+            &root.join(SPEND_FILE),
+            body.to_string().as_bytes(),
+        );
+    }
+    fn add_to(days: &mut Days, pool: &str, day: &str, micros: u64) {
+        let entry = days
+            .pools
+            .entry(pool.to_owned())
+            .or_insert_with(|| (day.to_owned(), 0));
+        if entry.0 != day {
+            *entry = (day.to_owned(), 0);
+        }
+        entry.1 = entry.1.saturating_add(micros);
+    }
     /// The counts survive a panic elsewhere: a poisoned lock is taken over, never read as zero.
     fn days(&self) -> MutexGuard<'_, Days> {
         self.days.lock().unwrap_or_else(|p| p.into_inner())
     }
     /// Adds one answer's cost to `pool`'s day.
     pub fn add(&self, pool: &str, now: i64, micros: u64) {
-        let day = crate::stats::day_of(now);
-        let mut days = self.days();
-        let entry = days
-            .pools
-            .entry(pool.to_owned())
-            .or_insert_with(|| (day.clone(), 0));
-        if entry.0 != day {
-            *entry = (day, 0);
-        }
-        entry.1 = entry.1.saturating_add(micros);
-    }
-    /// Adds what the statistics on disk hold for `pool` on `day` (the owner's start). A seed of
-    /// an older day than the one counted is ignored.
-    pub fn seed(&self, pool: &str, day: &str, micros: u64) {
-        let mut days = self.days();
-        let entry = days
-            .pools
-            .entry(pool.to_owned())
-            .or_insert_with(|| (day.to_owned(), 0));
-        if entry.0.as_str() < day {
-            *entry = (day.to_owned(), 0);
-        }
-        if entry.0 == day {
-            entry.1 = entry.1.saturating_add(micros);
-        }
+        self.add_and_write(pool, now, micros, None);
     }
     /// What `pool`'s answers cost so far this UTC day.
     pub fn today(&self, pool: &str, now: i64) -> u64 {
@@ -155,18 +249,56 @@ mod tests {
     }
 
     #[test]
-    fn a_seed_adds_the_days_spend_on_disk_and_ignores_an_older_day() {
-        let spend = Spend::default();
+    fn the_day_is_loaded_from_the_spend_file_and_the_statistics_the_larger_winning() {
+        let root = tempfile::tempdir().unwrap();
         let today = crate::stats::day_of(NOW);
-        let yesterday = crate::stats::day_of(NOW - 86_400);
-        spend.add("tokens", NOW, 500);
-        spend.seed("tokens", &today, 1_500);
-        spend.seed("tokens", &yesterday, 9_000);
-        assert_eq!(spend.today("tokens", NOW), 2_000);
-        // A seed of today on a pool counted yesterday replaces yesterday's figure.
-        spend.add("apps", NOW - 86_400, 7);
-        spend.seed("apps", &today, 3);
-        assert_eq!(spend.today("apps", NOW), 3);
+        // Nothing on disk: nothing spent, nothing unknown.
+        let empty = Spend::load(root.path(), NOW);
+        assert_eq!(
+            (empty.today("tokens", NOW), empty.unknown_today(NOW)),
+            (0, false)
+        );
+        // An answer of a pay-per-token key writes the file; a restart reads it.
+        empty.add_and_write("tokens", NOW, 700, Some(root.path()));
+        empty.add_and_write("tokens", NOW, 300, Some(root.path()));
+        empty.add("apps", NOW, 5);
+        let again = Spend::load(root.path(), NOW);
+        assert_eq!(again.today("tokens", NOW), 1_000);
+        assert_eq!(
+            again.today("apps", NOW),
+            0,
+            "only pay-per-token pools are written"
+        );
+        // statistics.json holding more for the day wins; an older day counts nothing.
+        let key = crate::stats::key(&today, "a", "tokens", "claude-code", "/w");
+        let old = crate::stats::key(
+            &crate::stats::day_of(NOW - 86_400),
+            "a",
+            "tokens",
+            "c",
+            "/w",
+        );
+        switchboard_core::private_fs::private_write(
+            &root.path().join("statistics.json"),
+            serde_json::json!({"version": 1, "tallies": {key: {"cost_micros": 4_000}, old: {"cost_micros": 9_000}}})
+                .to_string()
+                .as_bytes(),
+        )
+        .unwrap();
+        assert_eq!(Spend::load(root.path(), NOW).today("tokens", NOW), 4_000);
+        // A file that exists and cannot be read leaves the day unknown.
+        std::fs::write(root.path().join(SPEND_FILE), b"{not json").unwrap();
+        let broken = Spend::load(root.path(), NOW);
+        assert!(broken.unknown_today(NOW));
+        assert!(
+            !broken.unknown_today(NOW + 86_400),
+            "the next day starts clean"
+        );
+        // A statistics file past its bound, with no spend file of today: unknown too.
+        std::fs::remove_file(root.path().join(SPEND_FILE)).unwrap();
+        switchboard_core::private_fs::private_write(&root.path().join("statistics.json"), b"[1,")
+            .unwrap();
+        assert!(Spend::load(root.path(), NOW).unknown_today(NOW));
     }
 
     #[test]
