@@ -169,7 +169,6 @@ export const RU: Record<string, string> = {
   "A board run's process is gone, but its end was not recorded. Stop the run to record it.": "Процесс запуска с доски завершился, но его конец не записан. Остановите запуск, чтобы записать конец.",
   "Stop the run": "Остановить запуск",
   "Board runs are waiting: this computer's session limit refused them, and none has started since.": "Запуски с доски ждут: лимит сессий этого компьютера отклонил их, и с тех пор ни один не начался.",
-  "A board run is waiting: this computer's session limit refused it.": "Запуск с доски ждёт: его отклонил лимит сессий этого компьютера.",
   "{n} board runs are waiting: this computer's session limit refused them.": "{n} запуск с доски ждёт: его отклонил лимит сессий этого компьютера.|{n} запуска с доски ждут: их отклонил лимит сессий этого компьютера.|{n} запусков с доски ждут: их отклонил лимит сессий этого компьютера.",
   "A session has ended since, so the next run can start.": "С тех пор одна сессия завершилась, следующий запуск может начаться.",
   "No session has ended since.": "С тех пор ни одна сессия не завершилась.",
