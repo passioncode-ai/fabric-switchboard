@@ -1550,7 +1550,7 @@ mod tests {
 
     #[test]
     fn a_seat_held_as_also_counts_through_read_snapshot() {
-        // SB-403: investor.relations@ works for Appvillis beside its personal context. The
+        // SB-403: an account works for Appvillis beside its personal context. The
         // owner's snapshot went through `read_snapshot`, which dropped `also_organizations`, so
         // Appvillis read "no signed-in account".
         let mut probe = acme_without_a_seat();

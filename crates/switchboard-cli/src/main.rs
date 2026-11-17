@@ -703,8 +703,8 @@ enum Project {
         remove_folders: Vec<PathBuf>,
         /// An organization whose accounts the group runs on (its id or name from `switchboard
         /// org list`), or `personal`; repeat for a group of several organizations, the first
-        /// being its own context. With an organization defined, a group takes only accounts of
-        /// its organizations, or personal ones when it has none.
+        /// being its own context. The group serves every account it holds whatever its
+        /// organizations; the answer's `warnings` name the accounts outside them.
         #[arg(long)]
         organization: Vec<String>,
         /// With `--add-account`: move each account here from its group. Without it, an account

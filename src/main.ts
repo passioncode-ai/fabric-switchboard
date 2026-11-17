@@ -3938,7 +3938,6 @@ function moveDialog(account: Account, inCli: boolean) {
     option.append(radio, target.name === null ? el('span', '', label) : groupHint(label, target.pool, false)); group.append(option); radios.push(radio);
   }
   context.body.append(group);
-  if (targets.some((x) => x.refused)) context.body.append(el('p', 'form-note', t('Some groups are unavailable: their organization does not take this account. Change its organization first.')));
   if (inCli) context.body.append(el('p', 'form-note', t('This account is signed in to Claude Code or Codex, which every folder uses, so it cannot join a group. Switch the CLI to another account first.')));
   if (!snapshot?.projects?.length) context.body.append(el('p', 'form-note', t('There are no groups yet. Create one under Groups, then move accounts into it.')));
   const confirm = submit(t('Move')); context.actions.append(confirm);

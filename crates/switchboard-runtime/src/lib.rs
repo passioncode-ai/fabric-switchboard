@@ -9147,8 +9147,8 @@ mod owner_tests {
 
     #[tokio::test]
     async fn an_organizations_account_moves_into_a_personal_group_with_a_warning() {
-        // SB-403 (2026-11-17 03:40 UTC, the operator's Mac): a call back of vibecoder2@ into the
-        // personal group `passioncode` answered `placed_error` "… belongs to another
+        // SB-403 (2026-11-17 03:40 UTC, the operator's Mac): a call back of an organization's
+        // account into a personal group answered `placed_error` "… belongs to another
         // organization than this group" and left it in `default`. An organization never blocks
         // a move: the account is placed, and the answer warns.
         let root = tempfile::tempdir().unwrap();
@@ -9192,8 +9192,8 @@ mod owner_tests {
 
     #[test]
     fn an_account_that_also_works_for_an_organization_counts_as_its_seat() {
-        // SB-403: investor.relations@ on the operator's Mac works for Appvillis beside its
-        // personal context (`organizations: [personal, Appvillis]`). Organizations counted only
+        // SB-403: an account on the operator's Mac works for Appvillis beside its personal
+        // context (`organizations: [personal, Appvillis]`). Organizations counted only
         // first contexts, so Appvillis read as having no account.
         let root = tempfile::tempdir().unwrap();
         let store = Store::open(root.path().to_owned(), Arc::new(MemoryVault::default())).unwrap();
