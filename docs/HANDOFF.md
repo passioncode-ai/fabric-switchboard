@@ -2,6 +2,15 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-11-17: 0.7.111 and 0.7.112 released; SB-401, SB-403 S1, SB-405 and FD-291 shipped
+
+- **Released.** 0.7.110 was tagged but stopped at the release guard (Windows build: #790 put `pub mod session_accounts;` between `#[cfg(unix)]` and `pub mod session_host;`); 0.7.111 (#801) carried it with the fix. 0.7.112 (#807, `755f9129`, published 2026-11-17 09:42 UTC): SB-401 pay-per-token group (#806), SB-403 S1 organizations as labels (#805), SB-405 `handovers run --ask` (#804), FD-291 continued stops (#803). The Windows x64 release job failed once on the runner's PowerShell Gallery registration (NuGet `Missing option value for: '-source'`) and passed on rerun.
+- **Installed.** This MacBook runs 0.7.112; the `switchboard@switchboard` plugin is 0.7.112 in user and project scope (a session reload loads it). `switchboard onboard --status --json`: Appvillis seat `done`.
+- **Checks.** Each merge: `./scripts/check.sh` EXIT 0 on the Studio; 0.7.112 also `cargo xwin check --target x86_64-pc-windows-msvc` with no errors; review rounds: SB-401 six (R5 and R6 clean), SB-403 three (R2 and R3 clean).
+- **Open.** SB-406 (edges, P3), SB-407 (duty covers dispatch runs), SB-408 (.deb behind notice), SB-404 (keys from Observatory), SB-403 S2 to S5 (delegation to a teammate's machine). The Appvillis Anthropic key waits on the operator creating it in the Console (the Admin API has no create).
+
+**Exact next task.** When the operator copies the Appvillis key: put it into Observatory's vault from the clipboard (never printed), clear the clipboard, add it as a Claude API key (it lands in *Pay-per-token keys*), add the operator's three project folders, set a daily ceiling and turn the group on, then start the planned audit on `claude-fable-5-2` (the brief lives in that project's own repository). Meanwhile SB-404 K1 to K3 and SB-403 S2.
+
 ## 2026-11-17: SB-401 pay-per-token group, review rounds 1 to 4 fixed on `token-group`
 
 - **Asked.** The operator: Claude Code sessions on an Anthropic API key in a group of their own, with no folders until added one by one, off by default, and usage controlled by a daily ceiling when on (SB-401, [DEC-0023](DECISIONS.md#dec-0023-claude-api-keys-go-to-a-pay-per-token-group-that-starts-off-and-runs-only-under-a-daily-ceiling), [plan](plans/2026-11-17-token-group/README.md)).
