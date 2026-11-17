@@ -40,9 +40,9 @@ pub use credential::Credential;
 pub use machines::{is_machine_pool, Machine, MachineRef};
 pub use organizations::{Attribution, By, Organization};
 pub use projects::{
-    pool_from_name, Project, ProjectRule, RuleResolution, FOLDER_NESTED, GROUP_OFF, KEY_POOL,
-    TOKENS_BY_HAND, TOKENS_CEILING_REACHED, TOKENS_KEEPS_KEYS, TOKENS_NAME, TOKENS_NO_CEILING,
-    TOKENS_ONLY_KEYS, TOKENS_POOL,
+    pool_from_name, Project, ProjectRule, RuleResolution, CLAUDE_KEY_STAYS, FOLDER_NESTED,
+    GROUP_OFF, KEY_POOL, TOKENS_BY_HAND, TOKENS_CEILING_REACHED, TOKENS_KEEPS_KEYS, TOKENS_NAME,
+    TOKENS_NO_CEILING, TOKENS_ONLY_KEYS, TOKENS_POOL,
 };
 pub use rotation::{
     default_managed_policy, free_at, FailoverTally, Fits, RotationDecision, RotationPolicy,

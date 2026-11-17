@@ -553,8 +553,11 @@ pub fn restore(
                     .is_some()
             })
             || existing.accounts.iter().any(|a| {
+                // SB-401: a Claude API key restored earlier sits in the pay-per-token group.
+                let tokens_home = crate::Snapshot::is_claude_key(&account)
+                    && existing.tokens_group().is_some_and(|g| g.pool == a.pool);
                 a.provider == account.provider
-                    && a.pool == account.pool
+                    && (a.pool == account.pool || tokens_home)
                     && token.is_some_and(|t| {
                         store
                             .stored_credential(&a.id)
@@ -664,6 +667,13 @@ pub fn restore(
             "default".to_string()
         } else {
             account.pool.clone()
+        };
+        // SB-401 (DEC-0022 D-10): a Claude API key a restore brings back lands in the
+        // pay-per-token group, never in the default group or a pool no group holds.
+        let pool = if crate::Snapshot::is_claude_key(&account) {
+            store.ensure_tokens_group()?
+        } else {
+            pool
         };
         match store.upsert(
             account.label.clone(),
@@ -2237,6 +2247,15 @@ mod tests {
             1
         );
         let restored = fresh.snapshot().unwrap().accounts.remove(0);
+        // SB-401: a Claude API key comes back in the pay-per-token group, not the default one.
+        assert_eq!(
+            Some(restored.pool.as_str()),
+            fresh
+                .snapshot()
+                .unwrap()
+                .tokens_group()
+                .map(|g| g.pool.as_str())
+        );
         fresh.update(&restored.id, "Renamed".into(), true).unwrap();
         let again = restore(&fresh, &backups, &info.file, &keys).unwrap();
         assert_eq!(

@@ -241,23 +241,67 @@ pub const TOKENS_NAME: &str = "Pay-per-token keys";
 /// (shared, lent, moved, or sent to the default group by a save or a delete): elsewhere no
 /// switch or daily ceiling would stop it.
 pub const TOKENS_KEEPS_KEYS: &str = "A key in the pay-per-token group stays there, under its daily ceiling, and serves no other group. Remove the account to take it out.";
-/// SB-401: refuses a change that takes a key out of the pay-per-token group (`old` is the state
-/// before it, `new` the candidate). A key removed is not taken out: it is gone.
+/// SB-401 (DEC-0022 D-10): a Claude API key moves only into the pay-per-token group and is
+/// shared with no group once that group exists (a key from before it, in another group, stays
+/// where it is and may still be moved there).
+pub const CLAUDE_KEY_STAYS: &str = "A Claude API key is never moved or shared into another group: it belongs in the pay-per-token group, under its daily ceiling. Move it there, or remove the account.";
+/// SB-401: refuses a change that takes a key out of the pay-per-token group, moves a Claude API
+/// key anywhere but into it, or newly shares or lends one (`old` is the state before it, `new`
+/// the candidate). A key removed is not taken out: it is gone.
 pub(crate) fn tokens_keys_stay(old: &Snapshot, new: &Snapshot) -> Result<(), String> {
-    let Some(group) = old.tokens_group() else {
+    if let Some(group) = old.tokens_group() {
+        let moved = old
+            .accounts
+            .iter()
+            .filter(|a| a.pool == group.pool)
+            .any(|a| {
+                new.accounts
+                    .iter()
+                    .any(|b| b.id == a.id && b.pool != a.pool)
+            });
+        if moved {
+            return Err(TOKENS_KEEPS_KEYS.into());
+        }
+    }
+    let Some(group) = new.tokens_group() else {
         return Ok(());
     };
-    let moved = old
-        .accounts
+    for b in new.accounts.iter().filter(|b| Snapshot::is_claude_key(b)) {
+        if old
+            .accounts
+            .iter()
+            .any(|a| a.id == b.id && a.pool != b.pool && b.pool != group.pool)
+        {
+            return Err(CLAUDE_KEY_STAYS.into());
+        }
+    }
+    let shares = |s: &Snapshot| -> std::collections::HashSet<(String, String)> {
+        s.projects
+            .iter()
+            .flat_map(|p| {
+                p.shared_accounts
+                    .iter()
+                    .map(|id| (p.pool.clone(), id.clone()))
+            })
+            .chain(
+                s.default_shared
+                    .iter()
+                    .map(|id| (DEFAULT_POOL.into(), id.clone())),
+            )
+            .chain(s.default_lent.iter().map(|id| ("lent".into(), id.clone())))
+            .collect()
+    };
+    let before = shares(old);
+    let key = |id: &str| {
+        new.accounts
+            .iter()
+            .any(|a| a.id == id && Snapshot::is_claude_key(a))
+    };
+    if shares(new)
         .iter()
-        .filter(|a| a.pool == group.pool)
-        .any(|a| {
-            new.accounts
-                .iter()
-                .any(|b| b.id == a.id && b.pool != a.pool)
-        });
-    if moved {
-        return Err(TOKENS_KEEPS_KEYS.into());
+        .any(|share| !before.contains(share) && key(&share.1))
+    {
+        return Err(CLAUDE_KEY_STAYS.into());
     }
     Ok(())
 }
@@ -626,6 +670,36 @@ impl Snapshot {
     pub fn tokens_group(&self) -> Option<&Project> {
         self.projects.iter().find(|p| p.tokens)
     }
+    /// SB-401: a Claude API key, charged per token.
+    pub fn is_claude_key(account: &crate::Account) -> bool {
+        account.provider == crate::Provider::Claude && account.kind == crate::AuthKind::ApiKey
+    }
+    /// SB-401: the group `account` calls home is switched off: it serves no other group.
+    pub fn home_off(&self, account: &crate::Account) -> bool {
+        self.project_of_pool(&account.pool).is_some_and(|p| p.off)
+    }
+    /// SB-401: the pay-per-token group's pool, the group made in this state (no folder, switched
+    /// off) when it does not exist yet. A new group goes last, so an index into `projects` held
+    /// by the caller stays right; the caller sorts before it publishes.
+    pub(crate) fn tokens_pool_made(&mut self) -> String {
+        if let Some(group) = self.tokens_group() {
+            return group.pool.clone();
+        }
+        let pool = self.tokens_pool();
+        self.projects
+            .push(Project::tokens_group(pool.clone(), now()));
+        pool
+    }
+    /// SB-401: where an account goes when its group lets it go: the default group, or the
+    /// pay-per-token group for a Claude API key (made when needed), never the default group,
+    /// where every folder in no group would run on it.
+    pub(crate) fn leaving_pool(&mut self, account: &crate::Account) -> String {
+        if Self::is_claude_key(account) {
+            self.tokens_pool_made()
+        } else {
+            DEFAULT_POOL.into()
+        }
+    }
     /// SB-401: the pool a Claude API key goes to: the pay-per-token group's, else the id it will
     /// be made with (`tokens`, or the first free `tokens-<n>`).
     pub fn tokens_pool(&self) -> String {
@@ -653,15 +727,22 @@ impl Snapshot {
     }
     /// Whether `account` serves `pool` (SB-282): its home pool, or a group that shares it
     /// (the default group by a loan, SB-352 wave 2).
+    /// SB-401: an account whose home group is switched off serves no other group.
     pub fn serves(&self, account: &crate::Account, pool: &str) -> bool {
-        account.pool == pool || self.shared_with(pool).iter().any(|id| id == &account.id)
+        account.pool == pool
+            || (!self.home_off(account)
+                && self.shared_with(pool).iter().any(|id| id == &account.id))
     }
     /// The accounts that serve `pool`: its own, then those other groups share with it.
     pub fn pool_accounts(&self, pool: &str) -> Vec<&crate::Account> {
         let mut out: Vec<&crate::Account> =
             self.accounts.iter().filter(|a| a.pool == pool).collect();
         for id in self.shared_with(pool) {
-            if let Some(a) = self.accounts.iter().find(|a| &a.id == id && a.pool != pool) {
+            if let Some(a) = self
+                .accounts
+                .iter()
+                .find(|a| &a.id == id && a.pool != pool && !self.home_off(a))
+            {
                 out.push(a);
             }
         }
@@ -670,6 +751,10 @@ impl Snapshot {
     /// The pools an account serves: its home, then each group sharing it (SB-282), then
     /// `default` when it is lent there (SB-352 wave 2).
     pub fn pools_of<'a>(&'a self, account: &'a crate::Account) -> Vec<&'a str> {
+        // SB-401: switched off at home, it serves no group sharing it.
+        if self.home_off(account) {
+            return vec![account.pool.as_str()];
+        }
         std::iter::once(account.pool.as_str())
             .chain(
                 self.projects
@@ -734,6 +819,9 @@ impl Store {
             .ok_or("Project not found.")?;
         group.off = off;
         let project = group.clone();
+        // An account at home here no longer serves the groups sharing it: their selection of it
+        // goes, and their next request takes another of their accounts.
+        shared_routes_prune(&mut candidate);
         append_event(&mut candidate, "project", None, "updated");
         self.publish(&mut state, candidate)?;
         self.changed();
@@ -756,10 +844,7 @@ impl Store {
             return Ok(group.pool.clone());
         }
         let mut candidate = state.clone();
-        let pool = candidate.tokens_pool();
-        candidate
-            .projects
-            .push(Project::tokens_group(pool.clone(), now()));
+        let pool = candidate.tokens_pool_made();
         candidate.projects.sort_by(|a, b| a.name.cmp(&b.name));
         append_event(&mut candidate, "project", None, "created");
         self.publish(&mut state, candidate)?;
@@ -913,23 +998,31 @@ impl Store {
             }
         }
         // Membership: listed accounts in (or shared), the project's others out to `default`.
-        let moves: Vec<(String, String)> = candidate
+        // SB-401: a key the pay-per-token group leaves out would leave it: refused.
+        if tokens
+            && candidate
+                .accounts
+                .iter()
+                .any(|a| a.pool == pool && !accounts.contains(&a.id))
+        {
+            return Err(TOKENS_KEEPS_KEYS.into());
+        }
+        let leaving: Vec<crate::Account> = candidate
             .accounts
             .iter()
-            .filter_map(|a| {
-                if accounts.contains(&a.id) && a.pool != pool && !shared.contains(&a.id) {
-                    Some((a.id.clone(), pool.clone()))
-                } else if !accounts.contains(&a.id) && a.pool == pool {
-                    Some((a.id.clone(), "default".to_string()))
-                } else {
-                    None
-                }
-            })
+            .filter(|a| !accounts.contains(&a.id) && a.pool == pool)
+            .cloned()
             .collect();
-        // SB-401: a key leaves the pay-per-token group only for another group the person names,
-        // never for the default one, where every folder in no group would run on it.
-        if tokens && moves.iter().any(|(_, to)| to == DEFAULT_POOL) {
-            return Err(TOKENS_KEEPS_KEYS.into());
+        let mut moves: Vec<(String, String)> = candidate
+            .accounts
+            .iter()
+            .filter(|a| accounts.contains(&a.id) && a.pool != pool && !shared.contains(&a.id))
+            .map(|a| (a.id.clone(), pool.clone()))
+            .collect();
+        // Left out: back to the default group, a Claude API key to the pay-per-token group.
+        for a in &leaving {
+            let to = candidate.leaving_pool(a);
+            moves.push((a.id.clone(), to));
         }
         for (id, to) in &moves {
             let account = candidate
@@ -1264,7 +1357,8 @@ impl Store {
         Ok(true)
     }
     /// SB-122: moves an account whose pool no project reserves (a deleted project leaves its
-    /// accounts there) back to `default`. A project's account leaves through `save_project`.
+    /// accounts there) back to `default`, a Claude API key to the pay-per-token group (SB-401).
+    /// A project's account leaves through `save_project`.
     pub fn return_to_default(&self, id: &str) -> Result<(), String> {
         let mut state = self.lock()?;
         let mut candidate = state.clone();
@@ -1274,7 +1368,9 @@ impl Store {
             .find(|a| a.id == id)
             .ok_or("Account not found")?
             .clone();
-        if account.pool == "default" {
+        // SB-401: a Claude API key goes to the pay-per-token group instead (made when needed).
+        let to = candidate.leaving_pool(&account);
+        if account.pool == to {
             return Ok(());
         }
         if crate::machines::is_machine_pool(&account.pool) {
@@ -1286,7 +1382,7 @@ impl Store {
         let clash = candidate.accounts.iter().any(|b| {
             b.id != account.id
                 && b.provider == account.provider
-                && b.pool == "default"
+                && b.pool == to
                 && b.external_identity
                     .as_ref()
                     .zip(account.external_identity.as_ref())
@@ -1302,8 +1398,9 @@ impl Store {
             candidate.routes.remove(&old);
         }
         if let Some(a) = candidate.accounts.iter_mut().find(|a| a.id == id) {
-            a.pool = "default".into();
+            a.pool = to;
         }
+        candidate.projects.sort_by(|a, b| a.name.cmp(&b.name));
         stale_shares_prune(&mut candidate);
         shared_routes_prune(&mut candidate);
         append_event(&mut candidate, "account_updated", Some(id), "success");
@@ -1399,10 +1496,12 @@ impl Store {
                 .find(|a| a.id == id)
                 .unwrap()
                 .clone();
+            // SB-401: a Claude API key goes to the pay-per-token group, not the default one.
+            let to = candidate.leaving_pool(&account);
             let clash = candidate.accounts.iter().any(|b| {
                 b.id != account.id
                     && b.provider == account.provider
-                    && b.pool == "default"
+                    && b.pool == to
                     && b.external_identity
                         .as_ref()
                         .zip(account.external_identity.as_ref())
@@ -1416,9 +1515,10 @@ impl Store {
                 candidate.routes.remove(&old);
             }
             if let Some(a) = candidate.accounts.iter_mut().find(|a| a.id == id) {
-                a.pool = "default".into();
+                a.pool = to;
             }
         }
+        candidate.projects.sort_by(|a, b| a.name.cmp(&b.name));
         stale_shares_prune(&mut candidate);
         shared_routes_prune(&mut candidate);
         // SB-144: the project's own agent keys go with it, so a later project of the same pool

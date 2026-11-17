@@ -357,14 +357,15 @@ fn a_source_may_be_a_group_path() {
 }
 
 /// SB-313: an account whose own group goes away (it moves to `default`, or the group is deleted)
+/// (Codex keys here: a Claude API key goes to the pay-per-token group instead, SB-401)
 /// is no longer shared anywhere. Left in another group's list, that group's next save took it as
 /// a move and dropped its route in `default`.
 #[test]
 fn an_account_whose_own_group_goes_away_is_no_longer_shared_and_never_moves_by_itself() {
     let (root, store) = setup();
-    let x = add(&store, Provider::Claude, "default", "synthetic-x");
-    let y = add(&store, Provider::Claude, "default", "synthetic-y");
-    let z = add(&store, Provider::Claude, "default", "synthetic-z");
+    let x = add(&store, Provider::Codex, "default", "synthetic-x");
+    let y = add(&store, Provider::Codex, "default", "synthetic-y");
+    let z = add(&store, Provider::Codex, "default", "synthetic-z");
     let g = project(&root, "g");
     let h = project(&root, "h");
     let k = project(&root, "k");
@@ -410,7 +411,7 @@ fn an_account_whose_own_group_goes_away_is_no_longer_shared_and_never_moves_by_i
         group(&shares.pool).shared_accounts,
         std::slice::from_ref(&z.id)
     );
-    store.select(Provider::Claude, "default", &x.id).unwrap();
+    store.select(Provider::Codex, "default", &x.id).unwrap();
     // The sharing group's next save (a folder the background adds) leaves x where it is.
     let more = project(&root, "h-worktree");
     let listed: Vec<String> = [y.id.clone(), z.id.clone()].into();
@@ -420,7 +421,7 @@ fn an_account_whose_own_group_goes_away_is_no_longer_shared_and_never_moves_by_i
     let snapshot = store.snapshot().unwrap();
     let x_now = snapshot.accounts.iter().find(|a| a.id == x.id).unwrap();
     assert_eq!(x_now.pool, "default");
-    assert_eq!(snapshot.routes.get("claude:default"), Some(&x.id));
+    assert_eq!(snapshot.routes.get("codex:default"), Some(&x.id));
     // z's own group is deleted: no group shares it any more.
     store.remove_project(&kept.pool).unwrap();
     let snapshot = store.snapshot().unwrap();
@@ -520,7 +521,7 @@ fn a_share_that_no_longer_fits_does_not_block_its_group_and_a_deleted_groups_acc
     use switchboard_core::organizations::PERSONAL;
     let (root, store) = setup();
     let acme = store.add_organization("Acme", &[]).unwrap();
-    let x = add(&store, Provider::Claude, "default", "synthetic-x");
+    let x = add(&store, Provider::Codex, "default", "synthetic-x");
     store.assign_organization(&x.id, Some(&acme.id)).unwrap();
     let home = project(&root, "home");
     let mine = store
@@ -770,4 +771,142 @@ fn pool_flags_name_a_group_off_and_the_pay_per_token_group() {
     assert_eq!(store.pool_flags(&pool).unwrap(), (true, true));
     store.set_group_off(&pool, false).unwrap();
     assert_eq!(store.pool_flags(&pool).unwrap(), (false, true));
+}
+
+/// SB-401 (DEC-0022 D-10): a Claude API key a group lets go (left out of a save, its group
+/// deleted, sent back from a pool no group holds) goes to the pay-per-token group, never to the
+/// default one; once that group exists a key moves only into it and is shared with no group.
+#[test]
+fn a_claude_key_a_group_lets_go_lands_in_the_pay_per_token_group_and_moves_only_there() {
+    let (root, store) = setup();
+    let left = add(&store, Provider::Claude, "default", "synthetic-left");
+    let deleted = add(&store, Provider::Claude, "default", "synthetic-deleted");
+    let codex = add(&store, Provider::Codex, "default", "synthetic-codex");
+    let apps = store
+        .save_project(
+            None,
+            "Apps",
+            &[project(&root, "apps")],
+            &[left.id.clone(), codex.id.clone()],
+        )
+        .unwrap();
+    let gone = store
+        .save_project(
+            None,
+            "Gone",
+            &[project(&root, "gone")],
+            std::slice::from_ref(&deleted.id),
+        )
+        .unwrap();
+    assert!(store.snapshot().unwrap().tokens_group().is_none());
+    // Left out of a save: the key to the pay-per-token group (made now), the Codex key home.
+    store
+        .save_project(Some(&apps.pool), "Apps", &[project(&root, "apps")], &[])
+        .unwrap();
+    let snapshot = store.snapshot().unwrap();
+    let tokens = snapshot.tokens_group().unwrap().pool.clone();
+    let pool_of = |id: &str| {
+        store
+            .snapshot()
+            .unwrap()
+            .accounts
+            .iter()
+            .find(|a| a.id == id)
+            .unwrap()
+            .pool
+            .clone()
+    };
+    assert_eq!(pool_of(&left.id), tokens);
+    assert_eq!(pool_of(&codex.id), "default");
+    // Its group deleted: the same.
+    store.remove_project(&gone.pool).unwrap();
+    assert_eq!(pool_of(&deleted.id), tokens);
+    // A key from before, left in an ordinary group, may move only into the pay-per-token group.
+    let legacy = add(&store, Provider::Claude, "default", "synthetic-legacy");
+    let stays = switchboard_core::CLAUDE_KEY_STAYS;
+    assert_eq!(
+        store
+            .save_project(
+                Some(&apps.pool),
+                "Apps",
+                &[project(&root, "apps")],
+                std::slice::from_ref(&legacy.id),
+            )
+            .unwrap_err(),
+        stays
+    );
+    assert_eq!(
+        store
+            .save_project_with(
+                Some(&apps.pool),
+                "Apps",
+                &[project(&root, "apps")],
+                std::slice::from_ref(&legacy.id),
+                None,
+                true,
+            )
+            .unwrap_err(),
+        stays
+    );
+    assert!(!store
+        .set_shared(&apps.pool, &legacy.id, true)
+        .unwrap_or(false));
+    let mut keys = vec![left.id.clone(), deleted.id.clone(), legacy.id.clone()];
+    keys.sort();
+    store
+        .save_project(Some(&tokens), switchboard_core::TOKENS_NAME, &[], &keys)
+        .unwrap();
+    assert_eq!(pool_of(&legacy.id), tokens);
+}
+
+/// SB-401: an account whose home group is switched off serves no other group: it is not
+/// routed to, listed for, or launched in a group that shares it; its own group still lists it.
+#[test]
+fn an_account_whose_home_group_is_off_serves_no_group_sharing_it() {
+    let (root, store) = setup();
+    let x = add(&store, Provider::Codex, "default", "synthetic-x");
+    let y = add(&store, Provider::Codex, "default", "synthetic-y");
+    let home = store
+        .save_project(
+            None,
+            "Home",
+            &[project(&root, "home")],
+            std::slice::from_ref(&x.id),
+        )
+        .unwrap();
+    let shares = store
+        .save_project(
+            None,
+            "Shares",
+            &[project(&root, "shares")],
+            &[x.id.clone(), y.id.clone()],
+        )
+        .unwrap();
+    assert_eq!(shares.shared_accounts, [x.id.clone()]);
+    store.select(Provider::Codex, &shares.pool, &x.id).unwrap();
+    assert!(store.route(Provider::Codex, &shares.pool).is_ok());
+    store.set_group_off(&home.pool, true).unwrap();
+    let snapshot = store.snapshot().unwrap();
+    let account = snapshot.accounts.iter().find(|a| a.id == x.id).unwrap();
+    assert!(!snapshot.serves(account, &shares.pool));
+    assert!(
+        snapshot.serves(account, &home.pool),
+        "its own group still holds it"
+    );
+    assert!(snapshot
+        .pool_accounts(&shares.pool)
+        .iter()
+        .all(|a| a.id != x.id));
+    assert_eq!(snapshot.pools_of(account), [home.pool.as_str()]);
+    // The selection no longer resolves; the group's next usable account takes over.
+    assert!(store.route(Provider::Codex, &shares.pool).is_err());
+    let fits = switchboard_core::Fits {
+        kind: Some(AuthKind::ApiKey),
+        api_key_only: false,
+    };
+    let (next, _) = store
+        .failover_unusable(Provider::Codex, &shares.pool, fits, now())
+        .unwrap()
+        .unwrap();
+    assert_eq!(next.id, y.id);
 }
