@@ -110,6 +110,9 @@ pub fn export(root: &Path, snapshot: &Snapshot, now: i64) -> Bundle {
     let groups = snapshot
         .projects
         .iter()
+        // SB-401: the pay-per-token group's folders are chosen one by one on each computer; no
+        // settings file carries them to another one.
+        .filter(|p| !p.tokens)
         .map(|p| {
             let mut repositories = Vec::new();
             let mut plain_folders = Vec::new();

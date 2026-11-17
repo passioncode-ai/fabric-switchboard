@@ -240,6 +240,8 @@ pub const TOKENS_NAME: &str = "Pay-per-token keys";
 /// SB-401: saving the pay-per-token group without one of its keys would send that key to the
 /// default group.
 pub const TOKENS_KEEPS_KEYS: &str = "A key in the pay-per-token group leaves it only for another group. Move it there, or remove the account.";
+/// SB-401: sources, a found worktree or clone never join the pay-per-token group.
+pub const TOKENS_BY_HAND: &str = "Folders join the pay-per-token group only one by one, by hand. Add the folder to it yourself.";
 /// SB-401: a request to a group switched off.
 pub const GROUP_OFF: &str = "This group is switched off in Switchboard, so it serves no request. Turn it on in Switchboard, or work in a folder of another group.";
 /// SB-401: only a Claude API-key account may be in the pay-per-token group.
@@ -1289,6 +1291,10 @@ impl Store {
             .iter_mut()
             .find(|p| p.pool == pool)
             .ok_or("Project not found.")?;
+        // SB-401: nothing joins the pay-per-token group by itself; its folders are added by hand.
+        if project.tokens && !list.is_empty() {
+            return Err(TOKENS_BY_HAND.into());
+        }
         project.sources = list;
         let project = project.clone();
         // Journaled as "updated", a word every 0.6 build accepts (SB-117 seam review).
@@ -1310,6 +1316,10 @@ impl Store {
             .iter()
             .position(|p| p.pool == pool)
             .ok_or("Project not found.")?;
+        // SB-401: deleting the pay-per-token group would send its keys to the default group.
+        if candidate.projects[index].tokens && candidate.accounts.iter().any(|a| a.pool == pool) {
+            return Err(TOKENS_KEEPS_KEYS.into());
+        }
         let project = candidate.projects.remove(index);
         crate::chains::prune(&mut candidate);
         let leaving: Vec<String> = candidate
