@@ -725,6 +725,8 @@ pub fn serve(start: Start<'_>, ready: impl FnOnce()) -> Result<Ended, String> {
         // macOS revokes every open end of the terminal when its session leader exits: the next
         // process gets the terminal opened again by name. Opened before the session's lock, so a
         // viewer's write held on the terminal never keeps an end waiting behind it.
+        #[cfg(test)]
+        tests::hold_respawn(&session.launch_id);
         let slave = reopen_slave(&session);
         let started = {
             let mut inner = session.lock();
@@ -1150,6 +1152,21 @@ mod tests {
             .map_or(0, |(_, n)| *n)
     }
 
+    /// SB-413: for a launch whose reader pauses, the restart waits (at most 5 s) until the reader
+    /// has met the old process's end, so the test always takes the path the race took: on Linux
+    /// a fast restart can reopen the terminal before the reader ever sees the end.
+    pub(super) fn hold_respawn(launch_id: &str) {
+        let held = READER_PAUSE
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .as_ref()
+            .is_some_and(|(id, _)| id == launch_id);
+        let until = std::time::Instant::now() + Duration::from_secs(5);
+        while held && reader_pauses(launch_id) == 0 && std::time::Instant::now() < until {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+
     pub(super) fn pause_reader(launch_id: &str) {
         {
             let mut counts = READER_PAUSES.lock().unwrap_or_else(|p| p.into_inner());
@@ -1336,8 +1353,9 @@ mod tests {
     fn a_restart_in_place_keeps_its_output_when_the_reader_sees_the_old_end_late() {
         // SB-413: the output reader read the old process's end (EIO) just before the next
         // process started, and acted on it only after: it took the restart as over and stopped,
-        // so the viewers never saw the next process (Linux CI, run 44076842446). The pause holds
-        // the reader past the next process's start, as a loaded machine did.
+        // so the viewers never saw the next process (Linux CI, run 44076842446). The restart waits
+        // until the reader met the old end, and the pause holds the reader past the next
+        // process's start, as a loaded machine did.
         let data = tempfile::tempdir().unwrap();
         let root = data.path().canonicalize().unwrap();
         let program = script(&root, "echo first; read line; exit 0");
