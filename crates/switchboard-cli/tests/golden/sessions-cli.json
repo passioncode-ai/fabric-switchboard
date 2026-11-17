@@ -12,6 +12,7 @@
         "observed_at": "<observed_at>",
         "quiet": 0,
         "quiet_after_minutes": 30,
+        "refused_last_hour": null,
         "total": 0,
         "used": 0
       },
