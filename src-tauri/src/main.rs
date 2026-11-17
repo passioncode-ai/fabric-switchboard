@@ -976,7 +976,11 @@ async fn session_continue(session_id: String, state: State<'_, Slot>) -> Result<
     state
         .runtime()
         .await?
-        .execute(Operation::SessionContinue { session_id })
+        .execute(Operation::SessionContinue {
+            session_id,
+            in_place: false,
+            hosted: false,
+        })
         .await
 }
 /// SB-397 R1: the Sessions page's *Restart all sessions*: the plan first. The window is no
