@@ -23,6 +23,20 @@ pub fn status(root: &Path) -> Result<Value, String> {
 pub fn reserve(root: &Path, start: Start) -> Result<Option<Reservation>, Value> {
     core::reserve(root, &crate::session_accounts::Homes::at(root), start)
 }
+/// Review round 2, P2-3: a reservation whose drop (a blocking file lock) runs off the async
+/// worker, as every blocking section of the owner does (`blocking::run`).
+pub struct Held(Option<Reservation>);
+impl Drop for Held {
+    fn drop(&mut self) {
+        if let Some(reservation) = self.0.take() {
+            crate::blocking::run(move || drop(reservation));
+        }
+    }
+}
+/// `reserve` for the owner's `dispatch`: the reservation held until it is dropped.
+pub fn reserve_held(root: &Path, start: Start) -> Result<Held, Value> {
+    reserve(root, start).map(Held)
+}
 /// `reserve` for `launch --hosted`: the refusal as the sentence the CLI prints.
 pub fn admit(root: &Path, start: Start) -> Result<Option<Reservation>, String> {
     reserve(root, start).map_err(|_| AT_CAPACITY.to_owned())

@@ -127,8 +127,17 @@ pub fn set_pool(root: &Path, cap: Option<u32>, share: Share) -> Result<bool, Str
     if cap.is_some_and(|c| !(1..=MAX_CAP).contains(&c)) {
         return Err(CAP_INVALID.into());
     }
-    let saved = read(root).unwrap_or_default();
+    // Review round 2, P2-5: a file that cannot be read never loses a share silently: a change
+    // that keeps the share or the cap answers the error; one that names both rewrites it.
+    let saved = match read(root) {
+        Ok(saved) => saved,
+        Err(error) if share == Share::Keep || cap.is_none() => return Err(error),
+        Err(_) => Pool::default(),
+    };
     let cap = cap.or(saved.cap);
+    if cap.is_none() && share != Share::Keep {
+        return Err(BOARD_INVALID.into());
+    }
     let mut clamped = false;
     let board = match share {
         Share::Keep => saved.board.zip(cap).map(|(b, c)| {
@@ -423,11 +432,12 @@ pub fn status(root: &Path, accounts: &dyn Accounts) -> Result<Value, String> {
 /// SB-417 (review round 1, P1-B): starts the pool admitted and nobody has recorded as running yet,
 /// `<data>/board-pending.json` (0600). The gate decides and writes its entry under one lock on
 /// `board-pool.lock`, so two starts asked at once never both take the last slot; the entry goes
-/// when its `Reservation` is dropped (after the start is recorded, or when it fails), and an entry
-/// older than `PENDING_SECONDS` (a launcher that died) is dropped by the next read.
+/// when its `Reservation` is dropped (after the start is recorded, or when it fails). Each entry
+/// names its launcher's pid; an entry whose launcher no longer runs (unix), or older than
+/// `PENDING_SECONDS` whatever it names, is dropped by the next read (review round 2, P2-1).
 pub const PENDING: &str = "board-pending.json";
 pub const POOL_LOCK: &str = "board-pool.lock";
-pub const PENDING_SECONDS: i64 = 300;
+pub const PENDING_SECONDS: i64 = 600;
 const MAX_PENDING_BYTES: u64 = 64 * 1024;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -436,6 +446,31 @@ struct Pending {
     at: i64,
     #[serde(default)]
     board: bool,
+    /// The launcher's pid; absent in an entry an earlier build wrote.
+    #[serde(default)]
+    pid: Option<u32>,
+}
+
+/// Whether the launcher that wrote an entry still runs. Unknown counts as running (the age
+/// bound still drops it); on Windows the pid is not read.
+fn launcher_alive(pid: Option<u32>) -> bool {
+    #[cfg(unix)]
+    {
+        let Some(pid) = pid.and_then(|p| libc::pid_t::try_from(p).ok()) else {
+            return true;
+        };
+        if pid <= 0 {
+            return true;
+        }
+        // SAFETY: signal 0 only asks whether the process exists.
+        let result = unsafe { libc::kill(pid, 0) };
+        result == 0 || std::io::Error::last_os_error().raw_os_error() != Some(libc::ESRCH)
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = pid;
+        true
+    }
 }
 
 fn pending_read(root: &Path, now: i64) -> Vec<Pending> {
@@ -447,7 +482,7 @@ fn pending_read(root: &Path, now: i64) -> Vec<Pending> {
             .ok()
             .and_then(|b| serde_json::from_slice(&b).ok())
             .unwrap_or_default();
-    rows.retain(|p| (0..PENDING_SECONDS).contains(&(now - p.at)));
+    rows.retain(|p| (0..PENDING_SECONDS).contains(&(now - p.at)) && launcher_alive(p.pid));
     rows
 }
 
@@ -544,6 +579,7 @@ pub fn reserve_with(
         id: id.clone(),
         at: now,
         board: start == Start::Board,
+        pid: Some(std::process::id()),
     });
     pending_write(root, &rows);
     Ok(Some(Reservation {
@@ -774,6 +810,28 @@ mod tests {
             BOARD_INVALID,
             "no share without a cap"
         );
+        assert_eq!(
+            set_pool(root.path(), None, Share::Default).unwrap_err(),
+            BOARD_INVALID,
+            "no default share without a cap either (review round 2, P2-5)"
+        );
+        // A file that cannot be read is never rewritten without its share by a kept change.
+        std::fs::write(root.path().join(FILE), b"{not json").unwrap();
+        assert_eq!(
+            set_pool(root.path(), Some(10), Share::Keep).unwrap_err(),
+            UNREADABLE
+        );
+        assert_eq!(
+            set_pool(root.path(), None, Share::Set(1)).unwrap_err(),
+            UNREADABLE
+        );
+        set_pool(root.path(), Some(10), Share::Set(3)).unwrap();
+        assert_eq!(
+            read(root.path()).unwrap(),
+            pool(Some(10), Some(3)),
+            "both named: rewritten"
+        );
+        set(root.path(), None).unwrap();
         std::fs::write(root.path().join(FILE), b"{not json").unwrap();
         assert_eq!(cap(root.path()).unwrap_err(), UNREADABLE);
     }
@@ -847,6 +905,20 @@ mod tests {
         assert!(reserve_with(&path, Start::Board, |_| full())
             .unwrap()
             .is_some());
+        // An entry whose launcher no longer runs is dropped at once (review round 2, P2-1).
+        #[cfg(unix)]
+        {
+            let mut gone = std::process::Command::new("true").spawn().unwrap();
+            let dead = gone.id();
+            gone.wait().unwrap();
+            let rows = json!([{"id": "d1", "at": crate::clock::now(), "board": true, "pid": dead},
+                {"id": "d2", "at": crate::clock::now(), "board": true, "pid": dead}]);
+            crate::private_fs::private_write(&path.join(PENDING), rows.to_string().as_bytes())
+                .unwrap();
+            assert!(reserve_with(&path, Start::Board, |_| full())
+                .unwrap()
+                .is_some());
+        }
         // Without a cap nothing is reserved or written.
         set(&path, None).unwrap();
         let _ = std::fs::remove_file(path.join(PENDING));

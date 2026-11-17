@@ -3987,9 +3987,10 @@ enum Here {
     /// SB-342 H-1: in this terminal, through a session host of its own.
     Hosted,
 }
-/// SB-417 (review round 1, P1-B, P1-C): a hosted start whose launch is recorded no longer needs
-/// its reservation (its launch counts now); a board start recorded ends the wait of the board
-/// starts refused before.
+/// SB-417 (review rounds 1 and 2): a hosted start whose host answers no longer needs its
+/// reservation (its launch counts now); a board start started ends the wait of the board starts
+/// refused before.
+#[cfg_attr(not(unix), allow(dead_code))]
 fn recorded(
     root: &std::path::Path,
     reservation: Option<switchboard_runtime::capacity::Reservation>,
@@ -4091,8 +4092,7 @@ async fn launch(
         let launch_id = value["launch_id"]
             .as_str()
             .ok_or("The session's launch id is missing.")?;
-        recorded(root, reservation);
-        return run_hosted(root, launch_id, std::path::Path::new(script));
+        return run_hosted(root, launch_id, std::path::Path::new(script), reservation);
     }
     run_in_place(std::path::Path::new(script))
 }
@@ -4128,12 +4128,11 @@ async fn continue_in_place(
         ),
     )
     .await?;
-    recorded(root, reservation);
     let script = value["script"]
         .as_str()
         .ok_or("The session script is missing.")?;
     if let Some(launch_id) = value["launch_id"].as_str() {
-        let ran = run_hosted(root, launch_id, std::path::Path::new(script));
+        let ran = run_hosted(root, launch_id, std::path::Path::new(script), reservation);
         // Only a host that never came up ends the record here; one that runs (attaching failed)
         // ends it itself when its session ends (R4, R5 review).
         #[cfg(unix)]
@@ -4162,11 +4161,15 @@ fn run_hosted(
     root: &std::path::Path,
     launch_id: &str,
     script: &std::path::Path,
+    reservation: Option<switchboard_runtime::capacity::Reservation>,
 ) -> Result<Value, String> {
     if let Err(error) = hosted::spawn(root, launch_id, script) {
         release_reservation(script);
         return Err(error);
     }
+    // SB-417 (review round 2): the host answers, so its launch counts in the pool now; only then
+    // is the reservation let go and the waiting board starts told one has started.
+    recorded(root, reservation);
     finish_attach(launch_id, hosted::attach(root, launch_id)?)
 }
 #[cfg(unix)]
@@ -4177,7 +4180,12 @@ fn finish_attach(launch_id: &str, ended: hosted::Ended) -> Result<Value, String>
     }
 }
 #[cfg(not(unix))]
-fn run_hosted(_: &std::path::Path, _: &str, _: &std::path::Path) -> Result<Value, String> {
+fn run_hosted(
+    _: &std::path::Path,
+    _: &str,
+    _: &std::path::Path,
+    _: Option<switchboard_runtime::capacity::Reservation>,
+) -> Result<Value, String> {
     Err("A session host runs on macOS and Linux for now.".into())
 }
 /// SB-380: the command to run on another machine for `sessions`, `sessions end` and `attach`

@@ -5224,7 +5224,8 @@ async fn dispatch_start(
     // Review round 1, P1-B: the reservation counts this start from the gate's decision until the
     // run is watched (`live_add`), so dispatches asked at once never all pass the share; it is
     // dropped on every return below.
-    let _reservation = match blocking::run(|| capacity::reserve(root, capacity::Start::Board)) {
+    let _reservation = match blocking::run(|| capacity::reserve_held(root, capacity::Start::Board))
+    {
         Ok(reservation) => reservation,
         Err(pool) => {
             let mut refusal = dispatch::refused(Some(&agent), dispatch::AT_CAPACITY);

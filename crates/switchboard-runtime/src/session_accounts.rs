@@ -64,6 +64,15 @@ impl Accounts for Homes<'_> {
             .cloned()
             .collect();
         found.extend(crate::dispatch::live_runs(self.root));
+        // Review round 2: a hosted run Fabric asked for counts from its host's start, before
+        // the scan sees its agent.
+        #[cfg(unix)]
+        found.extend(
+            crate::session_host::live_hosts(self.root)
+                .into_iter()
+                .map(|(launch, _)| launch)
+                .filter(|launch| crate::launches::board_run_live(self.root, launch)),
+        );
         found
     }
     fn open_terminal(&self, script: &Path) -> Result<(), String> {
