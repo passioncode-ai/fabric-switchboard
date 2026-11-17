@@ -436,12 +436,12 @@ fn an_account_whose_own_group_goes_away_is_no_longer_shared_and_never_moves_by_i
     assert!(group(&shares.pool).shared_accounts.is_empty());
 }
 
-/// SB-313: placing an account moves its provider team with it. A teammate a group admitted
-/// before and would refuse after keeps the choice from being made; the account itself follows
-/// the person's word, and a group that had it selected moves to another account it admits.
+/// SB-313, DEC-0022 (SB-403): placing one seat of a provider team places that seat only; the
+/// team's other seats follow only when the person asks (`team`). Nothing about the groups the
+/// seats serve refuses the word, and no group's selected account moves because of it.
 #[test]
 fn a_teammate_a_group_would_refuse_keeps_the_word_from_being_given() {
-    use switchboard_core::organizations::{ASSIGN_OUTSIDE, PERSONAL};
+    use switchboard_core::organizations::{By, TeamOutcome, PERSONAL};
     use switchboard_core::ExternalIdentity;
     let (root, store) = setup();
     let acme = store.add_organization("Acme", &[]).unwrap();
@@ -468,10 +468,28 @@ fn a_teammate_a_group_would_refuse_keeps_the_word_from_being_given() {
     };
     let lead = seat("Lead", "lead");
     let mate = seat("Mate", "mate");
-    // The lead's word places the team in Acme; the mate follows the team into Acme's group.
-    store.assign_organization(&lead.id, Some(&acme.id)).unwrap();
+    // The default word places the lead only: its teammate is left where it was.
+    let placed = store
+        .assign_organization_team(&lead.id, Some(&acme.id), false)
+        .unwrap();
+    assert_eq!(placed.team, Some(TeamOutcome::NotClaimed));
+    assert_eq!(placed.teammates, 1);
+    let snapshot = store.snapshot().unwrap();
+    assert_eq!(snapshot.attribution(&mate).organization, None);
+    assert!(snapshot.organizations[0].provider_organizations.is_empty());
+    // Asked for, the team follows.
+    let claimed = store
+        .assign_organization_team(&lead.id, Some(&acme.id), true)
+        .unwrap();
+    assert_eq!(claimed.team, Some(TeamOutcome::Claimed));
+    let snapshot = store.snapshot().unwrap();
+    assert_eq!(
+        snapshot.attribution(&mate).organization.as_deref(),
+        Some(acme.id.as_str())
+    );
+    assert_eq!(snapshot.attribution(&mate).by, Some(By::Provider));
     let folder = project(&root, "acme");
-    store
+    let group = store
         .save_project_with(
             None,
             "Acme work",
@@ -481,13 +499,31 @@ fn a_teammate_a_group_would_refuse_keeps_the_word_from_being_given() {
             true,
         )
         .unwrap();
+    store
+        .select(Provider::Claude, &group.pool, &mate.id)
+        .unwrap();
+    // Taking the whole team out of Acme is no longer refused: the mate stays in Acme's group,
+    // keeps its route, and the group is named as one it serves outside its organizations.
+    store
+        .assign_organization_team(&lead.id, Some(PERSONAL), true)
+        .unwrap();
+    let snapshot = store.snapshot().unwrap();
+    assert_eq!(snapshot.attribution(&mate).organization, None);
     assert_eq!(
-        store
-            .assign_organization(&lead.id, Some(PERSONAL))
-            .unwrap_err(),
-        ASSIGN_OUTSIDE
+        snapshot.routes.get(&format!("claude:{}", group.pool)),
+        Some(&mate.id)
     );
-    // The account itself may leave: its group moves to another account it admits.
+    let mate_now = snapshot.accounts.iter().find(|a| a.id == mate.id).unwrap();
+    assert_eq!(snapshot.groups_outside(mate_now).len(), 1);
+    let warnings = snapshot.outside_warnings(mate_now);
+    assert_eq!(warnings[0]["code"], "outside_organization");
+    assert_eq!(warnings[0]["personal"], true);
+    assert_eq!(
+        store.route(Provider::Claude, &group.pool).unwrap().0.id,
+        mate.id,
+        "the proxy still serves it"
+    );
+    // A selected account whose word changes keeps its route: routing reads no organization.
     let c = add(&store, Provider::Claude, "default", "synthetic-c");
     let d = add(&store, Provider::Claude, "default", "synthetic-d");
     for id in [&c.id, &d.id] {
@@ -509,7 +545,7 @@ fn a_teammate_a_group_would_refuse_keeps_the_word_from_being_given() {
     let snapshot = store.snapshot().unwrap();
     assert_eq!(
         snapshot.routes.get(&format!("claude:{}", group.pool)),
-        Some(&d.id)
+        Some(&c.id)
     );
 }
 
@@ -576,8 +612,8 @@ fn a_share_that_no_longer_fits_does_not_block_its_group_and_a_deleted_groups_acc
         .all(|p| p.shared_accounts.is_empty()));
 }
 
-/// SB-314: a new account saved into the pool of a group of another organization is refused, as
-/// a move into that group is; its own organization's group and a personal group take it.
+/// DEC-0022 (SB-403): a new account saved into the pool of a group of another organization is
+/// kept there and serves it; the snapshot names the warning a person sees.
 #[test]
 fn a_new_account_lands_only_in_a_group_that_admits_it() {
     let (root, store) = setup();
@@ -593,7 +629,7 @@ fn a_new_account_lands_only_in_a_group_that_admits_it() {
             true,
         )
         .unwrap();
-    let refused = store
+    let kept = store
         .add(
             "Synthetic personal".into(),
             Provider::Claude,
@@ -601,23 +637,14 @@ fn a_new_account_lands_only_in_a_group_that_admits_it() {
             group.pool.clone(),
             Credential::parse(Provider::Claude, AuthKind::ApiKey, "synthetic-personal").unwrap(),
         )
-        .unwrap_err();
-    // It names the account and says it is personal (SB-314).
-    assert_eq!(
-        refused,
-        "Synthetic personal is a personal account and this group serves an organization. Choose accounts of the group's organization, or change it."
-    );
-    assert!(store.snapshot().unwrap().accounts.is_empty());
-    // A personal group takes it.
-    let mine = project(&root, "mine");
-    let personal = store
-        .save_project(None, "Mine", std::slice::from_ref(&mine), &[])
         .unwrap();
-    add(
-        &store,
-        Provider::Claude,
-        &personal.pool,
-        "synthetic-personal",
+    let snapshot = store.snapshot().unwrap();
+    assert_eq!(kept.pool, group.pool);
+    let warnings = snapshot.outside_warnings(&kept);
+    assert_eq!(warnings.len(), 1);
+    assert_eq!(
+        warnings[0]["message"],
+        "Synthetic personal is a personal account and the group “Beta work” serves an organization. It serves the group anyway; assign it the organization if it works for it."
     );
 }
 

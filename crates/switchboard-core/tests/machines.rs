@@ -259,6 +259,35 @@ fn coming_home_goes_to_the_group_named_else_the_one_it_left_else_default() {
     );
 }
 
+/// SB-403 (2026-11-17, the operator's Mac): an organization's account called back into a personal
+/// group went to `default`; an organization never keeps it out of the group named.
+#[test]
+fn an_organizations_account_comes_home_to_a_personal_group_named() {
+    let (root, _vault, store) = setup();
+    let seat = save(&store, "seat");
+    let org = store.add_organization("PassionCode.ai", &[]).unwrap();
+    store.assign_organization(&seat, Some(&org.id)).unwrap();
+    let folder = root.path().join("pc");
+    std::fs::create_dir_all(&folder).unwrap();
+    let personal = store
+        .save_project(None, "PassionCode", std::slice::from_ref(&folder), &[])
+        .unwrap();
+    store.join_machine(&seat, &studio(), 5).unwrap();
+    store.set_return(&seat, &personal.pool).unwrap();
+    store.update_fields(&seat, None, Some(true)).unwrap();
+    let snapshot = store.snapshot().unwrap();
+    let back = snapshot.accounts.iter().find(|a| a.id == seat).unwrap();
+    assert_eq!(back.pool, personal.pool);
+    assert_eq!(snapshot.groups_outside(back).len(), 1);
+    // Round 2: the warning names a personal group as one.
+    let warnings = snapshot.outside_warnings(back);
+    assert_eq!(warnings[0]["group_personal"], true);
+    assert_eq!(
+        warnings[0]["message"],
+        "seat@example.com works for an organization; the personal group “PassionCode” uses it anyway."
+    );
+}
+
 #[test]
 fn a_store_that_breaks_the_rule_is_refused() {
     let (root, _vault, store) = setup();

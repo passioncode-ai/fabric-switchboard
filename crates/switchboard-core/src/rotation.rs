@@ -41,11 +41,16 @@ impl RotationPolicy {
 pub struct RotationDecision {
     pub candidate_id: Option<String>,
     pub reason: String,
+    /// DEC-0022 (SB-403): the candidate holds none of the group's organizations (taken only
+    /// when no account of them had room), so the pass's decision says so.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub outside: bool,
 }
 fn hold(reason: &str) -> RotationDecision {
     RotationDecision {
         candidate_id: None,
         reason: reason.into(),
+        outside: false,
     }
 }
 /// The figures a managed policy starts with when nobody saved one (the initial UI/CLI settings).
@@ -203,6 +208,7 @@ impl Store {
             return Ok(hold("cooldown"));
         }
         let state = self.lock()?;
+        let outside = |a: &crate::Account| !state.context_admits(&policy.pool, a);
         let current = current_id.and_then(|id| {
             state.accounts.iter().find(|a| {
                 a.id == id && a.provider == policy.provider && state.serves(a, &policy.pool)
@@ -231,7 +237,6 @@ impl Store {
                     && state.serves(a, &policy.pool)
                     && !limited.contains(&a.id)
                     && !state.is_assigned(&a.id)
-                    && state.context_admits(&policy.pool, a)
                     // SB-217 (the architect's judged audit): the kind of account the sessions
                     // run on now, so a subscription never moves onto a pay-per-token key that no
                     // spending ceiling gates, and a key's caller never onto a subscription.
@@ -248,8 +253,12 @@ impl Store {
                 };
                 *used < limit && self.rotation_credential_eligible(a, policy, now)
             })
+            // DEC-0022 (SB-403): every account the group holds serves it; one of the group's own
+            // organizations is preferred over one placed there from another.
             .min_by(|(a, x), (b, y)| {
-                x.total_cmp(y)
+                outside(a)
+                    .cmp(&outside(b))
+                    .then_with(|| x.total_cmp(y))
                     .then_with(|| a.created_at.cmp(&b.created_at))
                     .then_with(|| a.id.cmp(&b.id))
             });
@@ -270,7 +279,6 @@ impl Store {
                         && state.serves(a, &policy.pool)
                         && !limited.contains(&a.id)
                         && !state.is_assigned(&a.id)
-                        && state.context_admits(&policy.pool, a)
                         && a.kind == current.kind
                         && self.rotation_credential_eligible(a, policy, now)
                 })
@@ -279,7 +287,9 @@ impl Store {
                     (used < 100.0).then_some((a, used))
                 })
                 .min_by(|(a, x), (b, y)| {
-                    x.total_cmp(y)
+                    outside(a)
+                        .cmp(&outside(b))
+                        .then_with(|| x.total_cmp(y))
                         .then_with(|| a.created_at.cmp(&b.created_at))
                         .then_with(|| a.id.cmp(&b.id))
                 })
@@ -300,7 +310,6 @@ impl Store {
                         && a.provider == policy.provider
                         && state.serves(a, &policy.pool)
                         && !state.is_assigned(&a.id)
-                        && state.context_admits(&policy.pool, a)
                         && a.kind == current.kind
                         && self.rotation_credential_eligible(a, policy, now)
                 })
@@ -308,11 +317,17 @@ impl Store {
                 // and one with room was the steps above.
                 .filter_map(|a| free_at(a, now).map(|t| (a, t)))
                 .filter(|(_, t)| *t > now && *t < current_free)
-                .min_by(|(a, x), (b, y)| x.cmp(y).then_with(|| a.id.cmp(&b.id)))
+                .min_by(|(a, x), (b, y)| {
+                    outside(a)
+                        .cmp(&outside(b))
+                        .then_with(|| x.cmp(y))
+                        .then_with(|| a.id.cmp(&b.id))
+                })
                 .map(|(a, t)| (a, t as f64))
         });
         Ok(match candidate {
             Some((a, _)) => RotationDecision {
+                outside: outside(a),
                 candidate_id: Some(a.id.clone()),
                 reason: if current_limited {
                     "limit_reached"
@@ -396,6 +411,7 @@ impl Store {
     ) -> Result<Option<String>, String> {
         let paced = self.paced.lock().map(|p| p.clone()).unwrap_or_default();
         let state = self.lock()?;
+        let outside = |a: &crate::Account| !state.context_admits(&policy.pool, a);
         Ok(state
             .accounts
             .iter()
@@ -405,7 +421,6 @@ impl Store {
                     && !held.contains(&a.id)
                     && !state.is_assigned(&a.id)
                     && fits.admits(a)
-                    && state.context_admits(&policy.pool, a)
                     && self.rotation_credential_eligible(a, policy, now)
             })
             .filter_map(|a| match fresh_usage(a, policy, now) {
@@ -422,9 +437,11 @@ impl Store {
                     (used < 100.0).then_some((a, if blind { 2u8 } else { 1u8 }, used))
                 }
             })
+            // DEC-0022 (SB-403): the group's own organizations first, as rotation prefers them.
             .min_by(|(a, tier_a, x), (b, tier_b, y)| {
-                tier_a
-                    .cmp(tier_b)
+                outside(a)
+                    .cmp(&outside(b))
+                    .then_with(|| tier_a.cmp(tier_b))
                     .then_with(|| x.total_cmp(y))
                     .then_with(|| a.created_at.cmp(&b.created_at))
                     .then_with(|| a.id.cmp(&b.id))
@@ -447,8 +464,10 @@ pub struct FailoverTally {
     pub held: u64,
     /// Accounts of another kind than the request's (subscription and API key never mix).
     pub kind: u64,
-    /// Accounts of another organization than the group's.
-    pub context: u64,
+    /// DEC-0022 (SB-403): of `moved`, requests moved to an account that holds none of the
+    /// group's organizations (taken only when none of theirs had room). Was `context`, the
+    /// accounts left out for another organization, before nothing was left out for it.
+    pub outside: u64,
     /// Accounts disabled, given to an agent (SB-322), or whose stored credential is missing,
     /// invalid or expired.
     pub credential: u64,
@@ -483,8 +502,6 @@ impl Store {
                 &mut tally.held
             } else if !fits.admits(a) {
                 &mut tally.kind
-            } else if !state.context_admits(&policy.pool, a) {
-                &mut tally.context
             } else if state.is_assigned(&a.id) || !self.rotation_credential_eligible(a, policy, now)
             {
                 &mut tally.credential
@@ -513,6 +530,7 @@ impl Store {
         now: i64,
     ) -> Result<Option<String>, String> {
         let state = self.lock()?;
+        let outside = |a: &crate::Account| !state.context_admits(&policy.pool, a);
         Ok(state
             .accounts
             .iter()
@@ -533,9 +551,11 @@ impl Store {
                     (used < 100.0).then_some((a, 1u8, used))
                 }
             })
+            // DEC-0022 (SB-403): the group's own organizations first, as rotation prefers them.
             .min_by(|(a, tier_a, x), (b, tier_b, y)| {
-                tier_a
-                    .cmp(tier_b)
+                outside(a)
+                    .cmp(&outside(b))
+                    .then_with(|| tier_a.cmp(tier_b))
                     .then_with(|| x.total_cmp(y))
                     .then_with(|| a.created_at.cmp(&b.created_at))
                     .then_with(|| a.id.cmp(&b.id))

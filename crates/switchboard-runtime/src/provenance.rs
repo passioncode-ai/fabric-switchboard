@@ -15,7 +15,7 @@ use switchboard_core::{Provider, Snapshot};
 fn cause_of(detail: &str) -> &'static str {
     match detail {
         "switched_on_limit" => "limit",
-        "failover" | "unusable" => "failover",
+        "failover" | "failover_outside" | "unusable" => "failover",
         _ => "rotation",
     }
 }

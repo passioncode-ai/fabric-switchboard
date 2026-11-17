@@ -1314,7 +1314,11 @@ fn assigning_one_seat_brings_its_team_and_removals_clean_up_assignments() {
     let snapshot = store.snapshot().unwrap();
     assert_eq!(snapshot.attribution(&b).organization, None);
 
-    let by_person = store.assign_organization(&a.id, Some(&acme.id)).unwrap();
+    // DEC-0022 (SB-403): the team follows only when the person asks for it.
+    let by_person = store
+        .assign_organization_team(&a.id, Some(&acme.id), true)
+        .unwrap()
+        .attribution;
     assert_eq!(by_person.by, Some(By::Person));
     let snapshot = store.snapshot().unwrap();
     let follows = snapshot.attribution(&b);
@@ -1336,9 +1340,8 @@ fn assigning_one_seat_brings_its_team_and_removals_clean_up_assignments() {
 
 #[test]
 fn a_groups_organization_keeps_its_folders_on_its_own_seats() {
-    // SB-109 (SCN-070): with an organization defined, a group takes only accounts of its own
-    // context (its organization, or personal), at placement and at run time; without one,
-    // nothing is refused.
+    // SB-109 (SCN-070), DEC-0022 (SB-403): a group's organization is a label; an account of
+    // another context joins and serves it all the same, and the snapshot says it is outside.
     use switchboard_core::ExternalIdentity;
     let (root, _vault, store) = setup();
     let oauth = |refresh: &str| {
@@ -1406,78 +1409,60 @@ fn a_groups_organization_keeps_its_folders_on_its_own_seats() {
         snapshot.context_admits("default", &work),
         "default is not a group"
     );
-    // Making the group Acme's is accepted and confirms what its seat's address suggested;
-    // making a personal group take Acme's seat is then refused.
+    // Making the group Acme's is accepted and confirms what its seat's address suggested.
+    // DEC-0022 (SB-403): a personal group may take Acme's seat too; the snapshot names it.
     let alpha = store
         .set_project_organization(&alpha.pool, Some(&acme.id))
         .unwrap();
     assert_eq!(alpha.primary_organization(), Some(acme.id.as_str()));
-    let err = store
-        .save_project(
-            None,
-            "Beta",
-            std::slice::from_ref(&beta_dir),
-            &[work.id.clone(), home.id.clone()],
-        )
-        .unwrap_err();
-    assert!(err.contains("belongs to another organization"), "{err}");
-    // Acme's group refuses the personal seat; saving keeps the group's organization.
-    let err = store
-        .save_project(
-            Some(&alpha.pool),
-            "Alpha",
-            std::slice::from_ref(&alpha_dir),
-            &[work.id.clone(), home.id.clone()],
-        )
-        .unwrap_err();
-    assert!(
-        err.contains("is a personal account and this group serves an organization"),
-        "{err}"
-    );
-    let kept = store
-        .save_project(
-            Some(&alpha.pool),
-            "Alpha",
-            std::slice::from_ref(&alpha_dir),
-            std::slice::from_ref(&work.id),
-        )
-        .unwrap();
-    assert_eq!(kept.primary_organization(), Some(acme.id.as_str()));
-    // A personal group with a personal seat; turning it into Acme's is refused while it holds it.
     let beta = store
         .save_project(
             None,
             "Beta",
             std::slice::from_ref(&beta_dir),
-            std::slice::from_ref(&home.id),
+            &[work.id.clone(), home.id.clone()],
         )
         .unwrap();
-    let err = store
+    let snapshot = store.snapshot().unwrap();
+    let work_now = snapshot.accounts.iter().find(|a| a.id == work.id).unwrap();
+    assert!(!snapshot.context_admits(&beta.pool, work_now));
+    // Acme's group takes the personal seat too, kept and warned of; saving keeps its organization.
+    let kept = store
+        .save_project(
+            Some(&alpha.pool),
+            "Alpha",
+            std::slice::from_ref(&alpha_dir),
+            &[work.id.clone(), home.id.clone()],
+        )
+        .unwrap();
+    assert_eq!(kept.primary_organization(), Some(acme.id.as_str()));
+    let snapshot = store.snapshot().unwrap();
+    let home_now = snapshot.accounts.iter().find(|a| a.id == home.id).unwrap();
+    assert_eq!(
+        snapshot.outside_warnings(home_now)[0]["code"],
+        "outside_organization"
+    );
+    // Turning the personal group into Acme's is no longer refused while it holds the seat.
+    store
         .set_project_organization(&beta.pool, Some(&acme.id))
-        .unwrap_err();
-    assert!(err.contains("elsewhere. Move"), "{err}");
+        .unwrap();
     assert!(store
         .set_project_organization(&beta.pool, Some("no-such"))
         .is_err());
-    // Selection and the route refuse a seat that moved to another context after placement.
+    // Selection and the route serve a seat whose word moved it to another context: routing
+    // reads no organization.
     store
         .select(Provider::Claude, &alpha.pool, &work.id)
         .unwrap();
     store
         .assign_organization(&work.id, Some("personal"))
         .unwrap();
-    assert!(store
-        .route(Provider::Claude, &alpha.pool)
-        .err()
-        .unwrap()
-        .contains("belongs to another organization"));
+    assert!(store.route(Provider::Claude, &alpha.pool).is_ok());
     assert!(store
         .select(Provider::Claude, &alpha.pool, &work.id)
-        .is_err());
-    // SB-285: forgetting the word leaves the seat personal (its domain places nothing), so the
-    // group still refuses it until the person places it in Acme again.
+        .is_ok());
     store.assign_organization(&work.id, None).unwrap();
-    assert!(store.route(Provider::Claude, &alpha.pool).is_err());
+    assert!(store.route(Provider::Claude, &alpha.pool).is_ok());
     store.assign_organization(&work.id, Some(&acme.id)).unwrap();
     assert!(store.route(Provider::Claude, &alpha.pool).is_ok());
     // Removing the organization turns its groups personal.
@@ -1494,8 +1479,8 @@ fn a_groups_organization_keeps_its_folders_on_its_own_seats() {
 
 #[test]
 fn a_group_of_two_organizations_takes_seats_of_both_and_no_others() {
-    // SB-282: a group may belong to several organizations; it admits the seats of each, refuses
-    // a personal one, and cannot drop an organization whose seat it still holds.
+    // SB-282: a group may belong to several organizations; the seats of each fit it. DEC-0022
+    // (SB-403): a personal one is placed too and named as outside.
     use switchboard_core::ExternalIdentity;
     let (root, _vault, store) = setup();
     let seat = |email: &str, refresh: &str| {
@@ -1533,20 +1518,24 @@ fn a_group_of_two_organizations_takes_seats_of_both_and_no_others() {
     let dir = root.path().join("shared");
     std::fs::create_dir_all(&dir).unwrap();
     let both = vec![acme.id.clone(), beta.id.clone()];
-    let err = store
+    // DEC-0022 (SB-403): a personal seat may be placed there too; it is named as outside.
+    let other_dir = root.path().join("shared-too");
+    std::fs::create_dir_all(&other_dir).unwrap();
+    let mixed = store
         .save_project_with(
             None,
-            "Shared",
-            std::slice::from_ref(&dir),
+            "Mixed",
+            std::slice::from_ref(&other_dir),
             &[acme_seat.id.clone(), home.id.clone()],
             Some(both.clone()),
             true,
         )
-        .unwrap_err();
-    assert!(
-        err.contains("is a personal account and this group serves an organization"),
-        "{err}"
-    );
+        .unwrap();
+    let snapshot = store.snapshot().unwrap();
+    let home_now = snapshot.accounts.iter().find(|a| a.id == home.id).unwrap();
+    assert!(!snapshot.context_admits(&mixed.pool, home_now));
+    assert_eq!(snapshot.groups_outside(home_now).len(), 1);
+    store.remove_project(&mixed.pool).unwrap();
     let shared = store
         .save_project_with(
             None,
@@ -1563,11 +1552,6 @@ fn a_group_of_two_organizations_takes_seats_of_both_and_no_others() {
         let a = snapshot.accounts.iter().find(|a| &a.id == id).unwrap();
         assert!(snapshot.context_admits(&shared.pool, a));
     }
-    // Beta's seat is still there: the group cannot become Acme's alone.
-    let err = store
-        .set_project_organizations(&shared.pool, vec![acme.id.clone()])
-        .unwrap_err();
-    assert!(err.contains("elsewhere. Move"), "{err}");
     // Saving without naming organizations keeps both.
     let kept = store
         .save_project(
@@ -1738,7 +1722,8 @@ fn one_account_of_two_organizations_serves_the_groups_of_both() {
             true,
         )
         .unwrap();
-    let err = store
+    // DEC-0022 (SB-403): a personal group takes it too, named as outside.
+    let in_personal = store
         .save_project_with(
             None,
             "P",
@@ -1747,8 +1732,12 @@ fn one_account_of_two_organizations_serves_the_groups_of_both() {
             Some(vec![]),
             true,
         )
-        .unwrap_err();
-    assert!(err.contains("belongs to another organization"), "{err}");
+        .unwrap();
+    let snapshot = store.snapshot().unwrap();
+    let held = snapshot.accounts.iter().find(|x| x.id == a.id).unwrap();
+    assert!(!snapshot.context_admits(&in_personal.pool, held));
+    assert_eq!(snapshot.groups_outside(held).len(), 1);
+    store.remove_project(&in_personal.pool).unwrap();
     let snapshot = store.snapshot().unwrap();
     let held = snapshot.accounts.iter().find(|x| x.id == a.id).unwrap();
     assert!(snapshot.context_admits(&in_acme.pool, held));
@@ -1815,7 +1804,7 @@ fn personal_after_an_organization_is_refused_and_a_word_names_the_groups_it_leav
     let snapshot = store.snapshot().unwrap();
     let held = snapshot.accounts.iter().find(|x| x.id == a.id).unwrap();
     let refusing: Vec<&str> = snapshot
-        .groups_refusing(held)
+        .groups_outside(held)
         .iter()
         .map(|p| p.pool.as_str())
         .collect();
@@ -1827,7 +1816,7 @@ fn personal_after_an_organization_is_refused_and_a_word_names_the_groups_it_leav
     assert_eq!(attribution.also, vec![acme.id.clone()]);
     let snapshot = store.snapshot().unwrap();
     let held = snapshot.accounts.iter().find(|x| x.id == a.id).unwrap();
-    assert!(snapshot.groups_refusing(held).is_empty());
+    assert!(snapshot.groups_outside(held).is_empty());
 }
 
 #[test]
@@ -4074,7 +4063,7 @@ fn an_organization_arriving_with_a_domain_changes_no_account_and_only_suggests()
     let mover = snap.accounts.iter().find(|a| a.id == mover.id).unwrap();
     assert_eq!(mover.pool, org_group.pool);
     assert_eq!(snap.memberships.get(&mover.id), Some(&organization.id));
-    // A group of another organization still refuses it.
+    // DEC-0022 (SB-403): a group of another organization takes it too, named as outside.
     let third = root.path().join("acme");
     fs::create_dir_all(&third).unwrap();
     let acme = snap
@@ -4085,7 +4074,7 @@ fn an_organization_arriving_with_a_domain_changes_no_account_and_only_suggests()
         .id
         .clone();
     let late = org_seat(&store, "late@passioncode.example", "l", "default");
-    let refused = store
+    store
         .save_project_in(
             None,
             "Acme work",
@@ -4093,11 +4082,10 @@ fn an_organization_arriving_with_a_domain_changes_no_account_and_only_suggests()
             std::slice::from_ref(&late.id),
             Some(Some(&acme)),
         )
-        .unwrap_err();
-    assert!(
-        refused.contains("is a personal account and this group serves an organization"),
-        "{refused}"
-    );
+        .unwrap();
+    let snap = store.snapshot().unwrap();
+    let late = snap.accounts.iter().find(|a| a.id == late.id).unwrap();
+    assert_eq!(snap.outside_warnings(late)[0]["personal"], true);
 }
 
 #[test]
@@ -4230,11 +4218,14 @@ fn a_new_account_on_an_organizations_domain_is_personal_with_a_suggestion() {
     store
         .select(Provider::Claude, &group.pool, &seat.id)
         .unwrap();
-    // SB-314: an address on no domain of Acme is refused when it would land in Acme's group,
-    // before anything is saved (it used to be saved and refused at selection).
+    // DEC-0022 (SB-403): an address on no domain of Acme lands in Acme's group all the same,
+    // personal, and is named as outside.
+    let home = try_org_seat(&store, "me@home.example", "x", &group.pool).unwrap();
+    let snap = store.snapshot().unwrap();
+    assert_eq!(snap.attribution(&home).organization, None);
     assert_eq!(
-        try_org_seat(&store, "me@home.example", "x", &group.pool).unwrap_err(),
-        "me@home.example is a personal account and this group serves an organization. Choose accounts of the group's organization, or change it."
+        snap.outside_warnings(&home)[0]["message"],
+        "me@home.example is a personal account and the group “Acme work” serves an organization. It serves the group anyway; assign it the organization if it works for it."
     );
     // A provider team recorded on Acme still places a seat by itself.
     let team = store
@@ -4275,7 +4266,9 @@ fn a_new_account_on_an_organizations_domain_is_personal_with_a_suggestion() {
             }),
         )
         .unwrap();
-    store.assign_organization(&team.id, Some(&acme.id)).unwrap();
+    store
+        .assign_organization_team(&team.id, Some(&acme.id), true)
+        .unwrap();
     let snap = store.snapshot().unwrap();
     assert_eq!(snap.attribution(&mate).by, Some(By::Provider));
 }

@@ -408,6 +408,59 @@ research notes); the ones still in force that the board cites are seeded below w
   которые … висят больше … 2-3-4 часов … просим ее остановиться, перезагружаем и продолжаем … если
   сессия уже закончила работа, она все еще висит, мы ее уводим»).
 
+### DEC-0022: An organization is a label, never a lock on where an account works
+
+- **Date:** 2026-11-17
+- **Status:** Accepted (built on branch `org-seats`: SB-403)
+- **Context:** an account's organization decided where it could work. A group took only accounts
+  of its own organizations: `SEAT_CHOSEN` refused a placement or a new sign-in, `SEATS_ELSEWHERE`
+  a binding, `SEAT_OUTSIDE` a selection and every request on the proxy, `ASSIGN_OUTSIDE` a word on
+  an account whose team a group served (SB-109, SB-282, SB-313, SB-314). On 2026-11-17 the
+  operator's Mac showed the cost: `accounts recall` of two organization accounts into personal
+  groups answered `placed_error` and left them in `default`; assigning an organization alone to an
+  account a personal group used was refused; one Claude Team seat placed in an organization pulled
+  its teammates the person never named; and an organization's checklist read "no signed-in account"
+  while one worked for it, and asked for "your {organization} address" although an organization may
+  have several domains or none.
+- **Decision:** an organization is a label on an account (whose work it does, what it is delegated
+  for), never a lock. A person's act (assigning an organization, adding one, placing, moving,
+  sharing, binding a group, signing in into a group, calling an account back) is never refused
+  because of organizations; when the account is outside the group's organizations the answer
+  carries a warning (`outside_organization`) and the group serves it. Local work is bounded only by
+  group folders: the proxy serves any account the group holds. Automatic acts may prefer: automatic
+  switching and the SB-98 move choose the group's own organizations' accounts first and take
+  another when none has room; balancing (DEC-0012) still lends nothing across an organization's
+  boundary. Assigning one seat of a provider team places that seat only; its team follows only
+  when the person asks (`team`); a seat of the team signed in later is attributed by its team only
+  after the team is claimed. The group owns the data, the account only pays: a session in a group's
+  folder runs in the group's context whatever account (or key) serves it, the first of the group's
+  contexts the account holds, else the group's first (round 1 of the review, 2026-11-17: before,
+  such a launch ran personal while a terminal in the same folder ran in the organization). Automatic
+  picks outside the group's organizations are recorded (`failover_outside`, `outside`). Statistics
+  count an account under its first context once. Known limitation (round 2 of the review): a launch
+  outside a group's managed route uses the account's isolated home `homes/<account id>`, one per
+  account, so an account serving a personal group and an organization's group keeps both groups'
+  Claude state there; managed launches run in each group's own runtime and are not affected. Keying
+  that home by account and context would move every existing home and sign-in, so it is left to a
+  board row. Supersedes the refusing parts of SB-109, SB-282,
+  SB-313 and SB-314 and the domain-only seat step of SB-202; DEC-0009 (a domain only suggests)
+  stands, and an organization may have several domains or none.
+- **Consequences / affects:** [CONTRACTS](CONTRACTS.md#an-organization-is-a-label-sb-403-dec-0022-2026-11-17),
+  [ux/scenarios.md](ux/scenarios.md) (SCN-062, SCN-069, SCN-070, SCN-076, SCN-077),
+  [CLI.md](CLI.md) (`org assign --also`, `--team`), the skill's
+  [tools reference](../plugins/switchboard/skills/switching-accounts/references/tools.md),
+  [brand/strings.md](brand/strings.md), [ORGANIZATION.md](ORGANIZATION.md),
+  [ORGANIZATION.ru.md](ORGANIZATION.ru.md), the plan
+  [org-seat-delegation](plans/2026-11-17-org-seat-delegation/README.md), [CHANGELOG](../CHANGELOG.md),
+  [evidence/backlog.md](evidence/backlog.md) (SB-403).
+- **Source:** operator 2026-11-17: «У нас может быть несколько e-mail на организацию … чтобы это не
+  было блокером. А вообще у нас в организации может и не быть имейлов … тогда мы другие способы
+  входа используем»; «чтобы подписки, которые у нас привязываются к организации, они не блочились,
+  чтобы мы могли их все равно передавать между группами … другую организацию поставить … все
+  избирать, а не ограничивая всю локальную работу. Локальную работу подписки на машине
+  ограничивается папками и PassionCode-ами, которые там уже создают сами пользователи.»; the live
+  call back of 2026-11-17 03:40 UTC relayed by the coordinating session.
+
 ### DEC-0023: Claude API keys go to a pay-per-token group that starts off and runs only under a daily ceiling
 
 - **Date:** 2026-11-17
@@ -487,7 +540,8 @@ research notes); the ones still in force that the board cites are seeded below w
     spend file is written off the counter's lock, newest first; a write that fails leaves the day
     unknown (the group refuses) until a write succeeds, retried at most every 5 s. Switching a
     group off moves its routes only to an account the usual checks allow (enabled, not given to
-    an agent, not used elsewhere, admitted by the group's context).
+    an agent, not used elsewhere), one of the group's own organizations first and one outside
+    them after it (DEC-0022: an organization never refuses).
 - **Consequences:** a key in the default group from before stays there (naming it under Needs
   attention is still open, see the plan); turning a group off stops its sessions at their next request; the reached question
   is the same one paid hand-overs use, and *Double* raises the ceiling at once.

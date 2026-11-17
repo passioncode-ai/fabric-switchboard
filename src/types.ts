@@ -87,7 +87,7 @@ export interface Adapter {
   /** SB-284: `location` says where it works (blank clears it). */ markElsewhere(id: string, on: boolean, location?: string): Promise<void>;
   /** SB-322: gives an account to an agent (`to` names it), or takes it back (`to` null). */ assignAccount(id: string, to: string | null): Promise<void>;
   /** SB-283: moves a sign-in to another machine over ssh; `pool` is its group there. */ sendAccount(id: string, to: string, pool: string): Promise<void>;
-  /** SB-315: takes a moved sign-in back from `from`, the machine the move named (null: its machine group's); SB-355: into group `pool` here (null: the one it left). */ recallAccount(id: string, from: string | null, pool?: string | null): Promise<void>;
+  /** SB-315: takes a moved sign-in back from `from`, the machine the move named (null: its machine group's); SB-355: into group `pool` here (null: the one it left). */ recallAccount(id: string, from: string | null, pool?: string | null): Promise<Placement | void>;
   /** SB-355: the machine groups read over ssh, each with its accounts' copies there. */ machinesLive(): Promise<MachinesLive>;
   /** SB-366: the machine groups with their last background read, from a file (no ssh). */ machinesList(): Promise<MachinesList>;
   /** WF-3 (SB-365): what needs a person now; an empty list when nothing does (or the command is missing). */ attention(): Promise<Attention>;
@@ -105,7 +105,7 @@ export interface Adapter {
   loginStatus(loginId: string): Promise<{ state: 'pending' | 'complete' | 'ended' }>;
   pendingLogins(): Promise<{ logins: { login_id: string; provider: Provider; label: string; pool: string; state: 'pending' | 'complete' | 'ended' }[] }>;
   /** The saved account; `login_cleanup: 'pending'` when its temporary sign-in folder is still to be removed (SB-42). */
-  finishLogin(loginId: string): Promise<Account & { login_cleanup?: 'done' | 'pending'; signed_in_again?: boolean; organization_group?: OrganizationGroupOffer }>;
+  finishLogin(loginId: string): Promise<Account & { login_cleanup?: 'done' | 'pending'; signed_in_again?: boolean; organization_group?: OrganizationGroupOffer; warnings?: Placement['warnings'] }>;
   cancelLogin(loginId: string): Promise<void>;
   probe(id: string): Promise<Usage>;
   setProjectRule(input: ProjectRuleInput): Promise<unknown>;
@@ -124,7 +124,7 @@ export interface Adapter {
   /** SB-135: each project's folders as roots with their worktrees and clones, by pool. */
   projectRoots(): Promise<Record<string, import('./ui-logic').ProjectRoot[]>>;
   /** SB-122: an account into a project's pool, or back to `default`. */
-  moveAccount(id: string, pool: string): Promise<unknown>;
+  moveAccount(id: string, pool: string): Promise<Placement | void>;
   /** SB-158: organizations. `choice` is an organization's id, `personal`, or null to let the rules decide. */
   organizationAdd(name: string, domains: string[]): Promise<unknown>;
   /** SB-265: the GitHub owners the person's `gh` can see. */
@@ -137,9 +137,11 @@ export interface Adapter {
   projectSources(pool: string, sources: string[]): Promise<unknown>;
   organizationEdit(id: string, name: string | null, domains: string[] | null): Promise<unknown>;
   organizationRemove(id: string): Promise<unknown>;
-  /** SB-282: `organizations` names every context of the account in order and wins over `choice`. */ organizationAssign(account: string, choice: string | null, organizations?: string[]): Promise<unknown>;
+  /** SB-282: `organizations` names every context of the account in order and wins over `choice`. SB-403: `options.also` adds organizations to the ones it has; `options.team` places its provider team's other seats too. The answer names the groups it serves outside them (`outside`). */ organizationAssign(account: string, choice: string | null, organizations?: string[], options?: { also?: string[]; team?: boolean }): Promise<OrganizationAssigned>;
   passioncode(action: 'status' | 'connect' | 'cancel' | 'read' | 'disconnect'): Promise<PassioncodeStatus>;
   /** SB-146: `also` adds it to one more group; `from` names the group it leaves when it is in several. */
+  /** SB-403 (round 2): accounts into a group by delta (`ProjectEdit { add_accounts }`); one at home in another group is shared, one in the default group moves. */
+  projectAddAccounts(pool: string, accounts: string[]): Promise<unknown>;
   moveRoot(folder: string, pool: string, also?: boolean, from?: string | null): Promise<unknown>;
   /** SB-143: Codex in project folders. */
   codexRoute(enabled?: boolean | null): Promise<CodexRoute>;
@@ -292,6 +294,10 @@ export interface ShellHookNotice { organization: string; group: string }
 export interface ShellHookFile { shell: string; path: string; state: string }
 /** What `switchboard shell status` reads, for the window: `hook` is on, off, default_on (a group belongs to an organization) or default_off; `can_change` is false outside the installed app. */
 /** SB-202 (B-8): one step of `switchboard onboard`, as the window reads it through the Tauri `onboard` command. */
+/** SB-403: what a move or a call back answers about where the account landed: the group (`pool`), `warnings` for a group whose organizations it does not hold, and `placed_error` when it could not join the group asked for. */
+export interface Placement { pool?: string; warnings?: { code: string; pool: string; group: string; group_personal?: boolean }[]; placed_error?: string }
+/** SB-403: the answer of a word on an account's organizations. */
+export interface OrganizationAssigned { account?: string; organization?: string | null; also?: string[]; outside?: { pool: string; name: string }[]; team?: 'claimed' | 'not_claimed'; teammates?: number }
 export interface OnboardStep { id: string; state: 'done' | 'todo' | 'needs_person' | 'optional'; summary: string; next?: unknown; organization?: { id: string; name: string }; group?: { pool: string; name: string }; groups?: string[]; ended?: number; terminals?: 'active' | 'pending' | 'off' | 'waiting' | 'unread'; /** org_group, seat: the machines where all of the organization's accounts live, when none is here. */ away?: string[] }
 export interface Onboarding { complete: boolean; degraded: string[]; steps: OnboardStep[] }
 export interface ShellHookStatus { hook: 'on' | 'off' | 'default_on' | 'default_off'; choice: 'on' | 'off' | 'default'; map: string; files: ShellHookFile[]; organizations: string[]; /** Organizations whose folder map rows carry a Codex account. */ codex_organizations?: string[]; /** SB-222: organization groups the folder map holds no row for, and why. */ unmapped?: { organization: string; group: string; reason: 'held' | 'missing' | 'no_folder'; held_by: string | null }[]; can_change: boolean; home: string | null }

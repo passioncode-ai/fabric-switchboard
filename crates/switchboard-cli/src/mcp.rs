@@ -151,7 +151,7 @@ pub(crate) fn tools() -> Vec<(bool, Value)> {
         (false, json!({"name":"switchboard_onboarding","title":"Setup steps","description":"Where setting up Switchboard stands, as steps in order: owner (the app runs), accounts (one is saved; signing in is the person's), project (the folder's group, optional; a repository in no group uses the default group, and next.command puts it in a group), mcp (this server is registered with the agent) and proving_call. Without organizations these five are all, plus one optional organization step when PassionCode.ai is connected and lists none; with organizations, organization follows, then org_group, seat, hook and launch for each, naming it. Each step is done, todo (run next.command), needs_person (tell the person next.person; run next.command or next.alternatives once they agree) or optional. next.turn_on and next.turn_off are the person's: run one only when the person asks. degraded names reads that failed; the step they touch says so. Reads only. The full guide: `switchboard onboard`.","inputSchema":{"type":"object","properties":{"path":path,"host":{"type":"string","enum":["claude","codex"],"description":"The coding agent being set up; default: the one this server runs for, when known."}},"additionalProperties":false}})),
         (false, json!({"name":"switchboard_project_context","title":"A folder's group and rule","description":"The group a folder belongs to, as project (its name, group id as pool, folders and reserved accounts, possibly empty; null when none), and the optional folder rule per provider: the rule in force, the nearest rule in any state (paused or expired), and whether it is in effect. A group's accounts serve only sessions launched from its folders; a provider with no enabled account in the group keeps its existing launch fallback.","inputSchema":{"type":"object","properties":{"path":path},"additionalProperties":false}})),
         (false, json!({"name":"switchboard_projects","title":"Groups","description":"Every group: its id (pool), name, folders (repositories), roots (each root folder with its branch and the worktrees and clones of its repository under it), sources, the accounts that serve it (its own, then those it shares from another group, marked shared; empty for an automatically created group) and its organizations, then every optional folder rule with its state. Reads only.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}})),
-        (true, json!({"name":"switchboard_project_edit","title":"Change a group","description":"Change a group by delta: reserve accounts for it (add_accounts; an account at home in another group keeps that home and serves this group too, unless move_accounts moves it here), give accounts back (remove_accounts: an account it only shares stops serving it, its own goes to the default group), add folders (add_folders) or take folders out (remove_folders; they are not added back by themselves), or rename it, or bind it to organizations (organization: one id or name, or personal; organizations: the whole list, none, one or several, the first being the group's own context; with an organization defined, a group runs only on accounts of its organizations, or on personal ones when it has none). Everything not named stays as it is; naming an account or folder the group does not hold is refused. Only when the operator asks. The account the ordinary Claude Code or Codex is signed in to cannot join a group.","inputSchema":{"type":"object","properties":{"pool":{"type":"string","description":"The group id, from switchboard_projects."},"name":{"type":"string"},"organization":{"type":"string","maxLength":200,"description":"An organization's id or name from switchboard_organizations, or personal."},"organizations":{"type":"array","maxItems":16,"items":{"type":"string","maxLength":200},"description":"Every organization of the group, by id or name, in order; empty makes it personal. Wins over organization."},"move_accounts":{"type":"boolean","description":"Move each account in add_accounts here from its group instead of sharing it."},"add_accounts":{"type":"array","items":account,"maxItems":64},"remove_accounts":{"type":"array","items":account,"maxItems":64},"add_folders":{"type":"array","items":{"type":"string","description":"An absolute folder."},"maxItems":64},"remove_folders":{"type":"array","items":{"type":"string","description":"A folder of the group, as switchboard_projects lists it."},"maxItems":64}},"required":["pool"],"additionalProperties":false}})),
+        (true, json!({"name":"switchboard_project_edit","title":"Change a group","description":"Change a group by delta: reserve accounts for it (add_accounts; an account at home in another group keeps that home and serves this group too, unless move_accounts moves it here), give accounts back (remove_accounts: an account it only shares stops serving it, its own goes to the default group), add folders (add_folders) or take folders out (remove_folders; they are not added back by themselves), or rename it, or bind it to organizations (organization: one id or name, or personal; organizations: the whole list, none, one or several, the first being the group's own context; an organization is a label: the group serves every account it holds, and the answer's warnings name accounts outside its organizations). Everything not named stays as it is; naming an account or folder the group does not hold is refused. Only when the operator asks. The account the ordinary Claude Code or Codex is signed in to cannot join a group.","inputSchema":{"type":"object","properties":{"pool":{"type":"string","description":"The group id, from switchboard_projects."},"name":{"type":"string"},"organization":{"type":"string","maxLength":200,"description":"An organization's id or name from switchboard_organizations, or personal."},"organizations":{"type":"array","maxItems":16,"items":{"type":"string","maxLength":200},"description":"Every organization of the group, by id or name, in order; empty makes it personal. Wins over organization."},"move_accounts":{"type":"boolean","description":"Move each account in add_accounts here from its group instead of sharing it."},"add_accounts":{"type":"array","items":account,"maxItems":64},"remove_accounts":{"type":"array","items":account,"maxItems":64},"add_folders":{"type":"array","items":{"type":"string","description":"An absolute folder."},"maxItems":64},"remove_folders":{"type":"array","items":{"type":"string","description":"A folder of the group, as switchboard_projects lists it."},"maxItems":64}},"required":["pool"],"additionalProperties":false}})),
         (true, json!({"name":"switchboard_project_create","title":"Create a group","description":"Create a group, as the window's New group does: its name, its folders (repositories), the accounts reserved for it and its organizations (none, one or several by id or name, the first being the group's own context; empty or left out makes it personal). An account at home in another group serves this one too, unless move_accounts moves it here. Answers the new group with its id (pool). Only when the operator asks. The account the ordinary Claude Code or Codex is signed in to cannot join a group.","inputSchema":{"type":"object","properties":{"name":{"type":"string","minLength":1},"folders":{"type":"array","minItems":1,"maxItems":64,"items":{"type":"string","description":"An absolute folder."}},"accounts":{"type":"array","items":account,"maxItems":64},"organizations":{"type":"array","maxItems":16,"items":{"type":"string","maxLength":200},"description":"Every organization of the group, by id or name, in order; empty makes it personal."},"move_accounts":{"type":"boolean","description":"Move each listed account here from its group instead of sharing it."}},"required":["name","folders"],"additionalProperties":false}})),
         (true, json!({"name":"switchboard_codex_route","title":"Codex in group folders","description":"Whether Codex sessions in a group's folders use that group's Codex accounts (one provider in Codex's own config.toml that points at Switchboard's local proxy; folders outside groups keep the person's own sign-in). Without enabled, the state only: on, applied, conflict, and the groups with a Codex account. enabled true or false changes it, only when the operator asks. Another model_provider the person chose is never replaced.","inputSchema":{"type":"object","properties":{"enabled":{"type":"boolean"}},"additionalProperties":false}})),
         (true, json!({"name":"switchboard_project_move_root","title":"Move a repository to another group","description":"Move a repository (its root folder) with the worktrees and clones under it into another group in one step, add one that is in no group, or with also add it to one more group and keep it in its others (a repository may be in several groups). Only when the operator asks. A group keeps at least one folder; a repository inside a group folder moves with that folder.","inputSchema":{"type":"object","properties":{"folder":{"type":"string","minLength":1,"description":"The repository's absolute folder, as switchboard_projects or switchboard_repository_map lists it."},"pool":{"type":"string","minLength":1,"description":"The group id from switchboard_projects."},"also":{"type":"boolean","description":"Add it to this group and keep it in its other groups (a repository may be in several)."},"from":{"type":"string","minLength":1,"description":"The group id it leaves, when it is in several."}},"required":["folder","pool"],"additionalProperties":false}})),
@@ -177,7 +177,7 @@ pub(crate) fn tools() -> Vec<(bool, Value)> {
         (true, json!({"name":"switchboard_account_hand_over","title":"Hand an account over","description":"Only when the operator asks. Hand an account over to another machine or a colleague's Switchboard: answers a signed record without its credential and marks the account here as used elsewhere, with to as where it works. The receiver passes the record to switchboard_account_receive and signs in there. Hand a personal subscription only to the operator's own machines unless the operator says otherwise.","inputSchema":{"type":"object","properties":{"account_id":account,"to":{"type":"string","minLength":1,"maxLength":80,"description":"Who receives it: a machine and its user, or a colleague."},"decision":{"type":"object","properties":{"by":{"type":"string","enum":["operator"]},"instruction":{"type":"string","minLength":1,"maxLength":500},"at":{"type":"string"},"source":{"type":"string","minLength":1,"maxLength":200}},"required":["by","instruction","at","source"],"additionalProperties":false,"description":"The operator's words that ordered it, recorded with the seat in seats.jsonl."}},"required":["account_id","to"],"additionalProperties":false}})),
         (true, json!({"name":"switchboard_account_receive","title":"Receive a handed-over account","description":"Receive an account handed over: answers whose sign-in, into which group (the record's pool when this machine has it, else default), whether the signature holds and whether this machine already holds that sign-in. apply starts the sign-in (the person signs in; headless gives the URL in switchboard_login status and takes the code), only with signer and never for a sign-in this machine already holds; nothing travels but the record.","inputSchema":{"type":"object","properties":{"record":{"type":"object"},"signer":{"type":"string","description":"The giver's published key: the record must be signed by it. Required with apply."},"apply":{"type":"boolean"},"headless":{"type":"boolean"}},"required":["record"],"additionalProperties":false}})),
         (false, json!({"name":"switchboard_organizations","title":"Organizations","description":"The organizations accounts belong to: each with its e-mail domains and account count, then every account with its organization (null: personal), what decided it: person (the operator's word) or provider (its Claude Team or ChatGPT workspace is the organization's), and suggested with suggested_name: the organization its address's domain suggests (null when none or already settled). A domain only suggests; the operator confirms with switchboard_organization_set assign. Empty until the operator adds one. Reads only.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}})),
-        (true, json!({"name":"switchboard_organization_set","title":"Change organizations","description":"Only when the operator asks. action add (name, domains), edit (id, name and/or domains, which replaces the list), remove (id; its accounts are attributed again by the other rules) or assign (account_id, organization: an organization's id, personal, or auto to let the rules decide; or organizations: every context of an account that works for several, the first its own, the rest it also works for, empty to let the rules decide; personal can only be first). The answer's refused_by names the groups that no longer use the account after the word. Assigning one Claude Team or ChatGPT workspace seat brings that team's other seats along. passioncode_read reads the person's PassionCode.ai organizations again now, when PassionCode.ai is connected (connecting is the person's: switchboard org connect); passioncode_cancel stops a connection waiting for the browser; passioncode_disconnect deletes the PassionCode.ai token and keeps the organizations as local ones.","inputSchema":{"type":"object","properties":{"action":{"type":"string","enum":["add","edit","remove","assign","passioncode_read","passioncode_cancel","passioncode_disconnect"]},"id":{"type":"string","description":"An organization's id from switchboard_organizations."},"name":{"type":"string","minLength":1,"maxLength":80},"domains":{"type":"array","maxItems":16,"items":{"type":"string","minLength":3}},"account_id":account,"organization":{"type":"string","description":"An organization's id, personal, or auto."},"organizations":{"type":"array","maxItems":16,"items":{"type":"string","maxLength":200},"description":"Every context of the account in order: organization ids or names, or personal."}},"required":["action"],"additionalProperties":false}})),
+        (true, json!({"name":"switchboard_organization_set","title":"Change organizations","description":"Only when the operator asks. action add (name, domains), edit (id, name and/or domains, which replaces the list), remove (id; its accounts are attributed again by the other rules) or assign (account_id, organization: an organization's id, personal, or auto to let the rules decide; or organizations: every context of an account that works for several, the first its own, the rest it also works for, empty to let the rules decide; personal can only be first; or also: organizations added to the ones it has). An organization is a label: groups that hold the account keep it, and the answer's outside and warnings name the groups whose organizations it does not hold. Only this account is placed; team: true also places the other seats of its Claude Team or ChatGPT workspace, and the answer's team says claimed or not_claimed with teammates. passioncode_read reads the person's PassionCode.ai organizations again now, when PassionCode.ai is connected (connecting is the person's: switchboard org connect); passioncode_cancel stops a connection waiting for the browser; passioncode_disconnect deletes the PassionCode.ai token and keeps the organizations as local ones.","inputSchema":{"type":"object","properties":{"action":{"type":"string","enum":["add","edit","remove","assign","passioncode_read","passioncode_cancel","passioncode_disconnect"]},"id":{"type":"string","description":"An organization's id from switchboard_organizations."},"name":{"type":"string","minLength":1,"maxLength":80},"domains":{"type":"array","maxItems":16,"items":{"type":"string","minLength":3}},"account_id":account,"organization":{"type":"string","description":"An organization's id, personal, or auto."},"organizations":{"type":"array","maxItems":16,"items":{"type":"string","maxLength":200},"description":"Every context of the account in order: organization ids or names, or personal."},"also":{"type":"array","maxItems":16,"items":{"type":"string","maxLength":200},"description":"Organizations (ids or names) the account also works for, added to the ones it has; used without organization and organizations."},"team":{"type":"boolean","description":"Also place the other seats of its Claude Team or ChatGPT workspace; default false: only this account."}},"required":["action"],"additionalProperties":false}})),
         (false, json!({"name":"switchboard_rotation","title":"Automatic switching","description":"The automatic switching settings per provider, group (pool) and target (enabled, threshold, headroom as hysteresis, cooldown, freshness) and what the background monitor decided last.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}})),
         (true, json!({"name":"switchboard_rotation_set","title":"Set automatic switching","description":"Change automatic switching for one provider, group (pool) and target: switch it on or off, or change its threshold, headroom (hysteresis), cooldown or freshness. What is left out keeps its saved value. Only when the operator asks.","inputSchema":{"type":"object","properties":{"provider":{"type":"string","enum":["claude","codex"]},"pool":{"type":"string","default":"default"},"target":{"type":"string","enum":["managed","claude_cli"],"default":"managed"},"enabled":{"type":"boolean"},"threshold_percent":{"type":"number","minimum":1,"maximum":100},"hysteresis_percent":{"type":"number","minimum":0,"maximum":99},"cooldown_seconds":{"type":"integer","minimum":0},"max_age_seconds":{"type":"integer","minimum":30}},"required":["provider"],"additionalProperties":false}})),
         (false, json!({"name":"switchboard_backups","title":"Backups","description":"Encrypted backups of accounts, groups, rules and settings: the folder, whether they run, the newest backups and the last error. Never their contents.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}})),
@@ -647,9 +647,12 @@ impl Server {
                     .map(str::to_owned),
             })
             .await?;
-        Ok(
-            json!({"project": project, "message": "Group saved. It is visible in the Switchboard app under Groups."}),
-        )
+        // DEC-0022 (SB-403): accounts it holds outside its organizations, said beside the group.
+        let mut answer = json!({"project": project, "message": "Group saved. It is visible in the Switchboard app under Groups."});
+        if let Some(warnings) = project.get("warnings") {
+            answer["warnings"] = warnings.clone();
+        }
+        Ok(answer)
     }
     /// SB-299: the window's *New group*, with its organizations, as one call.
     async fn project_create(&self, args: &Map<String, Value>) -> Result<Value, String> {
@@ -675,9 +678,12 @@ impl Server {
                     .unwrap_or(false),
             })
             .await?;
-        Ok(
-            json!({"project": project, "message": "Group created. It is visible in the Switchboard app under Groups."}),
-        )
+        // DEC-0022 (SB-403): accounts it holds outside its organizations, said beside the group.
+        let mut answer = json!({"project": project, "message": "Group created. It is visible in the Switchboard app under Groups."});
+        if let Some(warnings) = project.get("warnings") {
+            answer["warnings"] = warnings.clone();
+        }
+        Ok(answer)
     }
     async fn account_update(&self, args: &Map<String, Value>) -> Result<Value, String> {
         let label = args.get("label").and_then(Value::as_str).map(str::to_owned);
@@ -1002,6 +1008,27 @@ impl Server {
                     .collect()
             })
         };
+        let strings = |args: &Map<String, Value>, key: &str| -> Result<Vec<String>, String> {
+            match args.get(key) {
+                None => Ok(Vec::new()),
+                Some(Value::Array(items)) => items
+                    .iter()
+                    .map(|v| {
+                        v.as_str()
+                            .map(str::to_owned)
+                            .ok_or(format!("{key} must list strings."))
+                    })
+                    .collect(),
+                Some(_) => Err(format!("{key} must be a list.")),
+            }
+        };
+        let team = |args: &Map<String, Value>| -> Result<bool, String> {
+            match args.get("team") {
+                None => Ok(false),
+                Some(Value::Bool(b)) => Ok(*b),
+                Some(_) => Err("team must be true or false.".into()),
+            }
+        };
         let operation = match required(args, "action")? {
             "add" => Operation::OrganizationAdd {
                 name: required(args, "name")?.into(),
@@ -1016,9 +1043,29 @@ impl Server {
                 id: required(args, "id")?.into(),
             },
             "assign" => match args.get("organizations") {
+                // SB-403 (round 1): `also` adds to what the account has; with a first context
+                // named, or empty (which would let the rules decide again), it is refused.
+                _ if args.get("also").is_some() => {
+                    if args.get("organizations").is_some() || args.get("organization").is_some() {
+                        return Err(switchboard_runtime::ALSO_ALONE.into());
+                    }
+                    let also = strings(args, "also")?;
+                    if also.is_empty() {
+                        return Err(switchboard_runtime::ALSO_EMPTY.into());
+                    }
+                    Operation::OrganizationAssign {
+                        account: required(args, "account_id")?.into(),
+                        choice: None,
+                        organizations: None,
+                        also,
+                        team: team(args)?,
+                    }
+                }
                 Some(Value::Array(items)) => Operation::OrganizationAssign {
                     account: required(args, "account_id")?.into(),
                     choice: None,
+                    also: Vec::new(),
+                    team: team(args)?,
                     organizations: Some(
                         items
                             .iter()
@@ -1037,6 +1084,8 @@ impl Server {
                         .filter(|c| *c != "auto")
                         .map(str::to_owned),
                     organizations: None,
+                    also: Vec::new(),
+                    team: team(args)?,
                 },
             },
             // SB-159: read the PassionCode.ai organizations again now (connecting is the person's).

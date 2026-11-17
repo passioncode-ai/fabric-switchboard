@@ -74,6 +74,7 @@ export const nativeAdapter: Adapter = {
   removeProject: (pool) => invoke('remove_project', { pool }),
   projectSwitch: (pool, on) => invoke('project_switch', { pool, on }),
   projectRoots: () => invoke('project_roots'),
+  projectAddAccounts: (pool, accounts) => invoke('project_add_accounts', { pool, accounts }),
   moveRoot: (folder, pool, also, from) => invoke('move_root', { folder, pool, also: also ?? false, from: from ?? null }),
   codexRoute: (enabled) => invoke('codex_route', { enabled: enabled ?? null }),
   sessionTree: () => invoke('session_tree'),
@@ -99,7 +100,7 @@ export const nativeAdapter: Adapter = {
   projectSources: (pool, sources) => invoke('project_sources', { pool, sources }),
   organizationEdit: (id, name, domains) => invoke('organization_edit', { id, name, domains }),
   organizationRemove: (id) => invoke('organization_remove', { id }),
-  organizationAssign: (account, choice, organizations) => invoke('organization_assign', { account, choice, organizations: organizations ?? null }),
+  organizationAssign: (account, choice, organizations, options) => invoke('organization_assign', { account, choice, organizations: organizations ?? null, also: options?.also ?? null, team: options?.team ?? null }),
   passioncode: (action) => invoke('passioncode', { action }),
   projectSuggestions: () => readWithDeadline(invoke('project_suggestions')),
   acceptProjectSuggestion: (folder) => invoke('accept_project_suggestion', { folder }),
@@ -278,7 +279,6 @@ const safeErrors = new Set([
   // Organizations (SB-158).
   'Organization not found.',
   // Placing an account whose provider team a group would then refuse (SB-313).
-  "A group this account or its provider team serves would then refuse it. Move it out of that group first, or change the group's organization.",
   // SB-323: `personal` named after an organization.
   "Name personal first, then the organizations it also works for: an account's personal context can only be its first.",
   'Another organization already has this name.',
@@ -296,11 +296,9 @@ const safeErrors = new Set([
   'PassionCode.ai is already waiting for your browser.',
   'The PassionCode.ai connection could not be read. Disconnect and connect again.',
   'The browser could not be opened.',
-  // A group's organization (SB-109).
-  "This account belongs to another organization than this group. Move it, or change the group's organization.",
+  // A group's organization (SB-109). DEC-0022 (SB-403): an organization refuses no placement.
+  'Name organizations to add with also, or every context with organization or organizations, not both.',
   "This account is in use on another machine. Use one of this machine's accounts, or clear the mark if it moved here.",
-  "An account chosen for this group belongs to another organization. Choose accounts of the group's organization, or change it.",
-  'This group still holds accounts that belong elsewhere. Move them out first.',
   // Project suggestions (SB-117).
   'No such suggestion. Read the suggestions again.',
   'This folder is gone. Read the suggestions again.',

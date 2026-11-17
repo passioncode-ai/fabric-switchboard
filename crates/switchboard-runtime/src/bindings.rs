@@ -221,10 +221,11 @@ pub(crate) fn desired(snapshot: &Snapshot) -> Vec<(PathBuf, String)> {
     // folder another group holds as well runs on that group.
     let mut off: Vec<(PathBuf, String)> = Vec::new();
     for project in projects {
-        // A group whose seats left its organization keeps its folders: the proxy refuses the seat
-        // (closed), rather than the folder falling back to the ordinary login (open). SB-109.
-        // A group bound to an organization never falls back to the default group either.
-        // SB-401 D-15: a group switched off keeps its route, closed (the proxy refuses it).
+        // A group routes its folders to its own accounts whatever their organizations
+        // (DEC-0022, SB-403). A group bound to an organization with no enabled Claude account
+        // gets no binding (nothing is written for its folders) and never falls back to the
+        // default group's accounts. SB-401 D-15: a group switched off keeps its route, closed
+        // (the proxy refuses it with GROUP_OFF).
         let route = if project.off || has_claude(&project.pool) {
             project.pool.clone()
         } else if project.organizations.is_empty()

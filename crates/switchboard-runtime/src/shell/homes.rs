@@ -1013,6 +1013,28 @@ mod tests {
     }
 
     #[test]
+    fn a_terminal_and_a_launch_agree_on_the_groups_context_for_an_account_of_another() {
+        // SB-403 (DEC-0022): a terminal in an organization group's folder ran in the group's
+        // organization while a launch there on an account of none of its organizations ran
+        // personal. The group owns the data: both read the group's context.
+        let w = world();
+        let acme = folder(&w, "acme");
+        let mut snapshot = Snapshot {
+            organizations: vec![org(O1)],
+            projects: vec![group("acme", &[&acme], Some(O1))],
+            accounts: vec![account("a", "acme", Provider::Claude)],
+            ..Snapshot::default()
+        };
+        snapshot
+            .memberships
+            .insert("a".into(), switchboard_core::organizations::PERSONAL.into());
+        let rows = rows(&snapshot, &bound(&[&acme]));
+        let launch = snapshot.serving_context(&snapshot.accounts[0], "acme", Some(&acme));
+        assert_eq!(rows[0].context, format!("org:{O1}"));
+        assert_eq!(rows[0].context, launch);
+    }
+
+    #[test]
     fn rows_are_written_in_canonical_form_for_folders_that_exist() {
         let w = world();
         let acme = folder(&w, "acme");

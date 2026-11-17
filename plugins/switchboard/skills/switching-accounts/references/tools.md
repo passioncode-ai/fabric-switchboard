@@ -687,21 +687,29 @@ the person signs in. `apply` needs `signer` and is refused when this machine alr
 ### `switchboard_account_move`: `account_id`, `pool`
 
 Only when the operator asks. Moves an account into the group `pool`, or back with `default`;
-the account the ordinary Claude Code or Codex uses cannot join a group. To let an account serve
-one more group and keep its own, add it with `switchboard_project_edit` instead.
+the account the ordinary Claude Code or Codex uses cannot join a group. Any group takes it,
+whatever its organizations; the answer's `warnings` name a group whose organizations it does not
+hold (SB-403). To let an account serve one more group and keep its own, add it with
+`switchboard_project_edit` instead.
 
-### `switchboard_organization_set`: `action`, `id?`, `name?`, `domains?`, `account_id?`, `organization?`
+### `switchboard_organization_set`: `action`, `id?`, `name?`, `domains?`, `account_id?`, `organization?`, `organizations?`, `also?`, `team?`
 
-Only when the operator asks. `action` is `add` (name, domains), `edit` (id; name and/or domains,
-which replace the list), `remove` (id), `assign` (account_id, organization: an id, `personal` or
-`auto`; or `organizations`: every context of an account that works for several, the first its
-own, the rest it also works for, empty to let the rules decide; `personal` can only be first:
-`["personal", "Acme"]` keeps an account personal and working for Acme too; the answer's
-`refused_by` names the groups that no longer use it; for an account moved to another machine,
-`there` says whether its copy there took the same word), `passioncode_read` (read the
+Only when the operator asks. `action` is `add` (name, domains: optional, any number), `edit` (id;
+name and/or domains, which replace the list), `remove` (id), `assign` (account_id, organization:
+an id, `personal` or `auto`; or `organizations`: every context of an account that works for
+several, the first its own, the rest it also works for, empty to let the rules decide; `personal`
+can only be first: `["personal", "Acme"]` keeps an account personal and working for Acme too; or
+`also`: organizations added to the ones it has, its own kept; for an account moved to another
+machine, `there` says whether its copy there took the same word), `passioncode_read` (read the
 PassionCode.ai organizations again; connecting is the person's), `passioncode_cancel` (stop a
 connection waiting for the browser) or `passioncode_disconnect` (delete the token; the
 organizations stay as local ones).
+
+An organization is a label, never a lock (SB-403): no word is refused because of the groups the
+account serves, which keep it; the answer's `outside` and `warnings` name the groups whose
+organizations it does not hold. Only this account is placed: `team: true` also places the other
+seats of its Claude Team or ChatGPT workspace, and the answer's `team` (`claimed` or
+`not_claimed`) and `teammates` say what the team did.
 
 ### `switchboard_rotation_set`: `provider`, `pool?`, `target?`, `enabled?`, `threshold_percent?`, `hysteresis_percent?`, `cooldown_seconds?`, `max_age_seconds?`
 

@@ -1180,7 +1180,7 @@ fn log_failovers(tally: &switchboard_core::FailoverTally) {
             ("alone", n(tally.alone)),
             ("held", n(tally.held)),
             ("kind", n(tally.kind)),
-            ("context", n(tally.context)),
+            ("outside", n(tally.outside)),
             ("credential", n(tally.credential)),
             ("full", n(tally.full)),
         ],
@@ -1382,7 +1382,16 @@ fn rotate_with(
             }
         };
         log_rotation(runtime, policy, &reason);
-        decisions.push(json!({"provider":policy.provider,"pool":policy.pool,"target":policy.target,"reason":reason,"candidate_id":candidate}));
+        // DEC-0022 (SB-403): a candidate outside the group's organizations says so.
+        let outside = candidate.as_deref().is_some_and(|id| {
+            runtime.store.snapshot().is_ok_and(|s| {
+                s.accounts
+                    .iter()
+                    .find(|a| a.id == id)
+                    .is_some_and(|a| !s.context_admits(&policy.pool, a))
+            })
+        });
+        decisions.push(json!({"provider":policy.provider,"pool":policy.pool,"target":policy.target,"reason":reason,"candidate_id":candidate,"outside":outside}));
     }
     *runtime
         .monitor_decisions

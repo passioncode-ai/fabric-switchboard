@@ -8,9 +8,6 @@
 export const FORMATTED_ERRORS: readonly string[] = [
   '{name} is not installed. Install it first, then launch it again.',
   '{name} cannot take over a workflow: an agent in a chain loads MCP servers and takes a prompt without a person (switchboard agents list).',
-  // SB-314: an account refused in a group; the name is its label (an address included) or its id.
-  "{name} belongs to another organization than this group. Choose accounts of the group's organization, or change it.",
-  "{name} is a personal account and this group serves an organization. Choose accounts of the group's organization, or change it.",
 ];
 
 const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');

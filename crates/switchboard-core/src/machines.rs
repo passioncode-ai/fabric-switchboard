@@ -301,8 +301,8 @@ pub(crate) fn come_home(s: &mut Snapshot, id: &str, to: Option<&str>) -> Option<
         .or_else(|| s.returns_to.get(id).cloned())
         .unwrap_or_else(|| DEFAULT_POOL.into());
     let takes = |pool: &str| {
+        // DEC-0022 (SB-403): the group named takes it whatever its organizations.
         (pool == DEFAULT_POOL || s.project_of_pool(pool).is_some())
-            && s.context_admits(pool, &account)
             && !s.accounts.iter().any(|b| {
                 b.id != account.id
                     && b.provider == account.provider
