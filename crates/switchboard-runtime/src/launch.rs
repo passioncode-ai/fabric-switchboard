@@ -1160,7 +1160,7 @@ fn process_age(pid: u32) -> Option<Duration> {
         .or_else(|| process_age_from_ps(pid))
 }
 #[cfg(target_os = "macos")]
-fn process_started(pid: u32) -> Option<SystemTime> {
+pub(crate) fn process_started(pid: u32) -> Option<SystemTime> {
     let pid = libc::c_int::try_from(pid).ok()?;
     let mut info = std::mem::MaybeUninit::<libc::proc_bsdinfo>::zeroed();
     let size = libc::c_int::try_from(std::mem::size_of::<libc::proc_bsdinfo>()).ok()?;
