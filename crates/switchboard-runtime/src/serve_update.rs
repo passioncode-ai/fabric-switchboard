@@ -181,7 +181,7 @@ pub async fn pass(
         }
         Ok(v) if v["action"] == "available" => {
             let latest = v["latest"].as_str().unwrap_or_default().to_owned();
-            note("available", Some(&latest), Some("auto_update_off"));
+            note("available", Some(latest.as_str()), Some("auto_update_off"));
             if told.as_deref() != Some(latest.as_str()) {
                 crate::oplog::event(
                     "update_waiting",

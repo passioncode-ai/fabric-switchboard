@@ -198,7 +198,7 @@ mod tests {
         let image = std::ffi::OsString::from("/home/u/Fabric-Switchboard.AppImage");
         let inside = Path::new("/tmp/.mount_x/usr/bin/fabric-switchboard");
         if cfg!(target_os = "linux") {
-            assert_eq!(copy_of(inside, Some(&image)), Path::new(&image));
+            assert_eq!(copy_of(inside, Some(image.as_os_str())), Path::new(&image));
             assert_eq!(
                 copy_of(inside, Some(OsStr::new(""))),
                 Path::new("/tmp/.mount_x/usr/bin")
