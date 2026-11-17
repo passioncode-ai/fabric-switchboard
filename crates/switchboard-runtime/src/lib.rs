@@ -46,6 +46,7 @@ pub mod machines;
 mod mcp_homes;
 mod monitor;
 pub mod monitors;
+pub mod observatory_keys;
 pub mod onboarding;
 pub mod oplog;
 pub mod own_sign_in;
@@ -1145,6 +1146,19 @@ pub enum Operation {
     /// SB-390: the key's value, for a session script's `export`; only the CLI asks for it.
     AnthropicKeyValue {
         name: String,
+    },
+    /// SB-404 K1: the provider keys Project Observatory holds, by name, each with where it was
+    /// saved here; never a value. Observatory missing is an answer (`state: absent`).
+    ObservatoryKeys,
+    /// SB-404 K2: checks adding a key from Observatory and names the saves it makes; nothing is
+    /// saved here (`observatory_keys::add` runs the saves, then `ObservatoryKeyRecord`).
+    ObservatoryKeyPlan {
+        request: observatory_keys::AddRequest,
+    },
+    /// SB-404 K2: notes the Observatory slot each saved key came from (`observatory-keys.json`).
+    ObservatoryKeyRecord {
+        slot: String,
+        targets: Vec<observatory_keys::Target>,
     },
     ApplyProject {
         path: PathBuf,
@@ -6257,6 +6271,19 @@ async fn execute(
         Operation::AnthropicKeyValue { name } => {
             Ok(json!({"key": anthropic_keys::value(root, &store, &name)?}))
         }
+        Operation::ObservatoryKeys => {
+            let root = root.to_owned();
+            let store = store.clone();
+            blocking::run(move || observatory_keys::list(&root, &store))
+        }
+        Operation::ObservatoryKeyPlan { request } => {
+            let root = root.to_owned();
+            let store = store.clone();
+            blocking::run(move || observatory_keys::plan(&root, &store, &request))
+        }
+        Operation::ObservatoryKeyRecord { slot, targets } => {
+            observatory_keys::record(root, &store, &slot, &targets, monitor::now())
+        }
         Operation::LaunchAgent {
             agent,
             working_directory,
@@ -6280,6 +6307,7 @@ async fn execute(
             pool,
             working_directory,
             via: AgentVia::Proxy,
+            model,
             ..
         } => {
             let runtime = needs_owner()?;
@@ -6301,6 +6329,7 @@ async fn execute(
                 &agent,
                 &pool,
                 &working_directory,
+                model.as_deref(),
             )
         }
         Operation::LaunchAccount {

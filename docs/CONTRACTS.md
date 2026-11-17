@@ -3760,3 +3760,124 @@ Plan: [2026-11-17-token-group](plans/2026-11-17-token-group/README.md); decision
   pay-per-token group out: it runs on its Claude keys.
 - **Not carried:** a settings file never carries the pay-per-token group, a settings import never
   matches it (`settings_bundle::matched`), and the SB-117 scanner finds no folder for it.
+
+## Provider keys from Observatory (SB-404, DEC-0024)
+
+Plan: [2026-11-17-observatory-keys](plans/2026-11-17-observatory-keys/README.md); decision
+[DEC-0024](DECISIONS.md#dec-0024-provider-keys-come-from-observatory-by-name-through-a-pipe-and-every-launch-on-one-is-counted).
+
+- **The engine.** `observatory_keys::engine` runs `project-observatory full-path` (found as
+  continuations find it: `SWITCHBOARD_OBSERVATORY_BIN`, then the usual folders; 5 s) and takes
+  the Python beside that executable (its virtual environment), else the one whose environment
+  holds the engine folder, else `python3` on the PATH. The folder must hold `tools/vault.py`.
+  Every call is bounded (both pipes read on threads, 4 MiB each, the child's process group
+  killed and reaped at the deadline).
+- **K1, the list.** `Operation::ObservatoryKeys` (`observatory_keys::list`, run off the async
+  workers) reads `vault.py list` (15 s) and keeps the provider keys (`classify`: `ANTHROPIC_`,
+  `OPENAI_` or `OPENROUTER_`, a `KEY` or `TOKEN` part, none of `ADMIN`, `MANAGEMENT`, `MGMT`,
+  `BYOK`, `PROVISIONING`, `PREVIOUS`; not "not a credential"). Each row: `slot`
+  (`project/env/NAME`), `project`, `env`, `name`, `kind`, `expires` and `rotated` (days, when
+  Observatory recorded them), `can_add` and `why_not` (an OpenAI key: `OPENAI_NOT_YET`), and
+  `added`: the targets recorded for the slot that still exist (`account` with `label` and `pool`,
+  `anthropic` with `name`, `openrouter` with `pool`), each with `metered`. `state` is `ok`,
+  `absent` (`NOT_INSTALLED`, `UNIX_ONLY`) or `unreadable` (`UNREADABLE`), with `why`; an
+  unreadable record file is named in `degraded`. CLI `switchboard keys observatory [list]`, MCP
+  `switchboard_observatory_keys` (read-only), window *API keys* → *From Project Observatory*.
+- **K2, adding.** `observatory_keys::add(root, cli, request)` (CLI `keys observatory add`, MCP
+  `switchboard_observatory_key_add`, Tauri `observatory_key_add` with the bundled CLI from
+  `launch::agent_cli`): `Operation::ObservatoryKeyPlan {request}` checks the slot (`SLOT_INVALID`;
+  `NOT_LISTED` when the list has no provider key there) and answers the engine, the Python and the
+  steps; each step runs as `use_secret.py run --vault-only --env E project NAME -- /bin/sh -c
+  '<pipe_script>' <cli> --data-dir <root> --json <args>` with `OBSERVATORY_VAULT_ONLY=1`, at most
+  60 s (`SAVE_TIMED_OUT`). `pipe_script(NAME)` is `k="${NAME}"; unset NAME; printf '%s' "$k" |
+  "$0" "$@"` (NAME is a checked slot name, so it cannot change the script). The answer of a save is
+  its own JSON; a refusal is its own sentence, never a text holding `sk-` (`SAVE_FAILED`
+  otherwise). Then `Operation::ObservatoryKeyRecord {slot, targets}` writes
+  `observatory-keys.json` (0600, `{keys: [{slot, target, added_at}]}`; a target saved again moves
+  to its new slot; targets gone are dropped; the newest 256 kept; oplog `observatory_key added`).
+  A save that fails stops the rest; what was saved is still recorded, and the answer carries
+  `saved`, `failed` and `next`; a first save that fails is the error. Request fields: `slot`,
+  `to` (`account` by default for an Anthropic key, `agent`, `both`; an OpenRouter key takes only
+  `agent`, `TARGET_INVALID`), `as` (the account's label, default `<project> (<env>)`; or the
+  named key's name, default from the project's folder name, `NAME_NEEDED` when none fits),
+  `pool` (an OpenRouter key's group, `KEY_POOL_INVALID`; refused for an Anthropic key,
+  `POOL_NOT_FOR_ANTHROPIC`), `model` (checked as an Anthropic or OpenRouter id), `replace` (a
+  named key, `NAME_TAKEN`, or an OpenRouter key, `OPENROUTER_TAKEN`, already saved there). The
+  steps: an account is `accounts add --provider claude --kind api-key --label=L --pool default
+  --secret-stdin` (DEC-0023 routes it to the pay-per-token group); a named key is `agents
+  anthropic set N --key-stdin [--model M]`; an OpenRouter key is `agents openrouter set
+  --key-stdin [--pool P] [--model M]`. A slot recorded as an account that still exists is refused
+  (`ALREADY_ACCOUNT`). An OpenAI key is refused (`OPENAI_NOT_YET`). `observatory-keys.json` is
+  removed by `switchboard uninstall`.
+- **K3, launching.** `Operation::LaunchAgent {via: proxy, model}` passes `model` (an Anthropic
+  id, `anthropic_keys::MODEL_INVALID`) to `launch::launch_agent`. Claude Code adds `--model M`.
+  Hermes on the pay-per-token group (`Project::tokens`) writes `runtimes/agent-hermes-<pool>/
+  agent-home/config.yaml` (0600): `providers.switchboard` with `api: "http://<proxy>/claude/<pool>"`,
+  `key_env: SWITCHBOARD_AGENT_KEY`, `transport: anthropic_messages`, and `auth.adopt_external_logins:
+  false`; the session script exports `HERMES_HOME` (that folder) and `SWITCHBOARD_AGENT_KEY` (the
+  agents' capability, `ProxyHandle::agent_token`, never a provider key) and runs `hermes
+  --provider switchboard -m M`; without a model it is refused (`HERMES_TOKENS_MODEL_NEEDED`).
+  Another agent with a model is refused (`MODEL_NOT_TAKEN`). The launch's answer carries `model`
+  and `metered` (the pool is the pay-per-token group), its record `label: M`. Hermes on an
+  ordinary group starts as before (its own `~/.hermes` after `agents connect`). The usual checks
+  hold first: the group on, a ceiling set, the folder in the group, the key selected
+  (`group_allows_launch`, `project_allows`).
+- **K3, which keys.** `launch_keys::list` adds `metered` to every key (`openrouter`: true;
+  `anthropic`: false) and, for an agent that takes the group's key (`takes_group_key`: Hermes, or
+  one configured by its environment), each Claude API key of the pay-per-token group as
+  `kind: group` with `pool`, `group`, `account_id`, `name` (its label), `selected`, `usable` and
+  `why_not`: disabled, `GROUP_OFF`, `TOKENS_NO_CEILING`, `FOLDER_OUTSIDE` (with a folder outside
+  the group) or `NOT_SELECTED`. The answer's `group_keys` says whether the agent takes them.
+- **Review round 1 (2026-11-17).** The two engine calls take at most 20 s together, under the
+  window's 30 s read deadline, and a read that failed is shown with *Read again* and never read
+  again by itself. A key Observatory lists as `EXPIRED <day>` carries `expired: true`, `can_add:
+  false` and `why_not: KEY_EXPIRED`, and adding it is refused. A `model` goes with a named key or
+  an OpenRouter key and is refused for an account alone (`MODEL_FOR_ACCOUNT`). The account's label
+  travels as one argument, `--label=L`. `pipe_script` starts with `set +xv;`, and the engine's and
+  the shell's environment loses `SHELLOPTS`, `BASHOPTS`, `ENV`, `BASH_ENV` and `PS4`, so a traced
+  shell never prints the value. A save's refusal is its own sentence, else Observatory's own
+  `use_secret: …` line as `Project Observatory refused the key: <reason>` (one line, at most 300
+  characters, never one holding `sk-`). With the record lost (a save that timed out, a record not
+  written), adding the slot again as an account is refused by the store's own same-key check in
+  the pay-per-token group, so no second account is made. Hermes on the pay-per-token group: its
+  `config.yaml` also sets `fallback_providers: []`, `auxiliary.free_only: true` and pins every side
+  task of Hermes 0.22.2 (`HERMES_AUX_TASKS`) to `provider: switchboard` with the launch's model,
+  and the session script unsets the provider key variables Hermes would find
+  (`HERMES_PROVIDER_KEYS`: `OPENROUTER_API_KEY`, `NOUS_*` and the rest; `GH_TOKEN`, `GITHUB_TOKEN`
+  and `HF_TOKEN` stay for the session's own tools), so helper calls stay on the metered provider
+  as far as the side tasks and provider variables Hermes 0.22.2 is known to read go; a newer
+  Hermes may add others.
+- **Review round 2 (2026-11-17).** `pipe_script` writes with `command printf`, and every
+  `BASH_FUNC_*` variable (an exported bash function, which bash 3.2 imports as `/bin/sh` on
+  macOS and which could shadow `printf`) is removed from the environment with the others. A
+  refusal is never shown when it may hold a key (`may_hold_key`: `sk-` in any case, or a run of 24
+  or more key characters; the run rule: review round 3), the save's own and Observatory's alike; Observatory's error for a
+  slot it does not hold has no `use_secret:` prefix and ends as `SAVE_FAILED`. `SAVE_TIMED_OUT`
+  now says the key may have been saved. A record that cannot be written after a save answers the
+  saves with `failed: RECORDS_UNSAVED`, never an error that reads as nothing saved. The metered
+  Hermes home holds a `.env` (0600) of its own (what it holds: review round 3), and
+  the unset list adds the AWS, Google application credentials, Nebius, Upstage, Actual, MoA and
+  LM Studio variables. Adding a key from Observatory as an account is refused while a saved
+  Claude API key's value cannot be read (the answers: review round 3): it may be that very key, which
+  the store's same-key check cannot see. The store itself still adds beside an unreadable row (the
+  2026-11-08 rule, `an_account_whose_sign_in_cannot_be_read_does_not_stop_a_new_one_in_its_group`),
+  so `accounts add` and the window are unchanged.
+- **Review round 3 (2026-11-17).** The metered Hermes home's `.env` names every entry of
+  `HERMES_PROVIDER_KEYS` empty (`NAME=`): Hermes 0.22.2 loads it first, overriding, then its install
+  folder's `.env`, which fills only names not set yet, so none of those keys comes back from
+  there. `may_hold_key` counts runs of `A-Za-z0-9_+=-` (`/` and `:` end a run, so a slot path, an
+  absolute path or a time splits) and flags one of 24 or more only when it mixes upper case, lower
+  case and digits or is 40 or more long; a run of short `UPPER_SNAKE` or `lower-hyphen` parts (a
+  slot name, a uuid) is a name. Adding from Observatory as an account fails closed only when a
+  saved Claude API key's item is definitely absent (`Store::stored_credential_present`, false only
+  for the vault's absent answer), naming it by its label: "The saved Claude API key <label> has no
+  stored value, …"; a read that failed for now (a locked keychain, a refused prompt) answers
+  `SAVED_KEYS_UNREADABLE_NOW`, try again in a moment, and names nothing to remove.
+- **Tests:** `observatory_keys::tests::*` (the list, slots and the pipe script, the record, the
+  plan and its refusals, saved targets), `launch_keys::tests::the_pay_per_token_groups_keys_are_offered_with_why_not`,
+  `launch::tests::hermes_on_the_pay_per_token_group_runs_through_the_proxy`, and
+  `a_key_observatory_holds_is_added_by_name_through_a_pipe` (switchboard-cli: a stand-in
+  Observatory whose `use_secret.py` puts a synthetic value in the environment, a file store in the
+  data folder; the value reaches the vault, never the output or the record). Not observed live
+  with Observatory's real vault or a real Hermes run in this change.
+

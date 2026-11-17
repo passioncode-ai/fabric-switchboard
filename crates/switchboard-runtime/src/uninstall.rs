@@ -50,6 +50,8 @@ const OWNED: &[&str] = &[
     "duty",
     // The names of the Anthropic keys agents run on (SB-390); their vault items are deleted below.
     "anthropic-keys.json",
+    // Which Observatory slot each saved key came from, never a value (SB-404).
+    "observatory-keys.json",
     // The owner's run and the crashes found at its starts (SB-379 W3 part 2).
     "owner-run.json",
     "bugs.jsonl",

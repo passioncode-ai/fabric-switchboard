@@ -117,7 +117,7 @@ sign-in on that machine, or call the account back with `switchboard_account_reca
 ### `switchboard_anthropic_keys`: `name?` (string), `model?` (string)
 
 The Anthropic API keys agents run on directly (SB-390), each under a name the person chose
-(`appvillis`, `personal`): `name`, `saved_at` and default `model`, never a key. With both `name`
+(`team-a`, `personal`): `name`, `saved_at` and default `model`, never a key. With both `name`
 and `model`, changes that key's default model. Saving or removing a key is the person's
 (`switchboard agents anthropic set <name> --key-stdin`); a launch picks one with `switchboard
 agents launch hermes --anthropic <name>`. No spending ceiling counts these keys.
@@ -128,6 +128,33 @@ launch in the folder spends, marked `default` (the folder's group's own, else th
 other OpenRouter keys with `why_not` (the group whose folders use them), then the Anthropic keys
 for an agent that takes one (Hermes). `none_usable` says no saved key can start it. OpenRouter is
 the default; an Anthropic Admin key (`sk-ant-admin`) cannot run a model and is refused when saved.
+Since SB-404 every key carries `metered` (whether a ceiling counts it), and for Claude Code and
+Hermes the pay-per-token group's Claude API keys follow as `kind: group` (`pool`, `group`,
+`account_id`, `selected`): `usable` once the group is on, has a daily ceiling, holds the folder
+and has this key selected, else `why_not` says which.
+
+### `switchboard_observatory_keys`
+
+The provider keys Project Observatory holds that an agent can run on (SB-404), by `slot`
+(`project/env/NAME`) and never a value: `kind` (`anthropic`, `openai`, `openrouter`), `expires`,
+`rotated`, `expired` (an expired key is not addable), `can_add` with `why_not`, and `added`: where each is saved here already (an `account`
+in the pay-per-token group, a named `anthropic` key, an `openrouter` key), each with `metered`.
+Admin, management, provisioning, BYOK and archived `_PREVIOUS` keys are left out. `state` is
+`ok`, `absent` (Observatory is not installed; `why`) or `unreadable`; `degraded` names a record
+file that could not be read. Read-only.
+
+### `switchboard_observatory_key_add`: `slot` (string), `to?` (`account`, `agent`, `both`), `as?` (string), `pool?` (string), `model?` (string), `replace?` (boolean)
+
+Saves a key Observatory holds by its slot, so an agent starts on it at once (SB-404). The value
+goes from Observatory's vault to Switchboard's through a pipe (Observatory's `use_secret.py run
+--vault-only` into a `switchboard` save that reads stdin): it never appears in an argument, a
+file, a log or the answer. An Anthropic key becomes an account in the pay-per-token group (`to:
+account`, the default), counted against that group's daily ceiling; `agent` or `both` also saves
+it as a named key Hermes runs on directly, which no ceiling counts. An OpenRouter key becomes this
+computer's key, or `pool`'s. An OpenAI key is refused for now (no ceiling counts one), and so is an expired key; a `model` goes with a named key or an OpenRouter key, never an account alone. A name or
+key already saved is kept unless `replace`; a slot already added as an account is refused. The
+answer lists `saved` (each save's own answer), `failed` and `next` (turning the pay-per-token group
+on, the launch command).
 
 ### `switchboard_session_close_copy`: `session_id` (string), `pid?` (integer)
 

@@ -105,8 +105,9 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 | SCN-098 | See and manage every session here and on other machines on one page | draft |
 | SCN-099 | Restart every running session so it loads new skills, and watch each come back | draft |
 | SCN-100 | Run Claude Code on an API key only in the folders I choose, under a daily ceiling | draft |
-| SCN-101 | Delegate an organization's subscription to a teammate's machine and call it back | draft |
-| SCN-102 | Keep Switchboard away from my own sign-in on a teammate's computer | draft |
+| SCN-101 | Add a provider key Project Observatory holds and launch an agent on it at once | draft |
+| SCN-102 | Delegate an organization's subscription to a teammate's machine and call it back | draft |
+| SCN-103 | Keep Switchboard away from my own sign-in on a teammate's computer | draft |
 ### SCN-001: First run
 **Persona:** P-01
 **Goal:** Deliberately control which account a coding session uses.
@@ -2008,7 +2009,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Preconditions:** the desktop app or the browser demo (`?demo=1`).
 **Entry point:** the sidebar's *Settings* (between *Statistics* and *About*); Accounts → the switching line → *Open Settings*; Groups → “Balancing between groups, Codex in group folders and terminals in organization folders are set in Settings.” → *Open Settings*; the terminal hook's first-time notice → *Open Settings*.
 **Steps:**
-1. Open *Settings* → “How Switchboard switches, lends, updates and backs up on this computer.”, then ten folding sections, all folded, each with its state at the right of its header: *Automatic switching* (“On for {n} groups” or “Off”), *Balancing between groups* (“On”, “Off”), *Coding sessions* (“No limit” or “{used} of {cap} working”, SB-378), *Session duty officer*, *Your own sign-in* (“On”, “Off”, SCN-102), *Codex in group folders*, *Terminals in organization folders*, *Running in the background*, *Updates* (“Automatic”, “Off”), *Language and appearance* (the language), *Backups* (“Newest {date}”), *Usage counts*. A state not read yet leaves the header without one.
+1. Open *Settings* → “How Switchboard switches, lends, updates and backs up on this computer.”, then ten folding sections, all folded, each with its state at the right of its header: *Automatic switching* (“On for {n} groups” or “Off”), *Balancing between groups* (“On”, “Off”), *Coding sessions* (“No limit” or “{used} of {cap} working”, SB-378), *Session duty officer*, *Your own sign-in* (“On”, “Off”, SCN-103), *Codex in group folders*, *Terminals in organization folders*, *Running in the background*, *Updates* (“Automatic”, “Off”), *Language and appearance* (the language), *Backups* (“Newest {date}”), *Usage counts*. A state not read yet leaves the header without one.
 2. Press a section's header (or Enter or Space on it; the header is a button with `aria-expanded`) → it opens with the same controls and notices it had before on Accounts, Groups or About (SCN-022, SCN-090, SCN-066, SCN-075, SCN-033, SCN-037, SCN-041, SCN-030, SCN-044); press again → it folds. What is open stays open when the window renders again, when the person changes page and comes back, and through a background refresh.
 3. On Accounts → *Open Settings* beside “Automatic switching is on for {n} groups.” or “Automatic switching is off.” → Settings opens with *Automatic switching* unfolded and focused.
 4. *About* keeps the product, the provider terms, the tour, version and license.
@@ -2184,8 +2185,30 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Coverage:** demo `?tokens=reached` (and the default demo: the group off with a ceiling); `tokens_group_tests::the_ceiling_the_window_sets_is_the_one_the_proxy_refuses_by`, `tokens_group_tests::an_owner_starts_with_the_days_spend_the_files_hold`; `tests::the_pay_per_token_group_serves_nothing_while_off_or_without_a_ceiling`, `tests::a_reached_ceiling_refuses_even_after_the_owner_took_the_statistics_and_after_a_restart` (switchboard-proxy); `a_pay_per_token_key_stays_in_its_group_and_serves_no_other` (core); `tokens_group_tests::*` (runtime); `test-ui-logic` SB-401 block. Window walk-through: NOT_RUN (no display session in this run).
 **Product:** unobserved
 **Traces:** SB-401, SCN-042, SCN-083, SB-72
+### SCN-101: Add a provider key Project Observatory holds and launch an agent on it at once
+**Persona:** P-01
+**Goal:** A key already in Project Observatory's vault (an Anthropic or OpenRouter API key) becomes usable by an agent in one step, by its name, without anyone seeing or pasting its value, and every launch on it counts against a ceiling.
+**Preconditions:** the window runs; Project Observatory is installed and holds the key.
+**Entry point:** API keys → *From Project Observatory*. An agent: CLI `switchboard keys observatory`, `switchboard keys observatory add <project/env/NAME>`; MCP `switchboard_observatory_keys`, `switchboard_observatory_key_add`.
+**Steps:**
+1. The section reads “Keys Project Observatory holds for Anthropic, OpenAI and OpenRouter, by name. Adding one moves its value into Switchboard's store without showing it anywhere.” and lists each key as `project/env/NAME · Anthropic` (or OpenAI, OpenRouter), with “expires {day}” when Observatory recorded one, and either where it is saved here (“saved as account {label}”, “named key {name}”, “this computer's OpenRouter key”, “OpenRouter key {where}”) or *Add*. Admin, management, provisioning and BYOK keys are not listed.
+2. *Add* on an Anthropic key → “Add {slot}” with “An Anthropic key becomes an account in the pay-per-token group, which counts it against its daily ceiling. It can also be a named key Hermes runs on directly, which no ceiling counts.”, the choice *Where* (*Account in the pay-per-token group*, *Account and a named key for Hermes*, *Named key for Hermes only*), *Name* and *Model* (both optional) and the box *Replace a key already saved there* → *Add* → “{slot} is in the pay-per-token group. Set its daily ceiling and turn it on under Groups to launch on it.”
+3. *Add* on an OpenRouter key → *Used by* (*This computer* or a group) and *Model* → “{slot} is saved. Agents can start on it now.”
+4. Groups → *Pay-per-token keys*: set the daily ceiling, turn it on and add the folder (SCN-100).
+5. Agents → Claude Code or Hermes → the launch dialog: *Keys you can run on* lists “Pay-per-token group: {label}” with “a launch through the proxy {where} uses it”, or why not yet; choosing *Group* *Pay-per-token keys* shows *Model* (“An Anthropic id. Hermes on the pay-per-token group needs one.” for Hermes, optional for Claude Code) → the launch → “Terminal launch requested for {agent}.” Hermes starts in a home of its own through Switchboard, so every answer is priced against the group's ceiling.
+**Alt paths:** a key Observatory records as expired shows “expired {day}” and “Project Observatory records this key as expired. Rotate it there, then add it.” with no *Add*; with *Where* set to *Account in the pay-per-token group* the dialog hides *Model* (a model with an account alone is refused: “A model belongs to a named key. …”); Observatory refuses the slot → “Project Observatory refused the key: {name}”; the read fails, Observatory is absent or unreadable, or it holds no key → the reason and *Read again*, never read again by itself; the save took over a minute → “… It may have been saved: check the accounts and agent keys before adding it again.”; a saved Claude API key's stored value is gone → “The saved Claude API key {name} has no stored value, …”, and a read that failed for now → “Switchboard could not read the saved Claude API keys now, … Try again in a moment.”; Observatory not installed → the section says “Project Observatory is not installed on this computer, so no key can come from it. …”; an OpenAI key shows “An OpenAI key cannot be added yet: no spending ceiling counts one in Switchboard. …” and no *Add*; a slot already added as an account → “This key is already an account in the pay-per-token group. Remove that account first to add it again.”; a name taken without *Replace* → “An Anthropic key is already saved under that name. Choose another name, or replace the saved key.”; an OpenRouter key already saved there → “An OpenRouter key is already saved there. Replace it, or choose a group for this one.”; Hermes on the pay-per-token group without a model → “Name the model for Hermes, …”; a key not usable yet says why in *Keys you can run on* (the group is off, has no ceiling, does not hold the folder, or another key is selected).
+**Expected result:** the key is usable at once and its value never appears on screen, in an argument, a file, a log or an answer; where it came from is recorded so a rotation can be followed.
+**UI elements:** the section *From Project Observatory*, its list and *Add*, the add dialog, *Read again*; the launch dialog's *Keys you can run on* and *Model*.
+**States covered:** reading, Observatory absent or unreadable, no key, keys not added, keys added, OpenAI not addable, each refusal above.
+**Errors & recovery:** a save that fails stops the rest and names the save's own refusal; what was saved before it is still recorded.
+**Status:** draft
+**Meaning:** SB-404, DEC-0024 (operator 2026-11-17: «Чтобы можно было добавить токены ChatGPT, OpenRouter, Anthropic, либо они подтягивались в Observatory автоматически, и можно было бы их использовать для запуска агентов сразу»).
+**Copy:** checked with Copylot, register ui; report ids in [strings](../brand/strings.md).
+**Coverage:** `observatory_keys::tests::*`, `launch_keys::tests::the_pay_per_token_groups_keys_are_offered_with_why_not`, `launch::tests::hermes_on_the_pay_per_token_group_runs_through_the_proxy`, `a_key_observatory_holds_is_added_by_name_through_a_pipe` (switchboard-cli, a stand-in Observatory and a file store); demo (`?demo=1`, the list; adding needs the app). Window walk-through: NOT_RUN (no display session in this run).
+**Product:** unobserved
+**Traces:** SB-404, SB-401, SB-390, SB-392, SCN-097, SCN-100
 
-### SCN-101: Delegate an organization's subscription to a teammate's machine and call it back
+### SCN-102: Delegate an organization's subscription to a teammate's machine and call it back
 **Persona:** P-01
 **Goal:** The operator lets a teammate use one of the organization's subscriptions in console sessions on the teammate's own computer, without the teammate ever signing in with it, and can take it back at any time; more seats can be added the same way (SB-403 S2 to S4, DEC-0025).
 **Preconditions:** the teammate's computer runs Switchboard, has a group (in the organization) for the folders the seat serves, is reachable over ssh without a prompt, and its `~/.ssh/authorized_keys` holds this computer's key line with the forced command `switchboard ssh-serve --sender-key <this computer's key>` ([ORGANIZATION.md](../ORGANIZATION.md#a-teammates-computer)); the account is a Claude or Codex subscription sign-in used here.
@@ -2208,7 +2231,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Product:** unobserved
 **Traces:** SB-403, DEC-0025, DEC-0013, SCN-087, SCN-092
 
-### SCN-102: Keep Switchboard away from my own sign-in on a teammate's computer
+### SCN-103: Keep Switchboard away from my own sign-in on a teammate's computer
 **Persona:** P-01
 **Goal:** A teammate whose Switchboard serves only seats an organization delegated keeps their own subscription in Claude Desktop and in the ordinary Claude Code, and Switchboard never reads or changes it (SB-403 S3, DEC-0025).
 **Preconditions:** the desktop app runs on the teammate's computer.

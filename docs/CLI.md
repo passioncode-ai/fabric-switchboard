@@ -45,10 +45,15 @@ switchboard accounts receive handover.json --signer KEY [--apply] [--headless]  
 switchboard accounts recall ACCOUNT_UUID --from member@vm   # SB-292: take a moved sign-in back; its copy there is removed and proved gone (Claude and Codex)
 switchboard accounts send ACCOUNT_UUID --to user@studio.local --remote /usr/local/bin/switchboard --remote-data-dir /srv/switchboard   # SB-315: a Switchboard there that runs with --data-dir; a recall uses the same by default
 switchboard accounts seats [--limit 50]                     # SB-312: the moves, hand-overs and call backs recorded here, with the id there
-switchboard agents anthropic set appvillis --key-stdin --model claude-sonnet-5-5   # SB-390: an Anthropic API key under a name (piped, never echoed); list | model | remove | key
+switchboard agents anthropic set team-a --key-stdin --model claude-sonnet-5-5   # SB-390: an Anthropic API key under a name (piped, never echoed); list | model | remove | key
 switchboard agents launch hermes --anthropic personal --dir /abs/folder     # SB-390: Hermes on the Anthropic key saved as personal
 switchboard agents launch-keys hermes --folder /abs/folder   # SB-392: the keys this agent can start on, by name: the folder's OpenRouter key first, then the others and the Anthropic keys
-use_secret.py run --vault-only --env prod appvillis ANTHROPIC_API_KEY -- sh -c 'printf %s "$ANTHROPIC_API_KEY" | switchboard agents anthropic set appvillis --key-stdin'   # SB-392 K-0: save a key from Observatory without seeing it (an Admin key is refused)
+use_secret.py run --vault-only --env prod team-a ANTHROPIC_API_KEY -- sh -c 'printf %s "$ANTHROPIC_API_KEY" | switchboard agents anthropic set team-a --key-stdin'   # SB-392 K-0: save a key from Observatory without seeing it (an Admin key is refused)
+switchboard keys observatory                          # SB-404 K1: the Anthropic, OpenAI and OpenRouter keys Project Observatory holds, by project/env/NAME, and where each is saved here; never a value
+switchboard keys observatory add alpha-web/prod/ANTHROPIC_API_KEY [--to account|agent|both] [--as NAME] [--model M]   # SB-404 K2: an Anthropic key into the pay-per-token group (and/or a named key for Hermes); the value moves through a pipe
+switchboard keys observatory add alpha-web/prod/OPENROUTER_API_KEY [--pool POOL] [--model M] [--replace]   # SB-404 K2: an OpenRouter key as this computer's (or a group's) agents' key; an OpenAI key is refused for now
+switchboard agents launch hermes --pool tokens --model claude-sonnet-5-5 --dir /abs/folder   # SB-404 K3: Hermes on the pay-per-token group's selected key, through the proxy, counted against its daily ceiling
+switchboard agents launch claude-code --pool tokens --model claude-sonnet-5-5 --dir /abs/folder   # SB-404 K3: Claude Code on the same key, managed, with its model
 switchboard bugs                                       # SB-379 W3: crashes found at the next start (exception type and signal from macOS's report) and, with usage counts on, the week's error counts
 switchboard attention                                  # SB-365: what needs a person (sign-in, refused renewal, ended seat, failing usage checks, a lost move, a ceiling question), each with the tool that fixes it; the accounts stay in their groups
 switchboard mcp-homes                                  # SB-359: which Claude home is signed in to which MCP server (names, URLs, booleans; never a token)
@@ -345,7 +350,7 @@ Version 0.4 serves Switchboard to coding agents over the Model Context Protocol 
 
 ```sh
 switchboard mcp               # stdio server: status, accounts, usage, switch, project rules
-switchboard mcp --read-only   # only the 24 read tools; usage refresh shows the stored observation
+switchboard mcp --read-only   # only the 38 read tools; usage refresh shows the stored observation
 switchboard --data-dir /path/to/app-data mcp
 ```
 
@@ -821,6 +826,51 @@ key --service openrouter` when it starts and exports it under the agent's own va
 Hermes, pi, omp and Qwen Code start in their own home under Switchboard's data folder, so a key
 they saved themselves cannot win. Which agents launch this way, and their caveats:
 [AGENT-SUPPORT.md](AGENT-SUPPORT.md) ("OpenRouter key" lines). OpenClaw and Cline cannot.
+
+### Keys from Project Observatory (SB-404)
+
+When Project Observatory holds a provider key (an Anthropic, OpenAI or OpenRouter API key in its
+vault), Switchboard lists it by name and saves it without anyone seeing the value:
+
+```sh
+switchboard keys observatory                 # every such key by project/env/NAME, and where each is saved here
+switchboard keys observatory add alpha-web/prod/ANTHROPIC_API_KEY                  # an account in the pay-per-token group
+switchboard keys observatory add alpha-web/prod/ANTHROPIC_API_KEY --to both --as alpha --model claude-sonnet-5-5   # and a named key for Hermes
+switchboard keys observatory add beta/prod/OPENROUTER_API_KEY --pool client-alpha   # that group's OpenRouter key
+```
+
+The list leaves out organization admin, management, provisioning and BYOK keys and archived
+`_PREVIOUS` copies: no agent runs on one. Without Observatory it says so (`state: absent`).
+
+`add` runs Observatory's own `use_secret.py run --vault-only` with a small shell that moves the
+value into an unexported variable, removes it from the environment and writes it to the stdin of
+the ordinary save (`accounts add --secret-stdin`, `agents anthropic set --key-stdin`, `agents
+openrouter set --key-stdin`). The value never appears in an argument, a file, a log or the
+answer. `observatory-keys.json` (0600) then records which slot each saved key came from, never a
+value.
+
+Where a key goes:
+
+- **Anthropic**: by default an account in the pay-per-token group (DEC-0023), which starts off
+  and runs only under its daily ceiling; `--to agent` or `--to both` also saves it under a name
+  for Hermes's direct launch (`--anthropic NAME`), which no ceiling counts. A slot already added
+  as an account is refused.
+- **OpenRouter**: this computer's agents' key, or a group's with `--pool`, under its ceiling. A
+  key already saved there is kept unless `--replace`.
+- **OpenAI**: listed, not added yet: no ceiling in Switchboard counts an OpenAI key.
+
+Once the pay-per-token group has a daily ceiling, is turned on and holds the folder, Claude Code
+and Hermes start on its selected key through the proxy, and every answer is priced against that
+ceiling:
+
+```sh
+switchboard agents launch claude-code --pool tokens --model claude-sonnet-5-5 --dir ~/src/app
+switchboard agents launch hermes --pool tokens --model claude-sonnet-5-5 --dir ~/src/app
+```
+
+Hermes needs `--model` there: it starts in a Hermes home of its own whose provider points at the
+group's route with the agents' capability, so `~/.hermes` and its sign-ins are left alone.
+`agents launch-keys` lists these keys as `Pay-per-token group` with why one cannot start yet.
 
 ## Capacity recovery (SB-114)
 

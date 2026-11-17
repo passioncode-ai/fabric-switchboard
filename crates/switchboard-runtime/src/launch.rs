@@ -1602,6 +1602,8 @@ pub(crate) fn group_allows_launch(
     }
     Ok(())
 }
+pub const MODEL_NOT_TAKEN: &str =
+    "Only Claude Code, and Hermes on the pay-per-token group, take a model at launch through the proxy. Leave out the model, or choose it in the agent itself.";
 pub(crate) const PROJECT_ACCOUNT_OUTSIDE: &str =
     "This account belongs to a group. Launch it from one of the group's folders.";
 pub(crate) const PROJECT_FOLDER_FOREIGN: &str =
@@ -1654,6 +1656,7 @@ pub fn launch_agent(
     agent: &str,
     pool: &str,
     working_directory: &Path,
+    model: Option<&str>,
 ) -> Result<Value, String> {
     launch_agent_with(
         root,
@@ -1662,10 +1665,158 @@ pub fn launch_agent(
         agent,
         pool,
         working_directory,
+        model,
         find_program,
         start_terminal,
     )
 }
+pub const HERMES_TOKENS_MODEL_NEEDED: &str =
+    "Name the model for Hermes, an Anthropic id such as claude-sonnet-5-5: Hermes on the pay-per-token group starts on the model you name.";
+/// SB-404 K3: Hermes on the pay-per-token group, through the proxy, so every answer is priced and
+/// counted against the group's daily ceiling (DEC-0023). Hermes reads its provider from its own
+/// config file: the launch writes one in a Hermes home of its own, pointing a provider named
+/// `switchboard` at the group's route with the agents' capability (never a provider key), and
+/// leaves `~/.hermes` alone. The person's own sign-ins are not adopted.
+fn hermes_tokens_home(home: &Path, base: &str, model: &str) -> Result<PathBuf, String> {
+    let own = home.join("agent-home");
+    private_dir(&own)?;
+    let mut config = format!(
+        "# Written by Fabric Switchboard for this launch: Hermes on the pay-per-token group, through its proxy.\n\
+providers:\n  switchboard:\n    api: \"{base}\"\n    key_env: {HERMES_KEY_ENV}\n    transport: anthropic_messages\n\
+fallback_providers: []\n\
+auth:\n  adopt_external_logins: false\n\
+auxiliary:\n  free_only: true\n"
+    );
+    // Review round 1, P2-10: Hermes's side tasks (titles, compression, vision, approval and the
+    // rest) pick their own provider; each is pinned to this launch's provider and model, so none
+    // falls through to OpenRouter, Nous or a direct key past the meter.
+    for task in HERMES_AUX_TASKS {
+        config.push_str(&format!(
+            "  {task}:\n    provider: switchboard\n    model: \"{model}\"\n"
+        ));
+    }
+    switchboard_core::private_fs::private_write(&own.join("config.yaml"), config.as_bytes())
+        .map_err(|_| "Managed home unavailable.".to_string())?;
+    // Review round 3: Hermes 0.22.2 loads the home's `.env` first (overriding) and then its
+    // install folder's `.env`, which fills only names not set yet (`env_loader.py`). The home's
+    // `.env` names every provider key empty, so each is set, empty, and the install folder's
+    // value is skipped: an unset key cannot come back from there.
+    let dotenv: String = HERMES_PROVIDER_KEYS
+        .iter()
+        .map(|name| format!("{name}=\n"))
+        .collect();
+    switchboard_core::private_fs::private_write(&own.join(".env"), dotenv.as_bytes())
+        .map_err(|_| "Managed home unavailable.".to_string())?;
+    Ok(own)
+}
+/// Hermes's side tasks with a provider of their own (`hermes_cli/config_defaults.py`
+/// `auxiliary`, Hermes 0.22.2).
+const HERMES_AUX_TASKS: &[&str] = &[
+    "vision",
+    "compression",
+    "skills_hub",
+    "approval",
+    "review",
+    "mcp",
+    "title_generation",
+    "memory_query_rewrite",
+    "tts_audio_tags",
+    "voice_chat",
+    "triage_specifier",
+    "kanban_decomposer",
+    "profile_describer",
+    "goal_judge",
+    "curator",
+    "monitor",
+];
+/// Provider keys Hermes would find in the environment and use past the meter (its auxiliary
+/// chain tries OpenRouter, Nous and direct API-key providers): unset for a metered launch. Keys a
+/// session's own tools use (`GH_TOKEN`, `GITHUB_TOKEN`, `HF_TOKEN`) stay.
+pub(crate) const HERMES_PROVIDER_KEYS: &[&str] = &[
+    "OPENROUTER_API_KEY",
+    "NOUS_API_KEY",
+    "NOUS_BASE_URL",
+    "NOUS_INFERENCE_BASE_URL",
+    "NOUS_PORTAL_BASE_URL",
+    "ANTHROPIC_TOKEN",
+    "AI_GATEWAY_API_KEY",
+    "ALIBABA_CODING_PLAN_API_KEY",
+    "ARCEEAI_API_KEY",
+    "AZURE_FOUNDRY_API_KEY",
+    "COPILOT_GITHUB_TOKEN",
+    "DASHSCOPE_API_KEY",
+    "DEEPSEEK_API_KEY",
+    "GEMINI_API_KEY",
+    "GOOGLE_API_KEY",
+    "GLM_API_KEY",
+    "GMI_API_KEY",
+    "KILOCODE_API_KEY",
+    "KIMI_API_KEY",
+    "KIMI_CN_API_KEY",
+    "KIMI_CODING_API_KEY",
+    "LM_API_KEY",
+    "MINIMAX_API_KEY",
+    "MINIMAX_CN_API_KEY",
+    "NVIDIA_API_KEY",
+    "OLLAMA_API_KEY",
+    "OPENCODE_GO_API_KEY",
+    "OPENCODE_ZEN_API_KEY",
+    "STEPFUN_API_KEY",
+    "TOKENHUB_API_KEY",
+    "TOKENPLAN_API_KEY",
+    "XAI_API_KEY",
+    "XIAOMI_API_KEY",
+    "Z_AI_API_KEY",
+    "ZAI_API_KEY",
+    "GROQ_API_KEY",
+    "MISTRAL_API_KEY",
+    "TOGETHER_API_KEY",
+    "FIREWORKS_API_KEY",
+    "CEREBRAS_API_KEY",
+    "PERPLEXITY_API_KEY",
+    // Review round 2: cloud credentials and the remaining providers Hermes 0.22.2 reads.
+    "AWS_ACCESS_KEY_ID",
+    "AWS_SECRET_ACCESS_KEY",
+    "AWS_SESSION_TOKEN",
+    "AWS_PROFILE",
+    "AWS_BEARER_TOKEN_BEDROCK",
+    "GOOGLE_APPLICATION_CREDENTIALS",
+    "NEBIUS_API_KEY",
+    "NEBIUS_TOKEN_FACTORY_API_KEY",
+    "UPSTAGE_API_KEY",
+    "ACTUAL_API_KEY",
+    "MOA_API_KEY",
+    "HERMES_CUSTOM_LMSTUDIO_API_KEY",
+];
+/// A launch script that also clears `names` before anything runs (as it clears `CONFLICTS`).
+fn with_unset(content: String, names: &[&str]) -> String {
+    if names.is_empty() {
+        return content;
+    }
+    #[cfg(not(windows))]
+    {
+        content.replacen("\nunset ", &format!("\nunset {} ", names.join(" ")), 1)
+    }
+    #[cfg(windows)]
+    {
+        let lines: String = names
+            .iter()
+            .map(|n| {
+                format!(
+                    "[Environment]::SetEnvironmentVariable({}, $null, 'Process')\n",
+                    powershell_quote(n)
+                )
+            })
+            .collect();
+        content.replacen(
+            "Set-PSDebug -Off\n",
+            &format!("Set-PSDebug -Off\n{lines}"),
+            1,
+        )
+    }
+}
+/// The variable the Hermes home's provider reads the agents' capability from.
+const HERMES_KEY_ENV: &str = "SWITCHBOARD_AGENT_KEY";
 /// `launch_agent` with the agent's program found by `find` and Terminal started by `start`, so
 /// tests need neither an installed agent nor Terminal.
 #[allow(clippy::too_many_arguments)]
@@ -1676,10 +1827,15 @@ fn launch_agent_with(
     agent: &str,
     pool: &str,
     working_directory: &Path,
+    model: Option<&str>,
     find: fn(&str) -> Option<PathBuf>,
     start: fn(&Path) -> Result<(), String>,
 ) -> Result<Value, String> {
     let profile = crate::agent_catalog::launchable(agent)?;
+    // SB-404 K3: a model named for the launch is an Anthropic id (the route speaks Claude's API).
+    if model.is_some_and(|m| !crate::anthropic_keys::model_valid(m)) {
+        return Err(crate::anthropic_keys::MODEL_INVALID.into());
+    }
     let working_directory = agent_folder(root, working_directory)?;
     let (account, _) = store
         .route(Provider::Claude, pool)
@@ -1713,15 +1869,41 @@ fn launch_agent_with(
         ("SWITCHBOARD_CONTEXT".to_string(), context.clone()),
     ]);
     if let (Some(base_env), Some(key_env)) = (&profile.base_env, &profile.key_env) {
-        env.insert(base_env.clone(), base);
+        env.insert(base_env.clone(), base.clone());
         env.insert(key_env.clone(), proxy.agent_token().to_owned());
     }
     env.extend(profile.extra_env.clone());
+    let mut args: Vec<String> = profile.args.clone();
+    let mut unset: Vec<&str> = Vec::new();
+    // SB-404 K3: Hermes on the pay-per-token group runs through the proxy, in a home of its own.
+    let tokens = snapshot.project_of_pool(pool).is_some_and(|g| g.tokens);
+    if profile.id == "hermes" && tokens {
+        let model = model.ok_or(HERMES_TOKENS_MODEL_NEEDED)?;
+        let own = hermes_tokens_home(&home, &base, model)?;
+        unset.extend_from_slice(HERMES_PROVIDER_KEYS);
+        env.insert("HERMES_HOME".into(), own.to_string_lossy().into_owned());
+        env.insert(HERMES_KEY_ENV.into(), proxy.agent_token().to_owned());
+        args.extend([
+            "--provider".into(),
+            "switchboard".into(),
+            "-m".into(),
+            model.to_owned(),
+        ]);
+    } else if let Some(model) = model {
+        // Claude Code takes the model as `--model`; another agent picks it in its own config.
+        if profile.id != "claude-code" {
+            return Err(MODEL_NOT_TAKEN.into());
+        }
+        args.extend(["--model".into(), model.to_owned()]);
+    }
     // SB-212: the session's own launch id, for the record and for what it launches.
     let launch_id = crate::launches::new_id();
     env.insert(crate::launches::ENV.into(), launch_id.clone());
-    let args: Vec<&str> = profile.args.iter().map(String::as_str).collect();
-    let content = script(&home, &program, &args, &env, false, &working_directory);
+    let args: Vec<&str> = args.iter().map(String::as_str).collect();
+    let content = with_unset(
+        script(&home, &program, &args, &env, false, &working_directory),
+        &unset,
+    );
     let path = write_launch_script(&home, &content)?;
     // Listed under Sessions like any launch (`sessions`): ids, folder and times only.
     // `provider` is the provider the proxy route serves (the agent speaks Claude's protocol on
@@ -1732,11 +1914,12 @@ fn launch_agent_with(
         "pool": pool, "context": context,
         "mode": "managed", "working_directory": working_directory, "in_place": false,
         "launched_at": switchboard_proxy::now(), "continues": null,
+        "label": model,
     });
     crate::launches::record(root, &home, record, &launch_id)?;
     start(&path)?;
     Ok(
-        json!({"launched": true, "agent": profile.id, "name": profile.name, "pool": pool, "account": account.label}),
+        json!({"launched": true, "agent": profile.id, "name": profile.name, "pool": pool, "account": account.label, "model": model, "metered": tokens}),
     )
 }
 /// The folder a third-party agent starts in: an existing absolute folder outside Switchboard's
@@ -1799,7 +1982,7 @@ pub const ANTHROPIC_AGENT_UNSUPPORTED: &str =
     "Only Hermes runs on an Anthropic key for now. Choose Hermes, or its OpenRouter key.";
 pub const ANTHROPIC_MODEL_NEEDED: &str =
     "Choose a model for this launch, or set the key's default model with switchboard agents anthropic model.";
-/// SB-390: starts Hermes in a folder on the Anthropic key saved under `key` (`appvillis`,
+/// SB-390: starts Hermes in a folder on the Anthropic key saved under `key` (`team-a`,
 /// `personal`) and `model` (default: the key's model), as `hermes --provider anthropic -m
 /// <model>`. Like an OpenRouter launch (`launch_agent_openrouter`), it runs in a Hermes home of
 /// its own (`HERMES_HOME`, so `~/.hermes`'s own sign-ins do not win over the key), and the key is
@@ -5459,6 +5642,7 @@ mod tests {
             "goose",
             "default",
             &f.project,
+            None,
             goose_installed,
             terminal_opens,
         )
@@ -5499,6 +5683,7 @@ mod tests {
             "codex",
             "default",
             &f.project,
+            None,
             goose_installed,
             terminal_opens,
         )
@@ -5516,6 +5701,7 @@ mod tests {
             "goose",
             "acme",
             &f.project,
+            None,
             goose_installed,
             terminal_opens,
         )
@@ -5523,6 +5709,159 @@ mod tests {
         let record = recorded(&f.root.join("runtimes/agent-goose-acme"));
         assert_eq!(record["context"], format!("org:{acme}"));
         assert_eq!(record["pool"], "acme");
+    }
+    /// SB-404 K3: Hermes on the pay-per-token group goes through the proxy, in a home of its own
+    /// whose provider points at the group's route with the agents' capability, never a key; it
+    /// needs a model. Claude Code takes a model as `--model`; another agent refuses one.
+    #[tokio::test]
+    async fn hermes_on_the_pay_per_token_group_runs_through_the_proxy() {
+        let f = fixture();
+        let proxy = ProxyHandle::start(f.store.clone()).await.unwrap();
+        let credential =
+            Credential::parse(Provider::Claude, AuthKind::ApiKey, "synthetic-tokens-key").unwrap();
+        let key = f
+            .store
+            .add_routed(
+                "Team key".into(),
+                Provider::Claude,
+                AuthKind::ApiKey,
+                "default".into(),
+                credential,
+            )
+            .unwrap();
+        assert_eq!(key.pool, "tokens");
+        let folder = f.project.canonicalize().unwrap();
+        f.store
+            .save_project(
+                Some("tokens"),
+                "Pay-per-token keys",
+                std::slice::from_ref(&folder),
+                std::slice::from_ref(&key.id),
+            )
+            .unwrap();
+        f.store.select(Provider::Claude, "tokens", &key.id).unwrap();
+        crate::spend::set_ceiling(
+            &f.root,
+            &f.store.snapshot().unwrap(),
+            switchboard_core::ChainScope::Project {
+                pool: "tokens".into(),
+            },
+            Some(5.0),
+            crate::spend::Surface::Window,
+            1,
+        )
+        .unwrap();
+        f.store.set_group_off("tokens", false).unwrap();
+        let hermes = |model: Option<&str>| {
+            launch_agent_with(
+                &f.root,
+                &f.store,
+                &proxy,
+                "hermes",
+                "tokens",
+                &f.project,
+                model,
+                goose_installed,
+                terminal_opens,
+            )
+        };
+        assert_eq!(hermes(None).unwrap_err(), HERMES_TOKENS_MODEL_NEEDED);
+        assert_eq!(
+            hermes(Some("anthropic/claude-sonnet-5.5")).unwrap_err(),
+            crate::anthropic_keys::MODEL_INVALID
+        );
+        let answer = hermes(Some("claude-fable-5-2")).unwrap();
+        assert_eq!(answer["metered"], true);
+        assert_eq!(answer["model"], "claude-fable-5-2");
+        let home = f.root.join("runtimes/agent-hermes-tokens");
+        let config = fs::read_to_string(home.join("agent-home/config.yaml")).unwrap();
+        assert!(config.contains(&format!(
+            "api: \"http://{}/claude/tokens\"",
+            proxy.address()
+        )));
+        assert!(config.contains("key_env: SWITCHBOARD_AGENT_KEY"));
+        assert!(config.contains("transport: anthropic_messages"));
+        assert!(config.contains("adopt_external_logins: false"));
+        // Review round 1, P2-10: side tasks pinned to the metered provider, no fallback.
+        assert!(config.contains("fallback_providers: []"));
+        assert!(config.contains(
+            "  title_generation:\n    provider: switchboard\n    model: \"claude-fable-5-2\""
+        ));
+        assert!(config.contains("  compression:\n    provider: switchboard"));
+        assert!(!config.contains("synthetic-tokens-key"));
+        let script = fs::read_to_string(home.join(if cfg!(windows) {
+            "launch.ps1"
+        } else {
+            "launch.command"
+        }))
+        .unwrap();
+        assert!(script.contains("--provider") && script.contains("switchboard"));
+        assert!(script.contains("claude-fable-5-2"));
+        assert!(script.contains("HERMES_HOME"));
+        // Provider keys in the caller's environment are cleared before Hermes starts.
+        #[cfg(not(windows))]
+        assert!(script.contains("unset OPENROUTER_API_KEY NOUS_API_KEY"));
+        #[cfg(not(windows))]
+        for name in [
+            "AWS_SECRET_ACCESS_KEY",
+            "GOOGLE_APPLICATION_CREDENTIALS",
+            "MOA_API_KEY",
+        ] {
+            assert!(script.contains(&format!(" {name} ")), "{name}");
+        }
+        // Its own `.env` names every provider key empty, so the install folder's `.env` fills
+        // none of them.
+        let dotenv = fs::read_to_string(home.join("agent-home/.env")).unwrap();
+        for name in HERMES_PROVIDER_KEYS {
+            assert!(dotenv.lines().any(|l| l == format!("{name}=")), "{name}");
+        }
+        assert_eq!(dotenv.lines().count(), HERMES_PROVIDER_KEYS.len());
+        assert!(!script.contains("synthetic-tokens-key"));
+        let record = recorded(&home);
+        assert_eq!(record["pool"], "tokens");
+        assert_eq!(record["mode"], "managed");
+        assert_eq!(record["label"], "claude-fable-5-2");
+        // Claude Code takes the model as its own flag; an agent that picks its model refuses one.
+        launch_agent_with(
+            &f.root,
+            &f.store,
+            &proxy,
+            "claude-code",
+            "tokens",
+            &f.project,
+            Some("claude-fable-5-2"),
+            goose_installed,
+            terminal_opens,
+        )
+        .unwrap();
+        let script = fs::read_to_string(f.root.join(if cfg!(windows) {
+            "runtimes/agent-claude-code-tokens/launch.ps1"
+        } else {
+            "runtimes/agent-claude-code-tokens/launch.command"
+        }))
+        .unwrap();
+        assert!(script.contains("--model") && script.contains("claude-fable-5-2"));
+        assert_eq!(
+            launch_agent_with(
+                &f.root,
+                &f.store,
+                &proxy,
+                "goose",
+                "tokens",
+                &f.project,
+                Some("claude-fable-5-2"),
+                goose_installed,
+                terminal_opens,
+            )
+            .unwrap_err(),
+            MODEL_NOT_TAKEN
+        );
+        // A group switched off launches nothing on its key.
+        f.store.set_group_off("tokens", true).unwrap();
+        assert_eq!(
+            hermes(Some("claude-fable-5-2")).unwrap_err(),
+            switchboard_core::GROUP_OFF
+        );
     }
     #[test]
     fn a_windows_session_reads_the_key_by_command_and_exits_when_it_cannot() {

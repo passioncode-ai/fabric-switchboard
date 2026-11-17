@@ -6,7 +6,7 @@ never renumber, never delete. The doc map ([DOCMAP.md](DOCMAP.md)) names this fi
 register. Decisions made before 2026-11-08 live where they were made (plans' `D-<n>`, board rows,
 research notes); the ones still in force that the board cites are seeded below with their source.
 
-**Next free ID:** `DEC-0026` (`DEC-0024` is SB-404's, PR #809) (`DEC-0018` and `DEC-0020` are held for the window and fleet plan's modules)
+**Next free ID:** `DEC-0026` (`DEC-0018` and `DEC-0020` are held for the window and fleet plan's modules)
 
 ## Format
 
@@ -570,6 +570,80 @@ research notes); the ones still in force that the board cites are seeded below w
   until it is moved (D-18); turning a group off stops its sessions at their next request; the reached question
   is the same one paid hand-overs use, and *Double* raises the ceiling at once.
 
+### DEC-0024: Provider keys come from Observatory by name, through a pipe, and every launch on one is counted
+
+- **Date:** 2026-11-17
+- **Status:** Accepted (built on branch `observatory-keys`: SB-404 waves K1 to K3; plan
+  [2026-11-17-observatory-keys](plans/2026-11-17-observatory-keys/README.md))
+- **Context:** the operator, 2026-11-17: «Чтобы можно было добавить токены ChatGPT, OpenRouter,
+  Anthropic, либо они подтягивались в Observatory автоматически, и можно было бы их использовать
+  для запуска агентов сразу». Project Observatory already holds the operator's provider keys by
+  name and hands a value only to a command's environment (`use_secret.py run --vault-only`);
+  Switchboard saved a key only from a person's pipe.
+- **Decision:**
+  - O-1: Switchboard lists the keys Observatory holds from `vault.py list` (names and metadata,
+    never a value): slots named `ANTHROPIC_*`, `OPENAI_*` or `OPENROUTER_*` with `KEY` or `TOKEN`
+    in the name, without `ADMIN`, `MANAGEMENT`, `MGMT`, `BYOK`, `PROVISIONING` or `PREVIOUS`
+    (no agent runs on an organization's admin key, a provisioning key, a BYOK credential or an
+    archived copy), and none Observatory marks "not a credential". Observatory missing is an
+    answer (`state: absent`), never an error.
+  - O-2: adding moves the value through a pipe only. The CLI, the MCP server or the window asks
+    the owner for a plan (`Operation::ObservatoryKeyPlan`, which checks the slot against the list
+    and what is saved here), then runs each save as `use_secret.py run --vault-only --env E
+    project NAME -- /bin/sh -c 'k="$NAME"; unset NAME; printf %s "$k" | "$0" "$@"' switchboard
+    --data-dir D --json <save>`: the engine puts the value in the shell's environment, the shell
+    moves it into an unexported variable and writes it to the stdin of the ordinary save
+    (`accounts add --secret-stdin`, `agents anthropic set --key-stdin`, `agents openrouter set
+    --key-stdin`), which reads it as when a person pipes a key. No process of Switchboard's has
+    it in an argument or its environment; the engine scrubs it from what the save prints. A save
+    takes at most a minute; macOS and Linux only (`UNIX_ONLY` elsewhere).
+  - O-3: where a key goes. An Anthropic key becomes a Claude API-key account (by default), which
+    lands in the pay-per-token group (DEC-0023) and is metered there; `to: agent` or `both` also
+    saves it as a named key for Hermes's direct launch (SB-390), which no ceiling counts and the
+    answer says so. An OpenRouter key becomes this computer's key or a group's, under its ceiling
+    (SB-72). A key already saved there is kept unless replaced; a slot already added as an account
+    is refused. An OpenAI key is listed and not added (`OPENAI_NOT_YET`): no ceiling counts one
+    (the proxy prices Anthropic's models only, and a Codex API-key account has no ceiling), so
+    adding it would let an agent spend it unchecked. It waits for OpenAI prices in the proxy.
+  - O-4: the slot each saved key came from is recorded in `observatory-keys.json` (0600: slots and
+    targets, never a value; the newest 256, a target gone is dropped), so a rotation in
+    Observatory can be followed later (K4).
+  - O-5: launches on a key are counted. Claude Code on the pay-per-token group runs through the
+    proxy (managed), with `--model` when one is named. Hermes on the pay-per-token group runs
+    through the proxy too: the launch writes a Hermes home of its own whose `config.yaml` names a
+    provider `switchboard` pointing at the group's route (`transport: anthropic_messages`, the
+    agents' capability by `key_env`, never a provider key) and `auth.adopt_external_logins:
+    false`, and starts `hermes --provider switchboard -m <model>` (a model is needed there). Every
+    answer is then priced at Anthropic's list price against the group's daily ceiling, so the
+    plan's K-4 is met without a ceiling of a named key's own. Hermes on a named Anthropic key
+    (`--anthropic`) stays as SB-390 built it, unmetered, and is labelled so (`metered: false`).
+  - O-6: `launch_keys` lists the pay-per-token group's keys for Claude Code and Hermes
+    (`kind: group`), usable only when the group is on, has a ceiling, holds the folder and has the
+    key selected; otherwise `why_not` says which.
+  - O-7 (review round 1, 2026-11-17): a key Observatory records as expired is listed and not
+    added (`KEY_EXPIRED`); a model goes only with a named key (`MODEL_FOR_ACCOUNT`); the shell
+    turns tracing off before it expands the value, and shell start-up variables are not passed on;
+    Observatory's own refusal line is passed on bounded; a duplicate account after a lost record is
+    refused by the store's own same-key check; Hermes's side tasks are pinned to the metered
+    provider with no fallback, and provider key variables are unset for that launch; the window
+    reads Observatory once and again only on *Read again*, within 30 s of the backend's 20 s.
+  - O-8 (review round 2, 2026-11-17): exported bash functions never reach the pipe shell, which
+    writes with `command printf`; a refusal that may hold a key (`sk-` in any case, or 24 or more
+    key characters in a row) is never shown; a record not written after a save is reported beside
+    the save, not as a failure of it; the metered Hermes home has an empty `.env` of its own, and
+    more provider and cloud variables are unset. Adding a key from Observatory as an account fails closed
+    while a saved Claude API key's stored value is gone, naming it by its label, and asks to try
+    again when a read failed only for now (`SAVED_KEYS_UNREADABLE_NOW`, review round 3): the retry the review
+    feared is that path's. The store's own add keeps the 2026-11-08 rule (an unreadable row never
+    blocks a new account, an incident on the Mac Studio with exactly such API keys), so a person's
+    add is not broken again.
+- **Consequences:** an agent (or the operator over MCP) adds a key Observatory holds without a
+  person typing it; a Hermes launch on the pay-per-token group no longer needs `agents connect`
+  and leaves `~/.hermes` alone, while one on an ordinary group starts as before. Open: a rotation
+  in Observatory is not followed yet, and a key Observatory marks leaked is not refused yet (K4);
+  OpenAI keys wait for OpenAI prices in the proxy.
+- **Source:** the operator's words above (2026-11-17); branch `observatory-keys`.
+
 ### DEC-0025: A subscription is delegated to a teammate's machine as a guest, under a lease
 
 - **Date:** 2026-11-17
@@ -622,7 +696,7 @@ research notes); the ones still in force that the board cites are seeded below w
   [ORGANIZATION.md](ORGANIZATION.md#a-teammates-computer) and its Russian twin, [CLI.md](CLI.md)
   (`accounts send --delegate`, `accounts lease`, `own-sign-in`, `ssh-serve`), the skill's
   [tools reference](../plugins/switchboard/skills/switching-accounts/references/tools.md),
-  [ux/scenarios.md](ux/scenarios.md) (SCN-101, SCN-102), [brand/strings.md](brand/strings.md),
+  [ux/scenarios.md](ux/scenarios.md) (SCN-102, SCN-103), [brand/strings.md](brand/strings.md),
   `AGENTS.md` Lifecycle (the lease calls, `own-sign-in`), [CHANGELOG](../CHANGELOG.md),
   [evidence/backlog.md](evidence/backlog.md) (SB-403).
 - **Source:** operator 2026-11-17, quoted in the [plan](plans/2026-11-17-org-seat-delegation/README.md):

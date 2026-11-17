@@ -238,6 +238,6 @@ wave table at the end. Decision: [DEC-0022](../../DECISIONS.md#dec-0022-an-organ
   `switchboard_account_send` `delegate`/`lease_hours`, `switchboard_own_sign_in`; window
   `delegateFields`, `ownSignInSection`, Tauri `own_sign_in`.
 - Contract: [CONTRACTS](../../CONTRACTS.md#delegated-seats-and-the-own-sign-in-switch-sb-403-s2-to-s4-dec-0025-2026-11-17).
-- Scenarios: SCN-101, SCN-102 in [ux/scenarios.md](../../ux/scenarios.md).
+- Scenarios: SCN-102, SCN-103 in [ux/scenarios.md](../../ux/scenarios.md).
 - Deferred: S5, the live run on a teammate's computer (install, tailnet, the authorized_keys line
   are a person's steps on that computer); a Windows `ssh-serve` (D-28).

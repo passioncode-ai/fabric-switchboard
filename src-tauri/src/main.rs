@@ -1229,6 +1229,45 @@ async fn anthropic_keys(state: State<'_, Slot>) -> Result<Value, String> {
         .execute(Operation::AnthropicKeys)
         .await
 }
+/// SB-404 K1: the provider keys Project Observatory holds, by name; never a value.
+#[tauri::command]
+async fn observatory_keys(state: State<'_, Slot>) -> Result<Value, String> {
+    state
+        .runtime()
+        .await?
+        .execute(Operation::ObservatoryKeys)
+        .await
+}
+/// SB-404 K2: saves a key Observatory holds by its slot; the value goes from Observatory's vault
+/// to Switchboard's through a pipe into the installed switchboard command, never through this
+/// window.
+#[tauri::command]
+async fn observatory_key_add(
+    state: State<'_, Slot>,
+    slot: String,
+    to: Option<String>,
+    name: Option<String>,
+    pool: Option<String>,
+    model: Option<String>,
+    replace: Option<bool>,
+) -> Result<Value, String> {
+    let root = state.runtime().await?.root.clone();
+    let cli = switchboard_runtime::launch::agent_cli()
+        .ok_or(switchboard_runtime::launch::OPENROUTER_CLI_MISSING)?;
+    switchboard_runtime::observatory_keys::add(
+        &root,
+        &cli,
+        switchboard_runtime::observatory_keys::AddRequest {
+            slot,
+            to,
+            name,
+            pool,
+            model,
+            replace: replace.unwrap_or(false),
+        },
+    )
+    .await
+}
 /// SB-392 K-1: every key an agent can start on here, by name, the folder's OpenRouter key first.
 #[tauri::command]
 async fn launch_keys(
@@ -2083,6 +2122,8 @@ fn main() {
             hermes_model,
             anthropic_keys,
             launch_keys,
+            observatory_keys,
+            observatory_key_add,
             hermes_set_model,
             kimi_login_begin,
             kimi_login_status,

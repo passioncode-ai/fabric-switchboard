@@ -245,6 +245,8 @@ async fn handshake_lists_tools_and_rejects_malformed_messages() {
             "switchboard_hermes_status",
             "switchboard_hermes_set",
             "switchboard_anthropic_keys",
+            "switchboard_observatory_keys",
+            "switchboard_observatory_key_add",
             "switchboard_launch_keys",
             "switchboard_agents",
             "switchboard_kimi_accounts",
