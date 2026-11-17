@@ -152,9 +152,11 @@ enum Command {
     /// signed in in some homes and not in others, and two names for one URL in one home. A home
     /// whose credential item would ask for access reads `unknown`. Reads only.
     McpHomes,
-    /// This computer's cap on live coding sessions (Claude Code and Codex, managed or not, quiet
-    /// ones not counted): the cap, how many count and how many are free. `dispatch` and
-    /// `launch --hosted` wait at the cap. Without a subcommand, reads only.
+    /// This computer's cap on live coding sessions (Claude Code and Codex, managed or not; a
+    /// session quiet for 30 minutes outside a turn, on a limit stop or on a wait of its own is
+    /// not counted): the cap, the board's share, how many count and how many are free. A hosted
+    /// console waits at the cap; a board run (`dispatch`, or a hosted console Fabric opens) starts
+    /// inside the board's share whatever the cap holds. Without a subcommand, reads only.
     Capacity {
         #[command(subcommand)]
         command: Option<CapacityCmd>,
@@ -1061,6 +1063,10 @@ enum CapacityCmd {
     Set {
         /// The most working coding sessions at once, 1 to 500.
         cap: u32,
+        /// How many board runs may run whatever the cap holds, from 0 to the cap. Left out: a
+        /// quarter of the cap, at least 2.
+        #[arg(long)]
+        board: Option<u32>,
     },
     /// Remove the cap: nothing waits.
     Clear,
@@ -2818,14 +2824,17 @@ async fn run(cli: &Cli) -> Result<Value, String> {
             None => Operation::Capacity {
                 cap: None,
                 clear: false,
+                board: None,
             },
-            Some(CapacityCmd::Set { cap }) => Operation::Capacity {
+            Some(CapacityCmd::Set { cap, board }) => Operation::Capacity {
                 cap: Some(*cap),
                 clear: false,
+                board: *board,
             },
             Some(CapacityCmd::Clear) => Operation::Capacity {
                 cap: None,
                 clear: true,
+                board: None,
             },
         },
         Command::OwnSignIn { command } => Operation::OwnSignIn {
@@ -3941,6 +3950,15 @@ enum Here {
     /// SB-342 H-1: in this terminal, through a session host of its own.
     Hosted,
 }
+/// SB-417: a hosted start Fabric asks for (`--surface fabric`) is the board's, any other one
+/// interactive.
+fn start_class(surface: launches::Surface) -> switchboard_runtime::capacity::Start {
+    if surface == launches::Surface::Fabric {
+        switchboard_runtime::capacity::Start::Board
+    } else {
+        switchboard_runtime::capacity::Start::Interactive
+    }
+}
 #[allow(clippy::too_many_arguments)]
 async fn launch(
     root: &std::path::Path,
@@ -3966,9 +3984,10 @@ async fn launch(
         );
     }
     // SB-378: a hosted session (Fabric's and Dashboards' consoles) waits while this computer's
-    // session pool is full; the same gate as `dispatch`.
+    // session pool is full; the same gate as `dispatch`. SB-417: one Fabric opens for the board
+    // (`--surface fabric`) starts inside the board's share.
     if here == Here::Hosted {
-        switchboard_runtime::capacity::admit(root)?;
+        switchboard_runtime::capacity::admit(root, start_class(by.surface))?;
     }
     let id = match (id, provider) {
         (Some(id), None) => id.clone(),
@@ -4032,11 +4051,11 @@ async fn continue_in_place(
     if !(std::io::stdin().is_terminal() && std::io::stdout().is_terminal()) {
         return Err("Continuing in place needs a terminal on stdin and stdout.".into());
     }
+    let surface = launches::Surface::from(surface.unwrap_or(LaunchSurface::Cli));
     // SB-378: a hosted session waits while this computer's session pool is full, as `launch`.
     if hosted {
-        switchboard_runtime::capacity::admit(root)?;
+        switchboard_runtime::capacity::admit(root, start_class(surface))?;
     }
-    let surface = launches::Surface::from(surface.unwrap_or(LaunchSurface::Cli));
     let by = launches::LaunchedBy::from_caller(surface, None, None);
     let value = call(
         root,
@@ -5784,31 +5803,43 @@ fn print_result(value: &Value, cli: &Cli) {
             text(&value["platform"]),
             text(&value["proxy_address"])
         ),
-        Command::Capacity { .. } => {
-            match value["cap"].as_u64() {
-                Some(cap) => println!(
-                    "Sessions: {} of {cap} working, {} free ({} quiet not counted).",
-                    value["used"], value["free"], value["quiet"]
-                ),
-                None => println!(
-                    "No session limit: {} working sessions ({} quiet not counted).",
-                    value["used"], value["quiet"]
-                ),
-            }
-            // SB-412: board runs the limit refused in the last hour.
-            let refused = &value["refused_last_hour"];
-            if let Some(count) = refused["count"].as_u64() {
-                println!(
-                    "Board runs refused at the limit in the last hour: {count}{}.",
-                    if refused["freed"] == true {
-                        "; a session has ended since"
-                    } else {
-                        ""
-                    }
-                );
-            }
-        }
+        Command::Capacity { .. } => print_capacity(value),
         _ => print_value(value, false),
+    }
+}
+/// `switchboard capacity` as text.
+fn print_capacity(value: &Value) {
+    let not_counted = value["quiet"].as_u64().unwrap_or(0)
+        + value["on_limit_stop"].as_u64().unwrap_or(0)
+        + value["on_waits"].as_u64().unwrap_or(0);
+    match value["cap"].as_u64() {
+        Some(cap) => {
+            println!(
+                "Sessions: {} of {cap} working, {} free ({not_counted} quiet or waiting not counted).",
+                value["used"], value["free"]
+            );
+            println!(
+                "Board runs: {} of {} running in the board's share.",
+                value["board_used"], value["board_share"]
+            );
+        }
+        None => println!(
+            "No session limit: {} working sessions ({not_counted} quiet or waiting not counted).",
+            value["used"]
+        ),
+    }
+    // SB-417: board runs refused at the limit that still wait, however long ago.
+    let waiting = &value["refused_waiting"];
+    if let Some(count) = waiting["count"].as_u64() {
+        println!(
+            "Board runs waiting at the limit: {count}, the first refused at {}{}.",
+            utc(&waiting["since"]),
+            if waiting["freed"] == true {
+                "; a session has ended since"
+            } else {
+                ""
+            }
+        );
     }
 }
 /// A ceiling's dollars: `usd` in a view, `cents` in a stored ceiling.

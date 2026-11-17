@@ -642,13 +642,16 @@ function loadCapacity() {
 }
 function capacitySection() {
   const section = el('div', 'fold-content');
-  section.append(el('p', 'surface-note', t('Switchboard counts every Claude Code and Codex session working on this computer, except those with no writes for 30 minutes. At the limit, Fabric board runs and hosted consoles wait until one ends.')));
+  section.append(el('p', 'surface-note', t("Switchboard counts every Claude Code and Codex session doing work on this computer. A session with no writes for 30 minutes outside a turn, or one waiting on a limit or on a wait of its own, is not counted. At the limit, hosted consoles wait until one ends, and Fabric board runs still start inside the board's share.")));
   if (capacityError) { section.append(el('p', 'form-error', capacityError)); return section; }
   if (!capacityState) { if (!capacityLoading) loadCapacity(); section.append(el('p', 'form-note', t('Counting sessions…'))); return section; }
   const state = capacityState;
-  section.append(el('p', 'account-meta section-state', t('Working now: {used}, {quiet} quiet not counted.', { used: state.used, quiet: state.quiet })));
-  // SB-412: board runs the limit refused in the last hour.
-  if (state.refused_last_hour?.count) section.append(el('p', 'account-meta', dispatchRefusedLine(state.refused_last_hour)));
+  const notCounted = state.quiet + (state.on_limit_stop ?? 0) + (state.on_waits ?? 0);
+  section.append(el('p', 'account-meta section-state', t('Working now: {used}, {quiet} quiet or waiting not counted.', { used: state.used, quiet: notCounted })));
+  // SB-417: the board's share of the pool.
+  if (state.cap !== null && typeof state.board_share === 'number') section.append(el('p', 'account-meta', t("Board runs: {used} of {share} in the board's share.", { used: state.board_used ?? 0, share: state.board_share })));
+  // SB-412, SB-417: board runs the limit refused that still wait, however long ago.
+  if (state.refused_waiting?.count) section.append(el('p', 'account-meta', dispatchRefusedLine(state.refused_waiting)));
   const actions = el('div', 'management-actions');
   actions.append(button(state.cap === null ? t('Set limit…') : t('Change limit…'), capacityDialog, 'button', 'capacity-set'));
   if (state.cap !== null) actions.append(button(t('Remove limit'), () => { void mutate(async () => { capacityState = await adapter.capacity({ clear: true }); }, t('Limit removed.'), 'capacity-set'); }, 'button', 'capacity-clear'));
@@ -658,14 +661,19 @@ function capacitySection() {
 function capacityDialog() {
   const context = openDialog(t('Limit of working coding sessions'), t('Fabric board runs and hosted consoles wait while this many sessions work on this computer.'), 'capacity-set');
   const limit = input(capacityState?.cap ? String(capacityState.cap) : '20', 'number'); limit.min = '1'; limit.max = '500'; limit.step = '1'; limit.inputMode = 'numeric';
+  // SB-417: the board's share, left empty for the default (a quarter of the limit, at least 2).
+  const share = input(capacityState?.board_share_set && typeof capacityState.board_share === 'number' ? String(capacityState.board_share) : '', 'number'); share.min = '0'; share.max = '500'; share.step = '1'; share.inputMode = 'numeric';
   const grid = el('div', 'form-grid');
   grid.append(field(t('Sessions'), limit, t('From 1 to 500.')));
+  grid.append(field(t('Board runs'), share, t('Board runs that start whatever the limit holds, from 0 to the limit. Leave it empty for a quarter of the limit, at least 2.')));
   context.body.append(grid); context.actions.append(submit(t('Save limit')));
   context.form.addEventListener('submit', (event) => {
     event.preventDefault();
     const value = Number(limit.value);
     if (!Number.isInteger(value) || value < 1 || value > 500) { context.error.textContent = t('Give the session limit as a whole number from 1 to 500.'); limit.focus(); return; }
-    void dialogSave(context, async () => { capacityState = await adapter.capacity({ cap: value }); }, t('Limit saved: {cap} working sessions.', { cap: value }));
+    const board = share.value.trim() === '' ? undefined : Number(share.value);
+    if (board !== undefined && (!Number.isInteger(board) || board < 0 || board > value)) { context.error.textContent = t("Give the board's share as a whole number from 0 to the session limit, with a limit set."); share.focus(); return; }
+    void dialogSave(context, async () => { capacityState = await adapter.capacity(board === undefined ? { cap: value } : { cap: value, board }); }, t('Limit saved: {cap} working sessions.', { cap: value }));
   });
   limit.focus();
 }

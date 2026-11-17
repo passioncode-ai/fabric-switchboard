@@ -319,7 +319,8 @@ fn log_written_at(root: &Path, record: &Value) -> Option<i64> {
 pub fn tree(root: &Path, now: i64) -> Value {
     let (scan, records, pairs) = read_cached(root, now);
     let mut answer = assemble(&scan, &records, &pairs, now);
-    answer["capacity"] = crate::capacity::view(crate::capacity::cap(root).ok().flatten(), &scan);
+    // SB-417: counted per session, as `switchboard capacity` counts.
+    answer["capacity"] = crate::capacity::view_of(root, &scan, now).2;
     let map = crate::shell::map::read(root);
     let hook = hook_state(
         crate::shell::map::choice(root),

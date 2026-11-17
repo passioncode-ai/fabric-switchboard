@@ -170,7 +170,7 @@ export interface Adapter {
   /** SB-407: Needs attention's *Stop the run* on a stuck or gone board run (`dispatch stop`). */
   dispatchStop(launchId: string, ifGone?: boolean): Promise<{ launch_id: string; state: 'stopped' | 'already_ended' }>;
   /** SB-378: the session pool; `cap` sets it, `clear` removes it, neither reads. */
-  capacity(change?: { cap?: number; clear?: boolean } | null): Promise<CapacityStatus>;
+  capacity(change?: { cap?: number; board?: number; clear?: boolean } | null): Promise<CapacityStatus>;
   /** SB-384: the session duty officer: its settings, what it did and what a check would do now. */
   duty(change?: { on?: boolean; run?: boolean } | null): Promise<DutyStatus>;
   /** SB-403 S3: whether Switchboard reads or changes the person's own Claude Code and Codex sign-in here; `on` changes it. */
@@ -371,7 +371,7 @@ export interface ObservatoryAddRequest { slot: string; to: 'account' | 'agent' |
 export interface ObservatoryAdded { slot: string; kind: string; saved: { target: string; answer: unknown }[]; failed: string | null; next: string[] }
 export interface LaunchKeys { agent: string; folder: string | null; openrouter: boolean; anthropic: boolean; keys: LaunchKey[]; none_usable: boolean }
 export interface DutyStatus { settings: DutySettings; check_seconds: number; /** SB-392: minutes after which a finished session is closed: `idle_minutes`, at least 65 (a wake-up a session set itself is at most an hour). */ idle_closes_after_minutes?: number; watched: number; left_to_dashboards: number; /** Sessions waiting for the person's answer and sessions running a command of their own: never acted on. */ waiting_for_person?: number; running_commands?: number; due: DutyLine[]; recent: DutyLine[]; supported: boolean }
-export interface CapacityStatus { cap: number | null; used: number; free: number | null; at_capacity: boolean; total: number; quiet: number; quiet_after_minutes: number; /** SB-412: dispatches the limit refused in the last hour; null when none. */ refused_last_hour?: { count: number; last_at: number; freed: boolean } | null }
+export interface CapacityStatus { cap: number | null; used: number; free: number | null; at_capacity: boolean; total: number; quiet: number; quiet_after_minutes: number; /** SB-417: sessions on a limit stop or on a wait of their own, not counted. */ on_limit_stop?: number; on_waits?: number; /** SB-417: how many board runs may run whatever the cap holds (null without a cap), whether the person set it, how many run now and whether one would start now. */ board_share?: number | null; board_share_set?: boolean; board_used?: number; board_admitted?: boolean; /** SB-417: board runs refused since the pool last admitted one. */ waiting?: number; /** SB-412: dispatches the limit refused in the last hour; null when none. */ refused_last_hour?: { count: number; last_at: number; freed: boolean } | null; /** SB-417: the refused board runs that still wait, with no time cutoff; null when none. */ refused_waiting?: { count: number; since: number | null; last_at: number | null; freed: boolean } | null }
 /** SB-352: one loan in `balance status`. */
 export interface BalanceLoan { account_id: string; label: string | null; provider: Provider; from: string; from_name: string; to: string; to_name: string; at: number }
 /** SB-352: one journal line (`balancing.jsonl`): codes and ids only. */
