@@ -131,7 +131,8 @@ login*). Anywhere the installed app does not run the actions and the switches an
 `app updates` alone answers what it knows instead (SB-414): `{available: false, reason: not_owner|no_owner, owner:
 serve|null, owner_version, owner_updates_copy, window_version, window_older, windows, serve_update?, message}`, where
 `owner_version` is the `serve` that owns the data folder, `owner_updates_copy` whether it keeps its copy current (an
-installed copy with automatic updates on whose update check succeeded within 15 minutes; never on Windows), `serve_update` its own update
+installed copy with automatic updates on whose update check succeeded within 15 minutes, or whose first check is still
+due within 15 minutes of its start; never on Windows), `serve_update` its own update
 loop's last pass (`{state, latest, reason, checked_at, auto_update}`) and `window_version` the oldest app window open
 beside it that does not own the data folder (it says the same in Settings → Updates, and when it runs from the same
 copy as a `serve` that keeps that copy current it leaves updating the copy to `serve`).
@@ -336,10 +337,14 @@ sha256sum -c SHA256SUMS --ignore-missing && \
 sudo apt install ./Fabric-Switchboard-X.Y.Z-linux-x64.deb
 ```
 
-A `serve` from the .deb logs `update_waiting deb` once per newer version. Once apt replaced its program it restarts
-onto it (exit status 75, as an updated `serve` does) only under a supervisor that starts it again: systemd
-(`INVOCATION_ID`), launchd (`XPC_SERVICE_NAME`) or init as its parent. Started by hand from a shell it logs
-`update_restart unsupervised` once and keeps running on the old program until you restart it.
+A `serve` from the .deb logs `update_waiting deb` once per newer version. Once its program was replaced (by apt
+here; for an installed app or AppImage, by another account's update or `switchboard update`), any `serve` restarts
+onto it (exit status 75) only under a supervisor that starts it again: a systemd unit that runs `serve` itself, so
+`SYSTEMD_EXEC_PID` is its own pid (systemd 248 or later; set `Restart=on-failure`), or a launchd job, whose
+`XPC_SERVICE_NAME` is the job's label and whose parent is launchd (set `KeepAlive {SuccessfulExit: false}`). Started
+by hand (a shell, `nohup … &`, `setsid -f`, cron `@reboot`, a unit that runs it through `sh -c`), it logs
+`update_restart unsupervised` once and keeps running on the old program until you restart it; an inherited
+`INVOCATION_ID` or init as the parent does not count.
 
 ## Uninstall
 

@@ -947,7 +947,14 @@ export function updateLine(status: Pick<UpdateStatus, 'available' | 'reason' | '
   // this window installs nothing; otherwise this window's own line follows.
   // Review round 2: the owner holds the data folder and did not answer: this window installs
   // nothing on that pass, says so, and keeps Check for updates.
-  if (status.owner?.unanswered) return { text: t('Switchboard already runs in the background but did not answer, so this window did not check for updates. Try again in a minute, or quit Switchboard and open it again.'), restart: false, check: true };
+  if (status.owner?.unanswered) {
+    const unanswered = t('Switchboard already runs in the background but did not answer, so this window did not check for updates. Try again in a minute, or quit Switchboard and open it again.');
+    // Review round 3: an update this window already has ready (or offered) comes first, with its
+    // button; the owner's silence follows it.
+    const own = ownUpdateLine(status, when);
+    if (own.restart || own.install) return { ...own, text: `${own.text} ${unanswered}` };
+    return { text: unanswered, restart: false, check: true };
+  }
   const owner = ownerLine(status.owner, status.current);
   if (owner && status.owner?.same_copy && status.owner.updates_copy) return { text: owner, restart: false, owned: true };
   const line = ownUpdateLine(status, when);

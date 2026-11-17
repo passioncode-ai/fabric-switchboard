@@ -143,17 +143,31 @@ fn note_ok() {
     }
 }
 
+/// When this `serve`'s update loop started (`note_started`): until its first pass, a window from
+/// the same copy holds back for `UPDATES_COPY_FOR` rather than install beside it (review round 3).
+static STARTED: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mutex::new(None);
+
+/// The update loop of an installed `serve` starts: called once, before its first pass waits.
+pub fn note_started() {
+    if let Ok(mut started) = STARTED.lock() {
+        started.get_or_insert_with(std::time::Instant::now);
+    }
+}
+
 /// SB-414: whether this `serve` keeps the copy it runs from current: it updates itself at all
 /// (`program`: an installed copy, never on Windows), `<data>/auto-update` is not `off`, and a pass
-/// succeeded within `UPDATES_COPY_FOR` (before its first pass, or after passes that could not read
-/// the feed, install or write the app, it does not). A window from the same copy installs updates
-/// itself only when this is false.
+/// succeeded within `UPDATES_COPY_FOR`, or no pass has succeeded yet and its update loop started
+/// within `UPDATES_COPY_FOR` (its first pass comes 90 s after start: a window holds back for it
+/// rather than install beside it). A loop whose passes failed for that long, or none that
+/// started, does not. A window from the same copy installs updates itself only when this is false.
 pub fn updates_copy(data: &Path) -> bool {
     let last_ok = LAST_OK.lock().ok().and_then(|last| *last);
+    let started = STARTED.lock().ok().and_then(|started| *started);
     updates_copy_at(
         program().is_some(),
         auto_update_on(data),
         last_ok,
+        started,
         std::time::Instant::now(),
     )
 }
@@ -163,25 +177,47 @@ pub fn updates_copy_at(
     installed: bool,
     auto_update: bool,
     last_ok: Option<std::time::Instant>,
+    started: Option<std::time::Instant>,
     now: std::time::Instant,
 ) -> bool {
+    let recent = |at: std::time::Instant| now.saturating_duration_since(at) <= UPDATES_COPY_FOR;
     installed
         && auto_update
-        && last_ok.is_some_and(|at| now.saturating_duration_since(at) <= UPDATES_COPY_FOR)
+        && match last_ok {
+            Some(at) => recent(at),
+            None => started.is_some_and(recent),
+        }
 }
 
-/// SB-408 (review round 2): whether a supervisor starts this process again after it exits with
-/// `RESTART_STATUS`: systemd (`INVOCATION_ID`), launchd (`XPC_SERVICE_NAME`, not the `0` a
-/// Terminal session carries) or init as the parent. A `serve` started by hand from a shell is not
-/// supervised: exiting there would stop it for good.
+/// SB-408 (review rounds 2 and 3): whether a supervisor starts this process again after it exits
+/// with `RESTART_STATUS`, read from what only the supervisor sets for the process it started:
+///
+/// - systemd (248 and later) sets `SYSTEMD_EXEC_PID` to the pid of the process it started; a
+///   child inherits the variable but not the pid, so only the unit's own main process matches
+///   (`INVOCATION_ID` is not used: a shell in a terminal and everything it starts inherit it).
+/// - launchd starts a job's process with `XPC_SERVICE_NAME` set to the job's label and itself as
+///   the parent; a Terminal shell carries `0`, an app and what it starts an `application.` label,
+///   and a child of a job has the job's process as its parent.
+///
+/// Init as the parent alone is not supervision: `(switchboard serve &)`, `nohup … &`, `setsid -f`
+/// and a cron `@reboot … &` all end there with nothing to start them again. An older systemd, a
+/// unit that starts `serve` through a shell, Windows and every other start read unsupervised, the
+/// safe side: such a `serve` keeps running on the old program.
 pub fn supervised(
-    invocation_id: Option<&std::ffi::OsStr>,
+    pid: u32,
+    systemd_exec_pid: Option<&std::ffi::OsStr>,
     xpc_service: Option<&std::ffi::OsStr>,
     parent: Option<u32>,
 ) -> bool {
-    invocation_id.is_some_and(|id| !id.is_empty())
-        || xpc_service.is_some_and(|name| !name.is_empty() && name != "0")
-        || parent == Some(1)
+    let systemd = systemd_exec_pid
+        .and_then(|v| v.to_str())
+        .and_then(|v| v.trim().parse::<u32>().ok())
+        == Some(pid);
+    let launchd = xpc_service
+        .and_then(|v| v.to_str())
+        .is_some_and(|name| !name.is_empty() && name != "0" && !name.starts_with("application."))
+        && parent == Some(1);
+    systemd || launchd
 }
 
 /// `supervised` for this process.
@@ -191,10 +227,43 @@ pub fn supervised_now() -> bool {
     #[cfg(not(unix))]
     let parent = None;
     supervised(
-        std::env::var_os("INVOCATION_ID").as_deref(),
+        std::process::id(),
+        std::env::var_os("SYSTEMD_EXEC_PID").as_deref(),
         std::env::var_os("XPC_SERVICE_NAME").as_deref(),
         parent,
     )
+}
+
+/// What a `serve`'s update passes remember: the reason or version last said, and whether an
+/// unsupervised restart was said.
+#[derive(Debug, Default)]
+pub struct Told {
+    pub said: Option<String>,
+    pub unsupervised: bool,
+}
+
+/// A pass that would restart `serve` (`why`: `replaced` or `installed`): under a supervisor it
+/// logs `update_restart <why>` and restarts; unsupervised it logs `update_restart unsupervised`
+/// once and keeps running on the old program, since exiting would stop it for good (review
+/// round 3).
+fn restart(why: &'static str, latest: Option<&str>, supervised: bool, told: &mut Told) -> Pass {
+    if supervised {
+        crate::oplog::event(
+            "update_restart",
+            &[("outcome", crate::oplog::Field::Code(why))],
+        );
+        note("restarting", latest, Some(why));
+        return Pass::Restart(why);
+    }
+    if !told.unsupervised {
+        crate::oplog::event(
+            "update_restart",
+            &[("outcome", crate::oplog::Field::Code("unsupervised"))],
+        );
+        told.unsupervised = true;
+    }
+    note("waiting", latest, Some("unsupervised"));
+    Pass::Stay
 }
 
 /// One pass: follow a replaced program, else check and install. `version` is this binary's.
@@ -203,16 +272,13 @@ pub async fn pass(
     program: &Path,
     at_start: &Stamp,
     version: &str,
-    told: &mut Option<String>,
+    supervised: bool,
+    told_all: &mut Told,
 ) -> Pass {
     if replaced(program, at_start) {
-        crate::oplog::event(
-            "update_restart",
-            &[("outcome", crate::oplog::Field::Code("replaced"))],
-        );
-        note("restarting", None, Some("replaced"));
-        return Pass::Restart("replaced");
+        return restart("replaced", None, supervised, told_all);
     }
+    let told = &mut told_all.said;
     let install = auto_update_on(data);
     // Asked first without installing: an app this account may not replace is said before a
     // 30 MB package is downloaded for nothing every five minutes.
@@ -240,13 +306,8 @@ pub async fn pass(
     }
     match crate::self_update::run(None, check_only, version, None).await {
         Ok(v) if v["action"] == "installed" => {
-            crate::oplog::event(
-                "update_restart",
-                &[("outcome", crate::oplog::Field::Code("installed"))],
-            );
-            note("restarting", v["latest"].as_str(), Some("installed"));
             note_ok();
-            Pass::Restart("installed")
+            restart("installed", v["latest"].as_str(), supervised, told_all)
         }
         Ok(v) if v["action"] == "available" => {
             let latest = v["latest"].as_str().unwrap_or_default().to_owned();
@@ -311,14 +372,6 @@ pub fn deb_tell(notice: &Result<serde_json::Value, String>, told: &mut Option<St
     true
 }
 
-/// What a .deb `serve`'s passes remember: the newer version last said, and whether an
-/// unsupervised restart was said.
-#[derive(Debug, Default)]
-pub struct DebTold {
-    pub version: Option<String>,
-    pub unsupervised: bool,
-}
-
 /// SB-408: one pass of a `serve` installed from the .deb package, which never replaces its own
 /// files: a program apt replaced since `at_start` (the person installed the newer .deb) restarts
 /// `serve` onto it, as a replaced app does, when a supervisor will start it again (`supervised`);
@@ -330,28 +383,12 @@ pub async fn deb_pass(
     at_start: &Stamp,
     version: &str,
     supervised: bool,
-    told: &mut DebTold,
+    told: &mut Told,
 ) -> Pass {
     if replaced(program, at_start) {
-        if supervised {
-            crate::oplog::event(
-                "update_restart",
-                &[("outcome", crate::oplog::Field::Code("replaced"))],
-            );
-            note("restarting", None, Some("replaced"));
-            return Pass::Restart("replaced");
-        }
-        if !told.unsupervised {
-            crate::oplog::event(
-                "update_restart",
-                &[("outcome", crate::oplog::Field::Code("unsupervised"))],
-            );
-            told.unsupervised = true;
-        }
-        note("waiting", None, Some("unsupervised"));
-        return Pass::Stay;
+        return restart("replaced", None, supervised, told);
     }
-    let told = &mut told.version;
+    let told = &mut told.said;
     let notice = crate::deb::check(version).await;
     match &notice {
         Ok(v) if v["action"] == "available" => note("available", v["latest"].as_str(), Some("deb")),
@@ -469,11 +506,22 @@ mod tests {
         let next = dir.path().join("n");
         std::fs::write(&next, b"newer").unwrap();
         std::fs::rename(&next, &program).unwrap();
-        let mut told = None;
+        let mut told = Told::default();
         assert_eq!(
-            pass(dir.path(), &program, &at_start, "0.0.1", &mut told).await,
+            pass(dir.path(), &program, &at_start, "0.0.1", true, &mut told).await,
             Pass::Restart("replaced")
         );
+        // Review round 3: started by hand, it keeps running on the old program, says so once and
+        // reads no feed (an exit would stop it for good).
+        let mut told = Told::default();
+        for _ in 0..2 {
+            assert_eq!(
+                pass(dir.path(), &program, &at_start, "0.0.1", false, &mut told).await,
+                Pass::Stay
+            );
+            assert!(told.unsupervised);
+            assert_eq!(told.said, None);
+        }
     }
 
     #[test]
@@ -504,19 +552,19 @@ mod tests {
         let next = dir.path().join("n");
         std::fs::write(&next, b"newer").unwrap();
         std::fs::rename(&next, &program).unwrap();
-        let mut told = DebTold::default();
+        let mut told = Told::default();
         assert_eq!(
             deb_pass(&program, &at_start, "0.0.1", true, &mut told).await,
             Pass::Restart("replaced")
         );
         // Unsupervised: it keeps running, says so once, and reads no feed.
-        let mut told = DebTold::default();
+        let mut told = Told::default();
         assert_eq!(
             deb_pass(&program, &at_start, "0.0.1", false, &mut told).await,
             Pass::Stay
         );
         assert!(told.unsupervised);
-        assert_eq!(told.version, None);
+        assert_eq!(told.said, None);
         assert_eq!(
             deb_pass(&program, &at_start, "0.0.1", false, &mut told).await,
             Pass::Stay
@@ -526,36 +574,75 @@ mod tests {
     #[test]
     fn only_a_supervisor_that_starts_serve_again_counts() {
         use std::ffi::OsStr;
-        assert!(supervised(Some(OsStr::new("4f2a")), None, Some(812)));
+        let me = 4242;
+        // systemd's own main process: SYSTEMD_EXEC_PID is its pid.
+        assert!(supervised(me, Some(OsStr::new("4242")), None, Some(1)));
+        // A child of a unit, or a shell in a terminal with the variable inherited: another pid.
+        assert!(!supervised(me, Some(OsStr::new("812")), None, Some(812)));
+        assert!(!supervised(me, Some(OsStr::new("")), None, Some(812)));
+        // A launchd job: its label, launchd as the parent.
         assert!(supervised(
+            me,
+            None,
+            Some(OsStr::new("ai.passioncode.serve")),
+            Some(1)
+        ));
+        // A job's child: the label inherited, the job as the parent.
+        assert!(!supervised(
+            me,
             None,
             Some(OsStr::new("ai.passioncode.serve")),
             Some(812)
         ));
-        assert!(supervised(None, None, Some(1)));
-        // A Terminal on macOS carries XPC_SERVICE_NAME=0; a shell is not init.
-        assert!(!supervised(None, Some(OsStr::new("0")), Some(812)));
-        assert!(!supervised(Some(OsStr::new("")), None, Some(812)));
-        assert!(!supervised(None, None, None));
+        // A hand start from Terminal (0) or from an app's terminal (an application. label),
+        // even orphaned to launchd, is not a job.
+        assert!(!supervised(me, None, Some(OsStr::new("0")), Some(1)));
+        assert!(!supervised(
+            me,
+            None,
+            Some(OsStr::new("application.com.googlecode.iterm2.123.456")),
+            Some(1)
+        ));
+        // `(switchboard serve &)`, nohup, setsid -f, cron @reboot: init as the parent and nothing
+        // a supervisor sets.
+        assert!(!supervised(me, None, None, Some(1)));
+        assert!(!supervised(me, None, None, None));
     }
 
     #[test]
     fn a_serve_keeps_its_copy_only_after_a_recent_successful_pass() {
         let ok = std::time::Instant::now();
         let after = |secs| ok + Duration::from_secs(secs);
-        assert!(updates_copy_at(true, true, Some(ok), after(60)));
-        assert!(updates_copy_at(true, true, Some(ok), after(15 * 60)));
+        assert!(updates_copy_at(true, true, Some(ok), None, after(60)));
+        assert!(updates_copy_at(true, true, Some(ok), None, after(15 * 60)));
         assert!(
-            !updates_copy_at(true, true, Some(ok), after(15 * 60 + 1)),
+            !updates_copy_at(true, true, Some(ok), None, after(15 * 60 + 1)),
             "stale"
         );
-        assert!(!updates_copy_at(true, true, None, after(60)), "never");
         assert!(
-            !updates_copy_at(true, false, Some(ok), after(60)),
+            !updates_copy_at(true, true, None, None, after(60)),
+            "no loop"
+        );
+        // Review round 3: before its first pass, a loop that started recently holds the copy.
+        assert!(updates_copy_at(true, true, None, Some(ok), after(90)));
+        assert!(
+            !updates_copy_at(true, true, None, Some(ok), after(15 * 60 + 1)),
+            "no pass succeeded since the loop started"
+        );
+        // A pass that succeeded once and then went stale is not saved by a recent start.
+        assert!(!updates_copy_at(
+            true,
+            true,
+            Some(ok),
+            Some(after(15 * 60)),
+            after(15 * 60 + 1)
+        ));
+        assert!(
+            !updates_copy_at(true, false, Some(ok), None, after(60)),
             "updates off"
         );
         assert!(
-            !updates_copy_at(false, true, Some(ok), after(60)),
+            !updates_copy_at(false, true, Some(ok), None, after(60)),
             "not installed"
         );
     }

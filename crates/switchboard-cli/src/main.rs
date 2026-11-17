@@ -2556,17 +2556,21 @@ async fn run(cli: &Cli) -> Result<Value, String> {
             let Some(at_start) = su::stamp(&program) else {
                 return std::future::pending::<&'static str>().await;
             };
-            let mut told = None;
-            let mut deb_told = su::DebTold::default();
-            // A .deb `serve` replaced on disk exits only when a supervisor starts it again.
+            let mut told = su::Told::default();
+            // A `serve` whose program was replaced exits only when a supervisor starts it again;
+            // started by hand it says so once and keeps running on the old program.
             let supervised = su::supervised_now();
+            if !deb {
+                // Until its first pass, a window from this copy holds back (SB-414).
+                su::note_started();
+            }
             tokio::time::sleep(su::FIRST_AFTER).await;
             loop {
                 let version = env!("CARGO_PKG_VERSION");
                 let pass = if deb {
-                    su::deb_pass(&program, &at_start, version, supervised, &mut deb_told).await
+                    su::deb_pass(&program, &at_start, version, supervised, &mut told).await
                 } else {
-                    su::pass(&data, &program, &at_start, version, &mut told).await
+                    su::pass(&data, &program, &at_start, version, supervised, &mut told).await
                 };
                 if let su::Pass::Restart(why) = pass {
                     // A managed session between two requests is still working: wait for a quiet

@@ -264,7 +264,9 @@ switchboard settings import switchboard-settings.json --signer <опублико
 
 1. Либо каждый пользователь ставит приложение в свой `~/Applications` (папку `Applications` в своей
    домашней папке), либо одна копия в `/Applications` служит всем, как на Mac, где каждый
-   пользователь запускает `switchboard serve` своим LaunchAgent: `serve` обновляет общее
+   пользователь запускает `switchboard serve` своим LaunchAgent (с `KeepAlive {SuccessfulExit: false}`;
+   `serve`, запущенный вручную из Терминала, остаётся на старой программе и один раз пишет
+   `update_restart unsupervised`): `serve` обновляет общее
    приложение, если его пользователь может его заменить, а остальные `serve` сами перезапускаются
    на новую программу ([DEC-0011](DECISIONS.md#dec-0011-serve-keeps-itself-current-and-follows-an-app-another-account-replaced)).
 2. Продолжите разделом «По ssh» выше (другой пользователь так, как его знает ssh, например
@@ -293,8 +295,11 @@ switchboard settings import switchboard-settings.json --signer <опублико
    switchboard vault use file
    ```
 
-2. Запускайте `switchboard serve` как пользовательскую службу systemd с `Restart=on-failure`: он
-   проверяет обновления каждые пять минут и сам перезапускается на новую программу (DEC-0011);
+2. Запускайте `switchboard serve` как пользовательскую службу systemd с `Restart=on-failure`, в
+   `ExecStart` которой указана сама программа `switchboard` (не `sh -c …`), на systemd 248 или
+   новее: он проверяет обновления каждые пять минут и сам перезапускается на новую программу
+   (DEC-0011). Запущенный иначе, он продолжает работать на старой программе и один раз пишет в
+   журнал `update_restart unsupervised`, поэтому после обновления перезапустите его сами;
    вручную обновляет `switchboard update --app <путь к AppImage>`.
 3. На хосте, в пользователе, у которого аккаунты: заведите для работы VM отдельную группу, затем
    `settings sync --to user@vm --group <id группы> --apply` и

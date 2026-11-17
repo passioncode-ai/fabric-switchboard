@@ -473,6 +473,12 @@ check(() => {
   // and Check for updates stays.
   const unanswered = logic.updateLine({ ...base, owner: { unanswered: true } });
   assert.deepEqual(unanswered, { text: 'Switchboard already runs in the background but did not answer, so this window did not check for updates. Try again in a minute, or quit Switchboard and open it again.', restart: false, check: true });
+  // Review round 3: a ready update keeps its Restart to update, its own line first.
+  const readyUnanswered = logic.updateLine({ ...base, state: 'ready', version: '0.7.113', owner: { unanswered: true } });
+  assert.equal(readyUnanswered.restart, true);
+  assert.match(readyUnanswered.text, /^Version 0\.7\.113 is ready\. .* Switchboard already runs in the background but did not answer/);
+  const offeredUnanswered = logic.updateLine({ ...base, enabled: false, state: 'available', version: '0.7.113', owner: { unanswered: true } });
+  assert.equal(offeredUnanswered.install, true);
   // Nothing answered: the line is the window's own.
   assert.deepEqual(logic.updateLine({ ...base, owner: null }), logic.updateLine(base));
   for (const line of [other.text, same.text]) assert.doesNotMatch(line, /\u2014/);

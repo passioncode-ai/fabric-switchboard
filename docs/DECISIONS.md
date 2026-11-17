@@ -727,7 +727,7 @@ research notes); the ones still in force that the board cites are seeded below w
     it when the owner keeps that copy current (the owner says so: `owner_updates_copy`, true for the
     app, and for a `serve` only when it is an installed copy that updates itself, so never on
     Windows, with `<data>/auto-update` on and an update pass that succeeded within 15 minutes,
-    review round 2); the window's check ends
+    or no pass yet and its update loop started within 15 minutes; review rounds 2 and 3); the window's check ends
     at once (`update_check owner_updates`, once) and Settings offers no update button. When the
     owner does not keep it current, the window checks and installs as before (review round 1,
     P1-1). A pass where the store is held and the owner does not answer installs nothing
@@ -740,6 +740,12 @@ research notes); the ones still in force that the board cites are seeded below w
     answers the owner, its version, its own update loop's last pass and the non-owner window's
     version (`window-run.json`, one record per window, matched to its process by the process's
     start) instead of a refusal; every action and every switch still needs the app (`APP_ONLY`).
+  - A `serve` whose program was replaced (a window's install, another account's update, apt)
+    exits with status 75 only when a supervisor runs it (a launchd job, or the main process of a
+    systemd unit: `serve_update::supervised`); started by hand it logs `update_restart
+    unsupervised` once and keeps running on the old program, since an exit would stop it for good
+    (review round 3). Until its first update pass, a `serve` that started within 15 minutes still
+    counts as keeping its copy, so a window does not install beside it in those first 90 s.
 - **Consequences / affects:** [CONTRACTS](CONTRACTS.md#a-window-that-does-not-own-the-data-folder-sb-414-2026-11-17),
   [CLI](CLI.md), `src-tauri/src/updates.rs`, `crates/switchboard-runtime/src/copies.rs`,
   [AGENTS.md lifecycle](../AGENTS.md#lifecycle) (`window-run.json`).
