@@ -389,6 +389,8 @@ impl Pass {
         // SB-145: the proxy's counts, written at most every quarter of an hour.
         runtime.absorb_statistics();
         runtime.statistics.save(&runtime.root, time, false);
+        // SB-401: a pay-per-token ceiling reached since the last pass asks the person.
+        runtime.ask_reached_ceilings();
     }
 
     async fn sync_sources(&mut self, runtime: &Runtime, claude: bool, time: i64) {

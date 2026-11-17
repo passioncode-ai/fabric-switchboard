@@ -83,6 +83,19 @@ impl Statistics {
             writing: Mutex::new(()),
         }
     }
+    /// SB-401: each pool's list-price cost on the UTC `day`, in micro-dollars, as counted so
+    /// far: what the proxy's own day counter starts from when an owner starts.
+    pub(crate) fn day_cost(&self, day: &str) -> BTreeMap<String, u64> {
+        let mut cost: BTreeMap<String, u64> = BTreeMap::new();
+        let s = self.inner.lock().unwrap_or_else(|p| p.into_inner());
+        for (k, t) in &s.tallies {
+            if let Some(p) = stats::parts(k).filter(|p| p.day == day && t.cost_micros > 0) {
+                let cell = cost.entry(p.pool.to_owned()).or_default();
+                *cell = cell.saturating_add(t.cost_micros);
+            }
+        }
+        cost
+    }
     /// Adds the proxy's new counts.
     pub(crate) fn absorb(&self, new: Tallies) {
         self.absorb_at(new, crate::monitor::now());

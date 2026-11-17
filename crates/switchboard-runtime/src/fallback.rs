@@ -152,6 +152,8 @@ pub(crate) fn resolve_with(
     let usable = |a: &Account| {
         folder.is_none_or(|f| crate::launch::project_allows(snapshot, a, f).is_ok())
             && a.enabled
+            // SB-401: an account of a group switched off takes no workflow over.
+            && !snapshot.project_of_pool(&a.pool).is_some_and(|p| p.off)
             // SB-322: an account given to an agent never takes a workflow over.
             && !snapshot.is_assigned(&a.id)
             && Some(a.id.as_str()) != executor_account

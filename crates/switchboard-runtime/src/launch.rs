@@ -1535,6 +1535,32 @@ pub(crate) fn serving_pool(
         .unwrap_or(&account.pool)
         .to_owned()
 }
+/// SB-401: a pay-per-token key launched with its credential in the session's own home would
+/// reach the provider directly, past the daily ceiling the proxy checks.
+pub(crate) const TOKENS_ISOLATED: &str = "A pay-per-token key runs only through Switchboard, where its daily ceiling is checked. Launch it in managed mode.";
+/// SB-401: an account of a group switched off starts nothing; a pay-per-token key starts only in
+/// managed mode, while its group is on and has a daily ceiling. Fails closed: a ceiling file that
+/// cannot be read is no ceiling.
+pub(crate) fn group_allows_launch(
+    root: &Path,
+    snapshot: &switchboard_core::Snapshot,
+    account: &switchboard_core::Account,
+    mode: &str,
+) -> Result<(), String> {
+    let Some(group) = snapshot.project_of_pool(&account.pool) else {
+        return Ok(());
+    };
+    if group.tokens && mode != "managed" {
+        return Err(TOKENS_ISOLATED.into());
+    }
+    if group.off {
+        return Err(switchboard_core::GROUP_OFF.into());
+    }
+    if group.tokens && crate::spend::group_ceiling(root, &group.pool).is_none() {
+        return Err(switchboard_core::TOKENS_NO_CEILING.into());
+    }
+    Ok(())
+}
 pub(crate) const PROJECT_ACCOUNT_OUTSIDE: &str =
     "This account belongs to a group. Launch it from one of the group's folders.";
 pub(crate) const PROJECT_FOLDER_FOREIGN: &str =
@@ -1638,7 +1664,9 @@ fn launch_agent_with(
     if account.kind != AuthKind::ApiKey {
         return Err(switchboard_proxy::AGENT_SUBSCRIPTION_REFUSED.into());
     }
-    project_allows(&store.snapshot()?, &account, &working_directory)?;
+    let snapshot = store.snapshot()?;
+    group_allows_launch(root, &snapshot, &account, "managed")?;
+    project_allows(&snapshot, &account, &working_directory)?;
     let program = find(&profile.binary).ok_or_else(|| {
         format!(
             "{} is not installed. Install it first, then launch it again.",
@@ -2523,6 +2551,7 @@ fn validate(
     {
         return Err(switchboard_core::ASSIGNED.into());
     }
+    group_allows_launch(root, &snapshot, &account, mode)?;
     project_allows(&snapshot, &account, &working_directory)?;
     Ok((working_directory, account))
 }

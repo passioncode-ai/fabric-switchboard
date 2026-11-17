@@ -735,9 +735,7 @@ impl Server {
         })
         .await
     }
-    /// SB-314: the window's *Delete group*; the operator's words open a group with its own key
-    /// or ceiling (SB-299).
-    /// SB-401: a group switched off or on.
+    /// SB-401: a group switched off or on, as the group's switch in the window.
     async fn project_switch(&self, args: &Map<String, Value>) -> Result<Value, String> {
         let on = args
             .get("on")
@@ -749,6 +747,8 @@ impl Server {
         })
         .await
     }
+    /// SB-314: the window's *Delete group*; the operator's words open a group with its own key
+    /// or ceiling (SB-299).
     async fn project_delete(&self, args: &Map<String, Value>) -> Result<Value, String> {
         let delete = Operation::RemoveProject {
             pool: required(args, "pool")?.into(),

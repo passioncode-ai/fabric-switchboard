@@ -457,6 +457,7 @@ fn limit_secs(operation: &Operation) -> u64 {
         Operation::SaveProject { .. }
         | Operation::ProjectEdit { .. }
         | Operation::RemoveProject { .. }
+        | Operation::GroupSwitch { .. }
         | Operation::MoveRoot { .. }
         | Operation::MoveAccount { .. }
         | Operation::RepositoryMap { .. } => 180,
@@ -1689,7 +1690,13 @@ mod tests {
             .save_project(None, "alpha", std::slice::from_ref(&folder), &[])
             .unwrap();
         assert_eq!(again.pool, alpha.pool, "the same id comes back");
-        let view = crate::spend::view(tmp.path(), &store.snapshot().unwrap(), now).unwrap();
+        let view = crate::spend::view(
+            tmp.path(),
+            &store.snapshot().unwrap(),
+            now,
+            &Default::default(),
+        )
+        .unwrap();
         assert!(view["ceilings"].as_array().unwrap().is_empty());
         // A group without a ceiling is deleted from the CLI as before.
         request(tmp.path(), &remove(Surface::Cli))

@@ -130,10 +130,17 @@ pub fn write(root: &Path, settings: &Settings) -> Result<(), String> {
         .map_err(|_| NOT_SAVED.into())
 }
 
-/// Every group balancing can name: `default`, then each group a person made.
+/// Every group balancing can name: `default`, then each group a person made, never the
+/// pay-per-token group (SB-401): its keys are lent to nobody and it borrows nothing.
 pub fn pools(snapshot: &Snapshot) -> Vec<String> {
     std::iter::once(DEFAULT_POOL.to_owned())
-        .chain(snapshot.projects.iter().map(|p| p.pool.clone()))
+        .chain(
+            snapshot
+                .projects
+                .iter()
+                .filter(|p| !p.tokens)
+                .map(|p| p.pool.clone()),
+        )
         .collect()
 }
 
@@ -534,7 +541,7 @@ pub fn plan(
         .groups
         .iter()
         .map(String::as_str)
-        .filter(|g| *g == DEFAULT_POOL || snapshot.project_of_pool(g).is_some())
+        .filter(|g| *g == DEFAULT_POOL || snapshot.project_of_pool(g).is_some_and(|p| !p.tokens))
         .collect();
     let mut needy: Vec<(&str, Provider, Signal)> = Vec::new();
     for g in &groups {

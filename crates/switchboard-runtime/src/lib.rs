@@ -1421,6 +1421,12 @@ impl Runtime {
             usage_gate::UsageGate::kept_in(root.join(usage_gate::HOLDS_FILE), monitor::now());
         let limits = limits::LimitState::kept_in(root.join(limits::EVIDENCE_FILE), monitor::now());
         let statistics = statistics::Statistics::load(&root);
+        // SB-401: the pay-per-token ceiling counts the whole UTC day, the part a previous owner
+        // counted included.
+        let today = switchboard_proxy::stats::day_of(monitor::now());
+        for (pool, micros) in statistics.day_cost(&today) {
+            proxy.seed_spend(&pool, &today, micros);
+        }
         Ok(Arc::new(Self {
             store,
             proxy,
@@ -2281,6 +2287,40 @@ impl Runtime {
     /// project keeps its last folder.
     /// SB-156: hands the proxy's counts to the statistics with each folder already resolved to
     /// its project, so a count outlives the checkout it came from.
+    /// SB-401: a pay-per-token ceiling the proxy found reached opens the ceiling's question
+    /// (double or keep), once per group and UTC day; the window announces it as any other.
+    pub(crate) fn ask_reached_ceilings(&self) {
+        let reached = self.proxy.take_reached();
+        if reached.is_empty() {
+            return;
+        }
+        let Ok(snapshot) = self.store.snapshot() else {
+            return;
+        };
+        for r in reached {
+            let scope = switchboard_core::ChainScope::Project { pool: r.pool };
+            let spent = r.micros as f64 / 1_000_000.0;
+            let outcome = spend::open_question_once_a_day(
+                &self.root,
+                &snapshot,
+                &scope,
+                r.cents,
+                spent,
+                monitor::now(),
+            );
+            oplog::event(
+                "tokens_ceiling_reached",
+                &[(
+                    "outcome",
+                    oplog::Field::Code(match outcome {
+                        Ok(Some(_)) => "asked",
+                        Ok(None) => "asked_today",
+                        Err(_) => "unwritten",
+                    }),
+                )],
+            );
+        }
+    }
     pub(crate) fn absorb_statistics(&self) {
         // SB-273: connections the proxy closed because another account's process opened them.
         let foreign = self.proxy.take_foreign_refused();
@@ -4004,6 +4044,27 @@ pub const PROJECT_EDIT_NO_ACCOUNT: &str =
     "This account is not in the project. List the project's accounts and name one of them.";
 /// A path with its nearest existing ancestor resolved (symlinks, `/tmp` → `/private/tmp`) and the
 /// missing rest joined back (SB-131).
+/// SB-401: what the pay-per-token group's keys cost so far this UTC day at the list price, in
+/// micro-dollars, by pool: from the owner's proxy, which counts it for its ceiling, else (no
+/// owner runs) from `statistics.json`, which then holds the whole day.
+fn tokens_spent_today(
+    root: &Path,
+    runtime: Option<&Runtime>,
+    snapshot: &switchboard_core::Snapshot,
+) -> std::collections::BTreeMap<String, u64> {
+    let Some(group) = snapshot.tokens_group() else {
+        return std::collections::BTreeMap::new();
+    };
+    let micros = match runtime {
+        Some(rt) => rt.proxy.spent_today(&group.pool),
+        None => statistics::Statistics::load(root)
+            .day_cost(&switchboard_proxy::stats::day_of(monitor::now()))
+            .get(&group.pool)
+            .copied()
+            .unwrap_or(0),
+    };
+    std::collections::BTreeMap::from([(group.pool.clone(), micros)])
+}
 fn canonical_near(path: &Path) -> PathBuf {
     let mut rest: Vec<&std::ffi::OsStr> = Vec::new();
     let mut at = Some(path);
@@ -4195,6 +4256,7 @@ impl Reported {
             }
             Operation::RemoveProject { .. } => Self::Project("removed"),
             Operation::ProjectEdit { .. } => Self::Project("updated"),
+            Operation::GroupSwitch { .. } => Self::Project("updated"),
             Operation::MoveAccount { .. } => Self::Project("updated"),
             Operation::MoveRoot { .. } => Self::Project("updated"),
             Operation::ProjectSuggestionAccept { .. } => Self::Project("updated"),
@@ -5298,13 +5360,22 @@ async fn execute(
         } => {
             let credential = Credential::parse(provider, kind, &secret)?;
             // SB-401: a Claude API key never lands in the default group, where every folder in
-            // no group would run on it: it goes to the pay-per-token group, which starts off.
-            let pool =
-                if provider == Provider::Claude && kind == AuthKind::ApiKey && pool == "default" {
+            // no group would run on it: it goes to the pay-per-token group, which starts off. A
+            // key added to `tokens` before that group exists makes it too, rather than a pool no
+            // group holds.
+            let pool = if provider == Provider::Claude && kind == AuthKind::ApiKey {
+                let snapshot = store.snapshot()?;
+                let reserved = pool == switchboard_core::TOKENS_POOL
+                    && snapshot.tokens_group().is_none()
+                    && snapshot.project_of_pool(&pool).is_none();
+                if pool == "default" || reserved {
                     store.ensure_tokens_group()?
                 } else {
                     pool
-                };
+                }
+            } else {
+                pool
+            };
             Ok(json!(store.add(label, provider, kind, pool, credential)?))
         }
         Operation::Update {
@@ -5741,7 +5812,11 @@ async fn execute(
             }
             Ok(json!({"chain": store.set_chain(scope, executors)?}))
         }
-        Operation::Ceilings => spend::view(root, &store.snapshot()?, monitor::now()),
+        Operation::Ceilings => {
+            let snapshot = store.snapshot()?;
+            let spent = tokens_spent_today(root, runtime, &snapshot);
+            spend::view(root, &snapshot, monitor::now(), &spent)
+        }
         Operation::SetCeiling { scope, usd, by } => {
             let ceiling =
                 spend::set_ceiling(root, &store.snapshot()?, scope, usd, by, monitor::now())?;
@@ -13978,5 +14053,184 @@ mod operators_word_tests {
             );
         }
         assert!(spend::read(root.path()).unwrap().loosened.is_empty());
+    }
+}
+
+/// SB-401: the pay-per-token group from the runtime's side: where a key lands, turning it on,
+/// the ceiling view, the reached question, launches and the groups balancing names.
+#[cfg(test)]
+mod tokens_group_tests {
+    use super::*;
+    use fixtures::*;
+
+    fn add_key(pool: &str) -> Operation {
+        Operation::Add {
+            label: "Key".into(),
+            provider: Provider::Claude,
+            kind: AuthKind::ApiKey,
+            pool: pool.into(),
+            secret: "synthetic-key".into(),
+        }
+    }
+
+    #[tokio::test]
+    async fn a_claude_key_lands_in_the_pay_per_token_group_which_turns_on_only_with_a_ceiling() {
+        let root = tempfile::tempdir().unwrap();
+        let runtime = fixtures::runtime(root.path(), signed_out, activates).await;
+        let key = runtime.execute(add_key("default")).await.unwrap();
+        let snapshot = runtime.store.snapshot().unwrap();
+        let group = snapshot.tokens_group().cloned().unwrap();
+        assert_eq!(key["pool"], json!(group.pool));
+        assert!(group.off && group.folders.is_empty());
+        // A key named for `tokens` before any such group lands there too, the group made.
+        let other = tempfile::tempdir().unwrap();
+        let fresh = fixtures::runtime(other.path(), signed_out, activates).await;
+        let named = fresh
+            .execute(add_key(switchboard_core::TOKENS_POOL))
+            .await
+            .unwrap();
+        assert!(fresh.store.snapshot().unwrap().tokens_group().is_some());
+        assert_eq!(named["pool"], switchboard_core::TOKENS_POOL);
+        // On only with a daily ceiling.
+        let on = || Operation::GroupSwitch {
+            pool: group.pool.clone(),
+            on: true,
+        };
+        assert_eq!(
+            runtime.execute(on()).await.unwrap_err(),
+            switchboard_core::TOKENS_NO_CEILING
+        );
+        runtime
+            .execute(Operation::SetCeiling {
+                scope: switchboard_core::ChainScope::Project {
+                    pool: group.pool.clone(),
+                },
+                usd: Some(5.0),
+                by: spend::Surface::Window,
+            })
+            .await
+            .expect("a ceiling needs no OpenRouter key of the group's own");
+        runtime.execute(on()).await.unwrap();
+        assert!(!runtime.store.pool_flags(&group.pool).unwrap().0);
+        // The ceiling reads active, with today's spend.
+        let view = runtime.execute(Operation::Ceilings).await.unwrap();
+        let ceiling = &view["ceilings"][0];
+        assert_eq!(ceiling["active"], true);
+        assert_eq!(ceiling["tokens"], true);
+        assert_eq!(ceiling["spent_today_usd"], 0.0);
+        assert_eq!(ceiling["reached"], false);
+        // Off again, without conditions.
+        runtime
+            .execute(Operation::GroupSwitch {
+                pool: group.pool.clone(),
+                on: false,
+            })
+            .await
+            .unwrap();
+        assert!(runtime.store.pool_flags(&group.pool).unwrap().0);
+    }
+
+    #[test]
+    fn a_reached_ceiling_asks_once_a_day() {
+        let root = tempfile::tempdir().unwrap();
+        let snapshot = switchboard_core::Snapshot::default();
+        let scope = switchboard_core::ChainScope::Project {
+            pool: "tokens".into(),
+        };
+        let now = 1_794_880_000;
+        let first =
+            spend::open_question_once_a_day(root.path(), &snapshot, &scope, 500, 5.1, now).unwrap();
+        assert!(first.is_some());
+        spend::answer(
+            root.path(),
+            &snapshot,
+            first.as_deref().unwrap(),
+            spend::Answer::Keep,
+            spend::Surface::Window,
+            now + 5,
+        )
+        .ok();
+        assert_eq!(
+            spend::open_question_once_a_day(root.path(), &snapshot, &scope, 500, 5.3, now + 60)
+                .unwrap(),
+            None,
+            "kept for the day: not asked again"
+        );
+        assert!(spend::open_question_once_a_day(
+            root.path(),
+            &snapshot,
+            &scope,
+            500,
+            5.0,
+            now + 86_400
+        )
+        .unwrap()
+        .is_some());
+    }
+
+    #[test]
+    fn a_pay_per_token_key_launches_only_managed_while_its_group_is_on_with_a_ceiling() {
+        let root = tempfile::tempdir().unwrap();
+        let mut group = switchboard_core::Project::tokens_group("tokens".into(), 1);
+        let mut snapshot = switchboard_core::Snapshot::default();
+        let mut key = switchboard_core::Account {
+            id: "key".into(),
+            label: "Key".into(),
+            provider: Provider::Claude,
+            kind: AuthKind::ApiKey,
+            pool: "tokens".into(),
+            enabled: true,
+            created_at: 1,
+            identity: None,
+            usage: None,
+            external_identity: None,
+            usage_health: None,
+        };
+        snapshot.projects.push(group.clone());
+        let allows = |s: &switchboard_core::Snapshot, a: &Account, mode| {
+            launch::group_allows_launch(root.path(), s, a, mode)
+        };
+        assert_eq!(
+            allows(&snapshot, &key, "isolated").unwrap_err(),
+            launch::TOKENS_ISOLATED
+        );
+        assert_eq!(
+            allows(&snapshot, &key, "managed").unwrap_err(),
+            switchboard_core::GROUP_OFF
+        );
+        group.off = false;
+        snapshot.projects[0] = group.clone();
+        assert_eq!(
+            allows(&snapshot, &key, "managed").unwrap_err(),
+            switchboard_core::TOKENS_NO_CEILING
+        );
+        spend::set_ceiling(
+            root.path(),
+            &snapshot,
+            switchboard_core::ChainScope::Project {
+                pool: "tokens".into(),
+            },
+            Some(5.0),
+            spend::Surface::Window,
+            1,
+        )
+        .unwrap();
+        assert!(allows(&snapshot, &key, "managed").is_ok());
+        // An account of any group switched off starts nothing.
+        key.pool = "apps".into();
+        key.kind = AuthKind::OAuth;
+        snapshot.projects.push(switchboard_core::Project {
+            pool: "apps".into(),
+            name: "Apps".into(),
+            folders: vec!["/w/apps".into()],
+            off: true,
+            ..Default::default()
+        });
+        assert_eq!(
+            allows(&snapshot, &key, "isolated").unwrap_err(),
+            switchboard_core::GROUP_OFF
+        );
+        // Balancing never names the pay-per-token group.
+        assert!(!balancing::pools(&snapshot).contains(&"tokens".to_owned()));
     }
 }

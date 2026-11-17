@@ -790,6 +790,8 @@ pub(crate) fn key(snapshot: &Snapshot, address: &str, repos: &mut RepoCache) -> 
         // SB-325: a personal group falls back to the default group; one bound to an
         // organization does not.
         p.organizations.hash(&mut h);
+        // SB-401: a group switched off or on binds its folders again.
+        (p.off, p.tokens).hash(&mut h);
         for f in &p.folders {
             let worktrees = repos.common(Path::new(f)).map(|c| c.join("worktrees"));
             let stamp =
@@ -919,6 +921,29 @@ mod tests {
             !settings_path(&fresh).exists(),
             "a file Switchboard created is removed"
         );
+    }
+
+    /// SB-401: a group switched off routes none of its folders; switching it re-runs the sync.
+    #[test]
+    fn a_group_switched_off_binds_no_folder_and_its_switch_changes_the_fingerprint() {
+        let tmp = tempfile::tempdir().unwrap();
+        let data = tmp.path().canonicalize().unwrap();
+        let app = data.join("app");
+        git(&app);
+        let mut s = Snapshot {
+            projects: vec![project("pc", &[&app])],
+            accounts: vec![account("pc")],
+            ..Default::default()
+        };
+        assert_eq!(desired(&s).len(), 1);
+        let mut repos = RepoCache::default();
+        let on = key(&s, "127.0.0.1:4000", &mut repos);
+        s.projects[0].off = true;
+        assert!(desired(&s).is_empty(), "an off group routes nothing");
+        assert_ne!(key(&s, "127.0.0.1:4000", &mut repos), on);
+        s.projects[0].off = false;
+        s.projects[0].tokens = true;
+        assert_ne!(key(&s, "127.0.0.1:4000", &mut repos), on);
     }
 
     #[test]
