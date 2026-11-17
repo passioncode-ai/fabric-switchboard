@@ -10,7 +10,7 @@
 //! start for as long as they stayed. Two changes:
 //! - **A board share.** `capacity.json` may hold `board`, the number of board runs (a dispatch, or
 //!   a hosted launch Fabric starts) that may run whatever the interactive sessions hold; absent,
-//!   `max(2, cap / 4)`. A board start is admitted while the pool has room *or* the board's own
+//!   a quarter of the cap rounded up (cap 1 to 4: 1; cap 20: 5). A board start is admitted while the pool has room *or* the board's own
 //!   live runs are under the share.
 //! - **Counting per session.** A Claude Code process with its own session file counts unless its
 //!   own session is quiet (its transcript and its status unchanged for `QUIET_MINUTES`, outside a
@@ -33,7 +33,7 @@ const MAX_BYTES: u64 = 4096;
 /// The highest cap a person can set.
 pub const MAX_CAP: u32 = 500;
 /// The smallest board share when the person set none.
-pub const MIN_BOARD_SHARE: u32 = 2;
+pub const MIN_BOARD_SHARE: u32 = 1;
 
 /// `launch --hosted`'s refusal at the cap; `dispatch` answers `dispatch::AT_CAPACITY` instead.
 pub const AT_CAPACITY: &str = "At capacity: this computer runs as many coding sessions as its limit allows. The start waits until one ends.";
@@ -57,9 +57,13 @@ pub struct Pool {
     pub board: Option<u32>,
 }
 
-/// The board share when the person set none: a quarter of the cap, at least two.
+/// The board share when the person set none: a quarter of the cap rounded up, never more than
+/// the cap (design review of 2026-11-17: `max(2, cap / 4)` gave a share of 2 under a cap of 1,
+/// a value the person could not type, and more than a quarter for caps 2 to 8).
 pub fn default_board_share(cap: u32) -> u32 {
-    (cap / 4).max(MIN_BOARD_SHARE)
+    cap.div_ceil(4)
+        .max(MIN_BOARD_SHARE)
+        .min(cap.max(MIN_BOARD_SHARE))
 }
 
 impl Pool {
@@ -106,7 +110,7 @@ pub fn cap(root: &Path) -> Result<Option<u32>, String> {
 pub enum Share {
     /// Keeps the share the person set, clamped to the new cap.
     Keep,
-    /// Back to the default share (a quarter of the cap, at least 2).
+    /// Back to the default share (a quarter of the cap, rounded up).
     Default,
     /// This many board runs, from 0 to the cap.
     Set(u32),
@@ -669,18 +673,21 @@ mod tests {
     }
 
     #[test]
-    fn the_default_board_share_is_a_quarter_of_the_cap_and_at_least_two() {
+    fn the_default_board_share_is_a_quarter_of_the_cap_rounded_up_and_never_more_than_it() {
         for (cap, share) in [
-            (1, 2),
-            (4, 2),
+            (1, 1),
+            (2, 1),
+            (4, 1),
+            (5, 2),
             (8, 2),
-            (11, 2),
+            (11, 3),
             (12, 3),
             (20, 5),
             (40, 10),
             (500, 125),
         ] {
             assert_eq!(default_board_share(cap), share, "cap {cap}");
+            assert!(default_board_share(cap) <= cap, "cap {cap}");
         }
         assert_eq!(pool(Some(20), Some(7)).board_share(), Some(7));
         assert_eq!(pool(None, None).board_share(), None);
