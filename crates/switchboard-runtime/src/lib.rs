@@ -4522,6 +4522,9 @@ fn take_turn_wait() -> std::time::Duration {
 /// The refusal of an operation that needs the owner when none runs.
 pub const NEEDS_OWNER: &str =
     "Start the desktop app or 'switchboard serve' before login or launch.";
+/// A restart wave is run by the owner's session watch; without one nothing would act on it.
+pub const RESTART_NEEDS_OWNER: &str =
+    "Start the desktop app or 'switchboard serve' first: the restart wave runs in it.";
 /// Whether `error` says no owner could be asked (none runs, it is starting or quitting with the
 /// store held, or the control connection failed), as opposed to an owner that answered with a
 /// refusal. A caller that keeps work for the next owner keeps it only then (review of 2026-11-16,
@@ -4537,6 +4540,8 @@ pub fn owner_unreachable(error: &str) -> bool {
         || error == control::CONTROL_BUSY
         || error == recovery::UNREADABLE
         || error == "Control metadata unavailable."
+        // A corrupt `control.json`: no owner was asked (R3 review).
+        || error.starts_with("Invalid control metadata.")
         || error.ends_with(" No operation was attempted.")
         || error.contains("Check state before retrying")
 }
@@ -4546,6 +4551,13 @@ pub fn owner_unreachable(error: &str) -> bool {
 #[cfg(test)]
 mod owner_unreachable_tests {
     use super::*;
+
+    #[test]
+    fn a_corrupt_control_file_means_no_owner_was_asked() {
+        assert!(owner_unreachable(
+            "Invalid control metadata. Do not bypass a running owner."
+        ));
+    }
 
     #[test]
     fn a_stop_is_kept_whenever_no_owner_was_asked_and_never_for_an_owners_refusal() {
@@ -6513,7 +6525,7 @@ async fn execute(
             // Only the owner's one-minute watch moves a wave on: offline, a wave written now
             // would restart nothing and keep the duty officer off its sessions for a day
             // (review of 2026-11-16, defect 7). Planning, status and cancel stay offline.
-            needs_owner()?;
+            needs_owner().map_err(|_| RESTART_NEEDS_OWNER.to_string())?;
             let root = root.to_owned();
             blocking::run(move || {
                 restarts::apply(&root, &digest, &reason, caller_pid, monitor::now())

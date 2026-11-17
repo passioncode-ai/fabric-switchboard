@@ -193,6 +193,7 @@ const ALLOWLIST = {
   // runtime lib.rs needs_owner(): only the offline CLI runs without an owner. The desktop
   // app always executes operations through its own Owner, so this never answers the UI.
   "Start the desktop app or 'switchboard serve' before login or launch.": 'offline CLI only',
+  "Start the desktop app or 'switchboard serve' first: the restart wave runs in it.": 'offline CLI and MCP only: the window is the owner',
   // core persistence.rs secure_root(): the desktop app's root comes from default_root(),
   // which is always absolute; only a relative CLI --data-dir reaches this check.
   'Account storage path must be absolute': 'CLI --data-dir only',

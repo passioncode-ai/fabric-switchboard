@@ -136,6 +136,26 @@ mod tests {
     }
 
     #[test]
+    fn a_temporary_being_written_is_left_and_one_a_crash_left_is_removed() {
+        let root = tempfile::tempdir().unwrap();
+        let dir = root.path().join(DIR);
+        std::fs::create_dir_all(&dir).unwrap();
+        let fresh = dir.join(".private-fresh");
+        let stale = dir.join(".private-stale");
+        std::fs::write(&fresh, b"{").unwrap();
+        std::fs::write(&stale, b"{").unwrap();
+        std::fs::File::options()
+            .write(true)
+            .open(&stale)
+            .unwrap()
+            .set_modified(std::time::SystemTime::now() - std::time::Duration::from_secs(120))
+            .unwrap();
+        assert!(waiting(root.path(), 1_000).is_empty());
+        assert!(fresh.exists(), "another hook may still be writing it");
+        assert!(!stale.exists(), "a crash's leftover never fills the spool");
+    }
+
+    #[test]
     fn an_old_or_broken_report_is_dropped_and_a_bad_one_is_never_kept() {
         let root = tempfile::tempdir().unwrap();
         spool(root.path(), &stop("S1", 0)).unwrap();
