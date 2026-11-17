@@ -115,5 +115,27 @@ on with the ceiling, an empty Repositories part. The decision record was renumbe
 5.2, priced) in three folders: add it (it lands in the group), *Add folder…* three times, set the
 daily ceiling with "Turn the group on now", and sessions there run on it.
 
+## Review fixes, round 3 (2026-11-17)
+
+The third review found no P0, three P1 and seven P2, all fixed here (D-15 to D-17 in DEC-0023):
+
+- P1-1: a group switched off keeps its folders' routes, closed, in the Claude bindings, the Codex
+  route and the shell map, so an off group bound to an organization never lets its sessions fall
+  back to the ordinary sign-in (`bindings::tests::a_group_switched_off_keeps_its_route_and_its_switch_changes_the_fingerprint`,
+  the Codex route test). One rule for every group.
+- P1-2: the save path in the store routes a Claude API key to the pay-per-token group, so Claude
+  Swap's import does too (`a_claude_swap_key_lands_in_the_pay_per_token_group`).
+- P1-3: the window never selects or launches a key from before outside the group; it says why and
+  offers *Move to Pay-per-token keys* (`keyLaunch` in `scripts/test-ui-logic.mjs`); the runtime
+  answers `KEY_OUTSIDE_TOKENS` for such a key.
+- P2: a move to `tokens` makes the group (runtime and the window's move dialog); a key is never
+  placed in a machine group and comes home by `leaving_pool`; the spend file is written off the
+  counter's lock and a failed write refuses until one succeeds
+  (`a_spend_file_that_cannot_be_written_refuses_until_a_write_succeeds`); an ordinary group's
+  edit dialog lists no Claude API key it does not already hold; an earlier isolated home's
+  `ANTHROPIC_API_KEY` is removed once its key is in the group
+  (`a_key_from_before_moves_into_the_pay_per_token_group_and_its_home_forgets_it`); switching a
+  group off moves a route only to an account the usual checks allow.
+
 Next task for the next agent: file the board row for Needs attention naming a Claude key left in
 the default group, then merge `token-group` through the repository's policy and release.

@@ -453,8 +453,8 @@ research notes); the ones still in force that the board cites are seeded below w
     the simplest rule that leaves no unguarded key, as the reviewer recommended.
   - D-11 (second review): an account whose home group is switched off serves no group sharing it
     (route selection, rotation and failover pass over it; the routes it held move to another
-    account of the same kind there); balancing leaves an off group out and returns its loans; the
-    Codex route skips it.
+    account of the same kind there); balancing leaves an off group out and returns its loans. (Its
+    Codex route: see D-15.)
   - D-12 (second review): the proxy loads the day's spend before it listens, from
     `tokens-spend.json` (written after each answer of a pay-per-token key) and
     `statistics.json`, the larger winning; a file that exists and cannot be read leaves the day
@@ -466,6 +466,28 @@ research notes); the ones still in force that the board cites are seeded below w
   - D-14 (second review): the ceiling is checked before each request, so requests already in
     flight when it is crossed still finish; the day can pass the ceiling by what those requests
     cost (documented in CONTRACTS), never by a request started after.
+  - D-15 (third review, 2026-11-17; supersedes D-3's "routes no folder" and D-11's Codex line): a
+    group switched off keeps its folders' routes, closed, so a session there gets the proxy's
+    `GROUP_OFF` refusal and never falls through to the ordinary sign-in. One rule for every group,
+    ordinary, organization-bound or pay-per-token: Claude bindings, the Codex route and the shell
+    map keep an off group's folder pointed at it; only a folder an on group also holds is served
+    by that on group (an off group is listed last). Reason: before, an off group bound to an
+    organization dropped out of the bindings and its sessions ran on the person's own sign-in,
+    which is what switching it off was meant to stop.
+  - D-16 (third review): the rule that a Claude API key lands in the pay-per-token group lives in
+    the store's save path (`save_account` with upsert), so every way in (the add dialog, the CLI,
+    Claude Swap's import, a restore) goes through it; the plain `add` stays a primitive that the
+    operation layer routes itself. A key is never placed in a machine group, and one that comes
+    home goes to the group it left by `leaving_pool` (the pay-per-token group).
+  - D-17 (third review): a Claude API key from before, outside the pay-per-token group, is never
+    selected or launched by the window, the CLI or the fallback (`KEY_OUTSIDE_TOKENS`); the
+    window offers *Move to Pay-per-token keys*, and a move to `tokens` makes the group when it is
+    missing. When a key enters that group, the background pass removes `ANTHROPIC_API_KEY` from
+    the isolated home an earlier version wrote for it (`homes/<id>/settings.json`). The day's
+    spend file is written off the counter's lock, newest first; a write that fails leaves the day
+    unknown (the group refuses) until a write succeeds, retried at most every 5 s. Switching a
+    group off moves its routes only to an account the usual checks allow (enabled, not given to
+    an agent, not used elsewhere, admitted by the group's context).
 - **Consequences:** a key in the default group from before stays there (naming it under Needs
   attention is still open, see the plan); turning a group off stops its sessions at their next request; the reached question
   is the same one paid hand-overs use, and *Double* raises the ceiling at once.

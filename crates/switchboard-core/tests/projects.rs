@@ -902,3 +902,47 @@ fn an_account_whose_home_group_is_off_serves_no_group_sharing_it() {
     let (next, _) = store.route(Provider::Codex, &shares.pool).unwrap();
     assert_eq!(next.id, y.id);
 }
+
+#[test]
+fn a_folder_two_groups_hold_belongs_to_the_one_switched_on() {
+    let (root, store) = setup();
+    let x = add(&store, Provider::Codex, "default", "synthetic-x");
+    let y = add(&store, Provider::Codex, "default", "synthetic-y");
+    let folder = project(&root, "shared");
+    let first = store
+        .save_project(
+            None,
+            "First",
+            std::slice::from_ref(&folder),
+            std::slice::from_ref(&x.id),
+        )
+        .unwrap();
+    let second = store
+        .save_project(
+            None,
+            "Second",
+            std::slice::from_ref(&folder),
+            std::slice::from_ref(&y.id),
+        )
+        .unwrap();
+    let pick = |store: &Store| {
+        store
+            .snapshot()
+            .unwrap()
+            .project_for(&folder)
+            .map(|p| p.pool.clone())
+    };
+    assert_eq!(pick(&store), Some(first.pool.clone()));
+    store.set_group_off(&first.pool, true).unwrap();
+    assert_eq!(
+        pick(&store),
+        Some(second.pool.clone()),
+        "an off group is listed last"
+    );
+    store.set_group_off(&second.pool, true).unwrap();
+    assert_eq!(
+        pick(&store),
+        Some(first.pool.clone()),
+        "a folder only off groups hold stays in its group, closed"
+    );
+}

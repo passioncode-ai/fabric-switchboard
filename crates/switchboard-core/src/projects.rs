@@ -646,11 +646,16 @@ impl Snapshot {
     /// The group a session in `path` works in (SB-146): of the groups holding the folder, the
     /// first (in creation order) with an enabled account, else the first.
     /// With organizations defined, a personal group comes first: the more private wins (SB-109,
-    /// RM-28 CX-26).
+    /// RM-28 CX-26). SB-401 D-15: while a group switched on holds the folder, no group switched
+    /// off is chosen; a folder only off groups hold stays in its group, closed.
     pub fn project_for(&self, path: &Path) -> Option<&Project> {
         let mut all = self.projects_for(path);
         if !self.organizations.is_empty() {
             all.sort_by_key(|p| !p.organizations.is_empty());
+        }
+        all.sort_by_key(|p| p.off);
+        if all.iter().any(|p| !p.off) {
+            all.retain(|p| !p.off);
         }
         all.iter()
             .find(|p| self.accounts.iter().any(|a| a.pool == p.pool && a.enabled))

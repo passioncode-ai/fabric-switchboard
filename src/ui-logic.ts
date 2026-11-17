@@ -1033,6 +1033,13 @@ export function tourWaits(status: UsageStatus | null | undefined, statusFailed: 
  * the local proxy, is open only to the account selected in its pool while the proxy runs; otherwise
  * the session is isolated and the box stays ticked.
  */
+/** SB-401: how the window launches a Claude API key: `managed` (selected in the pay-per-token group, proxy up), `select` (in that group, selected first), `outside` (a key from before, outside it: never selected or launched from here, offered the move), `down` (the proxy is not running). Null for any other account. */
+export function keyLaunch(account: { provider: string; kind: string; pool: string }, tokensPool: string | null, selectedInPool: boolean, proxyRunning: boolean): 'managed' | 'select' | 'outside' | 'down' | null {
+  if (account.provider !== 'claude' || account.kind !== 'api_key') return null;
+  if (account.pool !== tokensPool) return 'outside';
+  if (!proxyRunning) return 'down';
+  return selectedInPool ? 'managed' : 'select';
+}
 export function launchChoice(selectedInPool: boolean, proxyRunning: boolean): { managed: boolean; isolatedByDefault: boolean } {
   const managed = selectedInPool && proxyRunning;
   return { managed, isolatedByDefault: !managed };
@@ -1057,8 +1064,10 @@ export function replaceFolder(folders: string[], old: string, folder: string): s
 export interface MoveTarget { pool: string; name: string | null; current: boolean; blocked: boolean; refused: boolean; keys: boolean }
 export function moveTargets(currentPool: string, projects: { pool: string; name: string; tokens?: boolean }[], inCli: boolean, admits: (pool: string) => boolean = () => true, claudeKey = false): MoveTarget[] {
   const sorted = [...projects].sort((a, b) => a.name.localeCompare(b.name));
-  const tokensPool = projects.find((p) => p.tokens)?.pool ?? null;
-  return [{ pool: 'default', name: null }, ...sorted.map((p) => ({ pool: p.pool, name: groupDisplayName(p) }))].map((target) => {
+  // SB-401: a Claude API key moves to the pay-per-token group, made by the move when it is missing.
+  const tokensPool = projects.find((p) => p.tokens)?.pool ?? (claudeKey ? 'tokens' : null);
+  const made = claudeKey && !projects.some((p) => p.tokens) ? [{ pool: 'tokens', name: t('Pay-per-token keys') }] : [];
+  return [{ pool: 'default', name: null }, ...sorted.map((p) => ({ pool: p.pool, name: groupDisplayName(p) })), ...made].map((target) => {
     const current = target.pool === currentPool;
     const refused = target.pool !== 'default' && !current && !admits(target.pool);
     const toTokens = target.pool === tokensPool;

@@ -3598,13 +3598,21 @@ Plan: [2026-11-17-token-group](plans/2026-11-17-token-group/README.md); decision
   never shares it; sources are refused (`TOKENS_BY_HAND`); deleting it is refused while it holds a
   key (`TOKENS_KEEPS_KEYS`). `set_shared` (balancing) answers false for its keys, and
   `restore_account_pool` and `restore_shared_accounts` leave them.
-- **Adding a key** (D-10). `Operation::Add` puts every Claude API key in the pay-per-token group
+- **Adding a key** (D-10, D-16). The store's save path (`Store::save_account` with upsert, used
+  by Claude Swap's import and every capture) puts a Claude API key in the pay-per-token group,
+  made when needed; `Operation::Add` puts every Claude API key in the pay-per-token group
   (made when needed), whatever pool was named; a backup restore brings one back there; a group that
   lets one go (left out of a save, the group deleted, `return_to_default` from a pool no group
   holds) sends it there instead of the default group (`Snapshot::leaving_pool`). Once the group
   exists, every publish refuses a Claude API key moved anywhere but into it, or newly shared or
   lent (`CLAUDE_KEY_STAYS`); `accounts move` (`Operation::MoveAccount`) refuses one to any other
-  group even before. A key in another group from before stays there.
+  group even before; a move to `tokens` makes the group when it is missing. A key is never placed
+  in a machine group (`machines::place` answers false), and one that comes home goes to
+  `leaving_pool`. A key in another group from before stays there, and is never selected or
+  launched there (D-17, `KEY_OUTSIDE_TOKENS`: the window offers *Move to Pay-per-token keys*).
+  Once a key is in the pay-per-token group, the bindings pass removes `env.ANTHROPIC_API_KEY`
+  from an isolated home an earlier version wrote for it (`launch::scrub_key_homes`, oplog
+  `key_homes_scrubbed`).
 - **Switch.** `Operation::GroupSwitch { pool, on }` (CLI `switchboard project switch --pool <id>
   on|off`, MCP `switchboard_project_switch {pool, on}`, Tauri `project_switch`) answers the group.
   Turning the pay-per-token group on without a daily ceiling is refused with `TOKENS_NO_CEILING`;
@@ -3614,15 +3622,20 @@ Plan: [2026-11-17-token-group](plans/2026-11-17-token-group/README.md); decision
   (`Snapshot::serves`, `pool_accounts` and `pools_of` leave it out, so route selection, rotation
   and failover pass over it); switching it moves the routes such an account held in other groups
   to another of their accounts of the same kind, or drops them. Balancing leaves an off group out
-  and returns its loans (`group_off`); the Codex route skips it, so a folder it shares with a
-  later group falls through to that group. Its folders get no binding (`bindings::desired` skips it; the
-  bindings fingerprint covers `off` and `tokens`, so a switch re-runs the sync); its accounts are
+  and returns its loans (`group_off`). Its folders keep their route, closed (D-15): the Claude
+  bindings (`bindings::desired`), the Codex route and the shell map keep pointing them at the off
+  group, so a session there gets the proxy's `GROUP_OFF` and never falls through to the ordinary
+  sign-in; only a folder an on group also holds is served by that group (an off group is listed
+  last, and `Snapshot::project_for` chooses no off group while an on group holds the folder). The bindings fingerprint covers `off` and `tokens`, so a switch re-runs the sync.
+  Switching a group off moves a route only to an account the usual checks allow (enabled, not
+  given to an agent, not used elsewhere, admitted by the group's context). Its accounts are
   no fallback candidate; a launch of one of its accounts is refused with `GROUP_OFF`
   (`launch::group_allows_launch`, called by every Claude Code and Codex launch, a continuation, a
   dispatch and a third-party agent).
-- **Launch of a Claude API key.** Managed mode only, wherever the key is (`TOKENS_ISOLATED`: an
-  isolated home would hold the key and reach the provider past any ceiling), from a folder of its
-  group (`project_allows`); the fallback and dispatch pass a Claude API key over. A key of the
+- **Launch of a Claude API key.** Managed mode only, from the pay-per-token group (an isolated
+  launch answers `TOKENS_ISOLATED` for a key there and `KEY_OUTSIDE_TOKENS` for one outside it:
+  an isolated home would hold the key and reach the provider past any ceiling), from a folder of
+  its group (`project_allows`); the fallback and dispatch pass a Claude API key over. A key of the
   pay-per-token group also only while the group is on and has a ceiling
   (`TOKENS_NO_CEILING`; an unreadable `spend.json` is no ceiling).
 - **Proxy refusals**, each `403` with a `switchboard_error` body and never sent upstream, checked
@@ -3636,7 +3649,10 @@ Plan: [2026-11-17-token-group](plans/2026-11-17-token-group/README.md); decision
 - **The day counter.** `tokens::Spend` adds each priced answer to its account's home pool for the
   UTC day of its end, saturating, and is never drained by `take_statistics`. After each answer of
   a pay-per-token key it writes `<data>/tokens-spend.json` (0600, `{version: 1, day, pools}`)
-  under its lock. The proxy loads it before it listens (`Spend::load`): the larger of that file and
+  off the counter's lock (on a blocking thread, newest snapshot first, older ones skipped). A write
+  that fails leaves the day unknown, so the group refuses with `TOKENS_SPEND_UNKNOWN`, until a
+  write succeeds; the refusal path retries it at most every 5 s. The proxy's stop waits up to 1 s
+  for writes in flight. The proxy loads it before it listens (`Spend::load`): the larger of that file and
   today's `cost_micros` in `statistics.json`, per pool. A file that exists and cannot be read (not
   JSON, past 64 KiB or 8 MiB) leaves the day unknown, unless the spend file holds today, and the
   pay-per-token group refuses that UTC day with `TOKENS_SPEND_UNKNOWN`. `ProxyHandle::spent_today(pool)`

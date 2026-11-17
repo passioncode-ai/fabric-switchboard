@@ -1844,6 +1844,18 @@ check(() => {
   assert.deepEqual(pick(logic.moveTargets('default', groups, false, () => true, true)), { default: false, apps: true, tokens: false }, 'a key in default (now) goes only to the pay-per-token group');
   assert.deepEqual(pick(logic.moveTargets('default', groups, false, () => true, false)), { default: false, apps: false, tokens: true }, 'nothing else goes there');
   assert.deepEqual(pick(logic.moveTargets('tokens', groups, false, () => true, true)), { default: true, apps: true, tokens: false });
+  // A key from before, with no pay-per-token group yet: the move offers it, and the move makes it.
+  assert.deepEqual(pick(logic.moveTargets('default', [groups[0]], false, () => true, true)), { default: false, apps: true, tokens: false }, 'the move to a missing pay-per-token group is offered');
+  assert.deepEqual(pick(logic.moveTargets('default', [groups[0]], false, () => true, false)), { default: false, apps: false }, 'no synthetic target for anything else');
+  // The window never selects or launches a Claude API key outside the pay-per-token group.
+  const key = (pool) => ({ provider: 'claude', kind: 'api_key', pool });
+  assert.equal(logic.keyLaunch(key('default'), 'tokens', true, true), 'outside', 'a key from before is never launched from the default group');
+  assert.equal(logic.keyLaunch(key('default'), null, false, true), 'outside');
+  assert.equal(logic.keyLaunch(key('tokens'), 'tokens', false, true), 'select');
+  assert.equal(logic.keyLaunch(key('tokens'), 'tokens', true, true), 'managed');
+  assert.equal(logic.keyLaunch(key('tokens'), 'tokens', true, false), 'down');
+  assert.equal(logic.keyLaunch({ provider: 'claude', kind: 'oauth', pool: 'default' }, 'tokens', false, true), null);
+  assert.equal(logic.keyLaunch({ provider: 'codex', kind: 'api_key', pool: 'default' }, 'tokens', false, true), null);
   assert.equal(logic.poolChoices([], groups).find((c) => c.pool === 'tokens').name, 'Pay-per-token keys');
   i18n.setLocale('ru');
   assert.equal(logic.groupDisplayName({ name: 'Pay-per-token keys', tokens: true }), 'Ключи с оплатой за токены');
