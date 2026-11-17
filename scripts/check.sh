@@ -35,16 +35,26 @@ core_tree() {
 # Code that builds only on Unix reached a release tag and failed the nightly Windows jobs (0.7.31,
 # SB-303). With cargo-xwin installed the crates are checked for Windows here, their tests too (the
 # proxy's tests did not build on Windows until SB-406 item 7); without it the step says it was
-# skipped.
-windows_check() {
-  if command -v cargo-xwin >/dev/null 2>&1; then
-    # The desktop crate's Windows configuration bundles the release CLI (docs/DISTRIBUTION.md),
-    # which a check does not build: TAURI_CONFIG takes the resources out for it.
-    TAURI_CONFIG='{"bundle":{"resources":null}}' cargo xwin check -q -p switchboard-core -p switchboard-proxy -p switchboard-runtime -p switchboard-cli -p fabric-switchboard -p fabric-sessions-core -p fabric-sessions --target x86_64-pc-windows-msvc --all-targets --locked
-  else
+# skipped. The desktop crate also needs `llvm-rc` for its Windows resources (Homebrew's `llvm`,
+# docs/DISTRIBUTION.md); without it that crate alone is skipped, and the nightly Windows jobs
+# still build and test it. Its Windows configuration bundles the release CLI, which a check does
+# not build: TAURI_CONFIG takes the resources out for it. A subshell keeps the PATH change here.
+windows_check() (
+  if ! command -v cargo-xwin >/dev/null 2>&1; then
     echo "Windows check skipped: cargo-xwin is not installed (docs/DISTRIBUTION.md)."
+    exit 0
   fi
-}
+  if [ -d /opt/homebrew/opt/llvm/bin ]; then
+    PATH="/opt/homebrew/opt/llvm/bin:$PATH"
+  fi
+  desktop="-p fabric-switchboard"
+  if ! command -v llvm-rc >/dev/null 2>&1; then
+    desktop=""
+    echo "Windows check of the desktop crate skipped: llvm-rc is not installed (docs/DISTRIBUTION.md)."
+  fi
+  # shellcheck disable=SC2086 # $desktop is one option and its value, or nothing.
+  TAURI_CONFIG='{"bundle":{"resources":null}}' cargo xwin check -q -p switchboard-core -p switchboard-proxy -p switchboard-runtime -p switchboard-cli $desktop -p fabric-sessions-core -p fabric-sessions --target x86_64-pc-windows-msvc --all-targets --locked
+)
 step brand node scripts/check-brand.mjs
 step ui-build npm run build
 step read-deadline node scripts/test-read-deadline.mjs

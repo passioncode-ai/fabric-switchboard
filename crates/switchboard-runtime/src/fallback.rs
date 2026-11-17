@@ -4901,7 +4901,11 @@ mod tests {
             2,
             "gated again on the group's key"
         );
-        assert_eq!(clock.charges(), 2, "both gates were charged on the test's clock");
+        assert_eq!(
+            clock.charges(),
+            2,
+            "both gates were charged on the test's clock"
+        );
         assert_eq!(
             refused,
             crate::agent_catalog::openrouter("no-such-agent")
