@@ -1765,7 +1765,7 @@ check(() => {
   i18nForShell.setLocale('ru');
   assert.equal(logic.attentionActionLabel('check_usage'), 'Проверить снова');
   assert.equal(logic.attentionActionLabel('dispatch_stop'), 'Остановить запуск');
-  assert.ok(logic.dispatchRefusedLine({ count: 3, freed: false }).startsWith('За последний час отклонено 3 запуска с доски'), logic.dispatchRefusedLine({ count: 3, freed: false }));
+  assert.ok(logic.dispatchRefusedLine({ count: 3, freed: false }).startsWith('3 запуска с доски ждут'), logic.dispatchRefusedLine({ count: 3, freed: false }));
   i18nForShell.setLocale('en');
 });
 // SB-384: the duty officer's reasons and outcomes in words.
