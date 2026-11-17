@@ -1807,7 +1807,7 @@ check(() => {
   assert.equal(logic.sessionWhyText({ why: 'closed_restart' }, 0), 'Ended by a restart and not back, can continue');
   assert.equal(logic.sessionWhyText({ why: 'moved_on' }, 0), 'Went on after its limit stop and ended, can continue');
   assert.equal(logic.sessionWhyText({ why: 'no_transcript' }, 0), 'Stopped on a limit, its history is gone');
-  assert.equal(logic.restartStateText('failed', 'gone'), 'Not back: it ended before its turn');
+  assert.equal(logic.restartStateText('failed', 'gone'), 'Not back: it ended before its turn did');
   i18n.setLocale('ru');
   assert.equal(logic.restartStateText('back', null), 'Вернулась', 'never the navigation «Назад»');
   assert.equal(logic.sessionGroupTitle('waiting'), 'Ждут');

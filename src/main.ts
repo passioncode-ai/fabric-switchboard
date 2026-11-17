@@ -441,7 +441,7 @@ function render(options: { background?: boolean } = {}): boolean {
     // SB-228 (VIS-21): the organization card's own action leads; this one goes quiet beside it.
     if (page === 'orgs' && !empty(snapshot?.organizations)) actions.append(button(t('+ New organization'), () => organizationDialog(null), orgCardLeads() ? 'button quiet' : 'button primary', 'org-add'));
     // SB-397 R1: restarting every session is the page's own action; one restart at a time.
-    if (page === 'sessions' && sessionRows) { const restart = button(t('Restart all sessions…'), () => void restartDialog(), 'button', 'sessions-restart'); if (restartRunning()) { restart.disabled = true; restart.title = t('A restart is running. Cancel it or wait for it to finish.'); restart.setAttribute('aria-describedby', 'restart-heading'); } actions.append(restart); }
+    if (page === 'sessions' && sessionRows) { const restart = button(t('Restart all sessions…'), () => void restartDialog(), 'button', 'sessions-restart'); if (restartRunning()) { restart.disabled = true; restart.title = restartWave!.counts.pending > 0 ? t('A restart is running. Cancel it or wait for it to finish.') : t('A restart is running. Wait for it to finish.'); restart.setAttribute('aria-describedby', 'restart-heading'); } actions.append(restart); }
     header.append(actions);
   }
   main.append(header);
@@ -3323,7 +3323,9 @@ function loadSessionRows(): Promise<void> {
         if (rows.status === 'fulfilled') { if (clock.accepts(stamp)) { sessionRows = rows.value; sessionRowsError = false; } } else sessionRowsError = true;
         // A read that failed for another reason than "no wave ran" keeps the wave on screen (a timeout mid-wave).
         if (wave.status === 'fulfilled') { if (clock.accepts(stamp)) restartWave = wave.value; } else if (clock.accepts(stamp) && safeError(wave.reason, 'read') === RESTART_NONE) restartWave = null;
-      } while (sessionRowsAgain);
+      // A read asked for meanwhile runs once more only while the page is on screen (an act's own
+      // reload is always on it); leaving the page drops it.
+      } while (sessionRowsAgain && page === 'sessions');
     } finally { sessionRowsRun = null; }
     watchRestart(); announceRestart(); backgroundRender();
   })();
@@ -3335,18 +3337,25 @@ function watchRestart() {
   window.clearTimeout(restartPoll);
   if (page === 'sessions' && !document.hidden && restartRunning()) restartPoll = window.setTimeout(() => { if (page === 'sessions' && !document.hidden) void loadSessionRows(); }, 10_000);
 }
-document.addEventListener('visibilitychange', () => { if (!document.hidden && page === 'sessions' && restartRunning()) void loadSessionRows(); else if (document.hidden) window.clearTimeout(restartPoll); });
+// Hidden: the poll stops. Shown again: `backgroundRefresh` reads the page, which arms it again.
+document.addEventListener('visibilitychange', () => { if (document.hidden) window.clearTimeout(restartPoll); });
 /** A wave older than a day is not shown, and does not hold the page's restart action off either. */
 const restartShown = (wave: RestartWave | null): wave is RestartWave => !!wave && Date.now() / 1000 - wave.at < 86_400;
 const restartRunning = () => restartShown(restartWave) && !restartWave.done_at;
-/** The wave's progress said once each time its counts change, as the other pages announce. */
-let restartAnnounced = '';
+/** Whether this computer's rows show the session running or waiting in a live process. */
+const sessionLive = (id: string) => !!sessionRows?.here.rows.some((r) => r.session_id === id && r.pid != null);
+/** The wave's progress said once each time its counts change, as the other pages announce. The
+ * first read of a visit only records it (the page itself says it), and a read right after an act
+ * leaves that act's notice to be heard. */
+let restartAnnounced = ''; let restartQuietUntil = 0;
 function announceRestart() {
   const wave = restartWave;
   const text = restartShown(wave) && page === 'sessions' ? restartCountsText(wave) : '';
-  if (text && text !== restartAnnounced) announce(text);
+  if (text && restartAnnounced && text !== restartAnnounced && Date.now() >= restartQuietUntil) announce(text);
   restartAnnounced = text;
 }
+/** After an act of the restart: its notice is heard first, then the reload puts focus back. */
+async function afterRestartAct() { restartQuietUntil = Date.now() + 4000; await loadSessionRows(); restoreFocus(actFocus()); }
 function restartCountsText(wave: RestartWave): string {
   const back = wave.counts.back + wave.counts.continuing;
   return wave.done_at
@@ -3429,13 +3438,15 @@ function restartPanel(): HTMLElement | null {
       item.append(top);
       if (s.caller) item.append(el('p', 'form-note', t('The session that started this restart; it restarts last.')));
       // A session whose folder or history is gone cannot be continued, so it is not offered.
-      if (s.state === 'failed' && s.session_id && s.reason !== 'cannot_resume') { const acts = el('div', 'row-actions'); const go = button(t('Continue'), () => { const id = s.session_id; void mutate(() => adapter.sessionContinue(id), t('Continued in a Terminal window as the same session, with its history.')).then(async () => { await loadSessionRows(); restoreFocus(actFocus()); }); }, 'button primary', `restart-continue-${s.session_id}`); go.setAttribute('aria-label', t('Continue the session in {folder}', { folder: s.folder ? folderName(s.folder) : t('an unknown folder') })); acts.append(go); item.append(acts); }
+      // Not offered once it runs again (continued from here or anywhere), so a second press never
+      // starts a copy.
+      if (s.state === 'failed' && s.session_id && s.reason !== 'cannot_resume' && !sessionLive(s.session_id)) { const acts = el('div', 'row-actions'); const go = button(t('Continue'), () => { const id = s.session_id; void mutate(() => adapter.sessionContinue(id), t('Continued in a Terminal window as the same session, with its history.'), actFocus()).then(afterRestartAct); }, 'button primary', `restart-continue-${s.session_id}`); go.setAttribute('aria-label', t('Continue the session in {folder}', { folder: s.folder ? folderName(s.folder) : t('an unknown folder') })); acts.append(go); item.append(acts); }
       list.append(item);
     }
     return [list];
   } }));
   // Only sessions still waiting for their turn can be left as they are; once none is, the rest finish.
-  if (running && wave.counts.pending > 0) { const acts = el('div', 'row-actions'); acts.append(button(t('Cancel the restart'), () => void mutate(() => adapter.sessionsRestartCancel(wave.wave), t('Restart cancelled. Sessions still waiting for their turn are left as they are.')).then(async () => { await loadSessionRows(); restoreFocus(actFocus()); }), 'button', 'restart-cancel')); section.append(acts); }
+  if (running && wave.counts.pending > 0) { const acts = el('div', 'row-actions'); acts.append(button(t('Cancel the restart'), () => void mutate(() => adapter.sessionsRestartCancel(wave.wave), t('Restart cancelled. Sessions still waiting for their turn are left as they are.')).then(afterRestartAct), 'button', 'restart-cancel')); section.append(acts); }
   else if (running) section.append(el('p', 'form-note', t('The remaining sessions are finishing their restart.')));
   return section;
 }

@@ -2076,7 +2076,7 @@ function restartFailureText(reason: string | null): string {
     case 'host_refused': case 'host_gone': return t('Not back: its window could not restart it');
     case 'not_started': case 'not_written': return t('Not back: the Terminal window did not open');
     case 'cannot_resume': return t('Not back: its folder or history is gone');
-    case 'gone': return t('Not back: it ended before its turn');
+    case 'gone': return t('Not back: it ended before its turn did');
     default: return t('Not back');
   }
 }
