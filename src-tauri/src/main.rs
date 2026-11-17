@@ -69,6 +69,10 @@ impl Slot {
                 Owner::desktop(root).await
             };
             let started = started.inspect(|owner| {
+                // SB-414: a window that waited for the store owns it now; its record goes.
+                if !self.smoke {
+                    switchboard_runtime::copies::clear_window(&owner.runtime.root);
+                }
                 // Release builds only (the App Key), the real data folder only (docs/ANALYTICS.md).
                 if let Some(doors) = &self.doors {
                     owner.runtime.set_app_doors(doors.clone());
@@ -1885,10 +1889,21 @@ impl switchboard_runtime::app_doors::AppDoors for WindowDoors {
         residency::set(&self.0, &default_root()?, enabled)
     }
 }
-/// Automatic updates (SB-55): `{available, reason, enabled, state, current, version, …}`.
+/// Automatic updates (SB-55): `{available, reason, enabled, state, current, version, …}`; for a
+/// window that does not own the data folder, also `owner` (SB-414): which copy owns it and its
+/// version.
 #[tauri::command]
-fn update_status(updates: State<'_, updates::Updates>) -> Value {
-    updates.status()
+async fn update_status(
+    updates: State<'_, updates::Updates>,
+    slot: State<'_, Slot>,
+) -> Result<Value, String> {
+    let mut status = updates.status();
+    if !slot.smoke && slot.running().await.is_none() {
+        if let Ok(root) = default_root() {
+            status["owner"] = updates::owner_view(&root).await;
+        }
+    }
+    Ok(status)
 }
 #[tauri::command]
 fn set_auto_update(
@@ -1972,6 +1987,17 @@ fn main() {
             // request instead of aborting the app (Tauri turns a setup error into a crash).
             let started = tauri::async_runtime::block_on(slot.runtime()).is_ok();
             app.manage(slot);
+            // SB-414: a window that does not own the data folder says so, for the owner to name.
+            if !started && !smoke {
+                if let Ok(root) = default_root() {
+                    switchboard_runtime::copies::note_window(
+                        &root,
+                        std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .map_or(0, |d| d.as_secs() as i64),
+                    );
+                }
+            }
             if !started {
                 // Keep trying in the background as well: renewals, rotation and backups must
                 // resume once the store is free even while the window stays hidden.
@@ -2022,7 +2048,12 @@ fn main() {
                     })
             };
             let root = if smoke { None } else { default_root().ok() };
-            app.manage(updates::Updates::new(available, root));
+            // SB-408: a copy installed from the .deb package is told what is out and how to
+            // install it; it never installs anything itself.
+            let deb = !smoke
+                && available == Err(updates::UNAVAILABLE_PACKAGE)
+                && switchboard_runtime::deb::this_install();
+            app.manage(updates::Updates::new(available, root).with_deb(deb));
             updates::start(app.handle());
             // The window is created hidden (tauri.conf.json): shown now on an ordinary start;
             // in the background, left hidden — opening the app again (`reveal`) brings it.
@@ -2245,6 +2276,12 @@ fn main() {
             switchboard_runtime::arm_hard_exit_with(switchboard_runtime::HARD_EXIT_AFTER, 0);
             let slot = handle.state::<Slot>();
             let owner = tauri::async_runtime::block_on(async { slot.owner.lock().await.take() });
+            // SB-414: a window that never owned the data folder leaves no record behind.
+            if owner.is_none() && !slot.smoke {
+                if let Ok(root) = default_root() {
+                    switchboard_runtime::copies::clear_window(&root);
+                }
+            }
             if let Some(owner) = owner {
                 // An exit that starts the Windows installer drains for less, so the installer
                 // keeps half of the hard-exit window (SB-78).

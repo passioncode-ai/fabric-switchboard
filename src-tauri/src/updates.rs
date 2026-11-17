@@ -18,7 +18,17 @@
 //!   installed from the .deb package never checks; the newer .deb updates it.
 //!
 //! No check runs in a development build, in the smoke check, from an app macOS is running
-//! from a translocated copy, or from a Linux copy that is not an AppImage.
+//! from a translocated copy, or from a Linux copy that is not an AppImage. A copy installed from
+//! the .deb package (SB-408) reads the release feed on the same cadence and says which version is
+//! out and the commands that install it; it installs nothing.
+//!
+//! A window that does not own the data folder (SB-414, DEC-0026) says which copy does and its
+//! version. When that owner runs from this same copy (`switchboard serve` from the app in
+//! `/Applications`, which keeps it current, DEC-0011), the window installs nothing into it: two
+//! processes would swap one bundle with no lock between them. A window from another copy of its
+//! own (a private `~/Applications` one) still checks, downloads and installs into that copy,
+//! which only it writes; it never restarts on its own there (no owner to drain), so *Restart to
+//! update* stays the person's.
 use serde_json::{json, Value};
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
@@ -419,10 +429,15 @@ struct Inner {
     /// one's phase instead of writing the same `.part` file at once: two writers, one truncating
     /// and one appending, made a package that failed its signature check (2026-11-09, 0.7.39).
     fetching: bool,
+    /// SB-408: the last feed read of a .deb install (`deb::notice`), and the version last said.
+    deb_notice: Option<Value>,
+    deb_told: Option<String>,
 }
 
 pub struct Updates {
     available: Result<(), &'static str>,
+    /// SB-408: this copy was installed from the .deb package.
+    deb: bool,
     root: Option<PathBuf>,
     inner: Mutex<Inner>,
     wake: tokio::sync::Notify,
@@ -452,6 +467,7 @@ impl Updates {
     pub fn new(available: Result<(), &'static str>, root: Option<PathBuf>) -> Self {
         Updates {
             available,
+            deb: false,
             root,
             inner: Mutex::new(Inner {
                 phase: Phase::Idle,
@@ -465,11 +481,19 @@ impl Updates {
                 watching: false,
                 rechecking: false,
                 fetching: false,
+                deb_notice: None,
+                deb_told: None,
             }),
             wake: tokio::sync::Notify::new(),
             swap: tokio::sync::Mutex::new(()),
             attention: std::sync::atomic::AtomicI64::new(now()),
         }
+    }
+
+    /// SB-408: marks a copy installed from the .deb package.
+    pub fn with_deb(mut self, deb: bool) -> Self {
+        self.deb = deb;
+        self
     }
 
     fn lock(&self) -> MutexGuard<'_, Inner> {
@@ -514,7 +538,7 @@ impl Updates {
             .filter(|ready| ready_starts_alone(ready))
             .map(|ready| urgent(&ready.update.raw_json));
         let restart_after = restart_after(waiting, self.restarted_at(), now());
-        json!({
+        let mut status = json!({
             "available": self.available.is_ok(),
             "reason": self.available.err(),
             "enabled": self.available.is_ok() && self.is_enabled(),
@@ -526,7 +550,11 @@ impl Updates {
             "needs_permission": cfg!(target_os = "macos")
                 && inner.ready.as_ref().is_some_and(|ready| ready.bytes.is_some()),
             "restart_after": restart_after,
-        })
+        });
+        if self.deb {
+            status["deb"] = inner.deb_notice.clone().unwrap_or(Value::Null);
+        }
+        status
     }
 
     /// The person's switch: saved first; turning it on checks now.
@@ -607,6 +635,16 @@ pub fn start(app: &AppHandle) {
             _ => "unsupported_platform",
         };
         event("update_check", &[("outcome", Field::Code(code))]);
+        if app.state::<Updates>().deb {
+            let app = app.clone();
+            tauri::async_runtime::spawn(async move {
+                tokio::time::sleep(FIRST_CHECK_AFTER).await;
+                loop {
+                    deb_check(&app).await;
+                    tokio::time::sleep(CHECK_EVERY).await;
+                }
+            });
+        }
         return;
     }
     let app = app.clone();
@@ -639,6 +677,13 @@ async fn check_once(app: &AppHandle) -> Phase {
 /// what it finds is downloaded and verified like any update (LC-16).
 async fn check(app: &AppHandle, manual: bool) -> Phase {
     let state = app.state::<Updates>();
+    // SB-414: the owner of the data folder runs from this copy and keeps it current.
+    if owner_updates_this_copy(app).await {
+        if logs_check("owner_updates") {
+            event("update_check", &[("outcome", Field::Code("owner_updates"))]);
+        }
+        return state.lock().phase;
+    }
     if !manual && !state.is_enabled() {
         return offer(app).await;
     }
@@ -715,7 +760,7 @@ fn logs_check(code: &'static str) -> bool {
     let Ok(mut last) = LAST_LOGGED.lock() else {
         return true;
     };
-    let repeat = matches!(code, "current" | "available") && *last == Some(code);
+    let repeat = matches!(code, "current" | "available" | "owner_updates") && *last == Some(code);
     *last = Some(code);
     !repeat
 }
@@ -880,6 +925,65 @@ impl Drop for Fetching<'_> {
     }
 }
 
+/// SB-408: one feed read of a .deb install: the notice About shows, and `update_waiting deb`
+/// once per newer version.
+async fn deb_check(app: &AppHandle) {
+    let notice = switchboard_runtime::deb::check(env!("CARGO_PKG_VERSION")).await;
+    let state = app.state::<Updates>();
+    let mut inner = state.lock();
+    inner.checked_at = Some(now());
+    let tell = switchboard_runtime::serve_update::deb_tell(&notice, &mut inner.deb_told);
+    inner.deb_notice = Some(match notice {
+        Ok(notice) => notice,
+        Err(_) => json!({"package": "deb", "current": env!("CARGO_PKG_VERSION"),
+            "action": "failed", "error": CHECK_FAILED}),
+    });
+    drop(inner);
+    if tell {
+        event("update_waiting", &[("reason", Field::Code("deb"))]);
+    }
+}
+
+/// SB-414: for a window that does not own the data folder, the owner as it answers over the
+/// control channel: `{kind: app|serve|null, version, copy, same_copy, older}` (`older`: this
+/// window's version is below the owner's); null when nothing owns it.
+pub async fn owner_view(root: &Path) -> Value {
+    use switchboard_runtime::copies;
+    let Ok(Some(status)) =
+        switchboard_runtime::control::request(root, &switchboard_runtime::Operation::Status).await
+    else {
+        return Value::Null;
+    };
+    let version = status["owner_version"].as_str();
+    let copy = status["owner_copy"].as_str();
+    let same_copy = match (copy, copies::this_copy()) {
+        (Some(copy), Some(mine)) => copies::same_copy(Path::new(copy), &mine),
+        _ => false,
+    };
+    json!({
+        "kind": status["owner_kind"],
+        "version": version,
+        "copy": copy,
+        "same_copy": same_copy,
+        "older": version.is_some_and(|v| copies::older(env!("CARGO_PKG_VERSION"), v)),
+    })
+}
+
+/// SB-414 (DEC-0026): another process owns the data folder and runs from this window's own copy,
+/// so that process updates the copy and this window installs nothing into it.
+async fn owner_updates_this_copy(app: &AppHandle) -> bool {
+    let Some(slot) = app.try_state::<crate::Slot>() else {
+        return false;
+    };
+    if slot.smoke || slot.running().await.is_some() {
+        return false;
+    }
+    let Some(root) = app.state::<Updates>().root.clone() else {
+        return false;
+    };
+    owner_view(&root).await["same_copy"] == true
+}
+
 fn busy(inner: &Inner) -> bool {
     inner.restart.is_some() || inner.stalled || inner.rechecking || inner.fetching
 }
@@ -887,6 +991,11 @@ fn busy(inner: &Inner) -> bool {
 /// The person's *Check for updates*: works with the switch off; returns the status after.
 pub async fn check_now(app: AppHandle) -> Result<Value, String> {
     let state = app.state::<Updates>();
+    // SB-408: a .deb install reads the feed now and says what is out.
+    if state.deb {
+        deb_check(&app).await;
+        return Ok(app.state::<Updates>().status());
+    }
     state.available.map_err(str::to_string)?;
     // SB-351: the check runs on a task of its own, so a caller that stops waiting (a control
     // request whose client timed out) leaves the download and the install to finish.

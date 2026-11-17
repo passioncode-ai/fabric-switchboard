@@ -3865,11 +3865,19 @@ function updateControls(panel: HTMLElement) {
   option.append(box, el('span', '', t('Install updates automatically')));
   const line = updateLine(status, date);
   panel.append(option, el('p', 'form-note', line.text));
+  // SB-408: a .deb install's commands, to copy into a terminal.
+  if (line.commands?.length) {
+    const commands = line.commands.join('\n'); const block = el('pre', 'deb-commands', commands); block.tabIndex = 0;
+    const copy = button(t('Copy'), () => copyText(copy, commands, t('Install the newer .deb')), 'text-button', 'deb-commands-copy');
+    panel.append(block, copy);
+  }
+  // SB-414: the copy that owns the data folder updates this one; nothing to press here.
+  if (line.owned) return;
   if (line.restart) panel.append(button(t('Restart to update'), () => void mutate(async () => { updateState = await adapter.restartToUpdate(); }, t('Restarting Switchboard with the new version…'), 'update-restart'), 'button', 'update-restart'));
   // SB-249: automatic updates are off and a newer version is out: installed on the person's press.
   else if (line.install) panel.append(button(t('Update'), () => void checkUpdatesNow(), 'button primary', 'update-install'));
   // LC-16: the person can always ask, with automatic updates off too.
-  else if (status.available && status.state !== 'checking' && status.state !== 'downloading') panel.append(button(t('Check for updates'), () => void checkUpdatesNow(), 'button', 'update-check'));
+  else if ((status.available || line.check) && status.state !== 'checking' && status.state !== 'downloading') panel.append(button(t('Check for updates'), () => void checkUpdatesNow(), 'button', 'update-check'));
 }
 /** Anonymous usage analytics (docs/ANALYTICS.md): what is sent, and Switchboard's own switch (SB-246). */
 function analyticsPanel() {

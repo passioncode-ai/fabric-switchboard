@@ -3,7 +3,7 @@
 import type { BalanceStatus, ShellHookNotice, ShellHookStatus, Onboarding, OnboardStep, ChainExecutor, ChainScope, ChainStepView, Placement } from './types';
 import type { SessionGroup, SessionRow, MachineReadStatus } from './types';
 import type { Machine, MachineCopy, RemoteRead, Attention, AttentionItem, AttentionReason, AttentionWindow, Event, EventsPage, GivenAccount } from './types';
-import type { Account, AccountLimit, Organization, OrganizationGroupOffer, Project, AgentRow, AgentSetup, OpenrouterCredit, RecommendedModel, SessionInfo, ProjectRule, RotationPolicy, UpdateStatus, Usage, UsageWindow } from './types';
+import type { Account, AccountLimit, Organization, OrganizationGroupOffer, Project, AgentRow, AgentSetup, OpenrouterCredit, RecommendedModel, SessionInfo, ProjectRule, RotationPolicy, UpdateStatus, UpdateOwner, DebNotice, Usage, UsageWindow } from './types';
 import { t, plural } from './i18n';
 
 export type Appearance = 'system' | 'dark' | 'light';
@@ -942,7 +942,34 @@ export function intervalWhile(tick: () => void, ms: number, timers: Timers = bro
 
 /** What About says about automatic updates (SB-55), and whether "Restart to update" is offered.
  * `when` formats a time (Unix seconds) for the line that says when a paused update starts (SB-208). */
-export function updateLine(status: Pick<UpdateStatus, 'available' | 'reason' | 'enabled' | 'state' | 'current' | 'version' | 'error' | 'needs_permission' | 'restart_after'>, when: (seconds: number) => string = (seconds) => new Date(seconds * 1000).toISOString().slice(0, 16).replace('T', ' ')): { text: string; restart: boolean; install?: boolean } {
+export function updateLine(status: Pick<UpdateStatus, 'available' | 'reason' | 'enabled' | 'state' | 'current' | 'version' | 'error' | 'needs_permission' | 'restart_after'> & Partial<Pick<UpdateStatus, 'owner' | 'deb'>>, when: (seconds: number) => string = (seconds) => new Date(seconds * 1000).toISOString().slice(0, 16).replace('T', ' ')): { text: string; restart: boolean; install?: boolean; check?: boolean; commands?: string[]; owned?: boolean } {
+  // SB-414: another copy owns the data folder. When it runs from this copy it keeps it current and
+  // this window installs nothing; from another copy, this window's own line follows.
+  const owner = ownerLine(status.owner, status.current);
+  if (owner && status.owner?.same_copy) return { text: owner, restart: false, owned: true };
+  const line = ownUpdateLine(status, when);
+  return owner ? { ...line, text: `${owner} ${line.text}` } : line;
+}
+/** SB-414: what a window that does not own the data folder says about the copy that does. */
+export function ownerLine(owner: UpdateOwner | null | undefined, current: string): string {
+  if (!owner?.version) return '';
+  if (owner.older && owner.same_copy) return t('Switchboard runs in the background as version {owner} from this copy; this window is still version {version}. Quit this window and open Switchboard again to use version {owner}.', { owner: owner.version, version: current });
+  if (owner.older && owner.copy?.endsWith('.app')) return t('Switchboard runs in the background as version {owner} from {copy}; this window is an older copy, version {version}. Quit it and open Switchboard from {copy}.', { owner: owner.version, copy: owner.copy, version: current });
+  if (owner.older) return t('Switchboard runs in the background as version {owner}; this window is an older copy, version {version}. Quit it and open the installed Switchboard.', { owner: owner.version, version: current });
+  if (owner.kind === 'serve') return t('Switchboard runs in the background as switchboard serve, version {owner}, which keeps itself current; this window is version {version}.', { owner: owner.version, version: current });
+  return t('Another Switchboard runs in the background, version {owner}; this window is version {version}.', { owner: owner.version, version: current });
+}
+/** SB-408: a copy installed from the .deb package: what is out and the commands that install it. */
+export function debLine(deb: DebNotice): { text: string; restart: boolean; check: boolean; commands?: string[] } {
+  if (deb.action === 'failed') return { text: t(deb.error ?? 'Could not check for updates. Switchboard tries again within the hour.'), restart: false, check: true };
+  if (deb.action === 'available' && deb.latest) {
+    const held = deb.needs_migration ? ` ${t('This version needs a step by a person first; its release notes say what to do.')}` : '';
+    return { text: t('Version {latest} is out; this copy is version {version}. It was installed from the .deb package, which does not update itself: download, verify and install the newer one with these commands.', { latest: deb.latest, version: deb.current }) + held, restart: false, check: true, commands: deb.commands ?? [] };
+  }
+  return { text: t('Version {version} is the latest. Switchboard checks again every five minutes; this copy came from the .deb package, so a newer version is installed with apt.', { version: deb.current }), restart: false, check: true };
+}
+function ownUpdateLine(status: Pick<UpdateStatus, 'available' | 'reason' | 'enabled' | 'state' | 'current' | 'version' | 'error' | 'needs_permission' | 'restart_after'> & Partial<Pick<UpdateStatus, 'deb'>>, when: (seconds: number) => string): { text: string; restart: boolean; install?: boolean; check?: boolean; commands?: string[] } {
+  if (!status.available && status.deb) return debLine(status.deb);
   if (!status.available) return { text: t(status.reason ?? 'Automatic updates work in the installed app only.'), restart: false };
   if (status.state === 'ready' && status.version) {
     return status.needs_permission

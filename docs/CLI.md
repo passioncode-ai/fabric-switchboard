@@ -127,7 +127,13 @@ switchboard org cancel         # stop a connection still waiting for the browser
 What About and the tray do, through the running app (SB-299): `switchboard app updates [on|off]`
 (the update state, or *Install updates automatically*), `app check-updates`, `app restart-to-update`
 (installs a downloaded update and restarts through the drain) and `app login-item [on|off]` (*Open at
-login*). Anywhere the installed app does not run they answer that only it can.
+login*). Anywhere the installed app does not run the actions and the switches answer that only it can;
+`app updates` alone answers what it knows instead (SB-414): `{available: false, reason: not_owner|no_owner, owner:
+serve|null, owner_version, window_version, window_older, serve_update?, message}`, where `owner_version` is the
+`serve` that owns the data folder, `serve_update` its own update loop's last pass (`{state, latest, reason,
+checked_at, auto_update}`) and `window_version` an app window open beside it that does not own the data folder (it
+says the same in Settings → Updates, and when it runs from the same copy as `serve` it leaves updating that copy to
+`serve`).
 
 `switchboard link` puts this `switchboard` into `~/.local/bin`, as the window's *Link the CLI* does
 (SB-299); run it by its full path, for example
@@ -301,6 +307,28 @@ It reads the release feed the app reads, offers only a newer version, refuses a 
 into it, and replaces the app with one rename (the old one is put back if the move fails). A `serve` already running
 keeps the old binary until it is restarted (`launchctl kickstart -k system/<label>` or the validator's `remove` and
 `apply`). Windows is not covered: there the app updates itself.
+
+A copy installed from the .deb package is never replaced (SB-408): the package manager owns its files. There
+`switchboard update`, with or without `--check`, reads the feed and answers the installed and the latest version and
+the commands that download, verify and install the newer package, installing nothing:
+
+```sh
+switchboard --json update --check   # {package: deb, current, latest, action: up_to_date|available, release, commands}
+```
+
+The commands, for version X.Y.Z on x64 (`arm64` on ARM), run in an empty folder:
+
+```sh
+curl -fLO https://github.com/passioncode-ai/fabric-switchboard/releases/download/vX.Y.Z/Fabric-Switchboard-X.Y.Z-linux-x64.deb
+curl -fLO https://github.com/passioncode-ai/fabric-switchboard/releases/download/vX.Y.Z/SHA256SUMS
+curl -fLO https://github.com/passioncode-ai/fabric-switchboard/releases/download/vX.Y.Z/SHA256SUMS.asc
+curl -fsSL https://raw.githubusercontent.com/passioncode-ai/.github/main/release-signing/passioncode-release-signing.asc | gpg --import
+gpg --verify SHA256SUMS.asc SHA256SUMS
+sha256sum -c SHA256SUMS --ignore-missing
+sudo apt install ./Fabric-Switchboard-X.Y.Z-linux-x64.deb
+```
+
+A `serve` from the .deb logs `update_waiting deb` once per newer version.
 
 ## Uninstall
 

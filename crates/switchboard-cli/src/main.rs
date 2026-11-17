@@ -65,7 +65,9 @@ enum Command {
     Link,
     /// Update a computer that runs only `switchboard serve` (no window, so the app never checks):
     /// reads the release feed, checks the package's signature and installs a newer version into
-    /// the app. Run it as the account that owns the app, then restart `serve`.
+    /// the app. Run it as the account that owns the app, then restart `serve`. A copy installed
+    /// from the .deb package is never replaced: it prints the latest version and the commands
+    /// that verify and install it.
     Update {
         /// Only say whether a newer version exists; install nothing.
         #[arg(long)]
@@ -2540,6 +2542,16 @@ async fn run(cli: &Cli) -> Result<Value, String> {
         let updates = async {
             use switchboard_runtime::serve_update as su;
             let Some(program) = su::program() else {
+                // SB-408: a .deb install never replaces its own files; it says once per newer
+                // version that one is out (`update --check` prints the commands).
+                if switchboard_runtime::deb::this_install() {
+                    let mut told = None;
+                    tokio::time::sleep(su::FIRST_AFTER).await;
+                    loop {
+                        su::deb_pass(env!("CARGO_PKG_VERSION"), &mut told).await;
+                        tokio::time::sleep(su::EVERY).await;
+                    }
+                }
                 return std::future::pending::<&'static str>().await;
             };
             let Some(at_start) = su::stamp(&program) else {

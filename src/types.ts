@@ -397,7 +397,13 @@ export interface UpdateStatus {
   needs_permission: boolean;
   /** SB-208: when a ready update may start on its own, while SB-191's pause holds it (Unix seconds); null otherwise. */
   restart_after: number | null;
+  /** SB-414: for a window that does not own the data folder, the copy that does; null when nothing answers. */
+  owner?: UpdateOwner | null;
+  /** SB-408: a copy installed from the .deb package: what the release feed offers and how to install it. */
+  deb?: DebNotice | null;
 }
+export interface UpdateOwner { kind: 'app' | 'serve' | null; version: string | null; copy: string | null; same_copy: boolean; older: boolean }
+export interface DebNotice { package: 'deb'; current: string; latest?: string; action: 'up_to_date' | 'available' | 'failed'; release?: string; commands?: string[]; needs_migration?: string; error?: string }
 
 /** SB-265: what `gh` can see: the person's login, then their organizations. */
 export interface GithubOwners { available: boolean; reason: 'missing' | 'signed_out' | null; owners: { login: string; kind: 'user' | 'organization' }[] }

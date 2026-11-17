@@ -6,7 +6,7 @@ never renumber, never delete. The doc map ([DOCMAP.md](DOCMAP.md)) names this fi
 register. Decisions made before 2026-11-08 live where they were made (plans' `D-<n>`, board rows,
 research notes); the ones still in force that the board cites are seeded below with their source.
 
-**Next free ID:** `DEC-0026` (`DEC-0018` and `DEC-0020` are held for the window and fleet plan's modules)
+**Next free ID:** `DEC-0027` (`DEC-0018` and `DEC-0020` are held for the window and fleet plan's modules)
 
 ## Format
 
@@ -705,3 +705,37 @@ research notes); the ones still in force that the board cites are seeded below w
   пользоваться, но по факту авторизоваться он типа не будет с ней»; «[a teammate] может
   использовать Claude Desktop для своей обычной стандартной подписки … убедиться, что мы не
   трогаем сессии для десктопного Claude Code».
+
+### DEC-0026: A window that does not own the data folder never updates the owner's copy
+
+- **Date:** 2026-11-17
+- **Status:** Accepted (SB-414, branch `update-notices`)
+- **Context:** studio-agent's request bc06a63d: on the Mac Studio a private `~/Applications` 0.7.111
+  window ran beside a 0.7.112 `switchboard serve` from `/Applications`; `serve` owned the data
+  folder, the window owned nothing and said nothing about its version, and `switchboard app updates`
+  answered a bare refusal. The window's own update loop ran all the same (`updates::start` does not
+  look at ownership): it checked, downloaded and swapped its bundle, and it could never restart into
+  it on its own (`owner_unavailable`). Where the window runs from the same `/Applications` copy as
+  `serve`, both could swap one bundle at once: `serve` through `self_update::install_bundle`
+  (DEC-0011) and the window through the updater plugin, with no lock between the two processes.
+- **Decision:**
+  - The owner says what it is and where it runs from (`Operation::Status`: `owner_kind` `app` or
+    `serve`, `owner_copy` the `.app` bundle, the AppImage or the program's folder); a window that is
+    not the owner reads it over the control channel and shows its own version beside the owner's,
+    with what to do when it is older (reopen it, or open the owner's copy).
+  - A window that does not own the data folder and runs from the owner's copy installs nothing into
+    it: the owner keeps that copy current, and the window's check ends at once (`update_check
+    owner_updates`, once). Its About offers no update button.
+  - A window from another copy of its own keeps checking, downloading and installing into that copy,
+    which only it writes. It does not restart into it on its own (there is no owner to drain);
+    *Restart to update* stays the person's, and the window says to use the owner's copy instead.
+  - `switchboard app updates` without the app (a `serve` owns the data folder, or nothing does)
+    answers the owner, its version, its own update loop's last pass and the non-owner window's
+    version (`window-run.json`) instead of a refusal; every action and every switch still needs the
+    app (`APP_ONLY`).
+- **Consequences / affects:** [CONTRACTS](CONTRACTS.md#a-window-that-does-not-own-the-data-folder-sb-414-2026-11-17),
+  [CLI](CLI.md), `src-tauri/src/updates.rs`, `crates/switchboard-runtime/src/copies.rs`,
+  [AGENTS.md lifecycle](../AGENTS.md#lifecycle) (`window-run.json`).
+- **Source:** studio-agent board request bc06a63d (board thread dca6e14d), 2026-11-17; decided by
+  the implementing agent under the operator's standing delegation (`~/.claude/CLAUDE.md`, "Act,
+  then report"), recorded in this change.
