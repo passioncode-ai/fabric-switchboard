@@ -102,8 +102,6 @@ pub struct Wave {
     pub done_at: Option<i64>,
 }
 
-/// What the planner knows of one live session beyond `duty::Seen`.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
 /// What a session's host answered when asked whether it restarts in place.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum HostOffer {
@@ -116,6 +114,8 @@ pub enum HostOffer {
     Busy,
 }
 
+/// What the planner knows of one live session beyond `duty::Seen`.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Facts {
     pub stopped: HashSet<String>,
     pub waiting: HashSet<String>,
