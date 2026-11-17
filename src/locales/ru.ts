@@ -214,6 +214,7 @@ export const RU: Record<string, string> = {
   "Working now: {used}, {quiet} quiet or waiting not counted.": "Сейчас работают: {used}, ещё {quiet} без активности или в ожидании не считаются.",
   "Board runs: {used} of {share} in the board's share.": "Запуски с доски: {used} из {share} в доле доски.",
   "Board runs that start whatever the limit holds, from 0 to the limit. Leave it empty for a quarter of the limit, at least 2.": "Сколько запусков с доски начинается, даже когда лимит занят: от 0 до лимита. Оставьте пустым, чтобы взять четверть лимита, но не меньше 2.",
+  "Clearing removes the session limit and the board's share together: give no limit or share with it.": "Сброс убирает лимит сессий и долю доски вместе: не указывайте с ним ни лимит, ни долю.",
   "Give the board's share as a whole number from 0 to the session limit, with a limit set.": "Укажите долю доски целым числом от 0 до лимита сессий; лимит должен быть задан.",
   "Set limit…": "Задать лимит…",
   "Change limit…": "Изменить лимит…",

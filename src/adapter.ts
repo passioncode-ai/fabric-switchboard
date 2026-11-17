@@ -282,6 +282,7 @@ const safeErrors = new Set([
   "This is the only account its group uses on this machine. Add another account to that group before moving this one.",
   "Give the session limit as a whole number from 1 to 500.",
   "Give the board's share as a whole number from 0 to the session limit, with a limit set.",
+  "Clearing removes the session limit and the board's share together: give no limit or share with it.",
   "The session limit (capacity.json) could not be read. Set it again, or clear it.",
   "The session limit could not be saved.",
   "Give the duty officer's limits in range: stuck, waiting and idle minutes from 10 to 1440, maximum age hours from 1 to 72.",
