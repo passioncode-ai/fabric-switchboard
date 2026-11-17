@@ -801,11 +801,11 @@ mod tests {
         // share has two slots: two are admitted, six refused, and a dropped reservation frees its
         // slot.
         let root = tempfile::tempdir().unwrap();
-        set_pool(root.path(), Some(1), Share::Set(2)).unwrap();
+        set_pool(root.path(), Some(2), Share::Set(2)).unwrap();
         let path = root.path().to_owned();
         let full = || {
             (
-                json!({"sessions": [{"pid": 1, "agent": "codex", "quiet": false}], "degraded": []}),
+                json!({"sessions": [{"pid": 1, "agent": "codex", "quiet": false}, {"pid": 2, "agent": "codex", "quiet": false}], "degraded": []}),
                 Facts::default(),
             )
         };
