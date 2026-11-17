@@ -194,6 +194,7 @@ const ALLOWLIST = {
   // app always executes operations through its own Owner, so this never answers the UI.
   "Start the desktop app or 'switchboard serve' before login or launch.": 'offline CLI only',
   "Start the desktop app or 'switchboard serve' first: the restart wave runs in it.": 'offline CLI and MCP only: the window is the owner',
+  'Continuing in place needs a terminal on stdin and stdout.': 'CLI only (SB-400): a console that runs the command has one',
   // core persistence.rs secure_root(): the desktop app's root comes from default_root(),
   // which is always absolute; only a relative CLI --data-dir reaches this check.
   'Account storage path must be absolute': 'CLI --data-dir only',

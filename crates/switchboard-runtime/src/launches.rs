@@ -220,7 +220,7 @@ tokio::task_local! {
     static SCOPE: Scope;
 }
 /// The launch the running operation was asked for by; the window when nothing says otherwise.
-fn current_by() -> LaunchedBy {
+pub(crate) fn current_by() -> LaunchedBy {
     SCOPE.try_with(|s| s.by.clone()).unwrap_or_default()
 }
 /// Whether an outer operation already collects the launch id (`ContinueToConsole` runs a
@@ -707,6 +707,20 @@ fn pointing_at(root: &Path, id: &str) -> Vec<(String, Value)> {
 /// the launch it continues. `record` is what `.session.json` held before SB-212.
 pub(crate) fn record(root: &Path, dir: &Path, record: Value, id: &str) -> Result<(), String> {
     record_by(root, dir, record, id, None)
+}
+/// SB-400: the record of a launch with no home of its own (a session continued as itself in its
+/// own config folder, which is never written to): the record in `launches/` only.
+pub(crate) fn record_resume(
+    root: &Path,
+    id: &str,
+    mut record: Value,
+    by: &LaunchedBy,
+) -> Result<(), String> {
+    record["launch_id"] = id.into();
+    record["launched_by"] = by.stored();
+    record["home_path"] = Value::Null;
+    let _writing = writing();
+    write(root, id, &record)
 }
 /// `record` with `launched_by.dispatch` (SB-247): the dispatch that started the launch,
 /// `{id, request, thread, project, workflow}`, set by the owner, never by the caller.

@@ -392,6 +392,13 @@ pub enum Operation {
     /// config folder), refused while a process holds it or when its history is gone.
     SessionContinue {
         session_id: String,
+        /// SB-400: no Terminal window: the answer carries the script, which the calling terminal
+        /// runs. Left out when false, so a plain continue still reaches an older owner.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        in_place: bool,
+        /// SB-400, with `in_place`: in a session host of its own launch, recorded like any launch.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        hosted: bool,
     },
     /// SB-397 R1: which running sessions a restart wave would restart and skip, the caller's own
     /// (the session whose process is the nearest ancestor of `caller_pid`) and the plan's digest.
@@ -4329,6 +4336,8 @@ fn is_launch(operation: &Operation) -> bool {
             | Operation::LaunchAgent { .. }
             | Operation::KimiLaunch { .. }
             | Operation::Dispatch { .. }
+            // SB-400: a hosted continue is a launch of its own, with who asked for it.
+            | Operation::SessionContinue { hosted: true, .. }
     )
 }
 /// SB-212: `operation` with who asked for it, when it launches a session; any other operation
@@ -6509,9 +6518,22 @@ async fn execute(
             blocking::run(move || launch::open_terminal(&folder, &script))?;
             Ok(json!({"opened": launch_id, "target": target}))
         }
-        Operation::SessionContinue { session_id } => {
+        Operation::SessionContinue {
+            session_id,
+            in_place,
+            hosted,
+        } => {
             let root = root.to_owned();
-            blocking::run(move || resumable::continue_session(&root, &session_id, monitor::now()))
+            // Read here: the task's launch scope does not reach the blocking thread.
+            let by = launches::current_by();
+            let how = resumable::How {
+                in_place,
+                hosted: in_place && hosted,
+                by,
+            };
+            blocking::run(move || {
+                resumable::continue_as(&root, &session_id, monitor::now(), &how)
+            })
         }
         Operation::SessionsRestartPlan { caller_pid } => {
             let root = root.to_owned();

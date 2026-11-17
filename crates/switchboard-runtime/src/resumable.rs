@@ -129,9 +129,27 @@ pub fn locate(root: &Path, session: &str, now: i64) -> Option<(PathBuf, String)>
     ))
 }
 
+/// SB-400: how a continued session runs. The default: a Terminal window of its own.
+#[derive(Clone, Debug, Default)]
+pub struct How {
+    /// The answer carries the script for the calling terminal; no window opens.
+    pub in_place: bool,
+    /// With `in_place`: under a launch of its own (recorded, its hooks reporting to it), which
+    /// the caller runs in a session host.
+    pub hosted: bool,
+    /// Who asked, for the launch record.
+    pub by: crate::launches::LaunchedBy,
+}
+
 /// Resumes `session` as itself in a Terminal window of its own.
-#[cfg(unix)]
 pub fn continue_session(root: &Path, session: &str, now: i64) -> Result<Value, String> {
+    continue_as(root, session, now, &How::default())
+}
+
+/// Resumes `session` as itself, as `how` says: in a Terminal window of its own, or (SB-400) as
+/// a script the calling terminal runs, with a launch of its own when it runs hosted.
+#[cfg(unix)]
+pub fn continue_as(root: &Path, session: &str, now: i64, how: &How) -> Result<Value, String> {
     if !crate::launches::valid_id(session) {
         return Err(UNKNOWN.into());
     }
@@ -147,7 +165,7 @@ pub fn continue_session(root: &Path, session: &str, now: i64) -> Result<Value, S
     }
     let program = crate::launch::find_program("claude").ok_or(NO_CLAUDE)?;
     let bypass = crate::launch::bypass_args(root, switchboard_core::Provider::Claude, &[]);
-    let script = crate::duty::resume_script_for(
+    let mut script = crate::duty::resume_script_for(
         &config,
         &cwd,
         session,
@@ -155,10 +173,31 @@ pub fn continue_session(root: &Path, session: &str, now: i64) -> Result<Value, S
         &bypass,
         Some(CONTINUE_PROMPT),
     );
+    let launch_id = how.hosted.then(crate::launches::new_id);
+    if let Some(id) = &launch_id {
+        // The session's hooks report to its own launch (its record, its turns, its end).
+        script = crate::restarts::with_launch_id(&script, id);
+    }
     let dir = root.join("duty");
     let path = dir.join(format!("continue-{session}.command"));
     std::fs::create_dir_all(&dir).map_err(|_| NOT_STARTED)?;
     crate::launch::write_script_at(&path, &script).map_err(|_| NOT_STARTED)?;
+    if how.in_place {
+        if let Some(id) = &launch_id {
+            let record = json!({
+                "provider": "claude", "mode": "resume", "working_directory": cwd,
+                "in_place": true, "hosted": true, "launched_at": now,
+                "provider_session_id": session,
+                "home_dir": config.strip_prefix(root).ok().map(|p| p.to_string_lossy().replace('\\', "/")),
+            });
+            crate::launches::record_resume(root, id, record, &how.by)?;
+        }
+        crate::oplog::event(
+            "session_continue",
+            &[("outcome", crate::oplog::Field::Code("in_place"))],
+        );
+        return Ok(json!({"continued": session, "folder": cwd, "script": path, "launch_id": launch_id}));
+    }
     crate::launch::start_terminal(&path).map_err(|_| NOT_STARTED)?;
     crate::oplog::event(
         "session_continue",
@@ -167,7 +206,7 @@ pub fn continue_session(root: &Path, session: &str, now: i64) -> Result<Value, S
     Ok(json!({"continued": session, "folder": cwd}))
 }
 #[cfg(not(unix))]
-pub fn continue_session(_: &Path, _: &str, _: i64) -> Result<Value, String> {
+pub fn continue_as(_: &Path, _: &str, _: i64, _: &How) -> Result<Value, String> {
     Err(crate::duty::CLOSE_UNSUPPORTED.into())
 }
 

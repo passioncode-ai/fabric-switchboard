@@ -806,7 +806,7 @@ pub fn tick(_: &Path, _: i64) {}
 /// The resume script with the launch it continues exported after its `unset` line: that line
 /// clears every variable the launch must not inherit, `SWITCHBOARD_LAUNCH_ID` among them, so an
 /// export before it would be cleared at once (review of 2026-11-16, blocker 1).
-fn with_launch_id(script: &str, launch: &str) -> String {
+pub(crate) fn with_launch_id(script: &str, launch: &str) -> String {
     let export = format!(
         "export SWITCHBOARD_LAUNCH_ID={}\n",
         fabric_sessions_core::cli::quoted(launch)
