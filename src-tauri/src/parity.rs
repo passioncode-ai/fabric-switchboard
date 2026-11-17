@@ -136,6 +136,7 @@ const PARITY: &[(&str, Over)] = &[
         Not("the window opens a Terminal for the person to watch a session; an agent has nothing to look at"),
     ),
     ("session_close_copy", Tool("switchboard_session_close_copy")),
+    ("dispatch_stop", Tool("switchboard_dispatch_stop")),
     ("report_problem", Not(UI_ONLY)),
     ("repository_map", Tool("switchboard_repository_map")),
     ("statistics", Tool("switchboard_statistics")),

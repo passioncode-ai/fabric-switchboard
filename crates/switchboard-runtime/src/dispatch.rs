@@ -425,9 +425,43 @@ pub(crate) fn watch(
     }
 }
 
+/// SB-407: the journal line of a stop: `phase: intent` before it acts (with what a later reader
+/// needs), the outcome after, with the `ended.kind` it recorded (`timed_out` at the deadline,
+/// `stopped` by a person, `exited` when the run had already gone; null when it failed). A deadline
+/// stop is the duty officer's (`by: duty`), `dispatch stop` a person's.
+fn journal_stop(
+    root: &Path,
+    record: &Value,
+    how: &str,
+    now: i64,
+    outcome: Option<(&str, Option<&str>)>,
+) {
+    let (reason, by) = if how == TIMED_OUT {
+        ("deadline", "duty")
+    } else {
+        ("person", "person")
+    };
+    let mut line = json!({
+        "at": now, "action": JOURNAL_ACTION, "reason": reason, "by": by,
+        "launch_id": record["launch_id"], "folder": record["working_directory"],
+        "deadline": record["dispatch"]["deadline"],
+    });
+    match outcome {
+        None => line["phase"] = "intent".into(),
+        Some((outcome, kind)) => {
+            line["outcome"] = outcome.into();
+            line["ended"] = kind.map_or(Value::Null, |kind| json!({"kind": kind}));
+        }
+    }
+    crate::duty::journal_line(root, line);
+}
+/// SB-407: a dispatched run's stop in the duty officer's journal (`duty.jsonl`).
+pub const JOURNAL_ACTION: &str = "dispatch_stop";
+
 /// `switchboard dispatch stop` and the time limit: stops launch `id`'s run and records `how`
 /// (`stopped`, `timed_out`). `already_ended` when it had ended (its end is then recorded as
-/// `exited` if nothing recorded it).
+/// `exited` if nothing recorded it). SB-407: each stop of a run not yet ended is journalled in
+/// `duty.jsonl`, its intent before the act and its outcome after.
 pub(crate) fn stop(
     root: &Path,
     id: &str,
@@ -446,14 +480,27 @@ pub(crate) fn stop(
         live_remove(root, id);
         return Ok(answer("already_ended"));
     }
+    let _stopping = Stopping::new(id);
+    journal_stop(root, &record, how, now, None);
+    let outcome = |state: &'static str, kind: Option<&str>| {
+        journal_stop(root, &record, how, now, Some((state, kind)));
+        Ok(answer(state))
+    };
     // SB-317: a run on another machine is stopped there, over ssh.
     if let Some(target) = record["dispatch"]["target"].as_str() {
         let (target, launch) = (target.to_owned(), id.to_owned());
-        crate::blocking::run(move || {
+        if let Err(error) = crate::blocking::run(move || {
             crate::remote_dispatch::stop(&target, &launch, &crate::account_send::ssh_runner)
-        })?;
+        }) {
+            journal_stop(root, &record, how, now, Some(("failed", None)));
+            return Err(error);
+        }
         let set = ended(root, id, how, now, None, analytics);
-        return Ok(answer(if set { "stopped" } else { "already_ended" }));
+        return if set {
+            outcome("stopped", Some(how))
+        } else {
+            outcome("already_ended", recorded_kind(root, id).as_deref())
+        };
     }
     let home = crate::launches::own_home(root, &record);
     let running = home
@@ -463,23 +510,159 @@ pub(crate) fn stop(
     let Some(home) = home.filter(|_| running) else {
         ended(root, id, EXITED, now, None, analytics);
         live_remove(root, id);
-        return Ok(answer("already_ended"));
+        return outcome("already_ended", recorded_kind(root, id).as_deref());
     };
     // Recorded first, so the run's own exit, seen by its watcher a moment later, keeps it.
     let set = ended(root, id, how, now, None, analytics);
     match crate::blocking::run(|| crate::launch::stop_dispatched(&home, STOP_GRACE)) {
         Ok(()) => {
             live_remove(root, id);
-            Ok(answer(if set { "stopped" } else { "already_ended" }))
+            if set {
+                outcome("stopped", Some(how))
+            } else {
+                outcome("already_ended", recorded_kind(root, id).as_deref())
+            }
         }
         Err(error) => {
             if set {
                 crate::launches::unend(root, id, how);
             }
+            journal_stop(root, &record, how, now, Some(("failed", None)));
             Err(error)
         }
     }
 }
+/// How launch `id`'s record says it ended, if it does.
+fn recorded_kind(root: &Path, id: &str) -> Option<String> {
+    crate::launches::get(root, id).and_then(|r| r["ended"]["kind"].as_str().map(str::to_owned))
+}
+
+/// SB-407: a stop a quitting owner cut between recording the run's end and its signal leaves the
+/// run running with `ended` set; the next pass that finds it so stops it again and journals the
+/// outcome with `finished_at`.
+fn finish_cut_stop(root: &Path, record: &Value, now: i64) -> bool {
+    let Some(kind @ (STOPPED | TIMED_OUT)) = record["ended"]["kind"].as_str() else {
+        return true;
+    };
+    if !record["dispatch"]["target"].is_null() {
+        return true;
+    }
+    let Some(id) = record["launch_id"].as_str() else {
+        return true;
+    };
+    // Review round 1: a stop in flight in this process, or one recorded within the time a stop
+    // takes (its SIGTERM, then SIGKILL after `STOP_GRACE`), is still at work; the next pass looks
+    // again.
+    let recent = record["ended"]["at"]
+        .as_i64()
+        .is_some_and(|at| now - at < 2 * STOP_GRACE.as_secs() as i64);
+    if recent || stopping(id) {
+        return false;
+    }
+    let Some(home) = crate::launches::own_home(root, record) else {
+        return true;
+    };
+    if !crate::launch::session_running(&home).unwrap_or(false) {
+        return true;
+    }
+    let how = if kind == TIMED_OUT {
+        TIMED_OUT
+    } else {
+        STOPPED
+    };
+    let result = crate::blocking::run(|| crate::launch::stop_dispatched(&home, STOP_GRACE));
+    let state = if result.is_ok() { "stopped" } else { "failed" };
+    let (reason, by) = if how == TIMED_OUT {
+        ("deadline", "duty")
+    } else {
+        ("person", "person")
+    };
+    crate::duty::journal_line(
+        root,
+        json!({
+            "at": record["ended"]["at"], "action": JOURNAL_ACTION, "reason": reason, "by": by,
+            "launch_id": record["launch_id"], "folder": record["working_directory"],
+            "deadline": record["dispatch"]["deadline"],
+            "outcome": state, "ended": {"kind": how}, "finished_at": now,
+        }),
+    );
+    // A stop that failed keeps the run watched, so the next pass tries again.
+    result.is_ok()
+}
+
+/// Review round 1: the launches a stop in this process is acting on now (between its record and
+/// its signal's end), so the background pass never finishes a stop that is still under way.
+static STOPPING: Mutex<Vec<String>> = Mutex::new(Vec::new());
+fn stopping(id: &str) -> bool {
+    STOPPING
+        .lock()
+        .map(|s| s.iter().any(|x| x == id))
+        .unwrap_or(false)
+}
+/// Marks `id` as being stopped until the guard drops, however the stop ends.
+struct Stopping(String);
+impl Stopping {
+    fn new(id: &str) -> Self {
+        if let Ok(mut s) = STOPPING.lock() {
+            s.push(id.to_owned());
+        }
+        Stopping(id.to_owned())
+    }
+}
+impl Drop for Stopping {
+    fn drop(&mut self) {
+        if let Ok(mut s) = STOPPING.lock() {
+            if let Some(i) = s.iter().position(|x| *x == self.0) {
+                s.remove(i);
+            }
+        }
+    }
+}
+
+/// SB-407 review round 1: what Needs attention's *Stop the run* does for a run it read as gone:
+/// only the end is recorded (`exited`), and only while the run's process is not running. A run
+/// whose process is alive (the read that called it gone could not see it) is refused with
+/// `STILL_RUNNING` and never signalled; a run on another machine is never gone here.
+pub(crate) fn record_gone(
+    root: &Path,
+    id: &str,
+    now: i64,
+    analytics: Option<&Analytics>,
+) -> Result<Value, String> {
+    let Some(record) = crate::launches::get(root, id) else {
+        return Err(crate::launches::LAUNCH_NOT_FOUND.into());
+    };
+    if !record["dispatch"].is_object() {
+        return Err(NOT_A_DISPATCH.into());
+    }
+    let answer = |state: &str| json!({"launch_id": id, "state": state});
+    if !record["ended"].is_null() {
+        return Ok(answer("already_ended"));
+    }
+    if !record["dispatch"]["target"].is_null() {
+        return Err(STILL_RUNNING.into());
+    }
+    let alive = crate::launches::own_home(root, &record)
+        .map(|home| crate::launch::session_running(&home).unwrap_or(true))
+        .unwrap_or(false);
+    if alive {
+        return Err(STILL_RUNNING.into());
+    }
+    journal_stop(root, &record, STOPPED, now, None);
+    ended(root, id, EXITED, now, None, analytics);
+    live_remove(root, id);
+    journal_stop(
+        root,
+        &record,
+        STOPPED,
+        now,
+        Some(("already_ended", recorded_kind(root, id).as_deref())),
+    );
+    Ok(answer("already_ended"))
+}
+/// The refusal of `record_gone` for a run whose process still runs.
+pub const STILL_RUNNING: &str =
+    "This board run is still running, so it was left alone. Refresh to see it now.";
 
 /// SB-317 (D-7): a dispatched run's state for Fabric: `{launch_id, target, state, exit_code,
 /// result}`. A run here answers from its record; a run on another machine is read there over
@@ -554,7 +737,10 @@ pub(crate) fn sweep(root: &Path, now: i64, analytics: Option<&Analytics>) {
             continue;
         };
         if !record["ended"].is_null() {
-            live_remove(root, &l.launch_id);
+            // A cut stop that could not be finished keeps the run watched.
+            if finish_cut_stop(root, &record, now) {
+                live_remove(root, &l.launch_id);
+            }
             continue;
         }
         if record["state"] == "ended" {
@@ -1123,10 +1309,21 @@ mod runs {
             .runtime
             .execute(Operation::DispatchStop {
                 launch_id: id.clone(),
+                if_gone: false,
             })
             .await
             .unwrap();
         assert_eq!(stopped["state"], "stopped");
+        // SB-407: the person's stop is journalled beside the duty officer's acts.
+        let lines = journal(b.root.path());
+        assert_eq!(lines.len(), 2, "{lines:?}");
+        assert_eq!(
+            (&lines[0]["phase"], &lines[0]["action"], &lines[0]["by"]),
+            (&json!("intent"), &json!(JOURNAL_ACTION), &json!("person"))
+        );
+        assert_eq!(lines[1]["outcome"], "stopped");
+        assert_eq!(lines[1]["ended"], json!({"kind": STOPPED}));
+        assert_eq!(lines[1]["launch_id"], id.as_str());
         let record = crate::launches::get(b.root.path(), &id).unwrap();
         assert_eq!(record["ended"]["kind"], STOPPED);
         assert!(record["ended"]["at"].is_i64());
@@ -1137,10 +1334,16 @@ mod runs {
             .runtime
             .execute(Operation::DispatchStop {
                 launch_id: id.clone(),
+                if_gone: false,
             })
             .await
             .unwrap();
         assert_eq!(twice["state"], "already_ended");
+        assert_eq!(
+            journal(b.root.path()).len(),
+            2,
+            "an ended run is not stopped again"
+        );
         assert!(
             !b.root.path().join(LIVE_FILE).exists(),
             "nothing left to watch"
@@ -1150,6 +1353,7 @@ mod runs {
             .runtime
             .execute(Operation::DispatchStop {
                 launch_id: "no-such-launch".into(),
+                if_gone: false,
             })
             .await
             .unwrap_err();
@@ -1200,6 +1404,182 @@ mod runs {
         let record = crate::launches::get(b.root.path(), &id).unwrap();
         assert_eq!(record["ended"]["kind"], TIMED_OUT);
         assert_eq!(record["state"], "ended");
+        assert!(!b.root.path().join(LIVE_FILE).exists());
+        // SB-407: the duty officer's stop at the deadline, intent then outcome.
+        let lines = journal(b.root.path());
+        let kinds: Vec<(&Value, &Value, &Value)> = lines
+            .iter()
+            .map(|l| (&l["phase"], &l["outcome"], &l["by"]))
+            .collect();
+        assert_eq!(
+            kinds,
+            [
+                (&json!("intent"), &Value::Null, &json!("duty")),
+                (&Value::Null, &json!("stopped"), &json!("duty"))
+            ]
+        );
+        assert_eq!(lines[1]["ended"], json!({"kind": TIMED_OUT}));
+        assert_eq!(lines[1]["reason"], "deadline");
+    }
+
+    fn journal(root: &Path) -> Vec<Value> {
+        std::fs::read_to_string(root.join(crate::duty::JOURNAL))
+            .unwrap_or_default()
+            .lines()
+            .map(|l| serde_json::from_str(l).unwrap())
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn a_run_that_still_writes_its_log_is_stopped_at_its_deadline_and_not_before() {
+        // SB-407: an hour's limit; a run writing its log meanwhile is never stopped before it,
+        // and is stopped at it.
+        let b = bench(true).await;
+        let mut long = dispatch(b.folder.path(), Permissions::Ask);
+        if let Operation::Launched { inner, .. } = &mut long {
+            if let Operation::Dispatch {
+                timeout_minutes, ..
+            } = inner.as_mut()
+            {
+                *timeout_minutes = 60;
+            }
+        }
+        let started = b.run(long, true, true).await.unwrap();
+        let id = started["launch_id"]
+            .as_str()
+            .unwrap_or_else(|| panic!("no launch was started: {started}"))
+            .to_owned();
+        wait_for(&b.tools.path().join("args"));
+        let record = crate::launches::get(b.root.path(), &id).unwrap();
+        let due = record["dispatch"]["deadline"].as_i64().unwrap();
+        // The deadline is taken a moment before the record's start, a second or more under load.
+        let limit = due - record["launched_at"].as_i64().unwrap();
+        assert!((3540..=3600).contains(&limit), "{limit}");
+        let log = b
+            .root
+            .path()
+            .join(crate::launches::DIR)
+            .join(crate::launches::LOGS)
+            .join(format!("{id}.log"));
+        for at in [due - 1800, due - 1] {
+            std::fs::write(&log, "still working\n").unwrap();
+            sweep(b.root.path(), at, None);
+            assert!(
+                crate::launches::get(b.root.path(), &id).unwrap()["ended"].is_null(),
+                "stopped before its deadline"
+            );
+        }
+        assert!(journal(b.root.path()).is_empty());
+        sweep(b.root.path(), due, None);
+        let record = crate::launches::get(b.root.path(), &id).unwrap();
+        assert_eq!(record["ended"]["kind"], TIMED_OUT);
+        assert_eq!(journal(b.root.path())[1]["reason"], "deadline");
+    }
+
+    #[tokio::test]
+    async fn a_run_read_as_gone_is_only_recorded_and_a_live_one_is_never_signalled() {
+        // SB-407 review round 1 (P1): *Stop the run* on a `session_gone` item records the end of
+        // a run whose process is gone, and refuses one whose process runs, leaving it running.
+        let b = bench(true).await;
+        let started = b
+            .run(dispatch(b.folder.path(), Permissions::Ask), true, true)
+            .await
+            .unwrap();
+        let id = started["launch_id"].as_str().unwrap().to_owned();
+        wait_for(&b.tools.path().join("args"));
+        let home = b
+            .root
+            .path()
+            .join("homes")
+            .join(started["account_id"].as_str().unwrap());
+        let gone = || {
+            b.runtime.execute(Operation::DispatchStop {
+                launch_id: id.clone(),
+                if_gone: true,
+            })
+        };
+        assert_eq!(gone().await.unwrap_err(), STILL_RUNNING);
+        assert!(
+            crate::launch::session_running(&home).unwrap(),
+            "left running"
+        );
+        assert!(crate::launches::get(b.root.path(), &id).unwrap()["ended"].is_null());
+        assert!(journal(b.root.path()).is_empty());
+        // A run whose process is gone with no end recorded (no owner reaped it): only its end
+        // is recorded, `exited`.
+        let dead = b.root.path().join("homes").join("gone-run");
+        switchboard_core::private_fs::private_dir(&dead).unwrap();
+        let dead_id = crate::launches::new_id();
+        crate::launches::record_by(
+            b.root.path(),
+            &dead,
+            json!({"provider": "claude", "launched_at": 1, "working_directory": "/work/app",
+                "dispatch": {"workflow": WF, "deadline": 99}}),
+            &dead_id,
+            None,
+        )
+        .unwrap();
+        let answer = b
+            .runtime
+            .execute(Operation::DispatchStop {
+                launch_id: dead_id.clone(),
+                if_gone: true,
+            })
+            .await
+            .unwrap();
+        assert_eq!(answer["state"], "already_ended");
+        let record = crate::launches::get(b.root.path(), &dead_id).unwrap();
+        assert_eq!(record["ended"]["kind"], EXITED);
+        let lines = journal(b.root.path());
+        assert_eq!(lines.len(), 2, "{lines:?}");
+        assert_eq!(lines[1]["ended"], json!({"kind": EXITED}));
+        assert_eq!(lines[1]["by"], "person");
+    }
+
+    #[tokio::test]
+    async fn a_stop_cut_between_its_record_and_its_signal_is_finished_by_the_next_pass() {
+        // SB-407: a quit after the record says `timed_out` but before the signal left the run
+        // running; the next pass stops it and journals the outcome with `finished_at`.
+        let b = bench(true).await;
+        let started = b
+            .run(dispatch(b.folder.path(), Permissions::Ask), true, true)
+            .await
+            .unwrap();
+        let id = started["launch_id"].as_str().unwrap().to_owned();
+        wait_for(&b.tools.path().join("args"));
+        let now = crate::monitor::now();
+        assert!(crate::launches::end_once(
+            b.root.path(),
+            &id,
+            TIMED_OUT,
+            now,
+            None
+        ));
+        let home = b
+            .root
+            .path()
+            .join("homes")
+            .join(started["account_id"].as_str().unwrap());
+        assert!(crate::launch::session_running(&home).unwrap());
+        // Review round 1: within the time a stop takes, it may still be under way: left alone,
+        // and the run stays watched.
+        sweep(b.root.path(), now + 5, None);
+        assert!(crate::launch::session_running(&home).unwrap());
+        assert!(b.root.path().join(LIVE_FILE).exists());
+        assert!(journal(b.root.path()).is_empty());
+        // So is a stop this process is making now, however old its record.
+        {
+            let _in_flight = Stopping::new(&id);
+            sweep(b.root.path(), now + 30, None);
+            assert!(crate::launch::session_running(&home).unwrap());
+        }
+        sweep(b.root.path(), now + 30, None);
+        assert!(!crate::launch::session_running(&home).unwrap());
+        let lines = journal(b.root.path());
+        assert_eq!(lines.len(), 1, "{lines:?}");
+        assert_eq!(lines[0]["outcome"], "stopped");
+        assert_eq!(lines[0]["ended"], json!({"kind": TIMED_OUT}));
+        assert_eq!(lines[0]["finished_at"], now + 30);
         assert!(!b.root.path().join(LIVE_FILE).exists());
     }
 

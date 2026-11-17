@@ -710,6 +710,10 @@ export function createDemoAdapter(): Adapter {
       demoDuplicate = null;
       return { session_id: sessionId, closed_pid: pid ?? 4188, kept_pids: [4101] };
     },
+    async dispatchStop(launchId, ifGone) {
+      await pause();
+      return { launch_id: launchId, state: ifGone ? 'already_ended' as const : 'stopped' as const };
+    },
     async sessionRows() {
       await pause();
       const now = Math.floor(Date.now() / 1000);

@@ -12,6 +12,7 @@
         "observed_at": "<observed_at>",
         "quiet": 0,
         "quiet_after_minutes": 30,
+        "refused_last_hour": null,
         "total": 0,
         "used": 0
       },
@@ -79,13 +80,60 @@
     },
     "stdout": null
   },
+  "sessions": {
+    "exit": 0,
+    "stderr": "",
+    "stdout": {
+      "data": {
+        "sessions": []
+      },
+      "ok": true
+    }
+  },
+  "sessions --all": {
+    "exit": 0,
+    "stderr": "",
+    "stdout": {
+      "data": {
+        "sessions": [
+          {
+            "agent": "claude-code",
+            "context_name": null,
+            "ended": {
+              "at": "<at>",
+              "exit_code": 0,
+              "kind": "exited"
+            },
+            "ended_at": "<ended_at>",
+            "home": null,
+            "home_dir": null,
+            "hosted": true,
+            "in_place": true,
+            "label": null,
+            "launch_id": "golden-resume-ended",
+            "launched_at": "<launched_at>",
+            "launched_by": {
+              "surface": "dashboards"
+            },
+            "mode": "resume",
+            "provider": "claude",
+            "provider_session_id": "resumed-session",
+            "started_at": null,
+            "state": "ended",
+            "working_directory": "<scratch>/home/work/app"
+          }
+        ]
+      },
+      "ok": true
+    }
+  },
   "sessions --rows": {
     "exit": 0,
     "stderr": "",
     "stdout": {
       "data": {
         "counts": {
-          "ended": 2,
+          "ended": 3,
           "needs_you": 0,
           "running": 0,
           "waiting": 0
@@ -95,6 +143,27 @@
         ],
         "observed_at": "<observed_at>",
         "rows": [
+          {
+            "account": null,
+            "acts": [
+              "continue"
+            ],
+            "agent": "claude-code",
+            "folder": "<scratch>/home/work/app",
+            "group": "ended",
+            "id": "launch:golden-resume-ended",
+            "launch_id": "golden-resume-ended",
+            "origin": "dashboards",
+            "pool": null,
+            "session_id": "resumed-session",
+            "since": "<since>",
+            "task": {
+              "project": null,
+              "request": null,
+              "workflow": null
+            },
+            "why": "exited"
+          },
           {
             "account": null,
             "acts": [
@@ -164,7 +233,30 @@
         },
         "degraded": [],
         "findings": [],
-        "launches": [],
+        "launches": [
+          {
+            "account_id": null,
+            "ended": {
+              "at": "<at>",
+              "exit_code": 0,
+              "kind": "exited"
+            },
+            "folder": "<scratch>/home/work/app",
+            "launch_id": "golden-resume-ended",
+            "launched_at": "<launched_at>",
+            "parent": null,
+            "pool": null,
+            "provider": "claude",
+            "session_id": "resumed-session",
+            "state": "ended",
+            "surface": "dashboards",
+            "task": {
+              "project": null,
+              "request": null,
+              "workflow": null
+            }
+          }
+        ],
         "live": "<live>",
         "observed_at": "<observed_at>"
       },

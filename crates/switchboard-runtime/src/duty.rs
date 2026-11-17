@@ -536,6 +536,12 @@ fn journal(root: &Path) -> Vec<Value> {
         .collect()
 }
 
+/// SB-407: a dispatched run's stop (`dispatch::stop`) is journalled here beside the duty
+/// officer's own acts, under the same lock and the same 500-line cap.
+pub(crate) fn journal_line(root: &Path, line: Value) {
+    append(root, line);
+}
+
 fn append(root: &Path, line: Value) {
     // SB-397 W0.1: the owner's checks and an offline `close_copy` both append; one at a time.
     let lock = std::fs::OpenOptions::new()
@@ -782,7 +788,11 @@ const SETTLE_SECONDS: i64 = 60;
 /// `INTERRUPTED_WINDOW`. Pure, for tests.
 pub fn interrupted(lines: &[Value], now: i64) -> Vec<Value> {
     let mut open: Vec<Value> = Vec::new();
-    for line in lines {
+    // SB-407: a dispatched run's stop is finished by the dispatch pass, from its launch record.
+    for line in lines
+        .iter()
+        .filter(|l| l["action"] != crate::dispatch::JOURNAL_ACTION)
+    {
         let key = (line["session"].clone(), line["at"].clone());
         if line["phase"] == "intent" {
             open.retain(|o| o["session"] != line["session"]);

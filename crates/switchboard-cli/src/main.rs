@@ -2008,6 +2008,10 @@ enum DispatchCommand {
         /// The run's launch id, as `switchboard dispatch` answered it.
         #[arg(long)]
         launch_id: String,
+        /// Only record the end of a run whose process is gone; a run still running is refused and
+        /// left running.
+        #[arg(long)]
+        if_gone: bool,
     },
     /// A dispatched run's state (`running`, `exited` with its exit code, `stopped`, `timed_out`,
     /// `lost`, `unknown` when its machine does not answer) and, for a run on another machine, the
@@ -3046,10 +3050,11 @@ async fn run(cli: &Cli) -> Result<Value, String> {
             },
         },
         Command::Dispatch {
-            command: Some(DispatchCommand::Stop { launch_id }),
+            command: Some(DispatchCommand::Stop { launch_id, if_gone }),
             ..
         } => Operation::DispatchStop {
             launch_id: launch_id.clone(),
+            if_gone: *if_gone,
         },
         Command::Dispatch {
             command: Some(DispatchCommand::Status { launch_id }),
@@ -5779,16 +5784,30 @@ fn print_result(value: &Value, cli: &Cli) {
             text(&value["platform"]),
             text(&value["proxy_address"])
         ),
-        Command::Capacity { .. } => match value["cap"].as_u64() {
-            Some(cap) => println!(
-                "Sessions: {} of {cap} working, {} free ({} quiet not counted).",
-                value["used"], value["free"], value["quiet"]
-            ),
-            None => println!(
-                "No session limit: {} working sessions ({} quiet not counted).",
-                value["used"], value["quiet"]
-            ),
-        },
+        Command::Capacity { .. } => {
+            match value["cap"].as_u64() {
+                Some(cap) => println!(
+                    "Sessions: {} of {cap} working, {} free ({} quiet not counted).",
+                    value["used"], value["free"], value["quiet"]
+                ),
+                None => println!(
+                    "No session limit: {} working sessions ({} quiet not counted).",
+                    value["used"], value["quiet"]
+                ),
+            }
+            // SB-412: board runs the limit refused in the last hour.
+            let refused = &value["refused_last_hour"];
+            if let Some(count) = refused["count"].as_u64() {
+                println!(
+                    "Board runs refused at the limit in the last hour: {count}{}.",
+                    if refused["freed"] == true {
+                        "; a session has ended since"
+                    } else {
+                        ""
+                    }
+                );
+            }
+        }
         _ => print_value(value, false),
     }
 }
@@ -6436,10 +6455,8 @@ mod mcp_parity {
         ),
         ("continue", Not(LAUNCH)),
         // `dispatch` itself starts a run as `sessions` lists them: one decision for both.
-        (
-            "dispatch stop",
-            Not("SB-247: Fabric's dispatcher starts and stops these runs with the CLI; an agent reads them with switchboard_sessions"),
-        ),
+        // SB-407: Needs attention's Stop the run on a stuck or gone board run.
+        ("dispatch stop", Tool("switchboard_dispatch_stop")),
         (
             "dispatch status",
             Not("SB-317: Fabric's dispatcher reads its runs' results with the CLI to relay them; an agent reads runs with switchboard_sessions"),
