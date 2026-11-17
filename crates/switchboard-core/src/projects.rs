@@ -847,6 +847,11 @@ impl Store {
                 }
             })
             .collect();
+        // SB-401: a key leaves the pay-per-token group only for another group the person names,
+        // never for the default one, where every folder in no group would run on it.
+        if tokens && moves.iter().any(|(_, to)| to == DEFAULT_POOL) {
+            return Err(TOKENS_KEEPS_KEYS.into());
+        }
         for (id, to) in &moves {
             let account = candidate
                 .accounts

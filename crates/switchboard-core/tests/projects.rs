@@ -639,3 +639,43 @@ fn a_group_never_takes_the_pool_the_openrouter_keys_launches_record() {
         .unwrap();
     assert_eq!(other.pool, "open-router");
 }
+
+/// SB-401: the pay-per-token group is made empty and switched off, holds Claude keys only, takes
+/// folders one by one, may stand empty again, and never lets a key fall back to the default group.
+#[test]
+fn the_pay_per_token_group_starts_empty_and_off_and_holds_claude_keys_only() {
+    let (root, store) = setup();
+    let pool = store.ensure_tokens_group().unwrap();
+    assert_eq!(pool, switchboard_core::TOKENS_POOL);
+    assert_eq!(store.ensure_tokens_group().unwrap(), pool, "made once");
+    let group = store.snapshot().unwrap().tokens_group().cloned().unwrap();
+    assert!(group.tokens && group.off && group.folders.is_empty());
+    assert_eq!(schema(root.path()), 15);
+    let key = add(&store, Provider::Claude, &pool, "synthetic-key");
+    assert_eq!(key.pool, pool);
+    let codex = add(&store, Provider::Codex, "default", "synthetic-codex");
+    assert_eq!(
+        store
+            .save_project(
+                Some(&pool),
+                switchboard_core::TOKENS_NAME,
+                &[],
+                &[key.id.clone(), codex.id.clone()]
+            )
+            .unwrap_err(),
+        switchboard_core::TOKENS_ONLY_KEYS
+    );
+    let name = switchboard_core::TOKENS_NAME;
+    let saved = store
+        .save_project(Some(&pool), name, &[project(&root, "paid")], std::slice::from_ref(&key.id))
+        .unwrap();
+    assert!(saved.tokens && saved.off && saved.folders.len() == 1);
+    let emptied = store
+        .save_project(Some(&pool), name, &[], std::slice::from_ref(&key.id))
+        .unwrap();
+    assert!(emptied.tokens && emptied.folders.is_empty());
+    assert_eq!(
+        store.save_project(Some(&pool), name, &[], &[]).unwrap_err(),
+        switchboard_core::TOKENS_KEEPS_KEYS
+    );
+}
