@@ -108,7 +108,8 @@ What needs a person, one item per account or question:
 | `ceiling_question` | a reached spending ceiling waits for keep or double | `switchboard_ceiling_answer` (`account_id`, `label`, `provider` null; `pool` the group's, or null) |
 | `session_duplicate` | one Claude Code session runs in two processes | `switchboard_session_close_copy` with the item's `session_id` |
 | `session_stuck` | a board run quiet for 30 minutes, its log included | `switchboard_dispatch_stop` with the item's `launch_id` (`action.command` is the CLI act) |
-| `session_gone` | a board run whose process ended with no end recorded | `switchboard_dispatch_stop` with the item's `launch_id` |
+| `session_gone` | a board run whose process ended with no end recorded | `switchboard_dispatch_stop` with the item's `launch_id` and `if_gone` (records the end, never signals a live run) |
+| `dispatch_refused` | board runs refused at this computer's session limit in the last hour (`count`, `newest_request`, `freed`) | `switchboard_capacity` (its `refused_last_hour`) |
 
 A view: every account listed stays in its group with its selection, and nothing moves; once
 fixed it leaves the list on the next background pass. Read-only, also on a read-only server.
@@ -174,7 +175,7 @@ still running ends with it. `close: null` means every copy is answering. Refused
 no longer runs in two processes. macOS and Linux.
 
 
-### `switchboard_dispatch_stop`: `launch_id` (string)
+### `switchboard_dispatch_stop`: `launch_id` (string), `if_gone?` (boolean)
 
 Stops a run `switchboard dispatch` started for a Fabric board request, as `switchboard dispatch stop
 --launch-id` and Needs attention's *Stop the run* do (SB-407): `SIGTERM` to its process group,
@@ -183,7 +184,8 @@ Stops a run `switchboard dispatch` started for a Fabric board request, as `switc
 officer's `duty.jsonl` with `by: person`. Answers `{launch_id, state: stopped | already_ended}`;
 a launch that is not a dispatched run is refused. For a `session_stuck` or `session_gone` item, or
 when the operator asks: a run is otherwise stopped at its own deadline (its time limit, or the
-board request's deadline when earlier), never before.
+board request's deadline when earlier), never before. With `if_gone` nothing is signalled: the
+end of a run whose process is gone is recorded, and a run whose process still runs is refused.
 
 ### `switchboard_session_continue`: `session_id` (string)
 

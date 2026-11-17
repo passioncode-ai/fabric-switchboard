@@ -1,4 +1,4 @@
-//! SB-412 (studio-agent's finding `1ddf0300`): a dispatch refused `at_capacity` was silent. Each
+//! SB-412 (board finding `1ddf0300`): a dispatch refused `at_capacity` was silent. Each
 //! such refusal is counted in `<data>/dispatch-refusals.json` (0600: refusal times of the last
 //! day, the newest board request's id and when a slot freed since; never text or a folder), so
 //! *Needs attention* lists one `dispatch_refused` item while the last hour holds any, and
