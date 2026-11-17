@@ -2198,7 +2198,7 @@ function restartFailureText(reason: string | null): string {
   switch (reason) {
     case 'not_back': return t('Not back five minutes after it ended');
     case 'still_running': return t('Not back: its old process did not end');
-    case 'host_refused': case 'host_gone': return t('Not back: its window could not restart it');
+    case 'host_refused': case 'host_gone': case 'host_busy': return t('Not back: its window could not restart it');
     case 'not_started': case 'not_written': return t('Not back: the Terminal window did not open');
     case 'cannot_resume': return t('Not back: its folder or history is gone');
     case 'gone': return t('Not back: it ended before its turn did');

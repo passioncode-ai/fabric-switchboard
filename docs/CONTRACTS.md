@@ -3462,7 +3462,8 @@ not held behind it. A host that took the request but gave no clear answer leaves
 `resuming` (its return decides); one an owner's quit cut in a Terminal window gets 60 s to start
 before another window opens. On Linux with no terminal (no `$TERMINAL`, no known emulator) a session
 that would come back in a new window is `cannot_resume`. Failed reasons: `not_back`, `gone` (it ended
-before its turn), `cannot_resume`, `not_written`, `host_refused`, `host_gone`, `still_running`,
+before its turn), `cannot_resume`, `not_written`, `host_refused`, `host_gone`, `host_busy` (the host took
+the connection and did not answer within 15 s, SB-413), `still_running`,
 `not_started`. Scripts are removed once the wave is done or their session's end is older than five
 minutes. A session the wave ended in a Terminal window and that came back gets a `resumable.jsonl`
 line `reason: restart_back`, so a later close by the person never reads as ended by the restart. The

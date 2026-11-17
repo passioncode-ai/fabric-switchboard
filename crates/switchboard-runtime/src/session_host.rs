@@ -71,11 +71,25 @@ const VIEWER_WRITE: Duration = Duration::from_secs(2);
 const MAX_DESCRIPTOR: u64 = 4096;
 /// How long a viewer waits for the host's answer to its `HELLO` (SB-413).
 const HELLO_WAIT: Duration = Duration::from_secs(15);
+/// SB-413: the output reader's first pause after an end of output, and its longest. A restart in
+/// place brings the terminal's other end back within the first pauses; a process that closed its
+/// terminal and goes on running is looked at about once a second, not twenty times.
+const READER_PAUSE_FIRST: Duration = Duration::from_millis(50);
+const READER_PAUSE_MAX: Duration = Duration::from_secs(1);
+
+/// The reader's pause after `pause`: doubled, at most `READER_PAUSE_MAX`.
+fn next_reader_pause(pause: Duration) -> Duration {
+    (pause * 2).min(READER_PAUSE_MAX)
+}
 
 /// The frame protocol's version, in both `HELLO`s: a viewer refuses a host that speaks another.
 pub const PROTOCOL: u64 = 1;
 
 pub const NOT_FOUND: &str = crate::launches::NO_SUCH_LAUNCH;
+/// SB-413: the host took the connection and did not answer its `HELLO` in time: it is there but
+/// busy, which is not "no session".
+pub const HOST_BUSY: &str =
+    "The session's host did not answer within 15 seconds; it may be busy. Try again.";
 pub const TOO_MANY_VIEWERS: &str = "This session already has eight viewers.";
 
 /// Writes one frame.
@@ -594,9 +608,13 @@ pub fn serve(start: Start<'_>, ready: impl FnOnce()) -> Result<Ended, String> {
         std::thread::spawn(move || {
             let mut reader = reader;
             let mut buf = [0u8; 16 * 1024];
+            let mut pause = READER_PAUSE_FIRST;
             loop {
                 match reader.read(&mut buf) {
-                    Ok(n) if n > 0 => session.output(&buf[..n]),
+                    Ok(n) if n > 0 => {
+                        pause = READER_PAUSE_FIRST;
+                        session.output(&buf[..n]);
+                    }
                     Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
                     // End of output or EIO once every holder of the terminal's other end is gone.
                     // It ends the reader only once the host says the session is finished: during
@@ -611,7 +629,8 @@ pub fn serve(start: Start<'_>, ready: impl FnOnce()) -> Result<Ended, String> {
                         if session.lock().finished {
                             break;
                         }
-                        std::thread::sleep(Duration::from_millis(50));
+                        std::thread::sleep(pause);
+                        pause = next_reader_pause(pause);
                     }
                 }
             }
@@ -1006,6 +1025,15 @@ pub fn restart(root: &Path, launch_id: &str, program: &Path) -> Result<Restart, 
 }
 
 fn connect(root: &Path, launch_id: &str, size: Option<(u16, u16)>) -> Result<Attached, String> {
+    connect_within(root, launch_id, size, HELLO_WAIT)
+}
+
+fn connect_within(
+    root: &Path,
+    launch_id: &str,
+    size: Option<(u16, u16)>,
+    hello_wait: Duration,
+) -> Result<Attached, String> {
     if !crate::launches::valid_id(launch_id) {
         return Err(NOT_FOUND.into());
     }
@@ -1020,10 +1048,18 @@ fn connect(root: &Path, launch_id: &str, size: Option<(u16, u16)>) -> Result<Att
         .map_err(|_| NOT_FOUND.to_string())?;
     // A host that takes the connection and never answers is not waited for forever (SB-413);
     // the stream is handed on with no timeout, as before.
-    let _ = stream.set_read_timeout(Some(HELLO_WAIT));
+    let _ = stream.set_read_timeout(Some(hello_wait));
     let answer = read_frame(&mut stream);
     let _ = stream.set_read_timeout(None);
     match answer {
+        Err(e)
+            if matches!(
+                e.kind(),
+                io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
+            ) =>
+        {
+            Err(HOST_BUSY.into())
+        }
         Ok((HELLO, ack)) => {
             let ack: Value = serde_json::from_slice(&ack).unwrap_or(Value::Null);
             if ack["protocol"].as_u64() != Some(PROTOCOL) {
@@ -1059,7 +1095,27 @@ mod tests {
     /// long, so a test can make the reader see a restart's EIO late, as a loaded machine does.
     static READER_PAUSE: Mutex<Option<(String, Duration)>> = Mutex::new(None);
 
+    /// SB-413: how many ends of output each launch's reader met, so a test proves the pause path
+    /// ran (on every OS) and how often.
+    static READER_PAUSES: Mutex<Vec<(String, usize)>> = Mutex::new(Vec::new());
+
+    fn reader_pauses(launch_id: &str) -> usize {
+        READER_PAUSES
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .iter()
+            .find(|(id, _)| id == launch_id)
+            .map_or(0, |(_, n)| *n)
+    }
+
     pub(super) fn pause_reader(launch_id: &str) {
+        {
+            let mut counts = READER_PAUSES.lock().unwrap_or_else(|p| p.into_inner());
+            match counts.iter_mut().find(|(id, _)| id == launch_id) {
+                Some((_, n)) => *n += 1,
+                None => counts.push((launch_id.to_owned(), 1)),
+            }
+        }
         let pause = READER_PAUSE
             .lock()
             .unwrap_or_else(|p| p.into_inner())
@@ -1256,10 +1312,79 @@ mod tests {
         std::fs::set_permissions(&next, std::fs::Permissions::from_mode(0o700)).unwrap();
         assert_eq!(restart(&root, &id, &next), Ok(Restart::Accepted));
         saw(&mut viewer.stream, "second");
+        assert!(
+            reader_pauses(&id) > 0,
+            "the reader met the old process's end and paused"
+        );
         write_frame(&mut viewer.stream, INPUT, b"done\n").unwrap();
         assert_eq!(exit_of(&mut viewer.stream), 3);
         assert_eq!(host.join().unwrap().exit_code, 3);
         *READER_PAUSE.lock().unwrap_or_else(|p| p.into_inner()) = None;
+    }
+
+    #[test]
+    fn the_reader_backs_off_from_fifty_milliseconds_to_a_second() {
+        let mut pause = READER_PAUSE_FIRST;
+        let mut seen = vec![pause.as_millis()];
+        for _ in 0..6 {
+            pause = next_reader_pause(pause);
+            seen.push(pause.as_millis());
+        }
+        assert_eq!(seen, [50, 100, 200, 400, 800, 1000, 1000]);
+    }
+
+    #[test]
+    fn a_process_that_closed_its_terminal_is_not_polled_twenty_times_a_second() {
+        // SB-413 review: a session's process that closes the terminal and goes on running ends
+        // the output (EIO on Linux at once); the reader looks again about once a second, not
+        // every 50 ms for the session's whole life, and the session still ends as usual.
+        let data = tempfile::tempdir().unwrap();
+        let root = data.path().canonicalize().unwrap();
+        let program = script(&root, "echo up; exec 0<&- 1>&- 2>&-; sleep 3; exit 4");
+        let id = crate::launches::new_id();
+        let host = start_host(&root, &id, &program, None);
+        let mut viewer = watch(&root, &id, 24, 80);
+        saw(&mut viewer.stream, "up");
+        assert_eq!(exit_of(&mut viewer.stream), 4);
+        assert_eq!(host.join().unwrap().exit_code, 4);
+        // Three seconds at 50 ms would be about sixty looks; backing off to a second, under ten.
+        let looks = reader_pauses(&id);
+        assert!(
+            looks <= 12,
+            "the reader looked {looks} times in three seconds"
+        );
+    }
+
+    #[test]
+    fn a_host_that_does_not_answer_its_hello_is_busy_and_one_that_closes_is_not_found() {
+        // SB-413 review: a live host slow to answer is not "no session" (`sessions end`, MCP
+        // `switchboard_session_end`, a restart wave's `host_gone`).
+        let data = tempfile::tempdir().unwrap();
+        let root = data.path().canonicalize().unwrap();
+        let id = crate::launches::new_id();
+        let socket = socket_path(&root, &id).unwrap();
+        let _ = std::fs::remove_file(&socket);
+        let listener = UnixListener::bind(&socket).unwrap();
+        let (silent_tx, silent_rx) = std::sync::mpsc::channel::<UnixStream>();
+        std::thread::spawn(move || {
+            // The first connection is held and never answered; the second is closed at once.
+            if let Some(Ok(held)) = listener.incoming().next() {
+                let _ = silent_tx.send(held);
+            }
+            if let Some(Ok(closed)) = listener.incoming().next() {
+                drop(closed);
+            }
+        });
+        assert_eq!(
+            connect_within(&root, &id, None, Duration::from_millis(300)).unwrap_err(),
+            HOST_BUSY
+        );
+        let _held = silent_rx.recv_timeout(WAIT).unwrap();
+        assert_eq!(
+            connect_within(&root, &id, None, Duration::from_millis(300)).unwrap_err(),
+            NOT_FOUND
+        );
+        let _ = std::fs::remove_file(&socket);
     }
 
     #[test]

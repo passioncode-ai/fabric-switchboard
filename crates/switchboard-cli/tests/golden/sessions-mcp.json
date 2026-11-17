@@ -357,7 +357,7 @@
         "openWorldHint": false,
         "readOnlyHint": true
       },
-      "description": "The state of a restart wave, the newest when wave is left out: each session pending (waiting for its turn to end), ending, resuming, back (a new process holds it), continuing (yours, working again), failed with the reason (not_back, still_running, host_refused, host_gone, not_started, not_written, cannot_resume, gone), skipped with the reason (still_busy after a day, changed_since_plan) or cancelled; counts; done_at once nothing is left to do.",
+      "description": "The state of a restart wave, the newest when wave is left out: each session pending (waiting for its turn to end), ending, resuming, back (a new process holds it), continuing (yours, working again), failed with the reason (not_back, still_running, host_refused, host_gone, host_busy, not_started, not_written, cannot_resume, gone), skipped with the reason (still_busy after a day, changed_since_plan) or cancelled; counts; done_at once nothing is left to do.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {

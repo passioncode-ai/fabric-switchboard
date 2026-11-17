@@ -835,10 +835,28 @@ pub(crate) fn with_launch_id(script: &str, launch: &str) -> String {
     }
 }
 
+/// The state a restart in a session's host leaves, and for a failure why.
+#[cfg(unix)]
+fn in_place_outcome(
+    answer: Result<crate::session_host::Restart, String>,
+) -> (&'static str, Option<&'static str>) {
+    match answer {
+        Ok(crate::session_host::Restart::Accepted) => ("resuming", None),
+        // The request went out and no clear answer came: it may restart, so the wait for its
+        // return decides (R3 review).
+        Ok(crate::session_host::Restart::Unknown) => ("resuming", None),
+        Ok(crate::session_host::Restart::Refused) => ("failed", Some("host_refused")),
+        // SB-413: a host that is there but did not answer in time is not a host that is gone.
+        Err(e) if e == crate::session_host::HOST_BUSY => ("failed", Some("host_busy")),
+        Err(_) => ("failed", Some("host_gone")),
+    }
+}
+
 /// Restarts one session: in its host when it runs in one that restarts in place, else as the duty
 /// officer does (stopped, then resumed in a Terminal window, through a host when it has a launch).
 /// The state that follows and, for a failure, why: `cannot_resume`, `not_written`,
-/// `host_refused` (the host would not), `host_gone` (no host answered), `still_running` (the
+/// `host_refused` (the host would not), `host_gone` (no host answered), `host_busy` (a host took
+/// the connection and did not answer in time, SB-413), `still_running` (the
 /// process did not end) or `not_started` (no Terminal window opened).
 #[cfg(unix)]
 fn restart_one(root: &Path, wave: &Wave, e: &Entry) -> (&'static str, Option<&'static str>) {
@@ -864,14 +882,7 @@ fn restart_one(root: &Path, wave: &Wave, e: &Entry) -> (&'static str, Option<&'s
         if crate::launch::write_script_at(&path, &script).is_err() {
             return ("failed", Some("not_written"));
         }
-        return match crate::session_host::restart(root, launch, &path) {
-            Ok(crate::session_host::Restart::Accepted) => ("resuming", None),
-            // The request went out and no clear answer came: it may restart, so the wait for its
-            // return decides (R3 review).
-            Ok(crate::session_host::Restart::Unknown) => ("resuming", None),
-            Ok(crate::session_host::Restart::Refused) => ("failed", Some("host_refused")),
-            Err(_) => ("failed", Some("host_gone")),
-        };
+        return in_place_outcome(crate::session_host::restart(root, launch, &path));
     }
     let path = terminal_script_path(root, &wave.id, &e.session);
     let written = path
@@ -900,6 +911,25 @@ fn restart_one(root: &Path, wave: &Wave, e: &Entry) -> (&'static str, Option<&'s
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn a_busy_host_is_not_a_gone_one() {
+        use crate::session_host::{Restart, HOST_BUSY, NOT_FOUND};
+        assert_eq!(
+            in_place_outcome(Err(HOST_BUSY.into())),
+            ("failed", Some("host_busy"))
+        );
+        assert_eq!(
+            in_place_outcome(Err(NOT_FOUND.into())),
+            ("failed", Some("host_gone"))
+        );
+        assert_eq!(in_place_outcome(Ok(Restart::Accepted)), ("resuming", None));
+        assert_eq!(
+            in_place_outcome(Ok(Restart::Refused)),
+            ("failed", Some("host_refused"))
+        );
+    }
     use crate::duty::Seen;
 
     fn seen(session: &str, pid: u32) -> Seen {
