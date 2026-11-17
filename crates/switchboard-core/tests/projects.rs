@@ -684,3 +684,76 @@ fn the_pay_per_token_group_starts_empty_and_off_and_holds_claude_keys_only() {
         switchboard_core::TOKENS_KEEPS_KEYS
     );
 }
+
+/// SB-401: a pay-per-token key never serves outside its group, where no switch or ceiling would
+/// stop it: no other group shares it, a save never moves it, balancing never lends it, the group
+/// is not deleted while it holds it, and nothing joins the group by itself.
+#[test]
+fn a_pay_per_token_key_stays_in_its_group_and_serves_no_other() {
+    let (root, store) = setup();
+    let pool = store.ensure_tokens_group().unwrap();
+    let key = add(&store, Provider::Claude, &pool, "synthetic-key");
+    let apps = store
+        .save_project(None, "Apps", &[project(&root, "apps")], &[])
+        .unwrap();
+    let keeps = switchboard_core::TOKENS_KEEPS_KEYS;
+    // Shared with another group.
+    assert_eq!(
+        store
+            .save_project_with(
+                Some(&apps.pool),
+                "Apps",
+                &[project(&root, "apps")],
+                std::slice::from_ref(&key.id),
+                None,
+                true,
+            )
+            .unwrap_err(),
+        keeps
+    );
+    // Moved into another group by a save.
+    assert_eq!(
+        store
+            .save_project(
+                Some(&apps.pool),
+                "Apps",
+                &[project(&root, "apps")],
+                std::slice::from_ref(&key.id),
+            )
+            .unwrap_err(),
+        keeps
+    );
+    // Lent by balancing, to a group or to the default group.
+    assert!(!store.set_shared(&apps.pool, &key.id, true).unwrap());
+    assert!(!store.set_shared("default", &key.id, true).unwrap());
+    // The group is not deleted while it holds a key, and takes no sources.
+    assert_eq!(store.remove_project(&pool).unwrap_err(), keeps);
+    assert_eq!(
+        store
+            .set_project_sources(&pool, &["github.com/example".into()])
+            .unwrap_err(),
+        switchboard_core::TOKENS_BY_HAND
+    );
+    let snapshot = store.snapshot().unwrap();
+    let held = snapshot.accounts.iter().find(|a| a.id == key.id).unwrap();
+    assert_eq!(held.pool, pool);
+    assert!(snapshot
+        .projects
+        .iter()
+        .all(|p| p.shared_accounts.is_empty()));
+    assert!(snapshot.default_lent.is_empty() && snapshot.default_shared.is_empty());
+    // Removing the account is how it leaves.
+    store.remove(&key.id).unwrap();
+    assert!(store.remove_project(&pool).is_ok());
+}
+
+/// SB-401: the proxy's read of a group: switched off, and whether it is the pay-per-token one.
+#[test]
+fn pool_flags_name_a_group_off_and_the_pay_per_token_group() {
+    let (_root, store) = setup();
+    assert_eq!(store.pool_flags("default").unwrap(), (false, false));
+    let pool = store.ensure_tokens_group().unwrap();
+    assert_eq!(store.pool_flags(&pool).unwrap(), (true, true));
+    store.set_group_off(&pool, false).unwrap();
+    assert_eq!(store.pool_flags(&pool).unwrap(), (false, true));
+}

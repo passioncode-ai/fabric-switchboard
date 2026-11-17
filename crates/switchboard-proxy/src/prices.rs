@@ -91,15 +91,24 @@ pub fn price(model: &str, prompt: u64) -> (Price, bool) {
 /// What one answer cost, in micro-dollars, and whether its model was known (false: estimated at
 /// the dearest family).
 pub fn cost(model: &str, u: &Usage) -> (u64, bool) {
-    let prompt = u.input + u.cache_read + u.cache_write + u.cache_write_5m + u.cache_write_1h;
+    let prompt = u
+        .input
+        .saturating_add(u.cache_read)
+        .saturating_add(u.cache_write)
+        .saturating_add(u.cache_write_5m)
+        .saturating_add(u.cache_write_1h);
     let (p, known) = price(model, prompt);
-    let part =
-        |tokens: u64, per_million: u64| (tokens as u128 * per_million as u128 / 1_000_000) as u64;
+    let part = |tokens: u64, per_million: u64| {
+        u64::try_from(u128::from(tokens) * u128::from(per_million) / 1_000_000).unwrap_or(u64::MAX)
+    };
     let total = part(u.input, p.input)
-        + part(u.output, p.output)
-        + part(u.cache_read, p.read)
-        + part(u.cache_write_5m, p.write_5m)
-        + part(u.cache_write_1h + u.cache_write, p.write_1h);
+        .saturating_add(part(u.output, p.output))
+        .saturating_add(part(u.cache_read, p.read))
+        .saturating_add(part(u.cache_write_5m, p.write_5m))
+        .saturating_add(part(
+            u.cache_write_1h.saturating_add(u.cache_write),
+            p.write_1h,
+        ));
     (total, known)
 }
 
@@ -146,5 +155,18 @@ mod tests {
         };
         assert_eq!(cost("claude-haiku-5-5", &small).0, 10_000);
         assert_eq!(cost("claude-haiku-5-5", &large).0, 50_000);
+    }
+
+    #[test]
+    fn counts_past_any_real_answer_saturate_instead_of_wrapping() {
+        let u = Usage {
+            input: u64::MAX,
+            output: u64::MAX,
+            cache_read: u64::MAX,
+            cache_write: u64::MAX,
+            cache_write_5m: u64::MAX,
+            cache_write_1h: u64::MAX,
+        };
+        assert_eq!(cost("claude-opus-4", &u), (u64::MAX, true));
     }
 }

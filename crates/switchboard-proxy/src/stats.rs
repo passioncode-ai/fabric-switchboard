@@ -37,8 +37,8 @@ impl Tally {
         self.output_tokens += other.output_tokens;
         self.cache_read_tokens += other.cache_read_tokens;
         self.cache_write_tokens += other.cache_write_tokens;
-        self.cost_micros += other.cost_micros;
-        self.cost_estimated += other.cost_estimated;
+        self.cost_micros = self.cost_micros.saturating_add(other.cost_micros);
+        self.cost_estimated = self.cost_estimated.saturating_add(other.cost_estimated);
     }
 }
 
@@ -181,14 +181,26 @@ pub struct UsageScanner {
     pub cache_write_1h_tokens: u64,
     /// SB-401: the model the answer names, for its price.
     pub model: Option<String>,
+    /// SB-401: every byte of the answer, for an estimate when its counts could not be read.
+    pub bytes: u64,
+    /// SB-401: part of the answer was not read (a line or a body past its bound), so its counts
+    /// may be short.
+    pub gave_up: bool,
+    /// SB-401: a Claude stream's `message_start` and its closing `message_delta`, read.
+    started: bool,
+    delta: bool,
 }
 const LINE_LIMIT: usize = 1024 * 1024;
 const BODY_LIMIT: usize = 4 * 1024 * 1024;
 impl UsageScanner {
     pub fn feed(&mut self, chunk: &[u8]) {
+        self.bytes = self.bytes.saturating_add(chunk.len() as u64);
         if self.body.len() + chunk.len() <= BODY_LIMIT {
             self.body.extend_from_slice(chunk);
         } else {
+            if !self.sse {
+                self.gave_up = true;
+            }
             self.body.clear();
             self.body.shrink_to_fit();
             self.body.push(0);
@@ -199,6 +211,8 @@ impl UsageScanner {
                 self.event_line(&line);
             } else if self.line.len() < LINE_LIMIT {
                 self.line.push(b);
+            } else {
+                self.gave_up = true;
             }
         }
     }
@@ -212,6 +226,7 @@ impl UsageScanner {
         };
         match v["type"].as_str() {
             Some("message_start") => {
+                self.started = true;
                 self.model_of(&v["message"]);
                 self.usage(&v["message"]["usage"]);
             }
@@ -219,6 +234,7 @@ impl UsageScanner {
                 // Cumulative: the last one is the turn's output.
                 if let Some(out) = v["usage"]["output_tokens"].as_u64() {
                     self.output_tokens = out;
+                    self.delta = true;
                 }
             }
             Some("response.completed") => self.usage(&v["response"]["usage"]),
@@ -254,23 +270,48 @@ impl UsageScanner {
             self.model = Some(m.to_owned());
         }
     }
-    /// SB-401: this answer's cost at the list price and whether its model was known; none for
-    /// an answer that names no Claude model.
+    /// SB-401: this answer's cost at the list price and whether it is exact; none for an answer
+    /// that names a model of another provider. A Claude answer is never free by accident: one
+    /// that names no model is priced at the dearest family, and one whose counts could not all
+    /// be read (a line or a body past its bound, a stream cut before its closing counts) takes an
+    /// output of a token per four bytes at least; both are marked estimated.
     pub fn cost(&self) -> Option<(u64, bool)> {
-        let model = self.model.as_deref().filter(|m| m.starts_with("claude"))?;
+        let model = match self.model.as_deref() {
+            Some(m) if !m.starts_with("claude") => return None,
+            Some(m) => m,
+            None => "",
+        };
+        let counted = self
+            .input_tokens
+            .saturating_add(self.output_tokens)
+            .saturating_add(self.cache_read_tokens)
+            .saturating_add(self.cache_write_tokens);
+        let cut = self.gave_up || (self.started && !self.delta);
+        if counted == 0 && !cut {
+            // Nothing was generated (`count_tokens`, an empty answer): nothing to pay.
+            return None;
+        }
+        let output = if cut {
+            self.output_tokens.max(self.bytes / 4)
+        } else {
+            self.output_tokens
+        };
         // A split names where each write went; what it does not cover is priced unsplit.
-        let split = self.cache_write_5m_tokens + self.cache_write_1h_tokens;
-        Some(crate::prices::cost(
+        let split = self
+            .cache_write_5m_tokens
+            .saturating_add(self.cache_write_1h_tokens);
+        let (micros, known) = crate::prices::cost(
             model,
             &crate::prices::Usage {
                 input: self.input_tokens,
-                output: self.output_tokens,
+                output,
                 cache_read: self.cache_read_tokens,
                 cache_write: self.cache_write_tokens.saturating_sub(split),
                 cache_write_5m: self.cache_write_5m_tokens,
                 cache_write_1h: self.cache_write_1h_tokens,
             },
-        ))
+        );
+        Some((micros, known && !cut))
     }
     /// At the end of the body: a plain JSON answer (not a stream) gives its `usage` here.
     pub fn finish(&mut self) {

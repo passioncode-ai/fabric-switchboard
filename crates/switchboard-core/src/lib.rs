@@ -1013,6 +1013,7 @@ impl Store {
         // restored sets it; the last one removed clears it).
         candidate.domain_rule_retired = !candidate.organizations.is_empty();
         validate_snapshot(&candidate)?;
+        projects::tokens_keys_stay(state, &candidate)?;
         let started = std::time::Instant::now();
         let written = persistence::write(&self.root, &candidate);
         self.slowest_write.fetch_max(
@@ -1033,6 +1034,7 @@ impl Store {
     fn hold(&self, state: &mut Snapshot, mut candidate: Snapshot) -> Result<(), String> {
         candidate.domain_rule_retired = !candidate.organizations.is_empty();
         validate_snapshot(&candidate)?;
+        projects::tokens_keys_stay(state, &candidate)?;
         *state = candidate;
         self.republish(state);
         let _ = self.pending_since.compare_exchange(

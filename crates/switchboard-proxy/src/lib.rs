@@ -95,6 +95,9 @@ struct Gateway {
     draining: Arc<std::sync::atomic::AtomicBool>,
     stats: stats::Stats,
     stat_folders: StatFolders,
+    /// SB-401: each pool's list-price spend this UTC day, never drained, and the ceilings read.
+    spend: Arc<tokens::Spend>,
+    ceilings: Arc<tokens::Ceilings>,
 }
 /// SB-147: every group folder, and each folder's own capability → that folder, so a request's
 /// statistics name the folder it came from.
@@ -133,6 +136,8 @@ pub struct ProxyHandle {
     last_request: Arc<std::sync::atomic::AtomicI64>,
     stats: stats::Stats,
     stat_folders: StatFolders,
+    /// SB-401: each pool's list-price spend this UTC day (`tokens::Spend`).
+    spend: Arc<tokens::Spend>,
     /// SB-273: connections closed because another account's process opened them.
     foreign_refused: Arc<std::sync::atomic::AtomicU64>,
 }
@@ -268,6 +273,7 @@ impl ProxyHandle {
         let draining = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let stats: stats::Stats = Arc::default();
         let stat_folders: StatFolders = Arc::default();
+        let spend: Arc<tokens::Spend> = Arc::default();
         let state = Gateway {
             store,
             token: token.clone(),
@@ -287,6 +293,8 @@ impl ProxyHandle {
             draining: draining.clone(),
             stats: stats.clone(),
             stat_folders: stat_folders.clone(),
+            spend: spend.clone(),
+            ceilings: Arc::default(),
         };
         let slots = state.slots.clone();
         let last_request = state.last_request.clone();
@@ -324,6 +332,7 @@ impl ProxyHandle {
             last_request,
             stats,
             stat_folders,
+            spend,
             foreign_refused,
         })
     }
@@ -366,6 +375,20 @@ impl ProxyHandle {
             .lock()
             .map(|mut s| std::mem::take(&mut *s))
             .unwrap_or_default()
+    }
+    /// SB-401: adds what `statistics.json` already holds for a pool on a UTC day (the owner's
+    /// start), so the pay-per-token group's ceiling counts the whole day across a restart.
+    pub fn seed_spend(&self, pool: &str, day: &str, micros: u64) {
+        self.spend.seed(pool, day, micros);
+    }
+    /// SB-401: what a pool's answers cost this UTC day at the list price, in micro-dollars.
+    pub fn spent_today(&self, pool: &str) -> u64 {
+        self.spend.today(pool, now())
+    }
+    /// SB-401: the pay-per-token ceilings found reached since the last call, once per pool and
+    /// UTC day.
+    pub fn take_reached(&self) -> Vec<tokens::Reached> {
+        self.spend.take_reached()
     }
     /// SB-273: connections closed since the last call because their process belongs to another
     /// account of this machine.
@@ -482,6 +505,10 @@ struct AuditedStream {
     stats: stats::Stats,
     key: String,
     scanner: Option<stats::UsageScanner>,
+    /// SB-401: a Claude answer, priced; the pool its account calls home, whose day it counts in.
+    claude: bool,
+    spend: Arc<tokens::Spend>,
+    spend_pool: String,
     _permit: tokio::sync::OwnedSemaphorePermit,
 }
 impl AuditedStream {
@@ -490,20 +517,27 @@ impl AuditedStream {
             return;
         };
         scan.finish();
-        if scan.input_tokens + scan.output_tokens + scan.cache_read_tokens + scan.cache_write_tokens
-            == 0
-        {
+        let cost = if self.claude { scan.cost() } else { None };
+        let counted = scan
+            .input_tokens
+            .saturating_add(scan.output_tokens)
+            .saturating_add(scan.cache_read_tokens)
+            .saturating_add(scan.cache_write_tokens);
+        if counted == 0 && cost.is_none() {
             return;
+        }
+        if let Some((micros, _)) = cost {
+            self.spend.add(&self.spend_pool, now(), micros);
         }
         if let Ok(mut all) = self.stats.lock() {
             let t = all.entry(std::mem::take(&mut self.key)).or_default();
-            t.input_tokens += scan.input_tokens;
-            t.output_tokens += scan.output_tokens;
-            t.cache_read_tokens += scan.cache_read_tokens;
-            t.cache_write_tokens += scan.cache_write_tokens;
-            if let Some((micros, known)) = scan.cost() {
-                t.cost_micros += micros;
-                t.cost_estimated += u64::from(!known);
+            t.input_tokens = t.input_tokens.saturating_add(scan.input_tokens);
+            t.output_tokens = t.output_tokens.saturating_add(scan.output_tokens);
+            t.cache_read_tokens = t.cache_read_tokens.saturating_add(scan.cache_read_tokens);
+            t.cache_write_tokens = t.cache_write_tokens.saturating_add(scan.cache_write_tokens);
+            if let Some((micros, known)) = cost {
+                t.cost_micros = t.cost_micros.saturating_add(micros);
+                t.cost_estimated = t.cost_estimated.saturating_add(u64::from(!known));
             }
         }
     }
@@ -561,6 +595,34 @@ impl Drop for AuditedStream {
         }
     }
 }
+/// SB-401: why `pool`'s accounts may not serve a request now, or none: a group switched off, the
+/// pay-per-token group with no daily ceiling, or with its ceiling reached. Fails closed: a store
+/// that cannot be read refuses.
+fn pool_refusal(g: &Gateway, pool: &str) -> Option<(StatusCode, &'static str)> {
+    let Ok((off, tokens)) = g.store.pool_flags(pool) else {
+        return Some((StatusCode::SERVICE_UNAVAILABLE, STORE_UNREADABLE));
+    };
+    if off {
+        return Some((StatusCode::FORBIDDEN, switchboard_core::GROUP_OFF));
+    }
+    if tokens {
+        let Some(cents) = g.ceilings.cents(g.store.root(), pool) else {
+            return Some((StatusCode::FORBIDDEN, switchboard_core::TOKENS_NO_CEILING));
+        };
+        let at = now();
+        let spent = g.spend.today(pool, at);
+        if spent >= u64::from(cents).saturating_mul(10_000) {
+            g.spend.note_reached(pool, at, cents, spent);
+            return Some((
+                StatusCode::FORBIDDEN,
+                switchboard_core::TOKENS_CEILING_REACHED,
+            ));
+        }
+    }
+    None
+}
+/// SB-401: the account store could not be read, so no group's state is known.
+pub const STORE_UNREADABLE: &str = "Switchboard could not read its accounts. Retry in a moment.";
 fn error(status: StatusCode, message: &'static str) -> Response {
     (
         status,
@@ -707,22 +769,11 @@ async fn relay(
     // gone), and one that serves this operation.
     let api_key_only = operation == "chat/completions";
     // SB-401: a group switched off serves no request, however a session reached it (a folder
-    // route written while it was on, an agent's pool): its keys never spend by accident.
-    if g.store.pool_off(&pool) {
-        return error(StatusCode::FORBIDDEN, switchboard_core::GROUP_OFF);
-    }
-    // SB-401: the pay-per-token group spends money on every request: it runs only under its
-    // daily ceiling, checked here against the day's list-price spend the proxy counted.
-    if g.store.pool_is_tokens(&pool) {
-        let Some(cents) = tokens::ceiling_cents(g.store.root(), &pool) else {
-            return error(StatusCode::FORBIDDEN, switchboard_core::TOKENS_NO_CEILING);
-        };
-        if tokens::spent_today(&g.stats, &pool, now()) >= u64::from(cents) * 10_000 {
-            return error(
-                StatusCode::FORBIDDEN,
-                switchboard_core::TOKENS_CEILING_REACHED,
-            );
-        }
+    // route written while it was on, an agent's pool): its keys never spend by accident. The
+    // pay-per-token group spends money on every request: it runs only under its daily ceiling,
+    // checked here against the day's list-price spend the proxy counted.
+    if let Some((status, message)) = pool_refusal(&g, &pool) {
+        return error(status, message);
     }
     let route = match g.store.route(provider, &pool) {
         Ok(route) => Some(route),
@@ -744,6 +795,13 @@ async fn relay(
             "Select a usable account in this pool first.",
         );
     };
+    // SB-401: an account at home in another group (shared, lent) answers to its home group's
+    // switch and ceiling too, so a pay-per-token key never spends outside its ceiling.
+    if account.pool != pool {
+        if let Some((status, message)) = pool_refusal(&g, &account.pool) {
+            return error(status, message);
+        }
+    }
     if agent && account.kind != AuthKind::ApiKey {
         return error(StatusCode::FORBIDDEN, AGENT_SUBSCRIPTION_REFUSED);
     }
@@ -911,7 +969,14 @@ async fn relay(
                 kind: Some(account.kind),
                 api_key_only,
             };
-            if let Ok(Some(next)) = g.store.failover(provider, &pool, &account.id, fits, now()) {
+            let next = g
+                .store
+                .failover(provider, &pool, &account.id, fits, now())
+                .ok()
+                .flatten()
+                // SB-401: never onto an account whose home group may not serve now.
+                .filter(|(next, _)| next.pool == pool || pool_refusal(&g, &next.pool).is_none());
+            if let Some(next) = next {
                 count(
                     &g.stats,
                     &tally(&account.id),
@@ -968,6 +1033,9 @@ async fn relay(
             stats: g.stats.clone(),
             key,
             scanner: status.is_success().then(stats::UsageScanner::default),
+            claude: provider == Provider::Claude,
+            spend: g.spend.clone(),
+            spend_pool: account.pool.clone(),
             _permit: permit,
         };
     response

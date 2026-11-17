@@ -455,6 +455,9 @@ async fn incomplete_stream_is_aborted_instead_of_success() {
         stats: Arc::default(),
         key: String::new(),
         scanner: None,
+        claude: true,
+        spend: Arc::default(),
+        spend_pool: String::new(),
         _permit: permit,
     };
     drop(stream);
@@ -2478,4 +2481,169 @@ async fn two_users_owners_on_one_computer_never_share_a_port_or_a_token() {
         p.shutdown().await;
     }
     up.abort();
+}
+
+/// SB-401: a request to the pay-per-token group with its key selected, as a session sends it.
+async fn tokens_request(proxy: &ProxyHandle, pool: &str) -> (StatusCode, String) {
+    let response = reqwest::Client::new()
+        .post(format!(
+            "http://{}/claude/{pool}/v1/messages",
+            proxy.address()
+        ))
+        .bearer_auth(proxy.token())
+        .body("{}")
+        .send()
+        .await
+        .unwrap();
+    let status = response.status();
+    (status, response.text().await.unwrap())
+}
+fn tokens_ceiling(store: &Store, pool: &str, cents: u32) {
+    switchboard_core::private_fs::private_write(
+        &store.root().join("spend.json"),
+        format!(r#"{{"version":1,"ceilings":[{{"scope":{{"kind":"project","pool":"{pool}"}},"cents":{cents},"set_at":1}}]}}"#).as_bytes(),
+    )
+    .unwrap();
+}
+/// SB-401: the pay-per-token group with one key selected; an upstream that answers every
+/// request with a million Opus 5.5 input tokens ($4 at the list price) and counts its calls.
+async fn tokens_fixture() -> (
+    tempfile::TempDir,
+    Arc<Store>,
+    String,
+    Arc<AtomicUsize>,
+    String,
+    JoinHandle<()>,
+) {
+    let (root, s) = store();
+    let pool = s.ensure_tokens_group().unwrap();
+    let credential = Credential {
+        access_token: "synthetic-key".into(),
+        refresh_token: None,
+        id_token: None,
+        native_context: None,
+        expires_at: None,
+        account_id: None,
+    };
+    let key = s
+        .add(
+            "key".into(),
+            Provider::Claude,
+            AuthKind::ApiKey,
+            pool.clone(),
+            credential,
+        )
+        .unwrap();
+    s.select(Provider::Claude, &pool, &key.id).unwrap();
+    let hits = Arc::new(AtomicUsize::new(0));
+    let counted = hits.clone();
+    let router = Router::new().route(
+        "/v1/messages",
+        post(move || {
+            let counted = counted.clone();
+            async move {
+                counted.fetch_add(1, Ordering::SeqCst);
+                axum::Json(serde_json::json!({
+                    "model": "claude-opus-5-5",
+                    "usage": {"input_tokens": 1_000_000, "output_tokens": 0}
+                }))
+            }
+        }),
+    );
+    let (url, up) = fixture(router).await;
+    (root, s, pool, hits, url, up)
+}
+
+#[tokio::test]
+async fn the_pay_per_token_group_serves_nothing_while_off_or_without_a_ceiling() {
+    let (_root, s, pool, hits, url, up) = tokens_fixture().await;
+    let p = start(s.clone(), url).await;
+    let (status, body) = tokens_request(&p, &pool).await;
+    assert_eq!(status, 403);
+    assert!(body.contains(switchboard_core::GROUP_OFF), "{body}");
+    s.set_group_off(&pool, false).unwrap();
+    let (status, body) = tokens_request(&p, &pool).await;
+    assert_eq!(status, 403);
+    assert!(body.contains(switchboard_core::TOKENS_NO_CEILING), "{body}");
+    assert_eq!(
+        hits.load(Ordering::SeqCst),
+        0,
+        "nothing reached the provider"
+    );
+    tokens_ceiling(&s, &pool, 1_000);
+    let (status, _) = tokens_request(&p, &pool).await;
+    assert!(status.is_success(), "{status}");
+    assert_eq!(hits.load(Ordering::SeqCst), 1);
+    p.shutdown().await;
+    up.abort();
+}
+
+#[tokio::test]
+async fn a_reached_ceiling_refuses_even_after_the_owner_took_the_statistics_and_after_a_restart() {
+    let (_root, s, pool, hits, url, up) = tokens_fixture().await;
+    s.set_group_off(&pool, false).unwrap();
+    // $5: the first answer ($4) fits, the second ($8 in all) passes it.
+    tokens_ceiling(&s, &pool, 500);
+    let p = start(s.clone(), url.clone()).await;
+    for _ in 0..2 {
+        let (status, _) = tokens_request(&p, &pool).await;
+        assert!(status.is_success(), "{status}");
+        // The background pass takes the tallies every 30 s; the ceiling must not forget them.
+        let taken = p.take_statistics();
+        assert!(taken.values().any(|t| t.cost_micros == 4_000_000));
+    }
+    assert_eq!(p.spent_today(&pool), 8_000_000);
+    let (status, body) = tokens_request(&p, &pool).await;
+    assert_eq!(status, 403);
+    assert!(
+        body.contains(switchboard_core::TOKENS_CEILING_REACHED),
+        "{body}"
+    );
+    assert_eq!(hits.load(Ordering::SeqCst), 2);
+    let reached = p.take_reached();
+    assert_eq!(reached.len(), 1);
+    assert_eq!((reached[0].cents, reached[0].micros), (500, 8_000_000));
+    let _ = tokens_request(&p, &pool).await;
+    assert!(p.take_reached().is_empty(), "asked once a day");
+    p.shutdown().await;
+    // A restarted owner seeds the day's spend from statistics.json before serving.
+    let p = start(s.clone(), url).await;
+    let (status, _) = tokens_request(&p, &pool).await;
+    assert!(status.is_success(), "unseeded, the day reads zero");
+    p.seed_spend(&pool, &crate::stats::day_of(now()), 8_000_000);
+    let (status, body) = tokens_request(&p, &pool).await;
+    assert_eq!(status, 403);
+    assert!(
+        body.contains(switchboard_core::TOKENS_CEILING_REACHED),
+        "{body}"
+    );
+    p.shutdown().await;
+    up.abort();
+}
+
+#[test]
+fn a_claude_answer_whose_counts_were_cut_is_never_free() {
+    // A stream cut before its closing counts: an output of a token per four bytes at least.
+    let mut cut = stats::UsageScanner::default();
+    cut.feed(b"data: {\"type\":\"message_start\",\"message\":{\"model\":\"claude-opus-5-5\",\"usage\":{\"input_tokens\":0,\"output_tokens\":1}}}\n\n");
+    cut.feed(&[b'x'; 4_000]);
+    cut.finish();
+    let (micros, exact) = cut.cost().unwrap();
+    assert!(!exact);
+    assert!(micros >= 1_000 * 20, "{micros}");
+    // An answer with counts and no model is priced at the dearest family.
+    let mut unnamed = stats::UsageScanner::default();
+    unnamed.feed(br#"{"usage":{"input_tokens":1000000,"output_tokens":0}}"#);
+    unnamed.finish();
+    assert_eq!(unnamed.cost(), Some((15_000_000, false)));
+    // A plain answer past the body bound: its counts were never read.
+    let mut big = stats::UsageScanner::default();
+    big.feed(&vec![b' '; 5 * 1024 * 1024]);
+    big.finish();
+    assert!(big.cost().is_some_and(|(m, exact)| m > 0 && !exact));
+    // `count_tokens`: nothing generated, nothing to pay.
+    let mut count = stats::UsageScanner::default();
+    count.feed(br#"{"input_tokens":12}"#);
+    count.finish();
+    assert_eq!(count.cost(), None);
 }

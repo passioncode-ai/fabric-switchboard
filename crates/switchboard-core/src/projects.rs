@@ -237,9 +237,30 @@ pub struct Project {
 pub const TOKENS_POOL: &str = "tokens";
 /// SB-401: the reserved group's name as the window shows it until the person renames it.
 pub const TOKENS_NAME: &str = "Pay-per-token keys";
-/// SB-401: saving the pay-per-token group without one of its keys would send that key to the
-/// default group.
-pub const TOKENS_KEEPS_KEYS: &str = "A key in the pay-per-token group leaves it only for another group. Move it there, or remove the account.";
+/// SB-401: a key of the pay-per-token group never leaves it, nor serves another group from it
+/// (shared, lent, moved, or sent to the default group by a save or a delete): elsewhere no
+/// switch or daily ceiling would stop it.
+pub const TOKENS_KEEPS_KEYS: &str = "A key in the pay-per-token group stays there, under its daily ceiling, and serves no other group. Remove the account to take it out.";
+/// SB-401: refuses a change that takes a key out of the pay-per-token group (`old` is the state
+/// before it, `new` the candidate). A key removed is not taken out: it is gone.
+pub(crate) fn tokens_keys_stay(old: &Snapshot, new: &Snapshot) -> Result<(), String> {
+    let Some(group) = old.tokens_group() else {
+        return Ok(());
+    };
+    let moved = old
+        .accounts
+        .iter()
+        .filter(|a| a.pool == group.pool)
+        .any(|a| {
+            new.accounts
+                .iter()
+                .any(|b| b.id == a.id && b.pool != a.pool)
+        });
+    if moved {
+        return Err(TOKENS_KEEPS_KEYS.into());
+    }
+    Ok(())
+}
 /// SB-401: sources, a found worktree or clone never join the pay-per-token group.
 pub const TOKENS_BY_HAND: &str =
     "Folders join the pay-per-token group only one by one, by hand. Add the folder to it yourself.";
@@ -494,6 +515,23 @@ pub(crate) fn validate_projects(s: &Snapshot) -> Result<(), String> {
         }) {
             return Err(TOKENS_ONLY_KEYS.into());
         }
+        // SB-401: its keys serve that group alone, under its switch and daily ceiling: no other
+        // group shares one, and balancing never lends one to the default group.
+        let keys: std::collections::HashSet<&str> = s
+            .accounts
+            .iter()
+            .filter(|a| a.pool == tokens.pool)
+            .map(|a| a.id.as_str())
+            .collect();
+        if s.projects
+            .iter()
+            .flat_map(|p| p.shared_accounts.iter())
+            .chain(s.default_shared.iter())
+            .chain(s.default_lent.iter())
+            .any(|id| keys.contains(id.as_str()))
+        {
+            return Err(TOKENS_KEEPS_KEYS.into());
+        }
     }
     let mut pools = std::collections::HashSet::new();
     let mut all: Vec<(&str, &str)> = Vec::new();
@@ -701,16 +739,13 @@ impl Store {
         self.changed();
         Ok(project)
     }
-    /// SB-401: whether `pool` is the pay-per-token group, read from the published metadata.
-    pub fn pool_is_tokens(&self, pool: &str) -> bool {
-        self.published()
-            .is_ok_and(|s| s.project_of_pool(pool).is_some_and(|p| p.tokens))
-    }
-    /// SB-401: whether `pool` is a group switched off, read from the published metadata (no
-    /// lock): the proxy asks it for every request.
-    pub fn pool_off(&self, pool: &str) -> bool {
-        self.published()
-            .is_ok_and(|s| s.project_of_pool(pool).is_some_and(|p| p.off))
+    /// SB-401: whether `pool` is a group switched off, and whether it is the pay-per-token
+    /// group, read from the published metadata (no lock): the proxy asks it for every request.
+    /// An unreadable store is an error, never "on" or "not the pay-per-token group".
+    pub fn pool_flags(&self, pool: &str) -> Result<(bool, bool), String> {
+        let s = self.published()?;
+        Ok(s.project_of_pool(pool)
+            .map_or((false, false), |p| (p.off, p.tokens)))
     }
     /// SB-401: the pay-per-token group's pool, the group made (no folder, switched off) when it
     /// does not exist yet. A Claude API key the person adds without naming another group goes
@@ -1100,7 +1135,12 @@ impl Store {
                         .zip(account.external_identity.as_ref())
                         .is_some_and(|(x, y)| x.matches(y))
             });
+            // SB-401: a pay-per-token key is never lent.
+            let tokens_key = candidate
+                .tokens_group()
+                .is_some_and(|g| g.pool == account.pool);
             if held
+                || tokens_key
                 || account.pool == pool
                 || !home_lends
                 || !candidate.loan_admits(pool, &account)
@@ -1146,6 +1186,8 @@ impl Store {
         let mut state = self.lock()?;
         let mut candidate = state.clone();
         let accounts = candidate.accounts.clone();
+        // SB-401: a pay-per-token key serves no other group, whatever a backup says.
+        let tokens_pool = candidate.tokens_group().map(|g| g.pool.clone());
         let project = candidate
             .projects
             .iter_mut()
@@ -1155,8 +1197,9 @@ impl Store {
             return Err("Nothing to restore.".into());
         }
         for id in ids {
-            if accounts.iter().any(|a| &a.id == id && a.pool != pool)
-                && !project.shared_accounts.contains(id)
+            if accounts.iter().any(|a| {
+                &a.id == id && a.pool != pool && Some(a.pool.as_str()) != tokens_pool.as_deref()
+            }) && !project.shared_accounts.contains(id)
             {
                 project.shared_accounts.push(id.clone());
             }
@@ -1179,6 +1222,13 @@ impl Store {
             return Ok(false);
         };
         if account.pool == pool || !candidate.context_admits(pool, &account) {
+            return Ok(false);
+        }
+        // SB-401: a key in the pay-per-token group stays there; a restore leaves it.
+        if candidate
+            .tokens_group()
+            .is_some_and(|g| g.pool == account.pool)
+        {
             return Ok(false);
         }
         let clash = candidate.accounts.iter().any(|b| {
