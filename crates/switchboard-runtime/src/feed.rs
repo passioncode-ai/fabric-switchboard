@@ -63,10 +63,7 @@ pub struct FeedFigures {
 
 /// How many ready accounts each fed group keeps.
 pub fn ready_target(settings: &Settings) -> usize {
-    settings
-        .ready
-        .unwrap_or(DEFAULT_READY)
-        .clamp(1, MAX_READY) as usize
+    settings.ready.unwrap_or(DEFAULT_READY).clamp(1, MAX_READY) as usize
 }
 /// The look-ahead in seconds.
 pub fn lookahead(settings: &Settings) -> i64 {
@@ -91,7 +88,11 @@ fn fed_order<'a>(snapshot: &Snapshot, settings: &'a Settings) -> Vec<&'a Fed> {
                 .is_some_and(|p| !p.tokens && !p.off)
         })
         .collect();
-    out.sort_by(|a, b| a.priority.cmp(&b.priority).then_with(|| a.pool.cmp(&b.pool)));
+    out.sort_by(|a, b| {
+        a.priority
+            .cmp(&b.priority)
+            .then_with(|| a.pool.cmp(&b.pool))
+    });
     out
 }
 
@@ -230,9 +231,9 @@ impl View<'_> {
 fn better(a: (&Account, Ready), b: (&Account, Ready)) -> bool {
     use std::cmp::Ordering;
     let order = match (a.1, b.1) {
-        (Ready::Room(x), Ready::Room(y)) => x.total_cmp(&y).then_with(|| {
-            balancing::latest_reset(b.0).cmp(&balancing::latest_reset(a.0))
-        }),
+        (Ready::Room(x), Ready::Room(y)) => x
+            .total_cmp(&y)
+            .then_with(|| balancing::latest_reset(b.0).cmp(&balancing::latest_reset(a.0))),
         (Ready::Room(_), Ready::Soon(_)) => Ordering::Less,
         (Ready::Soon(_), Ready::Room(_)) => Ordering::Greater,
         (Ready::Soon(x), Ready::Soon(y)) => x.cmp(&y),
@@ -412,7 +413,15 @@ pub fn plan(
             .collect();
         for a in spent {
             let figures = view.figures(fed, 0, want, None);
-            out.push(action("lend", a, &fed.pool, DEFAULT_POOL, "park", true, figures));
+            out.push(action(
+                "lend",
+                a,
+                &fed.pool,
+                DEFAULT_POOL,
+                "park",
+                true,
+                figures,
+            ));
             moving.insert(a.id.clone());
         }
     }
@@ -676,7 +685,11 @@ pub fn status(
     };
     let none = HashSet::new();
     let mut fed: Vec<&Fed> = settings.fed.iter().collect();
-    fed.sort_by(|a, b| a.priority.cmp(&b.priority).then_with(|| a.pool.cmp(&b.pool)));
+    fed.sort_by(|a, b| {
+        a.priority
+            .cmp(&b.priority)
+            .then_with(|| a.pool.cmp(&b.pool))
+    });
     let fed: Vec<Value> = fed
         .iter()
         .map(|f| {
@@ -858,8 +871,10 @@ mod tests {
         // An older file reads; a settings file without the feed keeps its bytes.
         let bytes = serde_json::to_vec(&Settings::default()).unwrap();
         assert_eq!(bytes, br#"{"groups":[],"all_new":false}"#);
-        let old: Settings = serde_json::from_slice(br#"{"groups":["apps"],"all_new":true,
-            "lent":[{"account":"a","provider":"claude","from":"apps","to":"agents","at":1}]}"#)
+        let old: Settings = serde_json::from_slice(
+            br#"{"groups":["apps"],"all_new":true,
+            "lent":[{"account":"a","provider":"claude","from":"apps","to":"agents","at":1}]}"#,
+        )
         .unwrap();
         assert!(!old.lent[0].feed && old.fed.is_empty() && old.ready.is_none());
     }
@@ -1122,15 +1137,28 @@ mod tests {
             NOT_FED
         );
         assert_eq!(
-            bad(&mut settings, Some("agents"), Some(true), Some(0), None, None),
+            bad(
+                &mut settings,
+                Some("agents"),
+                Some(true),
+                Some(0),
+                None,
+                None
+            ),
             PRIORITY_RANGE
         );
-        assert_eq!(bad(&mut settings, None, None, None, Some(11), None), READY_RANGE);
+        assert_eq!(
+            bad(&mut settings, None, None, None, Some(11), None),
+            READY_RANGE
+        );
         assert_eq!(
             bad(&mut settings, None, None, None, None, Some(721)),
             LOOKAHEAD_RANGE
         );
-        assert_eq!(bad(&mut settings, None, Some(true), None, None, None), NO_GROUP);
+        assert_eq!(
+            bad(&mut settings, None, Some(true), None, None, None),
+            NO_GROUP
+        );
         // A new group goes after the fed ones; the same input again changes nothing.
         let on = |settings: &mut Settings, pool, priority| {
             change(settings, &s, Some(pool), Some(true), priority, None, None).unwrap()
@@ -1153,7 +1181,10 @@ mod tests {
         );
         assert!(change(&mut settings, &s, Some("apps"), None, Some(1), None, None).unwrap());
         assert!(change(&mut settings, &s, None, None, None, Some(3), Some(45)).unwrap());
-        assert_eq!((settings.ready, settings.lookahead_minutes), (Some(3), Some(45)));
+        assert_eq!(
+            (settings.ready, settings.lookahead_minutes),
+            (Some(3), Some(45))
+        );
         // The defaults are stored as absent.
         assert!(change(&mut settings, &s, None, None, None, Some(2), Some(30)).unwrap());
         assert_eq!((settings.ready, settings.lookahead_minutes), (None, None));
@@ -1194,7 +1225,10 @@ mod tests {
         settings.lent = vec![lend("d-1", "default", "agents")];
         let view = status(root.path(), &s, &settings, None, NOW);
         assert_eq!(view["on"], true);
-        assert_eq!((view["ready"].clone(), view["lookahead_minutes"].clone()), (json!(2), json!(30)));
+        assert_eq!(
+            (view["ready"].clone(), view["lookahead_minutes"].clone()),
+            (json!(2), json!(30))
+        );
         assert_eq!(view["fed"][0]["pool"], "agents");
         assert_eq!(view["fed"][0]["providers"][0]["ready"], 1, "{view}");
         assert_eq!(view["available"][1]["fed"], false);
@@ -1233,7 +1267,10 @@ mod tests {
                     },
                 )
                 .unwrap();
-            runtime.store.usage_health(id, "ok", now, now + 150).unwrap();
+            runtime
+                .store
+                .usage_health(id, "ok", now, now + 150)
+                .unwrap();
         };
         let spent = save(&runtime.store, "Agents-0", "default");
         observe(&spent.id, 99.0, 5 * 3600);
@@ -1269,13 +1306,20 @@ mod tests {
             })
             .await
             .unwrap();
-        assert_eq!((on["on"].clone(), on["changed"].clone()), (json!(true), json!(true)));
+        assert_eq!(
+            (on["on"].clone(), on["changed"].clone()),
+            (json!(true), json!(true))
+        );
         assert_eq!(on["fed"][0]["priority"], 1, "{on}");
         runtime.balance_pass(now).await;
         let snapshot = runtime.store.snapshot().unwrap();
         let shared = &snapshot.project_of_pool(&agents).unwrap().shared_accounts;
         assert_eq!(shared, &reservoir[..2], "the two with the most room");
-        assert_eq!(snapshot.default_shared, [spent.id.clone()], "parked");
+        assert_eq!(
+            snapshot.default_shared,
+            std::slice::from_ref(&spent.id),
+            "parked"
+        );
         let status = runtime.execute(Operation::FeedStatus).await.unwrap();
         assert_eq!(status["fed"][0]["providers"][0]["ready"], 2, "{status}");
         assert_eq!(status["moved"].as_array().unwrap().len(), 3, "{status}");
@@ -1315,6 +1359,9 @@ mod tests {
         // Nothing fed, nothing lent, nothing chosen: a pass reads and writes nothing.
         let before = std::fs::read(root.path().join(balancing::FILE)).unwrap();
         runtime.balance_pass(now + 3600).await;
-        assert_eq!(std::fs::read(root.path().join(balancing::FILE)).unwrap(), before);
+        assert_eq!(
+            std::fs::read(root.path().join(balancing::FILE)).unwrap(),
+            before
+        );
     }
 }

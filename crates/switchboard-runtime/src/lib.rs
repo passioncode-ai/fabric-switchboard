@@ -26,12 +26,12 @@ mod digest;
 pub mod dispatch;
 pub mod dispatch_refusals;
 pub mod duty;
-pub(crate) mod feed;
 pub mod errors;
 pub mod external;
 #[cfg(target_os = "macos")]
 mod external_keychain;
 mod fallback;
+pub(crate) mod feed;
 pub mod github;
 pub mod given;
 pub mod handovers;
@@ -8055,7 +8055,8 @@ async fn execute(
             let now = monitor::now();
             if changed {
                 // A group whose feed went off gets back every account the feed moved, now.
-                let owed = feed::returns_owed(&snapshot, &balancing::Held::default(), &settings, now);
+                let owed =
+                    feed::returns_owed(&snapshot, &balancing::Held::default(), &settings, now);
                 balancing::apply(&store, root, &mut settings, &owed, now);
                 balancing::write(root, &settings)?;
                 if let Some(rt) = runtime {
