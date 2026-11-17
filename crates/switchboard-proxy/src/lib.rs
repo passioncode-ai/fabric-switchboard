@@ -700,6 +700,11 @@ async fn relay(
     // SB-102: only to an account of the same kind as the broken one (any kind when it is
     // gone), and one that serves this operation.
     let api_key_only = operation == "chat/completions";
+    // SB-401: a group switched off serves no request, however a session reached it (a folder
+    // route written while it was on, an agent's pool): its keys never spend by accident.
+    if g.store.pool_off(&pool) {
+        return error(StatusCode::FORBIDDEN, switchboard_core::GROUP_OFF);
+    }
     let route = match g.store.route(provider, &pool) {
         Ok(route) => Some(route),
         Err(_) if official => {

@@ -41,7 +41,7 @@ pub use machines::{is_machine_pool, Machine, MachineRef};
 pub use organizations::{Attribution, By, Organization};
 pub use projects::{
     pool_from_name, Project, ProjectRule, RuleResolution, FOLDER_NESTED, KEY_POOL, TOKENS_NAME,
-    TOKENS_KEEPS_KEYS, TOKENS_ONLY_KEYS, TOKENS_POOL,
+    GROUP_OFF, TOKENS_KEEPS_KEYS, TOKENS_ONLY_KEYS, TOKENS_POOL,
 };
 pub use rotation::{
     default_managed_policy, free_at, FailoverTally, Fits, RotationDecision, RotationPolicy,

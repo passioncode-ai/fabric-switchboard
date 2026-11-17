@@ -216,6 +216,10 @@ pub(crate) fn desired(snapshot: &Snapshot) -> Vec<(PathBuf, String)> {
     // group's own, so a folder two groups hold keeps the group that has an account.
     let mut fallback: Vec<(PathBuf, String)> = Vec::new();
     for project in projects {
+        // SB-401: a group switched off routes nothing; its folders run as if it did not hold them.
+        if project.off {
+            continue;
+        }
         // A group whose seats left its organization keeps its folders: the proxy refuses the seat
         // (closed), rather than the folder falling back to the ordinary login (open). SB-109.
         // A group bound to an organization never falls back to the default group either.

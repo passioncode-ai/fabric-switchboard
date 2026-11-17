@@ -237,6 +237,11 @@ pub struct Project {
 pub const TOKENS_POOL: &str = "tokens";
 /// SB-401: the reserved group's name as the window shows it until the person renames it.
 pub const TOKENS_NAME: &str = "Pay-per-token keys";
+/// SB-401: saving the pay-per-token group without one of its keys would send that key to the
+/// default group.
+pub const TOKENS_KEEPS_KEYS: &str = "A key in the pay-per-token group leaves it only for another group. Move it there, or remove the account.";
+/// SB-401: a request to a group switched off.
+pub const GROUP_OFF: &str = "This group is switched off in Switchboard, so it serves no request. Turn it on in Switchboard, or work in a folder of another group.";
 /// SB-401: only a Claude API-key account may be in the pay-per-token group.
 pub const TOKENS_ONLY_KEYS: &str =
     "Only a Claude API key can be in the pay-per-token group. Put this account in another group.";
@@ -670,6 +675,12 @@ impl Store {
     ) -> Result<Project, String> {
         let organizations = organization.map(|o| o.map(str::to_owned).into_iter().collect());
         self.save_project_with(pool, name, folders, accounts, organizations, true)
+    }
+    /// SB-401: whether `pool` is a group switched off, read from the published metadata (no
+    /// lock): the proxy asks it for every request.
+    pub fn pool_off(&self, pool: &str) -> bool {
+        self.published()
+            .is_ok_and(|s| s.project_of_pool(pool).is_some_and(|p| p.off))
     }
     /// SB-401: the pay-per-token group's pool, the group made (no folder, switched off) when it
     /// does not exist yet. A Claude API key the person adds without naming another group goes
