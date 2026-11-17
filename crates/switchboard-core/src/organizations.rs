@@ -510,7 +510,8 @@ impl Snapshot {
         }
     }
     /// SB-202, SB-282: the accounts of `organization` in any of its groups, whatever their
-    /// state; empty while it has no group.
+    /// state; empty while it has no group. The setup checklist's seat step (SB-403) counts a
+    /// wider set: every account its groups hold, and every account that works for it.
     pub fn organization_seats(&self, organization: &str) -> Vec<&Account> {
         let groups = self.organization_groups(organization);
         self.accounts
