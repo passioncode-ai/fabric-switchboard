@@ -186,6 +186,63 @@ pub fn read_accounts(
     }
 }
 
+/// SB-403: the seats this machine delegated to `machine` that are still there: accounts in that
+/// machine's group whose outstanding move carries a lease, with the id there and the lease.
+pub fn delegated_to(root: &Path, snapshot: &Snapshot, machine: &str) -> Vec<(String, u32, String)> {
+    let Some(pool) = snapshot
+        .machines
+        .iter()
+        .find(|m| m.name == machine)
+        .map(|m| m.pool.clone())
+    else {
+        return Vec::new();
+    };
+    snapshot
+        .accounts
+        .iter()
+        .filter(|a| a.pool == pool)
+        .filter_map(|a| {
+            // The store's record (review P2-5), else the move's `seats.jsonl` line.
+            if let Some(o) = snapshot.delegated_out.get(&a.id) {
+                return Some((o.remote_id.clone(), o.lease_hours, o.sender_key.clone()));
+            }
+            let seat = crate::seats::outstanding(root, &a.id)?;
+            Some((seat.remote_account?, seat.lease_hours?, seat.sender_key?))
+        })
+        .collect()
+}
+
+/// SB-403: extends each seat delegated to `machine` to its lease from now. Answers how many were
+/// extended and how many were not; a failure is logged and tried again on the next read.
+pub fn extend_leases(
+    root: &Path,
+    snapshot: &Snapshot,
+    machine: &str,
+    program: &Program<'_>,
+    run: &Run<'_>,
+) -> (usize, usize) {
+    let seats = delegated_to(root, snapshot, machine);
+    if seats.is_empty() {
+        return (0, 0);
+    }
+    let mut extended = 0;
+    let mut failed = 0;
+    for (remote_id, hours, key) in &seats {
+        match crate::account_send::extend_lease(machine, remote_id, *hours, key, program, run) {
+            Ok(_) => extended += 1,
+            Err(_) => failed += 1,
+        }
+    }
+    crate::oplog::event(
+        "delegation_lease",
+        &[
+            ("extended", crate::oplog::Field::Number(extended as i64)),
+            ("failed", crate::oplog::Field::Number(failed as i64)),
+        ],
+    );
+    (extended, failed)
+}
+
 /// One machine's account list as `read_accounts` answers it (a fake in tests).
 pub type ReadOne<'a> = dyn Fn(&str, &Program<'_>) -> Result<Vec<Value>, String> + 'a;
 
@@ -251,7 +308,13 @@ pub fn tick(root: &Path, snapshot: &Snapshot, now: i64) {
                         std::time::Duration::from_secs(CALL_SECONDS),
                     )
                 };
-                read_accounts(target, program, run)
+                let read = read_accounts(target, program, run);
+                // SB-403 (DEC-0025): a machine that answered gets its delegated seats' leases
+                // extended in the same pass, so a seat lapses only after its lease of silence.
+                if read.is_ok() {
+                    extend_leases(&root, &snapshot, target, program, run);
+                }
+                read
             });
             crate::oplog::event(
                 "remote_usage",
@@ -329,6 +392,76 @@ mod tests {
             json!({"label": "here@", "provider": "claude", "enabled": true,
                    "usage": {"used_percent": 99.0}}),
         ]
+    }
+
+    #[test]
+    fn the_stores_record_of_a_delegated_seat_outlives_seats_jsonl() {
+        // SB-403 (review P2-5): a rotated or rewritten `seats.jsonl` loses nothing.
+        let root = tempfile::tempdir().unwrap();
+        let mut s = snapshot();
+        s.delegated_out.insert(
+            "a2".into(),
+            switchboard_core::DelegatedOut {
+                remote_id: "0b1edeee-4125-403c-9c12-44c6aadaeb2b".into(),
+                lease_hours: 24,
+                sender_key: "KEY".into(),
+                sent: None,
+            },
+        );
+        assert_eq!(
+            delegated_to(root.path(), &s, "studio"),
+            vec![(
+                "0b1edeee-4125-403c-9c12-44c6aadaeb2b".to_owned(),
+                24,
+                "KEY".to_owned()
+            )]
+        );
+    }
+
+    #[test]
+    fn a_read_extends_the_leases_of_the_seats_delegated_there_and_only_those() {
+        // SB-403: a1 was delegated with a 48-hour lease, a2 moved as before (no lease).
+        let root = tempfile::tempdir().unwrap();
+        let mut delegated = crate::seats::of(1, "granted", "a1", "studio", "org", None);
+        delegated.remote_account = Some("r1".into());
+        delegated.lease_hours = Some(48);
+        delegated.sender_key = Some("KEY".into());
+        crate::seats::append(root.path(), &delegated).unwrap();
+        let mut moved = crate::seats::of(1, "granted", "a2", "studio", "org", None);
+        moved.remote_account = Some("r2".into());
+        crate::seats::append(root.path(), &moved).unwrap();
+        let s = snapshot();
+        assert_eq!(
+            delegated_to(root.path(), &s, "studio"),
+            vec![("r1".to_owned(), 48, "KEY".to_owned())]
+        );
+        let calls = std::sync::Mutex::new(Vec::new());
+        let program = Program {
+            path: "/usr/local/bin/switchboard",
+            data_dir: None,
+        };
+        let run = |args: &[String], _: Option<&[u8]>| {
+            calls.lock().unwrap().push(args[2].clone());
+            Ok(r#"{"ok":true,"data":{"id":"r1","lease_until":1}}"#.to_owned())
+        };
+        assert_eq!(
+            extend_leases(root.path(), &s, "studio", &program, &run),
+            (1, 0)
+        );
+        let calls = calls.into_inner().unwrap();
+        assert_eq!(calls.len(), 1);
+        assert!(
+            calls[0].contains("'accounts' 'lease' 'r1' '--hours' '48' '--sender-key' 'KEY'"),
+            "{calls:?}"
+        );
+        // A refusal there is counted, never fatal.
+        let refuse = |_: &[String], _: Option<&[u8]>| -> Result<String, String> {
+            Err(r#"{"ok":false,"error":"no"}"#.into())
+        };
+        assert_eq!(
+            extend_leases(root.path(), &s, "studio", &program, &refuse),
+            (0, 1)
+        );
     }
 
     #[test]

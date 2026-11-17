@@ -45,7 +45,15 @@ fn schema_version(snapshot: &Snapshot) -> u32 {
     // the unknown activity, rather than put an account on another machine back in a group here.
     // Version 15 only while the pay-per-token group exists or a group is switched off (SB-401):
     // a 0.7.111 or older reader refuses the unknown fields rather than route folders to a key.
-    if snapshot.projects.iter().any(|p| p.tokens || p.off) {
+    // Version 16 only while an account another machine delegated is here, or a journal entry
+    // of one (SB-403, DEC-0025): a 0.7.112 or older reader refuses the unknown field rather
+    // than treat a guest's sign-in as its own (send it on, give it to an agent, remove it).
+    if !snapshot.delegated.is_empty()
+        || !snapshot.delegated_out.is_empty()
+        || snapshot.events.iter().any(|e| e.action == "delegation")
+    {
+        16
+    } else if snapshot.projects.iter().any(|p| p.tokens || p.off) {
         15
     } else if !snapshot.machines.is_empty()
         || !snapshot.returns_to.is_empty()
@@ -169,7 +177,7 @@ pub(crate) fn open(root: &Path) -> Result<(File, Snapshot), String> {
             }
             let disk: Disk = serde_json::from_slice(&bytes)
                 .map_err(|_| "Account metadata is corrupt; restore a known-good backup")?;
-            if !matches!(disk.schema_version, 1..=15) {
+            if !matches!(disk.schema_version, 1..=16) {
                 return Err("Unsupported account metadata version".into());
             }
             validate_snapshot(&disk.snapshot)?;
@@ -251,7 +259,7 @@ pub(crate) fn open(root: &Path) -> Result<(File, Snapshot), String> {
         let bytes = read_private(&path, MAX_FILE)?;
         let disk: Disk = serde_json::from_slice(&bytes)
             .map_err(|_| "Account metadata is corrupt; restore a known-good backup")?;
-        if !matches!(disk.schema_version, 1..=15) {
+        if !matches!(disk.schema_version, 1..=16) {
             return Err("Unsupported account metadata version".into());
         }
         validate_snapshot(&disk.snapshot)?;

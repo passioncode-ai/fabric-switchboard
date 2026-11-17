@@ -53,6 +53,15 @@ const EXCLUDED_FILES = {
 // Messages that are error literals in the sources above but can never reach the UI.
 // Every entry names why. Keep this list short: a doubtful message gets a mapping instead.
 const ALLOWLIST = {
+  // SB-403 (DEC-0025): answered only to another machine through `switchboard ssh-serve` or to the
+  // CLI and MCP (a lease without --delegate); the window never sends these calls.
+  "This computer holds no seat with that id that the calling machine delegated.": 'SB-403: ssh-serve only, answered to the delegating machine',
+  "That is not a machine's key. Give the key switchboard settings signer printed on the machine that delegates.": 'SB-403: ssh-serve and accounts add --delegated only',
+  "Name the machine that delegates in at most 80 characters, on one line.": 'SB-403: ssh-serve --from only',
+  "A delegated seat joins one of this computer's groups, never the default group. Name a group this computer has.": 'SB-403: accounts add --delegated only, answered to the delegating machine',
+  "The other machine did not extend the seat's lease.": 'SB-403: the background lease extension logs it, never a reply',
+  "A lease belongs to a delegated seat. Add --delegate, or leave the lease out.": 'SB-403: the window sends a lease only with delegate',
+  "Only the machine that delegated a seat does this, through this computer's restricted entry (switchboard ssh-serve).": 'SB-403: the seat operations come only from ssh-serve; no window or MCP door sends them',
   // runtime spend.rs (SB-299): the operator's words come from the CLI and MCP only; the window
   // never wraps its own actions.
   "Carry the operator's own words: by operator, the instruction as said (at most 500 characters), when it was said (RFC 3339) and where.": 'SB-299 decision: CLI and MCP only',

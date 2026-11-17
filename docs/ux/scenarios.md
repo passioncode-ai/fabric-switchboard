@@ -106,6 +106,8 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 | SCN-099 | Restart every running session so it loads new skills, and watch each come back | draft |
 | SCN-100 | Run Claude Code on an API key only in the folders I choose, under a daily ceiling | draft |
 | SCN-101 | Add a provider key Project Observatory holds and launch an agent on it at once | draft |
+| SCN-102 | Delegate an organization's subscription to a teammate's machine and call it back | draft |
+| SCN-103 | Keep Switchboard away from my own sign-in on a teammate's computer | draft |
 ### SCN-001: First run
 **Persona:** P-01
 **Goal:** Deliberately control which account a coding session uses.
@@ -2007,7 +2009,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Preconditions:** the desktop app or the browser demo (`?demo=1`).
 **Entry point:** the sidebar's *Settings* (between *Statistics* and *About*); Accounts → the switching line → *Open Settings*; Groups → “Balancing between groups, Codex in group folders and terminals in organization folders are set in Settings.” → *Open Settings*; the terminal hook's first-time notice → *Open Settings*.
 **Steps:**
-1. Open *Settings* → “How Switchboard switches, lends, updates and backs up on this computer.”, then ten folding sections, all folded, each with its state at the right of its header: *Automatic switching* (“On for {n} groups” or “Off”), *Balancing between groups* (“On”, “Off”), *Coding sessions* (“No limit” or “{used} of {cap} working”, SB-378), *Codex in group folders*, *Terminals in organization folders*, *Running in the background*, *Updates* (“Automatic”, “Off”), *Language and appearance* (the language), *Backups* (“Newest {date}”), *Usage counts*. A state not read yet leaves the header without one.
+1. Open *Settings* → “How Switchboard switches, lends, updates and backs up on this computer.”, then ten folding sections, all folded, each with its state at the right of its header: *Automatic switching* (“On for {n} groups” or “Off”), *Balancing between groups* (“On”, “Off”), *Coding sessions* (“No limit” or “{used} of {cap} working”, SB-378), *Session duty officer*, *Your own sign-in* (“On”, “Off”, SCN-103), *Codex in group folders*, *Terminals in organization folders*, *Running in the background*, *Updates* (“Automatic”, “Off”), *Language and appearance* (the language), *Backups* (“Newest {date}”), *Usage counts*. A state not read yet leaves the header without one.
 2. Press a section's header (or Enter or Space on it; the header is a button with `aria-expanded`) → it opens with the same controls and notices it had before on Accounts, Groups or About (SCN-022, SCN-090, SCN-066, SCN-075, SCN-033, SCN-037, SCN-041, SCN-030, SCN-044); press again → it folds. What is open stays open when the window renders again, when the person changes page and comes back, and through a background refresh.
 3. On Accounts → *Open Settings* beside “Automatic switching is on for {n} groups.” or “Automatic switching is off.” → Settings opens with *Automatic switching* unfolded and focused.
 4. *About* keeps the product, the provider terms, the tour, version and license.
@@ -2205,3 +2207,47 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Coverage:** `observatory_keys::tests::*`, `launch_keys::tests::the_pay_per_token_groups_keys_are_offered_with_why_not`, `launch::tests::hermes_on_the_pay_per_token_group_runs_through_the_proxy`, `a_key_observatory_holds_is_added_by_name_through_a_pipe` (switchboard-cli, a stand-in Observatory and a file store); demo (`?demo=1`, the list; adding needs the app). Window walk-through: NOT_RUN (no display session in this run).
 **Product:** unobserved
 **Traces:** SB-404, SB-401, SB-390, SB-392, SCN-097, SCN-100
+
+### SCN-102: Delegate an organization's subscription to a teammate's machine and call it back
+**Persona:** P-01
+**Goal:** The operator lets a teammate use one of the organization's subscriptions in console sessions on the teammate's own computer, without the teammate ever signing in with it, and can take it back at any time; more seats can be added the same way (SB-403 S2 to S4, DEC-0025).
+**Preconditions:** the teammate's computer runs Switchboard, has a group (in the organization) for the folders the seat serves, is reachable over ssh without a prompt, and its `~/.ssh/authorized_keys` holds this computer's key line with the forced command `switchboard ssh-serve --sender-key <this computer's key>` ([ORGANIZATION.md](../ORGANIZATION.md#a-teammates-computer)); the account is a Claude or Codex subscription sign-in used here.
+**Entry point:** Accounts → the account's ⋯ → *Move to another machine…*, or Accounts → the machine's section → *Move an account here…*. An agent: CLI `switchboard accounts send ID --to MACHINE --pool GROUP --delegate [--lease-hours N]`, MCP `switchboard_account_send` with `delegate: true`.
+**Steps:**
+1. The dialog “Move {label} to another machine” (or “Move an account to {machine}”) → *Machine*, *Group there* (its group on the teammate's computer), and the box *Delegate to a teammate*.
+2. Check *Delegate to a teammate* → the note “A delegated seat stays a guest there: it serves the group you name, is never moved on, lent or made its own sign-in, and only this computer calls it back. The teammate never signs in with it.” and the field *Lease, hours* (48) with “This computer extends it each time it reads that machine. If it cannot reach it for this long, the seat there is switched off; its sign-in is kept 30 days for a call back, then removed.”
+3. *Move* → “{label} is delegated to {machine}. This computer calls it back when you ask.”; the account is in the machine's section (SCN-092), and the teammate's sessions in that group's folders run on it through Switchboard.
+4. Every background read of that machine (15 minutes) extends the lease to its hours from then.
+5. *Call back* on its row (SCN-092) → the teammate's machine switches the seat off and gives its sign-in back over ssh, the provider is checked here, then the copy there is removed and its list read to prove it (“{label} is back on this computer.”).
+**Alt paths:** *Group there* left as `default` with the box checked → “A delegated seat joins one of the other machine's groups. Name that group; the default group takes none.”; a lease out of range → “Give the lease in whole hours, from 1 to 720.”; the teammate's machine only takes delegated seats, so a plain move there is refused with “That machine takes seats only as delegated ones. Move it again as a delegated seat (accounts send --delegate).”; the provider did not answer the copy there and it could not be removed → “The delegated copy on the other machine could not be removed. This machine no longer uses the account, and its lease there is no longer extended. Call it back with accounts recall.”: the seat is recorded, so *Call back* takes the sign-in back under this computer's key, and left alone the copy there switches off when its lease runs out; this computer could not reach the teammate's for the whole lease → the seat there is switched off, its sign-in kept: the next read turns it on again and *Call back* takes the live sign-in; 30 days later the sign-in there is removed, and a *Call back* then takes the sign-in kept here; when that does not answer the account stays here with “The other machine removed the seat's sign-in 30 days after its lease ran out. The sign-in kept here did not answer; sign in to this account again.”; on the teammate's computer deleting the seat's group is refused with “This group holds a seat another machine delegated to this computer. Ask that machine to call the seat back before deleting the group.”, and launching it in an isolated home with “A seat another machine delegated runs only through Switchboard, in its group's folders. Launch it in managed mode.”
+**Expected result:** the seat works only in the teammate's group folders, only the operator's computer calls it back, and it lapses by itself when the operator's computer stops extending it.
+**UI elements:** the box *Delegate to a teammate*, its note and the *Lease, hours* field in both move dialogs; the notice after the move; *Call back* on the account's row.
+**States covered:** plain move, delegated move, refused into the default group, lease out of range, copy left there, lease extended, lease ran out, called back.
+**Errors & recovery:** a failed step leaves the account here, as a plain move does (SCN-087); on the teammate's computer, acts on the seat that would pass it on are refused with a sentence that names who calls it back (“This seat was delegated to this computer by another machine. …”).
+**Status:** draft
+**Meaning:** SB-403 (operator 2026-11-17: «подключим у него … подписки организации, которые делегированы ему … и отзыв этой подписки … чтобы [a teammate] на своей машине мог ей пользоваться, но по факту авторизоваться он типа не будет с ней»).
+**Copy:** checked with Copylot, register ui, en-US and ru-RU; report ids in [strings](../brand/strings.md#delegated-seats-scn-101-scn-102-sb-403-dec-0025).
+**Coverage:** `delegation::tests::*` (switchboard-core), `account_send::tests::a_delegated_seat_goes_there_as_a_guest_and_comes_back_only_to_its_sender`, `account_send::tests::a_call_back_after_the_lease_ran_out_keeps_the_sign_in_kept_here`, `remote_usage::tests::a_read_extends_the_leases_of_the_seats_delegated_there_and_only_those`, `ssh_serve::tests::*` (switchboard-cli). No walk with a teammate's real machine yet (S5).
+**Product:** unobserved
+**Traces:** SB-403, DEC-0025, DEC-0013, SCN-087, SCN-092
+
+### SCN-103: Keep Switchboard away from my own sign-in on a teammate's computer
+**Persona:** P-01
+**Goal:** A teammate whose Switchboard serves only seats an organization delegated keeps their own subscription in Claude Desktop and in the ordinary Claude Code, and Switchboard never reads or changes it (SB-403 S3, DEC-0025).
+**Preconditions:** the desktop app runs on the teammate's computer.
+**Entry point:** Settings → *Your own sign-in*. An agent: CLI `switchboard own-sign-in off`, MCP `switchboard_own_sign_in` with `on: false`.
+**Steps:**
+1. Open *Your own sign-in* → “On a teammate's computer that only serves seats an organization delegated, turn this off: Switchboard then never reads or changes your own Claude Code or Codex sign-in, copies nothing from it and leaves your own sessions alone. Claude Desktop is never touched either way.” and the box *Use my own Claude Code and Codex sign-in* (checked by default).
+2. Uncheck it → “Switchboard leaves your own sign-in alone.”; the header reads “Off”. From then the background no longer reads the ordinary sign-in, nothing is captured, imported, activated or renewed in it, a launch copies no MCP sign-in out of it, and the session duty officer looks only at sessions in Switchboard's own homes.
+3. Check it again → “Switchboard may use your own sign-in again.”
+**Alt paths:** while off, capturing or switching the ordinary sign-in is refused with “Switchboard does not read or change your own Claude Code or Codex sign-in on this computer (own sign-in is off). Turn it on with switchboard own-sign-in on to use it here.”; the setting cannot be saved → “The own sign-in setting could not be saved. Check Switchboard's data folder, then retry.”
+**Expected result:** Claude Desktop and the teammate's own Claude Code work exactly as without Switchboard, and the delegated seats work in their group's folders.
+**UI elements:** the Settings section, its box and notices.
+**States covered:** reading, on, off, not saved.
+**Errors & recovery:** a setting that cannot be read is treated as on, as every earlier version behaved; the window shows the read error with the section.
+**Status:** draft
+**Meaning:** SB-403 (operator 2026-11-17: «[a teammate] может использовать Claude Desktop для своей обычной стандартной подписки … убедиться, что мы не трогаем сессии для десктопного Claude Code, и он будет работать никак не связанно со свитчбордом»).
+**Copy:** checked with Copylot, register ui, en-US and ru-RU; report ids in [strings](../brand/strings.md#delegated-seats-scn-101-scn-102-sb-403-dec-0025).
+**Coverage:** `own_sign_in::tests::*`, `launch::tests::with_own_sign_in_off_a_launch_carries_no_mcp_sign_in`, `duty::tests::with_own_sign_in_off_only_switchboards_own_sessions_are_looked_at`, `own_sign_in::tests::no_code_names_claude_desktop`. No walk on a teammate's computer yet (S5).
+**Product:** unobserved
+**Traces:** SB-403, DEC-0025, SCN-093, SCN-096

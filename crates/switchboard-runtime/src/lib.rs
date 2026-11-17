@@ -49,6 +49,7 @@ pub mod monitors;
 pub mod observatory_keys;
 pub mod onboarding;
 pub mod oplog;
+pub mod own_sign_in;
 pub mod person;
 pub mod person_errors;
 pub mod projects;
@@ -145,6 +146,54 @@ pub enum Operation {
         kind: AuthKind,
         pool: String,
         secret: String,
+    },
+    /// SB-403 (DEC-0025): a sign-in another machine delegates here through `ssh-serve`, saved
+    /// as a guest pinned to `sender_key` in group `pool`, with a lease of `lease_hours`.
+    AddDelegated {
+        label: String,
+        provider: Provider,
+        pool: String,
+        secret: String,
+        sender_key: String,
+        #[serde(default)]
+        from: Option<String>,
+        lease_hours: u32,
+        /// Set only by `ssh-serve` (review P1-4): any other caller is refused.
+        #[serde(default)]
+        served: bool,
+    },
+    /// SB-403: the sender gives a delegated seat back to itself (`surrender_delegated`).
+    SurrenderDelegated {
+        id: String,
+        sender_key: String,
+        #[serde(default)]
+        undo: bool,
+        /// As in `AddDelegated`.
+        #[serde(default)]
+        served: bool,
+    },
+    /// SB-403: the sender extends a delegated seat's lease to `hours` from now.
+    LeaseDelegated {
+        id: String,
+        sender_key: String,
+        hours: u32,
+        /// As in `AddDelegated`.
+        #[serde(default)]
+        served: bool,
+    },
+    /// SB-403: the sender removes a delegated seat after calling it back.
+    RemoveDelegated {
+        id: String,
+        sender_key: String,
+        /// As in `AddDelegated`.
+        #[serde(default)]
+        served: bool,
+    },
+    /// SB-403 S3 (DEC-0025): whether Switchboard reads or writes the person's own Claude Code
+    /// and Codex sign-ins; `on` absent reads the setting.
+    OwnSignIn {
+        #[serde(default)]
+        on: Option<bool>,
     },
     /// A field left out keeps its saved value. Both present serializes as before, so an owner
     /// of an earlier version still understands the full form.
@@ -519,6 +568,13 @@ pub enum Operation {
         /// SB-292: as in `HandOver`.
         #[serde(default)]
         decision: Option<spend::Decision>,
+        /// SB-403 (DEC-0025): the seat is delegated there, pinned to this machine's key, with a
+        /// lease this machine's background read extends.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        delegate: bool,
+        /// The lease in hours (1 to 720); absent, 48.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        lease_hours: Option<u32>,
     },
     /// SB-283: what receiving a hand-over record here would do; with `apply`, starts the
     /// sign-in for that address in the group of the record's pool (else the default group).
@@ -1297,6 +1353,12 @@ pub struct Runtime {
     /// stretch, not every pass.
     rotation_logged: Mutex<HashMap<String, &'static str>>,
     native: NativeSources,
+    /// SB-403 S3 (DEC-0025): the person's own Claude Code and Codex sign-ins are off limits
+    /// (`own_sign_in`): `native()` hands out sources that never read or write them.
+    pub(crate) own_sign_in_off: std::sync::atomic::AtomicBool,
+    /// SB-403: when this owner opened the store (Unix seconds); a delegated seat's lease ends only
+    /// a full read interval past it.
+    pub(crate) opened_at: i64,
     refresh: refresh::RefreshState,
     limits: limits::LimitState,
     /// Automatic fallback along the operator's chains (SB-73).
@@ -1409,6 +1471,23 @@ struct CurrentCache {
     entry: Option<(i64, Value)>,
 }
 impl Runtime {
+    /// The ordinary sign-in sources, masked while the person's own sign-in is off (SB-403 S3).
+    pub(crate) fn native(&self) -> NativeSources {
+        own_sign_in::mask(
+            self.native,
+            self.own_sign_in_off
+                .load(std::sync::atomic::Ordering::SeqCst),
+        )
+    }
+    /// SB-331: whether the ordinary Claude Code reads as signed out, for the folder bindings'
+    /// placeholder token. SB-403 (review P2-3): with the person's own sign-in off limits, it is
+    /// never read, so it counts as signed out: a teammate who signs in only in Claude Desktop
+    /// still gets the placeholder in the group's folders.
+    pub(crate) fn claude_signed_out(&self) -> bool {
+        self.own_sign_in_off
+            .load(std::sync::atomic::Ordering::SeqCst)
+            || external::claude_signed_out()
+    }
     /// Something a restart would cut short: a managed request in flight (streams included) or a
     /// sign-in waiting to finish. An update activates only when this is false (LC-16).
     pub fn busy(&self) -> bool {
@@ -1448,6 +1527,7 @@ impl Runtime {
             usage_gate::UsageGate::kept_in(root.join(usage_gate::HOLDS_FILE), monitor::now());
         let limits = limits::LimitState::kept_in(root.join(limits::EVIDENCE_FILE), monitor::now());
         let statistics = statistics::Statistics::load(&root);
+        let own_sign_in_off = own_sign_in::is_off(&root);
         Ok(Arc::new(Self {
             store,
             proxy,
@@ -1462,6 +1542,8 @@ impl Runtime {
             failed_switches: Mutex::new(HashMap::new()),
             rotation_logged: Mutex::new(HashMap::new()),
             native,
+            own_sign_in_off: std::sync::atomic::AtomicBool::new(own_sign_in_off),
+            opened_at: monitor::now(),
             refresh,
             limits,
             fallback: fallback::FallbackState::default(),
@@ -1497,7 +1579,7 @@ impl Runtime {
     /// SB-143: with the switch on, Codex's config carries the provider while this owner runs
     /// (`up`) and loses it when it stops, so a Codex started meanwhile reaches OpenAI directly.
     pub(crate) fn codex_route_sync(&self, up: bool) {
-        let Some(path) = (self.native.codex_config)() else {
+        let Some(path) = (self.native().codex_config)() else {
             return;
         };
         if !codex_route::wanted(&self.root) {
@@ -1560,6 +1642,7 @@ impl Runtime {
                 | Operation::SendAccount { .. }
                 // SB-292: ssh both ways, as a move.
                 | Operation::SurrenderAccount { .. }
+                | Operation::SurrenderDelegated { .. }
                 | Operation::RecallAccount { .. }
                 | Operation::Seats { .. }
                 // SB-355: `ssh -G` and the live reads run outside the store; its writes are
@@ -1717,7 +1800,7 @@ impl Runtime {
             return Ok(json!(
                 monitor::check_by_person(
                     &self.store,
-                    self.native,
+                    self.native(),
                     &self.refresh,
                     id,
                     Some(&self.mutations),
@@ -1918,9 +2001,9 @@ impl Runtime {
                 salts.hash(&mut h);
                 // SB-183: the organizations' shell homes and the folder map follow the groups'
                 // organizations and Codex accounts too.
-                shell::homes::key(&snapshot, &self.native.shell).hash(&mut h);
+                shell::homes::key(&snapshot, &self.native().shell).hash(&mut h);
                 // SB-331: the placeholder token comes and goes with the ordinary sign-in.
-                external::claude_signed_out().hash(&mut h);
+                self.claude_signed_out().hash(&mut h);
                 key = h.finish();
             }
             key
@@ -1953,7 +2036,7 @@ impl Runtime {
                 &address,
                 self.proxy.token(),
                 &salts,
-                external::claude_signed_out(),
+                self.claude_signed_out(),
             )
         });
         match synced {
@@ -1975,7 +2058,7 @@ impl Runtime {
                         &report.bound_folders,
                         &address,
                         &self.proxy.auto_capability(),
-                        &self.native.shell,
+                        &self.native().shell,
                     )
                 });
                 if shell.homes_written > 0
@@ -2309,7 +2392,7 @@ impl Runtime {
                 }
             }
         }
-        let files = (self.native.transcripts)(time);
+        let files = (self.native().transcripts)(time);
         if let Ok(mut list) = self.transcript_list.lock() {
             *list = Some((time, files.clone()));
         }
@@ -3165,7 +3248,7 @@ impl Runtime {
         held
     }
     fn invalidate_current(&self) {
-        (self.native.forget)();
+        (self.native().forget)();
         self.invalidate_current_accounts();
     }
     /// SB-163: the runtime's answer to `current` only; the sign-in sources' watch is kept, so
@@ -3291,7 +3374,7 @@ impl Runtime {
         // call waits for the process-wide Keychain lock: seconds on a swapping machine. Off the
         // async worker, so a stop hook or a window refresh waiting here never parks the thread
         // other requests run on (2026-11-13: 9 of 14 workers parked on these two locks).
-        let value = blocking::run(|| observe_current(&self.store, self.native.current));
+        let value = blocking::run(|| observe_current(&self.store, self.native().current));
         let mut cache = self
             .current_cache
             .lock()
@@ -4577,7 +4660,36 @@ fn record_seat(
     sent: Option<&str>,
     remote: Option<&account_send::Program<'_>>,
 ) {
+    record_seat_leased(
+        root,
+        event,
+        account,
+        machine,
+        pool,
+        decision,
+        remote_account,
+        sent,
+        remote,
+        None,
+    );
+}
+/// SB-403: [`record_seat`] of a delegated seat, with its lease in hours.
+#[allow(clippy::too_many_arguments)]
+fn record_seat_leased(
+    root: &Path,
+    event: &str,
+    account: &str,
+    machine: &str,
+    pool: &str,
+    decision: Option<&spend::Decision>,
+    remote_account: Option<&str>,
+    sent: Option<&str>,
+    remote: Option<&account_send::Program<'_>>,
+    lease: Option<(u32, &str)>,
+) {
     let mut seat = seats::of(monitor::now(), event, account, machine, pool, decision);
+    seat.lease_hours = lease.map(|(hours, _)| hours);
+    seat.sender_key = lease.map(|(_, key)| key.to_owned());
     seat.remote_account = remote_account.map(str::to_owned);
     seat.sent = sent.map(str::to_owned);
     if let Some(remote) = remote {
@@ -4590,6 +4702,27 @@ fn record_seat(
             &[("result", oplog::Field::Code("unwritten"))],
         );
     }
+}
+/// SB-403 (review P1-4): the receiver's seat operations come only through `ssh-serve`. The
+/// teammate owns the machine, so this keeps an honest Switchboard from offering them, not a
+/// person who writes to the owner's socket; the real revocation of an uncooperative teammate is
+/// signing the subscription out at the provider.
+pub const SSH_SERVE_ONLY: &str = "Only the machine that delegated a seat does this, through this computer's restricted entry (switchboard ssh-serve).";
+/// SB-403: `--lease-hours` belongs to a delegated move.
+pub const SEND_LEASE_WITHOUT_DELEGATE: &str =
+    "A lease belongs to a delegated seat. Add --delegate, or leave the lease out.";
+/// The pool `id` is in here now, `default` when it is gone.
+fn local_pool(store: &Store, id: &str) -> String {
+    store
+        .snapshot()
+        .ok()
+        .and_then(|s| {
+            s.accounts
+                .iter()
+                .find(|a| a.id == id)
+                .map(|a| a.pool.clone())
+        })
+        .unwrap_or_else(|| "default".into())
 }
 /// SB-365: a move whose answer was lost (`OUTCOME_UNKNOWN`) leaves the account marked here and
 /// its copy there unknown; an `unknown` line lets Attention list it until a later move or call
@@ -4619,6 +4752,37 @@ fn record_lost_move(
             Some(remote),
         );
     }
+}
+/// SB-403 (review rounds 2 and 3): a delegated move whose check failed and whose copy there could
+/// not be removed (`LEFT_THERE_DELEGATED`) answers the seat it left; a granted seat line with its
+/// account there, lease, key and the print of the token sent lets `accounts recall` name the
+/// machine and keep a sign-in renewed here since. Written from the move's own answer, whether or
+/// not the store took its record. The account is not placed in the machine's group (nor by the
+/// adoption pass, `machines::plan`), so the background read does not extend its lease there.
+fn record_left_delegated(
+    root: &Path,
+    left: Option<&switchboard_core::DelegatedOut>,
+    id: &str,
+    to: &str,
+    pool: &str,
+    decision: Option<&spend::Decision>,
+    remote: &account_send::Program<'_>,
+) {
+    let Some(out) = left else {
+        return;
+    };
+    record_seat_leased(
+        root,
+        "granted",
+        id,
+        to,
+        pool,
+        decision,
+        Some(&out.remote_id),
+        out.sent.as_deref(),
+        Some(remote),
+        Some((out.lease_hours, &out.sender_key)),
+    );
 }
 /// SB-292: a seat granted to another machine, which the operator's words order and
 /// `seats.jsonl` records.
@@ -5064,7 +5228,7 @@ async fn dispatch_start(
         }
     }
     // As `continue` starts an isolated session: with hours left on its token.
-    let (native, refresh_state) = (runtime.native, &runtime.refresh);
+    let (native, refresh_state) = (runtime.native(), &runtime.refresh);
     refresh::learn_live_owner(store, native, refresh_state).await;
     let short = store
         .stored_credential(&id)
@@ -5299,7 +5463,10 @@ async fn execute(
         spend::record_loosening(root, action, &decision, monitor::now())?;
         return Ok(answer);
     }
-    let native = runtime.map_or(NATIVE, |r| r.native);
+    let native = runtime.map_or_else(
+        || own_sign_in::mask(NATIVE, own_sign_in::is_off(root)),
+        |r| r.native(),
+    );
     // The offline CLI owns the store for one command; its refresh bookkeeping is its own.
     // It never spends a refresh token: it cannot see Claude Swap's holds or a running owner's
     // state, and its kept successors would die with it (audit P1-2). Rejected lineages are
@@ -5519,6 +5686,16 @@ async fn execute(
             Ok(Value::Null)
         }
         Operation::Remove { id } => {
+            // SB-403: a delegated seat goes only by its sender's word, or once its sign-in was
+            // removed 30 days after its lease ended.
+            if store
+                .snapshot()?
+                .delegated
+                .get(&id)
+                .is_some_and(|d| !d.purged())
+            {
+                return Err(switchboard_core::delegation::DELEGATED_NOT_REMOVED.into());
+            }
             if store.snapshot()?.routes.values().any(|v| v == &id) {
                 return Err("Select another account before removing this one.".into());
             }
@@ -6553,7 +6730,34 @@ async fn execute(
             program,
             remote_data_dir,
             decision,
+            delegate,
+            lease_hours,
         } => {
+            // SB-403 (DEC-0025): a delegated seat is pinned there to this machine's settings
+            // signing key, the one its restricted entry names (`ssh-serve --sender-key`).
+            let delegation = if delegate {
+                let hours =
+                    lease_hours.unwrap_or(switchboard_core::delegation::DEFAULT_LEASE_HOURS);
+                if !switchboard_core::delegation::lease_valid(hours) {
+                    return Err(switchboard_core::delegation::LEASE_INVALID.into());
+                }
+                if pool.as_deref().is_none_or(|p| p == "default") {
+                    return Err(account_send::DELEGATE_INTO_GROUP.into());
+                }
+                let signer = {
+                    let (root, store) = (root.to_owned(), store.clone());
+                    blocking::run(move || settings_signing::signer(&root, &store))?
+                };
+                let key = signer["public_key"]
+                    .as_str()
+                    .ok_or(machine_proof::PROOF_MISSING)?
+                    .to_owned();
+                Some((key, hours))
+            } else if lease_hours.is_some() {
+                return Err(SEND_LEASE_WITHOUT_DELEGATE.into());
+            } else {
+                None
+            };
             // SB-355: from one machine to another is a call back, then the move.
             let mut recalled = Value::Null;
             if let Some(machine) = store.snapshot()?.machine_of(&id).cloned() {
@@ -6624,6 +6828,7 @@ async fn execute(
                 let (store, id, to, pool) = (store.clone(), id.clone(), to.clone(), pool.clone());
                 let (program, data_dir) = (program.clone(), remote_data_dir.clone());
                 let root = root.to_owned();
+                let delegation = delegation.clone();
                 blocking::run(move || {
                     let program = account_send::Program {
                         path: &program,
@@ -6631,7 +6836,7 @@ async fn execute(
                     };
                     // SB-357: the machine proves it is the one trusted before anything is sent.
                     let ssh = machine_proof::ssh(&root, &to, &program);
-                    account_send::send(
+                    account_send::send_with(
                         &store,
                         &id,
                         &to,
@@ -6640,14 +6845,34 @@ async fn execute(
                         monitor::now(),
                         &|a, i| ssh.run(a, i),
                         &|token| refresh_state.wait_settled(token),
+                        delegation
+                            .as_ref()
+                            .map(|(key, hours)| account_send::Delegate {
+                                sender_key: key,
+                                lease_hours: *hours,
+                            }),
                     )
                 })
             };
             // SB-365: a lost answer leaves the account marked here and its copy there unknown;
             // the line lets Attention list it until it is called back.
+            // SB-403 (review rounds 2 and 3): a delegated copy left there is recorded from what
+            // the move knew, so a call back takes it back under its key.
+            let moved = moved.map_err(|e| {
+                record_left_delegated(
+                    root,
+                    e.left.as_ref(),
+                    &id,
+                    &to,
+                    &pool,
+                    decision.as_ref(),
+                    &remote,
+                );
+                e.message
+            });
             record_lost_move(root, &moved, &id, &to, &pool, decision.as_ref(), &remote);
             let moved = moved?;
-            record_seat(
+            record_seat_leased(
                 root,
                 "granted",
                 &id,
@@ -6657,6 +6882,9 @@ async fn execute(
                 moved["remote_id"].as_str(),
                 moved["sent"].as_str(),
                 Some(&remote),
+                delegation
+                    .as_ref()
+                    .map(|(key, hours)| (*hours, key.as_str())),
             );
             let mut moved = moved;
             // SB-355 (DEC-0013): it lives on that machine now, in its group and no group here.
@@ -6673,6 +6901,24 @@ async fn execute(
             match joined {
                 Ok(m) => moved["machine_group"] = json!({"pool": m.pool, "name": m.name}),
                 Err(error) => moved["machine_group_error"] = json!(error),
+            }
+            // SB-403 (review P2-5): what extends and calls the seat back lives in the store with
+            // its machine group, so it outlives `seats.jsonl`'s rotation and comes back with a
+            // backup.
+            if let (Some((key, hours)), Some(remote_id)) =
+                (delegation.as_ref(), moved["remote_id"].as_str())
+            {
+                if let Err(error) = store.record_delegated_out(
+                    &id,
+                    switchboard_core::DelegatedOut {
+                        remote_id: remote_id.to_owned(),
+                        lease_hours: *hours,
+                        sender_key: key.clone(),
+                        sent: moved["sent"].as_str().map(str::to_owned),
+                    },
+                ) {
+                    moved["delegation_record_error"] = json!(error);
+                }
             }
             if !recalled.is_null() {
                 moved["recalled"] = recalled;
@@ -7091,6 +7337,78 @@ async fn execute(
                 refresh_state.wait_settled(token)
             })
         }
+        Operation::SurrenderDelegated { served: false, .. }
+        | Operation::AddDelegated { served: false, .. }
+        | Operation::LeaseDelegated { served: false, .. }
+        | Operation::RemoveDelegated { served: false, .. } => Err(SSH_SERVE_ONLY.into()),
+        Operation::SurrenderDelegated {
+            id,
+            sender_key,
+            undo,
+            ..
+        } => account_send::surrender_delegated(&store, &id, &sender_key, undo, &|token| {
+            refresh_state.wait_settled(token)
+        }),
+        Operation::AddDelegated {
+            label,
+            provider,
+            pool,
+            secret,
+            sender_key,
+            from,
+            lease_hours,
+            ..
+        } => {
+            let credential = Credential::parse(provider, AuthKind::OAuth, &secret)?;
+            let account = store.add_delegated(
+                label,
+                provider,
+                pool,
+                credential,
+                &sender_key,
+                from.as_deref(),
+                lease_hours,
+            )?;
+            Ok(json!(account))
+        }
+        Operation::LeaseDelegated {
+            id,
+            sender_key,
+            hours,
+            ..
+        } => {
+            let until = store.extend_lease(&id, &sender_key, hours)?;
+            Ok(json!({"id": id, "lease_until": until, "lease_until_at": rfc3339(until)}))
+        }
+        Operation::RemoveDelegated { id, sender_key, .. } => {
+            if !store
+                .snapshot()?
+                .delegated
+                .get(&id)
+                .is_some_and(|d| d.sender_key == sender_key)
+            {
+                return Err(switchboard_core::delegation::NOT_DELEGATED_BY_YOU.into());
+            }
+            if store.snapshot()?.routes.values().any(|v| v == &id) {
+                return Err("Select another account before removing this one.".into());
+            }
+            launch::clean_account(root, &id)?;
+            store.remove_delegated(&id, &sender_key)?;
+            Ok(json!({"removed": true}))
+        }
+        Operation::OwnSignIn { on } => {
+            let value = match on {
+                Some(on) => own_sign_in::set(root, on)?,
+                None => own_sign_in::status(root),
+            };
+            if let Some(runtime) = runtime {
+                runtime.own_sign_in_off.store(
+                    own_sign_in::is_off(root),
+                    std::sync::atomic::Ordering::SeqCst,
+                );
+            }
+            Ok(value)
+        }
         Operation::RecallAccount {
             id,
             from,
@@ -7121,7 +7439,24 @@ async fn execute(
             let remote_data_dir =
                 remote_data_dir.or_else(|| grant.as_ref().and_then(|g| g.data_dir.clone()));
             let sent = grant.as_ref().and_then(|g| g.sent.clone());
+            // SB-403: a delegated seat is named there with the key it was delegated under: the
+            // store's record first (review P2-5), else the move's `seats.jsonl` line.
+            let out = snapshot.delegated_out.get(&id).cloned();
+            // Review round 3, P2-1: taking the sign-in back clears the record; a call back that
+            // gives it back puts the record back, and a seat left there outside a machine's group
+            // goes back outside it.
+            let out_before = out.clone();
+            let on_machine = snapshot.machine_of(&id).is_some();
+            let sent = out.as_ref().and_then(|o| o.sent.clone()).or(sent);
+            let sender_key = out.as_ref().map(|o| o.sender_key.clone()).or_else(|| {
+                grant
+                    .as_ref()
+                    .filter(|g| g.lease_hours.is_some())
+                    .and_then(|g| g.sender_key.clone())
+            });
+            let delegated_by = sender_key.clone();
             let remote_id = remote_id
+                .or_else(|| out.map(|o| o.remote_id))
                 .or_else(|| grant.and_then(|g| g.remote_account))
                 .ok_or(account_send::NO_REMOTE_ID)?;
             let taken = {
@@ -7141,7 +7476,7 @@ async fn execute(
                     // SB-357: a sign-in is taken only from the machine trusted for this name; the
                     // calls that finish or undo this call back follow its proof.
                     let ssh = machine_proof::ssh(&root, &from, &program);
-                    account_send::recall_take(
+                    account_send::recall_take_as(
                         &store,
                         &id,
                         &from,
@@ -7150,6 +7485,7 @@ async fn execute(
                         monitor::now(),
                         &|a, i| ssh.run(a, i),
                         sent.as_deref(),
+                        delegated_by.as_deref(),
                     )
                 })
             };
@@ -7208,6 +7544,47 @@ async fn execute(
                     }
                     None => false,
                 };
+            // SB-403: a delegated seat whose lease ran out there: nothing is there to give back
+            // to. Its row there is removed, and the account stays here to be signed in again.
+            if !answered && taken.lease_ended {
+                let (machine, program, data_dir, remote, key) = (
+                    from.clone(),
+                    program.clone(),
+                    remote_data_dir.clone(),
+                    taken.remote_id.clone(),
+                    taken.sender_key.clone(),
+                );
+                let _ = blocking::run(move || {
+                    account_send::recall_finish(
+                        &machine,
+                        &account_send::Taken {
+                            remote_id: remote,
+                            token: None,
+                            kept: None,
+                            lease_ended: true,
+                            sender_key: key,
+                        },
+                        &account_send::Program {
+                            path: &program,
+                            data_dir: data_dir.as_deref(),
+                        },
+                        &account_send::ssh_runner,
+                    )
+                });
+                let pool = local_pool(&store, &id);
+                record_seat(
+                    root,
+                    "recalled",
+                    &id,
+                    &from,
+                    &pool,
+                    decision.as_ref(),
+                    Some(&taken.remote_id),
+                    None,
+                    None,
+                );
+                return Err(account_send::LEASE_ENDED_SIGN_IN.into());
+            }
             if !answered {
                 account_send::recall_undo(
                     &store,
@@ -7221,6 +7598,12 @@ async fn execute(
                     monitor::now(),
                     &account_send::ssh_runner,
                 )?;
+                if let Some(out) = out_before {
+                    let _ = store.record_delegated_out(&id, out.clone());
+                    if !on_machine {
+                        return Err(account_send::NOT_RETURNED.into());
+                    }
+                }
                 // SB-355: it went back to that machine, so back to its group too.
                 let (store, root, id, from) =
                     (store.clone(), root.to_owned(), id.clone(), from.clone());
@@ -7243,11 +7626,12 @@ async fn execute(
                 .map(|a| a.pool.clone())
                 .unwrap_or_else(|| "default".into());
             let finished = {
-                let (from, program, data_dir, remote) = (
+                let (from, program, data_dir, remote, key) = (
                     from.clone(),
                     program.clone(),
                     remote_data_dir.clone(),
                     taken.remote_id.clone(),
+                    taken.sender_key.clone(),
                 );
                 blocking::run(move || {
                     Ok::<_, String>(account_send::recall_finish(
@@ -7256,6 +7640,8 @@ async fn execute(
                             remote_id: remote,
                             token: None,
                             kept: None,
+                            lease_ended: false,
+                            sender_key: key,
                         },
                         &account_send::Program {
                             path: &program,
@@ -7721,7 +8107,7 @@ async fn execute(
                 &address,
                 rt.proxy.token(),
                 &salts,
-                external::claude_signed_out(),
+                rt.claude_signed_out(),
             )?;
             rt.proxy.set_folder_tokens(report.tokens.clone());
             rt.proxy.set_released_tokens(report.released.clone());
@@ -8097,7 +8483,7 @@ async fn execute(
             (None, None) => Ok(analytics_unavailable()),
         },
         Operation::CodexRoute { enabled } => {
-            let path = runtime.and_then(|r| (r.native.codex_config)());
+            let path = runtime.and_then(|r| (r.native().codex_config)());
             if let Some(on) = enabled {
                 let rt = needs_owner()?;
                 let path = path.clone().ok_or(codex_route::CODEX_ROUTE_UNREADABLE)?;
@@ -8653,6 +9039,10 @@ fn activate_native_anyway(
 ) -> Result<(), String> {
     // A project's account never becomes the ordinary Claude Code's: that serves every folder.
     let snapshot = store.snapshot()?;
+    // SB-403: a seat another machine delegated here never becomes the ordinary sign-in.
+    if snapshot.is_delegated(id) {
+        return Err(switchboard_core::delegation::DELEGATED_NOT_NATIVE.into());
+    }
     if !anyway && snapshot.is_assigned(id) {
         return Err(switchboard_core::ASSIGNED.into());
     }
@@ -11336,6 +11726,174 @@ mod owner_tests {
             .all(|p| p.shared_accounts.is_empty()));
     }
 
+    /// SB-403 (DEC-0025): the operations of a delegated seat and of the own sign-in switch.
+    #[tokio::test]
+    async fn a_delegated_seat_and_the_own_sign_in_switch_through_the_operations() {
+        use switchboard_core::delegation;
+        const KEY: &str = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=";
+        let root = tempfile::tempdir().unwrap();
+        let runtime = fixtures::runtime(root.path(), signed_out, activates).await;
+        // The own sign-in switch: on until turned off; off, the ordinary sign-in is not read.
+        let own = |on| Operation::OwnSignIn { on };
+        assert_eq!(
+            runtime.execute(own(None)).await.unwrap()["own_sign_in"],
+            "on"
+        );
+        assert_eq!(
+            runtime.execute(own(Some(false))).await.unwrap()["own_sign_in"],
+            "off"
+        );
+        assert_eq!(
+            (runtime.native().current)(Provider::Claude)
+                .err()
+                .as_deref(),
+            Some(own_sign_in::OFF_LIMITS)
+        );
+        // Review P2-3: never read, the ordinary sign-in counts as signed out for the bindings.
+        assert!(runtime.claude_signed_out());
+        runtime.execute(own(Some(true))).await.unwrap();
+        assert!(!own_sign_in::is_off(root.path()));
+        // A delegated move is refused before anything travels.
+        let one = fixtures::save(&runtime.store, "synthetic-one", "default").id;
+        let send = |pool: &str, delegate: bool, lease_hours: Option<u32>| Operation::SendAccount {
+            id: one.clone(),
+            to: "studio.local".into(),
+            pool: Some(pool.into()),
+            program: None,
+            remote_data_dir: None,
+            decision: None,
+            delegate,
+            lease_hours,
+        };
+        assert_eq!(
+            runtime
+                .execute(send("default", true, None))
+                .await
+                .unwrap_err(),
+            account_send::DELEGATE_INTO_GROUP
+        );
+        assert_eq!(
+            runtime
+                .execute(send("org", true, Some(0)))
+                .await
+                .unwrap_err(),
+            delegation::LEASE_INVALID
+        );
+        assert_eq!(
+            runtime
+                .execute(send("org", false, Some(4)))
+                .await
+                .unwrap_err(),
+            SEND_LEASE_WITHOUT_DELEGATE
+        );
+        // A seat delegated here, as `ssh-serve` saves it.
+        let work = tempfile::tempdir().unwrap();
+        let work = work.path().canonicalize().unwrap();
+        let group = runtime
+            .execute(Operation::SaveProject {
+                organizations: None,
+                move_accounts: false,
+                pool: None,
+                name: "Org".into(),
+                folders: vec![work.clone()],
+                account_ids: vec![],
+                base_folders: None,
+                organization: None,
+            })
+            .await
+            .unwrap();
+        let pool = group["pool"]
+            .as_str()
+            .or_else(|| group["project"]["pool"].as_str())
+            .unwrap()
+            .to_owned();
+        let seat = runtime
+            .execute(Operation::AddDelegated {
+                label: "seat".into(),
+                provider: Provider::Claude,
+                pool: pool.clone(),
+                secret: r#"{"claudeAiOauth":{"accessToken":"a-seat","refreshToken":"r-seat","expiresAt":4102444800000}}"#.into(),
+                sender_key: KEY.into(),
+                from: Some("administrator".into()),
+                lease_hours: 48,
+                served: true,
+            })
+            .await
+            .unwrap();
+        let id = seat["id"].as_str().unwrap().to_owned();
+        assert_eq!(
+            runtime
+                .execute(Operation::Remove { id: id.clone() })
+                .await
+                .unwrap_err(),
+            delegation::DELEGATED_NOT_REMOVED
+        );
+        assert_eq!(
+            runtime
+                .execute(Operation::Assign {
+                    id: id.clone(),
+                    to: Some("an agent".into()),
+                    force: false,
+                })
+                .await
+                .unwrap_err(),
+            delegation::DELEGATED_NOT_GIVEN
+        );
+        assert_eq!(
+            runtime
+                .execute(Operation::ActivateNative {
+                    id: id.clone(),
+                    force: false,
+                })
+                .await
+                .unwrap_err(),
+            delegation::DELEGATED_NOT_NATIVE
+        );
+        let lease = runtime
+            .execute(Operation::LeaseDelegated {
+                id: id.clone(),
+                sender_key: KEY.into(),
+                hours: 2,
+                served: true,
+            })
+            .await
+            .unwrap();
+        assert!(lease["lease_until"].as_i64().unwrap() > 0);
+        assert_eq!(
+            runtime
+                .execute(Operation::RemoveDelegated {
+                    id: id.clone(),
+                    sender_key: KEY.into(),
+                    served: false,
+                })
+                .await
+                .unwrap_err(),
+            SSH_SERVE_ONLY,
+            "only ssh-serve acts on a seat, whoever knows the public key"
+        );
+        assert_eq!(
+            runtime
+                .execute(Operation::LeaseDelegated {
+                    id: id.clone(),
+                    sender_key: KEY.into(),
+                    hours: 720,
+                    served: false,
+                })
+                .await
+                .unwrap_err(),
+            SSH_SERVE_ONLY
+        );
+        runtime
+            .execute(Operation::RemoveDelegated {
+                id: id.clone(),
+                sender_key: KEY.into(),
+                served: true,
+            })
+            .await
+            .unwrap();
+        assert!(!runtime.store.snapshot().unwrap().is_delegated(&id));
+    }
+
     #[tokio::test]
     async fn an_account_moves_between_projects_and_back_to_default() {
         // SB-122: «аккаунты между пулами перемещать через UI, три точки, добавить в пул, выбор».
@@ -12309,6 +12867,69 @@ mod owner_tests {
         assert_eq!(lines[0].remote_account, None);
         // A lost move is not a grant: a call back still finds no outstanding move.
         assert!(seats::outstanding(root.path(), "a").is_none());
+    }
+    /// SB-403 (review rounds 2 and 3): a delegated move whose check failed and whose copy there
+    /// could not be removed leaves a granted seat line under its key, with the print of the token
+    /// sent, so `accounts recall` finds the machine, the account there and the key to take it back
+    /// with; it is written from the move's answer, even when the store has no record. Nothing else
+    /// writes one, and the adoption pass leaves the account out of the machine's group.
+    #[tokio::test]
+    async fn a_delegated_copy_left_there_is_recorded_so_it_can_be_called_back() {
+        const KEY: &str = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=";
+        let root = tempfile::tempdir().unwrap();
+        let runtime = fixtures::runtime(root.path(), signed_out, activates).await;
+        let id = fixtures::save(&runtime.store, "synthetic-left", "default").id;
+        let remote = account_send::Program {
+            path: account_send::REMOTE_DEFAULT,
+            data_dir: None,
+        };
+        record_left_delegated(
+            root.path(),
+            None,
+            &id,
+            "studio.local",
+            "agents",
+            None,
+            &remote,
+        );
+        assert!(seats::recent(root.path(), 10).is_empty());
+        let out = switchboard_core::DelegatedOut {
+            remote_id: "0a1b2c3d".into(),
+            lease_hours: 48,
+            sender_key: KEY.into(),
+            sent: Some("0011223344556677".into()),
+        };
+        record_left_delegated(
+            root.path(),
+            Some(&out),
+            &id,
+            "studio.local",
+            "agents",
+            None,
+            &remote,
+        );
+        let seat = seats::outstanding(root.path(), &id).expect("a granted seat line");
+        assert_eq!(seat.event, "granted");
+        assert_eq!(seat.machine, "studio.local");
+        assert_eq!(seat.remote_account.as_deref(), Some("0a1b2c3d"));
+        assert_eq!(seat.lease_hours, Some(48));
+        assert_eq!(seat.sender_key.as_deref(), Some(KEY));
+        assert_eq!(seat.sent.as_deref(), Some("0011223344556677"));
+        // Review round 3, P2-2: the first-start adoption pass and `machines adopt` leave it out
+        // of the machine's group, so its lease there is not extended.
+        runtime
+            .store
+            .mark_elsewhere_at(&id, true, 10, Some("studio.local"))
+            .unwrap();
+        let adopted = machines::adopt(root.path(), &runtime.store, true, 20, &|_| None).unwrap();
+        assert_eq!(adopted["placed"], json!([]));
+        assert!(runtime.store.snapshot().unwrap().machine_of(&id).is_none());
+        assert!(remote_usage::delegated_to(
+            root.path(),
+            &runtime.store.snapshot().unwrap(),
+            "studio.local"
+        )
+        .is_empty());
     }
     /// SB-365 (WF-3.3, DEC-0015): an account Attention lists for a sign-in is in its group the
     /// whole time; signed in again it leaves the list on the next pass and keeps its group, its

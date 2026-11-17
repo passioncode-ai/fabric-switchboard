@@ -51,6 +51,9 @@ Annotations: `readOnlyHint: true`.
 
 ### `switchboard_accounts`: `provider?: "claude" | "codex"`, `machine?: "here" | "elsewhere"`
 
+A seat another machine delegated here (SB-403) also carries `delegated` (`from`, `sender_key`,
+`lease_until`, `lease_ended`): it serves its group only, and only that machine calls it back.
+
 `accounts[]`: `id`, `label`, `provider`, `kind` (`oauth`, `api_key`, `setup_token`), `pool` (the group id),
 `groups` (every group it serves, its own first), `enabled`, `selected_for_next_request`,
 `signed_in_cli`, `lowest_remaining_percent`, `usage_fresh`, `organization`, `also_organizations`
@@ -585,7 +588,18 @@ key here, as the window's *Remove account* does; this cannot be undone. Refused 
 it selected (select another first). Clients signed in elsewhere are not signed out; an account moved
 to another machine is called back or removed there with `switchboard_account_recall`.
 
-### `switchboard_account_send`: `account_id`, `to`, `pool?`, `remote?`, `remote_data_dir?`, `decision?`
+### `switchboard_account_send`: `account_id`, `to`, `pool?`, `remote?`, `remote_data_dir?`, `decision?`, `delegate?`, `lease_hours?`
+
+`delegate: true` (SB-403, DEC-0025) delegates the seat to a teammate's machine instead of moving it:
+that machine (reached through its restricted entry, `switchboard ssh-serve`, the forced command of
+this machine's ssh key there) keeps it as a guest in the group `pool` names (never its default
+group), pinned to this machine's settings signing key. There it is never moved on, given to an agent,
+lent, shared or made the ordinary sign-in, and only this machine calls it back
+(`switchboard_account_recall`). `lease_hours` (1 to 720, default 48): this machine's background
+read of that machine (every 15 minutes) extends it; past it the copy there is switched off but
+keeps its sign-in for 30 days (the next read turns it on again, and a call back takes the live
+sign-in), then the sign-in there is removed. The teammate's key line pins the one group there
+(`ssh-serve --pool`). The answer carries `delegated: {lease_hours}`.
 
 Only when the operator asks. Moves a Claude or Codex subscription sign-in to another machine over
 ssh without a new sign-in there: it is marked here as used elsewhere first, saved there (the tokens
@@ -804,6 +818,16 @@ folder's transcripts were written in the last 30 minutes; quiet ones are not cou
 `used` and `cap`, and `launch --hosted` is refused with "At capacity: …": a wait, not a failed run.
 Ask again when a session ends. A process table that could not be read admits the start and is
 named in `degraded`.
+
+### `switchboard_own_sign_in`: `on?`
+
+Whether Switchboard reads or changes the person's own Claude Code and Codex sign-in on this computer
+(SB-403, DEC-0025). Off on a teammate's computer that serves only seats an organization delegated
+to it: the background no longer reads that sign-in, nothing is captured, imported, activated or
+renewed in it, a launch copies no MCP sign-in out of the ordinary home's credential item, and the
+session duty officer looks only at sessions in Switchboard's own homes. Claude Desktop is outside
+Switchboard either way. Without `on` it reads `{own_sign_in: "on" | "off", on}`; `on` changes it, only
+when the operator asks. Kept in `<data>/own-sign-in`.
 
 ### `switchboard_duty`: `on?`, `stuck_minutes?`, `waiting_minutes?`, `idle_minutes?`, `max_age_hours?`, `run?`, `dry_run?`
 

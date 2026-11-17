@@ -153,9 +153,18 @@ pub fn plan(root: &Path, snapshot: &Snapshot, resolve: &dyn Fn(&str) -> Option<S
         if !snapshot.elsewhere.contains_key(&a.id) || is_machine_pool(&a.pool) {
             continue;
         }
-        let seat = crate::seats::outstanding(root, &a.id)
-            .map(|s| s.machine)
-            .filter(|m| target_valid(m));
+        let outstanding = crate::seats::outstanding(root, &a.id);
+        // SB-403 (review round 3, P2-2): a delegated seat outside a machine's group was left
+        // there after a failed check (DEC-0025, plan D-41): placing it would have the background
+        // read extend its lease. It waits for its call back instead.
+        if snapshot.delegated_out.contains_key(&a.id)
+            || outstanding
+                .as_ref()
+                .is_some_and(|s| s.lease_hours.is_some())
+        {
+            continue;
+        }
+        let seat = outstanding.map(|s| s.machine).filter(|m| target_valid(m));
         let location = snapshot
             .locations
             .get(&a.id)

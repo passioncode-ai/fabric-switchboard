@@ -1603,6 +1603,15 @@ impl Store {
             .iter()
             .position(|p| p.pool == pool)
             .ok_or("Project not found.")?;
+        // SB-403: a seat another machine delegated stays in its group; the group goes only
+        // after that machine called it back.
+        if candidate
+            .accounts
+            .iter()
+            .any(|a| a.pool == pool && candidate.delegated.contains_key(&a.id))
+        {
+            return Err(crate::delegation::GROUP_HOLDS_GUEST.into());
+        }
         // SB-401: deleting the pay-per-token group would send its keys to the default group.
         if candidate.projects[index].tokens && candidate.accounts.iter().any(|a| a.pool == pool) {
             return Err(TOKENS_KEEPS_KEYS.into());

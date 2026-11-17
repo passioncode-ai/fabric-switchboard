@@ -249,6 +249,8 @@ async fn send_account(
     id: String,
     to: String,
     pool: String,
+    delegate: Option<bool>,
+    lease_hours: Option<u32>,
     state: State<'_, Slot>,
 ) -> Result<Value, String> {
     state
@@ -261,7 +263,19 @@ async fn send_account(
             program: None,
             remote_data_dir: None,
             decision: None,
+            // SB-403: delegated to a teammate's machine, with its lease.
+            delegate: delegate.unwrap_or(false),
+            lease_hours,
         })
+        .await
+}
+/// SB-403 S3: whether Switchboard reads or changes the person's own sign-in; `on` changes it.
+#[tauri::command]
+async fn own_sign_in(on: Option<bool>, state: State<'_, Slot>) -> Result<Value, String> {
+    state
+        .runtime()
+        .await?
+        .execute(Operation::OwnSignIn { on })
         .await
 }
 /// SB-175: mark an account as used on another machine, or clear the mark; SB-284: with where.
@@ -2127,6 +2141,7 @@ fn main() {
             balance,
             capacity,
             duty,
+            own_sign_in,
             session_tree,
             session_rows,
             session_attach,

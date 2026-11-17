@@ -536,7 +536,18 @@ pub(crate) fn ordinary() -> Option<(PathBuf, String)> {
 /// SB-359: the report on this machine's homes (`switchboard mcp-homes`). Reads every item whose
 /// access list trusts `/usr/bin/security`; one that would ask reads `unknown`. Never on a timer.
 pub fn report_now(root: &Path, claude_accounts: &[String]) -> Value {
-    report(&homes(root, ordinary(), Some(claude_accounts)), &Native)
+    report(
+        &homes(root, ordinary_for(root), Some(claude_accounts)),
+        &Native,
+    )
+}
+/// SB-403 (review P2-4): the ordinary home, unless the person's own sign-in is off limits here
+/// (`own_sign_in`): then its credential item is neither read nor written.
+pub(crate) fn ordinary_for(root: &Path) -> Option<(PathBuf, String)> {
+    if crate::own_sign_in::is_off(root) {
+        return None;
+    }
+    ordinary()
 }
 
 static CACHE: std::sync::OnceLock<Cache> = std::sync::OnceLock::new();
@@ -545,7 +556,7 @@ static CACHE: std::sync::OnceLock<Cache> = std::sync::OnceLock::new();
 /// made under `root`. Logs counts only. A failure leaves the home as it was and never stops the
 /// launch.
 pub(crate) fn carry_into(root: &Path, folder: &Path) {
-    let all = homes(root, ordinary(), None);
+    let all = homes(root, ordinary_for(root), None);
     let service = service_of(folder);
     let target = Home {
         kind: "launch",
@@ -580,6 +591,19 @@ pub(crate) fn carry_into(root: &Path, folder: &Path) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn with_own_sign_in_off_the_ordinary_home_is_left_out() {
+        // SB-403 (review P2-4): `mcp-homes` and a launch's copy never read the ordinary home's
+        // item while the person's own sign-in is off limits.
+        let root = tempfile::tempdir().unwrap();
+        crate::own_sign_in::set(root.path(), false).unwrap();
+        assert!(ordinary_for(root.path()).is_none());
+        let listed = homes(root.path(), ordinary_for(root.path()), Some(&[]));
+        assert!(listed.iter().all(|h| h.kind != "ordinary"));
+        crate::own_sign_in::set(root.path(), true).unwrap();
+        assert_eq!(ordinary_for(root.path()), ordinary());
+    }
+
     use super::*;
     use std::cell::RefCell;
     use std::collections::HashMap;

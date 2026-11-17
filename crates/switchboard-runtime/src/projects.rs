@@ -368,7 +368,10 @@ pub(crate) fn apply(
     global: bool,
 ) -> Result<Value, String> {
     let now = monitor::now();
-    let native = runtime.map_or(NATIVE, |r| r.native);
+    let native = runtime.map_or_else(
+        || crate::own_sign_in::mask(NATIVE, crate::own_sign_in::is_off(store.root())),
+        |r| r.native(),
+    );
     let snapshot = store.snapshot()?;
     let mut results = Vec::new();
     for RuleResolution {

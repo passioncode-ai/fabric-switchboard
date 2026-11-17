@@ -12,7 +12,7 @@ import { demo, demoFirstRun, native, nativeAdapter, onProjectSuggestions, onShel
 import type { CardState, AccountGroup } from './ui-logic';
 import { statAlert, ceilingQuestion, ceilingWarning, ceilingLine, keyLimitLine, dollars, POOL_PATTERN, poolChoices, poolName, inGroup, tourPlacement, usableWhileBusy, APPEARANCE_KEY, attribution, placementAdmits, domainSuggestion, groupSeatsElsewhere, passioncodeLine, seatEndedText, groupSeatsEndedText, organizationReleasedAt, inOrganizationFilter, domainList, type AttributedBy, sortStatRows, nextStatSort, type StatRow, type StatSort, statCacheShare, statTokensPerRequest, chartSeries, niceMax, groupProjectRows, type ChartMetric, groupProjects, compactCount, statTokens, statTrouble, statTroubleText, statAgentName, type Statistics, EXPIRY_CHOICES, folderName, folderRows, withoutFolder, type ProjectRoot, moveTargets, mapRows, rootTargets, storedMapFolders, MAP_FOLDERS_KEY, type MapFilter, type MapRow, type RepositoryMap, sortAgents, defaultAgentChoices, backgroundReads, clockedRead, chainScopeKey, afterRead, ceilingRemovalNote, modelMeta, modelUse, ordinaryKimiNote, kimiLimitUntil, limitReasonText, limitTitle, agentSetupFacts, sessionHow, sessionAgentName, sessionStateLabel, kimiWindowsLine, kimiWindowsLines, openrouterCreditLine, eventAction, eventDetail, MutationClock, activeRules, autoSwitchPool, autoSwitchPossible, launchChoice, withFolders, githubDefaultSelection, githubPlan, githubSource, replaceFolder, storedFolder, LAST_FOLDER_KEY, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, signInNotice, signInMove, organizationMoveNote, dismissTermsNotice, termsNoticeDismissed, termsNoticeOn, termsNoticeText, tourWaits, orgSetups, releasedOrganizations, releasedSummary, orgSetupAction, orgSetupShown, orgSetupCaveat, orgSetupLeads, orgSetupPrimary, accountsOrgActionLeads, firstPrimary, orgSetupUnread, orgSetupStateLabel, orgSetupTitle, hiddenOrgSetups, ORG_SETUP_HIDDEN_KEY, accountsEmptyKey, type OrgSetup, usageAnswerText, usageNotice, usageFreshness, windowReset, type Appearance, shellHookView, balancingView, balancingNotice, shellHookToggleNotice, shellHookNoticeText, codexHookLine, moveStep, accountsForStep, chainSummary, stepReasonText, handoverOutcomeText, handoverSkipped, shortWorkflow, TAKEOVER_ORDER, seatChoices, assignNotice, placementNotice, providerOrganization, groupOrganizations, servesPool, sharedGroups, holdsContext, accountOrganizations, machineOf, remoteUsageLine, unplacedAccounts, foldlessGroups, repositoriesUnder, contextLines, machineAliasesLine, machineLiveLine, machineCopyLine, foldOpen, accountSections, accountMatches, attentionAccounts, attentionReasonText, duplicateOffer, attentionActionLabel, dutyReasonText, dutyOutcomeText, surfaceLabel, sessionTreeRows, SESSION_GROUPS, sessionGroupTitle, sessionWhyText, machineReadText, givenFacts, switchingLine, MACHINE_FOLD_LIMIT, EVENT_FILTER_KINDS, eventKindLabel, filterEvents, eventsByDay, relativeDay, EVENTS_PAGE, eventPage, sortSessions, statRowsShown, STAT_TOP, spendShare, groupKeyBlocks, keyTail, groupStateLine, type EventKind, type EventFilter, restartSkipText, sessionTone, sessionDegradedText, restartStateText, restartTone, statCost, groupDisplayName, tokensSpendLine, keyLaunch, keyOutsideTokens, movePool } from './ui-logic';
 import agentCatalog from '../catalog/agents.json';
-import type { AnalyticsStatus, Ceilings, CeilingView, CeilingQuestionView, OpenrouterCredit, BackupInfo, PassioncodeStatus, Account, Adapter, AgentConnection, AgentInfo, AgentRow, AgentsOverview, OpenrouterModels, HermesModel, KimiAccounts, KimiRegion, KimiStatus, OpenrouterStatus, OpenrouterKeys, CodexRoute, BalanceStatus, CapacityStatus, DutyStatus, DutyLine, SessionTree, WatchFinding, ShellHookStatus, AgentSetup, AuthKind, BackupStatus, KimiAccount, CurrentAccounts, LoginItem, Project, Restored, HandoverPlan, ExternalIdentity, MonitorStatus, ProjectRule, Provider, RotationPolicy, RuntimeStatus, SessionInfo, Snapshot, UpdateStatus, Onboarding, Chains, ChainExecutor, ChainScope, ChainStepView, GithubRepository, Machine, MachinesLive, MachinesList, Attention, AttentionItem, Event, GivenAccount, SessionsEverywhere, SessionRow, MachineReadStatus, RestartPlan, RestartWave, OrganizationAssigned, Placement, ObservatoryKeys, ObservatoryKey } from './types';
+import type { AnalyticsStatus, Ceilings, CeilingView, CeilingQuestionView, OpenrouterCredit, BackupInfo, PassioncodeStatus, Account, Adapter, AgentConnection, AgentInfo, AgentRow, AgentsOverview, OpenrouterModels, HermesModel, KimiAccounts, KimiRegion, KimiStatus, OpenrouterStatus, OpenrouterKeys, CodexRoute, BalanceStatus, CapacityStatus, DutyStatus, DutyLine, SessionTree, WatchFinding, ShellHookStatus, AgentSetup, AuthKind, BackupStatus, KimiAccount, CurrentAccounts, LoginItem, Project, Restored, HandoverPlan, ExternalIdentity, MonitorStatus, ProjectRule, Provider, RotationPolicy, RuntimeStatus, SessionInfo, Snapshot, UpdateStatus, Onboarding, Chains, ChainExecutor, ChainScope, ChainStepView, GithubRepository, Machine, MachinesLive, MachinesList, Attention, AttentionItem, Event, GivenAccount, SessionsEverywhere, SessionRow, MachineReadStatus, RestartPlan, RestartWave, OrganizationAssigned, Placement, ObservatoryKeys, ObservatoryKey, OwnSignIn } from './types';
 
 const root = document.querySelector<HTMLDivElement>('#app')!;
 const announcements = document.querySelector<HTMLDivElement>('#announcements')!;
@@ -602,6 +602,18 @@ function bringHereDialog(account: Account, machine: Machine) {
   });
   group.focus();
 }
+/** SB-403 (DEC-0025, SCN-094): the choice to delegate a seat to a teammate's machine instead of moving it, with its lease. */
+function delegateFields(context: ReturnType<typeof openDialog>) {
+  const option = el('label', 'appearance-option login-option'); const box = el('input'); box.type = 'checkbox'; box.dataset.focus = 'send-delegate';
+  option.append(box, el('span', '', t('Delegate to a teammate')));
+  const hours = input('48'); hours.type = 'number'; hours.min = '1'; hours.max = '720'; hours.step = '1';
+  const lease = field(t('Lease, hours'), hours, t('This computer extends it each time it reads that machine. If it cannot reach it for this long, the seat there is switched off; its sign-in is kept 30 days for a call back, then removed.'));
+  const note = el('p', 'form-note', t('A delegated seat stays a guest there: it serves the group you name, is never moved on, lent or made its own sign-in, and only this computer calls it back. The teammate never signs in with it.'));
+  const sync = () => { lease.hidden = !box.checked; note.hidden = !box.checked; };
+  box.addEventListener('change', sync); sync();
+  context.body.append(option, note, lease);
+  return () => box.checked ? { leaseHours: Math.round(Number(hours.value)) || 48 } : null;
+}
 /** SB-355 (SCN-092): a sign-in of this computer moves to a machine group's machine over ssh. */
 function moveHereDialog(machine: Machine) {
   const context = openDialog(t('Move an account to {machine}', { machine: machine.name }), t('Its sign-in moves over ssh: this computer stops using it first, the other machine saves it and checks that it answers. If a step fails, nothing changes.'));
@@ -611,11 +623,13 @@ function moveHereDialog(machine: Machine) {
   const which = select(movable.map((a): [string, string] => [a.id, `${a.label} · ${providerName(a.provider)}`]));
   const pool = input('default'); pool.maxLength = 32;
   context.body.append(field(t('Account'), which), field(t('Group there'), pool, t('Its group on the other machine.')));
+  const delegated = delegateFields(context);
   context.actions.append(submit(t('Move')));
   context.form.addEventListener('submit', (event) => {
     event.preventDefault();
     const account = movable.find((a) => a.id === which.value); if (!account) return;
-    void dialogSave(context, () => adapter.sendAccount(account.id, machine.name, pool.value.trim() || 'default'), t('{label} moved to {machine}. This computer no longer uses it.', { label: account.label, machine: machine.name }));
+    const delegate = delegated();
+    void dialogSave(context, () => adapter.sendAccount(account.id, machine.name, pool.value.trim() || 'default', delegate), delegate ? t('{label} is delegated to {machine}. This computer calls it back when you ask.', { label: account.label, machine: machine.name }) : t('{label} moved to {machine}. This computer no longer uses it.', { label: account.label, machine: machine.name }));
   });
   which.focus();
 }
@@ -686,6 +700,24 @@ function dutySection() {
   actions.append(button(set.on ? t('Turn off') : t('Turn on'), () => { void mutate(async () => { dutyState = await adapter.duty({ on: !set.on }); }, set.on ? t('The duty officer is off.') : t('The duty officer is on.'), 'duty-toggle'); }, 'button', 'duty-toggle'));
   if (set.on && state.supported) actions.append(button(t('Check now'), () => { void mutate(async () => { await adapter.duty({ run: true }); dutyState = await adapter.duty(null); }, t('Sessions checked.'), 'duty-run'); }, 'button', 'duty-run'));
   section.append(actions);
+  return section;
+}
+/** SB-403 S3 (DEC-0025, SCN-095): whether Switchboard reads or changes the person's own Claude Code and Codex sign-in here. */
+let ownSignInState: OwnSignIn | null = null; let ownSignInLoading = false; let ownSignInError = '';
+function loadOwnSignIn() {
+  if (ownSignInLoading) return;
+  ownSignInLoading = true; const stamp = clock.stamp();
+  void adapter.ownSignIn(null).then((s) => { if (clock.accepts(stamp) || !ownSignInState) { ownSignInState = s; ownSignInError = ''; } }, (e) => { if (clock.accepts(stamp) || !ownSignInState) ownSignInError = t(safeError(e, 'read')); }).finally(() => { ownSignInLoading = false; render(); });
+}
+function ownSignInSection() {
+  const section = el('div', 'fold-content');
+  section.append(el('p', 'surface-note', t('On a teammate\'s computer that only serves seats an organization delegated, turn this off: Switchboard then never reads or changes your own Claude Code or Codex sign-in, copies nothing from it and leaves your own sessions alone. Claude Desktop is never touched either way.')));
+  if (ownSignInError) { section.append(el('p', 'form-error', ownSignInError)); return section; }
+  if (!ownSignInState) { if (!ownSignInLoading) loadOwnSignIn(); section.append(el('p', 'form-note', t('Reading the setting…'))); return section; }
+  const option = el('label', 'appearance-option login-option'); const box = el('input'); box.type = 'checkbox'; box.checked = ownSignInState.on; box.dataset.focus = 'own-sign-in';
+  box.addEventListener('change', () => { const wanted = box.checked; void mutate(async () => { ownSignInState = await adapter.ownSignIn(wanted); }, wanted ? t('Switchboard may use your own sign-in again.') : t('Switchboard leaves your own sign-in alone.'), 'own-sign-in'); });
+  option.append(box, el('span', '', t('Use my own Claude Code and Codex sign-in')));
+  section.append(option);
   return section;
 }
 /** SB-352 wave 2 (SCN-090): which groups lend accounts to each other, one switch per group. */
@@ -2204,11 +2236,13 @@ function sendDialog(account: Account) {
   if (known.length) { const names = el('datalist'); names.id = 'machine-names'; for (const m of known) { const option = el('option'); option.value = m.name; names.append(option); } machine.setAttribute('list', 'machine-names'); context.body.append(names); }
   const pool = input(account.pool); pool.maxLength = 32;
   context.body.append(field(t('Machine'), machine, t('As ssh knows it, reachable without a password prompt.')), field(t('Group there'), pool, t('Its group on the other machine.')));
+  const delegated = delegateFields(context);
   context.actions.append(submit(t('Move')));
   context.form.addEventListener('submit', (event) => {
     event.preventDefault();
     const to = machine.value.trim();
-    void dialogSave(context, () => adapter.sendAccount(account.id, to, pool.value.trim() || 'default'), t('{label} moved to {machine}. This computer no longer uses it.', { label: account.label, machine: to }));
+    const delegate = delegated();
+    void dialogSave(context, () => adapter.sendAccount(account.id, to, pool.value.trim() || 'default', delegate), delegate ? t('{label} is delegated to {machine}. This computer calls it back when you ask.', { label: account.label, machine: to }) : t('{label} moved to {machine}. This computer no longer uses it.', { label: account.label, machine: to }));
   });
   machine.focus();
 }
@@ -3749,7 +3783,7 @@ function renderSettings(main: HTMLElement) {
   const switchingState = snapshot ? (() => { const groups = new Set(policies.filter((p) => p.enabled).map((p) => p.pool)).size; return groups ? plural(groups, { one: 'On for {n} group', other: 'On for {n} groups' }) : t('Off'); })() : undefined;
   const reading = () => [el('p', 'form-note', t('Reading account metadata from the native app…'))];
   // The reads behind the headers start with the page, so each header can say its state before it is opened.
-  if (snapshot) { if (!balancingState && !balancingError) loadBalancing(); if (!codexRouteState && !codexRouteError) loadCodexRoute(); if (!shellHookState && !shellHookError) loadShellHook(); if (!capacityState && !capacityError) loadCapacity(); if (!dutyState && !dutyError) loadDuty(); }
+  if (snapshot) { if (!balancingState && !balancingError) loadBalancing(); if (!codexRouteState && !codexRouteError) loadCodexRoute(); if (!shellHookState && !shellHookError) loadShellHook(); if (!capacityState && !capacityError) loadCapacity(); if (!dutyState && !dutyError) loadDuty(); if (!ownSignInState && !ownSignInError) loadOwnSignIn(); }
   const shell = shellHookView(shellHookState, shellHookError || null).state;
   const newest = backupStatus?.backups.slice().sort((a, b) => b.created_at - a.created_at)[0];
   let language: LocaleChoice = 'system'; try { language = parseLocaleChoice(localStorage.getItem(LOCALE_KEY)); } catch { language = 'system'; }
@@ -3758,6 +3792,7 @@ function renderSettings(main: HTMLElement) {
     foldSection({ key: 'balancing', title: t('Balancing between groups'), state: onOff(balancingState?.on), body: () => snapshot ? [balancingSection()] : reading() }),
     foldSection({ key: 'session-limit', title: t('Coding sessions'), state: capacityState ? (capacityState.cap === null ? t('No limit') : t('{used} of {cap} working', { used: capacityState.used, cap: capacityState.cap })) : undefined, body: () => [capacitySection()] }),
     foldSection({ key: 'session-duty', title: t('Session duty officer'), state: onOff(dutyState?.settings.on), body: () => [dutySection()] }),
+    foldSection({ key: 'own-sign-in', title: t('Your own sign-in'), state: onOff(ownSignInState?.on), body: () => [ownSignInSection()] }),
     foldSection({ key: 'codex-route', title: t('Codex in group folders'), state: onOff(codexRouteState?.on), body: () => snapshot ? [codexRouteSection()] : reading() }),
     foldSection({ key: 'terminals', title: t('Terminals in organization folders'), state: shell === 'on' || shell === 'default_on' || shell === 'inactive' ? t('On') : shell === 'off' || shell === 'default_off' ? t('Off') : undefined, body: () => snapshot ? [shellHookSection()] : reading() }),
     foldSection({ key: 'background', title: t('Running in the background'), state: onOff(loginItem?.available ? loginItem.enabled : null), body: () => [residencyPanel()] }),

@@ -70,6 +70,11 @@ pub const POOL_MISSING: &str =
 pub const RENEWED_DURING: &str = "This machine renewed the sign-in while it moved, so the copy sent was no longer valid. It was removed there and stays here; move it again.";
 pub const OUTCOME_UNKNOWN: &str = "The other machine's answer was lost. This machine no longer uses the account; look at the other machine's accounts and call it back or remove its copy there.";
 pub const LEFT_THERE: &str = "The copy on the other machine could not be removed. This machine no longer uses the account; remove that copy there, then mark the account used here.";
+/// SB-403: the delegated copy there could not be removed after a failed check. It is switched
+/// off there once its lease runs out; the guest cannot be removed by the person there.
+/// The seat is recorded under its key (review round 2, P2-B), so a call back takes it back; the
+/// account is not placed in the machine's group, so its lease there is not extended.
+pub const LEFT_THERE_DELEGATED: &str = "The delegated copy on the other machine could not be removed. This machine no longer uses the account, and its lease there is no longer extended. Call it back with accounts recall.";
 /// The location a surrender writes; `--undo` takes back only this mark.
 pub const CALLED_BACK: &str = "called back";
 /// SB-377: the mark of a surrender whose account was off here; `--undo` turns it off again.
@@ -205,6 +210,15 @@ pub(crate) fn next_for_cli<'a>(
         .min_by_key(|a| next_rank(a, now))
 }
 
+/// SB-403 (DEC-0025): a move that delegates the seat: the other machine saves it as a guest
+/// pinned to `sender_key` (this machine's settings signing key) with a lease of `lease_hours`,
+/// which this machine's background read of it extends.
+#[derive(Clone, Copy, Debug)]
+pub struct Delegate<'a> {
+    pub sender_key: &'a str,
+    pub lease_hours: u32,
+}
+
 /// Moves one sign-in. `settle` is called with the account's refresh token once it is marked used
 /// elsewhere here: it returns when no renewal of that token is on the network (SB-312), so the
 /// tokens read after it are the ones this machine will never renew again.
@@ -219,16 +233,79 @@ pub fn send(
     run: &Run<'_>,
     settle: &dyn Fn(&str),
 ) -> Result<Value, String> {
+    send_as(store, id, target, pool, program, now, run, settle, None)
+}
+/// [`send`], delegating the seat when `delegate` is given (SB-403).
+#[allow(clippy::too_many_arguments)]
+pub fn send_as(
+    store: &Store,
+    id: &str,
+    target: &str,
+    pool: &str,
+    program: &Program<'_>,
+    now: i64,
+    run: &Run<'_>,
+    settle: &dyn Fn(&str),
+    delegate: Option<Delegate<'_>>,
+) -> Result<Value, String> {
+    send_with(store, id, target, pool, program, now, run, settle, delegate).map_err(|e| e.message)
+}
+/// A refused move: the person's sentence, and the delegated seat left on the other machine when
+/// its copy failed its check and could not be removed (`LEFT_THERE_DELEGATED`).
+#[derive(Debug)]
+pub struct SendError {
+    pub message: String,
+    pub left: Option<switchboard_core::DelegatedOut>,
+}
+impl From<String> for SendError {
+    fn from(message: String) -> Self {
+        Self {
+            message,
+            left: None,
+        }
+    }
+}
+impl From<&str> for SendError {
+    fn from(message: &str) -> Self {
+        message.to_owned().into()
+    }
+}
+/// [`send_as`], answering what a delegated seat left there was (review round 3, minor), so the
+/// caller records it from what the move knew rather than from the store.
+#[allow(clippy::too_many_arguments)]
+pub fn send_with(
+    store: &Store,
+    id: &str,
+    target: &str,
+    pool: &str,
+    program: &Program<'_>,
+    now: i64,
+    run: &Run<'_>,
+    settle: &dyn Fn(&str),
+    delegate: Option<Delegate<'_>>,
+) -> Result<Value, SendError> {
     if !target_valid(target) {
         return Err(TARGET_INVALID.into());
     }
     program.check()?;
+    if let Some(d) = delegate {
+        if !switchboard_core::delegation::lease_valid(d.lease_hours) {
+            return Err(switchboard_core::delegation::LEASE_INVALID.into());
+        }
+        if pool == "default" {
+            return Err(DELEGATE_INTO_GROUP.into());
+        }
+    }
     let snapshot = store.snapshot()?;
     let account = snapshot
         .accounts
         .iter()
         .find(|a| a.id == id)
         .ok_or("Account not found")?;
+    // SB-403: a seat delegated here is the sender's: it is never passed on.
+    if snapshot.is_delegated(id) {
+        return Err(switchboard_core::delegation::DELEGATED_NOT_SENT.into());
+    }
     if account.kind != AuthKind::OAuth {
         return Err(NOT_A_SIGN_IN.into());
     }
@@ -317,7 +394,7 @@ pub fn send(
         Ok(c) => c,
         Err(e) => {
             undo_here()?;
-            return Err(e);
+            return Err(e.into());
         }
     };
     let sent = credential.refresh_token.clone();
@@ -325,7 +402,11 @@ pub fn send(
         run(
             &ssh(remote(
                 program,
-                &["--json", "accounts", "remove", remote_id],
+                // SB-403: a delegated copy is removed only under the key it was delegated under.
+                &as_sender(
+                    &["--json", "accounts", "remove", remote_id],
+                    delegate.map(|d| d.sender_key),
+                ),
             )),
             None,
         )
@@ -333,24 +414,32 @@ pub fn send(
         .and_then(|out| data(&out))
         .is_some()
     };
+    let hours = delegate.map(|d| d.lease_hours.to_string());
+    let mut words = vec![
+        "--json",
+        "accounts",
+        "add",
+        "--provider",
+        provider,
+        "--kind",
+        "oauth",
+        "--label",
+        &account.label,
+        "--pool",
+        pool,
+        "--secret-stdin",
+    ];
+    if let (Some(d), Some(hours)) = (delegate, hours.as_deref()) {
+        words.extend([
+            "--delegated",
+            "--sender-key",
+            d.sender_key,
+            "--lease-hours",
+            hours,
+        ]);
+    }
     let added = run(
-        &ssh(remote(
-            program,
-            &[
-                "--json",
-                "accounts",
-                "add",
-                "--provider",
-                provider,
-                "--kind",
-                "oauth",
-                "--label",
-                &account.label,
-                "--pool",
-                pool,
-                "--secret-stdin",
-            ],
-        )),
+        &ssh(remote(program, &words)),
         Some(credential.to_oauth_json(account.provider).as_bytes()),
     );
     let output = match &added {
@@ -398,7 +487,29 @@ pub fn send(
         .is_some_and(|c| c.refresh_token != sent);
     if !verified || renewed_here {
         if !remove_there(&remote_id) {
-            return Err(LEFT_THERE.into());
+            let Some(d) = delegate else {
+                return Err(LEFT_THERE.into());
+            };
+            // Review round 2, P2-B: the seat there is recorded under its key, so `accounts recall`
+            // finds it and takes the sign-in back; the account stays marked used there.
+            // The print of what was sent goes with it (review round 3, P2-3): a sign-in renewed
+            // here since is kept aside by the call back, never replaced by the spent copy there.
+            let out = switchboard_core::DelegatedOut {
+                remote_id: remote_id.clone(),
+                lease_hours: d.lease_hours,
+                sender_key: d.sender_key.to_owned(),
+                sent: sent.as_deref().map(token_print),
+            };
+            if store.record_delegated_out(id, out.clone()).is_err() {
+                crate::oplog::event(
+                    "delegation_record",
+                    &[("result", crate::oplog::Field::Code("unwritten"))],
+                );
+            }
+            return Err(SendError {
+                message: LEFT_THERE_DELEGATED.into(),
+                left: Some(out),
+            });
         }
         undo_here()?;
         return Err(if renewed_here {
@@ -413,10 +524,63 @@ pub fn send(
     let organizations = carry_organizations(&snapshot, account, &remote_id, &|args| {
         run(&ssh(remote(program, args)), None)
     });
-    Ok(json!({
+    let mut moved = json!({
         "moved": true, "target": target, "remote_id": remote_id, "marked_elsewhere": true,
         "sent": sent.as_deref().map(token_print), "organizations": organizations,
-    }))
+    });
+    if let Some(d) = delegate {
+        moved["delegated"] = json!({"lease_hours": d.lease_hours});
+    }
+    Ok(moved)
+}
+
+/// SB-403: a delegated seat joins one of the other machine's groups, never its default group.
+pub const DELEGATE_INTO_GROUP: &str = "A delegated seat joins one of the other machine's groups. Name that group; the default group takes none.";
+/// SB-403: the other machine's restricted entry takes only delegated seats.
+pub const DELEGATE_ONLY: &str = "That machine takes seats only as delegated ones. Move it again as a delegated seat (accounts send --delegate).";
+/// SB-403: the seat's lease had run out there: its copy was removed, and the sign-in this machine
+/// kept since the move did not answer here.
+pub const LEASE_ENDED_SIGN_IN: &str = "The other machine removed the seat's sign-in 30 days after its lease ran out. The sign-in kept here did not answer; sign in to this account again.";
+/// SB-403: a lease extension the other machine refused or did not answer; the read goes on.
+pub const LEASE_NOT_EXTENDED: &str = "The other machine did not extend the seat's lease.";
+
+/// SB-403: extends the lease of one delegated seat on the other machine to `hours` from now.
+pub fn extend_lease(
+    target: &str,
+    remote_id: &str,
+    hours: u32,
+    sender_key: &str,
+    program: &Program<'_>,
+    run: &Run<'_>,
+) -> Result<Value, String> {
+    if !target_valid(target) {
+        return Err(TARGET_INVALID.into());
+    }
+    program.check()?;
+    let hours = hours.to_string();
+    let output = match run(
+        &[
+            target.to_owned(),
+            "--".to_owned(),
+            remote(
+                program,
+                &[
+                    "--json",
+                    "accounts",
+                    "lease",
+                    remote_id,
+                    "--hours",
+                    &hours,
+                    "--sender-key",
+                    sender_key,
+                ],
+            ),
+        ],
+        None,
+    ) {
+        Ok(out) | Err(out) => out,
+    };
+    data(&output).ok_or_else(|| refusal(&output).unwrap_or_else(|| LEASE_NOT_EXTENDED.into()))
 }
 
 /// SB-323: an organization the other machine could not take or place the account in.
@@ -493,6 +657,11 @@ pub fn surrender(
     now: i64,
     settle: &dyn Fn(&str),
 ) -> Result<Value, String> {
+    // SB-403: a seat delegated here goes back only to the machine that delegated it, through
+    // this machine's restricted entry (`surrender_delegated`).
+    if store.snapshot()?.is_delegated(id) {
+        return Err(switchboard_core::delegation::DELEGATED_NOT_SENT.into());
+    }
     if undo {
         // SB-312: only the mark a surrender set is taken back, never one a move or a person set.
         let snapshot = store.snapshot()?;
@@ -568,6 +737,45 @@ pub fn surrender(
     )
 }
 
+/// SB-403 (DEC-0025), on the machine a seat was delegated to, through `ssh-serve`: gives the
+/// seat's sign-in back to the machine whose key delegated it. The seat is switched off first, so
+/// this machine never renews it again; a seat whose lease ran out answers `lease_ended` and no
+/// sign-in. `undo` switches it on again when the caller could not take it.
+pub fn surrender_delegated(
+    store: &Store,
+    id: &str,
+    sender_key: &str,
+    undo: bool,
+    settle: &dyn Fn(&str),
+) -> Result<Value, String> {
+    if undo {
+        store.surrender_delegated(id, sender_key, true)?;
+        return Ok(json!({"restored": true}));
+    }
+    let provider = store
+        .snapshot()?
+        .accounts
+        .iter()
+        .find(|a| a.id == id)
+        .map(|a| a.provider)
+        .ok_or(switchboard_core::delegation::NOT_DELEGATED_BY_YOU)?;
+    let Some(credential) = store.surrender_delegated(id, sender_key, false)? else {
+        return Ok(
+            json!({"provider": provider.as_str(), "credential": null, "lease_ended": true,
+            "groups_left_without_account": []}),
+        );
+    };
+    if let Some(token) = credential.refresh_token.as_deref() {
+        settle(token);
+    }
+    // A renewal that was on the network when it was switched off has stored its successor.
+    let credential = store.stored_credential(id)?;
+    let tokens: Value =
+        serde_json::from_str(&credential.to_oauth_json(provider)).unwrap_or(Value::Null);
+    Ok(json!({"provider": provider.as_str(), "credential": tokens,
+        "groups_left_without_account": []}))
+}
+
 /// Takes a surrender's mark back: used here again, and off again when it was off.
 fn restore(store: &Store, id: &str, was_off: bool, now: i64) -> Result<(), String> {
     store.mark_elsewhere(id, false, now)?;
@@ -594,6 +802,12 @@ pub struct Taken {
     /// SB-377: the sign-in this machine held when it changed after the move (its print no longer
     /// the one sent), kept aside: when the copy brought back does not answer, this one is tried.
     pub kept: Option<Credential>,
+    /// SB-403: the other machine held a delegated seat whose lease had run out: it had removed
+    /// its copy, so nothing came back and the sign-in kept here is the one asked.
+    pub lease_ended: bool,
+    /// SB-403: the key that delegated the seat there (this machine's), named in every call that
+    /// acts on it there; None for a plain move.
+    pub sender_key: Option<String>,
 }
 
 /// SB-292 (S-3), on this machine: take the sign-in of an account this machine moved away
@@ -610,6 +824,30 @@ pub fn recall_take(
     now: i64,
     run: &Run<'_>,
     sent: Option<&str>,
+) -> Result<Taken, String> {
+    recall_take_as(store, id, target, remote_id, program, now, run, sent, None)
+}
+/// The words that name a delegated seat's sender to the other machine (SB-403): its restricted
+/// entry acts on a seat only for the key that delegated it.
+fn as_sender<'a>(words: &[&'a str], sender_key: Option<&'a str>) -> Vec<&'a str> {
+    let mut words = words.to_vec();
+    if let Some(key) = sender_key {
+        words.extend(["--sender-key", key]);
+    }
+    words
+}
+/// [`recall_take`] of a seat this machine delegated (`sender_key`, SB-403); None as before.
+#[allow(clippy::too_many_arguments)]
+pub fn recall_take_as(
+    store: &Store,
+    id: &str,
+    target: &str,
+    remote_id: &str,
+    program: &Program<'_>,
+    now: i64,
+    run: &Run<'_>,
+    sent: Option<&str>,
+    sender_key: Option<&str>,
 ) -> Result<Taken, String> {
     if !target_valid(target) {
         return Err(TARGET_INVALID.into());
@@ -651,7 +889,10 @@ pub fn recall_take(
         let _ = run(
             &ssh(remote(
                 program,
-                &["--json", "accounts", "surrender", remote_id, "--undo"],
+                &as_sender(
+                    &["--json", "accounts", "surrender", remote_id, "--undo"],
+                    sender_key,
+                ),
             )),
             None,
         );
@@ -659,7 +900,7 @@ pub fn recall_take(
     let answer = run(
         &ssh(remote(
             program,
-            &["--json", "accounts", "surrender", remote_id],
+            &as_sender(&["--json", "accounts", "surrender", remote_id], sender_key),
         )),
         None,
     );
@@ -679,6 +920,18 @@ pub fn recall_take(
         undo_there();
         return Err(SURRENDER_FAILED.into());
     };
+    // SB-403: a delegated seat whose lease ran out there holds no sign-in any more; the one kept
+    // here since the move is the one asked.
+    if given["lease_ended"] == true {
+        store.mark_elsewhere(id, false, now)?;
+        return Ok(Taken {
+            remote_id: remote_id.to_owned(),
+            token: Some(spent),
+            kept: None,
+            lease_ended: true,
+            sender_key: sender_key.map(str::to_owned),
+        });
+    }
     let tokens = given["credential"].to_string();
     let Ok(credential) = Credential::parse(provider, AuthKind::OAuth, &tokens) else {
         undo_there();
@@ -696,6 +949,8 @@ pub fn recall_take(
         remote_id: remote_id.to_owned(),
         token: credential.refresh_token.clone(),
         kept,
+        lease_ended: false,
+        sender_key: sender_key.map(str::to_owned),
     })
 }
 
@@ -713,13 +968,16 @@ pub fn recall_undo(
     store.mark_elsewhere_at(id, true, now, Some(target))?;
     let command = remote(
         program,
-        &[
-            "--json",
-            "accounts",
-            "surrender",
-            &taken.remote_id,
-            "--undo",
-        ],
+        &as_sender(
+            &[
+                "--json",
+                "accounts",
+                "surrender",
+                &taken.remote_id,
+                "--undo",
+            ],
+            taken.sender_key.as_deref(),
+        ),
     );
     let _ = run(&[target.to_owned(), "--".to_owned(), command], None);
     Ok(())
@@ -732,7 +990,10 @@ pub fn recall_finish(target: &str, taken: &Taken, program: &Program<'_>, run: &R
     let removed = run(
         &ssh(remote(
             program,
-            &["--json", "accounts", "remove", &taken.remote_id],
+            &as_sender(
+                &["--json", "accounts", "remove", &taken.remote_id],
+                taken.sender_key.as_deref(),
+            ),
         )),
         None,
     )
@@ -1993,6 +2254,396 @@ mod tests {
             .err()
             .unwrap(),
             NO_REMOTE_ID
+        );
+    }
+
+    /// SB-403: the words a fake ssh was given, unquoted (no word here holds a quote).
+    fn unquoted(command: &str) -> Vec<String> {
+        command
+            .trim_matches('\'')
+            .split("' '")
+            .map(str::to_owned)
+            .collect()
+    }
+    fn after<'a>(words: &'a [String], flag: &str) -> Option<&'a str> {
+        let at = words.iter().position(|w| w == flag)?;
+        words.get(at + 1).map(String::as_str)
+    }
+
+    /// SB-403 (DEC-0025): a delegated seat goes to the other machine as a guest pinned to this
+    /// machine's key, and comes back only to that key. The other machine is a second store, which
+    /// the fake ssh drives as that machine's `ssh-serve` would.
+    #[test]
+    fn a_delegated_seat_goes_there_as_a_guest_and_comes_back_only_to_its_sender() {
+        const KEY: &str = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=";
+        let (_root, store, id) = store_with(AuthKind::OAuth);
+        let there_root = tempfile::tempdir().unwrap();
+        let folder = tempfile::tempdir().unwrap();
+        let there = Store::open(
+            there_root.path().to_owned(),
+            Arc::new(MemoryVault::default()),
+        )
+        .unwrap();
+        let folder = std::fs::canonicalize(folder.path()).unwrap();
+        let group = there.save_project(None, "Org", &[folder], &[]).unwrap();
+        let calls: Calls = Default::default();
+        let run = |args: &[String], stdin: Option<&[u8]>| -> Result<String, String> {
+            let words = unquoted(&args[2]);
+            calls.lock().unwrap().push((args[2].clone(), None));
+            let w: Vec<&str> = words.iter().skip(2).map(String::as_str).collect();
+            let answer = |data: Value| Ok(json!({"ok": true, "data": data}).to_string());
+            let refused = |e: String| Err(json!({"ok": false, "error": e}).to_string());
+            match w.as_slice() {
+                ["project", "list"] => answer(json!({"projects": [{"pool": group.pool}]})),
+                ["accounts", "list"] => answer(json!({"accounts": there
+                    .snapshot()
+                    .unwrap()
+                    .accounts
+                    .iter()
+                    .map(|a| json!({"id": a.id}))
+                    .collect::<Vec<_>>()})),
+                ["accounts", "add", ..] => {
+                    assert_eq!(after(&words, "--sender-key"), Some(KEY));
+                    assert!(words.iter().any(|w| w == "--delegated"));
+                    let hours: u32 = after(&words, "--lease-hours").unwrap().parse().unwrap();
+                    let credential = Credential::parse(
+                        Provider::Claude,
+                        AuthKind::OAuth,
+                        std::str::from_utf8(stdin.unwrap()).unwrap(),
+                    )
+                    .unwrap();
+                    match there.add_delegated(
+                        "seat".into(),
+                        Provider::Claude,
+                        after(&words, "--pool").unwrap().into(),
+                        credential,
+                        KEY,
+                        None,
+                        hours,
+                    ) {
+                        Ok(a) => answer(json!({"id": a.id})),
+                        Err(e) => refused(e),
+                    }
+                }
+                ["usage", _] => answer(json!({})),
+                ["accounts", "surrender", remote, ..] => {
+                    match surrender_delegated(
+                        &there,
+                        remote,
+                        after(&words, "--sender-key").unwrap_or(""),
+                        words.iter().any(|w| w == "--undo"),
+                        &|_| {},
+                    ) {
+                        Ok(v) => answer(v),
+                        Err(e) => refused(e),
+                    }
+                }
+                ["accounts", "remove", remote, ..] => {
+                    match there
+                        .remove_delegated(remote, after(&words, "--sender-key").unwrap_or(""))
+                    {
+                        Ok(()) => answer(json!({"removed": true})),
+                        Err(e) => refused(e),
+                    }
+                }
+                _ => Ok(r#"{"ok":true,"data":null}"#.into()),
+            }
+        };
+        let delegate = Delegate {
+            sender_key: KEY,
+            lease_hours: 48,
+        };
+        // Never into the other machine's default group.
+        assert_eq!(
+            send_as(
+                &store,
+                &id,
+                "studio.local",
+                "default",
+                &DEFAULT_APP,
+                100,
+                &run,
+                &|_| {},
+                Some(delegate)
+            )
+            .unwrap_err(),
+            DELEGATE_INTO_GROUP
+        );
+        let moved = send_as(
+            &store,
+            &id,
+            "studio.local",
+            &group.pool,
+            &DEFAULT_APP,
+            100,
+            &run,
+            &|_| {},
+            Some(delegate),
+        )
+        .unwrap();
+        assert_eq!(moved["delegated"]["lease_hours"], 48);
+        let remote_id = moved["remote_id"].as_str().unwrap().to_owned();
+        let guest = there.snapshot().unwrap();
+        assert!(guest.is_delegated(&remote_id));
+        // There, the guest is never moved on.
+        assert_eq!(
+            send(
+                &there,
+                &remote_id,
+                "x.local",
+                "agents",
+                &DEFAULT_APP,
+                100,
+                &run,
+                &|_| {}
+            )
+            .unwrap_err(),
+            switchboard_core::delegation::DELEGATED_NOT_SENT
+        );
+        // A call back without the key is refused there; with it, the seat comes home.
+        assert!(recall_take(
+            &store,
+            &id,
+            "studio.local",
+            &remote_id,
+            &DEFAULT_APP,
+            200,
+            &run,
+            None
+        )
+        .is_err());
+        let taken = recall_take_as(
+            &store,
+            &id,
+            "studio.local",
+            &remote_id,
+            &DEFAULT_APP,
+            200,
+            &run,
+            None,
+            Some(KEY),
+        )
+        .unwrap();
+        assert!(!taken.lease_ended);
+        assert!(
+            !there.snapshot().unwrap().accounts[0].enabled,
+            "switched off there"
+        );
+        let done = recall_finish("studio.local", &taken, &DEFAULT_APP, &run);
+        assert_eq!(done["proved"], true);
+        assert!(there.snapshot().unwrap().accounts.is_empty());
+        assert!(
+            calls
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|(c, _)| c
+                    .contains(&format!("'surrender' '{remote_id}' '--sender-key' '{KEY}'")))
+        );
+    }
+
+    /// SB-403 (review P1-2): a delegated move whose check fails there removes the copy there
+    /// under the key it was delegated under (the restricted entry refuses a removal without it),
+    /// so no guest is left running there for its lease.
+    #[test]
+    fn a_delegated_move_that_fails_its_check_removes_the_copy_there_under_its_key() {
+        let (_root, store, id) = store_with(AuthKind::OAuth);
+        let calls: Calls = Default::default();
+        let err = send_as(
+            &store,
+            &id,
+            "studio.local",
+            "agents",
+            &DEFAULT_APP,
+            100,
+            &fake(&calls, true, false),
+            &|_| {},
+            Some(Delegate {
+                sender_key: "K",
+                lease_hours: 48,
+            }),
+        )
+        .unwrap_err();
+        assert_eq!(err, NOT_VERIFIED);
+        assert!(calls
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|(c, _)| c.contains("'accounts' 'remove' 'remote-1' '--sender-key' 'K'")));
+        assert!(!store.snapshot().unwrap().elsewhere.contains_key(&id));
+        // Review round 2, P2-B: when the removal there fails too, the seat is recorded under its
+        // key, so a call back finds it and takes the sign-in back.
+        const KEY: &str = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=";
+        let calls: Calls = Default::default();
+        let failing = |args: &[String], stdin: Option<&[u8]>| {
+            if args[2].contains("'accounts' 'remove'") {
+                return Err("ssh failed.".to_string());
+            }
+            if args[2].contains("'accounts' 'add'") {
+                return Ok(r#"{"ok":true,"data":{"id":"0a1b2c3d"}}"#.to_string());
+            }
+            fake(&calls, true, false)(args, stdin)
+        };
+        assert_eq!(
+            send_as(
+                &store,
+                &id,
+                "studio.local",
+                "agents",
+                &DEFAULT_APP,
+                100,
+                &failing,
+                &|_| {},
+                Some(Delegate {
+                    sender_key: KEY,
+                    lease_hours: 48,
+                }),
+            )
+            .unwrap_err(),
+            LEFT_THERE_DELEGATED
+        );
+        assert!(LEFT_THERE_DELEGATED.contains("accounts recall"));
+        let snapshot = store.snapshot().unwrap();
+        assert!(snapshot.elsewhere.contains_key(&id));
+        let out = &snapshot.delegated_out[&id];
+        assert_eq!(out.remote_id, "0a1b2c3d");
+        assert_eq!(out.lease_hours, 48);
+        assert_eq!(out.sender_key, KEY);
+        assert_eq!(
+            out.sent.as_deref(),
+            Some(token_print("synthetic-refresh").as_str())
+        );
+    }
+
+    /// Review round 3: a delegated copy left there after this machine renewed the sign-in while
+    /// it moved (P2-3) carries the print of the token sent, so the call back keeps the live
+    /// sign-in renewed here aside instead of losing it to the spent copy there; taking it back
+    /// clears the record (P2-1).
+    #[test]
+    fn a_copy_left_there_after_a_renewal_here_is_called_back_keeping_the_live_sign_in() {
+        const KEY: &str = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=";
+        let (_root, store, id) = store_with(AuthKind::OAuth);
+        let calls: Calls = Default::default();
+        let spent = Credential {
+            access_token: "synthetic-access".into(),
+            refresh_token: Some("synthetic-refresh".into()),
+            id_token: None,
+            native_context: None,
+            expires_at: Some(2_000_000_000),
+            account_id: Some("synthetic-account".into()),
+        };
+        let renewing = studio(&calls, None, |command| {
+            if command.contains("'accounts' 'add'") {
+                let successor = Credential {
+                    access_token: "synthetic-access-2".into(),
+                    refresh_token: Some("synthetic-refresh-2".into()),
+                    id_token: None,
+                    native_context: None,
+                    expires_at: Some(2_000_000_100),
+                    account_id: Some("synthetic-account".into()),
+                };
+                store
+                    .adopt_refreshed(Provider::Claude, "synthetic-refresh", &successor)
+                    .unwrap();
+                return Ok(r#"{"ok":true,"data":{"id":"0a1b2c3d"}}"#.into());
+            }
+            if command.contains("'accounts' 'remove'") {
+                return Err("ssh failed.".into());
+            }
+            Ok(r#"{"ok":true,"data":{}}"#.into())
+        });
+        let err = send_with(
+            &store,
+            &id,
+            "studio.local",
+            "agents",
+            &DEFAULT_APP,
+            1,
+            &renewing,
+            &|_| {},
+            Some(Delegate {
+                sender_key: KEY,
+                lease_hours: 48,
+            }),
+        )
+        .unwrap_err();
+        assert_eq!(err.message, LEFT_THERE_DELEGATED);
+        let left = err.left.expect("the seat left there");
+        assert_eq!(left.remote_id, "0a1b2c3d");
+        assert_eq!(
+            left.sent.as_deref(),
+            Some(token_print("synthetic-refresh").as_str())
+        );
+        assert_eq!(store.snapshot().unwrap().delegated_out[&id], left);
+        // The call back: the copy there is the spent one; the live one here is kept aside.
+        let tokens = spent.to_oauth_json(Provider::Claude);
+        let give = |args: &[String], _: Option<&[u8]>| -> Result<String, String> {
+            assert!(
+                args[2].contains(&format!("'--sender-key' '{KEY}'")),
+                "{}",
+                args[2]
+            );
+            Ok(format!(
+                r#"{{"ok":true,"data":{{"provider":"claude","credential":{tokens}}}}}"#
+            ))
+        };
+        let taken = recall_take_as(
+            &store,
+            &id,
+            "studio.local",
+            &left.remote_id,
+            &DEFAULT_APP,
+            2,
+            &give,
+            left.sent.as_deref(),
+            Some(KEY),
+        )
+        .unwrap();
+        assert_eq!(
+            taken.kept.and_then(|c| c.refresh_token).as_deref(),
+            Some("synthetic-refresh-2")
+        );
+        let snapshot = store.snapshot().unwrap();
+        assert!(!snapshot.elsewhere.contains_key(&id));
+        assert!(snapshot.delegated_out.is_empty());
+    }
+
+    /// SB-403: a seat whose lease ran out there answers no sign-in; the one kept here is asked.
+    #[test]
+    fn a_call_back_after_the_lease_ran_out_keeps_the_sign_in_kept_here() {
+        let (_root, store, id) = store_with(AuthKind::OAuth);
+        store
+            .mark_elsewhere_at(&id, true, 100, Some("studio.local"))
+            .unwrap();
+        let run = |args: &[String], _: Option<&[u8]>| -> Result<String, String> {
+            assert!(args[2].contains("'--sender-key' 'K'"), "{}", args[2]);
+            Ok(
+                r#"{"ok":true,"data":{"provider":"claude","credential":null,"lease_ended":true}}"#
+                    .into(),
+            )
+        };
+        let taken = recall_take_as(
+            &store,
+            &id,
+            "studio.local",
+            "r1",
+            &DEFAULT_APP,
+            200,
+            &run,
+            None,
+            Some("K"),
+        )
+        .unwrap();
+        assert!(taken.lease_ended);
+        assert_eq!(taken.token.as_deref(), Some("synthetic-refresh"));
+        assert!(!store.snapshot().unwrap().elsewhere.contains_key(&id));
+        assert_eq!(
+            store
+                .stored_credential(&id)
+                .unwrap()
+                .refresh_token
+                .as_deref(),
+            Some("synthetic-refresh")
         );
     }
 }

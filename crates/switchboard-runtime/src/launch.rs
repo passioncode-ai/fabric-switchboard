@@ -1537,6 +1537,7 @@ pub(crate) fn serving_pool(
 }
 /// SB-401: a pay-per-token key launched with its credential in the session's own home would
 /// reach the provider directly, past the daily ceiling the proxy checks.
+pub(crate) const DELEGATED_ISOLATED: &str = "A seat another machine delegated runs only through Switchboard, in its group's folders. Launch it in managed mode.";
 pub(crate) const TOKENS_ISOLATED: &str = "A pay-per-token key runs only through Switchboard, where its daily ceiling is checked. Launch it in managed mode.";
 /// SB-401: a Claude API key from before the pay-per-token group, outside it: no ceiling holds it.
 pub(crate) use switchboard_core::KEY_OUTSIDE_TOKENS;
@@ -1584,6 +1585,11 @@ pub(crate) fn group_allows_launch(
     }
     if switchboard_core::Snapshot::is_claude_key(account) && mode != "managed" {
         return Err(TOKENS_ISOLATED.into());
+    }
+    // SB-403: a seat another machine delegated serves its group's managed sessions only; an
+    // isolated home would hold its sign-in outside the group and outside its lease.
+    if snapshot.is_delegated(&account.id) && mode != "managed" {
+        return Err(DELEGATED_ISOLATED.into());
     }
     let Some(group) = snapshot.project_of_pool(&account.pool) else {
         return Ok(());
@@ -2922,8 +2928,11 @@ fn launch_core(
     if account.provider == Provider::Claude {
         crate::carry::claude_state(&home, continuation.map(|_| working_directory.as_path()))?;
         // SB-358: the person's MCP sign-ins (Figma, Sentry...) from their other Claude homes, as
-        // access-token mirrors; never a failure of the launch.
-        (host.mcp_sign_ins)(root, &home);
+        // access-token mirrors; never a failure of the launch. SB-403 S3: not while the person's
+        // own sign-in is off limits, since they live in the ordinary home's credential item.
+        if !crate::own_sign_in::is_off(root) {
+            (host.mcp_sign_ins)(root, &home);
+        }
         let settings_path = home.join("settings.json");
         let settings = crate::carry::claude_settings(user.as_deref(), None);
         // Managed: the account comes through the proxy, so the file holds only the operator's
@@ -6014,6 +6023,46 @@ mod tests {
         }
     }
     const CLAUDE_OAUTH: &str = r#"{"claudeAiOauth":{"accessToken":"synthetic-access","refreshToken":"synthetic-refresh-must-not-export"}}"#;
+    #[test]
+    fn a_delegated_seat_launches_only_in_managed_mode() {
+        // SB-403: an isolated home would hold a guest's sign-in outside its group and lease.
+        let root = tempfile::tempdir().unwrap();
+        let account = switchboard_core::Account {
+            id: "0b1edeee-4125-403c-9c12-44c6aadaeb2b".into(),
+            label: "seat".into(),
+            provider: Provider::Claude,
+            kind: AuthKind::OAuth,
+            pool: "org".into(),
+            enabled: true,
+            created_at: 1,
+            identity: None,
+            usage: None,
+            external_identity: None,
+            usage_health: None,
+        };
+        let mut snapshot = switchboard_core::Snapshot {
+            accounts: vec![account.clone()],
+            ..Default::default()
+        };
+        assert!(group_allows_launch(root.path(), &snapshot, &account, "isolated").is_ok());
+        snapshot.delegated.insert(
+            account.id.clone(),
+            switchboard_core::Delegation {
+                sender_key: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=".into(),
+                from: None,
+                pool: "org".into(),
+                granted_at: 1,
+                lease_until: 2,
+                ended_at: None,
+                purged_at: None,
+            },
+        );
+        assert_eq!(
+            group_allows_launch(root.path(), &snapshot, &account, "isolated").unwrap_err(),
+            DELEGATED_ISOLATED
+        );
+        assert!(group_allows_launch(root.path(), &snapshot, &account, "managed").is_ok());
+    }
     #[tokio::test]
     async fn isolated_claude_launch_writes_only_the_access_token_into_its_home() {
         let f = fixture();
@@ -6135,6 +6184,44 @@ mod tests {
                 EXTRA_ARGS_INVALID
             );
         }
+    }
+    #[cfg(not(windows))]
+    #[tokio::test]
+    async fn with_own_sign_in_off_a_launch_carries_no_mcp_sign_in() {
+        // SB-403 S3: the person's MCP sign-ins live in the ordinary Claude home's credential
+        // item; with their own sign-in off limits, a launch never reads it.
+        fn must_not_carry(_: &Path, _: &Path) {
+            panic!("a launch read the ordinary home's MCP sign-ins");
+        }
+        fn terminal_must_not_open(_: &Path) -> Result<(), String> {
+            panic!("an in-place launch opened Terminal");
+        }
+        let f = fixture();
+        crate::own_sign_in::set(&f.root, false).unwrap();
+        let proxy = ProxyHandle::start(f.store.clone()).await.unwrap();
+        let id = f.add(Provider::Claude, AuthKind::OAuth, "default", CLAUDE_OAUTH);
+        let host = Host {
+            binary: synthetic_program,
+            agent_cli: synthetic_agent_cli,
+            board: no_board,
+            start_terminal: terminal_must_not_open,
+            user_scope: no_user_scope,
+            mcp_sign_ins: must_not_carry,
+        };
+        let (_, script) = launch_full(
+            &f.root,
+            &f.store,
+            &proxy,
+            &id,
+            "isolated",
+            &f.project,
+            &host,
+            None,
+            &[],
+            true,
+        )
+        .unwrap();
+        assert!(script.is_some());
     }
     /// Runs an in-place session script with the provider program replaced by a recorder, and
     /// returns the arguments and environment the agent would have started with.

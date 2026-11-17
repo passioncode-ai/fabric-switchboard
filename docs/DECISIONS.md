@@ -6,7 +6,7 @@ never renumber, never delete. The doc map ([DOCMAP.md](DOCMAP.md)) names this fi
 register. Decisions made before 2026-11-08 live where they were made (plans' `D-<n>`, board rows,
 research notes); the ones still in force that the board cites are seeded below with their source.
 
-**Next free ID:** `DEC-0025` (`DEC-0018` and `DEC-0020` are held for the window and fleet plan's modules)
+**Next free ID:** `DEC-0026` (`DEC-0018` and `DEC-0020` are held for the window and fleet plan's modules)
 
 ## Format
 
@@ -644,3 +644,64 @@ research notes); the ones still in force that the board cites are seeded below w
   OpenAI keys wait for OpenAI prices in the proxy.
 - **Source:** the operator's words above (2026-11-17); branch `observatory-keys`.
 
+### DEC-0025: A subscription is delegated to a teammate's machine as a guest, under a lease
+
+- **Date:** 2026-11-17
+- **Status:** Accepted (built on branch `org-delegation`: SB-403 waves S2 to S4; the live run with a
+  teammate's machine, S5, waits for that machine)
+- **Context:** the operator wants a teammate's computer to use one of an organization's
+  subscriptions in console sessions through Switchboard, without the teammate ever signing in with
+  it, revocable at any time, more added later; the teammate keeps their own subscription in Claude
+  Desktop, which Switchboard must never touch. `accounts send` already moved a sign-in over ssh
+  (SB-283), but over an ssh account that reached a shell, into an account the receiver could pass
+  on, with nothing that ends it while the operator's machine cannot reach the teammate's.
+- **Decision:**
+  - The delegation rides `accounts send --delegate` over ssh into a group of the teammate's
+    machine (D-1 of the [plan](plans/2026-11-17-org-seat-delegation/README.md)). The teammate's
+    machine admits the operator's ssh key only with the forced command `'<program>' ssh-serve
+    --sender-key KEY --pool GROUP` (the path quoted, `restrict`, replacing any older line for that
+    key), which answers exactly the calls a delegation into that one group needs (save, prove,
+    lists cut to the caller's seats, that group and its organizations, usage, lease, call back,
+    removal), never a shell, and refuses a plain move. The receiver's seat operations are sent
+    only by it: the local CLI, MCP and window never send them; a process holding the control token
+    can, with the same trust as the person's own Keychain; against an uncooperative teammate the
+    real revocation is signing the subscription out at the provider. `ssh-serve` carries no proof
+    of its own beyond that token, since any secret it held would be readable by the same
+    processes.
+  - The saved account is a guest: it carries the sender's settings signing key and its group; it
+    stays in that group, never `default`; it is never sent on, handed over, given to an agent,
+    lent, shared, marked elsewhere or made the ordinary sign-in; only a call naming that key
+    calls it back or removes it. The rules are checked on every publication of the store, so a
+    path that forgets them fails closed. A backup never carries a guest.
+  - A lease bounds it: 48 hours by default, 1 to 720. The sender's background read of the machine
+    (DEC-0017, every 15 minutes) extends it. Past it, the receiver stops renewing at once and,
+    once its own owner ran 15 minutes past both the lease and its own start, switches the seat
+    off and cleans its homes, but keeps its credential, the only live copy (the receiver's
+    renewals rotate the refresh token): the sender's next read revives it, and a call back takes
+    it. Thirty days after the lease ended the credential is removed; a call back then asks the
+    sign-in the sender kept, which is spent if the receiver had renewed it. Review round 1
+    (2026-11-17) chose this over deleting at once, which a closed laptop over a weekend was enough
+    to trigger and which lost the organization's sign-in; the sender does not pull tokens at each
+    read (one live copy at a time, fewer tokens on the wire).
+  - Threat model: the teammate owns the receiving machine. The rules keep an honest Switchboard
+    from passing a guest on, using it outside its group or keeping it after a call back; they do
+    not stop a person who reads their own Keychain. Against an uncooperative teammate the
+    revocation is signing the subscription out at the provider.
+  - A switch keeps Switchboard off the person's own sign-in (`own-sign-in off`): the ordinary
+    Claude Code and Codex sign-in is never read or written (source sync, capture, import,
+    activation, renewal, Claude Swap), a launch copies no MCP sign-in out of it, and the duty
+    officer leaves the person's own sessions alone. Claude Desktop is outside Switchboard either
+    way; no code names its bundle, data folder or Keychain item.
+- **Consequences / affects:** [CONTRACTS](CONTRACTS.md#delegated-seats-and-the-own-sign-in-switch-sb-403-s2-to-s4-dec-0025-2026-11-17),
+  [ORGANIZATION.md](ORGANIZATION.md#a-teammates-computer) and its Russian twin, [CLI.md](CLI.md)
+  (`accounts send --delegate`, `accounts lease`, `own-sign-in`, `ssh-serve`), the skill's
+  [tools reference](../plugins/switchboard/skills/switching-accounts/references/tools.md),
+  [ux/scenarios.md](ux/scenarios.md) (SCN-102, SCN-103), [brand/strings.md](brand/strings.md),
+  `AGENTS.md` Lifecycle (the lease calls, `own-sign-in`), [CHANGELOG](../CHANGELOG.md),
+  [evidence/backlog.md](evidence/backlog.md) (SB-403).
+- **Source:** operator 2026-11-17, quoted in the [plan](plans/2026-11-17-org-seat-delegation/README.md):
+  «он хочет себе подключить вторую подписку … у него добавится подписки организации, которые
+  делегированы ему … и отзыв этой подписки … чтобы [a teammate] на своей машине мог ей
+  пользоваться, но по факту авторизоваться он типа не будет с ней»; «[a teammate] может
+  использовать Claude Desktop для своей обычной стандартной подписки … убедиться, что мы не
+  трогаем сессии для десктопного Claude Code».

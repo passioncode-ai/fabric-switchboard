@@ -327,6 +327,8 @@ pub(crate) fn come_home(s: &mut Snapshot, id: &str, to: Option<&str>) -> Option<
         a.pool = home.clone();
     }
     s.returns_to.remove(id);
+    // SB-403: back here, it is no longer delegated anywhere.
+    s.delegated_out.remove(id);
     append_event(s, "machine", Some(id), "left");
     Some(home)
 }
