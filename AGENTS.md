@@ -43,7 +43,8 @@ Start at [docs/HANDOFF.md](docs/HANDOFF.md). [docs/DOCMAP.md](docs/DOCMAP.md) sa
 | What | Command |
 |---|---|
 | Install | `npm ci` (once after checkout) |
-| Test (the gate) | `./scripts/check.sh` |
+| Test (the gate) | `./scripts/check.sh` (prints `step <name> <seconds>s` per step and the total) |
+| Test inventory | `python3 scripts/test_names.py --write` on macOS after removing or renaming a Rust test: the gate fails when a name in `scripts/test-names.txt` is gone |
 | Build | `npm run app:build` (app); `cargo build --release --locked -p switchboard-cli` (CLI) |
 | MCP (register + proving call) | `claude mcp add --scope user switchboard -- switchboard mcp`; proving call `switchboard_accounts` through a real client — [README → Quick start](README.md#quick-start-for-a-new-teammate) |
 

@@ -212,7 +212,7 @@ pub fn steps(probe: &Probe) -> Value {
             "project",
             "optional",
             format!(
-                "{} is in no group yet: its sessions use the default group. A repository a group's agents create or work in joins that group by itself; to put this one in a group, name the group.",
+                "{} is in no group yet: its sessions use the default group. A worktree or clone a group's agents create joins that group by itself, but working in a folder never adds it; to put this one in a group, name the group.",
                 folder.display()
             ),
             json!({

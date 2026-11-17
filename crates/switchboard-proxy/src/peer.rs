@@ -39,14 +39,16 @@ fn owner_on(local_port: u16, peer_port: u16) -> Option<u32> {
 /// SB-330: offsets inside `struct socket_fdinfo` (`sys/proc_info.h`: `proc_fileinfo`, then
 /// `socket_info`), as `PROC_PIDFDSOCKETINFO` answers it: the TCP socket's foreign and local
 /// ports, each in network order at the start of an `int` of `in_sockinfo`. Read on macOS 26.6
-/// and 27.2 (792-byte answers); a live test reads a socket of another process back.
+/// and 27.2 (792-byte answers); a live test reads a socket of another process back. The module is
+/// built for tests on every OS, Windows included, where `libc` is not a dependency, so its C type
+/// comes from `std::ffi` (the same `i32` as `libc::c_int` on macOS; SB-406 item 7).
 #[cfg(any(target_os = "macos", test))]
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 mod fdinfo {
     pub const FPORT: usize = 264;
     pub const LPORT: usize = 268;
     pub const MIN_LEN: usize = 272;
-    pub const PROC_PIDFDSOCKETINFO: libc::c_int = 3;
+    pub const PROC_PIDFDSOCKETINFO: std::ffi::c_int = 3;
     pub const PROC_UID_ONLY: u32 = 4;
 }
 

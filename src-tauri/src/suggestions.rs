@@ -99,12 +99,12 @@ pub fn shell_hook_text(organization: &str, group: &str, ru: bool) -> (String, St
     if ru {
         (
             format!("Терминалы в папках {organization} теперь работают в контексте этой организации"),
-            format!("Новые терминалы в папках группы «{group}» запускают claude и codex на аккаунтах {organization} и с историей этой организации. Выключить это можно на странице «Группы»."),
+            format!("Новые терминалы в папках группы «{group}» запускают claude и codex на аккаунтах {organization} и с историей этой организации. Выключить это можно в настройках."),
         )
     } else {
         (
             format!("Terminals now work in {organization}'s context in its folders"),
-            format!("New terminals opened in {group}'s folders run claude and codex on {organization}'s accounts and history. Turn this off under Groups."),
+            format!("New terminals opened in {group}'s folders run claude and codex on {organization}'s accounts and history. Turn this off in Settings."),
         )
     }
 }
@@ -402,10 +402,10 @@ mod tests {
     fn the_shell_hook_notice_names_the_organization_and_the_way_out() {
         let (title, body) = shell_hook_text("Acme", "Acme web", false);
         assert_eq!(title, "Terminals now work in Acme's context in its folders");
-        assert_eq!(body, "New terminals opened in Acme web's folders run claude and codex on Acme's accounts and history. Turn this off under Groups.");
+        assert_eq!(body, "New terminals opened in Acme web's folders run claude and codex on Acme's accounts and history. Turn this off in Settings.");
         let (title, body) = shell_hook_text("Acme", "Acme web", true);
         assert!(title.contains("Acme"));
-        assert!(body.contains("Acme web") && body.contains("«Группы»"));
+        assert!(body.contains("Acme web") && body.contains("в настройках"));
         for text in [title, body] {
             assert!(!text.contains('\u{2014}'), "no dash");
         }

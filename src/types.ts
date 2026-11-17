@@ -356,7 +356,7 @@ export interface SessionsEverywhere { here: SessionRows; machines: MachineSessio
 /** SB-378: `switchboard capacity`, this computer's cap on working coding sessions. */
 /** SB-403 S3 (DEC-0025): the person's own sign-in, read and changed by Switchboard or off limits. */
 export interface OwnSignIn { own_sign_in: 'on' | 'off'; on: boolean }
-/** SB-384 (DEC-0018): the session duty officer. */
+/** SB-384 (DEC-0021): the session duty officer. */
 export interface DutySettings { on: boolean; stuck_minutes: number; waiting_minutes: number; idle_minutes: number; max_age_hours: number }
 export interface DutyLine { at?: number; /** SB-407: `dispatch_stop`, a board run stopped at its deadline (`by: duty`) or by a person. */ action: 'restart' | 'close' | 'dispatch_stop'; reason: string; outcome?: string; session?: string; folder: string; pid?: number; host?: string; by?: string; launch_id?: string }
 /** SB-392 K-1: one key an agent can start on, by name; never a value. */
