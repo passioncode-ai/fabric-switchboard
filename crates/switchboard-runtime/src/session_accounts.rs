@@ -3,7 +3,7 @@
 //! the launch each launched home's marker (`.session-pid`) names.
 use fabric_sessions_core::accounts::Accounts;
 use serde_json::Value;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 /// Switchboard's data folder, asked as an account manager.
@@ -52,6 +52,27 @@ impl Accounts for Homes<'_> {
         for (launch, pid) in crate::session_host::live_hosts(self.root) {
             found.entry(pid).or_insert(launch);
         }
+        found
+    }
+    /// SB-417: the scan's launches Fabric started (`launched_by.surface: fabric`: a dispatch or a
+    /// hosted console Fabric opened) that have not ended, and the dispatched runs the owner
+    /// watches (`dispatches.json`) that have not ended.
+    fn board_launches(&self, live: &[String]) -> HashSet<String> {
+        let mut found: HashSet<String> = live
+            .iter()
+            .filter(|id| crate::launches::board_run_live(self.root, id))
+            .cloned()
+            .collect();
+        found.extend(crate::dispatch::live_runs(self.root));
+        // Review round 2: a hosted run Fabric asked for counts from its host's start, before
+        // the scan sees its agent.
+        #[cfg(unix)]
+        found.extend(
+            crate::session_host::live_hosts(self.root)
+                .into_iter()
+                .map(|(launch, _)| launch)
+                .filter(|launch| crate::launches::board_run_live(self.root, launch)),
+        );
         found
     }
     fn open_terminal(&self, script: &Path) -> Result<(), String> {

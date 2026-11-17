@@ -335,6 +335,7 @@ export function createDemoAdapter(): Adapter {
   // SB-352 wave 2 (SCN-090): balancing, off until the person turns a group on; with two groups
   // on, the demo shows one account lent between them.
   let demoCap: number | null = null;
+  let demoBoard: number | null = null;
   let demoDutyOn = true;
   let demoOwnSignIn = true;
   let balanceGroups: string[] = []; let balanceAllNew = false; let balanceBackup: string[] = [];
@@ -762,17 +763,22 @@ export function createDemoAdapter(): Adapter {
         ],
         counts: { live: 3, working: 2, quiet: 1, managed: 2, by_pool: { 'alpha-web': 2, unmanaged: 1 }, by_surface: { fabric: 1, fallback: 1, unmanaged: 1 } },
         findings: [{ kind: 'gone', launch_id: 'L-gone', folder: '/Users/demo/work/tools-cli' }],
-        capacity: { cap: demoCap, used: 2, free: demoCap === null ? null : Math.max(0, demoCap - 2), at_capacity: demoCap !== null && demoCap <= 2, total: 3, quiet: 1, quiet_after_minutes: 30 },
+        capacity: { cap: demoCap, used: 2, free: demoCap === null ? null : Math.max(0, demoCap - 2), at_capacity: demoCap !== null && demoCap <= 2, total: 3, quiet: 1, quiet_after_minutes: 30, on_limit_stop: 0, on_waits: 0, board_share: demoCap === null ? null : (demoBoard ?? Math.max(2, Math.floor(demoCap / 4))), board_share_set: demoBoard !== null, board_used: 1, board_admitted: true, waiting: 0, refused_waiting: null },
         // SB-382: the first organization's folders, when the demo has one.
         context: { hook: 'default_on' as const, map: 'read', organizations: state.organizations?.[0] ? [{ context: `org:${state.organizations[0].id}`, live: 2, managed: 1, other: 1 }] : [] },
       };
     },
     async capacity(change) {
-      if (change?.clear) demoCap = null;
-      else if (typeof change?.cap === 'number') { if (!Number.isInteger(change.cap) || change.cap < 1 || change.cap > 500) throw new Error('Give the session limit as a whole number from 1 to 500.'); demoCap = change.cap; }
-      // The same two working sessions the demo's session tree shows.
+      if (change?.clear) { demoCap = null; demoBoard = null; }
+      else if (typeof change?.cap === 'number') {
+        if (!Number.isInteger(change.cap) || change.cap < 1 || change.cap > 500) throw new Error('Give the session limit as a whole number from 1 to 500.');
+        if (typeof change.board === 'number' && (!Number.isInteger(change.board) || change.board < 0 || change.board > change.cap)) throw new Error("Give the board's share as a whole number from 0 to the session limit, with a limit set.");
+        demoCap = change.cap; demoBoard = typeof change.board === 'number' ? change.board : change.boardDefault ? null : (demoBoard === null ? null : Math.min(demoBoard, change.cap));
+      }
+      // The same two working sessions the demo's session tree shows; one of them is a board run.
       const used = 2;
-      return { cap: demoCap, used, free: demoCap === null ? null : Math.max(0, demoCap - used), at_capacity: demoCap !== null && used >= demoCap, total: 5, quiet: 1, quiet_after_minutes: 30 };
+      const share = demoCap === null ? null : (demoBoard ?? Math.max(2, Math.floor(demoCap / 4)));
+      return { cap: demoCap, used, free: demoCap === null ? null : Math.max(0, demoCap - used), at_capacity: demoCap !== null && used >= demoCap, total: 5, quiet: 1, quiet_after_minutes: 30, on_limit_stop: 1, on_waits: 1, board_share: share, board_share_set: demoBoard !== null, board_used: 1, board_admitted: demoCap === null || used < demoCap || (share ?? 0) > 1, waiting: 0, refused_waiting: null };
     },
     async ownSignIn(on) { await pause(); if (typeof on === 'boolean') demoOwnSignIn = on; return { own_sign_in: demoOwnSignIn ? 'on' : 'off', on: demoOwnSignIn }; },
     async duty(change) {
