@@ -3846,9 +3846,11 @@ Plan: [2026-11-17-observatory-keys](plans/2026-11-17-observatory-keys/README.md)
   saves with `failed: RECORDS_UNSAVED`, never an error that reads as nothing saved. The metered
   Hermes home holds an empty `.env` (0600), so Hermes never loads its install folder's `.env`, and
   the unset list adds the AWS, Google application credentials, Nebius, Upstage, Actual, MoA and
-  LM Studio variables. In the store, an API key added beside an API-key row of the same provider
-  and group whose stored value cannot be read is refused (`SAVED_KEY_UNREADABLE`): it may be that
-  very key; a sign-in beside an unreadable sign-in is still added (its identity tells it apart).
+  LM Studio variables. Adding a key from Observatory as an account is refused while a saved
+  Claude API key's value cannot be read (`SAVED_KEY_UNREADABLE`): it may be that very key, which
+  the store's same-key check cannot see. The store itself still adds beside an unreadable row (the
+  2026-11-08 rule, `an_account_whose_sign_in_cannot_be_read_does_not_stop_a_new_one_in_its_group`),
+  so `accounts add` and the window are unchanged.
 - **Tests:** `observatory_keys::tests::*` (the list, slots and the pipe script, the record, the
   plan and its refusals, saved targets), `launch_keys::tests::the_pay_per_token_groups_keys_are_offered_with_why_not`,
   `launch::tests::hermes_on_the_pay_per_token_group_runs_through_the_proxy`, and

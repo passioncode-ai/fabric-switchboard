@@ -631,10 +631,11 @@ research notes); the ones still in force that the board cites are seeded below w
     writes with `command printf`; a refusal that may hold a key (`sk-` in any case, or 24 or more
     key characters in a row) is never shown; a record not written after a save is reported beside
     the save, not as a failure of it; the metered Hermes home has an empty `.env` of its own, and
-    more provider and cloud variables are unset. An API key added beside an unreadable saved API
-    key of the same provider and group fails closed (`SAVED_KEY_UNREADABLE`), narrowing the
-    2026-11-08 rule (an unreadable row never blocks a new account) to sign-ins, which have an
-    identity of their own.
+    more provider and cloud variables are unset. Adding a key from Observatory as an account fails closed
+    while a saved Claude API key cannot be read (`SAVED_KEY_UNREADABLE`): the retry the review
+    feared is that path's. The store's own add keeps the 2026-11-08 rule (an unreadable row never
+    blocks a new account, an incident on the Mac Studio with exactly such API keys), so a person's
+    add is not broken again.
 - **Consequences:** an agent (or the operator over MCP) adds a key Observatory holds without a
   person typing it; a Hermes launch on the pay-per-token group no longer needs `agents connect`
   and leaves `~/.hermes` alone, while one on an ordinary group starts as before. Open: a rotation

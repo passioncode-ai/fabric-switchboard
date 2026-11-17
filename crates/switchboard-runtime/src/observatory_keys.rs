@@ -57,6 +57,7 @@ pub const POOL_NOT_FOR_ANTHROPIC: &str =
 pub const KEY_EXPIRED: &str =
     "Project Observatory records this key as expired. Rotate it there, then add it.";
 pub const MODEL_FOR_ACCOUNT: &str = "A model belongs to a named key. An account in the pay-per-token group takes its model at launch: leave out the model, or add a named key too.";
+pub const SAVED_KEY_UNREADABLE: &str = "An API key already saved in this group cannot be read, so Switchboard cannot tell whether this is the same key. Remove that account or save its key again, then add this one.";
 pub const UNIX_ONLY: &str = "Adding a key from Observatory runs on macOS and Linux for now.";
 pub const SAVE_FAILED: &str = "The key could not be saved from Observatory. Check the slot with project-observatory, then try again.";
 pub const SAVE_TIMED_OUT: &str = "Saving the key from Observatory took longer than a minute and was stopped. It may have been saved: check the accounts and agent keys before adding it again.";
@@ -601,6 +602,18 @@ fn plan_from(
                 }
             }
             if account {
+                // Review round 2: a Claude API key saved here whose value cannot be read may be
+                // this very key (a retry after a lost record), and the store's same-key check
+                // cannot see it; this add fails closed. The store itself keeps adding beside an
+                // unreadable row (the 2026-11-08 rule), so other ways in are unchanged.
+                if snapshot
+                    .accounts
+                    .iter()
+                    .filter(|a| switchboard_core::Snapshot::is_claude_key(a))
+                    .any(|a| store.credential(&a.id).is_err())
+                {
+                    return Err(SAVED_KEY_UNREADABLE.into());
+                }
                 if saved.keys.iter().any(|r| {
                     r.slot == slot.text()
                         && matches!(r.target, Target::Account { .. })
@@ -1302,6 +1315,46 @@ mod tests {
             plan(to_group).unwrap_err(),
             switchboard_core::agent_keys::KEY_POOL_INVALID
         );
+    }
+
+    /// Review round 2: adding a key as an account beside a saved Claude API key whose value cannot
+    /// be read fails closed; it may be the same key.
+    #[test]
+    fn an_account_beside_an_unreadable_saved_key_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let vault = Arc::new(switchboard_core::MemoryVault::default());
+        let store = Store::open(root.into(), vault.clone()).unwrap();
+        let listed = parse_list(LIST);
+        let request = AddRequest {
+            slot: "alpha-web/prod/ANTHROPIC_API_KEY".into(),
+            ..Default::default()
+        };
+        let saved = store
+            .add_routed(
+                "earlier".into(),
+                switchboard_core::Provider::Claude,
+                switchboard_core::AuthKind::ApiKey,
+                "default".into(),
+                switchboard_core::Credential::parse(
+                    switchboard_core::Provider::Claude,
+                    switchboard_core::AuthKind::ApiKey,
+                    "synthetic-earlier",
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        assert!(plan_from(root, &store, &request, &engine(), &listed).is_ok());
+        use switchboard_core::Vault;
+        vault.delete(&saved.id).unwrap();
+        assert_eq!(
+            plan_from(root, &store, &request, &engine(), &listed).unwrap_err(),
+            SAVED_KEY_UNREADABLE
+        );
+        // A named key only is not an account: it is planned as before.
+        let mut named = request;
+        named.to = Some("agent".into());
+        assert!(plan_from(root, &store, &named, &engine(), &listed).is_ok());
     }
 
     #[test]
