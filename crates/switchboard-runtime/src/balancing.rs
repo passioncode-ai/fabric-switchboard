@@ -904,6 +904,27 @@ pub fn summary(
 
 #[cfg(test)]
 mod tests {
+    /// SB-401: a group switched off, and the pay-per-token group, are never named.
+    #[test]
+    fn a_group_switched_off_and_the_pay_per_token_group_take_no_part() {
+        let group = |pool: &str, off: bool, tokens: bool| switchboard_core::Project {
+            pool: pool.into(),
+            name: pool.into(),
+            folders: vec![format!("/w/{pool}")],
+            off,
+            tokens,
+            ..switchboard_core::Project::default()
+        };
+        let snapshot = Snapshot {
+            projects: vec![
+                group("apps", false, false),
+                group("paused", true, false),
+                group("tokens", true, true),
+            ],
+            ..Default::default()
+        };
+        assert_eq!(pools(&snapshot), ["default", "apps"]);
+    }
     #[test]
     fn a_group_out_of_room_brings_the_next_pass_forward_to_a_minute() {
         // The first pass always runs; then every 15 minutes.

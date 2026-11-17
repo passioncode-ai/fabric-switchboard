@@ -2942,7 +2942,7 @@ shared it), keeps `default_shared` only for accounts at home in a group, and for
 its loan from `default` listed keeps it a loan, never a move. Native rotation of the ordinary
 Claude Code (`claude_cli`) takes only an account at home in its pool, never one lent to `default`.
 `balancing::forced_return` also returns a loan whose account the person moved to another home
-since (`not_lendable`). Each loan and return is one activity entry, `balancing` with `lent` or
+since (`not_lendable`), and one to or from a group switched off (`group_off`, SB-401). Each loan and return is one activity entry, `balancing` with `lent` or
 `returned` and the account's id (`event_valid`; before wave 2 a loan was journaled as `project
 updated`); `switchboard_events` and the window's Activity show it. The window's Groups page has
 *Balancing between groups* (SCN-090): one switch per group (`Balance` with one group added or

@@ -882,7 +882,7 @@ fn an_account_whose_home_group_is_off_serves_no_group_sharing_it() {
             &[x.id.clone(), y.id.clone()],
         )
         .unwrap();
-    assert_eq!(shares.shared_accounts, [x.id.clone()]);
+    assert_eq!(shares.shared_accounts, std::slice::from_ref(&x.id));
     store.select(Provider::Codex, &shares.pool, &x.id).unwrap();
     assert!(store.route(Provider::Codex, &shares.pool).is_ok());
     store.set_group_off(&home.pool, true).unwrap();
