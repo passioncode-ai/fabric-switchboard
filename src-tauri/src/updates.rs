@@ -15,7 +15,8 @@
 //!
 //! - **Linux (SB-88):** only the AppImage updates itself: the verified AppImage replaces the
 //!   running one's file at once (as macOS swaps its bundle) and starts at the next restart. A copy
-//!   installed from the .deb package never checks; the newer .deb updates it.
+//!   installed from the .deb package never downloads or installs anything; the newer .deb, which
+//!   the person installs with apt, updates it (SB-408: it says which one, below).
 //!
 //! No check runs in a development build, in the smoke check, from an app macOS is running
 //! from a translocated copy, or from a Linux copy that is not an AppImage. A copy installed from
