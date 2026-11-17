@@ -58,6 +58,8 @@ pub const GROUP_CEILINGS_FULL: &str =
 pub const GROUP_HOLDS_CEILING: &str = "This group has a spending ceiling. Delete the group in the Switchboard window, where its ceiling goes with it.";
 pub const OUT_OF_RANGE: &str = "Enter an amount from $0.01 to $1,000.";
 pub const NO_OWN_KEY: &str = "Give this group its own key under API keys first.";
+/// SB-401: turning the pay-per-token group on without a ceiling.
+pub const TOKENS_NEED_CEILING: &str = "Set a daily spending ceiling for the pay-per-token group first: its keys are charged per token, and the ceiling is what stops them.";
 pub const NO_GROUP: &str = "That group id names no group.";
 pub const DOUBLE_IN_WINDOW: &str = "Doubling a ceiling is answered in the Switchboard window.";
 pub const DOUBLE_TOO_HIGH: &str =
@@ -502,6 +504,13 @@ fn write_bytes(root: &Path, bytes: &[u8]) -> Result<(), String> {
 }
 
 /// Whether a group has its own OpenRouter key (SB-144): only such a group takes a daily ceiling.
+/// SB-401: a group's daily ceiling in cents, when one is set.
+pub fn group_ceiling(root: &Path, pool: &str) -> Option<u32> {
+    read(root).ok()?.ceilings.iter().find_map(|c| match &c.scope {
+        ChainScope::Project { pool: p } if p == pool => Some(c.cents),
+        _ => None,
+    })
+}
 pub fn group_has_own_key(snapshot: &Snapshot, pool: &str) -> bool {
     snapshot
         .agent_keys
@@ -743,7 +752,10 @@ pub fn set_ceiling(
         if !snapshot.projects.iter().any(|p| &p.pool == pool) {
             return Err(NO_GROUP.into());
         }
-        if !group_has_own_key(snapshot, pool) {
+        // SB-401: the pay-per-token group's ceiling counts its own keys' spend, so it needs no
+        // OpenRouter key of its own.
+        let tokens = snapshot.project_of_pool(pool).is_some_and(|p| p.tokens);
+        if !tokens && !group_has_own_key(snapshot, pool) {
             return Err(NO_OWN_KEY.into());
         }
     }

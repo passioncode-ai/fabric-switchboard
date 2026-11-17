@@ -676,6 +676,23 @@ impl Store {
         let organizations = organization.map(|o| o.map(str::to_owned).into_iter().collect());
         self.save_project_with(pool, name, folders, accounts, organizations, true)
     }
+    /// SB-401: switches a group off (no folder routed to it, the proxy refuses its requests) or
+    /// on again. The checks that must hold before a group is turned on are the caller's.
+    pub fn set_group_off(&self, pool: &str, off: bool) -> Result<Project, String> {
+        let mut state = self.lock()?;
+        let mut candidate = state.clone();
+        let group = candidate
+            .projects
+            .iter_mut()
+            .find(|p| p.pool == pool)
+            .ok_or("Project not found.")?;
+        group.off = off;
+        let project = group.clone();
+        append_event(&mut candidate, "project", None, "updated");
+        self.publish(&mut state, candidate)?;
+        self.changed();
+        Ok(project)
+    }
     /// SB-401: whether `pool` is a group switched off, read from the published metadata (no
     /// lock): the proxy asks it for every request.
     pub fn pool_off(&self, pool: &str) -> bool {

@@ -647,6 +647,12 @@ pub enum Operation {
         #[serde(default = "spend::agent_surface")]
         by: spend::Surface,
     },
+    /// SB-401: switches a group off or on. The pay-per-token group turns on only with a daily
+    /// spending ceiling set.
+    GroupSwitch {
+        pool: String,
+        on: bool,
+    },
     /// Makes a pool's folder capability worthless and writes a new one into its folders (an
     /// exposure, 2026-10-18). Other pools and managed sessions keep theirs.
     RotatePoolCapability {
@@ -8077,6 +8083,18 @@ async fn execute(
             };
             let map = blocking::run(|| roots::disk_map(&under, &snapshot));
             serde_json::to_value(map).map_err(|_| "Repositories could not be listed.".into())
+        }
+        Operation::GroupSwitch { pool, on } => {
+            let snapshot = store.snapshot()?;
+            let group = snapshot
+                .project_of_pool(&pool)
+                .ok_or("Project not found.")?;
+            // SB-401: the pay-per-token group's keys spend money on every request: on only with a
+            // ceiling that stops them.
+            if on && group.tokens && spend::group_ceiling(root, &pool).is_none() {
+                return Err(spend::TOKENS_NEED_CEILING.into());
+            }
+            Ok(json!(store.set_group_off(&pool, !on)?))
         }
         Operation::RemoveProject { pool, by } => {
             // C-Q7: a group's ceiling goes with it, so spend.json is pruned under its lock. C-Q9:

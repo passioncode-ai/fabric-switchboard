@@ -671,6 +671,17 @@ enum Project {
         #[arg(value_enum)]
         state: Option<OnOff>,
     },
+    /// Switch a group off (no folder is routed to it and its accounts serve no request) or on
+    /// again. The pay-per-token group turns on only with a daily spending ceiling set
+    /// (`switchboard ceiling set --scope project:<pool>`).
+    Switch {
+        /// The group id (`switchboard project list`).
+        #[arg(long)]
+        pool: String,
+        /// `on` or `off`.
+        #[arg(value_enum)]
+        state: OnOff,
+    },
     /// Replace the capability a group's folders carry (their `.claude/settings.local.json`):
     /// the old one is refused at once and the new one is written into every folder of the group.
     /// For an exposure. Other groups and managed sessions keep theirs.
@@ -3396,6 +3407,10 @@ async fn run(cli: &Cli) -> Result<Value, String> {
             Project::Codex { state } => Operation::CodexRoute {
                 enabled: state.map(|s| matches!(s, OnOff::On)),
             },
+            Project::Switch { pool, state } => Operation::GroupSwitch {
+                pool: pool.clone(),
+                on: matches!(state, OnOff::On),
+            },
             Project::RotateCapability { pool } => {
                 Operation::RotatePoolCapability { pool: pool.clone() }
             }
@@ -6051,6 +6066,7 @@ mod mcp_parity {
         ("project codex", Tool("switchboard_codex_route")),
         ("project save", Tool("switchboard_project_create")),
         ("project delete", Tool("switchboard_project_delete")),
+        ("project switch", Tool("switchboard_project_switch")),
         ("project suggest", Not(HOST)),
         (
             "project suggestions",
