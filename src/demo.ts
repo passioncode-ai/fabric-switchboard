@@ -767,6 +767,7 @@ export function createDemoAdapter(): Adapter {
       }
       return out;
     },
+    async projectSwitch(pool, on) { await pause(); const p = (state.projects ?? []).find((x) => x.pool === pool); if (!p) throw new Error('Project not found.'); p.off = !on; log('project', '', 'updated'); },
     async removeProject(pool) { await pause(); const before = state.projects?.length ?? 0; state.projects = (state.projects ?? []).filter((p) => p.pool !== pool); if (state.projects.length === before) throw new Error('Project not found.'); log('project', '', 'removed'); },
     async projectSuggestions() { return { suggestions: structuredClone(suggestions.filter((s) => (state.projects ?? []).some((p) => p.pool === s.pool))) }; },
     async acceptProjectSuggestion(folder) { await pause(); const s = suggestions.find((x) => x.folder === folder); if (!s) throw new Error('No such suggestion. Read the suggestions again.'); const project = (state.projects ?? []).find((p) => p.pool === s.pool); if (!project) throw new Error('Project not found.'); project.folders.push(folder); suggestions = suggestions.filter((x) => x.folder !== folder); log('project', '', 'updated'); },

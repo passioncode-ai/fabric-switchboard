@@ -986,7 +986,16 @@ function groupCard(project: Project, only: boolean) {
   const aside = () => {
     const parts: Node[] = [];
     for (const org of groupOrgs) { const badge = el('span', 'badge org-badge', org.name); badge.title = groupOrgs.length > 1 ? t('Runs only on accounts of {names}.', { names: groupOrgs.map((o) => o.name).join(', ') }) : t('Runs only on accounts of {name}.', { name: org.name }); parts.push(badge); }
-    parts.push(menu(`group-${project.pool}`, t('Actions for {name}', { name: project.name }), [[t('Edit'), () => projectDialog(project)], [t('Delete'), () => deleteProjectDialog(project), 'danger-text']]));
+    // SB-401: a group switched off says so, and turns on from its menu; the pay-per-token group
+    // sets its daily ceiling there too, before it is turned on.
+    if (project.off) { const off = el('span', 'badge off-badge', t('Off')); off.title = t('No folder runs on this group\'s accounts while it is off.'); parts.push(off); }
+    const items: Parameters<typeof menu>[2] = [[t('Edit'), () => projectDialog(project)]];
+    if (project.tokens) items.push([t('Daily ceiling…'), () => ceilingDialog({ kind: 'project', pool: project.pool }, ceilingOf({ kind: 'project', pool: project.pool }), `menu-group-${project.pool}`)]);
+    items.push(project.off
+      ? [t('Turn on'), () => void mutate(() => adapter.projectSwitch(project.pool, true), t('{name} is on.', { name: project.name }), `menu-group-${project.pool}`)]
+      : [t('Turn off'), () => void mutate(() => adapter.projectSwitch(project.pool, false), t('{name} is off.', { name: project.name }), `menu-group-${project.pool}`)]);
+    items.push([t('Delete'), () => deleteProjectDialog(project), 'danger-text']);
+    parts.push(menu(`group-${project.pool}`, t('Actions for {name}', { name: project.name }), items));
     return parts;
   };
   const card = foldSection({ key: `group-${project.pool}`, title, state, open: only, level: 'h2', className: 'group-card', aside, body: () => groupCardBody(project, accounts) });
@@ -1005,6 +1014,8 @@ function groupCardBody(project: Project, accounts: Account[]): Node[] {
   const context = quotaContext();
   // Accounts: each with its state; the one the group's sessions use now is marked.
   const people = el('div', 'fold-part'); people.append(el('h3', 'fold-part-heading', t('Accounts')));
+  // SB-401: what the pay-per-token group is, said where its keys are listed.
+  if (project.tokens) people.append(el('p', 'form-note', t('Claude API keys, charged per token. Folders join only when you add them, and the group runs only while it is on, under its daily ceiling.')));
   if (!accounts.length) people.append(el('p', 'account-meta', t('No accounts yet, so sessions in these folders use your other accounts until you add one.')));
   else {
     const rows = el('ul', 'group-accounts'); rows.setAttribute('aria-label', t('Accounts'));
@@ -1728,7 +1739,7 @@ function taskCeilingsPanel(tasks: CeilingView[]) {
 }
 function ceilingDialog(scope: ChainScope, current: CeilingView | null, returnFocus: string) {
   const name = scopeLabel(scope);
-  const context = openDialog(scope.kind === 'machine' ? t('Daily ceiling for this computer') : t('Daily ceiling for {group}', { group: name }), scope.kind === 'machine' ? t('Counts every OpenRouter key saved in Switchboard, added up per UTC day.') : t('Counts this group\'s own key, per UTC day.'), returnFocus);
+  const context = openDialog(scope.kind === 'machine' ? t('Daily ceiling for this computer') : t('Daily ceiling for {group}', { group: name }), scope.kind === 'machine' ? t('Counts every OpenRouter key saved in Switchboard, added up per UTC day.') : snapshot?.projects?.find((p) => scope.kind === 'project' && p.pool === scope.pool)?.tokens ? t('Counts this group\'s Claude keys at Anthropic\'s list price, per UTC day. When it is reached, the group serves no request until the next day.') : t('Counts this group\'s own key, per UTC day.'), returnFocus);
   const amount = input(current ? current.usd.toFixed(2) : '', 'number'); amount.min = '0.01'; amount.max = '1000'; amount.step = '0.01'; amount.inputMode = 'decimal';
   const grid = el('div', 'form-grid');
   grid.append(field(t('Dollars per UTC day'), amount, t('From $0.01 to $1,000. When it is reached, no paid agent starts until you answer.')));
@@ -2774,6 +2785,8 @@ function addDialog() {
     else { secret = input('', 'password'); secret.autocomplete = 'new-password'; secret.placeholder = t('Enter credential'); }
     credentialSlot.append(field(method.value === 'oauth' ? t('OAuth credential JSON') : t('Credential'), secret, demo ? t('Use synthetic input only. Nothing is stored after reload.') : t('Sent only to native credential storage. Cleared on submit or cancel.')));
     if (method.value === 'oauth') credentialSlot.append(el('p', 'form-note', t('Imported OAuth is a snapshot. Sign in again when it expires. Imported identity is not independently verified.')));
+    // SB-401: a Claude key never lands in the default group.
+    if (provider.value === 'claude' && method.value === 'api_key') credentialSlot.append(el('p', 'form-note', t('A Claude API key left in the default group goes to the pay-per-token group, which starts off. Turn it on there with a daily ceiling.')));
   };
   provider.addEventListener('change', update); method.addEventListener('change', update); update();
   context.form.addEventListener('submit', (event) => {

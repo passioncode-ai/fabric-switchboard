@@ -43,7 +43,7 @@ export interface ProjectRule { path: string; provider: Provider; account_id: str
 export interface ProjectRuleInput { path: string; accountId: string; target: ProjectRule['target']; enabled: boolean; expiresAt: number | null }
 export interface AgentSetup { cli_path: string | null; bundled_cli: string | null; linked_cli: string | null; can_link: boolean; translocated?: boolean; commands: { claude_code: string; codex: string; claude_plugin: string }; connected?: { claude_code: boolean; codex: boolean }; agent_prompt?: string; proved?: { client: string | null; at: number } | null }
 /** A project's folders and the pool of accounts reserved for them (0.6). */
-export interface Project { pool: string; name: string; folders: string[]; created_at: number; sources?: string[]; /** SB-109: the organization the group runs on; none is personal. One organization arrives here. */ organization?: string | null; /** SB-282: a group of several organizations arrives as this list instead (`groupOrganizations` reads both). */ organizations?: string[]; /** SB-282: accounts at home in another group that serve this one too. */ shared_accounts?: string[] }
+export interface Project { pool: string; name: string; folders: string[]; created_at: number; sources?: string[]; /** SB-109: the organization the group runs on; none is personal. One organization arrives here. */ organization?: string | null; /** SB-282: a group of several organizations arrives as this list instead (`groupOrganizations` reads both). */ organizations?: string[]; /** SB-282: accounts at home in another group that serve this one too. */ shared_accounts?: string[]; /** SB-401: the reserved group of pay-per-token Claude keys. */ tokens?: boolean; /** SB-401: switched off: no folder routes to it, its accounts serve no request. */ off?: boolean }
 /** A folder Switchboard found that looks like a project's (SB-117); it joins only on Add. */
 export interface ProjectSuggestion { folder: string; name: string; pool: string; project: string | null; reason: 'worktree' | 'same_repository' | 'ecosystem' | 'worked'; repository: string; first_seen: number }
 export interface ProjectInput { pool?: string; name: string; folders: string[]; accountIds: string[]; /** SB-131: the folders the dialog opened with. */ baseFolders?: string[]; /** SB-109: an organization's id or `personal`; left out, the group keeps its own. */ organization?: string; /** SB-282: every organization of the group in order (empty: personal); wins over `organization`. */ organizations?: string[] }
@@ -119,6 +119,8 @@ export interface Adapter {
   /** Create or update a project; the listed accounts are its whole set (core `save_project`). */
   saveProject(input: ProjectInput): Promise<unknown>;
   removeProject(pool: string): Promise<unknown>;
+  /** SB-401: switch a group off or on; the pay-per-token group turns on only with a daily ceiling. */
+  projectSwitch(pool: string, on: boolean): Promise<unknown>;
   /** SB-135: each project's folders as roots with their worktrees and clones, by pool. */
   projectRoots(): Promise<Record<string, import('./ui-logic').ProjectRoot[]>>;
   /** SB-122: an account into a project's pool, or back to `default`. */
