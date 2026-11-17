@@ -404,6 +404,48 @@ impl Session {
     }
 }
 
+/// SB-413: on Linux both ends are opened close-on-exec from the start, so a process another
+/// thread forks meanwhile never keeps this terminal's other end; one that did kept the session's
+/// end of output (EIO) from ever being read (`openpty` sets nothing, and the flag set after it
+/// came too late for such a fork, as the tests running beside each other showed).
+#[cfg(target_os = "linux")]
+fn open_pty(rows: u16, cols: u16) -> io::Result<(OwnedFd, OwnedFd)> {
+    let master = unsafe { libc::posix_openpt(libc::O_RDWR | libc::O_NOCTTY | libc::O_CLOEXEC) };
+    if master < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    let master = unsafe { OwnedFd::from_raw_fd(master) };
+    if unsafe { libc::grantpt(master.as_raw_fd()) } != 0
+        || unsafe { libc::unlockpt(master.as_raw_fd()) } != 0
+    {
+        return Err(io::Error::last_os_error());
+    }
+    let mut name = [0 as libc::c_char; 128];
+    let r = unsafe { libc::ptsname_r(master.as_raw_fd(), name.as_mut_ptr(), name.len()) };
+    if r != 0 {
+        return Err(io::Error::from_raw_os_error(r));
+    }
+    let slave = unsafe {
+        libc::open(
+            name.as_ptr(),
+            libc::O_RDWR | libc::O_NOCTTY | libc::O_CLOEXEC,
+        )
+    };
+    if slave < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    let slave = unsafe { OwnedFd::from_raw_fd(slave) };
+    let size = libc::winsize {
+        ws_row: rows.max(1),
+        ws_col: cols.max(1),
+        ws_xpixel: 0,
+        ws_ypixel: 0,
+    };
+    unsafe { libc::ioctl(master.as_raw_fd(), libc::TIOCSWINSZ as _, &size) };
+    Ok((master, slave))
+}
+
+#[cfg(not(target_os = "linux"))]
 fn open_pty(rows: u16, cols: u16) -> io::Result<(OwnedFd, OwnedFd)> {
     let mut master: libc::c_int = -1;
     let mut slave: libc::c_int = -1;
@@ -1320,6 +1362,15 @@ mod tests {
         assert_eq!(exit_of(&mut viewer.stream), 3);
         assert_eq!(host.join().unwrap().exit_code, 3);
         *READER_PAUSE.lock().unwrap_or_else(|p| p.into_inner()) = None;
+    }
+
+    #[test]
+    fn both_ends_of_a_new_terminal_are_closed_on_exec() {
+        let (master, slave) = open_pty(24, 80).unwrap();
+        for fd in [&master, &slave] {
+            let flags = unsafe { libc::fcntl(fd.as_raw_fd(), libc::F_GETFD) };
+            assert!(flags >= 0 && flags & libc::FD_CLOEXEC != 0);
+        }
     }
 
     #[test]
