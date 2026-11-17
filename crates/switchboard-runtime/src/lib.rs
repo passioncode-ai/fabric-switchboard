@@ -980,6 +980,10 @@ pub enum Operation {
     /// Takes a waiting hand-over once, for the caller's terminal (`handovers run`).
     HandoverTake {
         id: String,
+        /// SB-405: start its session with the agent's permission prompts on (`handovers run
+        /// --ask`): a Claude Code or Codex hand-over only. Absent (an earlier client) is false.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        ask: bool,
     },
     /// Reads, or with `on` changes, the "Open hand-overs in Fabric" setting.
     HandoverSetting {
@@ -4518,6 +4522,46 @@ tokio::task_local! {
     /// it must hold it briefly.
     pub(crate) static TEST_TAKE_TURN_WAIT: std::time::Duration;
 }
+/// A waiting hand-over taken once, its paid start gated again first (C-Q8, SB-213, SB-215).
+async fn take_handover(
+    store: &std::sync::Arc<Store>,
+    root: &std::path::Path,
+    id: &str,
+) -> Result<handovers::Handover, String> {
+    // C-Q8: a paid hand-over passed the spend gate when it was queued; it passes it again,
+    // with the hand-over turn, when a console takes it, on the key slot its script names
+    // (SB-213). Refused, it stays waiting: the window may double the ceiling meanwhile. SB-215: a record without `paid` is
+    // classified as its start spends now, and the turn is waited for at most
+    // `TAKE_TURN_WAIT`: a hand-over in progress elsewhere answers busy, the record kept.
+    let paid = handovers::waiting(root, id).and_then(|h| {
+        fallback::handover_paid(store.snapshot().ok().as_ref(), &h).map(|kind| (h, kind))
+    });
+    let _turn = match &paid {
+        Some((waiting, kind)) => {
+            let turn = if fallback::gated() {
+                None
+            } else {
+                Some(
+                    tokio::time::timeout(take_turn_wait(), fallback::HAND_OVER.lock())
+                        .await
+                        .map_err(|_| handovers::BUSY.to_string())?,
+                )
+            };
+            // SB-213: on the key slot its script fetches; a moved folder refuses it.
+            fallback::gate_take(
+                store,
+                root,
+                waiting,
+                *kind,
+                tokio::time::Instant::now() + fallback::GATE_BUDGET,
+            )
+            .await?;
+            turn
+        }
+        None => None,
+    };
+    handovers::take(root, id)
+}
 fn take_turn_wait() -> std::time::Duration {
     // In tests a neighbour holds the lock across 10 s reads (SB-221), so a take that does not
     // test the wait itself waits as long as the fallback's own tests do.
@@ -5548,41 +5592,34 @@ async fn execute(
             "enabled": handovers::enabled(root),
             "handovers": handovers::pending(root),
         })),
-        Operation::HandoverTake { id } => {
-            // C-Q8: a paid hand-over passed the spend gate when it was queued; it passes it again,
-            // with the hand-over turn, when a console takes it, on the key slot its script names
-            // (SB-213). Refused, it stays waiting: the window may double the ceiling meanwhile. SB-215: a record without `paid` is
-            // classified as its start spends now, and the turn is waited for at most
-            // `TAKE_TURN_WAIT`: a hand-over in progress elsewhere answers busy, the record kept.
-            let paid = handovers::waiting(root, &id).and_then(|h| {
-                fallback::handover_paid(store.snapshot().ok().as_ref(), &h).map(|kind| (h, kind))
-            });
-            let _turn = match &paid {
-                Some((waiting, kind)) => {
-                    let turn = if fallback::gated() {
-                        None
-                    } else {
-                        Some(
-                            tokio::time::timeout(take_turn_wait(), fallback::HAND_OVER.lock())
-                                .await
-                                .map_err(|_| handovers::BUSY.to_string())?,
-                        )
-                    };
-                    // SB-213: on the key slot its script fetches; a moved folder refuses it.
-                    fallback::gate_take(
-                        &store,
-                        root,
-                        waiting,
-                        *kind,
-                        tokio::time::Instant::now() + fallback::GATE_BUDGET,
-                    )
-                    .await?;
-                    turn
-                }
+        Operation::HandoverTake { id, ask } => {
+            // SB-405: the session with prompts on is written beside the prepared one before
+            // anything is gated or taken, so a hand-over whose script cannot be rewritten (or
+            // that continues on another agent) stays waiting with nothing spent; a refusal after
+            // it removes the file again.
+            let asked = match ask.then(|| handovers::waiting(root, &id)).flatten() {
+                Some(waiting) => Some(launch::write_ask_script(&waiting.script, &waiting.agent)?),
                 None => None,
             };
-            let taken = handovers::take(root, &id)?;
-            Ok(json!({"handover": taken, "script": taken.script}))
+            let taken = take_handover(&store, root, &id).await;
+            let taken = match taken {
+                Ok(taken) => taken,
+                Err(e) => {
+                    if let Some(asked) = &asked {
+                        let _ = std::fs::remove_file(asked);
+                    }
+                    return Err(e);
+                }
+            };
+            let Some(asked) = asked else {
+                return Ok(json!({"handover": taken, "script": taken.script}));
+            };
+            if let Some((_, launch_id)) = launch::script_launch(&asked) {
+                if let Some(home) = asked.parent() {
+                    launches::mark_permissions(root, home, &launch_id, "ask");
+                }
+            }
+            Ok(json!({"handover": taken, "script": asked, "permissions": "ask"}))
         }
         Operation::HandoverSetting { on } => {
             if let Some(on) = on {
@@ -9674,12 +9711,104 @@ mod owner_tests {
             std::time::Duration::from_secs(2),
             runtime.execute(Operation::HandoverTake {
                 id: "h-nothing".into(),
+                ask: false,
             }),
         )
         .await
         .expect("a take is answered too");
         assert!(taken.is_err(), "no such hand-over");
         drop(held);
+    }
+
+    /// SB-405: `handovers run --ask` takes a hand-over and answers a session with the agent's
+    /// prompts on, beside the prepared one, and its launch record and session row say so; a take
+    /// without it is unchanged, and one on another agent stays waiting.
+    #[cfg(unix)]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_hand_over_taken_with_ask_starts_with_prompts_on_and_its_record_says_so() {
+        let root = tempfile::tempdir().unwrap();
+        let runtime = fixtures::runtime(root.path(), signed_out, activates).await;
+        let account = fixtures::save(&runtime.store, "synthetic-ask", "default");
+        handovers::set_enabled(root.path(), true).unwrap();
+        let queue = |agent: &str, home: &str| {
+            let home = root.path().join("runtimes").join(home);
+            std::fs::create_dir_all(&home).unwrap();
+            let launch_id = launches::new_id();
+            let env =
+                std::collections::BTreeMap::from([(launches::ENV.to_string(), launch_id.clone())]);
+            let text = launch::script(
+                &home,
+                std::path::Path::new("/bin/claude"),
+                &["--dangerously-skip-permissions", "Continue."],
+                &env,
+                false,
+                root.path(),
+            );
+            let script = launch::write_launch_script(&home, &text).unwrap();
+            launches::record(
+                root.path(),
+                &home,
+                json!({"account_id": account.id, "provider": "claude", "launched_at": 1}),
+                &launch_id,
+            )
+            .unwrap();
+            let handover = handovers::Handover {
+                id: handovers::new_id(),
+                workflow: "wf_0123456789abcdef".into(),
+                agent: agent.into(),
+                account_label: account.label.clone(),
+                dir: root.path().to_owned(),
+                script: script.clone(),
+                offered_until: "2099-10-13T01:00:00Z".into(),
+                created_at: monitor::now(),
+                paid: None,
+                account: Some(account.id.clone()),
+                key: None,
+            };
+            handovers::record(root.path(), &handover).unwrap();
+            (handover, home, launch_id, text)
+        };
+        let take = |id: &str, ask: bool| {
+            runtime.execute(Operation::HandoverTake {
+                id: id.to_owned(),
+                ask,
+            })
+        };
+
+        let (asked, home, launch_id, prepared) = queue("claude-code", "claude-default");
+        let answer = take(&asked.id, true).await.unwrap();
+        assert_eq!(answer["permissions"], "ask");
+        let script = std::path::PathBuf::from(answer["script"].as_str().unwrap());
+        assert_eq!(script, home.join(launch::ASK_SCRIPT));
+        let text = std::fs::read_to_string(&script).unwrap();
+        assert!(text.contains("exec '/bin/claude' '--permission-mode' 'manual' 'Continue.'\n"));
+        assert!(!text.contains("dangerously"));
+        assert_eq!(
+            std::fs::read_to_string(&asked.script).unwrap(),
+            prepared,
+            "the prepared script is left as it was"
+        );
+        assert_eq!(
+            launches::get(root.path(), &launch_id).unwrap()["permissions"],
+            "ask"
+        );
+        let row = launch::sessions(root.path(), true)
+            .into_iter()
+            .find(|r| r["launch_id"] == launch_id.as_str())
+            .unwrap();
+        assert_eq!(row["permissions"], "ask", "the sessions --all row says so");
+        assert!(take(&asked.id, true).await.is_err(), "taken once");
+
+        let (plain, _, plain_launch, _) = queue("claude-code", "claude-plain");
+        let answer = take(&plain.id, false).await.unwrap();
+        assert_eq!(answer["script"], json!(plain.script));
+        assert!(answer.get("permissions").is_none());
+        assert!(launches::get(root.path(), &plain_launch).unwrap()["permissions"].is_null());
+
+        let (hermes, hermes_home, _, _) = queue("hermes", "hermes-ask");
+        assert_eq!(take(&hermes.id, true).await.unwrap_err(), launch::ASK_AGENT);
+        assert_eq!(handovers::pending(root.path()), vec![hermes]);
+        assert!(!hermes_home.join(launch::ASK_SCRIPT).exists());
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

@@ -8,6 +8,7 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- `switchboard handovers run <id> --ask` starts a Claude Code or Codex hand-over with the agent's permission prompts on (Claude Code in its manual mode, Codex asking on request), whatever the machine's own permission setting; its launch record and its session row say `permissions: ask`. Fabric Dashboards uses it for a console that holds its folder (SB-405).
 - A limit stop whose session was already continued elsewhere (a hand-over, or a later launch of the same session) is no longer offered as ready to continue: `recovery` marks it `continued` and the Sessions page reads it ended, moved on.
 ## 0.7.111
 
