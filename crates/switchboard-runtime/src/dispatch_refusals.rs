@@ -104,8 +104,7 @@ pub fn observe(root: &Path, scan: &Value, now: i64) {
     }
     let read_table = crate::session_watch::table_read(scan);
     let (pool, count, _) = crate::capacity::view_of(root, scan, now);
-    if read_table && crate::capacity::decide(&pool, &count, crate::capacity::Start::Board).is_ok()
-    {
+    if read_table && crate::capacity::decide(&pool, &count, crate::capacity::Start::Board).is_ok() {
         state.freed_at = Some(now);
         write(root, &state);
     }
@@ -277,14 +276,28 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         assert!(waiting(root.path()).is_none(), "no file, no wait");
         admitted(root.path(), 50);
-        assert!(!root.path().join(FILE).exists(), "nothing written without a refusal");
-        record(root.path(), Some("11111111-2222-4333-8444-555555555555"), 100);
+        assert!(
+            !root.path().join(FILE).exists(),
+            "nothing written without a refusal"
+        );
+        record(
+            root.path(),
+            Some("11111111-2222-4333-8444-555555555555"),
+            100,
+        );
         record(root.path(), Some("inbox"), 200);
         let now = 200 + 5 * HOUR;
-        assert!(last_hour(root.path(), now).is_none(), "the hour is long over");
+        assert!(
+            last_hour(root.path(), now).is_none(),
+            "the hour is long over"
+        );
         let wait = waiting(root.path()).unwrap();
         assert_eq!(
-            (wait["count"].clone(), wait["since"].clone(), wait["last_at"].clone()),
+            (
+                wait["count"].clone(),
+                wait["since"].clone(),
+                wait["last_at"].clone()
+            ),
             (json!(2), json!(100), json!(200))
         );
         assert_eq!(wait["newest_request"], "inbox");
@@ -299,7 +312,10 @@ mod tests {
         // A refusal after it starts a new wait from its own time.
         record(root.path(), None, now + 20);
         let wait = waiting(root.path()).unwrap();
-        assert_eq!((wait["count"].clone(), wait["since"].clone()), (json!(1), json!(now + 20)));
+        assert_eq!(
+            (wait["count"].clone(), wait["since"].clone()),
+            (json!(1), json!(now + 20))
+        );
         assert_eq!(wait["freed"], false);
     }
 }

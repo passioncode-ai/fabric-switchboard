@@ -131,7 +131,10 @@ fn save(root: &Path, pool: Pool) -> Result<(), String> {
     if pool.cap.is_some_and(|c| !(1..=MAX_CAP).contains(&c)) {
         return Err(CAP_INVALID.into());
     }
-    if pool.board.is_some_and(|b| !pool.cap.is_some_and(|c| b <= c)) {
+    if pool
+        .board
+        .is_some_and(|b| !pool.cap.is_some_and(|c| b <= c))
+    {
         return Err(BOARD_INVALID.into());
     }
     let bytes = serde_json::to_vec(&pool).map_err(|_| NOT_SAVED)?;
@@ -357,7 +360,12 @@ pub fn facts(root: &Path, accounts: &dyn Accounts, scan: &Value, now: i64) -> Fa
 }
 
 /// The count and view of one scan already made, with the facts read now.
-pub fn view_of(root: &Path, accounts: &dyn Accounts, scan: &Value, now: i64) -> (Pool, Count, Value) {
+pub fn view_of(
+    root: &Path,
+    accounts: &dyn Accounts,
+    scan: &Value,
+    now: i64,
+) -> (Pool, Count, Value) {
     let pool = read(root).unwrap_or_default();
     let count = count(scan, &facts(root, accounts, scan, now), now);
     let view = view(&pool, &count, scan);
@@ -474,7 +482,16 @@ mod tests {
 
     #[test]
     fn the_default_board_share_is_a_quarter_of_the_cap_and_at_least_two() {
-        for (cap, share) in [(1, 2), (4, 2), (8, 2), (11, 2), (12, 3), (20, 5), (40, 10), (500, 125)] {
+        for (cap, share) in [
+            (1, 2),
+            (4, 2),
+            (8, 2),
+            (11, 2),
+            (12, 3),
+            (20, 5),
+            (40, 10),
+            (500, 125),
+        ] {
             assert_eq!(default_board_share(cap), share, "cap {cap}");
         }
         assert_eq!(pool(Some(20), Some(7)).board_share(), Some(7));
@@ -568,10 +585,7 @@ mod tests {
         // A share: from 0 to the cap.
         set_board(root.path(), None, 6).unwrap();
         assert_eq!(read(root.path()).unwrap(), pool(Some(20), Some(6)));
-        assert_eq!(
-            set_board(root.path(), None, 21).unwrap_err(),
-            BOARD_INVALID
-        );
+        assert_eq!(set_board(root.path(), None, 21).unwrap_err(), BOARD_INVALID);
         set_board(root.path(), Some(30), 0).unwrap();
         assert_eq!(read(root.path()).unwrap(), pool(Some(30), Some(0)));
         // A cap set alone goes back to the default share.
