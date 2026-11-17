@@ -5301,12 +5301,6 @@ mod tests {
             .contains("'-m' 'deepseek/deepseek-v4-pro-0813'"));
         let config = fs::read_to_string(base.join("agent-home/config.yaml")).unwrap();
         assert!(config.contains("adopt_external_logins: false"));
-        // Review round 1, P2-10: side tasks pinned to the metered provider, no fallback.
-        assert!(config.contains("fallback_providers: []"));
-        assert!(config.contains(
-            "  title_generation:\n    provider: switchboard\n    model: \"claude-fable-5-2\""
-        ));
-        assert!(config.contains("  compression:\n    provider: switchboard"));
         assert!(config.contains("command: \"/opt/Engine \\\"Tools\\\"/python\""));
         assert!(config.contains("args: [\"/opt/engine/mcp/server.py\", \"--home\", \"/opt/h\"]"));
         {
@@ -5756,6 +5750,12 @@ mod tests {
         assert!(config.contains("key_env: SWITCHBOARD_AGENT_KEY"));
         assert!(config.contains("transport: anthropic_messages"));
         assert!(config.contains("adopt_external_logins: false"));
+        // Review round 1, P2-10: side tasks pinned to the metered provider, no fallback.
+        assert!(config.contains("fallback_providers: []"));
+        assert!(config.contains(
+            "  title_generation:\n    provider: switchboard\n    model: \"claude-fable-5-2\""
+        ));
+        assert!(config.contains("  compression:\n    provider: switchboard"));
         assert!(!config.contains("synthetic-tokens-key"));
         let script = fs::read_to_string(home.join(if cfg!(windows) {
             "launch.ps1"
