@@ -266,7 +266,6 @@ const safeErrors = new Set([
   // Organizations (SB-158).
   'Organization not found.',
   // Placing an account whose provider team a group would then refuse (SB-313).
-  "A group this account or its provider team serves would then refuse it. Move it out of that group first, or change the group's organization.",
   // SB-323: `personal` named after an organization.
   "Name personal first, then the organizations it also works for: an account's personal context can only be its first.",
   'Another organization already has this name.',
@@ -284,11 +283,8 @@ const safeErrors = new Set([
   'PassionCode.ai is already waiting for your browser.',
   'The PassionCode.ai connection could not be read. Disconnect and connect again.',
   'The browser could not be opened.',
-  // A group's organization (SB-109).
-  "This account belongs to another organization than this group. Move it, or change the group's organization.",
+  // A group's organization (SB-109). DEC-0022 (SB-403): an organization refuses no placement.
   "This account is in use on another machine. Use one of this machine's accounts, or clear the mark if it moved here.",
-  "An account chosen for this group belongs to another organization. Choose accounts of the group's organization, or change it.",
-  'This group still holds accounts that belong elsewhere. Move them out first.',
   // Project suggestions (SB-117).
   'No such suggestion. Read the suggestions again.',
   'This folder is gone. Read the suggestions again.',

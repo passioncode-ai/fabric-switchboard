@@ -26,11 +26,6 @@ pub const ORGANIZATION_NAME_TAKEN: &str = "Another organization already has this
 pub const DOMAIN_TAKEN: &str = "Another organization already has this domain.";
 pub const DOMAIN_INVALID: &str = "A domain is a name such as example.com.";
 pub const ORGANIZATION_NAME_INVALID: &str = "Name the organization in 1 to 80 characters.";
-/// DEC-0022 (SB-403): an account placed in a group none of whose organizations it holds. It
-/// still serves the group (an organization is a label on the account, never a lock on where it
-/// works); the answer carries this as a warning so the person sees it.
-pub const OUTSIDE_GROUP: &str = "This account does not work for this group's organization. It serves the group anyway; assign it the organization if it works for it.";
-
 /// DEC-0022 (SB-403): what assigning one seat of a provider team did with the team's other seats.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]

@@ -4044,7 +4044,7 @@ function renderOrganizations(main: HTMLElement) {
     const importing = orgImports.get(o.id); if (importing) card.append(orgImportView(importing));
     // SB-160 (B-7, SCN-079): left on PassionCode.ai; kept here, and the person decides what to remove.
     const releasedAt = organizationReleasedAt(passioncodeView, o);
-    if (releasedAt !== null) card.append(el('p', 'surface-note org-released', t('Not in your PassionCode.ai organizations since {date}. Its groups still refuse other accounts. Remove it when you no longer need it.', { date: date(releasedAt) })));
+    if (releasedAt !== null) card.append(el('p', 'surface-note org-released', t('Not in your PassionCode.ai organizations since {date}. Its groups keep their accounts and folders. Remove it when you no longer need it.', { date: date(releasedAt) })));
     if (!members.length) card.append(el('p', 'form-note', t('No account belongs to it yet. Place one from its ⋯ menu on Accounts.')));
     else {
       const rows = el('ul', 'org-members');
