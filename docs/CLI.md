@@ -23,7 +23,8 @@ A refusal prints the sentence the window shows for it (SB-189): what happened an
 ```sh
 switchboard accounts list
 switchboard accounts add --provider claude --kind api-key --label Work --pool work --secret-stdin < /private/path/to/credential
-# SB-401: a Claude API key added without --pool (or to default) lands in the pay-per-token group, which starts off
+# SB-401: a Claude API key lands in the pay-per-token group whatever --pool says (made when needed, switched off);
+# `accounts move <key> --pool <other>` is refused: a Claude API key moves only into that group
 switchboard accounts select ACCOUNT_UUID --provider claude --pool work
 switchboard accounts update ACCOUNT_UUID --label Work                  # or --enabled false, or both
 switchboard accounts update ACCOUNT_UUID --elsewhere true              # used on another machine: never renewed, rotated to or switched to here (SB-175); false: used here again

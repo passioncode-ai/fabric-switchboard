@@ -443,6 +443,29 @@ research notes); the ones still in force that the board cites are seeded below w
   - D-8 (review): the proxy fails closed: an unreadable store refuses (`STORE_UNREADABLE`), an
     unreadable `spend.json` is no ceiling, and the day counter takes over a poisoned lock rather
     than read as zero.
+  - D-10 (second review, 2026-11-17; supersedes D-2's "an explicit other group is still allowed"):
+    every Claude API key the person adds, restores or lets a group go lands in the pay-per-token
+    group, whatever group was named; once that group exists a Claude API key moves only into it
+    and is newly shared or lent to no group (`CLAUDE_KEY_STAYS`); `accounts move` refuses one to
+    any other group. A key in another group from before stays where it is (nothing that works is
+    broken) and may be moved in. Any Claude API key launches only in managed mode, so its
+    credential never lands in a session's home; the fallback and dispatch pass one over. Reason:
+    the simplest rule that leaves no unguarded key, as the reviewer recommended.
+  - D-11 (second review): an account whose home group is switched off serves no group sharing it
+    (route selection, rotation and failover pass over it; the routes it held move to another
+    account of the same kind there); balancing leaves an off group out and returns its loans; the
+    Codex route skips it.
+  - D-12 (second review): the proxy loads the day's spend before it listens, from
+    `tokens-spend.json` (written after each answer of a pay-per-token key) and
+    `statistics.json`, the larger winning; a file that exists and cannot be read leaves the day
+    unknown, and the group refuses until the next UTC day (`TOKENS_SPEND_UNKNOWN`).
+  - D-13 (second review): any model a Claude route answers with is priced (an unknown one at the
+    dearest family); web searches at $10 per thousand; a prompt past 200,000 tokens at the
+    long-context premium (input x2, output x1.5) and the faster tier at six times the price, both
+    marked estimated, so a ceiling never reads less than was spent.
+  - D-14 (second review): the ceiling is checked before each request, so requests already in
+    flight when it is crossed still finish; the day can pass the ceiling by what those requests
+    cost (documented in CONTRACTS), never by a request started after.
 - **Consequences:** a key in the default group from before stays there (naming it under Needs
   attention is still open, see the plan); turning a group off stops its sessions at their next request; the reached question
   is the same one paid hand-overs use, and *Double* raises the ceiling at once.

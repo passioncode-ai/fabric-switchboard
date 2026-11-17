@@ -3594,20 +3594,32 @@ Plan: [2026-11-17-token-group](plans/2026-11-17-token-group/README.md); decision
   never shares it; sources are refused (`TOKENS_BY_HAND`); deleting it is refused while it holds a
   key (`TOKENS_KEEPS_KEYS`). `set_shared` (balancing) answers false for its keys, and
   `restore_account_pool` and `restore_shared_accounts` leave them.
-- **Adding a key.** `Operation::Add` with a Claude API key and pool `default`, or pool `tokens`
-  while no such group exists, makes the group and adds the key there.
+- **Adding a key** (D-10). `Operation::Add` puts every Claude API key in the pay-per-token group
+  (made when needed), whatever pool was named; a backup restore brings one back there; a group that
+  lets one go (left out of a save, the group deleted, `return_to_default` from a pool no group
+  holds) sends it there instead of the default group (`Snapshot::leaving_pool`). Once the group
+  exists, every publish refuses a Claude API key moved anywhere but into it, or newly shared or
+  lent (`CLAUDE_KEY_STAYS`); `accounts move` (`Operation::MoveAccount`) refuses one to any other
+  group even before. A key in another group from before stays there.
 - **Switch.** `Operation::GroupSwitch { pool, on }` (CLI `switchboard project switch --pool <id>
   on|off`, MCP `switchboard_project_switch {pool, on}`, Tauri `project_switch`) answers the group.
   Turning the pay-per-token group on without a daily ceiling is refused with `TOKENS_NO_CEILING`;
   off is never refused. It is reported to analytics as a group change and has the 180 s control
   timeout of the other group changes.
-- **A group switched off.** Its folders get no binding (`bindings::desired` skips it; the
+- **A group switched off.** An account at home there serves no group sharing it
+  (`Snapshot::serves`, `pool_accounts` and `pools_of` leave it out, so route selection, rotation
+  and failover pass over it); switching it moves the routes such an account held in other groups
+  to another of their accounts of the same kind, or drops them. Balancing leaves an off group out
+  and returns its loans (`group_off`); the Codex route skips it, so a folder it shares with a
+  later group falls through to that group. Its folders get no binding (`bindings::desired` skips it; the
   bindings fingerprint covers `off` and `tokens`, so a switch re-runs the sync); its accounts are
   no fallback candidate; a launch of one of its accounts is refused with `GROUP_OFF`
   (`launch::group_allows_launch`, called by every Claude Code and Codex launch, a continuation, a
   dispatch and a third-party agent).
-- **Launch of a pay-per-token key.** Managed mode only (`TOKENS_ISOLATED`: an isolated home would
-  hold the key and reach the provider past the ceiling), while the group is on and has a ceiling
+- **Launch of a Claude API key.** Managed mode only, wherever the key is (`TOKENS_ISOLATED`: an
+  isolated home would hold the key and reach the provider past any ceiling), from a folder of its
+  group (`project_allows`); the fallback and dispatch pass a Claude API key over. A key of the
+  pay-per-token group also only while the group is on and has a ceiling
   (`TOKENS_NO_CEILING`; an unreadable `spend.json` is no ceiling).
 - **Proxy refusals**, each `403` with a `switchboard_error` body and never sent upstream, checked
   for the route's pool before route selection, for the chosen account's home pool when it differs
@@ -3618,17 +3630,29 @@ Plan: [2026-11-17-token-group](plans/2026-11-17-token-group/README.md); decision
   `503` `STORE_UNREADABLE`. The ceiling is read through `tokens::Ceilings`, kept per path while
   the file's modification time, length and inode stay the same.
 - **The day counter.** `tokens::Spend` adds each priced answer to its account's home pool for the
-  UTC day of its end, saturating, and is never drained by `take_statistics`; the owner seeds it at
-  start with `Statistics::day_cost(today)` (`ProxyHandle::seed_spend`), so a restart forgets
-  nothing. `ProxyHandle::spent_today(pool)` reads it. A ceiling found reached is noted once per
-  pool and UTC day (`take_reached`); the owner's background pass opens the ceiling's question
-  (`spend::open_question_once_a_day`: not again that day once one of the scope was asked, answered
-  or not), logged as `tokens_ceiling_reached` with `asked`, `asked_today` or `unwritten`.
+  UTC day of its end, saturating, and is never drained by `take_statistics`. After each answer of
+  a pay-per-token key it writes `<data>/tokens-spend.json` (0600, `{version: 1, day, pools}`)
+  under its lock. The proxy loads it before it listens (`Spend::load`): the larger of that file and
+  today's `cost_micros` in `statistics.json`, per pool. A file that exists and cannot be read (not
+  JSON, past 64 KiB or 8 MiB) leaves the day unknown, unless the spend file holds today, and the
+  pay-per-token group refuses that UTC day with `TOKENS_SPEND_UNKNOWN`. `ProxyHandle::spent_today(pool)`
+  reads the counter. A ceiling found reached is noted once per pool and UTC day (`take_reached`);
+  the owner's background pass opens the ceiling's question (`spend::open_question_once_a_day`: not
+  again that day once one of the scope was asked, answered or not), logged as
+  `tokens_ceiling_reached` with `asked`, `asked_today` or `unwritten`.
+- **Overshoot.** The ceiling is checked before each request. Requests already in flight when the
+  day's spend crosses it still finish and are counted, so the day can pass the ceiling by what
+  those requests cost (at most as many as the proxy's 64 slots, each one answer); no request starts
+  after it is crossed.
 - **Prices** (`switchboard-proxy/src/prices.rs`): Anthropic's list price per million tokens by
   model family (base input, 5-minute and 1-hour cache writes, cache reads, output; Haiku 5.5 by
-  prompt size), from https://platform.claude.com/docs/en/about-claude/pricing read 2026-11-17. A
-  cache write the answer does not split is priced at the 1-hour rate. An unknown model, a Claude
-  answer naming no model, or counts that were cut (a line or a body past its bound, a stream ended
+  prompt size; Claude Fable 5.2 among them), from https://platform.claude.com/docs/en/about-claude/pricing
+  read 2026-11-17. A cache write the answer does not split is priced at the 1-hour rate. Every
+  answer of a Claude route is priced, whatever model it names. Premiums (`prices::cost_with`):
+  server web searches at $10 per thousand; a prompt past 200,000 tokens at the long-context
+  premium (input x2, output x1.5) and the faster tier (`service_tier: priority`, `speed: fast`) at
+  six times the price, both marked estimated. An unknown model, a Claude answer naming no model,
+  or counts that were cut (a line or a body past its bound, a stream ended
   before its closing counts: an output of a token per four bytes at least) are priced at the
   dearest family and marked estimated. An answer with no counts (`count_tokens`) costs nothing;
   another provider's answers are not priced.
@@ -3641,5 +3665,7 @@ Plan: [2026-11-17-token-group](plans/2026-11-17-token-group/README.md); decision
   `reached`. Its question is the one `spend::answer` takes: *Keep* holds it for the day,
   *Double* raises it at once.
 - **Balancing** never names the pay-per-token group (`balancing::pools`, `plan`).
-- **Not carried:** a settings file never carries the pay-per-token group, and the SB-117 scanner
-  finds no folder for it.
+- **Group keys.** The OpenRouter keys view (`agent_keys`, the window's API keys page) leaves the
+  pay-per-token group out: it runs on its Claude keys.
+- **Not carried:** a settings file never carries the pay-per-token group, a settings import never
+  matches it (`settings_bundle::matched`), and the SB-117 scanner finds no folder for it.

@@ -101,5 +101,19 @@ pool, the badge and terminology (P2). Tests: `switchboard-proxy` `tests::the_pay
 `pool_flags_name_*`; runtime `tokens_group_tests::*`, `bindings::tests::a_group_switched_off_*`;
 `scripts/test-ui-logic.mjs` SB-401 block.
 
+## Review fixes, round 2 (2026-11-17)
+
+The second review found no P0. Fixed on this branch: core P1-1 (every Claude API key in the
+pay-per-token group, D-10 in [DEC-0023](../../DECISIONS.md#dec-0023-claude-api-keys-go-to-a-pay-per-token-group-that-starts-off-and-runs-only-under-a-daily-ceiling)),
+P1-2 (an account switched off at home, D-11), and the P2 items (the spend file and its load before
+listening, D-12; premiums and any model priced, D-13; the overshoot written down, D-14; settings
+import, the Codex route, the fallback). Window P1-1 to P1-5 and its P2 items: the demo
+(`?tokens=reached`), API keys, clearing the ceiling, launching a key, the translated name in every
+picker, the move and edit locks, Retry, the background read, the reached copy, the add notice, turn
+on with the ceiling, an empty Repositories part. The decision record was renumbered DEC-0023
+(DEC-0022 is SB-403's). First real use (operator, 2026-11-17): one Claude API key (Claude Fable
+5.2, priced) in three folders: add it (it lands in the group), *Add folder…* three times, set the
+daily ceiling with "Turn the group on now", and sessions there run on it.
+
 Next task for the next agent: file the board row for Needs attention naming a Claude key left in
 the default group, then merge `token-group` through the repository's policy and release.
