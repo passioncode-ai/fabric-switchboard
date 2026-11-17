@@ -93,7 +93,8 @@ pub fn price(model: &str, prompt: u64) -> (Price, bool) {
 pub fn cost(model: &str, u: &Usage) -> (u64, bool) {
     let prompt = u.input + u.cache_read + u.cache_write + u.cache_write_5m + u.cache_write_1h;
     let (p, known) = price(model, prompt);
-    let part = |tokens: u64, per_million: u64| (tokens as u128 * per_million as u128 / 1_000_000) as u64;
+    let part =
+        |tokens: u64, per_million: u64| (tokens as u128 * per_million as u128 / 1_000_000) as u64;
     let total = part(u.input, p.input)
         + part(u.output, p.output)
         + part(u.cache_read, p.read)

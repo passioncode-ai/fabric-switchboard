@@ -1,8 +1,8 @@
 //! Credential-injecting loopback gateway. A request owns its route snapshot until EOF.
 pub mod peer;
 pub mod prices;
-pub mod tokens;
 pub mod stats;
+pub mod tokens;
 use axum::{
     body::{to_bytes, Body},
     extract::{Path, State},
@@ -718,7 +718,10 @@ async fn relay(
             return error(StatusCode::FORBIDDEN, switchboard_core::TOKENS_NO_CEILING);
         };
         if tokens::spent_today(&g.stats, &pool, now()) >= u64::from(cents) * 10_000 {
-            return error(StatusCode::FORBIDDEN, switchboard_core::TOKENS_CEILING_REACHED);
+            return error(
+                StatusCode::FORBIDDEN,
+                switchboard_core::TOKENS_CEILING_REACHED,
+            );
         }
     }
     let route = match g.store.route(provider, &pool) {

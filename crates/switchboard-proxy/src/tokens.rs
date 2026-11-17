@@ -60,9 +60,15 @@ mod tests {
                 (&today, "apps", 5_000),
                 (&yesterday, "tokens", 9_000),
             ] {
-                all.entry(crate::stats::key(day, "a", pool, "claude-code", &format!("/w/{micros}")))
-                    .or_default()
-                    .cost_micros += micros;
+                all.entry(crate::stats::key(
+                    day,
+                    "a",
+                    pool,
+                    "claude-code",
+                    &format!("/w/{micros}"),
+                ))
+                .or_default()
+                .cost_micros += micros;
             }
         }
         assert_eq!(spent_today(&stats, "tokens", now), 1_000);

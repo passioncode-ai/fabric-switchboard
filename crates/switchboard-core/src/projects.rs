@@ -241,7 +241,8 @@ pub const TOKENS_NAME: &str = "Pay-per-token keys";
 /// default group.
 pub const TOKENS_KEEPS_KEYS: &str = "A key in the pay-per-token group leaves it only for another group. Move it there, or remove the account.";
 /// SB-401: sources, a found worktree or clone never join the pay-per-token group.
-pub const TOKENS_BY_HAND: &str = "Folders join the pay-per-token group only one by one, by hand. Add the folder to it yourself.";
+pub const TOKENS_BY_HAND: &str =
+    "Folders join the pay-per-token group only one by one, by hand. Add the folder to it yourself.";
 /// SB-401: the pay-per-token group is on with no daily ceiling (it was cleared after it was
 /// turned on): nothing would stop its keys, so it serves no request.
 pub const TOKENS_NO_CEILING: &str = "Set a daily spending ceiling for the pay-per-token group first: its keys are charged per token, and the ceiling is what stops them.";

@@ -667,7 +667,12 @@ fn the_pay_per_token_group_starts_empty_and_off_and_holds_claude_keys_only() {
     );
     let name = switchboard_core::TOKENS_NAME;
     let saved = store
-        .save_project(Some(&pool), name, &[project(&root, "paid")], std::slice::from_ref(&key.id))
+        .save_project(
+            Some(&pool),
+            name,
+            &[project(&root, "paid")],
+            std::slice::from_ref(&key.id),
+        )
         .unwrap();
     assert!(saved.tokens && saved.off && saved.folders.len() == 1);
     let emptied = store

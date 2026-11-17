@@ -506,10 +506,14 @@ fn write_bytes(root: &Path, bytes: &[u8]) -> Result<(), String> {
 /// Whether a group has its own OpenRouter key (SB-144): only such a group takes a daily ceiling.
 /// SB-401: a group's daily ceiling in cents, when one is set.
 pub fn group_ceiling(root: &Path, pool: &str) -> Option<u32> {
-    read(root).ok()?.ceilings.iter().find_map(|c| match &c.scope {
-        ChainScope::Project { pool: p } if p == pool => Some(c.cents),
-        _ => None,
-    })
+    read(root)
+        .ok()?
+        .ceilings
+        .iter()
+        .find_map(|c| match &c.scope {
+            ChainScope::Project { pool: p } if p == pool => Some(c.cents),
+            _ => None,
+        })
 }
 pub fn group_has_own_key(snapshot: &Snapshot, pool: &str) -> bool {
     snapshot
