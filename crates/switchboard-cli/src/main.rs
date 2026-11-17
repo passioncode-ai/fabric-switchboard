@@ -3694,8 +3694,9 @@ async fn continue_in_place(
         .ok_or("The session script is missing.")?;
     if let Some(launch_id) = value["launch_id"].as_str() {
         let ran = run_hosted(root, launch_id, std::path::Path::new(script));
-        if ran.is_err() {
-            // The host never started: its launch record ends here, never reads as gone (R4 review).
+        // Only a host that never came up ends the record here; one that runs (attaching failed)
+        // ends it itself when its session ends (R4, R5 review).
+        if ran.is_err() && switchboard_runtime::session_host::attachable(root, launch_id).is_none() {
             let _ = call(
                 root,
                 Operation::SessionEnded {

@@ -759,17 +759,20 @@ pub fn tick(root: &Path, now: i64) {
         drop(held);
         let (state, reason) = restart_one(root, &wave, &e);
         held = lock(root);
-        if held.is_none() {
-            crate::oplog::event(
-                "restart_wave",
-                &[("phase", crate::oplog::Field::Code("lock_unavailable"))],
-            );
-        }
         if let Some(again) = read(root, &wave.id) {
             wave = again;
         }
         set(&mut wave, &session, state, reason, Some(now));
         let _ = write(root, &wave);
+        if held.is_none() {
+            // Without the lock a cancel could be overwritten: this act's outcome is kept and the
+            // rest wait for the next pass (R5 review).
+            crate::oplog::event(
+                "restart_wave",
+                &[("phase", crate::oplog::Field::Code("lock_unavailable"))],
+            );
+            return;
+        }
     }
     let _held = held;
     // A script is kept while its session may still need it: a host that answered unclearly may
