@@ -1053,7 +1053,7 @@ mod runs {
         } else {
             json!([])
         };
-        if let Some(at) = deadline.and_then(|d| crate::rfc3339(d)) {
+        if let Some(at) = deadline.and_then(crate::rfc3339) {
             artifacts
                 .as_array_mut()
                 .unwrap()

@@ -1598,7 +1598,7 @@ mod tests {
         let running = crate::launch::sessions(&root, false);
         #[cfg(unix)]
         {
-            assert_eq!(ids(&running), [hosted.clone()]);
+            assert_eq!(ids(&running), std::slice::from_ref(&hosted));
             let row = &running[0];
             assert_eq!(row["state"], "running");
             assert_eq!(row["attachable"], true);

@@ -2,6 +2,15 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-11-17: SB-407 board runs under the duty officer, SB-411 homeless launches in `sessions`, on branch `sessions-duty-dispatch`
+
+- **Asked.** studio-agent's board request `6c2ec7f2` (SB-407): a stuck or gone `claude -p` run `dispatch` started is a Needs attention item with `dispatch stop --launch-id`; the deadline stop also takes the board request's deadline and is journalled in `duty.jsonl`; a run writing its transcript or log is never stopped before its deadline. Fabric Dashboards' finding `ddeece6e` (SB-411): `sessions --all` misses a resume run as itself (no home).
+- **Built.** `session_watch` adds `log_written_at` to dispatched records and marks `stuck`/`gone` findings `dispatch: true` (a run elsewhere is never gone); `attention` lists `session_stuck` and the new `session_gone` with `{tool: switchboard_dispatch_stop, window: dispatch_stop, command}`; new MCP tool `switchboard_dispatch_stop` (CLI parity row `dispatch stop` now a tool), Tauri `dispatch_stop`, window *Stop the run*; `dispatch::packet` reads `deadline:`, `dispatch::deadline` takes the earlier (never under a minute), recorded as `deadline_by` and `board_deadline` (null: the packet named none); `dispatch::stop` journals intent and outcome in `duty.jsonl`, `finish_cut_stop` ends a run a quit cut mid-stop; `duty::interrupted` skips those lines. `launch::homeless` lists records whose `home_path` is present and null.
+- **Decisions.** A board deadline already past still gives the run a minute (no new refusal code Fabric would have to map). Only Needs attention offers *Stop the run*; the Sessions page rows do not yet (open item on SB-407). A gone launch that is not a dispatched run stays in the tree only. Records without a `home_path` key (older than its introduction) are never treated as homeless.
+- **Checks.** Studio worktree: focused `cargo test -p switchboard-runtime --lib` (156 passed, the new tests included), golden regenerated and read, `./scripts/check.sh` EXIT on the PR's head; this MacBook: `cargo xwin check --target x86_64-pc-windows-msvc -p switchboard-runtime -p switchboard-cli --tests`, no new warning. Copylot ids in [strings](brand/strings.md).
+
+**Exact next task.** Merge the `sessions-duty-dispatch` pull request once its gate reads EXIT 0 on the merged head, tell studio-agent (thread `f6ac05d8`) and Fabric Dashboards (thread `8d8abe81`) on the board which release carries it; then *Stop the run* on the Sessions page rows.
+
 ## 2026-11-17: SB-403 S2 to S4, a subscription delegated to a teammate's machine (DEC-0025), on branch `org-delegation`
 
 - **Asked.** The operator: a teammate's machine joins an organization; one of the organization's subscriptions is delegated to it, used in console sessions through Switchboard without the teammate signing in with it, revocable, more added later; the teammate keeps Claude Desktop on their own subscription, which Switchboard never touches ([plan](plans/2026-11-17-org-seat-delegation/README.md)).
