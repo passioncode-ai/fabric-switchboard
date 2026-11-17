@@ -2,6 +2,15 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-11-17: SB-413 a restarted hosted session kept no output reader on Linux, on branch `session-host-test-hang`
+
+- **Asked.** The nightly at `0f1ffe6a` (run 44076842446, job `linux (ubuntu-24.04-arm)`) hung 70 minutes in `session_host::tests::a_restart_in_place_keeps_the_viewers_and_runs_the_next_program_on_the_same_terminal`: make no session host test able to hang, find the cause, fix it.
+- **Cause.** The output reader read the old process's end (EIO) just before the restart started the next process, then waited for the session's lock while the next process was spawned under it; when it got the lock `respawning` was already false, so it stopped. The next process's output stayed in the terminal unread and the viewer saw nothing more. Reproduced in a Linux aarch64 container (rust:1.99, Colima on the Mac Studio): 3 failures in 41 loops of `session_host::` beside the whole `switchboard-runtime` suite; a diagnostic build printed `reader ends: Err(EIO) respawning=false` after the next pid started, with that process in the foreground waiting in `read`.
+- **Built.** `crates/switchboard-runtime/src/session_host.rs`: the reader stops only once the host marks the session `finished` (the `respawning` flag is gone; a failed `wait` marks it too); a viewer's wait for the host's `HELLO` answer is bounded at 15 s. Tests: every test viewer reads with a 30 s timeout and fails with what it saw, the host's end is awaited through a channel for at most 30 s, and `a_restart_in_place_keeps_its_output_when_the_reader_sees_the_old_end_late` pauses the reader past the next process's start (fails 3 of 3 against the old reader, passes with the fix).
+- **Checks.** Linux container: 150 of 150 loops of `session_host::` beside the whole suite. Mac Studio worktree at `8803c18a`: 20 of 20 loops of `cargo test -p switchboard-runtime --lib session_host`, `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --locked -- -D warnings`, `./scripts/check.sh` (EXIT in the pull request).
+
+**Exact next task.** Merge the `session-host-test-hang` pull request once its gate reads EXIT 0 on the merged head; the next release carries SB-413 (CHANGELOG Unreleased).
+
 ## 2026-11-17: SB-407 board runs under the duty officer, SB-411 homeless launches in `sessions`, on branch `sessions-duty-dispatch`
 
 - **Asked.** studio-agent's board request `6c2ec7f2` (SB-407): a stuck or gone `claude -p` run `dispatch` started is a Needs attention item with `dispatch stop --launch-id`; the deadline stop is journalled in `duty.jsonl`; a run writing its transcript or log is never stopped before its deadline. Fabric Dashboards' finding `ddeece6e` (SB-411): `sessions --all` misses a resume run as itself (no home).
