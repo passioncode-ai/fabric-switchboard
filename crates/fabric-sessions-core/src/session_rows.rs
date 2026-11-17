@@ -191,18 +191,16 @@ pub fn build(sources: &Sources) -> Value {
         // transcript in any folder cannot be continued, and one whose session went past it ended
         // somewhere else and is continued as itself.
         let claude = stop["provider"] == "claude";
-        let (group, why, acts) = if claude
-            && s.get("transcript_at").is_some()
-            && s["transcript_at"].is_null()
-        {
-            ("ended", "no_transcript", Vec::new())
-        } else if moved_on(s, now) {
-            ("ended", "moved_on", vec!["continue"])
-        } else if s["ready"] == true {
-            ("needs_you", "ready_to_continue", vec!["continue"])
-        } else {
-            ("waiting", "limit", Vec::new())
-        };
+        let (group, why, acts) =
+            if claude && s.get("transcript_at").is_some() && s["transcript_at"].is_null() {
+                ("ended", "no_transcript", Vec::new())
+            } else if moved_on(s, now) {
+                ("ended", "moved_on", vec!["continue"])
+            } else if s["ready"] == true {
+                ("needs_you", "ready_to_continue", vec!["continue"])
+            } else {
+                ("waiting", "limit", Vec::new())
+            };
         rows.push(row(
             group,
             why,

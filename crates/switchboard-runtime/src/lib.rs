@@ -4580,7 +4580,11 @@ mod owner_unreachable_tests {
         .unwrap();
         assert!(matches!(
             old,
-            Operation::SessionContinue { in_place: false, hosted: false, .. }
+            Operation::SessionContinue {
+                in_place: false,
+                hosted: false,
+                ..
+            }
         ));
     }
 
@@ -6646,7 +6650,11 @@ async fn execute(
                     .collect();
                 // SB-400: a hosted continue has no home; its host says it runs (R4 review).
                 #[cfg(unix)]
-                attachable.extend(session_host::live_hosts(&root).into_iter().map(|(id, _)| id));
+                attachable.extend(
+                    session_host::live_hosts(&root)
+                        .into_iter()
+                        .map(|(id, _)| id),
+                );
                 let resumable =
                     resumable::recent(&root, session_watch::now() - resumable::WINDOW_SECONDS);
                 let now = session_watch::now();
