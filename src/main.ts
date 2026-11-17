@@ -839,7 +839,7 @@ function shellHookSection() {
   }
   return section;
 }
-/** SCN-074 step 1: the first time the installed app wrote the terminal hook, the window says so once, with the way to Groups; read while the window is visible, then acknowledged. */
+/** SCN-074 step 1: the first time the installed app wrote the terminal hook, the window says so once, with the way to Settings; read while the window is visible, then acknowledged. */
 let shellNoticeReading = false;
 function checkShellHookNotice() {
   if (shellNoticeReading || document.hidden) return;
@@ -4655,8 +4655,8 @@ function backgroundRefresh() {
     // A read issued before a user mutation may predate it; applying it would revert the change.
     if (!clock.accepts(stamp)) return;
     // A-7 fix cycle 1 (N7): a change made elsewhere (`switchboard shell on|off`, MCP
-    // `switchboard_shell_hook_set`) reaches the Groups page at the next minute's read.
-    if (page === 'projects') shellHookKey = '';
+    // `switchboard_shell_hook_set`) reaches the Settings page, where the switch lives, at the next minute's read.
+    if (page === 'settings') shellHookKey = '';
     snapshot = data; applyContext(context); backgroundRender();
     // B-8, SB-104, C-7, SB-227: what the page on screen shows is read again with the list.
     const reads = backgroundReads(page, !!snapshot?.projects?.some((p) => p.tokens));

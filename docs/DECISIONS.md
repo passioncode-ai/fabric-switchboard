@@ -6,7 +6,7 @@ never renumber, never delete. The doc map ([DOCMAP.md](DOCMAP.md)) names this fi
 register. Decisions made before 2026-11-08 live where they were made (plans' `D-<n>`, board rows,
 research notes); the ones still in force that the board cites are seeded below with their source.
 
-**Next free ID:** `DEC-0027` (`DEC-0018` and `DEC-0020`, held for the window and fleet plan's modules, were written on 2026-11-17)
+**Next free ID:** `DEC-0029` (`DEC-0027` is held for SB-418, a person's off switch for an account, and `DEC-0028` for SB-419, groups fed from the default group, both on open branches; `DEC-0018` and `DEC-0020`, held for the window and fleet plan's modules, were written on 2026-11-17)
 
 ## Format
 
@@ -97,9 +97,9 @@ research notes); the ones still in force that the board cites are seeded below w
 - **Context:** it replaces REQ-002, under which a new repository could become a group of its own.
 - **Decision:** a repository in no group stays in the default group and is never made a group of
   its own; a repository a group's agents create or work in joins that group by itself.
-- **Amended 2026-10-22 (SB-171, 0.6.68).** A folder never joins a group because a group's agent
-  worked in it: that join (SB-131's `worked` rows) had moved 83 folders nobody chose into three
-  groups. A folder joins a group by itself only as a worktree or clone of a repository the group
+- **Amended 2026-10-22 (SB-171, tagged 0.6.68, first published in 0.6.70).** A folder never joins a group because a group's agent
+  worked in it: that join (SB-131's `worked` rows) had moved 33 folders nobody chose, with their worktrees
+  and clones, into three groups (SB-171). A folder joins a group by itself only as a worktree or clone of a repository the group
   holds, or as a repository of a source the person set for the group (`github.com/<owner>`); a
   deleted folder leaves by itself. The scan that found worked folders was removed and a `worked`
   row is never added (test `a_folder_never_joins_a_group_because_its_agent_worked_there`,
@@ -384,9 +384,9 @@ research notes); the ones still in force that the board cites are seeded below w
 ### DEC-0020: Routing between the person's own machines is opted in and moves a sign-in, never a request
 
 - **Date:** 2026-11-14
-- **Status:** Accepted under the operator's delegation, not built (SB-374, WF-12.3). It rests on
-  the window and fleet plan's assumed answer 3, asked once on the Fabric board with the plan's
-  other questions; no answer is recorded in this repository. Held in that plan and written here
+- **Status:** Assumed, not built (SB-374, WF-12.3): it rests on the window and fleet plan's
+  assumed answer 3; the plan says the question was asked on the Fabric board, and no answer is
+  recorded in this repository. It narrows DEC-0013 once built. Held in that plan and written here
   on 2026-11-17 from it.
 - **Context:** an account on another machine belongs to that machine's group and is never routed
   here ([DEC-0013](#dec-0013-an-account-on-another-machine-belongs-to-that-machines-group-and-to-no-group-here)); its

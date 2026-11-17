@@ -1711,7 +1711,7 @@ function defaultOffLine(unmapped: NonNullable<ShellHookStatus['unmapped']>): str
   if (first.reason === 'no_folder') return t('Off: {organization}\'s group “{group}” has no folder yet.', { organization: first.organization, group: first.group });
   return t('Off: {organization}\'s folders are not on this computer.', { organization: first.organization });
 }
-/** What the Groups page's *Terminals in organization folders* section shows for a read (null while
+/** What Settings' *Terminals in organization folders* section shows for a read (null while
  * reading) and the last read's or save's error (SCN-075). */
 export function shellHookView(status: ShellHookStatus | null, error: string | null = null): ShellHookView {
   const none = { files: [], action: null, readd: false, note: null };
