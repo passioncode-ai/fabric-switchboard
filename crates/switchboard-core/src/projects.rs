@@ -671,6 +671,25 @@ impl Store {
         let organizations = organization.map(|o| o.map(str::to_owned).into_iter().collect());
         self.save_project_with(pool, name, folders, accounts, organizations, true)
     }
+    /// SB-401: the pay-per-token group's pool, the group made (no folder, switched off) when it
+    /// does not exist yet. A Claude API key the person adds without naming another group goes
+    /// here, never to the default group, where every folder in no group would run on it.
+    pub fn ensure_tokens_group(&self) -> Result<String, String> {
+        let mut state = self.lock()?;
+        if let Some(group) = state.tokens_group() {
+            return Ok(group.pool.clone());
+        }
+        let mut candidate = state.clone();
+        let pool = candidate.tokens_pool();
+        candidate
+            .projects
+            .push(Project::tokens_group(pool.clone(), now()));
+        candidate.projects.sort_by(|a, b| a.name.cmp(&b.name));
+        append_event(&mut candidate, "project", None, "created");
+        self.publish(&mut state, candidate)?;
+        self.changed();
+        Ok(pool)
+    }
     /// [`Store::save_project`], also setting the group's organizations when given (SB-282: an
     /// empty list makes it personal); left out, a saved group keeps its own. With `share`, a
     /// listed account whose home is another group serves this one too and keeps its home

@@ -5243,6 +5243,16 @@ async fn execute(
             secret,
         } => {
             let credential = Credential::parse(provider, kind, &secret)?;
+            // SB-401: a Claude API key never lands in the default group, where every folder in
+            // no group would run on it: it goes to the pay-per-token group, which starts off.
+            let pool = if provider == Provider::Claude
+                && kind == AuthKind::ApiKey
+                && pool == "default"
+            {
+                store.ensure_tokens_group()?
+            } else {
+                pool
+            };
             Ok(json!(store.add(label, provider, kind, pool, credential)?))
         }
         Operation::Update {
