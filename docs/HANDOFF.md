@@ -2,6 +2,16 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-11-17: SB-417 the session pool gives board runs a share and counts sessions, not folders, on branch `board-share`
+
+- **Asked.** Target-state plan wave item W1.1 (`docs/plans/2026-11-17-target-state/03-sessions.md` capability 16, on branch `target-state`): measured 17:55 CET on the operator's MacBook, cap 20 with 34 sessions counted, most of them interactive, so every board `dispatch` was refused `at_capacity` with no end; operator: the session manager must start work when it arrives.
+- **Built.** `crates/fabric-sessions-core/src/capacity.rs`: `Pool {cap, board?}` (reader without `deny_unknown_fields`, `board` written only when set), `Start::{Interactive, Board}`, `admits` (board: room in the pool or board runs under the share, default `max(2, cap/4)`), per-session `classify`/`count`/`facts` from the duty officer's readers (`session_files`, `session_last_write`, `monitors::holds`, `stops::live_stop_sessions`); `Accounts::board_launches` (Switchboard: fabric-surface launches not ended and `dispatches.json` runs not ended). `dispatch_refusals`: `waiting`, `waiting_since`, `admitted`, `waiting`; `capacity::full(root, Start::Board)` ends the wait when it admits. CLI `capacity set N --board M`, hosted starts classed by `--surface fabric`; MCP and Tauri `board`; Settings field *Board runs*; Needs attention's `dispatch_refused` reads the wait with no one-hour cutoff.
+- **Decisions.** `capacity set N` without `--board` goes back to the default share (the window's empty field means the default). A version before SB-417 reads a file with `board` as unreadable and its gate admits (fails open), so downgrades never block board work. In a turn (`busy`, `shell`) a session counts however long it is silent; outside one it is quiet after 30 minutes of its own.
+- **Checks.** See the PR: focused tests and the golden answers on the build machine; `./scripts/check.sh` and `cargo xwin check --target x86_64-pc-windows-msvc` there (EXIT lines in the PR). Copylot report ids in [strings.md](brand/strings.md).
+- **Not done.** Fabric is not told when a slot frees (event or board message, plan capability 16 P1); window, fallback and hand-over Terminal starts still bypass the gate (P2); `--target auto` does not read candidates' pools (P2); the live `capacity.json` on the MacBook was not changed.
+
+**Exact next task.** Two review rounds on the `board-share` pull request, then merge once the gate reads EXIT 0 on the merged head; after the release, set the MacBook's pool back to the operator's 20 (`switchboard capacity set 20`) only if the operator asks, and file the remaining P1/P2 of capability 16 as wave rows.
+
 ## 2026-11-17: SB-414 a window that does not own the data folder, SB-408 a .deb install that is behind, on branch `update-notices`
 
 - **Asked.** studio-agent's board requests `bc06a63d` (SB-414: a private `~/Applications` 0.7.111 window beside a 0.7.112 `serve` said nothing, and `switchboard app updates` answered a bare `APP_ONLY`) and `2b5ffe83` (SB-408: a .deb install never says it is behind).
