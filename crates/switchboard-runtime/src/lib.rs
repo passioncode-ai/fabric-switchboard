@@ -20,6 +20,8 @@ mod chain_view;
 mod codex_route;
 pub mod continuation;
 pub mod control;
+pub mod copies;
+pub mod deb;
 mod digest;
 pub mod dispatch;
 pub mod dispatch_refusals;
@@ -5498,7 +5500,7 @@ async fn execute(
         // null offline, where no owner answered) and `online` says whether an owner runs,
         // beside the display string `live_mode`.
         Operation::Status => Ok(
-            json!({"proxy_address": runtime.map(|r| r.proxy.address().to_string()), "platform": std::env::consts::OS, "live_mode": if runtime.is_some() { "Next request · HTTP/SSE" } else { "Offline" }, "owner_version": runtime.map(|_| env!("CARGO_PKG_VERSION")), "online": runtime.is_some(), "vault": switchboard_core::vault_kind(root).ok()}),
+            json!({"proxy_address": runtime.map(|r| r.proxy.address().to_string()), "platform": std::env::consts::OS, "live_mode": if runtime.is_some() { "Next request · HTTP/SSE" } else { "Offline" }, "owner_version": runtime.map(|_| env!("CARGO_PKG_VERSION")), "owner_kind": runtime.map(|r| if r.app_doors().is_some() { "app" } else { "serve" }), "owner_copy": runtime.and_then(|_| copies::this_copy()).map(|c| c.to_string_lossy().into_owned()), "owner_updates_copy": runtime.map(|r| r.app_doors().is_some() || serve_update::updates_copy(root)), "online": runtime.is_some(), "vault": switchboard_core::vault_kind(root).ok()}),
         ),
         Operation::CurrentAccounts => match runtime {
             Some(runtime) => runtime.current_accounts(),
@@ -8512,7 +8514,22 @@ async fn execute(
             Ok(answer)
         }
         Operation::App { action, enabled } => {
-            app_doors::answer(runtime.and_then(|r| r.app_doors()), action, enabled).await
+            app_doors::answer(
+                runtime.and_then(|r| r.app_doors()),
+                action,
+                enabled,
+                // SB-414: a `serve` owns the data folder (a runtime without the app's doors), or
+                // nothing does (an offline command).
+                || {
+                    copies::not_app_view(
+                        runtime.map(|_| env!("CARGO_PKG_VERSION")),
+                        runtime.is_some() && serve_update::updates_copy(root),
+                        &copies::windows(root),
+                        serve_update::last(root),
+                    )
+                },
+            )
+            .await
         }
         Operation::Analytics { enabled } => match (runtime, enabled) {
             (Some(rt), Some(on)) => rt.set_analytics(on),

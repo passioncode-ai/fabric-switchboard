@@ -49,7 +49,15 @@ See [account behavior](docs/ACCOUNTS-AND-ROTATION.md) and
 macOS releases are universal, Developer ID signed and notarized by Apple. Windows releases (x64,
 arm64) are built natively and Authenticode-signed (Azure Artifact Signing, timestamped). Linux
 releases (x64, arm64) are a .deb, an AppImage and a CLI tarball. Installed copies from
-0.6.1 update automatically. Builds and signatures come from the protected
+0.6.1 update automatically, except a .deb install: the package manager owns its files, so
+Settings → Updates and `switchboard update --check` give one command that downloads the newer
+.deb, verifies it against the release key and installs it with apt (it needs `curl` and `gpgv`;
+`sudo apt install curl gpgv` adds whichever is missing). Once its program was replaced (apt, or an
+update another account installed), `switchboard serve` restarts onto the new one only under a
+supervisor that starts it again: a systemd unit that runs `serve` itself (systemd 248 or later,
+`Restart=on-failure`) or a launchd job (`KeepAlive`). Started by hand (from a shell, with `nohup`
+or `&`, `setsid`, cron), it logs `update_restart unsupervised` once and keeps running on the old
+program until you restart it ([CLI](docs/CLI.md)). Builds and signatures come from the protected
 [release workflow](docs/DISTRIBUTION.md#how-a-release-happens).
 Live-provider acceptance is tracked separately on the [board](docs/evidence/backlog.md)
 (SB-01, SB-02, SB-15).
