@@ -819,22 +819,11 @@ pub fn restore(
     if !payload.domain_rule_retired {
         let _ = store.freeze_domain_placements(&added);
     }
-    // SB-314: with the groups and the word back, each account this restore added sits in a group
-    // that admits it: one saved in `default` above goes to its group when that group now admits
-    // it, and one whose group came back refusing it goes to `default`.
+    // SB-314: with the groups and the word back, each account this restore saved in `default`
+    // above goes to its group; DEC-0022 (SB-403): whatever its organizations. Only another copy
+    // of its sign-in there keeps it in `default`.
     for (id, pool) in &deferred {
         if !store.restore_account_pool(id, pool).unwrap_or(false) {
-            result.returned_to_default += 1;
-        }
-    }
-    let here = store.snapshot()?;
-    for account in here.accounts.iter().filter(|a| added.contains(&a.id)) {
-        if !deferred.contains_key(&account.id)
-            && !here.context_admits(&account.pool, account)
-            && store
-                .restore_account_pool(&account.id, "default")
-                .unwrap_or(false)
-        {
             result.returned_to_default += 1;
         }
     }
@@ -1534,9 +1523,8 @@ mod tests {
 
     #[test]
     fn a_restore_places_an_account_in_its_group_only_once_its_word_is_back() {
-        // SB-314: a group here that names an organization checks placement when an account is
-        // saved, before the backup's word for it is back; the account starts in `default`, goes
-        // to its group once the word admits it there, and stays in `default` when it does not.
+        // SB-314: the account starts in `default` and goes to its group once the backup's word
+        // for it is back. DEC-0022 (SB-403): whatever the group's organizations.
         let temp = tempfile::tempdir().unwrap();
         let backups = temp.path().join("backups");
         let keys = Keys::default();
@@ -1586,7 +1574,8 @@ mod tests {
             Some(back.id.as_str())
         );
 
-        // An install whose group Alpha belongs to another organization: it stays in `default`.
+        // DEC-0022 (SB-403): an install whose group Alpha belongs to another organization takes
+        // it all the same; the person's placement is a label, never a lock.
         let other = store(&temp.path().join("three"));
         let beta = other.add_organization("Beta", &[]).unwrap();
         let folder = temp.path().join("checkout-b");
@@ -1601,15 +1590,15 @@ mod tests {
             )
             .unwrap();
         let restored = restore(&other, &backups, &info.file, &keys).unwrap();
-        assert_eq!((restored.added, restored.returned_to_default), (1, 1));
+        assert_eq!((restored.added, restored.returned_to_default), (1, 0));
         let snap = other.snapshot().unwrap();
         let kept = snap
             .accounts
             .iter()
             .find(|x| x.label == "synthetic-a")
             .unwrap();
-        assert_eq!(kept.pool, "default");
-        assert!(!snap.routes.contains_key("claude:alpha"));
+        assert_eq!(kept.pool, "alpha");
+        assert_eq!(snap.groups_outside(kept).len(), 1);
         // Restoring again adds nothing and moves nothing.
         let again = restore(&other, &backups, &info.file, &keys).unwrap();
         assert_eq!((again.added, again.returned_to_default), (0, 0));

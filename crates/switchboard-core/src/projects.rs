@@ -780,12 +780,9 @@ impl Store {
             Some(list) => organizations_checked(&candidate, list)?,
             None => current.clone(),
         };
-        // SB-109, SB-282: an account joins a group of its own context only; a group whose
-        // organizations change keeps only accounts of the new ones. SB-285: placing an account
-        // whose address suggests one of the group's organizations confirms it (below, once it
-        // has moved).
-        // SB-314: an account the group already shares is not joining; re-checking it on every save
-        // let one misfit share block a rename or the background's folder add.
+        // SB-285: placing an account whose address suggests one of the group's organizations
+        // confirms it (below, once it has moved). SB-314: an account the group already shares is
+        // not joining.
         let shared_before: Vec<String> =
             existing.map_or_else(Vec::new, |i| candidate.projects[i].shared_accounts.clone());
         let joining: Vec<String> = candidate
@@ -798,12 +795,8 @@ impl Store {
             })
             .map(|a| a.id.clone())
             .collect();
-        for id in &joining {
-            let a = candidate.accounts.iter().find(|a| &a.id == id).unwrap();
-            if !candidate.placement_admits(&organizations, a) {
-                return Err(candidate.seat_chosen(a));
-            }
-        }
+        // DEC-0022 (SB-403): an account of another context joins all the same; the runtime's
+        // answer warns of it (`Snapshot::outside_warnings`).
         for (id, to) in &moves {
             let old = {
                 let a = candidate.accounts.iter_mut().find(|a| &a.id == id).unwrap();
@@ -862,8 +855,8 @@ impl Store {
         self.changed();
         Ok(project)
     }
-    /// Binds a group to an organization, or to none (personal), SB-109. Refused while the group
-    /// still holds an account of another context.
+    /// Binds a group to an organization, or to none (personal), SB-109. DEC-0022 (SB-403): the
+    /// accounts it holds stay, whatever their organizations.
     pub fn set_project_organization(
         &self,
         pool: &str,
@@ -873,7 +866,7 @@ impl Store {
         self.set_project_organizations(pool, organization.map(str::to_owned).into_iter().collect())
     }
     /// Binds a group to these organizations (SB-282: none is personal, several share it, the
-    /// first is its own context). Refused while the group holds an account of another context.
+    /// first is its own context). The accounts it holds stay (DEC-0022).
     pub fn set_project_organizations(
         &self,
         pool: &str,
@@ -882,13 +875,7 @@ impl Store {
         let mut state = self.lock()?;
         let mut candidate = state.clone();
         let organizations = organizations_checked(&candidate, organizations)?;
-        if candidate
-            .accounts
-            .iter()
-            .any(|a| candidate.serves(a, pool) && !candidate.placement_admits(&organizations, a))
-        {
-            return Err(crate::organizations::SEATS_ELSEWHERE.into());
-        }
+        // DEC-0022 (SB-403): accounts of another context stay and keep serving the group.
         // SB-285: binding the group to the organization its accounts' addresses suggest
         // confirms it for each of them.
         let serving: Vec<String> = candidate
@@ -1023,9 +1010,8 @@ impl Store {
         self.changed();
         Ok(())
     }
-    /// SB-314: a restore puts `id` back in `pool` (`default` included) when the group of `pool`
-    /// admits it by its word as it stands now ([`crate::Snapshot::context_admits`]) and that pool
-    /// holds no other copy of its identity; nothing else. True when it moved. Its route in the
+    /// SB-314: a restore puts `id` back in `pool` (`default` included) when that pool holds no
+    /// other copy of its identity; nothing else. DEC-0022 (SB-403): whatever its organizations. True when it moved. Its route in the
     /// pool it leaves goes, and shares that no longer apply are pruned.
     pub(crate) fn restore_account_pool(&self, id: &str, pool: &str) -> Result<bool, String> {
         let mut state = self.lock()?;
@@ -1033,7 +1019,7 @@ impl Store {
         let Some(account) = candidate.accounts.iter().find(|a| a.id == id).cloned() else {
             return Ok(false);
         };
-        if account.pool == pool || !candidate.context_admits(pool, &account) {
+        if account.pool == pool {
             return Ok(false);
         }
         let clash = candidate.accounts.iter().any(|b| {

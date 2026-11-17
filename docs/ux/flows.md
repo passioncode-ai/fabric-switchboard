@@ -69,18 +69,17 @@ flowchart TD
  C -->|yes| D[Screen: Accounts with the organization card]
  D --> E{One group bound to it?}
  E -->|none| F[+ Group for organization: group dialog prefilled]
- F -->|refused: foreign accounts| F_err[Dialog stays open with SCN-070's reason]
- F_err --> F
  F -->|saved| G
  E -->|two or more| E_err[Step names both groups: keep one]
  E_err --> E
- E -->|one| G{Signed-in seat of it in the group?}
- G -->|no| H[Sign in with your organization address]
+ E -->|one| G{Signed-in account in the group?}
+ G -->|no| H[Add a seat: an account here, or sign in with any address]
  H -->|sign-in failed or cancelled| H_err[SCN-003 recovery, step stays Needs you]
  H_err --> H
  H -->|signed in elsewhere| M[Notice offers Move it to group SCN-077]
  M --> G
  H -->|signed in in the group| G
+ H -->|an account already here joins the group| G
  G -->|yes| I[Terminals step reads the hook SCN-074, optional]
  I --> J[First launch, optional]
  J --> K[Card gone, onboard complete]

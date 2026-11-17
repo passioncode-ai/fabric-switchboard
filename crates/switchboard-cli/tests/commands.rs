@@ -1063,6 +1063,32 @@ async fn org_list_names_the_organization_an_address_suggests() {
     let line = text.lines().find(|l| l.starts_with(&account.id)).unwrap();
     assert!(line.ends_with("dev@acme.example (set by you)"), "{line}");
     assert!(line.contains("Acme"), "{line}");
+    // SB-403: an organization needs no domain, and `--also` adds one to the account's
+    // contexts, keeping its first; it counts as the organization's account.
+    run(&["org", "add", "Beta"]);
+    let json: serde_json::Value = serde_json::from_str(&run(&[
+        "--json",
+        "org",
+        "assign",
+        &account.id,
+        "--also",
+        "beta",
+    ]))
+    .unwrap();
+    let beta = json["data"]["also"][0].as_str().unwrap().to_owned();
+    let json: serde_json::Value = serde_json::from_str(&run(&["--json", "org", "list"])).unwrap();
+    let row = &json["data"]["accounts"][0];
+    assert_eq!(row["organization_name"], "Acme", "{row}");
+    assert_eq!(row["also"], serde_json::json!([beta]), "{row}");
+    let beta_row = json["data"]["organizations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|o| o["name"] == "Beta")
+        .unwrap()
+        .clone();
+    assert_eq!(beta_row["domains"], serde_json::json!([]));
+    assert_eq!(beta_row["accounts"], 1);
 }
 
 #[test]

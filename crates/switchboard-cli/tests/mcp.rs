@@ -1156,18 +1156,24 @@ async fn a_project_is_listed_and_changed_by_delta_over_mcp() {
         json!({"pool": pool, "add_folders": ["relative/x"]}),
     );
     assert!(error, "{refused}");
-    // SB-109: a group bound to an organization by name; it refuses while it holds a personal
-    // account, takes it once the account is out, and `switchboard_projects` names it.
+    // SB-109: a group bound to an organization by name, and `switchboard_projects` names it.
+    // DEC-0022 (SB-403): binding it while it holds a personal account is not refused; the
+    // answer warns that the account serves it outside the organization.
     let (error, added) = agent.tool(
         "switchboard_organization_set",
         json!({"action": "add", "name": "Acme", "domains": ["acme.invalid"]}),
     );
     assert!(!error, "{added}");
-    let (error, refused) = agent.tool(
+    let (error, bound) = agent.tool(
         "switchboard_project_edit",
         json!({"pool": pool, "organization": "acme"}),
     );
-    assert!(error, "{refused}");
+    assert!(!error, "{bound}");
+    assert_eq!(
+        bound["warnings"][0]["code"], "outside_organization",
+        "{bound}"
+    );
+    assert_eq!(bound["warnings"][0]["account"], ids[2], "{bound}");
     let (error, changed) = agent.tool(
         "switchboard_project_edit",
         json!({"pool": pool, "remove_accounts": [ids[2]], "organization": "Acme"}),
@@ -1410,6 +1416,25 @@ async fn accounts_rotation_activity_and_queues_are_reachable_over_mcp() {
         json!({"action": "assign", "account_id": ids[2], "organization": "personal"}),
     );
     assert!(!error && personal["organization"].is_null(), "{personal}");
+    // SB-403: `also` adds to what it has; empty, or beside a first context, it is refused and
+    // nothing changes (an empty one would let the rules decide again).
+    let (error, refused) = agent.tool(
+        "switchboard_organization_set",
+        json!({"action": "assign", "account_id": ids[2], "also": []}),
+    );
+    assert!(error, "{refused}");
+    let (error, refused) = agent.tool(
+        "switchboard_organization_set",
+        json!({"action": "assign", "account_id": ids[2], "organization": "personal", "also": [org]}),
+    );
+    assert!(error, "{refused}");
+    let (error, added) = agent.tool(
+        "switchboard_organization_set",
+        json!({"action": "assign", "account_id": ids[2], "also": [org]}),
+    );
+    assert!(!error, "{added}");
+    assert!(added["organization"].is_null(), "personal kept: {added}");
+    assert_eq!(added["also"], json!([org]), "{added}");
     let (error, set) = agent.tool(
         "switchboard_rotation_set",
         json!({"provider": "claude", "pool": "work", "threshold_percent": 80}),

@@ -413,7 +413,9 @@ impl Statistics {
                 .collect(),
         );
         // SB-109: by whose seat the requests ran, once an organization exists: an organization's
-        // id, `personal`, or `unknown` for an account removed since.
+        // id, `personal`, or `unknown` for an account removed since. SB-403: an account that also
+        // works for other organizations counts once, under its first context, so the rows add up
+        // to the total; *By group* shows where its requests ran.
         let mut by_organization: BTreeMap<String, Tally> = BTreeMap::new();
         if !snapshot.organizations.is_empty() {
             for (id, t) in &by_account {

@@ -79,22 +79,33 @@ switchboard events --before 1763100000                 # SB-373: older events; a
 
 ```sh
 switchboard org add "Acme" --domain acme.example --domain acme.dev
+switchboard org add "Beta"                             # SB-403: an organization needs no domain
 switchboard org list                                   # organizations, then each account, why, and what its address suggests
 switchboard org assign ACCOUNT_UUID ORGANIZATION        # an id or a name, or personal, or auto
 switchboard org assign ACCOUNT_UUID auto Acme Beta      # SB-282: the rules decide its first; it also works for Acme and Beta
-switchboard org assign ACCOUNT_UUID personal Acme      # SB-323: personal, and it also works for Acme (personal comes first or is refused); the answer's refused_by names groups that no longer use it
+switchboard org assign ACCOUNT_UUID personal Acme      # SB-323: personal, and it also works for Acme (personal comes first or is refused)
+switchboard org assign ACCOUNT_UUID --also Acme        # SB-403: Acme added to the organizations it works for; its own stays
+switchboard org assign ACCOUNT_UUID Acme --team        # SB-403: the other seats of its Claude Team or ChatGPT workspace follow too
 switchboard org edit ORGANIZATION_ID --name "Acme Inc." --domain acme.example
 switchboard org remove ORGANIZATION_ID
 ```
 
 An account belongs to an organization by your word (`assign`) or by its team at the provider
-(assigning one seat of a Claude Team or ChatGPT workspace records the team, so its other seats
-follow); otherwise it is personal. An address on an organization's domain only suggests it
+(`assign --team` on one seat of a Claude Team or ChatGPT workspace records the team, so its other
+seats follow; without `--team` only that seat is placed and the answer says `team: not_claimed`
+with the number of `teammates`); otherwise it is personal. An organization is a label, never a lock
+(SB-403, [DEC-0022](DECISIONS.md#dec-0022-an-organization-is-a-label-never-a-lock-on-where-an-account-works)): no `assign`, move, share, sign-in or call back is refused because of
+organizations, and every group serves the accounts it holds. The answer's `outside` (and
+`warnings`) names the groups it serves whose organizations it does not hold, as information;
+`project save`/`edit`, `accounts move` and `accounts recall` answer `warnings` the same way. An address on an organization's domain only suggests it
 (SB-285, [DEC-0009](DECISIONS.md#dec-0009-an-e-mail-domain-suggests-an-organization-only-the-person-or-an-administrator-places-an-account)): `org list` shows `(its address suggests Acme)` beside such an account, and `assign`, a
 sign-in into that organization's group, or moving the account into it confirms the suggestion.
 Nothing changes until an organization exists. `--json` gives `{schema: 1, organizations, accounts,
 passioncode}`; each account carries `organization`, `organization_name`, `by` (`person`,
-`provider` or null), `suggested` and `suggested_name` (null when nothing is suggested).
+`provider` or null), `also` (the organizations it also works for, SB-403), `suggested` and
+`suggested_name` (null when nothing is suggested); an organization's `accounts` counts every
+account that works for it, first or also. The text view joins an account's organizations with
+` + `.
 
 ```sh
 switchboard org connect        # SB-159: sign in to PassionCode.ai in the browser (waits up to 5 minutes)

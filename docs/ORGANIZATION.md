@@ -22,9 +22,9 @@ complete, `data.complete` is `true`.
 
 **What you need first**
 
-- An invitation to your organization's team at the provider (Claude Team, or a ChatGPT
-  workspace), sent to your organization address. It reaches your own mailbox if your
-  organization forwards that address to you.
+- An account to work with for the organization: a seat in its team at the provider (Claude Team,
+  or a ChatGPT workspace) at whatever address it invited, or any subscription you already have.
+  An organization may have several e-mail domains or none; none is required (SB-403).
 - Claude Code or Codex installed. Switchboard does not include a subscription.
 - For step 3, either a settings file from your organization's administrator, or the folders
   where you keep the organization's code.
@@ -109,8 +109,19 @@ one action at a time.
 
 ## 4. Your seat
 
-Accept the provider's invitation from your mailbox. Then sign in to that seat into the group:
-on the card, *Sign in with your {organization} address*; or in a terminal:
+A seat is any account the organization's group uses: an account already on this computer, or a
+sign-in with any address (an organization may have several domains or none; SB-403,
+[DEC-0022](DECISIONS.md#dec-0022-an-organization-is-a-label-never-a-lock-on-where-an-account-works)). On the card, *Add a seat* lists the accounts here (those
+an organization's domain suggests first) and *Sign in with any address*. An account already here
+keeps its own group and serves this one too; in a terminal:
+
+```sh
+switchboard org assign <account id> --also <organization id or name>
+switchboard project edit --pool <group id> --add-account <account id>
+```
+
+To sign in to a new seat (accept the provider's invitation first, if there is one), on the card
+*Sign in with any address*, or in a terminal:
 
 ```sh
 switchboard login begin --provider claude --pool <group id>
@@ -121,7 +132,10 @@ switchboard login finish <login id>
 The provider's official sign-in opens in a terminal window; the sign-in is yours. A Codex seat
 uses `--provider codex` (in the window: *+ Add account* → *Sign in to another Codex account*).
 Signing in to the organization's group places the account there: it gets your organization's
-badge, recorded as your word. An address on the organization's domain alone only suggests it
+badge, recorded as your word when its address is on one of the organization's domains, and it
+serves the group whatever its address. When the organization's accounts all live on other
+machines, the step is optional and names them; `switchboard accounts recall <account id>` brings
+one here. An address on the organization's domain alone only suggests it
 (SB-285, [DEC-0009](DECISIONS.md#dec-0009-an-e-mail-domain-suggests-an-organization-only-the-person-or-an-administrator-places-an-account)): an account signed in elsewhere stays personal until you place it.
 
 If you signed in somewhere else first, the notice offers *Move it to “{group}”*. Switchboard never

@@ -722,6 +722,15 @@ pub enum Operation {
         /// lets the rules decide. Wins over `choice`.
         #[serde(default)]
         organizations: Option<Vec<String>>,
+        /// DEC-0022 (SB-403): organizations (ids or names) added to the ones the account works
+        /// for, after them; its first context and the rest stay. Used without `choice` and
+        /// `organizations`.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        also: Vec<String>,
+        /// DEC-0022 (SB-403): also place the account's provider team (its Claude Team or
+        /// ChatGPT workspace): its other seats follow the first context. Off: this account only.
+        #[serde(default)]
+        team: bool,
     },
     /// SB-159: the PassionCode.ai connection (no token in the answer).
     VestaStatus,
@@ -2520,6 +2529,14 @@ impl Runtime {
                 }
                 value["organization_group"] = offer;
             }
+            // DEC-0022 (SB-403): a sign-in into a group of another organization is kept there,
+            // and the receipt says so.
+            if let Some(s) = snapshot.as_ref() {
+                let warnings = s.outside_warnings(stored);
+                if !warnings.is_empty() {
+                    value["warnings"] = json!(warnings);
+                }
+            }
             value
         };
         let mut logins = self
@@ -3846,7 +3863,13 @@ fn remote_program(
 }
 
 /// SB-323: an organization word that left an account out of a group it serves.
-pub const GROUPS_REFUSE_NOW: &str = "These groups no longer use this account: each takes only accounts of its own organizations. Name personal first to keep it in a personal group, or bind the group to the organization.";
+/// SB-403 (round 1): `also` adds to the account's organizations; it never goes with a first
+/// context named, and an empty one is not a word at all (it would let the rules decide again).
+pub const ALSO_ALONE: &str = "Name organizations to add with also, or every context with organization or organizations, not both.";
+pub const ALSO_EMPTY: &str = "Name at least one organization to add with also.";
+/// SB-323, DEC-0022 (SB-403): the note beside `outside` after a word on an account's
+/// organizations. Information only: the groups keep using it.
+pub const GROUPS_OUTSIDE_NOW: &str = "These groups serve organizations this account does not work for. They keep using it; assign it their organization too if it works for it.";
 
 /// How long a folder added by Switchboard stays in `ProjectSuggestions`' `added`, for the app's
 /// one notification (SB-121).
@@ -4229,8 +4252,10 @@ pub fn organizations_view(snapshot: &switchboard_core::Snapshot) -> Value {
                 .and_then(|id| snapshot.organization(id))
                 .map(|o| o.name.clone());
             let suggested = snapshot.domain_suggestion(a);
+            // SB-403: the organizations it also works for, beyond its first context.
             json!({"id": a.id, "label": a.label, "provider": a.provider, "pool": a.pool,
                 "organization": at.organization, "organization_name": name, "by": at.by,
+                "also": at.also,
                 "suggested": suggested.map(|o| &o.id), "suggested_name": suggested.map(|o| &o.name)})
         })
         .collect();
@@ -4238,9 +4263,11 @@ pub fn organizations_view(snapshot: &switchboard_core::Snapshot) -> Value {
         .organizations
         .iter()
         .map(|o| {
-            let count = accounts
+            // SB-403: an account counts for every organization it works for, first or also.
+            let count = snapshot
+                .accounts
                 .iter()
-                .filter(|a| a["organization"].as_str() == Some(o.id.as_str()))
+                .filter(|a| snapshot.attribution(a).holds(Some(&o.id)))
                 .count();
             json!({"id": o.id, "name": o.name, "domains": o.domains,
                 "provider_organizations": o.provider_organizations.len(), "accounts": count,
@@ -4252,9 +4279,11 @@ pub fn organizations_view(snapshot: &switchboard_core::Snapshot) -> Value {
 }
 /// SB-381 (Vesta's request `a7325ed3` G2): each organization's AI seats as data Observatory
 /// sends on: provider, class (`subscription` or `api_key`), who placed the seat with the
-/// organization (`person`, or `provider` for its team there), whether it lives here or on another
+/// organization (`person`, or `provider` for its team there), `context` (`first` when it is the
+/// account's own organization, `also` when it works for it beside another, SB-403), whether it lives here or on another
 /// machine, and an opaque `seat` id (a digest of the organization and the account, the same on
-/// every read, never the account's id). No personal account, label, e-mail, token or machine name.
+/// every read, never the account's id). No account that does not work for it, label, e-mail,
+/// token or machine name: a personal account that also works for it is a seat (`also`).
 fn organization_seats(snapshot: &switchboard_core::Snapshot) -> Value {
     use sha2::{Digest, Sha256};
     let seats: Vec<Value> = snapshot
@@ -4266,9 +4295,16 @@ fn organization_seats(snapshot: &switchboard_core::Snapshot) -> Value {
                 .iter()
                 .filter_map(|a| {
                     let at = snapshot.attribution(a);
-                    if at.organization.as_deref() != Some(o.id.as_str()) {
+                    // SB-403: a seat is any account that works for the organization, as its
+                    // first context or one it also works for.
+                    if !at.holds(Some(&o.id)) {
                         return None;
                     }
+                    let context = if at.organization.as_deref() == Some(o.id.as_str()) {
+                        "first"
+                    } else {
+                        "also"
+                    };
                     let digest = Sha256::digest(format!("{}:{}", o.id, a.id).as_bytes());
                     let seat: String = digest.iter().take(8).map(|b| format!("{b:02x}")).collect();
                     let class = match a.kind {
@@ -4278,8 +4314,14 @@ fn organization_seats(snapshot: &switchboard_core::Snapshot) -> Value {
                     let elsewhere = snapshot.elsewhere.contains_key(&a.id)
                         || a.pool
                             .starts_with(switchboard_core::machines::MACHINE_POOL_PREFIX);
+                    // An organization the account also works for is always the person's word.
+                    let placed_by = if context == "also" {
+                        Some(switchboard_core::By::Person)
+                    } else {
+                        at.by
+                    };
                     Some(json!({"seat": seat, "provider": a.provider, "class": class,
-                        "placed_by": at.by, "enabled": a.enabled,
+                        "placed_by": placed_by, "enabled": a.enabled, "context": context,
                         "where": if elsewhere { "elsewhere" } else { "here" }}))
                 })
                 .collect();
@@ -5326,6 +5368,9 @@ async fn execute(
             "claude_swap_accounts": refresh::swap_held(refresh_state),
             "renewal_blocked": refresh_state.renewal_blocked(),
             "claude_swap_switching": refresh_state.swap_switching(),
+            // SB-403 (round 2): the accounts the ordinary CLI is signed in to, which no group
+            // takes (the setup checklist leaves them out of its seat suggestions).
+            "in_cli": store.in_use_ids(),
         })),
         Operation::Add {
             label,
@@ -7119,8 +7164,25 @@ async fn execute(
                 ))
                 .await
                 {
-                    Ok(_) => pool = home,
+                    Ok(moved) => {
+                        pool = home;
+                        // DEC-0022 (SB-403): placed whatever its organizations; said, not refused.
+                        if let Some(warnings) = moved.get("warnings") {
+                            finished["warnings"] = warnings.clone();
+                        }
+                    }
                     Err(error) => finished["placed_error"] = json!(error),
+                }
+            } else if let Ok(snapshot) = store.snapshot() {
+                if let Some(account) = snapshot.accounts.iter().find(|a| a.id == id) {
+                    let warnings: Vec<Value> = snapshot
+                        .outside_warnings(account)
+                        .into_iter()
+                        .filter(|w| w["pool"] == pool.as_str())
+                        .collect();
+                    if !warnings.is_empty() {
+                        finished["warnings"] = json!(warnings);
+                    }
                 }
             }
             finished["pool"] = json!(pool);
@@ -7707,8 +7769,41 @@ async fn execute(
             account,
             choice,
             organizations,
+            also,
+            team,
         } => {
-            let attribution = match organizations {
+            // DEC-0022 (SB-403): `also` keeps the account's contexts and adds to them.
+            if !also.is_empty() && (organizations.is_some() || choice.is_some()) {
+                return Err(ALSO_ALONE.into());
+            }
+            let organizations = if also.is_empty() || organizations.is_some() || choice.is_some() {
+                organizations
+            } else {
+                let snapshot = store.snapshot()?;
+                let held = snapshot
+                    .accounts
+                    .iter()
+                    .find(|a| a.id == account)
+                    .ok_or("Account not found")?;
+                let at = snapshot.attribution(held);
+                let first = match (at.by, at.organization.as_deref()) {
+                    (Some(switchboard_core::By::Person), Some(id)) => id.to_owned(),
+                    (Some(switchboard_core::By::Person), None) => {
+                        switchboard_core::organizations::PERSONAL.to_owned()
+                    }
+                    _ => switchboard_core::organizations::AUTO.to_owned(),
+                };
+                let mut list = vec![first];
+                list.extend(at.also.iter().cloned());
+                for named in &also {
+                    let id = organization_id(&snapshot, named.trim())?;
+                    if !at.holds(Some(&id)) && !list.contains(&id) {
+                        list.push(id);
+                    }
+                }
+                Some(list)
+            };
+            let assigned = match organizations {
                 Some(list) => {
                     let snapshot = store.snapshot()?;
                     let mut ids = Vec::new();
@@ -7724,7 +7819,7 @@ async fn execute(
                             ids.push(organization_id(&snapshot, named)?);
                         }
                     }
-                    store.assign_organizations(&account, &ids)?
+                    store.assign_organizations_team(&account, &ids, team)?
                 }
                 // One choice takes an id or a name too, as `org assign` says (SB-285: confirming
                 // a suggestion names the organization `org list` showed).
@@ -7746,28 +7841,33 @@ async fn execute(
                         Some(named) => Some(organization_id(&store.snapshot()?, named)?),
                         None => None,
                     };
-                    store.assign_organization(&account, choice.as_deref())?
+                    store.assign_organization_team(&account, choice.as_deref(), team)?
                 }
             };
-            // SB-323: the groups this word left the account out of, so the person learns that
-            // their sessions no longer use it.
+            // SB-323, DEC-0022 (SB-403): the groups the account serves outside its organizations
+            // now, as information: they keep using it.
             let snapshot = store.snapshot()?;
-            let refused_by: Vec<Value> = snapshot
-                .accounts
-                .iter()
-                .find(|a| a.id == account)
+            let held = snapshot.accounts.iter().find(|a| a.id == account);
+            let outside: Vec<Value> = held
                 .map(|a| {
                     snapshot
-                        .groups_refusing(a)
+                        .groups_outside(a)
                         .iter()
                         .map(|p| json!({"pool": p.pool, "name": p.name}))
                         .collect()
                 })
                 .unwrap_or_default();
-            let note = (!refused_by.is_empty()).then_some(GROUPS_REFUSE_NOW);
-            Ok(
-                json!({"account": account, "organization": attribution.organization, "by": attribution.by, "also": attribution.also, "refused_by": refused_by, "note": note}),
-            )
+            let warnings = held.map_or_else(Vec::new, |a| snapshot.outside_warnings(a));
+            let note = (!outside.is_empty()).then_some(GROUPS_OUTSIDE_NOW);
+            let attribution = &assigned.attribution;
+            let mut answer = json!({"account": account, "organization": attribution.organization,
+                "by": attribution.by, "also": attribution.also, "outside": outside,
+                "warnings": warnings, "note": note});
+            if let Some(team) = assigned.team {
+                answer["team"] = json!(team);
+                answer["teammates"] = json!(assigned.teammates);
+            }
+            Ok(answer)
         }
         Operation::MoveAccount { id, pool } => {
             let snapshot = store.snapshot()?;
@@ -7815,7 +7915,21 @@ async fn execute(
             } else {
                 store.return_to_default(&id)?;
             }
-            Ok(json!({"id": id, "from": from, "pool": pool, "moved": true}))
+            // DEC-0022 (SB-403): the group takes it whatever its organizations; the answer says
+            // when they are not among its own.
+            let mut answer = json!({"id": id, "from": from, "pool": pool, "moved": true});
+            let snapshot = store.snapshot()?;
+            if let Some(account) = snapshot.accounts.iter().find(|a| a.id == id) {
+                let warnings: Vec<Value> = snapshot
+                    .outside_warnings(account)
+                    .into_iter()
+                    .filter(|w| w["pool"] == pool.as_str())
+                    .collect();
+                if !warnings.is_empty() {
+                    answer["warnings"] = json!(warnings);
+                }
+            }
+            Ok(answer)
         }
         Operation::App { action, enabled } => {
             app_doors::answer(runtime.and_then(|r| r.app_doors()), action, enabled).await
@@ -9094,6 +9208,132 @@ mod owner_tests {
     }
 
     #[tokio::test]
+    async fn an_organizations_account_moves_into_a_personal_group_with_a_warning() {
+        // SB-403 (2026-11-17 03:40 UTC, the operator's Mac): a call back of an organization's
+        // account into a personal group answered `placed_error` "… belongs to another
+        // organization than this group" and left it in `default`. An organization never blocks
+        // a move: the account is placed, and the answer warns.
+        let root = tempfile::tempdir().unwrap();
+        let store = Arc::new(
+            Store::open(root.path().to_owned(), Arc::new(MemoryVault::default())).unwrap(),
+        );
+        let seat = save(&store, "synthetic-seat", "default");
+        let org = store.add_organization("PassionCode.ai", &[]).unwrap();
+        store.assign_organization(&seat.id, Some(&org.id)).unwrap();
+        let folder = tempfile::tempdir().unwrap();
+        let group = store
+            .save_project_in(
+                None,
+                "PassionCode",
+                &[folder.path().to_path_buf()],
+                &[],
+                None,
+            )
+            .unwrap();
+        let moved = execute(
+            store.clone(),
+            root.path(),
+            None,
+            Operation::MoveAccount {
+                id: seat.id.clone(),
+                pool: group.pool.clone(),
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(moved["moved"], true, "{moved}");
+        assert_eq!(
+            moved["warnings"][0]["code"], "outside_organization",
+            "{moved}"
+        );
+        assert_eq!(moved["warnings"][0]["pool"], group.pool.as_str(), "{moved}");
+        let snapshot = store.snapshot().unwrap();
+        let placed = snapshot.accounts.iter().find(|a| a.id == seat.id).unwrap();
+        assert_eq!(placed.pool, group.pool);
+    }
+
+    #[test]
+    fn an_account_that_also_works_for_an_organization_counts_as_its_seat() {
+        // SB-403: an account works for an organization beside its personal context
+        // (`organizations: [personal, <organization>]`). Organizations counted only first
+        // contexts, so the organization read as having no account.
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::open(root.path().to_owned(), Arc::new(MemoryVault::default())).unwrap();
+        let both = save(&store, "synthetic-both", "default");
+        let own = save(&store, "synthetic-own", "default");
+        let acme = store.add_organization("Acme", &[]).unwrap();
+        store
+            .assign_organizations(
+                &both.id,
+                &[
+                    switchboard_core::organizations::PERSONAL.to_owned(),
+                    acme.id.clone(),
+                ],
+            )
+            .unwrap();
+        store.assign_organization(&own.id, Some(&acme.id)).unwrap();
+        let view = organizations_view(&store.snapshot().unwrap());
+        assert_eq!(view["organizations"][0]["accounts"], 2);
+        let row = view["accounts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["id"] == both.id.as_str())
+            .unwrap()
+            .clone();
+        assert_eq!(row["organization"], Value::Null);
+        assert_eq!(row["also"], json!([acme.id]));
+        let seats = view["seats"]["organizations"][0]["seats"]
+            .as_array()
+            .unwrap()
+            .clone();
+        assert_eq!(seats.len(), 2);
+        let mut contexts: Vec<&str> = seats
+            .iter()
+            .map(|s| s["context"].as_str().unwrap())
+            .collect();
+        contexts.sort_unstable();
+        assert_eq!(contexts, ["also", "first"]);
+        assert!(
+            seats.iter().all(|s| s["placed_by"] == "person"),
+            "{seats:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_sign_in_into_another_organizations_group_says_so_in_its_receipt() {
+        // DEC-0022 (SB-403, round 1): the sign-in is kept in the group and serves it; the
+        // receipt names it as outside the group's organizations.
+        let root = tempfile::tempdir().unwrap();
+        let runtime = fixtures::runtime(root.path(), signed_in, activates).await;
+        let beta = runtime.store.add_organization("Beta", &[]).unwrap();
+        let folder = tempfile::tempdir().unwrap();
+        let group = runtime
+            .store
+            .save_project_in(
+                None,
+                "Beta work",
+                &[folder.path().to_path_buf()],
+                &[],
+                Some(Some(&beta.id)),
+            )
+            .unwrap();
+        let inside = save(&runtime.store, "synthetic-in", &group.pool);
+        let home = root.path().join(format!("staging-{}", inside.id));
+        std::fs::create_dir_all(&home).unwrap();
+        let login = launch::fixture_login(home, inside.clone());
+        let id = login.id.clone();
+        runtime.logins.lock().unwrap().insert(id.clone(), login);
+        let receipt = runtime.finish_login(&id).unwrap();
+        assert_eq!(receipt["pool"], group.pool.as_str(), "{receipt}");
+        assert_eq!(
+            receipt["warnings"][0]["code"], "outside_organization",
+            "{receipt}"
+        );
+        assert_eq!(receipt["warnings"][0]["group"], "Beta work", "{receipt}");
+    }
+
+    #[tokio::test]
     async fn a_new_seat_of_an_organization_outside_its_only_group_is_offered_it() {
         // SB-160 (B-4, SCN-077): a seat of an organization that has one group (SB-285: or one
         // its address suggests for it), signed in elsewhere, comes back with that group in its
@@ -10353,22 +10593,36 @@ mod owner_tests {
         assert!(settings.is_file());
         // Nothing of the real person's folder in a synthetic owner's home.
         assert!(!home.join("CLAUDE.md").exists());
-        // Idle: the files taken away stay away.
+        // Idle: the files taken away stay away. The pass's key reads the process-wide Claude
+        // sign-in state (`external::claude_signed_out`), which other tests in this process flip;
+        // a pass that saw it move rewrites by design, so the idle check is repeated until all
+        // its passes ran on one state (SB-403: the gate on a loaded machine met that race twice).
         let written = std::fs::read(&map_file).unwrap();
-        std::fs::remove_file(&map_file).unwrap();
-        std::fs::remove_file(&settings).unwrap();
-        for _ in 0..5 {
+        let mut steady = false;
+        for _ in 0..20 {
+            let state = external::claude_signed_out();
             runtime.bindings_pass().await;
+            let _ = std::fs::remove_file(&map_file);
+            let _ = std::fs::remove_file(&settings);
+            let mut moved = external::claude_signed_out() != state;
+            for _ in 0..5 {
+                runtime.bindings_pass().await;
+                moved |= external::claude_signed_out() != state;
+            }
+            if !moved {
+                steady = true;
+                break;
+            }
         }
+        assert!(
+            steady,
+            "the Claude sign-in state never held still for one idle check"
+        );
         assert!(!map_file.exists(), "an idle pass wrote the map");
         assert!(!settings.exists(), "an idle pass wrote a shell home");
         // A change (the group turns personal) is written: the map loses its row, the home stays.
         std::fs::write(&map_file, &written).unwrap();
         let pool = found.pool.clone();
-        runtime
-            .store
-            .set_project_organization(&pool, None)
-            .unwrap_err();
         runtime
             .store
             .assign_organization(

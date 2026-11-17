@@ -2,6 +2,14 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-11-17: SB-403 S1, an organization is a label (DEC-0022), on branch `org-seats`
+
+- **Asked.** The operator: several e-mail domains per organization or none, never a blocker; subscriptions tied to an organization must never block moving them between groups or giving them another organization; local work is bounded by folders only.
+- **Built (branch `org-seats`).** No person's act is refused on organizations (route, selection, sign-in into a group, group save and binding, assign, move, call back, restore); answers carry `warnings` (`outside_organization`) and `OrganizationAssign` answers `outside` instead of `refused_by`; automatic switching prefers the group's own organizations, balancing keeps its boundary; a provider team follows only with `team`; `org assign --also`; the checklist reads `also_organizations`, `machines` and the rest, counts every account that works for the organization, offers an account here, a sign-in with any address or a call back, and never asks for the organization's address; the window's *Add a seat*. [Plan](plans/2026-11-17-org-seat-delegation/README.md) (S1 done, D-7 to D-11), [DEC-0022](DECISIONS.md#dec-0022-an-organization-is-a-label-never-a-lock-on-where-an-account-works), [contract](CONTRACTS.md#an-organization-is-a-label-sb-403-dec-0022-2026-11-17).
+- **Checks.** `./scripts/check.sh` on the Mac Studio worktree `sb-org` at the branch head (see the PR).
+
+**Exact next task.** Open the pull request for `org-seats` and merge it once its gate reads EXIT 0 on the merged head; after the next release, check on the operator's Mac that the organization's card reads *Your seat: Done*; then SB-403 S2 (the restricted ssh entry, the delegated account kind and its lease).
+
 ## 2026-11-17: review rounds 3 to 5 closed, SB-400 and FD-291 merged, 0.7.110 cut; SB-401 started
 
 - **Asked.** The operator: two or three verification rounds over everything done, the Sessions UI in the brand pack, fix in waves, then release; later: Claude Code sessions on an Anthropic API key in a group of their own, off by default, with usage controlled when on (SB-401).

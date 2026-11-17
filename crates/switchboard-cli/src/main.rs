@@ -703,8 +703,8 @@ enum Project {
         remove_folders: Vec<PathBuf>,
         /// An organization whose accounts the group runs on (its id or name from `switchboard
         /// org list`), or `personal`; repeat for a group of several organizations, the first
-        /// being its own context. With an organization defined, a group takes only accounts of
-        /// its organizations, or personal ones when it has none.
+        /// being its own context. The group serves every account it holds whatever its
+        /// organizations; the answer's `warnings` name the accounts outside them.
         #[arg(long)]
         organization: Vec<String>,
         /// With `--add-account`: move each account here from its group. Without it, an account
@@ -991,13 +991,22 @@ enum Org {
     },
     /// Say where one account belongs: an organization's id, `personal`, or `auto` to let the
     /// rules decide again. Name several for an account that works for more than one: the first
-    /// is its own, the rest it also works for.
+    /// is its own, the rest it also works for. `--also` adds organizations and keeps the ones it
+    /// has. Groups that hold the account keep it whatever its organizations; the answer names
+    /// them under `outside`.
     Assign {
         /// The account id (`switchboard accounts list`).
         account: String,
         /// An organization's id or name, `personal`, or `auto`; several are allowed.
-        #[arg(required = true, num_args = 1..)]
+        #[arg(num_args = 0.., required_unless_present = "also")]
         organization: Vec<String>,
+        /// An organization it also works for, added to the ones it has; repeat for several.
+        #[arg(long = "also", conflicts_with = "organization")]
+        also: Vec<String>,
+        /// Also place the other seats of its Claude Team or ChatGPT workspace there; without it
+        /// only this account is placed.
+        #[arg(long)]
+        team: bool,
     },
 }
 
@@ -2696,16 +2705,29 @@ async fn run(cli: &Cli) -> Result<Value, String> {
             Org::Assign {
                 account,
                 organization,
+                also,
+                team,
             } => match organization.as_slice() {
+                [] => Operation::OrganizationAssign {
+                    account: account.clone(),
+                    choice: None,
+                    organizations: None,
+                    also: also.clone(),
+                    team: *team,
+                },
                 [one] => Operation::OrganizationAssign {
                     account: account.clone(),
                     choice: (one != "auto").then(|| one.clone()),
                     organizations: None,
+                    also: Vec::new(),
+                    team: *team,
                 },
                 several => Operation::OrganizationAssign {
                     account: account.clone(),
                     choice: None,
                     organizations: Some(several.to_vec()),
+                    also: Vec::new(),
+                    team: *team,
                 },
             },
         },
@@ -4201,12 +4223,16 @@ pub(crate) async fn onboard_status(
             // A failed read leaves its list empty and is named in the step it touches.
             match call(root, Operation::MonitorStatus).await {
                 Ok(monitor) => {
-                    probe.sign_in_required = monitor["sign_in_required"]
-                        .as_array()
-                        .into_iter()
-                        .flatten()
-                        .filter_map(|id| id.as_str().map(str::to_owned))
-                        .collect()
+                    let list = |key: &str| -> Vec<String> {
+                        monitor[key]
+                            .as_array()
+                            .into_iter()
+                            .flatten()
+                            .filter_map(|id| id.as_str().map(str::to_owned))
+                            .collect()
+                    };
+                    probe.sign_in_required = list("sign_in_required");
+                    probe.in_cli = list("in_cli");
                 }
                 Err(_) => probe.degraded.push("sign_ins".into()),
             }
@@ -4644,7 +4670,7 @@ fn print_result(value: &Value, cli: &Cli) {
                 .cloned()
                 .unwrap_or_default();
             if organizations.is_empty() {
-                println!("No organization. Add one: switchboard org add NAME --domain example.com");
+                println!("No organization. Add one: switchboard org add NAME (--domain example.com is optional)");
                 return;
             }
             for o in &organizations {
@@ -4673,11 +4699,21 @@ fn print_result(value: &Value, cli: &Cli) {
                     Some(name) => format!("{by}; its address suggests {name}"),
                     None => by,
                 };
+                // SB-403: the organizations it also works for, after its own.
+                let mut contexts = vec![a["organization_name"]
+                    .as_str()
+                    .unwrap_or("personal")
+                    .to_owned()];
+                for id in a["also"].as_array().cloned().unwrap_or_default() {
+                    if let Some(o) = organizations.iter().find(|o| o["id"] == id) {
+                        contexts.push(text(&o["name"]));
+                    }
+                }
                 println!(
                     "{}  {:7}  {:24}  {}",
                     text(&a["id"]),
                     text(&a["provider"]),
-                    a["organization_name"].as_str().unwrap_or("personal"),
+                    contexts.join(" + "),
                     if note.is_empty() {
                         text(&a["label"])
                     } else {

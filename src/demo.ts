@@ -188,7 +188,19 @@ export function createDemoAdapter(): Adapter {
   if (orgSetup) {
     const northwind = { id: 'demo-org-northwind', name: 'Northwind', domains: ['northwind.test'], created_at: now() - 86_400, vesta_id: 'synthetic-vesta-northwind' };
     state.organizations = [northwind];
+    // SB-403 (round 1): `&seat=here` keeps two accounts on this computer (a personal one and one
+    // its domain suggests), so *Add a seat* has choices; `&seat=away` keeps one account of
+    // Northwind's that lives on another machine, so the seat step is optional.
+    const seatParam = new URLSearchParams(location.search).get('seat');
+    const kept = state.accounts.filter((a) => a.provider === 'claude').slice(0, 2);
     state.accounts = [];
+    if (seatParam === 'here') {
+      state.accounts = kept.map((a, i) => ({ ...a, pool: 'default', label: i === 0 ? 'me@example.test' : 'dev@northwind.test', external_identity: a.external_identity ? { ...a.external_identity, email: i === 0 ? 'me@example.test' : 'dev@northwind.test' } : a.external_identity }));
+    } else if (seatParam === 'away' && kept[0]) {
+      state.accounts = [{ ...kept[0], pool: 'machine_studio-demo', label: 'ops@northwind.test' }];
+      state.machines = [{ pool: 'machine_studio-demo', name: 'studio-demo', created_at: now() - 86_400 }];
+      (state.memberships ??= {})[kept[0].id] = northwind.id;
+    }
     state.projects = new URLSearchParams(location.search).get('group') === 'none' ? [] : [{ pool: 'northwind', name: 'Northwind web', folders: ['/srv/projects/northwind-web'], created_at: now() - 3600, organization: northwind.id }];
     passioncode = { connected: true, base: 'https://org.passioncode.ai', state: 'ok', connected_at: now() - 3600, read_at: now() - 600, checked_at: now() - 600, organizations: 1 };
     // F3 (wave 4 design pass): `&second=1` adds an older organization with no group yet, so two
@@ -219,9 +231,17 @@ export function createDemoAdapter(): Adapter {
       const bound = (state.projects ?? []).filter((p) => groupOrganizations(p).includes(o.id));
       const group = bound.length ? { pool: bound[0].pool, name: bound[0].name } : null;
       steps.push(group ? { id: 'org_group', state: 'done', summary: '', organization, group, ...(bound.length > 1 ? { groups: bound.map((p) => p.name) } : {}) } : { id: 'org_group', state: 'needs_person', summary: '', organization });
-      const seats = state.accounts.filter((a) => bound.some((p) => servesPool(state, a, p.pool)) && groupAdmits(state, o.id, a));
-      const ended = seats.filter((a) => signInRequired.has(a.id)).length;
-      steps.push({ id: 'seat', state: seats.some((a) => a.enabled && !signInRequired.has(a.id)) ? 'done' : 'needs_person', summary: '', organization, ended });
+      // SB-403: as `onboarding.rs` counts: with a group, any account it holds whatever its
+      // organizations; with none, any account that works for the organization; an account on
+      // another machine makes the step optional only while no group is here (round 2).
+      const here = (a: Account) => !a.pool.startsWith('machine_') && !state.elsewhere?.[a.id];
+      const holds = (a: Account) => groupAdmits(state, o.id, a);
+      const seats = state.accounts.filter((a) => (bound.length ? bound.some((p) => servesPool(state, a, p.pool)) : holds(a)));
+      const away = state.accounts.filter((a) => (seats.includes(a) || holds(a)) && !here(a));
+      const ended = seats.filter((a) => here(a) && signInRequired.has(a.id)).length;
+      const signedIn = seats.some((a) => here(a) && a.enabled && !signInRequired.has(a.id));
+      const machines = [...new Set(away.map((a) => (state.machines ?? []).find((m) => m.pool === a.pool)?.name).filter((n): n is string => !!n))];
+      steps.push(signedIn ? { id: 'seat', state: 'done', summary: '', organization } : !bound.length && !ended && away.length ? { id: 'seat', state: 'optional', summary: '', organization, away: machines } : { id: 'seat', state: 'needs_person', summary: '', organization, ended, ...(machines.length ? { away: machines } : {}) });
       steps.push({ id: 'hook', state: 'optional', summary: '', organization, terminals: group && bound[0].folders.length ? 'active' : 'waiting' });
       steps.push({ id: 'launch', state: 'optional', summary: '', organization });
     }
@@ -508,7 +528,7 @@ export function createDemoAdapter(): Adapter {
       // SB-282: the whole list wins; one choice is a list of one; left out, the group keeps its own.
       const organizations = input.organizations !== undefined ? input.organizations.filter((o) => o && o !== 'personal') : input.organization === undefined ? groupOrganizations(existing) : input.organization === 'personal' ? [] : [input.organization];
       if (organizations.some((id) => !(state.organizations ?? []).some((o) => o.id === id))) throw new Error('Organization not found.');
-      for (const account of state.accounts.filter((a) => input.accountIds.includes(a.id))) if (!placementAdmits(state, organizations, account)) throw new Error("An account chosen for this group belongs to another organization. Choose accounts of the group's organization, or change it.");
+      // DEC-0022 (SB-403): an account of another organization joins all the same.
       // SB-282: an account at home in another group is shared, not moved.
       const groupPools = new Set(projects.map((p) => p.pool));
       const shared = input.accountIds.filter((id) => { const a = state.accounts.find((x) => x.id === id); return !!a && a.pool !== pool && groupPools.has(a.pool); });
@@ -595,9 +615,15 @@ export function createDemoAdapter(): Adapter {
       } else if (action === 'read') throw new Error('PassionCode.ai is not connected.');
       return structuredClone(passioncode);
     },
-    async organizationAssign(accountId, choiceIn, organizations) {
+    async organizationAssign(accountId, choiceIn, organizationsIn, options) {
       await pause();
       const account = state.accounts.find((a) => a.id === accountId); if (!account) throw new Error('Account not found');
+      // SB-403: `also` keeps the account's contexts and adds to them.
+      let organizations = organizationsIn;
+      if (!organizations && choiceIn === null && options?.also?.length) {
+        const first = state.memberships?.[accountId] ?? 'auto';
+        organizations = [first, ...(state.also_organizations?.[accountId] ?? []), ...options.also.filter((o) => o !== first && !(state.also_organizations?.[accountId] ?? []).includes(o))];
+      }
       // SB-282: every context in order: the first as `choice`, the rest it also works for.
       const choice = organizations ? (organizations[0] && organizations[0] !== 'auto' ? organizations[0] : null) : choiceIn;
       const also = organizations ? [...new Set(organizations.slice(1).filter((o) => o !== 'personal' && o !== choice))] : null;
@@ -609,12 +635,16 @@ export function createDemoAdapter(): Adapter {
       else {
         if (choice !== 'personal' && !state.organizations?.some((o) => o.id === choice)) throw new Error('Organization not found.');
         memberships[accountId] = choice;
-        for (const o of state.organizations ?? []) {
+        // SB-403: the team's other seats follow only when asked.
+        if (options?.team) for (const o of state.organizations ?? []) {
           o.provider_organizations = (o.provider_organizations ?? []).filter((k) => k !== key);
           if (key && o.id === choice) o.provider_organizations.push(key);
         }
       }
       log('organization', accountId, 'assigned');
+      const teammates = key ? state.accounts.filter((b) => b.id !== accountId && providerOrganization(b) === key).length : 0;
+      const outside = (state.projects ?? []).filter((p) => (p.pool === account.pool || (p.shared_accounts ?? []).includes(accountId)) && !groupAdmits(state, groupOrganizations(p), account)).map((p) => ({ pool: p.pool, name: p.name }));
+      return { account: accountId, outside, ...(key && choice !== null ? { team: options?.team ? 'claimed' as const : 'not_claimed' as const, teammates } : {}) };
     },
     async moveAccount(id, pool) {
       await pause();
@@ -626,6 +656,22 @@ export function createDemoAdapter(): Adapter {
       if (email && state.accounts.some((b) => b.id !== id && b.provider === account.provider && b.pool === pool && b.external_identity?.email === email)) throw new Error('This account is already saved in that pool. Remove the other copy first.');
       const old = `${account.provider}:${account.pool}`; if (state.routes[old] === id) delete state.routes[old];
       account.pool = pool; log('project', '', 'updated');
+      // SB-403: a group of another organization takes it; the answer warns, as the owner's does.
+      const project = (state.projects ?? []).find((p) => p.pool === pool);
+      if (project && (state.organizations ?? []).length && !groupAdmits(state, groupOrganizations(project), account)) return { pool, warnings: [{ code: 'outside_organization', pool, group: project.name, group_personal: !groupOrganizations(project).length }] };
+      return { pool };
+    },
+    async projectAddAccounts(pool, ids) {
+      await pause();
+      const project = (state.projects ?? []).find((p) => p.pool === pool); if (!project) throw new Error('Project not found.');
+      const groupPools = new Set((state.projects ?? []).map((p) => p.pool));
+      for (const id of ids) {
+        const account = state.accounts.find((a) => a.id === id); if (!account) throw new Error('Account not found.');
+        if (account.pool === pool) continue;
+        if (groupPools.has(account.pool)) { const shared = (project.shared_accounts ??= []); if (!shared.includes(id)) shared.push(id); }
+        else account.pool = pool;
+      }
+      log('project', '', 'updated');
     },
     async moveRoot(folder, pool, also, leave) {
       await pause();

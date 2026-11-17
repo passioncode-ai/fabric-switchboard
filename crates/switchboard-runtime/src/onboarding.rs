@@ -58,6 +58,10 @@ pub struct Probe {
     pub snapshot: Option<switchboard_core::Snapshot>,
     /// SB-202: accounts whose sign-in ended (the monitor's `sign_in_required`).
     pub sign_in_required: Vec<String>,
+    /// SB-403 (round 2): accounts the ordinary Claude Code or Codex is signed in to (the
+    /// monitor's `in_cli`): no group takes them (`PROJECT_ACCOUNT_IN_CLI`), so the seat step never
+    /// suggests adding one.
+    pub in_cli: Vec<String>,
     /// SB-202: the contexts of recorded sessions (`personal`, `org:<id>`).
     pub contexts: Vec<String>,
     /// SB-202: `switchboard shell status` (SB-183, node A-1), when it was read.
@@ -114,6 +118,16 @@ pub fn read_snapshot(value: &Value) -> (Option<switchboard_core::Snapshot>, bool
         organizations: list(&value["organizations"], &mut partial),
         memberships: map(&value["memberships"], &mut partial),
         elsewhere: map(&value["elsewhere"], &mut partial),
+        // SB-403: what decides who works for an organization and where an account lives. Left
+        // out, an account that also works for one read as none of its seats, and an account on
+        // another machine as one here.
+        also_organizations: map(&value["also_organizations"], &mut partial),
+        locations: map(&value["locations"], &mut partial),
+        machines: list(&value["machines"], &mut partial),
+        returns_to: map(&value["returns_to"], &mut partial),
+        assigned_to: map(&value["assigned_to"], &mut partial),
+        default_shared: list(&value["default_shared"], &mut partial),
+        default_lent: list(&value["default_lent"], &mut partial),
         ..Default::default()
     };
     (Some(snapshot), partial)
@@ -483,47 +497,147 @@ fn organization_steps(probe: &Probe, cli: &str) -> Vec<Value> {
                 }),
             ),
         });
-        let seats = snapshot.organization_seats(&organization.id);
-        let signed_in = seats.iter().any(|a| {
-            a.enabled
-                && !snapshot.elsewhere.contains_key(&a.id)
-                && !probe.sign_in_required.contains(&a.id)
-        });
+        // SB-403: a seat is any account that works for the organization (its first context or
+        // one it also works for) or that one of its groups holds: an organization is a label,
+        // so the group's account serves its sessions whatever its organizations.
+        let here = |a: &switchboard_core::Account| {
+            !snapshot.elsewhere.contains_key(&a.id)
+                && !switchboard_core::machines::is_machine_pool(&a.pool)
+        };
+        let holds =
+            |a: &switchboard_core::Account| snapshot.attribution(a).holds(Some(&organization.id));
+        let serving =
+            |a: &switchboard_core::Account| groups.iter().any(|g| snapshot.serves(a, &g.pool));
+        let usable = |a: &switchboard_core::Account| {
+            a.enabled && here(a) && !probe.sign_in_required.contains(&a.id)
+        };
+        // Round 2: the ordinary CLI's account cannot join a group, so it is never suggested.
+        let in_cli = |a: &switchboard_core::Account| probe.in_cli.contains(&a.id);
+        // With a group, a seat is an account one of its groups holds: only those route there
+        // (`bindings::desired`). With none, any account that works for the organization.
+        let seats: Vec<&switchboard_core::Account> = snapshot
+            .accounts
+            .iter()
+            .filter(|a| {
+                if groups.is_empty() {
+                    holds(a)
+                } else {
+                    serving(a)
+                }
+            })
+            .collect();
+        let signed_in = seats.iter().any(|a| usable(a));
         let ended = seats
             .iter()
-            .filter(|a| probe.sign_in_required.contains(&a.id))
+            .filter(|a| here(a) && probe.sign_in_required.contains(&a.id))
             .count();
-        let person = format!("Sign in with your {name} address.");
+        let mut seats_away: Vec<String> = Vec::new();
+        let mut away_ids: Vec<&str> = Vec::new();
+        for a in snapshot
+            .accounts
+            .iter()
+            .filter(|a| (serving(a) || holds(a)) && !here(a))
+        {
+            away_ids.push(&a.id);
+            let machine = snapshot
+                .machine_of(&a.id)
+                .map(|m| m.name.clone())
+                .or_else(|| snapshot.locations.get(&a.id).cloned())
+                .unwrap_or_default();
+            if !machine.is_empty() && !seats_away.contains(&machine) {
+                seats_away.push(machine);
+            }
+        }
+        // An account here that works for the organization and is signed in, but that none of
+        // its groups holds: it serves the group once added there.
+        let holders_here: Vec<&switchboard_core::Account> = if groups.is_empty() {
+            Vec::new()
+        } else {
+            snapshot
+                .accounts
+                .iter()
+                .filter(|a| holds(a) && !serving(a) && usable(a) && !in_cli(a))
+                .collect()
+        };
+        // Then the accounts its domains suggest (an organization may have several domains, or
+        // none): only suggested, never required.
+        let suggested: Vec<Value> = holders_here
+            .iter()
+            .map(|a| json!({"id": a.id, "label": a.label, "works_for": true}))
+            .chain(
+                snapshot
+                    .accounts
+                    .iter()
+                    .filter(|a| {
+                        here(a) && a.enabled && !in_cli(a) && !seats.iter().any(|s| s.id == a.id)
+                    })
+                    .filter(|a| !holders_here.iter().any(|h| h.id == a.id))
+                    .filter(|a| {
+                        snapshot
+                            .domain_organization(a)
+                            .is_some_and(|o| o.id == organization.id)
+                    })
+                    .map(|a| json!({"id": a.id, "label": a.label})),
+            )
+            .collect();
+        // An account that would have been suggested but that the ordinary CLI uses: named, so
+        // the person learns why it is missing (switch the CLI first).
+        let left_out: Vec<Value> = snapshot
+            .accounts
+            .iter()
+            .filter(|a| here(a) && a.enabled && in_cli(a) && !serving(a))
+            .filter(|a| {
+                holds(a)
+                    || snapshot
+                        .domain_organization(a)
+                        .is_some_and(|o| o.id == organization.id)
+            })
+            .map(|a| json!({"id": a.id, "label": a.label, "reason": "in_cli"}))
+            .collect();
         let unread = if degraded("sign_ins") {
             " Whether a sign-in ended could not be read."
         } else {
             ""
         };
-        push(match group {
+        // Only the accounts that live elsewhere: nothing to call back, no line.
+        let recall = |ids: &[&str]| -> Vec<String> {
+            ids.iter()
+                .map(|id| format!("{cli} accounts recall {}", shell_word(id)))
+                .collect()
+        };
+        let machines_text = |away: &[String]| {
+            if away.is_empty() {
+                "another machine".to_owned()
+            } else {
+                away.join(", ")
+            }
+        };
+        let seat_step = match group {
             Some(group) if signed_in => step(
                 "seat",
                 "done",
                 format!("{name}'s account in “{}” is signed in.{unread}", group.name),
                 Value::Null,
             ),
-            Some(group) => with(
-                "ended",
-                json!(ended),
+            None if signed_in => step(
+                "seat",
+                "done",
+                format!("An account that works for {name} is signed in.{unread}"),
+                Value::Null,
+            ),
+            // Its accounts work on other machines: nothing is needed here.
+            // With a group here it still needs an account here; calling one back is an alternative.
+            None if ended == 0 && !away_ids.is_empty() => with(
+                "away",
+                json!(seats_away),
                 step(
                     "seat",
-                    "needs_person",
-                    if ended > 0 {
-                        format!(
-                        "None of {name}'s accounts in {} is signed in: {ended} must sign in again.",
-                        group.name
-                    )
-                    } else {
-                        format!("“{}” holds no signed-in account of {name}.", group.name)
-                    },
-                    json!({
-                        "command": format!("{cli} login begin --provider {provider} --pool {}", shell_word(&group.pool)),
-                        "person": person,
-                    }),
+                    "optional",
+                    format!(
+                        "{name}'s accounts work on {}. Call one back to work here.",
+                        machines_text(&seats_away)
+                    ),
+                    json!({"alternatives": recall(&away_ids)}),
                 ),
             ),
             None if all_away => with(
@@ -535,16 +649,78 @@ fn organization_steps(probe: &Probe, cli: &str) -> Vec<Value> {
                     format!(
                         "{name}'s accounts are on another machine; call one back to work here."
                     ),
-                    json!({"command": format!("{cli} accounts recall <account id>")}),
+                    json!({"alternatives": if away_ids.is_empty() {
+                        vec![format!("{cli} accounts recall <account id>")]
+                    } else {
+                        recall(&away_ids)
+                    }}),
                 ),
             ),
+            Some(group) => {
+                let pool = shell_word(&group.pool);
+                let mut alternatives: Vec<String> = holders_here
+                    .iter()
+                    .map(|a| {
+                        format!(
+                            "{cli} project edit --pool {pool} --add-account {}",
+                            shell_word(&a.id)
+                        )
+                    })
+                    .collect();
+                alternatives.extend([
+                    format!(
+                        "{cli} org assign <account id> --also {}",
+                        shell_word(&organization.id)
+                    ),
+                    format!("{cli} project edit --pool {pool} --add-account <account id>"),
+                    format!("{cli} login begin --provider {provider} --pool {pool}"),
+                ]);
+                alternatives.extend(recall(&away_ids));
+                with(
+                    "ended",
+                    json!(ended),
+                    step(
+                        "seat",
+                        "needs_person",
+                        if ended > 0 {
+                            format!(
+                                "None of the accounts in “{}” is signed in: {ended} must sign in again.",
+                                group.name
+                            )
+                        } else {
+                            format!("“{}” holds no signed-in account of {name}.", group.name)
+                        },
+                        json!({
+                            "command": format!("{cli} login begin --provider {provider} --pool {pool}"),
+                            "person": format!("Add a seat for {name}: give it an account already on this computer, or sign in with any address."),
+                            "alternatives": alternatives,
+                        }),
+                    ),
+                )
+            }
             None => step(
                 "seat",
                 "needs_person",
-                format!("{name}'s group comes first; then the person signs in to it."),
-                json!({"person": person}),
+                format!("{name}'s group comes first; then it gets a seat."),
+                json!({"person": format!("Once {name} has a group, give it an account already on this computer, or sign in with any address.")}),
             ),
-        });
+        };
+        let seat_step = if suggested.is_empty() {
+            seat_step
+        } else {
+            with("suggested", json!(suggested), seat_step)
+        };
+        let seat_step = if left_out.is_empty() || seat_step["state"] == "done" {
+            seat_step
+        } else {
+            with("left_out", json!(left_out), seat_step)
+        };
+        let seat_step = if seat_step["state"] == "needs_person" && !seats_away.is_empty() {
+            with("away", json!(seats_away), seat_step)
+        } else {
+            seat_step
+        };
+        push(seat_step);
         let place = group.map_or_else(|| format!("{name}'s"), |g| format!("{}'s", g.name));
         let hook = probe
             .shell
@@ -1134,6 +1310,7 @@ mod tests {
         probe.sign_in_required = vec!["a-1".into()];
         assert_eq!(by_id(&steps(&probe), "seat")["ended"], 1);
         probe.snapshot.as_mut().unwrap().accounts[0].pool = "default".into();
+        probe.snapshot.as_mut().unwrap().memberships.clear();
         probe.sign_in_required.clear();
         assert_eq!(by_id(&steps(&probe), "seat")["ended"], 0);
         // Two groups bound to one organization: both named.
@@ -1254,9 +1431,10 @@ mod tests {
             assert_eq!(hook["next"]["command"], "switchboard shell status");
         }
 
-        // No seat in the group: the person signs in, in the group's pool; not complete.
+        // No seat at all: the person adds one, any address; not complete.
         let mut probe = acme();
         probe.snapshot.as_mut().unwrap().accounts[0].pool = "default".into();
+        probe.snapshot.as_mut().unwrap().memberships.clear();
         let answer = steps(&probe);
         let seat = by_id(&answer, "seat");
         assert_eq!(seat["state"], "needs_person");
@@ -1264,8 +1442,26 @@ mod tests {
             seat["next"]["command"],
             "switchboard login begin --provider claude --pool acme-work"
         );
-        assert_eq!(seat["next"]["person"], "Sign in with your Acme address.");
+        assert_eq!(
+            seat["next"]["person"],
+            "Add a seat for Acme: give it an account already on this computer, or sign in with any address."
+        );
         assert_eq!(answer["complete"], false);
+        // SB-403 (round 1): an account of Acme's that no group of Acme holds serves none of its
+        // folders, so the seat still needs adding it there: offered first, by its id.
+        let mut probe = acme();
+        probe.snapshot.as_mut().unwrap().accounts[0].pool = "default".into();
+        let answer = steps(&probe);
+        let seat = by_id(&answer, "seat");
+        assert_eq!(seat["state"], "needs_person");
+        assert_eq!(
+            seat["suggested"],
+            json!([{"id": "a-1", "label": "me@acme.com", "works_for": true}])
+        );
+        assert_eq!(
+            seat["next"]["alternatives"][0],
+            "switchboard project edit --pool acme-work --add-account a-1"
+        );
 
         // No group for the organization: to do, with the commands that make one.
         let mut probe = acme();
@@ -1278,9 +1474,14 @@ mod tests {
             .unwrap()
             .contains("settings import"));
         assert_eq!(group["next"]["alternatives"].as_array().unwrap().len(), 2);
+        // SB-403: its account works for Acme and is signed in: the seat is there already.
+        assert_eq!(by_id(&answer, "seat")["state"], "done");
+        assert_eq!(answer["complete"], false);
+        // With no account of Acme either, the group comes first.
+        probe.snapshot.as_mut().unwrap().memberships.clear();
+        let answer = steps(&probe);
         assert_eq!(by_id(&answer, "seat")["state"], "needs_person");
         assert!(by_id(&answer, "seat")["next"]["command"].is_null());
-        assert_eq!(answer["complete"], false);
 
         // Two groups bound to Acme (SB-282): both are its groups, nothing to choose; the first
         // is the one the sign-in step names.
@@ -1393,10 +1594,11 @@ mod tests {
         assert_eq!(seat["state"], "needs_person");
         assert_eq!(
             seat["summary"],
-            "None of Acme's accounts in Acme work is signed in: 1 must sign in again."
+            "None of the accounts in “Acme work” is signed in: 1 must sign in again."
         );
         assert_eq!(answer["complete"], false);
-        // A switched-off seat, or one used on another machine, does not count either.
+        // A switched-off seat does not count either, nor one used on another machine: the
+        // group here still has no account here (SB-403 round 2).
         let mut probe = acme();
         probe.snapshot.as_mut().unwrap().accounts[0].enabled = false;
         assert_eq!(by_id(&steps(&probe), "seat")["state"], "needs_person");
@@ -1408,15 +1610,222 @@ mod tests {
             .elsewhere
             .insert("a-1".into(), 1);
         assert_eq!(by_id(&steps(&probe), "seat")["state"], "needs_person");
-        // A personal account in the group is no seat of Acme, nor is one only its domain
-        // suggests for Acme (SB-285).
+        // SB-403: an account the group holds serves it whatever its organizations, so a personal
+        // account in the group, or one only its domain suggests for Acme, is its seat.
         let mut probe = acme();
         let snapshot = probe.snapshot.as_mut().unwrap();
         snapshot.accounts[0].label = "me@example.org".into();
         snapshot.memberships.clear();
-        assert_eq!(by_id(&steps(&probe), "seat")["state"], "needs_person");
+        assert_eq!(by_id(&steps(&probe), "seat")["state"], "done");
         let mut probe = acme();
         probe.snapshot.as_mut().unwrap().memberships.clear();
+        assert_eq!(by_id(&steps(&probe), "seat")["state"], "done");
+    }
+
+    /// SB-403: Acme with its group and no seat in it; another account of this computer, in no
+    /// group and personal, that the person could give it.
+    fn acme_without_a_seat() -> Probe {
+        let mut probe = acme();
+        let snapshot = probe.snapshot.as_mut().unwrap();
+        snapshot.accounts[0].pool = "default".into();
+        snapshot.accounts[0].label = "dev@gmail.example".into();
+        snapshot.memberships.clear();
+        probe
+    }
+
+    #[test]
+    fn a_seat_held_as_also_counts_through_read_snapshot() {
+        // SB-403: an account works for an organization beside its personal context. The
+        // owner's snapshot went through `read_snapshot`, which dropped `also_organizations`, so
+        // the organization read "no signed-in account".
+        let mut probe = acme_without_a_seat();
+        let snapshot = probe.snapshot.as_mut().unwrap();
+        snapshot.memberships.insert(
+            "a-1".into(),
+            switchboard_core::organizations::PERSONAL.into(),
+        );
+        snapshot
+            .also_organizations
+            .insert("a-1".into(), vec!["o-acme".into()]);
+        let also = snapshot.also_organizations.clone();
+        let value = serde_json::to_value(probe.snapshot.as_ref().unwrap()).unwrap();
+        let (read, degraded) = read_snapshot(&value);
+        assert!(!degraded);
+        let read = read.unwrap();
+        assert_eq!(read.also_organizations, also);
+        probe.snapshot = Some(read);
+        // It works for Acme but Acme's group does not hold it yet: offered first.
+        let answer = steps(&probe);
+        let seat = by_id(&answer, "seat");
+        assert_eq!(seat["state"], "needs_person", "{seat}");
+        assert_eq!(seat["suggested"][0]["works_for"], true, "{seat}");
+        // Once the group holds it, the seat is done.
+        probe.snapshot.as_mut().unwrap().accounts[0].pool = "acme-work".into();
+        let answer = steps(&probe);
+        let seat = by_id(&answer, "seat");
+        assert_eq!(seat["state"], "done", "{seat}");
+    }
+
+    #[test]
+    fn all_away_reads_accounts_in_machine_groups() {
+        // SB-403: an account moved to another machine lives in that machine's group (DEC-0013).
+        // `read_snapshot` dropped `machines`, so such an account read as one here.
+        let mut probe = acme();
+        let snapshot = probe.snapshot.as_mut().unwrap();
+        snapshot.projects.clear();
+        snapshot.accounts[0].pool = "machine_studio".into();
+        snapshot.machines.push(switchboard_core::Machine {
+            pool: "machine_studio".into(),
+            name: "studio".into(),
+            identity: None,
+            aliases: Vec::new(),
+            created_at: 1,
+        });
+        let value = serde_json::to_value(probe.snapshot.as_ref().unwrap()).unwrap();
+        let (read, degraded) = read_snapshot(&value);
+        assert!(!degraded, "{value}");
+        probe.snapshot = read;
+        let answer = steps(&probe);
+        let group = by_id(&answer, "org_group");
+        assert_eq!(group["state"], "optional", "{group}");
+        assert_eq!(group["away"], json!(["studio"]));
+        let seat = by_id(&answer, "seat");
+        assert_eq!(seat["state"], "optional", "{seat}");
+        assert_eq!(
+            seat["next"]["alternatives"],
+            json!(["switchboard accounts recall a-1"])
+        );
+    }
+
+    #[test]
+    fn seat_offers_assign_and_any_sign_in_without_a_domain() {
+        let mut probe = acme_without_a_seat();
+        probe.snapshot.as_mut().unwrap().organizations[0]
+            .domains
+            .clear();
+        let answer = steps(&probe);
+        let seat = by_id(&answer, "seat");
+        assert_eq!(seat["state"], "needs_person");
+        assert_eq!(
+            seat["next"]["alternatives"],
+            json!([
+                "switchboard org assign <account id> --also o-acme",
+                "switchboard project edit --pool acme-work --add-account <account id>",
+                "switchboard login begin --provider claude --pool acme-work",
+            ]),
+            "no call back offered when nothing lives elsewhere"
+        );
+        assert!(seat["suggested"].is_null(), "no domain suggests anything");
+    }
+
+    #[test]
+    fn seat_is_optional_when_seats_are_away() {
+        // Without a group here, Acme's one account on the Studio makes the step optional.
+        // Round 2: with a group here, that group still has no account, so the step needs the
+        // person, and calling the account back is one of its alternatives.
+        let mut probe = acme();
+        let snapshot = probe.snapshot.as_mut().unwrap();
+        snapshot.projects.clear();
+        snapshot.accounts[0].pool = "machine_studio".into();
+        snapshot.machines.push(switchboard_core::Machine {
+            pool: "machine_studio".into(),
+            name: "studio".into(),
+            identity: None,
+            aliases: Vec::new(),
+            created_at: 1,
+        });
+        let answer = steps(&probe);
+        let seat = by_id(&answer, "seat");
+        assert_eq!(seat["state"], "optional", "{seat}");
+        assert_eq!(seat["away"], json!(["studio"]));
+        assert_eq!(
+            seat["summary"],
+            "Acme's accounts work on studio. Call one back to work here."
+        );
+        let mut probe = acme();
+        let snapshot = probe.snapshot.as_mut().unwrap();
+        snapshot.accounts[0].pool = "machine_studio".into();
+        snapshot.machines.push(switchboard_core::Machine {
+            pool: "machine_studio".into(),
+            name: "studio".into(),
+            identity: None,
+            aliases: Vec::new(),
+            created_at: 1,
+        });
+        let answer = steps(&probe);
+        let seat = by_id(&answer, "seat");
+        assert_eq!(seat["state"], "needs_person", "{seat}");
+        assert_eq!(seat["away"], json!(["studio"]));
+        let alternatives = seat["next"]["alternatives"].as_array().unwrap();
+        assert!(
+            alternatives.contains(&json!("switchboard accounts recall a-1")),
+            "{seat}"
+        );
+        assert_eq!(answer["complete"], false);
+    }
+
+    #[test]
+    fn the_ordinary_clis_account_is_never_suggested_and_is_named() {
+        // Round 2: `project edit --add-account` refuses the ordinary CLI's account
+        // (`PROJECT_ACCOUNT_IN_CLI`), so it is never suggested; it is named under `left_out`.
+        let mut probe = acme();
+        probe.snapshot.as_mut().unwrap().accounts[0].pool = "default".into();
+        probe.in_cli = vec!["a-1".into()];
+        let answer = steps(&probe);
+        let seat = by_id(&answer, "seat");
+        assert_eq!(seat["state"], "needs_person", "{seat}");
+        assert!(seat["suggested"].is_null(), "{seat}");
+        assert_eq!(
+            seat["left_out"],
+            json!([{"id": "a-1", "label": "me@acme.com", "reason": "in_cli"}])
+        );
+        assert!(!seat["next"]["alternatives"]
+            .as_array()
+            .unwrap()
+            .contains(&json!(
+                "switchboard project edit --pool acme-work --add-account a-1"
+            )));
+    }
+
+    #[test]
+    fn seat_never_names_an_address() {
+        // Domains only suggest (an organization may have several, or none): the seat step never
+        // asks for an organization address, and lists an account a domain suggests as such.
+        let mut probe = acme_without_a_seat();
+        let snapshot = probe.snapshot.as_mut().unwrap();
+        snapshot.organizations[0].domains = vec!["acme.com".into(), "acme.io".into()];
+        snapshot
+            .accounts
+            .push(seat("a-2", "default", "ops@acme.io"));
+        let answer = steps(&probe);
+        let seat = by_id(&answer, "seat");
+        let text = seat.to_string();
+        assert!(!text.contains("your Acme address"), "{text}");
+        assert!(!text.contains("Sign in with your"), "{text}");
+        assert_eq!(
+            seat["suggested"],
+            json!([{"id": "a-2", "label": "ops@acme.io"}])
+        );
+        // With no group, still no address.
+        let mut probe = acme_without_a_seat();
+        probe.snapshot.as_mut().unwrap().projects.clear();
+        let answer = steps(&probe);
+        let seat = by_id(&answer, "seat");
+        assert!(!seat.to_string().contains("your Acme address"), "{seat}");
+    }
+
+    #[test]
+    fn org_with_no_domain_has_a_seat_step() {
+        let mut probe = acme();
+        probe.snapshot.as_mut().unwrap().organizations[0]
+            .domains
+            .clear();
+        let answer = steps(&probe);
+        assert_eq!(by_id(&answer, "seat")["state"], "done");
+        let mut probe = acme_without_a_seat();
+        probe.snapshot.as_mut().unwrap().organizations[0]
+            .domains
+            .clear();
         assert_eq!(by_id(&steps(&probe), "seat")["state"], "needs_person");
     }
 

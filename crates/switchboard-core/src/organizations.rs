@@ -26,18 +26,25 @@ pub const ORGANIZATION_NAME_TAKEN: &str = "Another organization already has this
 pub const DOMAIN_TAKEN: &str = "Another organization already has this domain.";
 pub const DOMAIN_INVALID: &str = "A domain is a name such as example.com.";
 pub const ORGANIZATION_NAME_INVALID: &str = "Name the organization in 1 to 80 characters.";
-/// A request or a selection on a seat that left the group's context after it was placed.
-pub const SEAT_OUTSIDE: &str = "This account belongs to another organization than this group. Move it, or change the group's organization.";
+/// DEC-0022 (SB-403): what assigning one seat of a provider team did with the team's other seats.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TeamOutcome {
+    /// The person asked: the team's other seats follow the account.
+    Claimed,
+    /// Only the account named was placed; its teammates stay where they were.
+    NotClaimed,
+}
 
-/// SB-313: an organization chosen for an account (and its provider team) that a group it serves
-/// would then refuse.
-pub const ASSIGN_OUTSIDE: &str = "A group this account or its provider team serves would then refuse it. Move it out of that group first, or change the group's organization.";
-/// Saving a group with an account of another context (SB-109). The answer names the account
-/// and why ([`Snapshot::seat_chosen`], SB-314); this sentence stays for the window's own check.
-pub const SEAT_CHOSEN: &str = "An account chosen for this group belongs to another organization. Choose accounts of the group's organization, or change it.";
-/// Changing a group's organization while it holds an account of another context (SB-109).
-pub const SEATS_ELSEWHERE: &str =
-    "This group still holds accounts that belong elsewhere. Move them out first.";
+/// The answer of [`Store::assign_organizations_with`].
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct Assigned {
+    pub attribution: Attribution,
+    /// Present when the account has a provider team: whether its other seats followed.
+    pub team: Option<TeamOutcome>,
+    /// The other saved accounts of the same provider team.
+    pub teammates: usize,
+}
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -256,20 +263,11 @@ impl Snapshot {
             .contains(&organization.id)
             .then(|| organization.id.clone())
     }
-    /// SB-109, SB-285: whether a group of `organizations` (none: personal) takes `account` when
-    /// the person places it there: it fits already, or placing it confirms what its address
-    /// suggests. Always while no organization exists.
-    /// SB-314: the refusal of `account` in a group bound to organizations it is not placed in,
-    /// naming it (its label when the window's formatted errors can carry it, else its id) and
-    /// saying whether it is another organization's or personal.
-    pub fn seat_chosen(&self, account: &Account) -> String {
-        let name = shown_name(account);
-        if self.attribution(account).organization.is_none() {
-            format!("{} is a personal account and this group serves an organization. Choose accounts of the group's organization, or change it.", name)
-        } else {
-            format!("{} belongs to another organization than this group. Choose accounts of the group's organization, or change it.", name)
-        }
-    }
+    /// SB-109, SB-285: whether `account` fits a group of `organizations` (none: personal) when
+    /// the person places it there: its contexts meet the group's already, or placing it confirms
+    /// what its address suggests. Always while no organization exists. DEC-0022 (SB-403): a fit
+    /// is information, never admission: a person's placement outside it is kept and warned of
+    /// ([`Snapshot::outside_warnings`]).
     pub fn placement_admits(&self, organizations: &[String], account: &Account) -> bool {
         if self.organizations.is_empty() {
             return true;
@@ -409,8 +407,9 @@ impl Snapshot {
     /// whatever pays for it (an account, a key; none is personal), `pool` the pool it serves,
     /// `folder` where it works. The group of the pool decides, else the group holding the folder,
     /// else `own` (a folder in no group is a session without a project, CX-26); when a group and
-    /// `own` disagree, the more private wins. `personal` while no organization exists. A group
-    /// of several organizations (SB-282) runs in the one `own` names when it is among them.
+    /// `own` disagree, the group's wins (DEC-0022, SB-403: the group owns the data, the payer
+    /// only pays). `personal` while no organization exists. A group of several organizations
+    /// (SB-282) runs in the one `own` names when it is among them, else in its first.
     pub fn context_for(
         &self,
         own: Option<&str>,
@@ -420,8 +419,9 @@ impl Snapshot {
         self.context_of(&[own], pool, folder)
     }
     /// [`Snapshot::context_for`] with every context the payer holds, its first first (SB-282):
-    /// the group's first context the payer also holds, else personal; with no group, the
-    /// payer's first.
+    /// the group's first context the payer also holds, else the group's first context
+    /// (DEC-0022, SB-403; it was personal, so a shell started in a group's folder and a launch
+    /// there disagreed); with no group, the payer's first.
     pub fn context_of(
         &self,
         own: &[Option<&str>],
@@ -435,11 +435,15 @@ impl Snapshot {
             .and_then(|p| self.project_of_pool(p))
             .or_else(|| folder.and_then(|f| self.project_for(f)));
         let context = match group {
-            Some(group) => group
-                .contexts()
-                .into_iter()
-                .find(|c| own.contains(c))
-                .flatten(),
+            Some(group) => {
+                let contexts = group.contexts();
+                contexts
+                    .iter()
+                    .find(|c| own.contains(c))
+                    .or_else(|| contexts.first())
+                    .copied()
+                    .flatten()
+            }
             None => own.first().copied().flatten(),
         };
         context.map_or_else(|| PERSONAL.into(), |id| format!("org:{id}"))
@@ -447,7 +451,8 @@ impl Snapshot {
     /// SB-201: the context of a session that runs on no account, on a saved key of `key_pool`
     /// (a group's own key; none: the machine's key, or no key at all as Kimi Code): the key's
     /// group's organization is its own (SB-282: its first, of several). The machine's key
-    /// belongs to no organization, so in an organization's folder it reads personal.
+    /// belongs to no organization: outside a group it reads personal, in a group's folder the
+    /// group's context (DEC-0022, SB-403 round 1: the group owns the data).
     pub fn key_context(&self, key_pool: Option<&str>, folder: Option<&std::path::Path>) -> String {
         let own = key_pool
             .and_then(|p| self.project_of_pool(p))
@@ -464,13 +469,38 @@ impl Snapshot {
         self.project_of_pool(pool)
             .is_none_or(|p| p.admits(&self.attribution(account)))
     }
-    /// SB-323: the groups `account` serves (its own or one sharing it) whose context does not
-    /// take it: what the person's word on its organizations left it out of.
-    pub fn groups_refusing(&self, account: &Account) -> Vec<&crate::Project> {
+    /// SB-323, DEC-0022: the groups `account` serves (its own or one sharing it) none of whose
+    /// contexts it holds. Information only: the account serves them all the same.
+    pub fn groups_outside(&self, account: &Account) -> Vec<&crate::Project> {
         self.projects
             .iter()
             .filter(|p| p.pool == account.pool || p.shared_accounts.contains(&account.id))
             .filter(|p| !self.context_admits(&p.pool, account))
+            .collect()
+    }
+    /// DEC-0022 (SB-403): one warning per group `account` serves outside its organizations
+    /// ([`Snapshot::groups_outside`]), for an answer to show: `code`, the account, the group and
+    /// whether the account is personal, with an English `message`.
+    pub fn outside_warnings(&self, account: &Account) -> Vec<serde_json::Value> {
+        let personal = self.attribution(account).organization.is_none()
+            && self.attribution(account).also.is_empty();
+        self.groups_outside(account)
+            .into_iter()
+            .map(|p| {
+                let name = shown_name(account);
+                // Round 2: a personal group holding an organization's account says so plainly.
+                let group_personal = p.organizations.is_empty();
+                let message = if group_personal {
+                    format!("{name} works for an organization; the personal group “{}” uses it anyway.", p.name)
+                } else if personal {
+                    format!("{name} is a personal account and the group “{}” serves an organization. It serves the group anyway; assign it the organization if it works for it.", p.name)
+                } else {
+                    format!("{name} works for another organization than the group “{}”. It serves the group anyway; assign it the group's organization too if it works for it.", p.name)
+                };
+                serde_json::json!({"code": "outside_organization", "account": account.id,
+                    "label": account.label, "pool": p.pool, "group": p.name,
+                    "personal": personal, "group_personal": group_personal, "message": message})
+            })
             .collect()
     }
     /// SB-202, SB-282: the groups bound to `organization`, in the store's order (by name); an
@@ -491,7 +521,8 @@ impl Snapshot {
         }
     }
     /// SB-202, SB-282: the accounts of `organization` in any of its groups, whatever their
-    /// state; empty while it has no group.
+    /// state; empty while it has no group. The setup checklist's seat step (SB-403) counts a
+    /// wider set: every account its groups hold, and every account that works for it.
     pub fn organization_seats(&self, organization: &str) -> Vec<&Account> {
         let groups = self.organization_groups(organization);
         self.accounts
@@ -979,20 +1010,31 @@ impl Store {
         Ok(added)
     }
     /// The person's word on one account: an organization's id, [`PERSONAL`], or none to let the
-    /// rules decide again. Assigning to an organization also records the account's provider
-    /// organization there (and nowhere else), so the team's other seats follow; keeping it
-    /// personal takes that provider organization off every organization. The organizations it
-    /// also works for (SB-282) are kept; none drops them too.
+    /// rules decide again. The organizations it also works for (SB-282) are kept; none drops
+    /// them too. DEC-0022 (SB-403): only this account is placed; its provider team's other seats
+    /// stay where they are ([`Store::assign_organization_team`] places the team too).
     pub fn assign_organization(
         &self,
         account: &str,
         choice: Option<&str>,
     ) -> Result<Attribution, String> {
+        self.assign_organization_team(account, choice, false)
+            .map(|a| a.attribution)
+    }
+    /// [`Store::assign_organization`]; with `team`, the account's provider organization (its
+    /// Claude Team or ChatGPT workspace) is recorded on the organization chosen (and taken off
+    /// every other, or off all of them for [`PERSONAL`]), so the team's other seats follow it.
+    pub fn assign_organization_team(
+        &self,
+        account: &str,
+        choice: Option<&str>,
+        team: bool,
+    ) -> Result<Assigned, String> {
         let also = match choice {
             None => Some(Vec::new()),
             Some(_) => None,
         };
-        self.assign(account, choice, also)
+        self.assign(account, choice, also, team)
     }
     /// SB-282: the person's word on every context of one account, in order: the first as
     /// [`Store::assign_organization`] takes it (an organization, [`PERSONAL`], or `auto` to let
@@ -1003,8 +1045,18 @@ impl Store {
         account: &str,
         choices: &[String],
     ) -> Result<Attribution, String> {
+        self.assign_organizations_team(account, choices, false)
+            .map(|a| a.attribution)
+    }
+    /// [`Store::assign_organizations`], with `team` as [`Store::assign_organization_team`] takes it.
+    pub fn assign_organizations_team(
+        &self,
+        account: &str,
+        choices: &[String],
+        team: bool,
+    ) -> Result<Assigned, String> {
         let Some((first, rest)) = choices.split_first() else {
-            return self.assign(account, None, Some(Vec::new()));
+            return self.assign(account, None, Some(Vec::new()), team);
         };
         let first = first.trim();
         let mut also: Vec<String> = Vec::new();
@@ -1018,14 +1070,18 @@ impl Store {
             also.push(o.to_owned());
         }
         let first = (first != AUTO).then_some(first);
-        self.assign(account, first, Some(also))
+        self.assign(account, first, Some(also), team)
     }
+    /// DEC-0022 (SB-403): a word on an account's organizations is a label. It never refuses
+    /// because of the groups the account serves (they keep it; the answer's warnings name them),
+    /// and it never moves a group's selected account: routing does not read organizations.
     fn assign(
         &self,
         account: &str,
         choice: Option<&str>,
         also: Option<Vec<String>>,
-    ) -> Result<Attribution, String> {
+        team: bool,
+    ) -> Result<Assigned, String> {
         let mut state = self.lock()?;
         let mut candidate = state.clone();
         let a = candidate
@@ -1035,6 +1091,13 @@ impl Store {
             .ok_or("Account not found")?
             .clone();
         let key = provider_organization(&a);
+        let teammates = key.as_ref().map_or(0, |key| {
+            candidate
+                .accounts
+                .iter()
+                .filter(|b| b.id != account && provider_organization(b).as_ref() == Some(key))
+                .count()
+        });
         match choice {
             None => {
                 candidate.memberships.remove(account);
@@ -1043,7 +1106,7 @@ impl Store {
                 candidate
                     .memberships
                     .insert(account.into(), PERSONAL.into());
-                if let Some(key) = &key {
+                if let Some(key) = key.as_ref().filter(|_| team) {
                     for o in &mut candidate.organizations {
                         o.provider_organizations.retain(|k| k != key);
                     }
@@ -1054,7 +1117,7 @@ impl Store {
                     return Err(ORGANIZATION_NOT_FOUND.into());
                 }
                 candidate.memberships.insert(account.into(), id.into());
-                if let Some(key) = &key {
+                if let Some(key) = key.as_ref().filter(|_| team) {
                     for o in &mut candidate.organizations {
                         o.provider_organizations.retain(|k| k != key);
                         if o.id == id && o.provider_organizations.len() < MAX_PROVIDER_ORGANIZATIONS
@@ -1075,68 +1138,20 @@ impl Store {
                 candidate.also_organizations.insert(account.into(), also);
             }
         }
-        // SB-313: placing an account moves its provider team with it, and nothing checked the
-        // groups the teammates serve: a teammate a group admitted before and refuses now was left
-        // there by a word nobody said about it, every request in that group's folders refused.
-        // Such a choice is refused; the account itself follows the person's word (SB-109), and a
-        // teammate a group refused already is not counted (this choice may be its fix).
-        let serving = |s: &crate::Snapshot, x: &crate::Account| -> Vec<Vec<String>> {
-            s.projects
-                .iter()
-                .filter(|p| p.pool == x.pool || p.shared_accounts.contains(&x.id))
-                .map(|p| p.organizations.clone())
-                .collect()
-        };
-        for x in candidate.accounts.iter().filter(|x| x.id != account) {
-            let Some(before) = state.accounts.iter().find(|b| b.id == x.id) else {
-                continue;
-            };
-            if serving(&candidate, x).iter().any(|organizations| {
-                state.placement_admits(organizations, before)
-                    && !candidate.placement_admits(organizations, x)
-            }) {
-                return Err(ASSIGN_OUTSIDE.into());
-            }
-        }
-        // SB-313: a group whose selected account this word takes out of its context moves to
-        // another of its accounts that it admits, so its sessions keep an account; with none, the
-        // route stays and says why it refuses.
-        let routed: Vec<String> = candidate
-            .routes
-            .iter()
-            .filter(|(_, id)| id.as_str() == account)
-            .map(|(key, _)| key.clone())
-            .collect();
-        for key in routed {
-            let pool = key
-                .split_once(':')
-                .map_or(key.as_str(), |(_, p)| p)
-                .to_owned();
-            if candidate.context_admits(&pool, &a) {
-                continue;
-            }
-            let next = candidate
-                .accounts
-                .iter()
-                .find(|b| {
-                    b.id != account
-                        && b.provider == a.provider
-                        && b.enabled
-                        && !candidate.elsewhere.contains_key(&b.id)
-                        && !candidate.is_assigned(&b.id)
-                        && candidate.pools_of(b).contains(&pool.as_str())
-                        && candidate.context_admits(&pool, b)
-                })
-                .map(|b| b.id.clone());
-            if let Some(next) = next {
-                candidate.routes.insert(key, next);
-            }
-        }
         append_event(&mut candidate, "organization", Some(account), "assigned");
         let attribution = candidate.attribution(&a);
         self.publish(&mut state, candidate)?;
         self.changed();
-        Ok(attribution)
+        let team = match (key.is_some(), choice) {
+            (true, Some(_)) if team => Some(TeamOutcome::Claimed),
+            (true, Some(_)) => Some(TeamOutcome::NotClaimed),
+            _ => None,
+        };
+        Ok(Assigned {
+            attribution,
+            team,
+            teammates,
+        })
     }
 }
 
@@ -1229,30 +1244,32 @@ mod tests {
             s.session_context(&acme, Some("/work/acme/app".as_ref())),
             org1
         );
-        // The folder's group is personal or another organization's: the more private wins.
+        // DEC-0022 (SB-403): the folder's group decides, whatever the account holds: a
+        // personal group is personal, another organization's group is that organization's.
         assert_eq!(
             s.session_context(&acme, Some("/work/own".as_ref())),
             "personal"
         );
         assert_eq!(
             s.session_context(&acme, Some("/work/beta".as_ref())),
-            "personal"
+            format!("org:{O2}")
         );
         // The account's pool belongs to a group: that group decides, wherever the folder is.
         acme.pool = "acme-pool".into();
         assert_eq!(s.session_context(&acme, Some("/elsewhere".as_ref())), org1);
-        // A personal account is personal everywhere.
+        // A personal account in an organization's folder runs in the organization's context:
+        // the group owns the data, the account only pays (DEC-0022).
         let me = account(B, Provider::Claude, "me@example.com", None);
+        assert_eq!(s.session_context(&me, Some("/work/acme".as_ref())), org1);
         assert_eq!(
-            s.session_context(&me, Some("/work/acme".as_ref())),
+            s.session_context(&me, Some("/elsewhere".as_ref())),
             "personal"
         );
     }
 
     /// SB-201: a session that runs on no account (Kimi Code, an agent on a saved OpenRouter key)
-    /// follows the same rule with its key's group as its own: the group's key gives the group's
-    /// context, the machine's key or no key gives the folder's group only when that agrees, so
-    /// an organization's folder on a personal key reads personal.
+    /// follows the same rule with its key's group as its own. DEC-0022 (SB-403): the folder's
+    /// group decides, so an organization's folder on a personal key reads the organization's.
     #[test]
     fn a_session_without_an_account_takes_its_keys_group_else_personal() {
         use crate::Project;
@@ -1279,16 +1296,16 @@ mod tests {
         assert_eq!(s.key_context(Some("acme-pool"), acme), org1);
         assert_eq!(s.key_context(Some("acme-pool"), None), org1);
         assert_eq!(s.key_context(Some("own-pool"), acme), "personal");
-        // The machine's key, or no key at all (Kimi Code): personal, also in the
-        // organization's folder (the more private wins, A-Q6).
-        assert_eq!(s.key_context(None, acme), "personal");
+        // The machine's key, or no key at all (Kimi Code): the folder's group decides
+        // (DEC-0022, SB-403; before, the more private won, A-Q6).
+        assert_eq!(s.key_context(None, acme), org1);
         assert_eq!(s.key_context(None, Some("/work/own".as_ref())), "personal");
         assert_eq!(s.key_context(None, None), "personal");
-        assert_eq!(s.context_for(None, None, acme), "personal");
+        assert_eq!(s.context_for(None, None, acme), org1);
         // A pool no group reserves decides nothing: the folder's group does.
         assert_eq!(s.context_for(Some(O1), Some("default"), acme), org1);
         assert_eq!(s.context_for(Some(O1), None, None), org1);
-        assert_eq!(s.context_for(Some(O2), None, acme), "personal");
+        assert_eq!(s.context_for(Some(O2), None, acme), org1);
     }
 
     /// SB-202: the one group bound to an organization, and its seats there.
@@ -1430,7 +1447,11 @@ mod tests {
         assert_eq!(s.session_context(&acme, None), format!("org:{O1}"));
         assert_eq!(s.session_context(&beta, None), format!("org:{O2}"));
         let folder = Some("/work/shared/app".as_ref());
-        assert_eq!(s.session_context(&gamma, folder), "personal");
+        // DEC-0022: an account of none of the group's organizations runs in the group's first.
+        assert_eq!(
+            s.session_context(&gamma, folder),
+            s.key_context(Some("shared"), None)
+        );
         assert_eq!(s.key_context(Some("shared"), None), format!("org:{O2}"));
         // Both organizations count the group as theirs.
         assert_eq!(

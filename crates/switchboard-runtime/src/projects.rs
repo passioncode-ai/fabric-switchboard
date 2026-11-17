@@ -338,7 +338,19 @@ pub(crate) fn project_view(
         .iter()
         .filter_map(|id| name_of(id))
         .collect();
-    json!({"pool": project.pool, "name": project.name, "folders": project.folders, "created_at": project.created_at, "sources": project.sources, "accounts": accounts, "organization": project.primary_organization(), "organization_name": organization_name, "organizations": project.organizations, "organization_names": organization_names, "shared_accounts": project.shared_accounts})
+    let mut view = json!({"pool": project.pool, "name": project.name, "folders": project.folders, "created_at": project.created_at, "sources": project.sources, "accounts": accounts, "organization": project.primary_organization(), "organization_name": organization_name, "organizations": project.organizations, "organization_names": organization_names, "shared_accounts": project.shared_accounts});
+    // DEC-0022 (SB-403): the accounts it holds outside its organizations, as warnings; they
+    // serve it all the same. Present only when there is one.
+    let warnings: Vec<Value> = snapshot
+        .pool_accounts(&project.pool)
+        .into_iter()
+        .flat_map(|a| snapshot.outside_warnings(a))
+        .filter(|w| w["pool"] == project.pool.as_str())
+        .collect();
+    if !warnings.is_empty() {
+        view["warnings"] = json!(warnings);
+    }
+    view
 }
 
 fn outcome(provider: Provider, action: &str, account: Option<&Account>, message: String) -> Value {
