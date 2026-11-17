@@ -323,7 +323,7 @@
           },
           "machine": "<machine>",
           "rows": {
-            "description": "This computer's sessions as one list in four groups (needs_you, running, waiting, ended), each row with its agent, account, folder, origin and the acts it has (close_copy, attach, end).",
+            "description": "This computer's sessions as one list in four groups (needs_you, running, waiting, ended), each row with its agent, account, folder, origin and the acts it has (close_copy, attach, end, continue).",
             "type": "boolean"
           },
           "tree": {

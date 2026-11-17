@@ -623,6 +623,9 @@ pub fn tick(root: &Path, now: i64) {
 
 /// One check: what is due, done (or only listed with `dry_run`).
 pub fn check(root: &Path, now: i64, dry_run: bool) -> Result<Value, String> {
+    // R3 review: an intent is stamped when it is written, not when the check began; a slow read and
+    // earlier acts can take over a minute, and a check beside this one judges its age by the stamp.
+    let begun = std::time::Instant::now();
     let set = settings(root)?;
     let mut seen = observe(root);
     // Only the five-minute checks keep their CPU samples: a stall is measured across them.
@@ -667,7 +670,7 @@ pub fn check(root: &Path, now: i64, dry_run: bool) -> Result<Value, String> {
             // when this one is cut by a quit (a close takes up to 10.5 s, the drain 8 s).
             append(
                 root,
-                json!({"at": now, "phase": "intent", "action": action, "reason": reason,
+                json!({"at": now + begun.elapsed().as_secs() as i64, "phase": "intent", "action": action, "reason": reason,
                     "session": s.session, "folder": s.cwd, "pid": s.pid, "host": s.host,
                     "config": s.config, "prompt": prompt}),
             );

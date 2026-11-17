@@ -392,6 +392,13 @@ pub enum Operation {
     /// config folder), refused while a process holds it or when its history is gone.
     SessionContinue {
         session_id: String,
+        /// SB-400: no Terminal window: the answer carries the script, which the calling terminal
+        /// runs. Left out when false, so a plain continue still reaches an older owner.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        in_place: bool,
+        /// SB-400, with `in_place`: in a session host of its own launch, recorded like any launch.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        hosted: bool,
     },
     /// SB-397 R1: which running sessions a restart wave would restart and skip, the caller's own
     /// (the session whose process is the nearest ancestor of `caller_pid`) and the plan's digest.
@@ -4329,6 +4336,8 @@ fn is_launch(operation: &Operation) -> bool {
             | Operation::LaunchAgent { .. }
             | Operation::KimiLaunch { .. }
             | Operation::Dispatch { .. }
+            // SB-400: a hosted continue is a launch of its own, with who asked for it.
+            | Operation::SessionContinue { hosted: true, .. }
     )
 }
 /// SB-212: `operation` with who asked for it, when it launches a session; any other operation
@@ -4522,6 +4531,9 @@ fn take_turn_wait() -> std::time::Duration {
 /// The refusal of an operation that needs the owner when none runs.
 pub const NEEDS_OWNER: &str =
     "Start the desktop app or 'switchboard serve' before login or launch.";
+/// A restart wave is run by the owner's session watch; without one nothing would act on it.
+pub const RESTART_NEEDS_OWNER: &str =
+    "Start the desktop app or 'switchboard serve' first: the restart wave runs in it.";
 /// Whether `error` says no owner could be asked (none runs, it is starting or quitting with the
 /// store held, or the control connection failed), as opposed to an owner that answered with a
 /// refusal. A caller that keeps work for the next owner keeps it only then (review of 2026-11-16,
@@ -4537,6 +4549,8 @@ pub fn owner_unreachable(error: &str) -> bool {
         || error == control::CONTROL_BUSY
         || error == recovery::UNREADABLE
         || error == "Control metadata unavailable."
+        // A corrupt `control.json`: no owner was asked (R3 review).
+        || error.starts_with("Invalid control metadata.")
         || error.ends_with(" No operation was attempted.")
         || error.contains("Check state before retrying")
 }
@@ -4546,6 +4560,40 @@ pub fn owner_unreachable(error: &str) -> bool {
 #[cfg(test)]
 mod owner_unreachable_tests {
     use super::*;
+
+    #[test]
+    fn a_plain_continue_reaches_an_older_owner_and_an_older_caller_is_read() {
+        // SB-400: the new fields travel only when true; an older CLI's request still parses.
+        let plain = serde_json::to_value(Operation::SessionContinue {
+            session_id: "S1".into(),
+            in_place: false,
+            hosted: false,
+        })
+        .unwrap();
+        assert_eq!(
+            plain,
+            serde_json::json!({"operation": "session_continue", "session_id": "S1"})
+        );
+        let old: Operation = serde_json::from_value(
+            serde_json::json!({"operation": "session_continue", "session_id": "S2"}),
+        )
+        .unwrap();
+        assert!(matches!(
+            old,
+            Operation::SessionContinue {
+                in_place: false,
+                hosted: false,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn a_corrupt_control_file_means_no_owner_was_asked() {
+        assert!(owner_unreachable(
+            "Invalid control metadata. Do not bypass a running owner."
+        ));
+    }
 
     #[test]
     fn a_stop_is_kept_whenever_no_owner_was_asked_and_never_for_an_owners_refusal() {
@@ -6045,6 +6093,8 @@ async fn execute(
             }
             let kind = match reason.as_deref() {
                 Some("idle") => "idle",
+                // SB-400: a host that never started (R4 review).
+                Some("not_started") => "not_started",
                 _ => dispatch::EXITED,
             };
             let recorded =
@@ -6507,9 +6557,20 @@ async fn execute(
             blocking::run(move || launch::open_terminal(&folder, &script))?;
             Ok(json!({"opened": launch_id, "target": target}))
         }
-        Operation::SessionContinue { session_id } => {
+        Operation::SessionContinue {
+            session_id,
+            in_place,
+            hosted,
+        } => {
             let root = root.to_owned();
-            blocking::run(move || resumable::continue_session(&root, &session_id, monitor::now()))
+            // Read here: the task's launch scope does not reach the blocking thread.
+            let by = launches::current_by();
+            let how = resumable::How {
+                in_place,
+                hosted: in_place && hosted,
+                by,
+            };
+            blocking::run(move || resumable::continue_as(&root, &session_id, monitor::now(), &how))
         }
         Operation::SessionsRestartPlan { caller_pid } => {
             let root = root.to_owned();
@@ -6523,7 +6584,7 @@ async fn execute(
             // Only the owner's one-minute watch moves a wave on: offline, a wave written now
             // would restart nothing and keep the duty officer off its sessions for a day
             // (review of 2026-11-16, defect 7). Planning, status and cancel stay offline.
-            needs_owner()?;
+            needs_owner().map_err(|_| RESTART_NEEDS_OWNER.to_string())?;
             let root = root.to_owned();
             blocking::run(move || {
                 restarts::apply(&root, &digest, &reason, caller_pid, monitor::now())
@@ -6592,11 +6653,18 @@ async fn execute(
             let root = root.to_owned();
             Ok(blocking::run(move || {
                 let tree = session_watch::tree(&root, session_watch::now());
-                let attachable: HashSet<String> = launch::sessions(&root, false)
+                let mut attachable: HashSet<String> = launch::sessions(&root, false)
                     .into_iter()
                     .filter(|s| s["attachable"] == true)
                     .filter_map(|s| s["launch_id"].as_str().map(str::to_owned))
                     .collect();
+                // SB-400: a hosted continue has no home; its host says it runs (R4 review).
+                #[cfg(unix)]
+                attachable.extend(
+                    session_host::live_hosts(&root)
+                        .into_iter()
+                        .map(|(id, _)| id),
+                );
                 let resumable =
                     resumable::recent(&root, session_watch::now() - resumable::WINDOW_SECONDS);
                 let now = session_watch::now();

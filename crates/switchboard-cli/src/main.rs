@@ -1972,6 +1972,16 @@ enum SessionsCommand {
     Continue {
         /// The session id (`sessions --rows` names it).
         session_id: String,
+        /// In this terminal instead of a Terminal window of its own.
+        #[arg(long)]
+        in_place: bool,
+        /// With --in-place: in a session host under a launch of its own, so its viewers, restart
+        /// waves and updates leave it running; this command attaches to it.
+        #[arg(long, requires = "in_place")]
+        hosted: bool,
+        /// With --in-place: where it is asked from, for its launch record.
+        #[arg(long, value_enum, requires = "in_place")]
+        surface: Option<LaunchSurface>,
     },
     /// Restart every running Claude Code session, for example so it loads new skills: each ends
     /// at the end of its current turn and is resumed as itself; this command's own session
@@ -2768,10 +2778,35 @@ async fn run(cli: &Cli) -> Result<Value, String> {
             pid: *pid,
         },
         Command::Sessions {
-            command: Some(SessionsCommand::Continue { session_id }),
+            command: Some(SessionsCommand::Continue { in_place: true, .. }),
+            target: Some(_),
+            ..
+        } => {
+            // A session continued in this terminal runs on this computer (R4 review).
+            return Err(
+                "Continue in place runs on this computer. Run it there, without --target.".into(),
+            );
+        }
+        Command::Sessions {
+            command:
+                Some(SessionsCommand::Continue {
+                    session_id,
+                    in_place: true,
+                    hosted,
+                    surface,
+                }),
+            target: None,
+            ..
+        } => {
+            return continue_in_place(&root, session_id, *hosted, *surface).await;
+        }
+        Command::Sessions {
+            command: Some(SessionsCommand::Continue { session_id, .. }),
             ..
         } => Operation::SessionContinue {
             session_id: session_id.clone(),
+            in_place: false,
+            hosted: false,
         },
         Command::Sessions {
             command: Some(SessionsCommand::Restart { command }),
@@ -3621,6 +3656,59 @@ async fn launch(
             .as_str()
             .ok_or("The session's launch id is missing.")?;
         return run_hosted(root, launch_id, std::path::Path::new(script));
+    }
+    run_in_place(std::path::Path::new(script))
+}
+/// SB-400: continues a session as itself in this terminal: its resume script run here, or in a
+/// session host of its own launch (`--hosted`) that this command attaches to. Refused as
+/// `sessions continue` refuses (a process holds it, its history is gone).
+async fn continue_in_place(
+    root: &std::path::Path,
+    session_id: &str,
+    hosted: bool,
+    surface: Option<LaunchSurface>,
+) -> Result<Value, String> {
+    if !(std::io::stdin().is_terminal() && std::io::stdout().is_terminal()) {
+        return Err("Continuing in place needs a terminal on stdin and stdout.".into());
+    }
+    // SB-378: a hosted session waits while this computer's session pool is full, as `launch`.
+    if hosted {
+        switchboard_runtime::capacity::admit(root)?;
+    }
+    let surface = launches::Surface::from(surface.unwrap_or(LaunchSurface::Cli));
+    let by = launches::LaunchedBy::from_caller(surface, None, None);
+    let value = call(
+        root,
+        switchboard_runtime::launched(
+            Operation::SessionContinue {
+                session_id: session_id.to_owned(),
+                in_place: true,
+                hosted,
+            },
+            by,
+        ),
+    )
+    .await?;
+    let script = value["script"]
+        .as_str()
+        .ok_or("The session script is missing.")?;
+    if let Some(launch_id) = value["launch_id"].as_str() {
+        let ran = run_hosted(root, launch_id, std::path::Path::new(script));
+        // Only a host that never came up ends the record here; one that runs (attaching failed)
+        // ends it itself when its session ends (R4, R5 review).
+        if ran.is_err() && switchboard_runtime::session_host::attachable(root, launch_id).is_none()
+        {
+            let _ = call(
+                root,
+                Operation::SessionEnded {
+                    launch_id: launch_id.to_owned(),
+                    exit_code: 1,
+                    reason: Some("not_started".into()),
+                },
+            )
+            .await;
+        }
+        return ran;
     }
     run_in_place(std::path::Path::new(script))
 }

@@ -24,6 +24,8 @@ pub const DIR: &str = "restarts";
 pub const IN_FLIGHT: usize = 3;
 /// How long after its end a session must hold its id again.
 pub const BACK_SECONDS: i64 = 300;
+/// How long an act a quit cut is left to start its own window before another is opened.
+pub const CUT_SETTLE_SECONDS: i64 = 60;
 /// How long the caller waits for the others before it restarts anyway.
 pub const CALLER_WAIT: i64 = 900;
 /// A session still mid-turn this long after the wave began is skipped (`still_busy`), so a wave
@@ -45,6 +47,22 @@ pub const NOT_SAVED: &str = "The restart wave could not be saved.";
 pub const UNSUPPORTED: &str = "Restarting sessions works on macOS and Linux for now.";
 /// The sentence every plan and apply answer carries, so the agent knows what it does.
 pub const WARNING: &str = "Every session listed under restart ends at the end of its current turn and is resumed as itself; the caller's own session restarts last, so end your turn after apply and you will be resumed with the wave's outcome.";
+/// R3 review: the caller's own session is skipped (a wait of its own, a limit, a console that is
+/// not hosted), so nothing will resume it; it must not end its turn waiting for a prompt.
+pub const WARNING_CALLER_STAYS: &str = "Every session listed under restart ends at the end of its current turn and is resumed as itself. Your own session is not in this restart (see skipped), so it is not resumed by the wave: keep working, and read switchboard_sessions_restart_status for the outcome.";
+
+/// Whether the caller's session is among the sessions that restart, and the warning that says so.
+fn caller_restarts(restart: &[Entry]) -> (bool, &'static str) {
+    let restarts = restart.iter().any(|e| e.caller);
+    (
+        restarts,
+        if restarts {
+            WARNING
+        } else {
+            WARNING_CALLER_STAYS
+        },
+    )
+}
 
 /// One session of a wave.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -199,6 +217,7 @@ pub fn advance(wave: &mut Wave, view: &HashMap<String, Now>, now: i64) -> Vec<St
                 }
             }
             "back" if e.caller => {
+                // From the pass that saw it back: its resume prompt itself is not work (R4 review).
                 if seen.last_write.zip(e.back_at).is_some_and(|(w, b)| w > b) {
                     e.state = "continuing".into();
                 }
@@ -207,6 +226,12 @@ pub fn advance(wave: &mut Wave, view: &HashMap<String, Now>, now: i64) -> Vec<St
                 // Ended by itself, or by a person, before its turn came: nothing to restart.
                 e.state = "failed".into();
                 e.reason = Some("gone".into());
+            }
+            "pending" if seen.pid.is_some_and(|p| p != e.pid) => {
+                // Resumed by a person into another process meanwhile: the plan's pid is not its own
+                // any more, and signalling it could reach another program (R3 review).
+                e.state = "skipped".into();
+                e.reason = Some("changed_since_plan".into());
             }
             "pending" if now - wave.at >= STILL_BUSY => {
                 e.state = "skipped".into();
@@ -393,7 +418,7 @@ pub fn caller_prompt(wave: &Wave) -> String {
         wave.id,
         count("back") + count("continuing"),
         count("failed"),
-        count("pending") + count("resuming"),
+        count("pending") + count("ending") + count("resuming"),
     )
 }
 
@@ -435,6 +460,25 @@ fn gather(root: &Path, caller_pid: Option<u32>, now: i64) -> (Vec<crate::duty::S
         })
         .map(|s| s.session.clone())
         .collect();
+    // A session that comes back in a new window cannot on a Linux computer with no terminal
+    // (no display, no emulator): it is left as it is rather than ended (R3 review).
+    #[cfg(target_os = "linux")]
+    let cannot_resume = {
+        let mut cannot_resume: HashSet<String> = cannot_resume;
+        if fabric_sessions_core::terminal::linux_terminal(
+            std::env::var_os("TERMINAL"),
+            fabric_sessions_core::terminal::find_program,
+        )
+        .is_err()
+        {
+            cannot_resume.extend(
+                seen.iter()
+                    .filter(|s| !hosted.get(&s.session).is_some_and(|(_, can)| *can))
+                    .map(|s| s.session.clone()),
+            );
+        }
+        cannot_resume
+    };
     let caller = caller_pid.and_then(|pid| caller_session(&seen, pid));
     (
         seen,
@@ -476,8 +520,9 @@ fn plan_value(restart: &[Entry], skipped: &[Skipped], caller: Option<&str>) -> V
             "session_id": s.session, "folder": s.cwd, "reason": s.reason,
         })).collect::<Vec<_>>(),
         "caller": caller,
+        "caller_restarts": caller_restarts(restart).0,
         "digest": digest(restart, skipped, caller),
-        "warning": WARNING,
+        "warning": caller_restarts(restart).1,
         "permissions": "Resumed sessions use Switchboard's permission choice, as the duty officer's restarts do; a mode a session was started with is not carried.",
     })
 }
@@ -544,7 +589,8 @@ pub fn apply(
     );
     Ok(
         json!({"wave": wave.id, "restart": wave.sessions.len(), "skipped": wave.skipped.len(),
-        "caller": wave.caller, "warning": WARNING}),
+        "caller": wave.caller, "caller_restarts": caller_restarts(&wave.sessions).0,
+        "warning": caller_restarts(&wave.sessions).1}),
     )
 }
 #[cfg(not(unix))]
@@ -601,16 +647,11 @@ pub fn cancel(root: &Path, wave: &str, now: i64) -> Result<Value, String> {
     Ok(json!({"wave": w.id, "cancelled": cancelled}))
 }
 
-/// From the one-minute session watch: advances the running wave.
-#[cfg(unix)]
-pub fn tick(root: &Path, now: i64) {
-    let _held = lock(root);
-    let Some(mut wave) = running(root, now) else {
-        return;
-    };
-    let seen = crate::duty::observe(root);
+/// What each live session looks like now, by session id.
+#[cfg_attr(not(unix), allow(dead_code))]
+fn view_of(seen: &[crate::duty::Seen], now: i64) -> HashMap<String, Now> {
     let mut view: HashMap<String, Now> = HashMap::new();
-    for s in &seen {
+    for s in seen {
         let entry = view.entry(s.session.clone()).or_default();
         entry.pid = Some(s.pid);
         entry.between_turns = s.status == "idle"
@@ -619,6 +660,17 @@ pub fn tick(root: &Path, now: i64) {
             && s.last_write.is_none_or(|w| now - w >= QUIET_SECONDS);
         entry.last_write = s.last_write;
     }
+    view
+}
+
+/// From the one-minute session watch: advances the running wave.
+#[cfg(unix)]
+pub fn tick(root: &Path, now: i64) {
+    let _held = lock(root);
+    let Some(mut wave) = running(root, now) else {
+        return;
+    };
+    let view = view_of(&crate::duty::observe(root), now);
     // An act a quit cut (`ending` left behind): not ended, it waits again; ended, it resumes.
     let cut: Vec<String> = wave
         .sessions
@@ -635,6 +687,10 @@ pub fn tick(root: &Path, now: i64) {
             e.state = "pending".into();
         } else if pid.is_some() || e.in_place {
             e.state = "resuming".into();
+        } else if e.ended_at.is_some_and(|t| now - t < CUT_SETTLE_SECONDS) {
+            // A window the cut act opened may still be starting its session: opening a second one
+            // now would run two copies (R3 review). It is looked at again on a later pass.
+            continue;
         } else {
             let path = terminal_script_path(root, &wave.id, &session);
             let started = path.is_file() && crate::launch::start_terminal(&path).is_ok();
@@ -644,12 +700,45 @@ pub fn tick(root: &Path, now: i64) {
             }
         }
     }
+    let resuming: HashSet<String> = wave
+        .sessions
+        .iter()
+        .filter(|e| e.state == "resuming")
+        .map(|e| e.session.clone())
+        .collect();
     let start = advance(&mut wave, &view, now);
+    // A session the wave ended and that came back is not "ended by a restart" any more: a later
+    // close by the person must not read as one (R3 review). Only the Terminal path recorded it.
+    for e in wave
+        .sessions
+        .iter()
+        .filter(|e| e.state == "back" && !e.in_place && resuming.contains(&e.session))
+    {
+        crate::resumable::record(
+            root,
+            json!({"session": e.session, "config": e.config, "cwd": e.cwd,
+                "reason": "restart_back", "at": now, "by": "wave"}),
+        );
+    }
     let stopped = crate::recovery::live_stop_sessions(root, now);
+    let mut held = _held;
     for session in start {
         let Some(e) = wave.sessions.iter().find(|e| e.session == session).cloned() else {
             continue;
         };
+        // A cancel while an earlier act of this pass ran leaves it as it is (R4 review).
+        if e.state != "pending" {
+            continue;
+        }
+        // Read again just before the act: earlier acts of this pass can take seconds each, and a
+        // session that went busy meanwhile, or now runs in another process, is not ended (R3 review).
+        let fresh = view_of(&crate::duty::observe(root), now);
+        if !fresh
+            .get(&session)
+            .is_some_and(|v| v.pid == Some(e.pid) && v.between_turns)
+        {
+            continue;
+        }
         // Checked again at the act: the plan may be hours old (SL-5, MON-2).
         let skip = if stopped.contains(&session) || holds_wait(root, &session, now) {
             Some("changed_since_plan")
@@ -665,12 +754,34 @@ pub fn tick(root: &Path, now: i64) {
         // The intent first, so the next owner finishes an act a quit cut.
         set(&mut wave, &session, "ending", None, Some(now));
         let _ = write(root, &wave);
+        // The lock is let go for the act (it may take seconds), so a cancel or a status read is
+        // not held behind it; the wave is read again afterwards (R3 review).
+        drop(held);
         let (state, reason) = restart_one(root, &wave, &e);
+        held = lock(root);
+        if let Some(again) = read(root, &wave.id) {
+            wave = again;
+        }
         set(&mut wave, &session, state, reason, Some(now));
         let _ = write(root, &wave);
+        if held.is_none() {
+            // Without the lock a cancel could be overwritten: this act's outcome is kept and the
+            // rest wait for the next pass (R5 review).
+            crate::oplog::event(
+                "restart_wave",
+                &[("phase", crate::oplog::Field::Code("lock_unavailable"))],
+            );
+            return;
+        }
     }
+    let _held = held;
+    // A script is kept while its session may still need it: a host that answered unclearly may
+    // run it within seconds, so it goes once the wave is done or the end is older than the wait
+    // for its return (R3 review).
     for e in &wave.sessions {
-        if !matches!(e.state.as_str(), "pending" | "ending" | "resuming") {
+        let settled = !matches!(e.state.as_str(), "pending" | "ending" | "resuming");
+        if settled && (wave.done_at.is_some() || e.ended_at.is_none_or(|t| now - t >= BACK_SECONDS))
+        {
             remove_scripts(root, &wave.id, &e.session);
         }
     }
@@ -708,7 +819,7 @@ pub fn tick(_: &Path, _: i64) {}
 /// The resume script with the launch it continues exported after its `unset` line: that line
 /// clears every variable the launch must not inherit, `SWITCHBOARD_LAUNCH_ID` among them, so an
 /// export before it would be cleared at once (review of 2026-11-16, blocker 1).
-fn with_launch_id(script: &str, launch: &str) -> String {
+pub(crate) fn with_launch_id(script: &str, launch: &str) -> String {
     let export = format!(
         "export SWITCHBOARD_LAUNCH_ID={}\n",
         fabric_sessions_core::cli::quoted(launch)
@@ -754,8 +865,11 @@ fn restart_one(root: &Path, wave: &Wave, e: &Entry) -> (&'static str, Option<&'s
             return ("failed", Some("not_written"));
         }
         return match crate::session_host::restart(root, launch, &path) {
-            Ok(true) => ("resuming", None),
-            Ok(false) => ("failed", Some("host_refused")),
+            Ok(crate::session_host::Restart::Accepted) => ("resuming", None),
+            // The request went out and no clear answer came: it may restart, so the wait for its
+            // return decides (R3 review).
+            Ok(crate::session_host::Restart::Unknown) => ("resuming", None),
+            Ok(crate::session_host::Restart::Refused) => ("failed", Some("host_refused")),
             Err(_) => ("failed", Some("host_gone")),
         };
     }
@@ -1042,6 +1156,46 @@ mod tests {
         advance(&mut w, &HashMap::new(), 1000);
         assert_eq!(w.sessions[0].state, "failed");
         assert_eq!(w.done_at, Some(1000));
+    }
+
+    #[test]
+    fn a_session_now_in_another_process_is_skipped_never_signalled() {
+        // R3 review: resumed by a person into a new pid while it waited; the plan's pid is stale.
+        let mut w = wave(vec![entry("B", 2, false)]);
+        let view: HashMap<String, Now> = [("B".to_string(), now(7, true))].into();
+        assert!(advance(&mut w, &view, 1000).is_empty());
+        assert_eq!(
+            (
+                w.sessions[0].state.as_str(),
+                w.sessions[0].reason.as_deref()
+            ),
+            ("skipped", Some("changed_since_plan"))
+        );
+    }
+
+    #[test]
+    fn a_caller_left_out_of_the_restart_is_told_to_keep_working() {
+        let (restarts, warning) = caller_restarts(&[entry("B", 2, false)]);
+        assert!(!restarts);
+        assert_eq!(warning, WARNING_CALLER_STAYS);
+        assert_eq!(caller_restarts(&[entry("A", 1, true)]), (true, WARNING));
+    }
+
+    #[test]
+    fn a_resumed_caller_reads_continuing_once_it_writes_after_it_is_back() {
+        let mut e = entry("A", 1, true);
+        e.state = "back".into();
+        e.ended_at = Some(1000);
+        e.back_at = Some(1100);
+        let mut w = wave(vec![e]);
+        // Its resume prompt, written before the pass that saw it back, is not work.
+        let mut seen = now(9, true);
+        seen.last_write = Some(1050);
+        advance(&mut w, &[("A".to_string(), seen.clone())].into(), 1200);
+        assert_eq!(w.sessions[0].state, "back");
+        seen.last_write = Some(1150);
+        advance(&mut w, &[("A".to_string(), seen)].into(), 1200);
+        assert_eq!(w.sessions[0].state, "continuing");
     }
 
     #[test]

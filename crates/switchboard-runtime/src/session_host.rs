@@ -200,6 +200,28 @@ fn pid_alive(pid: i64) -> bool {
     pid > 0 && pid <= i32::MAX as i64 && unsafe { libc::kill(pid as i32, 0) } == 0
 }
 
+/// SB-400: every launch whose host runs now, with the host's pid. A hosted continue has no
+/// home of its own, so the session list, the watch and the rows find it here (R4 review).
+pub fn live_hosts(root: &Path) -> Vec<(String, u32)> {
+    let Ok(entries) = std::fs::read_dir(root.join("sessions")) else {
+        return Vec::new();
+    };
+    entries
+        .flatten()
+        .filter_map(|e| {
+            let name = e.file_name().to_string_lossy().into_owned();
+            let id = name.strip_suffix(".json")?.to_owned();
+            if !crate::launches::valid_id(&id) {
+                return None;
+            }
+            let bytes =
+                switchboard_core::private_fs::read_private(&e.path(), MAX_DESCRIPTOR).ok()?;
+            let pid = serde_json::from_slice::<Value>(&bytes).ok()?["pid"].as_i64()?;
+            pid_alive(pid).then_some((id, u32::try_from(pid).ok()?))
+        })
+        .collect()
+}
+
 /// What the session list says about a launch's host: `{attachable: true, viewers}` while its
 /// host runs; None when it has none (not hosted, or ended).
 pub fn attachable(root: &Path, launch_id: &str) -> Option<Value> {
@@ -937,13 +959,23 @@ pub fn offers_restart(root: &Path, launch_id: &str) -> bool {
     attached.can.iter().any(|c| c == "restart")
 }
 
+/// How a host answered a restart request.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Restart {
+    Accepted,
+    /// It cannot (it predates restarts, or a restart already waits).
+    Refused,
+    /// The request went out and no answer came back (a timeout or a closed socket): it may have
+    /// been taken, so it is neither a refusal nor an acceptance (R3 review).
+    Unknown,
+}
+
 /// SB-397 R1: asks the host of `launch_id` to restart its session in place with `program`.
-/// `Ok(true)` once the host accepted; `Ok(false)` when this host cannot (it predates restarts,
-/// or a restart already waits); `Err` when no host answers.
-pub fn restart(root: &Path, launch_id: &str, program: &Path) -> Result<bool, String> {
+/// `Err` when no host answers before the request is written.
+pub fn restart(root: &Path, launch_id: &str, program: &Path) -> Result<Restart, String> {
     let attached = connect(root, launch_id, None)?;
     if !attached.can.iter().any(|c| c == "restart") {
-        return Ok(false);
+        return Ok(Restart::Refused);
     }
     let mut stream = attached.stream;
     let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
@@ -954,10 +986,14 @@ pub fn restart(root: &Path, launch_id: &str, program: &Path) -> Result<bool, Str
             Ok((RESTART, body)) => {
                 let answer: Value = serde_json::from_slice(&body).unwrap_or(Value::Null);
                 let _ = write_frame(&mut stream, DETACH, b"");
-                return Ok(answer["accepted"] == true);
+                return Ok(if answer["accepted"] == true {
+                    Restart::Accepted
+                } else {
+                    Restart::Refused
+                });
             }
             Ok(_) => continue,
-            Err(_) => return Ok(false),
+            Err(_) => return Ok(Restart::Unknown),
         }
     }
 }
@@ -1110,13 +1146,13 @@ mod tests {
 
         // Only a program of this user under `restarts/` is started.
         let outside = script(&root, "echo never");
-        assert_eq!(restart(&root, &id, &outside), Ok(false));
+        assert_eq!(restart(&root, &id, &outside), Ok(Restart::Refused));
         let dir = root.join(RESTART_DIR);
         std::fs::create_dir_all(&dir).unwrap();
         let next = dir.join("next.command");
         std::fs::write(&next, "#!/bin/sh\necho second; read line; exit 3\n").unwrap();
         std::fs::set_permissions(&next, std::fs::Permissions::from_mode(0o700)).unwrap();
-        assert_eq!(restart(&root, &id, &next), Ok(true));
+        assert_eq!(restart(&root, &id, &next), Ok(Restart::Accepted));
         let (seen, exit) = until(&mut viewer.stream, "second");
         assert_eq!(
             exit, None,
@@ -1151,7 +1187,7 @@ mod tests {
         let next = dir.join("next.command");
         std::fs::write(&next, "#!/bin/sh\necho second\n").unwrap();
         std::fs::set_permissions(&next, std::fs::Permissions::from_mode(0o700)).unwrap();
-        assert_eq!(restart(&root, &id, &next), Ok(true));
+        assert_eq!(restart(&root, &id, &next), Ok(Restart::Accepted));
         write_frame(&mut viewer.stream, END, b"").unwrap();
         let (seen, exit) = until(&mut viewer.stream, "");
         assert!(exit.is_some(), "the end reached the viewer");
@@ -1167,7 +1203,7 @@ mod tests {
         let plain = dir.join("plain.command");
         std::fs::write(&plain, "#!/bin/sh\necho x\n").unwrap();
         std::fs::set_permissions(&plain, std::fs::Permissions::from_mode(0o600)).unwrap();
-        assert_eq!(restart(&root, &id, &plain), Ok(false));
+        assert_eq!(restart(&root, &id, &plain), Ok(Restart::Refused));
         end(&root, &id).unwrap();
         host.join().unwrap().unwrap();
     }

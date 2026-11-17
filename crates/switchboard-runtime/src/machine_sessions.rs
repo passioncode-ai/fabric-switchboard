@@ -18,6 +18,10 @@ fn homes(root: &Path) -> crate::session_accounts::Homes<'_> {
 pub fn live_sessions(root: &Path) -> HashMap<String, (u32, String)> {
     core::live_sessions(&homes(root))
 }
+/// FD-291: the newest write of a session's transcript in any config folder it may live in.
+pub fn transcript_at(root: &Path, cwd: &str, session: &str) -> Option<i64> {
+    core::transcript_at(&homes(root), cwd, session)
+}
 /// SB-379: every live Claude Code process with the session id its `sessions/<pid>.json` names.
 pub fn session_pairs(root: &Path) -> Vec<(String, u32, String)> {
     core::session_pairs(&homes(root))
