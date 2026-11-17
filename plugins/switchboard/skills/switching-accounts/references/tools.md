@@ -829,18 +829,19 @@ or keeps it away; `default` sets the machine's default agent (an id, or null for
 `permissions` (`bypass`, the default, or `ask`) chooses whether the Claude Code and Codex
 sessions Switchboard starts bypass their permission prompts (SB-298).
 
-### `switchboard_capacity`: `cap?`, `board?`, `clear?`
+### `switchboard_capacity`: `cap?`, `board?`, `board_default?`, `clear?`
 
 This computer's cap on live coding sessions (SB-378) and the board's share of it (SB-417). Without
 arguments it reads: `{cap, board_share, board_share_set, used, free, at_capacity, board_used,
-board_free, board_admitted, total, quiet, on_limit_stop, on_waits, waiting, refused_waiting,
+board_free, board_admitted, total, quiet, on_limit_stop, on_waits, pending, waiting, refused_waiting,
 refused_last_hour, counted, quiet_after_minutes, observed_at, degraded}`. `used` counts the live
 Claude Code and Codex sessions of this user, Switchboard's or not, that do work: a Claude Code
-session by its own transcript and status (quiet for 30 minutes outside a turn: not counted; in a
-turn: counted however long it is silent), never one on a limit stop or on a wait of its own (a
-wake-up, a monitor, a cron job, a hold); a process with no session file counts by its folder.
-`cap` (1 to 500) sets the cap with the default share, `board` (0 to the cap) sets the board's share
-(with `cap`, or on the cap already set), `clear: true` removes both; change them only when the
+session by its own transcript and status (in a turn: counted however long it is silent and
+whatever it waits on; outside a turn, not counted when quiet for 30 minutes, on a limit stop or on
+a wait of its own: a wake-up, a monitor, a cron job, a hold); a process with no session file counts by its folder.
+`cap` (1 to 500) sets the cap and keeps a share set before, clamped to it (`board_share_clamped`),
+`board` (0 to the cap) sets the board's share (with `cap`, or on the cap already set),
+`board_default: true` goes back to the default share, `clear: true` removes both; change them only when the
 operator asks. The default share is a quarter of the cap, at least 2. A board run (`switchboard
 dispatch`, or `launch --hosted --surface fabric`) starts while `used` is under `cap` or
 `board_used` is under `board_share`; when neither holds, `dispatch` answers `state: refused`,
