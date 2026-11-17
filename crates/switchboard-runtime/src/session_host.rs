@@ -1093,7 +1093,9 @@ mod tests {
     /// Reads until `needle` is seen, the session's exit arrives, the stream closes or `WAIT`
     /// passes; answers what was seen and the exit code, if one came.
     fn until(stream: &mut UnixStream, needle: &str) -> (String, Option<i32>) {
-        stream.set_read_timeout(Some(WAIT)).unwrap();
+        // macOS refuses the option (EINVAL) on a socket the host already shut down; reads then
+        // end at once anyway.
+        let _ = stream.set_read_timeout(Some(WAIT));
         let mut seen = String::new();
         loop {
             match read_frame(stream) {
