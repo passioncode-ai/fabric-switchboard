@@ -140,6 +140,9 @@ pub async fn check(current: &str) -> Result<Value, String> {
 mod tests {
     use super::*;
 
+    // A .deb install exists only on Linux; on Windows `name:arch.list` is an NTFS stream, not a
+    // file, so the multi-arch list cannot even be written there (nightly 44156588020).
+    #[cfg(unix)]
     #[test]
     fn a_program_in_the_packages_file_list_is_a_deb_install() {
         let info = tempfile::tempdir().unwrap();
