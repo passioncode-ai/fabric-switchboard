@@ -953,10 +953,19 @@ export function createDemoAdapter(): Adapter {
       return { agent, folder, openrouter: true, anthropic, none_usable: false, keys: [
         { kind: 'openrouter' as const, scope: 'machine' as const, pool: null, name: 'This computer', model: 'moonshotai/kimi-k2', usable: true, default: true, why_not: null },
         { kind: 'openrouter' as const, scope: 'group' as const, pool: 'passioncode', name: 'PassionCode', model: null, usable: false, default: false, why_not: 'Used in the folders of PassionCode.' },
-        ...(anthropic ? [{ kind: 'anthropic' as const, name: 'appvillis', model: 'claude-sonnet-5-5', usable: true, default: false, why_not: null }] : []),
+        ...(anthropic ? [{ kind: 'anthropic' as const, name: 'team-a', model: 'claude-sonnet-5-5', usable: true, default: false, why_not: null }] : []),
       ] };
     },
-    async anthropicKeys() { await pause(); return { keys: [{ name: 'appvillis', saved_at: now() - 3600, model: 'claude-sonnet-5-5' }, { name: 'personal', saved_at: now() - 7200, model: null }] }; },
+    async observatoryKeys() {
+      await pause();
+      return { state: 'ok' as const, why: null, degraded: [], keys: [
+        { slot: 'alpha-web/prod/ANTHROPIC_API_KEY', project: 'alpha-web', env: 'prod', name: 'ANTHROPIC_API_KEY', kind: 'anthropic' as const, expires: null, rotated: null, can_add: true, why_not: null, added: [] },
+        { slot: 'beta/prod/OPENROUTER_API_KEY', project: 'beta', env: 'prod', name: 'OPENROUTER_API_KEY', kind: 'openrouter' as const, expires: '2027-11-13', rotated: null, can_add: true, why_not: null, added: [{ kind: 'openrouter' as const, pool: null, metered: true }] },
+        { slot: 'beta/stage/OPENAI_API_KEY', project: 'beta', env: 'stage', name: 'OPENAI_API_KEY', kind: 'openai' as const, expires: null, rotated: null, can_add: false, why_not: 'An OpenAI key cannot be added yet: no spending ceiling counts one in Switchboard. Run Codex on a ChatGPT sign-in, or an agent on an OpenRouter key.', added: [] },
+      ] };
+    },
+    async observatoryKeyAdd() { await pause(); throw new Error('The browser demo cannot read Project Observatory.'); },
+    async anthropicKeys() { await pause(); return { keys: [{ name: 'team-a', saved_at: now() - 3600, model: 'claude-sonnet-5-5' }, { name: 'personal', saved_at: now() - 7200, model: null }] }; },
     async launchOnAnthropic() { await pause(); throw new Error('The browser demo cannot open a terminal.'); },
     async loginItem() { return { ...loginItem }; },
     async shellHookNotice() { return shellNotice ? { organization: 'Northwind', group: 'Northwind web' } : null; },

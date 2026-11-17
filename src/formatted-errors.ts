@@ -7,6 +7,10 @@
  */
 export const FORMATTED_ERRORS: readonly string[] = [
   '{name} is not installed. Install it first, then launch it again.',
+  // SB-404 review round 1, P2-7: Observatory's own refusal, already scrubbed by it.
+  'Project Observatory refused the key: {name}',
+  // SB-404 review round 3: a saved Claude API key whose stored value is gone, by its label.
+  'The saved Claude API key {name} has no stored value, so Switchboard cannot tell whether this is the same key. Remove that account or add its key again, then add this one.',
   '{name} cannot take over a workflow: an agent in a chain loads MCP servers and takes a prompt without a person (switchboard agents list).',
 ];
 

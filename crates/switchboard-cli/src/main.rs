@@ -487,6 +487,13 @@ enum Command {
         #[command(subcommand)]
         command: AgentsCommand,
     },
+    /// Provider keys for agents found in Project Observatory, by name: list them, and add one so
+    /// an agent starts on it at once. The value goes from Observatory's vault to Switchboard's
+    /// through a pipe, never through an argument, a file or the screen.
+    Keys {
+        #[command(subcommand)]
+        command: KeysCommand,
+    },
     /// Accounts lent between the groups you choose: every 15 minutes, a chosen group out of room
     /// borrows an account with room from another chosen group, which keeps it as its own; the
     /// account goes back when the need passes. Off until you choose groups.
@@ -1663,7 +1670,7 @@ enum AgentsCommand {
         #[command(subcommand)]
         command: OpenrouterCommand,
     },
-    /// Anthropic API keys agents run on directly, each under a name you choose (`appvillis`,
+    /// Anthropic API keys agents run on directly, each under a name you choose (`team-a`,
     /// `personal`); `agents launch hermes --anthropic <name>` picks one.
     Anthropic {
         #[command(subcommand)]
@@ -1701,13 +1708,54 @@ enum AgentsCommand {
         #[arg(long, conflicts_with = "anthropic")]
         openrouter: bool,
         /// Run on the Anthropic key saved under this name (`switchboard agents anthropic set
-        /// <name>`), such as `appvillis` or `personal`.
+        /// <name>`), such as `team-a` or `personal`.
         #[arg(long, value_name = "NAME")]
         anthropic: Option<String>,
         /// The model for this launch: an OpenRouter id such as `moonshotai/kimi-k2`, or with
         /// `--anthropic` an Anthropic id such as `claude-sonnet-5-5`; default: the key's model.
-        #[arg(long, requires = "key_source")]
+        /// Through the proxy, an Anthropic id for Claude Code, and for Hermes on the
+        /// pay-per-token group (where it is needed).
+        #[arg(long)]
         model: Option<String>,
+    },
+}
+#[derive(Subcommand)]
+enum KeysCommand {
+    /// The Anthropic, OpenAI and OpenRouter keys Project Observatory holds, by project, env and
+    /// name, each with where it is saved here; `add` saves one.
+    Observatory {
+        #[command(subcommand)]
+        command: Option<ObservatoryCommand>,
+    },
+}
+#[derive(Subcommand)]
+enum ObservatoryCommand {
+    /// Every provider key Observatory holds that an agent can run on, by name; never a value.
+    List,
+    /// Save a key Observatory holds in Switchboard by its name. An Anthropic key becomes an
+    /// account in the pay-per-token group (counted against its daily ceiling); with `--to agent`
+    /// or `--to both` also a named key Hermes runs on directly. An OpenRouter key becomes this
+    /// computer's OpenRouter key, or a group's with `--pool`.
+    Add {
+        /// The key as Observatory names it: `project/env/NAME`, as `switchboard keys
+        /// observatory` lists it.
+        slot: String,
+        /// For an Anthropic key: `account` (the default), `agent` or `both`.
+        #[arg(long)]
+        to: Option<String>,
+        /// The account's name, or the named key's name (lowercase letters, digits, hyphens);
+        /// default: from the project's name.
+        #[arg(long = "as", value_name = "NAME")]
+        name: Option<String>,
+        /// For an OpenRouter key: the group whose folders run on it; default this computer's key.
+        #[arg(long)]
+        pool: Option<String>,
+        /// The default model of a named key: an Anthropic id or an OpenRouter id.
+        #[arg(long)]
+        model: Option<String>,
+        /// Replace a named Anthropic key or an OpenRouter key already saved there.
+        #[arg(long)]
+        replace: bool,
     },
 }
 #[derive(Subcommand)]
@@ -1827,7 +1875,7 @@ enum AnthropicCommand {
     /// Save the key piped on stdin (`sk-ant-api…`) under a name; it goes to the OS vault, never to
     /// a file. Saving again under the same name replaces it.
     Set {
-        /// The key's name, such as `appvillis` or `personal`.
+        /// The key's name, such as `team-a` or `personal`.
         name: String,
         /// The model agents start on, an Anthropic id such as `claude-sonnet-5-5`.
         #[arg(long)]
@@ -2328,6 +2376,40 @@ async fn run(cli: &Cli) -> Result<Value, String> {
             std::process::exit(switchboard_runtime::serve_update::RESTART_STATUS);
         }
         return Ok(json!({"state":"stopped", "drained": stopped.drained}));
+    }
+    // SB-404 K2: the saves run as separate switchboard processes that read the value on stdin,
+    // so this process holds no store while they run.
+    if let Command::Keys {
+        command:
+            KeysCommand::Observatory {
+                command:
+                    Some(ObservatoryCommand::Add {
+                        slot,
+                        to,
+                        name,
+                        pool,
+                        model,
+                        replace,
+                    }),
+            },
+    } = &cli.command
+    {
+        let cli_path = std::env::current_exe()
+            .and_then(|p| p.canonicalize())
+            .map_err(|_| "The switchboard program could not be found.".to_string())?;
+        return switchboard_runtime::observatory_keys::add(
+            &root,
+            &cli_path,
+            switchboard_runtime::observatory_keys::AddRequest {
+                slot: slot.clone(),
+                to: to.clone(),
+                name: name.clone(),
+                pool: pool.clone(),
+                model: model.clone(),
+                replace: *replace,
+            },
+        )
+        .await;
     }
     // `continue --ceiling`: the task's ceiling first, so a refusal (out of range, higher than
     // the one set) stops the continue before anything is offered.
@@ -3369,6 +3451,12 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                 model: model.clone(),
                 key: anthropic.clone(),
             },
+        },
+        Command::Keys {
+            command: KeysCommand::Observatory { command },
+        } => match command {
+            None | Some(ObservatoryCommand::List) => Operation::ObservatoryKeys,
+            Some(ObservatoryCommand::Add { .. }) => unreachable!(),
         },
         Command::Kimi { command } => match command {
             KimiCommand::List => Operation::KimiAccounts,
@@ -5170,10 +5258,10 @@ fn print_result(value: &Value, cli: &Cli) {
                 println!("No key is saved that this agent can start on.");
             }
             for key in keys {
-                let kind = if key["kind"] == "anthropic" {
-                    "Anthropic"
-                } else {
-                    "OpenRouter"
+                let kind = match key["kind"].as_str() {
+                    Some("anthropic") => "Anthropic (no ceiling)",
+                    Some("group") => "Pay-per-token group",
+                    _ => "OpenRouter",
                 };
                 let state = if key["default"] == true {
                     "used by a launch here".to_string()
@@ -5190,6 +5278,32 @@ fn print_result(value: &Value, cli: &Cli) {
                 );
             }
         }
+        Command::Keys {
+            command: KeysCommand::Observatory { command },
+        } => match command {
+            None | Some(ObservatoryCommand::List) => print_observatory_keys(value),
+            Some(ObservatoryCommand::Add { .. }) => {
+                for saved in value["saved"].as_array().into_iter().flatten() {
+                    let answer = &saved["answer"];
+                    match saved["target"].as_str() {
+                        Some("account") => println!(
+                            "Saved as the account {} in the pay-per-token group.",
+                            text(&answer["label"])
+                        ),
+                        Some("anthropic") => {
+                            println!("Saved as the Anthropic key {}.", text(&answer["name"]))
+                        }
+                        _ => println!("Saved as an OpenRouter key."),
+                    }
+                }
+                if let Some(failed) = value["failed"].as_str() {
+                    println!("Not saved further: {failed}");
+                }
+                for line in value["next"].as_array().into_iter().flatten() {
+                    println!("{}", text(line));
+                }
+            }
+        },
         Command::Agents {
             command:
                 AgentsCommand::Anthropic {
@@ -5526,6 +5640,53 @@ fn print_ceilings(value: &Value) {
             utc(&last["at"]),
             last["outcome"].as_str().unwrap_or_default()
         );
+    }
+}
+/// SB-404 K1: the keys Observatory holds, one line each, never a value.
+fn print_observatory_keys(value: &Value) {
+    let text = |v: &Value| v.as_str().unwrap_or("").to_owned();
+    if value["state"] != "ok" {
+        println!("{}", text(&value["why"]));
+        return;
+    }
+    let keys = value["keys"].as_array().cloned().unwrap_or_default();
+    if keys.is_empty() {
+        println!("Observatory holds no Anthropic, OpenAI or OpenRouter key an agent can run on.");
+    }
+    for key in keys {
+        let kind = match key["kind"].as_str() {
+            Some("anthropic") => "Anthropic",
+            Some("openai") => "OpenAI",
+            _ => "OpenRouter",
+        };
+        let added: Vec<String> = key["added"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .map(|t| match t["kind"].as_str() {
+                Some("account") => format!("account {}", text(&t["label"])),
+                Some("anthropic") => format!("named key {}", text(&t["name"])),
+                _ => match t["pool"].as_str() {
+                    Some(pool) => format!("OpenRouter key of group {pool}"),
+                    None => "this computer's OpenRouter key".into(),
+                },
+            })
+            .collect();
+        let state = if !added.is_empty() {
+            format!("saved as {}", added.join(", "))
+        } else if key["can_add"] == true {
+            format!(
+                "add with: switchboard keys observatory add {}",
+                text(&key["slot"])
+            )
+        } else {
+            text(&key["why_not"])
+        };
+        let expires = key["expires"]
+            .as_str()
+            .map(|d| format!(" · expires {d}"))
+            .unwrap_or_default();
+        println!("{} · {kind}{expires} · {state}", text(&key["slot"]));
     }
 }
 fn print_value(value: &Value, json_output: bool) {
@@ -6076,6 +6237,8 @@ mod mcp_parity {
             Tool("switchboard_openrouter_status"),
         ),
         ("agents launch-keys", Tool("switchboard_launch_keys")),
+        ("keys observatory list", Tool("switchboard_observatory_keys")),
+        ("keys observatory add", Tool("switchboard_observatory_key_add")),
         ("agents anthropic list", Tool("switchboard_anthropic_keys")),
         ("agents anthropic model", Tool("switchboard_anthropic_keys")),
         ("agents anthropic set", Not(PERSON)),

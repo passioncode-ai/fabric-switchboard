@@ -91,6 +91,8 @@ the launch injected it with the session and data folder set explicitly.
 | `switchboard_ceiling_set` | yes | set a first or a lower spending ceiling; raise or clear one with the operator's own words (`decision`) |
 | `switchboard_ceiling_answer` | yes | keep a reached ceiling, or double it with the operator's own words (`decision`) |
 | `switchboard_openrouter_status` | no | the agents' OpenRouter key: saved?, its default model, what it may still spend; never the key |
+| `switchboard_observatory_keys` | no | the Anthropic, OpenAI and OpenRouter keys Project Observatory holds, by name, and where each is saved here; never a value |
+| `switchboard_observatory_key_add` | yes | save a key Observatory holds by its name (an Anthropic key into the pay-per-token group, an OpenRouter key as an agents' key); the value moves through a pipe, never through the call |
 | `switchboard_hermes_status` | no | the model, provider and endpoint the ordinary Hermes runs on; never a key |
 | `switchboard_hermes_set` | yes | change Hermes's provider and/or default model, only when the operator asks |
 | `switchboard_agents` | no | coding agents installed here, which are enabled for taking over work, the machine's default agent and the recommended OpenRouter models |
@@ -112,7 +114,7 @@ first write call, or when a result field is unclear.
 
 **Degraded paths: say it once, then fall back; never loop:**
 
-- **Only the 24 read tools are listed**: the server runs `--read-only` (an isolated
+- **Only the 38 read tools are listed**: the server runs `--read-only` (an isolated
   session gets that set, since a route change cannot reach it). Report reads; for a
   change, tell the operator which tool is missing and why. Do not work around it.
 - **No `switchboard_*` tool, or the server failed to connect**: use the CLI

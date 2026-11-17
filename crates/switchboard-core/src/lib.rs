@@ -2500,6 +2500,17 @@ impl Store {
         // the session's context (`context_of`) still keeps personal and organization data apart.
         Ok((a.clone(), self.checked_credential(a)?))
     }
+    /// SB-404 review round 3: whether an account's stored value is there. `Ok(false)` only when the
+    /// vault says the item is absent (`keychain::ABSENT`, the same text every vault answers for a
+    /// missing item); a locked keychain, a refused prompt or any other failure is an `Err`, a
+    /// transient state never read as "missing". Never returns the value.
+    pub fn stored_credential_present(&self, id: &str) -> Result<bool, String> {
+        match self.vault.get(id) {
+            Ok(_) => Ok(true),
+            Err(error) if error == keychain::ABSENT => Ok(false),
+            Err(_) => Err(VAULT_UNAVAILABLE.into()),
+        }
+    }
     pub fn credential(&self, id: &str) -> Result<Credential, String> {
         let state = self.lock()?;
         self.checked_credential(
