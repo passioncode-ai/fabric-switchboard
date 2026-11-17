@@ -977,15 +977,31 @@ pub fn attach(root: &Path, launch_id: &str, rows: u16, cols: u16) -> Result<Atta
     connect(root, launch_id, Some((rows, cols)))
 }
 
-/// H-1d: ends the hosted session of `launch_id` and waits (up to 15 s) for its exit:
+/// H-1d: ends the hosted session of `launch_id` and waits for its exit:
 /// `{launch_id, exit_code, reason}`. Connects as a viewer with no size, so the session's size
-/// stays the one its viewers set.
+/// stays the one its viewers set. One 15 s deadline covers the host's `HELLO` answer and the exit
+/// both (SB-413): `HOST_BUSY` when the host did not answer (nothing was sent), `END_UNCONFIRMED`
+/// when the end was sent and no exit came in what was left.
 pub fn end(root: &Path, launch_id: &str) -> Result<Value, String> {
-    let attached = connect(root, launch_id, None)?;
+    end_within(root, launch_id, END_WAIT)
+}
+
+/// How long `end` waits in all, for the host's answer and the session's exit.
+const END_WAIT: Duration = Duration::from_secs(15);
+
+fn end_within(root: &Path, launch_id: &str, wait: Duration) -> Result<Value, String> {
+    let deadline = std::time::Instant::now() + wait;
+    let attached = connect_within(root, launch_id, None, wait)?;
     let mut stream = attached.stream;
-    let _ = stream.set_read_timeout(Some(Duration::from_secs(15)));
     write_frame(&mut stream, END, b"").map_err(|_| NOT_FOUND.to_string())?;
     loop {
+        let left = deadline.saturating_duration_since(std::time::Instant::now());
+        if left.is_zero() {
+            return Err(END_UNCONFIRMED.into());
+        }
+        // macOS refuses the option on a socket the host already shut down; its EXIT, if sent,
+        // is still read.
+        let _ = stream.set_read_timeout(Some(left));
         match read_frame(&mut stream) {
             Ok((EXIT, body)) => {
                 let exit: Value = serde_json::from_slice(&body).unwrap_or(Value::Null);
@@ -1028,12 +1044,11 @@ fn restart_program_allowed(root: &Path, program: &Path) -> bool {
 
 /// SB-397 R1: whether the host of `launch_id` restarts its session in place (its `HELLO` answer
 /// lists `restart`). Attaches with no size, so the session's size stays its viewers', and detaches.
-pub fn offers_restart(root: &Path, launch_id: &str) -> bool {
-    let Ok(mut attached) = connect(root, launch_id, None) else {
-        return false;
-    };
+/// `Err` is why no answer came: `HOST_BUSY` for a host that did not answer in time (SB-413).
+pub fn offers_restart(root: &Path, launch_id: &str) -> Result<bool, String> {
+    let mut attached = connect(root, launch_id, None)?;
     let _ = write_frame(&mut attached.stream, DETACH, b"");
-    attached.can.iter().any(|c| c == "restart")
+    Ok(attached.can.iter().any(|c| c == "restart"))
 }
 
 /// How a host answered a restart request.
@@ -1429,6 +1444,55 @@ mod tests {
             looks <= 12,
             "the reader looked {looks} times in three seconds"
         );
+    }
+
+    /// A host that answers `HELLO` after `delay` and then never sends `EXIT`.
+    fn slow_host(root: &Path, id: &str, delay: Duration) -> PathBuf {
+        let socket = socket_path(root, id).unwrap();
+        let _ = std::fs::remove_file(&socket);
+        let listener = UnixListener::bind(&socket).unwrap();
+        let id = id.to_owned();
+        std::thread::spawn(move || {
+            let Some(Ok(mut stream)) = listener.incoming().next() else {
+                return;
+            };
+            let _ = read_frame(&mut stream);
+            std::thread::sleep(delay);
+            let ack = json!({"protocol": PROTOCOL, "launch_id": id, "viewers": 1});
+            let _ = write_frame(&mut stream, HELLO, ack.to_string().as_bytes());
+            // Takes the END and keeps the connection, answering nothing.
+            while read_frame(&mut stream).is_ok() {}
+        });
+        socket
+    }
+
+    #[test]
+    fn ending_waits_once_for_the_answer_and_the_exit_together() {
+        // SB-413 review 2: `sessions end` waited up to 15 s for the HELLO answer and 15 s more
+        // for the exit; one deadline covers both, as CONTRACTS and Fabric Dashboards expect.
+        let data = tempfile::tempdir().unwrap();
+        let root = data.path().canonicalize().unwrap();
+        let id = crate::launches::new_id();
+        let socket = slow_host(&root, &id, Duration::from_millis(600));
+        let started = std::time::Instant::now();
+        assert_eq!(
+            end_within(&root, &id, Duration::from_secs(1)).unwrap_err(),
+            END_UNCONFIRMED
+        );
+        let took = started.elapsed();
+        assert!(
+            took >= Duration::from_millis(900) && took < Duration::from_secs(5),
+            "the end took {took:?}, not one second in all"
+        );
+        let _ = std::fs::remove_file(&socket);
+        // A host that does not answer within the whole wait is busy, and nothing was sent.
+        let id = crate::launches::new_id();
+        let socket = slow_host(&root, &id, Duration::from_secs(5));
+        assert_eq!(
+            end_within(&root, &id, Duration::from_millis(300)).unwrap_err(),
+            HOST_BUSY
+        );
+        let _ = std::fs::remove_file(&socket);
     }
 
     #[test]

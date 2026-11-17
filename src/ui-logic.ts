@@ -2217,6 +2217,7 @@ export function restartSkipText(reason: string): string {
     case 'duplicate': return t('runs in two processes');
     case 'console_not_hosted': return t('a Fabric Dashboards console');
     case 'host_too_old': return t('its window predates restarts in place');
+    case 'host_busy': return t('its window did not answer; plan again');
     case 'not_interactive': return t('not an interactive session');
     default: return t('its folder or history is gone');
   }

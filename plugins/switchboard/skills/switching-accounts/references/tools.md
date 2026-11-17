@@ -192,7 +192,7 @@ end of a run whose process is gone is recorded, and a run whose process still ru
 SB-396: continues a session that ended (the duty officer closed it, its hosted window was idle past the wake-up floor, a launch of the last week) as that same session: `claude --resume <id>` in its own Claude config folder and its folder, in a Terminal window of its own, so its history and context are the ones it had (`{continued, folder}`). Refused while a process still holds the session, when its folder or history is gone, and for a session Switchboard has no record of: never a fresh session in its place. `switchboard_sessions` with `rows` marks each such row with the act `continue`; the CLI is `switchboard sessions continue <session_id>`.
 ### `switchboard_sessions_restart_plan`: no arguments
 
-SB-397 R1: the plan of a restart wave, which restarts every running Claude Code session so it loads new skills, plugins, hooks or a new Claude Code. Restarts nothing. Answers `restart` (each `session_id`, `folder`, `how`: `in_place` in its session host, viewers kept, or `terminal` in a new Terminal window; `caller` true for your own session), `skipped` with the reason (`limit`: stopped on a limit, recovery resumes it; `has_waits`: a wake-up, monitor or cron job of its own; `duplicate`; `console_not_hosted`: a Fabric Dashboards plain console; `host_too_old`; `not_interactive`; `cannot_resume`), `caller`, `digest`, `warning` and `permissions` (resumed sessions use Switchboard's permission choice). CLI: `switchboard sessions restart plan`.
+SB-397 R1: the plan of a restart wave, which restarts every running Claude Code session so it loads new skills, plugins, hooks or a new Claude Code. Restarts nothing. Answers `restart` (each `session_id`, `folder`, `how`: `in_place` in its session host, viewers kept, or `terminal` in a new Terminal window; `caller` true for your own session), `skipped` with the reason (`limit`: stopped on a limit, recovery resumes it; `has_waits`: a wake-up, monitor or cron job of its own; `duplicate`; `console_not_hosted`: a Fabric Dashboards plain console; `host_too_old`; `host_busy`: its host did not answer within 15 s, plan again; `not_interactive`; `cannot_resume`), `caller`, `digest`, `warning` and `permissions` (resumed sessions use Switchboard's permission choice). CLI: `switchboard sessions restart plan`.
 
 ### `switchboard_sessions_restart_apply`: `digest` (string), `reason` (string)
 
@@ -228,8 +228,11 @@ seven days as `{day, class, code, count}`. `running` is this run. Codes only. Re
 
 Ends a session a session host holds (`switchboard_sessions` marks it `attachable`), as
 `switchboard sessions end` does (SB-342): its process gets a hangup, a `SIGTERM` 5 s later if it
-still runs, and every viewer is told it ended. Answers `{launch_id, exit_code, reason: "ended"}`.
-Closing a viewer only detaches; this ends the session. A write: not on a read-only server.
+still runs, and every viewer is told it ended. Answers `{launch_id, exit_code, reason: "ended"}`
+within 15 s in all (SB-413). Refusals: “No session with this launch id is open here.” (no host);
+“The session's host did not answer within 15 seconds; it may be busy. Try again.” (nothing was
+sent; retry); “The session was asked to end, and its end was not seen within 15 seconds.” (the end
+was sent; read `switchboard_sessions`). Closing a viewer only detaches; this ends the session. A write: not on a read-only server.
 macOS and Linux.
 
 ### `switchboard_sessions`: `all?` (boolean), `history?` (boolean), `limit?` (integer), `before?` (integer), `launch_id?` (string), `machine?` (boolean), `rows?` (boolean)

@@ -2066,6 +2066,7 @@ export const RU: Record<string, string> = {
   "runs in two processes": "работает в двух процессах",
   "a Fabric Dashboards console": "консоль Fabric Dashboards",
   "its window predates restarts in place": "её окно старше перезапуска на месте",
+  "its window did not answer; plan again": "её окно не ответило; составьте план снова",
   "not an interactive session": "не интерактивная сессия",
   "its folder or history is gone": "её папки или истории больше нет",
   "No running session can be restarted now.": "Сейчас нет сессий, которые можно перезапустить.",

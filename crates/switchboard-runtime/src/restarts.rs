@@ -104,11 +104,23 @@ pub struct Wave {
 
 /// What the planner knows of one live session beyond `duty::Seen`.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
+/// What a session's host answered when asked whether it restarts in place.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HostOffer {
+    /// It restarts in place.
+    Restarts,
+    /// It predates restarts in place (or gave no answer at all).
+    TooOld,
+    /// It took the connection and did not answer within 15 s (SB-413): it is there but busy, so
+    /// the plan says so instead of calling it too old.
+    Busy,
+}
+
 pub struct Facts {
     pub stopped: HashSet<String>,
     pub waiting: HashSet<String>,
-    /// Session id to (launch id, whether its host restarts in place).
-    pub hosted: HashMap<String, (String, bool)>,
+    /// Session id to (launch id, what its host answered about restarting in place).
+    pub hosted: HashMap<String, (String, HostOffer)>,
     /// Sessions that cannot be resumed (folder, transcript, `claude` or home missing).
     pub cannot_resume: HashSet<String>,
     pub caller: Option<String>,
@@ -136,8 +148,10 @@ pub fn plan_of(seen: &[crate::duty::Seen], facts: &Facts) -> (Vec<Entry>, Vec<Sk
             Some("limit")
         } else if facts.waiting.contains(&s.session) {
             Some("has_waits")
-        } else if hosted.is_some_and(|(_, can)| !can) {
+        } else if hosted.is_some_and(|(_, offer)| *offer == HostOffer::TooOld) {
             Some("host_too_old")
+        } else if hosted.is_some_and(|(_, offer)| *offer == HostOffer::Busy) {
+            Some("host_busy")
         } else if hosted.is_none() && s.dashboards {
             Some("console_not_hosted")
         } else if facts.cannot_resume.contains(&s.session) {
@@ -422,6 +436,16 @@ pub fn caller_prompt(wave: &Wave) -> String {
     )
 }
 
+/// What `session_host::offers_restart` answered, as the plan reads it.
+#[cfg(unix)]
+fn host_offer(answer: Result<bool, String>) -> HostOffer {
+    match answer {
+        Ok(true) => HostOffer::Restarts,
+        Err(e) if e == crate::session_host::HOST_BUSY => HostOffer::Busy,
+        Ok(false) | Err(_) => HostOffer::TooOld,
+    }
+}
+
 /// The live sessions as `duty::observe` sees them and the facts the plan needs.
 #[cfg(unix)]
 fn gather(root: &Path, caller_pid: Option<u32>, now: i64) -> (Vec<crate::duty::Seen>, Facts) {
@@ -433,7 +457,7 @@ fn gather(root: &Path, caller_pid: Option<u32>, now: i64) -> (Vec<crate::duty::S
         .map(|s| s.session.clone())
         .collect();
     // A session's launch: the launch record naming it; hosted when its host is live.
-    let mut hosted = HashMap::new();
+    let mut live = Vec::new();
     for r in crate::launches::recent_records(root, now - KEEP_SECONDS) {
         let (Some(session), Some(launch)) =
             (r["provider_session_id"].as_str(), r["launch_id"].as_str())
@@ -443,10 +467,23 @@ fn gather(root: &Path, caller_pid: Option<u32>, now: i64) -> (Vec<crate::duty::S
         if seen.iter().any(|s| s.session == session)
             && crate::session_host::attachable(root, launch).is_some()
         {
-            let can = crate::session_host::offers_restart(root, launch);
-            hosted.insert(session.to_owned(), (launch.to_owned(), can));
+            live.push((session.to_owned(), launch.to_owned()));
         }
     }
+    // Every host is asked at once: a busy one takes up to 15 s to be called busy, and never
+    // one after another (SB-413).
+    let hosted: HashMap<String, (String, HostOffer)> = std::thread::scope(|scope| {
+        let asks: Vec<_> = live
+            .into_iter()
+            .map(|(session, launch)| {
+                scope.spawn(move || {
+                    let offer = host_offer(crate::session_host::offers_restart(root, &launch));
+                    (session, (launch, offer))
+                })
+            })
+            .collect();
+        asks.into_iter().filter_map(|ask| ask.join().ok()).collect()
+    });
     let program = crate::launch::find_program("claude");
     let person = crate::person::claude_dir();
     let cannot_resume = seen
@@ -473,7 +510,11 @@ fn gather(root: &Path, caller_pid: Option<u32>, now: i64) -> (Vec<crate::duty::S
         {
             cannot_resume.extend(
                 seen.iter()
-                    .filter(|s| !hosted.get(&s.session).is_some_and(|(_, can)| *can))
+                    .filter(|s| {
+                        !hosted
+                            .get(&s.session)
+                            .is_some_and(|(_, offer)| *offer == HostOffer::Restarts)
+                    })
                     .map(|s| s.session.clone()),
             );
         }
@@ -914,6 +955,16 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    fn a_busy_host_is_neither_too_old_nor_gone() {
+        use crate::session_host::{HOST_BUSY, NOT_FOUND};
+        assert_eq!(host_offer(Ok(true)), HostOffer::Restarts);
+        assert_eq!(host_offer(Ok(false)), HostOffer::TooOld);
+        assert_eq!(host_offer(Err(HOST_BUSY.into())), HostOffer::Busy);
+        assert_eq!(host_offer(Err(NOT_FOUND.into())), HostOffer::TooOld);
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn a_busy_host_is_not_a_gone_one() {
         use crate::session_host::{Restart, HOST_BUSY, NOT_FOUND};
         assert_eq!(
@@ -989,6 +1040,7 @@ mod tests {
             seen("G", 8),
             seen("H", 9),
             seen("I", 10),
+            seen("J", 11),
         ];
         list[2].kind = "print".into();
         list[7].dashboards = true;
@@ -996,8 +1048,9 @@ mod tests {
             stopped: ["E".to_string()].into(),
             waiting: ["F".to_string()].into(),
             hosted: [
-                ("B".to_string(), ("L-B".to_string(), true)),
-                ("H".to_string(), ("L-H".to_string(), false)),
+                ("B".to_string(), ("L-B".to_string(), HostOffer::Restarts)),
+                ("H".to_string(), ("L-H".to_string(), HostOffer::TooOld)),
+                ("J".to_string(), ("L-J".to_string(), HostOffer::Busy)),
             ]
             .into(),
             cannot_resume: ["I".to_string()].into(),
@@ -1023,6 +1076,7 @@ mod tests {
                 ("G", "console_not_hosted"),
                 ("H", "host_too_old"),
                 ("I", "cannot_resume"),
+                ("J", "host_busy"),
             ]
         );
         // The digest names the plan: a new skip, or another caller, is another plan.
