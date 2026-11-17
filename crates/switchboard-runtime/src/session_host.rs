@@ -255,10 +255,9 @@ struct Inner {
     reason: Option<&'static str>,
     /// SB-397 R1: the program to start once the running process exits (a restart in place).
     restart: Option<PathBuf>,
-    /// SB-397 R1: a restart is under way; the terminal's other end is briefly gone, which is not
-    /// the session's end.
-    respawning: bool,
-    /// SB-397 R1: the last process exited with no restart waiting; the session is ending.
+    /// SB-397 R1: the last process exited with no restart waiting; the session is ending. Only
+    /// then does the output reader stop: an end of output it read before (a restart in place
+    /// closes the terminal's other end for a moment) is not the session's end (SB-413).
     finished: bool,
 }
 
@@ -363,7 +362,6 @@ impl Session {
                 return false;
             }
             inner.restart = Some(program);
-            inner.respawning = true;
             self.pid()
         };
         unsafe { libc::kill(-pid, libc::SIGHUP) };
@@ -541,7 +539,6 @@ pub fn serve(start: Start<'_>, ready: impl FnOnce()) -> Result<Ended, String> {
             last_activity: std::time::Instant::now(),
             reason: None,
             restart: None,
-            respawning: false,
             finished: false,
         }),
     });
@@ -601,12 +598,21 @@ pub fn serve(start: Start<'_>, ready: impl FnOnce()) -> Result<Ended, String> {
                 match reader.read(&mut buf) {
                     Ok(n) if n > 0 => session.output(&buf[..n]),
                     Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
-                    // End of output or EIO once every holder of the terminal's other end is gone;
-                    // during a restart in place it comes back with the next process.
-                    _ if session.lock().respawning => {
+                    // End of output or EIO once every holder of the terminal's other end is gone.
+                    // It ends the reader only once the host says the session is finished: during
+                    // a restart in place the other end comes back with the next process, and an
+                    // EIO read just before the next process started must not end the reader after
+                    // it started (SB-413: on Linux the reader waited for the session's lock while
+                    // the next process was spawned under it, then read the restart as over and
+                    // stopped, and the viewers saw nothing of the next process).
+                    _ => {
+                        #[cfg(test)]
+                        tests::pause_reader(&session.launch_id);
+                        if session.lock().finished {
+                            break;
+                        }
                         std::thread::sleep(Duration::from_millis(50));
                     }
-                    _ => break,
                 }
             }
             let _ = drained_tx.send(());
@@ -624,9 +630,10 @@ pub fn serve(start: Start<'_>, ready: impl FnOnce()) -> Result<Ended, String> {
     ready();
 
     let status = loop {
-        let status = child
-            .wait()
-            .map_err(|_| "The session could not be watched.")?;
+        let status = child.wait().map_err(|_| {
+            session.lock().finished = true;
+            "The session could not be watched."
+        })?;
         // SB-397 R1: a restart in place starts the session's next process on the same terminal;
         // the viewers stay. One that cannot start ends the session as it would have.
         let program = {
@@ -661,12 +668,10 @@ pub fn serve(start: Start<'_>, ready: impl FnOnce()) -> Result<Ended, String> {
         let started = {
             let mut inner = session.lock();
             if inner.reason.is_some() {
-                inner.respawning = false;
                 inner.finished = true;
                 None
             } else {
                 let next = slave.and_then(|slave| spawn_on(&program, &slave));
-                inner.respawning = false;
                 if let Ok(next) = &next {
                     session
                         .pid
@@ -1050,6 +1055,22 @@ fn connect(root: &Path, launch_id: &str, size: Option<(u16, u16)>) -> Result<Att
 mod tests {
     use super::*;
 
+    /// SB-413: the launch id whose output reader pauses after an end of output, and for how
+    /// long, so a test can make the reader see a restart's EIO late, as a loaded machine does.
+    static READER_PAUSE: Mutex<Option<(String, Duration)>> = Mutex::new(None);
+
+    pub(super) fn pause_reader(launch_id: &str) {
+        let pause = READER_PAUSE
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .as_ref()
+            .filter(|(id, _)| id == launch_id)
+            .map(|(_, d)| *d);
+        if let Some(pause) = pause {
+            std::thread::sleep(pause);
+        }
+    }
+
     fn script(dir: &Path, body: &str) -> PathBuf {
         let path = dir.join("launch.command");
         std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
@@ -1209,6 +1230,34 @@ mod tests {
         write_frame(&mut viewer.stream, INPUT, b"done\n").unwrap();
         assert_eq!(exit_of(&mut viewer.stream), 3);
         assert_eq!(host.join().unwrap().exit_code, 3);
+    }
+
+    #[test]
+    fn a_restart_in_place_keeps_its_output_when_the_reader_sees_the_old_end_late() {
+        // SB-413: the output reader read the old process's end (EIO) just before the next
+        // process started, and acted on it only after: it took the restart as over and stopped,
+        // so the viewers never saw the next process (Linux CI, run 44076842446). The pause holds
+        // the reader past the next process's start, as a loaded machine did.
+        let data = tempfile::tempdir().unwrap();
+        let root = data.path().canonicalize().unwrap();
+        let program = script(&root, "echo first; read line; exit 0");
+        let id = crate::launches::new_id();
+        *READER_PAUSE.lock().unwrap_or_else(|p| p.into_inner()) =
+            Some((id.clone(), Duration::from_millis(600)));
+        let host = start_host(&root, &id, &program, None);
+        let mut viewer = watch(&root, &id, 24, 80);
+        saw(&mut viewer.stream, "first");
+        let dir = root.join(RESTART_DIR);
+        std::fs::create_dir_all(&dir).unwrap();
+        let next = dir.join("next.command");
+        std::fs::write(&next, "#!/bin/sh\necho second; read line; exit 3\n").unwrap();
+        std::fs::set_permissions(&next, std::fs::Permissions::from_mode(0o700)).unwrap();
+        assert_eq!(restart(&root, &id, &next), Ok(Restart::Accepted));
+        saw(&mut viewer.stream, "second");
+        write_frame(&mut viewer.stream, INPUT, b"done\n").unwrap();
+        assert_eq!(exit_of(&mut viewer.stream), 3);
+        assert_eq!(host.join().unwrap().exit_code, 3);
+        *READER_PAUSE.lock().unwrap_or_else(|p| p.into_inner()) = None;
     }
 
     #[test]
