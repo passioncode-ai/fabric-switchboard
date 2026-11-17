@@ -1454,7 +1454,11 @@ impl Server {
                     .and_then(Value::as_str)
                     .unwrap_or_default()
                     .to_owned();
-                self.call(Operation::SessionContinue { session_id: id })
+                self.call(Operation::SessionContinue {
+                    session_id: id,
+                    in_place: false,
+                    hosted: false,
+                })
                     .await
             }
             "switchboard_sessions" => {

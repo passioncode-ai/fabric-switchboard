@@ -2778,6 +2778,19 @@ async fn run(cli: &Cli) -> Result<Value, String> {
             pid: *pid,
         },
         Command::Sessions {
+            command:
+                Some(SessionsCommand::Continue {
+                    session_id,
+                    in_place: true,
+                    hosted,
+                    surface,
+                }),
+            target: None,
+            ..
+        } => {
+            return continue_in_place(&root, session_id, *hosted, *surface).await;
+        }
+        Command::Sessions {
             command: Some(SessionsCommand::Continue { session_id, .. }),
             ..
         } => Operation::SessionContinue {
@@ -3006,19 +3019,6 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                 by,
             )
             .await;
-        }
-        Command::Sessions {
-            command:
-                Some(SessionsCommand::Continue {
-                    session_id,
-                    in_place: true,
-                    hosted,
-                    surface,
-                }),
-            target: None,
-            ..
-        } => {
-            return continue_in_place(&root, session_id, *hosted, *surface).await;
         }
         #[cfg(unix)]
         Command::Attach { launch_id, .. } => {
