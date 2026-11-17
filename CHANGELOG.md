@@ -8,8 +8,9 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
-## 0.7.110
+## 0.7.111
 
+- 0.7.110 was tagged but never published: its Windows build failed, because a session module meant for macOS and Linux was compiled for Windows too. This release carries its changes, listed below, with that fixed.
 - `switchboard sessions continue <id> --in-place [--hosted] [--surface recovery]` continues a session as itself in this terminal; with `--hosted` it runs in a session host under a launch of its own, so restart waves and updates leave it running and Fabric Dashboards can attach to it (SB-400).
 - The Sessions page tells a stop from what happened after it: a session that went on working after its limit stop reads running, a stop whose history is gone reads ended with no *Continue*, and one whose session went on and ended reads ended with *Continue* (FD-291).
 - Restart waves after three more review rounds: a session is read again just before it is ended, so one that went busy or moved to another process is left alone; a cancel during a wave holds; an agent whose own session the plan leaves out is told to keep working; a Linux computer with no terminal leaves sessions as they are instead of ending them (SB-397).
