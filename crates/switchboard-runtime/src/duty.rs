@@ -485,6 +485,10 @@ pub fn resume_script_for(
         crate::launch::CONFLICTS.join(" ")
     );
     let person = crate::person::claude_dir();
+    // SB-452: a managed home's own route, which outranks the folder's local settings.
+    let route = (person.as_deref() != Some(config)
+        && config.join(crate::launch::ROUTE_FILE).is_file())
+    .then(|| crate::launch::route_arg(config));
     if person.as_deref() != Some(config) {
         if let Ok(text) = std::fs::read_to_string(config.join("launch.command")) {
             for line in text.lines().filter(|l| l.starts_with("export ")) {
@@ -513,7 +517,7 @@ pub fn resume_script_for(
         quote(cwd),
         quote(&program.to_string_lossy())
     ));
-    for arg in bypass {
+    for arg in bypass.iter().copied().chain(route.as_deref()) {
         out.push(' ');
         out.push_str(&quote(arg));
     }
@@ -1565,6 +1569,23 @@ mod tests {
         assert!(quiet.contains("/opt/homebrew/bin"));
         assert!(!quiet.contains("exec "));
         assert!(quiet.trim_end().ends_with("exit \"$status\""));
+        // SB-452: a managed home's own route comes back with the session, before `--resume`.
+        assert!(!quiet.contains("--settings"), "no route file, no route");
+        std::fs::write(home.path().join(crate::launch::ROUTE_FILE), "{}").unwrap();
+        let routed = resume_script(home.path(), &s, Path::new("/bin/claude"), &[], false);
+        let arg = format!(
+            "--settings={}",
+            home.path()
+                .join(crate::launch::ROUTE_FILE)
+                .to_string_lossy()
+        );
+        assert!(
+            routed.contains(&format!(
+                "'/bin/claude' {} --resume 's-1'",
+                fabric_sessions_core::cli::quoted(&arg)
+            )),
+            "{routed}"
+        );
     }
 
     #[test]

@@ -2505,6 +2505,17 @@ impl Runtime {
         if new.is_empty() {
             return;
         }
+        // SB-452: requests served by another group than their own since the last pass.
+        let mismatched: u64 = new.values().map(|t| t.mismatched).sum();
+        if mismatched > 0 {
+            oplog::event(
+                "proxy_group_mismatch",
+                &[(
+                    "count",
+                    oplog::Field::Number(i64::try_from(mismatched).unwrap_or(i64::MAX)),
+                )],
+            );
+        }
         let Ok(snapshot) = self.store.snapshot() else {
             self.statistics.absorb(new);
             return;
