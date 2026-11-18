@@ -53,6 +53,23 @@ const EXCLUDED_FILES = {
 // Messages that are error literals in the sources above but can never reach the UI.
 // Every entry names why. Keep this list short: a doubtful message gets a mapping instead.
 const ALLOWLIST = {
+  "Give the settings file as an absolute path.": 'SB-421: allow and rotate are CLI and MCP only; the window lists and disallows by uid',
+  "The settings file's folder does not exist. Create it, then retry.": 'SB-421: allow and rotate are CLI and MCP only; the window lists and disallows by uid',
+  "The settings file could not be written there. Check the folder's permissions, then retry.": 'SB-421: allow and rotate are CLI and MCP only; the window lists and disallows by uid',
+  "A file Switchboard did not write is at that path (a link, a folder or another account's file). Remove it or name another path.": 'SB-421: allow and rotate are CLI and MCP only; the window lists and disallows by uid',
+  "Switchboard's proxy has not started on this computer yet, so the settings file cannot name its address. Start Switchboard (switchboard serve), then retry.": 'SB-421: allow and rotate are CLI and MCP only; the window lists and disallows by uid',
+  "Name the group whose accounts this user may use.": 'SB-421: allow and rotate are CLI and MCP only; the window lists and disallows by uid',
+  "No group has that id or name.": 'SB-421: allow and rotate are CLI and MCP only; the window lists and disallows by uid',
+  "Give each folder as an absolute path.": 'SB-421: allow and rotate are CLI and MCP only; the window lists and disallows by uid',
+  "Name the account: its user name or uid.": 'SB-421: allow and rotate are CLI and MCP only; the window lists and disallows by uid',
+  "No account of this computer has that name or uid.": 'SB-421: allow and rotate are CLI and MCP only; the window lists and disallows by uid',
+  "That is the account Switchboard runs as: its sessions are served already.": 'SB-421: allow and rotate are CLI and MCP only; the window lists and disallows by uid',
+  "Switchboard never serves the root account's processes.": 'SB-421: allow and rotate are CLI and MCP only; the window lists and disallows by uid',
+  "The proxy serves at most 256 other users.": 'SB-421: allow and rotate are CLI and MCP only; the window lists and disallows by uid',
+  "This account of the computer may not use Switchboard's proxy now. Ask the person who runs Switchboard to allow it with switchboard proxy allow-user.": 'SB-421: an HTTP answer of the proxy to another account\'s Claude Code, never a renderer reply',
+  "This account may use Switchboard's proxy only with its own capability. Use the settings file Switchboard wrote for it.": 'SB-421: an HTTP answer of the proxy to another account\'s Claude Code, never a renderer reply',
+  "This account may use only the Claude Code route of the group it was allowed for.": 'SB-421: an HTTP answer of the proxy to another account\'s Claude Code, never a renderer reply',
+  "Unknown action: use list, allow, disallow or rotate.": 'SB-421: the window sends only list and disallow; a CLI or MCP typo',
   // SB-403 (DEC-0025): answered only to another machine through `switchboard ssh-serve` or to the
   // CLI and MCP (a lease without --delegate); the window never sends these calls.
   "This computer holds no seat with that id that the calling machine delegated.": 'SB-403: ssh-serve only, answered to the delegating machine',

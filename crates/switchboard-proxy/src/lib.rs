@@ -3,9 +3,10 @@ pub mod peer;
 pub mod prices;
 pub mod stats;
 pub mod tokens;
+pub mod users;
 use axum::{
     body::{to_bytes, Body},
-    extract::{Path, State},
+    extract::{ConnectInfo, Path, State},
     http::{HeaderMap, Request, StatusCode},
     response::{IntoResponse, Response},
     routing::{get, post},
@@ -98,7 +99,12 @@ struct Gateway {
     /// SB-401: each pool's list-price spend this UTC day, never drained, and the ceilings read.
     spend: Arc<tokens::Spend>,
     ceilings: Arc<tokens::Ceilings>,
+    /// SB-421: the named accounts of this computer and how many requests each made.
+    users: Arc<users::Users>,
+    user_requests: UserRequests,
 }
+/// SB-421: requests served for each named account (uid) since the owner last took them.
+pub type UserRequests = Arc<std::sync::Mutex<std::collections::BTreeMap<u32, u64>>>;
 /// SB-147: every group folder, and each folder's own capability → that folder, so a request's
 /// statistics name the folder it came from.
 #[derive(Default)]
@@ -140,6 +146,8 @@ pub struct ProxyHandle {
     spend: Arc<tokens::Spend>,
     /// SB-273: connections closed because another account's process opened them.
     foreign_refused: Arc<std::sync::atomic::AtomicU64>,
+    /// SB-421: requests served for each named account since the last call.
+    user_requests: UserRequests,
 }
 /// Requests relayed at once; each holds a slot until its response stream ends. 16 was too few for
 /// a machine with two dozen agent sessions streaming at once (2026-10-18): the rest got 503.
@@ -197,6 +205,12 @@ pub const FOLDER_NOT_IN_PROJECT: &str = "This folder is not in a Switchboard gro
 /// Subscription sign-ins (Claude.ai OAuth, a Claude setup token, ChatGPT) belong to the
 /// provider's own client (docs/AGENTS.md → Terms).
 pub const AGENT_SUBSCRIPTION_REFUSED: &str = "This pool's selected account is a subscription sign-in, which its provider allows only in Claude Code or Codex. Select an API-key account in this pool for other agents.";
+/// SB-421: a named account no longer on the list (disallowed while its connection was open).
+pub const NAMED_USER_REFUSED: &str = "This account of the computer may not use Switchboard's proxy now. Ask the person who runs Switchboard to allow it with switchboard proxy allow-user.";
+/// SB-421: a named account presented something other than its own capability.
+pub const NAMED_USER_CAPABILITY: &str = "This account may use Switchboard's proxy only with its own capability. Use the settings file Switchboard wrote for it.";
+/// SB-421: a named account asked for another group's accounts, or for something but Claude Code.
+pub const NAMED_USER_GROUP: &str = "This account may use only the Claude Code route of the group it was allowed for.";
 fn valid_token(token: &str) -> bool {
     token.len() == 64 && token.bytes().all(|b| b.is_ascii_hexdigit())
 }
@@ -250,6 +264,25 @@ impl ProxyHandle {
         port: Option<u16>,
         token: Option<String>,
     ) -> Result<Self, String> {
+        Self::start_as(
+            store,
+            [claude, openai, chatgpt],
+            timeouts,
+            port,
+            token,
+            peer::me(),
+        )
+        .await
+    }
+    /// `start_at` as `me`: tests play another account (SB-273, SB-421).
+    async fn start_as(
+        store: Arc<Store>,
+        [claude, openai, chatgpt]: [String; 3],
+        timeouts: Timeouts,
+        port: Option<u16>,
+        token: Option<String>,
+        me: peer::Me,
+    ) -> Result<Self, String> {
         // SB-401: the day's pay-per-token spend is known before the first request is taken.
         let spend = Arc::new(tokens::Spend::load(store.root(), now()));
         let listener = Self::bind(port).await?;
@@ -275,6 +308,13 @@ impl ProxyHandle {
         let draining = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let stats: stats::Stats = Arc::default();
         let stat_folders: StatFolders = Arc::default();
+        // SB-421: the named accounts' list in the data folder; on Windows nobody is ever named.
+        let users = Arc::new(if cfg!(windows) {
+            users::Users::none()
+        } else {
+            users::Users::new(store.root())
+        });
+        let user_requests: UserRequests = Arc::default();
         let state = Gateway {
             store,
             token: token.clone(),
@@ -296,19 +336,23 @@ impl ProxyHandle {
             stat_folders: stat_folders.clone(),
             spend: spend.clone(),
             ceilings: Arc::default(),
+            users: users.clone(),
+            user_requests: user_requests.clone(),
         };
         let slots = state.slots.clone();
         let last_request = state.last_request.clone();
         let router = Router::new()
             .route("/{provider}/{pool}/v1/{*operation}", post(relay))
             .route("/claude/{pool}/api/hello", get(connectivity))
-            .with_state(state);
+            .with_state(state)
+            .into_make_service_with_connect_info::<peer::Conn>();
         let (stop, rx) = oneshot::channel();
         let foreign_refused = Arc::new(std::sync::atomic::AtomicU64::new(0));
         let listener = peer::OwnUser {
             inner: listener,
-            me: peer::me(),
+            me,
             refused: foreign_refused.clone(),
+            users,
         };
         let task = tokio::spawn(async move {
             let _ = axum::serve(listener, router)
@@ -335,6 +379,7 @@ impl ProxyHandle {
             stat_folders,
             spend,
             foreign_refused,
+            user_requests,
         })
     }
     /// When the last managed request started, Unix seconds (0 before the first). Between two
@@ -391,6 +436,18 @@ impl ProxyHandle {
     pub fn take_foreign_refused(&self) -> u64 {
         self.foreign_refused
             .swap(0, std::sync::atomic::Ordering::Relaxed)
+    }
+    /// SB-421: the requests served for each named account (uid) since the last call, handed over
+    /// and cleared; counts only.
+    pub fn take_user_requests(&self) -> std::collections::BTreeMap<u32, u64> {
+        self.user_requests
+            .lock()
+            .map(|mut m| std::mem::take(&mut *m))
+            .unwrap_or_default()
+    }
+    /// SB-421: the capability of the named account `uid` for `pool` with its `salt`.
+    pub fn user_capability(&self, pool: &str, uid: u32, salt: &str) -> String {
+        users::user_token(&self.token, pool, uid, salt)
     }
     pub fn token(&self) -> &str {
         &self.token
@@ -648,9 +705,57 @@ async fn connectivity(State(g): State<Gateway>, request: Request<Body>) -> Respo
     }
     axum::Json(serde_json::json!({"status":"local_proxy_ready"})).into_response()
 }
+/// SB-421: a named account's request: only that account's own capability (as a bearer or the
+/// capability header), only for the Claude route of its one group. Nothing else it presents is
+/// compared: the session token, the agents' key and every group's or folder's capability are
+/// refused from it.
+fn named_user(
+    g: &Gateway,
+    uid: u32,
+    provider: &str,
+    pool: &str,
+    headers: &HeaderMap,
+) -> Result<users::NamedUser, Response> {
+    let Some(user) = g.users.find(uid) else {
+        return Err(error(StatusCode::UNAUTHORIZED, NAMED_USER_REFUSED));
+    };
+    let bearer = headers
+        .get("authorization")
+        .and_then(|x| x.to_str().ok())
+        .and_then(|x| x.strip_prefix("Bearer "))
+        .unwrap_or_default()
+        .as_bytes();
+    let header = headers
+        .get(CAPABILITY_HEADER)
+        .map(|x| x.as_bytes())
+        .unwrap_or_default();
+    let expected = users::user_token(&g.token, &user.pool, uid, &user.salt);
+    let presented = bearer.ct_eq(expected.as_bytes()) | header.ct_eq(expected.as_bytes());
+    if !bool::from(presented) {
+        return Err(error(StatusCode::UNAUTHORIZED, NAMED_USER_CAPABILITY));
+    }
+    if provider != "claude" || pool != user.pool {
+        return Err(error(StatusCode::FORBIDDEN, NAMED_USER_GROUP));
+    }
+    if let Ok(mut counts) = g.user_requests.lock() {
+        *counts.entry(uid).or_default() += 1;
+    }
+    Ok(user)
+}
 async fn relay(
     State(g): State<Gateway>,
+    ConnectInfo(conn): ConnectInfo<peer::Conn>,
     Path((provider, pool, operation)): Path<(String, String, String)>,
+    request: Request<Body>,
+) -> Response {
+    relay_as(g, conn.user, provider, pool, operation, request).await
+}
+async fn relay_as(
+    g: Gateway,
+    user: Option<u32>,
+    provider: String,
+    pool: String,
+    operation: String,
     request: Request<Body>,
 ) -> Response {
     // Browser-origin calls, host confusion, and upgrades must not reach credential resolution.
@@ -664,7 +769,15 @@ async fn relay(
             "Managed mode supports HTTP/SSE only.",
         );
     }
-    if provider == "codex" && pool == AUTO_POOL {
+    // SB-421: a named account's connection is decided here, by its own capability alone.
+    let named = match user {
+        Some(uid) => match named_user(&g, uid, &provider, &pool, request.headers()) {
+            Ok(user) => Some(user),
+            Err(refusal) => return refusal,
+        },
+        None => None,
+    };
+    if named.is_none() && provider == "codex" && pool == AUTO_POOL {
         return Box::pin(codex_auto(g, operation, request)).await;
     }
     // Claude Code and Codex present the session token as a bearer; other agents present the
@@ -690,53 +803,60 @@ async fn relay(
         .get(CAPABILITY_HEADER)
         .map(|x| x.as_bytes().to_vec())
         .unwrap_or_default();
-    // Every comparison runs, whatever matched: no timing tells which header or token was right.
-    // SB-118: a project folder's capability counts as the session token, for its pool only.
-    let salt = g.salts.read().ok().and_then(|s| s.get(&pool).cloned());
-    let capability = pool_token_salted(&g.token, &pool, salt.as_deref());
-    // SB-133: a folder's own capability, while the folder is part of the pool's project; the
-    // pool's capability itself only inside the migration window.
-    let legacy = subtle::Choice::from(u8::from(
-        now() < g.legacy_until.load(std::sync::atomic::Ordering::Relaxed),
-    ));
-    let mut scoped =
-        (bearer.ct_eq(capability.as_bytes()) | header.ct_eq(capability.as_bytes())) & legacy;
-    if let Some(tokens) = g
-        .folders
-        .read()
-        .ok()
-        .and_then(|f| f.as_ref().and_then(|m| m.get(&pool).cloned()))
-    {
-        for token in &tokens {
-            scoped |= bearer.ct_eq(token.as_bytes()) | header.ct_eq(token.as_bytes());
+    // SB-421: a named account was decided above by its own capability: a Claude Code session,
+    // never an agent, on its one group.
+    let (official, agent, pool) = if named.is_some() {
+        (true, false, pool)
+    } else {
+        // Every comparison runs, whatever matched: no timing tells which header or token was right.
+        // SB-118: a project folder's capability counts as the session token, for its pool only.
+        let salt = g.salts.read().ok().and_then(|s| s.get(&pool).cloned());
+        let capability = pool_token_salted(&g.token, &pool, salt.as_deref());
+        // SB-133: a folder's own capability, while the folder is part of the pool's project; the
+        // pool's capability itself only inside the migration window.
+        let legacy = subtle::Choice::from(u8::from(
+            now() < g.legacy_until.load(std::sync::atomic::Ordering::Relaxed),
+        ));
+        let mut scoped =
+            (bearer.ct_eq(capability.as_bytes()) | header.ct_eq(capability.as_bytes())) & legacy;
+        if let Some(tokens) = g
+            .folders
+            .read()
+            .ok()
+            .and_then(|f| f.as_ref().and_then(|m| m.get(&pool).cloned()))
+        {
+            for token in &tokens {
+                scoped |= bearer.ct_eq(token.as_bytes()) | header.ct_eq(token.as_bytes());
+            }
         }
-    }
-    let official = bearer.ct_eq(g.token.as_bytes()) | scoped;
-    let as_agent = bearer.ct_eq(g.agent_token.as_bytes()) | key.ct_eq(g.agent_token.as_bytes());
-    // SB-172: a folder taken out of its group lately: its session goes on, on the default pool,
-    // never on the group's accounts.
-    let mut released = subtle::Choice::from(0u8);
-    if let Some(tokens) = g
-        .released
-        .read()
-        .ok()
-        .and_then(|f| f.as_ref().and_then(|m| m.get(&pool).cloned()))
-    {
-        for token in &tokens {
-            released |= header.ct_eq(token.as_bytes());
+        let official = bearer.ct_eq(g.token.as_bytes()) | scoped;
+        let as_agent = bearer.ct_eq(g.agent_token.as_bytes()) | key.ct_eq(g.agent_token.as_bytes());
+        // SB-172: a folder taken out of its group lately: its session goes on, on the default pool,
+        // never on the group's accounts.
+        let mut released = subtle::Choice::from(0u8);
+        if let Some(tokens) = g
+            .released
+            .read()
+            .ok()
+            .and_then(|f| f.as_ref().and_then(|m| m.get(&pool).cloned()))
+        {
+            for token in &tokens {
+                released |= header.ct_eq(token.as_bytes());
+            }
         }
-    }
-    let released = bool::from(!official & !as_agent & released);
-    let agent = bool::from(!official & as_agent);
-    let official = bool::from(official) || released;
-    let pool = if released { "default".to_owned() } else { pool };
-    if !official && !agent {
-        // A folder that left its project still sends its old header: say what to do there.
-        if !header.is_empty() {
-            return error(StatusCode::UNAUTHORIZED, FOLDER_NOT_IN_PROJECT);
+        let released = bool::from(!official & !as_agent & released);
+        let agent = bool::from(!official & as_agent);
+        let official = bool::from(official) || released;
+        let pool = if released { "default".to_owned() } else { pool };
+        if !official && !agent {
+            // A folder that left its project still sends its old header: say what to do there.
+            if !header.is_empty() {
+                return error(StatusCode::UNAUTHORIZED, FOLDER_NOT_IN_PROJECT);
+            }
+            return error(StatusCode::UNAUTHORIZED, "Local capability required.");
         }
-        return error(StatusCode::UNAUTHORIZED, "Local capability required.");
-    }
+        (official, agent, pool)
+    };
     let query = request.uri().query().map(str::to_owned);
     if (query.is_some() && !(provider == "claude" && query.as_deref() == Some("beta=true")))
         || pool.is_empty()
@@ -842,7 +962,15 @@ async fn relay(
     // holds the folder it names; SB-157: else the folder it names, which the statistics resolve
     // to its repository (a session outside every group, or an agent Switchboard launched on a
     // key), instead of a count with no folder.
-    let folder = g
+    // SB-421: a named account's request counts in its group, under the deepest of its own folders
+    // that holds the folder it names, else its first.
+    let named_folder = named.as_ref().map(|user| {
+        stats::folder_hint(&bytes)
+            .and_then(|hint| stats::deepest(&user.folders, &hint).map(str::to_owned))
+            .or_else(|| user.folders.first().cloned())
+            .unwrap_or_default()
+    });
+    let folder = named_folder.or_else(|| g
         .stat_folders
         .read()
         .ok()
@@ -862,7 +990,7 @@ async fn relay(
                             .unwrap_or(hint)
                     })
                 })
-        })
+        }))
         .unwrap_or_default();
     let tally = |id: &str| stats::key(&stats::day_of(now()), id, &pool, &client, &folder);
     let mut moved = false;
@@ -1107,12 +1235,7 @@ async fn codex_auto(g: Gateway, operation: String, request: Request<Body>) -> Re
             parts.headers.insert("authorization", value);
         }
         let request = Request::from_parts(parts, Body::from(bytes));
-        return Box::pin(relay(
-            State(g),
-            Path(("codex".to_owned(), pool, operation)),
-            request,
-        ))
-        .await;
+        return Box::pin(relay_as(g, None, "codex".to_owned(), pool, operation, request)).await;
     }
     let permit = match g.slots.clone().try_acquire_owned() {
         Ok(p) => {

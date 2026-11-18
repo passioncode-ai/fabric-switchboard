@@ -11,6 +11,10 @@
 //! compared by SID with this process's; a process this one may not open counts as another user's.
 //! An owner that cannot be read (the peer closed already, or the table could not be read) is
 //! refused too, as the norm asks.
+//!
+//! SB-421 (DEC-0029): the one exception is an account the person named (`users::Users`): its
+//! connection is let in and marked with its uid (`Conn::user`), so the relay serves it only with
+//! that account's own capability, for its one group.
 use axum::serve::Listener;
 use std::{
     net::SocketAddr,
@@ -447,42 +451,113 @@ mod windows {
     }
 }
 
-/// A listener that hands axum only connections whose peer is this process's own account, counting
-/// the ones it closed (another account's, or one whose owner could not be read).
+/// One accepted connection: its peer's address, and the named account it came from (SB-421), or
+/// `None` for this process's own account.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Conn {
+    pub addr: SocketAddr,
+    pub user: Option<u32>,
+}
+impl axum::extract::connect_info::Connected<axum::serve::IncomingStream<'_, OwnUser>> for Conn {
+    fn connect_info(stream: axum::serve::IncomingStream<'_, OwnUser>) -> Self {
+        *stream.remote_addr()
+    }
+}
+
+/// Who a connection's peer is, as the listener decides it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Admission {
+    /// This process's own account.
+    Own,
+    /// An account the person named (SB-421).
+    Named(u32),
+    /// Another account, or one that could not be read: closed.
+    Refused,
+}
+
+/// Decides a connection: this account's, a named account's, or refused. Blocking: it reads the
+/// system's socket table and, for another account, the named users' list.
+pub fn admit(me: Me, local: SocketAddr, peer: SocketAddr, users: &crate::users::Users) -> Admission {
+    match me {
+        Me::Unchecked => Admission::Own,
+        Me::TokenUser => {
+            // SB-421: never on Windows, where the peer is compared by SID, never by a uid.
+            if token_user_matches(local.port(), peer.port()) {
+                Admission::Own
+            } else {
+                Admission::Refused
+            }
+        }
+        Me::Uid(uid) => classify(uid, owner(local, peer), users),
+    }
+}
+
+/// SB-421: this account's peer is its own; another account's only when it is named now; one
+/// whose owner could not be read never.
+fn classify(uid: u32, found: Option<u32>, users: &crate::users::Users) -> Admission {
+    match found {
+        _ if admits(uid, found) => Admission::Own,
+        Some(other) if other != 0 && users.find(other).is_some() => Admission::Named(other),
+        _ => Admission::Refused,
+    }
+}
+
+/// A listener that hands axum only connections whose peer is this process's own account, or an
+/// account the person named (SB-421), counting the ones it closed (another account's, or one
+/// whose owner could not be read).
 pub struct OwnUser {
     pub inner: tokio::net::TcpListener,
     pub me: Me,
     pub refused: Arc<AtomicU64>,
+    /// SB-421: the named accounts whose connections are let in.
+    pub users: Arc<crate::users::Users>,
 }
 
 impl Listener for OwnUser {
     type Io = tokio::net::TcpStream;
-    type Addr = SocketAddr;
+    type Addr = Conn;
 
     async fn accept(&mut self) -> (Self::Io, Self::Addr) {
         loop {
             let (io, peer) = Listener::accept(&mut self.inner).await;
+            let own = Conn {
+                addr: peer,
+                user: None,
+            };
             let me = self.me;
             if me == Me::Unchecked {
-                return (io, peer);
+                return (io, own);
             }
             let Ok(local) = io.local_addr() else {
-                return (io, peer);
+                return (io, own);
             };
-            let same = tokio::task::spawn_blocking(move || same_user(me, local, peer))
-                .await
-                .unwrap_or(false);
-            if same {
-                return (io, peer);
+            let users = self.users.clone();
+            let admission =
+                tokio::task::spawn_blocking(move || admit(me, local, peer, &users))
+                    .await
+                    .unwrap_or(Admission::Refused);
+            match admission {
+                Admission::Own => return (io, own),
+                Admission::Named(uid) => {
+                    return (
+                        io,
+                        Conn {
+                            addr: peer,
+                            user: Some(uid),
+                        },
+                    )
+                }
+                Admission::Refused => {
+                    self.refused
+                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    drop(io);
+                }
             }
-            self.refused
-                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            drop(io);
         }
     }
 
     fn local_addr(&self) -> std::io::Result<Self::Addr> {
-        self.inner.local_addr()
+        self.inner.local_addr().map(|addr| Conn { addr, user: None })
     }
 }
 
@@ -679,6 +754,7 @@ mod tests {
             inner,
             me: Me::Uid(own_uid().unwrap().wrapping_add(1)),
             refused: refused.clone(),
+            users: Arc::new(crate::users::Users::none()),
         };
         let _first = tokio::net::TcpStream::connect(address).await.unwrap();
         let accepted =
@@ -695,12 +771,94 @@ mod tests {
             inner,
             me: me(),
             refused: refused.clone(),
+            users: Arc::new(crate::users::Users::none()),
         };
         let client = tokio::net::TcpStream::connect(address).await.unwrap();
         let (_, peer) = tokio::time::timeout(std::time::Duration::from_secs(5), own.accept())
             .await
             .unwrap();
-        assert_eq!(peer, client.local_addr().unwrap());
+        assert_eq!(peer.addr, client.local_addr().unwrap());
+        assert_eq!(peer.user, None);
         assert_eq!(refused.load(std::sync::atomic::Ordering::Relaxed), 1);
+    }
+
+    /// SB-421: another account's connection is let in only while that account is named, and is
+    /// marked with its uid; unnamed, it is closed as before.
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[tokio::test]
+    async fn a_named_accounts_connection_is_let_in_and_marked_with_its_uid() {
+        let root = tempfile::tempdir().unwrap();
+        let own = own_uid().unwrap();
+        let refused = Arc::new(AtomicU64::new(0));
+        let users = Arc::new(crate::users::Users::new(root.path()));
+        let inner = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = inner.local_addr().unwrap();
+        // This process plays the service account `own + 1`; its own connections come from `own`.
+        let mut listener = OwnUser {
+            inner,
+            me: Me::Uid(own.wrapping_add(1)),
+            refused: refused.clone(),
+            users: users.clone(),
+        };
+        let _unnamed = tokio::net::TcpStream::connect(address).await.unwrap();
+        let accepted =
+            tokio::time::timeout(std::time::Duration::from_millis(500), listener.accept()).await;
+        assert!(accepted.is_err(), "an account nobody named is closed");
+        assert_eq!(refused.load(std::sync::atomic::Ordering::Relaxed), 1);
+
+        crate::users::save(
+            root.path(),
+            &[crate::users::NamedUser {
+                uid: own,
+                name: None,
+                pool: "team".into(),
+                folders: Vec::new(),
+                salt: crate::users::new_salt(),
+                added_at: 1,
+                added_by: "cli".into(),
+                settings: None,
+            }],
+        )
+        .unwrap();
+        let client = tokio::net::TcpStream::connect(address).await.unwrap();
+        let (_, conn) = tokio::time::timeout(std::time::Duration::from_secs(5), listener.accept())
+            .await
+            .unwrap();
+        assert_eq!(conn.addr, client.local_addr().unwrap());
+        assert_eq!(conn.user, Some(own));
+
+        crate::users::save(root.path(), &[]).unwrap();
+        let _after = tokio::net::TcpStream::connect(address).await.unwrap();
+        let accepted =
+            tokio::time::timeout(std::time::Duration::from_millis(500), listener.accept()).await;
+        assert!(accepted.is_err(), "a disallowed account is closed at once");
+        assert_eq!(refused.load(std::sync::atomic::Ordering::Relaxed), 2);
+    }
+
+    #[test]
+    fn only_a_named_account_or_this_one_is_admitted() {
+        let root = tempfile::tempdir().unwrap();
+        let users = crate::users::Users::new(root.path());
+        assert_eq!(classify(501, Some(501), &users), Admission::Own);
+        assert_eq!(classify(501, Some(1001), &users), Admission::Refused);
+        assert_eq!(classify(501, None, &users), Admission::Refused);
+        crate::users::save(
+            root.path(),
+            &[crate::users::NamedUser {
+                uid: 1001,
+                name: None,
+                pool: "team".into(),
+                folders: Vec::new(),
+                salt: crate::users::new_salt(),
+                added_at: 1,
+                added_by: "cli".into(),
+                settings: None,
+            }],
+        )
+        .unwrap();
+        assert_eq!(classify(501, Some(1001), &users), Admission::Named(1001));
+        assert_eq!(classify(501, Some(1002), &users), Admission::Refused);
+        assert_eq!(classify(501, Some(0), &users), Admission::Refused, "root never");
+        assert_eq!(classify(501, None, &users), Admission::Refused);
     }
 }

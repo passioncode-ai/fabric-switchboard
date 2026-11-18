@@ -91,6 +91,7 @@ export const nativeAdapter: Adapter = {
   capacity: (change) => invoke('capacity', { cap: change?.cap ?? null, clear: change?.clear ?? false, board: change?.board ?? null, boardDefault: change?.boardDefault ?? false }),
   duty: (change) => invoke('duty', { on: change?.on ?? null, run: change?.run ?? false }),
   ownSignIn: (on) => invoke('own_sign_in', { on: on ?? null }),
+  proxyUsers: (action, user) => invoke('proxy_users', { action: action ?? null, user: user ?? null }),
   balance: (change) => invoke('balance', { add: change?.add ?? [], remove: change?.remove ?? [], allNew: change?.all_new ?? null, backupAdd: change?.backup_add ?? [], backupRemove: change?.backup_remove ?? [] }),
   repositoryMap: (under) => readWithDeadline(invoke('repository_map', { under }), 60_000),
   statistics: (days) => invoke('statistics', { days }),
@@ -271,6 +272,11 @@ const safeErrors = new Set([
   "The other machine removed the seat's sign-in 30 days after its lease ran out. The sign-in kept here did not answer; sign in to this account again.",
   "Switchboard does not read or change your own Claude Code or Codex sign-in on this computer (own sign-in is off). Turn it on with switchboard own-sign-in on to use it here.",
   "The own sign-in setting could not be saved. Check Switchboard's data folder, then retry.",
+  // SB-421 (DEC-0029): the list of other users the proxy serves, which the window reads and disallows from.
+  "Serving other users of this computer works on macOS and Linux only. On Windows Switchboard's proxy serves only the account it runs as.",
+  "That account is not on the list of users the proxy serves.",
+  "The list of other users the proxy serves could not be read. Restore the private file proxy-users.json in Switchboard's data folder, or remove it to allow nobody.",
+  "The list of other users the proxy serves could not be saved. Check Switchboard's data folder, then retry.",
   // Safe moves and call backs between machines (SB-312).
   "The ordinary Claude Code or Codex here is signed in to this account. Sign it in to another account first.",
   "This sign-in is also saved in another group here. Remove or move that copy first, so only one machine renews it.",

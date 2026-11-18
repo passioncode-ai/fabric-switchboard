@@ -56,6 +56,7 @@ pub mod own_sign_in;
 pub mod person;
 pub mod person_errors;
 pub mod projects;
+pub mod proxy_users;
 mod provenance;
 pub mod recovery;
 mod refresh;
@@ -197,6 +198,22 @@ pub enum Operation {
     OwnSignIn {
         #[serde(default)]
         on: Option<bool>,
+    },
+    /// SB-421 (DEC-0029): other accounts of this computer the proxy serves. `action` is list
+    /// (absent), allow, disallow or rotate; `by` names the surface (cli, mcp, window).
+    ProxyUsers {
+        #[serde(default)]
+        action: Option<String>,
+        #[serde(default)]
+        user: Option<String>,
+        #[serde(default)]
+        group: Option<String>,
+        #[serde(default)]
+        folders: Vec<String>,
+        #[serde(default)]
+        write_settings: Option<String>,
+        #[serde(default)]
+        by: Option<String>,
     },
     /// A field left out keeps its saved value. Both present serializes as before, so an owner
     /// of an earlier version still understands the full form.
@@ -1665,6 +1682,8 @@ impl Runtime {
                 | Operation::Machines { .. }
                 // SB-378: the process table and its own small file.
                 | Operation::Capacity { .. }
+                // SB-421: its own small file and the settings file it writes.
+                | Operation::ProxyUsers { .. }
                 // SB-384: the process table and its own two small files.
                 | Operation::Duty { .. }
                 // SB-388: the process table, the session files and one signal.
@@ -2463,6 +2482,19 @@ impl Runtime {
                     "count",
                     oplog::Field::Number(i64::try_from(foreign).unwrap_or(i64::MAX)),
                 )],
+            );
+        }
+        // SB-421: requests served for each named account, counts only.
+        for (uid, count) in self.proxy.take_user_requests() {
+            oplog::event(
+                "proxy_user_requests",
+                &[
+                    ("uid", oplog::Field::Number(uid.into())),
+                    (
+                        "count",
+                        oplog::Field::Number(i64::try_from(count).unwrap_or(i64::MAX)),
+                    ),
+                ],
             );
         }
         let new = self.proxy.take_statistics();
@@ -3558,6 +3590,17 @@ async fn start_proxy(root: &Path, store: Arc<Store>) -> Result<ProxyHandle, Stri
         };
         if let Ok(bytes) = serde_json::to_vec(&saved) {
             let _ = switchboard_core::private_fs::private_write(&root.join(PROXY_FILE), &bytes);
+        }
+        // SB-421: the named accounts' settings files name the old address or capability.
+        let (written, failed) = proxy_users::repoint(root, port, proxy.token());
+        if written + failed > 0 {
+            oplog::event(
+                "proxy_user_settings_repointed",
+                &[
+                    ("written", oplog::Field::Number(written as i64)),
+                    ("failed", oplog::Field::Number(failed as i64)),
+                ],
+            );
         }
     }
     if let Some(old) = record.filter(|r| r.port != port) {
@@ -7465,6 +7508,24 @@ async fn execute(
             store.remove_delegated(&id, &sender_key)?;
             Ok(json!({"removed": true}))
         }
+        Operation::ProxyUsers {
+            action,
+            user,
+            group,
+            folders,
+            write_settings,
+            by,
+        } => proxy_users::execute(
+            &store,
+            root,
+            runtime,
+            action.as_deref(),
+            user.as_deref(),
+            group.as_deref(),
+            &folders,
+            write_settings.as_deref(),
+            by.as_deref(),
+        ),
         Operation::OwnSignIn { on } => {
             let value = match on {
                 Some(on) => own_sign_in::set(root, on)?,

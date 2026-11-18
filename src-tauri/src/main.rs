@@ -282,6 +282,33 @@ async fn own_sign_in(on: Option<bool>, state: State<'_, Slot>) -> Result<Value, 
         .execute(Operation::OwnSignIn { on })
         .await
 }
+/// SB-421 (DEC-0029): the other accounts of this computer the proxy serves. The window lists
+/// them and disallows one; allowing and rotating write a settings file with a capability, which
+/// the CLI and MCP do.
+#[tauri::command]
+async fn proxy_users(
+    action: Option<String>,
+    user: Option<String>,
+    state: State<'_, Slot>,
+) -> Result<Value, String> {
+    let action = match action.as_deref() {
+        None | Some("list") => "list",
+        Some("disallow") => "disallow",
+        Some(_) => return Err(switchboard_runtime::proxy_users::UNKNOWN_ACTION.into()),
+    };
+    state
+        .runtime()
+        .await?
+        .execute(Operation::ProxyUsers {
+            action: Some(action.into()),
+            user,
+            group: None,
+            folders: Vec::new(),
+            write_settings: None,
+            by: Some("window".into()),
+        })
+        .await
+}
 /// SB-175: mark an account as used on another machine, or clear the mark; SB-284: with where.
 #[tauri::command]
 async fn mark_elsewhere(
@@ -2191,6 +2218,7 @@ fn main() {
             capacity,
             duty,
             own_sign_in,
+            proxy_users,
             session_tree,
             session_rows,
             session_attach,

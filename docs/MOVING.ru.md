@@ -306,6 +306,70 @@ switchboard settings import switchboard-settings.json --signer <опублико
    `accounts send <id аккаунта> --to user@vm --pool <id группы>`, как в разделе «По ssh». Запись о
    переносе остаётся на хосте.
 
+## Несколько пользователей на одном хосте Linux
+
+Виртуальная машина Linux организации может запускать один Switchboard для нескольких агентов,
+каждый под своим пользователем Linux (SB-421, DEC-0029). Прокси обслуживает только пользователя,
+под которым запущен Switchboard, и закрывает соединения других пользователей (SB-273), пока вы не
+назовёте пользователя вместе с одной группой, аккаунтами которой ему можно пользоваться. Названного
+пользователя обслуживают только с его собственным ключом доступа, для этой группы и как Claude Code:
+его обслуживает подписка, а его запросы учитываются в группе. Это работает в Linux (и в macOS до
+27); macOS 27 не даёт Switchboard увидеть, какой другой пользователь открыл соединение, а Windows
+не поддерживается.
+
+1. Запустите `switchboard serve` как системную службу под отдельным пользователем (здесь
+   `switchboard`; агенты: `agent-a`, `agent-b`), со входами в собственных файлах (`sudo -u
+   switchboard switchboard vault use file`, как в разделе [Виртуальная машина Linux](#виртуальная-машина-linux)):
+
+   ```ini
+   # /etc/systemd/system/fabric-switchboard.service
+   [Unit]
+   Description=Fabric Switchboard
+   After=network-online.target
+
+   [Service]
+   User=switchboard
+   Group=switchboard
+   ExecStart=/opt/fabric-switchboard/switchboard serve
+   Restart=on-failure
+
+   [Install]
+   WantedBy=multi-user.target
+   ```
+
+2. Дайте службе передать каждому агенту его файл настроек: добавьте её в основную группу каждого
+   агента и создайте папку, через которую агенты могут пройти, но не могут её просмотреть, затем
+   перезапустите службу (процесс получает свои группы при запуске):
+
+   ```sh
+   sudo usermod -aG agent-a,agent-b switchboard
+   sudo install -d -o switchboard -g switchboard -m 0711 /var/lib/switchboard-users
+   sudo systemctl restart fabric-switchboard
+   ```
+
+3. Назовите каждого пользователя-агента с его группой и запишите его файл настроек:
+
+   ```sh
+   sudo -u switchboard switchboard proxy allow-user agent-a --group team \
+     --folder /srv/agents/a --write-settings /var/lib/switchboard-users/agent-a.json
+   ```
+
+   Файл принадлежит службе, права 0640 с группой `agent-a`, поэтому прочитать его может только
+   `agent-a`. Если служба не в этой группе, файл остаётся с правами 0600, а ответ печатает строку
+   `sudo install -o agent-a -m 0600 ...`, которая передаёт копию пользователю. Ни одна команда не
+   печатает ключ доступа.
+
+4. Агент запускает Claude Code с этим файлом:
+
+   ```sh
+   sudo -u agent-a claude --settings /var/lib/switchboard-users/agent-a.json -p "..."
+   ```
+
+`switchboard proxy users` показывает, кого обслуживает прокси; `proxy rotate-user agent-a` выдаёт
+новый ключ и записывает файл заново; `proxy disallow-user agent-a` сразу отключает пользователя.
+Когда прокси запускается на другом порту, он заново записывает все файлы, которые записал сам; копия,
+переданная через sudo, принадлежит пользователю, поэтому выдайте новый ключ и передайте её снова.
+
 ## Если что-то пошло не так
 
 - Импорт называет каждую часть, которую не смог сделать, в `refused`; остальное не отменяется.

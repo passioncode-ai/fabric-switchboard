@@ -300,6 +300,68 @@ rather than moving the only account of a group the host still uses.
    `accounts send <account id> --to user@vm --pool <group id>` as in "Over ssh". The host keeps the
    record of what it sent.
 
+## Several users on one Linux host
+
+An organization's Linux VM can run one Switchboard for several agents, each under a Linux user of
+its own (SB-421, DEC-0029). The proxy serves only the user Switchboard runs as and closes every
+other user's connection (SB-273) until you name that user with the one group whose accounts it may
+use. A named user is served only with its own capability, for that group, as Claude Code: a
+subscription serves it, and its requests count in the group. It works on Linux (and on macOS before
+27); macOS 27 does not let Switchboard see which other user opened a connection, and Windows is
+not supported.
+
+1. Run `switchboard serve` as a system service of its own user (here `switchboard`; agents are
+   `agent-a`, `agent-b`), with sign-ins in its own files (`sudo -u switchboard switchboard vault use
+   file`, as in [A Linux VM](#a-linux-vm)):
+
+   ```ini
+   # /etc/systemd/system/fabric-switchboard.service
+   [Unit]
+   Description=Fabric Switchboard
+   After=network-online.target
+
+   [Service]
+   User=switchboard
+   Group=switchboard
+   ExecStart=/opt/fabric-switchboard/switchboard serve
+   Restart=on-failure
+
+   [Install]
+   WantedBy=multi-user.target
+   ```
+
+2. Let the service hand each agent its settings file: add it to each agent's own primary group
+   and a folder the agents can pass through but not list, then restart it (a process takes its
+   groups when it starts):
+
+   ```sh
+   sudo usermod -aG agent-a,agent-b switchboard
+   sudo install -d -o switchboard -g switchboard -m 0711 /var/lib/switchboard-users
+   sudo systemctl restart fabric-switchboard
+   ```
+
+3. Name each agent user with its group, and write its settings file:
+
+   ```sh
+   sudo -u switchboard switchboard proxy allow-user agent-a --group team \
+     --folder /srv/agents/a --write-settings /var/lib/switchboard-users/agent-a.json
+   ```
+
+   The file is the service's, mode 0640 with the group `agent-a`, so only `agent-a` reads it. When
+   the service is not in that group the file stays 0600 and the answer prints the `sudo install -o
+   agent-a -m 0600 ...` line that hands a copy to the user. No command prints the capability.
+
+4. The agent runs Claude Code with that file:
+
+   ```sh
+   sudo -u agent-a claude --settings /var/lib/switchboard-users/agent-a.json -p "..."
+   ```
+
+`switchboard proxy users` lists who is served; `proxy rotate-user agent-a` gives a new capability
+and writes the file again; `proxy disallow-user agent-a` takes the user off at once. When the proxy
+starts on another port it writes every file it wrote again; a copy handed over with sudo is the
+user's, so rotate and hand it over again.
+
 ## If something goes wrong
 
 - The import names each part it could not do under `refused`; nothing else is undone. Run it

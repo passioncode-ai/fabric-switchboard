@@ -344,6 +344,7 @@ export function createDemoAdapter(): Adapter {
   const demoShare = (cap: number) => demoBoard ?? Math.min(cap, Math.max(1, Math.ceil(cap / 4)));
   let demoDutyOn = true;
   let demoOwnSignIn = true;
+  let demoProxyUsers = [{ uid: 1201, name: 'agent-a', group: 'default', group_name: null, folders: ['/srv/agents/a'], added_at: 1_763_000_000, added_by: 'cli', settings: '/srv/agents/a/claude-settings.json' }];
   let balanceGroups: string[] = []; let balanceAllNew = false; let balanceBackup: string[] = [];
   const balanceStatus = () => {
     const pools = ['default', ...(state.projects ?? []).map((p) => p.pool)];
@@ -791,6 +792,11 @@ export function createDemoAdapter(): Adapter {
       // A board run the pool would admit now ends the demo's wait, as `dispatch_refusals::admitted` does once one starts.
       if (admitted) demoRefused = null;
       return { cap: demoCap, used, free: demoCap === null ? null : Math.max(0, demoCap - used), at_capacity: demoCap !== null && used >= demoCap, total: 5, quiet: 1, quiet_after_minutes: 30, on_limit_stop: 1, on_waits: 1, board_share: share, board_share_set: demoBoard !== null, board_share_clamped: clamped, board_used: 1, board_admitted: admitted, waiting: demoRefused?.count ?? 0, refused_waiting: demoRefused };
+    },
+    async proxyUsers(action, user) {
+      await pause();
+      if (action === 'disallow') { const removed = demoProxyUsers.find((u) => u.name === user || String(u.uid) === user); demoProxyUsers = demoProxyUsers.filter((u) => u !== removed); return { removed }; }
+      return { users: demoProxyUsers };
     },
     async ownSignIn(on) { await pause(); if (typeof on === 'boolean') demoOwnSignIn = on; return { own_sign_in: demoOwnSignIn ? 'on' : 'off', on: demoOwnSignIn }; },
     async duty(change) {

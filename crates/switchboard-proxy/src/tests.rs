@@ -2748,3 +2748,192 @@ fn a_claude_answer_whose_counts_were_cut_is_never_free() {
     count.finish();
     assert_eq!(count.cost(), None);
 }
+
+/// SB-421: this proxy plays the service account `own + 1`, so a connection this test opens comes
+/// from another account (`own`), which the named users' list may let in.
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+async fn start_as_service(store: Arc<Store>, url: String) -> ProxyHandle {
+    let me = peer::Me::Uid(peer::own_uid().unwrap().wrapping_add(1));
+    ProxyHandle::start_as(
+        store,
+        [url.clone(), url.clone(), url],
+        Timeouts::default(),
+        None,
+        None,
+        me,
+    )
+    .await
+    .unwrap()
+}
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+fn name_this_account(root: &std::path::Path, pool: &str, folders: &[&str]) -> users::NamedUser {
+    let user = users::NamedUser {
+        uid: peer::own_uid().unwrap(),
+        name: Some("agent-a".into()),
+        pool: pool.into(),
+        folders: folders.iter().map(|f| (*f).to_owned()).collect(),
+        salt: users::new_salt(),
+        added_at: 1,
+        added_by: "cli".into(),
+        settings: None,
+    };
+    users::save(root, std::slice::from_ref(&user)).unwrap();
+    user
+}
+
+/// SB-421: a named account with its own capability is served as Claude Code on the group's
+/// subscription and counted in that group; the session token, the agents' key, the group's and
+/// another group's capability, and its own capability on another group or route are all refused.
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[tokio::test]
+async fn a_named_account_is_served_only_with_its_own_capability_on_its_group() {
+    let (_root, s) = store();
+    let sub = add(
+        &s,
+        Provider::Claude,
+        AuthKind::OAuth,
+        "sub",
+        "synthetic-oauth",
+    );
+    s.select(Provider::Claude, "default", &sub.id).unwrap();
+    let hits = Arc::new(AtomicUsize::new(0));
+    let seen = hits.clone();
+    let (url, up) = fixture(Router::new().route(
+        "/v1/messages",
+        post(move |headers: HeaderMap| {
+            let seen = seen.clone();
+            async move {
+                seen.fetch_add(1, Ordering::SeqCst);
+                // The subscription's own sign-in goes upstream, never the capability.
+                assert_eq!(headers["authorization"], "Bearer synthetic-oauth");
+                assert!(!headers.contains_key(CAPABILITY_HEADER));
+                "{}"
+            }
+        }),
+    ))
+    .await;
+    let p = start_as_service(s.clone(), url).await;
+    let user = name_this_account(s.root(), "default", &["/srv/agents/a"]);
+    let own = p.user_capability("default", user.uid, &user.salt);
+    let base = format!("http://{}/claude/default/v1/messages", p.address());
+    let client = reqwest::Client::new();
+    let send = |bearer: Option<&str>, header: Option<&str>, key: Option<&str>, url: &str| {
+        let mut r = client
+            .post(url)
+            .header("user-agent", "claude-cli/2.1.300 (external, sdk-cli)")
+            .body("{\"system\":\"Working directory: /srv/agents/a/repo\"}");
+        if let Some(b) = bearer {
+            r = r.bearer_auth(b);
+        }
+        if let Some(h) = header {
+            r = r.header(CAPABILITY_HEADER, h);
+        }
+        if let Some(k) = key {
+            r = r.header("x-api-key", k);
+        }
+        r.send()
+    };
+    assert_eq!(send(Some(&own), None, None, &base).await.unwrap().status(), 200);
+    assert_eq!(send(None, Some(&own), None, &base).await.unwrap().status(), 200);
+    assert_eq!(hits.load(Ordering::SeqCst), 2);
+    let tallies = p.take_statistics();
+    let day = stats::day_of(now());
+    let key = stats::key(&day, &sub.id, "default", "claude-code", "/srv/agents/a");
+    assert_eq!(tallies[&key].ok, 2, "{:?}", tallies.keys().collect::<Vec<_>>());
+    assert_eq!(p.take_user_requests().get(&user.uid), Some(&2));
+    // Nothing but its own capability gets in from it.
+    let agent = p.agent_token().to_owned();
+    let refused = [
+        (Some(p.token().to_owned()), None, None),
+        (Some(agent.clone()), None, None),
+        (None, None, Some(agent.clone())),
+        (Some(p.pool_capability("default")), None, None),
+        (None, Some(p.pool_capability("default")), None),
+        (None, Some(p.pool_capability("other")), None),
+        (Some(p.user_capability("other", user.uid, &user.salt)), None, None),
+        (Some(p.user_capability("default", user.uid + 7, &user.salt)), None, None),
+        (None, None, None),
+    ];
+    for (bearer, header, key) in &refused {
+        let r = send(bearer.as_deref(), header.as_deref(), key.as_deref(), &base)
+            .await
+            .unwrap();
+        assert_eq!(r.status(), 401);
+        assert!(r.text().await.unwrap().contains(NAMED_USER_CAPABILITY));
+    }
+    // Its own capability on another group, or on Codex, is refused too.
+    let other = format!("http://{}/claude/other/v1/messages", p.address());
+    assert_eq!(send(Some(&own), None, None, &other).await.unwrap().status(), 403);
+    let codex = format!("http://{}/codex/default/v1/responses", p.address());
+    assert_eq!(send(Some(&own), None, None, &codex).await.unwrap().status(), 403);
+    let auto = format!("http://{}/codex/_auto/v1/responses", p.address());
+    assert_eq!(send(None, Some(&own), None, &auto).await.unwrap().status(), 403);
+    assert_eq!(hits.load(Ordering::SeqCst), 2, "no refused request went upstream");
+    p.shutdown().await;
+    up.abort();
+}
+
+/// SB-421: disallowing and rotating take effect at once, on a connection kept open too; an
+/// account nobody named is closed before a byte is read, as before.
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[tokio::test]
+async fn disallow_and_rotate_take_effect_at_once_and_an_unnamed_account_is_closed() {
+    let (_root, s) = store();
+    let sub = add(
+        &s,
+        Provider::Claude,
+        AuthKind::OAuth,
+        "sub",
+        "synthetic-oauth",
+    );
+    s.select(Provider::Claude, "default", &sub.id).unwrap();
+    let (url, up) = fixture(Router::new().route("/v1/messages", post(|| async { "{}" }))).await;
+    let p = start_as_service(s.clone(), url).await;
+    let base = format!("http://{}/claude/default/v1/messages", p.address());
+    let client = reqwest::Client::new();
+    // Unnamed: the connection is closed, so the request fails without an answer.
+    assert!(client
+        .post(&base)
+        .bearer_auth(p.token())
+        .body("{}")
+        .send()
+        .await
+        .is_err());
+    assert_eq!(p.take_foreign_refused(), 1);
+    let user = name_this_account(s.root(), "default", &[]);
+    let first = p.user_capability("default", user.uid, &user.salt);
+    let ok = client.post(&base).bearer_auth(&first).body("{}").send().await.unwrap();
+    assert_eq!(ok.status(), 200);
+    ok.text().await.unwrap();
+    // Rotated: the old capability is refused, the new one served.
+    let rotated = users::NamedUser {
+        salt: users::new_salt(),
+        ..user.clone()
+    };
+    users::save(s.root(), std::slice::from_ref(&rotated)).unwrap();
+    let old = client.post(&base).bearer_auth(&first).body("{}").send().await.unwrap();
+    assert_eq!(old.status(), 401);
+    old.text().await.unwrap();
+    let second = p.user_capability("default", user.uid, &rotated.salt);
+    let new = client.post(&base).bearer_auth(&second).body("{}").send().await.unwrap();
+    assert_eq!(new.status(), 200);
+    new.text().await.unwrap();
+    // Disallowed: refused on the open connection, and a new connection is closed.
+    users::save(s.root(), &[]).unwrap();
+    match client.post(&base).bearer_auth(&second).body("{}").send().await {
+        Ok(r) => {
+            assert_eq!(r.status(), 401);
+            assert!(r.text().await.unwrap().contains(NAMED_USER_REFUSED));
+        }
+        Err(_) => {}
+    }
+    assert!(reqwest::Client::new()
+        .post(&base)
+        .bearer_auth(&second)
+        .body("{}")
+        .send()
+        .await
+        .is_err());
+    p.shutdown().await;
+    up.abort();
+}

@@ -11,9 +11,9 @@ Words: the person reads **group** for what tool names and fields call a project,
 group's id is its `pool` (`default` is the default group). **Automatic switching** is what tool
 names and fields call rotation. Say group and automatic switching to the person.
 
-`switchboard mcp --read-only` lists only the 24 tools that read (every tool under
-[Read tools](#read-tools)) and none of the 24 that write. A session Switchboard launches in
-isolated mode gets that set. The server lists 76 tools; each has a section below.
+`switchboard mcp --read-only` lists only the 38 tools that read (every tool under
+[Read tools](#read-tools)) and none of the 55 that write. A session Switchboard launches in
+isolated mode gets that set. The server lists 93 tools; each has a section below.
 
 ## Contents
 
@@ -860,6 +860,26 @@ renewed in it, a launch copies no MCP sign-in out of the ordinary home's credent
 session duty officer looks only at sessions in Switchboard's own homes. Claude Desktop is outside
 Switchboard either way. Without `on` it reads `{own_sign_in: "on" | "off", on}`; `on` changes it, only
 when the operator asks. Kept in `<data>/own-sign-in`.
+
+### `switchboard_proxy_users`: `action?`, `user?`, `group?`, `folders?`, `write_settings?`
+
+Other accounts of this computer that may use one group's accounts through Switchboard's proxy
+(SB-421, DEC-0029): an organization's Linux host where Switchboard runs as one user under systemd
+and agents run as users of their own (`agent-a`, `agent-b`). By default the proxy closes every
+connection from another account (SB-273). `action: "list"` (the default) reads `{users: [{uid,
+name, group, group_name, folders, added_at, added_by, settings}]}`. `allow` (`user`: a name or uid;
+`group`: an id or name; `folders`: absolute, used for statistics; `write_settings`: an absolute
+path) lists the account; from then on its connection is let in and served only with its own
+capability for that group, as Claude Code (a subscription serves it). The session token, the
+agents' key and every group's or folder's capability are refused from it, and so are another
+group's route and Codex. `write_settings` writes its Claude Code settings file there
+(`ANTHROPIC_BASE_URL` and `ANTHROPIC_AUTH_TOKEN`, the capability), owned by this account, mode
+0640 with the user's primary group when this account may set it, else 0600 with
+`settings_file.install_command`, the `sudo install` line a person runs to hand it over; run
+`claude --settings <file> -p ...` as that user. No answer carries the capability. `disallow` takes
+the account off the list and `rotate` gives it a new capability (and writes the recorded file
+again): both at once. macOS and Linux only; Windows answers that it is not supported. Changing it
+only when the operator asks. Kept in `<data>/proxy-users.json` (0600, no secret).
 
 ### `switchboard_duty`: `on?`, `stuck_minutes?`, `waiting_minutes?`, `idle_minutes?`, `max_age_hours?`, `run?`, `dry_run?`
 

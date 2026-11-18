@@ -20,6 +20,8 @@ const OWNED: &[&str] = &[
     "instance.lock",
     "control.json",
     "proxy.json",
+    // Other accounts of this computer the proxy serves (SB-421).
+    "proxy-users.json",
     "renewal-state.json",
     "usage-holds.json",
     "limit-evidence.json",

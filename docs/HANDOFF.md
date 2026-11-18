@@ -2,6 +2,16 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-11-18: SB-421 named users of one Linux host reach a group's subscriptions through the proxy, on branch `proxy-named-users`
+
+- **Asked.** Board request `c3dfcc4e` (an organization's Linux VM): `switchboard serve` runs as one user under systemd, agents run as Linux users of their own and start `claude -p` against a group's subscriptions; the proxy closed them (SB-273) and the agents' key is refused for subscriptions, correctly.
+- **Built.** `crates/switchboard-proxy/src/users.rs` (`proxy-users.json`, `user_token`, the `Users` view read again when the file changed); `peer.rs` `admit`/`Conn` (a listed uid is let in and marked; root never; Windows never); `lib.rs` `named_user` (only its own capability, only its group's Claude route; counted per uid) and `start_as` (tests play another account); `crates/switchboard-runtime/src/proxy_users.rs` (name and uid lookup, allow, disallow, rotate, the settings file 0640 with the user's group or 0600 plus a `sudo install` line, `repoint` after a port or token change); `Operation::ProxyUsers`; CLI `proxy allow-user|disallow-user|users|rotate-user`; MCP `switchboard_proxy_users`; Settings → *Other users of this computer* (list and disallow; Tauri `proxy_users`).
+- **Decisions.** [DEC-0029](DECISIONS.md#dec-0029-another-user-of-the-host-reaches-the-proxy-only-by-name-with-its-own-capability-for-one-group). The capability is the bearer `ANTHROPIC_AUTH_TOKEN` in the settings file, so an agent user needs no sign-in of its own. Codex is not served to a named user (Claude Code only, as asked). `added_by` records the surface. The list holds a salt, not a capability.
+- **ID collision found.** `SB-421` is this work in `main` (plan README, #827), but the open branch `secret-argv` (PR #826) also adds rows `SB-421` and `SB-422` (Keychain transport, session-script credentials) and `SB-423`, which `sb/recovery-open-launch-filter` uses too: those branches renumber before they merge.
+- **Checks.** See the PR: focused tests (proxy 84, runtime `proxy_users` 4, CLI and MCP), the gate (`./scripts/check.sh`) and `cargo xwin check --target x86_64-pc-windows-msvc` on the build machine, with their EXIT lines. Copylot report ids in [strings](brand/strings.md#other-users-of-this-computer-scn-106-sb-421-dec-0029).
+- **Not done.** A run on a real multi-user Linux VM (operator-assisted acceptance); macOS 27 hides other accounts' sockets (SB-330), so there a named user is still closed.
+
+**Exact next task.** Review round 1 on the `proxy-named-users` pull request, then merge once the gate reads EXIT 0 on the merged head; then answer board request `c3dfcc4e` with the release that carries it and the MOVING.md steps.
 
 ## 2026-11-17: SB-417 window follow-up from the design review, on branch `board-share-ui`
 

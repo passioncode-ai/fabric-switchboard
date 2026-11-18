@@ -9,6 +9,7 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 ## Unreleased
 
 - The session pool's default board share is a quarter of the limit rounded up and never more than the limit (a limit of 1 to 4 gives 1, 20 gives 5; a limit from 9 that is not a multiple of 4 gives one more than before). The limit dialog now says hosted consoles wait at the limit while Fabric board runs still start within the board's share; the empty *Board runs* field shows the default for the limit typed; saving a lower limit that clamped the share says so; the browser demo shows waiting board runs with `?demo=1&board-waiting=1` (SB-417, design review).
+- Agents that run as other users of the same Linux host can use a group's accounts through Switchboard's proxy, as Claude Code on its subscriptions: `switchboard proxy allow-user <user> --group <group> --write-settings <file>` (MCP `switchboard_proxy_users`) names the user and writes its Claude Code settings file, and `proxy users`, `proxy rotate-user` and `proxy disallow-user` list, renew and remove it, at once. A named user is served only with its own capability for its one group; nothing else it presents gets in, and every other user is still refused (SB-421, DEC-0029). Settings → *Other users of this computer* lists them and disallows one. macOS before 27 and Linux; Windows refuses.
 
 ## 0.7.117
 

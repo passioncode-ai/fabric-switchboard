@@ -2752,7 +2752,9 @@ data folder, Keychain items, log and login item are that user's own.
   connections are counted and logged by the next statistics pass as
   `proxy_refused_foreign_user` with `count`
   (`the_listener_serves_this_account_and_closes_a_peer_of_another`; the record layout is read back
-  from a live connection by `a_connection_from_this_account_reads_back_as_this_account`).
+  from a live connection by `a_connection_from_this_account_reads_back_as_this_account`). The one
+  exception is an account the person named with `proxy allow-user` (SB-421, DEC-0029, the next
+  section): its connection is let in and served only with its own capability.
 - **A folder both users work in.** Claude Code reads one `.claude/settings.local.json` for every
   session in a folder, so it can carry one user's route only. The user who owns the folder, its
   `.claude` folder or the settings file keeps it: another user's owner neither reads nor writes
@@ -2764,6 +2766,69 @@ data folder, Keychain items, log and login item are that user's own.
   or through their own Switchboard when they launch them from it.
 - **Not proved yet.** A run with two real users on one Mac (both owners, a shared folder, the
   terminal hook) is an operator-assisted acceptance task.
+
+## Named users of one host (SB-421, DEC-0029, 2026-11-18)
+
+An organization's Linux VM runs `switchboard serve` as one user (a systemd service) and its agents
+as users of their own (`agent-a`, `agent-b`), each starting `claude -p` against a group's
+subscriptions. SB-273 closes their connections, and the agents' key never reaches a subscription
+(a third-party agent). The person names such an account explicitly; nothing else changes.
+
+- **The list.** `<data>/proxy-users.json` (0600, written by rename, removed when empty;
+  `switchboard_proxy::users`): `{version: 1, users: [{uid, name, pool, folders, salt, added_at,
+  added_by, settings}]}`. `added_by` is the surface (`cli`, `mcp`, `window`); `settings` is the
+  settings file Switchboard wrote for the account; `salt` is part of its capability and no secret
+  (the capability needs the session token too). Root (uid 0), a pool id that is not one, a salt
+  that is not 64 hex digits and a relative folder are never listed (`root_and_malformed_rows_are_never_listed`).
+  At most 256 accounts. An unreadable file lets nobody in (`the_view_follows_the_file_and_fails_closed`).
+- **Admission.** The listener (`peer::OwnUser`) reads the connection's owner as before; an owner that
+  is another account is let in only while that uid is listed (`peer::admit`, `Admission::Named`),
+  and the connection carries the uid (`peer::Conn`, axum `ConnectInfo`). The list is read again
+  whenever its length, modification time or inode changed (`users::Users::current`), so allowing
+  and disallowing take effect at the next connection, with no owner restart
+  (`a_named_accounts_connection_is_let_in_and_marked_with_its_uid`,
+  `only_a_named_account_or_this_one_is_admitted`). Windows never names one (`users::Users::none`):
+  SB-274 compares the peer's SID with the owner's and has no uid to list. macOS 27 lets an
+  unprivileged process read only its own account's sockets (SB-330), so there another account's
+  connection still reads as nobody's and is closed: the feature serves Linux hosts (and macOS
+  before 27, which lists every socket's owner).
+- **Its capability.** `users::user_token(token, pool, uid, salt)`: SHA-256 of
+  `switchboard-user:<pool>:<uid>:<salt>:<session token>`, 64 hex. From a named account's connection
+  the relay compares only that value (as the bearer or `X-Switchboard-Capability`, in constant
+  time) and only on `/claude/<its pool>/v1/...`: the session token, the agents' key, a group's or a
+  folder's capability and another account's or group's user capability are refused with 401
+  `NAMED_USER_CAPABILITY`; its own capability on another group, on Codex or on `/codex/_auto` with
+  403 `NAMED_USER_GROUP`; an account taken off the list while its connection stayed open with 401
+  `NAMED_USER_REFUSED` (`a_named_account_is_served_only_with_its_own_capability_on_its_group`,
+  `disallow_and_rotate_take_effect_at_once_and_an_unnamed_account_is_closed`). An admitted request
+  is official: a Claude Code session, so a subscription account serves it, SB-98's one move to the
+  next account applies, and the group's switch and ceiling hold as for any request.
+- **Counts.** Its statistics go to its group with client `claude-code` and the deepest of its own
+  folders that holds the folder the request names (else its first; `stats::key`). The proxy counts
+  each account's requests (`take_user_requests`), and the statistics pass logs
+  `proxy_user_requests` with `uid` and `count`: numbers only.
+- **The settings file.** `proxy allow-user ... --write-settings <path>` (and `rotate-user`) write
+  `{"env": {"ANTHROPIC_BASE_URL": "http://127.0.0.1:<port>/claude/<pool>", "ANTHROPIC_AUTH_TOKEN":
+  <capability>}}` as a new file renamed over the path: owned by the service account, `fchown` to the
+  named account's primary group and mode 0640 when the service account may set that group (it is a
+  member), else 0600 and the answer carries `install_command`, the `sudo install -o <user> -m 0600`
+  line that hands a copy to the user (`installed_path`). A link, a folder or another account's
+  file at the path is never replaced; the folder must exist
+  (`a_settings_file_holds_the_address_and_is_never_world_readable`). No answer, log line or list
+  carries the capability (`allow_rotate_and_disallow_keep_the_capability_out_of_every_answer_and_file`).
+  The address comes from the running owner, else `proxy.json`; with neither the call is refused and
+  nothing is listed. When the proxy starts on another port or token (SB-269), every recorded file is
+  written again and `proxy_user_settings_repointed` logs how many were and were not (a copy handed
+  over with sudo belongs to the user and is not; run `rotate-user` and hand it over again).
+- **Surfaces.** CLI `proxy allow-user <name|uid> --group <group> [--folder <abs>]...
+  [--write-settings <abs>]`, `proxy disallow-user`, `proxy users`, `proxy rotate-user
+  [--write-settings <abs>]`; MCP `switchboard_proxy_users` (`action` list, allow, disallow,
+  rotate); the window's Settings → *Other users of this computer* lists the accounts and disallows
+  one (Tauri `proxy_users`, list and disallow only). `Operation::ProxyUsers` runs outside the store
+  transaction: it writes only its own file and the settings file. Every surface refuses on Windows.
+- **Not proved yet.** A run on a real multi-user Linux VM (the service under systemd, two agent
+  users, `claude -p` through the settings file) is an operator-assisted acceptance task; the gate
+  plays the other account with synthetic uids (`start_as` with `Me::Uid(own + 1)`).
 
 ## Headless sign-in (SB-256 N1, 2026-11-05)
 
