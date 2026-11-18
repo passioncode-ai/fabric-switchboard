@@ -1,6 +1,6 @@
 // Pure interface rules, kept free of DOM access so scripts/test-ui-logic.mjs can
 // exercise them directly. main.ts owns rendering; these functions own decisions.
-import type { BalanceStatus, ShellHookNotice, ShellHookStatus, Onboarding, OnboardStep, ChainExecutor, ChainScope, ChainStepView, Placement } from './types';
+import type { BalanceStatus, FeedEntry, FeedStatus, ShellHookNotice, ShellHookStatus, Onboarding, OnboardStep, ChainExecutor, ChainScope, ChainStepView, Placement } from './types';
 import type { SessionGroup, SessionRow, MachineReadStatus } from './types';
 import type { Machine, MachineCopy, RemoteRead, Attention, AttentionItem, AttentionReason, AttentionWindow, Event, EventsPage, GivenAccount } from './types';
 import type { Account, AccountLimit, Organization, OrganizationGroupOffer, Project, AgentRow, AgentSetup, OpenrouterCredit, RecommendedModel, SessionInfo, ProjectRule, RotationPolicy, UpdateStatus, UpdateOwner, DebNotice, Usage, UsageWindow } from './types';
@@ -2093,6 +2093,80 @@ export function balancingNotice(change: { group?: string; on: boolean; allNew?: 
   if (change.backup !== undefined) return change.backup ? t('{group} is a backup group now: it lends its accounts first and gets each back once the borrower has room of its own.', { group: change.group ?? '' }) : t('{group} is no longer a backup group and takes part like the others.', { group: change.group ?? '' });
   if (change.allNew !== undefined) return change.allNew ? t('Groups made later take part in balancing.') : t('Groups made later stay out of balancing until you turn them on.');
   return change.on ? t('{group} takes part in balancing.', { group: change.group ?? '' }) : t('{group} no longer takes part. Accounts it lent or borrowed are back in their own groups.', { group: change.group ?? '' });
+}
+
+/** SB-419 (DEC-0028, SCN-104): the feed from the default group as the Groups page shows it. */
+export interface FeedView {
+  state: 'reading' | 'failed' | 'on' | 'off';
+  line: string;
+  error: string | null;
+  retry: boolean;
+  /** Each group that can be fed, with its feed. */
+  groups: Map<string, { fed: boolean; priority: number | null }>;
+  /** The fed groups, highest priority first, as the map draws them. */
+  arrows: { pool: string; label: string; priority: number }[];
+  /** The rule a fed group follows, with the person's targets. */
+  rule: string;
+}
+export function feedView(status: FeedStatus | null, error: string | null = null): FeedView {
+  const none = { groups: new Map(), arrows: [], rule: '' };
+  if (!status) {
+    if (error) return { ...none, state: 'failed', line: t('The feed from the default group could not be read.'), error, retry: true };
+    return { ...none, state: 'reading', line: t('Reading the feed…'), error: null, retry: false };
+  }
+  const groups = new Map(status.available.map((g) => [g.pool, { fed: g.fed, priority: g.priority }]));
+  const arrows = [...status.fed].sort((a, b) => a.priority - b.priority || a.pool.localeCompare(b.pool)).map((f) => ({ pool: f.pool, label: f.name, priority: f.priority }));
+  const line = status.on ? plural(arrows.length, { one: '{n} group is fed from the default group.', other: '{n} groups are fed from the default group.' }) : t('No group is fed from the default group.');
+  const rule = plural(status.ready, { one: 'A fed group keeps {n} ready account: the default group lends it accounts with room, or whose limit resets within {minutes} minutes, and takes back one that runs out once another serves the group.', other: 'A fed group keeps {n} ready accounts: the default group lends it accounts with room, or whose limit resets within {minutes} minutes, and takes back one that runs out once another serves the group.' }, { minutes: status.lookahead_minutes });
+  return { state: status.on ? 'on' : 'off', line, error, retry: false, groups, arrows, rule };
+}
+/** The badge on a fed group's card. */
+export function feedBadge(priority: number): string {
+  return t('Fed from Default · priority {n}', { n: priority });
+}
+/** One feed move in plain words; the group named is the fed one, never the default group. */
+export function feedMoveLine(entry: Pick<FeedEntry, 'from' | 'to' | 'reason' | 'outcome'>, account: string, groupName: (pool: string) => string): string {
+  const fedPool = entry.to === 'default' ? entry.from : entry.to;
+  const group = groupName(fedPool);
+  if (entry.outcome === 'failed') return t('{account} could not be moved. The next pass tries again.', { account });
+  // Review round 3: a return held because the account that would replace it was not placed.
+  if (entry.outcome === 'held') return t('{account} ran out in {group} and stays: the account that would replace it was not placed.', { account, group });
+  switch (entry.reason) {
+    case 'feed': return t('{account} was placed in {group} from the default group.', { account, group });
+    case 'priority': return t('{account} moved to {group}, which has a higher priority and had no ready account.', { account, group });
+    case 'taken': return t('{account} left {group} for a group with a higher priority.', { account, group });
+    case 'park': return t('{account} ran out in {group} and is shared with the default group until its limit resets.', { account, group });
+    case 'spent': return t('{account} ran out in {group} and went back; another ready account serves the group.', { account, group });
+    case 'rested': return t('{account} has room again and is no longer shared with the default group.', { account });
+    case 'surplus': return t('{account} went back: {group} has more ready accounts than it keeps.', { account, group });
+    case 'sign_in': return t('{account} went back: it waits for a sign-in.', { account });
+    case 'feed_off': return t('{account} went back: {group} is no longer fed.', { account, group });
+    default: return t('{account} went back to its own group.', { account });
+  }
+}
+/** The notice after a change on a group's card. */
+export function feedNotice(change: { group: string; on?: boolean; priority?: number }): string {
+  if (change.on === false) return t('{group} is no longer fed. Accounts the feed moved are back in their own groups.', { group: change.group });
+  if (change.on === true) return t('{group} is fed from the default group, priority {n}.', { group: change.group, n: change.priority ?? 1 });
+  return t('{group} has priority {n} now.', { group: change.group, n: change.priority ?? 1 });
+}
+/** A priority typed in the field: a whole number from 1 to 99, else null. */
+export function feedPriority(text: string): number | null {
+  const trimmed = text.trim();
+  if (!/^[0-9]{1,2}$/.test(trimmed)) return null;
+  const n = Number(trimmed);
+  return n >= 1 && n <= 99 ? n : null;
+}
+/** The arrows of the feed map: from the default group's node, centred on the rows, to the middle
+ * of each fed group's row. One path per row, `width` wide, rows `rowHeight` apart. */
+export function feedArrows(rows: number, rowHeight: number, width: number): string[] {
+  const from = (rows * rowHeight) / 2;
+  const end = Math.max(0, width - 6);
+  return Array.from({ length: rows }, (_, i) => {
+    const to = i * rowHeight + rowHeight / 2;
+    const mid = width / 2;
+    return `M0 ${from} C${mid} ${from} ${mid} ${to} ${end} ${to}`;
+  });
 }
 
 /** SB-355 (DEC-0013): a machine group's pool; a group of folders never takes this prefix. */
