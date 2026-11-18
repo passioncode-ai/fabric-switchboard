@@ -271,7 +271,7 @@ function loadOnboarding() {
 function backgroundRender() {
   if (busy || loading || openMenu || document.querySelector('dialog')) return;
   const key = (document.activeElement as HTMLElement | null)?.dataset.focus;
-  if (render({ background: true })) restoreFocus(key);
+  if (render({ background: true })) restoreFocus(key, true);
 }
 const selected = (account: Account) => snapshot?.routes[`${account.provider}:${account.pool}`] === account.id;
 
@@ -322,7 +322,29 @@ function foldSection(options: { key: string; title: string | Node; state?: strin
 }
 /** WF-1.1 (1.1.3): every link into standing configuration opens its Settings section, then focuses `focusKey` (or the section's header). */
 function goToSettings(section: string, focusKey?: string) { foldChoices.set(section, true); goTo('settings', focusKey ?? `fold-${section}`); }
-function restoreFocus(key?: string) { if (key) document.querySelectorAll<HTMLElement>('[data-focus]').forEach((node) => { if (node.dataset.focus === key) node.focus(); }); }
+// SB-471: after an action, a background read or a closed dialog, focus comes back without scrolling (`keepPlace`): the
+// action's button may now stand elsewhere (an account moved to another group), and the page stays where the person
+// left it. Moving on purpose (a page, a tour step, a fold) still scrolls to what it focuses.
+function restoreFocus(key?: string, keepPlace = false) { if (key) document.querySelectorAll<HTMLElement>('[data-focus]').forEach((node) => { if (node.dataset.focus === key) node.focus({ preventScroll: keepPlace }); }); }
+/** SB-471: the page the last render drew: a render of the same page keeps its scroll, a new page starts as the browser leaves it. */
+let renderedPage: Page | null = null;
+/** SB-471: the scrolled lists inside the page, kept by position across a render (the page itself is the window's). */
+const INNER_SCROLLERS = '.move-options, .project-accounts, .folder-list, .stat-scroll';
+/** Each inner list by its class, the nearest element with an id around it and its place among the same, so a list that appears or goes elsewhere never takes another's position. */
+function scrollerKeys(): [string, HTMLElement][] {
+  const seen = new Map<string, number>();
+  return [...root.querySelectorAll<HTMLElement>(INNER_SCROLLERS)].map((node) => {
+    const base = `${node.className}|${node.parentElement?.closest<HTMLElement>('[id]')?.id ?? ''}`;
+    const n = seen.get(base) ?? 0; seen.set(base, n + 1); return [`${base}|${n}`, node];
+  });
+}
+function scrollState(): { x: number; y: number; inner: Map<string, number> } {
+  return { x: window.scrollX, y: window.scrollY, inner: new Map(scrollerKeys().filter(([, node]) => node.scrollTop > 0).map(([key, node]) => [key, node.scrollTop])) };
+}
+function keepScroll(state: { x: number; y: number; inner: Map<string, number> }) {
+  for (const [key, node] of scrollerKeys()) { const top = state.inner.get(key); if (top) node.scrollTop = top; }
+  if (window.scrollX !== state.x || window.scrollY !== state.y) window.scrollTo(state.x, state.y);
+}
 
 async function reload() {
   if (!native && !demo) { loading = false; render(); return; }
@@ -382,7 +404,7 @@ async function mutate(action: () => Promise<unknown>, success: string | (() => s
     try { snapshot = await adapter.snapshot(); loadError = ''; }
     catch { loadError = t('The action completed, but accounts could not be refreshed. Retry loading the account list.'); }
   } catch (error) { if (accountId) { try { snapshot = await adapter.snapshot(); } catch { /* Keep last snapshot. */ } } const text = safeError(error, operation); if (accountId) usageErrors.set(accountId, text); showNotice(text, true); }
-  finally { clock.end(); busy = false; render(); restoreFocus(focusKey); loadOnboarding(); }
+  finally { clock.end(); busy = false; render(); restoreFocus(focusKey, true); loadOnboarding(); }
 }
 
 /** Returns false when a background render found nothing to change and left the DOM alone. */
@@ -398,7 +420,7 @@ function render(options: { background?: boolean } = {}): boolean {
     shell.querySelectorAll<HTMLDetailsElement>('details').forEach((details) => { details.open = openDetails.has(details.querySelector<HTMLElement>('summary')?.dataset.focus); });
     const markup = shell.outerHTML;
     if (options.background && markup === lastRendered) return false;
-    lastRendered = markup; root.replaceChildren(shell); syncCountdown(); if (tourStep !== null) placeTour(); return true;
+    lastRendered = markup; const scroll = scrollState(); const samePage = renderedPage === page; renderedPage = page; root.replaceChildren(shell); if (samePage) keepScroll(scroll); syncCountdown(); if (tourStep !== null) placeTour(); return true;
   };
   const withTour = () => {
     if (tourStep !== null && tourShown()) {
@@ -3228,9 +3250,11 @@ function attentionSection(main: HTMLElement) {
     const key = `attention-${item.account_id ?? `${item.reason}-${index}`}`;
     const act = button(offer?.label ?? attentionActionLabel(item.action.window), () => attentionAct(item, account, key, offer?.pid ?? undefined), 'button row-button', key);
     // A sign-in or a check needs the account here; without it the action has nothing to act on.
-    if ((item.action.window === 'sign_in' && !account && !item.provider) || ((item.action.window === 'check_usage' || item.action.window === 'move_tokens') && !account) || (item.action.window === 'close_copy' && (!item.session_id || !!offer?.disabled)) || (item.action.window === 'dispatch_stop' && !item.launch_id)) { act.disabled = true; act.dataset.locked = 'true'; }
+    // SB-472: an action with nothing to act on offers no button at all, never a disabled one the
+    // person cannot press; the line above says what happens instead.
+    const idle = (item.action.window === 'sign_in' && !account && !item.provider) || ((item.action.window === 'check_usage' || item.action.window === 'move_tokens') && !account) || (item.action.window === 'close_copy' && (!item.session_id || (offer !== null && offer.label === null))) || (item.action.window === 'dispatch_stop' && !item.launch_id);
     // SB-420: an item whose fix is outside Switchboard offers no button.
-    if (item.action.window === 'none') row.append(copy); else row.append(copy, act);
+    if (item.action.window === 'none' || idle) row.append(copy); else row.append(copy, act);
     list.append(row);
   });
   section.append(list); main.append(section);
@@ -4198,7 +4222,7 @@ function openDialog(title: string, intro: string, returnFocus?: string): DialogC
   const cancel = button(t('Cancel'), () => void requestCancel(), 'button'); actions.append(cancel);
   form.append(header, body, error, actions); dialog.append(form); document.body.append(dialog);
   dialog.addEventListener('cancel', (event) => { event.preventDefault(); void requestCancel(); });
-  dialog.addEventListener('close', () => { form.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>('input,textarea').forEach((input) => { input.value = ''; }); dialog.remove(); if (!document.querySelector('dialog[open]')) restoreFocus(trigger); });
+  dialog.addEventListener('close', () => { form.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>('input,textarea').forEach((input) => { input.value = ''; }); dialog.remove(); if (!document.querySelector('dialog[open]')) restoreFocus(trigger, true); });
   dialog.showModal();
   const setBusy = (value: boolean) => { pending = value; form.setAttribute('aria-busy', String(value)); form.querySelectorAll<HTMLInputElement | HTMLButtonElement | HTMLSelectElement | HTMLTextAreaElement>('input, button, select, textarea').forEach((node) => { node.disabled = value || node.dataset.locked === 'true'; }); };
   return { dialog, form, body, actions, error, trigger, close, setBusy, beforeCancel: (handler) => { cancelHandler = handler; } };

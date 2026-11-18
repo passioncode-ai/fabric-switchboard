@@ -558,20 +558,24 @@ function closeOffer(raw: unknown): AttentionItem['close'] {
 /**
  * SB-389: what a duplicate's item says and offers. A quiet copy is closed as before; when every
  * copy works, the older one waiting on a command of its own is offered by its pid, and the line
- * says that command ends with it; when every copy is answering nothing is offered.
+ * says that command ends with it. SB-472: when every copy is answering nothing can be closed
+ * without losing work, so the item offers no button (`label` null) and says when it will: a
+ * disabled button the person cannot press is never shown.
  */
-export function duplicateOffer(item: Pick<AttentionItem, 'session_id' | 'close'>): { line: string; label: string; pid: number | null; disabled: boolean } {
+export function duplicateOffer(item: Pick<AttentionItem, 'session_id' | 'close'>): { line: string; label: string | null; pid: number | null } {
   const close = item.close;
+  // Without its session id nothing here can close a copy: the line says what the person can do.
+  if (!item.session_id) return { line: t('Both copies of this session are working. Close one in its own window when it finishes.'), label: null, pid: null };
   if (close?.why === 'older') {
     const line = close.command_age !== null
       ? t('One session runs in two processes, and both are working. The older copy has been in one command for {age}; closing it ends that command.', { age: shortAge(close.command_age) })
       : t('One session runs in two processes, and both are working. Closing the older copy ends what it is doing.');
-    return { line, label: t('Close the older copy'), pid: close.pid, disabled: !item.session_id };
+    return { line, label: t('Close the older copy'), pid: close.pid };
   }
-  if (item.close === null && item.session_id) {
-    return { line: t('One session runs in two processes, and both are answering. Close one in its own window when it finishes.'), label: t('Close the quiet copy'), pid: null, disabled: true };
+  if (close === null) {
+    return { line: t('One session runs in two processes, and both are answering now. When one of them finishes its turn, this item offers to close it.'), label: null, pid: null };
   }
-  return { line: t('One session runs in two processes. Close the quiet copy so they do not work over each other.'), label: t('Close the quiet copy'), pid: null, disabled: !item.session_id };
+  return { line: t('One session runs in two processes. Close the quiet copy so they do not work over each other.'), label: t('Close the quiet copy'), pid: null };
 }
 /** WF-3: the accounts that need a person: those the list names, and those the monitor says must sign in again. */
 export function attentionAccounts(attention: Attention | null, signInRequired: readonly string[] = []): Set<string> {

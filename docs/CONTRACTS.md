@@ -3799,7 +3799,7 @@ command_age}` when every copy works (`duty::older_copy`: never one answering; of
 command of their own, the one whose status has not changed for longest), or null when every copy is
 answering. The kept watch is rewritten when the findings change, not only their keys. Needs
 attention passes both on; the window says which copy and what ends with it (`duplicateOffer`) and
-*Close the older copy* sends its pid. `Operation::SessionCloseCopy {session_id, pid?}` with a pid
+*Close the older copy* sends its pid. When every copy is answering (`close` null) the item offers no button and says it will offer one once a copy finishes its turn (SB-472, `duplicateOffer` returns `label: null`); the window shows no attention button that has nothing to act on, never a disabled one. `Operation::SessionCloseCopy {session_id, pid?}` with a pid
 closes that copy (`duty::chosen_copy`), refused while it is answering (`COPY_BUSY`). The case that
 showed it: the copy Switchboard 0.7.93 reopened in Terminal had polled a remote job for two hours
 (status `shell`, its status unchanged 108 minutes) beside the person's copy answering in Orca, so
