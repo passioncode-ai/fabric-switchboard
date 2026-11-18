@@ -142,11 +142,11 @@ prepared to the last step a person must take and named with its link. Also (oper
 
 | Wave | Items | State |
 |---|---|---|
-| W0 | in flight before this plan: PR #815 (SB-414, SB-408), 0.7.115 with SB-410 and SB-415 | done: #815 `737e070d` and #816 `f5e2c77e` merged, 0.7.115 cut (release PR #820 `48cacbe5`, tag `v0.7.115`; its release run was in progress at 19:15 UTC, no GitHub release yet); AGENTS.md R33 O10 merged (#819 `942e9a59`) |
-| W1 | W1.1 in review (PR #818, SB-417); W1.2 and W1.6 building; W1.3 to W1.5 and W1.7 next | in progress |
+| W0 | PR #815 (SB-414, SB-408), #816 (SB-410, SB-415) | done: merged; tag `v0.7.115` was never published (a .deb test failed on Windows, nightly 44156588020); 0.7.116 (#822, tag `v0.7.116` at `5e9b0c40`) carries it with the test limited to Unix; its release run waited on GitHub macOS runners on 2026-11-17 evening |
+| W1 | W1.1 merged (#818 `aada621c`, SB-417), its window follow-ups in PR #825; W1.2 building (branch `account-off`, SB-418, DEC-0027); W1.6 in review (PR #824, SB-419, DEC-0028: round 1 found two P1, being fixed); W1.7 key-leak audit done (private report, published only after its fixes ship): P0 fix in PR #826 (SB-420), the other P1s next; W1.3 to W1.5 next; SB-421 (named Linux users at the proxy, board request c3dfcc4e, an organization's VM) building on branch `proxy-named-users` | in progress |
 | W2 | devices of an organization | planned |
-| W3 | A1 to A3 merged (PR #817, `84e7e352`); A4 to A6 next | in progress |
+| W3 | A1 to A3 merged (#817 `84e7e352`); A4 to A6 next | in progress |
 | W4 | structure | planned |
 | W5 | Fabric Sessions | planned |
-| W6 | docs and board | done on branch `target-state` (2026-11-17), not merged (no PR yet): SPEC §2, §5, §6, §8, §9, §14 against CONTRACTS and DEC-0002, DEC-0008; DEC-0007 amended for SB-171 and the `suggest.rs` module doc; DEC-0012 status; DEC-0018 and DEC-0020 written; the group dialog note, the organization badge's hint and ORGANIZATION.md (and its Russian twin) against DEC-0022; the terminal hook notice points to Settings; SCN-096 and SCN-097 in the index; 17 board rows brought up to their PRs and release tags (SB-243, SB-352, SB-357, SB-367, SB-385, SB-391, SB-401, SB-403 to SB-405, SB-407, SB-408, SB-410, SB-411, SB-413 to SB-415), SB-414 with PR #815's review round 4 follow-ups; duty officer comments cite DEC-0021. The MCP server instructions and the onboarding sentence (`onboarding.rs:215`) changed too; the Settings page now reads the hook switch again after a change made elsewhere (it read again only on Groups). Review round 1: no P0/P1; findings left: "under Groups" in folder-rule messages (`mcp.rs` ~694, ~725, ~1423, `CLI.md` ~596) to check against where folder rules live, the MCP and onboarding wording to also name a group's sources |
+| W6 | docs and board | done: #823 `3ba78af8` (two review rounds, no P0/P1); left: "under Groups" in folder-rule messages to check, the MCP and onboarding wording to also name a group's sources |
 | W7 | acceptance by the person | planned |
