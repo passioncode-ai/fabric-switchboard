@@ -903,6 +903,7 @@ pub fn launch_continuation(
     )
 }
 #[cfg_attr(windows, allow(unused_variables))]
+#[allow(clippy::too_many_arguments)]
 fn launch_continuation_with(
     root: &Path,
     store: &Store,
