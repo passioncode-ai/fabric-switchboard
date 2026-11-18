@@ -842,7 +842,7 @@ a wait of its own: a wake-up, a monitor, a cron job, a hold); a process with no 
 `cap` (1 to 500) sets the cap and keeps a share set before, clamped to it (`board_share_clamped`),
 `board` (0 to the cap) sets the board's share (with `cap`, or on the cap already set),
 `board_default: true` goes back to the default share, `clear: true` removes both; change them only when the
-operator asks. The default share is a quarter of the cap, at least 2. A board run (`switchboard
+operator asks. The default share is a quarter of the cap, rounded up (cap 1 to 4: 1). A board run (`switchboard
 dispatch`, or `launch --hosted --surface fabric`) starts while `used` is under `cap` or
 `board_used` is under `board_share`; when neither holds, `dispatch` answers `state: refused`,
 `reason: at_capacity` with `used`, `cap`, `board_used` and `board_share`. Any other

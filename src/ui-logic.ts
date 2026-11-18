@@ -609,6 +609,11 @@ export function dispatchStopLineText(line: { reason: string; folder: string | nu
     ? t('Stopped a board run in {folder}: it reached its deadline.', { folder })
     : t('Stopped a board run in {folder} at your request.', { folder });
 }
+/** SB-417: the board's share when the person sets none: a quarter of the limit rounded up, never more than the limit (core `capacity::default_board_share`). */
+export function defaultBoardShare(limit: number): number {
+  if (!Number.isInteger(limit) || limit < 1) return 1;
+  return Math.min(limit, Math.max(1, Math.ceil(limit / 4)));
+}
 /** SB-412, SB-417: the refused board runs that still wait, however long ago, and whether a session ended since. */
 export function dispatchRefusedLine(item: { count?: number; freed?: boolean }): string {
   const n = item.count ?? 0;
