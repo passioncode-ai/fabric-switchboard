@@ -8,6 +8,8 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- Statistics now give each organization's daily usage as data its own agents can read: per day, seat and coding agent, the requests, how they ended and the tokens, with no group, folder, label or account id (`usage`, schema `org-usage/1`, in `switchboard --json stats` and MCP `switchboard_statistics`). The seat ids match the organization's seats list, so the two can be joined (SB-418).
+
 ## 0.7.117
 
 - Fabric board runs no longer wait behind a full session pool: the pool keeps a share for them (`switchboard capacity set N --board M`, MCP `switchboard_capacity` `board`, Settings → Coding sessions → *Board runs*; by default a quarter of the limit), so a board run starts within that share even when the person's own sessions fill the pool. Sessions are now counted one by one: a session waiting on a limit, a wake-up, a monitor or a hold, or quiet for 30 minutes outside a turn, no longer takes a place, while a session in a turn always does. Board starts that wait are counted until one starts, with no one-hour cutoff (`refused_waiting` in `switchboard capacity`, *Board runs are waiting* in Needs attention), and concurrent board starts cannot pass the share together (SB-417).

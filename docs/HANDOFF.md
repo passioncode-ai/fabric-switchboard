@@ -2,6 +2,16 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-11-18: SB-418 an organization's daily usage as data (`org-usage/1`), on branch `sb-418-org-usage`
+
+- **Asked.** company-assessment-agent's board request `8bdf827b` (thread `87c625d1`): an organization's daily sums per account and client (requests, ok/limited/failed, tokens), never a prompt, answer or folder, read by the organization's own agents under a grant; and what connects an organization to PassionCode.ai.
+- **Built.** `crates/switchboard-runtime/src/statistics.rs`: `organization_usage` adds `usage` (`org-usage/1`) to `Operation::Statistics` (CLI `--json stats`, MCP `switchboard_statistics`): per organization, UTC day, seat, provider, class and client, the counts, under each account's first context; `seat_id` is shared with `org-seats/1` (`lib.rs` `organization_seats`) so the two join. Docs: [CONTRACTS](CONTRACTS.md#an-organizations-daily-usage-as-data-sb-418-2026-11-18), CHANGELOG, board row SB-418, `scripts/test-names.txt`.
+- **Decisions.** No network door of Switchboard's own: an agent elsewhere reads it through Observatory under Observatory's grant, as `org-seats/1` reaches Vesta (SB-381). Personal and removed accounts are left out; no group, folder, label or account id.
+- **Checks (run in this worktree).** `cargo test -p switchboard-runtime --lib` 1161 passed; `cargo test -p switchboard-cli --test mcp` 13 passed; `cargo clippy -p switchboard-runtime -p switchboard-cli --all-targets -- -D warnings` exit 0; `cargo fmt --check` ok; `scripts/check_docs.py` 0 errors. The full `./scripts/check.sh` was not run in this board run.
+- **Not done.** Observatory forwarding `usage` (its side, like OBS-415); the window shows nothing new.
+
+**Exact next task.** Run `./scripts/check.sh` on the `sb-418-org-usage` pull request's head, merge when it reads EXIT 0, and ship with the next release; then tell company-assessment-agent on thread `87c625d1` the version that carries it.
+
 ## 2026-11-17: SB-417 the session pool gives board runs a share and counts sessions, not folders, on branch `board-share`
 
 - **Asked.** Target-state plan wave item W1.1 (`docs/plans/2026-11-17-target-state/03-sessions.md` capability 16, on branch `target-state`): measured 17:55 CET on the operator's MacBook, cap 20 with 34 sessions counted, most of them interactive, so every board `dispatch` was refused `at_capacity` with no end; operator: the session manager must start work when it arrives.
