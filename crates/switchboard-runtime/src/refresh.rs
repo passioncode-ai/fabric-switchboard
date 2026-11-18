@@ -1468,7 +1468,16 @@ pub(crate) async fn renew_idle_live(
     // SB-101: the provider has already spent the old token, so the successor goes into the
     // vault now — a quit or crash before the next pass must not leave it only in memory. The
     // kept copy stays, and the next pass still writes Claude Code's item first.
-    if live_lock.write(&item).is_err() {
+    let written = live_lock.write(&item);
+    // SB-420: an item too large to write is seen in `status` and Needs attention.
+    crate::item_size::note(
+        store.root(),
+        crate::item_size::ORDINARY,
+        crate::item_size::DURING_RENEWAL,
+        &written,
+        time,
+    );
+    if written.is_err() {
         drop(live_lock);
         let _held = hold_store(lock).await;
         let owner = kept

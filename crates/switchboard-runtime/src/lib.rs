@@ -38,6 +38,7 @@ mod headless_login;
 pub mod health;
 pub mod hermes;
 mod inbox;
+pub mod item_size;
 pub mod kimi;
 pub mod launch;
 pub mod launch_keys;
@@ -120,9 +121,8 @@ pub fn rfc3339(seconds: i64) -> Option<String> {
 /// Never derive Debug on this type. Five operations answer a credential or key value:
 /// `AgentKey` (the agents' proxy key), `AgentKeyValue` and `AnthropicKeyValue` (a saved
 /// provider key), `SurrenderAccount` and `SurrenderDelegated` (a sign-in handed back to the
-/// machine that moved it). No MCP tool and no window command maps to any of them; the CLI prints
-/// a provider key or a sign-in only into a pipe its caller named for the hand-over (SB-420), and
-/// any holder of the control token can still ask for them over the control door.
+/// machine that moved it). No MCP tool and no window command maps to any of them; the CLI
+/// refuses to print a provider key or a sign-in to a terminal or a file (SB-420).
 #[derive(Serialize, Deserialize)]
 #[serde(tag = "operation", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Operation {
@@ -5473,6 +5473,7 @@ fn attention_report(
         watch: &session_watch::last(root),
         // SB-417: the board starts waiting since the pool last admitted one, with no cutoff.
         refusals: dispatch_refusals::waiting(root).as_ref(),
+        too_large: &item_size::read(root),
         now,
     }))
 }
@@ -5518,7 +5519,7 @@ async fn execute(
         // null offline, where no owner answered) and `online` says whether an owner runs,
         // beside the display string `live_mode`.
         Operation::Status => Ok(
-            json!({"proxy_address": runtime.map(|r| r.proxy.address().to_string()), "platform": std::env::consts::OS, "live_mode": if runtime.is_some() { "Next request · HTTP/SSE" } else { "Offline" }, "owner_version": runtime.map(|_| env!("CARGO_PKG_VERSION")), "owner_kind": runtime.map(|r| if r.app_doors().is_some() { "app" } else { "serve" }), "owner_copy": runtime.and_then(|_| copies::this_copy()).map(|c| c.to_string_lossy().into_owned()), "owner_updates_copy": runtime.map(|r| r.app_doors().is_some() || serve_update::updates_copy(root)), "online": runtime.is_some(), "vault": switchboard_core::vault_kind(root).ok()}),
+            json!({"proxy_address": runtime.map(|r| r.proxy.address().to_string()), "platform": std::env::consts::OS, "live_mode": if runtime.is_some() { "Next request · HTTP/SSE" } else { "Offline" }, "owner_version": runtime.map(|_| env!("CARGO_PKG_VERSION")), "owner_kind": runtime.map(|r| if r.app_doors().is_some() { "app" } else { "serve" }), "owner_copy": runtime.and_then(|_| copies::this_copy()).map(|c| c.to_string_lossy().into_owned()), "owner_updates_copy": runtime.map(|r| r.app_doors().is_some() || serve_update::updates_copy(root)), "online": runtime.is_some(), "vault": switchboard_core::vault_kind(root).ok(), "keychain_too_large": item_size::status(root)}),
         ),
         Operation::CurrentAccounts => match runtime {
             Some(runtime) => runtime.current_accounts(),
@@ -9170,6 +9171,14 @@ fn activate_native_anyway(
         .as_ref()
         .ok_or("Capture or import this profile before native activation.")?;
     let result = replace_native(store, &account, identity, expected_id, native, refresh);
+    // SB-420: an item too large to write is seen in `status` and Needs attention.
+    item_size::note(
+        store.root(),
+        item_size::ORDINARY,
+        item_size::DURING_SWITCH,
+        &result,
+        monitor::now(),
+    );
     // The outcome is already decided; a journal failure must not change it.
     let _ = store.record(
         "activation",

@@ -847,11 +847,11 @@ switchboard agents key --service openrouter --dir /work/app --to-pipe   # the ke
 ```
 
 A command that prints a key (`agents key --service openrouter`, `agents anthropic key NAME`)
-prints it only with `--to-pipe` and only into a pipe, a session script's `$(...)`; without the
-flag, to a terminal or into a file it refuses and prints nothing (SB-420). Session scripts
-Switchboard writes pass it; a script an earlier version wrote (Hermes or OpenCode on a saved key)
-is written again at the next launch. `accounts surrender` prints a sign-in only for the ssh call
-of `accounts recall`, which names the hand-over in its command (`SWITCHBOARD_TRANSFER=surrender`).
+takes `--to-pipe` and writes into a pipe, a session script's `$(...)`; without the flag, to a
+terminal or into a file it refuses and prints nothing (SB-420). Session scripts Switchboard writes
+pass it; a script an earlier version wrote (Hermes or OpenCode on a saved key) is written again at
+the next launch. `accounts surrender` is run by `accounts recall` over ssh, which names the
+hand-over in its command (`SWITCHBOARD_TRANSFER=surrender`); to a terminal or a file it refuses.
 
 A session script names the key slot its start's spending check read (`--pool` or `--machine`),
 never its folder: a folder that joins another group between the launch and the script's first

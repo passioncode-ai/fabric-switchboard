@@ -8,8 +8,8 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
-- A long Keychain write no longer passes the value on the command line: it goes on standard input as text when hex does not fit, and an item too large for that is refused with a sentence that names it; nothing is written (SB-420).
-- Commands that print a credential print it only where it was asked for by name: `agents key --service openrouter` and `agents anthropic key NAME` need `--to-pipe` and a pipe, as Switchboard's session scripts give them, and `accounts surrender` prints a sign-in only for the ssh call of `accounts recall` from the calling machine. To a terminal or into a file they refuse and print nothing. A Hermes or OpenCode session script an earlier version wrote is written again at its next launch (SB-420).
+- A long Keychain write no longer passes the value on the command line: it goes on standard input as text when hex does not fit, and an item too large for that is refused, nothing written. A switch or a renewal of Claude Code's sign-in that meets such an item says so and leaves the previous sign-in in place; `switchboard status`, MCP `switchboard_status` and Needs attention show it until a later write succeeds (SB-420).
+- `agents key --service openrouter`, `agents anthropic key NAME` and `accounts surrender` no longer print a credential to a terminal or into a file. The key commands take `--to-pipe`, as Switchboard's session scripts do; a Hermes or OpenCode session script an earlier version wrote is written again at its next launch (SB-420).
 
 ## 0.7.117
 

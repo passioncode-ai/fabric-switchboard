@@ -5930,12 +5930,21 @@ fn print_result(value: &Value, cli: &Cli) {
                 );
             }
         }
-        Command::Status => println!(
-            "Mode: {}\nPlatform: {}\nProxy: {}",
-            text(&value["live_mode"]),
-            text(&value["platform"]),
-            text(&value["proxy_address"])
-        ),
+        Command::Status => {
+            println!(
+                "Mode: {}\nPlatform: {}\nProxy: {}",
+                text(&value["live_mode"]),
+                text(&value["platform"]),
+                text(&value["proxy_address"])
+            );
+            // SB-420: a Claude Code Keychain item Switchboard could not write.
+            if value["keychain_too_large"]
+                .as_array()
+                .is_some_and(|items| !items.is_empty())
+            {
+                println!("{}", switchboard_runtime::item_size::DETAIL);
+            }
+        }
         Command::Capacity { .. } => print_capacity(value),
         _ => print_value(value, false),
     }

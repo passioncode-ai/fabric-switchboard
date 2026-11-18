@@ -174,6 +174,8 @@ export const RU: Record<string, string> = {
   "No session has ended since.": "С тех пор ни одна сессия не завершилась.",
   "Open the session limit": "Открыть лимит сессий",
   "Board runs": "Запуски с доски",
+  "Claude Code sign-in": "Вход Claude Code",
+  "Claude Code's sign-in is too large to write to the Keychain safely, so Switchboard could not update it. Sign out of MCP servers you no longer use in Claude Code.": "Вход Claude Code слишком велик для безопасной записи в Связку ключей, поэтому Switchboard не смог его обновить. Выйдите из MCP-серверов, которыми больше не пользуетесь в Claude Code.",
   "This board run is still running, so it was left alone. Refresh to see it now.": "Этот запуск с доски ещё работает, поэтому его не тронули. Обновите, чтобы увидеть, как сейчас.",
   "Stopped the board run.": "Запуск с доски остановлен.",
   "The board run had already ended. Its end is recorded now.": "Запуск с доски уже закончился. Теперь его конец записан.",

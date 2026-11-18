@@ -587,6 +587,18 @@ pub(crate) fn carry_into(root: &Path, folder: &Path) {
             &|write| crate::external::with_credential_locks(folder, write),
         )
     });
+    // SB-420: an item too large to write is seen in `status` and Needs attention.
+    let now = now_ms / 1000;
+    match &result {
+        Ok(carried) if *carried > 0 => crate::item_size::clear(root, crate::item_size::LAUNCH),
+        Err(error) if crate::item_size::is_too_large(error) => crate::item_size::record(
+            root,
+            crate::item_size::LAUNCH,
+            crate::item_size::DURING_LAUNCH_COPY,
+            now,
+        ),
+        _ => {}
+    }
     match result {
         Ok(0) => {}
         Ok(carried) => crate::oplog::event(

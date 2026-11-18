@@ -527,8 +527,8 @@ export function accountMatches(account: Pick<Account, 'id' | 'label' | 'external
   return words.every((word) => text.includes(word));
 }
 
-const ATTENTION_REASONS: AttentionReason[] = ['session_duplicate', 'session_stuck', 'session_gone', 'dispatch_refused', 'sign_in', 'seat_ended', 'renewal_refused', 'usage_failing', 'move_unknown', 'refused_there', 'key_outside_tokens', 'ceiling_question'];
-const ATTENTION_WINDOWS: AttentionWindow[] = ['sign_in', 'answer_ceiling', 'check_usage', 'open_machines', 'open_sessions', 'close_copy', 'dispatch_stop', 'open_capacity', 'move_tokens'];
+const ATTENTION_REASONS: AttentionReason[] = ['keychain_too_large', 'session_duplicate', 'session_stuck', 'session_gone', 'dispatch_refused', 'sign_in', 'seat_ended', 'renewal_refused', 'usage_failing', 'move_unknown', 'refused_there', 'key_outside_tokens', 'ceiling_question'];
+const ATTENTION_WINDOWS: AttentionWindow[] = ['sign_in', 'answer_ceiling', 'check_usage', 'open_machines', 'open_sessions', 'close_copy', 'dispatch_stop', 'open_capacity', 'move_tokens', 'none'];
 /**
  * WF-3 (SB-365): the answer of the `attention` command, kept to the fields the window knows. An
  * answer that is not one (an older owner without the command, a malformed item) is an empty list
@@ -623,6 +623,7 @@ export function dispatchStopNotice(state: string): string {
 }
 export function attentionReasonText(reason: AttentionReason): string {
   switch (reason) {
+    case 'keychain_too_large': return t("Claude Code's sign-in is too large to write to the Keychain safely, so Switchboard could not update it. Sign out of MCP servers you no longer use in Claude Code.");
     case 'session_duplicate': return t('One session runs in two processes. Close the quiet copy so they do not work over each other.');
     case 'session_stuck': return t('A board run has been quiet for 30 minutes. Look at it, or stop it.');
     case 'session_gone': return t("A board run's process is gone, but its end was not recorded. Stop the run to record it.");
@@ -649,6 +650,8 @@ export function attentionActionLabel(window: AttentionWindow): string {
     case 'dispatch_stop': return t('Stop the run');
     case 'open_capacity': return t('Open the session limit');
     case 'move_tokens': return t('Move to Pay-per-token keys');
+    // SB-420: the fix is in Claude Code; no button.
+    case 'none': return '';
   }
 }
 /** WF-2.4: the facts line of an account given to an agent; each part is said even when it is not recorded. */
