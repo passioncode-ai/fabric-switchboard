@@ -164,9 +164,9 @@ enum Command {
         command: Option<CapacityCmd>,
     },
     /// The session duty officer: every five minutes it closes and continues a Claude Code session
-    /// that stopped moving, closes one that finished and only holds a terminal, and gives a
-    /// long-lived one a fresh process at the end of a turn. Without a subcommand: its settings,
-    /// its last actions and what a check would do now.
+    /// that stopped moving, and closes one that finished and only holds a terminal (nothing it
+    /// started still runs or writes). Nothing is restarted for its age. Without a subcommand: its
+    /// settings, its last actions and what a check would do now.
     Duty {
         #[command(subcommand)]
         command: Option<DutyCmd>,

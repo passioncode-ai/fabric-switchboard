@@ -3732,7 +3732,18 @@ only while `duty.json` (0600: `on`, `stuck_minutes`, `waiting_minutes`, `idle_mi
   least `duty::WAKE_UP_FLOOR` (65 minutes: the longest wake-up a session can set itself with
   `ScheduleWakeup` is an hour, and a session waiting for it reads `idle`; SB-392 S-1), with no
   command of its own running (a recurring `CronCreate` job lives inside its session and cannot be
-  seen from outside, so it is not counted); `stuck` restarts a busy (or shell) session whose status and
+  seen from outside, so it is not counted). SB-500 (operator 2026-11-18): an `idle` session is
+  also kept while its transcript or any of its background agents' transcripts
+  (`<session>/subagents/`, read by `machine_sessions::session_last_write`) was written within that
+  time, while no transcript of it can be found, and while a launch it started itself runs
+  (`session_watch::running_children`: a live launch whose `launched_by.caller_launch_id`, else
+  `launched_by.parent`, is the session's own launch; `None`, so kept, when the read did not see
+  the process table). SB-501: a session the journal shows closed as `idle` before and that runs
+  again was taken up again by the person, and is never closed as `idle` again (stuck and duplicate
+  still apply). Tests `duty::tests::an_idle_session_whose_agents_or_launches_still_work_is_never_closed`,
+  `a_session_taken_up_again_after_an_idle_close_is_not_closed_as_idle_again`,
+  `session_watch::tests::a_sessions_running_launches_of_its_own_are_counted_for_its_process`;
+  `stuck` restarts a busy (or shell) session whose status and
   transcript have not moved for `stuck_minutes`, whose tree used no CPU since the previous check
   (`cpu_quiet` true, never unknown) and which runs no command of its own, or one that has run for
   three times `stuck_minutes`; `duplicate` closes a copy of a session that is finished (idle, no
