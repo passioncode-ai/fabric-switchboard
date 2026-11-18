@@ -246,9 +246,11 @@ impl View<'_> {
         })
     }
     /// The group asked for `provider` lately: requests in the last 6 hours, or a limit refusal
-    /// in about the last 15 minutes. The refusal is read from this owner's own quarter-hour
-    /// counts only (review round 2): after a restart the 6-hour figures include the whole day's
-    /// counts, which would read a refusal this morning as one now.
+    /// in about the last 15 minutes from this owner's own quarter-hour counts. A refused request
+    /// is also a request, so the 6-hour requests already cover any refusal those figures hold;
+    /// what reading "refusing" from memory only changes is the priority move's override of an
+    /// account in use (review round 2). After a restart the 6-hour requests still read the day's
+    /// counts, so an idle group that worked earlier today has demand (board row SB-430).
     fn demand(&self, pool: &str, provider: Provider) -> bool {
         self.signals
             .get(&(pool.to_owned(), provider.as_str()))
@@ -479,6 +481,18 @@ pub fn plan(
     let mut moving: HashSet<String> = busy.clone();
     let mut leaving: HashSet<(String, String)> = HashSet::new();
     let account_of = |id: &str| snapshot.accounts.iter().find(|a| a.id == id);
+    // Review round 3: an account balancing moves in the same pass counts in no group but its
+    // own home (a return takes it out of the group it was lent to; a lend's new group is not
+    // counted until it lands), so no count below relies on it.
+    for id in busy {
+        if let Some(a) = account_of(id) {
+            for pool in snapshot.pools_of(a) {
+                if pool != a.pool {
+                    leaving.insert((pool.to_owned(), id.clone()));
+                }
+            }
+        }
+    }
     let fed_now = |pool: &str| {
         fed_order(snapshot, settings)
             .into_iter()
@@ -1296,6 +1310,8 @@ mod tests {
             ],
             "{actions:?}"
         );
+        // Review round 3: the return relies only on d-2, lent in this pass, and says so.
+        assert_eq!(actions[1].relies_on, ["d-2"]);
         // Between the room line (80) and the switching threshold (90) it is still in use:
         // a replacement comes, the account stays.
         s.accounts[0] = account("d-1", "default", 85.0, 5 * 3600);
@@ -1477,6 +1493,208 @@ mod tests {
         assert!(!settings.moved.contains_key("spent"));
         let lines = balancing::read_journal(root.path());
         assert!(lines[1].contains("\"outcome\":\"held\""), "{lines:?}");
+    }
+
+    /// Review round 3: when the lend a return relies on lands, the return runs after it.
+    #[tokio::test]
+    async fn a_spent_return_runs_once_its_replacement_was_lent() {
+        use crate::fixtures::*;
+        use crate::Operation;
+        let root = tempfile::tempdir().unwrap();
+        let runtime = runtime(root.path(), signed_out, activates).await;
+        let work = tempfile::tempdir().unwrap();
+        let folder = work.path().canonicalize().unwrap().join("Agents");
+        std::fs::create_dir_all(&folder).unwrap();
+        let own = save(&runtime.store, "Agents-0", "default");
+        let view = runtime
+            .execute(Operation::SaveProject {
+                pool: None,
+                name: "Agents".into(),
+                folders: vec![folder],
+                account_ids: vec![own.id.clone()],
+                base_folders: None,
+                organization: None,
+                organizations: None,
+                move_accounts: false,
+            })
+            .await
+            .unwrap();
+        let agents = view["pool"].as_str().unwrap().to_owned();
+        let spent = save(&runtime.store, "Spent", "default");
+        let fresh = save(&runtime.store, "Fresh", "default");
+        assert!(runtime.store.set_shared(&agents, &spent.id, true).unwrap());
+        let mut settings = fed(&[(agents.as_str(), 1)]);
+        settings.lent = vec![lend(&spent.id, "default", &agents)];
+        let mut back = action(
+            "return",
+            &spent,
+            "default",
+            &agents,
+            "spent",
+            true,
+            FeedFigures::default(),
+        );
+        back.relies_on = vec![fresh.id.clone()];
+        let actions = vec![
+            action(
+                "lend",
+                &fresh,
+                "default",
+                &agents,
+                "feed",
+                true,
+                FeedFigures::default(),
+            ),
+            back,
+        ];
+        balancing::apply(&runtime.store, root.path(), &mut settings, &actions, NOW);
+        assert_eq!(settings.lent.len(), 1, "{:?}", settings.lent);
+        assert_eq!(settings.lent[0].account, fresh.id);
+        assert!(settings.moved.contains_key(&spent.id));
+        let shared = runtime
+            .store
+            .snapshot()
+            .unwrap()
+            .project_of_pool(&agents)
+            .unwrap()
+            .shared_accounts
+            .clone();
+        assert_eq!(shared, [fresh.id.clone()]);
+        let lines = balancing::read_journal(root.path());
+        assert!(
+            lines.iter().all(|l| l.contains("\"outcome\":\"done\"")),
+            "{lines:?}"
+        );
+    }
+
+    /// Review round 3: an account balancing takes back in the same pass counts for no group it
+    /// is lent to, so a group chosen for both never ends the pass with nothing that has room.
+    #[test]
+    fn an_account_balancing_takes_back_in_the_same_pass_is_not_relied_on() {
+        let mut s = estate();
+        s.accounts = vec![
+            account("apps-1", "apps", 10.0, 3600),
+            account("d-2", "default", 99.0, 5 * 3600),
+        ];
+        s.projects[0].shared_accounts = vec!["apps-1".into(), "d-2".into()];
+        let mut settings = fed(&[("agents", 1)]);
+        settings.lent = vec![lend("d-2", "default", "agents")];
+        // Without balancing moving it, apps-1 has room in Agents: d-2 goes back.
+        let actions = run(&s, &settings, &Held::default());
+        assert!(actions.iter().any(|a| a.reason == "spent"), "{actions:?}");
+        // Balancing returns apps-1 in the same pass: d-2 stays, Agents' last account.
+        let busy: HashSet<String> = ["apps-1".to_owned()].into();
+        let actions = plan(
+            &s,
+            &Signals::new(),
+            &Activity::default(),
+            &Held::default(),
+            &settings,
+            NOW,
+            &busy,
+        );
+        assert!(actions.iter().all(|a| a.reason != "spent"), "{actions:?}");
+    }
+
+    /// Review round 3: the owner's pass reads "refusing now" from its own quarters. A refusal
+    /// counted half an hour before a restart is in the day counts the 6-hour window reads, but
+    /// not a refusal now, so no priority move overrides the lower group.
+    #[tokio::test]
+    async fn the_pass_reads_refusals_from_this_owners_own_counts() {
+        use crate::fixtures::*;
+        use crate::Operation;
+        use switchboard_proxy::stats::{self, Tallies, Tally};
+        let root = tempfile::tempdir().unwrap();
+        let runtime = runtime(root.path(), signed_out, activates).await;
+        let work = tempfile::tempdir().unwrap();
+        let now = crate::monitor::now();
+        let observe = |id: &str, used: f64| {
+            runtime
+                .store
+                .observe(
+                    id,
+                    Usage {
+                        windows: vec![UsageWindow {
+                            name: "five_hour".into(),
+                            used_percent: used,
+                            resets_at: Some(now + 5 * 3600),
+                        }],
+                        used_percent: used,
+                        observed_at: now,
+                        resets_at: Some(now + 5 * 3600),
+                        source: "claude_oauth".into(),
+                    },
+                )
+                .unwrap();
+            runtime
+                .store
+                .usage_health(id, "ok", now, now + 150)
+                .unwrap();
+        };
+        let mut pools = Vec::new();
+        for (name, used) in [("Agents", 99.0), ("Apps", 10.0)] {
+            let folder = work.path().canonicalize().unwrap().join(name);
+            std::fs::create_dir_all(&folder).unwrap();
+            let a = save(&runtime.store, &format!("{name}-0"), "default");
+            observe(&a.id, used);
+            let view = runtime
+                .execute(Operation::SaveProject {
+                    pool: None,
+                    name: name.into(),
+                    folders: vec![folder],
+                    account_ids: vec![a.id.clone()],
+                    base_folders: None,
+                    organization: None,
+                    organizations: None,
+                    move_accounts: false,
+                })
+                .await
+                .unwrap();
+            pools.push((view["pool"].as_str().unwrap().to_owned(), a.id));
+        }
+        let (agents, agents_id) = pools[0].clone();
+        let (apps, apps_id) = pools[1].clone();
+        // Agents was refused for its limit half an hour ago, with no request since; then the
+        // owner restarted.
+        let then = now - 1800;
+        runtime.statistics.started_at(now - 8 * 3600);
+        runtime.statistics.absorb_at(
+            Tallies::from([(
+                stats::key(&stats::day_of(then), &agents_id, &agents, "claude-code", ""),
+                Tally {
+                    requests: 0,
+                    limited: 3,
+                    ..Tally::default()
+                },
+            )]),
+            then,
+        );
+        runtime.statistics.started_at(now - 60);
+        if stats::day_of(then) == stats::day_of(now) {
+            assert!(
+                runtime
+                    .statistics
+                    .window(REFUSING_SECONDS, now)
+                    .contains_key(&(agents.clone(), agents_id.clone())),
+                "the day counts read the refusal as now"
+            );
+        }
+        for (pool, priority) in [(&agents, 1), (&apps, 2)] {
+            runtime
+                .execute(Operation::Feed {
+                    pool: Some(pool.clone()),
+                    on: Some(true),
+                    priority: Some(priority),
+                    ready: None,
+                    lookahead_minutes: None,
+                })
+                .await
+                .unwrap();
+        }
+        runtime.balance_pass(now).await;
+        let snapshot = runtime.store.snapshot().unwrap();
+        let shared = &snapshot.project_of_pool(&agents).unwrap().shared_accounts;
+        assert!(!shared.contains(&apps_id), "no priority move: {shared:?}");
     }
 
     #[test]

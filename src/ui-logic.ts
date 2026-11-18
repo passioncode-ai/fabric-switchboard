@@ -2129,6 +2129,8 @@ export function feedMoveLine(entry: Pick<FeedEntry, 'from' | 'to' | 'reason' | '
   const fedPool = entry.to === 'default' ? entry.from : entry.to;
   const group = groupName(fedPool);
   if (entry.outcome === 'failed') return t('{account} could not be moved. The next pass tries again.', { account });
+  // Review round 3: a return held because the account that would replace it was not placed.
+  if (entry.outcome === 'held') return t('{account} ran out in {group} and stays: the account that would replace it was not placed.', { account, group });
   switch (entry.reason) {
     case 'feed': return t('{account} was placed in {group} from the default group.', { account, group });
     case 'priority': return t('{account} moved to {group}, which has a higher priority and had no ready account.', { account, group });

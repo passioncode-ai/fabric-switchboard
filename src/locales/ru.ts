@@ -2350,4 +2350,5 @@ export const RU: Record<string, string> = {
   "Turn the feed on to set a priority.": "Включите подпитку, чтобы задать приоритет.",
   "The feed is on and has moved no account yet. A pass every 15 minutes keeps the fed groups ready.": "Подпитка включена и пока не переместила ни одного аккаунта. Проход раз в 15 минут держит подпитываемые группы готовыми.",
   "A group whose feed is turned off has no priority. Turn the feed off without one.": "У группы с выключенной подпиткой нет приоритета. Выключите подпитку без него.",
+  "{account} ran out in {group} and stays: the account that would replace it was not placed.": "{account} исчерпан в «{group}» и остаётся: аккаунт на замену не перемещён.",
 };

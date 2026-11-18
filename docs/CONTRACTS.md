@@ -3041,7 +3041,8 @@ design target-state `06-default-feed.md`. A second policy on balancing's pass an
   has counted for about 30 minutes), and the groups with a limit refusal in about the last 15
   (`Statistics::window_in_memory`, this owner's own quarters only, never the day counts, so a
   refusal before a restart is not one now; the refusal part of demand reads only this). Balancing's own plan and `returns_owed` leave a `feed` loan alone;
-  `balance status` lists none of them.
+  `balance status` lists none of them. An account balancing moves in the same pass counts in no
+  group but its own home, so no feed count relies on it.
 - **Ready and out.** Ready: `balancing::room` answers (fresh figures, below the group's threshold
   less its hysteresis), or every own window at or past that line resets within the look-ahead; a
   sign-in waiting is never ready. Out: not ready, and a limit refusal holds it or a window is at or
@@ -3092,7 +3093,10 @@ design target-state `06-default-feed.md`. A second policy on balancing's pass an
   refusal now), `a_surplus_placement_and_one_waiting_for_a_sign_in_go_back` (the margin),
   `a_spent_return_never_relies_on_an_account_a_priority_take_removes`,
   `a_refusal_before_a_restart_is_not_a_refusal_now`,
-  `a_spent_return_is_held_when_its_replacement_was_not_lent`, statistics
+  `a_spent_return_is_held_when_its_replacement_was_not_lent`,
+  `a_spent_return_runs_once_its_replacement_was_lent`,
+  `an_account_balancing_takes_back_in_the_same_pass_is_not_relied_on`,
+  `the_pass_reads_refusals_from_this_owners_own_counts`, statistics
   `a_window_reads_the_last_hours_and_a_fresh_start_reads_the_day_as_well` (`window_in_memory`),
   `higher_priority_is_served_first_and_each_gets_one_before_any_gets_two` (a group with no account
   and no requests is fed nothing), `the_persons_change_is_checked`,

@@ -1718,6 +1718,7 @@ check(() => {
   assert.match(line('priority', 'default', 'agents'), /higher priority/);
   assert.equal(line('account_gone', 'default', 'agents'), 'Work went back to its own group.');
   assert.equal(line('feed', 'default', 'agents', 'failed'), 'Work could not be moved. The next pass tries again.');
+  assert.equal(line('spent', 'default', 'agents', 'held'), 'Work ran out in Agents and stays: the account that would replace it was not placed.');
   assert.equal(logic.feedNotice({ group: 'Agents', on: true, priority: 1 }), 'Agents is fed from the default group, priority 1.');
   assert.match(logic.feedNotice({ group: 'Agents', on: false }), /back in their own groups/);
   assert.equal(logic.feedNotice({ group: 'Agents', priority: 3 }), 'Agents has priority 3 now.');
