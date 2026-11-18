@@ -728,6 +728,33 @@ mod tests {
         );
         assert_eq!(operation_kind(&wrapped), "continue");
     }
+    /// SB-449: `queued` is the owner's own: it never travels, and a request that names it is
+    /// refused, so a caller cannot ask for the console queue's longer hold.
+    #[test]
+    fn a_continues_queued_flag_never_crosses_the_wire() {
+        let sent = serde_json::to_value(Operation::Continue {
+            workflow_id: "wf_0123456789abcdef".into(),
+            id: "acct".into(),
+            mode: "isolated".into(),
+            working_directory: "/work".into(),
+            in_place: true,
+            queued: true,
+        })
+        .unwrap();
+        assert!(sent.get("queued").is_none(), "{sent}");
+        let read: Operation = serde_json::from_value(sent.clone()).unwrap();
+        assert!(matches!(
+            read,
+            Operation::Continue {
+                in_place: true,
+                queued: false,
+                ..
+            }
+        ));
+        let mut asked = sent;
+        asked["queued"] = json!(true);
+        assert!(serde_json::from_value::<Operation>(asked).is_err());
+    }
     use super::*;
     use crate::Owner;
     use serde_json::json;
