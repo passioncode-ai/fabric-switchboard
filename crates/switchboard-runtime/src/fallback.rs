@@ -510,6 +510,7 @@ pub(crate) async fn pass(runtime: &Runtime, now: i64) {
                 mode: "isolated".into(),
                 working_directory: dir.clone(),
                 in_place: in_fabric,
+                queued: in_fabric,
             }),
         )
         .await?;
@@ -4083,6 +4084,7 @@ mod tests {
             mode: mode.into(),
             working_directory: dir.to_owned(),
             in_place: false,
+            queued: false,
         }
     }
 
@@ -4275,6 +4277,7 @@ mod tests {
                         mode: "managed".into(),
                         working_directory: dir,
                         in_place: false,
+                        queued: false,
                     })
                     .await;
                 if let Err(e) = &answer {
@@ -4581,6 +4584,7 @@ mod tests {
                         mode: "managed".into(),
                         working_directory: dir,
                         in_place: false,
+                        queued: false,
                     })
                     .await;
                 if let Err(e) = &answer {

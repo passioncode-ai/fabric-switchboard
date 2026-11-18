@@ -28,6 +28,23 @@
 
 **Exact next task.** Review round 2 on PR #826, then merge once the gate reads EXIT 0 on the merged head; the next release carries SB-420.
 
+## 2026-11-18: PR #831 review round 1 (SB-440, SB-443, SB-445 fixed; SB-444, SB-446 filed), on branch `launch-stale`
+
+- **Asked.** Review round 1 of #831 (no P1): margin between the unclaimed-marker bound and the client wait; start tokens instead of pid age; `continue --in-place` as a caller; a race in clearing a stale marker; docs on non-regular markers; `O_NOFOLLOW`; a row for `run_hosted`; Fabric's finding (thread 36572ae0) that a control timeout must be told apart by code.
+- **Built.** `UNCLAIMED_TTL` 5 min (asserted longer than `limit_secs(Launch)` plus a minute); the marker carries `token` (`copies::process_token`), judged on every platform; `Operation::Continue.queued` (never sent; set by `ContinueToConsole` and the fallback) picks the ten-minute hold, otherwise an in-place continue is the caller's; `Continue` waits 120 s; `clear_stale` renames aside, judges again, links back a fresh marker; `commit` opens with `O_NOFOLLOW`; Linux `process_started` from `/proc/<pid>/stat` (SB-445); CLI `failure`: `control-timeout`, status 4 (SB-443). Merged origin/main `ce62f8c9`.
+- **Checks.** See the PR (Studio gate, EXIT line).
+
+**Exact next task.** Review round 2 of #831, then merge once the gate reads EXIT 0 on the merged head; then SB-441, SB-444, SB-446 by priority.
+
+## 2026-11-18: SB-440 a launch nobody ran no longer blocks its home; SB-441 filed, on branch `launch-stale`
+
+- **Asked.** Operator report 2026-11-18: `switchboard launch <account> --mode managed --headless` for `runtimes/claude-tokens` timed out on its control request, left `.session.json` `starting` and an empty `.launch-pending`, and every later launch was refused until both files were moved by hand. Also file `keys observatory add` answering "The key was saved, but where it came from could not be recorded."
+- **Built.** `crates/switchboard-runtime/src/launch.rs`: `.launch-pending` names the preparing process (`{"pid": N}`), then who runs the script (`Reservation::commit(Handed::Terminal | Handed::Caller)`, rewritten in place); one judgement `pending()` for `ensure_idle`, `reservation_open` and `home_state`: a gone or reused preparer frees the home at once, a script handed to the caller of `Launch` after two minutes (`UNCLAIMED_TTL`), Terminal's, a continuation's prepared in place (it may wait in the hand-over queue for a console) and an earlier version's marker after ten as before; a stale marker is cleared by the next launch with the log line `launch_reservation`. `control::limit_secs`: `Launch` (bare or wrapped in `Launched`) waits 120 s. Kimi and sign-in launches commit as Terminal. Docs: CONTRACTS session list, OPERATIONS, CHANGELOG.
+- **Decisions.** No change to the control protocol (the CLI cannot name its pid without a new field that an older owner's `deny_unknown_fields` would refuse); a two-minute bound for an unclaimed caller marker instead. SB-441 left as a row: the cause is dropped by `after_record`, so the next step is to keep it.
+- **Checks.** See the PR (gate on the Studio, EXIT line).
+
+**Exact next task.** Review the `launch-stale` pull request and merge it once its gate reads EXIT 0 on the merged head; then SB-441 (keep the record failure's reason and reproduce it on a synthetic data folder).
+
 ## 2026-11-17: SB-417 window follow-up from the design review, on branch `board-share-ui`
 
 - **Asked.** The design review of PR #818 (`~/DATA/_worktrees/design-review-feed-pool.md`, SCN-093 step 5, SCN-094 step 4b): the limit dialog said board runs wait at the limit; the default share `max(2, cap/4)` exceeded a limit of 1; a clamped share was silent in the window; the demo could not show waiting board runs.
