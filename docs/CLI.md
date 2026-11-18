@@ -45,7 +45,7 @@ switchboard accounts receive handover.json --signer KEY [--apply] [--headless]  
 switchboard accounts recall ACCOUNT_UUID --from member@vm   # SB-292: take a moved sign-in back; its copy there is removed and proved gone (Claude and Codex)
 switchboard accounts send ACCOUNT_UUID --to user@studio.local --remote /usr/local/bin/switchboard --remote-data-dir /srv/switchboard   # SB-315: a Switchboard there that runs with --data-dir; a recall uses the same by default
 switchboard accounts seats [--limit 50]                     # SB-312: the moves, hand-overs and call backs recorded here, with the id there
-switchboard agents anthropic set team-a --key-stdin --model claude-sonnet-5-5   # SB-390: an Anthropic API key under a name (piped, never echoed); list | model | remove | key
+switchboard agents anthropic set team-a --key-stdin --model claude-sonnet-5-5   # SB-390: an Anthropic API key under a name (piped, never echoed); list | model | remove | key NAME --to-pipe
 switchboard agents launch hermes --anthropic personal --dir /abs/folder     # SB-390: Hermes on the Anthropic key saved as personal
 switchboard agents launch-keys hermes --folder /abs/folder   # SB-392: the keys this agent can start on, by name: the folder's OpenRouter key first, then the others and the Anthropic keys
 use_secret.py run --vault-only --env prod team-a ANTHROPIC_API_KEY -- sh -c 'printf %s "$ANTHROPIC_API_KEY" | switchboard agents anthropic set team-a --key-stdin'   # SB-392 K-0: save a key from Observatory without seeing it (an Admin key is refused)
@@ -874,11 +874,19 @@ switchboard agents openrouter model anthropic/claude-sonnet-4.5
 switchboard agents openrouter remove
 switchboard agents openrouter set --key-stdin --pool client-alpha   # SB-144: the key agents in that project's folders run on
 switchboard agents openrouter list         # every saved key with its project, and the projects without one
-switchboard agents key --service openrouter --pool client-alpha   # exactly that group's own key (launch scripts call this, SB-213)
-switchboard agents key --service openrouter --machine   # exactly the machine's key (launch scripts call this, SB-213)
-switchboard agents key --service openrouter --dir /work/app   # the key of that folder's group, else the machine's (scripts written before 0.7.0)
-switchboard agents key --service openrouter   # the value, for a session script's export only
+switchboard agents key --service openrouter --pool client-alpha --to-pipe   # exactly that group's own key (launch scripts call this, SB-213)
+switchboard agents key --service openrouter --machine --to-pipe   # exactly the machine's key (launch scripts call this, SB-213)
+switchboard agents key --service openrouter --dir /work/app --to-pipe   # the key of that folder's group, else the machine's
 ```
+
+A command that prints a key (`agents key --service openrouter`, `agents anthropic key NAME`)
+takes `--to-pipe` and writes into a pipe, a session script's `$(...)`; without the flag, to a
+terminal or into a file it refuses and prints nothing (SB-420). Session scripts Switchboard writes
+pass it; a script an earlier version wrote (Hermes or OpenCode on a saved key) is written again at
+the next launch. `accounts surrender` is run by `accounts recall` over ssh, which names the
+hand-over in its command (`SWITCHBOARD_TRANSFER=surrender`); to a terminal or a file it refuses.
+These checks keep a value off a screen and out of a file. They are not an access control: a
+program running as the same user can still pass them.
 
 A session script names the key slot its start's spending check read (`--pool` or `--machine`),
 never its folder: a folder that joins another group between the launch and the script's first

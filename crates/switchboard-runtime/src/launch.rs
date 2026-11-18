@@ -2223,6 +2223,8 @@ pub fn launch_agent_anthropic(
         "anthropic".into(),
         "key".into(),
         key.to_owned(),
+        // SB-420: the key prints only into the pipe this script reads it from.
+        "--to-pipe".into(),
     ];
     let content = script_with(
         &home,
@@ -2685,6 +2687,8 @@ fn key_command(
             command.push(pool.clone());
         }
     }
+    // SB-420: the key prints only into the pipe this script reads it from.
+    command.push("--to-pipe".into());
     Ok((command, slot))
 }
 fn openrouter_session(

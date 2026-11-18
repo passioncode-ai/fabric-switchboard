@@ -77,7 +77,7 @@ accounts only, `invalid_grant` is permanent, 401 retries once after refresh).
 
 **`/usr/bin/security` writes.** `security -i` with one line
 `add-generic-password -U -a "<account>" -s "<service>" -X <hex>` on stdin when the line is at
-most 4032 bytes, otherwise the same arguments in argv (Claude Code's own fallback). Delete:
+most 4032 bytes, otherwise the same arguments in argv (Claude Code's own fallback). Superseded by SB-420 (2026-11-17): no argv; quoted text on the same line when hex does not fit, else refused. Delete:
 `delete-generic-password -a … -s …`, exit 44 counts as success. 5-second deadline, no stderr
 captured, sanitized errors.
 
@@ -168,7 +168,7 @@ use).
 | REQ-39 | Docs in the same change (ACCOUNTS-AND-ROTATION, SPEC, CONTRACTS, scenarios, evidence, HANDOFF), coverage measured, full gate green (#18) | `scripts/check_docs.py`, `cargo llvm-cov`, `./scripts/check.sh` |
 
 **Not taken, with reason.** Report §"Accepted": a credential item larger than the `security -i`
-line goes to argv as hex, exactly as Claude Code does; no prompt-free alternative exists.
+line goes to argv as hex, exactly as Claude Code does; no prompt-free alternative exists. Superseded by SB-420 (2026-11-17): such an item is written as quoted text on the stdin line when it fits, else refused; it never goes to argv.
 
 | Item | Status |
 |---|---|

@@ -94,7 +94,11 @@ pub const SURRENDER_FAILED: &str =
     "The other machine did not give the sign-in back. Nothing changed; check ssh and its Switchboard.";
 pub const NOT_RETURNED: &str = "The sign-in came back but the provider did not answer it here. It went back to the other machine.";
 pub const SURRENDER_TO_TERMINAL: &str =
-    "This prints a sign-in. Run it only through ssh from the machine that calls the account back.";
+    "This prints a sign-in. Only the machine that calls the account back runs it, over ssh.";
+/// SB-420: the variable the calling machine's ssh command sets for one `accounts surrender`, the
+/// only way that command prints a sign-in; set on that command alone, never exported.
+pub const TRANSFER_ENV: &str = "SWITCHBOARD_TRANSFER";
+pub const TRANSFER_SURRENDER: &str = "surrender";
 
 /// Runs one command on the other machine: `ssh <target> -- <remote command>`, with `stdin` when
 /// given; answers its standard output, or an error when it failed.
@@ -122,6 +126,14 @@ pub fn remote(program: &Program<'_>, args: &[&str]) -> String {
         .map(quoted)
         .collect::<Vec<_>>()
         .join(" ")
+}
+/// SB-420: [`remote`] for the one call that hands a sign-in over (`accounts surrender`): it names
+/// the hand-over in the command itself. An older Switchboard there ignores the variable.
+fn remote_transfer(program: &Program<'_>, args: &[&str]) -> String {
+    format!(
+        "/usr/bin/env {TRANSFER_ENV}={TRANSFER_SURRENDER} {}",
+        remote(program, args)
+    )
 }
 pub use fabric_sessions_core::cli::data;
 /// The other machine's refusal (`{"ok":false,"error":...}`), from its output whether ssh ended
@@ -897,11 +909,15 @@ pub fn recall_take_as(
             None,
         );
     };
+    // A delegated seat comes back through the other machine's restricted entry (`ssh-serve`),
+    // which reads the words itself; a moved account through its `accounts surrender`.
+    let surrender = as_sender(&["--json", "accounts", "surrender", remote_id], sender_key);
     let answer = run(
-        &ssh(remote(
-            program,
-            &as_sender(&["--json", "accounts", "surrender", remote_id], sender_key),
-        )),
+        &ssh(if sender_key.is_some() {
+            remote(program, &surrender)
+        } else {
+            remote_transfer(program, &surrender)
+        }),
         None,
     );
     let output = match &answer {
@@ -1562,6 +1578,13 @@ mod tests {
             calls.lock().unwrap().push((command.clone(), None));
             if command.contains("'surrender'") && command.contains("'--undo'") {
                 return Ok(r#"{"ok":true,"data":{"restored":true}}"#.into());
+            }
+            // SB-420: the call that hands a sign-in over names the hand-over in its command.
+            if command.contains("'surrender'") {
+                assert!(
+                    command.starts_with("/usr/bin/env SWITCHBOARD_TRANSFER=surrender '"),
+                    "{command}"
+                );
             }
             if command.contains("'surrender'") {
                 return give
@@ -2440,6 +2463,16 @@ mod tests {
                 .any(|(c, _)| c
                     .contains(&format!("'surrender' '{remote_id}' '--sender-key' '{KEY}'")))
         );
+        // The restricted entry reads the words itself: a call under the key has no variable in
+        // front of them (SB-420); the call back without the key above had one.
+        let calls = calls.lock().unwrap();
+        assert!(calls
+            .iter()
+            .filter(|(c, _)| c.contains("'--sender-key'"))
+            .all(|(c, _)| !c.contains("SWITCHBOARD_TRANSFER")));
+        assert!(calls.iter().any(|(c, _)| c
+            .starts_with("/usr/bin/env SWITCHBOARD_TRANSFER=surrender '")
+            && c.contains(&format!("'surrender' '{remote_id}'"))));
     }
 
     /// SB-403 (review P1-2): a delegated move whose check fails there removes the copy there

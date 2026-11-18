@@ -777,6 +777,9 @@ fn report(slot: &mut Slot, provider: Provider, code: &'static str) {
         );
     }
 }
+/// SB-420: Claude Code's item (its sign-in with every MCP sign-in) no longer fits one write
+/// that keeps the value off the command line. Nothing was written.
+pub(crate) const CREDENTIAL_TOO_LARGE: &str = "Claude Code's Keychain item is too large to write safely. Sign out of MCP servers you no longer use in Claude Code, then retry.";
 /// The keychain is locked: the background waits for it to be unlocked rather than asking.
 #[cfg(unix)]
 const LOCKED: &str = switchboard_core::security_cli::UNAVAILABLE;
@@ -1442,8 +1445,15 @@ impl Writer for Native {
             // Claude Code creates and reads this item with /usr/bin/security; writing it
             // from any other executable would make macOS ask for consent (PLAN-0.5 C-2).
             return match value {
-                Some(bytes) => crate::external_keychain::write(&c.service, &c.user, bytes)
-                    .map_err(|_| "Claude credential write needs Keychain access.".into()),
+                Some(bytes) => {
+                    crate::external_keychain::write(&c.service, &c.user, bytes).map_err(|e| {
+                        if e == switchboard_core::security_cli::TOO_LARGE {
+                            CREDENTIAL_TOO_LARGE.into()
+                        } else {
+                            "Claude credential write needs Keychain access.".into()
+                        }
+                    })
+                }
                 None => crate::external_keychain::delete(&c.service, &c.user)
                     .map_err(|_| "Claude credential rollback needs Keychain access.".into()),
             };
@@ -1866,7 +1876,12 @@ fn activate(
         let config = writer.config_write(&c.config, restored.as_deref()).is_ok();
         auth && shadow && config
     };
-    if writer.auth_write(c, Some(&new_auth)).is_err() {
+    if let Err(error) = writer.auth_write(c, Some(&new_auth)) {
+        // SB-420: refused before the security tool ran: nothing was written, so nothing is put
+        // back (a rollback write of the old item, as large, would be refused too).
+        if error == CREDENTIAL_TOO_LARGE {
+            return Err(error);
+        }
         // A timed-out write may already have committed: put the old item back.
         ensure_lock().map_err(|_| "Claude account lock was lost after credential write. Sign in through Claude before retrying.")?;
         return Err(if writer.auth_write(c, old_auth.as_deref()).is_ok() {
@@ -1959,6 +1974,33 @@ pub trait LiveItem: Send {
     fn read(&self) -> Result<Option<Vec<u8>>, String>;
     /// Replaces the live item; only while every lock is still held.
     fn write(&self, auth: &[u8]) -> Result<(), String>;
+    /// SB-420: whether a renewed `auth` (new tokens, a little longer at most) could be written
+    /// without its value on the command line. Asked before a renewal spends the refresh token.
+    fn fits(&self, auth: &[u8]) -> bool {
+        let _ = auth;
+        true
+    }
+}
+/// SB-420: what a renewed item may grow by over the one read (its new tokens and expiry).
+pub(crate) const RENEWAL_HEADROOM: usize = 512;
+/// SB-420: the Keychain stamp of Claude Code's credential item (created and modified times),
+/// read from its attributes: nothing is decrypted, no lock is taken, no dialog can show. Off
+/// macOS, the file's time and length. None when it cannot be read.
+pub fn live_stamp() -> Option<String> {
+    let c = context(Provider::Claude, None).ok()?;
+    #[cfg(target_os = "macos")]
+    if c.mac {
+        use switchboard_core::external_keychain::{probe_external, ItemProbe};
+        return match probe_external(&c.service, &c.user, Some(Path::new("/usr/bin/security"))) {
+            ItemProbe::Present {
+                stamp: (created, modified),
+                ..
+            } => Some(format!("{created}:{modified}")),
+            _ => None,
+        };
+    }
+    let meta = fs::metadata(c.home.join(".credentials.json")).ok()?;
+    Some(format!("{:?}:{}", meta.modified().ok()?, meta.len()))
 }
 pub fn lock_live() -> Result<Box<dyn LiveItem>, String> {
     let context = context(Provider::Claude, None)?;
@@ -1971,6 +2013,19 @@ impl LiveItem for LiveLock {
     fn read(&self) -> Result<Option<Vec<u8>>, String> {
         self.locks.ensure()?;
         current_auth(&Native, &self.context)
+    }
+    fn fits(&self, auth: &[u8]) -> bool {
+        #[cfg(target_os = "macos")]
+        if self.context.mac {
+            return switchboard_core::security_cli::fits(
+                &self.context.service,
+                &self.context.user,
+                auth,
+                RENEWAL_HEADROOM,
+            );
+        }
+        let _ = auth;
+        true
     }
     fn write(&self, auth: &[u8]) -> Result<(), String> {
         self.locks.ensure()?;
@@ -2129,6 +2184,10 @@ mod tests {
         fail_config: Cell<bool>,
         /// The next credential write commits, then reports failure (a `security` timeout).
         fail_auth_after_commit: Cell<bool>,
+        /// SB-420: every credential write is refused as too large, writing nothing.
+        refuse_too_large: Cell<bool>,
+        /// Credential writes attempted.
+        auth_writes: Cell<usize>,
     }
     impl Fixture {
         fn new() -> Self {
@@ -2137,6 +2196,8 @@ mod tests {
                 keys: RefCell::new(BTreeMap::new()),
                 fail_config: Cell::new(false),
                 fail_auth_after_commit: Cell::new(false),
+                refuse_too_large: Cell::new(false),
+                auth_writes: Cell::new(0),
             }
         }
         fn put(&self, path: &Path, bytes: &[u8]) {
@@ -2157,6 +2218,10 @@ mod tests {
     }
     impl Writer for Fixture {
         fn auth_write(&self, c: &Context, v: Option<&[u8]>) -> Result<(), String> {
+            self.auth_writes.set(self.auth_writes.get() + 1);
+            if self.refuse_too_large.get() {
+                return Err(CREDENTIAL_TOO_LARGE.into());
+            }
             if c.mac {
                 let key = (c.service.clone(), c.user.clone());
                 match v {
@@ -2615,6 +2680,40 @@ mod tests {
             "Claude activation failed; previous account restored."
         );
         assert_eq!(*f.keys.borrow(), before);
+    }
+    /// SB-420: an item too large to write leaves everything as it was and says so: no rollback
+    /// write is tried, and the answer is the size, not a rollback that needs attention.
+    #[test]
+    fn an_item_too_large_to_write_changes_nothing_and_says_so() {
+        let f = Fixture::new();
+        let c = mac_ctx();
+        f.put(&c.config, &config("old@example.test"));
+        put_live(
+            &f,
+            &c,
+            json!({"claudeAiOauth":{"accessToken":"old","refreshToken":"old-r"}}),
+        );
+        let before = (f.files.borrow().clone(), f.keys.borrow().clone());
+        let new = target("new", json!({}));
+        let old = identity(&parse(&config("old@example.test")).unwrap()).unwrap();
+        f.refuse_too_large.set(true);
+        f.auth_writes.set(0);
+        let error = activate(
+            &f,
+            &c,
+            &new.credential,
+            &new.identity,
+            Some(&old),
+            &mut |_| Ok(()),
+            || Ok(()),
+        )
+        .unwrap_err();
+        assert_eq!(error, CREDENTIAL_TOO_LARGE);
+        assert_eq!(f.auth_writes.get(), 1, "no rollback write");
+        assert_eq!((f.files.borrow().clone(), f.keys.borrow().clone()), before);
+        // A renewal's write answers the same and writes nothing.
+        assert_eq!(write_live(&f, &c, b"{}").unwrap_err(), CREDENTIAL_TOO_LARGE);
+        assert_eq!((f.files.borrow().clone(), f.keys.borrow().clone()), before);
     }
     #[test]
     fn a_config_created_by_a_switch_skips_onboarding_and_an_existing_one_is_kept() {

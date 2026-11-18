@@ -3162,7 +3162,7 @@ function attentionSection(main: HTMLElement) {
   items.forEach((item, index) => {
     const account = item.account_id ? snapshot!.accounts.find((a) => a.id === item.account_id) : undefined;
     const row = el('li', 'attention-row'); const copy = el('div', 'attention-copy');
-    const name = item.label ?? account?.label ?? (item.reason === 'ceiling_question' ? t('Spending ceiling') : item.reason === 'dispatch_refused' ? t('Board runs') : t('An account no longer saved'));
+    const name = item.label ?? account?.label ?? (item.reason === 'ceiling_question' ? t('Spending ceiling') : item.reason === 'dispatch_refused' ? t('Board runs') : item.reason === 'keychain_too_large' ? t('Claude Code sign-in') : t('An account no longer saved'));
     const provider = item.provider ?? account?.provider ?? null; const pool = item.pool ?? account?.pool ?? null;
     const where = [provider ? providerName(provider) : '', pool ? poolName(pool, snapshot?.projects) : ''].filter(Boolean).join(' · ');
     const head = el('div', 'attention-title'); head.append(el('strong', '', name)); if (where) head.append(el('span', 'attention-where', where));
@@ -3173,7 +3173,9 @@ function attentionSection(main: HTMLElement) {
     const act = button(offer?.label ?? attentionActionLabel(item.action.window), () => attentionAct(item, account, key, offer?.pid ?? undefined), 'button row-button', key);
     // A sign-in or a check needs the account here; without it the action has nothing to act on.
     if ((item.action.window === 'sign_in' && !account && !item.provider) || ((item.action.window === 'check_usage' || item.action.window === 'move_tokens') && !account) || (item.action.window === 'close_copy' && (!item.session_id || !!offer?.disabled)) || (item.action.window === 'dispatch_stop' && !item.launch_id)) { act.disabled = true; act.dataset.locked = 'true'; }
-    row.append(copy, act); list.append(row);
+    // SB-420: an item whose fix is outside Switchboard offers no button.
+    if (item.action.window === 'none') row.append(copy); else row.append(copy, act);
+    list.append(row);
   });
   section.append(list); main.append(section);
 }
@@ -3190,6 +3192,7 @@ function attentionAct(item: AttentionItem, account: Account | undefined, key: st
     case 'open_sessions': goTo('sessions'); return;
     case 'open_capacity': goToSettings('session-limit'); return;
     case 'move_tokens': if (account) moveToTokens(account, key); return;
+    case 'none': return;
     // SB-388: one press closes the copy quiet longest, never a working one.
     case 'close_copy': { const id = item.session_id; if (id) void mutate(() => adapter.sessionCloseCopy(id, pid), pid ? t('Closed the older copy. The other one keeps working.') : t('Closed the quiet copy. The other one keeps working.'), key); return; }
     // SB-407: a stuck or gone board run is stopped, which records its end.
