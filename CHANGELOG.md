@@ -10,6 +10,7 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 - A long Keychain write no longer passes the value on the command line: it goes on standard input as text when hex does not fit, and an item too large for that is refused, nothing written. A switch or a renewal of Claude Code's sign-in that meets such an item says so and leaves the previous sign-in in place; `switchboard status`, MCP `switchboard_status` and Needs attention show it until a later write succeeds (SB-420).
 - `agents key --service openrouter`, `agents anthropic key NAME` and `accounts surrender` no longer print a credential to a terminal or into a file. The key commands take `--to-pipe`, as Switchboard's session scripts do; a Hermes or OpenCode session script an earlier version wrote is written again at its next launch (SB-420).
+- The session pool's default board share is a quarter of the limit rounded up and never more than the limit (a limit of 1 to 4 gives 1, 20 gives 5; a limit from 9 that is not a multiple of 4 gives one more than before). The limit dialog now says hosted consoles wait at the limit while Fabric board runs still start within the board's share; the empty *Board runs* field shows the default for the limit typed; saving a lower limit that clamped the share says so; the browser demo shows waiting board runs with `?demo=1&board-waiting=1` (SB-417, design review).
 
 ## 0.7.117
 

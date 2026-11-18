@@ -1080,7 +1080,7 @@ enum CapacityCmd {
         /// The most working coding sessions at once, 1 to 500.
         cap: u32,
         /// How many board runs may run whatever the cap holds: a number from 0 to the cap, or
-        /// `default` (a quarter of the cap, at least 2). Left out: the share set before is kept,
+        /// `default` (a quarter of the cap, rounded up). Left out: the share set before is kept,
         /// clamped to the new cap.
         #[arg(long, value_parser = board_share_arg)]
         board: Option<BoardShare>,

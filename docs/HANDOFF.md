@@ -11,6 +11,14 @@
 
 **Exact next task.** Review round 2 on PR #826, then merge once the gate reads EXIT 0 on the merged head; the next release carries SB-420.
 
+## 2026-11-17: SB-417 window follow-up from the design review, on branch `board-share-ui`
+
+- **Asked.** The design review of PR #818 (`~/DATA/_worktrees/design-review-feed-pool.md`, SCN-093 step 5, SCN-094 step 4b): the limit dialog said board runs wait at the limit; the default share `max(2, cap/4)` exceeded a limit of 1; a clamped share was silent in the window; the demo could not show waiting board runs.
+- **Built.** `capacity::default_board_share` is a quarter of the cap rounded up, never more than the cap (`ui-logic` `defaultBoardShare` the same); the dialog's description, hint and error rewritten; the empty *Board runs* field shows the default for the limit typed and its top follows the limit; *Save limit* adds the clamped line; `?demo=1&board-waiting=1` shows the waiting board runs.
+- **Checks.** See the PR (gate on the build machine). Copylot report ids in [strings.md](brand/strings.md).
+
+**Exact next task.** Review the `board-share-ui` pull request and merge it once its gate reads EXIT 0 on the merged head.
+
 ## 2026-11-17: SB-417 the session pool gives board runs a share and counts sessions, not folders, on branch `board-share`
 
 - **Asked.** Target-state plan wave item W1.1 (`docs/plans/2026-11-17-target-state/03-sessions.md` capability 16, on branch `target-state`): measured 17:55 CET on the operator's MacBook, cap 20 with 34 sessions counted, most of them interactive, so every board `dispatch` was refused `at_capacity` with no end; operator: the session manager must start work when it arrives.
