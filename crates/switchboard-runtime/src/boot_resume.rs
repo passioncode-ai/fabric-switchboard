@@ -51,7 +51,8 @@ const MAX_BYTES: u64 = 256 * 1024;
 pub const BY: &str = "boot-resume";
 
 pub const UNREADABLE: &str = "The setting for continuing sessions after a restart (boot-resume.json) could not be read. Set it again, or delete the file for the default.";
-pub const NOT_SAVED: &str = "The setting for continuing sessions after a restart could not be saved.";
+pub const NOT_SAVED: &str =
+    "The setting for continuing sessions after a restart could not be saved.";
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
@@ -348,7 +349,12 @@ pub fn run(root: &Path, boot: i64, now: i64, machine: &dyn Machine) -> Value {
     let records: HashMap<String, Value> = ledger
         .sessions
         .iter()
-        .filter_map(|s| Some((s.launch_id.clone(), crate::launches::get(root, &s.launch_id)?)))
+        .filter_map(|s| {
+            Some((
+                s.launch_id.clone(),
+                crate::launches::get(root, &s.launch_id)?,
+            ))
+        })
         .chain(
             crate::launches::recent_records(root, boot)
                 .into_iter()
@@ -462,14 +468,9 @@ impl Machine for Real<'_> {
         else {
             return Err("no_script".into());
         };
-        if let Err(error) = crate::session_host::start_detached(
-            self.root,
-            id,
-            Path::new(script),
-            &cli,
-            40,
-            120,
-        ) {
+        if let Err(error) =
+            crate::session_host::start_detached(self.root, id, Path::new(script), &cli, 40, 120)
+        {
             // A host that never came up ends its record here; one that runs ends it itself.
             if crate::session_host::attachable(self.root, id).is_none() {
                 crate::launches::end_once(self.root, id, "not_started", self.now, Some(1));
@@ -634,14 +635,26 @@ mod tests {
         // f: a host runs it (another agent continued it). g: a launch since the boot names it.
         // h: a dispatched run that ended. i: Codex.
         launch(root, &id(1), "a", before - 3600, json!({}));
-        launch(root, &id(2), "b", before, json!({"ended": {"kind": "exited"}}));
+        launch(
+            root,
+            &id(2),
+            "b",
+            before,
+            json!({"ended": {"kind": "exited"}}),
+        );
         launch(root, &id(3), "c", before, json!({}));
         launch(root, &id(4), "d", before, json!({}));
         launch(root, &id(5), "e", before, json!({}));
         launch(root, &id(6), "f", before, json!({}));
         launch(root, &id(7), "g", before, json!({}));
         launch(root, &id(8), "g", BOOT + 30, json!({}));
-        launch(root, &id(9), "h", before, json!({"dispatch": {"request": "r"}, "ended": {"kind": "exited"}}));
+        launch(
+            root,
+            &id(9),
+            "h",
+            before,
+            json!({"dispatch": {"request": "r"}, "ended": {"kind": "exited"}}),
+        );
         launch(root, &id(10), "i", before, json!({"provider": "codex"}));
         let ids: Vec<String> = (1..=10).map(id).collect();
         let pairs: Vec<(&str, &str)> = ["a", "b", "c", "d", "e", "f", "g", "h", "i"]
@@ -697,8 +710,14 @@ mod tests {
         launch(root, &id(1), "a", BOOT - 4000, json!({}));
         launch(root, &id(2), "b", BOOT - 4000, json!({}));
         ledger(root, &[("a", &id(1)), ("b", &id(2))], BOOT - 60, None);
-        append(root, json!({"at": BOOT + 10, "boot": BOOT, "phase": "intent", "session": "a", "launch_id": id(1)}));
-        append(root, json!({"at": BOOT + 10, "boot": BOOT, "phase": "intent", "session": "b", "launch_id": id(2)}));
+        append(
+            root,
+            json!({"at": BOOT + 10, "boot": BOOT, "phase": "intent", "session": "a", "launch_id": id(1)}),
+        );
+        append(
+            root,
+            json!({"at": BOOT + 10, "boot": BOOT, "phase": "intent", "session": "b", "launch_id": id(2)}),
+        );
         let mut fake = Fake::default();
         fake.written.insert("a".into(), BOOT - 100);
         fake.written.insert("b".into(), BOOT - 100);
@@ -733,10 +752,15 @@ mod tests {
         let mut fake = Fake::default();
         for (n, (s, i)) in names.iter().zip(&ids).enumerate() {
             launch(root, i, s, BOOT - 5000, json!({}));
-            fake.written.insert((*s).into(), BOOT - 100 * (n as i64 + 1));
+            fake.written
+                .insert((*s).into(), BOOT - 100 * (n as i64 + 1));
         }
         fake.fail.insert("s2".into());
-        let pairs: Vec<(&str, &str)> = names.iter().copied().zip(ids.iter().map(String::as_str)).collect();
+        let pairs: Vec<(&str, &str)> = names
+            .iter()
+            .copied()
+            .zip(ids.iter().map(String::as_str))
+            .collect();
         ledger(root, &pairs, BOOT - 30, Some(BOOT - 20));
         let answer = run(root, BOOT, BOOT + 60, &fake);
         assert_eq!(*fake.started.borrow(), ["s1", "s3", "s4", "s5"]);
@@ -745,7 +769,10 @@ mod tests {
             .into_iter()
             .find(|l| l["outcome"] == "failed")
             .unwrap();
-        assert_eq!((failed["session"].clone(), failed["reason"].clone()), (json!("s2"), json!("no_cli")));
+        assert_eq!(
+            (failed["session"].clone(), failed["reason"].clone()),
+            (json!("s2"), json!("no_cli"))
+        );
         assert!(crate::launches::get(root, &id(2)).unwrap()["continued_as"].is_null());
 
         // A full pool: nothing starts, and each is named.
@@ -788,7 +815,10 @@ mod tests {
                 stopped_at: None,
             },
         );
-        assert_eq!(run(root, BOOT, BOOT + 60, &fake)["reason"], "no_earlier_boot");
+        assert_eq!(
+            run(root, BOOT, BOOT + 60, &fake)["reason"],
+            "no_earlier_boot"
+        );
     }
 
     #[test]
@@ -811,7 +841,11 @@ mod tests {
         );
         observe(root, BOOT, seen.clone(), BOOT + 10);
         observe(root, BOOT, seen.clone(), BOOT + 70);
-        assert_eq!(read_ledger(root).unwrap().at, BOOT + 10, "unchanged: not rewritten");
+        assert_eq!(
+            read_ledger(root).unwrap().at,
+            BOOT + 10,
+            "unchanged: not rewritten"
+        );
         observe(root, BOOT, seen.clone(), BOOT + 10 + REFRESH_SECONDS);
         assert_eq!(
             read_ledger(root).unwrap().at,
@@ -821,7 +855,11 @@ mod tests {
         observe(root, BOOT, Vec::new(), BOOT + 4000);
         assert_eq!(read_ledger(root).unwrap().at, BOOT + 4000);
         observe(root, BOOT, Vec::new(), BOOT + 9000);
-        assert_eq!(read_ledger(root).unwrap().at, BOOT + 4000, "none running: never renewed");
+        assert_eq!(
+            read_ledger(root).unwrap().at,
+            BOOT + 4000,
+            "none running: never renewed"
+        );
         #[cfg(unix)]
         assert_eq!(
             std::os::unix::fs::PermissionsExt::mode(

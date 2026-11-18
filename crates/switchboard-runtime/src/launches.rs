@@ -1125,10 +1125,7 @@ pub(crate) fn reconcile(
     if !corrected.is_empty() {
         crate::oplog::event(
             "launch_session_corrected",
-            &[(
-                "count",
-                crate::oplog::Field::Number(corrected.len() as i64),
-            )],
+            &[("count", crate::oplog::Field::Number(corrected.len() as i64))],
         );
     }
     corrected
@@ -1693,7 +1690,14 @@ mod tests {
         let (_temp, root, id) = fixture();
         let nested = transcript_at("222f-nested.jsonl");
         let own = transcript_at("9dd3-own.jsonl");
-        event(&root, &id, Event::Start, Some("222f-nested"), Some(&nested), 200);
+        event(
+            &root,
+            &id,
+            Event::Start,
+            Some("222f-nested"),
+            Some(&nested),
+            200,
+        );
         // The launch's own start, second, reads as a nested session and changes nothing.
         event(&root, &id, Event::Start, Some("9dd3-own"), Some(&own), 201);
         event(&root, &id, Event::Turn, Some("9dd3-own"), None, 210);
@@ -1711,9 +1715,8 @@ mod tests {
             ("222f-nested".to_owned(), 21),
             ("unknown-launch".to_owned(), 40),
         ];
-        let found = |pid: u32, session: &str| {
-            (pid == 20 && session == "9dd3-own").then(|| own.clone())
-        };
+        let found =
+            |pid: u32, session: &str| (pid == 20 && session == "9dd3-own").then(|| own.clone());
         assert_eq!(reconcile(&root, &rows, &pairs, found, 300), [id.clone()]);
         let r = read_back(&root, &id);
         assert_eq!(r["provider_session_id"], "9dd3-own");
@@ -1727,9 +1730,13 @@ mod tests {
         assert!(reconcile(&root, &rows, &pairs, found, 400).is_empty());
         assert_eq!(read_back(&root, &id)["session_corrected_at"], 300);
         // A session that wrote no transcript yet leaves none named, never the old one.
-        let rows = vec![json!({"pid": 22, "agent": "claude-code", "launch_id": id, "started_at": 150})];
+        let rows =
+            vec![json!({"pid": 22, "agent": "claude-code", "launch_id": id, "started_at": 150})];
         let pairs = vec![("cleared-again".to_owned(), 22)];
-        assert_eq!(reconcile(&root, &rows, &pairs, |_, _| None, 500), [id.clone()]);
+        assert_eq!(
+            reconcile(&root, &rows, &pairs, |_, _| None, 500),
+            [id.clone()]
+        );
         let r = read_back(&root, &id);
         assert!(r["transcript"].is_null());
         assert_eq!(r["nested_sessions"], json!(["222f-nested", "9dd3-own"]));
