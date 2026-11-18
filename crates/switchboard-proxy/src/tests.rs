@@ -2970,18 +2970,16 @@ async fn disallow_and_rotate_take_effect_at_once_and_an_unnamed_account_is_close
     new.text().await.unwrap();
     // Disallowed: refused on the open connection, and a new connection is closed.
     users::save(s.root(), &[]).unwrap();
-    match client
+    // The kept-alive connection answers 401; a connection opened anew is closed.
+    if let Ok(r) = client
         .post(&base)
         .bearer_auth(&second)
         .body("{}")
         .send()
         .await
     {
-        Ok(r) => {
-            assert_eq!(r.status(), 401);
-            assert!(r.text().await.unwrap().contains(NAMED_USER_REFUSED));
-        }
-        Err(_) => {}
+        assert_eq!(r.status(), 401);
+        assert!(r.text().await.unwrap().contains(NAMED_USER_REFUSED));
     }
     assert!(reqwest::Client::new()
         .post(&base)
