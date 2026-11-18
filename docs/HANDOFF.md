@@ -13,6 +13,26 @@
 - **Not done.** The live sessions started before this release keep their old `launch.command` until relaunched. SB-455 (launch scripts without the login PATH) is separate.
 
 **Exact next task.** Review the `tokens-spend` pull request and merge once its gate reads EXIT 0 on the merged head (renumber DEC-0031 if a pull request took it first); after the release, relaunch the `tokens` sessions and read `switchboard statistics --days 1` for a `tokens` row and `switchboard ceiling` for a non-zero `spent_today_usd`.
+## 2026-11-18: SB-500 to SB-503, the session duty officer closed working sessions, on branch `duty-keeps-working-sessions`
+
+- **Asked.** Operator, session 4c635d5e: audit why the duty officer closes sessions that are working, and stop it.
+- **Found.** [Duty audit](reports/2026-11-18-duty-audit/README.md): 118 closes in three days; 3 closed while the transcript was being written (stale status file), 3 with no transcript found, 33 repeats of sessions the person had resumed; the Sound Engine orchestrator was closed with nothing running, and its own hosted launches were invisible to the check.
+- **Built.** `duty.rs`: `idle` also needs `transcript_quiet` (subagents included, unknown is not quiet) and `no_own_launches`; `closed_idle_before` keeps a session the person took up again. `session_watch.rs`: `running_children`, `children_now`. Help text, MCP description and its golden, CONTRACTS.
+- **Decisions.** Unknown counts as working everywhere (no transcript, records unread). A resumed session is kept for good rather than for a period: the person showed it is theirs.
+- **Interim.** `idle_minutes` 240 on the operator's Mac until the release is installed; set back to 60 after (the floor of 65 stays).
+- **Checks.** See the PR (Studio gate, EXIT line).
+
+**Exact next task.** Merge the `duty-keeps-working-sessions` PR after two clean review rounds; after the release that carries it is installed, `switchboard duty set --idle-minutes 60`; then SB-503.
+
+## 2026-11-19: SB-447 to SB-449, PR #831 review round 2 follow-up, on branch `launch-stale-2`
+
+- **Asked.** Round 2 of #831 (merged as `9e7026cb`): CLI.md on when statuses 3 and 4 are Switchboard's; `clear_stale` deleting a marker when the link back fails; only `Reservation::new` clears stale markers; `queued` never on the wire; Kimi in-place continue as `caller`; non-regular markers read alike everywhere; `btime` once.
+- **Built.** `launch.rs`: `ensure_idle` reads only (a stale marker is idle, never removed); `Reservation::new` clears through `clear_stale`, whose link back falls back to a rename (`clear_stale_with` for tests); `reservation_open` is `pending() == Held`; `Handed::for_continue`; Linux `BOOT` in a `OnceLock`. `lib.rs`: `#[serde(skip)] queued`; Kimi continue passes `Handed`. `kimi.rs`: `launch_continuation(.., handed)`. Docs: CLI.md, CONTRACTS, CHANGELOG, backlog.
+- **Decisions.** The read-only checks read a stale marker as idle, not busy: nothing will run its script, and a busy answer would make the fallback and the Kimi status see a session that never comes until someone launches again (the bug class SB-440 fixed). They no longer remove anything, which closes the race the review named.
+- **Checks.** See the PR (Studio gate, EXIT line).
+
+**Exact next task.** Review the `launch-stale-2` pull request and merge it once its gate reads EXIT 0 on the merged head; then SB-441, SB-444, SB-446 by priority.
+
 ## 2026-11-18: SB-420 Keychain writes keep values off the command line; credential output kept off screens and files, on branch `secret-argv`
 
 - **Asked.** Two findings of a leak audit (kept outside the repository) about Keychain writes and credential output; review round 1 of PR #826 (P1-A, P1-B, P1-C).

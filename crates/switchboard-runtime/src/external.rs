@@ -1981,7 +1981,9 @@ pub trait LiveItem: Send {
         true
     }
 }
-/// SB-420: what a renewed item may grow by over the one read (its new tokens and expiry).
+/// SB-420: what a renewed item may grow by over the one read (its new tokens and expiry). Only
+/// macOS writes the Keychain; elsewhere only the tests read it.
+#[cfg(any(target_os = "macos", test))]
 pub(crate) const RENEWAL_HEADROOM: usize = 512;
 /// SB-420: the Keychain stamp of Claude Code's credential item (created and modified times),
 /// read from its attributes: nothing is decrypted, no lock is taken, no dialog can show. Off

@@ -278,8 +278,9 @@ pub enum Operation {
         #[serde(default)]
         in_place: bool,
         /// SB-440: in place for the hand-over queue (`ContinueToConsole`, the automatic fallback),
-        /// where the script may wait for a console; set only inside the owner, never sent.
-        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        /// where the script may wait for a console; set only inside the owner, never sent nor read
+        /// from the wire (SB-449).
+        #[serde(skip)]
         queued: bool,
     },
     /// SB-247: Fabric's start of the default agent, with no person, on a workflow Fabric opened
@@ -6745,9 +6746,16 @@ async fn execute(
                     observatory,
                     previous_provider: plan.from_provider.clone(),
                 };
-                let launched =
-                    kimi::launch_continuation(root, &store, &id, &directory, &resumed, start)
-                        .map_err(|e| continuation::launch_failed(&offer, &e))?;
+                // SB-449: in place, the caller (or the hand-over queue) runs Kimi's script too.
+                let handed = if in_place {
+                    launch::Handed::for_continue(queued)
+                } else {
+                    launch::Handed::Terminal
+                };
+                let launched = kimi::launch_continuation(
+                    root, &store, &id, &directory, &resumed, start, handed,
+                )
+                .map_err(|e| continuation::launch_failed(&offer, &e))?;
                 return Ok(json!({
                     "script": if in_place { launched["script"].clone() } else { Value::Null },
                     "message": "Terminal launch requested; the Kimi Code session accepts the handoff itself. Provider response is not yet verified.",
@@ -6795,11 +6803,7 @@ async fn execute(
                     &directory,
                     &resumed,
                     // SB-440: a queued script may wait for a console; the CLI runs its own at once.
-                    if queued {
-                        launch::Handed::Terminal
-                    } else {
-                        launch::Handed::Caller
-                    },
+                    launch::Handed::for_continue(queued),
                 )
                 .map_err(|e| continuation::launch_failed(&offer, &e))?;
                 (tools, Some(script))
@@ -6928,7 +6932,12 @@ async fn execute(
                 }
             }
             let pool = pool.unwrap_or_else(|| "default".into());
-            let program = program.unwrap_or_else(|| account_send::REMOTE_DEFAULT.into());
+            // SB-475: the switchboard the machine is known to run (the newest move or run there),
+            // as every other call to it does; the macOS app's only for a machine never reached. A
+            // Linux machine runs the .deb's `/usr/bin/switchboard`, and the macOS default made
+            // every move there fail as if the machine had not answered.
+            let (program, remote_data_dir) =
+                targets::program_for(root, &to, program, remote_data_dir);
             let remote = account_send::Program {
                 path: &program,
                 data_dir: remote_data_dir.as_deref(),
