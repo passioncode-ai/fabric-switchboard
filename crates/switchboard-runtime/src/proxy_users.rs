@@ -131,6 +131,7 @@ pub struct Written {
     pub sha256: String,
 }
 
+#[cfg_attr(not(unix), allow(dead_code))]
 fn sha256_hex(bytes: &[u8]) -> String {
     use sha2::{Digest, Sha256};
     Sha256::digest(bytes)
