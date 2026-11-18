@@ -2826,9 +2826,13 @@ subscriptions. SB-273 closes their connections, and the agents' key never reache
   rotate); the window's Settings → *Other users of this computer* lists the accounts and disallows
   one (Tauri `proxy_users`, list and disallow only). `Operation::ProxyUsers` runs outside the store
   transaction: it writes only its own file and the settings file. Every surface refuses on Windows.
-- **Not proved yet.** A run on a real multi-user Linux VM (the service under systemd, two agent
-  users, `claude -p` through the settings file) is an operator-assisted acceptance task; the gate
-  plays the other account with synthetic uids (`start_as` with `Me::Uid(own + 1)`).
+- **Proved and not yet.** The gate plays the other account with synthetic uids (`start_as` with
+  `Me::Uid(own + 1)`). A Linux container run (2026-11-18, PR #832) used real users: `serve` as
+  `svc`, `agent-a` named with its file at `svc:agent-a 0640`, which `agent-b` cannot read; `agent-a`
+  with its capability reached route selection (409, no account in the group), a wrong one 401,
+  another group 403; `agent-b` was closed; after `rotate-user` the old capability read 401 and the
+  new one 409; after `disallow-user` `agent-a` was closed. `claude -p` on a real subscription on the
+  organization's VM is an operator-assisted acceptance task.
 
 ## Headless sign-in (SB-256 N1, 2026-11-05)
 
