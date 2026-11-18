@@ -338,10 +338,19 @@ pub fn write_settings(
 #[cfg(unix)]
 fn group_entry(gid: u32) -> Option<(String, Vec<String>)> {
     let mut grp: libc::group = unsafe { std::mem::zeroed() };
-    let mut buf = vec![0 as libc::c_char; 64 * 1024];
+    // 8-byte words: the member list the call writes into the buffer is an array of pointers.
+    let mut buf = vec![0u64; 8 * 1024];
     let mut found: *mut libc::group = std::ptr::null_mut();
     // SAFETY: every pointer is to a live buffer of the stated size; `found` is null or `grp`.
-    let rc = unsafe { libc::getgrgid_r(gid, &mut grp, buf.as_mut_ptr(), buf.len(), &mut found) };
+    let rc = unsafe {
+        libc::getgrgid_r(
+            gid,
+            &mut grp,
+            buf.as_mut_ptr().cast(),
+            buf.len() * 8,
+            &mut found,
+        )
+    };
     if rc != 0 || found.is_null() || grp.gr_name.is_null() {
         return None;
     }
@@ -355,7 +364,7 @@ fn group_entry(gid: u32) -> Option<(String, Vec<String>)> {
     if !grp.gr_mem.is_null() {
         for i in 0.. {
             // SAFETY: `gr_mem` is a NULL-terminated array of strings in `buf`.
-            let member = unsafe { *grp.gr_mem.add(i) };
+            let member = unsafe { grp.gr_mem.add(i).read_unaligned() };
             if member.is_null() || i > 4096 {
                 break;
             }
