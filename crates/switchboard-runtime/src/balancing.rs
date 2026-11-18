@@ -301,6 +301,10 @@ pub struct Action {
     /// SB-419 (DEC-0028): a move of the feed, with its figures; none for balancing's own.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub feed: Option<crate::feed::FeedFigures>,
+    /// SB-419 (review round 2): accounts lent earlier in the same batch that this return relies
+    /// on; `apply` holds the return when none of them was lent.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub relies_on: Vec<String>,
 }
 
 /// The used share below which an account of `provider` has room in `pool`, and how fresh its
@@ -481,6 +485,7 @@ fn returning(lend: &Lend, reason: &'static str, edit: bool, figures: Figures) ->
         edit,
         figures,
         feed: None,
+        relies_on: Vec::new(),
     }
 }
 
@@ -671,6 +676,7 @@ pub fn plan(
                     used_percent: Some(used),
                 },
                 feed: None,
+                relies_on: Vec::new(),
             });
             break;
         }
@@ -691,9 +697,15 @@ pub fn apply(
 ) -> bool {
     let before = settings.clone();
     let mut lines = Vec::new();
+    // SB-419: the accounts lent in this batch, for a return that relies on one of them.
+    let mut lent_now: HashSet<&str> = HashSet::new();
     for a in actions {
         let lend = a.action == "lend";
-        let outcome = if !a.edit {
+        let held =
+            !a.relies_on.is_empty() && !a.relies_on.iter().any(|id| lent_now.contains(id.as_str()));
+        let outcome = if held {
+            "held"
+        } else if !a.edit {
             "forgotten"
         } else {
             match store.set_shared(&a.to, &a.account, lend) {
@@ -703,6 +715,9 @@ pub fn apply(
             }
         };
         if lend && outcome == "done" {
+            lent_now.insert(a.account.as_str());
+        }
+        if lend && outcome == "done" {
             settings.lent.push(Lend {
                 account: a.account.clone(),
                 provider: a.provider,
@@ -711,12 +726,12 @@ pub fn apply(
                 at: now,
                 feed: a.feed.is_some(),
             });
-        } else if !lend && outcome != "failed" {
+        } else if !lend && outcome != "failed" && outcome != "held" {
             settings
                 .lent
                 .retain(|l| l.account != a.account || l.to != a.to);
         }
-        if a.edit {
+        if a.edit && outcome != "held" {
             settings.moved.insert(a.account.clone(), now);
         }
         crate::oplog::event(

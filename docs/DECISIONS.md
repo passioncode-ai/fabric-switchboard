@@ -838,15 +838,22 @@ research notes); the ones still in force that the board cites are seeded below w
   the cooldown); (3) fills the fed groups from the reservoir, the default group's accounts lent
   nowhere and parked accounts of other groups, highest priority first (equal priorities by group
   id), first to one ready account each, then to `ready`, the account with room now first (the most
-  room, then the latest reset), then the soonest reset (`feed`); (4) gives back a placement that is
-  out, never delayed, but only while another ready account serves its group, so a fed group never
-  loses its last account and its sessions always have one to go to (`spent`); (5) gives a fed group
-  with demand (requests in 6 hours, or a limit refusal in the last 15 minutes) and still no ready
-  account one ready account of the lowest fed group of a lower priority, even its last (an account
-  the feed placed there moves, `taken` then `priority`; its own account is shared with it), but not
-  an account that served that group in the last 30 minutes unless the higher group is refusing
-  requests now; (6) gives back the extra placements of a group holding more ready accounts than
-  `ready`, never the one its sessions use now (`surplus`). Every move is a loan like balancing's (a
+  room, then the latest reset), then the soonest reset (`feed`); (4) gives a fed group with demand
+  (requests in 6 hours, or a limit refusal in about the last 15 minutes as this owner counted it:
+  never the day counts a fresh start reads, so a refusal this morning is not one now) and still no
+  ready account one ready account of the lowest fed group of a lower priority, even its last (an
+  account the feed placed there moves, `taken` then `priority`; its own account is shared with it),
+  but not an account that served that group in about the last 30 minutes unless the higher group is
+  refusing requests now; (5) after those takes, gives back a placement that is out, never delayed,
+  but only while another account with room now serves its group, so a fed group never loses its
+  last account and its sessions always have one to go to (`spent`); a return that relies on an
+  account lent in the same pass is held when that lend did not happen; (6) gives back the extra
+  placements of a group holding at least `ready` + 2 accounts with room now, down to `ready`,
+  never the one its sessions use now (`surplus`). The two short windows are read in the statistics'
+  quarter-hour buckets, so they are about 30 and 15 minutes; "serving" reads the day counts after a
+  restart (erring toward protecting an account), and a lost `statistics.json` leaves it empty until
+  this owner has counted for about 30 minutes, when a priority move may take an account in use.
+  Every move is a loan like balancing's (a
   share; nobody's home changes), takes effect from the next request, waits out the account's
   one-hour cooldown except a park, a spent placement and one waiting for a sign-in, and is one
   `balancing.jsonl` line with its reason and figures. Never moved: the ordinary CLI's sign-in, an

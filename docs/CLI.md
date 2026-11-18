@@ -559,13 +559,13 @@ an account is ready when it has room now, or when its limit resets within the lo
 minutes). Each balancing pass (every 15 minutes, a minute after a group ran out or after any change
 of the feed) lends the default group's accounts to a fed group, the most room first, then the
 soonest reset, and takes one back when it is out (refused for a limit, or at the switching
-threshold) once another ready account serves the group, so a group never loses its last account.
+threshold) once another account with room serves the group, so a group never loses its last account.
 A fed group's own account that is out is shared with the default group (it keeps serving its own
 group) so another fed group can use it once its limit resets. A higher priority (1 is the highest;
 equal priorities go by group id) is served first; a fed group whose sessions asked for accounts and
 that has none may take a lower fed group's last ready account, though not one that served a
-request in the last 30 minutes unless the higher group is refusing requests now. A group holding
-more ready accounts than it keeps gives the extra ones back. A group with no account is fed only
+request in about the last 30 minutes unless the higher group is refusing requests now. A group holding at
+least two more accounts with room than it keeps gives the extra ones back. A group with no account is fed only
 the providers its sessions asked for. Like a loan, a move keeps the account's own group (`project
 list` shows it under both) and takes effect from the next request; an account waits an hour
 between moves, except one that ran out. The ordinary Claude Code's or Codex's account, an account

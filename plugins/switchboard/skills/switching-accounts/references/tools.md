@@ -918,11 +918,11 @@ sets it for a fed group; `ready` (1 to 10) and `lookahead_minutes` (0 to 720) se
 every fed group. Change it only when the operator asks. A fed group keeps `ready` ready accounts:
 room now, or a limit that resets within the look-ahead. Each pass lends the default group's
 accounts to it, higher priority first, and takes back one that is out (a limit refusal or the
-switching threshold) once another ready account serves the group; its own account that is out is
+switching threshold) once another account with room serves the group; its own account that is out is
 shared with the default group and keeps serving its group. A fed group with recent requests and no
 ready account may take a lower fed group's last ready account, though not one that served a request
-in the last 30 minutes unless it is refusing requests now; extra ready accounts beyond `ready` go
-back. A group with no account is fed only what its sessions asked for. A move is a loan (the
+in about the last 30 minutes unless it is refusing requests now (a limit refusal in about the last
+15 minutes); at least two accounts with room beyond `ready` make the extra ones go back. A group with no account is fed only what its sessions asked for. A move is a loan (the
 account keeps its own group) and takes effect from the next request; each is also a `balancing`
 entry of `switchboard_events`. The ordinary CLI's account, one given to an agent, turned off,
 delegated or used on another machine is never moved; no account crosses an organization's boundary.

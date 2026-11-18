@@ -3376,7 +3376,11 @@ impl Runtime {
         let activity = feed::Activity::from_windows(
             &snapshot,
             &self.statistics.window(feed::SERVING_SECONDS, time),
-            &self.statistics.window(feed::REFUSING_SECONDS, time),
+            // Review round 2: refusals from this owner's own quarters only, never the day
+            // counts a fresh start adds (a refusal this morning is not one now).
+            &self
+                .statistics
+                .window_in_memory(feed::REFUSING_SECONDS, time),
         );
         actions.extend(feed::plan(
             &snapshot, &signals, &activity, &held, &planned, time, &busy,
