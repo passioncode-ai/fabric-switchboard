@@ -122,6 +122,7 @@ const PARITY: &[(&str, Over)] = &[
     ("feed", Tool("switchboard_feed")),
     ("capacity", Tool("switchboard_capacity")),
     ("duty", Tool("switchboard_duty")),
+    ("boot_resume", Tool("switchboard_boot_resume")),
     ("session_tree", Tool("switchboard_sessions")),
     ("session_rows", Tool("switchboard_sessions")),
     ("session_end", Tool("switchboard_session_end")),
