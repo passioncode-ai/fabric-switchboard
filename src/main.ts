@@ -759,7 +759,7 @@ function proxyUsersSection() {
   if (!proxyUsersState) { if (!proxyUsersLoading) loadProxyUsers(); section.append(el('p', 'form-note', t('Reading the list…'))); return section; }
   const users = proxyUsersState.users ?? [];
   if (!users.length) { section.append(el('p', 'account-meta', t('No other users are allowed.'))); return section; }
-  const groupName = (pool: string, name: string | null) => name ?? snapshot?.projects.find((p) => p.pool === pool)?.name ?? pool;
+  const groupName = (pool: string, name: string | null) => name ?? snapshot?.projects?.find((p) => p.pool === pool)?.name ?? pool;
   for (const u of users) {
     const who = u.name ?? String(u.uid);
     const row = el('div', 'form-row');
