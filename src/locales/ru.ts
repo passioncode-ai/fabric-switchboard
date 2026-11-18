@@ -548,7 +548,7 @@ export const RU: Record<string, string> = {
   "Anthropic keys could not be saved.": "Не удалось сохранить ключи Anthropic.",
   "One session runs in two processes, and both are working. The older copy has been in one command for {age}; closing it ends that command.": "Одна сессия работает в двух процессах, и оба заняты. Старая копия уже {age} выполняет одну команду; если закрыть её, команда остановится.",
   "One session runs in two processes, and both are working. Closing the older copy ends what it is doing.": "Одна сессия работает в двух процессах, и оба заняты. Если закрыть старую копию, то, что она делает, остановится.",
-  "One session runs in two processes, and both are answering. Close one in its own window when it finishes.": "Одна сессия работает в двух процессах, и оба сейчас отвечают. Закройте одну копию в её окне, когда она закончит.",
+  "One session runs in two processes, and both are answering now. When one of them finishes its turn, this item offers to close it.": "Одна сессия работает в двух процессах, и обе копии сейчас отвечают. Когда одна из них закончит ход, здесь можно будет её закрыть.",
   "Close the older copy": "Закрыть старую копию",
   "Closed the older copy. The other one keeps working.": "Старая копия закрыта. Другая продолжает работать.",
   "That copy is answering right now. Close it in its own window when it finishes.": "Эта копия сейчас отвечает. Закройте её в её окне, когда она закончит.",

@@ -3183,9 +3183,11 @@ function attentionSection(main: HTMLElement) {
     const key = `attention-${item.account_id ?? `${item.reason}-${index}`}`;
     const act = button(offer?.label ?? attentionActionLabel(item.action.window), () => attentionAct(item, account, key, offer?.pid ?? undefined), 'button row-button', key);
     // A sign-in or a check needs the account here; without it the action has nothing to act on.
-    if ((item.action.window === 'sign_in' && !account && !item.provider) || ((item.action.window === 'check_usage' || item.action.window === 'move_tokens') && !account) || (item.action.window === 'close_copy' && (!item.session_id || !!offer?.disabled)) || (item.action.window === 'dispatch_stop' && !item.launch_id)) { act.disabled = true; act.dataset.locked = 'true'; }
+    // SB-472: an action with nothing to act on offers no button at all, never a disabled one the
+    // person cannot press; the line above says what happens instead.
+    const idle = (item.action.window === 'sign_in' && !account && !item.provider) || ((item.action.window === 'check_usage' || item.action.window === 'move_tokens') && !account) || (item.action.window === 'close_copy' && (!item.session_id || (offer !== null && offer.label === null))) || (item.action.window === 'dispatch_stop' && !item.launch_id);
     // SB-420: an item whose fix is outside Switchboard offers no button.
-    if (item.action.window === 'none') row.append(copy); else row.append(copy, act);
+    if (item.action.window === 'none' || idle) row.append(copy); else row.append(copy, act);
     list.append(row);
   });
   section.append(list); main.append(section);

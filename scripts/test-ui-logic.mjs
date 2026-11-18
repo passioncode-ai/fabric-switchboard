@@ -1842,9 +1842,13 @@ check(() => {
   const offer = logic.duplicateOffer(both);
   assert.equal(offer.pid, 84681); assert.equal(offer.label, 'Close the older copy'); assert.ok(offer.line.includes('2 h'), offer.line); assert.ok(!offer.disabled);
   const busy = logic.duplicateOffer(logic.attentionView({ items: [{ reason: 'session_duplicate', session_id: 's-3', close: null, action: { tool: 't', window: 'close_copy' } }] }).items[0]);
-  assert.ok(busy.disabled, 'both answering: nothing to press'); assert.equal(busy.pid, null);
+  // SB-472: both answering offers no button at all (never a disabled one) and says when it will.
+  assert.equal(busy.label, null, 'both answering: no button'); assert.equal(busy.pid, null);
+  assert.ok(busy.line.includes('finishes its turn'), busy.line); assert.ok(!busy.line.includes('\u2014'));
+  assert.equal(logic.duplicateOffer({ session_id: null, close: null }).label, null, 'no session: no button');
+  assert.equal(logic.duplicateOffer({ session_id: null, close: { pid: 1, why: 'older', command_age: 5 } }).label, null, 'no session: no button even with an offer');
   assert.equal(logic.duplicateOffer(dup.items[0]).label, 'Close the quiet copy', 'an older owner sends no offer: the quiet copy as before');
-  assert.ok(!logic.duplicateOffer(dup.items[0]).disabled, 'no offer is not "both answering"');
+  assert.ok(!('disabled' in logic.duplicateOffer(dup.items[0])), 'the offer has no disabled state');
   assert.equal(logic.attentionView({ items: [{ reason: 'session_duplicate', session_id: 's', close: { pid: 'x', why: 'older' }, action: { tool: 't', window: 'close_copy' } }] }).items[0].close, null, 'a malformed offer is none');
   // SB-407: a stuck or gone board run carries its launch id and offers *Stop the run*.
   const gone = logic.attentionView({ items: [{ reason: 'session_gone', label: 'beta', launch_id: 'L-3', action: { tool: 'switchboard_dispatch_stop', window: 'dispatch_stop', command: 'switchboard dispatch stop --launch-id L-3' } }] }).items[0];
