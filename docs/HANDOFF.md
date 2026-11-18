@@ -3,6 +3,14 @@
 > [board](evidence/backlog.md).
 
 
+## 2026-11-18: PR #831 review round 1 (SB-440, SB-443, SB-445 fixed; SB-444, SB-446 filed), on branch `launch-stale`
+
+- **Asked.** Review round 1 of #831 (no P1): margin between the unclaimed-marker bound and the client wait; start tokens instead of pid age; `continue --in-place` as a caller; a race in clearing a stale marker; docs on non-regular markers; `O_NOFOLLOW`; a row for `run_hosted`; Fabric's finding (thread 36572ae0) that a control timeout must be told apart by code.
+- **Built.** `UNCLAIMED_TTL` 5 min (asserted longer than `limit_secs(Launch)` plus a minute); the marker carries `token` (`copies::process_token`), judged on every platform; `Operation::Continue.queued` (never sent; set by `ContinueToConsole` and the fallback) picks the ten-minute hold, otherwise an in-place continue is the caller's; `Continue` waits 120 s; `clear_stale` renames aside, judges again, links back a fresh marker; `commit` opens with `O_NOFOLLOW`; Linux `process_started` from `/proc/<pid>/stat` (SB-445); CLI `failure`: `control-timeout`, status 4 (SB-443). Merged origin/main `ce62f8c9`.
+- **Checks.** See the PR (Studio gate, EXIT line).
+
+**Exact next task.** Review round 2 of #831, then merge once the gate reads EXIT 0 on the merged head; then SB-441, SB-444, SB-446 by priority.
+
 ## 2026-11-18: SB-440 a launch nobody ran no longer blocks its home; SB-441 filed, on branch `launch-stale`
 
 - **Asked.** Operator report 2026-11-18: `switchboard launch <account> --mode managed --headless` for `runtimes/claude-tokens` timed out on its control request, left `.session.json` `starting` and an empty `.launch-pending`, and every later launch was refused until both files were moved by hand. Also file `keys observatory add` answering "The key was saved, but where it came from could not be recorded."

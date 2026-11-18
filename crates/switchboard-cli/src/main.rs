@@ -532,6 +532,13 @@ enum Command {
         #[command(subcommand)]
         command: BalanceCommand,
     },
+    /// Groups fed from the default group: `status` reads the fed groups, the default group's
+    /// accounts and the newest moves; `set` changes how many ready accounts a fed group keeps.
+    /// Turn a group's feed on or off with `switchboard project feed`.
+    Feed {
+        #[command(subcommand)]
+        command: FeedCommand,
+    },
     /// Kimi Code subscription accounts: sign in with the official `kimi login`, see each plan's
     /// usage, and launch `kimi` on an account. Each login stays in its own folder.
     Kimi {
@@ -844,6 +851,21 @@ enum Project {
     Dismiss {
         /// The folder, as `project suggestions` lists it.
         folder: String,
+    },
+    /// Feed a group from the default group, or stop: Switchboard keeps the group's ready
+    /// accounts by lending it accounts of the default group and taking back one that runs out
+    /// once another serves the group. Turning it off gives back every account the feed moved.
+    Feed {
+        /// The group id (`switchboard project list`).
+        pool: String,
+        /// on or off.
+        #[arg(value_enum)]
+        state: OnOff,
+        /// 1 is the highest: a higher group is served first when accounts run short; of two
+        /// with the same priority, the group id first in alphabetical order. Without it, a
+        /// group fed for the first time goes after the others. Not with off.
+        #[arg(long, value_parser = clap::value_parser!(u32).range(1..=99))]
+        priority: Option<u32>,
     },
     /// The repository owners whose new repositories join a group, as host/owner
     /// (`github.com/example`). Without --add or --remove, prints them.
@@ -1671,6 +1693,23 @@ enum BalanceCommand {
         /// A backup group to unmark (it stays chosen); repeat for more.
         #[arg(long = "backup-remove", value_name = "ID")]
         backup_remove: Vec<String>,
+    },
+}
+#[derive(Subcommand)]
+enum FeedCommand {
+    /// The fed groups with their priority and ready accounts, the default group's accounts, what
+    /// the feed moved and why. Reads only.
+    Status,
+    /// How many ready accounts each fed group keeps and how far ahead a reset counts, for every
+    /// fed group.
+    Set {
+        /// How many ready accounts each fed group keeps, 1 to 10 (2 until you change it).
+        #[arg(long, value_parser = clap::value_parser!(u32).range(1..=10))]
+        ready: Option<u32>,
+        /// Minutes ahead an account whose limit resets counts as ready, 0 to 720 (30 until you
+        /// change it).
+        #[arg(long, value_parser = clap::value_parser!(u32).range(0..=720))]
+        lookahead: Option<u32>,
     },
 }
 #[derive(Subcommand)]
@@ -3590,6 +3629,21 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                 backup_remove: backup_remove.clone(),
             },
         },
+        Command::Feed { command } => match command {
+            FeedCommand::Status => Operation::FeedStatus,
+            FeedCommand::Set { ready, lookahead } => {
+                if ready.is_none() && lookahead.is_none() {
+                    return Err("Give --ready, --lookahead or both.".into());
+                }
+                Operation::Feed {
+                    pool: None,
+                    on: None,
+                    priority: None,
+                    ready: *ready,
+                    lookahead_minutes: *lookahead,
+                }
+            }
+        },
         Command::Agents { command } => match command {
             AgentsCommand::List => Operation::AgentCatalog,
             AgentsCommand::Status => Operation::AgentsOverview,
@@ -3865,6 +3919,17 @@ async fn run(cli: &Cli) -> Result<Value, String> {
             },
             Project::Dismiss { folder } => Operation::ProjectSuggestionDismiss {
                 folder: folder.clone(),
+            },
+            Project::Feed {
+                pool,
+                state,
+                priority,
+            } => Operation::Feed {
+                pool: Some(pool.clone()),
+                on: Some(matches!(state, OnOff::On)),
+                priority: *priority,
+                ready: None,
+                lookahead_minutes: None,
             },
             Project::Source { pool, add, remove } => {
                 return project_sources(&root, pool, add, remove).await
@@ -4448,6 +4513,7 @@ async fn continue_workflow(
                 .into(),
                 working_directory: dir.to_owned(),
                 in_place,
+                queued: false,
             },
             launches::LaunchedBy::from_caller(launches::Surface::Cli, None, None),
         ),
@@ -6055,6 +6121,20 @@ fn print_value(value: &Value, json_output: bool) {
 /// died on its first offline call, nightly `39676565992`); a fixed size makes the limit the same
 /// on every platform instead of the platform's default.
 const STACK_BYTES: usize = 16 * 1024 * 1024;
+/// A failed command's `code` in `--json` and its exit status. SB-343: no account for the folder
+/// is `no-route` and 3, which `launch --target` carries back through ssh. SB-443 (Fabric board
+/// finding, thread 36572ae0): a control request the owner did not answer in time is
+/// `control-timeout` and 4, since the owner may still do the act; a caller never matches text.
+/// Anything else is 1.
+fn failure(error: &str) -> (Option<&'static str>, u8) {
+    if switchboard_runtime::projects::is_no_route(error) {
+        (Some("no-route"), 3)
+    } else if switchboard_runtime::control::is_timeout(error) {
+        (Some("control-timeout"), 4)
+    } else {
+        (None, 1)
+    }
+}
 fn main() -> ExitCode {
     // `shell env` runs on every change of folder in a hooked terminal: answered here, before the
     // runtime starts, within its 25 ms budget (SB-183).
@@ -6243,26 +6323,42 @@ async fn start() -> ExitCode {
             // SB-189: the sentence the window shows, which says what to do; `--json` keeps the
             // backend's own text in `raw` for a script that matches it.
             let sentence = switchboard_runtime::person_errors::for_person(&error);
-            // SB-343: no account for the folder is told apart by its code and status 3, which
-            // `launch --target` carries back through ssh.
-            let no_route = switchboard_runtime::projects::is_no_route(&error);
+            // SB-343, SB-443: a failure a caller must tell apart has a code and a status of its own.
+            let (code, status) = failure(&error);
             if cli.json {
                 let mut body = json!({"ok":false,"error":sentence});
                 if sentence != error {
                     body["raw"] = json!(error);
                 }
-                if no_route {
-                    body["code"] = json!("no-route");
+                if let Some(code) = code {
+                    body["code"] = json!(code);
                 }
                 eprintln!("{body}");
             } else {
                 eprintln!("{sentence}");
             }
-            ExitCode::from(if no_route { 3 } else { 1 })
+            ExitCode::from(status)
         }
     }
 }
 
+#[cfg(test)]
+mod failure_tests {
+    #[test]
+    fn a_control_timeout_has_its_own_code_and_status() {
+        assert_eq!(
+            super::failure(switchboard_runtime::control::CONTROL_TIMED_OUT),
+            (Some("control-timeout"), 4)
+        );
+        assert_eq!(
+            super::failure(
+                "Select an account for this provider first (switchboard accounts select)."
+            ),
+            (Some("no-route"), 3)
+        );
+        assert_eq!(super::failure("Account not found."), (None, 1));
+    }
+}
 #[cfg(all(test, unix))]
 mod in_place_tests {
     #[test]
@@ -6649,6 +6745,9 @@ mod mcp_parity {
         ("project accept", Tool("switchboard_project_suggestion")),
         ("project dismiss", Tool("switchboard_project_suggestion")),
         ("project source", Tool("switchboard_project_sources")),
+        ("project feed", Tool("switchboard_feed")),
+        ("feed status", Tool("switchboard_feed")),
+        ("feed set", Tool("switchboard_feed")),
         ("project apply", Tool("switchboard_project_apply")),
         ("backup list", Tool("switchboard_backups")),
         ("backup now", Tool("switchboard_backup_now")),

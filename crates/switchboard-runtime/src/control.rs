@@ -420,8 +420,17 @@ pub async fn request(root: &Path, operation: &Operation) -> Result<Option<Value>
         answer => answer,
     }
 }
+/// The answer when the owner did not answer within `limit_secs`: the owner may still do the act
+/// after the caller gave up. The CLI tells it apart by its code `control-timeout` and exit status
+/// 4 (Fabric board finding, thread 36572ae0), so a caller never matches this text.
+pub const CONTROL_TIMED_OUT: &str =
+    "Control request timed out. Check state before retrying a mutation.";
+/// Whether `error` is `CONTROL_TIMED_OUT`.
+pub fn is_timeout(error: &str) -> bool {
+    error == CONTROL_TIMED_OUT
+}
 /// How long the client waits for the owner's answer to `operation`, in seconds.
-fn limit_secs(operation: &Operation) -> u64 {
+pub(crate) fn limit_secs(operation: &Operation) -> u64 {
     let inner = match operation {
         Operation::OnOperatorsWord { inner, .. } => inner.as_ref(),
         other => other,
@@ -467,9 +476,11 @@ fn limit_secs(operation: &Operation) -> u64 {
         | Operation::MoveAccount { .. }
         | Operation::RepositoryMap { .. } => 180,
         // SB-440: a launch reads the sign-ins to carry (Keychain, 5 s a call), may check a paid
-        // key's spending (up to 20 s) and renews an isolated account's sign-in; on a busy machine
-        // a 30 s client gave up on a launch the owner went on to prepare (2026-11-18).
-        Operation::Launch { .. } => 120,
+        // key's spending (up to 20 s) and renews an isolated account's sign-in; a continuation also
+        // reads and offers its workflow through Observatory. On a busy machine a 30 s client gave
+        // up on a launch the owner went on to prepare (2026-11-18). `launch::UNCLAIMED_TTL` must
+        // stay longer than this wait.
+        Operation::Launch { .. } | Operation::Continue { .. } => 120,
         _ => 30,
     }
 }
@@ -514,7 +525,7 @@ async fn request_once(root: &Path, operation: &Operation) -> Result<Option<Value
     .await
     {
         Ok(result) => result.map(Some),
-        Err(_) => Err("Control request timed out. Check state before retrying a mutation.".into()),
+        Err(_) => Err(CONTROL_TIMED_OUT.into()),
     }
 }
 
@@ -673,7 +684,23 @@ mod tests {
         };
         assert_eq!(limit_secs(&launch), 120);
         let by = crate::launches::LaunchedBy::surface(crate::launches::Surface::Cli);
-        assert_eq!(limit_secs(&crate::launched(launch, by)), 120);
+        let wrapped = crate::launched(launch, by.clone());
+        assert_eq!(limit_secs(&wrapped), 120);
+        let resume = Operation::Continue {
+            workflow_id: "wf_0123456789abcdef".into(),
+            id: "a".into(),
+            mode: "isolated".into(),
+            working_directory: "/tmp".into(),
+            in_place: true,
+            queued: false,
+        };
+        assert_eq!(limit_secs(&crate::launched(resume, by)), 120);
+        // SB-440 review round 1: a script handed to a caller outlives the caller's longest wait
+        // for the answer that hands it over, with a margin.
+        assert!(
+            crate::launch::UNCLAIMED_TTL
+                > std::time::Duration::from_secs(limit_secs(&wrapped) + 60)
+        );
     }
     #[test]
     fn an_operation_kind_is_its_tag_and_never_its_arguments() {
@@ -695,6 +722,7 @@ mod tests {
                 mode: "managed".into(),
                 working_directory: "/work".into(),
                 in_place: true,
+                queued: false,
             },
             crate::launches::LaunchedBy::surface(crate::launches::Surface::Cli),
         );

@@ -1148,21 +1148,42 @@ Code: `launch::sessions`, `launch::session_running` (factored out of `ensure_idl
   unreadable marker → `unknown`. The owner answers it without its transaction lock (a read).
 - The one-session marker `.launch-pending` (SB-440) holds a home while its launch is prepared and
   until its script starts (the script's first lines remove it). While the launch is prepared it
-  names the preparing process, `{"pid": N}`, and frees the home as soon as that process is gone or
-  its pid names a process started well after the marker (Unix; on Windows it holds as below). Once
-  prepared it says who runs the script, `{"pid": null, "by": "terminal" | "caller"}`, rewritten in
-  place and never created again: a Terminal launch, and a continuation prepared in place (it may
-  wait in the hand-over queue for a console), hold for ten minutes, as before; a script handed to
-  the caller of `Launch` (`launch --in-place`, `--headless`, `--hosted`) holds for two minutes, the 30 s control limit and a margin, so a caller that gave up on its control request
-  after the owner prepared the session (2026-11-18: `runtimes/claude-tokens` left `starting`)
-  frees the home by itself. An empty marker (an earlier version's), an unreadable one or one that
-  is not a regular file holds for ten minutes. The next launch clears a stale marker and logs
-  `launch_reservation outcome=cleared reason=expired|launcher_gone|unclaimed`; a launch that fails
-  removes its own marker on every error path. `Launch` waits 120 s for the owner's answer (30 s
-  before). Tests: `sb440_a_marker_no_caller_took_frees_the_home_after_two_minutes`,
+  names the preparing process and its start token, `{"pid": N, "token": T}`
+  (`copies::process_token`: macOS and Windows the start time, Linux the start in clock ticks after
+  boot), and frees the home as soon as that process is gone or its pid names another process (a
+  different token; on every platform; without a recorded token, Unix compares the process's age
+  with the marker's). Once prepared it says who runs the script,
+  `{"pid": null, "by": "terminal" | "caller"}`, rewritten in place (never through a link) and never
+  created again: a Terminal launch, and a continuation prepared in place for the hand-over queue
+  (`ContinueToConsole`, the automatic fallback: it may wait for a console), hold for ten minutes,
+  as before; a script handed to the caller of `Launch` or `Continue` (`launch --in-place`,
+  `--headless`, `--hosted`, `continue --in-place`) holds for five minutes, longer than that
+  caller's own 120 s wait for the answer (`control::limit_secs`), so a caller that gave up on its
+  control request after the owner prepared the session (2026-11-18: `runtimes/claude-tokens` left
+  `starting`) frees the home by itself and one whose answer came at the end of its wait still runs
+  the script. An empty or unreadable marker (an earlier version's) holds for ten minutes; one
+  whose modification time cannot be read, and anything at that name that is not a regular file,
+  always holds, as before. A stale marker is cleared by the next launch (or any check of the home)
+  without ever removing a fresh one: it is renamed to a name of its own, judged again there,
+  removed only if still stale (log `launch_reservation outcome=cleared
+  reason=expired|launcher_gone|unclaimed`, codes only) and otherwise linked back, the home busy. A
+  launch that fails removes its own marker on every error path. `Launch` and `Continue` wait 120 s
+  for the owner's answer (30 s before). Tests:
+  `sb440_a_marker_no_caller_took_frees_the_home_after_five_minutes`,
+  `sb440_a_marker_handed_to_terminal_still_holds_for_ten_minutes`,
   `sb440_a_marker_whose_preparing_process_is_gone_is_cleared_at_once`,
+  `sb440_a_preparer_is_told_by_its_start_token_not_its_pid_alone`,
+  `sb440_clearing_a_stale_marker_never_removes_a_fresh_one`,
+  `sb440_a_reservation_names_its_preparer_then_who_runs_the_script`,
   `sb440_an_in_place_launch_nobody_ran_frees_the_group_runtime`,
-  `terminal_failure_releases_the_home_and_records_no_launch`.
+  `a_continuation_in_place_returns_its_script_and_opens_no_terminal`,
+  `terminal_failure_releases_the_home_and_records_no_launch`,
+  `control::tests::a_group_change_waits_longer_than_a_read`.
+- A control request the owner did not answer within its limit (SB-443, Fabric board finding,
+  thread 36572ae0) fails with `control::CONTROL_TIMED_OUT`; the owner may still do the act later.
+  The CLI answers it with exit status 4 and, with `--json`, `code: "control-timeout"`, so a caller
+  tells it apart without matching text (status 3 and `no-route` stay SB-343's). Test:
+  `failure_tests::a_control_timeout_has_its_own_code_and_status`.
 - The window reads it through the Tauri command `sessions` (`all: false`) and shows it on Activity → *Sessions* (SB-65, SCN-051), refreshed with the metadata (once a minute) and on Refresh.
 - Not covered yet (packet SS-01, SB-65): active requests per session, and acting on a session
   (open, drain, close).
@@ -3030,6 +3051,96 @@ needs room. `balance status` adds `backup: [{pool, name, accounts, lent}]` and
 `a_backup_group_never_borrows_and_its_own_work_takes_its_account_home`,
 `a_backup_account_goes_home_once_the_borrower_has_room_of_its_own`,
 `any_group_but_default_is_marked_backup_and_marking_chooses_it`.
+### Groups fed from the default group (SB-419, DEC-0028)
+
+Decided in [DEC-0028](DECISIONS.md#dec-0028-a-group-fed-from-the-default-group-keeps-its-ready-accounts-by-priority);
+design target-state `06-default-feed.md`. A second policy on balancing's pass and files
+(`crates/switchboard-runtime/src/feed.rs`).
+
+- **Settings.** `balancing.json` carries `fed: [{pool, priority}]` (1 is the highest, 1 to 99),
+  `ready` (absent: 2, 1 to 10) and `lookahead_minutes` (absent: 30, 0 to 720); a loan the feed made
+  carries `feed: true`. Each is absent until set, so a file without the feed keeps its bytes.
+  An older reader drops the three settings when it next writes and its balancing pass returns each
+  feed loan (`not_chosen`, or as its own loan when both groups are chosen for balancing), so a
+  downgrade turns the feed off and gives back what it moved. `feed::change` refuses `default`
+  (“The default group feeds the others, so it cannot be fed itself.”), a group that does not exist
+  or is the pay-per-token group (`NO_SUCH_GROUP`), a priority for a group not fed, a priority with
+  `on: false` (`OFF_PRIORITY`), and values out of range; a group fed for the first time with no
+  priority goes after the fed ones; the defaults are stored as absent. `balancing::resolve` drops a
+  fed group that was deleted; one switched off keeps its place and is skipped while it is off.
+- **The pass.** `Runtime::balance_pass` runs while groups are chosen, an account is still lent or a
+  group is fed; any change of the feed asks for a pass within a minute (`balance_soon`). After
+  `balancing::plan`, `feed::plan` decides on the accounts balancing did not move in the same pass
+  (`busy`), reading the snapshot, `Held` (limit evidence, the ordinary CLI's sign-in, sign-ins
+  waiting), the 6-hour signals and `feed::Activity`, read in the statistics' quarter-hour
+  buckets (so about 30 and 15 minutes): the accounts that served a request per group in about the
+  last 30 minutes (`Statistics::window`, which after a restart adds the day counts: an upper bound,
+  safe since it only protects an account; a lost `statistics.json` leaves it empty until this owner
+  has counted for about 30 minutes), and the groups with a limit refusal in about the last 15
+  (`Statistics::window_in_memory`, this owner's own quarters only, never the day counts, so a
+  refusal before a restart is not one now; the refusal part of demand reads only this). Balancing's own plan and `returns_owed` leave a `feed` loan alone;
+  `balance status` lists none of them. An account balancing moves in the same pass counts in no
+  group but its own home, so no feed count relies on it.
+- **Ready and out.** Ready: `balancing::room` answers (fresh figures, below the group's threshold
+  less its hysteresis), or every own window at or past that line resets within the look-ahead; a
+  sign-in waiting is never ready. Out: not ready, and a limit refusal holds it or a window is at or
+  past the switching threshold itself (`threshold_percent`, 90 % initially). A group is fed the
+  providers it works with: an account of it serves the group or was fed to it, or it had requests
+  on it in 6 hours (a group with no account: only the latter).
+- **The plan**, in order: (1) returns owed at once (`account_gone`, `share_gone`, `feed_off`,
+  `group_off`, `not_lendable`), a placement waiting for a sign-in (`sign_in`), a park whose
+  account has room again in its own group after its cooldown (`rested`); (2) parks: each own
+  account of a fed group, lent nowhere, that is out and that `default` admits, `lend` to `default`
+  (`park`, never delayed); a park only shares it, so it keeps serving its own group; (3) fill,
+  highest priority first (then the group id), first to one ready account per group and provider,
+  then to `ready`, from the reservoir (accounts at home in `default` lent nowhere, and parked
+  accounts of other groups, cooled), ranked room now first by the lowest used share then the latest
+  reset, then the soonest reset, then the id (`lend`, `feed`); (4) priority: a fed group with demand (requests in 6 hours, or a
+  refusal in about the last 15 minutes, `window_in_memory`) and no ready account takes one ready
+  account of the lowest fed group of a lower priority (an account the feed placed there is
+  returned, `taken`, and lent, `priority`; its own account lent nowhere is lent to it), skipping an
+  account that served that group in about the last 30 minutes unless the higher group is refusing
+  now; (5) after the takes, a placement that is out goes back (`spent`, never delayed) only while
+  another account with room now (not one resetting soon) serves the group, counting the accounts lent
+  to it in this pass; a return relying only on those carries them in `Action::relies_on`, and
+  `balancing::apply` holds it (outcome `held`: no share removed, no cooldown) when none was lent;
+  (6) surplus: a group with at least `ready` + 2 accounts with room now returns the extra placements
+  with room down to `ready`, the most used first (then the id), never the account its route names,
+  after their cooldown (`surplus`). Never moved: an account balancing's
+  `usable` refuses (disabled, an API key, used elsewhere or on another machine's group, given to
+  an agent, a delegated seat; `TODO(SB-418)` marks where the person's own off switch replaces
+  `enabled`), the ordinary CLI's sign-in; nothing crosses `loan_admits`.
+- **Moves.** `balancing::apply` carries them out as loans (`Store::set_shared`: a share of the fed
+  group or of `default`; no home changes), records each in `lent` with `feed: true` and in `moved`
+  (the cooldown), and journals it in `balancing.jsonl` with `feed: {priority, ready, want,
+  used_percent?, resets_in?}`. A move takes effect from the next request. Each is also a `balancing`
+  activity entry (`lent`, `returned`); no new activity word, so an older Switchboard reads the store.
+- **Turning off.** `Operation::Feed` with `on: false` takes the group out and returns at once every
+  feed loan into or out of it (`feed::returns_owed`, `feed_off`).
+- **Surfaces.** `Operation::Feed {pool, on, priority, ready, lookahead_minutes}` and
+  `Operation::FeedStatus` (no owner transaction); CLI `switchboard project feed <group> on|off
+  [--priority N]`, `switchboard feed status` (reads only), `switchboard feed set [--ready N]
+  [--lookahead M]`; MCP `switchboard_feed` (without arguments the state, else the change; not
+  read-only, idempotent for the same input); the window's `feed` command. The state: `{on, ready,
+  lookahead_minutes, pass_minutes, fed: [{pool, name, priority, off, providers: [{provider, ready,
+  accounts}]}], available: [{pool, name, fed, priority}], reservoir: [{provider, accounts, placed,
+  ready, parked}], moved: [{account_id, label, provider, kind: placed|parked, from, from_name, to,
+  to_name, at}], recent, last_pass, changed?}`; its ready counts read the figures only.
+- **Evidence:** `feed::tests::*`, among them `a_placement_goes_back_only_when_truly_out_and_replaced`,
+  `a_higher_group_with_none_takes_a_lower_groups_last_account` (demand, an account serving now, a
+  refusal now), `a_surplus_placement_and_one_waiting_for_a_sign_in_go_back` (the margin),
+  `a_spent_return_never_relies_on_an_account_a_priority_take_removes`,
+  `a_refusal_before_a_restart_is_not_a_refusal_now`,
+  `a_spent_return_is_held_when_its_replacement_was_not_lent`,
+  `a_spent_return_runs_once_its_replacement_was_lent`,
+  `an_account_balancing_takes_back_in_the_same_pass_is_not_relied_on`,
+  `the_pass_reads_refusals_from_this_owners_own_counts`, statistics
+  `a_window_reads_the_last_hours_and_a_fresh_start_reads_the_day_as_well` (`window_in_memory`),
+  `higher_priority_is_served_first_and_each_gets_one_before_any_gets_two` (a group with no account
+  and no requests is fed nothing), `the_persons_change_is_checked`,
+  `a_pass_feeds_a_group_and_turning_the_feed_off_gives_everything_back` (the owner's pass end to
+  end); `tests/mcp.rs` (the tool); ui-logic `the_feed_reads_every_state`.
+
 ## Machine groups (SB-355)
 
 Decided in [DEC-0013](DECISIONS.md#dec-0013-an-account-on-another-machine-belongs-to-that-machines-group-and-to-no-group-here);

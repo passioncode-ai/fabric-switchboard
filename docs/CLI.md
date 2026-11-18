@@ -368,7 +368,7 @@ switchboard --json activity
 
 Without an ID, usage reads cached observations; an ID requests a provider check, refused without a request while a wait the provider asked for lasts (SB-39; [ACCOUNTS-AND-ROTATION](ACCOUNTS-AND-ROTATION.md)). Human output prints times as RFC 3339 UTC, marks an observation older than 900 seconds as stale (the idle quota cadence plus slack, SB-48; rotation judges by its policy's `--max-age`) and shows the last check's health (`ok`, `failed`, `unavailable` or `not checked`) with the next check time; `events` prints RFC 3339 times too, oldest first; `--kind`, `--account`, `--before` (Unix seconds, exclusive) and `--limit` (1 to 500; without it every event the journal holds) page it as the window and `switchboard_events` do ([CONTRACTS](CONTRACTS.md#activity-by-kind-and-page-sb-373)). `--json` output keeps Unix seconds (`human_usage_and_events_print_utc_times_and_health`). Unsupported/unknown quota is an error or unknown state, never zero. The human percentage is the account's own; a Codex feature limit is listed in `--json` and MCP (`scope: feature`) but does not count toward it (SB-40). API billing is not subscription utilization.
 
-`--json` writes `{ "ok": true, "data": ... }` to stdout on success and `{ "ok": false, "error": "..." }` to stderr on failure. Exit status is 0 for success, 1 for an operational failure and 2 for invalid arguments. `--help` succeeds without touching the vault. Do not log stdin or treat parser diagnostics as a place to print credentials. Output never includes the control capability, provider token, credential JSON or provider request/response payload. The [CLI implementation and integration fixtures](../crates/switchboard-cli/src/main.rs) define this envelope.
+`--json` writes `{ "ok": true, "data": ... }` to stdout on success and `{ "ok": false, "error": "..." }` to stderr on failure. Exit status is 0 for success, 1 for an operational failure and 2 for invalid arguments; 3 with `code: "no-route"` when no account serves the folder (SB-343), and 4 with `code: "control-timeout"` when the owner did not answer the control request in time (SB-443): the owner may still do what was asked, so check its state (for a launch, `switchboard sessions`) before trying again. Match `code` and the status, never the error text. `--help` succeeds without touching the vault. Do not log stdin or treat parser diagnostics as a place to print credentials. Output never includes the control capability, provider token, credential JSON or provider request/response payload. The [CLI implementation and integration fixtures](../crates/switchboard-cli/src/main.rs) define this envelope.
 
 The local `control.json` contains a capability and is private runtime state. It is not an API discovery file to share. It does not grant authority on LAN: clients require exact loopback host/port, no redirects/proxies, bounded bodies and a per-runtime bearer. Browser Origins are refused. Same-user malicious processes are outside the protection boundary, just as for the official CLIs they could inspect.
 
@@ -542,6 +542,39 @@ borrows only a personal account while organizations exist. The choice and the lo
 with its figures in `balancing.jsonl` (0600); each is also an activity entry, `balancing lent` or
 `balancing returned` (`switchboard events`). The window has the same choice on the Groups page.
 MCP: `switchboard_balance`.
+
+### Groups fed from the default group (SB-419)
+
+```sh
+switchboard project feed agents on --priority 1          # Agents is fed from the default group, served first
+switchboard project feed apps-soft on                    # after the groups already fed
+switchboard project feed apps-soft off                   # every account the feed moved in or out of it goes back
+switchboard feed status                                  # reads only: fed groups, the default group's accounts, the moves and why
+switchboard feed set --ready 3 --lookahead 45            # each fed group keeps 3 ready; a reset within 45 minutes counts
+```
+
+Off until you turn a group's feed on ([DEC-0028](DECISIONS.md#dec-0028-a-group-fed-from-the-default-group-keeps-its-ready-accounts-by-priority)).
+A fed group keeps `ready` ready accounts (2 until you change it) of each provider it works with:
+an account is ready when it has room now, or when its limit resets within the look-ahead (30
+minutes). Each balancing pass (every 15 minutes, a minute after a group ran out or after any change
+of the feed) lends the default group's accounts to a fed group, the most room first, then the
+soonest reset, and takes one back when it is out (refused for a limit, or at the switching
+threshold) once another account with room serves the group, so a group never loses its last account.
+A fed group's own account that is out is shared with the default group (it keeps serving its own
+group) so another fed group can use it once its limit resets. A higher priority (1 is the highest;
+equal priorities go by group id) is served first; a fed group whose sessions asked for accounts and
+that has none may take a lower fed group's last ready account, though not one that served a
+request in about the last 30 minutes unless the higher group is refusing requests now. A group holding at
+least two more accounts with room than it keeps gives the extra ones back. A group with no account is fed only
+the providers its sessions asked for. Like a loan, a move keeps the account's own group (`project
+list` shows it under both) and takes effect from the next request; an account waits an hour
+between moves, except one that ran out. The ordinary Claude Code's or Codex's account, an account
+given to an agent, turned off, delegated or used on another machine is never moved, and no account
+crosses an organization's boundary. `default` cannot be fed, and `off` takes no `--priority`. Each
+move is a line of `balancing.jsonl` with its reason (`feed`, `park`, `spent`, `rested`, `priority`,
+`taken`, `surplus`, `sign_in`, `feed_off`) and figures, and an activity entry `balancing lent` or
+`balancing returned`. The window has the same switch and priority on each group's card. MCP:
+`switchboard_feed`.
 
 ### A project's folders follow its work and the disk (SB-117, SB-121, SB-131)
 
