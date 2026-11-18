@@ -141,6 +141,32 @@ pub struct How {
     pub by: crate::launches::LaunchedBy,
 }
 
+/// SB-450: held while a continuation checks and records itself.
+#[cfg(unix)]
+static CONTINUING: std::sync::Mutex<()> = std::sync::Mutex::new(());
+/// SB-450: how long after its launch a continuation with no end counts as starting.
+pub const JUST_STARTED_SECONDS: i64 = 120;
+/// SB-450: whether `session` runs in a session host now (its launch's record names it), or a
+/// launch that names it started less than `JUST_STARTED_SECONDS` ago and has not ended.
+pub fn being_continued(root: &Path, session: &str, now: i64) -> bool {
+    #[cfg(unix)]
+    if crate::session_host::live_hosts(root)
+        .iter()
+        .any(|(id, _)| crate::launches::session_of(root, id).as_deref() == Some(session))
+    {
+        return true;
+    }
+    crate::launches::recent_records(root, now - JUST_STARTED_SECONDS)
+        .iter()
+        .any(|r| {
+            r["provider_session_id"] == session
+                && r["ended"].is_null()
+                && r["launched_at"]
+                    .as_i64()
+                    .is_some_and(|at| (0..JUST_STARTED_SECONDS).contains(&(now - at)))
+        })
+}
+
 /// Resumes `session` as itself in a Terminal window of its own.
 pub fn continue_session(root: &Path, session: &str, now: i64) -> Result<Value, String> {
     continue_as(root, session, now, &How::default())
@@ -154,6 +180,13 @@ pub fn continue_as(root: &Path, session: &str, now: i64, how: &How) -> Result<Va
         return Err(UNKNOWN.into());
     }
     if crate::machine_sessions::live_sessions(root).contains_key(session) {
+        return Err(LIVE.into());
+    }
+    // SB-450: one continuation at a time in this process, and none of a session a host runs or a
+    // launch began to continue a moment ago (its process may not hold the session yet): the
+    // owner's continuation after a restart and a person's, or another agent's, never both start.
+    let _one = CONTINUING.lock().unwrap_or_else(|p| p.into_inner());
+    if being_continued(root, session, now) {
         return Err(LIVE.into());
     }
     let (config, cwd) = locate(root, session, now).ok_or(UNKNOWN)?;
@@ -286,6 +319,40 @@ mod tests {
             transcript(Path::new("/h/.claude"), "/Users/a/DATA/my app", "S1"),
             PathBuf::from("/h/.claude/projects/-Users-a-DATA-my-app/S1.jsonl")
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_session_a_launch_began_to_continue_a_moment_ago_is_not_continued_again() {
+        // SB-450: the owner's continuation after a restart and another agent's never both start.
+        let root = tempfile::tempdir().unwrap();
+        let work = tempfile::tempdir().unwrap();
+        let cwd = work.path().to_string_lossy().into_owned();
+        let config = root.path().join("cfg");
+        record(
+            root.path(),
+            json!({"session": "S1", "config": config, "cwd": cwd, "reason": "idle", "at": 100}),
+        );
+        let t = transcript(&config, &cwd, "S1");
+        std::fs::create_dir_all(t.parent().unwrap()).unwrap();
+        std::fs::write(&t, b"{}\n").unwrap();
+        let id = crate::launches::new_id();
+        crate::launches::record_resume(
+            root.path(),
+            &id,
+            json!({"provider": "claude", "provider_session_id": "S1", "launched_at": 250}),
+            &crate::launches::LaunchedBy::default(),
+        )
+        .unwrap();
+        assert!(being_continued(root.path(), "S1", 300));
+        assert_eq!(continue_session(root.path(), "S1", 300), Err(LIVE.into()));
+        assert!(!being_continued(root.path(), "S2", 300), "another session");
+        assert!(
+            !being_continued(root.path(), "S1", 250 + JUST_STARTED_SECONDS),
+            "a continuation whose process never came is not waited for"
+        );
+        crate::launches::end_once(root.path(), &id, "not_started", 260, Some(1));
+        assert!(!being_continued(root.path(), "S1", 300), "an ended one");
     }
 
     #[cfg(unix)]

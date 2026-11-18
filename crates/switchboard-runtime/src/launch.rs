@@ -317,6 +317,14 @@ fn script_with(
     working_directory: &Path,
 ) -> String {
     let mut result = format!("#!{SCRIPT_SHELL}\nset +x\nunset {}\n", CONFLICTS.join(" "));
+    // SB-455: the script is no login shell, so a session started outside one (the app, a
+    // console, a host) had no Homebrew on its PATH and every hook that runs `node` failed. The
+    // caller's PATH stays first; the folders a run the owner starts gets (the program's, the
+    // owner's PATH, `~/.local/bin`, Homebrew's) follow. `env` may still set one.
+    result.push_str(&format!(
+        "export PATH=\"${{PATH:+$PATH:}}\"{}\n",
+        quote(&headless_path(program).to_string_lossy())
+    ));
     for (key, value) in env {
         result.push_str(&format!("export {key}={}\n", quote(value)));
     }
@@ -6175,6 +6183,16 @@ mod tests {
         assert!(
             text.contains("export SWITCHBOARD_SESSION="),
             "the same environment"
+        );
+        // SB-455: a hook that runs `node` finds Homebrew's however the script was started.
+        let path_line = text
+            .lines()
+            .find(|l| l.starts_with("export PATH="))
+            .expect("the script sets PATH");
+        assert!(path_line.contains("/opt/homebrew/bin"), "{path_line}");
+        assert!(
+            text.find("export PATH=") < text.find("export SWITCHBOARD_SESSION="),
+            "set before the launch's own variables, which may still name one"
         );
         assert!(
             text.contains(&format!(

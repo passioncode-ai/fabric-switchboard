@@ -91,6 +91,7 @@ export const nativeAdapter: Adapter = {
   capacity: (change) => invoke('capacity', { cap: change?.cap ?? null, clear: change?.clear ?? false, board: change?.board ?? null, boardDefault: change?.boardDefault ?? false }),
   duty: (change) => invoke('duty', { on: change?.on ?? null, run: change?.run ?? false }),
   ownSignIn: (on) => invoke('own_sign_in', { on: on ?? null }),
+  bootResume: (on) => invoke('boot_resume', { on: on ?? null }),
   balance: (change) => invoke('balance', { add: change?.add ?? [], remove: change?.remove ?? [], allNew: change?.all_new ?? null, backupAdd: change?.backup_add ?? [], backupRemove: change?.backup_remove ?? [] }),
   feed: (change) => invoke('feed', { pool: change?.pool ?? null, on: change?.on ?? null, priority: change?.priority ?? null, ready: change?.ready ?? null, lookaheadMinutes: change?.lookahead_minutes ?? null }),
   repositoryMap: (under) => readWithDeadline(invoke('repository_map', { under }), 60_000),

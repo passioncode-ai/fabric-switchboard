@@ -177,6 +177,8 @@ export interface Adapter {
   duty(change?: { on?: boolean; run?: boolean } | null): Promise<DutyStatus>;
   /** SB-403 S3: whether Switchboard reads or changes the person's own Claude Code and Codex sign-in here; `on` changes it. */
   ownSignIn(on?: boolean | null): Promise<OwnSignIn>;
+  /** SB-450 (DEC-0030): whether the sessions a restart of this computer cut are continued; `on` changes it. */
+  bootResume(on?: boolean | null): Promise<BootResumeStatus>;
   repositoryMap(under: string[]): Promise<import('./ui-logic').RepositoryMap>;
   /** SB-145: what the proxy relayed in the last `days` days. */
   statistics(days: number): Promise<import('./ui-logic').Statistics>;
@@ -360,6 +362,10 @@ export interface SessionsEverywhere { here: SessionRows; machines: MachineSessio
 /** SB-378: `switchboard capacity`, this computer's cap on working coding sessions. */
 /** SB-403 S3 (DEC-0025): the person's own sign-in, read and changed by Switchboard or off limits. */
 export interface OwnSignIn { own_sign_in: 'on' | 'off'; on: boolean }
+/** SB-450 (DEC-0030): one outcome of continuing a session a restart cut. */
+export interface BootResumeLine { at: number; boot: number; session: string; folder?: string; outcome: 'continued' | 'failed' | 'interrupted' | 'at_capacity' | 'over_limit' | string; new_launch_id?: string; reason?: string }
+/** SB-450 (DEC-0030): continuing the sessions a restart of this computer cut. */
+export interface BootResumeStatus { settings: { on: boolean }; boot_time: number | null; window_minutes: number; max_per_boot: number; recent: BootResumeLine[]; supported: boolean }
 /** SB-384 (DEC-0021): the session duty officer. */
 export interface DutySettings { on: boolean; stuck_minutes: number; waiting_minutes: number; idle_minutes: number; max_age_hours: number }
 export interface DutyLine { at?: number; /** SB-407: `dispatch_stop`, a board run stopped at its deadline (`by: duty`) or by a person. */ action: 'restart' | 'close' | 'dispatch_stop'; reason: string; outcome?: string; session?: string; folder: string; pid?: number; host?: string; by?: string; launch_id?: string }

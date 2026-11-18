@@ -4,6 +4,19 @@
  * `node scripts/check-locale.mjs` keeps it complete.
  */
 export const RU: Record<string, string> = {
+  // SB-450 (DEC-0030, 2026-11-18): continuing the sessions a restart cut. Copylot en-US reports 52cdef07…9f96a565, ru-RU 149e0051…b8c22300 (suggestions only).
+  "Sessions after a restart": "Сессии после перезагрузки",
+  "After this computer restarts, Switchboard continues the Claude Code sessions the restart cut: those it launched that were running and wrote in the two hours before. Each opens as itself in a session you can attach to from Fabric Dashboards. At most five after one restart.": "После перезагрузки компьютера Switchboard продолжает прерванные ею сессии Claude Code: запущенные им, работавшие и писавшие в последние два часа перед ней. Каждая открывается как та же сессия, к ней можно подключиться из Fabric Dashboards. Не больше пяти после одной перезагрузки.",
+  "On this system sessions are not continued after a restart.": "На этой системе сессии после перезагрузки не продолжаются.",
+  "Continue my sessions after a restart": "Продолжать мои сессии после перезагрузки",
+  "Sessions a restart cuts will be continued.": "Сессии, прерванные перезагрузкой, будут продолжены.",
+  "Sessions a restart cuts are left as they are.": "Сессии, прерванные перезагрузкой, остаются как есть.",
+  "After the last restarts": "После последних перезагрузок",
+  "Continued in {folder} after the restart.": "Продолжена в {folder} после перезагрузки.",
+  "Not continued in {folder}: the session pool was full.": "Не продолжена в {folder}: пул сессий был заполнен.",
+  "Not continued in {folder}: five sessions were already continued.": "Не продолжена в {folder}: пять сессий уже были продолжены.",
+  "Not continued in {folder}: Switchboard stopped while starting it.": "Не продолжена в {folder}: Switchboard остановился во время её запуска.",
+  "Not continued in {folder}: it could not start.": "Не продолжена в {folder}: она не смогла запуститься.",
   // SB-403 waves S2 to S4 (DEC-0025, 2026-11-17): delegated seats and the own sign-in switch. Copylot ru-RU reports f0080d06…cd533b73; review round 1: 2117bbe1…e9785338.
   "sign-in removed": "вход удалён",
   "This seat's sign-in was removed from this computer 30 days after its lease ran out. The machine that delegated it signs in to the account again and delegates it again.": "Вход этого места удалён с этого компьютера через 30 дней после конца аренды. Машина, которая его делегировала, снова войдёт в аккаунт и делегирует его заново.",

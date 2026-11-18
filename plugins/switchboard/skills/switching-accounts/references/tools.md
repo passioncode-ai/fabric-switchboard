@@ -861,6 +861,19 @@ session duty officer looks only at sessions in Switchboard's own homes. Claude D
 Switchboard either way. Without `on` it reads `{own_sign_in: "on" | "off", on}`; `on` changes it, only
 when the operator asks. Kept in `<data>/own-sign-in`.
 
+### `switchboard_boot_resume`: `on?`
+
+Continuing sessions after this computer restarts (SB-450, DEC-0030). The owner's first pass after
+a restart continues each Claude Code session the restart cut, as itself (`claude --resume <id>`
+with a prompt to go on) in a session host of its own, attachable by its launch id: Switchboard
+launched it, it was running at the owner's last look before the restart, its transcript was last
+written in the two hours before the restart and not since, it has no end, and no process, session
+host or later launch holds it. At most five after one restart, newest first, inside the session
+pool; each intent and outcome is journalled in `<data>/boot-resume.jsonl` and never repeated.
+Without `on` it reads `{settings: {on}, boot_time, last_look, window_minutes, max_per_boot, recent,
+supported}`; `on` changes it, only when the operator asks. Kept in `<data>/boot-resume.json`, on
+when absent.
+
 ### `switchboard_duty`: `on?`, `stuck_minutes?`, `waiting_minutes?`, `idle_minutes?`, `max_age_hours?`, `run?`, `dry_run?`
 
 The session duty officer (SB-384, DEC-0021). Every five minutes it looks at each live interactive

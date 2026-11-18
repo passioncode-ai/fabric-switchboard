@@ -6,7 +6,7 @@ never renumber, never delete. The doc map ([DOCMAP.md](DOCMAP.md)) names this fi
 register. Decisions made before 2026-11-08 live where they were made (plans' `D-<n>`, board rows,
 research notes); the ones still in force that the board cites are seeded below with their source.
 
-**Next free ID:** `DEC-0029` (`DEC-0027` is held for SB-418, a person's off switch for an account, and `DEC-0028` for SB-419, groups fed from the default group, both on open branches; `DEC-0018` and `DEC-0020`, held for the window and fleet plan's modules, were written on 2026-11-17)
+**Next free ID:** `DEC-0031` (`DEC-0029` is held by an open branch, `DEC-0030` is SB-450, sessions continued after a restart; `DEC-0027` is held for SB-418, a person's off switch for an account, and `DEC-0028` for SB-419, groups fed from the default group, both on open branches; `DEC-0018` and `DEC-0020`, held for the window and fleet plan's modules, were written on 2026-11-17)
 
 ## Format
 
@@ -876,3 +876,48 @@ research notes); the ones still in force that the board cites are seeded below w
   связано … Те, которые выбывают, они уходят в дефолтную папку отстаиваться … аккаунты, которые
   скоро станут активными, наперед мы подготавливаем … У папок типа есть свой приоритет»); design
   target-state `06-default-feed.md`.
+
+### DEC-0030: The sessions a restart of this computer cut are continued once, hosted
+
+- **Date:** 2026-11-18
+- **Status:** Accepted (built on branch `boot-resume`: SB-450)
+- **Context:** after the Mac rebooted nothing continued the sessions (Fabric Dashboards, board
+  request 737b04e6): each session host died with the machine, the duty officer acts only on live
+  processes, and recovery only on sessions stopped on a limit. Fabric Dashboards runs a temporary
+  agent (`ai.passioncode.resume-after-boot`, until 2026-11-25) with the same rule until this ships.
+- **Decision:** the one-minute session watch keeps `boot-live.json` (0600): the boot time and the
+  session and launch ids of every live Claude Code session a Switchboard launch runs, rewritten only
+  when they change, and stamped with `stopped_at` at the owner's drain. The first watch pass of an
+  owner whose ledger is from an earlier boot (boot time from `kern.boottime` on macOS, `/proc/stat`
+  `btime` on Linux) continues each session of that ledger that:
+  - has a launch record with no `ended`, no `continued_as`, provider Claude, launched before the
+    boot (a dispatched board run is continued only when it has no end either);
+  - was in the ledger at a look no older than 2 hours before the boot, and its owner did not stop
+    looking before the session's last transcript write (120 s of slack);
+  - has its transcript (in any config folder) last written in the 2 hours before the boot, not after;
+  - no live Claude Code process holds, no session host runs, no launch since the boot names, no
+    launch began to continue in the last 2 minutes, and this boot's journal does not name.
+  At most 5 a boot, newest transcript first; each needs the session pool's admission
+  (`capacity.json`, an interactive start), and a refusal ends the pass. A continuation is
+  `resumable::continue_as` hosted (`claude --resume <id>` with `resumable::CONTINUE_PROMPT`, in the
+  session's own config and working folders), recorded as a launch of its own (`launched_by: {surface:
+  recovery, by: boot-resume, parent: <the cut launch>}`) and started with
+  `session_host::start_detached`, the one way every hosted start uses; the cut launch gets `ended:
+  {kind: reboot}` and `continued_as`. `boot-resume.jsonl` (0600, 500 lines) gets an `intent` line
+  before each start and its outcome after (`continued` with `new_launch_id`, `failed`,
+  `at_capacity`, `over_limit`); a later owner settles an intent with no outcome as `continued` when
+  a process or host holds the session, else `interrupted`, and never starts it again. On by default
+  (`boot-resume.json`), off with `switchboard boot-resume off`, MCP `switchboard_boot_resume {on:
+  false}` or Settings → *Sessions after a restart*. macOS and Linux; Windows keeps the ledger only.
+  `continue_as` itself refuses a session a host runs or a launch began to continue within 2 minutes
+  and serializes continuations, so the owner's pass, a person's Continue and another agent's
+  `sessions continue` never start one session twice.
+- **Consequences / affects:** the temporary agent in Fabric Dashboards can be removed once a release
+  with this ships: until then the two cannot both start one session, since each checks for a live
+  process (and Switchboard also for a host or a launch since the boot) first; a person's own session
+  started outside Switchboard is never continued (it has no launch record); the first restart after
+  updating continues nothing (no earlier ledger). CLI `boot-resume`; MCP `switchboard_boot_resume`;
+  Settings (SCN-105); [CONTRACTS](CONTRACTS.md#sessions-after-a-restart-sb-450-dec-0030); AGENTS.md
+  Lifecycle (Writes).
+- **Source:** Fabric Dashboards' board request 737b04e6 (thread a9844103), 2026-11-18; the
+  operator's rule that sessions are never lost and never doubled (DEC-0021, SB-396).

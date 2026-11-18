@@ -344,6 +344,7 @@ export function createDemoAdapter(): Adapter {
   const demoShare = (cap: number) => demoBoard ?? Math.min(cap, Math.max(1, Math.ceil(cap / 4)));
   let demoDutyOn = true;
   let demoOwnSignIn = true;
+  let demoBootResume = true;
   let balanceGroups: string[] = []; let balanceAllNew = false; let balanceBackup: string[] = [];
   const balanceStatus = () => {
     const pools = ['default', ...(state.projects ?? []).map((p) => p.pool)];
@@ -803,6 +804,12 @@ export function createDemoAdapter(): Adapter {
       // A board run the pool would admit now ends the demo's wait, as `dispatch_refusals::admitted` does once one starts.
       if (admitted) demoRefused = null;
       return { cap: demoCap, used, free: demoCap === null ? null : Math.max(0, demoCap - used), at_capacity: demoCap !== null && used >= demoCap, total: 5, quiet: 1, quiet_after_minutes: 30, on_limit_stop: 1, on_waits: 1, board_share: share, board_share_set: demoBoard !== null, board_share_clamped: clamped, board_used: 1, board_admitted: admitted, waiting: demoRefused?.count ?? 0, refused_waiting: demoRefused };
+    },
+    async bootResume(on) {
+      await pause(); if (typeof on === 'boolean') demoBootResume = on;
+      const now = Math.floor(Date.now() / 1000);
+      return { settings: { on: demoBootResume }, boot_time: now - 3600, window_minutes: 120, max_per_boot: 5, supported: true,
+        recent: [{ at: now - 3500, boot: now - 3600, session: 'demo-s7', folder: '/Users/demo/Code/site', outcome: 'continued', new_launch_id: 'demo-launch-7' }] };
     },
     async ownSignIn(on) { await pause(); if (typeof on === 'boolean') demoOwnSignIn = on; return { own_sign_in: demoOwnSignIn ? 'on' : 'off', on: demoOwnSignIn }; },
     async duty(change) {

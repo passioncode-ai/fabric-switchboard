@@ -1051,7 +1051,14 @@ Asked for by Fabric Dashboards (an embedded console beside each service, operato
   …args=[…] -c …env.ELECTRON_RUN_AS_NODE="1" [resume --last] <first prompt>` — Codex gets
   Switchboard's server from its private `config.toml`, so the `-c` entries add to it. The session
   script unsets only the provider variables in `CONFLICTS`, so the caller's own environment
-  (`FABRIC_DASHBOARDS_CONTEXT`, `FABRIC_DASHBOARDS_TASK`) reaches the agent. Test
+  (`FABRIC_DASHBOARDS_CONTEXT`, `FABRIC_DASHBOARDS_TASK`) reaches the agent. Since SB-455
+  (2026-11-18) every Unix session script also sets `export PATH="${PATH:+$PATH:}"<dirs>`: the
+  caller's PATH first, then the program's folder, the owner's PATH, `~/.local/bin` and Homebrew's
+  folders (`launch::headless_path`), so a session started outside a login shell (the app, a
+  console, a session host) finds `node` for its hooks; before, `SessionStart:startup hook failed
+  /bin/sh: node: command not found` (launch `0c21ab66`), and Switchboard's own start hook never
+  recorded the session (SB-451). Test `an_in_place_launch_prepares_the_same_session_and_opens_no_terminal`
+  (the `PATH` line). Test
   `a_dashboards_console_launch_reaches_the_agent_as_sent` runs the generated script with a
   recording agent and compares the exact argv and environment.
 
@@ -1227,6 +1234,22 @@ through `project suggest --from-hook` and `recovery hook`, MCP `switchboard_sess
   (`launches::tests::a_nested_session_in_the_same_home_never_overwrites_its_parent`). The hook
   sends `source` only for those three values; an owner from before it refuses the field, and the
   hook sends the start once more without it, which that owner records as before.
+- **The session a launch's own process holds wins (SB-451, 2026-11-18).** A start hook reaches the
+  owner in the order its processes run it, and a session's id can change with no start hook:
+  launch 38e41114 (0.7.117, a hosted console in the `tokens` group) recorded a session whose
+  transcript never existed while its process held another, so its history, its continuation and
+  every reader of its transcript looked at the wrong one. `launches::reconcile` corrects a record
+  from the process table: each launch's own process is the earliest Claude Code process the scan
+  joins to it (through its home's `.session-pid` or its host, two parents up; a session it runs
+  itself, a nested `claude -p`, is a child and starts later), and its session is the one that
+  process's `sessions/<pid>.json` names. A record naming another gets `provider_session_id` and
+  `transcript` (the session's `projects/<folder>/<id>.jsonl` in that file's config folder, or
+  null while it is not written) from it, the session it named moves to `nested_sessions`, and
+  `session_corrected_at` says when; logged once per pass as `launch_session_corrected` with a
+  count. It runs on every fresh read of the session watch (each minute, and a tree read older than
+  15 s) and before `sessions show <launch_id>` answers; a scan that could not read the process
+  table corrects nothing. Its own turns count from the correction on. Evidence:
+  `a_record_naming_another_session_than_its_own_process_holds_is_corrected`.
 - **Where it went.** `continued_as` is set once, where the successor is known, and only to a
   launch that started: a launch naming a
   `parent` sets `{kind: "launch", id}` on it; a continuation of a workflow sets it on the latest
@@ -3757,6 +3780,55 @@ the item offered *Close the quiet copy* and the press was refused. Tests
 quiet copy* on the item). Tests `duty::tests::a_person_closes_the_copy_quiet_longest_and_never_a_working_one`,
 `session_watch::tests::a_copy_of_a_live_session_a_quiet_board_run_and_a_vanished_launch_are_found`,
 `attention::tests::a_copy_of_a_live_session_and_a_quiet_board_run_come_first`.
+
+## Sessions after a restart (SB-450, DEC-0030)
+
+Code: `crates/switchboard-runtime/src/boot_resume.rs`, `session_watch::watch`,
+`resumable::being_continued`, `session_host::start_detached`, `launches::continued_by_boot`,
+`Operation::BootResume`; CLI `switchboard boot-resume [on|off]`; MCP `switchboard_boot_resume`;
+the window's `boot_resume` command (Settings → Sessions after a restart, SCN-105).
+
+- **The ledger.** Each fresh pass of the one-minute session watch, when it read the process table,
+  computes the live launched sessions (`boot_resume::seen_of`: a Claude Code row with a launch id
+  whose pid a `sessions/<pid>.json` pairs with a session) and writes `<data>/boot-live.json` (0600:
+  `boot`, `at`, `sessions: [{session, launch_id}]`, `stopped_at`) only when the boot or that set
+  changed, or `stopped_at` was set. The owner's drain sets `stopped_at` on a ledger of this boot.
+  Boot time: `sysctl kern.boottime` (macOS), `btime` of `/proc/stat` (Linux), read once a process.
+- **The pass.** Once per owner process, the first watch pass with `boot-resume.json` saying on
+  (absent: on) and a ledger from an earlier boot runs `boot_resume::run`: it first settles each
+  intent of this boot with no outcome (`continued` when a live process holds the session or it is
+  `being_continued`, else `interrupted`), then continues what `boot_resume::candidates` admits,
+  the rule of DEC-0030 (no end, not continued, Claude, launched before the boot; in the ledger, the
+  ledger at most 2 hours older than the boot and its `stopped_at` neither older than that nor older
+  than the transcript's last write minus 120 s; transcript last written in `[boot - 7200, boot]`
+  in any config folder (`machine_sessions::transcript_at`); not live, not `being_continued`, not
+  named by a launch since the boot, not in this boot's journal), newest transcript first, at most 5
+  (the rest `over_limit`). Each needs `capacity::reserve(Start::Interactive)`; a refusal writes
+  `at_capacity` for it and every one after. A continuation is `resumable::continue_as` with `How
+  {in_place: true, hosted: true, by: {surface: recovery, by: boot-resume, parent: <launch>}}`, then
+  `session_host::start_detached(root, launch, script, launch::agent_cli(), 40, 120)`; a host that
+  never came up ends the new launch `not_started`. A started one gives the cut launch `ended: {kind:
+  reboot, at}` (unless an end was recorded) and `continued_as: {kind: launch, id}`.
+- **The journal.** `<data>/boot-resume.jsonl` (0600, newest 500): `at`, `boot`, `session`,
+  `launch_id`, `folder`, `phase` (`intent` before a start; `outcome` after) and `outcome`
+  (`continued` with `new_launch_id`, `failed` with `reason`, `interrupted`, `at_capacity`,
+  `over_limit`). Logged once a pass as `boot_resume` with the counts.
+- **Never twice.** `continue_as` serializes continuations in its process and refuses (`LIVE`) a
+  session a session host runs (its launch's `provider_session_id`) or a launch named in the last
+  `JUST_STARTED_SECONDS` (120) with no end, beside the live-process check it had. Fabric
+  Dashboards' temporary `ai.passioncode.resume-after-boot` applies the same rule until 2026-11-25;
+  either one finds the other's continuation through the live process, and Switchboard also through
+  its host or launch record.
+- **Reading.** `Operation::BootResume {on}` (no store lock) saves `on` when given and answers
+  `settings`, `boot_time`, `last_look` (`boot`, `at`, `sessions` count, `stopped_at`),
+  `window_minutes` (120), `max_per_boot` (5), `recent` (the newest 20 outcome lines) and
+  `supported` (false on Windows, which keeps the ledger only). An unreadable `boot-resume.json` is
+  `boot_resume::UNREADABLE`.
+- **Hosted starts.** `session_host::start_detached` is the one way a host starts: `launch --hosted`
+  and `sessions continue --hosted` (`hosted::spawn`, the CLI's own executable) and this pass (the
+  installed CLI). It runs `<cli> --data-dir <root> session-host --launch-id … --program <script>
+  --rows … --cols …` in a session of its own with nothing on its stdio, waits up to 10 s for the
+  socket, and reaps the host on a thread.
 
 ## Pay-per-token group (SB-401, DEC-0023)
 

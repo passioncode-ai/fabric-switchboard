@@ -525,6 +525,56 @@ fn spawn_on(program: &Path, slave: &OwnedFd) -> io::Result<std::process::Child> 
     command.spawn()
 }
 
+/// SB-450: starts the host of `launch_id` as its own process, as `cli session-host` (its own
+/// session, nothing on its stdio), so it outlives whoever started it, and waits until it can be
+/// attached (ten seconds at most). `launch --hosted`, `sessions continue --hosted` and the owner's
+/// continuation after a restart all start a host this one way. A thread reaps the host when it
+/// ends, so the starting process keeps no zombie.
+pub fn start_detached(
+    root: &Path,
+    launch_id: &str,
+    program: &Path,
+    cli: &Path,
+    rows: u16,
+    cols: u16,
+) -> Result<(), String> {
+    let mut command = Command::new(cli);
+    command
+        .arg("--data-dir")
+        .arg(root)
+        .args(["session-host", "--launch-id", launch_id, "--program"])
+        .arg(program)
+        .args(["--rows", &rows.to_string(), "--cols", &cols.to_string()])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    unsafe {
+        command.pre_exec(|| {
+            libc::setsid();
+            Ok(())
+        });
+    }
+    let mut child = command
+        .spawn()
+        .map_err(|_| "The session host could not start.")?;
+    for _ in 0..100 {
+        if attachable(root, launch_id).is_some() {
+            std::thread::spawn(move || {
+                let _ = child.wait();
+            });
+            return Ok(());
+        }
+        if let Ok(Some(_)) = child.try_wait() {
+            return Err("The session host stopped before the session started.".into());
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    std::thread::spawn(move || {
+        let _ = child.wait();
+    });
+    Err("The session host did not answer within ten seconds.".into())
+}
+
 /// What a host starts.
 pub struct Start<'a> {
     pub root: &'a Path,

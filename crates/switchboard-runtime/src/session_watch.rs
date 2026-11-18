@@ -281,6 +281,10 @@ fn read_fresh(root: &Path, now: i64) -> Read {
 /// What the live processes and records read now give.
 fn read(root: &Path, now: i64) -> Read {
     let (scan, pairs) = crate::machine_sessions::scan_and_pairs(root);
+    let pairs: Vec<(String, u32)> = pairs.into_iter().map(|(s, p, _)| (s, p)).collect();
+    // SB-451: a record naming a session its own process does not hold is corrected before the
+    // records are read.
+    reconcile_records(root, &scan, &pairs, now);
     let mut records = crate::launches::recent_records(root, now - WINDOW_SECONDS);
     for record in records.iter_mut().filter(|r| r["dispatch"].is_object()) {
         if let Some(at) = log_written_at(root, record) {
@@ -294,8 +298,40 @@ fn read(root: &Path, now: i64) -> Read {
             record[HOME_RUNNING] = true.into();
         }
     }
-    let pairs = pairs.into_iter().map(|(s, p, _)| (s, p)).collect();
     (scan, records, pairs)
+}
+
+/// SB-451: the launch records corrected from their processes' own session files
+/// (`launches::reconcile`); the session files are read only when a record differs. Nothing is
+/// corrected from a scan that could not read the process table.
+fn reconcile_records(root: &Path, scan: &Value, pairs: &[(String, u32)], now: i64) {
+    if !table_read(scan) {
+        return;
+    }
+    let rows: Vec<Value> = scan["sessions"].as_array().cloned().unwrap_or_default();
+    type Files = HashMap<u32, (std::path::PathBuf, String)>;
+    let files: std::cell::OnceCell<Files> = std::cell::OnceCell::new();
+    let transcript_of = |pid: u32, session: &str| {
+        let files = files.get_or_init(|| {
+            crate::machine_sessions::session_files(root)
+                .into_iter()
+                .filter_map(|(config, f)| {
+                    let pid = u32::try_from(f["pid"].as_u64()?).ok()?;
+                    Some((pid, (config, f["cwd"].as_str()?.to_owned())))
+                })
+                .collect()
+        });
+        let (config, cwd) = files.get(&pid)?;
+        let path = crate::resumable::transcript(config, cwd, session);
+        path.is_file().then_some(path)
+    };
+    crate::launches::reconcile(root, &rows, pairs, transcript_of, now);
+}
+
+/// SB-451: before one launch is shown, its record is checked against its process (a read at most
+/// `READ_FRESH` seconds old, the tree's own).
+pub fn refresh(root: &Path, now: i64) {
+    let _ = read_cached(root, now);
 }
 
 /// SB-407: when a dispatched run's log (`launches/logs/<id>.log`) was last written; a stat only.
@@ -449,6 +485,9 @@ fn watch(root: &Path, now: i64) {
     // SB-412: room in the pool after a refused dispatch is noted once.
     crate::dispatch_refusals::observe(root, &scan, now);
     let rows: Vec<Value> = scan["sessions"].as_array().cloned().unwrap_or_default();
+    // SB-450: after a restart the sessions it cut are continued once; the live ones are kept for
+    // the next restart.
+    crate::boot_resume::tick(root, &rows, &pairs, table_read(&scan), now);
     let mut found = findings(&rows, &records, &pairs, now, table_read(&scan));
     describe_duplicates(root, &mut found);
     let before = last_keys(root);
