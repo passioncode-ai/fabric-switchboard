@@ -694,9 +694,12 @@ mod tests {
             [("intent", "a"), ("outcome", "a")]
         );
         // A second owner start in the same boot (the ledger still from the earlier boot, say it
-        // was never rewritten) continues nothing again.
+        // was never rewritten), with `a`'s continuation not yet holding it, continues nothing
+        // again: this boot's journal names `a`, and its record ended.
         let fake2 = Fake {
             written: fake.written.clone(),
+            live: fake.live.clone(),
+            hosted: fake.hosted.clone(),
             ..Fake::default()
         };
         run(root, BOOT, BOOT + 200, &fake2);
