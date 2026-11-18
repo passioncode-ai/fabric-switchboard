@@ -1001,6 +1001,7 @@ mod tests {
             command_age: None,
             cpu: None,
             cpu_quiet: None,
+            own_launches: None,
         }
     }
 
