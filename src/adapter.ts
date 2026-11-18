@@ -46,6 +46,8 @@ export const nativeAdapter: Adapter = {
   sendAccount: (id, to, pool, delegate) => invoke('send_account', { id, to, pool, delegate: delegate ? true : null, leaseHours: delegate?.leaseHours ?? null }),
   recallAccount: (id, from, pool) => invoke('recall_account', { id, from, pool: pool ?? null }),
   machinesLive: () => invoke('machines', { live: true }),
+  targets: (probe) => invoke('targets', { probe: probe ?? false }),
+  remoteStatus: (target) => invoke('remote_status', { target }),
   machinesList: () => invoke('machines', { live: false }),
   // WF-3 (SB-365): an owner without the command yet, or a read that fails, is an empty list: the page never breaks on it.
   attention: () => readWithDeadline(invoke('attention')).then(attentionView, () => attentionView(null)),

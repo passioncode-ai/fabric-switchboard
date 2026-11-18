@@ -10,7 +10,7 @@ if (native) watchProblems(reportProblem);
 import { LOCALE_KEY, dateLocale, locale, parseLocaleChoice, plural, saveLocaleChoice, t, type LocaleChoice } from './i18n';
 import { demo, demoFirstRun, native, nativeAdapter, onProjectSuggestions, onShellHook, onSpendChanged, safeError, reportFrontendReady, reportLanguage, reportProblem, type Operation } from './adapter';
 import type { CardState, AccountGroup } from './ui-logic';
-import { feedView, feedBadge, feedMoveLine, feedNotice, feedPriority, feedArrows, statAlert, ceilingQuestion, ceilingWarning, ceilingLine, keyLimitLine, dollars, POOL_PATTERN, poolChoices, poolName, inGroup, tourPlacement, usableWhileBusy, APPEARANCE_KEY, attribution, placementAdmits, domainSuggestion, groupSeatsElsewhere, passioncodeLine, seatEndedText, groupSeatsEndedText, organizationReleasedAt, inOrganizationFilter, domainList, type AttributedBy, sortStatRows, nextStatSort, type StatRow, type StatSort, statCacheShare, statTokensPerRequest, chartSeries, niceMax, groupProjectRows, type ChartMetric, groupProjects, compactCount, statTokens, statTrouble, statTroubleText, statAgentName, type Statistics, EXPIRY_CHOICES, folderName, folderRows, withoutFolder, type ProjectRoot, moveTargets, mapRows, rootTargets, storedMapFolders, MAP_FOLDERS_KEY, type MapFilter, type MapRow, type RepositoryMap, sortAgents, defaultAgentChoices, backgroundReads, clockedRead, chainScopeKey, afterRead, ceilingRemovalNote, modelMeta, modelUse, ordinaryKimiNote, kimiLimitUntil, limitReasonText, limitTitle, agentSetupFacts, sessionHow, sessionAgentName, sessionStateLabel, kimiWindowsLine, kimiWindowsLines, openrouterCreditLine, eventAction, eventDetail, MutationClock, activeRules, autoSwitchPool, autoSwitchPossible, launchChoice, withFolders, githubDefaultSelection, githubPlan, githubSource, replaceFolder, storedFolder, LAST_FOLDER_KEY, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, signInNotice, signInMove, organizationMoveNote, dismissTermsNotice, termsNoticeDismissed, termsNoticeOn, termsNoticeText, tourWaits, orgSetups, releasedOrganizations, releasedSummary, orgSetupAction, orgSetupShown, orgSetupCaveat, orgSetupLeads, orgSetupPrimary, accountsOrgActionLeads, firstPrimary, orgSetupUnread, orgSetupStateLabel, orgSetupTitle, hiddenOrgSetups, ORG_SETUP_HIDDEN_KEY, accountsEmptyKey, type OrgSetup, usageAnswerText, usageNotice, usageFreshness, windowReset, type Appearance, shellHookView, balancingView, balancingNotice, shellHookToggleNotice, shellHookNoticeText, codexHookLine, moveStep, accountsForStep, chainSummary, stepReasonText, handoverOutcomeText, handoverSkipped, shortWorkflow, TAKEOVER_ORDER, seatChoices, assignNotice, placementNotice, providerOrganization, groupOrganizations, servesPool, sharedGroups, holdsContext, accountOrganizations, machineOf, remoteUsageLine, unplacedAccounts, foldlessGroups, repositoriesUnder, contextLines, machineAliasesLine, machineLiveLine, machineCopyLine, foldOpen, accountSections, accountMatches, attentionAccounts, attentionReasonText, duplicateOffer, attentionActionLabel, dispatchRefusedLine, defaultBoardShare, dispatchStopLineText, dispatchStopNotice, dutyReasonText, dutyOutcomeText, surfaceLabel, sessionTreeRows, SESSION_GROUPS, sessionGroupTitle, sessionWhyText, machineReadText, givenFacts, switchingLine, MACHINE_FOLD_LIMIT, EVENT_FILTER_KINDS, eventKindLabel, filterEvents, eventsByDay, relativeDay, EVENTS_PAGE, eventPage, sortSessions, statRowsShown, STAT_TOP, spendShare, groupKeyBlocks, keyTail, groupStateLine, type EventKind, type EventFilter, restartSkipText, sessionTone, sessionDegradedText, restartStateText, restartTone, statCost, groupDisplayName, tokensSpendLine, keyLaunch, keyOutsideTokens, movePool } from './ui-logic';
+import { feedView, feedBadge, feedMoveLine, feedNotice, feedPriority, feedArrows, statAlert, ceilingQuestion, ceilingWarning, ceilingLine, keyLimitLine, dollars, POOL_PATTERN, poolChoices, poolName, inGroup, tourPlacement, usableWhileBusy, APPEARANCE_KEY, attribution, placementAdmits, domainSuggestion, groupSeatsElsewhere, passioncodeLine, seatEndedText, groupSeatsEndedText, organizationReleasedAt, inOrganizationFilter, domainList, type AttributedBy, sortStatRows, nextStatSort, type StatRow, type StatSort, statCacheShare, statTokensPerRequest, chartSeries, niceMax, groupProjectRows, type ChartMetric, groupProjects, compactCount, statTokens, statTrouble, statTroubleText, statAgentName, type Statistics, EXPIRY_CHOICES, folderName, folderRows, withoutFolder, type ProjectRoot, moveTargets, mapRows, rootTargets, storedMapFolders, MAP_FOLDERS_KEY, type MapFilter, type MapRow, type RepositoryMap, sortAgents, defaultAgentChoices, backgroundReads, clockedRead, chainScopeKey, afterRead, ceilingRemovalNote, modelMeta, modelUse, ordinaryKimiNote, kimiLimitUntil, limitReasonText, limitTitle, agentSetupFacts, sessionHow, sessionAgentName, sessionStateLabel, kimiWindowsLine, kimiWindowsLines, openrouterCreditLine, eventAction, eventDetail, MutationClock, activeRules, autoSwitchPool, autoSwitchPossible, launchChoice, withFolders, githubDefaultSelection, githubPlan, githubSource, replaceFolder, storedFolder, LAST_FOLDER_KEY, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, signInNotice, signInMove, organizationMoveNote, dismissTermsNotice, termsNoticeDismissed, termsNoticeOn, termsNoticeText, tourWaits, orgSetups, releasedOrganizations, releasedSummary, orgSetupAction, orgSetupShown, orgSetupCaveat, orgSetupLeads, orgSetupPrimary, accountsOrgActionLeads, firstPrimary, orgSetupUnread, orgSetupStateLabel, orgSetupTitle, hiddenOrgSetups, ORG_SETUP_HIDDEN_KEY, accountsEmptyKey, type OrgSetup, usageAnswerText, usageNotice, usageFreshness, windowReset, type Appearance, shellHookView, balancingView, balancingNotice, shellHookToggleNotice, shellHookNoticeText, codexHookLine, moveStep, accountsForStep, chainSummary, stepReasonText, handoverOutcomeText, handoverSkipped, shortWorkflow, TAKEOVER_ORDER, seatChoices, assignNotice, placementNotice, providerOrganization, groupOrganizations, servesPool, sharedGroups, holdsContext, accountOrganizations, machineOf, machineChoices, remoteGroupChoices, movableAccounts, remoteUsageLine, unplacedAccounts, foldlessGroups, repositoriesUnder, contextLines, machineAliasesLine, machineLiveLine, machineCopyLine, foldOpen, accountSections, accountMatches, attentionAccounts, attentionReasonText, duplicateOffer, attentionActionLabel, dispatchRefusedLine, defaultBoardShare, dispatchStopLineText, dispatchStopNotice, dutyReasonText, dutyOutcomeText, surfaceLabel, sessionTreeRows, SESSION_GROUPS, sessionGroupTitle, sessionWhyText, machineReadText, givenFacts, switchingLine, MACHINE_FOLD_LIMIT, EVENT_FILTER_KINDS, eventKindLabel, filterEvents, eventsByDay, relativeDay, EVENTS_PAGE, eventPage, sortSessions, statRowsShown, STAT_TOP, spendShare, groupKeyBlocks, keyTail, groupStateLine, type EventKind, type EventFilter, restartSkipText, sessionTone, sessionDegradedText, restartStateText, restartTone, statCost, groupDisplayName, tokensSpendLine, keyLaunch, keyOutsideTokens, movePool } from './ui-logic';
 import agentCatalog from '../catalog/agents.json';
 import type { AnalyticsStatus, Ceilings, CeilingView, CeilingQuestionView, OpenrouterCredit, BackupInfo, PassioncodeStatus, Account, Adapter, AgentConnection, AgentInfo, AgentRow, AgentsOverview, OpenrouterModels, HermesModel, KimiAccounts, KimiRegion, KimiStatus, OpenrouterStatus, OpenrouterKeys, CodexRoute, BalanceStatus, FeedStatus, CapacityStatus, DutyStatus, DutyLine, SessionTree, WatchFinding, ShellHookStatus, AgentSetup, AuthKind, BackupStatus, KimiAccount, CurrentAccounts, LoginItem, Project, Restored, HandoverPlan, ExternalIdentity, MonitorStatus, ProjectRule, Provider, RotationPolicy, RuntimeStatus, SessionInfo, Snapshot, UpdateStatus, Onboarding, Chains, ChainExecutor, ChainScope, ChainStepView, GithubRepository, Machine, MachinesLive, MachinesList, Attention, AttentionItem, Event, GivenAccount, SessionsEverywhere, SessionRow, MachineReadStatus, RestartPlan, RestartWave, OrganizationAssigned, Placement, ObservatoryKeys, ObservatoryKey, OwnSignIn } from './types';
 
@@ -614,25 +614,8 @@ function delegateFields(context: ReturnType<typeof openDialog>) {
   context.body.append(option, note, lease);
   return () => box.checked ? { leaseHours: Math.round(Number(hours.value)) || 48 } : null;
 }
-/** SB-355 (SCN-092): a sign-in of this computer moves to a machine group's machine over ssh. */
-function moveHereDialog(machine: Machine) {
-  const context = openDialog(t('Move an account to {machine}', { machine: machine.name }), t('Its sign-in moves over ssh: this computer stops using it first, the other machine saves it and checks that it answers. If a step fails, nothing changes.'));
-  // SB-377: a selected account moves too; its group switches to its next account here first.
-  const movable = snapshot!.accounts.filter((a) => a.kind === 'oauth' && a.enabled && snapshot?.elsewhere?.[a.id] === undefined);
-  if (!movable.length) { context.body.append(el('p', 'form-note', t('No account here can move now: only a subscription sign-in that is on and used on this computer moves.'))); context.actions.append(button(t('Done'), () => context.close(), 'button primary')); return; }
-  const which = select(movable.map((a): [string, string] => [a.id, `${a.label} · ${providerName(a.provider)}`]));
-  const pool = input('default'); pool.maxLength = 32;
-  context.body.append(field(t('Account'), which), field(t('Group there'), pool, t('Its group on the other machine.')));
-  const delegated = delegateFields(context);
-  context.actions.append(submit(t('Move')));
-  context.form.addEventListener('submit', (event) => {
-    event.preventDefault();
-    const account = movable.find((a) => a.id === which.value); if (!account) return;
-    const delegate = delegated();
-    void dialogSave(context, () => adapter.sendAccount(account.id, machine.name, pool.value.trim() || 'default', delegate), delegate ? t('{label} is delegated to {machine}. This computer calls it back when you ask.', { label: account.label, machine: machine.name }) : t('{label} moved to {machine}. This computer no longer uses it.', { label: account.label, machine: machine.name }));
-  });
-  which.focus();
-}
+/** SB-355 (SCN-092): accounts of this computer move to a machine group's machine over ssh. */
+function moveHereDialog(machine: Machine) { machineMoveDialog([], machine); }
 /** SB-378 (SCN-093 step 7): this computer's cap on working coding sessions. */
 let capacityState: CapacityStatus | null = null; let capacityLoading = false; let capacityError = '';
 function loadCapacity() {
@@ -2363,25 +2346,98 @@ function givenFactsLine(account: Account) {
   return line;
 }
 /** SB-283: move a sign-in to another machine over ssh; nothing changes when a step fails. */
-function sendDialog(account: Account) {
-  // SB-355: from one machine to another it comes back here first, then moves.
-  const from = machineOf(snapshot!, account);
-  const context = openDialog(t('Move {label} to another machine', { label: account.label }), from ? t('It comes back from {machine} first, then its sign-in moves over ssh. If the move fails, it stays on this computer.', { machine: from.name }) : t('Its sign-in moves over ssh: this computer stops using it first, the other machine saves it and checks that it answers. If a step fails, nothing changes.'));
-  const machine = input(''); machine.maxLength = 255; machine.placeholder = 'user@studio.local'; machine.required = true;
-  if (!from && Object.values(snapshot!.routes).includes(account.id)) context.body.append(el('p', 'form-note', t('Its groups switch to their next account here first, so their sessions go on.')));
-  const known = (snapshot?.machines ?? []).filter((m) => m.pool !== from?.pool);
-  if (known.length) { const names = el('datalist'); names.id = 'machine-names'; for (const m of known) { const option = el('option'); option.value = m.name; names.append(option); } machine.setAttribute('list', 'machine-names'); context.body.append(names); }
-  const pool = input(account.pool); pool.maxLength = 32;
-  context.body.append(field(t('Machine'), machine, t('As ssh knows it, reachable without a password prompt.')), field(t('Group there'), pool, t('Its group on the other machine.')));
+function sendDialog(account: Account) { machineMoveDialog([account.id], null); }
+/**
+ * SB-473 to SB-476 (plan section 09): one dialog moves one account or several to another machine.
+ * The machine is chosen from the machines this computer knows, its groups are read from it over
+ * ssh, and the accounts move one after another, each with its own line; one that fails stops
+ * nothing else. An account on another machine comes back here first, then moves (SB-355).
+ */
+function machineMoveDialog(checked: string[], to: Machine | null) {
+  const movable = movableAccounts(snapshot!, to);
+  const first = movable.find((a) => checked.includes(a.id)) ?? null;
+  const from = first ? machineOf(snapshot!, first) ?? null : null;
+  const context = openDialog(to ? t('Move accounts to {machine}', { machine: to.name }) : first ? t('Move {label} to another machine', { label: first.label }) : t('Move accounts to another machine'),
+    t('Each sign-in moves over ssh: this computer stops using it first, the other machine saves it and checks that it answers. If a step fails for one account, nothing changes for it.'));
+  if (!movable.length) { context.body.append(el('p', 'form-note', t('No account here can move now: only a subscription sign-in that is on and used on this computer moves.'))); context.actions.append(button(t('Done'), () => context.close(), 'button primary')); return; }
+  // The accounts: the one it was opened for checked, the others offered beside it.
+  const list = el('fieldset', 'appearance-options move-options'); list.append(el('legend', 'sr-only', t('Accounts')));
+  const boxes = movable.map((a) => {
+    const option = el('label', 'appearance-option'); const box = el('input'); box.type = 'checkbox'; box.value = a.id; box.checked = checked.includes(a.id); box.dataset.focus = `move-account-${a.id}`;
+    const there = machineOf(snapshot!, a);
+    option.append(box, el('span', '', [a.label, providerName(a.provider), there ? t('on {machine}', { machine: there.name }) : poolName(a.pool, snapshot?.projects)].join(' · ')));
+    list.append(option); return box;
+  });
+  context.body.append(groupField(t('Accounts'), list, t('Accounts on another machine come back here first, then move.')));
+  // The machine: chosen, never guessed; a machine never reached is typed after *Another machine…*.
+  const OTHER = '__other';
+  const picker = select([]); const typed = input(''); typed.maxLength = 255; typed.placeholder = 'user@studio.local'; typed.required = false;
+  const typedField = field(t('Machine as ssh knows it'), typed, t('Reachable without a password prompt.')); typedField.hidden = true;
+  const fill = (choices: { name: string; detail: string }[]) => {
+    picker.replaceChildren();
+    for (const c of choices) { const o = el('option', '', `${c.name} · ${c.detail}`); o.value = c.name; picker.append(o); }
+    const other = el('option', '', t('Another machine…')); other.value = OTHER; picker.append(other);
+    if (to) picker.value = to.name;
+  };
+  const syncOther = () => { const other = picker.value === OTHER; typedField.hidden = !other; typed.required = other; return other; };
+  fill(machineChoices(snapshot?.machines ?? [], [], from)); syncOther();
+  context.body.append(field(t('Machine'), picker), typedField);
+  // The group there: read from the machine; typed only when that read fails.
+  const groupPicker = select([['default', t('Default group')]]); const groupTyped = input(''); groupTyped.maxLength = 32; groupTyped.required = false;
+  const groupNote = el('p', 'form-note'); groupNote.setAttribute('aria-live', 'polite');
+  const groupTypedField = field(t('Group id there'), groupTyped, t('As that machine names it; empty for its default group.')); groupTypedField.hidden = true;
+  context.body.append(field(t('Group there'), groupPicker), groupNote, groupTypedField);
+  let readStamp = 0;
+  const readGroups = async (machine: string) => {
+    const stamp = ++readStamp; groupTypedField.hidden = true; groupPicker.hidden = false;
+    groupNote.textContent = t('Reading the groups on {machine}…', { machine });
+    try {
+      const status = await adapter.remoteStatus(machine); if (stamp !== readStamp) return;
+      const { choices, chosen } = remoteGroupChoices(status, first && !machineOf(snapshot!, first) ? first.pool : null);
+      groupPicker.replaceChildren(); for (const [value, text] of choices) { const o = el('option', '', text); o.value = value; groupPicker.append(o); }
+      groupPicker.value = chosen; groupNote.textContent = '';
+    } catch {
+      if (stamp !== readStamp) return;
+      groupPicker.hidden = true; groupTypedField.hidden = false;
+      groupNote.textContent = t('Could not read the groups on {machine}. Type the group id, or leave it empty for its default group.', { machine });
+    }
+  };
+  const machineName = () => picker.value === OTHER ? typed.value.trim() : picker.value;
+  picker.addEventListener('change', () => { const other = syncOther(); if (other) { typed.focus(); groupPicker.hidden = true; groupTypedField.hidden = false; groupNote.textContent = ''; } else void readGroups(picker.value); });
+  typed.addEventListener('change', () => { if (typed.value.trim()) void readGroups(typed.value.trim()); });
+  // The machines `switchboard targets` knows join the list once read; the first one is read at once.
+  void adapter.targets(false).then((answer) => { const keep = picker.value; fill(machineChoices(snapshot?.machines ?? [], answer.targets, from)); if (keep && keep !== OTHER && [...picker.options].some((o) => o.value === keep)) picker.value = keep; if (!syncOther()) void readGroups(picker.value); }).catch(() => { if (!syncOther()) void readGroups(picker.value); });
   const delegated = delegateFields(context);
-  context.actions.append(submit(t('Move')));
+  const results = el('ul', 'move-results'); results.setAttribute('aria-live', 'polite'); context.body.append(results);
+  const confirm = submit(t('Move')); context.actions.append(confirm);
   context.form.addEventListener('submit', (event) => {
     event.preventDefault();
-    const to = machine.value.trim();
+    const target = machineName(); const chosen = boxes.filter((b) => b.checked).map((b) => movable.find((a) => a.id === b.value)!).filter(Boolean);
+    if (!target) { context.error.textContent = t('Choose a machine.'); return; }
+    if (!chosen.length) { context.error.textContent = t('Choose at least one account.'); return; }
+    const pool = (groupPicker.hidden ? groupTyped.value.trim() : groupPicker.value) || 'default';
     const delegate = delegated();
-    void dialogSave(context, () => adapter.sendAccount(account.id, to, pool.value.trim() || 'default', delegate), delegate ? t('{label} is delegated to {machine}. This computer calls it back when you ask.', { label: account.label, machine: to }) : t('{label} moved to {machine}. This computer no longer uses it.', { label: account.label, machine: to }));
+    void (async () => {
+      context.error.textContent = ''; results.replaceChildren(); context.setBusy(true); clock.begin();
+      let failed = 0;
+      try {
+        for (const account of chosen) {
+          const line = el('li', '', t('{label}: moving…', { label: account.label })); results.append(line);
+          const came = machineOf(snapshot!, account);
+          try {
+            await adapter.sendAccount(account.id, target, pool, delegate);
+            line.textContent = came ? t('{label}: came back from {from}, then moved to {machine}.', { label: account.label, from: came.name, machine: target }) : delegate ? t('{label}: delegated to {machine}.', { label: account.label, machine: target }) : t('{label}: moved to {machine}.', { label: account.label, machine: target });
+          } catch (error) { failed += 1; line.textContent = t('{label}: not moved. {reason}', { label: account.label, reason: t(safeError(error, 'change')) }); }
+        }
+        await refreshContext();
+        try { snapshot = await adapter.snapshot(); loadError = ''; } catch { loadError = t('The action completed, but the list could not be refreshed. Retry loading accounts.'); }
+        render(); loadOnboarding();
+      } finally { clock.end(); context.setBusy(false); }
+      if (!failed) { showNotice(plural(chosen.length, { one: '{n} account moved to {machine}.', other: '{n} accounts moved to {machine}.' }, { machine: target })); context.close(); return; }
+      context.actions.replaceChildren(button(t('Done'), () => context.close(), 'button primary'));
+    })();
   });
-  machine.focus();
+  (boxes.find((b) => b.checked) ?? picker).focus();
 }
 /** SB-318: hands an account over to a colleague or a machine ssh does not reach: the person names the receiver and chooses where the signed record is saved; then the record and this computer's key go to them (SCN-091). */
 function handOverDialog(account: Account) {

@@ -6921,7 +6921,12 @@ async fn execute(
                 }
             }
             let pool = pool.unwrap_or_else(|| "default".into());
-            let program = program.unwrap_or_else(|| account_send::REMOTE_DEFAULT.into());
+            // SB-475: the switchboard the machine is known to run (the newest move or run there),
+            // as every other call to it does; the macOS app's only for a machine never reached. A
+            // Linux machine runs the .deb's `/usr/bin/switchboard`, and the macOS default made
+            // every move there fail as if the machine had not answered.
+            let (program, remote_data_dir) =
+                targets::program_for(root, &to, program, remote_data_dir);
             let remote = account_send::Program {
                 path: &program,
                 data_dir: remote_data_dir.as_deref(),

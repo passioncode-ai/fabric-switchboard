@@ -1317,7 +1317,8 @@ enum Accounts {
         /// The group it joins there (`default`: the default group).
         #[arg(long)]
         pool: Option<String>,
-        /// The other machine's switchboard, an absolute path; by default the macOS app's.
+        /// The other machine's switchboard, an absolute path; by default the one the newest move or
+        /// run there used (`switchboard targets`), else the macOS app's.
         #[arg(long)]
         remote: Option<String>,
         /// The other machine's data folder, an absolute path, when its Switchboard runs with
