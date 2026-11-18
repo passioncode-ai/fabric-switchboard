@@ -716,9 +716,9 @@ fn named_user(
     provider: &str,
     pool: &str,
     headers: &HeaderMap,
-) -> Result<users::NamedUser, Response> {
+) -> Result<users::NamedUser, (StatusCode, &'static str)> {
     let Some(user) = g.users.find(uid) else {
-        return Err(error(StatusCode::UNAUTHORIZED, NAMED_USER_REFUSED));
+        return Err((StatusCode::UNAUTHORIZED, NAMED_USER_REFUSED));
     };
     let bearer = headers
         .get("authorization")
@@ -733,10 +733,10 @@ fn named_user(
     let expected = users::user_token(&g.token, &user.pool, uid, &user.salt);
     let presented = bearer.ct_eq(expected.as_bytes()) | header.ct_eq(expected.as_bytes());
     if !bool::from(presented) {
-        return Err(error(StatusCode::UNAUTHORIZED, NAMED_USER_CAPABILITY));
+        return Err((StatusCode::UNAUTHORIZED, NAMED_USER_CAPABILITY));
     }
     if provider != "claude" || pool != user.pool {
-        return Err(error(StatusCode::FORBIDDEN, NAMED_USER_GROUP));
+        return Err((StatusCode::FORBIDDEN, NAMED_USER_GROUP));
     }
     if let Ok(mut counts) = g.user_requests.lock() {
         *counts.entry(uid).or_default() += 1;
@@ -774,7 +774,7 @@ async fn relay_as(
     let named = match user {
         Some(uid) => match named_user(&g, uid, &provider, &pool, request.headers()) {
             Ok(user) => Some(user),
-            Err(refusal) => return refusal,
+            Err((status, message)) => return error(status, message),
         },
         None => None,
     };

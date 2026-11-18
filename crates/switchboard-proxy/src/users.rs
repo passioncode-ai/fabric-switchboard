@@ -144,11 +144,13 @@ fn stamp(path: &Path) -> Option<Stamp> {
     })
 }
 
+/// The stamp of the file last read (none: absent) and the list read from it.
+type Cached = Option<(Option<Stamp>, Arc<Vec<NamedUser>>)>;
 /// The proxy's view of the list: read again only when the file changed. A file that cannot be
 /// read lets nobody in (fails closed).
 pub struct Users {
     root: Option<PathBuf>,
-    cache: Mutex<Option<(Option<Stamp>, Arc<Vec<NamedUser>>)>>,
+    cache: Mutex<Cached>,
 }
 impl Users {
     pub fn new(root: &Path) -> Self {
