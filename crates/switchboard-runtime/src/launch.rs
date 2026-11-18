@@ -2831,6 +2831,7 @@ pub fn launch_continuation(
 }
 /// `launch_continuation` prepared for the caller's own terminal (SB-108): the same session, home
 /// and first prompt, its script returned instead of Terminal opened.
+#[allow(clippy::too_many_arguments)]
 pub fn continuation_here(
     root: &Path,
     store: &Arc<Store>,
