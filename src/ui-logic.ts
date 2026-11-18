@@ -564,7 +564,8 @@ function closeOffer(raw: unknown): AttentionItem['close'] {
  */
 export function duplicateOffer(item: Pick<AttentionItem, 'session_id' | 'close'>): { line: string; label: string | null; pid: number | null } {
   const close = item.close;
-  if (!item.session_id) return { line: t('One session runs in two processes. Close the quiet copy so they do not work over each other.'), label: null, pid: null };
+  // Without its session id nothing here can close a copy: the line says what the person can do.
+  if (!item.session_id) return { line: t('Both copies of this session are working. Close one in its own window when it finishes.'), label: null, pid: null };
   if (close?.why === 'older') {
     const line = close.command_age !== null
       ? t('One session runs in two processes, and both are working. The older copy has been in one command for {age}; closing it ends that command.', { age: shortAge(close.command_age) })

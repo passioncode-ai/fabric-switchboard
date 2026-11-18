@@ -327,11 +327,19 @@ function goToSettings(section: string, focusKey?: string) { foldChoices.set(sect
 function restoreFocus(key?: string) { if (key) document.querySelectorAll<HTMLElement>('[data-focus]').forEach((node) => { if (node.dataset.focus === key) node.focus({ preventScroll: true }); }); }
 /** SB-471: the scrolled lists inside the page, kept by position across a render (the page itself is the window's). */
 const INNER_SCROLLERS = '.move-options, .project-accounts, .folder-list, .stat-scroll';
-function scrollState(): { x: number; y: number; inner: number[] } {
-  return { x: window.scrollX, y: window.scrollY, inner: [...root.querySelectorAll<HTMLElement>(INNER_SCROLLERS)].map((node) => node.scrollTop) };
+/** Each inner list by its class, the nearest element with an id around it and its place among the same, so a list that appears or goes elsewhere never takes another's position. */
+function scrollerKeys(): [string, HTMLElement][] {
+  const seen = new Map<string, number>();
+  return [...root.querySelectorAll<HTMLElement>(INNER_SCROLLERS)].map((node) => {
+    const base = `${node.className}|${node.parentElement?.closest<HTMLElement>('[id]')?.id ?? ''}`;
+    const n = seen.get(base) ?? 0; seen.set(base, n + 1); return [`${base}|${n}`, node];
+  });
 }
-function keepScroll(state: { x: number; y: number; inner: number[] }) {
-  root.querySelectorAll<HTMLElement>(INNER_SCROLLERS).forEach((node, index) => { const top = state.inner[index]; if (top) node.scrollTop = top; });
+function scrollState(): { x: number; y: number; inner: Map<string, number> } {
+  return { x: window.scrollX, y: window.scrollY, inner: new Map(scrollerKeys().filter(([, node]) => node.scrollTop > 0).map(([key, node]) => [key, node.scrollTop])) };
+}
+function keepScroll(state: { x: number; y: number; inner: Map<string, number> }) {
+  for (const [key, node] of scrollerKeys()) { const top = state.inner.get(key); if (top) node.scrollTop = top; }
   if (window.scrollX !== state.x || window.scrollY !== state.y) window.scrollTo(state.x, state.y);
 }
 

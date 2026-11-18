@@ -1846,6 +1846,7 @@ check(() => {
   assert.equal(busy.label, null, 'both answering: no button'); assert.equal(busy.pid, null);
   assert.ok(busy.line.includes('finishes its turn'), busy.line); assert.ok(!busy.line.includes('\u2014'));
   assert.equal(logic.duplicateOffer({ session_id: null, close: null }).label, null, 'no session: no button');
+  assert.ok(logic.duplicateOffer({ session_id: null, close: null }).line.includes('in its own window'), 'without a session the line says what the person can do');
   assert.equal(logic.duplicateOffer({ session_id: null, close: { pid: 1, why: 'older', command_age: 5 } }).label, null, 'no session: no button even with an offer');
   assert.equal(logic.duplicateOffer(dup.items[0]).label, 'Close the quiet copy', 'an older owner sends no offer: the quiet copy as before');
   assert.ok(!('disabled' in logic.duplicateOffer(dup.items[0])), 'the offer has no disabled state');
