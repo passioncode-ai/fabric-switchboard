@@ -443,6 +443,7 @@ impl Statistics {
                 })
                 .collect(),
         );
+        let usage = organization_usage(snapshot, &tallies, &from, &to);
         let agents = busiest(
             by_agent
                 .iter()
@@ -494,6 +495,7 @@ impl Statistics {
             "total": total,
             "groups": groups,
             "organizations": organizations,
+            "usage": usage,
             "projects": projects,
             "accounts": accounts,
             "agents": agents,
@@ -501,6 +503,83 @@ impl Statistics {
             "by_day": days_rows,
         })
     }
+}
+
+/// SB-418 (company-assessment-agent's request `8bdf827b`): one seat's opaque id within an
+/// organization, 16 hex digits of SHA-256 over the organization's id and the account's id; the
+/// same in `org-seats/1` (SB-381) and `org-usage/1`, so the two join, and never the account's id.
+pub(crate) fn seat_id(organization: &str, account: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let digest = Sha256::digest(format!("{organization}:{account}").as_bytes());
+    digest.iter().take(8).map(|b| format!("{b:02x}")).collect()
+}
+
+/// SB-418: each organization's daily sums as data another agent may read through Observatory or
+/// the CLI (`org-usage/1`): per UTC day, seat (`seat_id`), provider, class and client, the
+/// requests, their outcomes and tokens. A request counts under its account's first context
+/// (SB-403), so an organization's rows add up to its line in `organizations`; personal accounts
+/// and removed ones are left out. Never a group, project, folder, label, e-mail or account id.
+/// One organization's rows: (day, seat, client) → the row's fields and its counts.
+type UsageRows = BTreeMap<(String, String, String), (Value, Tally)>;
+fn organization_usage(snapshot: &Snapshot, tallies: &Tallies, from: &str, to: &str) -> Value {
+    let mut by_org: BTreeMap<String, UsageRows> = BTreeMap::new();
+    if !snapshot.organizations.is_empty() {
+        for (key, t) in tallies {
+            let Some(p) = stats::parts(key) else {
+                continue;
+            };
+            if p.day < from || p.day > to {
+                continue;
+            }
+            let Some(a) = snapshot.accounts.iter().find(|a| a.id == p.account) else {
+                continue;
+            };
+            let Some(org) = snapshot.attribution(a).organization else {
+                continue;
+            };
+            if snapshot.organization(&org).is_none() {
+                continue;
+            }
+            let seat = seat_id(&org, &a.id);
+            let class = match a.kind {
+                switchboard_core::AuthKind::ApiKey => "api_key",
+                _ => "subscription",
+            };
+            let entry = by_org
+                .entry(org)
+                .or_default()
+                .entry((p.day.to_owned(), seat.clone(), p.client.to_owned()))
+                .or_insert_with(|| {
+                    (
+                        json!({"day": p.day, "seat": seat, "provider": a.provider,
+                            "class": class, "client": p.client}),
+                        Tally::default(),
+                    )
+                });
+            entry.1.add(t);
+        }
+    }
+    let organizations: Vec<Value> = snapshot
+        .organizations
+        .iter()
+        .map(|o| {
+            let rows: Vec<Value> = by_org
+                .remove(&o.id)
+                .unwrap_or_default()
+                .into_values()
+                .rev()
+                .map(|(mut fields, t)| {
+                    if let (Value::Object(m), Value::Object(counts)) = (&mut fields, json!(t)) {
+                        m.extend(counts);
+                    }
+                    fields
+                })
+                .collect();
+            json!({"organization": o.id, "name": o.name,
+                "passioncode": o.vesta_id.is_some(), "days": rows})
+        })
+        .collect();
+    json!({"schema": "org-usage/1", "from": from, "to": to, "organizations": organizations})
 }
 
 /// SB-147: which project a group folder belongs to. A project is a repository with all its
@@ -868,6 +947,123 @@ mod tests {
         assert!(rows
             .iter()
             .any(|r| r["organization"] == "unknown" && r["requests"] == 1));
+    }
+
+    #[test]
+    fn an_organizations_daily_usage_names_seats_and_clients_and_no_person_or_folder() {
+        // SB-418: org-usage/1 per day, seat and client; personal and removed accounts left out.
+        use switchboard_core::{Account, AuthKind, ExternalIdentity, Organization, Provider};
+        let now = 1_792_400_000;
+        let today = stats::day_of(now);
+        let yesterday = stats::day_of(now - 86_400);
+        let old = stats::day_of(now - 40 * 86_400);
+        let s = Statistics::default();
+        s.absorb(Tallies::from([
+            (
+                stats::key(
+                    &today,
+                    "work",
+                    "acme",
+                    "claude-code",
+                    "/Users/x/secret-repo",
+                ),
+                tally(3, 30),
+            ),
+            (
+                stats::key(&today, "work", "acme", "claude-code", "/Users/x/other"),
+                tally(2, 20),
+            ),
+            (
+                stats::key(&yesterday, "work", "acme", "codex", ""),
+                tally(1, 10),
+            ),
+            (stats::key(&old, "work", "acme", "codex", ""), tally(9, 90)),
+            (
+                stats::key(&today, "home", "default", "claude-code", "/Users/x/private"),
+                tally(4, 40),
+            ),
+            (
+                stats::key(&today, "gone", "acme", "codex", ""),
+                tally(1, 10),
+            ),
+        ]));
+        let seat = |id: &str, email: &str| Account {
+            id: id.into(),
+            label: email.into(),
+            provider: Provider::Claude,
+            kind: AuthKind::OAuth,
+            pool: "default".into(),
+            enabled: true,
+            created_at: 1,
+            identity: None,
+            usage: None,
+            external_identity: Some(ExternalIdentity {
+                account_id: None,
+                organization_id: None,
+                email: Some(email.into()),
+            }),
+            usage_health: None,
+        };
+        let mut snapshot = Snapshot {
+            accounts: vec![
+                seat("work", "dev@acme.example"),
+                seat("home", "me@home.invalid"),
+            ],
+            ..Snapshot::default()
+        };
+        let index = ProjectIndex::default();
+        let report = s.report(&snapshot, &index, 30, now);
+        assert_eq!(report["usage"]["schema"], "org-usage/1");
+        assert_eq!(report["usage"]["organizations"], json!([]));
+        let org = "00000000-0000-4000-8000-000000000001";
+        snapshot.organizations.push(Organization {
+            id: org.into(),
+            name: "Acme".into(),
+            domains: vec!["acme.example".into()],
+            provider_organizations: vec![],
+            created_at: 1,
+            vesta_id: None,
+        });
+        snapshot.memberships.insert("work".into(), org.into());
+        let report = s.report(&snapshot, &index, 30, now);
+        let usage = &report["usage"];
+        let orgs = usage["organizations"].as_array().unwrap();
+        assert_eq!(orgs.len(), 1);
+        assert_eq!(orgs[0]["name"], "Acme");
+        assert_eq!(orgs[0]["passioncode"], false);
+        let rows = orgs[0]["days"].as_array().unwrap();
+        // Today's two folders sum into one row; yesterday's codex row; the 40-day-old one is out.
+        assert_eq!(rows.len(), 2, "{rows:?}");
+        assert_eq!(rows[0]["day"], json!(today));
+        assert_eq!(rows[0]["client"], "claude-code");
+        assert_eq!(rows[0]["requests"], 5);
+        assert_eq!(rows[0]["class"], "subscription");
+        assert_eq!(rows[0]["seat"], json!(seat_id(org, "work")));
+        assert_eq!(rows[1]["day"], json!(yesterday));
+        assert_eq!(rows[1]["client"], "codex");
+        // The rows add up to the organization's line in `organizations`.
+        let total: u64 = rows.iter().map(|r| r["requests"].as_u64().unwrap()).sum();
+        let line = report["organizations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["organization"] == org)
+            .unwrap()["requests"]
+            .as_u64()
+            .unwrap();
+        assert_eq!(total, line);
+        let text = usage.to_string();
+        for leak in [
+            "secret-repo",
+            "/Users/",
+            "dev@acme",
+            "me@home",
+            "\"work\"",
+            "acme\"",
+            "pool",
+        ] {
+            assert!(!text.contains(leak), "{leak} in {text}");
+        }
     }
 
     #[test]

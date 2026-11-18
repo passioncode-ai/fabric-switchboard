@@ -4485,7 +4485,6 @@ pub fn organizations_view(snapshot: &switchboard_core::Snapshot) -> Value {
 /// every read, never the account's id). No account that does not work for it, label, e-mail,
 /// token or machine name: a personal account that also works for it is a seat (`also`).
 fn organization_seats(snapshot: &switchboard_core::Snapshot) -> Value {
-    use sha2::{Digest, Sha256};
     let seats: Vec<Value> = snapshot
         .organizations
         .iter()
@@ -4505,8 +4504,7 @@ fn organization_seats(snapshot: &switchboard_core::Snapshot) -> Value {
                     } else {
                         "also"
                     };
-                    let digest = Sha256::digest(format!("{}:{}", o.id, a.id).as_bytes());
-                    let seat: String = digest.iter().take(8).map(|b| format!("{b:02x}")).collect();
+                    let seat = statistics::seat_id(&o.id, &a.id);
                     let class = match a.kind {
                         switchboard_core::AuthKind::ApiKey => "api_key",
                         _ => "subscription",
