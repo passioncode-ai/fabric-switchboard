@@ -1717,7 +1717,10 @@ mod tests {
         ];
         let found =
             |pid: u32, session: &str| (pid == 20 && session == "9dd3-own").then(|| own.clone());
-        assert_eq!(reconcile(&root, &rows, &pairs, found, 300), [id.clone()]);
+        assert_eq!(
+            reconcile(&root, &rows, &pairs, found, 300),
+            std::slice::from_ref(&id)
+        );
         let r = read_back(&root, &id);
         assert_eq!(r["provider_session_id"], "9dd3-own");
         assert_eq!(r["transcript"], own.to_string_lossy().as_ref());
@@ -1735,7 +1738,7 @@ mod tests {
         let pairs = vec![("cleared-again".to_owned(), 22)];
         assert_eq!(
             reconcile(&root, &rows, &pairs, |_, _| None, 500),
-            [id.clone()]
+            std::slice::from_ref(&id)
         );
         let r = read_back(&root, &id);
         assert!(r["transcript"].is_null());

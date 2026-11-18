@@ -223,6 +223,10 @@ fn append(root: &Path, line: Value) {
     let _ = switchboard_core::private_fs::private_write(&root.join(JOURNAL), text.as_bytes());
 }
 
+/// The session pool refused one more session.
+#[derive(Debug)]
+pub struct Full;
+
 /// What the pass reads of the machine now; the real one, or a test's.
 pub trait Machine {
     /// Sessions a live Claude Code process holds.
@@ -232,7 +236,7 @@ pub trait Machine {
     /// The newest write of the session's transcript in any config folder.
     fn transcript_at(&self, folder: &str, session: &str) -> Option<i64>;
     /// Whether the session pool admits one more interactive session; the held reservation.
-    fn admit(&self) -> Result<Option<Box<dyn std::any::Any>>, ()>;
+    fn admit(&self) -> Result<Option<Box<dyn std::any::Any>>, Full>;
     /// Continues `session` hosted; the new launch id, or the reason it could not.
     fn continue_hosted(&self, session: &str, parent: &str) -> Result<String, String>;
 }
@@ -306,7 +310,7 @@ pub fn candidates(
             written_at: written,
         });
     }
-    found.sort_by(|a, b| b.written_at.cmp(&a.written_at));
+    found.sort_by_key(|c| std::cmp::Reverse(c.written_at));
     let over = found.split_off(found.len().min(MAX_PER_BOOT));
     (found, over)
 }
@@ -444,10 +448,10 @@ impl Machine for Real<'_> {
     fn transcript_at(&self, folder: &str, session: &str) -> Option<i64> {
         crate::machine_sessions::transcript_at(self.root, folder, session)
     }
-    fn admit(&self) -> Result<Option<Box<dyn std::any::Any>>, ()> {
+    fn admit(&self) -> Result<Option<Box<dyn std::any::Any>>, Full> {
         crate::capacity::reserve(self.root, crate::capacity::Start::Interactive)
             .map(|r| r.map(|r| Box::new(r) as Box<dyn std::any::Any>))
-            .map_err(|_| ())
+            .map_err(|_| Full)
     }
     #[cfg(unix)]
     fn continue_hosted(&self, session: &str, parent: &str) -> Result<String, String> {
@@ -558,9 +562,9 @@ mod tests {
         fn transcript_at(&self, _: &str, session: &str) -> Option<i64> {
             self.written.get(session).copied()
         }
-        fn admit(&self) -> Result<Option<Box<dyn std::any::Any>>, ()> {
+        fn admit(&self) -> Result<Option<Box<dyn std::any::Any>>, Full> {
             if self.full {
-                Err(())
+                Err(Full)
             } else {
                 Ok(None)
             }
