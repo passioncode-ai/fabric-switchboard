@@ -3791,8 +3791,9 @@ the window's `boot_resume` command (Settings → Sessions after a restart, SCN-1
 - **The ledger.** Each fresh pass of the one-minute session watch, when it read the process table,
   computes the live launched sessions (`boot_resume::seen_of`: a Claude Code row with a launch id
   whose pid a `sessions/<pid>.json` pairs with a session) and writes `<data>/boot-live.json` (0600:
-  `boot`, `at`, `sessions: [{session, launch_id}]`, `stopped_at`) only when the boot or that set
-  changed, or `stopped_at` was set. The owner's drain sets `stopped_at` on a ledger of this boot.
+  `boot`, `at`, `sessions: [{session, launch_id}]`, `stopped_at`) when the boot or that set
+  changed, `stopped_at` was set, or, while that set is not empty, its `at` is 30 minutes old
+  (`REFRESH_SECONDS`); with no such session running nothing is written. The owner's drain sets `stopped_at` on a ledger of this boot.
   Boot time: `sysctl kern.boottime` (macOS), `btime` of `/proc/stat` (Linux), read once a process.
 - **The pass.** Once per owner process, the first watch pass with `boot-resume.json` saying on
   (absent: on) and a ledger from an earlier boot runs `boot_resume::run`: it first settles each

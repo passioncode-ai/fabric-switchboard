@@ -4,9 +4,9 @@
 //! A restart ends every session with no end recorded: its host dies with it, the duty officer
 //! looks only at live processes, and recovery only at sessions stopped on a limit. So the
 //! one-minute session watch keeps `boot-live.json` (0600: the boot time, and the session id and
-//! launch id of every live Claude Code session a Switchboard launch runs; rewritten only when that
-//! set or the boot changes, and once at the owner's drain with when it stopped), and the first
-//! watch pass of an owner after a restart reads the ledger the previous boot left and continues,
+//! launch id of every live Claude Code session a Switchboard launch runs; rewritten when that set
+//! or the boot changes, every 30 minutes while such sessions run, and once at the owner's drain
+//! with when it stopped), and the first watch pass of an owner after a restart reads the ledger the previous boot left and continues,
 //! as itself and in a session host of its own, each session the restart cut:
 //!
 //! - its launch has no end recorded, has not been continued, ran Claude Code and started before
@@ -40,6 +40,9 @@ pub const LIVE: &str = "boot-live.json";
 pub const WINDOW_SECONDS: i64 = 2 * 3600;
 /// At most this many sessions are continued after one boot.
 pub const MAX_PER_BOOT: usize = 5;
+/// While sessions run, the ledger's look is renewed this often even when nothing changed, so a
+/// set that held for hours still reads as seen shortly before the boot.
+pub const REFRESH_SECONDS: i64 = 1800;
 /// A transcript written this long after the owner's last look still counts as seen then.
 const LOOK_SLACK_SECONDS: i64 = 120;
 const JOURNAL_LINES: usize = 500;
@@ -167,14 +170,17 @@ pub fn seen_of(rows: &[Value], pairs: &[(String, u32)]) -> Vec<Seen> {
     seen
 }
 
-/// The watch's look: the ledger is rewritten when its boot or its sessions changed, never
-/// otherwise (an idle hour writes nothing). Called after `tick`, which reads the previous boot's.
+/// The watch's look: the ledger is rewritten when its boot or its sessions changed, and while
+/// sessions run every `REFRESH_SECONDS`; with no session running nothing is written. Called after
+/// `tick`, which reads the previous boot's.
 pub fn observe(root: &Path, boot: i64, seen: Vec<Seen>, now: i64) {
     let kept = read_ledger(root);
-    if kept
-        .as_ref()
-        .is_some_and(|l| l.boot == boot && l.sessions == seen && l.stopped_at.is_none())
-    {
+    if kept.as_ref().is_some_and(|l| {
+        l.boot == boot
+            && l.sessions == seen
+            && l.stopped_at.is_none()
+            && (seen.is_empty() || (0..REFRESH_SECONDS).contains(&(now - l.at)))
+    }) {
         return;
     }
     write_ledger(
@@ -806,8 +812,16 @@ mod tests {
         observe(root, BOOT, seen.clone(), BOOT + 10);
         observe(root, BOOT, seen.clone(), BOOT + 70);
         assert_eq!(read_ledger(root).unwrap().at, BOOT + 10, "unchanged: not rewritten");
-        observe(root, BOOT, Vec::new(), BOOT + 130);
-        assert_eq!(read_ledger(root).unwrap().at, BOOT + 130);
+        observe(root, BOOT, seen.clone(), BOOT + 10 + REFRESH_SECONDS);
+        assert_eq!(
+            read_ledger(root).unwrap().at,
+            BOOT + 10 + REFRESH_SECONDS,
+            "renewed while sessions run"
+        );
+        observe(root, BOOT, Vec::new(), BOOT + 4000);
+        assert_eq!(read_ledger(root).unwrap().at, BOOT + 4000);
+        observe(root, BOOT, Vec::new(), BOOT + 9000);
+        assert_eq!(read_ledger(root).unwrap().at, BOOT + 4000, "none running: never renewed");
         #[cfg(unix)]
         assert_eq!(
             std::os::unix::fs::PermissionsExt::mode(

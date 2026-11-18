@@ -886,8 +886,8 @@ research notes); the ones still in force that the board cites are seeded below w
   processes, and recovery only on sessions stopped on a limit. Fabric Dashboards runs a temporary
   agent (`ai.passioncode.resume-after-boot`, until 2026-11-25) with the same rule until this ships.
 - **Decision:** the one-minute session watch keeps `boot-live.json` (0600): the boot time and the
-  session and launch ids of every live Claude Code session a Switchboard launch runs, rewritten only
-  when they change, and stamped with `stopped_at` at the owner's drain. The first watch pass of an
+  session and launch ids of every live Claude Code session a Switchboard launch runs, rewritten when
+  they change and every 30 minutes while such sessions run, and stamped with `stopped_at` at the owner's drain. The first watch pass of an
   owner whose ledger is from an earlier boot (boot time from `kern.boottime` on macOS, `/proc/stat`
   `btime` on Linux) continues each session of that ledger that:
   - has a launch record with no `ended`, no `continued_as`, provider Claude, launched before the
