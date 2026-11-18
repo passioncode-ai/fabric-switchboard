@@ -97,7 +97,8 @@ pub fn status(target: &str, program: &Program<'_>, run: &Run<'_>) -> Result<Valu
 
 /// One thing the check found. `kind`:
 /// - `missing_there`: a move recorded here whose account the other machine no longer lists;
-/// - `off_there`: the copy there is turned off or marked used elsewhere, so nobody uses it;
+/// - `off_there`: the copy there is turned off or marked used elsewhere, so nobody uses it (not
+///   reported for a seat the person here turned off: it lapses there by their choice, W1.2);
 /// - `refused_there`: the provider refused the copy there at its last check (it needs a sign-in);
 /// - `not_marked_here`: a move recorded here, but this machine uses the account too;
 /// - `held_twice`: an account the other machine uses is used here as well (same provider
@@ -171,9 +172,15 @@ pub fn check(
         let copy = s.remote_account.as_deref().and_then(by_id);
         match copy {
             None => findings.push(finding("missing_there", Some(&s.account), &label, None)),
-            Some(c) if c["enabled"] != true || c["elsewhere"] == true => {
+            // W1.2 review round 3 of PR #821: a seat the person here turned off is no longer
+            // extended, so its copy there lapses by their choice, not as a fault.
+            Some(c)
+                if (c["enabled"] != true || c["elsewhere"] == true)
+                    && !here.is_some_and(|a| a.off.is_some()) =>
+            {
                 findings.push(finding("off_there", Some(&s.account), &label, Some(c)))
             }
+            Some(c) if c["enabled"] != true || c["elsewhere"] == true => {}
             Some(c) if c["usage_health"]["status"] == "failed" => {
                 findings.push(finding("refused_there", Some(&s.account), &label, Some(c)))
             }
@@ -363,6 +370,37 @@ mod tests {
         );
         assert_eq!(answer["moved_there"], 5);
         assert_eq!(answer["counts"]["missing_there"], 1);
+    }
+
+    /// W1.2 review round 3 of PR #821, SB-428 (j): a seat the person here turned off lapses
+    /// there by their choice, so its copy turned off there is not reported as a fault.
+    #[test]
+    fn a_seat_turned_off_here_is_not_a_fault_when_its_copy_there_lapsed() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::open(root.path().to_owned(), Arc::new(MemoryVault::default())).unwrap();
+        let off = account(&store, "off@example.test", "r1");
+        store
+            .mark_elsewhere_at(&off, true, 1, Some("studio.local"))
+            .unwrap();
+        let there = json!([
+            {"id": "t-off", "label": "off@example.test", "provider": "claude", "enabled": false, "elsewhere": false},
+        ]);
+        let check_now = |store: &Store| {
+            check(
+                &store.snapshot().unwrap(),
+                &[grant(&off, "t-off")],
+                "studio.local",
+                &DEFAULT_APP,
+                &fake(there.clone()),
+            )
+            .unwrap()["findings"]
+                .as_array()
+                .unwrap()
+                .len()
+        };
+        assert_eq!(check_now(&store), 1, "off there: a fault while on here");
+        store.update_fields(&off, None, Some(false)).unwrap();
+        assert_eq!(check_now(&store), 0, "turned off here: expected");
     }
 
     #[test]

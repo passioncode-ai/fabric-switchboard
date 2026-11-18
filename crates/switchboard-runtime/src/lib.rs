@@ -5802,10 +5802,14 @@ async fn execute(
             // SB-315: giving away an account a move sent to another machine would renew it from
             // two places, as using it here would.
             let giving = to.as_deref().is_some_and(|t| !t.trim().is_empty());
+            // W1.2 review round 3 of PR #821: the store's record of a seat delegated out counts
+            // as a move too, as for `Update`.
+            let snapshot = store.snapshot()?;
             if giving
                 && !force
-                && store.snapshot()?.elsewhere.contains_key(&id)
-                && seats::outstanding(root, &id).is_some()
+                && snapshot.elsewhere.contains_key(&id)
+                && (seats::outstanding(root, &id).is_some()
+                    || snapshot.delegated_out.contains_key(&id))
             {
                 return Err(account_send::MOVED_AWAY.into());
             }
@@ -14946,6 +14950,17 @@ mod usage_gate_tests {
             runtime.execute(use_here).await.unwrap_err(),
             account_send::MOVED_AWAY
         );
+        // Round 3: giving it to an agent would clear its mark too, so it is refused the same way.
+        let give = Operation::Assign {
+            id: id.clone(),
+            to: Some("an agent".into()),
+            force: false,
+        };
+        assert_eq!(
+            runtime.execute(give).await.unwrap_err(),
+            account_send::MOVED_AWAY
+        );
+        assert!(!runtime.store.snapshot().unwrap().is_assigned(&id));
     }
 
     #[tokio::test]

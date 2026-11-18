@@ -598,7 +598,11 @@ Only when the operator asks. Renames an account (without `enabled`, its switch s
 turns it off (`enabled: false`: nothing on this computer
 selects, switches to, renews, checks, launches, lends or sends it, and nothing turns it on again by
 itself, not a call back, a restore, a lease or a cleared mark, until the operator sends
-`enabled: true`; `switchboard_accounts` shows `off_since`, `off_by` and `availability`) or on; `elsewhere: true`
+`enabled: true`; `switchboard_accounts` shows `off_since`, `off_by` and `availability`) or on (`enabled: true`
+on an account turned off that is also held away, used on another machine, in a machine group,
+delegated out, or a seat whose lease ran out or that its sender called back, clears only the
+operator's off and leaves it there; bringing it home is `elsewhere: false`, with `force` for a
+sign-in moved or delegated there); `elsewhere: true`
 disables it here because another machine uses it (`elsewhere: false` clears the mark and turns it
 on again, unless the operator turned it off); `location` says where it works (a machine and
 its user, or a colleague, at most 80 characters) and marks it so; an empty one clears it.

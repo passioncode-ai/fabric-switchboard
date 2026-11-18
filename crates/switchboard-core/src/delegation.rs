@@ -123,6 +123,33 @@ pub fn lease_valid(hours: u32) -> bool {
     (1..=MAX_LEASE_HOURS).contains(&hours)
 }
 
+/// W1.2 review round 3 of PR #821: a seat called back before 0.7.118 has no `surrendered_at`; only
+/// the journal (its newest 256 entries) remembers it. At `Store::open`, every such seat whose newest
+/// `delegation` entry is `surrendered` takes that entry's time, so the record outlives the journal.
+/// Answers whether anything changed.
+pub(crate) fn record_old_call_backs(s: &mut Snapshot) -> bool {
+    let mut changed = false;
+    let newest: Vec<(String, i64)> =
+        s.delegated
+            .iter()
+            .filter(|(_, d)| d.surrendered_at.is_none())
+            .filter_map(|(id, _)| {
+                let e =
+                    s.events.iter().rev().find(|e| {
+                        e.action == "delegation" && e.account_id.as_deref() == Some(id)
+                    })?;
+                (e.detail == "surrendered").then(|| (id.clone(), e.at))
+            })
+            .collect();
+    for (id, at) in newest {
+        if let Some(d) = s.delegated.get_mut(&id) {
+            d.surrendered_at = Some(at.max(d.granted_at));
+            changed = true;
+        }
+    }
+    changed
+}
+
 /// The shape of every record, read or written.
 pub(crate) fn validate(s: &Snapshot) -> Result<(), String> {
     let invalid = || Err("Invalid account metadata".to_string());
@@ -194,13 +221,13 @@ pub(crate) fn stays(old: &Snapshot, new: &Snapshot) -> Result<(), String> {
         {
             return Err(DELEGATED_STAYS.into());
         }
-        if d.ended_at.is_some() && (account.enabled || new.routes.values().any(|v| v == id)) {
-            return Err(LEASE_ENDED.into());
-        }
         // W1.2 review round 2 of PR #821 (P2-3): a seat its sender called back stays switched
         // off here until the sender delegates it again or undoes the call back.
         if d.surrendered_at.is_some() && (account.enabled || new.routes.values().any(|v| v == id)) {
             return Err(SEAT_CALLED_BACK.into());
+        }
+        if d.ended_at.is_some() && (account.enabled || new.routes.values().any(|v| v == id)) {
+            return Err(LEASE_ENDED.into());
         }
         match old.delegated.get(id) {
             Some(o) => {
@@ -322,9 +349,9 @@ impl crate::Store {
         self.save_delegated(label, provider, pool, credential, delegation)
     }
     /// The sender extends a seat's lease to `hours` from now (shorter or longer). A seat whose
-    /// lease ended, or that it had called back, comes back on while its credential is still here
-    /// (a sender that was offline over a weekend) unless the person here turned it off; once its
-    /// credential is removed it does not.
+    /// lease ended comes back on while its credential is still here (a sender that was offline
+    /// over a weekend) unless the person here turned it off; once its credential is removed it
+    /// does not, and a seat its sender called back stays switched off until the sender's undo.
     pub fn extend_lease(&self, id: &str, sender_key: &str, hours: u32) -> Result<i64, String> {
         if !lease_valid(hours) {
             return Err(LEASE_INVALID.into());
@@ -335,16 +362,20 @@ impl crate::Store {
         if d.purged() {
             return Err(SIGN_IN_REMOVED.into());
         }
-        // W1.2 review round 2 of PR #821 (P2-2): an extension is the sender's word that the seat
-        // is delegated here again, a call back recorded here included (the sender extends only
-        // the seats it still records as delegated), so it clears that record too.
-        let revived = d.ended_at.is_some() || d.surrendered_at.is_some();
+        // W1.2 review round 3 of PR #821: an extension never revives a seat its sender called
+        // back. The sender's background pass extends from a snapshot read before up to 20 s of
+        // ssh, so an extension can arrive after the call back here; reviving the seat then would
+        // leave it live on both machines if the sender's removal fails. Only the sender's undo
+        // (`surrender_delegated(undo)`) clears the record; the lease time is still written.
+        let called_back = d.surrendered_at.is_some();
+        let revived = d.ended_at.is_some() && !called_back;
         let until = time + i64::from(hours) * 3600;
         let mut candidate = state.clone();
         if let Some(d) = candidate.delegated.get_mut(id) {
             d.lease_until = until.max(d.granted_at + 1);
-            d.ended_at = None;
-            d.surrendered_at = None;
+            if !called_back {
+                d.ended_at = None;
+            }
         }
         if revived {
             if let Some(a) = candidate.accounts.iter_mut().find(|a| a.id == id) {
@@ -907,6 +938,106 @@ mod tests {
         store.surrender_delegated(&a.id, KEY, true).unwrap();
         let s = store.snapshot().unwrap();
         assert!(s.delegated[&a.id].surrendered_at.is_none() && s.accounts[0].usable());
+    }
+
+    /// W1.2 review round 3 of PR #821: an extension that arrives after a call back (the
+    /// sender's pass read its snapshot before the call back) never revives the seat, ended or
+    /// not; switching it on is refused (`SEAT_CALLED_BACK`); only the sender's undo clears it.
+    #[test]
+    fn an_extension_after_a_call_back_never_revives_the_seat_and_only_the_undo_clears_it() {
+        let (_r, _f, store) = store_with_group();
+        let a = store
+            .add_delegated(
+                "seat".into(),
+                Provider::Claude,
+                pool(&store),
+                oauth("9"),
+                KEY,
+                None,
+                48,
+            )
+            .unwrap();
+        store.surrender_delegated(&a.id, KEY, false).unwrap();
+        let called = store.snapshot().unwrap().delegated[&a.id].surrendered_at;
+        assert!(called.is_some());
+        // Lease still running: extended, still called back and off.
+        store.extend_lease(&a.id, KEY, 48).unwrap();
+        let s = store.snapshot().unwrap();
+        assert_eq!(s.delegated[&a.id].surrendered_at, called);
+        assert!(!s.accounts[0].enabled);
+        assert_eq!(crate::off::availability(&s, &s.accounts[0]), "called_back");
+        // Lease ended too: the extension keeps it ended and off.
+        {
+            let mut state = store.lock().unwrap();
+            let d = state.delegated.get_mut(&a.id).unwrap();
+            d.granted_at = now() - 100 * 3600;
+            d.lease_until = now() - 1;
+            d.surrendered_at = Some(now() - 50 * 3600);
+            store.republish(&state);
+        }
+        store.end_lease(&a.id).unwrap();
+        store.extend_lease(&a.id, KEY, 48).unwrap();
+        let s = store.snapshot().unwrap();
+        assert!(s.delegated[&a.id].ended_at.is_some());
+        assert!(s.delegated[&a.id].surrendered_at.is_some() && !s.accounts[0].enabled);
+        // Switching it on by hand is refused while the call back stands.
+        assert_eq!(
+            store.update_fields(&a.id, None, Some(true)).unwrap_err(),
+            SEAT_CALLED_BACK
+        );
+        // The undo clears the record; an ended lease keeps it off until an extension.
+        store.surrender_delegated(&a.id, KEY, true).unwrap();
+        assert!(store.snapshot().unwrap().delegated[&a.id]
+            .surrendered_at
+            .is_none());
+        store.extend_lease(&a.id, KEY, 48).unwrap();
+        assert!(store.snapshot().unwrap().accounts[0].usable());
+    }
+
+    /// W1.2 review round 3 of PR #821, SB-428 (i): a seat called back before 0.7.118 (no
+    /// `surrendered_at`) takes its record from the journal at open, so the migration never reads
+    /// it as turned off by the person once the journal rolls over.
+    #[test]
+    fn an_old_call_back_is_recorded_from_the_journal_at_open() {
+        let (_r, _f, store) = store_with_group();
+        let a = store
+            .add_delegated(
+                "seat".into(),
+                Provider::Claude,
+                pool(&store),
+                oauth("9"),
+                KEY,
+                None,
+                48,
+            )
+            .unwrap();
+        store.surrender_delegated(&a.id, KEY, false).unwrap();
+        let mut s = store.snapshot().unwrap();
+        // As a 0.7.117 call back left it: no record, only the journal.
+        s.delegated.get_mut(&a.id).unwrap().surrendered_at = None;
+        let at = s
+            .events
+            .iter()
+            .rev()
+            .find(|e| e.action == "delegation")
+            .unwrap()
+            .at;
+        assert!(record_old_call_backs(&mut s));
+        assert_eq!(s.delegated[&a.id].surrendered_at, Some(at));
+        assert!(!record_old_call_backs(&mut s), "once");
+        s.events.clear();
+        assert!(!crate::off::migrate(&mut s, now()));
+        assert!(s.accounts[0].off.is_none());
+        // A seat whose newest entry is not a call back takes nothing.
+        let mut t = store.snapshot().unwrap();
+        t.delegated.get_mut(&a.id).unwrap().surrendered_at = None;
+        t.events.push(crate::Event {
+            at: now(),
+            action: "delegation".into(),
+            account_id: Some(a.id.clone()),
+            detail: "restored".into(),
+        });
+        assert!(!record_old_call_backs(&mut t));
     }
 
     #[test]

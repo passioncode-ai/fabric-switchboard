@@ -856,7 +856,12 @@ research notes); the ones still in force that the board cites are seeded below w
     machine group, delegated out, a seat whose lease ran out or that its sender called back)
     keeps that reason, so a seat delegated out is extended again at the next read and *Use here*
     or a call back stays the way home. An account not turned off by the person comes home on
-    as before. A sender's extension clears a call back recorded on the seat.
+    as before. A call back recorded on a seat is cleared only by the sender's undo; an extension
+    that reaches the seat after its call back (the sender's pass reads its snapshot before up to
+    20 s of ssh) never revives it (review round 3), and a seat called back before 0.7.118 takes
+    its record from the journal at the next open while the journal still holds the entry.
+    `switchboard remote check` does not report the lapsed copy of a seat the person turned off
+    as a fault.
   - A backup carries the off beside the accounts (`off`, old account id to `{since, by}`), so a
     0.7.117 or older reader still restores them (off, as before); a restore saves each new account
     in its backed-up state in the save's one publication. A backup from before carries none: an

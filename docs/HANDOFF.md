@@ -13,7 +13,9 @@
 
 - **Review round 2 (2026-11-18, one P1) fixed.** P1-A: turning a seat delegated out back on was refused or brought it home, so it was never extended again; turning on now takes back only the person's word while an automatic reason also holds (`off::held_away`: used elsewhere, a machine group, delegated out, a lapsed or called-back seat), and the next read extends the seat. P2-2 an extension clears `surrendered_at`; P2-3 `stays` refuses a called-back seat switched on (`SEAT_CALLED_BACK`); P2-6 `MOVED_AWAY` reads `delegated_out`; P2-7, P2-8, P2-9 (Edit dialog and *Use here* wording, Copylot ids in [strings.md](brand/strings.md)), P2-10 test inventory rewritten. Merged origin/main (SB-419, DEC-0028; main's `TODO(SB-418)` in `balancing.rs` now asks `usable()`).
 
-**Exact next task.** Review round 3 of PR #821, then merge once the gate reads EXIT 0 on the merged head; the next release carries SB-418 (CHANGELOG Unreleased). Then SB-428 (e): a golden test fixing the CLI and MCP row shapes.
+- **Review round 3 (2026-11-18, clean; follow-ups fixed).** An extension that reaches a seat after its call back never revives it, and only the sender's undo clears `surrendered_at`; `stays` answers `SEAT_CALLED_BACK`; the `Assign` guard reads `delegated_out`; MCP and tools.md describe `enabled: true` on an account held away; the window's *Turn on* says when the account stays away and hides *Enable* on a lapsed or called-back seat; seats called back before 0.7.118 take their record from the journal at open; `remote check` skips the lapsed copy of a seat turned off here. Merged origin/main.
+
+**Exact next task.** Review round 4 of PR #821 (narrow), then merge once the gate reads EXIT 0 on the merged head; the next release carries SB-418 (CHANGELOG Unreleased). Then SB-428 (e): a golden test fixing the CLI and MCP row shapes.
 
 ## 2026-11-17: SB-417 window follow-up from the design review, on branch `board-share-ui`
 

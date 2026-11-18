@@ -1371,6 +1371,26 @@ export function chainSummary(executors: readonly ChainExecutor[] | null | undefi
  * Untouched, nothing (`undefined`), so renaming an account that is off for another reason (used
  * on another machine, a lapsed seat) never records it as turned off by the person.
  */
+/**
+ * W1.2 review round 3 of PR #821: why an account the person turns on stays away anyway. `machine`:
+ * used on another machine, in a machine group or delegated out (turning on clears only the off;
+ * *Use here* or a call back brings it home); `seat`: a seat delegated here whose lease ran out or
+ * that its sender called back (the sender decides; *Enable* is not offered). Null: nothing else
+ * keeps it off. Mirrors `off::held_away` in the core.
+ */
+export function heldAway(snapshot: { elsewhere?: Record<string, number>; delegated?: Record<string, { ended_at?: number | null; surrendered_at?: number | null }>; delegated_out?: Record<string, unknown> } | null | undefined, account: { id: string; pool: string }): 'machine' | 'seat' | null {
+  if (!snapshot) return null;
+  if (snapshot.elsewhere?.[account.id] !== undefined || account.pool.startsWith('machine_') || snapshot.delegated_out?.[account.id] !== undefined) return 'machine';
+  const seat = snapshot.delegated?.[account.id];
+  if (seat && (seat.ended_at != null || seat.surrendered_at != null)) return 'seat';
+  return null;
+}
+/** The notice after *Turn on*: on again, or no longer turned off but still held away (W1.2 round 3). */
+export function turnOnNotice(label: string, away: 'machine' | 'seat' | null): string {
+  if (away === 'machine') return t('{label} is no longer turned off. It stays on the other machine until you call it back or use it here.', { label });
+  if (away === 'seat') return t('{label} is no longer turned off. The machine that delegated it decides when it works here again.', { label });
+  return t('{label} is on again.', { label });
+}
 export function editedEnabled(enabledNow: boolean, checked: boolean): boolean | undefined {
   return checked === enabledNow ? undefined : checked;
 }

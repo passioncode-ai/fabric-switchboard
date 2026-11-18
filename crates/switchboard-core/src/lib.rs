@@ -967,9 +967,14 @@ impl Store {
         // are dropped once, with the same write.
         let pruned = projects::stale_shares_prune(&mut migrated);
         let retired = migrated.retire_domain_rule();
+        // W1.2 review round 3 of PR #821: a seat called back before 0.7.118 takes its record from
+        // the journal while it still holds the entry, before the migration reads it.
+        let recorded = delegation::record_old_call_backs(&mut migrated);
         // W1.2 (DEC-0027): an account off for no automatic reason is the person's off.
         let turned_off = off::migrate(&mut migrated, now());
-        let pending = if (retired || pruned || turned_off) && validate_snapshot(&migrated).is_ok() {
+        let pending = if (retired || pruned || recorded || turned_off)
+            && validate_snapshot(&migrated).is_ok()
+        {
             state = migrated;
             persistence::write(&root, &state).is_err()
         } else {

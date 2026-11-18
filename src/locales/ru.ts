@@ -6,6 +6,8 @@
 export const RU: Record<string, string> = {
   // W1.2 (SB-418, DEC-0027, 2026-11-17): an account turned off by the person, and since when. Copylot report ids (en-US and ru-RU, all pass) in docs/brand/strings.md; review round 1 of PR #821 changed «Nothing uses it» to «Nothing on this computer uses it» and the row menu to «Rename or turn off…».
   "Off since {date}": "Выключен с {date}",
+  "{label} is no longer turned off. It stays on the other machine until you call it back or use it here.": "{label} больше не выключен. Он остаётся на другой машине, пока вы его не вернёте или не начнёте использовать здесь.",
+  "{label} is no longer turned off. The machine that delegated it decides when it works here again.": "{label} больше не выключен. Когда он снова заработает здесь, решает машина, которая его делегировала.",
   "On for selection, launch and renewal": "Включён для выбора, запуска и продления",
   "Turned off, it stays off until you turn it on, and its group no longer has it selected.": "Выключенный аккаунт остаётся выключенным, пока вы его не включите, и его группа больше не выбирает его.",
   "{label} is back on this computer and stays off until you turn it on.": "{label} снова на этом компьютере и остаётся выключенным, пока вы его не включите.",

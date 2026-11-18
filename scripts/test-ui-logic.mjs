@@ -2066,4 +2066,19 @@ check(() => {
   assert.equal(logic.editedEnabled(true, false), false);
   assert.equal(logic.editedEnabled(false, true), true);
 });
+// W1.2 review round 3 of PR #821: Turn on says when the account stays away; a lapsed or called-back seat is the sender's.
+check(() => {
+  const acc = (id, pool = 'default') => ({ id, pool });
+  assert.equal(logic.heldAway(null, acc('a')), null);
+  assert.equal(logic.heldAway({}, acc('a')), null);
+  assert.equal(logic.heldAway({ elsewhere: { a: 1 } }, acc('a')), 'machine');
+  assert.equal(logic.heldAway({}, acc('a', 'machine_studio')), 'machine');
+  assert.equal(logic.heldAway({ delegated_out: { a: {} } }, acc('a')), 'machine');
+  assert.equal(logic.heldAway({ delegated: { a: { ended_at: 5 } } }, acc('a')), 'seat');
+  assert.equal(logic.heldAway({ delegated: { a: { surrendered_at: 5 } } }, acc('a')), 'seat');
+  assert.equal(logic.heldAway({ delegated: { a: { ended_at: null, surrendered_at: null } } }, acc('a')), null);
+  assert.equal(logic.turnOnNotice('W', null), 'W is on again.');
+  assert.match(logic.turnOnNotice('W', 'machine'), /stays on the other machine/);
+  assert.match(logic.turnOnNotice('W', 'seat'), /decides when it works here again/);
+});
 console.log(`${cases} ui-logic cases passed, including quota priority and wall-clock countdowns.`);
