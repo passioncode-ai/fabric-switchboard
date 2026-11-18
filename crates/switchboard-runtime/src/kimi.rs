@@ -9,7 +9,7 @@
 //! never writes the ordinary `~/.kimi-code` (shown, not switched — A-6).
 use crate::launch::{
     agent_folder, ensure_idle, find_program, private_dir, private_write, script,
-    write_launch_script, Reservation, SESSION_RECORD,
+    write_launch_script, Handed, Reservation, SESSION_RECORD,
 };
 use serde_json::{json, Value};
 use std::{
@@ -801,7 +801,7 @@ fn launch_with(
     });
     crate::launches::record(root, &session, record, &launch_id)?;
     start(&path)?;
-    reservation.committed = true;
+    reservation.commit(Handed::Terminal);
     Ok(json!({"launched": true, "account": account.label}))
 }
 
@@ -958,7 +958,7 @@ fn launch_continuation_with(
         });
         crate::launches::record(root, &session, record, &launch_id)?;
         start(&path)?;
-        reservation.committed = true;
+        reservation.commit(Handed::Terminal);
         Ok(json!({"launched": true, "account": account.label, "script": path}))
     }
 }
@@ -997,7 +997,7 @@ pub fn sign_in_again(
         ),
     )?;
     start(&path)?;
-    reservation.committed = true;
+    reservation.commit(Handed::Terminal);
     Ok(json!({"started": true}))
 }
 

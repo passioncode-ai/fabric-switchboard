@@ -3,6 +3,15 @@
 > [board](evidence/backlog.md).
 
 
+## 2026-11-18: SB-428 a launch nobody ran no longer blocks its home; SB-429 filed, on branch `launch-stale`
+
+- **Asked.** Operator report 2026-11-18: `switchboard launch <account> --mode managed --headless` for `runtimes/claude-tokens` timed out on its control request, left `.session.json` `starting` and an empty `.launch-pending`, and every later launch was refused until both files were moved by hand. Also file `keys observatory add` answering "The key was saved, but where it came from could not be recorded."
+- **Built.** `crates/switchboard-runtime/src/launch.rs`: `.launch-pending` names the preparing process (`{"pid": N}`), then who runs the script (`Reservation::commit(Handed::Terminal | Handed::Caller)`, rewritten in place); one judgement `pending()` for `ensure_idle`, `reservation_open` and `home_state`: a gone or reused preparer frees the home at once, a script handed to the caller after two minutes (`UNCLAIMED_TTL`), Terminal's and an earlier version's marker after ten as before; a stale marker is cleared by the next launch with the log line `launch_reservation`. `control::limit_secs`: `Launch` (bare or wrapped in `Launched`) waits 120 s. Kimi and sign-in launches commit as Terminal. Docs: CONTRACTS session list, OPERATIONS, CHANGELOG.
+- **Decisions.** No change to the control protocol (the CLI cannot name its pid without a new field that an older owner's `deny_unknown_fields` would refuse); a two-minute bound for an unclaimed caller marker instead. SB-429 left as a row: the cause is dropped by `after_record`, so the next step is to keep it.
+- **Checks.** See the PR (gate on the Studio, EXIT line).
+
+**Exact next task.** Review the `launch-stale` pull request and merge it once its gate reads EXIT 0 on the merged head; then SB-429 (keep the record failure's reason and reproduce it on a synthetic data folder).
+
 ## 2026-11-17: SB-417 window follow-up from the design review, on branch `board-share-ui`
 
 - **Asked.** The design review of PR #818 (`~/DATA/_worktrees/design-review-feed-pool.md`, SCN-093 step 5, SCN-094 step 4b): the limit dialog said board runs wait at the limit; the default share `max(2, cap/4)` exceeded a limit of 1; a clamped share was silent in the window; the demo could not show waiting board runs.

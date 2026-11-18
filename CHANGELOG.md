@@ -8,6 +8,7 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- A launch whose control request timed out after Switchboard had prepared the session no longer blocks that home: `switchboard launch --in-place`, `--headless` and `--hosted` sessions nobody started free their home after two minutes, and a home whose preparing process is gone is freed at once, where before every launch was refused with "Close the existing session before changing its home." for ten minutes. A launch now waits 120 seconds for the answer instead of 30.
 - The session pool's default board share is a quarter of the limit rounded up and never more than the limit (a limit of 1 to 4 gives 1, 20 gives 5; a limit from 9 that is not a multiple of 4 gives one more than before). The limit dialog now says hosted consoles wait at the limit while Fabric board runs still start within the board's share; the empty *Board runs* field shows the default for the limit typed; saving a lower limit that clamped the share says so; the browser demo shows waiting board runs with `?demo=1&board-waiting=1` (SB-417, design review).
 
 ## 0.7.117

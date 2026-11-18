@@ -496,6 +496,94 @@ fn reservation_expired(written: SystemTime, now: SystemTime) -> bool {
         Err(ahead) => ahead.duration() > RESERVATION_TTL,
     }
 }
+/// SB-428: a marker handed to a caller that runs the script itself (`launch --in-place`,
+/// `--headless`, `--hosted`, a console) is taken within moments of the answer. One no script took
+/// after this long belongs to a caller that gave up (a control request that timed out after the
+/// owner had prepared the session): the 30 s control limit and a margin.
+const UNCLAIMED_TTL: Duration = Duration::from_secs(120);
+/// SB-428: who runs a home's script once its preparation is done, written into its marker.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum Handed {
+    /// Terminal (or PowerShell) was asked to open it; it may take a while on a busy machine, so
+    /// the marker holds for `RESERVATION_TTL`.
+    Terminal,
+    /// The caller got the script in the answer and runs it at once (`UNCLAIMED_TTL`).
+    Caller,
+}
+impl Handed {
+    fn as_str(self) -> &'static str {
+        match self {
+            Handed::Terminal => "terminal",
+            Handed::Caller => "caller",
+        }
+    }
+}
+/// SB-428: whether a home's `.launch-pending` still holds it.
+#[derive(Debug, PartialEq, Eq)]
+enum Pending {
+    Absent,
+    Held,
+    /// Nobody will run the script any more; the code says why (`expired`, `launcher_gone`,
+    /// `unclaimed`).
+    Stale(&'static str),
+}
+/// Whether `written` is more than `ttl` away from `now`, in either direction: a marker dated
+/// ahead of the clock (a clock set back) expires by the same distance.
+fn older_than(written: SystemTime, now: SystemTime, ttl: Duration) -> bool {
+    match now.duration_since(written) {
+        Ok(age) => age > ttl,
+        Err(ahead) => ahead.duration() > ttl,
+    }
+}
+/// SB-428: reads a marker. A marker holds while its preparation runs (`{"pid": N}`, the process
+/// preparing it, released at once when that process is gone or its pid was reused), then while
+/// its script has not run (`{"pid": null, "by": "terminal" | "caller"}`, for `RESERVATION_TTL`
+/// or `UNCLAIMED_TTL`). An empty or unreadable marker (one an earlier version wrote) holds for
+/// `RESERVATION_TTL`, and anything that is not a regular file holds. Reads only.
+fn pending(home: &Path, now: SystemTime) -> Result<Pending, String> {
+    let path = home.join(".launch-pending");
+    let meta = match fs::symlink_metadata(&path) {
+        Ok(meta) => meta,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Pending::Absent),
+        Err(_) => return Err("Session state unavailable. Inspect the managed home.".into()),
+    };
+    if !meta.file_type().is_file() {
+        return Ok(Pending::Held);
+    }
+    let Ok(written) = meta.modified() else {
+        return Ok(Pending::Held);
+    };
+    if reservation_expired(written, now) {
+        return Ok(Pending::Stale("expired"));
+    }
+    let marker: Value = switchboard_core::private_fs::read_private(&path, 256)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+        .unwrap_or(Value::Null);
+    if let Some(pid) = marker["pid"].as_u64().and_then(|p| u32::try_from(p).ok()) {
+        let age = now.duration_since(written).unwrap_or_default();
+        return Ok(if launcher_gone(pid, age) {
+            Pending::Stale("launcher_gone")
+        } else {
+            Pending::Held
+        });
+    }
+    if marker["by"] == Handed::Caller.as_str() && older_than(written, now, UNCLAIMED_TTL) {
+        return Ok(Pending::Stale("unclaimed"));
+    }
+    Ok(Pending::Held)
+}
+/// SB-428: the process preparing a home is gone, or its pid now names a process started well
+/// after the marker. A process whose age cannot be read still holds.
+#[cfg(unix)]
+fn launcher_gone(pid: u32, marker_age: Duration) -> bool {
+    pid == 0 || !pid_alive(pid) || process_age(pid).is_some_and(|age| pid_reused(marker_age, age))
+}
+/// Windows: a preparing process holds its marker until `RESERVATION_TTL`, as before.
+#[cfg(not(unix))]
+fn launcher_gone(pid: u32, _marker_age: Duration) -> bool {
+    pid == 0
+}
 pub(crate) struct Reservation {
     path: PathBuf,
     pub(crate) committed: bool,
@@ -504,12 +592,40 @@ impl Reservation {
     pub(crate) fn new(home: &Path) -> Result<Self, String> {
         ensure_idle(home)?;
         let path = home.join(".launch-pending");
-        switchboard_core::private_fs::create_new(&path)
+        let mut file = switchboard_core::private_fs::create_new(&path)
             .map_err(|_| "Close the existing session before changing its home.")?;
-        Ok(Self {
+        // SB-428: the process preparing the home, so a crash while it prepares frees the home.
+        let reservation = Self {
             path,
             committed: false,
-        })
+        };
+        {
+            use std::io::Write;
+            file.write_all(json!({"pid": std::process::id()}).to_string().as_bytes())
+                .map_err(|_| "Session state unavailable. Inspect the managed home.")?;
+        }
+        Ok(reservation)
+    }
+    /// SB-428: the preparation is done and `by` runs the script, which removes the marker as it
+    /// starts. The marker is rewritten in place, never created again: a script that already
+    /// started (or a dispatched run that already took the home) removed it, and that stays so.
+    pub(crate) fn commit(&mut self, by: Handed) {
+        self.committed = true;
+        if !fs::symlink_metadata(&self.path).is_ok_and(|m| m.file_type().is_file()) {
+            return;
+        }
+        if let Ok(mut file) = fs::OpenOptions::new()
+            .write(true)
+            .truncate(true)
+            .open(&self.path)
+        {
+            use std::io::Write;
+            let _ = file.write_all(
+                json!({"pid": null, "by": by.as_str()})
+                    .to_string()
+                    .as_bytes(),
+            );
+        }
     }
 }
 impl Drop for Reservation {
@@ -735,7 +851,7 @@ pub fn begin_login(
     } else {
         open_terminal(&home, &script(&home, &program, &args, &env, true, &home))?;
     }
-    reservation.committed = true;
+    reservation.commit(Handed::Terminal);
     Ok(Login {
         id,
         provider,
@@ -904,12 +1020,9 @@ fn login_completed(home: &Path) -> bool {
     read_regular(&home.join(".completed")).is_ok_and(|v| v == "complete")
 }
 pub(crate) fn reservation_open(home: &Path) -> bool {
-    fs::symlink_metadata(home.join(".launch-pending")).is_ok_and(|meta| {
-        meta.file_type().is_file()
-            && !meta
-                .modified()
-                .is_ok_and(|t| reservation_expired(t, SystemTime::now()))
-    })
+    // SB-428: an unreadable home holds no reservation here, as before (a regular file only).
+    fs::symlink_metadata(home.join(".launch-pending")).is_ok_and(|m| m.file_type().is_file())
+        && pending(home, SystemTime::now()) == Ok(Pending::Held)
 }
 /// A sign-in's journal, when it names a known provider and a valid label and pool.
 fn login_journal(home: &Path) -> Option<(Provider, String, String, i64)> {
@@ -1222,20 +1335,25 @@ fn process_age_from_ps(pid: u32) -> Option<Duration> {
         .flatten()
 }
 pub(crate) fn ensure_idle(home: &Path) -> Result<(), String> {
-    let pending = home.join(".launch-pending");
-    match fs::symlink_metadata(&pending) {
-        Ok(meta) => {
-            let expired = meta.file_type().is_file()
-                && meta
-                    .modified()
-                    .is_ok_and(|t| reservation_expired(t, SystemTime::now()));
-            // The script never ran: releasing the abandoned marker frees the home.
-            if !expired || fs::remove_file(&pending).is_err() {
+    match pending(home, SystemTime::now())? {
+        Pending::Absent => {}
+        Pending::Held => {
+            return Err("Close the existing session before changing its home.".into());
+        }
+        // The script never ran and nothing will run it: releasing the abandoned marker frees
+        // the home (SB-428: also when its launcher is gone, not only after ten minutes).
+        Pending::Stale(reason) => {
+            if fs::remove_file(home.join(".launch-pending")).is_err() {
                 return Err("Close the existing session before changing its home.".into());
             }
+            crate::oplog::event(
+                "launch_reservation",
+                &[
+                    ("outcome", crate::oplog::Field::Code("cleared")),
+                    ("reason", crate::oplog::Field::Code(reason)),
+                ],
+            );
         }
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-        Err(_) => return Err("Session state unavailable. Inspect the managed home.".into()),
     }
     if session_running(home)? {
         return Err("Close the existing session before changing its home.".into());
@@ -3112,7 +3230,7 @@ fn launch_core(
             &working_directory,
             &launch_id,
         )?;
-        reservation.committed = true;
+        reservation.commit(Handed::Caller);
         journal_launch(store, id, mode);
         return Ok((
             cli.is_some(),
@@ -3158,7 +3276,11 @@ fn launch_core(
     if !in_place {
         (host.start_terminal)(&path)?;
     }
-    reservation.committed = true;
+    reservation.commit(if in_place {
+        Handed::Caller
+    } else {
+        Handed::Terminal
+    });
     journal_launch(store, id, mode);
     Ok((cli.is_some(), in_place.then_some(path), None))
 }
@@ -3799,12 +3921,7 @@ pub fn sessions(root: &Path, all: bool) -> Vec<serde_json::Value> {
 /// A home's session state now (`starting`, `running`, `ended` or `unknown`, see `sessions`)
 /// and when its process started, from its marker.
 pub(crate) fn home_state(home: &Path) -> (&'static str, Option<i64>) {
-    let pending = fs::symlink_metadata(home.join(".launch-pending")).is_ok_and(|meta| {
-        meta.file_type().is_file()
-            && !meta
-                .modified()
-                .is_ok_and(|t| reservation_expired(t, SystemTime::now()))
-    });
+    let pending = reservation_open(home);
     let state = if pending {
         "starting"
     } else {
@@ -4514,7 +4631,7 @@ mod tests {
     fn stale_reservation_no_longer_holds_the_home() {
         let root = tempfile::tempdir().unwrap();
         let mut hold = Reservation::new(root.path()).unwrap();
-        hold.committed = true; // Terminal was asked to run the script, which never ran.
+        hold.commit(Handed::Terminal); // Terminal was asked to run the script, which never ran.
         drop(hold);
         age(&root.path().join(".launch-pending"), 9 * 60);
         assert!(
@@ -4526,13 +4643,110 @@ mod tests {
         assert!(!root.path().join(".launch-pending").exists());
         assert!(Reservation::new(root.path()).is_ok());
     }
+    /// SB-428: the marker's contents as `ensure_idle` reads them, with its time set back.
+    fn marker(home: &Path, contents: &str, seconds: u64) {
+        let path = home.join(".launch-pending");
+        private_write(&path, contents.as_bytes(), false).unwrap();
+        age(&path, seconds);
+    }
+    #[test]
+    fn sb428_a_marker_no_caller_took_frees_the_home_after_two_minutes() {
+        // The 2026-11-18 incident: the owner prepared an in-place session, the CLI's control
+        // request had already timed out, and nothing ran the script.
+        let root = tempfile::tempdir().unwrap();
+        let unclaimed = r#"{"pid":null,"by":"caller"}"#;
+        marker(root.path(), unclaimed, 60);
+        assert!(
+            reservation_open(root.path()),
+            "a caller still has time to run it"
+        );
+        assert!(ensure_idle(root.path()).is_err());
+        marker(root.path(), unclaimed, 3 * 60);
+        assert!(!reservation_open(root.path()));
+        assert_eq!(home_state(root.path()).0, "ended");
+        let (idle, events) = crate::oplog::capture_fields(|| ensure_idle(root.path()));
+        idle.unwrap();
+        assert!(!root.path().join(".launch-pending").exists());
+        let cleared: Vec<_> = events
+            .iter()
+            .filter(|(event, _)| *event == "launch_reservation")
+            .collect();
+        assert_eq!(cleared.len(), 1, "{events:?}");
+        assert!(cleared[0]
+            .1
+            .contains(&("reason", crate::oplog::Field::Code("unclaimed"))));
+        assert!(
+            Reservation::new(root.path()).is_ok(),
+            "the next launch proceeds"
+        );
+    }
+    #[test]
+    fn sb428_a_marker_handed_to_terminal_still_holds_for_ten_minutes() {
+        let root = tempfile::tempdir().unwrap();
+        marker(root.path(), r#"{"pid":null,"by":"terminal"}"#, 3 * 60);
+        assert!(
+            ensure_idle(root.path()).is_err(),
+            "Terminal may still be opening"
+        );
+        marker(root.path(), "", 3 * 60);
+        assert!(
+            ensure_idle(root.path()).is_err(),
+            "an earlier version's marker"
+        );
+    }
+    #[cfg(unix)]
+    #[test]
+    fn sb428_a_marker_whose_preparing_process_is_gone_is_cleared_at_once() {
+        let root = tempfile::tempdir().unwrap();
+        let mut child = Command::new("/usr/bin/true").spawn().unwrap();
+        let gone = child.id();
+        child.wait().unwrap();
+        marker(root.path(), &format!(r#"{{"pid":{gone}}}"#), 0);
+        let (idle, events) = crate::oplog::capture_fields(|| ensure_idle(root.path()));
+        idle.unwrap();
+        assert!(!root.path().join(".launch-pending").exists());
+        assert!(events
+            .iter()
+            .any(|(event, fields)| *event == "launch_reservation"
+                && fields.contains(&("reason", crate::oplog::Field::Code("launcher_gone")))));
+        // A live preparing process (this one) still holds the home.
+        marker(
+            root.path(),
+            &format!(r#"{{"pid":{}}}"#, std::process::id()),
+            0,
+        );
+        assert!(ensure_idle(root.path()).is_err());
+        assert!(root.path().join(".launch-pending").exists());
+    }
+    #[test]
+    fn sb428_a_reservation_names_its_preparer_then_who_runs_the_script() {
+        let root = tempfile::tempdir().unwrap();
+        let read = || -> Value {
+            serde_json::from_slice(&fs::read(root.path().join(".launch-pending")).unwrap()).unwrap()
+        };
+        let mut hold = Reservation::new(root.path()).unwrap();
+        assert_eq!(read(), json!({"pid": std::process::id()}));
+        hold.commit(Handed::Caller);
+        assert_eq!(read(), json!({"pid": null, "by": "caller"}));
+        drop(hold);
+        assert!(
+            root.path().join(".launch-pending").exists(),
+            "the script removes it"
+        );
+        // A script that already started removed the marker; committing never writes it again.
+        fs::remove_file(root.path().join(".launch-pending")).unwrap();
+        let mut hold = Reservation::new(root.path()).unwrap();
+        fs::remove_file(root.path().join(".launch-pending")).unwrap();
+        hold.commit(Handed::Terminal);
+        assert!(!root.path().join(".launch-pending").exists());
+    }
     #[test]
     fn sign_in_whose_terminal_never_ran_can_be_cancelled_once_its_reservation_expires() {
         let root = tempfile::tempdir().unwrap();
         let home = root.path().join("login");
         private_dir(&home).unwrap();
         let mut hold = Reservation::new(&home).unwrap();
-        hold.committed = true;
+        hold.commit(Handed::Terminal);
         drop(hold);
         let login = Login {
             id: Uuid::new_v4().to_string(),
@@ -7122,6 +7336,42 @@ mod tests {
             ))));
         }
     }
+    #[cfg(not(windows))]
+    #[tokio::test]
+    async fn sb428_an_in_place_launch_nobody_ran_frees_the_group_runtime() {
+        // 2026-11-18: `launch --mode managed --headless` timed out on its control request after
+        // the owner had prepared `runtimes/claude-tokens`; every later launch was refused.
+        let f = fixture();
+        let proxy = ProxyHandle::start(f.store.clone()).await.unwrap();
+        let id = f.add(Provider::Claude, AuthKind::OAuth, "tokens", CLAUDE_OAUTH);
+        f.store.select(Provider::Claude, "tokens", &id).unwrap();
+        let prepare = || {
+            launch_full(
+                &f.root,
+                &f.store,
+                &proxy,
+                &id,
+                "managed",
+                &f.project,
+                &TEST_HOST,
+                None,
+                &[],
+                true,
+            )
+        };
+        prepare().unwrap();
+        let home = f.root.join("runtimes").join("claude-tokens");
+        assert_eq!(home_state(&home).0, "starting");
+        assert_eq!(
+            prepare().unwrap_err(),
+            "Close the existing session before changing its home.",
+            "a caller that may still run the script keeps the home"
+        );
+        age(&home.join(".launch-pending"), 3 * 60);
+        assert_eq!(home_state(&home).0, "ended", "nobody will run it");
+        prepare().unwrap();
+        assert_eq!(home_state(&home).0, "starting");
+    }
     #[tokio::test]
     async fn managed_codex_launch_points_codex_at_the_local_proxy() {
         let f = fixture();
@@ -7256,6 +7506,13 @@ mod tests {
             f.launch(&proxy, &id, "isolated", &host).unwrap_err(),
             "Terminal could not open."
         );
+        // SB-428: the failed launch took its own marker away; nothing was left to clear.
+        assert!(!f
+            .root
+            .join("homes")
+            .join(&id)
+            .join(".launch-pending")
+            .exists());
         assert!(ensure_idle(&f.root.join("homes").join(&id)).is_ok());
         let events = f.store.snapshot().unwrap().events;
         assert!(!events.iter().any(|e| e.action == "launch"));

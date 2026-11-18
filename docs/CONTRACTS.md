@@ -1080,7 +1080,7 @@ Code: `launch::sweep_logins` (`sweep_logins_with` for tests), called once from
 `Owner::start_with_sources` for a native owner, on a blocking thread off the start path.
 
 - Considers only folders directly under `logins/` named by a UUID, never a link.
-- Keeps a home whose sign-in is still open in Terminal (`.launch-pending` not expired, or
+- Keeps a home whose sign-in is still open in Terminal (`.launch-pending` still holding, or
   `session_running`); a later start removes it once it ended — an earlier owner's sign-in cannot
   be finished by this one (its registry was in memory).
 - Otherwise, on macOS, probes the derived Claude Code Keychain item by attributes only
@@ -1144,8 +1144,25 @@ Code: `launch::sessions`, `launch::session_running` (factored out of `ensure_idl
   `a_proxy_agent_launch_records_its_context`.
 - The list scans `homes/` and `runtimes/` only, directory entries only (a link is skipped), and
   homes with a record. State comes from the same markers that keep one session per home:
-  `.launch-pending` not expired → `starting`; `session_running` → `running` / `ended`; an
+  `.launch-pending` still holding (below) → `starting`; `session_running` → `running` / `ended`; an
   unreadable marker → `unknown`. The owner answers it without its transaction lock (a read).
+- The one-session marker `.launch-pending` (SB-428) holds a home while its launch is prepared and
+  until its script starts (the script's first lines remove it). While the launch is prepared it
+  names the preparing process, `{"pid": N}`, and frees the home as soon as that process is gone or
+  its pid names a process started well after the marker (Unix; on Windows it holds as below). Once
+  prepared it says who runs the script, `{"pid": null, "by": "terminal" | "caller"}`, rewritten in
+  place and never created again: a Terminal launch holds for ten minutes, as before; a script
+  handed to the caller (`launch --in-place`, `--headless`, `--hosted`, a console) holds for two
+  minutes, the 30 s control limit and a margin, so a caller that gave up on its control request
+  after the owner prepared the session (2026-11-18: `runtimes/claude-tokens` left `starting`)
+  frees the home by itself. An empty marker (an earlier version's), an unreadable one or one that
+  is not a regular file holds for ten minutes. The next launch clears a stale marker and logs
+  `launch_reservation outcome=cleared reason=expired|launcher_gone|unclaimed`; a launch that fails
+  removes its own marker on every error path. `Launch` waits 120 s for the owner's answer (30 s
+  before). Tests: `sb428_a_marker_no_caller_took_frees_the_home_after_two_minutes`,
+  `sb428_a_marker_whose_preparing_process_is_gone_is_cleared_at_once`,
+  `sb428_an_in_place_launch_nobody_ran_frees_the_group_runtime`,
+  `terminal_failure_releases_the_home_and_records_no_launch`.
 - The window reads it through the Tauri command `sessions` (`all: false`) and shows it on Activity → *Sessions* (SB-65, SCN-051), refreshed with the metadata (once a minute) and on Refresh.
 - Not covered yet (packet SS-01, SB-65): active requests per session, and acting on a session
   (open, drain, close).

@@ -426,6 +426,11 @@ fn limit_secs(operation: &Operation) -> u64 {
         Operation::OnOperatorsWord { inner, .. } => inner.as_ref(),
         other => other,
     };
+    // SB-428: a launch from the command line arrives wrapped with who asked for it.
+    let inner = match inner {
+        Operation::Launched { inner, .. } => inner.as_ref(),
+        other => other,
+    };
     match inner {
         // SB-159: connecting PassionCode.ai waits up to 5 minutes for the person's browser.
         // 300 s for the browser, a read that may hold the turn, the exchange and the read (15 s
@@ -461,6 +466,10 @@ fn limit_secs(operation: &Operation) -> u64 {
         | Operation::MoveRoot { .. }
         | Operation::MoveAccount { .. }
         | Operation::RepositoryMap { .. } => 180,
+        // SB-428: a launch reads the sign-ins to carry (Keychain, 5 s a call), may check a paid
+        // key's spending (up to 20 s) and renews an isolated account's sign-in; on a busy machine
+        // a 30 s client gave up on a launch the owner went on to prepare (2026-11-18).
+        Operation::Launch { .. } => 120,
         _ => 30,
     }
 }
@@ -654,6 +663,17 @@ mod tests {
         assert_eq!(limit_secs(&edit), 180);
         assert_eq!(limit_secs(&Operation::Snapshot), 30);
         assert_eq!(limit_secs(&Operation::VestaConnect), 420);
+        // SB-428: a launch, bare or with who asked for it, waits for a busy owner to prepare it.
+        let launch = Operation::Launch {
+            id: "a".into(),
+            mode: "managed".into(),
+            working_directory: "/tmp".into(),
+            in_place: true,
+            args: vec![],
+        };
+        assert_eq!(limit_secs(&launch), 120);
+        let by = crate::launches::LaunchedBy::surface(crate::launches::Surface::Cli);
+        assert_eq!(limit_secs(&crate::launched(launch, by)), 120);
     }
     #[test]
     fn an_operation_kind_is_its_tag_and_never_its_arguments() {
