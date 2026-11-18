@@ -80,8 +80,11 @@ pub(crate) fn add_via(
     update: bool,
 ) -> Result<Added, String> {
     names_valid(service, account)?;
-    if secret.is_empty() || secret.len() > LIMIT {
+    if secret.is_empty() {
         return Err(UNAVAILABLE.into());
+    }
+    if secret.len() > LIMIT {
+        return Err(TOO_LARGE.into());
     }
     let line = add_line(service, account, secret, update, keychain)?;
     let (code, _) = run(
@@ -123,6 +126,17 @@ fn names_valid(service: &str, account: &str) -> Result<(), String> {
 
 fn quote(value: &str) -> String {
     format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
+}
+
+/// SB-420: whether a write of `secret` grown by `headroom` printable bytes would still fit one
+/// `security -i` line, asked before an act that cannot be undone (a renewal spends its refresh
+/// token before it writes). Runs nothing.
+pub fn fits(service: &str, account: &str, secret: &[u8], headroom: usize) -> bool {
+    let mut probe = secret.to_vec();
+    probe.extend(std::iter::repeat_n(b'x', headroom));
+    names_valid(service, account).is_ok()
+        && probe.len() <= LIMIT
+        && add_line(service, account, &probe, true, None).is_ok()
 }
 
 /// Every argument a write passes to the security tool: none carries the value.
@@ -297,6 +311,30 @@ mod tests {
             add_line("s", "u", &vec![1u8; room + 1], true, None).unwrap_err(),
             TOO_LARGE
         );
+        // Past the 64 KiB a write takes at all: too large, never the unlock sentence.
+        assert_eq!(
+            add_via(
+                "/nonexistent/security",
+                None,
+                "s",
+                "u",
+                &vec![b'a'; LIMIT + 1],
+                true
+            )
+            .unwrap_err(),
+            TOO_LARGE
+        );
+    }
+    #[test]
+    fn a_fit_check_counts_the_headroom_and_runs_nothing() {
+        let text = vec![b'a'; 3000];
+        assert!(fits("s", "u", &text, 0));
+        assert!(fits("s", "u", &text, 512));
+        let room = STDIN_LINE_LIMIT - "add-generic-password -U -a \"u\" -s \"s\" -w \"\"\n".len();
+        assert!(fits("s", "u", &vec![b'a'; room], 0));
+        assert!(!fits("s", "u", &vec![b'a'; room], 1));
+        assert!(!fits("s", "u", &vec![b'a'; room - 10], 512));
+        assert!(!fits("line\nbreak", "u", b"x", 0));
     }
     #[test]
     fn a_named_keychain_ends_the_line() {

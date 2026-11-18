@@ -560,7 +560,7 @@ Design: [XA-01](packets/cross-agent-continuation.md) (operator decision D-1: aut
   the rehearsal below: the session had to work both out), and Terminal running `hermes chat
   --query-file <prompt> --provider openrouter -m <model>`; on a terminal that seeds an interactive
   session with the prompt as its first turn; the key is read from `switchboard agents key --service
-  openrouter` when the session starts, never written. Spend is bounded by the key's own OpenRouter
+  openrouter ... --to-pipe` when the session starts, never written. Spend is bounded by the key's own OpenRouter
   ceiling, and since 0.7.0 the [spend gate](#spending-ceilings-sb-72-070) decides whether the step starts. Measured 2026-10-12 with Hermes 0.21.4: an empty
   `HERMES_HOME` starts without the setup wizard, and the session lists
   `observatory_handoff_accept`. `switchboard continue <wf> --account hermes` is the manual path.
@@ -700,7 +700,7 @@ detailed in the two entries below:
   whose folder moved to another group is gated once more on its new key, and moved again is
   refused (`STOP_FOLDER_MOVED`). The session script names the slot the gate read
   (`launch::key_command`, `launch.rs:2133`, through `switchboard agents key --service openrouter
-  --pool <group>` or `--machine`, `crates/switchboard-cli/src/main.rs:861-865`), so a move after
+  --pool <group> --to-pipe` or `--machine --to-pipe`, `crates/switchboard-cli/src/main.rs`; SB-420), so a move after
   the transaction changes nothing it spends.
 - **Questions.** A reached ceiling opens one question per scope and value (`spend::open_question`,
   `spend.rs:686`): *Double to $2X* (window only) or *Keep $X*, two answers of equal weight; a
@@ -881,7 +881,7 @@ detailed in the two entries below:
   (`a_fallback_steps_pin_reaches_no_later_operation`). The fallback's step holds `HAND_OVER`
   across the step and cannot gate again mid-step, so a moved key refuses the step before the
   offer and the chain moves on. The session script the start writes names the gated slot
-  (`agents key --pool|--machine`, `launch::key_command`), so a move after the transaction changes
+  (`agents key --pool|--machine --to-pipe`, `launch::key_command`), so a move after the transaction changes
   nothing it spends. A start refused for a moved key drops the task baseline its gate wrote
   (`Pin::release`, `spend::forget_baseline`: only that record, matched by workflow, key and time;
   safe because its gate still holds `HAND_OVER`, so no other start counted from it), so the task
@@ -1345,7 +1345,8 @@ disabled}`, `Operation::{AgentsOverview, AgentEnable, AgentDefault, OpenrouterMo
   "{env:OPENROUTER_API_KEY}"}, models: {<model>: {}}}}, mcp: {observatory: {type: local, command:
   [...], enabled: true}}}` — OpenCode merges that layer last, so the session's key wins over one
   in `auth.json` and an id missing from OpenCode's model list is declared. The key reaches the
-  session only through `switchboard agents key --service openrouter` when the script runs. The
+  session only through `switchboard agents key --service openrouter ... --to-pipe` when the script
+  runs (SB-420). The
   person's own `~/.config/opencode`, `auth.json` and sessions are never written. The prompt names
   `owner agent:opencode` and a UUID `sessionId`; the session is listed under Sessions with its
   model as the label.
@@ -1673,7 +1674,7 @@ MCP `switchboard_openrouter_status` (read) and `switchboard_openrouter_model` (w
     `a_group_never_takes_the_pool_the_openrouter_keys_launches_record`).
   - The key never touches disk (XA-02 A-2): the script clears the conflicting variables, exports
     the recipe's plain variables, then runs `<cli> --data-dir <root> agents key --service
-    openrouter` and exports its output under `key_env`; a failed or empty answer prints
+    openrouter ... --to-pipe` (SB-420) and exports its output under `key_env`; a failed or empty answer prints
     `KEY_UNREADABLE` and exits before the agent starts. PowerShell does the same with
     `$LASTEXITCODE`. `a_session_script_hands_the_key_to_the_agent_and_stops_without_it` runs the
     zsh script with a stand-in CLI and agent.

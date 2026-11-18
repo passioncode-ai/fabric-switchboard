@@ -908,6 +908,8 @@ mod tests {
             (code, out)
         };
         let mut long = br#"{"claudeAiOauth":{"accessToken":"fixture-only"},"mcpOAuth":{"a\"b":"c'd\\e \n","pad":""#.to_vec();
+        // Every printable byte, quotes and backslashes among them, reads back as written.
+        long.extend(0x20u8..=0x7e);
         long.resize(3200, b'x');
         long.extend_from_slice(br#""}}"#);
         for (service, value, update) in [

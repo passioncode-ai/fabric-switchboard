@@ -9171,14 +9171,6 @@ fn activate_native_anyway(
         .as_ref()
         .ok_or("Capture or import this profile before native activation.")?;
     let result = replace_native(store, &account, identity, expected_id, native, refresh);
-    // SB-420: an item too large to write is seen in `status` and Needs attention.
-    item_size::note(
-        store.root(),
-        item_size::ORDINARY,
-        item_size::DURING_SWITCH,
-        &result,
-        monitor::now(),
-    );
     // The outcome is already decided; a journal failure must not change it.
     let _ = store.record(
         "activation",
@@ -9469,7 +9461,17 @@ fn replace_native(
         }
         Ok(())
     };
-    (native.activate)(&credential, identity, expected.as_ref(), &mut preserve)?;
+    let activated = (native.activate)(&credential, identity, expected.as_ref(), &mut preserve);
+    // SB-420: only the write itself records or clears the refusal: a switch that returned
+    // early (the account already in use) wrote nothing and says nothing about the item's size.
+    item_size::note(
+        store.root(),
+        item_size::ORDINARY,
+        item_size::DURING_SWITCH,
+        &activated,
+        monitor::now(),
+    );
+    activated?;
     // SB-102: the switch has happened; failing to note its time must not report it as failed
     // (the monitor would set the account now in use aside and try another).
     if store.snapshot().is_ok_and(|s| {
@@ -12567,6 +12569,58 @@ mod owner_tests {
             );
             assert_eq!(stored.refresh_token.as_deref(), Some("synthetic-a-refresh"));
         }
+    }
+    /// SB-420: a switch refused because Claude Code's item is too large is recorded and shown;
+    /// one that returns early (the account already in use) leaves the record; one that writes
+    /// clears it.
+    #[tokio::test]
+    async fn a_switch_refused_as_too_large_is_recorded_until_a_switch_writes() {
+        static REFUSE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+        fn activate(
+            credential: &Credential,
+            identity: &ExternalIdentity,
+            expected: Option<&ExternalIdentity>,
+            preserve: &mut dyn FnMut(&external::Outgoing<'_>) -> Result<(), String>,
+        ) -> Result<(), String> {
+            if REFUSE.load(std::sync::atomic::Ordering::SeqCst) {
+                return Err(external::CREDENTIAL_TOO_LARGE.into());
+            }
+            activates(credential, identity, expected, preserve)
+        }
+        let root = tempfile::tempdir().unwrap();
+        let runtime = fixtures::runtime(root.path(), signed_in, activate).await;
+        runtime
+            .refresh
+            .set_profile_endpoint(profile_of("synthetic-a").await);
+        let a = stale_copy(&runtime.store, "default");
+        let b = save(&runtime.store, "synthetic-b", "default");
+        let switch = |id: String| {
+            let runtime = runtime.clone();
+            async move {
+                runtime
+                    .execute(Operation::ActivateNative { id, force: false })
+                    .await
+            }
+        };
+        assert_eq!(
+            switch(b.id.clone()).await.unwrap_err(),
+            external::CREDENTIAL_TOO_LARGE
+        );
+        let recorded = item_size::read(root.path());
+        assert_eq!(recorded.len(), 1);
+        assert_eq!(
+            (recorded[0].item.as_str(), recorded[0].during.as_str()),
+            (item_size::ORDINARY, item_size::DURING_SWITCH)
+        );
+        let attention = runtime.execute(Operation::Attention).await.unwrap();
+        assert_eq!(attention["items"][0]["reason"], "keychain_too_large");
+        // The account already in use: nothing written, so the record stays.
+        switch(a.id.clone()).await.unwrap();
+        assert_eq!(item_size::read(root.path()).len(), 1);
+        // A switch that writes clears it.
+        REFUSE.store(false, std::sync::atomic::Ordering::SeqCst);
+        switch(b.id.clone()).await.unwrap();
+        assert!(item_size::read(root.path()).is_empty());
     }
     #[tokio::test]
     async fn a_copy_newer_than_claude_codes_item_is_not_overwritten_on_switch() {

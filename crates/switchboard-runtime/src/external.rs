@@ -1974,7 +1974,15 @@ pub trait LiveItem: Send {
     fn read(&self) -> Result<Option<Vec<u8>>, String>;
     /// Replaces the live item; only while every lock is still held.
     fn write(&self, auth: &[u8]) -> Result<(), String>;
+    /// SB-420: whether a renewed `auth` (new tokens, a little longer at most) could be written
+    /// without its value on the command line. Asked before a renewal spends the refresh token.
+    fn fits(&self, auth: &[u8]) -> bool {
+        let _ = auth;
+        true
+    }
 }
+/// SB-420: what a renewed item may grow by over the one read (its new tokens and expiry).
+pub(crate) const RENEWAL_HEADROOM: usize = 512;
 pub fn lock_live() -> Result<Box<dyn LiveItem>, String> {
     let context = context(Provider::Claude, None)?;
     checked_path(&context.home)?;
@@ -1986,6 +1994,19 @@ impl LiveItem for LiveLock {
     fn read(&self) -> Result<Option<Vec<u8>>, String> {
         self.locks.ensure()?;
         current_auth(&Native, &self.context)
+    }
+    fn fits(&self, auth: &[u8]) -> bool {
+        #[cfg(target_os = "macos")]
+        if self.context.mac {
+            return switchboard_core::security_cli::fits(
+                &self.context.service,
+                &self.context.user,
+                auth,
+                RENEWAL_HEADROOM,
+            );
+        }
+        let _ = auth;
+        true
     }
     fn write(&self, auth: &[u8]) -> Result<(), String> {
         self.locks.ensure()?;

@@ -56,9 +56,18 @@ pub fn read(root: &Path) -> Vec<Entry> {
         .unwrap_or_default()
 }
 
-/// Records that `item` was refused `during` an act at `at` (one entry per item, the newest).
+/// One read-modify-write of the file at a time among the owner's threads (a switch, a
+/// renewal and a launch's copy can meet).
+static WRITE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Records that `item` was refused `during` an act at `at` (one entry per item). The same
+/// refusal again writes and logs nothing: a renewal asks every pass (the idle budget).
 pub fn record(root: &Path, item: &str, during: &str, at: i64) {
+    let _held = WRITE.lock().unwrap_or_else(|e| e.into_inner());
     let mut items = read(root);
+    if items.iter().any(|e| e.item == item && e.during == during) {
+        return;
+    }
     items.retain(|e| e.item != item);
     items.push(Entry {
         item: item.into(),
@@ -77,6 +86,7 @@ pub fn record(root: &Path, item: &str, during: &str, at: i64) {
 
 /// A write of `item` succeeded: its refusal, if any, is over. Writes nothing when none is kept.
 pub fn clear(root: &Path, item: &str) {
+    let _held = WRITE.lock().unwrap_or_else(|e| e.into_inner());
     let mut items = read(root);
     let before = items.len();
     items.retain(|e| e.item != item);
@@ -161,6 +171,21 @@ mod tests {
                 .mode();
             assert_eq!(mode & 0o777, 0o600);
         }
+        // The same refusal again changes nothing, not even its time.
+        let stamp = std::fs::metadata(root.join(FILE))
+            .unwrap()
+            .modified()
+            .unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        note(root, ORDINARY, DURING_RENEWAL, &too_large, 20);
+        assert_eq!(read(root)[1].at, 13);
+        assert_eq!(
+            std::fs::metadata(root.join(FILE))
+                .unwrap()
+                .modified()
+                .unwrap(),
+            stamp
+        );
         note(root, ORDINARY, DURING_SWITCH, &Ok(()), 14);
         assert_eq!(read(root).len(), 1);
         note(root, LAUNCH, DURING_LAUNCH_COPY, &Ok(()), 15);

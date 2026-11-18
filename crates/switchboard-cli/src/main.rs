@@ -1371,9 +1371,8 @@ enum Accounts {
         limit: usize,
     },
     /// On the machine an account was moved to: give its sign-in back to the machine that calls
-    /// it back. Run only by `accounts recall` over ssh, which names the hand-over in its command
-    /// (`SWITCHBOARD_TRANSFER=surrender`); it prints only into that pipe, never to a terminal or
-    /// a file.
+    /// it back. Run by `accounts recall` over ssh; it refuses to print to a terminal or into a
+    /// file.
     Surrender {
         /// The account id on this machine.
         id: String,

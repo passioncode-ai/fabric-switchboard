@@ -852,6 +852,8 @@ terminal or into a file it refuses and prints nothing (SB-420). Session scripts 
 pass it; a script an earlier version wrote (Hermes or OpenCode on a saved key) is written again at
 the next launch. `accounts surrender` is run by `accounts recall` over ssh, which names the
 hand-over in its command (`SWITCHBOARD_TRANSFER=surrender`); to a terminal or a file it refuses.
+These checks keep a value off a screen and out of a file. They are not an access control: a
+program running as the same user can still pass them.
 
 A session script names the key slot its start's spending check read (`--pool` or `--machine`),
 never its folder: a folder that joins another group between the launch and the script's first

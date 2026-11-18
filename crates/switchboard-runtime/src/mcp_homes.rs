@@ -550,15 +550,29 @@ pub(crate) fn ordinary_for(root: &Path) -> Option<(PathBuf, String)> {
     ordinary()
 }
 
+/// SB-420: a launch's copy refused as too large is seen in `status` and Needs attention; one
+/// that wrote clears it; one with nothing to carry says nothing about the item's size.
+fn note_carry(root: &Path, result: &Result<usize, String>, now: i64) {
+    match result {
+        Ok(carried) if *carried > 0 => crate::item_size::clear(root, crate::item_size::LAUNCH),
+        Err(error) if crate::item_size::is_too_large(error) => crate::item_size::record(
+            root,
+            crate::item_size::LAUNCH,
+            crate::item_size::DURING_LAUNCH_COPY,
+            now,
+        ),
+        _ => {}
+    }
+}
+
 /// SB-420: an item too large to write without the value on the command line is left as it was
 /// (the launch goes on without the copy) and logged by its own code.
 fn too_large_or_write(error: &str) -> &'static str {
-    #[cfg(unix)]
-    if error == switchboard_core::security_cli::TOO_LARGE {
-        return "too_large";
+    if crate::item_size::is_too_large(error) {
+        "too_large"
+    } else {
+        "write"
     }
-    let _ = error;
-    "write"
 }
 
 static CACHE: std::sync::OnceLock<Cache> = std::sync::OnceLock::new();
@@ -587,18 +601,7 @@ pub(crate) fn carry_into(root: &Path, folder: &Path) {
             &|write| crate::external::with_credential_locks(folder, write),
         )
     });
-    // SB-420: an item too large to write is seen in `status` and Needs attention.
-    let now = now_ms / 1000;
-    match &result {
-        Ok(carried) if *carried > 0 => crate::item_size::clear(root, crate::item_size::LAUNCH),
-        Err(error) if crate::item_size::is_too_large(error) => crate::item_size::record(
-            root,
-            crate::item_size::LAUNCH,
-            crate::item_size::DURING_LAUNCH_COPY,
-            now,
-        ),
-        _ => {}
-    }
+    note_carry(root, &result, now_ms / 1000);
     match result {
         Ok(0) => {}
         Ok(carried) => crate::oplog::event(
@@ -617,6 +620,27 @@ pub(crate) fn carry_into(root: &Path, folder: &Path) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_launch_copy_refused_as_too_large_is_recorded_until_one_writes() {
+        let root = tempfile::tempdir().unwrap();
+        let root = root.path();
+        note_carry(root, &Err(crate::external::CREDENTIAL_TOO_LARGE.into()), 5);
+        let recorded = crate::item_size::read(root);
+        assert_eq!(recorded.len(), 1);
+        assert_eq!(recorded[0].item, crate::item_size::LAUNCH);
+        assert_eq!(recorded[0].during, crate::item_size::DURING_LAUNCH_COPY);
+        assert_eq!(
+            too_large_or_write(crate::external::CREDENTIAL_TOO_LARGE),
+            "too_large"
+        );
+        assert_eq!(too_large_or_write("locked"), "write");
+        // Nothing to carry, or another failure: the record stays.
+        note_carry(root, &Ok(0), 6);
+        note_carry(root, &Err("locked".into()), 7);
+        assert_eq!(crate::item_size::read(root).len(), 1);
+        note_carry(root, &Ok(2), 8);
+        assert!(crate::item_size::read(root).is_empty());
+    }
     #[test]
     fn with_own_sign_in_off_the_ordinary_home_is_left_out() {
         // SB-403 (review P2-4): `mcp-homes` and a launch's copy never read the ordinary home's
