@@ -8,6 +8,8 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- `switchboard recovery --open` (MCP `switchboard_recovery` with `open`) lists only the stops still open, waiting or claimed; the counts stay those of every stop. Each open stop also names `continued_as`, where its launch's work went, so a host no longer reads the whole launch history to find it (SB-423, Fabric Dashboards FD-316). `switchboard sessions --history --launch <id>` (repeatable, at most 64; MCP `switchboard_sessions` with `history` and `launch_ids`) reads only the named launches, and names in `missing` the ids that have no record.
+
 ## 0.7.117
 
 - Fabric board runs no longer wait behind a full session pool: the pool keeps a share for them (`switchboard capacity set N --board M`, MCP `switchboard_capacity` `board`, Settings → Coding sessions → *Board runs*; by default a quarter of the limit), so a board run starts within that share even when the person's own sessions fill the pool. Sessions are now counted one by one: a session waiting on a limit, a wake-up, a monitor or a hold, or quiet for 30 minutes outside a turn, no longer takes a place, while a session in a turn always does. Board starts that wait are counted until one starts, with no one-hour cutoff (`refused_waiting` in `switchboard capacity`, *Board runs are waiting* in Needs attention), and concurrent board starts cannot pass the share together (SB-417).

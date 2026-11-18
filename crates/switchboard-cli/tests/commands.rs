@@ -1842,6 +1842,32 @@ fn the_history_and_one_launch_with_its_chain_read_from_the_command_line() {
         text.contains("Launched by:") && text.contains("Then:"),
         "{text}"
     );
+    // SB-423 (FD-316): only the named launches, in the order given, a repeat once, and the ids
+    // with no record named.
+    let missing = "5b7f2c1e-0000-4000-8000-0000000000ff";
+    let picked: serde_json::Value = serde_json::from_str(&run(&[
+        "--json",
+        "sessions",
+        "--history",
+        "--launch",
+        a,
+        "--launch",
+        c,
+        "--launch",
+        a,
+        "--launch",
+        missing,
+    ]))
+    .unwrap();
+    let ids: Vec<&str> = picked["data"]["launches"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|l| l["launch_id"].as_str().unwrap())
+        .collect();
+    assert_eq!(ids, [a, c]);
+    assert_eq!(picked["data"]["total"], 2);
+    assert_eq!(picked["data"]["missing"], serde_json::json!([missing]));
 }
 #[test]
 fn a_launcher_name_or_parent_that_is_not_one_is_refused_before_anything_is_asked() {

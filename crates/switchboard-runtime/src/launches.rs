@@ -655,12 +655,16 @@ pub(crate) fn by_session(
 /// the stop at `stopped_at`: its record names where its work went (`continued_as`, a hand-over or
 /// a later launch), or it was itself started after the stop (the session was continued by it).
 /// Either way the stop is no longer there to be continued. A missing record answers false.
-pub(crate) fn continued_after(root: &Path, id: &str, stopped_at: i64) -> bool {
-    read(root, id).is_some_and(|r| {
-        !r["continued_as"].is_null()
+/// With it, the record's own `continued_as` (null when it names none or the record is missing),
+/// from the same read: FD-316 (2026-11-17) puts `continued_as` on each open stop of `recovery`,
+/// so Fabric Dashboards no longer reads `sessions --history` to find it.
+pub(crate) fn continuation(root: &Path, id: &str, stopped_at: i64) -> (bool, Value) {
+    read(root, id).map_or((false, Value::Null), |r| {
+        let continued = !r["continued_as"].is_null()
             || r["launched_at"]
                 .as_i64()
-                .is_some_and(|at| at > stopped_at.saturating_add(STOP_SLACK_SECONDS))
+                .is_some_and(|at| at > stopped_at.saturating_add(STOP_SLACK_SECONDS));
+        (continued, r["continued_as"].clone())
     })
 }
 /// The seconds after a stop a launch of the same session may still be the one that stopped
@@ -1975,10 +1979,13 @@ mod tests {
             json!({"launch_id": "l-later", "launched_at": 900}),
         );
         put("l-same", json!({"launch_id": "l-same", "launched_at": 500}));
-        assert!(continued_after(root, "l-handed", 600));
-        assert!(continued_after(root, "l-later", 600));
-        assert!(!continued_after(root, "l-same", 600));
-        assert!(!continued_after(root, "l-missing", 600));
+        assert_eq!(
+            continuation(root, "l-handed", 600),
+            (true, json!({"kind": "handover", "id": "ho-1"}))
+        );
+        assert_eq!(continuation(root, "l-later", 600), (true, Value::Null));
+        assert_eq!(continuation(root, "l-same", 600), (false, Value::Null));
+        assert_eq!(continuation(root, "l-missing", 600), (false, Value::Null));
     }
 
     #[test]
