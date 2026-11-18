@@ -1163,10 +1163,14 @@ Code: `launch::sessions`, `launch::session_running` (factored out of `ensure_idl
   `starting`) frees the home by itself and one whose answer came at the end of its wait still runs
   the script. An empty or unreadable marker (an earlier version's) holds for ten minutes; one
   whose modification time cannot be read, and anything at that name that is not a regular file,
-  always holds, as before. A stale marker is cleared by the next launch (or any check of the home)
-  without ever removing a fresh one: it is renamed to a name of its own, judged again there,
-  removed only if still stale (log `launch_reservation outcome=cleared
-  reason=expired|launcher_gone|unclaimed`, codes only) and otherwise linked back, the home busy. A
+  always holds, as before; the session list (`home_state`), `reservation_open` and every check
+  read it the same way (SB-449). A stale marker means no session: every check (`ensure_idle`,
+  `launched_session_running`, the Kimi reads) reads it as idle and leaves it in place (SB-448);
+  only the next reservation (`Reservation::new`) clears it, without ever removing a fresh one: it
+  is renamed to a name of its own, judged again there, removed only if still stale (log
+  `launch_reservation outcome=cleared reason=expired|launcher_gone|unclaimed`, codes only) and
+  otherwise linked back (moved back where no link can be made, kept as is when another marker took
+  the name), the home busy. A Kimi `continue --in-place` from the caller commits `caller` too. A
   launch that fails removes its own marker on every error path. `Launch` and `Continue` wait 120 s
   for the owner's answer (30 s before). Tests:
   `sb440_a_marker_no_caller_took_frees_the_home_after_five_minutes`,
