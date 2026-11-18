@@ -1983,6 +1983,25 @@ pub trait LiveItem: Send {
 }
 /// SB-420: what a renewed item may grow by over the one read (its new tokens and expiry).
 pub(crate) const RENEWAL_HEADROOM: usize = 512;
+/// SB-420: the Keychain stamp of Claude Code's credential item (created and modified times),
+/// read from its attributes: nothing is decrypted, no lock is taken, no dialog can show. Off
+/// macOS, the file's time and length. None when it cannot be read.
+pub fn live_stamp() -> Option<String> {
+    let c = context(Provider::Claude, None).ok()?;
+    #[cfg(target_os = "macos")]
+    if c.mac {
+        use switchboard_core::external_keychain::{probe_external, ItemProbe};
+        return match probe_external(&c.service, &c.user, Some(Path::new("/usr/bin/security"))) {
+            ItemProbe::Present {
+                stamp: (created, modified),
+                ..
+            } => Some(format!("{created}:{modified}")),
+            _ => None,
+        };
+    }
+    let meta = fs::metadata(c.home.join(".credentials.json")).ok()?;
+    Some(format!("{:?}:{}", meta.modified().ok()?, meta.len()))
+}
 pub fn lock_live() -> Result<Box<dyn LiveItem>, String> {
     let context = context(Provider::Claude, None)?;
     checked_path(&context.home)?;

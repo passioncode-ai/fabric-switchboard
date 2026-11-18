@@ -25,6 +25,10 @@ pub struct Entry {
     pub item: String,
     pub during: String,
     pub at: i64,
+    /// The item's Keychain stamp when a renewal was refused (attributes only, nothing
+    /// decrypted): while it has not moved, the renewal is not tried again (the idle budget).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stamp: Option<String>,
 }
 #[derive(Default, Serialize, Deserialize)]
 struct File {
@@ -63,9 +67,17 @@ static WRITE: std::sync::Mutex<()> = std::sync::Mutex::new(());
 /// Records that `item` was refused `during` an act at `at` (one entry per item). The same
 /// refusal again writes and logs nothing: a renewal asks every pass (the idle budget).
 pub fn record(root: &Path, item: &str, during: &str, at: i64) {
+    record_at_stamp(root, item, during, at, None);
+}
+
+/// [`record`] with the item's Keychain stamp at the refusal ([`renewal_held`] reads it).
+pub fn record_at_stamp(root: &Path, item: &str, during: &str, at: i64, stamp: Option<String>) {
     let _held = WRITE.lock().unwrap_or_else(|e| e.into_inner());
     let mut items = read(root);
-    if items.iter().any(|e| e.item == item && e.during == during) {
+    if items
+        .iter()
+        .any(|e| e.item == item && e.during == during && e.stamp == stamp)
+    {
         return;
     }
     items.retain(|e| e.item != item);
@@ -73,6 +85,7 @@ pub fn record(root: &Path, item: &str, during: &str, at: i64) {
         item: item.into(),
         during: during.into(),
         at,
+        stamp,
     });
     write(root, items);
     crate::oplog::event(
@@ -130,7 +143,22 @@ fn code(word: &str) -> &'static str {
 
 /// The answer `status` carries: `[{item, during, at}]`, empty when nothing is refused.
 pub fn status(root: &Path) -> Value {
-    json!(read(root))
+    json!(read(root)
+        .into_iter()
+        .map(|e| json!({"item": e.item, "during": e.during, "at": e.at}))
+        .collect::<Vec<_>>())
+}
+
+/// Whether a renewal of Claude Code's item was refused as too large and the item has not been
+/// written since: its Keychain stamp (`stamp`, attributes only) is the one recorded. An unknown
+/// stamp is never held.
+pub fn renewal_held(root: &Path, stamp: Option<&str>) -> bool {
+    let Some(stamp) = stamp else {
+        return false;
+    };
+    read(root).iter().any(|e| {
+        e.item == ORDINARY && e.during == DURING_RENEWAL && e.stamp.as_deref() == Some(stamp)
+    })
 }
 
 #[cfg(test)]
@@ -153,12 +181,14 @@ mod tests {
                 Entry {
                     item: LAUNCH.into(),
                     during: DURING_LAUNCH_COPY.into(),
-                    at: 11
+                    at: 11,
+                    stamp: None,
                 },
                 Entry {
                     item: ORDINARY.into(),
                     during: DURING_RENEWAL.into(),
-                    at: 13
+                    at: 13,
+                    stamp: None,
                 },
             ]
         );

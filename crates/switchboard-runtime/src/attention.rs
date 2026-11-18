@@ -451,6 +451,7 @@ mod tests {
             item: crate::item_size::ORDINARY.into(),
             during: crate::item_size::DURING_RENEWAL.into(),
             at: 9_000,
+            stamp: Some("1:2".into()),
         }];
         let answer = build(&Inputs {
             snapshot: &snapshot,

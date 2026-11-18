@@ -1288,6 +1288,9 @@ pub(crate) struct NativeSources {
     pub(crate) activate: Activate,
     /// Claude Code's live credential item under its locks, for renewing it while idle.
     pub(crate) live: fn() -> Result<Box<dyn external::LiveItem>, String>,
+    /// SB-420: the Keychain stamp of Claude Code's credential item, from its attributes only
+    /// (nothing decrypted, no lock); None when unknown.
+    pub(crate) live_stamp: fn() -> Option<String>,
     /// Claude Swap's saved profiles, read on demand before switching to an account it holds.
     pub(crate) swap: fn() -> Result<external::ImportBatch, String>,
     /// Whether Claude Swap runs and switches, read from the process table in-process.
@@ -1319,6 +1322,7 @@ pub(crate) const UNAVAILABLE: NativeSources = NativeSources {
         Err("Current Claude credential is unavailable; activation was cancelled.".into())
     },
     live: no_live,
+    live_stamp: || None,
     swap: no_swap,
     swap_activity: external::SwapActivity::none,
     swap_signature: || None,
@@ -1340,6 +1344,7 @@ pub(crate) const NATIVE: NativeSources = NativeSources {
     fresh: Some(external::capture_current),
     activate: external::activate_claude,
     live: external::lock_live,
+    live_stamp: external::live_stamp,
     swap: external::read_claude_swap,
     swap_activity: external::claude_swap_activity,
     swap_signature: external::claude_swap_signature,
