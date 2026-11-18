@@ -164,7 +164,8 @@ impl Store {
             _ => return Ok(entry.clone()),
         };
         let entry = entry.clone();
-        append_event(&mut candidate, action, None, "person");
+        // Review round 1 of PR #821: the entry names the Kimi Code account it turned.
+        append_event(&mut candidate, action, Some(id), "person");
         crate::validate_snapshot(&candidate)?;
         self.publish(&mut state, candidate)?;
         Ok(entry)
@@ -226,7 +227,10 @@ mod tests {
         assert_eq!((saved.label.as_str(), saved.off), ("Renamed", Some(off)));
         assert!(store.set_kimi_off(&id, false).unwrap().off.is_none());
         let s = store.snapshot().unwrap();
-        assert!(s.events.iter().any(|e| e.action == crate::off::TURNED_ON));
+        assert!(s
+            .events
+            .iter()
+            .any(|e| e.action == crate::off::TURNED_ON && e.account_id.as_deref() == Some(&id)));
         assert_eq!(
             store.set_kimi_off("nope", true).unwrap_err(),
             NO_KIMI_ACCOUNT

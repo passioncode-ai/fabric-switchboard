@@ -191,3 +191,25 @@ fn a_store_that_says_off_and_on_at_once_is_refused() {
     fs::write(&path, serde_json::to_vec(&disk).unwrap()).unwrap();
     assert!(Store::open(root.path().into(), vault).is_err());
 }
+
+/// Review round 1 of PR #821 (P1-1): the window's rename names no `enabled` when its switch was
+/// not touched. A rename of an account used on another machine leaves it as it was, so clearing
+/// its mark turns it on as before; it never becomes the person's off.
+#[test]
+fn a_rename_that_names_no_switch_leaves_an_account_used_elsewhere_as_it_was() {
+    let (_root, _vault, store, id) = setup();
+    store
+        .mark_elsewhere_at(&id, true, 10, Some("studio"))
+        .unwrap();
+    store
+        .update_fields(&id, Some("renamed".into()), None)
+        .unwrap();
+    let s = store.snapshot().unwrap();
+    let a = account(&store, &id);
+    assert_eq!(a.label, "renamed");
+    assert!(!a.enabled && a.off.is_none());
+    assert_eq!(off::availability(&s, &a), "elsewhere");
+    assert!(!s.events.iter().any(|e| e.action == off::TURNED_OFF));
+    store.mark_elsewhere(&id, false, 20).unwrap();
+    assert!(account(&store, &id).usable());
+}

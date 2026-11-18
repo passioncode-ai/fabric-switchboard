@@ -2013,4 +2013,12 @@ check(() => {
   assert.equal(logic.groupDisplayName({ name: 'Pay-per-token keys' }), 'Pay-per-token keys', 'a group the person named so stays as typed');
   i18n.setLocale('en');
 });
+// W1.2 (DEC-0027), review round 1 of PR #821: the Edit dialog sends its switch only when touched,
+// so renaming an account used on another machine (enabled false, no off) never turns it off.
+check(() => {
+  assert.equal(logic.editedEnabled(false, false), undefined);
+  assert.equal(logic.editedEnabled(true, true), undefined);
+  assert.equal(logic.editedEnabled(true, false), false);
+  assert.equal(logic.editedEnabled(false, true), true);
+});
 console.log(`${cases} ui-logic cases passed, including quota priority and wall-clock countdowns.`);

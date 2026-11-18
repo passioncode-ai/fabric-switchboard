@@ -80,14 +80,18 @@ pub fn availability(s: &Snapshot, a: &Account) -> &'static str {
     }
 }
 
-/// A seat another machine delegated here whose newest record is its call back.
+/// A seat another machine delegated here that its sender called back: its record says so
+/// (`Delegation::surrendered_at`, since 0.7.118), or, for a record written before, the newest
+/// journal entry about it is its call back while the journal still holds one.
 fn seat_called_back(s: &Snapshot, id: &str) -> bool {
-    s.delegated.contains_key(id)
-        && s.events
-            .iter()
-            .rev()
-            .find(|e| e.action == "delegation" && e.account_id.as_deref() == Some(id))
-            .is_some_and(|e| e.detail == "surrendered")
+    s.delegated.get(id).is_some_and(|d| {
+        d.surrendered_at.is_some()
+            || s.events
+                .iter()
+                .rev()
+                .find(|e| e.action == "delegation" && e.account_id.as_deref() == Some(id))
+                .is_some_and(|e| e.detail == "surrendered")
+    })
 }
 
 /// Before W1.2 the person's off and the automatic ones shared `enabled`. A store written then
@@ -95,7 +99,7 @@ fn seat_called_back(s: &Snapshot, id: &str) -> bool {
 /// a delegated lease that ran out, a delegated seat called back) as turned off by the person:
 /// that is the safe reading, since no automatic process may turn such an account on again. Its
 /// time is the account's newest `account_updated` journal entry (turning off wrote one), else
-/// `now` (the journal keeps the newest 1,000 entries). Answers whether anything changed.
+/// `now` (the journal keeps the newest 256 entries, `MAX_EVENTS`). Answers whether anything changed.
 pub(crate) fn migrate(s: &mut Snapshot, now: i64) -> bool {
     let mut changed = false;
     let reasons: Vec<(String, bool)> = s

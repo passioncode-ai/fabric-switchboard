@@ -48,11 +48,17 @@ fn schema_version(snapshot: &Snapshot) -> u32 {
     // Version 16 only while an account another machine delegated is here, or a journal entry
     // of one (SB-403, DEC-0025): a 0.7.112 or older reader refuses the unknown field rather
     // than treat a guest's sign-in as its own (send it on, give it to an agent, remove it).
-    // Version 17 only while the person turned an account or a Kimi Code account off, or the
-    // journal holds such a turn (W1.2, DEC-0027): a 0.7.115 or older reader refuses the unknown
-    // field and action rather than read an account the person turned off as one it may turn on.
+    // Version 17 only while the person turned an account or a Kimi Code account off, a
+    // delegated seat records its call back, or the journal holds such a turn (W1.2, DEC-0027): a
+    // 0.7.117 or older reader refuses the unknown field and action rather than read an account
+    // the person turned off as one it may turn on. The way back to such a version is restoring a
+    // backup there (its accounts come back off, as before).
     if snapshot.accounts.iter().any(|a| a.off.is_some())
         || snapshot.kimi_accounts.iter().any(|k| k.off.is_some())
+        || snapshot
+            .delegated
+            .values()
+            .any(|d| d.surrendered_at.is_some())
         || snapshot
             .events
             .iter()

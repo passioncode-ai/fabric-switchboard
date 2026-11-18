@@ -847,9 +847,12 @@ research notes); the ones still in force that the board cites are seeded below w
   - A call back carries the off: the other machine's surrender answer has `off_since` (null when
     on), and the copy comes home off with that time. A delegated seat's off is the teammate's
     word about their own use and is not carried. An older Switchboard sends no `off_since`; such
-    a copy comes home as before.
+    a copy comes home as before. On the sending machine, a seat delegated out that the person
+    turned off is no longer extended, so it lapses on the teammate's machine at the end of its
+    lease; a copy moved without a lease keeps working where it is until it is called back. The
+    switch says what this computer does: every surface says nothing on this computer uses it.
   - A backup carries the off beside the accounts (`off`, old account id to `{since, by}`), so a
-    0.7.115 or older reader still restores them (off, as before); a restore saves each new account
+    0.7.117 or older reader still restores them (off, as before); a restore saves each new account
     in its backed-up state in the save's one publication. A backup from before carries none: an
     account it holds off for no reason it records (not used elsewhere, not on another machine) is
     restored as the person's off since the backup's time. Settings exports never carry it (they
@@ -859,7 +862,11 @@ research notes); the ones still in force that the board cites are seeded below w
     person's off. The code cannot tell the person's off from an older automatic one that left no
     record, so it takes the safe reading: nothing automatic may turn such an account on. Its time
     is the account's newest `account_updated` journal entry, else the time of the migration. The
-    store is written once, at schema version 17, which a 0.7.115 or older reader refuses.
+    store is written at schema version 17, which a 0.7.117 or older reader refuses. The way back
+    to such a version is restoring a backup there: the backup's accounts come back off, as before.
+    A delegated seat's call back is recorded on its record (`Delegation.surrendered_at`, review
+    round 1 of PR #821), so a journal that rolled over its 256 entries never turns a called-back
+    seat into the person's off.
   - A Kimi Code account that is off is not asked about its usage (the background view and the
     list skip it), launched or continued; a fallback step whose only accounts are off, a pinned
     one included, is passed over as `account_off` (contract probe `refused`).

@@ -4,11 +4,11 @@
  * `node scripts/check-locale.mjs` keeps it complete.
  */
 export const RU: Record<string, string> = {
-  // W1.2 (SB-418, DEC-0027, 2026-11-17): an account turned off by the person, and since when. Copylot en-US reports 490b9288…97c27c4b, ru-RU 16da3fb0…538d9c8b (pass; one suggestion on a trailing period, kept as in the English).
+  // W1.2 (SB-418, DEC-0027, 2026-11-17): an account turned off by the person, and since when. Copylot report ids (en-US and ru-RU, all pass) in docs/brand/strings.md; review round 1 of PR #821 changed «Nothing uses it» to «Nothing on this computer uses it» and the row menu to «Rename or turn off…».
   "Off since {date}": "Выключен с {date}",
-  "You turned it off. Nothing uses it, and nothing turns it on again until you do.": "Вы его выключили. Им ничто не пользуется, и ничто не включит его снова, пока вы сами его не включите.",
+  "You turned it off. Nothing on this computer uses it, and nothing turns it on again until you do.": "Вы его выключили. На этом компьютере им ничто не пользуется, и ничто не включит его снова, пока вы сами его не включите.",
   "{label} is on again.": "{label} снова включён.",
-  "{label} is off. Nothing uses it until you turn it on.": "{label} выключен. Им ничто не пользуется, пока вы его не включите.",
+  "{label} is off. Nothing on this computer uses it until you turn it on.": "{label} выключен. На этом компьютере им ничто не пользуется, пока вы его не включите.",
   "Not checked while turned off": "Не проверяется, пока выключен",
   "Account turned off": "Аккаунт выключен",
   "Account turned on": "Аккаунт включён",
@@ -950,7 +950,7 @@ export const RU: Record<string, string> = {
   "Select for managed sessions": "Выбрать для управляемых сессий",
   "Check usage": "Проверить использование",
   "Usage observation updated.": "Данные об использовании обновлены.",
-  "Rename or disable…": "Переименовать или отключить…",
+  "Rename or turn off…": "Переименовать или выключить…",
   "Remove…": "Удалить…",
   "More actions for {label}": "Ещё действия для {label}",
   "Available": "Доступен",

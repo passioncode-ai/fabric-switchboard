@@ -71,6 +71,11 @@ pub struct Delegation {
     /// When its credential was removed, `KEEP_AFTER_LEASE_SECONDS` after it ended.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub purged_at: Option<i64>,
+    /// When its sender called it back (W1.2, DEC-0027): switched off here, its tokens given back.
+    /// Cleared when the sender undoes the call back. Absent in records written before 0.7.118,
+    /// whose call back only the journal remembers (`off::seat_called_back`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub surrendered_at: Option<i64>,
 }
 
 /// SB-403 (P2-5): on the machine that delegated a seat, what it needs to extend and call it back:
@@ -134,6 +139,7 @@ pub(crate) fn validate(s: &Snapshot) -> Result<(), String> {
             || d.ended_at.is_some_and(|t| t < d.granted_at)
             || d.purged_at
                 .is_some_and(|t| d.ended_at.is_none_or(|e| t < e))
+            || d.surrendered_at.is_some_and(|t| t < d.granted_at)
         {
             return invalid();
         }
@@ -305,6 +311,7 @@ impl crate::Store {
             lease_until: time + i64::from(lease_hours) * 3600,
             ended_at: None,
             purged_at: None,
+            surrendered_at: None,
         };
         self.save_delegated(label, provider, pool, credential, delegation)
     }
@@ -422,6 +429,11 @@ impl crate::Store {
             a.enabled = undo && !ended && a.off.is_none();
             if !undo {
                 candidate.routes.retain(|_, v| v != id);
+            }
+            // W1.2 (DEC-0027): the call back is recorded on the seat, so nothing reads it from a
+            // journal that keeps only its newest entries.
+            if let Some(d) = candidate.delegated.get_mut(id) {
+                d.surrendered_at = (!undo).then(|| crate::now().max(d.granted_at));
             }
             crate::append_event(
                 &mut candidate,
@@ -818,6 +830,74 @@ mod tests {
         assert!(store.snapshot().unwrap().accounts[0].usable());
     }
 
+    /// W1.2 (DEC-0027), review round 1 of PR #821: a rename that names no `enabled` (the
+    /// window's dialog with its switch untouched) leaves a seat whose lease ran out as it was,
+    /// so the sender's extension still brings it back on; it never becomes the person's off.
+    #[test]
+    fn a_rename_leaves_a_lapsed_seat_off_for_its_lease_and_never_turned_off() {
+        let (_r, _f, store) = store_with_group();
+        let a = store
+            .add_delegated(
+                "seat".into(),
+                Provider::Claude,
+                pool(&store),
+                oauth("9"),
+                KEY,
+                None,
+                48,
+            )
+            .unwrap();
+        {
+            let mut state = store.lock().unwrap();
+            let d = state.delegated.get_mut(&a.id).unwrap();
+            d.granted_at = now() - 100 * 3600;
+            d.lease_until = now() - 1;
+            store.republish(&state);
+        }
+        store.end_lease(&a.id).unwrap();
+        store
+            .update_fields(&a.id, Some("renamed".into()), None)
+            .unwrap();
+        let s = store.snapshot().unwrap();
+        assert_eq!(s.accounts[0].label, "renamed");
+        assert!(!s.accounts[0].enabled && s.accounts[0].off.is_none());
+        assert_eq!(crate::off::availability(&s, &s.accounts[0]), "lease_ended");
+        store.extend_lease(&a.id, KEY, 48).unwrap();
+        assert!(store.snapshot().unwrap().accounts[0].usable());
+    }
+
+    /// W1.2 (DEC-0027), review round 1 of PR #821 (P2-1): a call back is recorded on the seat,
+    /// so a journal that rolled over its 256 entries no longer makes the migration read the seat
+    /// as turned off by the person; an undo clears it.
+    #[test]
+    fn a_called_back_seat_is_recorded_on_its_record_and_never_migrated_to_the_persons_off() {
+        let (_r, _f, store) = store_with_group();
+        let a = store
+            .add_delegated(
+                "seat".into(),
+                Provider::Claude,
+                pool(&store),
+                oauth("9"),
+                KEY,
+                None,
+                48,
+            )
+            .unwrap();
+        store.surrender_delegated(&a.id, KEY, false).unwrap();
+        let mut s = store.snapshot().unwrap();
+        assert!(s.delegated[&a.id].surrendered_at.is_some());
+        assert_eq!(crate::off::availability(&s, &s.accounts[0]), "called_back");
+        // Every journal entry about it rolled out.
+        s.events.clear();
+        assert!(!crate::off::migrate(&mut s, now()));
+        assert!(s.accounts[0].off.is_none());
+        assert_eq!(crate::off::availability(&s, &s.accounts[0]), "called_back");
+        // Undone: the record is cleared and the seat is on again.
+        store.surrender_delegated(&a.id, KEY, true).unwrap();
+        let s = store.snapshot().unwrap();
+        assert!(s.delegated[&a.id].surrendered_at.is_none() && s.accounts[0].usable());
+    }
+
     #[test]
     fn a_group_holding_a_guest_is_not_deleted() {
         let (_r, _f, store) = store_with_group();
@@ -863,6 +943,7 @@ mod tests {
                 lease_until: now() + 10,
                 ended_at: None,
                 purged_at: None,
+                surrendered_at: None,
             },
         );
         assert_eq!(

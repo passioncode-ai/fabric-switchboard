@@ -125,6 +125,10 @@ pub fn hand_over(
     }
     // SB-315: as a move does, a hand-over takes an account used here only, and never the one the
     // ordinary CLI is signed in to (it would keep renewing it here).
+    // W1.2 (DEC-0027): an account the person turned off says so, as a move does.
+    if account.off.is_some() {
+        return Err(switchboard_core::off::ACCOUNT_OFF.into());
+    }
     if !account.usable() || snapshot.elsewhere.contains_key(id) {
         return Err(crate::account_send::NOT_HERE.into());
     }

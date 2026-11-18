@@ -86,7 +86,8 @@ export interface Adapter {
   sessions(): Promise<{ sessions: SessionInfo[] }>;
   runtime(): Promise<RuntimeStatus>;
   add(input: AddInput): Promise<Account>;
-  update(id: string, label: string, enabled: boolean): Promise<void>;
+  /** `enabled` absent: the switch is left as it is (a rename never turns an account off; W1.2). */
+  update(id: string, label: string, enabled?: boolean): Promise<void>;
   /** SB-175: mark an account as used on another machine (disabled here), or clear the mark. */
   /** SB-284: `location` says where it works (blank clears it). */ markElsewhere(id: string, on: boolean, location?: string): Promise<void>;
   /** SB-322: gives an account to an agent (`to` names it), or takes it back (`to` null). */ assignAccount(id: string, to: string | null): Promise<void>;

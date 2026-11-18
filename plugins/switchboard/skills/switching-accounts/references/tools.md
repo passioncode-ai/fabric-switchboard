@@ -594,11 +594,13 @@ themselves. Without `add` or `remove`, reads them; changing them only when the o
 
 ### `switchboard_account_update`: `account_id`, `label?`, `enabled?`, `elsewhere?`, `location?`, `assigned_to?`, `force?`
 
-Only when the operator asks. Renames an account, or turns it off (`enabled: false`: nothing
+Only when the operator asks. Renames an account (without `enabled`, its switch stays as it is), or
+turns it off (`enabled: false`: nothing on this computer
 selects, switches to, renews, checks, launches, lends or sends it, and nothing turns it on again by
 itself, not a call back, a restore, a lease or a cleared mark, until the operator sends
 `enabled: true`; `switchboard_accounts` shows `off_since`, `off_by` and `availability`) or on; `elsewhere: true`
-disables it here because another machine uses it; `location` says where it works (a machine and
+disables it here because another machine uses it (`elsewhere: false` clears the mark and turns it
+on again, unless the operator turned it off); `location` says where it works (a machine and
 its user, or a colleague, at most 80 characters) and marks it so; an empty one clears it.
 `assigned_to` gives the account to an agent or service that signs in with it now (its name, at
 most 120 characters): unlike `elsewhere` it stays enabled, its sign-in is renewed and its usage

@@ -6071,6 +6071,7 @@ mod tests {
                 lease_until: 2,
                 ended_at: None,
                 purged_at: None,
+                surrendered_at: None,
             },
         );
         assert_eq!(
