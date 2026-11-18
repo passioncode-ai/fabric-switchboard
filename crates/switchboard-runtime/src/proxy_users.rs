@@ -187,13 +187,8 @@ fn open_safe_folder(parent: &Path, me: u32) -> Result<std::os::fd::OwnedFd, Stri
         };
         let name = std::ffi::CString::new(name.as_bytes()).map_err(|_| SETTINGS_PARENT)?;
         // SAFETY: `folder` is open; `name` is NUL-terminated.
-        let raw = unsafe {
-            libc::openat(
-                folder.as_raw_fd(),
-                name.as_ptr(),
-                flags | libc::O_NOFOLLOW,
-            )
-        };
+        let raw =
+            unsafe { libc::openat(folder.as_raw_fd(), name.as_ptr(), flags | libc::O_NOFOLLOW) };
         if raw < 0 {
             let error = errno();
             let mut st: libc::stat = unsafe { std::mem::zeroed() };
@@ -249,7 +244,8 @@ pub fn write_settings(
     let c_name = std::ffi::CString::new(name.as_bytes()).map_err(|_| RELATIVE_SETTINGS)?;
     let mut st: libc::stat = unsafe { std::mem::zeroed() };
     // SAFETY: `dir` is open; `c_name` is NUL-terminated; `st` is a live buffer.
-    let present = unsafe { libc::fstatat(dir, c_name.as_ptr(), &mut st, libc::AT_SYMLINK_NOFOLLOW) } == 0;
+    let present =
+        unsafe { libc::fstatat(dir, c_name.as_ptr(), &mut st, libc::AT_SYMLINK_NOFOLLOW) } == 0;
     if present {
         if (st.st_mode & libc::S_IFMT) != libc::S_IFREG || st.st_uid != me || st.st_nlink != 1 {
             return Err(SETTINGS_NOT_OURS.into());
@@ -259,7 +255,11 @@ pub fn write_settings(
         };
         // SAFETY: as above; the descriptor is owned by `file` from here on.
         let raw = unsafe {
-            libc::openat(dir, c_name.as_ptr(), libc::O_RDONLY | libc::O_NOFOLLOW | libc::O_CLOEXEC)
+            libc::openat(
+                dir,
+                c_name.as_ptr(),
+                libc::O_RDONLY | libc::O_NOFOLLOW | libc::O_CLOEXEC,
+            )
         };
         if raw < 0 {
             return Err(SETTINGS_NOT_OURS.into());
@@ -864,7 +864,10 @@ mod tests {
             write_settings(&theirs, &bytes, None, Some(&sha256_hex(b"something else"))),
             Err(SETTINGS_CHANGED.into())
         );
-        assert_eq!(std::fs::read(&theirs).unwrap(), b"ssh-ed25519 AAAA keep-me\n");
+        assert_eq!(
+            std::fs::read(&theirs).unwrap(),
+            b"ssh-ed25519 AAAA keep-me\n"
+        );
         // A folder swapped for a link to this account's own folder: refused.
         let home = base.join("home");
         std::fs::create_dir(&home).unwrap();
@@ -894,7 +897,13 @@ mod tests {
         let written = write_settings(&open.join("settings.json"), &bytes, None, None).unwrap();
         assert_eq!(written.mode, 0o600);
         // Its own file again, with the recorded digest: replaced.
-        assert!(write_settings(&open.join("settings.json"), &bytes, None, Some(&written.sha256)).is_ok());
+        assert!(write_settings(
+            &open.join("settings.json"),
+            &bytes,
+            None,
+            Some(&written.sha256)
+        )
+        .is_ok());
     }
 
     /// SB-421 review (P1-1): the hand-over line copies the file as the user, never as root into a
@@ -922,7 +931,14 @@ mod tests {
             home: "/home/agent-a".into(),
         };
         let path = base.join("agent-a.json");
-        let (answer, _) = deliver(&user, Some(&account), &path, Some(&(4555, token.clone())), None).unwrap();
+        let (answer, _) = deliver(
+            &user,
+            Some(&account),
+            &path,
+            Some(&(4555, token.clone())),
+            None,
+        )
+        .unwrap();
         let line = answer["install_command"].as_str().unwrap();
         assert!(line.starts_with("sudo cat '"), "{line}");
         assert!(line.contains("| sudo -u 'agent-a' sh -c "), "{line}");
@@ -930,9 +946,19 @@ mod tests {
         assert!(!line.contains("sudo install"), "{line}");
         let capability = users::user_token(&token, "team", 4242, &user.salt);
         assert!(!answer.to_string().contains(&capability));
-        assert_eq!(answer["installed_path"], "/home/agent-a/.claude/switchboard-settings.json");
+        assert_eq!(
+            answer["installed_path"],
+            "/home/agent-a/.claude/switchboard-settings.json"
+        );
         // P2-3: an account not looked up gets no group and no hand-over line it cannot name.
-        let (alone, _) = deliver(&user, None, &base.join("b.json"), Some(&(4555, token)), None).unwrap();
+        let (alone, _) = deliver(
+            &user,
+            None,
+            &base.join("b.json"),
+            Some(&(4555, token)),
+            None,
+        )
+        .unwrap();
         assert_eq!(alone["mode"], "0600");
         assert!(alone.get("install_command").is_none());
     }
@@ -1146,18 +1172,35 @@ mod tests {
         let settings = real(&dir).join("agent.json");
         let text = settings.display().to_string();
         let allow = |group: &str, path: Option<&str>| {
-            execute(&store, &root, None, Some("allow"), Some(&other.name), Some(group), &[], path, None)
+            execute(
+                &store,
+                &root,
+                None,
+                Some("allow"),
+                Some(&other.name),
+                Some(group),
+                &[],
+                path,
+                None,
+            )
         };
         allow("default", Some(&text)).unwrap();
-        let read = || -> Value { serde_json::from_slice(&std::fs::read(&settings).unwrap()).unwrap() };
-        assert_eq!(read()["env"]["ANTHROPIC_BASE_URL"], "http://127.0.0.1:4555/claude/default");
+        let read =
+            || -> Value { serde_json::from_slice(&std::fs::read(&settings).unwrap()).unwrap() };
+        assert_eq!(
+            read()["env"]["ANTHROPIC_BASE_URL"],
+            "http://127.0.0.1:4555/claude/default"
+        );
         let moved = allow(&team.pool, None).unwrap();
         assert_eq!(moved["settings_file"]["path"], text.as_str());
         assert_eq!(
             read()["env"]["ANTHROPIC_BASE_URL"],
             format!("http://127.0.0.1:4555/claude/{}", team.pool)
         );
-        assert_eq!(users::load(&root).unwrap()[0].settings_sha256.as_deref(), Some(sha256_hex(&std::fs::read(&settings).unwrap()).as_str()));
+        assert_eq!(
+            users::load(&root).unwrap()[0].settings_sha256.as_deref(),
+            Some(sha256_hex(&std::fs::read(&settings).unwrap()).as_str())
+        );
     }
 
     /// SB-421 review (P2-4): a uid listed under a name that the system now gives another account
@@ -1187,12 +1230,25 @@ mod tests {
         )
         .unwrap();
         let run = |action: &str| {
-            execute(&store, &root, None, Some(action), Some(&other.uid.to_string()), Some("default"), &[], None, None)
+            execute(
+                &store,
+                &root,
+                None,
+                Some(action),
+                Some(&other.uid.to_string()),
+                Some("default"),
+                &[],
+                None,
+                None,
+            )
         };
         assert_eq!(run("allow"), Err(UID_REUSED.into()));
         assert_eq!(run("rotate"), Err(UID_REUSED.into()));
         assert_eq!(repoint(&root, 4777, &"e".repeat(64)), (0, 1));
         assert!(!settings.exists());
-        assert!(run("disallow").is_ok(), "a reused uid can always be taken off");
+        assert!(
+            run("disallow").is_ok(),
+            "a reused uid can always be taken off"
+        );
     }
 }

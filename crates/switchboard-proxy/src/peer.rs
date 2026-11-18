@@ -642,7 +642,12 @@ fn classify(uid: u32, found: Option<u32>, users: &crate::users::Users) -> Admiss
         Some(other) if other != 0 => match users.find(other) {
             // SB-421 review (P2-4): a uid listed under a name is that account only while the
             // system still names the uid so; a uid given to a new account is refused.
-            Some(user) if user.name.as_deref().is_none_or(|name| account_name(other).as_deref() == Some(name)) => {
+            Some(user)
+                if user
+                    .name
+                    .as_deref()
+                    .is_none_or(|name| account_name(other).as_deref() == Some(name)) =>
+            {
                 Admission::Named(other)
             }
             _ => Admission::Refused,
@@ -795,7 +800,11 @@ mod tests {
         assert_eq!(owner_in(&l, at(4000), at(5555)), Seen::Owner(777));
         let only_other = list(&[record_at(other, at(4000), 666)]);
         assert_eq!(owner_in(&only_other, at(4000), at(5555)), Seen::Absent);
-        let to_other = list(&[record_at(at(5555), SocketAddr::from(([127, 0, 0, 2], 4000)), 666)]);
+        let to_other = list(&[record_at(
+            at(5555),
+            SocketAddr::from(([127, 0, 0, 2], 4000)),
+            666,
+        )]);
         assert_eq!(owner_in(&to_other, at(4000), at(5555)), Seen::Absent);
         let twice = list(&[record(5555, 4000, 777), record(5555, 4000, 666)]);
         assert_eq!(owner_in(&twice, at(4000), at(5555)), Seen::Ambiguous);
@@ -871,7 +880,15 @@ mod tests {
         assert_eq!(owner_in_proc(&elsewhere, at(4000), at(5555)), None);
         // The same connection in tcp6 as ::ffff:127.0.0.1.
         let mapped = "0000000000000000FFFF00000100007F";
-        let six = format!("{head}{}", row(&format!("{mapped}:15B3"), &format!("{mapped}:0FA0"), 1003, 10));
+        let six = format!(
+            "{head}{}",
+            row(
+                &format!("{mapped}:15B3"),
+                &format!("{mapped}:0FA0"),
+                1003,
+                10
+            )
+        );
         assert_eq!(owner_in_proc(&six, at(4000), at(5555)), Some(1003));
         // Two live rows for one address pair that disagree.
         let twice = format!("{both}{}", row("0100007F:15B3", "0100007F:0FA0", 1004, 11));
@@ -948,10 +965,7 @@ mod tests {
         let (server, peer) = listener.accept().await.unwrap();
         let local = server.local_addr().unwrap();
         let (found, held) = tokio::task::spawn_blocking(move || {
-            (
-                owner(local, peer),
-                own_processes_hold(local, peer),
-            )
+            (owner(local, peer), own_processes_hold(local, peer))
         })
         .await
         .unwrap();
@@ -1109,8 +1123,14 @@ mod tests {
     fn a_socket_whose_address_cannot_be_read_admits_nobody() {
         let users = crate::users::Users::none();
         let err = || Err(std::io::Error::other("gone"));
-        assert_eq!(admit_at(Me::Uid(501), err(), at(5555), &users), Admission::Refused);
-        assert_eq!(admit_at(Me::TokenUser, err(), at(5555), &users), Admission::Refused);
+        assert_eq!(
+            admit_at(Me::Uid(501), err(), at(5555), &users),
+            Admission::Refused
+        );
+        assert_eq!(
+            admit_at(Me::TokenUser, err(), at(5555), &users),
+            Admission::Refused
+        );
     }
 
     /// SB-421 review (P2-4): a uid listed under a name is admitted only while the system still
@@ -1152,7 +1172,10 @@ mod tests {
         let (found, other) = tokio::task::spawn_blocking(move || {
             let list = pcblist().unwrap();
             let elsewhere = SocketAddr::from(([127, 0, 0, 2], peer.port()));
-            (owner_in(&list, local, peer), owner_in(&list, local, elsewhere))
+            (
+                owner_in(&list, local, peer),
+                owner_in(&list, local, elsewhere),
+            )
         })
         .await
         .unwrap();
