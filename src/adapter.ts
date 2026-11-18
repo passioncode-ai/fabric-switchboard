@@ -298,6 +298,8 @@ const safeErrors = new Set([
   "Give the duty officer's limits in range: stuck, waiting and idle minutes from 10 to 1440, maximum age hours from 1 to 72.",
   "The duty officer's settings (duty.json) could not be read. Set them again, or delete duty.json for the defaults.",
   "The duty officer's settings could not be saved.",
+  "The setting for continuing sessions after a restart (boot-resume.json) could not be read. Set it again, or delete the file for the default.",
+  "The setting for continuing sessions after a restart could not be saved.",
   "At capacity: this computer runs as many coding sessions as its limit allows. The start waits until one ends.",
   "Claude Code here is signed in to this account and no other Claude account here can take its place. Add one, then move this one.",
   "This account was not given back by a call back here, so its mark stays. Nothing changed.",

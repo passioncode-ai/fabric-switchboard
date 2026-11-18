@@ -1087,7 +1087,7 @@ Code: `launch::sweep_logins` (`sweep_logins_with` for tests), called once from
 `Owner::start_with_sources` for a native owner, on a blocking thread off the start path.
 
 - Considers only folders directly under `logins/` named by a UUID, never a link.
-- Keeps a home whose sign-in is still open in Terminal (`.launch-pending` not expired, or
+- Keeps a home whose sign-in is still open in Terminal (`.launch-pending` still holding, or
   `session_running`); a later start removes it once it ended — an earlier owner's sign-in cannot
   be finished by this one (its registry was in memory).
 - Otherwise, on macOS, probes the derived Claude Code Keychain item by attributes only
@@ -1151,8 +1151,46 @@ Code: `launch::sessions`, `launch::session_running` (factored out of `ensure_idl
   `a_proxy_agent_launch_records_its_context`.
 - The list scans `homes/` and `runtimes/` only, directory entries only (a link is skipped), and
   homes with a record. State comes from the same markers that keep one session per home:
-  `.launch-pending` not expired → `starting`; `session_running` → `running` / `ended`; an
+  `.launch-pending` still holding (below) → `starting`; `session_running` → `running` / `ended`; an
   unreadable marker → `unknown`. The owner answers it without its transaction lock (a read).
+- The one-session marker `.launch-pending` (SB-440) holds a home while its launch is prepared and
+  until its script starts (the script's first lines remove it). While the launch is prepared it
+  names the preparing process and its start token, `{"pid": N, "token": T}`
+  (`copies::process_token`: macOS and Windows the start time, Linux the start in clock ticks after
+  boot), and frees the home as soon as that process is gone or its pid names another process (a
+  different token; on every platform; without a recorded token, Unix compares the process's age
+  with the marker's). Once prepared it says who runs the script,
+  `{"pid": null, "by": "terminal" | "caller"}`, rewritten in place (never through a link) and never
+  created again: a Terminal launch, and a continuation prepared in place for the hand-over queue
+  (`ContinueToConsole`, the automatic fallback: it may wait for a console), hold for ten minutes,
+  as before; a script handed to the caller of `Launch` or `Continue` (`launch --in-place`,
+  `--headless`, `--hosted`, `continue --in-place`) holds for five minutes, longer than that
+  caller's own 120 s wait for the answer (`control::limit_secs`), so a caller that gave up on its
+  control request after the owner prepared the session (2026-11-18: `runtimes/claude-tokens` left
+  `starting`) frees the home by itself and one whose answer came at the end of its wait still runs
+  the script. An empty or unreadable marker (an earlier version's) holds for ten minutes; one
+  whose modification time cannot be read, and anything at that name that is not a regular file,
+  always holds, as before. A stale marker is cleared by the next launch (or any check of the home)
+  without ever removing a fresh one: it is renamed to a name of its own, judged again there,
+  removed only if still stale (log `launch_reservation outcome=cleared
+  reason=expired|launcher_gone|unclaimed`, codes only) and otherwise linked back, the home busy. A
+  launch that fails removes its own marker on every error path. `Launch` and `Continue` wait 120 s
+  for the owner's answer (30 s before). Tests:
+  `sb440_a_marker_no_caller_took_frees_the_home_after_five_minutes`,
+  `sb440_a_marker_handed_to_terminal_still_holds_for_ten_minutes`,
+  `sb440_a_marker_whose_preparing_process_is_gone_is_cleared_at_once`,
+  `sb440_a_preparer_is_told_by_its_start_token_not_its_pid_alone`,
+  `sb440_clearing_a_stale_marker_never_removes_a_fresh_one`,
+  `sb440_a_reservation_names_its_preparer_then_who_runs_the_script`,
+  `sb440_an_in_place_launch_nobody_ran_frees_the_group_runtime`,
+  `a_continuation_in_place_returns_its_script_and_opens_no_terminal`,
+  `terminal_failure_releases_the_home_and_records_no_launch`,
+  `control::tests::a_group_change_waits_longer_than_a_read`.
+- A control request the owner did not answer within its limit (SB-443, Fabric board finding,
+  thread 36572ae0) fails with `control::CONTROL_TIMED_OUT`; the owner may still do the act later.
+  The CLI answers it with exit status 4 and, with `--json`, `code: "control-timeout"`, so a caller
+  tells it apart without matching text (status 3 and `no-route` stay SB-343's). Test:
+  `failure_tests::a_control_timeout_has_its_own_code_and_status`.
 - The window reads it through the Tauri command `sessions` (`all: false`) and shows it on Activity → *Sessions* (SB-65, SCN-051), refreshed with the metadata (once a minute) and on Refresh.
 - Not covered yet (packet SS-01, SB-65): active requests per session, and acting on a session
   (open, drain, close).

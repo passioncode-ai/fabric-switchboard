@@ -278,6 +278,10 @@ pub enum Operation {
         /// terminal (an embedded console, SB-108), instead of opening Terminal.
         #[serde(default)]
         in_place: bool,
+        /// SB-440: in place for the hand-over queue (`ContinueToConsole`, the automatic fallback),
+        /// where the script may wait for a console; set only inside the owner, never sent.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        queued: bool,
     },
     /// SB-247: Fabric's start of the default agent, with no person, on a workflow Fabric opened
     /// for a board request and offered to the agent's provider (`handoff_id`). The answer is the
@@ -2285,6 +2289,7 @@ impl Runtime {
             mode: "isolated".into(),
             working_directory: working_directory.clone(),
             in_place: true,
+            queued: true,
         }))
         .await?;
         let snapshot = self.store.snapshot().ok();
@@ -6595,6 +6600,7 @@ async fn execute(
             mode,
             working_directory,
             in_place,
+            queued,
         } => {
             if in_place && cfg!(windows) {
                 return Err(launch::IN_PLACE_UNSUPPORTED.into());
@@ -6788,6 +6794,12 @@ async fn execute(
                     &mode,
                     &directory,
                     &resumed,
+                    // SB-440: a queued script may wait for a console; the CLI runs its own at once.
+                    if queued {
+                        launch::Handed::Terminal
+                    } else {
+                        launch::Handed::Caller
+                    },
                 )
                 .map_err(|e| continuation::launch_failed(&offer, &e))?;
                 (tools, Some(script))

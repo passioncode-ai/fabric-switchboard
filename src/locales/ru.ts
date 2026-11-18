@@ -17,6 +17,8 @@ export const RU: Record<string, string> = {
   "Not continued in {folder}: five sessions were already continued.": "Не продолжена в {folder}: пять сессий уже были продолжены.",
   "Not continued in {folder}: Switchboard stopped while starting it.": "Не продолжена в {folder}: Switchboard остановился во время её запуска.",
   "Not continued in {folder}: it could not start.": "Не продолжена в {folder}: она не смогла запуститься.",
+  "The setting for continuing sessions after a restart (boot-resume.json) could not be read. Set it again, or delete the file for the default.": "Настройку продолжения сессий после перезагрузки (boot-resume.json) не удалось прочитать. Задайте её снова или удалите файл, чтобы вернуть значение по умолчанию.",
+  "The setting for continuing sessions after a restart could not be saved.": "Настройку продолжения сессий после перезагрузки не удалось сохранить.",
   // SB-403 waves S2 to S4 (DEC-0025, 2026-11-17): delegated seats and the own sign-in switch. Copylot ru-RU reports f0080d06…cd533b73; review round 1: 2117bbe1…e9785338.
   "sign-in removed": "вход удалён",
   "This seat's sign-in was removed from this computer 30 days after its lease ran out. The machine that delegated it signs in to the account again and delegates it again.": "Вход этого места удалён с этого компьютера через 30 дней после конца аренды. Машина, которая его делегировала, снова войдёт в аккаунт и делегирует его заново.",

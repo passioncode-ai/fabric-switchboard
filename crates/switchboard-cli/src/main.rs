@@ -4595,6 +4595,7 @@ async fn continue_workflow(
                 .into(),
                 working_directory: dir.to_owned(),
                 in_place,
+                queued: false,
             },
             launches::LaunchedBy::from_caller(launches::Surface::Cli, None, None),
         ),
@@ -6211,6 +6212,20 @@ fn print_value(value: &Value, json_output: bool) {
 /// died on its first offline call, nightly `39676565992`); a fixed size makes the limit the same
 /// on every platform instead of the platform's default.
 const STACK_BYTES: usize = 16 * 1024 * 1024;
+/// A failed command's `code` in `--json` and its exit status. SB-343: no account for the folder
+/// is `no-route` and 3, which `launch --target` carries back through ssh. SB-443 (Fabric board
+/// finding, thread 36572ae0): a control request the owner did not answer in time is
+/// `control-timeout` and 4, since the owner may still do the act; a caller never matches text.
+/// Anything else is 1.
+fn failure(error: &str) -> (Option<&'static str>, u8) {
+    if switchboard_runtime::projects::is_no_route(error) {
+        (Some("no-route"), 3)
+    } else if switchboard_runtime::control::is_timeout(error) {
+        (Some("control-timeout"), 4)
+    } else {
+        (None, 1)
+    }
+}
 fn main() -> ExitCode {
     // `shell env` runs on every change of folder in a hooked terminal: answered here, before the
     // runtime starts, within its 25 ms budget (SB-183).
@@ -6399,26 +6414,42 @@ async fn start() -> ExitCode {
             // SB-189: the sentence the window shows, which says what to do; `--json` keeps the
             // backend's own text in `raw` for a script that matches it.
             let sentence = switchboard_runtime::person_errors::for_person(&error);
-            // SB-343: no account for the folder is told apart by its code and status 3, which
-            // `launch --target` carries back through ssh.
-            let no_route = switchboard_runtime::projects::is_no_route(&error);
+            // SB-343, SB-443: a failure a caller must tell apart has a code and a status of its own.
+            let (code, status) = failure(&error);
             if cli.json {
                 let mut body = json!({"ok":false,"error":sentence});
                 if sentence != error {
                     body["raw"] = json!(error);
                 }
-                if no_route {
-                    body["code"] = json!("no-route");
+                if let Some(code) = code {
+                    body["code"] = json!(code);
                 }
                 eprintln!("{body}");
             } else {
                 eprintln!("{sentence}");
             }
-            ExitCode::from(if no_route { 3 } else { 1 })
+            ExitCode::from(status)
         }
     }
 }
 
+#[cfg(test)]
+mod failure_tests {
+    #[test]
+    fn a_control_timeout_has_its_own_code_and_status() {
+        assert_eq!(
+            super::failure(switchboard_runtime::control::CONTROL_TIMED_OUT),
+            (Some("control-timeout"), 4)
+        );
+        assert_eq!(
+            super::failure(
+                "Select an account for this provider first (switchboard accounts select)."
+            ),
+            (Some("no-route"), 3)
+        );
+        assert_eq!(super::failure("Account not found."), (None, 1));
+    }
+}
 #[cfg(all(test, unix))]
 mod in_place_tests {
     #[test]

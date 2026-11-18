@@ -92,7 +92,7 @@ pub fn older(mine: &str, theirs: &str) -> bool {
 }
 
 #[cfg(unix)]
-fn alive(pid: u32) -> bool {
+pub(crate) fn alive(pid: u32) -> bool {
     let Ok(pid) = libc::pid_t::try_from(pid) else {
         return false;
     };
@@ -104,11 +104,11 @@ fn alive(pid: u32) -> bool {
     result == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
 }
 #[cfg(windows)]
-fn alive(pid: u32) -> bool {
+pub(crate) fn alive(pid: u32) -> bool {
     windows_process(pid).is_some_and(|(running, _)| running)
 }
 #[cfg(not(any(unix, windows)))]
-fn alive(_: u32) -> bool {
+pub(crate) fn alive(_: u32) -> bool {
     false
 }
 
