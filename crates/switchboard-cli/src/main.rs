@@ -532,6 +532,13 @@ enum Command {
         #[command(subcommand)]
         command: BalanceCommand,
     },
+    /// Groups fed from the default group: `status` reads the fed groups, the default group's
+    /// accounts and the newest moves; `set` changes how many ready accounts a fed group keeps.
+    /// Turn a group's feed on or off with `switchboard project feed`.
+    Feed {
+        #[command(subcommand)]
+        command: FeedCommand,
+    },
     /// Kimi Code subscription accounts: sign in with the official `kimi login`, see each plan's
     /// usage, and launch `kimi` on an account. Each login stays in its own folder.
     Kimi {
@@ -844,6 +851,21 @@ enum Project {
     Dismiss {
         /// The folder, as `project suggestions` lists it.
         folder: String,
+    },
+    /// Feed a group from the default group, or stop: Switchboard keeps the group's ready
+    /// accounts by lending it accounts of the default group and taking back one that runs out
+    /// once another serves the group. Turning it off gives back every account the feed moved.
+    Feed {
+        /// The group id (`switchboard project list`).
+        pool: String,
+        /// on or off.
+        #[arg(value_enum)]
+        state: OnOff,
+        /// 1 is the highest: a higher group is served first when accounts run short; of two
+        /// with the same priority, the group id first in alphabetical order. Without it, a
+        /// group fed for the first time goes after the others. Not with off.
+        #[arg(long, value_parser = clap::value_parser!(u32).range(1..=99))]
+        priority: Option<u32>,
     },
     /// The repository owners whose new repositories join a group, as host/owner
     /// (`github.com/example`). Without --add or --remove, prints them.
@@ -1672,6 +1694,23 @@ enum BalanceCommand {
         /// A backup group to unmark (it stays chosen); repeat for more.
         #[arg(long = "backup-remove", value_name = "ID")]
         backup_remove: Vec<String>,
+    },
+}
+#[derive(Subcommand)]
+enum FeedCommand {
+    /// The fed groups with their priority and ready accounts, the default group's accounts, what
+    /// the feed moved and why. Reads only.
+    Status,
+    /// How many ready accounts each fed group keeps and how far ahead a reset counts, for every
+    /// fed group.
+    Set {
+        /// How many ready accounts each fed group keeps, 1 to 10 (2 until you change it).
+        #[arg(long, value_parser = clap::value_parser!(u32).range(1..=10))]
+        ready: Option<u32>,
+        /// Minutes ahead an account whose limit resets counts as ready, 0 to 720 (30 until you
+        /// change it).
+        #[arg(long, value_parser = clap::value_parser!(u32).range(0..=720))]
+        lookahead: Option<u32>,
     },
 }
 #[derive(Subcommand)]
@@ -3602,6 +3641,21 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                 backup_remove: backup_remove.clone(),
             },
         },
+        Command::Feed { command } => match command {
+            FeedCommand::Status => Operation::FeedStatus,
+            FeedCommand::Set { ready, lookahead } => {
+                if ready.is_none() && lookahead.is_none() {
+                    return Err("Give --ready, --lookahead or both.".into());
+                }
+                Operation::Feed {
+                    pool: None,
+                    on: None,
+                    priority: None,
+                    ready: *ready,
+                    lookahead_minutes: *lookahead,
+                }
+            }
+        },
         Command::Agents { command } => match command {
             AgentsCommand::List => Operation::AgentCatalog,
             AgentsCommand::Status => Operation::AgentsOverview,
@@ -3885,6 +3939,17 @@ async fn run(cli: &Cli) -> Result<Value, String> {
             },
             Project::Dismiss { folder } => Operation::ProjectSuggestionDismiss {
                 folder: folder.clone(),
+            },
+            Project::Feed {
+                pool,
+                state,
+                priority,
+            } => Operation::Feed {
+                pool: Some(pool.clone()),
+                on: Some(matches!(state, OnOff::On)),
+                priority: *priority,
+                ready: None,
+                lookahead_minutes: None,
             },
             Project::Source { pool, add, remove } => {
                 return project_sources(&root, pool, add, remove).await
@@ -6685,6 +6750,9 @@ mod mcp_parity {
         ("project accept", Tool("switchboard_project_suggestion")),
         ("project dismiss", Tool("switchboard_project_suggestion")),
         ("project source", Tool("switchboard_project_sources")),
+        ("project feed", Tool("switchboard_feed")),
+        ("feed status", Tool("switchboard_feed")),
+        ("feed set", Tool("switchboard_feed")),
         ("project apply", Tool("switchboard_project_apply")),
         ("backup list", Tool("switchboard_backups")),
         ("backup now", Tool("switchboard_backup_now")),

@@ -82,6 +82,16 @@ pub struct Settings {
     /// a group as an ordinary chosen one).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub backup: Vec<String>,
+    /// SB-419, DEC-0028: groups fed from the default group, each with its priority (1 is the
+    /// highest). Absent, nothing is fed; an older Switchboard ignores it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub fed: Vec<crate::feed::Fed>,
+    /// DEC-0028: how many ready accounts a fed group keeps (absent: 2).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ready: Option<u32>,
+    /// DEC-0028: how far ahead an account whose limit resets counts as ready (absent: 30).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lookahead_minutes: Option<u32>,
 }
 impl Settings {
     pub fn on(&self) -> bool {
@@ -93,10 +103,10 @@ impl Settings {
     pub fn is_backup(&self, pool: &str) -> bool {
         self.backup.iter().any(|g| g == pool)
     }
-    fn lent_out(&self, id: &str) -> bool {
+    pub(crate) fn lent_out(&self, id: &str) -> bool {
         self.lent.iter().any(|l| l.account == id)
     }
-    fn cooled(&self, id: &str, now: i64) -> bool {
+    pub(crate) fn cooled(&self, id: &str, now: i64) -> bool {
         self.moved
             .get(id)
             .is_none_or(|t| *t > now || now - t >= COOLDOWN_SECONDS)
@@ -111,6 +121,10 @@ pub struct Lend {
     /// The group it serves on loan.
     pub to: String,
     pub at: i64,
+    /// SB-419 (DEC-0028): a move the feed made, into a fed group or a park in `default`.
+    /// Balancing's own plan leaves it to the feed; an older Switchboard reads it as a loan.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub feed: bool,
 }
 
 pub fn read(root: &Path) -> Result<Settings, String> {
@@ -156,6 +170,14 @@ pub fn resolve(settings: &mut Settings, snapshot: &Snapshot) -> bool {
     // DEC-0016: a backup group that left the chosen ones lends no more.
     let groups = settings.groups.clone();
     settings.backup.retain(|g| groups.contains(g));
+    // SB-419: a fed group that was deleted, or became the pay-per-token group, is fed no more;
+    // one switched off keeps its place and is skipped while it is off.
+    settings.fed.retain(|f| {
+        snapshot
+            .projects
+            .iter()
+            .any(|p| p.pool == f.pool && !p.tokens)
+    });
     if settings.on() {
         for pool in &pools {
             if !settings.seen.contains(pool) {
@@ -276,12 +298,19 @@ pub struct Action {
     /// Whether the group changes; false only for a loan already ended outside balancing.
     pub edit: bool,
     pub figures: Figures,
+    /// SB-419 (DEC-0028): a move of the feed, with its figures; none for balancing's own.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub feed: Option<crate::feed::FeedFigures>,
+    /// SB-419 (review round 2): accounts lent earlier in the same batch that this return relies
+    /// on; `apply` holds the return when none of them was lent.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub relies_on: Vec<String>,
 }
 
 /// The used share below which an account of `provider` has room in `pool`, and how fresh its
 /// figures must be: the group's managed switching policy (threshold less hysteresis, its
 /// `max_age_seconds`), or the initial policy's figures when none is saved (as SB-345 reads it).
-fn limits(snapshot: &Snapshot, provider: Provider, pool: &str) -> (f64, i64) {
+pub(crate) fn limits(snapshot: &Snapshot, provider: Provider, pool: &str) -> (f64, i64) {
     let policy = snapshot
         .policies
         .iter()
@@ -334,7 +363,9 @@ pub fn room(
 /// An account balancing may count or move at all: a subscription sign-in, enabled, not used on
 /// another machine, not given to an agent and not a seat another machine delegated here
 /// (SB-403: a guest is never lent).
-fn usable(snapshot: &Snapshot, account: &Account) -> bool {
+// W1.2 (SB-418, DEC-0027): the person's off switch included (`Account::usable`); the feed reads
+// this function too.
+pub(crate) fn usable(snapshot: &Snapshot, account: &Account) -> bool {
     account.usable()
         && account.kind == AuthKind::OAuth
         && !snapshot.elsewhere.contains_key(&account.id)
@@ -342,7 +373,7 @@ fn usable(snapshot: &Snapshot, account: &Account) -> bool {
         && !snapshot.is_delegated(&account.id)
 }
 /// The latest reset among the account's own windows, to prefer the one whose room lasts longer.
-fn latest_reset(account: &Account) -> i64 {
+pub(crate) fn latest_reset(account: &Account) -> i64 {
     account.usage.as_ref().map_or(0, |u| {
         u.windows
             .iter()
@@ -453,6 +484,8 @@ fn returning(lend: &Lend, reason: &'static str, edit: bool, figures: Figures) ->
         reason,
         edit,
         figures,
+        feed: None,
+        relies_on: Vec::new(),
     }
 }
 
@@ -475,6 +508,8 @@ pub fn returns_owed(
     settings
         .lent
         .iter()
+        // SB-419: the feed's own moves are returned by the feed (`feed::returns_owed`).
+        .filter(|lend| !lend.feed)
         .filter_map(|lend| {
             forced_return(&view, lend).map(|(r, e)| returning(lend, r, e, Figures::default()))
         })
@@ -509,7 +544,8 @@ pub fn plan(
     };
     let mut out = Vec::new();
     let mut moving: HashSet<String> = HashSet::new();
-    for lend in &settings.lent {
+    // SB-419: the feed's moves are its own (`feed::plan`).
+    for lend in settings.lent.iter().filter(|l| !l.feed) {
         if let Some((reason, edit)) = forced_return(&view, lend) {
             out.push(returning(lend, reason, edit, Figures::default()));
             moving.insert(lend.account.clone());
@@ -639,6 +675,8 @@ pub fn plan(
                     lender_room: Some(own),
                     used_percent: Some(used),
                 },
+                feed: None,
+                relies_on: Vec::new(),
             });
             break;
         }
@@ -659,9 +697,15 @@ pub fn apply(
 ) -> bool {
     let before = settings.clone();
     let mut lines = Vec::new();
+    // SB-419: the accounts lent in this batch, for a return that relies on one of them.
+    let mut lent_now: HashSet<&str> = HashSet::new();
     for a in actions {
         let lend = a.action == "lend";
-        let outcome = if !a.edit {
+        let held =
+            !a.relies_on.is_empty() && !a.relies_on.iter().any(|id| lent_now.contains(id.as_str()));
+        let outcome = if held {
+            "held"
+        } else if !a.edit {
             "forgotten"
         } else {
             match store.set_shared(&a.to, &a.account, lend) {
@@ -671,19 +715,23 @@ pub fn apply(
             }
         };
         if lend && outcome == "done" {
+            lent_now.insert(a.account.as_str());
+        }
+        if lend && outcome == "done" {
             settings.lent.push(Lend {
                 account: a.account.clone(),
                 provider: a.provider,
                 from: a.from.clone(),
                 to: a.to.clone(),
                 at: now,
+                feed: a.feed.is_some(),
             });
-        } else if !lend && outcome != "failed" {
+        } else if !lend && outcome != "failed" && outcome != "held" {
             settings
                 .lent
                 .retain(|l| l.account != a.account || l.to != a.to);
         }
-        if a.edit {
+        if a.edit && outcome != "held" {
             settings.moved.insert(a.account.clone(), now);
         }
         crate::oplog::event(
@@ -694,11 +742,14 @@ pub fn apply(
                 ("outcome", crate::oplog::Field::Code(outcome)),
             ],
         );
-        lines.push(
-            json!({"at": now, "account": a.account, "provider": a.provider,
+        let mut line = json!({"at": now, "account": a.account, "provider": a.provider,
             "from": a.from, "to": a.to, "action": a.action, "reason": a.reason,
-            "outcome": outcome, "figures": a.figures}),
-        );
+            "outcome": outcome, "figures": a.figures});
+        // SB-419: a feed move says so, with its own figures (ids and numbers only).
+        if let Some(feed) = &a.feed {
+            line["feed"] = json!(feed);
+        }
+        lines.push(line);
     }
     settings
         .moved
@@ -712,7 +763,7 @@ pub fn apply(
     *settings != before
 }
 
-fn read_journal(root: &Path) -> Vec<String> {
+pub(crate) fn read_journal(root: &Path) -> Vec<String> {
     let path = root.join(JOURNAL);
     if std::fs::symlink_metadata(&path).is_err() {
         return Vec::new();
@@ -828,6 +879,8 @@ pub fn status(
     let lent: Vec<Value> = settings
         .lent
         .iter()
+        // SB-419: the feed's moves are in `feed status`.
+        .filter(|l| !l.feed)
         .map(|l| {
             json!({"account_id": l.account, "label": label(&l.account), "provider": l.provider,
                 "from": l.from, "from_name": name(&l.from), "to": l.to, "to_name": name(&l.to),
@@ -1025,6 +1078,7 @@ mod tests {
             from: from.into(),
             to: to.into(),
             at,
+            feed: false,
         }
     }
     /// The estate with `apps-1` already shared with Agents.

@@ -31,6 +31,7 @@ pub mod external;
 #[cfg(target_os = "macos")]
 mod external_keychain;
 mod fallback;
+pub(crate) mod feed;
 pub mod github;
 pub mod given;
 pub mod handovers;
@@ -1055,6 +1056,24 @@ pub enum Operation {
     /// SB-352: the chosen groups, the accounts lent now, the last pass and the newest lends and
     /// returns.
     BalanceStatus,
+    /// SB-419 (DEC-0028): a group's feed from the default group on or off, with its priority
+    /// (1 is the highest), and how many ready accounts a fed group keeps and how far ahead a
+    /// reset counts. Turning a group's feed off gives back every account the feed moved in or
+    /// out of it at once.
+    Feed {
+        #[serde(default)]
+        pool: Option<String>,
+        #[serde(default)]
+        on: Option<bool>,
+        #[serde(default)]
+        priority: Option<u32>,
+        #[serde(default)]
+        ready: Option<u32>,
+        #[serde(default)]
+        lookahead_minutes: Option<u32>,
+    },
+    /// SB-419: the fed groups, the reservoir, the accounts the feed moved and its newest moves.
+    FeedStatus,
     /// The recommended OpenRouter models and OpenRouter's tool-capable list (SB-119).
     OpenrouterModels,
     /// Replaces the repository owners whose new repositories a project is offered.
@@ -1764,6 +1783,8 @@ impl Runtime {
                 | Operation::OpenrouterModels
                 // SB-352: balancing.json and its journal, and the owner's memory of the last pass.
                 | Operation::BalanceStatus
+                // SB-419: the same files.
+                | Operation::FeedStatus
                 // Hand-overs are files: listing reads them, and taking one is claimed by an
                 // exclusive create (`handovers::take`). Behind the owner transaction a console's
                 // read waited out renewals and syncs for up to 366 s (Fabric Dashboards FD-71).
@@ -3320,7 +3341,8 @@ impl Runtime {
                 return;
             }
         };
-        if !settings.on() && settings.lent.is_empty() {
+        // SB-419: a group fed from the default group keeps the pass running too.
+        if !settings.on() && settings.lent.is_empty() && settings.fed.is_empty() {
             return;
         }
         let Ok(snapshot) = self.store.snapshot() else {
@@ -3353,7 +3375,21 @@ impl Runtime {
                 .collect(),
             limited: self.store.limited(),
         };
-        let actions = balancing::plan(&snapshot, &signals, &held, &planned, time);
+        let mut actions = balancing::plan(&snapshot, &signals, &held, &planned, time);
+        // SB-419 (DEC-0028): the feed decides after balancing, on the accounts it left alone.
+        let busy: HashSet<String> = actions.iter().map(|a| a.account.clone()).collect();
+        let activity = feed::Activity::from_windows(
+            &snapshot,
+            &self.statistics.window(feed::SERVING_SECONDS, time),
+            // Review round 2: refusals from this owner's own quarters only, never the day
+            // counts a fresh start adds (a refusal this morning is not one now).
+            &self
+                .statistics
+                .window_in_memory(feed::REFUSING_SECONDS, time),
+        );
+        actions.extend(feed::plan(
+            &snapshot, &signals, &activity, &held, &planned, time, &busy,
+        ));
         let summary = balancing::summary(&snapshot, &signals, &held, &planned, &actions, time);
         let _mutation = self.hold("balance").await;
         // The person changed the groups meanwhile: the next pass decides on what they chose.
@@ -8065,6 +8101,62 @@ async fn execute(
             let mut view = balancing::status(root, &store.snapshot()?, &settings, last.as_ref());
             view["changed"] = json!(changed);
             Ok(view)
+        }
+        Operation::Feed {
+            pool,
+            on,
+            priority,
+            ready,
+            lookahead_minutes,
+        } => {
+            let snapshot = store.snapshot()?;
+            let mut settings = match runtime {
+                Some(rt) => rt.balance_settings()?,
+                None => balancing::read(root)?,
+            };
+            let changed = feed::change(
+                &mut settings,
+                &snapshot,
+                pool.as_deref(),
+                on,
+                priority,
+                ready,
+                lookahead_minutes,
+            )?;
+            let now = monitor::now();
+            if changed {
+                // A group whose feed went off gets back every account the feed moved, now.
+                let owed =
+                    feed::returns_owed(&snapshot, &balancing::Held::default(), &settings, now);
+                balancing::apply(&store, root, &mut settings, &owed, now);
+                balancing::write(root, &settings)?;
+                if let Some(rt) = runtime {
+                    if let Ok(mut watch) = rt.balancing.lock() {
+                        watch.settings = Some(settings.clone());
+                    }
+                    // Any change of the feed is decided on within a minute, not at the next
+                    // quarter hour.
+                    rt.balance_soon(now);
+                }
+            }
+            let last = runtime.and_then(|rt| rt.balancing.lock().ok().and_then(|w| w.last.clone()));
+            let mut view = feed::status(root, &store.snapshot()?, &settings, last.as_ref(), now);
+            view["changed"] = json!(changed);
+            Ok(view)
+        }
+        Operation::FeedStatus => {
+            let settings = match runtime {
+                Some(rt) => rt.balance_settings()?,
+                None => balancing::read(root)?,
+            };
+            let last = runtime.and_then(|rt| rt.balancing.lock().ok().and_then(|w| w.last.clone()));
+            Ok(feed::status(
+                root,
+                &store.snapshot()?,
+                &settings,
+                last.as_ref(),
+                monitor::now(),
+            ))
         }
         Operation::BalanceStatus => {
             let settings = match runtime {

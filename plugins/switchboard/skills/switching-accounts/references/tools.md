@@ -908,6 +908,30 @@ a backup group never borrows, keeps no minimum and is asked first, and its accou
 the borrower has room of its own again or the backup group's own folders need it. Marking chooses
 the group; `backup_remove` unmarks it and leaves it chosen. The state then carries
 `backup: [{pool, name, accounts, lent}]` and `available[].backup`.
+### `switchboard_feed`: `pool?`, `on?`, `priority?`, `ready?`, `lookahead_minutes?`
+
+Groups fed from the default group (SB-419, DEC-0028). Without arguments it reads `{on, ready,
+lookahead_minutes, pass_minutes, fed: [{pool, name, priority, off, providers: [{provider, ready,
+accounts}]}], available: [{pool, name, fed, priority}], reservoir: [{provider, accounts, placed,
+ready, parked}], moved: [{account_id, label, provider, kind, from, from_name, to, to_name, at}],
+recent, last_pass}`, where `recent` is the newest feed moves with their reason (`feed`, `park`,
+`spent`, `rested`, `priority`, `taken`, `surplus`, `sign_in`, `feed_off`), outcome and figures
+(`feed: {priority, ready, want, used_percent?, resets_in?}`). `pool` with `on` turns a group's feed
+on or off (never `default`; off gives back every account the feed moved in or out of it at once,
+and takes no `priority`); `priority` (1 is the highest, 1 to 99; equal priorities go by group id)
+sets it for a fed group; `ready` (1 to 10) and `lookahead_minutes` (0 to 720) set the targets for
+every fed group. Change it only when the operator asks. A fed group keeps `ready` ready accounts:
+room now, or a limit that resets within the look-ahead. Each pass lends the default group's
+accounts to it, higher priority first, and takes back one that is out (a limit refusal or the
+switching threshold) once another account with room serves the group; its own account that is out is
+shared with the default group and keeps serving its group. A fed group with recent requests and no
+ready account may take a lower fed group's last ready account, though not one that served a request
+in about the last 30 minutes unless it is refusing requests now (a limit refusal in about the last
+15 minutes); at least two accounts with room beyond `ready` make the extra ones go back. A group with no account is fed only what its sessions asked for. A move is a loan (the
+account keeps its own group) and takes effect from the next request; each is also a `balancing`
+entry of `switchboard_events`. The ordinary CLI's account, one given to an agent, turned off,
+delegated or used on another machine is never moved; no account crosses an organization's boundary.
+
 ### `switchboard_login`: `action`, `login_id?`, `provider?`, `label?`, `pool?`
 
 Only when the operator asks. `begin` (provider, label, pool as the group id) opens Terminal on

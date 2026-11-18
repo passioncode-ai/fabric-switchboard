@@ -10,9 +10,9 @@ if (native) watchProblems(reportProblem);
 import { LOCALE_KEY, dateLocale, locale, parseLocaleChoice, plural, saveLocaleChoice, t, type LocaleChoice } from './i18n';
 import { demo, demoFirstRun, native, nativeAdapter, onProjectSuggestions, onShellHook, onSpendChanged, safeError, reportFrontendReady, reportLanguage, reportProblem, type Operation } from './adapter';
 import type { CardState, AccountGroup } from './ui-logic';
-import { editedEnabled, statAlert, ceilingQuestion, ceilingWarning, ceilingLine, keyLimitLine, dollars, POOL_PATTERN, poolChoices, poolName, inGroup, tourPlacement, usableWhileBusy, APPEARANCE_KEY, attribution, placementAdmits, domainSuggestion, groupSeatsElsewhere, passioncodeLine, seatEndedText, groupSeatsEndedText, organizationReleasedAt, inOrganizationFilter, domainList, type AttributedBy, sortStatRows, nextStatSort, type StatRow, type StatSort, statCacheShare, statTokensPerRequest, chartSeries, niceMax, groupProjectRows, type ChartMetric, groupProjects, compactCount, statTokens, statTrouble, statTroubleText, statAgentName, type Statistics, EXPIRY_CHOICES, folderName, folderRows, withoutFolder, type ProjectRoot, moveTargets, mapRows, rootTargets, storedMapFolders, MAP_FOLDERS_KEY, type MapFilter, type MapRow, type RepositoryMap, sortAgents, defaultAgentChoices, backgroundReads, clockedRead, chainScopeKey, afterRead, ceilingRemovalNote, modelMeta, modelUse, ordinaryKimiNote, kimiLimitUntil, limitReasonText, limitTitle, agentSetupFacts, sessionHow, sessionAgentName, sessionStateLabel, kimiWindowsLine, kimiWindowsLines, openrouterCreditLine, eventAction, eventDetail, MutationClock, activeRules, autoSwitchPool, autoSwitchPossible, launchChoice, withFolders, githubDefaultSelection, githubPlan, githubSource, replaceFolder, storedFolder, LAST_FOLDER_KEY, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, signInNotice, signInMove, organizationMoveNote, dismissTermsNotice, termsNoticeDismissed, termsNoticeOn, termsNoticeText, tourWaits, orgSetups, releasedOrganizations, releasedSummary, orgSetupAction, orgSetupShown, orgSetupCaveat, orgSetupLeads, orgSetupPrimary, accountsOrgActionLeads, firstPrimary, orgSetupUnread, orgSetupStateLabel, orgSetupTitle, hiddenOrgSetups, ORG_SETUP_HIDDEN_KEY, accountsEmptyKey, type OrgSetup, usageAnswerText, usageNotice, usageFreshness, windowReset, type Appearance, shellHookView, balancingView, balancingNotice, shellHookToggleNotice, shellHookNoticeText, codexHookLine, moveStep, accountsForStep, chainSummary, stepReasonText, handoverOutcomeText, handoverSkipped, shortWorkflow, TAKEOVER_ORDER, seatChoices, assignNotice, placementNotice, providerOrganization, groupOrganizations, servesPool, sharedGroups, holdsContext, accountOrganizations, machineOf, remoteUsageLine, unplacedAccounts, foldlessGroups, repositoriesUnder, contextLines, machineAliasesLine, machineLiveLine, machineCopyLine, foldOpen, accountSections, accountMatches, attentionAccounts, attentionReasonText, duplicateOffer, attentionActionLabel, dispatchRefusedLine, defaultBoardShare, dispatchStopLineText, dispatchStopNotice, dutyReasonText, dutyOutcomeText, surfaceLabel, sessionTreeRows, SESSION_GROUPS, sessionGroupTitle, sessionWhyText, machineReadText, givenFacts, switchingLine, MACHINE_FOLD_LIMIT, EVENT_FILTER_KINDS, eventKindLabel, filterEvents, eventsByDay, relativeDay, EVENTS_PAGE, eventPage, sortSessions, statRowsShown, STAT_TOP, spendShare, groupKeyBlocks, keyTail, groupStateLine, type EventKind, type EventFilter, restartSkipText, sessionTone, sessionDegradedText, restartStateText, restartTone, statCost, groupDisplayName, tokensSpendLine, keyLaunch, keyOutsideTokens, movePool } from './ui-logic';
+import { editedEnabled, feedView, feedBadge, feedMoveLine, feedNotice, feedPriority, feedArrows, statAlert, ceilingQuestion, ceilingWarning, ceilingLine, keyLimitLine, dollars, POOL_PATTERN, poolChoices, poolName, inGroup, tourPlacement, usableWhileBusy, APPEARANCE_KEY, attribution, placementAdmits, domainSuggestion, groupSeatsElsewhere, passioncodeLine, seatEndedText, groupSeatsEndedText, organizationReleasedAt, inOrganizationFilter, domainList, type AttributedBy, sortStatRows, nextStatSort, type StatRow, type StatSort, statCacheShare, statTokensPerRequest, chartSeries, niceMax, groupProjectRows, type ChartMetric, groupProjects, compactCount, statTokens, statTrouble, statTroubleText, statAgentName, type Statistics, EXPIRY_CHOICES, folderName, folderRows, withoutFolder, type ProjectRoot, moveTargets, mapRows, rootTargets, storedMapFolders, MAP_FOLDERS_KEY, type MapFilter, type MapRow, type RepositoryMap, sortAgents, defaultAgentChoices, backgroundReads, clockedRead, chainScopeKey, afterRead, ceilingRemovalNote, modelMeta, modelUse, ordinaryKimiNote, kimiLimitUntil, limitReasonText, limitTitle, agentSetupFacts, sessionHow, sessionAgentName, sessionStateLabel, kimiWindowsLine, kimiWindowsLines, openrouterCreditLine, eventAction, eventDetail, MutationClock, activeRules, autoSwitchPool, autoSwitchPossible, launchChoice, withFolders, githubDefaultSelection, githubPlan, githubSource, replaceFolder, storedFolder, LAST_FOLDER_KEY, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, signInNotice, signInMove, organizationMoveNote, dismissTermsNotice, termsNoticeDismissed, termsNoticeOn, termsNoticeText, tourWaits, orgSetups, releasedOrganizations, releasedSummary, orgSetupAction, orgSetupShown, orgSetupCaveat, orgSetupLeads, orgSetupPrimary, accountsOrgActionLeads, firstPrimary, orgSetupUnread, orgSetupStateLabel, orgSetupTitle, hiddenOrgSetups, ORG_SETUP_HIDDEN_KEY, accountsEmptyKey, type OrgSetup, usageAnswerText, usageNotice, usageFreshness, windowReset, type Appearance, shellHookView, balancingView, balancingNotice, shellHookToggleNotice, shellHookNoticeText, codexHookLine, moveStep, accountsForStep, chainSummary, stepReasonText, handoverOutcomeText, handoverSkipped, shortWorkflow, TAKEOVER_ORDER, seatChoices, assignNotice, placementNotice, providerOrganization, groupOrganizations, servesPool, sharedGroups, holdsContext, accountOrganizations, machineOf, remoteUsageLine, unplacedAccounts, foldlessGroups, repositoriesUnder, contextLines, machineAliasesLine, machineLiveLine, machineCopyLine, foldOpen, accountSections, accountMatches, attentionAccounts, attentionReasonText, duplicateOffer, attentionActionLabel, dispatchRefusedLine, defaultBoardShare, dispatchStopLineText, dispatchStopNotice, dutyReasonText, dutyOutcomeText, surfaceLabel, sessionTreeRows, SESSION_GROUPS, sessionGroupTitle, sessionWhyText, machineReadText, givenFacts, switchingLine, MACHINE_FOLD_LIMIT, EVENT_FILTER_KINDS, eventKindLabel, filterEvents, eventsByDay, relativeDay, EVENTS_PAGE, eventPage, sortSessions, statRowsShown, STAT_TOP, spendShare, groupKeyBlocks, keyTail, groupStateLine, type EventKind, type EventFilter, restartSkipText, sessionTone, sessionDegradedText, restartStateText, restartTone, statCost, groupDisplayName, tokensSpendLine, keyLaunch, keyOutsideTokens, movePool } from './ui-logic';
 import agentCatalog from '../catalog/agents.json';
-import type { AnalyticsStatus, Ceilings, CeilingView, CeilingQuestionView, OpenrouterCredit, BackupInfo, PassioncodeStatus, Account, Adapter, AgentConnection, AgentInfo, AgentRow, AgentsOverview, OpenrouterModels, HermesModel, KimiAccounts, KimiRegion, KimiStatus, OpenrouterStatus, OpenrouterKeys, CodexRoute, BalanceStatus, CapacityStatus, DutyStatus, DutyLine, SessionTree, WatchFinding, ShellHookStatus, AgentSetup, AuthKind, BackupStatus, KimiAccount, CurrentAccounts, LoginItem, Project, Restored, HandoverPlan, ExternalIdentity, MonitorStatus, ProjectRule, Provider, RotationPolicy, RuntimeStatus, SessionInfo, Snapshot, UpdateStatus, Onboarding, Chains, ChainExecutor, ChainScope, ChainStepView, GithubRepository, Machine, MachinesLive, MachinesList, Attention, AttentionItem, Event, GivenAccount, SessionsEverywhere, SessionRow, MachineReadStatus, RestartPlan, RestartWave, OrganizationAssigned, Placement, ObservatoryKeys, ObservatoryKey, OwnSignIn } from './types';
+import type { AnalyticsStatus, Ceilings, CeilingView, CeilingQuestionView, OpenrouterCredit, BackupInfo, PassioncodeStatus, Account, Adapter, AgentConnection, AgentInfo, AgentRow, AgentsOverview, OpenrouterModels, HermesModel, KimiAccounts, KimiRegion, KimiStatus, OpenrouterStatus, OpenrouterKeys, CodexRoute, BalanceStatus, FeedStatus, CapacityStatus, DutyStatus, DutyLine, SessionTree, WatchFinding, ShellHookStatus, AgentSetup, AuthKind, BackupStatus, KimiAccount, CurrentAccounts, LoginItem, Project, Restored, HandoverPlan, ExternalIdentity, MonitorStatus, ProjectRule, Provider, RotationPolicy, RuntimeStatus, SessionInfo, Snapshot, UpdateStatus, Onboarding, Chains, ChainExecutor, ChainScope, ChainStepView, GithubRepository, Machine, MachinesLive, MachinesList, Attention, AttentionItem, Event, GivenAccount, SessionsEverywhere, SessionRow, MachineReadStatus, RestartPlan, RestartWave, OrganizationAssigned, Placement, ObservatoryKeys, ObservatoryKey, OwnSignIn } from './types';
 
 const root = document.querySelector<HTMLDivElement>('#app')!;
 const announcements = document.querySelector<HTMLDivElement>('#announcements')!;
@@ -784,6 +784,111 @@ function balancingSection() {
   for (const line of [...view.backups, ...view.loans, ...view.returns]) section.append(el('p', 'form-note', line));
   return section;
 }
+/** SB-419 (DEC-0028, SCN-104): groups fed from the default group: a switch and a priority on each
+ * group's card, and on the Groups page arrows from the default group to each fed group. */
+let feedState: FeedStatus | null = null; let feedLoading = false; let feedError = ''; let feedKey = '';
+/** What the feed's answer depends on: the groups and the accounts they share. */
+const feedInputs = () => JSON.stringify([(snapshot?.projects ?? []).map((p) => [p.pool, p.shared_accounts ?? []]), snapshot?.default_shared ?? []]);
+function loadFeed() {
+  if (feedLoading) return;
+  feedLoading = true; const key = feedInputs(); const stamp = clock.stamp();
+  void adapter.feed(null).then((s) => { if (clock.accepts(stamp) || !feedState) { feedState = s; feedError = ''; } feedKey = key; }, (e) => { if (clock.accepts(stamp) || !feedState) feedError = t(safeError(e, 'read')); feedKey = key; }).finally(() => { feedLoading = false; render(); });
+}
+function wantFeed() {
+  if (!snapshot) return;
+  if (feedState ? feedKey !== feedInputs() : !feedError) loadFeed();
+}
+/** The map at the top of Groups: the default group, an arrow to each fed group, highest priority first. */
+const FEED_ROW = 32; const FEED_WIDTH = 56;
+function feedMapSection(): HTMLElement | null {
+  const view = feedView(feedState, feedError || null);
+  // Review round 1: a failed read is said once here, with Retry, never only inside folded cards.
+  if (view.state === 'failed') {
+    const box = el('div', 'feed-map-wrap'); const line = el('p', 'account-meta usage-error');
+    line.append(`${view.line} `, button(t('Retry'), () => { feedError = ''; loadFeed(); render(); }, 'text-button', 'feed-retry'));
+    box.append(line); if (view.error) box.append(el('p', 'form-error', view.error));
+    return box;
+  }
+  if (view.state === 'reading') return null;
+  if (!view.arrows.length) { const box = el('div', 'feed-map-wrap'); box.append(el('p', 'account-meta section-state', view.line)); return box; }
+  const wrap = el('div', 'feed-map-wrap');
+  const box = el('div', 'feed-map'); box.setAttribute('role', 'group'); box.setAttribute('aria-label', t('Fed from Default'));
+  const svgNs = 'http://www.w3.org/2000/svg';
+  const height = view.arrows.length * FEED_ROW;
+  const svg = document.createElementNS(svgNs, 'svg');
+  for (const [k, v] of [['class', 'feed-arrows'], ['width', String(FEED_WIDTH)], ['height', String(height)], ['viewBox', `0 0 ${FEED_WIDTH} ${height}`], ['aria-hidden', 'true'], ['focusable', 'false']]) svg.setAttribute(k, v);
+  const defs = document.createElementNS(svgNs, 'defs'); const marker = document.createElementNS(svgNs, 'marker');
+  for (const [k, v] of [['id', 'feed-arrow-head'], ['viewBox', '0 0 6 6'], ['refX', '0'], ['refY', '3'], ['markerWidth', '6'], ['markerHeight', '6'], ['markerUnits', 'userSpaceOnUse'], ['orient', 'auto']]) marker.setAttribute(k, v);
+  const head = document.createElementNS(svgNs, 'path'); head.setAttribute('d', 'M0 0 L6 3 L0 6 z'); head.setAttribute('class', 'feed-arrow-head');
+  marker.append(head); defs.append(marker); svg.append(defs);
+  for (const d of feedArrows(view.arrows.length, FEED_ROW, FEED_WIDTH)) { const path = document.createElementNS(svgNs, 'path'); path.setAttribute('d', d); path.setAttribute('class', 'feed-arrow'); path.setAttribute('marker-end', 'url(#feed-arrow-head)'); svg.append(path); }
+  const targets = el('ol', 'feed-targets');
+  for (const a of view.arrows) {
+    const project = projectOf(a.pool);
+    const item = el('li', 'feed-target');
+    item.append(el('span', 'feed-node', project ? groupDisplayName(project) : a.label), el('span', 'feed-priority', t('Priority {n}', { n: a.priority })));
+    targets.append(item);
+  }
+  box.append(el('span', 'feed-node feed-source', t('Default group')), svg, targets);
+  const setNote = el('p', 'form-note'); setNote.append(`${t('Groups with the same priority are served in the order of their ids. The number of ready accounts is set from the command line:')} `, el('code', 'address', 'switchboard feed set --ready <n>'));
+  wrap.append(el('p', 'account-meta section-state', view.line), box, el('p', 'form-note feed-rule', view.rule), setNote);
+  return wrap;
+}
+/** Review round 1: a priority that did not parse stays in its field, marked, until it is fixed. */
+const feedPriorityTyped = new Map<string, string>();
+/** On a group's card: whether it is fed from the default group, and its priority. */
+function groupFeedRow(project: Project): HTMLElement | null {
+  if (project.tokens) return null;
+  wantFeed();
+  const view = feedView(feedState, feedError || null);
+  // The state of the read is said once, at the top of the page (feedMapSection).
+  if (view.state === 'reading' || view.state === 'failed') return null;
+  const row = el('div', 'group-feed');
+  const entry = view.groups.get(project.pool) ?? { fed: false, priority: null };
+  const shown = groupDisplayName(project);
+  const option = el('label', 'appearance-option login-option'); const box = el('input'); box.type = 'checkbox'; box.checked = entry.fed; box.dataset.focus = `feed-${project.pool}`;
+  box.setAttribute('aria-label', t('Fed from Default: {group}', { group: shown }));
+  box.addEventListener('change', () => { const on = box.checked; feedPriorityTyped.delete(project.pool); void mutate(async () => { feedState = await adapter.feed({ pool: project.pool, on }); }, () => feedNotice({ group: shown, on, priority: feedState?.available.find((g) => g.pool === project.pool)?.priority ?? undefined }), `feed-${project.pool}`); });
+  option.append(box, el('span', '', t('Fed from Default')));
+  const field = el('label', 'feed-priority-field'); const input = el('input'); input.type = 'number'; input.min = '1'; input.max = '99'; input.step = '1'; input.inputMode = 'numeric';
+  const typed = feedPriorityTyped.get(project.pool);
+  input.value = typed ?? (entry.priority ? String(entry.priority) : ''); input.disabled = !entry.fed; input.dataset.focus = `feed-priority-${project.pool}`;
+  input.setAttribute('aria-label', t('Priority of {group}', { group: shown }));
+  const errorId = `feed-priority-error-${project.pool}`;
+  if (typed !== undefined) { input.setAttribute('aria-invalid', 'true'); input.setAttribute('aria-describedby', errorId); }
+  input.addEventListener('change', () => {
+    const n = feedPriority(input.value);
+    if (n === null) { feedPriorityTyped.set(project.pool, input.value); render(); restoreFocus(`feed-priority-${project.pool}`); return; }
+    feedPriorityTyped.delete(project.pool);
+    void mutate(async () => { feedState = await adapter.feed({ pool: project.pool, priority: n }); }, feedNotice({ group: shown, priority: n }), `feed-priority-${project.pool}`);
+  });
+  field.append(el('span', '', t('Priority')), input);
+  row.append(option, field);
+  if (typed !== undefined) { const error = el('p', 'form-error feed-rule', t('Give the priority as a whole number from 1 (highest) to 99.')); error.id = errorId; row.append(error); }
+  if (!entry.fed) row.append(el('p', 'form-note feed-rule', t('Turn the feed on to set a priority.')));
+  return row;
+}
+/** On Activity: the feed's newest moves, each with its reason. */
+function feedActivityPanel(): HTMLElement | null {
+  wantFeed();
+  const recent = feedState?.recent ?? [];
+  if (!recent.length && !feedState?.on) return null;
+  const panel = el('section', 'about-panel feed-activity'); panel.setAttribute('aria-labelledby', 'feed-activity-heading');
+  const heading = el('h2', '', t('Fed from Default')); heading.id = 'feed-activity-heading';
+  const name = (pool: string) => pool === 'default' ? t('Default group') : (projectOf(pool) ? groupDisplayName(projectOf(pool)!) : poolName(pool, snapshot!.projects));
+  // Review round 1: the feed is on and has moved nothing yet: say so, so it reads as running.
+  if (!recent.length) { panel.append(heading, el('p', 'surface-note', t('The feed is on and has moved no account yet. A pass every 15 minutes keeps the fed groups ready.'))); return panel; }
+  const list = el('ol', 'event-list');
+  for (const e of recent.slice(0, 10)) {
+    const row = el('li', 'event-row'); const line = el('div', 'event-title');
+    const label = snapshot!.accounts.find((a) => a.id === e.account)?.label ?? t('An account no longer saved');
+    line.append(el('strong', '', t('Feed')), el('time', '', new Date(e.at * 1000).toLocaleString(dateLocale(), { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })));
+    row.append(line, el('p', 'event-detail', feedMoveLine(e, label, name)));
+    list.append(row);
+  }
+  panel.append(heading, list, el('p', 'surface-note', t('A pass every 15 minutes keeps the fed groups ready. Only the newest moves are shown.')));
+  return panel;
+}
 /** SB-143: Codex sessions in a project's folders use its Codex accounts, by one switch. */
 let codexRouteState: CodexRoute | null = null; let codexRouteLoading = false; let codexRouteError = ''; let codexRouteKey = '';
 /** What the section's answer depends on: the groups and where Codex accounts are (UX-03). */
@@ -1007,6 +1112,8 @@ function projectsSection() {
     section.append(empty, ...foldlessSection()); return section;
   }
   // WF-8.1 (SB-370): each group folds to one line of state; open, it reads Accounts, Repositories, Agents and keys.
+  // SB-419 (SCN-104): the arrows from the default group to each fed group.
+  wantFeed(); const map = feedMapSection(); if (map) section.append(map);
   const list = el('div', 'group-cards'); list.setAttribute('aria-label', t('Groups'));
   for (const project of projects) list.append(groupCard(project, projects.length === 1));
   section.append(list); section.append(...foldlessSection()); return section;
@@ -1051,6 +1158,9 @@ function groupCard(project: Project, only: boolean) {
     // SB-401: a group switched off says so, and turns on from its menu; the pay-per-token group
     // sets its daily ceiling there, before it is turned on, and takes its folders one by one.
     if (project.off) { const off = el('span', 'badge off-badge', t('Switched off')); off.title = t('No folder runs on this group\'s accounts while it is off.'); parts.push(off); }
+    // SB-419: a fed group says so, with its priority, folded or not.
+    const fedEntry = feedState?.available.find((g) => g.pool === project.pool);
+    if (fedEntry?.fed && fedEntry.priority) parts.push(el('span', 'badge feed-badge', feedBadge(fedEntry.priority)));
     const items: Parameters<typeof menu>[2] = [[t('Edit'), () => projectDialog(project)]];
     if (project.tokens) {
       items.push([t('Add folder…'), () => void addTokensFolders(project)]);
@@ -1103,6 +1213,8 @@ function groupCardBody(project: Project, accounts: Account[]): Node[] {
     }
     people.append(rows);
   }
+  // SB-419 (SCN-104): fed from the default group, with its priority.
+  const feedRow = groupFeedRow(project); if (feedRow) people.append(feedRow);
   // Repositories: the worktree tree as before (SB-147).
   const repos = el('div', 'fold-part'); repos.append(el('h3', 'fold-part-heading', t('Repositories')));
   // SB-401: the pay-per-token group starts with no folder: say so, and add one from here.
@@ -3754,6 +3866,8 @@ function endSessionDialog(row: SessionRow, target: string | null) {
 function renderActivity(main: HTMLElement) {
   main.append(sessionTreePanel());
   main.append(sessionsPanel());
+  // SB-419 (SCN-104): the feed's newest moves.
+  const feedPanel = feedActivityPanel(); if (feedPanel) main.append(feedPanel);
   if (!journal && !journalLoading) void loadJournal();
   const fromCommand = journal?.source === 'command';
   const source = fromCommand ? journal!.events : snapshot!.events;

@@ -152,6 +152,8 @@ export interface Adapter {
   codexRoute(enabled?: boolean | null): Promise<CodexRoute>;
   /** SB-352: the groups that take part in balancing; with no change, the state. */
   balance(change?: BalanceChange | null): Promise<BalanceStatus>;
+  /** SB-419 (DEC-0028): groups fed from the default group; with no change, the state. */
+  feed(change?: FeedChange | null): Promise<FeedStatus>;
   /** SB-379: live sessions with their launches, the day's launches, counts and the watch's findings. */
   sessionTree(): Promise<SessionTree>;
   /** SB-395: the Sessions page: this computer's sessions in four groups, and every other machine's. */
@@ -338,6 +340,8 @@ export interface OpenrouterModel { id: string; name?: string | null; context?: n
 export interface OpenrouterModels { recommended: RecommendedModel[]; models: OpenrouterModel[]; available: boolean }
 /** SB-143: whether Codex sessions in project folders use the projects' Codex accounts. */
 /** SB-352: a change of the groups that take part in balancing (pool ids, `default` included). */
+/** SB-419: a group's feed on or off with its priority, or the targets for every fed group. */
+export interface FeedChange { pool?: string; on?: boolean; priority?: number; ready?: number; lookahead_minutes?: number }
 export interface BalanceChange { add?: string[]; remove?: string[]; all_new?: boolean | null; backup_add?: string[]; backup_remove?: string[] }
 /** SB-379: one task a launch serves. */
 export interface SessionTask { workflow: string | null; request: string | null; project: string | null }
@@ -385,6 +389,17 @@ export interface BalanceLoan { account_id: string; label: string | null; provide
 export interface BalanceEntry { at: number; account: string; provider: Provider; from: string; to: string; action: 'lend' | 'return'; reason: string; outcome: string }
 /** SB-352: `balance status`, as `switchboard balance status --json` answers it. */
 export interface BalanceStatus { on: boolean; groups: { pool: string; name: string }[]; available: { pool: string; name: string; chosen: boolean; backup?: boolean }[]; all_new: boolean; pass_minutes: number; lent: BalanceLoan[]; recent: BalanceEntry[]; changed?: boolean; /** WF-6, DEC-0016. */ backup?: { pool: string; name: string; accounts: number; lent: number }[] }
+/** SB-419: one feed move in `balancing.jsonl`, with its figures; ids and numbers only. */
+export interface FeedEntry extends BalanceEntry { feed: { priority: number; ready: number; want: number; used_percent?: number; resets_in?: number } }
+/** SB-419 (DEC-0028): `feed status`, as `switchboard feed status --json` answers it. */
+export interface FeedStatus {
+  on: boolean; ready: number; lookahead_minutes: number; pass_minutes: number;
+  fed: { pool: string; name: string; priority: number; off: boolean; providers: { provider: Provider; ready: number; accounts: number }[] }[];
+  available: { pool: string; name: string; fed: boolean; priority: number | null }[];
+  reservoir: { provider: Provider; accounts: number; placed: number; ready: number; parked: number }[];
+  moved: (BalanceLoan & { kind: 'placed' | 'parked' })[];
+  recent: FeedEntry[]; changed?: boolean;
+}
 export interface CodexRoute { on: boolean; applied: boolean; config: string | null; conflict: string | null; projects: string[] }
 /** SB-144: saved OpenRouter keys by project (`pool: null` is the machine's key). */
 export interface OpenrouterKeys { service: 'openrouter'; keys: { pool: string | null; project: string | null; saved_at: number; model: string | null }[]; projects: { pool: string; name: string; own: boolean }[] }

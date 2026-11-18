@@ -355,6 +355,18 @@ export function createDemoAdapter(): Adapter {
     const lent = lender && to ? [{ account_id: lender.id, label: lender.label, provider: lender.provider, from, from_name: name(from), to, to_name: name(to), at: now() - 1800 }] : [];
     return { on: balanceGroups.length > 0, groups: balanceGroups.map((pool) => ({ pool, name: name(pool) })), available: pools.map((pool) => ({ pool, name: name(pool), chosen: balanceGroups.includes(pool), backup: balanceBackup.includes(pool) })), all_new: balanceAllNew, pass_minutes: 15, lent, recent: [], backup: balanceBackup.map((pool) => { const own = state.accounts.filter((a) => a.pool === pool); return { pool, name: name(pool), accounts: own.length, lent: lent.filter((l) => l.from === pool).length }; }) };
   };
+  // SB-419 (DEC-0028, SCN-104): groups fed from the default group, none until the person turns
+  // one on; a fed group shows one account placed from the default group.
+  let feedGroups: { pool: string; priority: number }[] = []; let feedReady = 2; let feedLookahead = 30;
+  const feedStatus = () => {
+    const name = (pool: string) => pool === 'default' ? 'default' : (state.projects ?? []).find((p) => p.pool === pool)?.name ?? pool;
+    feedGroups = feedGroups.filter((f) => (state.projects ?? []).some((p) => p.pool === f.pool));
+    const order = [...feedGroups].sort((a, b) => a.priority - b.priority || a.pool.localeCompare(b.pool));
+    const spare = state.accounts.filter((a) => a.pool === 'default' && a.provider === 'claude');
+    const moved = order.flatMap((f, i) => spare[i] ? [{ account_id: spare[i].id, label: spare[i].label, provider: spare[i].provider, from: 'default', from_name: 'default', to: f.pool, to_name: name(f.pool), at: now() - 900, kind: 'placed' as const }] : []);
+    const recent = moved.map((m) => ({ at: m.at, account: m.account_id, provider: m.provider, from: m.from, to: m.to, action: 'lend' as const, reason: 'feed', outcome: 'done', feed: { priority: order.find((f) => f.pool === m.to)?.priority ?? 1, ready: 0, want: feedReady, used_percent: 20 } }));
+    return { on: order.length > 0, ready: feedReady, lookahead_minutes: feedLookahead, pass_minutes: 15, fed: order.map((f) => ({ pool: f.pool, name: name(f.pool), priority: f.priority, off: false, providers: [{ provider: 'claude' as const, ready: moved.filter((m) => m.to === f.pool).length, accounts: moved.filter((m) => m.to === f.pool).length }] })), available: (state.projects ?? []).filter((p) => !p.tokens).map((p) => { const f = feedGroups.find((g) => g.pool === p.pool); return { pool: p.pool, name: p.name, fed: !!f, priority: f?.priority ?? null }; }), reservoir: [{ provider: 'claude' as const, accounts: spare.length, placed: moved.length, ready: Math.max(0, spare.length - moved.length), parked: 0 }], moved, recent };
+  };
   // SB-183 (node A-7): the terminal hook, every state of SCN-075 by `?shell=` (default_on, on,
   // off, default_off, held (SB-222: the organization's folders belong to another group), inactive,
   // zdotdir, removed, policy, constrained, dev, failed, notice); without it, on by
@@ -818,6 +830,16 @@ export function createDemoAdapter(): Adapter {
       }
       if (change?.backup_remove?.length) balanceBackup = balanceBackup.filter((g) => !change.backup_remove?.includes(g));
       return balanceStatus();
+    },
+    async feed(change) {
+      await pause();
+      if (change?.pool === 'default') throw new Error('The default group feeds the others, so it cannot be fed itself.');
+      if (change?.pool && change.on === true) { const f = feedGroups.find((g) => g.pool === change.pool); if (f) { if (change.priority) f.priority = change.priority; } else feedGroups.push({ pool: change.pool, priority: change.priority ?? Math.max(0, ...feedGroups.map((g) => g.priority)) + 1 }); }
+      else if (change?.pool && change.on === false) feedGroups = feedGroups.filter((g) => g.pool !== change.pool);
+      else if (change?.pool && change.priority) { const f = feedGroups.find((g) => g.pool === change.pool); if (!f) throw new Error('That group is not fed from the default group. Turn its feed on first, then set its priority.'); f.priority = change.priority; }
+      if (change?.ready) feedReady = change.ready;
+      if (typeof change?.lookahead_minutes === 'number') feedLookahead = change.lookahead_minutes;
+      return feedStatus();
     },
     async codexRoute(enabled) {
       await pause();
