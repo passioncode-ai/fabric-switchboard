@@ -1559,7 +1559,7 @@ mod tests {
             .unwrap()
             .shared_accounts
             .clone();
-        assert_eq!(shared, [fresh.id.clone()]);
+        assert_eq!(shared, std::slice::from_ref(&fresh.id));
         let lines = balancing::read_journal(root.path());
         assert!(
             lines.iter().all(|l| l.contains("\"outcome\":\"done\"")),
