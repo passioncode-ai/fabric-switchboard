@@ -16,6 +16,7 @@ and close everything in waves to the end, while taking up incoming tasks in para
    - [05 Code structure and the test suite](05-code-structure.md)
    - [06 Groups fed from the default group](06-default-feed.md) (the operator's order of 2026-11-17)
    - [07 Saved launches](07-saved-launches.md) (the operator's order of 2026-11-18)
+   - [08 Who starts, watches and continues coding sessions](08-session-map.md) (the operator's order of 2026-11-18)
 2. Each capability carries **Target**, **Now**, **Gap** (P0 to P3, backlog ids) and **Refactor**.
 3. The gaps and refactors are ordered into waves below. Every wave item becomes a backlog row in
    [docs/evidence/backlog.md](../../evidence/backlog.md) (edited under the agent-sync lease) before
@@ -83,6 +84,7 @@ structure: refactors A1 to A7, B1 to B3 and the splits).
 | W1.5 | MCP annotations: `switchboard_account_remove` not destructive, write tools idempotent, network tools `openWorldHint: false` (`mcp.rs:226-246`); plugin hooks silent without `switchboard` on PATH (04) | new row | next |
 | W1.6 | Groups fed from the default group ([06](06-default-feed.md)) | SB-419, DEC-0028 | merged (#824) |
 | W4.4 | Saved launches run from the Sessions page, the menu-bar icon, the CLI and MCP ([07](07-saved-launches.md)) | SB-454 | designed |
+| W4.5 | One owner per session concern: route, environment, remote launch, continuity, admission with host load, a sessions and load feed for Observatory ([08](08-session-map.md)) | SB-450 to SB-455, SB-461 to SB-464 | designed |
 | W1.7 | Key-leak audit: where every key flows (vault, argv, environment, logs, files, answers), read-only, report in `docs/reports/2026-11-17-secret-flows/` | new row | next |
 
 ### W2. Devices of an organization (02, 04 §7)
