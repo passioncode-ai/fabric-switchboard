@@ -56,6 +56,12 @@ export interface Snapshot { accounts: Account[]; routes: Record<string, string>;
 export interface Machine { pool: string; name: string; identity?: string | null; aliases?: string[]; created_at: number }
 /** SB-355: an account's copy on its machine, as a live read found it. */
 export interface MachineCopy { pool: string | null; enabled: boolean | null; used_percent: number | null; usage_status: string | null }
+/** SB-473: a machine this computer knows, as `switchboard targets` lists it (moves and runs). */
+export interface Target { machine: string; aliases?: string[]; known_by?: string[]; last_at?: number | null; program?: string | null; probe?: { answered: boolean; online?: boolean; owner_version?: string | null } }
+/** SB-474: one group on another machine, as `switchboard remote status` reads it. */
+export interface RemoteGroup { pool: string; name: string | null; organization: string | null; accounts: number; folders: number }
+/** SB-474: another machine's groups, read over ssh. */
+export interface RemoteStatus { target: string; groups: RemoteGroup[] }
 /** SB-366 (DEC-0017): the last background read of one account's copy on its machine. */
 export interface RemoteRead { used_percent: number | null; usage_status: string | null; enabled: boolean | null; as_of: number | null; tried_at: number; reason: string | null }
 /** SB-366: `machines` without `live`: each machine group with its last background read. */
@@ -89,6 +95,8 @@ export interface Adapter {
   /** SB-283: moves a sign-in to another machine over ssh; `pool` is its group there. SB-403: `delegate` delegates it to a teammate's machine with a lease of `leaseHours` (48 by default). */ sendAccount(id: string, to: string, pool: string, delegate?: { leaseHours?: number } | null): Promise<void>;
   /** SB-315: takes a moved sign-in back from `from`, the machine the move named (null: its machine group's); SB-355: into group `pool` here (null: the one it left). */ recallAccount(id: string, from: string | null, pool?: string | null): Promise<Placement | void>;
   /** SB-355: the machine groups read over ssh, each with its accounts' copies there. */ machinesLive(): Promise<MachinesLive>;
+  /** SB-473: the machines this computer knows (`switchboard targets`). */ targets(probe?: boolean): Promise<{ targets: Target[] }>;
+  /** SB-474: another machine's groups, read over ssh (`switchboard remote status`). */ remoteStatus(target: string): Promise<RemoteStatus>;
   /** SB-366: the machine groups with their last background read, from a file (no ssh). */ machinesList(): Promise<MachinesList>;
   /** WF-3 (SB-365): what needs a person now; an empty list when nothing does (or the command is missing). */ attention(): Promise<Attention>;
   /** SB-318: hands an account over: a save picker for the signed record, then the account is used by `to`; `saved` null when the picker was closed. */ handOverAccount(id: string, to: string, name: string): Promise<HandOverResult>;

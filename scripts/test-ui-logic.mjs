@@ -2069,4 +2069,25 @@ check(() => {
   assert.equal(logic.groupDisplayName({ name: 'Pay-per-token keys' }), 'Pay-per-token keys', 'a group the person named so stays as typed');
   i18n.setLocale('en');
 });
+// SB-473 to SB-476: a move to another machine is chosen, read and batched.
+check(() => {
+  const machines = [{ pool: 'machine_nicegram', name: 'nicegram@10.0.0.2', aliases: ['ng'], created_at: 50 }, { pool: 'machine_studio', name: 'studio', created_at: 10 }];
+  const targets = [{ machine: 'ng', known_by: ['moves'], last_at: 90 }, { machine: 'linux-box', known_by: ['moves'], last_at: 80, program: '/usr/bin/switchboard' }, { machine: 'gpu', known_by: ['dispatch'], last_at: 70 }];
+  const choices = logic.machineChoices(machines, targets);
+  assert.deepEqual(choices.map((c) => c.name), ['ng', 'linux-box', 'gpu', 'studio'], 'each machine once, newest first; an alias of a machine group is that group');
+  assert.equal(choices[0].detail, 'accounts live there'); assert.equal(choices[1].detail, 'accounts moved there before'); assert.equal(choices[2].detail, 'runs started there');
+  assert.deepEqual(logic.machineChoices(machines, targets, machines[0]).map((c) => c.name), ['linux-box', 'gpu', 'studio'], 'the machine the account is on is left out, by any of its names');
+  assert.deepEqual(logic.machineChoices([], []), [], 'nothing known: only the typed entry is left');
+  const status = { target: 'ng', groups: [{ pool: 'machine_mac', name: 'mac', organization: null, accounts: 2, folders: 0 }, { pool: 'zeta', name: 'Zeta', organization: 'PassionCode.ai', accounts: 1, folders: 2 }, { pool: 'default', name: null, organization: null, accounts: 3, folders: 0 }, { pool: 'apps', name: 'Apps', organization: null, accounts: 2, folders: 1 }] };
+  const read = logic.remoteGroupChoices(status, 'zeta');
+  assert.deepEqual(read.choices.map(([pool]) => pool), ['default', 'apps', 'zeta'], 'the default group first, machine groups there left out, the rest by name');
+  assert.equal(read.choices[0][1], 'Default group · 3 accounts'); assert.equal(read.choices[2][1], 'Zeta · PassionCode.ai · 1 account');
+  assert.equal(read.chosen, 'zeta', "the account's own group when that machine has it");
+  assert.equal(logic.remoteGroupChoices(status, 'nowhere').chosen, 'default'); assert.equal(logic.remoteGroupChoices({ target: 'x', groups: [] }, null).choices.length, 1);
+  const accounts = [{ id: 'a', kind: 'oauth', enabled: true, pool: 'default' }, { id: 'b', kind: 'api_key', enabled: true, pool: 'tokens' }, { id: 'c', kind: 'oauth', enabled: false, pool: 'default' }, { id: 'd', kind: 'oauth', enabled: false, pool: 'machine_studio' }, { id: 'e', kind: 'oauth', enabled: true, pool: 'apps' }];
+  const snap = { accounts, machines, elsewhere: { d: 1, e: 2 } };
+  assert.deepEqual(logic.movableAccounts(snap).map((a) => a.id), ['a', 'd'], 'a subscription that is on here, or one on another machine; never a key, one off or one marked elsewhere without a machine');
+  assert.deepEqual(logic.movableAccounts(snap, machines[1]).map((a) => a.id), ['a'], 'never one already on the machine it goes to');
+  for (const c of choices) assert.ok(!c.detail.includes('\u2014'));
+});
 console.log(`${cases} ui-logic cases passed, including quota priority and wall-clock countdowns.`);

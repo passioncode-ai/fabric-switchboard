@@ -2,6 +2,17 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-11-18: SB-500 to SB-503, the session duty officer closed working sessions, on branch `duty-keeps-working-sessions`
+
+- **Asked.** Operator, session 4c635d5e: audit why the duty officer closes sessions that are working, and stop it.
+- **Found.** [Duty audit](reports/2026-11-18-duty-audit/README.md): 118 closes in three days; 3 closed while the transcript was being written (stale status file), 3 with no transcript found, 33 repeats of sessions the person had resumed; the Sound Engine orchestrator was closed with nothing running, and its own hosted launches were invisible to the check.
+- **Built.** `duty.rs`: `idle` also needs `transcript_quiet` (subagents included, unknown is not quiet) and `no_own_launches`; `closed_idle_before` keeps a session the person took up again. `session_watch.rs`: `running_children`, `children_now`. Help text, MCP description and its golden, CONTRACTS.
+- **Decisions.** Unknown counts as working everywhere (no transcript, records unread). A resumed session is kept for good rather than for a period: the person showed it is theirs.
+- **Interim.** `idle_minutes` 240 on the operator's Mac until the release is installed; set back to 60 after (the floor of 65 stays).
+- **Checks.** See the PR (Studio gate, EXIT line).
+
+**Exact next task.** Merge the `duty-keeps-working-sessions` PR after two clean review rounds; after the release that carries it is installed, `switchboard duty set --idle-minutes 60`; then SB-503.
+
 ## 2026-11-19: SB-447 to SB-449, PR #831 review round 2 follow-up, on branch `launch-stale-2`
 
 - **Asked.** Round 2 of #831 (merged as `9e7026cb`): CLI.md on when statuses 3 and 4 are Switchboard's; `clear_stale` deleting a marker when the link back fails; only `Reservation::new` clears stale markers; `queued` never on the wire; Kimi in-place continue as `caller`; non-regular markers read alike everywhere; `btime` once.
