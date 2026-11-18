@@ -3876,6 +3876,39 @@ Plan: [2026-11-17-token-group](plans/2026-11-17-token-group/README.md); decision
   its group (`project_allows`); the fallback and dispatch pass a Claude API key over. A key of the
   pay-per-token group also only while the group is on and has a ceiling
   (`TOKENS_NO_CEILING`; an unreadable `spend.json` is no ceiling).
+- **A launch keeps its group's route (SB-452).** Claude Code ranks settings sources
+  user < project < local < command line (`--settings`) < policy, and a source's `env` outranks the
+  process environment; it reads a Git worktree's local settings from the worktree's main checkout
+  (2.1.327, measured 2026-11-18 on synthetic folders). So the route a managed launch exported was
+  replaced by the main checkout's `.claude/settings.local.json` when the worktree's group differed
+  from the main checkout's. Every managed Claude launch (interactive, `--in-place`, `--hosted`,
+  `--headless` dispatch) writes `<home>/switchboard-route.json` (`launch::ROUTE_FILE`, 0600:
+  `env` with `ANTHROPIC_BASE_URL` of the launch's group, `ANTHROPIC_AUTH_TOKEN` the proxy's token,
+  an empty `ANTHROPIC_API_KEY` and `ANTHROPIC_CUSTOM_HEADERS: X-Switchboard-Launch-Group: <pool>`)
+  and passes `--settings=<file>` (`launch::route_arg`) last on the command line, before a caller's
+  `--` (a later `--settings` would replace it whole). The resume scripts (`duty::resume_script_for`:
+  the duty officer's restart, a restart wave, *Continue*) pass it when the home has the file;
+  `launch::repoint_managed` rewrites it with `launch.command` when the proxy moves. A `claude` the
+  person starts in such a worktree is not a launch and still takes the main checkout's route.
+- **Group crossings (SB-452).** The proxy reads `x-switchboard-launch-group`
+  (`LAUNCH_GROUP_HEADER`, never relayed upstream). A value naming another group than the route's
+  is counted, and refused with `403` `LAUNCH_GROUP_MISMATCH` before anything is sent upstream when
+  either group is the pay-per-token group (a group whose flags cannot be read counts as one). The
+  header only narrows: a group it names that does not exist reads as an ordinary group. Each
+  request whose own folder (the body's working directory, `stats::folder_hint`, which reads both
+  `Working directory:` and Claude Code 2.1.327's `Primary working directory:`) lies in group
+  folders none of which is the serving group is counted too, and served. Both count in the
+  tally's `mismatched`; the owner logs each pass's total as `proxy_group_mismatch` with `count`.
+- **A short rate limit of the key (SB-453, DEC-0031).** A `429` for an account that is a Claude
+  API key at home in the pay-per-token group, when no SB-98 move takes the request, with a
+  `Retry-After` of at most 30 s (`TOKENS_RETRY_WAIT`; at least 1 s is waited) and no
+  `x-should-retry: false`: the proxy counts the `429` (`limited`), journals `rate_limited` once
+  per request, waits, checks `pool_refusal` for the route's group and the key's home group again
+  (a refusal ends the request with its `403`), and sends the same body again on the same key.
+  At most three tries (`TOKENS_RETRY_TRIES`) and 60 s of waits (`TOKENS_RETRY_BUDGET`) per
+  request; nothing reached the client before, so the session sees only the final answer. A longer
+  wait, a missing `Retry-After`, a third `429` or another account's `429` is relayed as before.
+  The request holds its proxy slot while it waits; a client that goes away ends the wait.
 - **Proxy refusals**, each `403` with a `switchboard_error` body and never sent upstream, checked
   for the route's pool before route selection, for the chosen account's home pool when it differs
   (a shared or lent account), and for an SB-98 move's next account (a refused one is not moved
@@ -3917,7 +3950,9 @@ Plan: [2026-11-17-token-group](plans/2026-11-17-token-group/README.md); decision
   another provider's answers are not priced.
 - **Statistics.** Each tally adds `cost_micros` (micro-dollars) and `cost_estimated` (answers
   priced as an estimate), both absent when zero, in `statistics.json` and in every row of
-  `Statistics`; the window shows them as *List price* (≈ when part is an estimate).
+  `Statistics`; the window shows them as *List price* (≈ when part is an estimate). SB-452 adds
+  `mismatched` (requests served by another group than their own, above), absent when zero, in
+  the same rows.
 - **Ceilings view.** The pay-per-token group's ceiling is `active` without an OpenRouter key of
   the group's own (and `set_ceiling` accepts it), and carries `tokens: true`,
   `spent_today_usd` (the proxy's day counter, or `statistics.json` when no owner runs) and

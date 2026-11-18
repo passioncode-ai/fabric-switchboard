@@ -876,3 +876,30 @@ research notes); the ones still in force that the board cites are seeded below w
   связано … Те, которые выбывают, они уходят в дефолтную папку отстаиваться … аккаунты, которые
   скоро станут активными, наперед мы подготавливаем … У папок типа есть свой приоритет»); design
   target-state `06-default-feed.md`.
+
+### DEC-0031: A short rate limit of the pay-per-token key is waited out inside the proxy
+
+- **Date:** 2026-11-18
+- **Status:** Accepted (built on branch `tokens-spend`: SB-453). The number is the next one free
+  after the decisions on open pull requests (DEC-0027 #821, DEC-0029 #832, DEC-0030 #836); a
+  pull request that lands first with the same number moves this one to the next free.
+- **Context:** the pay-per-token group usually holds one Claude API key, so DEC-0002's move to the
+  group's next account finds none, and a `429` for the key's rate limit reached the session as an
+  error. On 2026-11-18 (board thread a9844103) a session and its nine subagents met `429` within
+  two minutes and stood still until they were closed for inactivity. An API rate limit refills
+  within the minute and the provider says how long to wait (`Retry-After`).
+- **Decision:** a `429` for a Claude API key at home in the pay-per-token group, when no DEC-0002
+  move takes the request, is waited out inside the proxy and the same request sent again on the
+  same key, when the provider asked for at most 30 seconds and did not say `x-should-retry:
+  false`: at most three tries and 60 seconds of waiting per request, the group's switch and
+  ceiling checked again before each try. Nothing reached the session before, so it sees only the
+  final answer. This is a second deliberate replay beside DEC-0002, limited to a request that did
+  no work and charged nothing; no other replay is added.
+- **Consequences / affects:** a waiting request holds one of the proxy's 64 slots; a session that
+  goes away ends its wait. Each refused try counts as `limited` in the statistics and the journal
+  records `rate_limited` once per request. `AGENTS.md` (Local rules),
+  [CONTRACTS](CONTRACTS.md#pay-per-token-group-sb-401-dec-0023).
+- **Source:** board thread a9844103 (Fabric Dashboards, 2026-11-18), relayed by the coordinator
+  of SB-452/SB-453: "the proxy should handle an upstream 429 with retry-after: a bounded wait and
+  retry inside the proxy before any byte reached the client (a request that did no work, like
+  DEC-0002's rule; never retry after bytes were sent)".
