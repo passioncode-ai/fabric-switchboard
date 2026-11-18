@@ -7731,7 +7731,10 @@ mod tests {
                 Path::new("/tmp/project"),
             )
         });
-        let line = text.lines().find(|l| l.starts_with("export PATH=")).unwrap();
+        let line = text
+            .lines()
+            .find(|l| l.starts_with("export PATH="))
+            .unwrap();
         let value = line.split('\'').nth(1).unwrap();
         let dirs: Vec<PathBuf> = std::env::split_paths(value).collect();
         assert_eq!(dirs[0], PathBuf::from("/opt/agent/bin"));
@@ -7762,7 +7765,12 @@ mod tests {
         let base = temp.path().canonicalize().unwrap();
         let brew = base.join("homebrew/bin");
         fs::create_dir_all(&brew).unwrap();
-        private_write(&brew.join("node"), b"#!/bin/sh\necho synthetic-node\n", true).unwrap();
+        private_write(
+            &brew.join("node"),
+            b"#!/bin/sh\necho synthetic-node\n",
+            true,
+        )
+        .unwrap();
         let agent_dir = base.join("agent");
         fs::create_dir(&agent_dir).unwrap();
         let report = base.join("report");

@@ -62,7 +62,11 @@ pub fn warm() {
                 &[
                     (
                         "source",
-                        crate::oplog::Field::Code(if dirs.is_some() { "shell" } else { "fallback" }),
+                        crate::oplog::Field::Code(if dirs.is_some() {
+                            "shell"
+                        } else {
+                            "fallback"
+                        }),
                     ),
                     (
                         "dirs",
@@ -172,7 +176,11 @@ pub fn resolve(shell: &Path, timeout: Duration) -> Option<Vec<PathBuf>> {
     };
     // A profile that started a background process keeps the pipe open past the shell's exit: a
     // member of the group is then alive, so the group is killed and the reader ends.
-    let out = match read.recv_timeout(timeout.saturating_sub(started.elapsed()).max(Duration::from_millis(100))) {
+    let out = match read.recv_timeout(
+        timeout
+            .saturating_sub(started.elapsed())
+            .max(Duration::from_millis(100)),
+    ) {
         Ok(out) => out,
         Err(_) => {
             kill_group(&child);
@@ -248,7 +256,10 @@ mod tests {
         );
         let dirs = resolve(&fake, TIMEOUT).unwrap();
         assert_eq!(dirs[0], brew);
-        assert_eq!(dirs[1..], [PathBuf::from("/usr/bin"), PathBuf::from("/bin")]);
+        assert_eq!(
+            dirs[1..],
+            [PathBuf::from("/usr/bin"), PathBuf::from("/bin")]
+        );
         let args = std::fs::read_to_string(log).unwrap();
         assert_eq!(args, "-l\n-c\n/usr/bin/printenv PATH\n");
     }
@@ -266,9 +277,15 @@ mod tests {
     #[test]
     fn a_failed_shell_or_an_answer_that_is_not_a_path_gives_nothing() {
         let dir = tempfile::tempdir().unwrap();
-        assert_eq!(resolve(&shell(dir.path(), "echo /usr/bin\nexit 1"), TIMEOUT), None);
+        assert_eq!(
+            resolve(&shell(dir.path(), "echo /usr/bin\nexit 1"), TIMEOUT),
+            None
+        );
         let dir = tempfile::tempdir().unwrap();
-        assert_eq!(resolve(&shell(dir.path(), "echo 'not a path'"), TIMEOUT), None);
+        assert_eq!(
+            resolve(&shell(dir.path(), "echo 'not a path'"), TIMEOUT),
+            None
+        );
         let dir = tempfile::tempdir().unwrap();
         assert_eq!(resolve(&shell(dir.path(), "true"), TIMEOUT), None);
         assert_eq!(resolve(Path::new("/nonexistent/shell"), TIMEOUT), None);
@@ -276,7 +293,10 @@ mod tests {
 
     #[test]
     fn the_merged_path_puts_the_login_folders_first_and_keeps_every_folder_once() {
-        let login = [PathBuf::from("/synthetic/brew/bin"), PathBuf::from("/usr/bin")];
+        let login = [
+            PathBuf::from("/synthetic/brew/bin"),
+            PathBuf::from("/usr/bin"),
+        ];
         let merged = merge(
             Some(Path::new("/opt/agent/bin")),
             Some(&login),
