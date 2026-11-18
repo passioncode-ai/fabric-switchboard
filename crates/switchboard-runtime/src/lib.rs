@@ -492,12 +492,19 @@ pub enum Operation {
         target: Option<String>,
     },
     /// SB-378: this computer's cap on live coding sessions: the cap, what counts and what is
-    /// free; `cap` sets it, `clear` removes it.
+    /// free; `cap` sets it, `clear` removes it. SB-417: `board` sets the board's share (0 to the
+    /// cap), with `cap` or on the cap already set; `board_default` goes back to the default share;
+    /// `cap` alone keeps the share, clamped to it.
     Capacity {
         #[serde(default)]
         cap: Option<u32>,
         #[serde(default)]
         clear: bool,
+        #[serde(default)]
+        board: Option<u32>,
+        /// SB-417: back to the default board share.
+        #[serde(default)]
+        board_default: bool,
     },
     /// SB-384: the session duty officer: its settings, what it did and what a check would do now;
     /// each field given changes that setting; `run` checks now (`dry_run`: only lists).
@@ -5217,15 +5224,25 @@ async fn dispatch_start(
         );
     }
     // SB-378: a run here waits while this computer's session pool is full; a run on another
-    // machine counts against that machine's pool.
-    if let Some(pool) = blocking::run(|| capacity::full(root)) {
-        let mut refusal = dispatch::refused(Some(&agent), dispatch::AT_CAPACITY);
-        refusal["used"] = pool["used"].clone();
-        refusal["cap"] = pool["cap"].clone();
-        // SB-412: counted, so Needs attention and `capacity` say runs are waiting.
-        blocking::run(|| dispatch_refusals::record(root, Some(&request), monitor::now()));
-        return Ok(refusal);
-    }
+    // machine counts against that machine's pool. SB-417: a board run starts inside the board's
+    // share whatever the interactive sessions hold.
+    // Review round 1, P1-B: the reservation counts this start from the gate's decision until the
+    // run is watched (`live_add`), so dispatches asked at once never all pass the share; it is
+    // dropped on every return below.
+    let _reservation = match blocking::run(|| capacity::reserve_held(root, capacity::Start::Board))
+    {
+        Ok(reservation) => reservation,
+        Err(pool) => {
+            let mut refusal = dispatch::refused(Some(&agent), dispatch::AT_CAPACITY);
+            refusal["used"] = pool["used"].clone();
+            refusal["cap"] = pool["cap"].clone();
+            refusal["board_used"] = pool["board_used"].clone();
+            refusal["board_share"] = pool["board_share"].clone();
+            // SB-412: counted, so Needs attention and `capacity` say runs are waiting.
+            blocking::run(|| dispatch_refusals::record(root, Some(&request), monitor::now()));
+            return Ok(refusal);
+        }
+    };
     let Ok(id) = fallback::account_for_default(
         runtime,
         &agent,
@@ -5299,6 +5316,8 @@ async fn dispatch_start(
     let launch_id = started.launch_id.clone();
     let account_id = started.account_id.clone();
     dispatch::live_add(root, &launch_id, deadline);
+    // Review round 1, P1-C: a board run recorded as running ends the wait of those refused before.
+    blocking::run(|| dispatch_refusals::admitted(root, monitor::now()));
     dispatch::watch(root, launch_id.clone(), started.child, runtime.analytics());
     oplog::event(
         "dispatch",
@@ -5452,7 +5471,8 @@ fn attention_report(
         questions: &questions,
         remote: &crate::remote_usage::read(root),
         watch: &session_watch::last(root),
-        refusals: dispatch_refusals::last_hour(root, now).as_ref(),
+        // SB-417: the board starts waiting since the pool last admitted one, with no cutoff.
+        refusals: dispatch_refusals::waiting(root).as_ref(),
         now,
     }))
 }
@@ -7157,19 +7177,43 @@ async fn execute(
                 })
             }))
         }
-        Operation::Capacity { cap, clear } => {
-            if clear && cap.is_some() {
-                return Err(capacity::CAP_INVALID.into());
+        Operation::Capacity {
+            cap,
+            clear,
+            board,
+            board_default,
+        } => {
+            if clear && (cap.is_some() || board.is_some() || board_default) {
+                return Err(capacity::CLEAR_INVALID.into());
             }
-            if clear || cap.is_some() {
-                capacity::set(root, cap)?;
+            if board.is_some() && board_default {
+                return Err(capacity::BOARD_INVALID.into());
+            }
+            let share = match (board, board_default) {
+                (Some(board), _) => capacity::Share::Set(board),
+                (None, true) => capacity::Share::Default,
+                (None, false) => capacity::Share::Keep,
+            };
+            let mut clamped = false;
+            if clear {
+                capacity::set(root, None)?;
+            } else if cap.is_some() || share != capacity::Share::Keep {
+                clamped = capacity::set_pool(root, cap, share)?;
             }
             let root = root.to_owned();
             blocking::run(move || {
                 let mut status = capacity::status(&root)?;
+                // Review round 1, P2-2: a kept share larger than the new cap was clamped to it.
+                status["board_share_clamped"] = clamped.into();
                 // SB-412: the board runs this pool refused in the last hour, or null.
                 status["refused_last_hour"] =
                     dispatch_refusals::last_hour(&root, monitor::now()).unwrap_or(Value::Null);
+                // SB-417: the board starts waiting since the pool last admitted one, or null.
+                let waiting = dispatch_refusals::waiting(&root);
+                status["waiting"] = waiting
+                    .as_ref()
+                    .map_or(Value::from(0), |w| w["count"].clone());
+                status["refused_waiting"] = waiting.unwrap_or(Value::Null);
                 Ok(status)
             })
         }
