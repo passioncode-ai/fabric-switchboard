@@ -322,7 +322,18 @@ function foldSection(options: { key: string; title: string | Node; state?: strin
 }
 /** WF-1.1 (1.1.3): every link into standing configuration opens its Settings section, then focuses `focusKey` (or the section's header). */
 function goToSettings(section: string, focusKey?: string) { foldChoices.set(section, true); goTo('settings', focusKey ?? `fold-${section}`); }
-function restoreFocus(key?: string) { if (key) document.querySelectorAll<HTMLElement>('[data-focus]').forEach((node) => { if (node.dataset.focus === key) node.focus(); }); }
+// SB-471: focus after a render never scrolls: an action's button may now stand elsewhere (an account moved to another
+// group), and the page stays where the person left it.
+function restoreFocus(key?: string) { if (key) document.querySelectorAll<HTMLElement>('[data-focus]').forEach((node) => { if (node.dataset.focus === key) node.focus({ preventScroll: true }); }); }
+/** SB-471: the scrolled lists inside the page, kept by position across a render (the page itself is the window's). */
+const INNER_SCROLLERS = '.move-options, .project-accounts, .folder-list, .stat-scroll';
+function scrollState(): { x: number; y: number; inner: number[] } {
+  return { x: window.scrollX, y: window.scrollY, inner: [...root.querySelectorAll<HTMLElement>(INNER_SCROLLERS)].map((node) => node.scrollTop) };
+}
+function keepScroll(state: { x: number; y: number; inner: number[] }) {
+  root.querySelectorAll<HTMLElement>(INNER_SCROLLERS).forEach((node, index) => { const top = state.inner[index]; if (top) node.scrollTop = top; });
+  if (window.scrollX !== state.x || window.scrollY !== state.y) window.scrollTo(state.x, state.y);
+}
 
 async function reload() {
   if (!native && !demo) { loading = false; render(); return; }
@@ -398,7 +409,7 @@ function render(options: { background?: boolean } = {}): boolean {
     shell.querySelectorAll<HTMLDetailsElement>('details').forEach((details) => { details.open = openDetails.has(details.querySelector<HTMLElement>('summary')?.dataset.focus); });
     const markup = shell.outerHTML;
     if (options.background && markup === lastRendered) return false;
-    lastRendered = markup; root.replaceChildren(shell); syncCountdown(); if (tourStep !== null) placeTour(); return true;
+    lastRendered = markup; const scroll = scrollState(); root.replaceChildren(shell); keepScroll(scroll); syncCountdown(); if (tourStep !== null) placeTour(); return true;
   };
   const withTour = () => {
     if (tourStep !== null && tourShown()) {
