@@ -1853,6 +1853,12 @@ check(() => {
   const goneOnly = logic.attentionView({ items: [{ reason: 'session_gone', launch_id: 'L-4', action: { tool: 'switchboard_dispatch_stop', window: 'dispatch_stop', if_gone: true } }] }).items[0];
   assert.equal(goneOnly.action.if_gone, true, 'a gone run only records its end');
   assert.equal(logic.attentionActionLabel(gone.action.window), 'Stop the run');
+  // SB-420: a Claude Code item too large to write is kept, with no button (window none).
+  const big = logic.attentionView({ items: [{ reason: 'keychain_too_large', provider: 'claude', item: 'ordinary', during: 'renewal', since: 9000, action: { tool: 'switchboard_status', window: 'none' } }] }).items[0];
+  assert.equal(big.reason, 'keychain_too_large'); assert.equal(big.action.window, 'none'); assert.equal(big.since, 9000);
+  assert.equal(logic.attentionActionLabel('none'), '', 'no button label');
+  assert.ok(logic.attentionReasonText('keychain_too_large').startsWith("Claude Code's sign-in is too large to write to the Keychain safely"));
+  assert.ok(!logic.attentionReasonText('keychain_too_large').includes('\u2014'));
   assert.ok(!logic.attentionReasonText('session_gone').includes('\u2014'));
   assert.equal(logic.dispatchStopNotice('stopped'), 'Stopped the board run.');
   assert.equal(logic.dispatchStopNotice('already_ended'), 'The board run had already ended. Its end is recorded now.');

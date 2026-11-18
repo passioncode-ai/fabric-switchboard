@@ -39,6 +39,7 @@ mod headless_login;
 pub mod health;
 pub mod hermes;
 mod inbox;
+pub mod item_size;
 pub mod kimi;
 pub mod launch;
 pub mod launch_keys;
@@ -118,7 +119,11 @@ pub fn rfc3339(seconds: i64) -> Option<String> {
         .ok()
 }
 
-/// No credential retrieval operation exists. Never derive Debug on this type.
+/// Never derive Debug on this type. Five operations answer a credential or key value:
+/// `AgentKey` (the agents' proxy key), `AgentKeyValue` and `AnthropicKeyValue` (a saved
+/// provider key), `SurrenderAccount` and `SurrenderDelegated` (a sign-in handed back to the
+/// machine that moved it). No MCP tool and no window command maps to any of them; the CLI
+/// refuses to print a provider key or a sign-in to a terminal or a file (SB-420).
 #[derive(Serialize, Deserialize)]
 #[serde(tag = "operation", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Operation {
@@ -1283,6 +1288,9 @@ pub(crate) struct NativeSources {
     pub(crate) activate: Activate,
     /// Claude Code's live credential item under its locks, for renewing it while idle.
     pub(crate) live: fn() -> Result<Box<dyn external::LiveItem>, String>,
+    /// SB-420: the Keychain stamp of Claude Code's credential item, from its attributes only
+    /// (nothing decrypted, no lock); None when unknown.
+    pub(crate) live_stamp: fn() -> Option<String>,
     /// Claude Swap's saved profiles, read on demand before switching to an account it holds.
     pub(crate) swap: fn() -> Result<external::ImportBatch, String>,
     /// Whether Claude Swap runs and switches, read from the process table in-process.
@@ -1314,6 +1322,7 @@ pub(crate) const UNAVAILABLE: NativeSources = NativeSources {
         Err("Current Claude credential is unavailable; activation was cancelled.".into())
     },
     live: no_live,
+    live_stamp: || None,
     swap: no_swap,
     swap_activity: external::SwapActivity::none,
     swap_signature: || None,
@@ -1335,6 +1344,7 @@ pub(crate) const NATIVE: NativeSources = NativeSources {
     fresh: Some(external::capture_current),
     activate: external::activate_claude,
     live: external::lock_live,
+    live_stamp: external::live_stamp,
     swap: external::read_claude_swap,
     swap_activity: external::claude_swap_activity,
     swap_signature: external::claude_swap_signature,
@@ -5504,6 +5514,7 @@ fn attention_report(
         watch: &session_watch::last(root),
         // SB-417: the board starts waiting since the pool last admitted one, with no cutoff.
         refusals: dispatch_refusals::waiting(root).as_ref(),
+        too_large: &item_size::read(root),
         now,
     }))
 }
@@ -5549,7 +5560,7 @@ async fn execute(
         // null offline, where no owner answered) and `online` says whether an owner runs,
         // beside the display string `live_mode`.
         Operation::Status => Ok(
-            json!({"proxy_address": runtime.map(|r| r.proxy.address().to_string()), "platform": std::env::consts::OS, "live_mode": if runtime.is_some() { "Next request · HTTP/SSE" } else { "Offline" }, "owner_version": runtime.map(|_| env!("CARGO_PKG_VERSION")), "owner_kind": runtime.map(|r| if r.app_doors().is_some() { "app" } else { "serve" }), "owner_copy": runtime.and_then(|_| copies::this_copy()).map(|c| c.to_string_lossy().into_owned()), "owner_updates_copy": runtime.map(|r| r.app_doors().is_some() || serve_update::updates_copy(root)), "online": runtime.is_some(), "vault": switchboard_core::vault_kind(root).ok()}),
+            json!({"proxy_address": runtime.map(|r| r.proxy.address().to_string()), "platform": std::env::consts::OS, "live_mode": if runtime.is_some() { "Next request · HTTP/SSE" } else { "Offline" }, "owner_version": runtime.map(|_| env!("CARGO_PKG_VERSION")), "owner_kind": runtime.map(|r| if r.app_doors().is_some() { "app" } else { "serve" }), "owner_copy": runtime.and_then(|_| copies::this_copy()).map(|c| c.to_string_lossy().into_owned()), "owner_updates_copy": runtime.map(|r| r.app_doors().is_some() || serve_update::updates_copy(root)), "online": runtime.is_some(), "vault": switchboard_core::vault_kind(root).ok(), "keychain_too_large": item_size::status(root)}),
         ),
         Operation::CurrentAccounts => match runtime {
             Some(runtime) => runtime.current_accounts(),
@@ -9547,7 +9558,17 @@ fn replace_native(
         }
         Ok(())
     };
-    (native.activate)(&credential, identity, expected.as_ref(), &mut preserve)?;
+    let activated = (native.activate)(&credential, identity, expected.as_ref(), &mut preserve);
+    // SB-420: only the write itself records or clears the refusal: a switch that returned
+    // early (the account already in use) wrote nothing and says nothing about the item's size.
+    item_size::note(
+        store.root(),
+        item_size::ORDINARY,
+        item_size::DURING_SWITCH,
+        &activated,
+        monitor::now(),
+    );
+    activated?;
     // SB-102: the switch has happened; failing to note its time must not report it as failed
     // (the monitor would set the account now in use aside and try another).
     if store.snapshot().is_ok_and(|s| {
@@ -12645,6 +12666,58 @@ mod owner_tests {
             );
             assert_eq!(stored.refresh_token.as_deref(), Some("synthetic-a-refresh"));
         }
+    }
+    /// SB-420: a switch refused because Claude Code's item is too large is recorded and shown;
+    /// one that returns early (the account already in use) leaves the record; one that writes
+    /// clears it.
+    #[tokio::test]
+    async fn a_switch_refused_as_too_large_is_recorded_until_a_switch_writes() {
+        static REFUSE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+        fn activate(
+            credential: &Credential,
+            identity: &ExternalIdentity,
+            expected: Option<&ExternalIdentity>,
+            preserve: &mut dyn FnMut(&external::Outgoing<'_>) -> Result<(), String>,
+        ) -> Result<(), String> {
+            if REFUSE.load(std::sync::atomic::Ordering::SeqCst) {
+                return Err(external::CREDENTIAL_TOO_LARGE.into());
+            }
+            activates(credential, identity, expected, preserve)
+        }
+        let root = tempfile::tempdir().unwrap();
+        let runtime = fixtures::runtime(root.path(), signed_in, activate).await;
+        runtime
+            .refresh
+            .set_profile_endpoint(profile_of("synthetic-a").await);
+        let a = stale_copy(&runtime.store, "default");
+        let b = save(&runtime.store, "synthetic-b", "default");
+        let switch = |id: String| {
+            let runtime = runtime.clone();
+            async move {
+                runtime
+                    .execute(Operation::ActivateNative { id, force: false })
+                    .await
+            }
+        };
+        assert_eq!(
+            switch(b.id.clone()).await.unwrap_err(),
+            external::CREDENTIAL_TOO_LARGE
+        );
+        let recorded = item_size::read(root.path());
+        assert_eq!(recorded.len(), 1);
+        assert_eq!(
+            (recorded[0].item.as_str(), recorded[0].during.as_str()),
+            (item_size::ORDINARY, item_size::DURING_SWITCH)
+        );
+        let attention = runtime.execute(Operation::Attention).await.unwrap();
+        assert_eq!(attention["items"][0]["reason"], "keychain_too_large");
+        // The account already in use: nothing written, so the record stays.
+        switch(a.id.clone()).await.unwrap();
+        assert_eq!(item_size::read(root.path()).len(), 1);
+        // A switch that writes clears it.
+        REFUSE.store(false, std::sync::atomic::Ordering::SeqCst);
+        switch(b.id.clone()).await.unwrap();
+        assert!(item_size::read(root.path()).is_empty());
     }
     #[tokio::test]
     async fn a_copy_newer_than_claude_codes_item_is_not_overwritten_on_switch() {

@@ -1419,6 +1419,13 @@ pub(crate) async fn renew_idle_live(
     {
         return Outcome::NotNeeded;
     }
+    // SB-420 (review round 3): an item already found too large to renew, not written since (its
+    // stamp, attributes only), is not locked and decrypted again every pass only to be refused.
+    if kept.is_none()
+        && crate::item_size::renewal_held(store.root(), (native.live_stamp)().as_deref())
+    {
+        return Outcome::NotNeeded;
+    }
     let Ok(live_lock) = (native.live)() else {
         return Outcome::Transient;
     };
@@ -1431,6 +1438,29 @@ pub(crate) async fn renew_idle_live(
         });
     if !unchanged {
         return Outcome::NotNeeded;
+    }
+    // SB-420 (review round 2, P1-D): a renewed item that could not be written without its value
+    // on the command line would be refused after the grant spent Claude Code's refresh token,
+    // leaving it a spent one. No grant then: Claude Code renews its own token when next used,
+    // and the refusal is shown.
+    // Measured as it would be written: `renewed_item` re-encodes the item (an escaped
+    // character read as `\uXXXX` is written as itself), with the current tokens in place of the
+    // new ones, whose growth the headroom covers.
+    if kept.is_none() {
+        let Some(probe) = renewed_item(&before, &live.credential) else {
+            return Outcome::Transient;
+        };
+        if !live_lock.fits(&probe) {
+            drop(live_lock);
+            crate::item_size::record_at_stamp(
+                store.root(),
+                crate::item_size::ORDINARY,
+                crate::item_size::DURING_RENEWAL,
+                time,
+                (native.live_stamp)(),
+            );
+            return Outcome::NotNeeded;
+        }
     }
     let kept = match kept {
         Some(kept) => kept,
@@ -1468,7 +1498,16 @@ pub(crate) async fn renew_idle_live(
     // SB-101: the provider has already spent the old token, so the successor goes into the
     // vault now — a quit or crash before the next pass must not leave it only in memory. The
     // kept copy stays, and the next pass still writes Claude Code's item first.
-    if live_lock.write(&item).is_err() {
+    let written = live_lock.write(&item);
+    // SB-420: an item too large to write is seen in `status` and Needs attention.
+    crate::item_size::note(
+        store.root(),
+        crate::item_size::ORDINARY,
+        crate::item_size::DURING_RENEWAL,
+        &written,
+        time,
+    );
+    if written.is_err() {
         drop(live_lock);
         let _held = hold_store(lock).await;
         let owner = kept
@@ -4453,6 +4492,13 @@ mod tests {
     thread_local! {
         static LIVE: std::cell::RefCell<Option<Vec<u8>>> = const { std::cell::RefCell::new(None) };
         static WRITE_FAILS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+        /// SB-420: the renewed item would not fit a write without its value on the command line.
+        static TOO_LARGE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+        /// SB-420: measure with the real fit check instead of the switch above.
+        static REAL_FIT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+        /// SB-420: how many times Claude Code's locks were taken, and the item's stamp.
+        static LIVE_CALLS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+        static STAMP: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
     }
     /// Claude Code's live item on this test's thread (`#[tokio::test]` is single-threaded).
     struct FakeLive;
@@ -4467,9 +4513,26 @@ mod tests {
             LIVE.with(|l| *l.borrow_mut() = Some(auth.to_vec()));
             Ok(())
         }
+        fn fits(&self, auth: &[u8]) -> bool {
+            #[cfg(unix)]
+            if REAL_FIT.with(|r| r.get()) {
+                return switchboard_core::security_cli::fits(
+                    "Claude Code-credentials",
+                    "user",
+                    auth,
+                    crate::external::RENEWAL_HEADROOM,
+                );
+            }
+            let _ = auth;
+            !TOO_LARGE.with(|t| t.get())
+        }
     }
     fn fake_live() -> Result<Box<dyn crate::external::LiveItem>, String> {
+        LIVE_CALLS.with(|c| c.set(c.get() + 1));
         Ok(Box::new(FakeLive))
+    }
+    fn fake_stamp() -> Option<String> {
+        STAMP.with(|s| s.borrow().clone())
     }
     /// Claude Code is signed in as synthetic-a and left its access token expired.
     fn idle_a(provider: Provider) -> Result<crate::external::CapturedProfile, String> {
@@ -4481,12 +4544,20 @@ mod tests {
         current: idle_a,
         activate: activates,
         live: fake_live,
+        live_stamp: fake_stamp,
         swap: crate::no_swap,
         ..crate::UNAVAILABLE
     };
     fn idle_setup(item: Value) -> (tempfile::TempDir, Arc<Store>) {
-        LIVE.with(|l| *l.borrow_mut() = Some(serde_json::to_vec(&item).unwrap()));
+        idle_setup_bytes(serde_json::to_vec(&item).unwrap())
+    }
+    fn idle_setup_bytes(item: Vec<u8>) -> (tempfile::TempDir, Arc<Store>) {
+        LIVE.with(|l| *l.borrow_mut() = Some(item));
         WRITE_FAILS.with(|f| f.set(false));
+        TOO_LARGE.with(|t| t.set(false));
+        REAL_FIT.with(|r| r.set(false));
+        LIVE_CALLS.with(|c| c.set(0));
+        STAMP.with(|s| *s.borrow_mut() = None);
         let root = tempfile::tempdir().unwrap();
         let store = store_with(
             root.path(),
@@ -4522,6 +4593,110 @@ mod tests {
                 .unwrap();
             assert_eq!(c.refresh_token.as_deref(), Some("fresh-refresh"));
         }
+    }
+    /// SB-420 (review round 2, P1-D): an item too large to write back is never renewed: no
+    /// grant is sent, so Claude Code keeps a refresh token that works and renews it itself; the
+    /// refusal is recorded once and shown.
+    #[tokio::test]
+    async fn an_item_too_large_to_write_back_is_not_renewed_and_no_grant_is_sent() {
+        let (url, calls) = endpoint((
+            200,
+            json!({"access_token":"fresh-access","expires_in":28800,"refresh_token":"fresh-refresh","account":{"uuid":"synthetic-a"}}),
+        ))
+        .await;
+        let (root, store) = idle_setup(IDLE_ITEM());
+        TOO_LARGE.with(|t| t.set(true));
+        let state = RefreshState::at(url);
+        for _ in 0..2 {
+            assert_eq!(
+                renew_idle_live(&store, IDLE_A, &state, None).await,
+                Outcome::NotNeeded
+            );
+        }
+        assert_eq!(calls.load(Ordering::SeqCst), 0, "no grant was sent");
+        assert_eq!(live_item(), IDLE_ITEM(), "Claude Code's item is untouched");
+        let recorded = crate::item_size::read(root.path());
+        assert_eq!(recorded.len(), 1);
+        assert_eq!(recorded[0].item, crate::item_size::ORDINARY);
+        assert_eq!(recorded[0].during, crate::item_size::DURING_RENEWAL);
+    }
+    /// SB-420 (review round 3): the fit is measured on the item as it would be written. Read with
+    /// `\uXXXX` escapes it is printable text that fits; re-encoded, the characters are not, and
+    /// as hex it would not fit: no grant is sent.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn the_fit_is_measured_on_the_item_as_it_would_be_written() {
+        let raw = |n: usize| {
+            format!(
+                r#"{{"claudeAiOauth":{{"accessToken":"synthetic-a-token","refreshToken":"synthetic-a-refresh","expiresAt":{}}},"mcpOAuth":{{"note":"{}"}}}}"#,
+                EXPIRED * 1000,
+                "\\u4e2d".repeat(n)
+            )
+            .into_bytes()
+        };
+        let fits = |bytes: &[u8]| {
+            switchboard_core::security_cli::fits(
+                "Claude Code-credentials",
+                "user",
+                bytes,
+                crate::external::RENEWAL_HEADROOM,
+            )
+        };
+        let credential = idle_a(Provider::Claude).unwrap().credential;
+        let item = (100..600)
+            .map(raw)
+            .find(|bytes| fits(bytes) && !fits(&renewed_item(bytes, &credential).unwrap()))
+            .expect("an item that fits as read and not as written");
+        let (url, calls) = endpoint((
+            200,
+            json!({"access_token":"fresh-access","expires_in":28800,"refresh_token":"fresh-refresh","account":{"uuid":"synthetic-a"}}),
+        ))
+        .await;
+        let (_root, store) = idle_setup_bytes(item.clone());
+        REAL_FIT.with(|r| r.set(true));
+        let state = RefreshState::at(url);
+        assert_eq!(
+            renew_idle_live(&store, IDLE_A, &state, None).await,
+            Outcome::NotNeeded
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), 0, "no grant was sent");
+        assert_eq!(LIVE.with(|l| l.borrow().clone()).unwrap(), item);
+    }
+    /// SB-420 (review round 3, the idle budget): once a renewal was refused as too large, each
+    /// later pass (a source sync every 180 s) probes the item's stamp only: no lock, nothing
+    /// decrypted, no grant, until the item is written again.
+    #[tokio::test]
+    async fn a_held_renewal_probes_only_the_stamp_until_the_item_changes() {
+        let (url, calls) = endpoint((
+            200,
+            json!({"access_token":"fresh-access","expires_in":28800,"refresh_token":"fresh-refresh","account":{"uuid":"synthetic-a"}}),
+        ))
+        .await;
+        let (root, store) = idle_setup(IDLE_ITEM());
+        TOO_LARGE.with(|t| t.set(true));
+        STAMP.with(|s| *s.borrow_mut() = Some("100:200".into()));
+        let state = RefreshState::at(url);
+        // An hour of passes, one every 180 s: the first takes the locks and reads the item.
+        for _ in 0..20 {
+            assert_eq!(
+                renew_idle_live(&store, IDLE_A, &state, None).await,
+                Outcome::NotNeeded
+            );
+        }
+        assert_eq!(LIVE_CALLS.with(|c| c.get()), 1, "locked and read once");
+        assert!(crate::item_size::renewal_held(root.path(), Some("100:200")));
+        // Claude Code wrote its item (a new stamp): it is looked at again, once.
+        STAMP.with(|s| *s.borrow_mut() = Some("100:300".into()));
+        for _ in 0..3 {
+            renew_idle_live(&store, IDLE_A, &state, None).await;
+        }
+        assert_eq!(LIVE_CALLS.with(|c| c.get()), 2);
+        assert!(crate::item_size::renewal_held(root.path(), Some("100:300")));
+        // An unknown stamp is never held.
+        STAMP.with(|s| *s.borrow_mut() = None);
+        renew_idle_live(&store, IDLE_A, &state, None).await;
+        assert_eq!(LIVE_CALLS.with(|c| c.get()), 3);
+        assert_eq!(calls.load(Ordering::SeqCst), 0, "no grant was ever sent");
     }
     #[tokio::test]
     async fn an_idle_renewal_issued_to_another_account_stays_with_claude_code_only() {

@@ -1393,7 +1393,8 @@ enum Accounts {
         limit: usize,
     },
     /// On the machine an account was moved to: give its sign-in back to the machine that calls
-    /// it back. Run only by `accounts recall` over ssh; it refuses to print to a terminal.
+    /// it back. Run by `accounts recall` over ssh; it refuses to print to a terminal or into a
+    /// file.
     Surrender {
         /// The account id on this machine.
         id: String,
@@ -1769,6 +1770,10 @@ enum AgentsCommand {
         /// With --service: exactly the machine's key, never a group's.
         #[arg(long, requires = "service", conflicts_with = "dir")]
         machine: bool,
+        /// With --service: print the key into the pipe the caller reads it from (a session
+        /// script's `$(...)`). Required: without it, or to a terminal or a file, it is refused.
+        #[arg(long, requires = "service")]
+        to_pipe: bool,
     },
     /// The OpenRouter key agents run on: save it (piped on stdin), see what it may still spend,
     /// change the default model, or remove it.
@@ -2006,6 +2011,10 @@ enum AnthropicCommand {
     Key {
         /// The key's name.
         name: String,
+        /// Print the key into the pipe the caller reads it from (a session script's `$(...)`).
+        /// Required: without it, or to a terminal or a file, it is refused.
+        #[arg(long)]
+        to_pipe: bool,
     },
 }
 #[derive(Subcommand)]
@@ -2263,6 +2272,52 @@ impl From<Kind> for AuthKind {
 enum Mode {
     Isolated,
     Managed,
+}
+/// SB-420: printed when a command that prints a key is run without `--to-pipe` or into a
+/// terminal or a file. Names the use, never the key.
+const KEY_TO_PIPE_ONLY: &str = "This prints a key, only for a session script that reads it from a pipe with --to-pipe. See what is saved with `switchboard agents openrouter status` or `switchboard agents anthropic list`.";
+
+/// SB-420: a command that prints a credential writes it only when its caller named the hand-over
+/// (`named`) and reads the value from a pipe or socket: never to a terminal, never into a file,
+/// never for a caller that did not ask for the value by name.
+fn value_output(named: bool, refusal: &str) -> Result<(), String> {
+    if named && stdout_is_pipe() {
+        Ok(())
+    } else {
+        Err(refusal.into())
+    }
+}
+fn stdout_is_pipe() -> bool {
+    if io::stdout().is_terminal() {
+        return false;
+    }
+    #[cfg(unix)]
+    {
+        // SAFETY: fstat writes only into the zeroed buffer it is given.
+        let mut status: libc::stat = unsafe { std::mem::zeroed() };
+        if unsafe { libc::fstat(libc::STDOUT_FILENO, &mut status) } != 0 {
+            return false;
+        }
+        let kind = status.st_mode & libc::S_IFMT;
+        kind == libc::S_IFIFO || kind == libc::S_IFSOCK
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::io::AsRawHandle;
+        #[link(name = "kernel32")]
+        extern "system" {
+            fn GetFileType(file: *mut std::ffi::c_void) -> u32;
+        }
+        const FILE_TYPE_PIPE: u32 = 3;
+        // SAFETY: GetFileType only reads the handle's type.
+        unsafe {
+            GetFileType(io::stdout().as_raw_handle() as *mut std::ffi::c_void) == FILE_TYPE_PIPE
+        }
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        false
+    }
 }
 fn read_secret() -> Result<String, String> {
     if io::stdin().is_terminal() {
@@ -2826,8 +2881,14 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                 remote_data_dir: remote_data_dir.clone(),
             },
             Accounts::Surrender { id, undo } => {
-                if !undo && io::stdout().is_terminal() {
-                    return Err(switchboard_runtime::account_send::SURRENDER_TO_TERMINAL.into());
+                // SB-420: the sign-in goes out only to the ssh call that asked for it by name.
+                if !undo {
+                    let named = std::env::var(switchboard_runtime::account_send::TRANSFER_ENV)
+                        .is_ok_and(|v| v == switchboard_runtime::account_send::TRANSFER_SURRENDER);
+                    value_output(
+                        named,
+                        switchboard_runtime::account_send::SURRENDER_TO_TERMINAL,
+                    )?;
                 }
                 Operation::SurrenderAccount {
                     id: id.clone(),
@@ -3672,7 +3733,9 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                 dir,
                 pool,
                 machine,
+                to_pipe,
             } => {
+                value_output(*to_pipe, KEY_TO_PIPE_ONLY)?;
                 use switchboard_runtime::spend::KeySlot;
                 // SB-213: a slot named is the key fetched, whatever group the folder is in now.
                 let slot = match (pool, machine) {
@@ -3743,7 +3806,8 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                 AnthropicCommand::Remove { name } => {
                     Operation::AnthropicKeyRemove { name: name.clone() }
                 }
-                AnthropicCommand::Key { name } => {
+                AnthropicCommand::Key { name, to_pipe } => {
+                    value_output(*to_pipe, KEY_TO_PIPE_ONLY)?;
                     Operation::AnthropicKeyValue { name: name.clone() }
                 }
             },
@@ -5930,12 +5994,21 @@ fn print_result(value: &Value, cli: &Cli) {
                 );
             }
         }
-        Command::Status => println!(
-            "Mode: {}\nPlatform: {}\nProxy: {}",
-            text(&value["live_mode"]),
-            text(&value["platform"]),
-            text(&value["proxy_address"])
-        ),
+        Command::Status => {
+            println!(
+                "Mode: {}\nPlatform: {}\nProxy: {}",
+                text(&value["live_mode"]),
+                text(&value["platform"]),
+                text(&value["proxy_address"])
+            );
+            // SB-420: a Claude Code Keychain item Switchboard could not write.
+            if value["keychain_too_large"]
+                .as_array()
+                .is_some_and(|items| !items.is_empty())
+            {
+                println!("{}", switchboard_runtime::item_size::DETAIL);
+            }
+        }
         Command::Capacity { .. } => print_capacity(value),
         _ => print_value(value, false),
     }
