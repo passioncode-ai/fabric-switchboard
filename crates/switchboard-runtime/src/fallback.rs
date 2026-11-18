@@ -404,6 +404,16 @@ pub(crate) fn executor_containment(executor: &Value) -> crate::agent_catalog::Co
     }
 }
 
+/// SB-481: the floor a workflow's walk keeps: its executor's containment as Switchboard starts
+/// it, `none` while sessions run with permissions bypassed (SB-298).
+pub(crate) fn executor_floor(executor: &Value, bypass: bool) -> crate::agent_catalog::Containment {
+    if bypass {
+        crate::agent_catalog::Containment::None
+    } else {
+        executor_containment(executor)
+    }
+}
+
 /// A workflow run by Kimi Code on a saved Kimi account that the background view finds limited
 /// (SB-99). Only `accountRef` decides: the ordinary `kimi` is shown, not watched.
 pub(crate) fn kimi_executor_limited(
@@ -891,8 +901,9 @@ pub(crate) async fn pass_with_reads<F, Fut, R, RFut>(
             },
         };
         examined += 1;
-        // SB-82 D-6: no step that asks less before acting than this workflow's executor.
-        kimi.floor = executor_containment(&executor);
+        // SB-82 D-6: no step that asks less before acting than this workflow's executor. SB-481:
+        // with permissions bypassed (SB-298) the executor asks for nothing, so nothing is looser.
+        kimi.floor = executor_floor(&executor, crate::agent_settings::bypass(&runtime.root));
         // C-8: the group's chain is chosen by the checkout below, so the engine is asked for it
         // whenever a chain could apply: the workflow's, the executor group's or the machine's
         // (as before), or any group's.
@@ -2445,6 +2456,14 @@ mod tests {
         // An executor the engine names otherwise gets nothing looser than asking.
         assert_eq!(of("someone-else"), Containment::Asks);
         assert_eq!(executor_containment(&Value::Null), Containment::Asks);
+        // SB-481: with permissions bypassed (the default since SB-298) a Claude Code executor asks
+        // for nothing, so Kimi Code and Hermes may follow it; asking keeps the floor.
+        let claude = json!({ "provider": "claude-code" });
+        assert_eq!(executor_floor(&claude, true), Containment::None);
+        assert_eq!(executor_floor(&claude, false), Containment::Asks);
+        let codex = json!({ "provider": "codex" });
+        assert_eq!(executor_floor(&codex, true), Containment::None);
+        assert_eq!(executor_floor(&codex, false), Containment::Asks);
     }
 
     #[test]
