@@ -8,6 +8,9 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- A session Switchboard launched in a Git worktree is now served by its own group (SB-452). Before this fix, Claude Code read the worktree's local settings from its main checkout, so a launch in a worktree of another group than its main checkout's ran on the main checkout's group: on 2026-11-18 a launch for the pay-per-token group ran on another group's subscriptions, its key was never used and its ceiling never counted anything. Every managed Claude launch now passes its home's own route file (`switchboard-route.json`) as `--settings`, last on its command line, which Claude Code ranks above a folder's local settings; a session the duty officer, a restart wave or *Continue* resumes keeps it. The proxy refuses a request whose launch named another group than its route when one of the two is the pay-per-token group, and counts every request served by another group than its own (`mismatched` in `switchboard statistics`, `proxy_group_mismatch` in the log). A `claude` you start yourself in such a worktree still takes its main checkout's group and is counted the same way: launch it with Switchboard.
+- A short rate limit of the pay-per-token group's key no longer stops a session (SB-453, DEC-0031): when the provider refuses a request for its rate limit and asks for a wait of 30 seconds or less, Switchboard waits and sends the same request again on the same key before the session has seen anything, up to three tries and 60 seconds in all, checking the group's switch and ceiling again first. A longer wait, a third refusal or a provider that says not to retry reaches the session as before.
+
 ## 0.7.119
 
 - 0.7.119 carries 0.7.118's changes, which were tagged but never published: a Keychain constant used only on macOS stopped the Linux build's lint, so the release stopped before any package was built. Nothing a person runs changed by that fix.

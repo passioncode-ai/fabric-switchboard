@@ -28,6 +28,30 @@ pub struct Login {
 }
 /// SB-259: names the operator's own Claude folder in a session Switchboard launched.
 pub(crate) const SOURCE_DIR: &str = "SWITCHBOARD_CLAUDE_SOURCE_DIR";
+/// SB-452: a managed Claude home's own route (0600): the proxy's route of the launch's group,
+/// its token and the launch's group, passed as `--settings`, which Claude Code ranks above a
+/// folder's `.claude/settings.local.json` (and a worktree's, which it reads from the main
+/// checkout). Rewritten at each launch and repointed with `launch.command` when the proxy moves.
+pub(crate) const ROUTE_FILE: &str = "switchboard-route.json";
+/// SB-452: the argument that gives a Claude session its home's route file, last on its command
+/// line (a later `--settings` would replace it whole).
+pub(crate) fn route_arg(home: &Path) -> String {
+    format!("--settings={}", home.join(ROUTE_FILE).to_string_lossy())
+}
+/// SB-452: writes `home`'s route file for a managed Claude session of `pool` through `base`.
+fn write_route(home: &Path, base: &str, token: &str, pool: &str) -> Result<(), String> {
+    let route = json!({"env": {
+        "ANTHROPIC_BASE_URL": base,
+        "ANTHROPIC_AUTH_TOKEN": token,
+        "ANTHROPIC_API_KEY": "",
+        "ANTHROPIC_CUSTOM_HEADERS": format!("X-Switchboard-Launch-Group: {pool}"),
+    }});
+    private_write(
+        &home.join(ROUTE_FILE),
+        serde_json::to_string(&route).unwrap().as_bytes(),
+        false,
+    )
+}
 pub(crate) const CONFLICTS: &[&str] = &[
     "ANTHROPIC_API_KEY",
     "ANTHROPIC_AUTH_TOKEN",
@@ -797,6 +821,7 @@ pub(crate) fn repoint_managed(
             ("launch.command", true),
             ("launch.ps1", true),
             ("config.toml", false),
+            (ROUTE_FILE, false),
         ] {
             let path = home.path().join(name);
             let Ok(bytes) = switchboard_core::private_fs::read_private(&path, 256 * 1024) else {
@@ -3243,6 +3268,7 @@ fn launch_core(
         );
         match account.provider {
             Provider::Claude => {
+                write_route(&home, &base, proxy.token(), &pool)?;
                 env.insert("ANTHROPIC_BASE_URL".into(), base);
                 env.insert("ANTHROPIC_AUTH_TOKEN".into(), proxy.token().into());
                 env.insert("ANTHROPIC_API_KEY".into(), String::new());
@@ -3316,8 +3342,13 @@ fn launch_core(
     // config file; a caller's own `--mcp-config` still adds to it (SB-94, measured on 2.1.296).
     let config = config.map(|path| format!("--mcp-config={path}"));
     // SB-247: a dispatched run starts no interactive session (`headless_args`).
+    // SB-452: a managed Claude session takes its route from its home's own file, whatever a
+    // folder's (or its main checkout's) local settings say.
+    let route =
+        (mode == "managed" && account.provider == Provider::Claude).then(|| route_arg(&home));
     if let Some(h) = headless {
-        let args = headless_args(account.provider, config.as_deref(), h);
+        let mut args = headless_args(account.provider, config.as_deref(), h);
+        args.extend(route.clone());
         let launch_id = crate::launches::new_id();
         env.insert(crate::launches::ENV.into(), launch_id.clone());
         env.insert(DISPATCH_ENV.into(), h.workflow.clone());
@@ -3377,6 +3408,12 @@ fn launch_core(
         args.push(first.as_str());
     }
     args.extend(extra.iter().map(String::as_str));
+    // SB-452: last, so a caller's own `--settings` cannot replace it; before a caller's `--`, after
+    // which it would be read as a prompt.
+    if let Some(route) = &route {
+        let at = args.iter().position(|a| *a == "--").unwrap_or(args.len());
+        args.insert(at, route.as_str());
+    }
     // SB-212: the session's own launch id, for the record and for what it launches.
     let launch_id = crate::launches::new_id();
     env.insert(crate::launches::ENV.into(), launch_id.clone());
@@ -7025,6 +7062,8 @@ mod tests {
             "--dangerously-skip-permissions".to_string(),
         ];
         expected.extend(sent.iter().cloned());
+        // SB-452: the home's own route, last (Claude Code 2.1.327 takes it after the prompt too).
+        expected.push(route_arg(ours.parent().unwrap()));
         assert_eq!(args, expected);
         no_value_is_read_as_a_config(&args);
         for (key, value) in context {
@@ -7615,7 +7654,68 @@ mod tests {
                 "--mcp-config={}",
                 home.join("switchboard-mcp.json").to_string_lossy()
             ))));
+            // SB-452: the home's own route, last on the command line, so a folder's (or a
+            // worktree's main checkout's) local settings cannot send the session elsewhere.
+            let route = quote(&route_arg(&home));
+            let exec = text.lines().find(|l| l.starts_with("exec ")).unwrap();
+            assert!(exec.ends_with(&route), "{exec}");
         }
+        let file = home.join(ROUTE_FILE);
+        let route: serde_json::Value = serde_json::from_slice(&fs::read(&file).unwrap()).unwrap();
+        assert_eq!(
+            route,
+            json!({"env": {
+                "ANTHROPIC_BASE_URL": format!("http://{}/claude/work", proxy.address()),
+                "ANTHROPIC_AUTH_TOKEN": proxy.token(),
+                "ANTHROPIC_API_KEY": "",
+                "ANTHROPIC_CUSTOM_HEADERS": "X-Switchboard-Launch-Group: work",
+            }})
+        );
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                fs::metadata(&file).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
+        }
+    }
+    /// SB-452: a caller's own words come before the home's route, and a caller's `--` after it.
+    #[cfg(not(windows))]
+    #[tokio::test]
+    async fn the_launch_route_follows_a_callers_words_and_precedes_its_end_of_options() {
+        let f = fixture();
+        let proxy = ProxyHandle::start(f.store.clone()).await.unwrap();
+        let id = f.add(Provider::Claude, AuthKind::OAuth, "work", CLAUDE_OAUTH);
+        f.store.select(Provider::Claude, "work", &id).unwrap();
+        let (_, script) = launch_full(
+            &f.root,
+            &f.store,
+            &proxy,
+            &id,
+            "managed",
+            &f.project,
+            &TEST_HOST,
+            None,
+            &[
+                "--settings".into(),
+                "/theirs.json".into(),
+                "--".into(),
+                "-x".into(),
+            ],
+            true,
+        )
+        .unwrap();
+        let home = f.root.join("runtimes").join("claude-work");
+        let text = fs::read_to_string(script.unwrap()).unwrap();
+        let exec = text.lines().find(|l| l.starts_with("exec ")).unwrap();
+        assert!(
+            exec.ends_with(&format!(
+                "'--settings' '/theirs.json' {} '--' '-x'",
+                quote(&route_arg(&home))
+            )),
+            "{exec}"
+        );
     }
     #[cfg(not(windows))]
     #[tokio::test]
