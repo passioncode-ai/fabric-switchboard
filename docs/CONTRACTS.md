@@ -613,7 +613,10 @@ Design: [XA-01](packets/cross-agent-continuation.md) (operator decision D-1: aut
   Claude Code and Codex `asks`, Kimi Code `none`, an executor the engine names otherwise `asks`) and passes over every
   step of a weaker class as `permission_mode` (probe `refused`), before its account, key or spend is looked at. So
   after a Claude Code or Codex executor only Claude Code or Codex take over; the `subscriptions-first` preset's Kimi
-  Code and Hermes steps serve a Kimi Code executor. `switchboard continue` by hand and the chain view do not apply it;
+  Code and Hermes steps serve a Kimi Code executor. Since SB-481 the floor is the executor's class as Switchboard
+  starts it (`fallback::executor_floor`): while Claude Code and Codex run with permissions bypassed (SB-298, the
+  default since 2026-11-07, `switchboard agents permissions`), they ask for nothing either, the floor is `none` and
+  Kimi Code and Hermes take a limited workflow over; only with `ask` does the rule above hold. `switchboard continue` by hand and the chain view do not apply it;
   the chain view's steps carry `containment` (`asks` or `none`, SB-245), and the window adds “Takes no Claude Code or
   Codex task.” to a ready step of class `none` and names the three new skip reasons (`not_installed`, `quota_unknown`,
   `permission_mode`) in its readiness and *Passed over* lines (SCN-082). Tests:
