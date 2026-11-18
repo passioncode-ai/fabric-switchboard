@@ -213,3 +213,24 @@ fn a_rename_that_names_no_switch_leaves_an_account_used_elsewhere_as_it_was() {
     store.mark_elsewhere(&id, false, 20).unwrap();
     assert!(account(&store, &id).usable());
 }
+
+/// Review round 2 of PR #821 (P1-A): turning on an account the person turned off while it is
+/// marked as used on another machine takes back only their word; the mark stays, and *Use here*
+/// (clearing the mark) brings it home on.
+#[test]
+fn turning_on_an_account_off_and_used_elsewhere_keeps_its_mark() {
+    let (_root, _vault, store, id) = setup();
+    store
+        .mark_elsewhere_at(&id, true, 10, Some("studio"))
+        .unwrap();
+    store.update_fields(&id, None, Some(false)).unwrap();
+    store.update_fields(&id, None, Some(true)).unwrap();
+    let s = store.snapshot().unwrap();
+    let a = account(&store, &id);
+    assert!(a.off.is_none() && !a.enabled);
+    assert!(s.elsewhere.contains_key(&id) && s.locations.contains_key(&id));
+    assert_eq!(off::availability(&s, &a), "elsewhere");
+    assert!(s.events.iter().any(|e| e.action == off::TURNED_ON));
+    store.mark_elsewhere(&id, false, 20).unwrap();
+    assert!(account(&store, &id).usable());
+}

@@ -1366,8 +1366,6 @@ export function chainSummary(executors: readonly ChainExecutor[] | null | undefi
     return label ? `${name} (${label})` : name;
   }).join(' → ');
 }
-/** Why a step would be passed over, as a phrase: the chains view's readiness reasons and the
- * hand-over gate's (fallback.rs, spend gate C-5). An unknown code is shown as itself. */
 /**
  * W1.2 (DEC-0027), review round 1 of PR #821: what the *Edit account* dialog sends for its switch.
  * Untouched, nothing (`undefined`), so renaming an account that is off for another reason (used
@@ -1376,6 +1374,8 @@ export function chainSummary(executors: readonly ChainExecutor[] | null | undefi
 export function editedEnabled(enabledNow: boolean, checked: boolean): boolean | undefined {
   return checked === enabledNow ? undefined : checked;
 }
+/** Why a step would be passed over, as a phrase: the chains view's readiness reasons and the
+ * hand-over gate's (fallback.rs, spend gate C-5). An unknown code is shown as itself. */
 export function skipReasonText(reason: string | null | undefined, agent?: string): string | null {
   // Q2 item 32: Hermes and OpenCode run on the OpenRouter key, not on an account.
   if (reason === 'no_usable_account' && (agent === 'hermes' || agent === 'opencode')) return t('no OpenRouter key ready');

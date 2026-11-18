@@ -202,9 +202,9 @@ pub fn delegated_to(root: &Path, snapshot: &Snapshot, machine: &str) -> Vec<(Str
         .iter()
         .filter(|a| a.pool == pool)
         // W1.2 (DEC-0027), review round 1 of PR #821: a seat the person here turned off is not
-        // extended, so it lapses on the teammate's machine at the end of its lease; turned on
-        // again, the next read extends it (`extend_lease` brings back a lapsed seat whose
-        // sign-in is still there).
+        // extended, so it lapses on the teammate's machine at the end of its lease. Turning it on
+        // again keeps it in this group with its record (review round 2, P1-A), so the next read
+        // extends it (`extend_lease` brings back a lapsed seat whose sign-in is still there).
         .filter(|a| a.off.is_none())
         .filter_map(|a| {
             // The store's record (review P2-5), else the move's `seats.jsonl` line.
@@ -489,6 +489,10 @@ mod tests {
         let a1 = s.accounts.iter_mut().find(|a| a.id == "a1").unwrap();
         a1.off = Some(switchboard_core::TurnedOff::by_person(5));
         assert!(delegated_to(root.path(), &s, "studio").is_empty());
+        // Review round 2 (P1-A): turned on again, it stays in the machine's group with its
+        // record, so the next read extends it.
+        s.accounts.iter_mut().find(|a| a.id == "a1").unwrap().off = None;
+        assert_eq!(delegated_to(root.path(), &s, "studio").len(), 1);
     }
 
     #[test]

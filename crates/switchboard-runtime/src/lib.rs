@@ -5704,9 +5704,19 @@ async fn execute(
         } => {
             // SB-315: a sign-in moved to another machine and not called back has its holder there;
             // using it here too would renew it from two places.
+            // W1.2 review round 2 of PR #821 (P1-A): turning on an account the person turned
+            // off clears only their word and keeps its mark, so it clears nothing here. P2-6:
+            // the store's record of a seat delegated out counts as a move too.
+            let snapshot = store.snapshot()?;
+            let turned_off = snapshot
+                .accounts
+                .iter()
+                .any(|a| a.id == id && a.off.is_some());
             let clearing = elsewhere == Some(false)
-                || (enabled == Some(true) && store.snapshot()?.elsewhere.contains_key(&id));
-            if clearing && !force && seats::outstanding(root, &id).is_some() {
+                || (enabled == Some(true) && !turned_off && snapshot.elsewhere.contains_key(&id));
+            let moved =
+                seats::outstanding(root, &id).is_some() || snapshot.delegated_out.contains_key(&id);
+            if clearing && !force && moved {
                 return Err(account_send::MOVED_AWAY.into());
             }
             if label.is_some() || enabled.is_some() || (elsewhere.is_none() && location.is_none()) {
@@ -14773,6 +14783,77 @@ mod usage_gate_tests {
         assert!(spend::read(root.path())
             .map(|f| f.loosened.is_empty())
             .unwrap_or(true));
+    }
+
+    /// W1.2 review round 2 of PR #821 (P1-A, P2-6): a seat delegated to a teammate that the
+    /// person turns off is not extended; turning it on (`Operation::Update`, as the window and
+    /// MCP do) clears only their word, is not refused as a move, and keeps the seat in the
+    /// machine's group with its record, so the next read extends it again.
+    #[tokio::test]
+    async fn a_seat_delegated_out_turned_off_and_on_is_extended_again() {
+        let root = tempfile::tempdir().unwrap();
+        let runtime = fixtures::runtime(root.path(), signed_out, activates).await;
+        let id = fixtures::save(&runtime.store, "synthetic-seat", "default").id;
+        let at = switchboard_core::MachineRef {
+            target: "studio".into(),
+            identity: None,
+            aliases: vec![],
+        };
+        runtime.store.join_machine(&id, &at, 5).unwrap();
+        runtime
+            .store
+            .record_delegated_out(
+                &id,
+                switchboard_core::DelegatedOut {
+                    remote_id: "0b1edeee-4125-403c-9c12-44c6aadaeb2b".into(),
+                    lease_hours: 48,
+                    sender_key: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=".into(),
+                    sent: None,
+                },
+            )
+            .unwrap();
+        let switch = |enabled: bool| Operation::Update {
+            id: id.clone(),
+            label: None,
+            enabled: Some(enabled),
+            elsewhere: None,
+            location: None,
+            force: false,
+        };
+        let extended = || {
+            remote_usage::delegated_to(root.path(), &runtime.store.snapshot().unwrap(), "studio")
+        };
+        assert_eq!(extended().len(), 1);
+        runtime.execute(switch(false)).await.unwrap();
+        assert!(extended().is_empty());
+        runtime.execute(switch(true)).await.unwrap();
+        let s = runtime.store.snapshot().unwrap();
+        let a = s.accounts.iter().find(|a| a.id == id).unwrap();
+        assert!(a.off.is_none() && !a.enabled);
+        assert!(switchboard_core::is_machine_pool(&a.pool));
+        assert!(s.elsewhere.contains_key(&id) && s.delegated_out.contains_key(&id));
+        assert_eq!(
+            extended(),
+            vec![(
+                "0b1edeee-4125-403c-9c12-44c6aadaeb2b".to_owned(),
+                48,
+                "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=".to_owned()
+            )]
+        );
+        // P2-6: clearing the mark of a seat the store records as delegated out is a move to
+        // call back, even with no `seats.jsonl` line.
+        let use_here = Operation::Update {
+            id: id.clone(),
+            label: None,
+            enabled: None,
+            elsewhere: Some(false),
+            location: None,
+            force: false,
+        };
+        assert_eq!(
+            runtime.execute(use_here).await.unwrap_err(),
+            account_send::MOVED_AWAY
+        );
     }
 
     #[tokio::test]

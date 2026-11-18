@@ -2238,6 +2238,8 @@ impl Store {
         }
         let mut state = self.lock()?;
         let mut candidate = state.clone();
+        // W1.2 review round 2 of PR #821 (P1-A): whether an automatic reason also keeps it off.
+        let held = off::held_away(&candidate, id);
         let a = candidate
             .accounts
             .iter_mut()
@@ -2252,12 +2254,20 @@ impl Store {
             Some(false) => off::turn_off(&mut candidate, id, now())?.then_some(off::TURNED_OFF),
             Some(true) => {
                 let was_off = a.off.take().is_some();
-                a.enabled = true;
-                // Enabling an account here says it is used here (SB-175), so it comes home from
-                // its machine's group (SB-355).
-                candidate.elsewhere.remove(id);
-                candidate.locations.remove(id);
-                machines::come_home(&mut candidate, id, None);
+                if was_off && held {
+                    // W1.2 review round 2 of PR #821 (P1-A): turning on what the person turned
+                    // off takes back only their word. An account used on another machine, in a
+                    // machine group or delegated out stays there (the next read extends a seat
+                    // delegated out again; *Use here* or a call back brings it home), and a seat
+                    // whose lease ran out or that its sender called back stays switched off.
+                } else {
+                    a.enabled = true;
+                    // Enabling an account here says it is used here (SB-175), so it comes home
+                    // from its machine's group (SB-355).
+                    candidate.elsewhere.remove(id);
+                    candidate.locations.remove(id);
+                    machines::come_home(&mut candidate, id, None);
+                }
                 was_off.then_some(off::TURNED_ON)
             }
             None => None,

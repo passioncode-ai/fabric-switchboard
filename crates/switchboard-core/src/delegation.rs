@@ -42,6 +42,7 @@ pub const DELEGATED_NOT_NATIVE: &str = "This seat was delegated to this computer
 pub const NOT_DELEGATED_BY_YOU: &str =
     "This computer holds no seat with that id that the calling machine delegated.";
 pub const LEASE_ENDED: &str = "This seat's lease ran out, so it is switched off here. The machine that delegated it extends its lease to use it again, or calls it back.";
+pub const SEAT_CALLED_BACK: &str = "The machine that delegated this seat called it back, so it is switched off here until that machine delegates it again.";
 pub const SIGN_IN_REMOVED: &str = "This seat's sign-in was removed from this computer 30 days after its lease ran out. The machine that delegated it signs in to the account again and delegates it again.";
 pub const GROUP_HOLDS_GUEST: &str = "This group holds a seat another machine delegated to this computer. Ask that machine to call the seat back before deleting the group.";
 pub const LEASE_INVALID: &str = "Give the lease in whole hours, from 1 to 720.";
@@ -196,6 +197,11 @@ pub(crate) fn stays(old: &Snapshot, new: &Snapshot) -> Result<(), String> {
         if d.ended_at.is_some() && (account.enabled || new.routes.values().any(|v| v == id)) {
             return Err(LEASE_ENDED.into());
         }
+        // W1.2 review round 2 of PR #821 (P2-3): a seat its sender called back stays switched
+        // off here until the sender delegates it again or undoes the call back.
+        if d.surrendered_at.is_some() && (account.enabled || new.routes.values().any(|v| v == id)) {
+            return Err(SEAT_CALLED_BACK.into());
+        }
         match old.delegated.get(id) {
             Some(o) => {
                 // A seat may come back from an ended lease (the sender extended it) while its
@@ -316,8 +322,9 @@ impl crate::Store {
         self.save_delegated(label, provider, pool, credential, delegation)
     }
     /// The sender extends a seat's lease to `hours` from now (shorter or longer). A seat whose
-    /// lease ended comes back on while its credential is still here (a sender that was offline
-    /// over a weekend); once its credential is removed it does not.
+    /// lease ended, or that it had called back, comes back on while its credential is still here
+    /// (a sender that was offline over a weekend) unless the person here turned it off; once its
+    /// credential is removed it does not.
     pub fn extend_lease(&self, id: &str, sender_key: &str, hours: u32) -> Result<i64, String> {
         if !lease_valid(hours) {
             return Err(LEASE_INVALID.into());
@@ -328,12 +335,16 @@ impl crate::Store {
         if d.purged() {
             return Err(SIGN_IN_REMOVED.into());
         }
-        let revived = d.ended_at.is_some();
+        // W1.2 review round 2 of PR #821 (P2-2): an extension is the sender's word that the seat
+        // is delegated here again, a call back recorded here included (the sender extends only
+        // the seats it still records as delegated), so it clears that record too.
+        let revived = d.ended_at.is_some() || d.surrendered_at.is_some();
         let until = time + i64::from(hours) * 3600;
         let mut candidate = state.clone();
         if let Some(d) = candidate.delegated.get_mut(id) {
             d.lease_until = until.max(d.granted_at + 1);
             d.ended_at = None;
+            d.surrendered_at = None;
         }
         if revived {
             if let Some(a) = candidate.accounts.iter_mut().find(|a| a.id == id) {

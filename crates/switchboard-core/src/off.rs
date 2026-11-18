@@ -80,6 +80,20 @@ pub fn availability(s: &Snapshot, a: &Account) -> &'static str {
     }
 }
 
+/// W1.2 review round 2 of PR #821 (P1-A): whether account `id` is off for an automatic reason
+/// besides the person's word: used on another machine, in a machine group, delegated out, or a
+/// seat delegated here whose lease ran out or that its sender called back. Turning such an account
+/// on clears only the person's word and leaves it where it is.
+pub(crate) fn held_away(s: &Snapshot, id: &str) -> bool {
+    s.elsewhere.contains_key(id)
+        || s.delegated_out.contains_key(id)
+        || s.accounts
+            .iter()
+            .any(|a| a.id == id && crate::is_machine_pool(&a.pool))
+        || s.delegated.get(id).is_some_and(|d| d.ended_at.is_some())
+        || seat_called_back(s, id)
+}
+
 /// A seat another machine delegated here that its sender called back: its record says so
 /// (`Delegation::surrendered_at`, since 0.7.118), or, for a record written before, the newest
 /// journal entry about it is its call back while the journal still holds one.

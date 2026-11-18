@@ -266,6 +266,8 @@ const safeErrors = new Set([
   "This seat was delegated to this computer by another machine, so it is not given to an agent.",
   "This seat was delegated to this computer by another machine. Ask that machine to call it back; it can be removed here 30 days after its lease ran out.",
   "This seat was delegated to this computer by another machine. It serves its group's sessions only and never becomes the ordinary Claude Code or Codex sign-in.",
+  // W1.2 review round 2 of PR #821 (P2-3): a seat its sender called back.
+  "The machine that delegated this seat called it back, so it is switched off here until that machine delegates it again.",
   "This seat's lease ran out, so it is switched off here. The machine that delegated it extends its lease to use it again, or calls it back.",
   "Give the lease in whole hours, from 1 to 720.",
   "A delegated seat joins one of the other machine's groups. Name that group; the default group takes none.",

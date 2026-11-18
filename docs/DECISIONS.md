@@ -851,6 +851,12 @@ research notes); the ones still in force that the board cites are seeded below w
     turned off is no longer extended, so it lapses on the teammate's machine at the end of its
     lease; a copy moved without a lease keeps working where it is until it is called back. The
     switch says what this computer does: every surface says nothing on this computer uses it.
+  - Turning on takes back only the person's word (review round 2 of PR #821): an account the
+    person turned off that is also off for an automatic reason (used on another machine, in a
+    machine group, delegated out, a seat whose lease ran out or that its sender called back)
+    keeps that reason, so a seat delegated out is extended again at the next read and *Use here*
+    or a call back stays the way home. An account not turned off by the person comes home on
+    as before. A sender's extension clears a call back recorded on the seat.
   - A backup carries the off beside the accounts (`off`, old account id to `{since, by}`), so a
     0.7.117 or older reader still restores them (off, as before); a restore saves each new account
     in its backed-up state in the save's one publication. A backup from before carries none: an
