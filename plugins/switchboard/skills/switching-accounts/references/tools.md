@@ -109,7 +109,7 @@ What needs a person, one item per account or question:
 | `session_duplicate` | one Claude Code session runs in two processes | `switchboard_session_close_copy` with the item's `session_id` |
 | `session_stuck` | a board run quiet for 30 minutes, its log included | `switchboard_dispatch_stop` with the item's `launch_id` (`action.command` is the CLI act) |
 | `session_gone` | a board run whose process ended with no end recorded | `switchboard_dispatch_stop` with the item's `launch_id` and `if_gone` (records the end, never signals a live run) |
-| `dispatch_refused` | board runs refused at this computer's session limit in the last hour (`count`, `newest_request`, `freed`) | `switchboard_capacity` (its `refused_last_hour`) |
+| `dispatch_refused` | board runs refused at this computer's session limit that still wait, however long ago (`count`, `since`, `last_at`, `newest_request`, `freed`) | `switchboard_capacity` (its `refused_waiting`) |
 
 A view: every account listed stays in its group with its selection, and nothing moves; once
 fixed it leaves the list on the next background pass. Read-only, also on a read-only server.
@@ -832,17 +832,27 @@ or keeps it away; `default` sets the machine's default agent (an id, or null for
 `permissions` (`bypass`, the default, or `ask`) chooses whether the Claude Code and Codex
 sessions Switchboard starts bypass their permission prompts (SB-298).
 
-### `switchboard_capacity`: `cap?`, `clear?`
+### `switchboard_capacity`: `cap?`, `board?`, `board_default?`, `clear?`
 
-This computer's cap on live coding sessions (SB-378). Without arguments it reads:
-`{cap, used, free, at_capacity, total, quiet, counted, quiet_after_minutes, observed_at, degraded}`.
-`used` counts the live Claude Code and Codex processes of this user, Switchboard's or not, whose
-folder's transcripts were written in the last 30 minutes; quiet ones are not counted. `cap` (1 to
-500) sets the cap and `clear: true` removes it; change it only when the operator asks. While
-`used` reaches `cap`, `switchboard dispatch` answers `state: refused`, `reason: at_capacity` with
-`used` and `cap`, and `launch --hosted` is refused with "At capacity: …": a wait, not a failed run.
-Ask again when a session ends. A process table that could not be read admits the start and is
-named in `degraded`.
+This computer's cap on live coding sessions (SB-378) and the board's share of it (SB-417). Without
+arguments it reads: `{cap, board_share, board_share_set, used, free, at_capacity, board_used,
+board_free, board_admitted, total, quiet, on_limit_stop, on_waits, pending, waiting, refused_waiting,
+refused_last_hour, counted, quiet_after_minutes, observed_at, degraded}`. `used` counts the live
+Claude Code and Codex sessions of this user, Switchboard's or not, that do work: a Claude Code
+session by its own transcript and status (in a turn: counted however long it is silent and
+whatever it waits on; outside a turn, not counted when quiet for 30 minutes, on a limit stop or on
+a wait of its own: a wake-up, a monitor, a cron job, a hold); a process with no session file counts by its folder.
+`cap` (1 to 500) sets the cap and keeps a share set before, clamped to it (`board_share_clamped`),
+`board` (0 to the cap) sets the board's share (with `cap`, or on the cap already set),
+`board_default: true` goes back to the default share, `clear: true` removes both; change them only when the
+operator asks. The default share is a quarter of the cap, rounded up (cap 1 to 4: 1). A board run (`switchboard
+dispatch`, or `launch --hosted --surface fabric`) starts while `used` is under `cap` or
+`board_used` is under `board_share`; when neither holds, `dispatch` answers `state: refused`,
+`reason: at_capacity` with `used`, `cap`, `board_used` and `board_share`. Any other
+`launch --hosted` is refused at the cap with "At capacity: …". Either is a wait, not a failed run:
+ask again when a session ends. `refused_waiting` (null when none) holds the board runs refused
+since the pool last admitted one, however long ago: `count`, `since`, `last_at`, `newest_request`,
+`freed`. A process table that could not be read admits the start and is named in `degraded`.
 
 ### `switchboard_own_sign_in`: `on?`
 

@@ -59,15 +59,16 @@ pub struct Inputs<'a> {
     pub remote: &'a crate::remote_usage::State,
     /// SB-379: the one-minute watch's last findings (`session_watch::last`).
     pub watch: &'a [Value],
-    /// SB-412: the last hour's dispatches refused at the session limit
-    /// (`dispatch_refusals::last_hour`), or none.
+    /// SB-412, SB-417: the dispatches refused at the session limit that still wait
+    /// (`dispatch_refusals::waiting`), or none.
     pub refusals: Option<&'a Value>,
     pub now: i64,
 }
 
-/// SB-412: dispatches refused at this computer's session limit in the last hour.
+/// SB-412: dispatches refused at this computer's session limit. SB-417: listed while they wait
+/// (since the pool last admitted a board start), with no one-hour cutoff.
 pub const DISPATCH_REFUSED: &str =
-    "Board runs were refused in the last hour because this computer's session limit was reached.";
+    "Board runs are waiting: this computer's session limit refused them, and none has started since.";
 
 /// Reasons in the order they are listed.
 const ORDER: [&str; 12] = [
@@ -292,7 +293,8 @@ pub fn build(inputs: &Inputs) -> Value {
             }),
         );
     }
-    // SB-412: one item for the hour's refusals, however many.
+    // SB-412: one item for the waiting refusals, however many. SB-417: `since` is the first of
+    // them, `last_at` the newest.
     if let Some(refused) = inputs.refusals {
         push(
             "dispatch_refused",
@@ -300,7 +302,8 @@ pub fn build(inputs: &Inputs) -> Value {
             json!({
                 "account_id": null, "label": null, "provider": null, "pool": null,
                 "reason": "dispatch_refused", "detail": DISPATCH_REFUSED,
-                "since": refused["last_at"],
+                "since": refused["since"],
+                "last_at": refused["last_at"],
                 "count": refused["count"],
                 "newest_request": refused["newest_request"],
                 "freed": refused["freed"],
@@ -423,8 +426,8 @@ mod tests {
     fn dispatches_refused_at_the_session_limit_are_one_item_with_their_count() {
         // SB-412: the hour's refusals, however many, are one item that opens the session limit.
         let snapshot = Snapshot::default();
-        let refused = json!({"count": 3, "last_at": 9_900, "freed": true, "freed_at": 9_950,
-            "newest_request": "11111111-2222-4333-8444-555555555555", "per_hour": []});
+        let refused = json!({"count": 3, "since": 2_000, "last_at": 9_900, "freed": true,
+            "freed_at": 9_950, "newest_request": "11111111-2222-4333-8444-555555555555"});
         let answer = build(&Inputs {
             snapshot: &snapshot,
             sign_in: &[],
@@ -439,7 +442,8 @@ mod tests {
         assert_eq!(reasons(&answer), ["session_duplicate", "dispatch_refused"]);
         let item = &answer["items"][1];
         assert_eq!(item["count"], 3);
-        assert_eq!(item["since"], 9_900);
+        assert_eq!(item["since"], 2_000, "the first refusal that still waits");
+        assert_eq!(item["last_at"], 9_900);
         assert_eq!(item["freed"], true);
         assert_eq!(
             item["newest_request"],

@@ -337,6 +337,25 @@ fn live_write(root: &Path, live: &[Live]) {
         let _ = switchboard_core::private_fs::private_write(&path, &bytes);
     }
 }
+/// SB-417: the dispatched runs the owner watches that have not ended, by launch id; none without
+/// `dispatches.json`. The session pool counts them against the board's share.
+pub(crate) fn live_runs(root: &Path) -> Vec<String> {
+    if std::fs::symlink_metadata(root.join(LIVE_FILE)).is_err() {
+        return Vec::new();
+    }
+    let live = {
+        let _lock = live_lock();
+        live_read(root)
+    };
+    live.into_iter()
+        .filter(|l| {
+            crate::launches::get(root, &l.launch_id).is_some_and(|r| {
+                r["ended"].is_null() && !matches!(r["state"].as_str(), Some("ended" | "gone"))
+            })
+        })
+        .map(|l| l.launch_id)
+        .collect()
+}
 /// Watches launch `id` for its time limit.
 pub(crate) fn live_add(root: &Path, id: &str, deadline: i64) {
     let _lock = live_lock();

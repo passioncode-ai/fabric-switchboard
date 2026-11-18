@@ -115,11 +115,19 @@
       "answer": {
         "capacity": {
           "at_capacity": false,
+          "board_admitted": true,
+          "board_free": 3,
+          "board_share": 3,
+          "board_share_set": false,
+          "board_used": 0,
           "cap": 12,
-          "counted": "live Claude Code and Codex processes whose folder was written within the last 30 minutes",
+          "counted": "live Claude Code and Codex sessions doing work: a session quiet for 30 minutes outside a turn, on a limit stop or on a wait of its own is not counted",
           "degraded": [],
           "free": 12,
           "observed_at": "<observed_at>",
+          "on_limit_stop": 0,
+          "on_waits": 0,
+          "pending": 0,
           "quiet": 0,
           "quiet_after_minutes": 30,
           "total": 0,
@@ -219,16 +227,27 @@
     {
       "answer": {
         "at_capacity": false,
+        "board_admitted": true,
+        "board_free": 3,
+        "board_share": 3,
+        "board_share_clamped": false,
+        "board_share_set": false,
+        "board_used": 0,
         "cap": 12,
-        "counted": "live Claude Code and Codex processes whose folder was written within the last 30 minutes",
+        "counted": "live Claude Code and Codex sessions doing work: a session quiet for 30 minutes outside a turn, on a limit stop or on a wait of its own is not counted",
         "degraded": [],
         "free": 12,
         "observed_at": "<observed_at>",
+        "on_limit_stop": 0,
+        "on_waits": 0,
+        "pending": 0,
         "quiet": 0,
         "quiet_after_minutes": 30,
         "refused_last_hour": null,
+        "refused_waiting": null,
         "total": 0,
-        "used": 0
+        "used": 0,
+        "waiting": 0
       },
       "arguments": {},
       "is_error": false,
@@ -263,10 +282,18 @@
         "openWorldHint": false,
         "readOnlyHint": false
       },
-      "description": "This computer's cap on live coding sessions: cap (null when none), used (live Claude Code and Codex processes, managed or not, whose folder was written within the last 30 minutes), free, at_capacity, total and quiet (quiet ones are not counted), degraded when the process table could not be read. switchboard dispatch answers state refused with reason at_capacity (and used, cap) while the pool is full, and launch --hosted is refused: a wait, not a failed run; ask again when a session ends. refused_last_hour (null when none) counts the dispatches refused at the cap in the last hour: count, last_at, newest_request, freed (a session ended since, so a run can start), per_hour (the last day's counts by hour); switchboard_attention lists them as one dispatch_refused item. cap sets the cap (1 to 500), clear removes it; without either, reads only. Setting or clearing it only when the operator asks.",
+      "description": "This computer's cap on live coding sessions: cap (null when none), used (live Claude Code and Codex sessions doing work, managed or not: a Claude Code session counts by its own transcript and status, so one quiet for 30 minutes outside a turn is not counted, nor one on a limit stop or on a wait of its own (a wake-up, a monitor, a cron job, a hold); a process with no session file counts by its folder), free, at_capacity, total, quiet, on_limit_stop and on_waits (not counted), degraded when the process table could not be read. board_share (null without a cap) is how many board runs may run whatever the cap holds: a dispatch, or launch --hosted --surface fabric, starts while used is under the cap or board_used (board runs live now, and admitted ones not yet recorded: pending) is under board_share; board_share_set says the person set it (else a quarter of the cap, rounded up); board_admitted says a board run would start now. switchboard dispatch answers state refused with reason at_capacity (and used, cap, board_used, board_share) when neither holds, and any other launch --hosted is refused at the cap: a wait, not a failed run; ask again when a session ends. waiting counts the board runs refused since the pool last admitted one; refused_waiting (null when none) has count, since (the first), last_at, newest_request and freed (a session ended since), with no time cutoff; refused_last_hour (null when none) keeps the last hour's count and per_hour. switchboard_attention lists the waiting ones as one dispatch_refused item. cap sets the cap (1 to 500), board sets the board's share (0 to the cap; with cap or on the cap already set), board_default: true goes back to the default share, and cap alone keeps a share set before, clamped to the cap (board_share_clamped says so); clear removes both and takes neither; without any, reads only. Setting or clearing it only when the operator asks.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
+          "board": {
+            "maximum": 500,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "board_default": {
+            "type": "boolean"
+          },
           "cap": {
             "maximum": 500,
             "minimum": 1,

@@ -10,7 +10,7 @@ if (native) watchProblems(reportProblem);
 import { LOCALE_KEY, dateLocale, locale, parseLocaleChoice, plural, saveLocaleChoice, t, type LocaleChoice } from './i18n';
 import { demo, demoFirstRun, native, nativeAdapter, onProjectSuggestions, onShellHook, onSpendChanged, safeError, reportFrontendReady, reportLanguage, reportProblem, type Operation } from './adapter';
 import type { CardState, AccountGroup } from './ui-logic';
-import { statAlert, ceilingQuestion, ceilingWarning, ceilingLine, keyLimitLine, dollars, POOL_PATTERN, poolChoices, poolName, inGroup, tourPlacement, usableWhileBusy, APPEARANCE_KEY, attribution, placementAdmits, domainSuggestion, groupSeatsElsewhere, passioncodeLine, seatEndedText, groupSeatsEndedText, organizationReleasedAt, inOrganizationFilter, domainList, type AttributedBy, sortStatRows, nextStatSort, type StatRow, type StatSort, statCacheShare, statTokensPerRequest, chartSeries, niceMax, groupProjectRows, type ChartMetric, groupProjects, compactCount, statTokens, statTrouble, statTroubleText, statAgentName, type Statistics, EXPIRY_CHOICES, folderName, folderRows, withoutFolder, type ProjectRoot, moveTargets, mapRows, rootTargets, storedMapFolders, MAP_FOLDERS_KEY, type MapFilter, type MapRow, type RepositoryMap, sortAgents, defaultAgentChoices, backgroundReads, clockedRead, chainScopeKey, afterRead, ceilingRemovalNote, modelMeta, modelUse, ordinaryKimiNote, kimiLimitUntil, limitReasonText, limitTitle, agentSetupFacts, sessionHow, sessionAgentName, sessionStateLabel, kimiWindowsLine, kimiWindowsLines, openrouterCreditLine, eventAction, eventDetail, MutationClock, activeRules, autoSwitchPool, autoSwitchPossible, launchChoice, withFolders, githubDefaultSelection, githubPlan, githubSource, replaceFolder, storedFolder, LAST_FOLDER_KEY, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, signInNotice, signInMove, organizationMoveNote, dismissTermsNotice, termsNoticeDismissed, termsNoticeOn, termsNoticeText, tourWaits, orgSetups, releasedOrganizations, releasedSummary, orgSetupAction, orgSetupShown, orgSetupCaveat, orgSetupLeads, orgSetupPrimary, accountsOrgActionLeads, firstPrimary, orgSetupUnread, orgSetupStateLabel, orgSetupTitle, hiddenOrgSetups, ORG_SETUP_HIDDEN_KEY, accountsEmptyKey, type OrgSetup, usageAnswerText, usageNotice, usageFreshness, windowReset, type Appearance, shellHookView, balancingView, balancingNotice, shellHookToggleNotice, shellHookNoticeText, codexHookLine, moveStep, accountsForStep, chainSummary, stepReasonText, handoverOutcomeText, handoverSkipped, shortWorkflow, TAKEOVER_ORDER, seatChoices, assignNotice, placementNotice, providerOrganization, groupOrganizations, servesPool, sharedGroups, holdsContext, accountOrganizations, machineOf, remoteUsageLine, unplacedAccounts, foldlessGroups, repositoriesUnder, contextLines, machineAliasesLine, machineLiveLine, machineCopyLine, foldOpen, accountSections, accountMatches, attentionAccounts, attentionReasonText, duplicateOffer, attentionActionLabel, dispatchRefusedLine, dispatchStopLineText, dispatchStopNotice, dutyReasonText, dutyOutcomeText, surfaceLabel, sessionTreeRows, SESSION_GROUPS, sessionGroupTitle, sessionWhyText, machineReadText, givenFacts, switchingLine, MACHINE_FOLD_LIMIT, EVENT_FILTER_KINDS, eventKindLabel, filterEvents, eventsByDay, relativeDay, EVENTS_PAGE, eventPage, sortSessions, statRowsShown, STAT_TOP, spendShare, groupKeyBlocks, keyTail, groupStateLine, type EventKind, type EventFilter, restartSkipText, sessionTone, sessionDegradedText, restartStateText, restartTone, statCost, groupDisplayName, tokensSpendLine, keyLaunch, keyOutsideTokens, movePool } from './ui-logic';
+import { statAlert, ceilingQuestion, ceilingWarning, ceilingLine, keyLimitLine, dollars, POOL_PATTERN, poolChoices, poolName, inGroup, tourPlacement, usableWhileBusy, APPEARANCE_KEY, attribution, placementAdmits, domainSuggestion, groupSeatsElsewhere, passioncodeLine, seatEndedText, groupSeatsEndedText, organizationReleasedAt, inOrganizationFilter, domainList, type AttributedBy, sortStatRows, nextStatSort, type StatRow, type StatSort, statCacheShare, statTokensPerRequest, chartSeries, niceMax, groupProjectRows, type ChartMetric, groupProjects, compactCount, statTokens, statTrouble, statTroubleText, statAgentName, type Statistics, EXPIRY_CHOICES, folderName, folderRows, withoutFolder, type ProjectRoot, moveTargets, mapRows, rootTargets, storedMapFolders, MAP_FOLDERS_KEY, type MapFilter, type MapRow, type RepositoryMap, sortAgents, defaultAgentChoices, backgroundReads, clockedRead, chainScopeKey, afterRead, ceilingRemovalNote, modelMeta, modelUse, ordinaryKimiNote, kimiLimitUntil, limitReasonText, limitTitle, agentSetupFacts, sessionHow, sessionAgentName, sessionStateLabel, kimiWindowsLine, kimiWindowsLines, openrouterCreditLine, eventAction, eventDetail, MutationClock, activeRules, autoSwitchPool, autoSwitchPossible, launchChoice, withFolders, githubDefaultSelection, githubPlan, githubSource, replaceFolder, storedFolder, LAST_FOLDER_KEY, canProbe, canSwitchNative, accountReset, accountUsedPercent, cardState, compactCountdown, expiryFrom, failedNextCheck, featureWindowLabel, isFeatureWindow, limitLabel, intervalWhile, loginOutcome, updateLine, monitorChecks, parseAppearance, primaryAction, projectName, quotaMaxAge, quotaOrder, resetCountdown, resolveTheme, ruleState, signInNotice, signInMove, organizationMoveNote, dismissTermsNotice, termsNoticeDismissed, termsNoticeOn, termsNoticeText, tourWaits, orgSetups, releasedOrganizations, releasedSummary, orgSetupAction, orgSetupShown, orgSetupCaveat, orgSetupLeads, orgSetupPrimary, accountsOrgActionLeads, firstPrimary, orgSetupUnread, orgSetupStateLabel, orgSetupTitle, hiddenOrgSetups, ORG_SETUP_HIDDEN_KEY, accountsEmptyKey, type OrgSetup, usageAnswerText, usageNotice, usageFreshness, windowReset, type Appearance, shellHookView, balancingView, balancingNotice, shellHookToggleNotice, shellHookNoticeText, codexHookLine, moveStep, accountsForStep, chainSummary, stepReasonText, handoverOutcomeText, handoverSkipped, shortWorkflow, TAKEOVER_ORDER, seatChoices, assignNotice, placementNotice, providerOrganization, groupOrganizations, servesPool, sharedGroups, holdsContext, accountOrganizations, machineOf, remoteUsageLine, unplacedAccounts, foldlessGroups, repositoriesUnder, contextLines, machineAliasesLine, machineLiveLine, machineCopyLine, foldOpen, accountSections, accountMatches, attentionAccounts, attentionReasonText, duplicateOffer, attentionActionLabel, dispatchRefusedLine, defaultBoardShare, dispatchStopLineText, dispatchStopNotice, dutyReasonText, dutyOutcomeText, surfaceLabel, sessionTreeRows, SESSION_GROUPS, sessionGroupTitle, sessionWhyText, machineReadText, givenFacts, switchingLine, MACHINE_FOLD_LIMIT, EVENT_FILTER_KINDS, eventKindLabel, filterEvents, eventsByDay, relativeDay, EVENTS_PAGE, eventPage, sortSessions, statRowsShown, STAT_TOP, spendShare, groupKeyBlocks, keyTail, groupStateLine, type EventKind, type EventFilter, restartSkipText, sessionTone, sessionDegradedText, restartStateText, restartTone, statCost, groupDisplayName, tokensSpendLine, keyLaunch, keyOutsideTokens, movePool } from './ui-logic';
 import agentCatalog from '../catalog/agents.json';
 import type { AnalyticsStatus, Ceilings, CeilingView, CeilingQuestionView, OpenrouterCredit, BackupInfo, PassioncodeStatus, Account, Adapter, AgentConnection, AgentInfo, AgentRow, AgentsOverview, OpenrouterModels, HermesModel, KimiAccounts, KimiRegion, KimiStatus, OpenrouterStatus, OpenrouterKeys, CodexRoute, BalanceStatus, CapacityStatus, DutyStatus, DutyLine, SessionTree, WatchFinding, ShellHookStatus, AgentSetup, AuthKind, BackupStatus, KimiAccount, CurrentAccounts, LoginItem, Project, Restored, HandoverPlan, ExternalIdentity, MonitorStatus, ProjectRule, Provider, RotationPolicy, RuntimeStatus, SessionInfo, Snapshot, UpdateStatus, Onboarding, Chains, ChainExecutor, ChainScope, ChainStepView, GithubRepository, Machine, MachinesLive, MachinesList, Attention, AttentionItem, Event, GivenAccount, SessionsEverywhere, SessionRow, MachineReadStatus, RestartPlan, RestartWave, OrganizationAssigned, Placement, ObservatoryKeys, ObservatoryKey, OwnSignIn } from './types';
 
@@ -642,13 +642,16 @@ function loadCapacity() {
 }
 function capacitySection() {
   const section = el('div', 'fold-content');
-  section.append(el('p', 'surface-note', t('Switchboard counts every Claude Code and Codex session working on this computer, except those with no writes for 30 minutes. At the limit, Fabric board runs and hosted consoles wait until one ends.')));
+  section.append(el('p', 'surface-note', t("Switchboard counts every Claude Code and Codex session doing work on this computer. A session with no writes for 30 minutes outside a turn, or one waiting on a limit or on a wait of its own, is not counted. At the limit, hosted consoles wait until one ends, and Fabric board runs still start inside the board's share.")));
   if (capacityError) { section.append(el('p', 'form-error', capacityError)); return section; }
   if (!capacityState) { if (!capacityLoading) loadCapacity(); section.append(el('p', 'form-note', t('Counting sessions…'))); return section; }
   const state = capacityState;
-  section.append(el('p', 'account-meta section-state', t('Working now: {used}, {quiet} quiet not counted.', { used: state.used, quiet: state.quiet })));
-  // SB-412: board runs the limit refused in the last hour.
-  if (state.refused_last_hour?.count) section.append(el('p', 'account-meta', dispatchRefusedLine(state.refused_last_hour)));
+  const notCounted = state.quiet + (state.on_limit_stop ?? 0) + (state.on_waits ?? 0);
+  section.append(el('p', 'account-meta section-state', t('Working now: {used}, {quiet} quiet or waiting not counted.', { used: state.used, quiet: notCounted })));
+  // SB-417: the board's share of the pool.
+  if (state.cap !== null && typeof state.board_share === 'number') section.append(el('p', 'account-meta', t("Board runs: {used} of {share} in the board's share.", { used: state.board_used ?? 0, share: state.board_share })));
+  // SB-412, SB-417: board runs the limit refused that still wait, however long ago.
+  if (state.refused_waiting?.count) section.append(el('p', 'account-meta', dispatchRefusedLine(state.refused_waiting)));
   const actions = el('div', 'management-actions');
   actions.append(button(state.cap === null ? t('Set limit…') : t('Change limit…'), capacityDialog, 'button', 'capacity-set'));
   if (state.cap !== null) actions.append(button(t('Remove limit'), () => { void mutate(async () => { capacityState = await adapter.capacity({ clear: true }); }, t('Limit removed.'), 'capacity-set'); }, 'button', 'capacity-clear'));
@@ -656,20 +659,39 @@ function capacitySection() {
   return section;
 }
 function capacityDialog() {
-  const context = openDialog(t('Limit of working coding sessions'), t('Fabric board runs and hosted consoles wait while this many sessions work on this computer.'), 'capacity-set');
+  const context = openDialog(t('Limit of working coding sessions'), t("Hosted consoles wait while this many sessions work on this computer. Fabric board runs still start within the board's share."), 'capacity-set');
   const limit = input(capacityState?.cap ? String(capacityState.cap) : '20', 'number'); limit.min = '1'; limit.max = '500'; limit.step = '1'; limit.inputMode = 'numeric';
+  // SB-417: the board's share, left empty for the default (a quarter of the limit, rounded up), which
+  // the empty field shows for the limit typed; the field's top follows the limit.
+  const share = input(capacityState?.board_share_set && typeof capacityState.board_share === 'number' ? String(capacityState.board_share) : '', 'number'); share.min = '0'; share.step = '1'; share.inputMode = 'numeric';
+  const followLimit = () => { const typed = Number(limit.value); const valid = Number.isInteger(typed) && typed >= 1 && typed <= 500; share.max = valid ? String(typed) : '500'; share.placeholder = valid ? String(defaultBoardShare(typed)) : ''; };
+  followLimit(); limit.addEventListener('input', followLimit);
+  // PR #825 review: the field as it opened; unchanged, the save leaves the share to the owner, which
+  // keeps it and clamps it to a lower limit (and says so).
+  const opened = share.value;
   const grid = el('div', 'form-grid');
   grid.append(field(t('Sessions'), limit, t('From 1 to 500.')));
+  grid.append(field(t('Board runs'), share, t('Board runs that start whatever the limit holds, from 0 to the limit. Leave it empty for a quarter of the limit, rounded up.')));
   context.body.append(grid); context.actions.append(submit(t('Save limit')));
+  // The window's own checks below say what is wrong in the window's language; the engine's
+  // validation (in the system's language) would block the submit first.
+  context.form.noValidate = true;
   context.form.addEventListener('submit', (event) => {
     event.preventDefault();
     const value = Number(limit.value);
     if (!Number.isInteger(value) || value < 1 || value > 500) { context.error.textContent = t('Give the session limit as a whole number from 1 to 500.'); limit.focus(); return; }
-    void dialogSave(context, async () => { capacityState = await adapter.capacity({ cap: value }); }, t('Limit saved: {cap} working sessions.', { cap: value }));
+    const unchanged = share.value.trim() === opened.trim();
+    const board = share.value.trim() === '' ? undefined : Number(share.value);
+    if (!unchanged && board !== undefined && (!Number.isInteger(board) || board < 0 || board > value)) { context.error.textContent = t("Give the board's share as a whole number from 0 to the session limit."); share.focus(); return; }
+    // Design review 2026-11-17: a share the save clamped to a lower limit is said, as the CLI says it.
+    void dialogSave(context, async () => { capacityState = await adapter.capacity(unchanged ? { cap: value } : board === undefined ? { cap: value, boardDefault: true } : { cap: value, board }); }, () => {
+      const saved = t('Limit saved: {cap} working sessions.', { cap: value });
+      return capacityState?.board_share_clamped && typeof capacityState.board_share === 'number' ? `${saved} ${t("The board's share was larger than the new limit, so it is now {n}.", { n: capacityState.board_share })}` : saved;
+    });
   });
   limit.focus();
 }
-/** SB-384 (DEC-0018): the session duty officer, which restarts stalled sessions and closes finished ones. */
+/** SB-384 (DEC-0021): the session duty officer, which restarts stalled sessions and closes finished ones. */
 let dutyState: DutyStatus | null = null; let dutyLoading = false; let dutyError = '';
 function loadDuty() {
   if (dutyLoading) return;
@@ -839,7 +861,7 @@ function shellHookSection() {
   }
   return section;
 }
-/** SCN-074 step 1: the first time the installed app wrote the terminal hook, the window says so once, with the way to Groups; read while the window is visible, then acknowledged. */
+/** SCN-074 step 1: the first time the installed app wrote the terminal hook, the window says so once, with the way to Settings; read while the window is visible, then acknowledged. */
 let shellNoticeReading = false;
 function checkShellHookNotice() {
   if (shellNoticeReading || document.hidden) return;
@@ -1025,7 +1047,7 @@ function groupCard(project: Project, only: boolean) {
   const shown = groupDisplayName(project);
   const aside = () => {
     const parts: Node[] = [];
-    for (const org of groupOrgs) { const badge = el('span', 'badge org-badge', org.name); badge.title = groupOrgs.length > 1 ? t('Runs only on accounts of {names}.', { names: groupOrgs.map((o) => o.name).join(', ') }) : t('Runs only on accounts of {name}.', { name: org.name }); parts.push(badge); }
+    for (const org of groupOrgs) { const badge = el('span', 'badge org-badge', org.name); badge.title = groupOrgs.length > 1 ? t('This group works for {names}: its sessions run in their context on any account the group holds.', { names: groupOrgs.map((o) => o.name).join(', ') }) : t('This group works for {name}: its sessions run in that context on any account the group holds.', { name: org.name }); parts.push(badge); }
     // SB-401: a group switched off says so, and turns on from its menu; the pay-per-token group
     // sets its daily ceiling there, before it is turned on, and takes its folders one by one.
     if (project.off) { const off = el('span', 'badge off-badge', t('Switched off')); off.title = t('No folder runs on this group\'s accounts while it is off.'); parts.push(off); }
@@ -1176,7 +1198,7 @@ function projectDialog(existing?: Project, organization?: string) {
       const option = el('label', 'appearance-option login-option'); const box = el('input'); box.type = 'checkbox'; box.value = o.id; box.checked = startOrgs.includes(o.id);
       option.append(box, el('span', '', o.name)); orgPicker.append(option); orgBoxes.push(box);
     }
-    orgPicker.append(el('p', 'form-note', t('Sessions in this group\'s folders run only on accounts of the organizations you check, or only on personal accounts when you check none.')));
+    orgPicker.append(el('p', 'form-note', t('Sessions in this group\'s folders work in the context of the organizations you check, on any account the group holds; automatic switching tries their accounts first. With none checked, the group is personal.')));
   }
   // SB-202 (B-8): + Group for {organization} starts with its name and its seats already here.
   if (!existing && organization) name.value = organizations.find((o) => o.id === organization)?.name ?? '';
@@ -4666,8 +4688,8 @@ function backgroundRefresh() {
     // A read issued before a user mutation may predate it; applying it would revert the change.
     if (!clock.accepts(stamp)) return;
     // A-7 fix cycle 1 (N7): a change made elsewhere (`switchboard shell on|off`, MCP
-    // `switchboard_shell_hook_set`) reaches the Groups page at the next minute's read.
-    if (page === 'projects') shellHookKey = '';
+    // `switchboard_shell_hook_set`) reaches the Settings page, where the switch lives, at the next minute's read.
+    if (page === 'settings') shellHookKey = '';
     snapshot = data; applyContext(context); backgroundRender();
     // B-8, SB-104, C-7, SB-227: what the page on screen shows is read again with the list.
     const reads = backgroundReads(page, !!snapshot?.projects?.some((p) => p.tokens));

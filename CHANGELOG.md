@@ -9,6 +9,16 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 ## Unreleased
 
 - An account can be turned off until you turn it on (SB-418, DEC-0027): `accounts update ID --enabled false`, MCP `switchboard_account_update` `enabled: false`, or the window's *Turn off*; for a Kimi Code account `kimi off ID` / `kimi on ID`, MCP `switchboard_kimi_update`, or its row. Nothing selects, switches to, renews, checks, launches, lends, sends or hands work to it, and nothing turns it on by itself any more: before, clearing a mark of being used elsewhere, a call back from another machine, an extended lease of a delegated seat, an undone call back and a restore could each turn it on, and Switchboard renewed Claude Code's sign-in for an account whose every copy was off. A copy turned off on another machine comes home off. Every surface says since when: the window (*Off since*), `accounts list` (`STATE off`, `SINCE`), `--json` and MCP (`off_since`, `off_by`, `availability`). An account that was off for no recorded reason reads as turned off by you. `accounts.json` moves to schema version 17 while an account is turned off.
+- The session pool's default board share is a quarter of the limit rounded up and never more than the limit (a limit of 1 to 4 gives 1, 20 gives 5; a limit from 9 that is not a multiple of 4 gives one more than before). The limit dialog now says hosted consoles wait at the limit while Fabric board runs still start within the board's share; the empty *Board runs* field shows the default for the limit typed; saving a lower limit that clamped the share says so; the browser demo shows waiting board runs with `?demo=1&board-waiting=1` (SB-417, design review).
+
+## 0.7.117
+
+- Fabric board runs no longer wait behind a full session pool: the pool keeps a share for them (`switchboard capacity set N --board M`, MCP `switchboard_capacity` `board`, Settings → Coding sessions → *Board runs*; by default a quarter of the limit), so a board run starts within that share even when the person's own sessions fill the pool. Sessions are now counted one by one: a session waiting on a limit, a wake-up, a monitor or a hold, or quiet for 30 minutes outside a turn, no longer takes a place, while a session in a turn always does. Board starts that wait are counted until one starts, with no one-hour cutoff (`refused_waiting` in `switchboard capacity`, *Board runs are waiting* in Needs attention), and concurrent board starts cannot pass the share together (SB-417).
+- The notice about the terminal hook now points to Settings, where its switch lives, and Settings shows a change made from the CLI or MCP at the next read. The group dialog and the organization badge no longer say a group runs only on its organization's accounts: an organization is a label (DEC-0022).
+
+## 0.7.116
+
+- 0.7.116 carries 0.7.115's changes, which were tagged but never published: a test of the .deb check could not write its multi-architecture file list on Windows (an NTFS stream, not a file), so the Windows tests failed and the release stopped. The test now runs only where a .deb exists; nothing a person runs changed.
 
 ## 0.7.115
 

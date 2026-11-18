@@ -335,6 +335,13 @@ export function createDemoAdapter(): Adapter {
   // SB-352 wave 2 (SCN-090): balancing, off until the person turns a group on; with two groups
   // on, the demo shows one account lent between them.
   let demoCap: number | null = null;
+  let demoBoard: number | null = null;
+  // SB-417 (SCN-094 step 4b): `?board-waiting=1` starts the demo with a limit of 2 and three board
+  // runs it refused, so the Needs attention item and its Settings line can be walked.
+  const demoBoardWaiting = new URLSearchParams(location.search).get('board-waiting') === '1';
+  let demoRefused: { count: number; since: number; last_at: number; freed: boolean } | null = demoBoardWaiting ? { count: 3, since: Math.floor(Date.now() / 1000) - 5400, last_at: Math.floor(Date.now() / 1000) - 300, freed: false } : null;
+  if (demoBoardWaiting) { demoCap = 2; demoBoard = 0; }
+  const demoShare = (cap: number) => demoBoard ?? Math.min(cap, Math.max(1, Math.ceil(cap / 4)));
   let demoDutyOn = true;
   let demoOwnSignIn = true;
   let balanceGroups: string[] = []; let balanceAllNew = false; let balanceBackup: string[] = [];
@@ -394,6 +401,7 @@ export function createDemoAdapter(): Adapter {
         ...(demoDuplicate ? [{ account_id: null, label: 'alpha-web', provider: null, pool: null, reason: 'session_duplicate' as const, detail: 'Synthetic: one session in two processes.', since: null, session_id: demoDuplicate, action: { tool: 'switchboard_session_close_copy', window: 'close_copy' as const } }] : []),
         ...[...signInRequired].map((id) => item(id)).filter((a): a is Account => !!a).map((a) => ({ account_id: a.id, label: a.label, provider: a.provider, pool: a.pool, reason: 'sign_in' as const, detail: 'Synthetic: the sign-in ended.', since: now() - 3600, action: { tool: 'switchboard_login', window: 'sign_in' as const } })),
         ...[...failingChecks].map((id) => item(id)).filter((a): a is Account => !!a).map((a) => ({ account_id: a.id, label: a.label, provider: a.provider, pool: a.pool, reason: 'usage_failing' as const, detail: 'Synthetic: the usage check fails.', since: now() - 5400, action: { tool: 'switchboard_usage', window: 'check_usage' as const } })),
+        ...(demoRefused ? [{ account_id: null, label: null, provider: null, pool: null, reason: 'dispatch_refused' as const, detail: "Board runs are waiting: this computer's session limit refused them, and none has started since.", since: demoRefused.since, count: demoRefused.count, freed: demoRefused.freed, action: { tool: 'switchboard_capacity', window: 'open_capacity' as const } }] : []),
         ...demoQuestions.map(() => ({ account_id: null, label: null, provider: null, pool: null, reason: 'ceiling_question' as const, detail: 'Synthetic: a ceiling was reached.', since: now() - 600, action: { tool: 'switchboard_ceiling_answer', window: 'answer_ceiling' as const } })),
       ];
       return { count: items.length, items };
@@ -762,17 +770,27 @@ export function createDemoAdapter(): Adapter {
         ],
         counts: { live: 3, working: 2, quiet: 1, managed: 2, by_pool: { 'alpha-web': 2, unmanaged: 1 }, by_surface: { fabric: 1, fallback: 1, unmanaged: 1 } },
         findings: [{ kind: 'gone', launch_id: 'L-gone', folder: '/Users/demo/work/tools-cli' }],
-        capacity: { cap: demoCap, used: 2, free: demoCap === null ? null : Math.max(0, demoCap - 2), at_capacity: demoCap !== null && demoCap <= 2, total: 3, quiet: 1, quiet_after_minutes: 30 },
+        capacity: { cap: demoCap, used: 2, free: demoCap === null ? null : Math.max(0, demoCap - 2), at_capacity: demoCap !== null && demoCap <= 2, total: 3, quiet: 1, quiet_after_minutes: 30, on_limit_stop: 0, on_waits: 0, board_share: demoCap === null ? null : demoShare(demoCap), board_share_set: demoBoard !== null, board_used: 1, board_admitted: demoRefused === null, waiting: demoRefused?.count ?? 0, refused_waiting: demoRefused },
         // SB-382: the first organization's folders, when the demo has one.
         context: { hook: 'default_on' as const, map: 'read', organizations: state.organizations?.[0] ? [{ context: `org:${state.organizations[0].id}`, live: 2, managed: 1, other: 1 }] : [] },
       };
     },
     async capacity(change) {
-      if (change?.clear) demoCap = null;
-      else if (typeof change?.cap === 'number') { if (!Number.isInteger(change.cap) || change.cap < 1 || change.cap > 500) throw new Error('Give the session limit as a whole number from 1 to 500.'); demoCap = change.cap; }
-      // The same two working sessions the demo's session tree shows.
+      let clamped = false;
+      if (change?.clear) { demoCap = null; demoBoard = null; }
+      else if (typeof change?.cap === 'number') {
+        if (!Number.isInteger(change.cap) || change.cap < 1 || change.cap > 500) throw new Error('Give the session limit as a whole number from 1 to 500.');
+        if (typeof change.board === 'number' && (!Number.isInteger(change.board) || change.board < 0 || change.board > change.cap)) throw new Error("Give the board's share as a whole number from 0 to the session limit, with a limit set.");
+        clamped = typeof change.board !== 'number' && !change.boardDefault && demoBoard !== null && demoBoard > change.cap;
+        demoCap = change.cap; demoBoard = typeof change.board === 'number' ? change.board : change.boardDefault ? null : (demoBoard === null ? null : Math.min(demoBoard, change.cap));
+      }
+      // The same two working sessions the demo's session tree shows; one of them is a board run.
       const used = 2;
-      return { cap: demoCap, used, free: demoCap === null ? null : Math.max(0, demoCap - used), at_capacity: demoCap !== null && used >= demoCap, total: 5, quiet: 1, quiet_after_minutes: 30 };
+      const share = demoCap === null ? null : demoShare(demoCap);
+      const admitted = demoCap === null || used < demoCap || (share ?? 0) > 1;
+      // A board run the pool would admit now ends the demo's wait, as `dispatch_refusals::admitted` does once one starts.
+      if (admitted) demoRefused = null;
+      return { cap: demoCap, used, free: demoCap === null ? null : Math.max(0, demoCap - used), at_capacity: demoCap !== null && used >= demoCap, total: 5, quiet: 1, quiet_after_minutes: 30, on_limit_stop: 1, on_waits: 1, board_share: share, board_share_set: demoBoard !== null, board_share_clamped: clamped, board_used: 1, board_admitted: admitted, waiting: demoRefused?.count ?? 0, refused_waiting: demoRefused };
     },
     async ownSignIn(on) { await pause(); if (typeof on === 'boolean') demoOwnSignIn = on; return { own_sign_in: demoOwnSignIn ? 'on' : 'off', on: demoOwnSignIn }; },
     async duty(change) {

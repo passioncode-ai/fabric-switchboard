@@ -1230,7 +1230,7 @@ check(() => {
   assert.equal(logic.shellHookToggleNotice(true), 'The terminal hook is on. New terminals in organization folders work in their context.');
   assert.deepEqual(logic.shellHookNoticeText({ organization: 'Acme', group: 'Acme web' }), {
     title: "Terminals now work in Acme's context in its folders",
-    body: "New terminals opened in Acme web's folders run claude and codex on Acme's accounts and history. Turn this off under Groups.",
+    body: "New terminals opened in Acme web's folders run claude and codex on Acme's accounts and history. Turn this off in Settings.",
   });
   // SCN-066: the Codex section says what the hook does to Codex in an organization's folders.
   assert.equal(logic.codexHookLine({ ...base, hook: 'default_on', files: written }), "In Acme's folders, new terminals use its Codex accounts whether this is on or off.");
@@ -1814,17 +1814,20 @@ check(() => {
   assert.equal(logic.dispatchStopLineText({ reason: 'deadline', folder: '/w/app' }, 'app'), 'Stopped a board run in app: it reached its deadline.');
   assert.equal(logic.dispatchStopLineText({ reason: 'person', folder: '/w/app' }, 'app'), 'Stopped a board run in app at your request.');
   assert.equal(logic.dutyOutcomeText('already_ended'), 'it had already ended');
-  // SB-412: the hour's refused dispatches, one item that opens the session limit.
+  // SB-412, SB-417: the refused dispatches that still wait, one item that opens the session limit.
   const refused = logic.attentionView({ items: [{ reason: 'dispatch_refused', count: 3, freed: false, since: 9900, action: { tool: 'switchboard_capacity', window: 'open_capacity' } }] }).items[0];
   assert.equal(refused.count, 3); assert.equal(refused.freed, false);
   assert.equal(logic.attentionActionLabel('open_capacity'), 'Open the session limit');
-  assert.equal(logic.dispatchRefusedLine(refused), "3 board runs were refused in the last hour: this computer's session limit was reached. No session has ended since.");
-  assert.equal(logic.dispatchRefusedLine({ count: 1, freed: true }), "A board run was refused in the last hour: this computer's session limit was reached. A session has ended since, so the next run can start.");
+  // SB-417 (design review 2026-11-17): the default share is a quarter of the limit rounded up, never above the limit.
+  for (const [limit, share] of [[1, 1], [2, 1], [4, 1], [5, 2], [8, 2], [12, 3], [20, 5], [500, 125]]) assert.equal(logic.defaultBoardShare(limit), share, `limit ${limit}`);
+  assert.equal(logic.defaultBoardShare(0), 1);
+  assert.equal(logic.dispatchRefusedLine(refused), "3 board runs are waiting: this computer's session limit refused them. No session has ended since.");
+  assert.equal(logic.dispatchRefusedLine({ count: 1, freed: true }), "A board run is waiting: this computer's session limit refused it. A session has ended since, so the next run can start.");
   assert.equal(logic.dutyOutcomeText('stopped'), null);
   i18nForShell.setLocale('ru');
   assert.equal(logic.attentionActionLabel('check_usage'), 'Проверить снова');
   assert.equal(logic.attentionActionLabel('dispatch_stop'), 'Остановить запуск');
-  assert.ok(logic.dispatchRefusedLine({ count: 3, freed: false }).startsWith('За последний час отклонено 3 запуска с доски'), logic.dispatchRefusedLine({ count: 3, freed: false }));
+  assert.ok(logic.dispatchRefusedLine({ count: 3, freed: false }).startsWith('3 запуска с доски ждут'), logic.dispatchRefusedLine({ count: 3, freed: false }));
   i18nForShell.setLocale('en');
 });
 // SB-384: the duty officer's reasons and outcomes in words.

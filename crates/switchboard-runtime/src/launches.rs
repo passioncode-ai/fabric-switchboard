@@ -415,6 +415,15 @@ fn update(root: &Path, id: &str, change: impl FnOnce(&mut Value) -> bool) -> boo
 pub(crate) fn get(root: &Path, id: &str) -> Option<Value> {
     read(root, id).map(|r| with_state(root, r))
 }
+/// SB-417: whether launch `id` was started for Fabric's board (`launched_by.surface: fabric`) and
+/// has not ended: the session pool counts it against the board's share.
+pub fn board_run_live(root: &Path, id: &str) -> bool {
+    get(root, id).is_some_and(|r| {
+        r["launched_by"]["surface"] == "fabric"
+            && r["ended"].is_null()
+            && !matches!(r["state"].as_str(), Some("ended" | "gone"))
+    })
+}
 /// A session run in place (`launch --in-place`) ended with `exit_code`: its record says so once,
 /// as a hosted session's does (studio-agent's finding `b18dd31c`: before, `launch` replaced
 /// itself with the script, nobody saw the end, and the launch read `gone`).
