@@ -59,7 +59,9 @@ pub struct Pool {
 
 /// The board share when the person set none: a quarter of the cap rounded up, never more than
 /// the cap (design review of 2026-11-17: `max(2, cap / 4)` gave a share of 2 under a cap of 1,
-/// a value the person could not type, and more than a quarter for caps 2 to 8).
+/// a value the person could not type, and more than a quarter for caps 2 to 8). For a cap from 9
+/// that is not a multiple of 4 the share is one more than `cap / 4` was (cap 10: 3, not 2); for a
+/// multiple of 4 it is the same (cap 20: 5).
 pub fn default_board_share(cap: u32) -> u32 {
     cap.div_ceil(4)
         .max(MIN_BOARD_SHARE)

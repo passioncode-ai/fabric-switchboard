@@ -666,18 +666,25 @@ function capacityDialog() {
   const share = input(capacityState?.board_share_set && typeof capacityState.board_share === 'number' ? String(capacityState.board_share) : '', 'number'); share.min = '0'; share.step = '1'; share.inputMode = 'numeric';
   const followLimit = () => { const typed = Number(limit.value); const valid = Number.isInteger(typed) && typed >= 1 && typed <= 500; share.max = valid ? String(typed) : '500'; share.placeholder = valid ? String(defaultBoardShare(typed)) : ''; };
   followLimit(); limit.addEventListener('input', followLimit);
+  // PR #825 review: the field as it opened; unchanged, the save leaves the share to the owner, which
+  // keeps it and clamps it to a lower limit (and says so).
+  const opened = share.value;
   const grid = el('div', 'form-grid');
   grid.append(field(t('Sessions'), limit, t('From 1 to 500.')));
   grid.append(field(t('Board runs'), share, t('Board runs that start whatever the limit holds, from 0 to the limit. Leave it empty for a quarter of the limit, rounded up.')));
   context.body.append(grid); context.actions.append(submit(t('Save limit')));
+  // The window's own checks below say what is wrong in the window's language; the engine's
+  // validation (in the system's language) would block the submit first.
+  context.form.noValidate = true;
   context.form.addEventListener('submit', (event) => {
     event.preventDefault();
     const value = Number(limit.value);
     if (!Number.isInteger(value) || value < 1 || value > 500) { context.error.textContent = t('Give the session limit as a whole number from 1 to 500.'); limit.focus(); return; }
+    const unchanged = share.value.trim() === opened.trim();
     const board = share.value.trim() === '' ? undefined : Number(share.value);
-    if (board !== undefined && (!Number.isInteger(board) || board < 0 || board > value)) { context.error.textContent = t("Give the board's share as a whole number from 0 to the session limit."); share.focus(); return; }
+    if (!unchanged && board !== undefined && (!Number.isInteger(board) || board < 0 || board > value)) { context.error.textContent = t("Give the board's share as a whole number from 0 to the session limit."); share.focus(); return; }
     // Design review 2026-11-17: a share the save clamped to a lower limit is said, as the CLI says it.
-    void dialogSave(context, async () => { capacityState = await adapter.capacity(board === undefined ? { cap: value, boardDefault: true } : { cap: value, board }); }, () => {
+    void dialogSave(context, async () => { capacityState = await adapter.capacity(unchanged ? { cap: value } : board === undefined ? { cap: value, boardDefault: true } : { cap: value, board }); }, () => {
       const saved = t('Limit saved: {cap} working sessions.', { cap: value });
       return capacityState?.board_share_clamped && typeof capacityState.board_share === 'number' ? `${saved} ${t("The board's share was larger than the new limit, so it is now {n}.", { n: capacityState.board_share })}` : saved;
     });
