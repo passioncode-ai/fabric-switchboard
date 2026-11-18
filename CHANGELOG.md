@@ -8,6 +8,10 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+## 0.7.119
+
+- 0.7.119 carries 0.7.118's changes, which were tagged but never published: a Keychain constant used only on macOS stopped the Linux build's lint, so the release stopped before any package was built. Nothing a person runs changed by that fix.
+- When a Claude Code or Codex session hits its limit, the automatic fallback now hands the workflow to Kimi Code or Hermes as its chain says (SB-481). It used to pass them over as asking less before acting than Claude Code, but Switchboard starts Claude Code and Codex with permissions bypassed by default, so neither is looser. With `switchboard agents permissions ask` the old rule holds.
 ## 0.7.118
 
 - Moving accounts to another machine no longer asks you to guess (SB-473, SB-474, SB-476): the machine is chosen from every machine this computer knows, the groups are read from that machine and offered with its default group first, and one dialog moves several accounts one after another, each with its own result line. An account on another machine comes back here first, then moves.
