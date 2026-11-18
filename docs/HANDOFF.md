@@ -2,6 +2,15 @@
 > current — the next tasks of older entries are history. Open work lives on the
 > [board](evidence/backlog.md).
 
+## 2026-11-19: SB-447 to SB-449, PR #831 review round 2 follow-up, on branch `launch-stale-2`
+
+- **Asked.** Round 2 of #831 (merged as `9e7026cb`): CLI.md on when statuses 3 and 4 are Switchboard's; `clear_stale` deleting a marker when the link back fails; only `Reservation::new` clears stale markers; `queued` never on the wire; Kimi in-place continue as `caller`; non-regular markers read alike everywhere; `btime` once.
+- **Built.** `launch.rs`: `ensure_idle` reads only (a stale marker is idle, never removed); `Reservation::new` clears through `clear_stale`, whose link back falls back to a rename (`clear_stale_with` for tests); `reservation_open` is `pending() == Held`; `Handed::for_continue`; Linux `BOOT` in a `OnceLock`. `lib.rs`: `#[serde(skip)] queued`; Kimi continue passes `Handed`. `kimi.rs`: `launch_continuation(.., handed)`. Docs: CLI.md, CONTRACTS, CHANGELOG, backlog.
+- **Decisions.** The read-only checks read a stale marker as idle, not busy: nothing will run its script, and a busy answer would make the fallback and the Kimi status see a session that never comes until someone launches again (the bug class SB-440 fixed). They no longer remove anything, which closes the race the review named.
+- **Checks.** See the PR (Studio gate, EXIT line).
+
+**Exact next task.** Review the `launch-stale-2` pull request and merge it once its gate reads EXIT 0 on the merged head; then SB-441, SB-444, SB-446 by priority.
+
 ## 2026-11-18: SB-420 Keychain writes keep values off the command line; credential output kept off screens and files, on branch `secret-argv`
 
 - **Asked.** Two findings of a leak audit (kept outside the repository) about Keychain writes and credential output; review round 1 of PR #826 (P1-A, P1-B, P1-C).

@@ -511,6 +511,15 @@ pub enum Handed {
     Caller,
 }
 impl Handed {
+    /// SB-449: who runs an in-place continuation's script: the hand-over queue, where it may wait
+    /// for a console (`Terminal`'s hold), or the caller that asked for it (`Caller`).
+    pub fn for_continue(queued: bool) -> Self {
+        if queued {
+            Handed::Terminal
+        } else {
+            Handed::Caller
+        }
+    }
     fn as_str(self) -> &'static str {
         match self {
             Handed::Terminal => "terminal",
@@ -606,6 +615,14 @@ fn launcher_gone(pid: u32, token: Option<u64>, marker_age: Duration) -> bool {
 /// is still stale; a marker that holds goes back (a hard link, which never replaces a marker
 /// written meanwhile) and the home stays busy.
 fn clear_stale(home: &Path, now: SystemTime) -> Result<(), String> {
+    clear_stale_with(home, now, |from, to| fs::hard_link(from, to))
+}
+/// `clear_stale` with the link that puts a marker back (tests make it fail).
+fn clear_stale_with(
+    home: &Path,
+    now: SystemTime,
+    link: impl Fn(&Path, &Path) -> std::io::Result<()>,
+) -> Result<(), String> {
     static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let path = home.join(".launch-pending");
     let aside = home.join(format!(
@@ -632,8 +649,21 @@ fn clear_stale(home: &Path, now: SystemTime) -> Result<(), String> {
             Ok(())
         }
         _ => {
-            let _ = fs::hard_link(&aside, &path);
-            let _ = fs::remove_file(&aside);
+            match link(&aside, &path) {
+                // Back in place; the copy aside goes.
+                Ok(()) => {
+                    let _ = fs::remove_file(&aside);
+                }
+                // Another marker took the name meanwhile and holds the home itself.
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                    let _ = fs::remove_file(&aside);
+                }
+                // SB-448: no link here (a file system without hard links, a refused link): the
+                // marker is moved back instead, never deleted while it holds.
+                Err(_) => {
+                    let _ = fs::rename(&aside, &path);
+                }
+            }
             Err(HOME_BUSY.into())
         }
     }
@@ -645,6 +675,10 @@ pub(crate) struct Reservation {
 }
 impl Reservation {
     pub(crate) fn new(home: &Path) -> Result<Self, String> {
+        // SB-448: only a new reservation clears a stale marker; every other check only reads.
+        if let Pending::Stale(_) = pending(home, SystemTime::now())? {
+            clear_stale(home, SystemTime::now())?;
+        }
         ensure_idle(home)?;
         let path = home.join(".launch-pending");
         let mut file = switchboard_core::private_fs::create_new(&path)
@@ -1085,9 +1119,9 @@ fn login_completed(home: &Path) -> bool {
     read_regular(&home.join(".completed")).is_ok_and(|v| v == "complete")
 }
 pub(crate) fn reservation_open(home: &Path) -> bool {
-    // SB-440: an unreadable home holds no reservation here, as before (a regular file only).
-    fs::symlink_metadata(home.join(".launch-pending")).is_ok_and(|m| m.file_type().is_file())
-        && pending(home, SystemTime::now()) == Ok(Pending::Held)
+    // SB-449: the same judgement as `ensure_idle`: a marker that is not a regular file holds here
+    // too (CONTRACTS); only a home whose marker cannot be looked at holds no reservation.
+    pending(home, SystemTime::now()) == Ok(Pending::Held)
 }
 /// A sign-in's journal, when it names a known provider and a valid label and pool.
 fn login_journal(home: &Path) -> Option<(Provider, String, String, i64)> {
@@ -1372,10 +1406,14 @@ fn process_started(pid: u32) -> Option<SystemTime> {
     // After the command name in parentheses, field 22 (`starttime`) is the 20th.
     let rest = &stat[stat.rfind(')')? + 1..];
     let ticks: u64 = rest.split_whitespace().nth(19)?.parse().ok()?;
-    let boot: u64 = fs::read_to_string("/proc/stat")
-        .ok()?
-        .lines()
-        .find_map(|line| line.strip_prefix("btime ")?.trim().parse().ok())?;
+    // SB-449: the boot time does not change while this process runs; read it once.
+    static BOOT: std::sync::OnceLock<Option<u64>> = std::sync::OnceLock::new();
+    let boot: u64 = (*BOOT.get_or_init(|| {
+        fs::read_to_string("/proc/stat")
+            .ok()?
+            .lines()
+            .find_map(|line| line.strip_prefix("btime ")?.trim().parse().ok())
+    }))?;
     // SAFETY: sysconf only reads a configuration value.
     let hz = u64::try_from(unsafe { libc::sysconf(libc::_SC_CLK_TCK) })
         .ok()
@@ -1414,15 +1452,16 @@ fn process_age_from_ps(pid: u32) -> Option<Duration> {
         .then(|| parse_elapsed(&String::from_utf8_lossy(&output.stdout)))
         .flatten()
 }
+/// Whether nothing holds `home`: no marker that still holds and no live session. Reads only
+/// (SB-448): a stale marker counts as idle, since nothing will run its script, and is left for
+/// the next `Reservation::new` to clear (SB-440: also when its launcher is gone, not only after
+/// ten minutes), so a check never removes a marker another launch writes meanwhile.
 pub(crate) fn ensure_idle(home: &Path) -> Result<(), String> {
     match pending(home, SystemTime::now())? {
-        Pending::Absent => {}
+        Pending::Absent | Pending::Stale(_) => {}
         Pending::Held => {
             return Err("Close the existing session before changing its home.".into());
         }
-        // The script never ran and nothing will run it: releasing the abandoned marker frees
-        // the home (SB-440: also when its launcher is gone, not only after ten minutes).
-        Pending::Stale(_) => clear_stale(home, SystemTime::now())?,
     }
     if session_running(home)? {
         return Err("Close the existing session before changing its home.".into());
@@ -4723,8 +4762,25 @@ mod tests {
         );
         age(&root.path().join(".launch-pending"), 11 * 60);
         assert!(ensure_idle(root.path()).is_ok());
-        assert!(!root.path().join(".launch-pending").exists());
+        // SB-448: a check only reads; the next reservation clears the stale marker.
+        assert!(root.path().join(".launch-pending").exists());
         assert!(Reservation::new(root.path()).is_ok());
+    }
+    /// SB-448: takes a reservation on `home`, as the next launch does, and answers the reasons
+    /// of the stale markers it cleared; the reservation is dropped, so no marker is left.
+    fn reserve_clearing(home: &Path) -> Vec<&'static str> {
+        let (hold, events) = crate::oplog::capture_fields(|| Reservation::new(home));
+        drop(hold.expect("the next launch proceeds"));
+        assert!(!home.join(".launch-pending").exists());
+        events
+            .into_iter()
+            .filter(|(event, _)| *event == "launch_reservation")
+            .flat_map(|(_, fields)| fields)
+            .filter_map(|(name, field)| match (name, field) {
+                ("reason", crate::oplog::Field::Code(code)) => Some(code),
+                _ => None,
+            })
+            .collect()
     }
     /// SB-440: the marker's contents as `ensure_idle` reads them, with its time set back.
     fn marker(home: &Path, contents: &str, seconds: u64) {
@@ -4749,19 +4805,9 @@ mod tests {
         assert_eq!(home_state(root.path()).0, "ended");
         let (idle, events) = crate::oplog::capture_fields(|| ensure_idle(root.path()));
         idle.unwrap();
-        assert!(!root.path().join(".launch-pending").exists());
-        let cleared: Vec<_> = events
-            .iter()
-            .filter(|(event, _)| *event == "launch_reservation")
-            .collect();
-        assert_eq!(cleared.len(), 1, "{events:?}");
-        assert!(cleared[0]
-            .1
-            .contains(&("reason", crate::oplog::Field::Code("unclaimed"))));
-        assert!(
-            Reservation::new(root.path()).is_ok(),
-            "the next launch proceeds"
-        );
+        assert!(events.is_empty(), "a check clears nothing: {events:?}");
+        assert!(root.path().join(".launch-pending").exists());
+        assert_eq!(reserve_clearing(root.path()), ["unclaimed"]);
     }
     #[test]
     fn sb440_a_marker_handed_to_terminal_still_holds_for_ten_minutes() {
@@ -4785,13 +4831,8 @@ mod tests {
         let gone = child.id();
         child.wait().unwrap();
         marker(root.path(), &format!(r#"{{"pid":{gone}}}"#), 0);
-        let (idle, events) = crate::oplog::capture_fields(|| ensure_idle(root.path()));
-        idle.unwrap();
-        assert!(!root.path().join(".launch-pending").exists());
-        assert!(events
-            .iter()
-            .any(|(event, fields)| *event == "launch_reservation"
-                && fields.contains(&("reason", crate::oplog::Field::Code("launcher_gone")))));
+        assert!(ensure_idle(root.path()).is_ok());
+        assert_eq!(reserve_clearing(root.path()), ["launcher_gone"]);
         // A live preparing process (this one) still holds the home.
         marker(
             root.path(),
@@ -4819,13 +4860,8 @@ mod tests {
             &json!({"pid": me, "token": token + 1}).to_string(),
             0,
         );
-        let (idle, events) = crate::oplog::capture_fields(|| ensure_idle(root.path()));
-        idle.unwrap();
-        assert!(events
-            .iter()
-            .any(|(event, fields)| *event == "launch_reservation"
-                && fields.contains(&("reason", crate::oplog::Field::Code("launcher_gone")))));
-        assert!(!root.path().join(".launch-pending").exists());
+        assert!(ensure_idle(root.path()).is_ok());
+        assert_eq!(reserve_clearing(root.path()), ["launcher_gone"]);
     }
     #[cfg(target_os = "linux")]
     #[test]
@@ -4860,6 +4896,73 @@ mod tests {
         // Nothing is left aside either way, and a marker already gone is not an error.
         assert_eq!(fs::read_dir(root.path()).unwrap().count(), 0);
         clear_stale(root.path(), SystemTime::now()).unwrap();
+    }
+    #[test]
+    fn sb448_a_marker_that_cannot_be_linked_back_is_moved_back_never_deleted() {
+        let root = tempfile::tempdir().unwrap();
+        let fresh = json!({"pid": null, "by": "caller"}).to_string();
+        marker(root.path(), &fresh, 0);
+        let refused = |_: &Path, _: &Path| -> std::io::Result<()> {
+            Err(std::io::Error::from(std::io::ErrorKind::Unsupported))
+        };
+        assert_eq!(
+            clear_stale_with(root.path(), SystemTime::now(), refused).unwrap_err(),
+            HOME_BUSY
+        );
+        assert_eq!(
+            fs::read_to_string(root.path().join(".launch-pending")).unwrap(),
+            fresh
+        );
+        assert_eq!(
+            fs::read_dir(root.path()).unwrap().count(),
+            1,
+            "nothing left aside"
+        );
+        // Another marker took the name meanwhile: it stays, and the copy aside goes.
+        let taken = |_: &Path, to: &Path| -> std::io::Result<()> {
+            fs::write(to, "other")?;
+            Err(std::io::Error::from(std::io::ErrorKind::AlreadyExists))
+        };
+        assert!(clear_stale_with(root.path(), SystemTime::now(), taken).is_err());
+        assert_eq!(
+            fs::read_to_string(root.path().join(".launch-pending")).unwrap(),
+            "other"
+        );
+        assert_eq!(fs::read_dir(root.path()).unwrap().count(), 1);
+    }
+    #[test]
+    fn sb448_read_only_checks_never_remove_a_marker() {
+        let f = tempfile::tempdir().unwrap();
+        let home = f.path().join("runtimes").join("claude-tokens");
+        private_dir(&f.path().join("runtimes")).unwrap();
+        private_dir(&home).unwrap();
+        marker(&home, r#"{"pid":null,"by":"caller"}"#, 6 * 60);
+        // Stale: nothing will run its script, so no session runs, and the marker stays.
+        assert!(!launched_session_running(f.path(), Provider::Claude, &[]));
+        assert!(!reservation_open(&home));
+        assert_eq!(home_state(&home).0, "ended");
+        assert!(ensure_idle(&home).is_ok());
+        assert!(home.join(".launch-pending").exists());
+        // A marker that holds is a running launch.
+        marker(&home, r#"{"pid":null,"by":"caller"}"#, 0);
+        assert!(launched_session_running(f.path(), Provider::Claude, &[]));
+        assert_eq!(home_state(&home).0, "starting");
+    }
+    #[cfg(unix)]
+    #[test]
+    fn sb449_a_marker_that_is_not_a_regular_file_holds_everywhere() {
+        let root = tempfile::tempdir().unwrap();
+        fs::create_dir(root.path().join(".launch-pending")).unwrap();
+        assert!(ensure_idle(root.path()).is_err());
+        assert!(reservation_open(root.path()));
+        assert_eq!(home_state(root.path()).0, "starting");
+        assert!(Reservation::new(root.path()).is_err());
+        assert!(root.path().join(".launch-pending").is_dir());
+    }
+    #[test]
+    fn sb449_an_in_place_continue_is_the_callers_unless_queued() {
+        assert_eq!(Handed::for_continue(false), Handed::Caller);
+        assert_eq!(Handed::for_continue(true), Handed::Terminal);
     }
     #[test]
     fn sb440_a_reservation_names_its_preparer_then_who_runs_the_script() {
