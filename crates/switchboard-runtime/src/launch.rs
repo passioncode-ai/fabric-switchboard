@@ -6959,6 +6959,8 @@ mod tests {
             "--dangerously-skip-permissions".to_string(),
         ];
         expected.extend(sent.iter().cloned());
+        // SB-452: the home's own route, last (Claude Code 2.1.327 takes it after the prompt too).
+        expected.push(route_arg(ours.parent().unwrap()));
         assert_eq!(args, expected);
         no_value_is_read_as_a_config(&args);
         for (key, value) in context {
