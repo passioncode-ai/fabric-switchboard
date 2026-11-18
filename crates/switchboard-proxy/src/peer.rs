@@ -477,7 +477,12 @@ pub enum Admission {
 
 /// Decides a connection: this account's, a named account's, or refused. Blocking: it reads the
 /// system's socket table and, for another account, the named users' list.
-pub fn admit(me: Me, local: SocketAddr, peer: SocketAddr, users: &crate::users::Users) -> Admission {
+pub fn admit(
+    me: Me,
+    local: SocketAddr,
+    peer: SocketAddr,
+    users: &crate::users::Users,
+) -> Admission {
     match me {
         Me::Unchecked => Admission::Own,
         Me::TokenUser => {
@@ -532,10 +537,9 @@ impl Listener for OwnUser {
                 return (io, own);
             };
             let users = self.users.clone();
-            let admission =
-                tokio::task::spawn_blocking(move || admit(me, local, peer, &users))
-                    .await
-                    .unwrap_or(Admission::Refused);
+            let admission = tokio::task::spawn_blocking(move || admit(me, local, peer, &users))
+                .await
+                .unwrap_or(Admission::Refused);
             match admission {
                 Admission::Own => return (io, own),
                 Admission::Named(uid) => {
@@ -557,7 +561,9 @@ impl Listener for OwnUser {
     }
 
     fn local_addr(&self) -> std::io::Result<Self::Addr> {
-        self.inner.local_addr().map(|addr| Conn { addr, user: None })
+        self.inner
+            .local_addr()
+            .map(|addr| Conn { addr, user: None })
     }
 }
 
@@ -858,7 +864,11 @@ mod tests {
         .unwrap();
         assert_eq!(classify(501, Some(1001), &users), Admission::Named(1001));
         assert_eq!(classify(501, Some(1002), &users), Admission::Refused);
-        assert_eq!(classify(501, Some(0), &users), Admission::Refused, "root never");
+        assert_eq!(
+            classify(501, Some(0), &users),
+            Admission::Refused,
+            "root never"
+        );
         assert_eq!(classify(501, None, &users), Admission::Refused);
     }
 }

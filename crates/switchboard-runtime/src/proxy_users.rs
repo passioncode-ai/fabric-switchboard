@@ -15,7 +15,8 @@ use switchboard_proxy::users::{self, NamedUser};
 pub const UNSUPPORTED: &str = "Serving other users of this computer works on macOS and Linux only. On Windows Switchboard's proxy serves only the account it runs as.";
 pub const NO_USER: &str = "Name the account: its user name or uid.";
 pub const UNKNOWN_USER: &str = "No account of this computer has that name or uid.";
-pub const SELF_USER: &str = "That is the account Switchboard runs as: its sessions are served already.";
+pub const SELF_USER: &str =
+    "That is the account Switchboard runs as: its sessions are served already.";
 pub const ROOT_USER: &str = "Switchboard never serves the root account's processes.";
 pub const NO_GROUP: &str = "Name the group whose accounts this user may use.";
 pub const UNKNOWN_GROUP: &str = "No group has that id or name.";
@@ -24,9 +25,11 @@ pub const RELATIVE_FOLDER: &str = "Give each folder as an absolute path.";
 pub const RELATIVE_SETTINGS: &str = "Give the settings file as an absolute path.";
 pub const TOO_MANY: &str = "The proxy serves at most 256 other users.";
 pub const NO_PROXY: &str = "Switchboard's proxy has not started on this computer yet, so the settings file cannot name its address. Start Switchboard (switchboard serve), then retry.";
-pub const SETTINGS_PARENT: &str = "The settings file's folder does not exist. Create it, then retry.";
+pub const SETTINGS_PARENT: &str =
+    "The settings file's folder does not exist. Create it, then retry.";
 pub const SETTINGS_NOT_OURS: &str = "A file Switchboard did not write is at that path (a link, a folder or another account's file). Remove it or name another path.";
-pub const SETTINGS_UNWRITTEN: &str = "The settings file could not be written there. Check the folder's permissions, then retry.";
+pub const SETTINGS_UNWRITTEN: &str =
+    "The settings file could not be written there. Check the folder's permissions, then retry.";
 pub const UNKNOWN_ACTION: &str = "Unknown action: use list, allow, disallow or rotate.";
 
 /// One account of this computer, as the password database names it.
@@ -56,7 +59,13 @@ pub fn account(who: &str) -> Option<Account> {
         let name = std::ffi::CString::new(who).ok()?;
         // SAFETY: as above; `name` is a NUL-terminated copy.
         unsafe {
-            libc::getpwnam_r(name.as_ptr(), &mut pwd, buf.as_mut_ptr(), buf.len(), &mut found)
+            libc::getpwnam_r(
+                name.as_ptr(),
+                &mut pwd,
+                buf.as_mut_ptr(),
+                buf.len(),
+                &mut found,
+            )
         }
     };
     if rc != 0 || found.is_null() {
@@ -211,7 +220,9 @@ fn deliver(
         // into the user's own folder, readable by that user only.
         let name = account.map_or_else(|| user.uid.to_string(), |a| a.name.clone());
         let destination = match account {
-            Some(a) if !a.home.is_empty() => format!("{}/.claude/switchboard-settings.json", a.home),
+            Some(a) if !a.home.is_empty() => {
+                format!("{}/.claude/switchboard-settings.json", a.home)
+            }
             _ => format!("{shown}.{name}"),
         };
         // GNU install makes the folder too (-D); macOS's install has no such flag.
@@ -273,7 +284,11 @@ fn normal_folder(folder: &str) -> Result<String, String> {
     }
     let text = path.display().to_string();
     let trimmed = text.trim_end_matches('/');
-    Ok(if trimmed.is_empty() { "/".into() } else { trimmed.into() })
+    Ok(if trimmed.is_empty() {
+        "/".into()
+    } else {
+        trimmed.into()
+    })
 }
 
 /// The listed entry `who` names: by the password database first, else by the uid or the name
@@ -282,9 +297,10 @@ fn listed_index(list: &[NamedUser], who: &str) -> Option<usize> {
     let uid = account(who)
         .map(|a| a.uid)
         .or_else(|| who.trim().parse().ok());
-    list.iter()
-        .position(|u| Some(u.uid) == uid)
-        .or_else(|| list.iter().position(|u| u.name.as_deref() == Some(who.trim())))
+    list.iter().position(|u| Some(u.uid) == uid).or_else(|| {
+        list.iter()
+            .position(|u| u.name.as_deref() == Some(who.trim()))
+    })
 }
 
 fn surface(by: Option<&str>) -> String {
@@ -474,8 +490,11 @@ mod tests {
     fn store() -> (tempfile::TempDir, std::sync::Arc<Store>) {
         let dir = tempfile::tempdir().unwrap();
         let store = std::sync::Arc::new(
-            Store::open(dir.path().join("data"), std::sync::Arc::new(MemoryVault::default()))
-                .unwrap(),
+            Store::open(
+                dir.path().join("data"),
+                std::sync::Arc::new(MemoryVault::default()),
+            )
+            .unwrap(),
         );
         (dir, store)
     }
@@ -525,7 +544,10 @@ mod tests {
         // A link at the path is never followed or replaced.
         let link = dir.path().join("link.json");
         std::os::unix::fs::symlink(&path, &link).unwrap();
-        assert_eq!(write_settings(&link, &bytes, gid), Err(SETTINGS_NOT_OURS.into()));
+        assert_eq!(
+            write_settings(&link, &bytes, gid),
+            Err(SETTINGS_NOT_OURS.into())
+        );
         assert_eq!(
             write_settings(Path::new("relative.json"), &bytes, gid),
             Err(RELATIVE_SETTINGS.into())
@@ -547,7 +569,9 @@ mod tests {
         // The proxy's recorded address, as an offline command reads it.
         switchboard_core::private_fs::private_write(
             &root.join("proxy.json"),
-            serde_json::to_vec(&json!({"protocol": 1, "port": 4555, "token": token})).unwrap().as_slice(),
+            serde_json::to_vec(&json!({"protocol": 1, "port": 4555, "token": token}))
+                .unwrap()
+                .as_slice(),
         )
         .unwrap();
         let settings = dir.path().join("agent.json");
@@ -576,7 +600,11 @@ mod tests {
         assert!(!answer_text.contains(&listed[0].salt));
         let list_text = std::fs::read_to_string(root.join(users::FILE)).unwrap();
         assert!(!list_text.contains(&capability) && !list_text.contains(&token));
-        let mode = std::fs::metadata(root.join(users::FILE)).unwrap().permissions().mode() & 0o777;
+        let mode = std::fs::metadata(root.join(users::FILE))
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777;
         assert_eq!(mode, 0o600);
         let written: Value = serde_json::from_slice(&std::fs::read(&settings).unwrap()).unwrap();
         assert_eq!(written["env"]["ANTHROPIC_AUTH_TOKEN"], capability.as_str());
@@ -587,7 +615,18 @@ mod tests {
                 .starts_with("sudo install"));
         }
         // Rotation: a new capability, written into the recorded file.
-        let rotated = execute(&store, &root, None, Some("rotate"), Some(&other.uid.to_string()), None, &[], None, Some("cli")).unwrap();
+        let rotated = execute(
+            &store,
+            &root,
+            None,
+            Some("rotate"),
+            Some(&other.uid.to_string()),
+            None,
+            &[],
+            None,
+            Some("cli"),
+        )
+        .unwrap();
         assert_eq!(rotated["rotated"], true);
         let salt = users::load(&root).unwrap()[0].salt.clone();
         assert_ne!(salt, listed[0].salt);
@@ -598,13 +637,37 @@ mod tests {
         // A new port and token after a restart: the file follows.
         assert_eq!(repoint(&root, 4777, &"e".repeat(64)), (1, 0));
         let written: Value = serde_json::from_slice(&std::fs::read(&settings).unwrap()).unwrap();
-        assert_eq!(written["env"]["ANTHROPIC_BASE_URL"], "http://127.0.0.1:4777/claude/default");
+        assert_eq!(
+            written["env"]["ANTHROPIC_BASE_URL"],
+            "http://127.0.0.1:4777/claude/default"
+        );
         // Disallowed: off the list, and the file goes when it is empty.
-        let removed = execute(&store, &root, None, Some("disallow"), Some(&other.name), None, &[], None, None).unwrap();
+        let removed = execute(
+            &store,
+            &root,
+            None,
+            Some("disallow"),
+            Some(&other.name),
+            None,
+            &[],
+            None,
+            None,
+        )
+        .unwrap();
         assert_eq!(removed["removed"]["uid"], other.uid);
         assert!(!root.join(users::FILE).exists());
         assert_eq!(
-            execute(&store, &root, None, Some("disallow"), Some(&other.name), None, &[], None, None),
+            execute(
+                &store,
+                &root,
+                None,
+                Some("disallow"),
+                Some(&other.name),
+                None,
+                &[],
+                None,
+                None
+            ),
             Err(NOT_LISTED.into())
         );
     }
@@ -615,26 +678,61 @@ mod tests {
         let root = store.root().to_owned();
         let me = own_uid().unwrap().to_string();
         let allow = |who: &str, group: &str, folders: &[String], settings: Option<&str>| {
-            execute(&store, &root, None, Some("allow"), Some(who), Some(group), folders, settings, None)
+            execute(
+                &store,
+                &root,
+                None,
+                Some("allow"),
+                Some(who),
+                Some(group),
+                folders,
+                settings,
+                None,
+            )
         };
         assert_eq!(allow(&me, "default", &[], None), Err(SELF_USER.into()));
         if account("0").is_some() && own_uid() != Some(0) {
             assert_eq!(allow("0", "default", &[], None), Err(ROOT_USER.into()));
         }
-        assert_eq!(allow("no-such-account-sb421", "default", &[], None), Err(UNKNOWN_USER.into()));
+        assert_eq!(
+            allow("no-such-account-sb421", "default", &[], None),
+            Err(UNKNOWN_USER.into())
+        );
         if let Some(other) = another_account() {
             let name = other.name.as_str();
-            assert_eq!(allow(name, "no-such-group", &[], None), Err(UNKNOWN_GROUP.into()));
+            assert_eq!(
+                allow(name, "no-such-group", &[], None),
+                Err(UNKNOWN_GROUP.into())
+            );
             assert_eq!(allow(name, "", &[], None), Err(NO_GROUP.into()));
-            assert_eq!(allow(name, "default", &["rel".into()], None), Err(RELATIVE_FOLDER.into()));
-            assert_eq!(allow(name, "default", &[], Some("rel.json")), Err(RELATIVE_SETTINGS.into()));
+            assert_eq!(
+                allow(name, "default", &["rel".into()], None),
+                Err(RELATIVE_FOLDER.into())
+            );
+            assert_eq!(
+                allow(name, "default", &[], Some("rel.json")),
+                Err(RELATIVE_SETTINGS.into())
+            );
             // Without the proxy's recorded address no settings file can be written, and
             // nothing is listed.
-            assert_eq!(allow(name, "default", &[], Some("/tmp/x.json")), Err(NO_PROXY.into()));
+            assert_eq!(
+                allow(name, "default", &[], Some("/tmp/x.json")),
+                Err(NO_PROXY.into())
+            );
             assert!(users::load(&root).unwrap().is_empty());
         }
         assert_eq!(
-            execute(&store, &root, None, Some("bogus"), None, None, &[], None, None),
+            execute(
+                &store,
+                &root,
+                None,
+                Some("bogus"),
+                None,
+                None,
+                &[],
+                None,
+                None
+            ),
             Err(UNKNOWN_ACTION.into())
         );
         assert_eq!(

@@ -210,7 +210,8 @@ pub const NAMED_USER_REFUSED: &str = "This account of the computer may not use S
 /// SB-421: a named account presented something other than its own capability.
 pub const NAMED_USER_CAPABILITY: &str = "This account may use Switchboard's proxy only with its own capability. Use the settings file Switchboard wrote for it.";
 /// SB-421: a named account asked for another group's accounts, or for something but Claude Code.
-pub const NAMED_USER_GROUP: &str = "This account may use only the Claude Code route of the group it was allowed for.";
+pub const NAMED_USER_GROUP: &str =
+    "This account may use only the Claude Code route of the group it was allowed for.";
 fn valid_token(token: &str) -> bool {
     token.len() == 64 && token.bytes().all(|b| b.is_ascii_hexdigit())
 }
@@ -970,27 +971,26 @@ async fn relay_as(
             .or_else(|| user.folders.first().cloned())
             .unwrap_or_default()
     });
-    let folder = named_folder.or_else(|| g
-        .stat_folders
-        .read()
-        .ok()
-        .and_then(|map| {
-            let presented = |v: &[u8]| {
-                std::str::from_utf8(v)
-                    .ok()
-                    .and_then(|t| map.by_capability.get(t))
-                    .cloned()
-            };
-            presented(&header)
-                .or_else(|| presented(&bearer))
-                .or_else(|| {
-                    stats::folder_hint(&bytes).map(|hint| {
-                        stats::deepest(&map.folders, &hint)
-                            .map(str::to_owned)
-                            .unwrap_or(hint)
+    let folder = named_folder
+        .or_else(|| {
+            g.stat_folders.read().ok().and_then(|map| {
+                let presented = |v: &[u8]| {
+                    std::str::from_utf8(v)
+                        .ok()
+                        .and_then(|t| map.by_capability.get(t))
+                        .cloned()
+                };
+                presented(&header)
+                    .or_else(|| presented(&bearer))
+                    .or_else(|| {
+                        stats::folder_hint(&bytes).map(|hint| {
+                            stats::deepest(&map.folders, &hint)
+                                .map(str::to_owned)
+                                .unwrap_or(hint)
+                        })
                     })
-                })
-        }))
+            })
+        })
         .unwrap_or_default();
     let tally = |id: &str| stats::key(&stats::day_of(now()), id, &pool, &client, &folder);
     let mut moved = false;
@@ -1235,7 +1235,15 @@ async fn codex_auto(g: Gateway, operation: String, request: Request<Body>) -> Re
             parts.headers.insert("authorization", value);
         }
         let request = Request::from_parts(parts, Body::from(bytes));
-        return Box::pin(relay_as(g, None, "codex".to_owned(), pool, operation, request)).await;
+        return Box::pin(relay_as(
+            g,
+            None,
+            "codex".to_owned(),
+            pool,
+            operation,
+            request,
+        ))
+        .await;
     }
     let permit = match g.slots.clone().try_acquire_owned() {
         Ok(p) => {

@@ -118,9 +118,8 @@ pub fn user_token(token: &str, pool: &str, uid: u32, salt: &str) -> String {
 /// A fresh salt: two random UUIDs, hashed.
 pub fn new_salt() -> String {
     use sha2::{Digest, Sha256};
-    let digest = Sha256::digest(
-        format!("{}{}", uuid::Uuid::new_v4(), uuid::Uuid::new_v4()).as_bytes(),
-    );
+    let digest =
+        Sha256::digest(format!("{}{}", uuid::Uuid::new_v4(), uuid::Uuid::new_v4()).as_bytes());
     digest.iter().map(|b| format!("{b:02x}")).collect()
 }
 
@@ -250,10 +249,16 @@ mod tests {
         save(root.path(), &[user(1001, "team")]).unwrap();
         assert_eq!(users.find(1001).unwrap().pool, "team");
         save(root.path(), &[user(1002, "team")]).unwrap();
-        assert!(users.find(1001).is_none(), "a disallowed uid is out at once");
+        assert!(
+            users.find(1001).is_none(),
+            "a disallowed uid is out at once"
+        );
         assert!(users.find(1002).is_some());
         std::fs::write(root.path().join(FILE), b"not json").unwrap();
-        assert!(users.find(1002).is_none(), "an unreadable list lets nobody in");
+        assert!(
+            users.find(1002).is_none(),
+            "an unreadable list lets nobody in"
+        );
         assert!(Users::none().find(1002).is_none());
     }
 

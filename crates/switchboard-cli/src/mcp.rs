@@ -1496,7 +1496,12 @@ impl Server {
                     folders: args
                         .get("folders")
                         .and_then(Value::as_array)
-                        .map(|f| f.iter().filter_map(Value::as_str).map(str::to_owned).collect())
+                        .map(|f| {
+                            f.iter()
+                                .filter_map(Value::as_str)
+                                .map(str::to_owned)
+                                .collect()
+                        })
                         .unwrap_or_default(),
                     write_settings: text("write_settings"),
                     by: Some("mcp".into()),

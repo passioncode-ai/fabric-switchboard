@@ -2934,18 +2934,19 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                 };
                 Ok(path.display().to_string())
             };
-            let users = |action: &str,
-                         user: Option<&String>,
-                         group: Option<&String>,
-                         folders: Vec<String>,
-                         write_settings: Option<String>| Operation::ProxyUsers {
-                action: Some(action.into()),
-                user: user.cloned(),
-                group: group.cloned(),
-                folders,
-                write_settings,
-                by: Some("cli".into()),
-            };
+            let users =
+                |action: &str,
+                 user: Option<&String>,
+                 group: Option<&String>,
+                 folders: Vec<String>,
+                 write_settings: Option<String>| Operation::ProxyUsers {
+                    action: Some(action.into()),
+                    user: user.cloned(),
+                    group: group.cloned(),
+                    folders,
+                    write_settings,
+                    by: Some("cli".into()),
+                };
             match command {
                 ProxyCmd::Users => users("list", None, None, Vec::new(), None),
                 ProxyCmd::AllowUser {
@@ -5988,7 +5989,12 @@ fn print_proxy_users(value: &Value) {
             .unwrap_or_default();
         let folders = user["folders"]
             .as_array()
-            .map(|f| f.iter().filter_map(Value::as_str).collect::<Vec<_>>().join(", "))
+            .map(|f| {
+                f.iter()
+                    .filter_map(Value::as_str)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            })
             .unwrap_or_default();
         if folders.is_empty() {
             format!("{name}: group {group}")
@@ -6010,7 +6016,10 @@ fn print_proxy_users(value: &Value) {
         return;
     }
     if value["rotated"] == true {
-        println!("New capability for {}. The old one is refused.", line(&value["user"]));
+        println!(
+            "New capability for {}. The old one is refused.",
+            line(&value["user"])
+        );
     } else if value["user"].is_object() {
         println!("Allowed: {}.", line(&value["user"]));
     }

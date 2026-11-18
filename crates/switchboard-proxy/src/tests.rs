@@ -2833,13 +2833,24 @@ async fn a_named_account_is_served_only_with_its_own_capability_on_its_group() {
         }
         r.send()
     };
-    assert_eq!(send(Some(&own), None, None, &base).await.unwrap().status(), 200);
-    assert_eq!(send(None, Some(&own), None, &base).await.unwrap().status(), 200);
+    assert_eq!(
+        send(Some(&own), None, None, &base).await.unwrap().status(),
+        200
+    );
+    assert_eq!(
+        send(None, Some(&own), None, &base).await.unwrap().status(),
+        200
+    );
     assert_eq!(hits.load(Ordering::SeqCst), 2);
     let tallies = p.take_statistics();
     let day = stats::day_of(now());
     let key = stats::key(&day, &sub.id, "default", "claude-code", "/srv/agents/a");
-    assert_eq!(tallies[&key].ok, 2, "{:?}", tallies.keys().collect::<Vec<_>>());
+    assert_eq!(
+        tallies[&key].ok,
+        2,
+        "{:?}",
+        tallies.keys().collect::<Vec<_>>()
+    );
     assert_eq!(p.take_user_requests().get(&user.uid), Some(&2));
     // Nothing but its own capability gets in from it.
     let agent = p.agent_token().to_owned();
@@ -2850,8 +2861,16 @@ async fn a_named_account_is_served_only_with_its_own_capability_on_its_group() {
         (Some(p.pool_capability("default")), None, None),
         (None, Some(p.pool_capability("default")), None),
         (None, Some(p.pool_capability("other")), None),
-        (Some(p.user_capability("other", user.uid, &user.salt)), None, None),
-        (Some(p.user_capability("default", user.uid + 7, &user.salt)), None, None),
+        (
+            Some(p.user_capability("other", user.uid, &user.salt)),
+            None,
+            None,
+        ),
+        (
+            Some(p.user_capability("default", user.uid + 7, &user.salt)),
+            None,
+            None,
+        ),
         (None, None, None),
     ];
     for (bearer, header, key) in &refused {
@@ -2863,12 +2882,25 @@ async fn a_named_account_is_served_only_with_its_own_capability_on_its_group() {
     }
     // Its own capability on another group, or on Codex, is refused too.
     let other = format!("http://{}/claude/other/v1/messages", p.address());
-    assert_eq!(send(Some(&own), None, None, &other).await.unwrap().status(), 403);
+    assert_eq!(
+        send(Some(&own), None, None, &other).await.unwrap().status(),
+        403
+    );
     let codex = format!("http://{}/codex/default/v1/responses", p.address());
-    assert_eq!(send(Some(&own), None, None, &codex).await.unwrap().status(), 403);
+    assert_eq!(
+        send(Some(&own), None, None, &codex).await.unwrap().status(),
+        403
+    );
     let auto = format!("http://{}/codex/_auto/v1/responses", p.address());
-    assert_eq!(send(None, Some(&own), None, &auto).await.unwrap().status(), 403);
-    assert_eq!(hits.load(Ordering::SeqCst), 2, "no refused request went upstream");
+    assert_eq!(
+        send(None, Some(&own), None, &auto).await.unwrap().status(),
+        403
+    );
+    assert_eq!(
+        hits.load(Ordering::SeqCst),
+        2,
+        "no refused request went upstream"
+    );
     p.shutdown().await;
     up.abort();
 }
@@ -2902,7 +2934,13 @@ async fn disallow_and_rotate_take_effect_at_once_and_an_unnamed_account_is_close
     assert_eq!(p.take_foreign_refused(), 1);
     let user = name_this_account(s.root(), "default", &[]);
     let first = p.user_capability("default", user.uid, &user.salt);
-    let ok = client.post(&base).bearer_auth(&first).body("{}").send().await.unwrap();
+    let ok = client
+        .post(&base)
+        .bearer_auth(&first)
+        .body("{}")
+        .send()
+        .await
+        .unwrap();
     assert_eq!(ok.status(), 200);
     ok.text().await.unwrap();
     // Rotated: the old capability is refused, the new one served.
@@ -2911,16 +2949,34 @@ async fn disallow_and_rotate_take_effect_at_once_and_an_unnamed_account_is_close
         ..user.clone()
     };
     users::save(s.root(), std::slice::from_ref(&rotated)).unwrap();
-    let old = client.post(&base).bearer_auth(&first).body("{}").send().await.unwrap();
+    let old = client
+        .post(&base)
+        .bearer_auth(&first)
+        .body("{}")
+        .send()
+        .await
+        .unwrap();
     assert_eq!(old.status(), 401);
     old.text().await.unwrap();
     let second = p.user_capability("default", user.uid, &rotated.salt);
-    let new = client.post(&base).bearer_auth(&second).body("{}").send().await.unwrap();
+    let new = client
+        .post(&base)
+        .bearer_auth(&second)
+        .body("{}")
+        .send()
+        .await
+        .unwrap();
     assert_eq!(new.status(), 200);
     new.text().await.unwrap();
     // Disallowed: refused on the open connection, and a new connection is closed.
     users::save(s.root(), &[]).unwrap();
-    match client.post(&base).bearer_auth(&second).body("{}").send().await {
+    match client
+        .post(&base)
+        .bearer_auth(&second)
+        .body("{}")
+        .send()
+        .await
+    {
         Ok(r) => {
             assert_eq!(r.status(), 401);
             assert!(r.text().await.unwrap().contains(NAMED_USER_REFUSED));
