@@ -1370,11 +1370,6 @@ export function chainSummary(executors: readonly ChainExecutor[] | null | undefi
   }).join(' → ');
 }
 /**
- * W1.2 (DEC-0027), review round 1 of PR #821: what the *Edit account* dialog sends for its switch.
- * Untouched, nothing (`undefined`), so renaming an account that is off for another reason (used
- * on another machine, a lapsed seat) never records it as turned off by the person.
- */
-/**
  * W1.2 review round 3 of PR #821: why an account the person turns on stays away anyway. `machine`:
  * used on another machine, in a machine group or delegated out (turning on clears only the off;
  * *Use here* or a call back brings it home); `seat`: a seat delegated here whose lease ran out or
@@ -1394,6 +1389,11 @@ export function turnOnNotice(label: string, away: 'machine' | 'seat' | null): st
   if (away === 'seat') return t('{label} is no longer turned off. The machine that delegated it decides when it works here again.', { label });
   return t('{label} is on again.', { label });
 }
+/**
+ * W1.2 (DEC-0027), review round 1 of PR #821: what the *Edit account* dialog sends for its switch.
+ * Untouched, nothing (`undefined`), so renaming an account that is off for another reason (used
+ * on another machine, a lapsed seat) never records it as turned off by the person.
+ */
 export function editedEnabled(enabledNow: boolean, checked: boolean): boolean | undefined {
   return checked === enabledNow ? undefined : checked;
 }

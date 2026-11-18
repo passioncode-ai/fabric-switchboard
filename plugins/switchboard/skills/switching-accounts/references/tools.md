@@ -601,8 +601,9 @@ itself, not a call back, a restore, a lease or a cleared mark, until the operato
 `enabled: true`; `switchboard_accounts` shows `off_since`, `off_by` and `availability`) or on (`enabled: true`
 on an account turned off that is also held away, used on another machine, in a machine group,
 delegated out, or a seat whose lease ran out or that its sender called back, clears only the
-operator's off and leaves it there; bringing it home is `elsewhere: false`, with `force` for a
-sign-in moved or delegated there); `elsewhere: true`
+operator's off and leaves it there; a sign-in moved or delegated there comes home with
+`switchboard_account_recall`, and `elsewhere: false` with `force` is only for a copy that is gone
+there); `elsewhere: true`
 disables it here because another machine uses it (`elsewhere: false` clears the mark and turns it
 on again, unless the operator turned it off); `location` says where it works (a machine and
 its user, or a colleague, at most 80 characters) and marks it so; an empty one clears it.

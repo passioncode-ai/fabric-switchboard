@@ -4289,7 +4289,9 @@ function editDialog(account: Account) {
   const context = openDialog(t('Edit account'), t('{provider} · {group}. To change credentials, add the account again; to change the group, use Move to another group.', { provider: providerName(account.provider), group: poolName(account.pool, snapshot?.projects) }));
   const label = input(account.label); label.maxLength = 80; const enabled = input('', 'checkbox'); enabled.required = false; enabled.checked = account.enabled;
   const enabledLabel = el('label', 'checkbox-field'); enabledLabel.append(enabled, el('span', '', t('On for selection, launch and renewal')));
-  context.body.append(field(t('Account label'), label), enabledLabel, el('p', 'form-note', t('Turned off, it stays off until you turn it on, and its group no longer has it selected.')));
+  // W1.2 review round 4 of PR #821: a lapsed or called-back seat is switched on only by the machine that delegated it, so the dialog offers no switch (the row's ⋯ still has *Turn on* for the person's own off).
+  if (heldAway(snapshot, account) === 'seat') context.body.append(field(t('Account label'), label));
+  else context.body.append(field(t('Account label'), label), enabledLabel, el('p', 'form-note', t('Turned off, it stays off until you turn it on, and its group no longer has it selected.')));
   context.actions.append(submit(t('Save changes')));
   context.form.addEventListener('submit', (event) => { event.preventDefault(); if (!label.value.trim()) { label.setCustomValidity(t('Enter an account label.')); label.reportValidity(); label.addEventListener('input', () => label.setCustomValidity(''), { once: true }); return; } const switched = editedEnabled(account.enabled, enabled.checked); void dialogSave(context, () => adapter.update(account.id, label.value.trim(), switched), switched === false ? t('{label} is off. Nothing on this computer uses it until you turn it on.', { label: label.value.trim() }) : switched === true ? turnOnNotice(label.value.trim(), account.off ? heldAway(snapshot, account) : null) : t('Account updated.')); }); label.focus();
 }

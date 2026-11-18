@@ -126,7 +126,11 @@ pub fn lease_valid(hours: u32) -> bool {
 /// W1.2 review round 3 of PR #821: a seat called back before 0.7.118 has no `surrendered_at`; only
 /// the journal (its newest 256 entries) remembers it. At `Store::open`, every such seat whose newest
 /// `delegation` entry is `surrendered` takes that entry's time, so the record outlives the journal.
-/// Answers whether anything changed.
+/// Review round 4 (P1-B): 0.7.117 let the person switch such a seat on again (*Enable*,
+/// `accounts update --enabled true` or `--elsewhere false`); this version keeps a called-back seat
+/// off, so the same migration switches it off and drops its selections (journalled as an
+/// `account_updated`), and the store it writes is one `stays` accepts. Answers whether anything
+/// changed.
 pub(crate) fn record_old_call_backs(s: &mut Snapshot) -> bool {
     let mut changed = false;
     let newest: Vec<(String, i64)> =
@@ -145,6 +149,16 @@ pub(crate) fn record_old_call_backs(s: &mut Snapshot) -> bool {
         if let Some(d) = s.delegated.get_mut(&id) {
             d.surrendered_at = Some(at.max(d.granted_at));
             changed = true;
+        }
+        let mut switched = false;
+        if let Some(a) = s.accounts.iter_mut().find(|a| a.id == id) {
+            switched = a.enabled;
+            a.enabled = false;
+        }
+        let routed = s.routes.values().any(|v| *v == id);
+        s.routes.retain(|_, v| *v != id);
+        if switched || routed {
+            crate::append_event(s, "account_updated", Some(&id), "success");
         }
     }
     changed
@@ -206,28 +220,52 @@ fn shared(s: &Snapshot, id: &str) -> bool {
         || s.default_lent.iter().any(|x| x == id)
 }
 
+/// The rules a guest seat's state keeps in one snapshot (`stays`).
+fn seat_state(
+    s: &Snapshot,
+    id: &str,
+    d: &Delegation,
+    account: &crate::Account,
+) -> Result<(), &'static str> {
+    if account.pool != d.pool
+        || d.pool == crate::projects::DEFAULT_POOL
+        || s.elsewhere.contains_key(id)
+        || s.assigned_to.contains_key(id)
+        || s.returns_to.contains_key(id)
+        || shared(s, id)
+    {
+        return Err(DELEGATED_STAYS);
+    }
+    let selected = account.enabled || s.routes.values().any(|v| v == id);
+    // W1.2 review round 2 of PR #821 (P2-3): a seat its sender called back stays switched off
+    // here until the sender delegates it again or undoes the call back.
+    if d.surrendered_at.is_some() && selected {
+        return Err(SEAT_CALLED_BACK);
+    }
+    if d.ended_at.is_some() && selected {
+        return Err(LEASE_ENDED);
+    }
+    Ok(())
+}
+
 /// The rules a guest seat keeps, checked on every publication against the state before it.
 pub(crate) fn stays(old: &Snapshot, new: &Snapshot) -> Result<(), String> {
     for (id, d) in &new.delegated {
         let Some(account) = new.accounts.iter().find(|a| &a.id == id) else {
             return Err(DELEGATED_STAYS.into());
         };
-        if account.pool != d.pool
-            || d.pool == crate::projects::DEFAULT_POOL
-            || new.elsewhere.contains_key(id)
-            || new.assigned_to.contains_key(id)
-            || new.returns_to.contains_key(id)
-            || shared(new, id)
-        {
-            return Err(DELEGATED_STAYS.into());
-        }
-        // W1.2 review round 2 of PR #821 (P2-3): a seat its sender called back stays switched
-        // off here until the sender delegates it again or undoes the call back.
-        if d.surrendered_at.is_some() && (account.enabled || new.routes.values().any(|v| v == id)) {
-            return Err(SEAT_CALLED_BACK.into());
-        }
-        if d.ended_at.is_some() && (account.enabled || new.routes.values().any(|v| v == id)) {
-            return Err(LEASE_ENDED.into());
+        // Review round 4 of PR #821 (P1-B): a seat's state is checked against what this write
+        // changed. A rule the store already broke before the write (an older version wrote it,
+        // or a migration could not mend it) never makes a write about anything else fail; the
+        // write is refused only when it breaks the rule itself.
+        if let Err(error) = seat_state(new, id, d, account) {
+            let before = old.delegated.get(id).and_then(|o| {
+                let a = old.accounts.iter().find(|a| &a.id == id)?;
+                seat_state(old, id, o, a).err()
+            });
+            if before != Some(error) {
+                return Err(error.into());
+            }
         }
         match old.delegated.get(id) {
             Some(o) => {
@@ -1038,6 +1076,121 @@ mod tests {
             detail: "restored".into(),
         });
         assert!(!record_old_call_backs(&mut t));
+    }
+
+    /// Review round 4 of PR #821 (P1-B, P2-3): a store 0.7.117 wrote with a called-back seat the
+    /// person switched on again (no `surrendered_at`, the call back only in the journal) opens
+    /// with the seat recorded as called back and switched off, in one write, and every later
+    /// write about another account goes through.
+    #[test]
+    fn an_old_store_with_a_called_back_seat_switched_on_opens_writable_with_the_seat_off() {
+        let root = tempfile::tempdir().unwrap();
+        let folder = tempfile::tempdir().unwrap();
+        let vault = Arc::new(MemoryVault::default());
+        let store = Store::open(root.path().into(), vault.clone()).unwrap();
+        let path = std::fs::canonicalize(folder.path()).unwrap();
+        store.save_project(None, "Org work", &[path], &[]).unwrap();
+        let p = pool(&store);
+        let seat = store
+            .add_delegated(
+                "seat".into(),
+                Provider::Claude,
+                p.clone(),
+                oauth("9"),
+                KEY,
+                None,
+                48,
+            )
+            .unwrap();
+        let other = store
+            .add(
+                "other".into(),
+                Provider::Claude,
+                AuthKind::OAuth,
+                "default".into(),
+                oauth("8"),
+            )
+            .unwrap();
+        store.surrender_delegated(&seat.id, KEY, false).unwrap();
+        drop(store);
+        // As 0.7.117 left it after the person's *Enable*: on, selected, no record.
+        let file = root.path().join("accounts.json");
+        let mut disk: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();
+        disk["schema_version"] = 16.into();
+        let snap = &mut disk["snapshot"];
+        snap["delegated"][&seat.id]
+            .as_object_mut()
+            .unwrap()
+            .remove("surrendered_at");
+        for a in snap["accounts"].as_array_mut().unwrap() {
+            if a["id"] == seat.id.as_str() {
+                a["enabled"] = true.into();
+            }
+        }
+        snap["routes"][format!("claude:{p}")] = seat.id.clone().into();
+        std::fs::write(&file, serde_json::to_vec(&disk).unwrap()).unwrap();
+        let store = Store::open(root.path().into(), vault).unwrap();
+        let s = store.snapshot().unwrap();
+        let a = s.accounts.iter().find(|a| a.id == seat.id).unwrap();
+        assert!(!a.enabled && a.off.is_none());
+        assert!(s.delegated[&seat.id].surrendered_at.is_some());
+        assert!(!s.routes.values().any(|v| *v == seat.id));
+        assert_eq!(crate::off::availability(&s, a), "called_back");
+        // Written once, at open.
+        let disk: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();
+        assert!(disk["snapshot"]["delegated"][&seat.id]["surrendered_at"].is_i64());
+        assert_eq!(disk["schema_version"], 17);
+        // A write about another account goes through.
+        store
+            .update_fields(&other.id, Some("renamed".into()), None)
+            .unwrap();
+    }
+
+    /// Review round 4 of PR #821 (P1-B): a seat state the store already broke before a write
+    /// (an ended lease left switched on) never makes a write about another account fail; a write
+    /// that breaks the rule itself is still refused.
+    #[test]
+    fn a_seat_broken_before_a_write_never_blocks_a_write_about_another_account() {
+        let (_r, _f, store) = store_with_group();
+        let seat = store
+            .add_delegated(
+                "seat".into(),
+                Provider::Claude,
+                pool(&store),
+                oauth("9"),
+                KEY,
+                None,
+                48,
+            )
+            .unwrap();
+        let other = store
+            .add(
+                "other".into(),
+                Provider::Claude,
+                AuthKind::OAuth,
+                "default".into(),
+                oauth("8"),
+            )
+            .unwrap();
+        {
+            let mut state = store.lock().unwrap();
+            state.delegated.get_mut(&seat.id).unwrap().ended_at = Some(now());
+            store.republish(&state);
+        }
+        store
+            .update_fields(&other.id, Some("renamed".into()), None)
+            .unwrap();
+        // The person's off and on leave the lapsed seat off (only their word is taken back).
+        store.update_fields(&seat.id, None, Some(false)).unwrap();
+        store.update_fields(&seat.id, None, Some(true)).unwrap();
+        assert!(!store.snapshot().unwrap().accounts[0].enabled);
+        // Switching it on now breaks the rule anew: refused.
+        assert_eq!(
+            store.update_fields(&seat.id, None, Some(true)).unwrap_err(),
+            LEASE_ENDED
+        );
     }
 
     #[test]

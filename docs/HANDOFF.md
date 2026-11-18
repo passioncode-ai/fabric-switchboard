@@ -15,7 +15,9 @@
 
 - **Review round 3 (2026-11-18, clean; follow-ups fixed).** An extension that reaches a seat after its call back never revives it, and only the sender's undo clears `surrendered_at`; `stays` answers `SEAT_CALLED_BACK`; the `Assign` guard reads `delegated_out`; MCP and tools.md describe `enabled: true` on an account held away; the window's *Turn on* says when the account stays away and hides *Enable* on a lapsed or called-back seat; seats called back before 0.7.118 take their record from the journal at open; `remote check` skips the lapsed copy of a seat turned off here. Merged origin/main.
 
-**Exact next task.** Review round 4 of PR #821 (narrow), then merge once the gate reads EXIT 0 on the merged head; the next release carries SB-418 (CHANGELOG Unreleased). Then SB-428 (e): a golden test fixing the CLI and MCP row shapes.
+- **Review round 4 (2026-11-18, one P1) fixed.** P1-B: the round-3 migration recorded a call back on a seat 0.7.117 had let the person switch on, which made every later write fail with `SEAT_CALLED_BACK`; the migration now switches the seat off in the same write, and `delegation::stays` refuses only a seat state the write itself breaks. P2: recall is the way home for a moved or delegated sign-in (MCP, tools.md); `remote check`'s skip limited to delegated seats; the doc comment; no switch in the Edit dialog on a lapsed or called-back seat.
+
+**Exact next task.** Review round 5 of PR #821 (narrow), then merge once the gate reads EXIT 0 on the merged head; the next release carries SB-418 (CHANGELOG Unreleased). Then SB-428 (e): a golden test fixing the CLI and MCP row shapes.
 
 ## 2026-11-18: SB-420 Keychain writes keep values off the command line; credential output kept off screens and files, on branch `secret-argv`
 
