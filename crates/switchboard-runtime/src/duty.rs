@@ -605,7 +605,9 @@ fn closed_idle_before(lines: &[Value], session: &str) -> bool {
             && l["action"] == "close"
             && l["reason"] == "idle"
             && l["phase"] != "intent"
-            && l["outcome"].as_str().is_some_and(|o| o.starts_with("closed"))
+            && l["outcome"]
+                .as_str()
+                .is_some_and(|o| o.starts_with("closed"))
     })
 }
 
@@ -1354,9 +1356,15 @@ mod tests {
         let set = Settings::default();
         let now = 1_000_000;
         // Its background agents wrote ten minutes ago: working.
-        assert_eq!(decide(&seen("idle", 120, 3, Some(10)), &set, now, false), None);
+        assert_eq!(
+            decide(&seen("idle", 120, 3, Some(10)), &set, now, false),
+            None
+        );
         // Written 64 minutes ago, under the wake-up floor: not quiet long enough yet.
-        assert_eq!(decide(&seen("idle", 120, 3, Some(64)), &set, now, false), None);
+        assert_eq!(
+            decide(&seen("idle", 120, 3, Some(64)), &set, now, false),
+            None
+        );
         // No transcript found: unknown is not quiet.
         assert_eq!(decide(&seen("idle", 600, 9, None), &set, now, false), None);
         // Two sessions it launched itself still run: working.
@@ -1381,7 +1389,10 @@ mod tests {
             idle_minutes: 10,
             ..set
         };
-        assert_eq!(decide(&seen("idle", 64, 1, Some(64)), &low, now, false), None);
+        assert_eq!(
+            decide(&seen("idle", 64, 1, Some(64)), &low, now, false),
+            None
+        );
     }
 
     #[test]
@@ -1392,10 +1403,19 @@ mod tests {
             json!({"action": "close", "reason": "idle", "outcome": "still_running", "session": "c"}),
             json!({"action": "close", "reason": "duplicate", "outcome": "closed", "session": "d"}),
         ];
-        assert!(!closed_idle_before(&lines, "a"), "an intent alone is no close");
+        assert!(
+            !closed_idle_before(&lines, "a"),
+            "an intent alone is no close"
+        );
         assert!(closed_idle_before(&lines, "b"));
-        assert!(!closed_idle_before(&lines, "c"), "a close that failed closed nothing");
-        assert!(!closed_idle_before(&lines, "d"), "a duplicate's close says nothing of the session");
+        assert!(
+            !closed_idle_before(&lines, "c"),
+            "a close that failed closed nothing"
+        );
+        assert!(
+            !closed_idle_before(&lines, "d"),
+            "a duplicate's close says nothing of the session"
+        );
         assert!(!closed_idle_before(&lines, "e"));
     }
 

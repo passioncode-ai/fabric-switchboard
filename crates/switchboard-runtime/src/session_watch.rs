@@ -252,7 +252,10 @@ const READ_FRESH: i64 = 15;
 /// process tree does not show it; the duty officer counts it as the session's work.
 pub fn running_children(scan: &Value, records: &[Value]) -> HashMap<u32, usize> {
     let rows: Vec<Value> = scan["sessions"].as_array().cloned().unwrap_or_default();
-    let live: HashSet<&str> = rows.iter().filter_map(|r| r["launch_id"].as_str()).collect();
+    let live: HashSet<&str> = rows
+        .iter()
+        .filter_map(|r| r["launch_id"].as_str())
+        .collect();
     let mut per_launch: HashMap<&str, usize> = HashMap::new();
     for r in records {
         let Some(id) = r["launch_id"].as_str() else {
@@ -262,7 +265,10 @@ pub fn running_children(scan: &Value, records: &[Value]) -> HashMap<u32, usize> 
             continue;
         }
         let by = &r["launched_by"];
-        if let Some(caller) = by["caller_launch_id"].as_str().or_else(|| by["parent"].as_str()) {
+        if let Some(caller) = by["caller_launch_id"]
+            .as_str()
+            .or_else(|| by["parent"].as_str())
+        {
             if caller != id {
                 *per_launch.entry(caller).or_default() += 1;
             }
