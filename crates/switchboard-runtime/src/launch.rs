@@ -317,6 +317,9 @@ fn script_with(
     working_directory: &Path,
 ) -> String {
     let mut result = format!("#!{SCRIPT_SHELL}\nset +x\nunset {}\n", CONFLICTS.join(" "));
+    // SB-455: Terminal, a session host, `--in-place` and `--headless` run this script without the
+    // person's login shell; the session and its hooks get the login PATH (`node` from Homebrew).
+    result.push_str(&path_export(program));
     for (key, value) in env {
         result.push_str(&format!("export {key}={}\n", quote(value)));
     }
@@ -3679,28 +3682,29 @@ pub const DISPATCH_FAILED: &str =
     "The dispatched session did not start: its program could not be run.";
 pub const DISPATCH_WOULD_NOT_STOP: &str =
     "The dispatched session did not stop. End its process by hand, then stop it again.";
-/// SB-247: the PATH a run started by the owner gets: the program's own folder first (a
-/// `#!/usr/bin/env node` launcher finds its `node` beside it), then the owner's, then the
-/// per-user and Homebrew folders the desktop app's PATH lacks.
+/// SB-247, SB-455: the PATH every session Switchboard starts gets (a launch script's `export
+/// PATH`, a resume script's, a dispatched run's environment): the program's own folder first (a
+/// `#!/usr/bin/env node` launcher finds its `node` beside it), then the person's login PATH (asked
+/// of their login shell once, `login_path`), then the owner's, then the per-user and Homebrew
+/// folders a launchd PATH lacks.
 pub(crate) fn headless_path(program: &Path) -> std::ffi::OsString {
-    let mut dirs: Vec<PathBuf> = program
-        .parent()
-        .map(Path::to_path_buf)
+    session_path(program, crate::login_path::login_dirs().as_deref())
+}
+/// SB-455: a session script's `PATH` line: `headless_path`, then the `PATH` the script was started
+/// with (a terminal's own, for `--in-place`), so a folder only the caller had is not lost.
+pub(crate) fn path_export(program: &Path) -> String {
+    format!(
+        "export PATH={}\"${{PATH:+:$PATH}}\"\n",
+        fabric_sessions_core::cli::quoted(&headless_path(program).to_string_lossy())
+    )
+}
+/// `headless_path` with the login folders given.
+pub(crate) fn session_path(program: &Path, login: Option<&[PathBuf]>) -> std::ffi::OsString {
+    let extra: Vec<PathBuf> = std::env::var_os("HOME")
+        .map(|home| PathBuf::from(home).join(".local/bin"))
         .into_iter()
         .collect();
-    if let Some(path) = std::env::var_os("PATH") {
-        dirs.extend(std::env::split_paths(&path));
-    }
-    if let Some(home) = std::env::var_os("HOME") {
-        dirs.push(PathBuf::from(home).join(".local/bin"));
-    }
-    dirs.extend([
-        PathBuf::from("/opt/homebrew/bin"),
-        PathBuf::from("/usr/local/bin"),
-    ]);
-    let mut seen = std::collections::BTreeSet::new();
-    dirs.retain(|d| seen.insert(d.clone()));
-    std::env::join_paths(dirs).unwrap_or_default()
+    crate::login_path::merge(program.parent(), login, std::env::var_os("PATH"), &extra)
 }
 /// SB-247: starts a dispatched run from the owner's own process: no Terminal, no PowerShell. It
 /// leads its own process group (Unix) or a new process group with no window (Windows), reads
@@ -7711,6 +7715,85 @@ mod tests {
         let names: Vec<&str> = unset.split(' ').skip(1).collect();
         assert_eq!(names, CONFLICTS);
         assert!(text.find("unset ").unwrap() < text.find("export ").unwrap_or(usize::MAX));
+    }
+    /// SB-455: a launch script exports the login PATH, first after the program's own folder.
+    #[cfg(unix)]
+    #[test]
+    fn a_launch_script_exports_the_login_path() {
+        let brew = PathBuf::from("/synthetic/homebrew/bin");
+        let text = crate::login_path::with_login(vec![brew.clone(), "/usr/bin".into()], || {
+            script(
+                Path::new("/tmp/home"),
+                Path::new("/opt/agent/bin/claude"),
+                &[],
+                &BTreeMap::new(),
+                false,
+                Path::new("/tmp/project"),
+            )
+        });
+        let line = text.lines().find(|l| l.starts_with("export PATH=")).unwrap();
+        let value = line.split('\'').nth(1).unwrap();
+        let dirs: Vec<PathBuf> = std::env::split_paths(value).collect();
+        assert_eq!(dirs[0], PathBuf::from("/opt/agent/bin"));
+        assert_eq!(dirs[1], brew);
+        assert!(dirs.contains(&PathBuf::from("/opt/homebrew/bin")));
+        // Exported after the scrub and before the session's own variables and its program.
+        assert!(text.find("unset ").unwrap() < text.find("export PATH=").unwrap());
+        assert!(text.find("export PATH=").unwrap() < text.find("exec ").unwrap());
+        // The resume script of the duty officer and Continue carries the same folders.
+        let resume = crate::login_path::with_login(vec![brew.clone()], || {
+            crate::duty::resume_script_for(
+                Path::new("/tmp/config"),
+                "/tmp/project",
+                "s1",
+                Path::new("/opt/agent/bin/claude"),
+                &[],
+                None,
+            )
+        });
+        assert!(resume.contains(&format!("export PATH='/opt/agent/bin:{}:", brew.display())));
+    }
+    /// SB-455: a hook the session runs through `/bin/sh` (as Claude Code runs its hooks) finds a
+    /// tool that only the login PATH names, although the script starts with a launchd PATH.
+    #[cfg(unix)]
+    #[test]
+    fn a_hook_in_a_launched_session_finds_a_tool_on_the_login_path() {
+        let temp = tempfile::tempdir().unwrap();
+        let base = temp.path().canonicalize().unwrap();
+        let brew = base.join("homebrew/bin");
+        fs::create_dir_all(&brew).unwrap();
+        private_write(&brew.join("node"), b"#!/bin/sh\necho synthetic-node\n", true).unwrap();
+        let agent_dir = base.join("agent");
+        fs::create_dir(&agent_dir).unwrap();
+        let report = base.join("report");
+        let agent = agent_dir.join("claude");
+        private_write(
+            &agent,
+            format!(
+                "#!/bin/sh\n/bin/sh -c 'node' > {} 2>&1\n",
+                quote(&report.to_string_lossy())
+            )
+            .as_bytes(),
+            true,
+        )
+        .unwrap();
+        let home = base.join("home");
+        private_dir(&home).unwrap();
+        let project = base.join("project");
+        fs::create_dir(&project).unwrap();
+        let text = crate::login_path::with_login(vec![brew.clone()], || {
+            script(&home, &agent, &[], &BTreeMap::new(), false, &project)
+        });
+        let path = home.join("launch.command");
+        private_write(&path, text.as_bytes(), true).unwrap();
+        let status = Command::new(SCRIPT_SHELL)
+            .arg(&path)
+            .env_clear()
+            .env("PATH", "/usr/bin:/bin")
+            .status()
+            .unwrap();
+        assert!(status.success());
+        assert_eq!(fs::read_to_string(report).unwrap(), "synthetic-node\n");
     }
     /// Runs the real generated script with zsh against hostile paths and a polluted
     /// environment. Terminal launches only exist on macOS, which is where zsh is guaranteed.

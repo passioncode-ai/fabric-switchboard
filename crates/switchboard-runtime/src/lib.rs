@@ -44,6 +44,7 @@ pub mod kimi;
 pub mod launch;
 pub mod launch_keys;
 pub mod launches;
+pub mod login_path;
 mod limits;
 pub mod machine_proof;
 pub mod machine_sessions;
@@ -3761,6 +3762,11 @@ impl Owner {
                 "login_adopted",
                 &[("count", oplog::Field::Number(adopted as i64))],
             );
+        }
+        // SB-455: the person's login PATH, asked of their login shell once (bounded, off the start
+        // path), so the sessions this owner starts find Homebrew's tools.
+        if native_sources {
+            login_path::warm();
         }
         // SB-87: sign-in homes an earlier owner forgot; off the start path (it may ask `ps` and
         // Keychain, each bounded), and only the real owner of its data folder does it.

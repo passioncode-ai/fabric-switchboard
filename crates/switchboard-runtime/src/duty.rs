@@ -490,6 +490,7 @@ pub fn resume_script_for(
             for line in text.lines().filter(|l| l.starts_with("export ")) {
                 if !line.starts_with("export SWITCHBOARD_LAUNCH_ID=")
                     && !line.starts_with("export CLAUDE_CONFIG_DIR=")
+                    && !line.starts_with("export PATH=")
                 {
                     out.push_str(line);
                     out.push('\n');
@@ -502,12 +503,9 @@ pub fn resume_script_for(
         ));
     }
     // A Terminal window runs the script without the person's login shell: the PATH a run started
-    // by the owner gets, so the session's hooks find `node` (operator 2026-11-15: every hook failed
-    // with "node: command not found").
-    out.push_str(&format!(
-        "export PATH={}\n",
-        quote(&crate::launch::headless_path(program).to_string_lossy())
-    ));
+    // by the owner gets, the person's login PATH first (SB-455), so the session's hooks find `node`
+    // (operator 2026-11-15: every hook failed with "node: command not found").
+    out.push_str(&crate::launch::path_export(program));
     out.push_str(&format!(
         "cd {} || exit 1\n{}",
         quote(cwd),
