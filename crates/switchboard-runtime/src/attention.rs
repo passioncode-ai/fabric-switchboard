@@ -62,6 +62,9 @@ pub struct Inputs<'a> {
     /// SB-412, SB-417: the dispatches refused at the session limit that still wait
     /// (`dispatch_refusals::waiting`), or none.
     pub refusals: Option<&'a Value>,
+    /// SB-420: Claude Code Keychain items Switchboard could not write, too large
+    /// (`item_size::read`).
+    pub too_large: &'a [crate::item_size::Entry],
     pub now: i64,
 }
 
@@ -71,7 +74,8 @@ pub const DISPATCH_REFUSED: &str =
     "Board runs are waiting: this computer's session limit refused them, and none has started since.";
 
 /// Reasons in the order they are listed.
-const ORDER: [&str; 12] = [
+const ORDER: [&str; 13] = [
+    "keychain_too_large",
     "session_duplicate",
     "session_stuck",
     "session_gone",
@@ -312,6 +316,22 @@ pub fn build(inputs: &Inputs) -> Value {
             }),
         );
     }
+    // SB-420: one item per Claude Code item refused as too large; the fix is in Claude Code, so
+    // the window offers no button (`none`).
+    for entry in inputs.too_large {
+        push(
+            "keychain_too_large",
+            entry.item.clone(),
+            json!({
+                "account_id": null, "label": null, "provider": "claude", "pool": null,
+                "reason": "keychain_too_large", "detail": crate::item_size::DETAIL,
+                "since": entry.at,
+                "item": entry.item,
+                "during": entry.during,
+                "action": {"tool": "switchboard_status", "window": "none"},
+            }),
+        );
+    }
     items.sort_by(|a, b| (a.0, &a.1).cmp(&(b.0, &b.1)));
     let items: Vec<Value> = items.into_iter().map(|(_, _, item)| item).collect();
     json!({"count": items.len(), "items": items})
@@ -371,6 +391,7 @@ mod tests {
             remote: &crate::remote_usage::State::default(),
             watch: &[],
             refusals: None,
+            too_large: &[],
             now: 10_000,
         })
     }
@@ -392,6 +413,7 @@ mod tests {
             remote: &crate::remote_usage::State::default(),
             watch: &watch,
             refusals: None,
+            too_large: &[],
             now: 10_000,
         });
         // A launch that is gone is shown in the session tree, not here, unless it is a board run
@@ -422,6 +444,40 @@ mod tests {
             "switchboard_session_close_copy"
         );
     }
+    /// SB-420: a Claude Code item too large to write is one item each, listed first, naming
+    /// what refused it and when; it offers no button, the fix is in Claude Code.
+    #[test]
+    fn a_keychain_item_too_large_to_write_is_listed_first() {
+        let snapshot = Snapshot::default();
+        let too_large = [crate::item_size::Entry {
+            item: crate::item_size::ORDINARY.into(),
+            during: crate::item_size::DURING_RENEWAL.into(),
+            at: 9_000,
+            stamp: Some("1:2".into()),
+        }];
+        let answer = build(&Inputs {
+            snapshot: &snapshot,
+            sign_in: &[],
+            renewal_refused: &[],
+            seats: &[],
+            questions: &[],
+            remote: &crate::remote_usage::State::default(),
+            watch: &[json!({"kind": "duplicate", "session_id": "s-1", "pids": [3, 4]})],
+            refusals: None,
+            too_large: &too_large,
+            now: 10_000,
+        });
+        assert_eq!(
+            reasons(&answer),
+            ["keychain_too_large", "session_duplicate"]
+        );
+        let item = &answer["items"][0];
+        assert_eq!(item["detail"], crate::item_size::DETAIL);
+        assert_eq!(item["item"], "ordinary");
+        assert_eq!(item["during"], "renewal");
+        assert_eq!(item["since"], 9_000);
+        assert_eq!(item["action"]["window"], "none");
+    }
     #[test]
     fn dispatches_refused_at_the_session_limit_are_one_item_with_their_count() {
         // SB-412: the hour's refusals, however many, are one item that opens the session limit.
@@ -437,6 +493,7 @@ mod tests {
             remote: &crate::remote_usage::State::default(),
             watch: &[json!({"kind": "duplicate", "session_id": "s-1", "pids": [3, 4]})],
             refusals: Some(&refused),
+            too_large: &[],
             now: 10_000,
         });
         assert_eq!(reasons(&answer), ["session_duplicate", "dispatch_refused"]);
@@ -606,6 +663,7 @@ mod tests {
             remote: &remote,
             watch: &[],
             refusals: None,
+            too_large: &[],
             now: 10_000,
         });
         assert_eq!(reasons(&answer), ["refused_there"]);
