@@ -365,8 +365,12 @@ group's Claude Code route: a subscription serves it, and its requests count in t
 session token, the agents' key and every group's or folder's capability are refused from it. The
 settings file holds the proxy's address and the capability (`ANTHROPIC_BASE_URL`,
 `ANTHROPIC_AUTH_TOKEN`); no command prints the capability. Switchboard writes it as its own file,
-mode 0640 with the user's primary group when you are a member of that group, else 0600, and then
-prints the `sudo install -o agent-a -m 0600 ...` line that hands a copy to the user. The agent runs
+mode 0640 when the user's primary group is its own private group and you are a member of it, else
+0600, and then prints the line that hands a copy to the user, written as that user (`sudo cat
+<file> | sudo -u agent-a sh -c 'umask 077; mkdir -p ... && cat > ...'`). Every folder on the way
+must belong to root or the service account and be writable by no one else, none may be a link
+(give `/private/var/...`, not `/var/...`, on macOS), and a file already there is replaced only when
+it holds exactly what Switchboard wrote there last. The agent runs
 `claude --settings /srv/agents/a/claude-settings.json -p "..."`. The list is
 `<data>/proxy-users.json` (0600, no secret). A systemd example is in
 [MOVING.md](MOVING.md#several-users-on-one-linux-host).

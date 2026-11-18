@@ -348,8 +348,11 @@ not supported.
    ```
 
    The file is the service's, mode 0640 with the group `agent-a`, so only `agent-a` reads it. When
-   the service is not in that group the file stays 0600 and the answer prints the `sudo install -o
-   agent-a -m 0600 ...` line that hands a copy to the user. No command prints the capability.
+   the service is not in that group, or the group is not the user's own, the file stays 0600 and
+   the answer prints the line that hands a copy to the user, written as that user (`sudo cat ... |
+   sudo -u agent-a sh -c '...'`). The folder must belong to root or the service and be writable by
+   no one else, which `install -d -o switchboard -m 0711` above gives. No command prints the
+   capability.
 
 4. The agent runs Claude Code with that file:
 

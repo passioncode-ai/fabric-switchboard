@@ -901,7 +901,10 @@ research notes); the ones still in force that the board cites are seeded below w
     worthless at once.
   - The capability reaches the user as a Claude Code settings file the person names, written by
     the service user and never printed: 0640 with the user's primary group when the service user
-    may set it, else 0600 with the `sudo install` line that hands a copy over. It is rewritten when
+    may set it and that group is the user's own private group, else 0600 with a line that copies
+    it as the user (`sudo -u`), never as root into a path the user controls. It is written through
+    a handle on folders that only root and the service user can change, and replaces only the bytes
+    Switchboard wrote there last (security round 1 of PR #832). It is rewritten when
     the proxy's port or token changes.
   - Only where the proxy can name the peer's account by uid: Linux, and macOS before 27. Windows
     refuses every call (SB-274 compares SIDs and has no uid to name); macOS 27 hides other

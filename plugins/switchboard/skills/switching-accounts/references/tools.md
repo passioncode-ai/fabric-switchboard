@@ -875,7 +875,10 @@ agents' key and every group's or folder's capability are refused from it, and so
 group's route and Codex. `write_settings` writes its Claude Code settings file there
 (`ANTHROPIC_BASE_URL` and `ANTHROPIC_AUTH_TOKEN`, the capability), owned by this account, mode
 0640 with the user's primary group when this account may set it, else 0600 with
-`settings_file.install_command`, the `sudo install` line a person runs to hand it over; run
+`settings_file.install_command`, a `sudo cat ... | sudo -u <user> sh -c '...'` line a person
+runs to hand it over as the user (the folders on the way must belong to root or the service
+account and no link may be among them; a file there is replaced only when it holds what
+Switchboard wrote there last); run
 `claude --settings <file> -p ...` as that user. No answer carries the capability. `disallow` takes
 the account off the list and `rotate` gives it a new capability (and writes the recorded file
 again): both at once. macOS and Linux only; Windows answers that it is not supported. Changing it

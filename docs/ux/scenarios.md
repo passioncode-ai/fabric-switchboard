@@ -2288,7 +2288,7 @@ Approval basis: operator explicitly authorized autonomous design and implementat
 **Entry point:** an agent or the person in Terminal: `switchboard proxy allow-user <user> --group <group> --write-settings <file>`, MCP `switchboard_proxy_users` with `action: "allow"`. The window: Settings → *Other users of this computer*.
 **Steps:**
 1. `switchboard proxy allow-user agent-a --group team --folder /srv/agents/a --write-settings /var/lib/switchboard-users/agent-a.json` → “Allowed: agent-a (uid …): group team, folders /srv/agents/a.” and “Settings file: … (mode 0640).”
-2. When the service user may not give the file to the user's group, the file stays 0600 and the answer prints the `sudo install -o agent-a -m 0600 ...` line and the path to use instead.
+2. When the service user may not give the file to the user's group, the file stays 0600 and the answer prints the line that copies it as `agent-a` (`sudo cat ... | sudo -u agent-a sh -c '...'`) and the path to use instead.
 3. As `agent-a`: `claude --settings <file> -p "..."` runs on the group's subscription; its requests count in the group.
 4. Open Settings → *Other users of this computer* → “Agents that run as other users of this computer can use one group's accounts as Claude Code. …” and one row “agent-a: group team” with *Disallow*.
 5. *Disallow* → “agent-a can no longer use Switchboard's proxy.”; the agent's next request and connection are refused.

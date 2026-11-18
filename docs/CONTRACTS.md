@@ -2776,8 +2776,9 @@ subscriptions. SB-273 closes their connections, and the agents' key never reache
 
 - **The list.** `<data>/proxy-users.json` (0600, written by rename, removed when empty;
   `switchboard_proxy::users`): `{version: 1, users: [{uid, name, pool, folders, salt, added_at,
-  added_by, settings}]}`. `added_by` is the surface (`cli`, `mcp`, `window`); `settings` is the
-  settings file Switchboard wrote for the account; `salt` is part of its capability and no secret
+  added_by, settings, settings_sha256}]}`. `added_by` is the surface (`cli`, `mcp`, `window`);
+  `settings` is the settings file Switchboard wrote for the account and `settings_sha256` the
+  digest of the bytes it wrote there last; `salt` is part of its capability and no secret
   (the capability needs the session token too). Root (uid 0), a pool id that is not one, a salt
   that is not 64 hex digits and a relative folder are never listed (`root_and_malformed_rows_are_never_listed`).
   At most 256 accounts. An unreadable file lets nobody in (`the_view_follows_the_file_and_fails_closed`).
@@ -2787,7 +2788,21 @@ subscriptions. SB-273 closes their connections, and the agents' key never reache
   whenever its length, modification time or inode changed (`users::Users::current`), so allowing
   and disallowing take effect at the next connection, with no owner restart
   (`a_named_accounts_connection_is_let_in_and_marked_with_its_uid`,
-  `only_a_named_account_or_this_one_is_admitted`). Windows never names one (`users::Users::none`):
+  `only_a_named_account_or_this_one_is_admitted`). A uid listed with a name is admitted only while
+  the password database still gives the uid that name: a uid handed to a new account is refused
+  (security round 1 P2-4, `a_listed_uid_is_admitted_only_under_its_recorded_name`).
+  The owner is the one socket whose local address and port are the peer's and whose foreign ones
+  are ours, on every system (security round 1 P2-1: ports alone let another user bind
+  `127.0.0.2:<proxy port>`, or reuse a source port on another address, and be named as this
+  account or a named one): Linux reads both `/proc/net/tcp` tables as one and refuses when two
+  live rows for the pair disagree, macOS reads the addresses of `xtcpcb64` (`inp_vflag` at 96, the
+  foreign and local unions at 100 and 116) and of `socket_fdinfo` (288, 296, 312; offsets read with
+  `offsetof` from the macOS 27.2 SDK), Windows the address columns of its table
+  (`a_proc_net_tcp_row_matches_by_both_addresses_and_disagreement_is_nobodys`,
+  `a_pcb_record_matches_by_both_addresses_and_ports_and_disagreement_is_nobodys`,
+  `this_processs_own_connection_is_found_in_the_pcb_list_by_its_address_pair`). An accepted
+  socket whose own address cannot be read admits nobody (P2-5,
+  `a_socket_whose_address_cannot_be_read_admits_nobody`). Windows never names one (`users::Users::none`):
   SB-274 compares the peer's SID with the owner's and has no uid to list. macOS 27 lets an
   unprivileged process read only its own account's sockets (SB-330), so there another account's
   connection still reads as nobody's and is closed: the feature serves Linux hosts (and macOS
@@ -2809,12 +2824,27 @@ subscriptions. SB-273 closes their connections, and the agents' key never reache
   `proxy_user_requests` with `uid` and `count`: numbers only.
 - **The settings file.** `proxy allow-user ... --write-settings <path>` (and `rotate-user`) write
   `{"env": {"ANTHROPIC_BASE_URL": "http://127.0.0.1:<port>/claude/<pool>", "ANTHROPIC_AUTH_TOKEN":
-  <capability>}}` as a new file renamed over the path: owned by the service account, `fchown` to the
-  named account's primary group and mode 0640 when the service account may set that group (it is a
-  member), else 0600 and the answer carries `install_command`, the `sudo install -o <user> -m 0600`
-  line that hands a copy to the user (`installed_path`). A link, a folder or another account's
-  file at the path is never replaced; the folder must exist
-  (`a_settings_file_holds_the_address_and_is_never_world_readable`). No answer, log line or list
+  <capability>}}` as a new file renamed over the path: owned by the service account, mode 0640 with
+  the named account's primary group only when that group is the account's own private group (named
+  as the account, with no member but it and the service account) and the service account may set
+  it, else 0600; an account that could not be looked up gets 0600 and no group (security round 1
+  P2-2, P2-3). Security round 1 P1-2: the folders are opened one at a time from `/` through
+  `openat` with `O_NOFOLLOW`, each owned by root or the service account and writable by no one
+  else (a sticky folder such as `/tmp` excepted), and the file is created and renamed through that
+  folder handle (`renameat`), so no folder can be swapped for a link under it; a file already at
+  the path is replaced only when it is the service account's regular file with one link holding
+  exactly the bytes recorded at the last write (`settings_sha256`); a link there, another
+  account's file, a file Switchboard did not write or one changed since are refused, so a rewrite
+  (rotation, the SB-269 port move) never lands on the service account's own `authorized_keys` or
+  shell files (`a_settings_file_replaces_only_its_own_bytes_and_never_passes_a_link_or_an_open_folder`,
+  `a_settings_file_holds_the_address_and_is_never_world_readable`). With 0600 the answer carries
+  `install_command` (security round 1 P1-1): `sudo cat <file> | sudo -u <user> sh -c 'umask 077;
+  mkdir -p <home>/.claude && cat > <home>/.claude/switchboard-settings.json'`, so the copy is
+  written as the user, never as root under a path the user controls, and the line carries no
+  secret (`installed_path`; `the_hand_over_line_writes_as_the_user_and_carries_no_secret`).
+  Allowing a listed user for another group writes its recorded file again (P2-6,
+  `a_new_group_rewrites_the_recorded_settings_file`); a uid whose name changed is refused for
+  allow and rotate and its file left alone (`a_reused_uid_is_refused_and_its_file_left_alone`). No answer, log line or list
   carries the capability (`allow_rotate_and_disallow_keep_the_capability_out_of_every_answer_and_file`).
   The address comes from the running owner, else `proxy.json`; with neither the call is refused and
   nothing is listed. When the proxy starts on another port or token (SB-269), every recorded file is

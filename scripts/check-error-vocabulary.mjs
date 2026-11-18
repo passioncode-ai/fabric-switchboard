@@ -53,6 +53,9 @@ const EXCLUDED_FILES = {
 // Messages that are error literals in the sources above but can never reach the UI.
 // Every entry names why. Keep this list short: a doubtful message gets a mapping instead.
 const ALLOWLIST = {
+  "A folder on the way to the settings file is a link, or an account other than root and the one Switchboard runs as may write to it. Name a path whose folders only those two can change.": 'SB-421: allow and rotate are CLI and MCP only; the window lists and disallows by uid',
+  "The file at that path is not the one Switchboard wrote there last, or it changed since. Remove it or name another path.": 'SB-421: allow and rotate are CLI and MCP only; the window lists and disallows by uid',
+  "The account this uid was allowed for is gone or has another name now. Disallow it, then allow the account again.": 'SB-421: allow and rotate are CLI and MCP only; the window lists and disallows by uid',
   "Give the settings file as an absolute path.": 'SB-421: allow and rotate are CLI and MCP only; the window lists and disallows by uid',
   "The settings file's folder does not exist. Create it, then retry.": 'SB-421: allow and rotate are CLI and MCP only; the window lists and disallows by uid',
   "The settings file could not be written there. Check the folder's permissions, then retry.": 'SB-421: allow and rotate are CLI and MCP only; the window lists and disallows by uid',
