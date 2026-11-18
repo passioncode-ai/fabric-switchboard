@@ -426,7 +426,7 @@ fn limit_secs(operation: &Operation) -> u64 {
         Operation::OnOperatorsWord { inner, .. } => inner.as_ref(),
         other => other,
     };
-    // SB-428: a launch from the command line arrives wrapped with who asked for it.
+    // SB-440: a launch from the command line arrives wrapped with who asked for it.
     let inner = match inner {
         Operation::Launched { inner, .. } => inner.as_ref(),
         other => other,
@@ -466,7 +466,7 @@ fn limit_secs(operation: &Operation) -> u64 {
         | Operation::MoveRoot { .. }
         | Operation::MoveAccount { .. }
         | Operation::RepositoryMap { .. } => 180,
-        // SB-428: a launch reads the sign-ins to carry (Keychain, 5 s a call), may check a paid
+        // SB-440: a launch reads the sign-ins to carry (Keychain, 5 s a call), may check a paid
         // key's spending (up to 20 s) and renews an isolated account's sign-in; on a busy machine
         // a 30 s client gave up on a launch the owner went on to prepare (2026-11-18).
         Operation::Launch { .. } => 120,
@@ -663,7 +663,7 @@ mod tests {
         assert_eq!(limit_secs(&edit), 180);
         assert_eq!(limit_secs(&Operation::Snapshot), 30);
         assert_eq!(limit_secs(&Operation::VestaConnect), 420);
-        // SB-428: a launch, bare or with who asked for it, waits for a busy owner to prepare it.
+        // SB-440: a launch, bare or with who asked for it, waits for a busy owner to prepare it.
         let launch = Operation::Launch {
             id: "a".into(),
             mode: "managed".into(),

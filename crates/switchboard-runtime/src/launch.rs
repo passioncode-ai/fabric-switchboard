@@ -496,18 +496,19 @@ fn reservation_expired(written: SystemTime, now: SystemTime) -> bool {
         Err(ahead) => ahead.duration() > RESERVATION_TTL,
     }
 }
-/// SB-428: a marker handed to a caller that runs the script itself (`launch --in-place`,
+/// SB-440: a marker handed to a caller that runs the script itself (`launch --in-place`,
 /// `--headless`, `--hosted`, a console) is taken within moments of the answer. One no script took
 /// after this long belongs to a caller that gave up (a control request that timed out after the
 /// owner had prepared the session): the 30 s control limit and a margin.
 const UNCLAIMED_TTL: Duration = Duration::from_secs(120);
-/// SB-428: who runs a home's script once its preparation is done, written into its marker.
+/// SB-440: who runs a home's script once its preparation is done, written into its marker.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum Handed {
-    /// Terminal (or PowerShell) was asked to open it; it may take a while on a busy machine, so
-    /// the marker holds for `RESERVATION_TTL`.
+    /// Terminal (or PowerShell) was asked to open it, or a continuation prepared in place may wait
+    /// in the hand-over queue for a console (SB-108); either may take a while, so the marker holds
+    /// for `RESERVATION_TTL`.
     Terminal,
-    /// The caller got the script in the answer and runs it at once (`UNCLAIMED_TTL`).
+    /// The caller of `Launch` got the script in the answer and runs it at once (`UNCLAIMED_TTL`).
     Caller,
 }
 impl Handed {
@@ -518,7 +519,7 @@ impl Handed {
         }
     }
 }
-/// SB-428: whether a home's `.launch-pending` still holds it.
+/// SB-440: whether a home's `.launch-pending` still holds it.
 #[derive(Debug, PartialEq, Eq)]
 enum Pending {
     Absent,
@@ -535,7 +536,7 @@ fn older_than(written: SystemTime, now: SystemTime, ttl: Duration) -> bool {
         Err(ahead) => ahead.duration() > ttl,
     }
 }
-/// SB-428: reads a marker. A marker holds while its preparation runs (`{"pid": N}`, the process
+/// SB-440: reads a marker. A marker holds while its preparation runs (`{"pid": N}`, the process
 /// preparing it, released at once when that process is gone or its pid was reused), then while
 /// its script has not run (`{"pid": null, "by": "terminal" | "caller"}`, for `RESERVATION_TTL`
 /// or `UNCLAIMED_TTL`). An empty or unreadable marker (one an earlier version wrote) holds for
@@ -573,7 +574,7 @@ fn pending(home: &Path, now: SystemTime) -> Result<Pending, String> {
     }
     Ok(Pending::Held)
 }
-/// SB-428: the process preparing a home is gone, or its pid now names a process started well
+/// SB-440: the process preparing a home is gone, or its pid now names a process started well
 /// after the marker. A process whose age cannot be read still holds.
 #[cfg(unix)]
 fn launcher_gone(pid: u32, marker_age: Duration) -> bool {
@@ -594,7 +595,7 @@ impl Reservation {
         let path = home.join(".launch-pending");
         let mut file = switchboard_core::private_fs::create_new(&path)
             .map_err(|_| "Close the existing session before changing its home.")?;
-        // SB-428: the process preparing the home, so a crash while it prepares frees the home.
+        // SB-440: the process preparing the home, so a crash while it prepares frees the home.
         let reservation = Self {
             path,
             committed: false,
@@ -606,7 +607,7 @@ impl Reservation {
         }
         Ok(reservation)
     }
-    /// SB-428: the preparation is done and `by` runs the script, which removes the marker as it
+    /// SB-440: the preparation is done and `by` runs the script, which removes the marker as it
     /// starts. The marker is rewritten in place, never created again: a script that already
     /// started (or a dispatched run that already took the home) removed it, and that stays so.
     pub(crate) fn commit(&mut self, by: Handed) {
@@ -1020,7 +1021,7 @@ fn login_completed(home: &Path) -> bool {
     read_regular(&home.join(".completed")).is_ok_and(|v| v == "complete")
 }
 pub(crate) fn reservation_open(home: &Path) -> bool {
-    // SB-428: an unreadable home holds no reservation here, as before (a regular file only).
+    // SB-440: an unreadable home holds no reservation here, as before (a regular file only).
     fs::symlink_metadata(home.join(".launch-pending")).is_ok_and(|m| m.file_type().is_file())
         && pending(home, SystemTime::now()) == Ok(Pending::Held)
 }
@@ -1341,7 +1342,7 @@ pub(crate) fn ensure_idle(home: &Path) -> Result<(), String> {
             return Err("Close the existing session before changing its home.".into());
         }
         // The script never ran and nothing will run it: releasing the abandoned marker frees
-        // the home (SB-428: also when its launcher is gone, not only after ten minutes).
+        // the home (SB-440: also when its launcher is gone, not only after ten minutes).
         Pending::Stale(reason) => {
             if fs::remove_file(home.join(".launch-pending")).is_err() {
                 return Err("Close the existing session before changing its home.".into());
@@ -3276,7 +3277,9 @@ fn launch_core(
     if !in_place {
         (host.start_terminal)(&path)?;
     }
-    reservation.commit(if in_place {
+    // SB-440: only a launch's own caller runs its script at once; a continuation prepared in
+    // place may wait in the hand-over queue for a console.
+    reservation.commit(if in_place && continuation.is_none() {
         Handed::Caller
     } else {
         Handed::Terminal
@@ -4643,14 +4646,14 @@ mod tests {
         assert!(!root.path().join(".launch-pending").exists());
         assert!(Reservation::new(root.path()).is_ok());
     }
-    /// SB-428: the marker's contents as `ensure_idle` reads them, with its time set back.
+    /// SB-440: the marker's contents as `ensure_idle` reads them, with its time set back.
     fn marker(home: &Path, contents: &str, seconds: u64) {
         let path = home.join(".launch-pending");
         private_write(&path, contents.as_bytes(), false).unwrap();
         age(&path, seconds);
     }
     #[test]
-    fn sb428_a_marker_no_caller_took_frees_the_home_after_two_minutes() {
+    fn sb440_a_marker_no_caller_took_frees_the_home_after_two_minutes() {
         // The 2026-11-18 incident: the owner prepared an in-place session, the CLI's control
         // request had already timed out, and nothing ran the script.
         let root = tempfile::tempdir().unwrap();
@@ -4681,7 +4684,7 @@ mod tests {
         );
     }
     #[test]
-    fn sb428_a_marker_handed_to_terminal_still_holds_for_ten_minutes() {
+    fn sb440_a_marker_handed_to_terminal_still_holds_for_ten_minutes() {
         let root = tempfile::tempdir().unwrap();
         marker(root.path(), r#"{"pid":null,"by":"terminal"}"#, 3 * 60);
         assert!(
@@ -4696,7 +4699,7 @@ mod tests {
     }
     #[cfg(unix)]
     #[test]
-    fn sb428_a_marker_whose_preparing_process_is_gone_is_cleared_at_once() {
+    fn sb440_a_marker_whose_preparing_process_is_gone_is_cleared_at_once() {
         let root = tempfile::tempdir().unwrap();
         let mut child = Command::new("/usr/bin/true").spawn().unwrap();
         let gone = child.id();
@@ -4719,7 +4722,7 @@ mod tests {
         assert!(root.path().join(".launch-pending").exists());
     }
     #[test]
-    fn sb428_a_reservation_names_its_preparer_then_who_runs_the_script() {
+    fn sb440_a_reservation_names_its_preparer_then_who_runs_the_script() {
         let root = tempfile::tempdir().unwrap();
         let read = || -> Value {
             serde_json::from_slice(&fs::read(root.path().join(".launch-pending")).unwrap()).unwrap()
@@ -6937,6 +6940,13 @@ mod tests {
         let text = fs::read_to_string(&script).unwrap();
         assert!(text.contains("export OBSERVATORY_WORKFLOW_ID='wf_0123456789abcdef'\n"));
         assert!(text.contains(&quote(&crate::continuation::prompt(&resumed))));
+        // SB-440: the script may wait in the hand-over queue for a console, so its home holds
+        // for ten minutes, not the two minutes of a launch's own caller.
+        let marker: Value = serde_json::from_slice(
+            &fs::read(f.root.join("homes").join(&id).join(".launch-pending")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(marker, json!({"pid": null, "by": "terminal"}));
     }
     #[cfg(unix)]
     #[tokio::test]
@@ -7338,7 +7348,7 @@ mod tests {
     }
     #[cfg(not(windows))]
     #[tokio::test]
-    async fn sb428_an_in_place_launch_nobody_ran_frees_the_group_runtime() {
+    async fn sb440_an_in_place_launch_nobody_ran_frees_the_group_runtime() {
         // 2026-11-18: `launch --mode managed --headless` timed out on its control request after
         // the owner had prepared `runtimes/claude-tokens`; every later launch was refused.
         let f = fixture();
@@ -7506,7 +7516,7 @@ mod tests {
             f.launch(&proxy, &id, "isolated", &host).unwrap_err(),
             "Terminal could not open."
         );
-        // SB-428: the failed launch took its own marker away; nothing was left to clear.
+        // SB-440: the failed launch took its own marker away; nothing was left to clear.
         assert!(!f
             .root
             .join("homes")
