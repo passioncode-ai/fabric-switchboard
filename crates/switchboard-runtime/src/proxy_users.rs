@@ -28,6 +28,9 @@ pub const NO_PROXY: &str = "Switchboard's proxy has not started on this computer
 pub const SETTINGS_PARENT: &str =
     "The settings file's folder does not exist. Create it, then retry.";
 pub const SETTINGS_NOT_OURS: &str = "A file Switchboard did not write is at that path (a link, a folder or another account's file). Remove it or name another path.";
+pub const SETTINGS_FOLDER_UNSAFE: &str = "A folder on the way to the settings file is a link, or an account other than root and the one Switchboard runs as may write to it. Name a path whose folders only those two can change.";
+pub const SETTINGS_CHANGED: &str = "The file at that path is not the one Switchboard wrote there last, or it changed since. Remove it or name another path.";
+pub const UID_REUSED: &str = "The account this uid was allowed for is gone or has another name now. Disallow it, then allow the account again.";
 pub const SETTINGS_UNWRITTEN: &str =
     "The settings file could not be written there. Check the folder's permissions, then retry.";
 pub const UNKNOWN_ACTION: &str = "Unknown action: use list, allow, disallow or rotate.";
@@ -121,73 +124,263 @@ fn settings_bytes(port: u16, pool: &str, capability: &str) -> Vec<u8> {
 /// What writing a settings file did.
 #[derive(Debug, PartialEq, Eq)]
 pub struct Written {
-    /// 0o640 when the file's group is the account's own, else 0o600.
+    /// 0o640 when the file's group is the account's own private group, else 0o600.
     pub mode: u32,
     pub shared_with_group: bool,
+    /// SHA-256 of the bytes written, recorded so the next write replaces only this file.
+    pub sha256: String,
 }
 
-/// Writes `bytes` at `path` as this account's file: a new file renamed over the old one, mode
-/// 0640 with the group `gid` when this account may set it (a member of that group), else 0600.
-/// A link, a folder or another account's file at `path` is never replaced.
+fn sha256_hex(bytes: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    Sha256::digest(bytes)
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
+}
+
+/// The last OS error number.
 #[cfg(unix)]
-pub fn write_settings(path: &Path, bytes: &[u8], gid: u32) -> Result<Written, String> {
-    use std::io::Write;
-    use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
+fn errno() -> i32 {
+    std::io::Error::last_os_error().raw_os_error().unwrap_or(0)
+}
+
+/// A folder may hold a settings file only when root or this account owns it and nobody else may
+/// write in it (a sticky folder such as `/tmp` excepted: there nobody may rename or remove what
+/// another account owns).
+#[cfg(unix)]
+fn folder_is_safe(fd: std::os::fd::RawFd, me: u32) -> Result<(), String> {
+    let mut st: libc::stat = unsafe { std::mem::zeroed() };
+    // SAFETY: `fd` is an open descriptor this module owns; `st` is a live buffer.
+    if unsafe { libc::fstat(fd, &mut st) } != 0 {
+        return Err(SETTINGS_UNWRITTEN.into());
+    }
+    let mode = u32::from(st.st_mode);
+    let owner_ok = st.st_uid == 0 || st.st_uid == me;
+    let others_write = mode & 0o022 != 0 && mode & u32::from(libc::S_ISVTX) == 0;
+    if (mode & u32::from(libc::S_IFMT)) != u32::from(libc::S_IFDIR) || !owner_ok || others_write {
+        return Err(SETTINGS_FOLDER_UNSAFE.into());
+    }
+    Ok(())
+}
+
+/// SB-421 review (P1-2): opens `parent` one folder at a time from `/`, never through a link, and
+/// refuses it when any folder on the way is a link or writable by an account other than root and
+/// this one. The file is then written through this handle, so no folder can be swapped under it.
+#[cfg(unix)]
+fn open_safe_folder(parent: &Path, me: u32) -> Result<std::os::fd::OwnedFd, String> {
+    use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
+    use std::os::unix::ffi::OsStrExt;
+    let flags = libc::O_RDONLY | libc::O_DIRECTORY | libc::O_CLOEXEC;
+    // SAFETY: a NUL-terminated literal; the descriptor is owned from here on.
+    let raw = unsafe { libc::open(c"/".as_ptr(), flags) };
+    if raw < 0 {
+        return Err(SETTINGS_UNWRITTEN.into());
+    }
+    let mut folder = unsafe { OwnedFd::from_raw_fd(raw) };
+    folder_is_safe(folder.as_raw_fd(), me)?;
+    for part in parent.components() {
+        let name = match part {
+            std::path::Component::RootDir => continue,
+            std::path::Component::Normal(name) => name,
+            _ => return Err(RELATIVE_SETTINGS.into()),
+        };
+        let name = std::ffi::CString::new(name.as_bytes()).map_err(|_| SETTINGS_PARENT)?;
+        // SAFETY: `folder` is open; `name` is NUL-terminated.
+        let raw = unsafe {
+            libc::openat(
+                folder.as_raw_fd(),
+                name.as_ptr(),
+                flags | libc::O_NOFOLLOW,
+            )
+        };
+        if raw < 0 {
+            let error = errno();
+            let mut st: libc::stat = unsafe { std::mem::zeroed() };
+            // SAFETY: as above; `st` is a live buffer.
+            let exists = unsafe {
+                libc::fstatat(
+                    folder.as_raw_fd(),
+                    name.as_ptr(),
+                    &mut st,
+                    libc::AT_SYMLINK_NOFOLLOW,
+                )
+            } == 0;
+            let link = exists && (st.st_mode & libc::S_IFMT) == libc::S_IFLNK;
+            return Err(if link || error == libc::ELOOP {
+                SETTINGS_FOLDER_UNSAFE
+            } else if error == libc::ENOENT || error == libc::ENOTDIR {
+                SETTINGS_PARENT
+            } else {
+                SETTINGS_UNWRITTEN
+            }
+            .into());
+        }
+        folder = unsafe { OwnedFd::from_raw_fd(raw) };
+        folder_is_safe(folder.as_raw_fd(), me)?;
+    }
+    Ok(folder)
+}
+
+/// Writes `bytes` at `path` as this account's file, through a handle on its folder: a new file
+/// renamed over the old one, mode 0640 with the group `share_gid` when given and this account may
+/// set it, else 0600. SB-421 review (P1-2): the folders on the way must be safe
+/// (`open_safe_folder`), and a file already at `path` is replaced only when it is this account's
+/// regular file with one link holding exactly the bytes recorded at the last write (`expected`);
+/// anything else is refused, so a rewrite can never land on another file of this account.
+#[cfg(unix)]
+pub fn write_settings(
+    path: &Path,
+    bytes: &[u8],
+    share_gid: Option<u32>,
+    expected: Option<&str>,
+) -> Result<Written, String> {
+    use std::io::{Read, Write};
+    use std::os::fd::{AsRawFd, FromRawFd};
+    use std::os::unix::ffi::OsStrExt;
     if !path.is_absolute() {
         return Err(RELATIVE_SETTINGS.into());
     }
     let parent = path.parent().ok_or(SETTINGS_PARENT)?;
-    if !parent.is_dir() {
-        return Err(SETTINGS_PARENT.into());
-    }
+    let name = path.file_name().ok_or(RELATIVE_SETTINGS)?;
     let me = own_uid().ok_or(SETTINGS_UNWRITTEN)?;
-    if let Ok(m) = std::fs::symlink_metadata(path) {
-        if m.file_type().is_symlink() || !m.is_file() || m.uid() != me || m.nlink() != 1 {
+    let folder = open_safe_folder(parent, me)?;
+    let dir = folder.as_raw_fd();
+    let c_name = std::ffi::CString::new(name.as_bytes()).map_err(|_| RELATIVE_SETTINGS)?;
+    let mut st: libc::stat = unsafe { std::mem::zeroed() };
+    // SAFETY: `dir` is open; `c_name` is NUL-terminated; `st` is a live buffer.
+    let present = unsafe { libc::fstatat(dir, c_name.as_ptr(), &mut st, libc::AT_SYMLINK_NOFOLLOW) } == 0;
+    if present {
+        if (st.st_mode & libc::S_IFMT) != libc::S_IFREG || st.st_uid != me || st.st_nlink != 1 {
             return Err(SETTINGS_NOT_OURS.into());
         }
+        let Some(expected) = expected else {
+            return Err(SETTINGS_CHANGED.into());
+        };
+        // SAFETY: as above; the descriptor is owned by `file` from here on.
+        let raw = unsafe {
+            libc::openat(dir, c_name.as_ptr(), libc::O_RDONLY | libc::O_NOFOLLOW | libc::O_CLOEXEC)
+        };
+        if raw < 0 {
+            return Err(SETTINGS_NOT_OURS.into());
+        }
+        let file = unsafe { std::fs::File::from_raw_fd(raw) };
+        let mut held = Vec::new();
+        file.take(1024 * 1024 + 1)
+            .read_to_end(&mut held)
+            .map_err(|_| SETTINGS_NOT_OURS.to_string())?;
+        if sha256_hex(&held) != expected {
+            return Err(SETTINGS_CHANGED.into());
+        }
     }
-    let name = path
-        .file_name()
-        .and_then(|n| n.to_str())
-        .ok_or(SETTINGS_UNWRITTEN)?;
-    let temporary = parent.join(format!(".{name}.switchboard-{}.tmp", uuid::Uuid::new_v4()));
+    let temporary = format!(
+        ".{}.switchboard-{}.tmp",
+        name.to_string_lossy(),
+        uuid::Uuid::new_v4().simple()
+    );
+    let c_temp = std::ffi::CString::new(temporary).map_err(|_| SETTINGS_UNWRITTEN)?;
+    // SAFETY: as above; O_EXCL and O_NOFOLLOW: a new file, never through a link.
+    let raw = unsafe {
+        libc::openat(
+            dir,
+            c_temp.as_ptr(),
+            libc::O_WRONLY | libc::O_CREAT | libc::O_EXCL | libc::O_NOFOLLOW | libc::O_CLOEXEC,
+            0o600 as libc::c_uint,
+        )
+    };
+    if raw < 0 {
+        return Err(SETTINGS_UNWRITTEN.into());
+    }
     let result = (|| {
-        let mut f = std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .mode(0o600)
-            .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
-            .open(&temporary)
-            .map_err(|_| SETTINGS_UNWRITTEN.to_string())?;
-        f.write_all(bytes)
-            .and_then(|_| f.sync_all())
+        let mut file = unsafe { std::fs::File::from_raw_fd(raw) };
+        file.write_all(bytes)
+            .and_then(|_| file.sync_all())
             .map_err(|_| SETTINGS_UNWRITTEN.to_string())?;
         // SAFETY: the descriptor is this function's open file; -1 leaves the owner unchanged.
-        let grouped = unsafe {
-            libc::fchown(
-                std::os::fd::AsRawFd::as_raw_fd(&f),
-                u32::MAX as libc::uid_t,
-                gid as libc::gid_t,
-            )
-        } == 0;
-        let mode = if grouped { 0o640 } else { 0o600 };
-        f.set_permissions(std::fs::Permissions::from_mode(mode))
-            .map_err(|_| SETTINGS_UNWRITTEN.to_string())?;
-        drop(f);
-        std::fs::rename(&temporary, path).map_err(|_| SETTINGS_UNWRITTEN.to_string())?;
+        let grouped = share_gid.is_some_and(|gid| unsafe {
+            libc::fchown(file.as_raw_fd(), u32::MAX as libc::uid_t, gid as libc::gid_t)
+        } == 0);
+        let mode: u32 = if grouped { 0o640 } else { 0o600 };
+        // SAFETY: as above.
+        if unsafe { libc::fchmod(file.as_raw_fd(), mode as libc::mode_t) } != 0 {
+            return Err(SETTINGS_UNWRITTEN.to_string());
+        }
+        drop(file);
+        // SAFETY: both names are NUL-terminated and relative to the same open folder.
+        if unsafe { libc::renameat(dir, c_temp.as_ptr(), dir, c_name.as_ptr()) } != 0 {
+            return Err(SETTINGS_UNWRITTEN.to_string());
+        }
+        // SAFETY: `dir` is open; a failed folder sync only loses durability.
+        unsafe { libc::fsync(dir) };
         Ok(Written {
             mode,
             shared_with_group: grouped,
+            sha256: sha256_hex(bytes),
         })
     })();
     if result.is_err() {
-        let _ = std::fs::remove_file(&temporary);
+        // SAFETY: as above; the temporary is ours.
+        unsafe { libc::unlinkat(dir, c_temp.as_ptr(), 0) };
     }
     result
 }
 #[cfg(not(unix))]
-pub fn write_settings(_path: &Path, _bytes: &[u8], _gid: u32) -> Result<Written, String> {
+pub fn write_settings(
+    _path: &Path,
+    _bytes: &[u8],
+    _share_gid: Option<u32>,
+    _expected: Option<&str>,
+) -> Result<Written, String> {
     Err(UNSUPPORTED.into())
+}
+
+/// The members of group `gid` and its name, as the group database lists them.
+#[cfg(unix)]
+fn group_entry(gid: u32) -> Option<(String, Vec<String>)> {
+    let mut grp: libc::group = unsafe { std::mem::zeroed() };
+    let mut buf = vec![0 as libc::c_char; 64 * 1024];
+    let mut found: *mut libc::group = std::ptr::null_mut();
+    // SAFETY: every pointer is to a live buffer of the stated size; `found` is null or `grp`.
+    let rc = unsafe { libc::getgrgid_r(gid, &mut grp, buf.as_mut_ptr(), buf.len(), &mut found) };
+    if rc != 0 || found.is_null() || grp.gr_name.is_null() {
+        return None;
+    }
+    let text = |p: *const libc::c_char| {
+        // SAFETY: the entry's strings point into `buf`, NUL-terminated.
+        unsafe { std::ffi::CStr::from_ptr(p) }
+            .to_string_lossy()
+            .into_owned()
+    };
+    let mut members = Vec::new();
+    if !grp.gr_mem.is_null() {
+        for i in 0.. {
+            // SAFETY: `gr_mem` is a NULL-terminated array of strings in `buf`.
+            let member = unsafe { *grp.gr_mem.add(i) };
+            if member.is_null() || i > 4096 {
+                break;
+            }
+            members.push(text(member));
+        }
+    }
+    Some((text(grp.gr_name), members))
+}
+#[cfg(not(unix))]
+fn group_entry(_gid: u32) -> Option<(String, Vec<String>)> {
+    None
+}
+
+/// SB-421 review (P2-2, P2-3): the group a settings file may be given to: the account's primary
+/// group only when it is its own private group (named as the account, with no member but the
+/// account and this service account). An account that could not be looked up gets none.
+fn private_group(account: Option<&Account>) -> Option<u32> {
+    let account = account?;
+    let (name, members) = group_entry(account.gid)?;
+    let me = own_uid().and_then(switchboard_proxy::peer::account_name);
+    let private = name == account.name
+        && members
+            .iter()
+            .all(|m| *m == account.name || Some(m) == me.as_ref());
+    private.then_some(account.gid)
 }
 
 /// The proxy's port and session token: the running owner's, else the recorded ones.
@@ -198,44 +391,49 @@ fn proxy_address(runtime: Option<&crate::Runtime>, root: &Path) -> Option<(u16, 
     }
 }
 
-/// Writes `user`'s settings file at `path` and answers what was done, never the capability.
+/// Writes `user`'s settings file at `path` and answers what was done, never the capability, with
+/// the digest of the bytes written. `expected` is the digest recorded at the last write there.
 fn deliver(
     user: &NamedUser,
     account: Option<&Account>,
     path: &Path,
     proxy: Option<&(u16, String)>,
-) -> Result<Value, String> {
+    expected: Option<&str>,
+) -> Result<(Value, String), String> {
     let (port, token) = proxy.ok_or(NO_PROXY)?;
     let capability = users::user_token(token, &user.pool, user.uid, &user.salt);
-    let gid = account.map_or(u32::MAX, |a| a.gid);
-    let written = write_settings(path, &settings_bytes(*port, &user.pool, &capability), gid)?;
+    let written = write_settings(
+        path,
+        &settings_bytes(*port, &user.pool, &capability),
+        private_group(account),
+        expected,
+    )?;
     let shown = path.display().to_string();
     let mut answer = json!({
         "path": shown,
         "mode": format!("{:04o}", written.mode),
         "readable_by_group": written.shared_with_group,
     });
-    if !written.shared_with_group {
-        // This account may not give the file to the user's group: a person with sudo copies it
-        // into the user's own folder, readable by that user only.
-        let name = account.map_or_else(|| user.uid.to_string(), |a| a.name.clone());
-        let destination = match account {
-            Some(a) if !a.home.is_empty() => {
-                format!("{}/.claude/switchboard-settings.json", a.home)
-            }
-            _ => format!("{shown}.{name}"),
-        };
-        // GNU install makes the folder too (-D); macOS's install has no such flag.
-        let make_folder = if cfg!(target_os = "linux") { " -D" } else { "" };
-        answer["install_command"] = json!(format!(
-            "sudo install{make_folder} -o {} -m 0600 {} {}",
-            sh_quote(&name),
-            sh_quote(&shown),
+    if let Some(a) = account.filter(|a| !written.shared_with_group && !a.home.is_empty()) {
+        // SB-421 review (P1-1): the file stays the service account's (0600); a person with sudo
+        // copies it into the user's own folder, written AS that user (`sudo -u`), so nothing runs
+        // as root under a path the user controls. The line carries no secret.
+        let folder = format!("{}/.claude", a.home.trim_end_matches('/'));
+        let destination = format!("{folder}/switchboard-settings.json");
+        let inner = format!(
+            "umask 077; mkdir -p {} && cat > {}",
+            sh_quote(&folder),
             sh_quote(&destination)
+        );
+        answer["install_command"] = json!(format!(
+            "sudo cat {} | sudo -u {} sh -c {}",
+            sh_quote(&shown),
+            sh_quote(&a.name),
+            sh_quote(&inner)
         ));
         answer["installed_path"] = json!(destination);
     }
-    Ok(answer)
+    Ok((answer, written.sha256))
 }
 
 /// The answer's view of one listed account: never the salt.
@@ -357,7 +555,22 @@ pub(crate) fn execute(
                 })
                 .transpose()?;
             let existing = list.iter().position(|u| u.uid == account.uid);
-            let entry = NamedUser {
+            // SB-421 review (P2-4): a uid listed under another name is a reused uid.
+            if let Some(i) = existing {
+                if list[i].name.as_deref().is_some_and(|n| n != account.name) {
+                    return Err(UID_REUSED.into());
+                }
+            }
+            let before = existing.map(|i| list[i].clone());
+            // SB-421 review (P2-6): a new group rewrites the file written before, so its address
+            // names the group the user is now allowed for.
+            let target = settings.clone().or_else(|| {
+                before
+                    .as_ref()
+                    .filter(|b| b.pool != pool)
+                    .and_then(|b| b.settings.clone())
+            });
+            let mut entry = NamedUser {
                 uid: account.uid,
                 name: Some(account.name.clone()),
                 pool: pool.clone(),
@@ -367,25 +580,36 @@ pub(crate) fn execute(
                     .unwrap_or_else(users::new_salt),
                 added_at: crate::monitor::now(),
                 added_by: surface(by),
-                settings: settings
-                    .clone()
-                    .or_else(|| existing.and_then(|i| list[i].settings.clone())),
+                settings: before.as_ref().and_then(|b| b.settings.clone()),
+                settings_sha256: before.as_ref().and_then(|b| b.settings_sha256.clone()),
+            };
+            if existing.is_none() && list.len() >= users::MAX_USERS {
+                return Err(TOO_MANY.into());
+            }
+            // The file first: a settings file the proxy would refuse is never left behind. A
+            // file is replaced only where Switchboard wrote it last, with the bytes it wrote.
+            let delivered = match &target {
+                Some(path) => {
+                    let expected = (entry.settings.as_deref() == Some(path.as_str()))
+                        .then(|| entry.settings_sha256.clone())
+                        .flatten();
+                    let (answer, sha) = deliver(
+                        &entry,
+                        Some(&account),
+                        Path::new(path),
+                        proxy_address(runtime, root).as_ref(),
+                        expected.as_deref(),
+                    )?;
+                    entry.settings = Some(path.clone());
+                    entry.settings_sha256 = Some(sha);
+                    Some(answer)
+                }
+                None => None,
             };
             match existing {
                 Some(i) => list[i] = entry.clone(),
-                None if list.len() >= users::MAX_USERS => return Err(TOO_MANY.into()),
                 None => list.push(entry.clone()),
             }
-            // The file first: a settings file the proxy would refuse is never left behind.
-            let delivered = match &settings {
-                Some(path) => Some(deliver(
-                    &entry,
-                    Some(&account),
-                    Path::new(path),
-                    proxy_address(runtime, root).as_ref(),
-                )?),
-                None => None,
-            };
             users::save(root, &list)?;
             crate::oplog::event(
                 "proxy_user",
@@ -414,13 +638,21 @@ pub(crate) fn execute(
         "rotate" => {
             let who = who.filter(|w| !w.trim().is_empty()).ok_or(NO_USER)?;
             let index = listed_index(&list, who).ok_or(NOT_LISTED)?;
-            if let Some(p) = write_to {
-                let path = Path::new(p.trim());
-                if !path.is_absolute() {
-                    return Err(RELATIVE_SETTINGS.into());
-                }
-                list[index].settings = Some(path.display().to_string());
+            let account_now = account(&list[index].uid.to_string());
+            // SB-421 review (P2-4): never a new capability for whoever holds a reused uid now.
+            if !same_account(&list[index], account_now.as_ref()) {
+                return Err(UID_REUSED.into());
             }
+            let target = match write_to {
+                Some(p) => {
+                    let path = Path::new(p.trim());
+                    if !path.is_absolute() {
+                        return Err(RELATIVE_SETTINGS.into());
+                    }
+                    Some(path.display().to_string())
+                }
+                None => list[index].settings.clone(),
+            };
             list[index].salt = users::new_salt();
             let entry = list[index].clone();
             // Saved first: the old capability is worthless from here on, whatever the file does.
@@ -432,17 +664,28 @@ pub(crate) fn execute(
                     ("uid", crate::oplog::Field::Number(entry.uid.into())),
                 ],
             );
-            let delivered = match &entry.settings {
-                Some(path) => Some(deliver(
-                    &entry,
-                    account(&entry.uid.to_string()).as_ref(),
-                    Path::new(path),
-                    proxy_address(runtime, root).as_ref(),
-                )),
+            let delivered = match &target {
+                Some(path) => {
+                    let expected = (entry.settings.as_deref() == Some(path.as_str()))
+                        .then(|| entry.settings_sha256.clone())
+                        .flatten();
+                    Some(deliver(
+                        &entry,
+                        account_now.as_ref(),
+                        Path::new(path),
+                        proxy_address(runtime, root).as_ref(),
+                        expected.as_deref(),
+                    ))
+                }
                 None => None,
             };
             let (settings_file, settings_error) = match delivered {
-                Some(Ok(v)) => (Some(v), None),
+                Some(Ok((answer, sha))) => {
+                    list[index].settings = target.clone();
+                    list[index].settings_sha256 = Some(sha);
+                    users::save(root, &list)?;
+                    (Some(answer), None)
+                }
                 Some(Err(e)) => (None, Some(e)),
                 None => (None, None),
             };
@@ -461,24 +704,48 @@ pub(crate) fn execute(
 /// written again with the new address and capability. Answers how many were written and how many
 /// could not be (a file a person moved to the user with sudo is no longer this account's).
 pub(crate) fn repoint(root: &Path, port: u16, token: &str) -> (usize, usize) {
-    let Ok(list) = users::load(root) else {
+    let Ok(mut list) = users::load(root) else {
         return (0, 0);
     };
     let proxy = (port, token.to_owned());
     let (mut written, mut failed) = (0, 0);
-    for user in list.iter().filter(|u| u.settings.is_some()) {
-        let path = user.settings.as_deref().unwrap_or_default();
+    for user in list.iter_mut().filter(|u| u.settings.is_some()) {
+        let account = account(&user.uid.to_string());
+        // SB-421 review (P2-4): a reused uid's file is left alone.
+        if !same_account(user, account.as_ref()) {
+            failed += 1;
+            continue;
+        }
+        let path = user.settings.clone().unwrap_or_default();
         match deliver(
             user,
-            account(&user.uid.to_string()).as_ref(),
-            Path::new(path),
+            account.as_ref(),
+            Path::new(&path),
             Some(&proxy),
+            user.settings_sha256.as_deref(),
         ) {
-            Ok(_) => written += 1,
+            Ok((_, sha)) => {
+                user.settings_sha256 = Some(sha);
+                written += 1;
+            }
             Err(_) => failed += 1,
         }
     }
+    if written > 0 && users::save(root, &list).is_err() {
+        failed += written;
+        written = 0;
+    }
     (written, failed)
+}
+
+/// SB-421 review (P2-4): whether `account`, the password database's account for the listed uid
+/// now, is the account it was listed for (an entry without a recorded name: any account).
+fn same_account(user: &NamedUser, account: Option<&Account>) -> bool {
+    match (&user.name, account) {
+        (None, _) => true,
+        (Some(name), Some(a)) => *name == a.name,
+        (Some(_), None) => false,
+    }
 }
 
 #[cfg(all(test, unix))]
@@ -519,15 +786,23 @@ mod tests {
         assert!(account("").is_none());
     }
 
+    /// A temporary folder by its real path (macOS's `/var` is a link, which a settings path
+    /// may not pass through).
+    fn real(dir: &tempfile::TempDir) -> std::path::PathBuf {
+        std::fs::canonicalize(dir.path()).unwrap()
+    }
+
     #[test]
     fn a_settings_file_holds_the_address_and_is_never_world_readable() {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("agent-a.json");
+        let base = real(&dir);
+        let path = base.join("agent-a.json");
         let bytes = settings_bytes(4321, "team", "c".repeat(64).as_str());
         // A group this account cannot give the file to: 0600, and the answer says so.
-        let refused = write_settings(&path, &bytes, 0).unwrap();
+        let refused = write_settings(&path, &bytes, Some(0), None).unwrap();
         assert_eq!(refused.mode, 0o600);
         assert!(!refused.shared_with_group);
+        assert_eq!(refused.sha256, sha256_hex(&bytes));
         let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
         assert_eq!(mode, 0o600);
         let v: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
@@ -535,27 +810,122 @@ mod tests {
             v["env"]["ANTHROPIC_BASE_URL"],
             "http://127.0.0.1:4321/claude/team"
         );
-        // This account's own primary group: 0640.
+        // This account's own primary group, with the digest of what is there: 0640.
         let gid = account(&own_uid().unwrap().to_string()).unwrap().gid;
-        let shared = write_settings(&path, &bytes, gid).unwrap();
+        let shared = write_settings(&path, &bytes, Some(gid), Some(&refused.sha256)).unwrap();
         assert_eq!(shared.mode, 0o640);
         let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
         assert_eq!(mode, 0o640);
+        // P2-3: no group to give it to (no account looked up): 0600, never this account's group.
+        let lone = write_settings(&path, &bytes, None, Some(&shared.sha256)).unwrap();
+        assert_eq!(lone.mode, 0o600);
         // A link at the path is never followed or replaced.
-        let link = dir.path().join("link.json");
+        let link = base.join("link.json");
         std::os::unix::fs::symlink(&path, &link).unwrap();
         assert_eq!(
-            write_settings(&link, &bytes, gid),
+            write_settings(&link, &bytes, Some(gid), None),
             Err(SETTINGS_NOT_OURS.into())
         );
         assert_eq!(
-            write_settings(Path::new("relative.json"), &bytes, gid),
+            write_settings(Path::new("relative.json"), &bytes, Some(gid), None),
             Err(RELATIVE_SETTINGS.into())
         );
         assert_eq!(
-            write_settings(&dir.path().join("missing/x.json"), &bytes, gid),
+            write_settings(&base.join("missing/x.json"), &bytes, Some(gid), None),
             Err(SETTINGS_PARENT.into())
         );
+    }
+
+    /// SB-421 review (P1-2): a rewrite never lands on another file of this account: an existing
+    /// file is replaced only with the digest of what Switchboard wrote there, and a folder on the
+    /// way that is a link, or that another account may write to, is refused.
+    #[test]
+    fn a_settings_file_replaces_only_its_own_bytes_and_never_passes_a_link_or_an_open_folder() {
+        let dir = tempfile::tempdir().unwrap();
+        let base = real(&dir);
+        let bytes = settings_bytes(4321, "team", "c".repeat(64).as_str());
+        // A file of this account that Switchboard did not write: never replaced.
+        let theirs = base.join("authorized_keys");
+        std::fs::write(&theirs, b"ssh-ed25519 AAAA keep-me\n").unwrap();
+        assert_eq!(
+            write_settings(&theirs, &bytes, None, None),
+            Err(SETTINGS_CHANGED.into())
+        );
+        assert_eq!(
+            write_settings(&theirs, &bytes, None, Some(&sha256_hex(b"something else"))),
+            Err(SETTINGS_CHANGED.into())
+        );
+        assert_eq!(std::fs::read(&theirs).unwrap(), b"ssh-ed25519 AAAA keep-me\n");
+        // A folder swapped for a link to this account's own folder: refused.
+        let home = base.join("home");
+        std::fs::create_dir(&home).unwrap();
+        let swapped = base.join("agent");
+        std::os::unix::fs::symlink(&home, &swapped).unwrap();
+        assert_eq!(
+            write_settings(&swapped.join("settings.json"), &bytes, None, None),
+            Err(SETTINGS_FOLDER_UNSAFE.into())
+        );
+        assert!(!home.join("settings.json").exists());
+        // A folder anyone may write to, without the sticky bit: refused; with it: allowed.
+        let open = base.join("open");
+        std::fs::create_dir(&open).unwrap();
+        std::fs::set_permissions(&open, std::fs::Permissions::from_mode(0o777)).unwrap();
+        assert_eq!(
+            write_settings(&open.join("settings.json"), &bytes, None, None),
+            Err(SETTINGS_FOLDER_UNSAFE.into())
+        );
+        let group = base.join("group");
+        std::fs::create_dir(&group).unwrap();
+        std::fs::set_permissions(&group, std::fs::Permissions::from_mode(0o770)).unwrap();
+        assert_eq!(
+            write_settings(&group.join("settings.json"), &bytes, None, None),
+            Err(SETTINGS_FOLDER_UNSAFE.into())
+        );
+        std::fs::set_permissions(&open, std::fs::Permissions::from_mode(0o1777)).unwrap();
+        let written = write_settings(&open.join("settings.json"), &bytes, None, None).unwrap();
+        assert_eq!(written.mode, 0o600);
+        // Its own file again, with the recorded digest: replaced.
+        assert!(write_settings(&open.join("settings.json"), &bytes, None, Some(&written.sha256)).is_ok());
+    }
+
+    /// SB-421 review (P1-1): the hand-over line copies the file as the user, never as root into a
+    /// path the user controls, and carries no capability.
+    #[test]
+    fn the_hand_over_line_writes_as_the_user_and_carries_no_secret() {
+        let dir = tempfile::tempdir().unwrap();
+        let base = real(&dir);
+        let token = "e".repeat(64);
+        let user = NamedUser {
+            uid: 4242,
+            name: Some("agent-a".into()),
+            pool: "team".into(),
+            folders: Vec::new(),
+            salt: users::new_salt(),
+            added_at: 1,
+            added_by: "cli".into(),
+            settings: None,
+            settings_sha256: None,
+        };
+        let account = Account {
+            uid: 4242,
+            name: "agent-a".into(),
+            gid: 0,
+            home: "/home/agent-a".into(),
+        };
+        let path = base.join("agent-a.json");
+        let (answer, _) = deliver(&user, Some(&account), &path, Some(&(4555, token.clone())), None).unwrap();
+        let line = answer["install_command"].as_str().unwrap();
+        assert!(line.starts_with("sudo cat '"), "{line}");
+        assert!(line.contains("| sudo -u 'agent-a' sh -c "), "{line}");
+        assert!(line.contains("umask 077; mkdir -p"), "{line}");
+        assert!(!line.contains("sudo install"), "{line}");
+        let capability = users::user_token(&token, "team", 4242, &user.salt);
+        assert!(!answer.to_string().contains(&capability));
+        assert_eq!(answer["installed_path"], "/home/agent-a/.claude/switchboard-settings.json");
+        // P2-3: an account not looked up gets no group and no hand-over line it cannot name.
+        let (alone, _) = deliver(&user, None, &base.join("b.json"), Some(&(4555, token)), None).unwrap();
+        assert_eq!(alone["mode"], "0600");
+        assert!(alone.get("install_command").is_none());
     }
 
     #[test]
@@ -574,7 +944,7 @@ mod tests {
                 .as_slice(),
         )
         .unwrap();
-        let settings = dir.path().join("agent.json");
+        let settings = real(&dir).join("agent.json");
         let settings_text = settings.display().to_string();
         let folder = ["/srv/agents/a/".to_owned()];
         let answer = execute(
@@ -612,7 +982,7 @@ mod tests {
             assert!(answer["settings_file"]["install_command"]
                 .as_str()
                 .unwrap()
-                .starts_with("sudo install"));
+                .starts_with("sudo cat "));
         }
         // Rotation: a new capability, written into the recorded file.
         let rotated = execute(
@@ -739,5 +1109,81 @@ mod tests {
             execute(&store, &root, None, None, None, None, &[], None, None).unwrap(),
             json!({"users": []})
         );
+    }
+
+    fn record_proxy(root: &Path, token: &str) {
+        switchboard_core::private_fs::private_write(
+            &root.join("proxy.json"),
+            serde_json::to_vec(&json!({"protocol": 1, "port": 4555, "token": token}))
+                .unwrap()
+                .as_slice(),
+        )
+        .unwrap();
+    }
+
+    /// SB-421 review (P2-6): allowing a listed user for another group writes the file recorded
+    /// before again, so it names the new group.
+    #[test]
+    fn a_new_group_rewrites_the_recorded_settings_file() {
+        let Some(other) = another_account() else {
+            return;
+        };
+        let (dir, store) = store();
+        let root = store.root().to_owned();
+        record_proxy(&root, &"d".repeat(64));
+        let folder = real(&dir).join("team");
+        std::fs::create_dir(&folder).unwrap();
+        let team = store.save_project(None, "Team", &[folder], &[]).unwrap();
+        let settings = real(&dir).join("agent.json");
+        let text = settings.display().to_string();
+        let allow = |group: &str, path: Option<&str>| {
+            execute(&store, &root, None, Some("allow"), Some(&other.name), Some(group), &[], path, None)
+        };
+        allow("default", Some(&text)).unwrap();
+        let read = || -> Value { serde_json::from_slice(&std::fs::read(&settings).unwrap()).unwrap() };
+        assert_eq!(read()["env"]["ANTHROPIC_BASE_URL"], "http://127.0.0.1:4555/claude/default");
+        let moved = allow(&team.pool, None).unwrap();
+        assert_eq!(moved["settings_file"]["path"], text.as_str());
+        assert_eq!(
+            read()["env"]["ANTHROPIC_BASE_URL"],
+            format!("http://127.0.0.1:4555/claude/{}", team.pool)
+        );
+        assert_eq!(users::load(&root).unwrap()[0].settings_sha256.as_deref(), Some(sha256_hex(&std::fs::read(&settings).unwrap()).as_str()));
+    }
+
+    /// SB-421 review (P2-4): a uid listed under a name that the system now gives another account
+    /// is refused for allow and rotate, and its file is not rewritten.
+    #[test]
+    fn a_reused_uid_is_refused_and_its_file_left_alone() {
+        let Some(other) = another_account() else {
+            return;
+        };
+        let (dir, store) = store();
+        let root = store.root().to_owned();
+        record_proxy(&root, &"d".repeat(64));
+        let settings = real(&dir).join("agent.json");
+        users::save(
+            &root,
+            &[NamedUser {
+                uid: other.uid,
+                name: Some("gone-account-sb421".into()),
+                pool: "default".into(),
+                folders: Vec::new(),
+                salt: users::new_salt(),
+                added_at: 1,
+                added_by: "cli".into(),
+                settings: Some(settings.display().to_string()),
+                settings_sha256: None,
+            }],
+        )
+        .unwrap();
+        let run = |action: &str| {
+            execute(&store, &root, None, Some(action), Some(&other.uid.to_string()), Some("default"), &[], None, None)
+        };
+        assert_eq!(run("allow"), Err(UID_REUSED.into()));
+        assert_eq!(run("rotate"), Err(UID_REUSED.into()));
+        assert_eq!(repoint(&root, 4777, &"e".repeat(64)), (0, 1));
+        assert!(!settings.exists());
+        assert!(run("disallow").is_ok(), "a reused uid can always be taken off");
     }
 }

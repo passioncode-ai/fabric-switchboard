@@ -279,7 +279,8 @@ async fn handshake_lists_tools_and_rejects_malformed_messages() {
             "switchboard_openrouter_model",
             "switchboard_shell_hook",
             "switchboard_shell_hook_set",
-            "switchboard_balance"
+            "switchboard_balance",
+            "switchboard_feed"
         ]
     );
     // SB-183 (node A-7): the terminal hook reads over MCP like `shell status`; setting it from
@@ -331,6 +332,37 @@ async fn handshake_lists_tools_and_rejects_malformed_messages() {
     assert_eq!(on["available"][0]["chosen"], true, "{on}");
     let (error, off) = agent.tool("switchboard_balance", json!({"remove": ["default"]}));
     assert!(!error && off["on"] == false, "{off}");
+    // SB-419: no group is fed until one is turned on; the default group cannot be fed, an
+    // unknown group is refused, and nothing is saved by a refusal.
+    let (error, feed) = agent.tool("switchboard_feed", json!({}));
+    assert!(!error, "{feed}");
+    assert_eq!(
+        (feed["on"].clone(), feed["ready"].clone()),
+        (json!(false), json!(2))
+    );
+    assert_eq!(feed["fed"], json!([]));
+    let (error, refused) = agent.tool("switchboard_feed", json!({"pool": "default", "on": true}));
+    assert!(error, "{refused}");
+    let (error, refused) = agent.tool(
+        "switchboard_feed",
+        json!({"pool": "no-such-group", "on": true}),
+    );
+    assert!(error, "{refused}");
+    let (error, refused) = agent.tool("switchboard_feed", json!({"ready": 0}));
+    assert!(error, "{refused}");
+    let (error, set) = agent.tool(
+        "switchboard_feed",
+        json!({"ready": 3, "lookahead_minutes": 45}),
+    );
+    assert!(!error, "{set}");
+    assert_eq!(
+        (
+            set["ready"].clone(),
+            set["lookahead_minutes"].clone(),
+            set["changed"].clone()
+        ),
+        (json!(3), json!(45), json!(true))
+    );
     // SB-120: the agents overview reads; the default is Auto until the operator picks one.
     let (error, agents) = agent.tool("switchboard_agents", json!({}));
     assert!(!error, "{agents}");

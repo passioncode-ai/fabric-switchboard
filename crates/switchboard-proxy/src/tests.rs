@@ -2769,13 +2769,14 @@ async fn start_as_service(store: Arc<Store>, url: String) -> ProxyHandle {
 fn name_this_account(root: &std::path::Path, pool: &str, folders: &[&str]) -> users::NamedUser {
     let user = users::NamedUser {
         uid: peer::own_uid().unwrap(),
-        name: Some("agent-a".into()),
+        name: peer::account_name(peer::own_uid().unwrap()),
         pool: pool.into(),
         folders: folders.iter().map(|f| (*f).to_owned()).collect(),
         salt: users::new_salt(),
         added_at: 1,
         added_by: "cli".into(),
         settings: None,
+        settings_sha256: None,
     };
     users::save(root, std::slice::from_ref(&user)).unwrap();
     user

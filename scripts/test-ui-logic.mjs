@@ -1687,6 +1687,51 @@ check(() => {
   assert.equal(logic.balancingView({ on: true, groups: [], available: chosen.map((g) => ({ ...g, chosen: g.pool === 'agents' })), all_new: false, pass_minutes: 15, lent: [], recent: [] }).line, 'Включено: участвует 1 группа.');
   i18nForShell.setLocale('en');
 });
+// SB-419 (SCN-104, DEC-0028), the_feed_reads_every_state: reading, failed, off, on with the fed
+// groups highest priority first, the rule with the person's targets, each move's line, the notices,
+// the priority field and the arrows' geometry.
+check(() => {
+  i18nForShell.setLocale('en');
+  assert.equal(logic.feedView(null).state, 'reading');
+  const failed = logic.feedView(null, 'Switchboard could not read its own state.');
+  assert.equal(failed.state, 'failed'); assert.ok(failed.retry);
+  const base = { ready: 2, lookahead_minutes: 30, pass_minutes: 15, reservoir: [], moved: [], recent: [] };
+  const off = logic.feedView({ ...base, on: false, fed: [], available: [{ pool: 'agents', name: 'Agents', fed: false, priority: null }] });
+  assert.equal(off.line, 'No group is fed from the default group.');
+  assert.deepEqual(off.arrows, []);
+  assert.deepEqual(off.groups.get('agents'), { fed: false, priority: null });
+  const fed = [{ pool: 'apps', name: 'Apps', priority: 2, off: false, providers: [] }, { pool: 'agents', name: 'Agents', priority: 1, off: false, providers: [] }];
+  const on = logic.feedView({ ...base, on: true, fed, available: [{ pool: 'agents', name: 'Agents', fed: true, priority: 1 }, { pool: 'apps', name: 'Apps', fed: true, priority: 2 }] });
+  assert.equal(on.state, 'on'); assert.equal(on.line, '2 groups are fed from the default group.');
+  assert.deepEqual(on.arrows.map((a) => [a.pool, a.priority]), [['agents', 1], ['apps', 2]]);
+  assert.match(on.rule, /^A fed group keeps 2 ready accounts: the default group lends it .* within 30 minutes, and takes back one that runs out once another serves the group\.$/);
+  assert.equal(logic.feedBadge(1), 'Fed from Default · priority 1');
+  const name = (pool) => ({ agents: 'Agents', default: 'Default group' })[pool] ?? pool;
+  const line = (reason, from, to, outcome = 'done') => logic.feedMoveLine({ reason, from, to, outcome }, 'Work', name);
+  assert.equal(line('feed', 'default', 'agents'), 'Work was placed in Agents from the default group.');
+  assert.equal(line('park', 'agents', 'default'), 'Work ran out in Agents and is shared with the default group until its limit resets.');
+  assert.equal(line('spent', 'default', 'agents'), 'Work ran out in Agents and went back; another ready account serves the group.');
+  assert.equal(line('surplus', 'default', 'agents'), 'Work went back: Agents has more ready accounts than it keeps.');
+  assert.equal(line('sign_in', 'default', 'agents'), 'Work went back: it waits for a sign-in.');
+  assert.equal(line('rested', 'agents', 'default'), 'Work has room again and is no longer shared with the default group.');
+  assert.equal(line('feed_off', 'agents', 'default'), 'Work went back: Agents is no longer fed.');
+  assert.match(line('priority', 'default', 'agents'), /higher priority/);
+  assert.equal(line('account_gone', 'default', 'agents'), 'Work went back to its own group.');
+  assert.equal(line('feed', 'default', 'agents', 'failed'), 'Work could not be moved. The next pass tries again.');
+  assert.equal(line('spent', 'default', 'agents', 'held'), 'Work ran out in Agents and stays: the account that would replace it was not placed.');
+  assert.equal(logic.feedNotice({ group: 'Agents', on: true, priority: 1 }), 'Agents is fed from the default group, priority 1.');
+  assert.match(logic.feedNotice({ group: 'Agents', on: false }), /back in their own groups/);
+  assert.equal(logic.feedNotice({ group: 'Agents', priority: 3 }), 'Agents has priority 3 now.');
+  assert.deepEqual(['1', ' 7 ', '99', '0', '100', '2.5', '', 'x'].map(logic.feedPriority), [1, 7, 99, null, null, null, null, null]);
+  // Every arrow starts at the source's middle and ends 6 px before the edge, at its row's middle.
+  assert.deepEqual(logic.feedArrows(2, 32, 56), ['M0 32 C28 32 28 16 50 16', 'M0 32 C28 32 28 48 50 48']);
+  assert.deepEqual(logic.feedArrows(0, 32, 56), []);
+  i18nForShell.setLocale('ru');
+  assert.equal(on.line === '2 groups are fed from the default group.', true);
+  assert.equal(logic.feedView({ ...base, on: true, fed: fed.slice(0, 1), available: [] }).line, 'Из группы по умолчанию подпитывается 1 группа.');
+  assert.equal(logic.feedBadge(2), 'Подпитка · приоритет 2');
+  i18nForShell.setLocale('en');
+});
 // SB-355 (SCN-092, DEC-0013), the_machine_groups_read_every_state: an account on another machine is
 // in its machine's group, the accounts whose machine is not known are named, a machine pool is never
 // offered as a group here, and a live read says what each copy there is.

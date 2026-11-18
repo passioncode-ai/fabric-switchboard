@@ -93,6 +93,7 @@ export const nativeAdapter: Adapter = {
   ownSignIn: (on) => invoke('own_sign_in', { on: on ?? null }),
   proxyUsers: (action, user) => invoke('proxy_users', { action: action ?? null, user: user ?? null }),
   balance: (change) => invoke('balance', { add: change?.add ?? [], remove: change?.remove ?? [], allNew: change?.all_new ?? null, backupAdd: change?.backup_add ?? [], backupRemove: change?.backup_remove ?? [] }),
+  feed: (change) => invoke('feed', { pool: change?.pool ?? null, on: change?.on ?? null, priority: change?.priority ?? null, ready: change?.ready ?? null, lookaheadMinutes: change?.lookahead_minutes ?? null }),
   repositoryMap: (under) => readWithDeadline(invoke('repository_map', { under }), 60_000),
   statistics: (days) => invoke('statistics', { days }),
   moveAccount: (id, pool) => invoke('move_account', { id, pool }),
@@ -236,6 +237,14 @@ const safeErrors = new Set([
   'No group has that id. Run switchboard project list to see the groups, or name default.',
   'The default group cannot be a backup group: it holds every folder that is in no group.',
   'Balancing settings could not be saved. Check that the data folder is writable, then try again.',
+  // SB-419: the feed's own refusals.
+  'The default group feeds the others, so it cannot be fed itself.',
+  'That group is not fed from the default group. Turn its feed on first, then set its priority.',
+  'Give the priority as a whole number from 1 (highest) to 99.',
+  'Give the number of ready accounts as a whole number from 1 to 10.',
+  'Give the look-ahead in minutes, from 0 to 720.',
+  'Name the group whose feed changes.',
+  'A group whose feed is turned off has no priority. Turn the feed off without one.',
   'Group not found.',
   // Moving a sign-in to another machine (SB-283).
   "Name the other machine as ssh knows it: letters, digits, dots, hyphens, @ and : only.",

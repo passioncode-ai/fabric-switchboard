@@ -45,6 +45,10 @@ pub struct NamedUser {
     /// the proxy's port or token changes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub settings: Option<String>,
+    /// SB-421 review (P1-2): SHA-256 of the bytes Switchboard last wrote there. A file at that
+    /// path is replaced only while it still holds exactly them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub settings_sha256: Option<String>,
 }
 
 #[derive(Default, Serialize, Deserialize)]
@@ -206,6 +210,7 @@ mod tests {
             added_at: 1,
             added_by: "cli".into(),
             settings: None,
+            settings_sha256: None,
         }
     }
 

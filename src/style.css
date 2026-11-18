@@ -811,3 +811,20 @@ g:hover > .chart-bar { opacity: .82; }
 .agent-more > summary::before, .available-list > summary::before, .quota-details summary::before { content: ""; flex: none; width: .45em; height: .45em; border-right: 1.5px solid var(--muted); border-bottom: 1.5px solid var(--muted); transform: translateY(-.1em) rotate(-45deg); transition: transform var(--dur-state) ease; }
 .agent-more[open] > summary::before, .available-list[open] > summary::before, details.quota-details[open] summary::before { transform: translateY(-.2em) rotate(45deg); }
 @media (prefers-reduced-motion: reduce) { .agent-more > summary::before, .available-list > summary::before, .quota-details summary::before { transition: none; } }
+/* SB-419 (SCN-104): the feed map, an arrow from the default group to each fed group; the lines
+   take the readable accent of the theme, the nodes the badge's calm surface. */
+.feed-map-wrap { margin: var(--space-2) 0 var(--space-3); }
+.feed-map { display: grid; grid-template-columns: auto 56px minmax(0, 1fr); align-items: center; margin-top: var(--space-2); }
+.feed-node { display: inline-block; max-width: 100%; box-sizing: border-box; font-size: var(--t-label); line-height: 22px; padding: 0 var(--space-2); border: 1px solid var(--border); border-radius: var(--r-pill); background: var(--panel-2); color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.feed-source { border-color: var(--accent); background: var(--accent-weak); }
+.feed-arrows { display: block; color: var(--accent-text); }
+.feed-arrow { fill: none; stroke: currentColor; stroke-width: 1.5; opacity: 0.85; }
+.feed-arrow-head { fill: currentColor; }
+.feed-targets { list-style: none; margin: 0; padding: 0; min-width: 0; }
+.feed-target { height: 32px; display: flex; align-items: center; gap: var(--space-2); min-width: 0; }
+.feed-priority { flex: none; font-size: var(--t-chip); color: var(--muted); }
+.feed-badge { color: var(--ink); border-color: var(--accent-text); }
+.group-feed { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); margin-top: var(--space-2); }
+.feed-priority-field { display: inline-flex; align-items: center; gap: var(--space-2); font-size: var(--t-label); }
+.feed-priority-field input { width: 4.5rem; }
+.group-feed .feed-rule { flex-basis: 100%; }

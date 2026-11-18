@@ -17,27 +17,62 @@
 //! that account's own capability, for its one group.
 use axum::serve::Listener;
 use std::{
-    net::SocketAddr,
+    net::{IpAddr, SocketAddr},
     sync::{atomic::AtomicU64, Arc},
 };
 
 /// The uid that owns the TCP socket bound to `peer` and connected to `local`, when it can be read.
+/// SB-421 review (P2-1): a socket counts only when both its addresses and both its ports are the
+/// connection's: another account may bind `127.0.0.2:<proxy port>` or reuse a source port on
+/// another address, and a port alone would name it. Two sockets that both match, and disagree, are
+/// nobody's.
 pub fn owner(local: SocketAddr, peer: SocketAddr) -> Option<u32> {
-    owner_on(local.port(), peer.port())
+    owner_on(local, peer)
+}
+
+/// An address as a socket table writes it, IPv4 inside IPv6 (`::ffff:a.b.c.d`) read as IPv4, so
+/// the two spellings of one connection compare equal.
+fn plain(ip: IpAddr) -> IpAddr {
+    match ip {
+        IpAddr::V6(v6) => v6.to_ipv4_mapped().map_or(IpAddr::V6(v6), IpAddr::V4),
+        v4 => v4,
+    }
+}
+
+/// What a socket table says about one connection's peer.
+#[cfg(any(target_os = "macos", test))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Seen {
+    /// Exactly one socket matches, owned by this uid (or several that agree).
+    Owner(u32),
+    /// Matching sockets disagree: nobody's.
+    Ambiguous,
+    /// No socket matches.
+    Absent,
+}
+#[cfg(any(target_os = "macos", test))]
+impl Seen {
+    fn and(self, uid: u32) -> Self {
+        match self {
+            Seen::Absent => Seen::Owner(uid),
+            Seen::Owner(u) if u == uid => self,
+            _ => Seen::Ambiguous,
+        }
+    }
 }
 
 #[cfg(target_os = "macos")]
-fn owner_on(local_port: u16, peer_port: u16) -> Option<u32> {
+fn owner_on(local: SocketAddr, peer: SocketAddr) -> Option<u32> {
     // SB-330: macOS 27 lists only the caller's own sockets in `pcblist64` (read on the Mac Studio,
     // 27.2: two records, the listener and the accepted socket), so every client read as nobody's
     // and the proxy closed each one. A peer the list does not name is looked for among this
     // account's own processes, whose sockets `proc_pidfdinfo` reads; another account's processes
     // cannot be read without privileges, so they stay nobody's and are refused, as before.
-    owner_in(&pcblist()?, local_port, peer_port).or_else(|| {
-        own_processes_hold(local_port, peer_port)
-            .then(own_uid)
-            .flatten()
-    })
+    match owner_in(&pcblist()?, local, peer) {
+        Seen::Owner(uid) => Some(uid),
+        Seen::Ambiguous => None,
+        Seen::Absent => own_processes_hold(local, peer).then(own_uid).flatten(),
+    }
 }
 
 /// SB-330: offsets inside `struct socket_fdinfo` (`sys/proc_info.h`: `proc_fileinfo`, then
@@ -51,15 +86,20 @@ fn owner_on(local_port: u16, peer_port: u16) -> Option<u32> {
 mod fdinfo {
     pub const FPORT: usize = 264;
     pub const LPORT: usize = 268;
-    pub const MIN_LEN: usize = 272;
+    /// `insi_vflag` (`INI_IPV4` 1, `INI_IPV6` 2) and the two 16-byte address unions, an IPv4
+    /// address in their last 4 bytes; read from the SDK with `offsetof` on macOS 27.2.
+    pub const VFLAG: usize = 288;
+    pub const FADDR: usize = 296;
+    pub const LADDR: usize = 312;
+    pub const MIN_LEN: usize = 328;
     pub const PROC_PIDFDSOCKETINFO: std::ffi::c_int = 3;
     pub const PROC_UID_ONLY: u32 = 4;
 }
 
-/// SB-330: whether a socket of one of this account's processes has `peer_port` as its local
-/// port and `local_port` as its foreign one (the peer's end of a connection to us).
+/// SB-330: whether a socket of one of this account's processes has `peer` as its local
+/// address and port and `local` as its foreign ones (the peer's end of a connection to us).
 #[cfg(target_os = "macos")]
-fn own_processes_hold(local_port: u16, peer_port: u16) -> bool {
+fn own_processes_hold(local: SocketAddr, peer: SocketAddr) -> bool {
     let Some(uid) = own_uid() else {
         return false;
     };
@@ -78,11 +118,11 @@ fn own_processes_hold(local_port: u16, peer_port: u16) -> bool {
     pids.sort_unstable_by(|a, b| b.cmp(a));
     pids.into_iter()
         .filter(|&pid| pid > 0 && pid != me)
-        .any(|pid| process_holds(pid, local_port, peer_port))
+        .any(|pid| process_holds(pid, local, peer))
 }
 
 #[cfg(target_os = "macos")]
-fn process_holds(pid: libc::pid_t, local_port: u16, peer_port: u16) -> bool {
+fn process_holds(pid: libc::pid_t, local: SocketAddr, peer: SocketAddr) -> bool {
     let size = std::mem::size_of::<libc::proc_fdinfo>();
     let mut fds = vec![
         libc::proc_fdinfo {
@@ -119,31 +159,55 @@ fn process_holds(pid: libc::pid_t, local_port: u16, peer_port: u16) -> bool {
                     info.len() as libc::c_int,
                 )
             };
-            got as usize >= fdinfo::MIN_LEN && ports_in(&info, local_port, peer_port)
+            got as usize >= fdinfo::MIN_LEN && ports_in(&info, local, peer)
         })
 }
 
-/// SB-330: whether one `socket_fdinfo` answer is the peer's end: its local port is `peer_port`
-/// and its foreign one `local_port`. Our accepted socket is the mirror image and never matches.
+/// SB-330: whether one `socket_fdinfo` answer is the peer's end: its local address and port are
+/// `peer`'s and its foreign ones `local`'s (SB-421 review P2-1: addresses too). Our accepted socket
+/// is the mirror image and never matches.
 #[cfg(any(target_os = "macos", test))]
-fn ports_in(info: &[u8], local_port: u16, peer_port: u16) -> bool {
+fn ports_in(info: &[u8], local: SocketAddr, peer: SocketAddr) -> bool {
     let port = |at: usize| {
         info.get(at..at + 2)
             .map(|b| u16::from_be_bytes([b[0], b[1]]))
     };
-    port(fdinfo::LPORT) == Some(peer_port) && port(fdinfo::FPORT) == Some(local_port)
+    let vflag = info.get(fdinfo::VFLAG).copied().unwrap_or(0);
+    port(fdinfo::LPORT) == Some(peer.port())
+        && port(fdinfo::FPORT) == Some(local.port())
+        && union_address(info, fdinfo::LADDR, vflag) == Some(plain(peer.ip()))
+        && union_address(info, fdinfo::FADDR, vflag) == Some(plain(local.ip()))
+}
+
+/// An address from a 16-byte `in4in6_addr`/`in6_addr` union at `at`: IPv4 (flag 1) in its last 4
+/// bytes, else IPv6 (flag 2).
+#[cfg(any(target_os = "macos", test))]
+fn union_address(bytes: &[u8], at: usize, vflag: u8) -> Option<IpAddr> {
+    let raw: [u8; 16] = bytes.get(at..at + 16)?.try_into().ok()?;
+    if vflag & 1 != 0 {
+        let v4: [u8; 4] = raw[12..16].try_into().ok()?;
+        Some(IpAddr::from(v4))
+    } else if vflag & 2 != 0 {
+        Some(plain(IpAddr::from(raw)))
+    } else {
+        None
+    }
 }
 
 #[cfg(target_os = "linux")]
-fn owner_on(local_port: u16, peer_port: u16) -> Option<u32> {
-    ["/proc/net/tcp", "/proc/net/tcp6"].iter().find_map(|path| {
-        let table = std::fs::read_to_string(path).ok()?;
-        owner_in_proc(&table, local_port, peer_port)
-    })
+fn owner_on(local: SocketAddr, peer: SocketAddr) -> Option<u32> {
+    // Both tables, read as one: a connection listed in both with two owners is nobody's.
+    let mut tables = String::new();
+    for path in ["/proc/net/tcp", "/proc/net/tcp6"] {
+        if let Ok(table) = std::fs::read_to_string(path) {
+            tables.push_str(&table);
+        }
+    }
+    owner_in_proc(&tables, local, peer)
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "linux")))]
-fn owner_on(_local_port: u16, _peer_port: u16) -> Option<u32> {
+fn owner_on(_local: SocketAddr, _peer: SocketAddr) -> Option<u32> {
     None
 }
 
@@ -176,16 +240,16 @@ pub fn same_user(me: Me, local: SocketAddr, peer: SocketAddr) -> bool {
     match me {
         Me::Unchecked => true,
         Me::Uid(uid) => admits(uid, owner(local, peer)),
-        Me::TokenUser => token_user_matches(local.port(), peer.port()),
+        Me::TokenUser => token_user_matches(local, peer),
     }
 }
 
 #[cfg(windows)]
-fn token_user_matches(local_port: u16, peer_port: u16) -> bool {
-    windows::same_user(local_port, peer_port)
+fn token_user_matches(local: SocketAddr, peer: SocketAddr) -> bool {
+    windows::same_user(local, peer)
 }
 #[cfg(not(windows))]
-fn token_user_matches(_local_port: u16, _peer_port: u16) -> bool {
+fn token_user_matches(_local: SocketAddr, _peer: SocketAddr) -> bool {
     false
 }
 
@@ -212,6 +276,11 @@ mod layout {
     pub const HEADER: usize = 24;
     pub const FPORT: usize = 4 + 16;
     pub const LPORT: usize = 4 + 18;
+    /// SB-421 review (P2-1): `inp_vflag` and the foreign and local address unions, read from the
+    /// SDK with `offsetof` on macOS 27.2 (96, 100, 116 from the record's start).
+    pub const VFLAG: usize = 96;
+    pub const FADDR: usize = 100;
+    pub const LADDR: usize = 116;
     pub const UID: usize = 4 + 248;
 }
 
@@ -258,10 +327,11 @@ fn pcblist() -> Option<Vec<u8>> {
 }
 
 /// Walks a `pcblist64` answer: a `xinpgen` header, `xtcpcb64` records each led by its length,
-/// and a closing `xinpgen`. The peer's socket has the peer's port as its local port and ours as
-/// its foreign one; our accepted socket is the mirror image and never matches.
+/// and a closing `xinpgen`. The peer's socket has the peer's address and port as its local ones
+/// and ours as its foreign ones; our accepted socket is the mirror image and never matches. Every
+/// matching record is read: two that disagree are nobody's.
 #[cfg(any(target_os = "macos", test))]
-fn owner_in(list: &[u8], local_port: u16, peer_port: u16) -> Option<u32> {
+fn owner_in(list: &[u8], local: SocketAddr, peer: SocketAddr) -> Seen {
     let u32_at = |at: usize| -> Option<u32> {
         list.get(at..at + 4)
             .map(|b| u32::from_ne_bytes([b[0], b[1], b[2], b[3]]))
@@ -270,43 +340,81 @@ fn owner_in(list: &[u8], local_port: u16, peer_port: u16) -> Option<u32> {
         list.get(at..at + 2)
             .map(|b| u16::from_be_bytes([b[0], b[1]]))
     };
-    let mut at = usize::try_from(u32_at(0)?).ok()?;
+    let mut seen = Seen::Absent;
+    let Some(mut at) = u32_at(0).and_then(|n| usize::try_from(n).ok()) else {
+        return seen;
+    };
     while at < list.len() {
-        let len = usize::try_from(u32_at(at)?).ok()?;
+        let Some(len) = u32_at(at).and_then(|n| usize::try_from(n).ok()) else {
+            break;
+        };
         if len <= layout::HEADER || at + len > list.len() {
             break;
         }
-        if port_at(at + layout::LPORT)? == peer_port && port_at(at + layout::FPORT)? == local_port {
-            return u32_at(at + layout::UID);
+        let record = &list[at..at + len];
+        let vflag = record.get(layout::VFLAG).copied().unwrap_or(0);
+        let matches = port_at(at + layout::LPORT) == Some(peer.port())
+            && port_at(at + layout::FPORT) == Some(local.port())
+            && union_address(record, layout::LADDR, vflag) == Some(plain(peer.ip()))
+            && union_address(record, layout::FADDR, vflag) == Some(plain(local.ip()));
+        if matches {
+            seen = match u32_at(at + layout::UID) {
+                Some(uid) => seen.and(uid),
+                None => Seen::Ambiguous,
+            };
         }
         at += len;
     }
-    None
+    seen
 }
 
-/// One `/proc/net/tcp` table: `sl local rem st tx:rx tr:tm retrnsmt uid timeout inode ...`,
-/// addresses as `HEXADDR:HEXPORT`. The client's own row names its uid; a row whose inode is 0
-/// belongs to a client that already closed (its uid then reads 0), so its owner is unknown and
-/// is never taken from anything else (contract CT-254, `v0.1.0+2026-11-07.3`, server side).
+/// One or more `/proc/net/tcp` and `/proc/net/tcp6` tables: `sl local rem st tx:rx tr:tm retrnsmt
+/// uid timeout inode ...`, addresses as `HEXADDR:HEXPORT` (an IPv4 address as one host-order word,
+/// an IPv6 address as four). The peer's row has the peer's address and port as its local ones and
+/// ours as its remote ones (SB-421 review P2-1: addresses too, not ports alone). A matching row
+/// whose inode is 0 belongs to a client that already closed (its uid then reads 0): its owner is
+/// unknown and is never taken from anything else (contract CT-254, `v0.1.0+2026-11-07.3`, server
+/// side); two live rows that disagree are nobody's.
 #[cfg(any(target_os = "linux", test))]
-fn owner_in_proc(table: &str, local_port: u16, peer_port: u16) -> Option<u32> {
-    let port =
-        |field: &str| -> Option<u16> { u16::from_str_radix(field.rsplit_once(':')?.1, 16).ok() };
-    table
-        .lines()
-        .skip(1)
-        .find_map(|line| {
-            let fields: Vec<&str> = line.split_whitespace().collect();
-            if fields.len() < 10 {
-                return None;
+fn owner_in_proc(table: &str, local: SocketAddr, peer: SocketAddr) -> Option<u32> {
+    let endpoint = |field: &str| -> Option<(IpAddr, u16)> {
+        let (addr, port) = field.rsplit_once(':')?;
+        let port = u16::from_str_radix(port, 16).ok()?;
+        let word = |hex: &str| u32::from_str_radix(hex, 16).ok().map(u32::to_ne_bytes);
+        let ip = match addr.len() {
+            8 => IpAddr::from(word(addr)?),
+            32 => {
+                let mut bytes = [0u8; 16];
+                for i in 0..4 {
+                    bytes[i * 4..i * 4 + 4].copy_from_slice(&word(&addr[i * 8..i * 8 + 8])?);
+                }
+                IpAddr::from(bytes)
             }
-            if port(fields[1])? != peer_port || port(fields[2])? != local_port {
-                return None;
-            }
-            // Found the client's row: an answer either way, never a later row's.
-            Some((fields[9] != "0").then(|| fields[7].parse().ok()).flatten())
-        })
-        .flatten()
+            _ => return None,
+        };
+        Some((plain(ip), port))
+    };
+    let want_local = (plain(peer.ip()), peer.port());
+    let want_remote = (plain(local.ip()), local.port());
+    let mut found: Option<u32> = None;
+    for line in table.lines() {
+        let fields: Vec<&str> = line.split_whitespace().collect();
+        if fields.len() < 10 || !fields[0].ends_with(':') {
+            continue; // a header line, or one cut short
+        }
+        if endpoint(fields[1]) != Some(want_local) || endpoint(fields[2]) != Some(want_remote) {
+            continue;
+        }
+        if fields[9] == "0" {
+            return None;
+        }
+        let uid: u32 = fields[7].parse().ok()?;
+        match found {
+            Some(other) if other != uid => return None,
+            _ => found = Some(uid),
+        }
+    }
+    found
 }
 
 /// Only a peer read as this account is served; another account's, or one whose owner could not be
@@ -317,23 +425,38 @@ fn admits(uid: u32, found: Option<u32>) -> bool {
 
 /// SB-274: the IPv4 TCP table of `GetExtendedTcpTable` (`MIB_TCPTABLE_OWNER_PID`): a row count,
 /// then rows of six `u32`s (state, local address, local port, remote address, remote port, owning
-/// pid), each port in network order in its low 16 bits. Answers the pid of the peer's socket, whose
-/// local port is the peer's and whose remote port is ours.
+/// pid), each address in network order and each port in network order in its low 16 bits. Answers
+/// the pid of the peer's socket, whose local address and port are the peer's and whose remote ones
+/// are ours (SB-421 review P2-1: addresses too); two rows that disagree name nobody.
 #[cfg(any(windows, test))]
-fn pid_in(table: &[u8], local_port: u16, peer_port: u16) -> Option<u32> {
+fn pid_in(table: &[u8], local: SocketAddr, peer: SocketAddr) -> Option<u32> {
     let u32_at = |at: usize| -> Option<u32> {
         table
             .get(at..at + 4)
             .map(|b| u32::from_ne_bytes([b[0], b[1], b[2], b[3]]))
     };
+    let ip_at = |at: usize| -> Option<IpAddr> {
+        let b: [u8; 4] = table.get(at..at + 4)?.try_into().ok()?;
+        Some(IpAddr::from(b))
+    };
     let port = |value: u32| u16::from_be(value as u16);
     let rows = usize::try_from(u32_at(0)?).ok()?;
-    (0..rows.min(table.len().saturating_sub(4) / 24)).find_map(|row| {
+    let mut found: Option<u32> = None;
+    for row in 0..rows.min(table.len().saturating_sub(4) / 24) {
         let at = 4 + row * 24;
-        (port(u32_at(at + 8)?) == peer_port && port(u32_at(at + 16)?) == local_port)
-            .then(|| u32_at(at + 20))
-            .flatten()
-    })
+        let matches = port(u32_at(at + 8)?) == peer.port()
+            && port(u32_at(at + 16)?) == local.port()
+            && ip_at(at + 4) == Some(plain(peer.ip()))
+            && ip_at(at + 12) == Some(plain(local.ip()));
+        if matches {
+            let pid = u32_at(at + 20)?;
+            match found {
+                Some(other) if other != pid => return None,
+                _ => found = Some(pid),
+            }
+        }
+    }
+    found
 }
 
 #[cfg(windows)]
@@ -421,8 +544,8 @@ mod windows {
     }
 
     /// Whether the process that owns the peer's socket runs as this process's user.
-    pub(super) fn same_user(local_port: u16, peer_port: u16) -> bool {
-        let Some(pid) = table().and_then(|t| super::pid_in(&t, local_port, peer_port)) else {
+    pub(super) fn same_user(local: std::net::SocketAddr, peer: std::net::SocketAddr) -> bool {
+        let Some(pid) = table().and_then(|t| super::pid_in(&t, local, peer)) else {
             return false;
         };
         if pid == std::process::id() {
@@ -487,7 +610,7 @@ pub fn admit(
         Me::Unchecked => Admission::Own,
         Me::TokenUser => {
             // SB-421: never on Windows, where the peer is compared by SID, never by a uid.
-            if token_user_matches(local.port(), peer.port()) {
+            if token_user_matches(local, peer) {
                 Admission::Own
             } else {
                 Admission::Refused
@@ -497,14 +620,56 @@ pub fn admit(
     }
 }
 
+/// `admit` for an accepted socket whose own address may not have been readable: SB-421 review
+/// (P2-5), such a connection admits nobody, never this account.
+fn admit_at(
+    me: Me,
+    local: std::io::Result<SocketAddr>,
+    peer: SocketAddr,
+    users: &crate::users::Users,
+) -> Admission {
+    match local {
+        Ok(local) => admit(me, local, peer, users),
+        Err(_) => Admission::Refused,
+    }
+}
+
 /// SB-421: this account's peer is its own; another account's only when it is named now; one
 /// whose owner could not be read never.
 fn classify(uid: u32, found: Option<u32>, users: &crate::users::Users) -> Admission {
     match found {
         _ if admits(uid, found) => Admission::Own,
-        Some(other) if other != 0 && users.find(other).is_some() => Admission::Named(other),
+        Some(other) if other != 0 => match users.find(other) {
+            // SB-421 review (P2-4): a uid listed under a name is that account only while the
+            // system still names the uid so; a uid given to a new account is refused.
+            Some(user) if user.name.as_deref().is_none_or(|name| account_name(other).as_deref() == Some(name)) => {
+                Admission::Named(other)
+            }
+            _ => Admission::Refused,
+        },
         _ => Admission::Refused,
     }
+}
+
+/// The name the password database gives `uid` now (macOS, Linux).
+#[cfg(unix)]
+pub fn account_name(uid: u32) -> Option<String> {
+    let mut pwd: libc::passwd = unsafe { std::mem::zeroed() };
+    let mut buf = vec![0 as libc::c_char; 16 * 1024];
+    let mut found: *mut libc::passwd = std::ptr::null_mut();
+    // SAFETY: every pointer is to a live buffer of the stated size; `found` is null or `pwd`,
+    // whose strings point into `buf`.
+    let rc = unsafe { libc::getpwuid_r(uid, &mut pwd, buf.as_mut_ptr(), buf.len(), &mut found) };
+    if rc != 0 || found.is_null() || pwd.pw_name.is_null() {
+        return None;
+    }
+    // SAFETY: as above.
+    let name = unsafe { std::ffi::CStr::from_ptr(pwd.pw_name) };
+    Some(name.to_string_lossy().into_owned())
+}
+#[cfg(not(unix))]
+pub fn account_name(_uid: u32) -> Option<String> {
+    None
 }
 
 /// A listener that hands axum only connections whose peer is this process's own account, or an
@@ -533,11 +698,9 @@ impl Listener for OwnUser {
             if me == Me::Unchecked {
                 return (io, own);
             }
-            let Ok(local) = io.local_addr() else {
-                return (io, own);
-            };
+            let local = io.local_addr();
             let users = self.users.clone();
-            let admission = tokio::task::spawn_blocking(move || admit(me, local, peer, &users))
+            let admission = tokio::task::spawn_blocking(move || admit_at(me, local, peer, &users))
                 .await
                 .unwrap_or(Admission::Refused);
             match admission {
@@ -571,11 +734,26 @@ impl Listener for OwnUser {
 mod tests {
     use super::*;
 
+    /// 127.0.0.1 and a port.
+    fn at(port: u16) -> SocketAddr {
+        SocketAddr::from(([127, 0, 0, 1], port))
+    }
+
     fn record(lport: u16, fport: u16, uid: u32) -> Vec<u8> {
+        record_at(at(lport), at(fport), uid)
+    }
+    fn record_at(local: SocketAddr, foreign: SocketAddr, uid: u32) -> Vec<u8> {
         let mut r = vec![0u8; 472];
         r[0..4].copy_from_slice(&472u32.to_ne_bytes());
-        r[layout::FPORT..layout::FPORT + 2].copy_from_slice(&fport.to_be_bytes());
-        r[layout::LPORT..layout::LPORT + 2].copy_from_slice(&lport.to_be_bytes());
+        r[layout::FPORT..layout::FPORT + 2].copy_from_slice(&foreign.port().to_be_bytes());
+        r[layout::LPORT..layout::LPORT + 2].copy_from_slice(&local.port().to_be_bytes());
+        r[layout::VFLAG] = 1;
+        let v4 = |a: SocketAddr| match a.ip() {
+            IpAddr::V4(v4) => v4.octets(),
+            IpAddr::V6(_) => unreachable!(),
+        };
+        r[layout::FADDR + 12..layout::FADDR + 16].copy_from_slice(&v4(foreign));
+        r[layout::LADDR + 12..layout::LADDR + 16].copy_from_slice(&v4(local));
         r[layout::UID..layout::UID + 4].copy_from_slice(&uid.to_ne_bytes());
         r
     }
@@ -598,14 +776,31 @@ mod tests {
             record(5555, 4000, 777),
             record(4001, 5555, 0),
         ]);
-        assert_eq!(owner_in(&l, 4000, 5555), Some(777));
-        assert_eq!(owner_in(&l, 4000, 5556), None);
-        assert_eq!(owner_in(&list(&[]), 4000, 5555), None);
+        assert_eq!(owner_in(&l, at(4000), at(5555)), Seen::Owner(777));
+        assert_eq!(owner_in(&l, at(4000), at(5556)), Seen::Absent);
+        assert_eq!(owner_in(&list(&[]), at(4000), at(5555)), Seen::Absent);
         // A truncated record ends the walk instead of reading past the buffer.
         let mut cut = list(&[record(5555, 4000, 777)]);
         cut.truncate(100);
-        assert_eq!(owner_in(&cut, 4000, 5555), None);
-        assert_eq!(owner_in(&[], 4000, 5555), None);
+        assert_eq!(owner_in(&cut, at(4000), at(5555)), Seen::Absent);
+        assert_eq!(owner_in(&[], at(4000), at(5555)), Seen::Absent);
+    }
+
+    /// SB-421 review (P2-1): another account bound to 127.0.0.2 with the same ports is not the
+    /// peer, and two matching sockets that disagree name nobody.
+    #[test]
+    fn a_pcb_record_matches_by_both_addresses_and_ports_and_disagreement_is_nobodys() {
+        let other = SocketAddr::from(([127, 0, 0, 2], 5555));
+        let l = list(&[record_at(other, at(4000), 666), record(5555, 4000, 777)]);
+        assert_eq!(owner_in(&l, at(4000), at(5555)), Seen::Owner(777));
+        let only_other = list(&[record_at(other, at(4000), 666)]);
+        assert_eq!(owner_in(&only_other, at(4000), at(5555)), Seen::Absent);
+        let to_other = list(&[record_at(at(5555), SocketAddr::from(([127, 0, 0, 2], 4000)), 666)]);
+        assert_eq!(owner_in(&to_other, at(4000), at(5555)), Seen::Absent);
+        let twice = list(&[record(5555, 4000, 777), record(5555, 4000, 666)]);
+        assert_eq!(owner_in(&twice, at(4000), at(5555)), Seen::Ambiguous);
+        let agree = list(&[record(5555, 4000, 777), record(5555, 4000, 777)]);
+        assert_eq!(owner_in(&agree, at(4000), at(5555)), Seen::Owner(777));
     }
 
     #[test]
@@ -635,23 +830,52 @@ mod tests {
                 table.extend_from_slice(&v.to_ne_bytes());
             }
         }
-        assert_eq!(pid_in(&table, 4000, 5555), Some(4242));
-        assert_eq!(pid_in(&table, 4000, 1), None);
+        assert_eq!(pid_in(&table, at(4000), at(5555)), Some(4242));
+        assert_eq!(pid_in(&table, at(4000), at(1)), None);
+        // SB-421 review (P2-1): the peer's address must match too.
+        let elsewhere = SocketAddr::from(([127, 0, 0, 2], 5555));
+        assert_eq!(pid_in(&table, at(4000), elsewhere), None);
         // A count larger than the table never reads past it.
         let mut short = table.clone();
         short[0..4].copy_from_slice(&99u32.to_ne_bytes());
         short.truncate(4 + 24);
-        assert_eq!(pid_in(&short, 4000, 5555), None);
-        assert_eq!(pid_in(&[], 4000, 5555), None);
+        assert_eq!(pid_in(&short, at(4000), at(5555)), None);
+        assert_eq!(pid_in(&[], at(4000), at(5555)), None);
     }
 
     #[test]
     fn a_proc_net_tcp_line_names_its_uid() {
         let table = "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode\n   0: 0100007F:0FA0 0100007F:15B3 01 00000000:00000000 00:00000000 00000000  1000        0 1 1\n   1: 0100007F:15B3 0100007F:0FA0 01 00000000:00000000 00:00000000 00000000  1001        0 2 1\n";
-        assert_eq!(owner_in_proc(table, 4000, 5555), Some(1001));
-        assert_eq!(owner_in_proc(table, 5555, 4000), Some(1000));
-        assert_eq!(owner_in_proc(table, 4000, 1), None);
-        assert_eq!(owner_in_proc("header only\n", 4000, 5555), None);
+        assert_eq!(owner_in_proc(table, at(4000), at(5555)), Some(1001));
+        assert_eq!(owner_in_proc(table, at(5555), at(4000)), Some(1000));
+        assert_eq!(owner_in_proc(table, at(4000), at(1)), None);
+        assert_eq!(owner_in_proc("header only\n", at(4000), at(5555)), None);
+    }
+
+    /// SB-421 review (P2-1): on Linux another account may bind 127.0.0.2 with the proxy's port
+    /// numbers, or reuse a source port on another address; only the whole address pair counts,
+    /// IPv4 in IPv6 reads as IPv4, and two live rows that disagree name nobody.
+    #[test]
+    fn a_proc_net_tcp_row_matches_by_both_addresses_and_disagreement_is_nobodys() {
+        let head = "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode\n";
+        let row = |local: &str, remote: &str, uid: u32, inode: u32| {
+            format!("   0: {local} {remote} 01 00000000:00000000 00:00000000 00000000  {uid}        0 {inode} 1\n")
+        };
+        // 127.0.0.2:5555 -> 127.0.0.1:4000 is someone else's connection to another address pair.
+        let other = format!("{head}{}", row("0200007F:15B3", "0100007F:0FA0", 1002, 7));
+        assert_eq!(owner_in_proc(&other, at(4000), at(5555)), None);
+        let both = format!("{other}{}", row("0100007F:15B3", "0100007F:0FA0", 1001, 8));
+        assert_eq!(owner_in_proc(&both, at(4000), at(5555)), Some(1001));
+        // 127.0.0.1:5555 -> 127.0.0.2:4000: a connection to another listener on the same port.
+        let elsewhere = format!("{head}{}", row("0100007F:15B3", "0200007F:0FA0", 1002, 9));
+        assert_eq!(owner_in_proc(&elsewhere, at(4000), at(5555)), None);
+        // The same connection in tcp6 as ::ffff:127.0.0.1.
+        let mapped = "0000000000000000FFFF00000100007F";
+        let six = format!("{head}{}", row(&format!("{mapped}:15B3"), &format!("{mapped}:0FA0"), 1003, 10));
+        assert_eq!(owner_in_proc(&six, at(4000), at(5555)), Some(1003));
+        // Two live rows for one address pair that disagree.
+        let twice = format!("{both}{}", row("0100007F:15B3", "0100007F:0FA0", 1004, 11));
+        assert_eq!(owner_in_proc(&twice, at(4000), at(5555)), None);
     }
 
     /// CT-254 (server side): a client row with inode 0 is a client that already closed; its
@@ -659,8 +883,8 @@ mod tests {
     #[test]
     fn a_closed_clients_row_names_no_owner() {
         let table = "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode\n   0: 0100007F:0FA0 0100007F:15B3 01 00000000:00000000 00:00000000 00000000  1000        0 1 1\n   1: 0100007F:15B3 0100007F:0FA0 06 00000000:00000000 00:00000000 00000000     0        0 0 1\n   2: 0100007F:15B3 0100007F:0FA0 01 00000000:00000000 00:00000000 00000000  1001        0 3 1\n";
-        assert_eq!(owner_in_proc(table, 4000, 5555), None);
-        assert!(!admits(0, owner_in_proc(table, 4000, 5555)));
+        assert_eq!(owner_in_proc(table, at(4000), at(5555)), None);
+        assert!(!admits(0, owner_in_proc(table, at(4000), at(5555))));
     }
 
     /// On every system the listener checks, a connection this process opens is its own user's.
@@ -694,12 +918,18 @@ mod tests {
         let mut info = vec![0u8; 792];
         info[fdinfo::FPORT..fdinfo::FPORT + 2].copy_from_slice(&4000u16.to_be_bytes());
         info[fdinfo::LPORT..fdinfo::LPORT + 2].copy_from_slice(&5555u16.to_be_bytes());
-        assert!(ports_in(&info, 4000, 5555));
+        info[fdinfo::VFLAG] = 1;
+        info[fdinfo::FADDR + 12..fdinfo::FADDR + 16].copy_from_slice(&[127, 0, 0, 1]);
+        info[fdinfo::LADDR + 12..fdinfo::LADDR + 16].copy_from_slice(&[127, 0, 0, 1]);
+        assert!(ports_in(&info, at(4000), at(5555)));
         assert!(
-            !ports_in(&info, 5555, 4000),
+            !ports_in(&info, at(5555), at(4000)),
             "our accepted socket is the mirror image"
         );
-        assert!(!ports_in(&info[..100], 4000, 5555));
+        assert!(!ports_in(&info[..100], at(4000), at(5555)));
+        // SB-421 review (P2-1): the same ports on another address are not the peer's end.
+        info[fdinfo::LADDR + 12..fdinfo::LADDR + 16].copy_from_slice(&[127, 0, 0, 2]);
+        assert!(!ports_in(&info, at(4000), at(5555)));
     }
 
     /// SB-330, the live check: a connection another process of this account opens reads back as
@@ -720,7 +950,7 @@ mod tests {
         let (found, held) = tokio::task::spawn_blocking(move || {
             (
                 owner(local, peer),
-                own_processes_hold(local.port(), peer.port()),
+                own_processes_hold(local, peer),
             )
         })
         .await
@@ -823,6 +1053,7 @@ mod tests {
                 added_at: 1,
                 added_by: "cli".into(),
                 settings: None,
+                settings_sha256: None,
             }],
         )
         .unwrap();
@@ -859,6 +1090,7 @@ mod tests {
                 added_at: 1,
                 added_by: "cli".into(),
                 settings: None,
+                settings_sha256: None,
             }],
         )
         .unwrap();
@@ -870,5 +1102,61 @@ mod tests {
             "root never"
         );
         assert_eq!(classify(501, None, &users), Admission::Refused);
+    }
+
+    /// SB-421 review (P2-5): an accepted socket whose own address cannot be read admits nobody.
+    #[test]
+    fn a_socket_whose_address_cannot_be_read_admits_nobody() {
+        let users = crate::users::Users::none();
+        let err = || Err(std::io::Error::other("gone"));
+        assert_eq!(admit_at(Me::Uid(501), err(), at(5555), &users), Admission::Refused);
+        assert_eq!(admit_at(Me::TokenUser, err(), at(5555), &users), Admission::Refused);
+    }
+
+    /// SB-421 review (P2-4): a uid listed under a name is admitted only while the system still
+    /// gives the uid that name.
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[test]
+    fn a_listed_uid_is_admitted_only_under_its_recorded_name() {
+        let root = tempfile::tempdir().unwrap();
+        let users = crate::users::Users::new(root.path());
+        let own = own_uid().unwrap();
+        let named = |name: Option<String>| crate::users::NamedUser {
+            uid: own,
+            name,
+            pool: "team".into(),
+            folders: Vec::new(),
+            salt: crate::users::new_salt(),
+            added_at: 1,
+            added_by: "cli".into(),
+            settings: None,
+            settings_sha256: None,
+        };
+        let me = own.wrapping_add(1);
+        crate::users::save(root.path(), &[named(account_name(own))]).unwrap();
+        assert_eq!(classify(me, Some(own), &users), Admission::Named(own));
+        crate::users::save(root.path(), &[named(Some("gone-account-sb421".into()))]).unwrap();
+        assert_eq!(classify(me, Some(own), &users), Admission::Refused);
+    }
+
+    /// SB-421 review (P2-1), the live check of the record layout: this process's own connection is
+    /// found in `pcblist64` by both addresses and ports, and nowhere else.
+    #[cfg(target_os = "macos")]
+    #[tokio::test]
+    async fn this_processs_own_connection_is_found_in_the_pcb_list_by_its_address_pair() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let _client = tokio::net::TcpStream::connect(address).await.unwrap();
+        let (server, peer) = listener.accept().await.unwrap();
+        let local = server.local_addr().unwrap();
+        let (found, other) = tokio::task::spawn_blocking(move || {
+            let list = pcblist().unwrap();
+            let elsewhere = SocketAddr::from(([127, 0, 0, 2], peer.port()));
+            (owner_in(&list, local, peer), owner_in(&list, local, elsewhere))
+        })
+        .await
+        .unwrap();
+        assert_eq!(found, Seen::Owner(own_uid().unwrap()));
+        assert_eq!(other, Seen::Absent);
     }
 }

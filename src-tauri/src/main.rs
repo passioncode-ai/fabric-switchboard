@@ -977,6 +977,35 @@ async fn balance(
     };
     state.runtime().await?.execute(operation).await
 }
+/// SB-419 (DEC-0028): groups fed from the default group. With nothing named, the state (`feed
+/// status`); otherwise a group's feed on or off with its priority, or the targets.
+#[tauri::command]
+async fn feed(
+    pool: Option<String>,
+    on: Option<bool>,
+    priority: Option<u32>,
+    ready: Option<u32>,
+    lookahead_minutes: Option<u32>,
+    state: State<'_, Slot>,
+) -> Result<Value, String> {
+    let operation = if pool.is_none()
+        && on.is_none()
+        && priority.is_none()
+        && ready.is_none()
+        && lookahead_minutes.is_none()
+    {
+        Operation::FeedStatus
+    } else {
+        Operation::Feed {
+            pool,
+            on,
+            priority,
+            ready,
+            lookahead_minutes,
+        }
+    };
+    state.runtime().await?.execute(operation).await
+}
 /// SB-379 (W3): a problem the window saw (an uncaught error, a rejected promise, an answer it did
 /// not know, a timed-out read, a stall), as two codes from closed lists; counted in the error
 /// report (`app_error`, class `renderer_problem`), never with text.
@@ -2215,6 +2244,7 @@ fn main() {
             project_add_accounts,
             codex_route,
             balance,
+            feed,
             capacity,
             duty,
             own_sign_in,
