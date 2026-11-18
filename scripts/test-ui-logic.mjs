@@ -1818,6 +1818,9 @@ check(() => {
   const refused = logic.attentionView({ items: [{ reason: 'dispatch_refused', count: 3, freed: false, since: 9900, action: { tool: 'switchboard_capacity', window: 'open_capacity' } }] }).items[0];
   assert.equal(refused.count, 3); assert.equal(refused.freed, false);
   assert.equal(logic.attentionActionLabel('open_capacity'), 'Open the session limit');
+  // SB-417 (design review 2026-11-17): the default share is a quarter of the limit rounded up, never above the limit.
+  for (const [limit, share] of [[1, 1], [2, 1], [4, 1], [5, 2], [8, 2], [12, 3], [20, 5], [500, 125]]) assert.equal(logic.defaultBoardShare(limit), share, `limit ${limit}`);
+  assert.equal(logic.defaultBoardShare(0), 1);
   assert.equal(logic.dispatchRefusedLine(refused), "3 board runs are waiting: this computer's session limit refused them. No session has ended since.");
   assert.equal(logic.dispatchRefusedLine({ count: 1, freed: true }), "A board run is waiting: this computer's session limit refused it. A session has ended since, so the next run can start.");
   assert.equal(logic.dutyOutcomeText('stopped'), null);
