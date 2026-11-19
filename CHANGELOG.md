@@ -8,6 +8,8 @@ on their [GitHub releases](https://github.com/passioncode-ai/fabric-switchboard/
 
 ## Unreleased
 
+- Hermes on a named Anthropic key now takes a reasoning level (SB-535): `switchboard agents launch hermes --anthropic <name> --effort xhigh` (also `--reasoning`) starts `hermes --provider anthropic -m <model> --reasoning xhigh`. Such a launch no longer lets Hermes adopt Claude Code's sign-in, has no fallback provider, runs its side tasks (titles, compression and the rest) on the same key and model, and clears every other provider key from its environment, so nothing it does is billed to another account.
+
 ## 0.7.121
 
 - Switching the ordinary Claude Code account no longer fails when Claude Code's Keychain item has grown too large (SB-542). Switchboard now leaves out the MCP entries that hold neither a sign-in nor a client registration, which Claude Code writes again when it next looks for a server, and keeps every other entry. Before, the switch was refused with "Claude Code's sign-in is too large to write to the Keychain safely".

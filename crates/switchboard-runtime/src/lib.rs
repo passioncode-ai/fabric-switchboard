@@ -1168,6 +1168,9 @@ pub enum Operation {
         /// SB-390: with `via: anthropic`, the name of the saved Anthropic key.
         #[serde(default)]
         key: Option<String>,
+        /// SB-535: with `via: anthropic`, the reasoning level Hermes runs at (`--reasoning`).
+        #[serde(default)]
+        effort: Option<String>,
     },
     /// SB-390: the saved Anthropic keys by name, never a value.
     AnthropicKeys,
@@ -6354,6 +6357,7 @@ async fn execute(
             via: AgentVia::Anthropic,
             model,
             key,
+            effort,
             ..
         } => {
             // SB-390: no ceiling counts an Anthropic key (Anthropic offers no read of its spend).
@@ -6365,6 +6369,7 @@ async fn execute(
                     &agent,
                     &key,
                     model.as_deref(),
+                    effort.as_deref(),
                     &working_directory,
                     launch::start_terminal,
                 )
@@ -10448,6 +10453,7 @@ mod owner_tests {
             via: AgentVia::Proxy,
             model: None,
             key: None,
+            effort: None,
         };
         assert_eq!(
             runtime.execute(launch("goose")).await.unwrap_err(),
