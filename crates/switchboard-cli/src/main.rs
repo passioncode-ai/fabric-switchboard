@@ -1132,7 +1132,7 @@ enum CapacityCmd {
 enum UsageModeCmd {
     /// Response headers first, the usage endpoint when a figure decides something (the default).
     Smart,
-    /// Every account of a switching group checked every three minutes, as before 0.7.121.
+    /// Every account of a switching group checked every three minutes, as in 0.7.121.
     Timer,
     /// No check on a schedule: only a switch's candidate and a check you ask for.
     OnDemand,

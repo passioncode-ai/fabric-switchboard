@@ -175,7 +175,7 @@ pub enum UsageMode {
     /// budget per provider (the default).
     #[default]
     Smart,
-    /// The fixed cadence of 0.7.120: every account of a switching group every three minutes,
+    /// The fixed cadence of 0.7.121: every account of a switching group every three minutes,
     /// headers never postpone a check, no budget beyond the provider's own waits.
     Timer,
     /// No background check: the endpoint is asked only for a switch's candidate and when a
@@ -2819,7 +2819,7 @@ impl Store {
             .ok()
             .and_then(|seen| seen.get(id).copied());
         // While the endpoint answered within the ceiling, a header is as fresh as a check. The
-        // `timer` mode keeps the fixed cadence of 0.7.120: no header postpones anything.
+        // `timer` mode keeps the fixed cadence of 0.7.121: no header postpones anything.
         let smart = self.usage_mode() != UsageMode::Timer;
         let passive =
             smart && complete && anchor.is_some_and(|at| observed < at + PASSIVE_CEILING_SECONDS);

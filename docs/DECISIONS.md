@@ -949,7 +949,7 @@ research notes); the ones still in force that the board cites are seeded below w
   - Header observations wait in memory and reach `accounts.json` at most once a minute and at the
     drain.
 
-  The person may choose `timer` (0.7.120's fixed cadence: every account of a switching group every
+  The person may choose `timer` (0.7.121's fixed cadence: every account of a switching group every
   180 s, headers postpone nothing, no budget beyond the provider's holds) or `on_demand` (no check
   on a schedule; a switch's candidate and a person's check still ask). In `on_demand` a managed
   group's account in use is read from its answers' headers, so it still switches before the limit;

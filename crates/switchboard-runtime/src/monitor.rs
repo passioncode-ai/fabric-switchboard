@@ -261,7 +261,7 @@ impl Pass {
             .usage_gate
             .forget_missing(snapshot.accounts.iter().map(|a| a.id.as_str()));
         // SB-518 (DEC-0032): the person's mode. `on_demand` checks nothing on a schedule (a
-        // switch's candidate and a person's check still ask); `timer` keeps 0.7.120's cadence.
+        // switch's candidate and a person's check still ask); `timer` keeps 0.7.121's cadence.
         let mode = runtime.store.usage_mode();
         let mut due: Vec<_> = snapshot
             .accounts
@@ -638,7 +638,7 @@ fn order_due(due: &mut [Account], active: &std::collections::HashSet<String>) {
 /// The due accounts (in `order_due`'s order) this pass checks: at most four, and in the `smart` and
 /// `on_demand` modes each only with a token of its provider's budget (SB-518, DEC-0032: two a
 /// minute, a burst of four), so a provider without one waits for a later pass. The `timer` mode
-/// keeps 0.7.120's four a pass with no budget.
+/// keeps 0.7.121's four a pass with no budget.
 fn choose_checks(
     due: Vec<Account>,
     gate: &UsageGate,
@@ -2924,7 +2924,7 @@ mod tests {
     }
     /// SB-518 (DEC-0032): 32 accounts of one provider, all due every three minutes (the
     /// demand that made about 640 checks an hour), on a fake clock: the smart mode's budget
-    /// lets about 120 through in an hour; the timer mode keeps 0.7.120's four a pass.
+    /// lets about 120 through in an hour; the timer mode keeps 0.7.121's four a pass.
     #[test]
     fn the_budget_holds_an_hour_of_passes_with_32_accounts_to_about_120_checks() {
         fn hour(mode: switchboard_core::UsageMode) -> usize {

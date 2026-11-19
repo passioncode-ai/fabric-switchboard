@@ -898,7 +898,7 @@ while requests flow the usage endpoint is asked at most every 30 minutes per acc
 that carries no traffic is checked every 10 minutes; a switch checks its candidate fresh first;
 each provider has a budget of 2 checks a minute (a burst of 4, at most 2 at once), and a 429 on any
 usage check holds the whole provider for at least 15 minutes, doubling on repeats up to an hour.
-`timer`: the fixed cadence of 0.7.120. `on_demand`: no check on a schedule, only a switch's
+`timer`: the fixed cadence of 0.7.121. `on_demand`: no check on a schedule, only a switch's
 candidate and a person's check. Without `mode` it reads `{usage_mode, modes}`; `mode` changes it,
 only when the operator asks. Kept in `<data>/usage-mode`. A person's check (`switchboard_usage`
 with `refresh`) runs ahead of the budget by at most 4 checks, then answers that checks are paced.
