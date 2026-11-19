@@ -2243,18 +2243,51 @@ pub const ANTHROPIC_AGENT_UNSUPPORTED: &str =
     "Only Hermes runs on an Anthropic key for now. Choose Hermes, or its OpenRouter key.";
 pub const ANTHROPIC_MODEL_NEEDED: &str =
     "Choose a model for this launch, or set the key's default model with switchboard agents anthropic model.";
+/// SB-535: the reasoning levels Hermes takes as `--reasoning` (Hermes 0.22.2 `chat --help`).
+pub const HERMES_EFFORTS: &[&str] = &[
+    "none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra",
+];
+pub const EFFORT_INVALID: &str =
+    "Choose a reasoning level: none, minimal, low, medium, high, xhigh, max or ultra.";
 /// SB-390: starts Hermes in a folder on the Anthropic key saved under `key` (`team-a`,
 /// `personal`) and `model` (default: the key's model), as `hermes --provider anthropic -m
-/// <model>`. Like an OpenRouter launch (`launch_agent_openrouter`), it runs in a Hermes home of
-/// its own (`HERMES_HOME`, so `~/.hermes`'s own sign-ins do not win over the key), and the key is
-/// read when the session starts (`switchboard agents anthropic key <name>`), never written. No
-/// proxy, group or account is involved, and no ceiling counts it.
+/// <model>` and, with `effort`, `--reasoning <effort>` (SB-535). Like an OpenRouter launch
+/// (`launch_agent_openrouter`), it runs in a Hermes home of its own (`HERMES_HOME`, so
+/// `~/.hermes`'s own config and sign-ins are never read; that home is what `--ignore-user-config`
+/// would give, and it also keeps the settings below), and the key is read when the session starts
+/// (`switchboard agents anthropic key <name>`), never written. No proxy, group or account is
+/// involved, and no ceiling counts it yet (SB-536).
 pub fn launch_agent_anthropic(
     root: &Path,
     agent: &str,
     key: &str,
     model: Option<&str>,
+    effort: Option<&str>,
     working_directory: &Path,
+    start: fn(&Path) -> Result<(), String>,
+) -> Result<Value, String> {
+    launch_agent_anthropic_with(
+        root,
+        agent,
+        key,
+        model,
+        effort,
+        working_directory,
+        find_program,
+        agent_cli(),
+        start,
+    )
+}
+#[allow(clippy::too_many_arguments)]
+fn launch_agent_anthropic_with(
+    root: &Path,
+    agent: &str,
+    key: &str,
+    model: Option<&str>,
+    effort: Option<&str>,
+    working_directory: &Path,
+    find: fn(&str) -> Option<PathBuf>,
+    cli: Option<PathBuf>,
     start: fn(&Path) -> Result<(), String>,
 ) -> Result<Value, String> {
     let (id, name) = ANTHROPIC_AGENTS
@@ -2262,6 +2295,9 @@ pub fn launch_agent_anthropic(
         .find(|(id, _)| *id == agent)
         .copied()
         .ok_or(ANTHROPIC_AGENT_UNSUPPORTED)?;
+    if effort.is_some_and(|e| !HERMES_EFFORTS.contains(&e)) {
+        return Err(EFFORT_INVALID.into());
+    }
     let saved = crate::anthropic_keys::find(root, key)?;
     let model = match model {
         Some(m) if !crate::anthropic_keys::model_valid(m) => {
@@ -2271,16 +2307,19 @@ pub fn launch_agent_anthropic(
         None => saved.model.clone().ok_or(ANTHROPIC_MODEL_NEEDED)?,
     };
     let working_directory = agent_folder(root, working_directory)?;
-    let program = find_program(id).ok_or_else(|| {
+    let program = find(id).ok_or_else(|| {
         format!("{name} is not installed. Install it first, then launch it again.")
     })?;
-    let cli = agent_cli().ok_or(OPENROUTER_CLI_MISSING)?;
+    let cli = cli.ok_or(OPENROUTER_CLI_MISSING)?;
     let homes = root.join("runtimes");
     private_dir(&homes)?;
     let home = homes.join(format!("agent-{id}-anthropic-{key}"));
     private_dir(&home)?;
-    let own = home.join("agent-home");
-    private_dir(&own)?;
+    // SB-535: the home's own config keeps Hermes on this key: it never adopts Claude Code's
+    // sign-in (`auth.adopt_external_logins: false`), has no fallback provider, and its side tasks
+    // run on the same key and model; the home's `.env` and the script clear every other provider
+    // key, so nothing this launch does is billed elsewhere.
+    let own = hermes_anthropic_home(&home, &model)?;
     let launch_id = crate::launches::new_id();
     let mut env = BTreeMap::from([
         (
@@ -2292,6 +2331,9 @@ pub fn launch_agent_anthropic(
     let mut args: Vec<String> = ["--provider", "anthropic", "-m", model.as_str()]
         .map(str::to_owned)
         .to_vec();
+    if let Some(effort) = effort {
+        args.extend(["--reasoning".to_owned(), effort.to_owned()]);
+    }
     // SB-515: Hermes runs with its own full access unless the person chose `ask`.
     with_full_access(root, id, &mut args, &mut env);
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
@@ -2305,16 +2347,23 @@ pub fn launch_agent_anthropic(
         // SB-420: the key prints only into the pipe this script reads it from.
         "--to-pipe".into(),
     ];
-    let content = script_with(
-        &home,
-        &program,
-        &args,
-        &env,
-        Some(("ANTHROPIC_API_KEY", &cli, &key_command)),
-        false,
-        &working_directory,
+    let content = with_unset(
+        script_with(
+            &home,
+            &program,
+            &args,
+            &env,
+            Some(("ANTHROPIC_API_KEY", &cli, &key_command)),
+            false,
+            &working_directory,
+        ),
+        HERMES_PROVIDER_KEYS,
     );
     let path = write_launch_script(&home, &content)?;
+    let label = match effort {
+        Some(effort) => format!("{key} · {model} · {effort}"),
+        None => format!("{key} · {model}"),
+    };
     // Listed under Sessions like any launch, labelled with the key's name and model; never the key.
     let record = json!({
         "account_id": format!("anthropic:{key}"), "provider": "anthropic", "agent": id,
@@ -2322,13 +2371,40 @@ pub fn launch_agent_anthropic(
         "pool": "anthropic", "mode": "isolated",
         "working_directory": working_directory, "in_place": false,
         "launched_at": switchboard_proxy::now(), "continues": null,
-        "label": format!("{key} · {model}"),
+        "label": label,
     });
     crate::launches::record(root, &home, record, &launch_id)?;
     start(&path)?;
     Ok(
-        json!({"launched": true, "agent": id, "name": name, "via": "anthropic", "key": key, "model": model}),
+        json!({"launched": true, "agent": id, "name": name, "via": "anthropic", "key": key, "model": model, "effort": effort}),
     )
+}
+/// SB-535: the Hermes home of a launch on a named Anthropic key: Hermes's built-in `anthropic`
+/// provider (its key from `ANTHROPIC_API_KEY`, which the script reads from the vault), no
+/// fallback, no adopted sign-in, every side task on the same provider and model.
+fn hermes_anthropic_home(home: &Path, model: &str) -> Result<PathBuf, String> {
+    let own = home.join("agent-home");
+    private_dir(&own)?;
+    let mut config = String::from(
+        "# Written by Fabric Switchboard for this launch: Hermes on a named Anthropic key.\n\
+fallback_providers: []\n\
+auth:\n  adopt_external_logins: false\n\
+auxiliary:\n",
+    );
+    for task in HERMES_AUX_TASKS {
+        config.push_str(&format!(
+            "  {task}:\n    provider: anthropic\n    model: \"{model}\"\n"
+        ));
+    }
+    switchboard_core::private_fs::private_write(&own.join("config.yaml"), config.as_bytes())
+        .map_err(|_| "Managed home unavailable.".to_string())?;
+    let dotenv: String = HERMES_PROVIDER_KEYS
+        .iter()
+        .map(|name| format!("{name}=\n"))
+        .collect();
+    switchboard_core::private_fs::private_write(&own.join(".env"), dotenv.as_bytes())
+        .map_err(|_| "Managed home unavailable.".to_string())?;
+    Ok(own)
 }
 pub const OPENROUTER_CLI_MISSING: &str =
     "The switchboard command was not found. Install it from Agents, then launch again.";
@@ -6192,6 +6268,85 @@ mod tests {
     }
     fn goose_installed(_: &str) -> Option<PathBuf> {
         Some(PathBuf::from("/opt/Agent Tools/goose"))
+    }
+    fn hermes_installed(_: &str) -> Option<PathBuf> {
+        Some(PathBuf::from("/opt/Agent Tools/hermes"))
+    }
+    /// SB-535: Hermes on a named Anthropic key runs at the reasoning level asked, never adopts
+    /// Claude Code's sign-in, falls back nowhere and keeps its side tasks on the same key.
+    #[test]
+    fn hermes_on_a_named_anthropic_key_keeps_to_that_key_at_its_reasoning_level() {
+        let f = fixture();
+        crate::anthropic_keys::set(
+            &f.root,
+            &f.store,
+            "team-a",
+            "sk-ant-api03-synthetic-named",
+            Some("claude-fable-5-2"),
+            1,
+        )
+        .unwrap();
+        let cli = Some(PathBuf::from("/opt/Agent Tools/switchboard"));
+        let launch = |effort: Option<&str>| {
+            launch_agent_anthropic_with(
+                &f.root,
+                "hermes",
+                "team-a",
+                None,
+                effort,
+                &f.project,
+                hermes_installed,
+                cli.clone(),
+                terminal_opens,
+            )
+        };
+        assert_eq!(launch(Some("extreme")).unwrap_err(), EFFORT_INVALID);
+        let answer = launch(Some("xhigh")).unwrap();
+        assert_eq!(answer["via"], "anthropic");
+        assert_eq!(answer["model"], "claude-fable-5-2");
+        assert_eq!(answer["effort"], "xhigh");
+        let home = f.root.join("runtimes/agent-hermes-anthropic-team-a");
+        let config = fs::read_to_string(home.join("agent-home/config.yaml")).unwrap();
+        assert!(config.contains("auth:\n  adopt_external_logins: false"));
+        assert!(config.contains("fallback_providers: []"));
+        assert!(config.contains(
+            "  title_generation:\n    provider: anthropic\n    model: \"claude-fable-5-2\""
+        ));
+        assert!(config.contains("  compression:\n    provider: anthropic"));
+        assert!(!config.contains("synthetic-named"));
+        let dotenv = fs::read_to_string(home.join("agent-home/.env")).unwrap();
+        assert_eq!(dotenv.lines().count(), HERMES_PROVIDER_KEYS.len());
+        assert!(!dotenv.contains("ANTHROPIC_API_KEY"));
+        let script = fs::read_to_string(home.join(if cfg!(windows) {
+            "launch.ps1"
+        } else {
+            "launch.command"
+        }))
+        .unwrap();
+        assert!(script.contains("--reasoning") && script.contains("xhigh"));
+        assert!(script.contains("--provider") && script.contains("anthropic"));
+        assert!(script.contains("HERMES_HOME"));
+        assert!(!script.contains("synthetic-named"));
+        #[cfg(not(windows))]
+        {
+            assert!(script.contains("unset OPENROUTER_API_KEY NOUS_API_KEY"));
+            // The parent's proxy route never reaches it (SB-533).
+            assert!(script.contains(" ANTHROPIC_BASE_URL"));
+            assert!(script.contains("ANTHROPIC_API_KEY=\"$("));
+        }
+        let record = recorded(&home);
+        assert_eq!(record["pool"], "anthropic");
+        assert_eq!(record["label"], "team-a · claude-fable-5-2 · xhigh");
+        // Without a level Hermes keeps its own, and the flag is not passed.
+        let plain = launch(None).unwrap();
+        assert_eq!(plain["effort"], Value::Null);
+        let script = fs::read_to_string(home.join(if cfg!(windows) {
+            "launch.ps1"
+        } else {
+            "launch.command"
+        }))
+        .unwrap();
+        assert!(!script.contains("--reasoning"));
     }
     /// SB-201: an agent launched through the proxy on an API-key account records its session
     /// and the account's context, as a Claude Code launch does.

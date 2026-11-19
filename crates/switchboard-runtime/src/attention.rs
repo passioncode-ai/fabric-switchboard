@@ -44,6 +44,15 @@ pub const SESSION_STUCK: &str =
 pub const SESSION_GONE: &str =
     "A board run's process is gone, but its end was not recorded. Stop the run to record it.";
 
+/// SB-509: a launch whose process is gone left a session with its history here; it can be
+/// continued as itself. Offered once per session (`session_watch::offer`).
+pub const SESSION_CONTINUABLE: &str =
+    "A session's process ended without its end being recorded. Its history is here: continue it as the same session.";
+/// SB-509: the proxy's token changed (its port was taken), and sessions started before still send
+/// the old one, which is refused.
+pub const TOKEN_ROTATED: &str =
+    "The proxy's token changed when its port was taken, so sessions started before it are refused. Restart them.";
+
 /// What the list is built from; every field is already in memory or one small file read.
 pub struct Inputs<'a> {
     pub snapshot: &'a Snapshot,
@@ -65,6 +74,8 @@ pub struct Inputs<'a> {
     /// SB-420: Claude Code Keychain items Switchboard could not write, too large
     /// (`item_size::read`).
     pub too_large: &'a [crate::item_size::Entry],
+    /// SB-509: the sessions left on the proxy's old token (`token_rotation::sessions`), or none.
+    pub rotated: Option<&'a Value>,
     pub now: i64,
 }
 
@@ -74,11 +85,13 @@ pub const DISPATCH_REFUSED: &str =
     "Board runs are waiting: this computer's session limit refused them, and none has started since.";
 
 /// Reasons in the order they are listed.
-const ORDER: [&str; 13] = [
+const ORDER: [&str; 15] = [
     "keychain_too_large",
+    "token_rotated",
     "session_duplicate",
     "session_stuck",
     "session_gone",
+    "session_continuable",
     "dispatch_refused",
     "sign_in",
     "seat_ended",
@@ -247,6 +260,10 @@ pub fn build(inputs: &Inputs) -> Value {
             Some(crate::session_watch::GONE) if finding["dispatch"] == true => {
                 ("session_gone", SESSION_GONE)
             }
+            // SB-509: a gone launch whose session can be continued as itself, offered once.
+            Some(crate::session_watch::GONE) if finding["continuable"] == true => {
+                ("session_continuable", SESSION_CONTINUABLE)
+            }
             _ => continue,
         };
         let label = finding["folder"]
@@ -287,12 +304,38 @@ pub fn build(inputs: &Inputs) -> Value {
                         "if_gone": true,
                         "command": format!("switchboard dispatch stop --launch-id {id} --if-gone"),
                     }),
+                    // SB-509: continued only when the person (or an agent on their word) asks.
+                    ("session_continuable", _) => json!({
+                        "tool": "switchboard_session_continue", "window": "continue_session",
+                        "command": format!(
+                            "switchboard sessions continue {}",
+                            finding["session_id"].as_str().unwrap_or_default()
+                        ),
+                    }),
                     (_, Some(id)) if finding["dispatch"] == true => json!({
                         "tool": "switchboard_dispatch_stop", "window": "dispatch_stop",
                         "command": format!("switchboard dispatch stop --launch-id {id}"),
                     }),
                     _ => json!({"tool": "switchboard_sessions", "window": "open_sessions"}),
                 },
+            }),
+        );
+    }
+    // SB-509: one item for the sessions on the proxy's old token, with a restart wave as the fix
+    // (never a restart by itself).
+    if let Some(rotated) = inputs.rotated {
+        let sessions = rotated["sessions"].as_array().cloned().unwrap_or_default();
+        push(
+            "token_rotated",
+            String::new(),
+            json!({
+                "account_id": null, "label": null, "provider": null, "pool": null,
+                "reason": "token_rotated", "detail": TOKEN_ROTATED,
+                "since": rotated["at"],
+                "count": sessions.len(),
+                "sessions": sessions,
+                "action": {"tool": "switchboard_sessions_restart_plan", "window": "restart_wave",
+                    "command": "switchboard sessions restart plan"},
             }),
         );
     }
@@ -390,6 +433,7 @@ mod tests {
             watch: &[],
             refusals: None,
             too_large: &[],
+            rotated: None,
             now: 10_000,
         })
     }
@@ -412,6 +456,7 @@ mod tests {
             watch: &watch,
             refusals: None,
             too_large: &[],
+            rotated: None,
             now: 10_000,
         });
         // A launch that is gone is shown in the session tree, not here, unless it is a board run
@@ -442,6 +487,49 @@ mod tests {
             "switchboard_session_close_copy"
         );
     }
+    #[test]
+    fn a_gone_session_with_its_history_offers_continue_and_a_rotated_token_offers_a_restart() {
+        // SB-509: both are offered, never done by themselves.
+        let snapshot = Snapshot::default();
+        let watch = vec![
+            json!({"kind": "gone", "launch_id": "L-2", "folder": "/work/gamma",
+                "session_id": "s-2", "continuable": true}),
+            json!({"kind": "gone", "launch_id": "L-3", "session_id": "s-3"}),
+        ];
+        let rotated = json!({"at": 9_000, "sessions": [
+            {"pid": 7, "agent": "claude-code", "folder": "/work/a", "launch_id": "L-7"}]});
+        let answer = build(&Inputs {
+            snapshot: &snapshot,
+            sign_in: &[],
+            renewal_refused: &[],
+            seats: &[],
+            questions: &[],
+            remote: &crate::remote_usage::State::default(),
+            watch: &watch,
+            refusals: None,
+            too_large: &[],
+            rotated: Some(&rotated),
+            now: 10_000,
+        });
+        assert_eq!(reasons(&answer), ["token_rotated", "session_continuable"]);
+        let restart = &answer["items"][0];
+        assert_eq!(restart["detail"], TOKEN_ROTATED);
+        assert_eq!(restart["count"], 1);
+        assert_eq!(restart["since"], 9_000);
+        assert_eq!(
+            restart["action"]["tool"],
+            "switchboard_sessions_restart_plan"
+        );
+        assert_eq!(restart["action"]["window"], "restart_wave");
+        let resume = &answer["items"][1];
+        assert_eq!(resume["label"], "gamma");
+        assert_eq!(resume["session_id"], "s-2");
+        assert_eq!(
+            resume["action"],
+            json!({"tool": "switchboard_session_continue", "window": "continue_session",
+                "command": "switchboard sessions continue s-2"})
+        );
+    }
     /// SB-420: a Claude Code item too large to write is one item each, listed first, naming
     /// what refused it and when; it offers no button, the fix is in Claude Code.
     #[test]
@@ -463,6 +551,7 @@ mod tests {
             watch: &[json!({"kind": "duplicate", "session_id": "s-1", "pids": [3, 4]})],
             refusals: None,
             too_large: &too_large,
+            rotated: None,
             now: 10_000,
         });
         assert_eq!(
@@ -492,6 +581,7 @@ mod tests {
             watch: &[json!({"kind": "duplicate", "session_id": "s-1", "pids": [3, 4]})],
             refusals: Some(&refused),
             too_large: &[],
+            rotated: None,
             now: 10_000,
         });
         assert_eq!(reasons(&answer), ["session_duplicate", "dispatch_refused"]);
@@ -662,6 +752,7 @@ mod tests {
             watch: &[],
             refusals: None,
             too_large: &[],
+            rotated: None,
             now: 10_000,
         });
         assert_eq!(reasons(&answer), ["refused_there"]);
@@ -766,6 +857,8 @@ mod tests {
             SESSION_DUPLICATE,
             SESSION_STUCK,
             SESSION_GONE,
+            SESSION_CONTINUABLE,
+            TOKEN_ROTATED,
             DISPATCH_REFUSED,
         ] {
             assert!(

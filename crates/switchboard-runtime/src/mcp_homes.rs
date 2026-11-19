@@ -105,6 +105,29 @@ pub(crate) fn entries(item: &Value) -> Vec<Entry> {
         .collect()
 }
 
+/// SB-542: `item` without its `mcpOAuth` entries that hold no token and no client registration
+/// (Claude Code's discovery stubs: a name, a URL, `discoveryState` and an empty token), with how many were dropped; `None` when it is not a JSON
+/// object or holds no such entry. Every other field and every entry with a token is kept.
+#[cfg(any(target_os = "macos", test))]
+pub(crate) fn without_stubs(item: &[u8]) -> Option<(Vec<u8>, usize)> {
+    let mut value: Value = serde_json::from_slice(item).ok()?;
+    let map = value.get_mut("mcpOAuth")?.as_object_mut()?;
+    let before = map.len();
+    map.retain(|_, v| {
+        // An entry that keeps a client registration is kept too: a server without dynamic
+        // registration could not be signed in to again without it.
+        !v.is_object()
+            || ["accessToken", "refreshToken", "clientId", "clientSecret"]
+                .iter()
+                .any(|k| text(v, k).is_some())
+    });
+    let dropped = before - map.len();
+    if dropped == 0 {
+        return None;
+    }
+    Some((serde_json::to_vec(&value).ok()?, dropped))
+}
+
 fn live(expires_at: Option<i64>, now_ms: i64) -> bool {
     expires_at.is_none_or(|t| t > now_ms + MARGIN_MS)
 }
@@ -513,7 +536,7 @@ impl Items for Native {
         #[cfg(target_os = "macos")]
         {
             let user = crate::launch::login_user()?;
-            switchboard_core::security_cli::add(&home.service, &user, &bytes, true).map(|_| ())
+            crate::external_keychain::add_compacting(&home.service, &user, &bytes)
         }
         #[cfg(not(target_os = "macos"))]
         {
@@ -706,6 +729,36 @@ mod tests {
     fn stub() -> Value {
         json!({"serverName":"plugin:figma:figma","serverUrl":"https://mcp.example/mcp",
             "accessToken":"","discoveryState":{"oauthMetadataFound":true}})
+    }
+    #[test]
+    fn a_too_large_item_drops_only_the_entries_without_a_token() {
+        let item = json!({"claudeAiOauth": {"accessToken": "kept"},
+            "mcpOAuth": {KEY: own(NOW + 3_600_000), "plugin:a:a|1": stub(),
+                "plugin:b:b|2": {"serverName": "b", "refreshToken": "r-only"}},
+            "trustedDeviceToken": "kept-too"});
+        let (bytes, dropped) = without_stubs(&serde_json::to_vec(&item).unwrap()).unwrap();
+        let out: Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(dropped, 1);
+        assert_eq!(out["claudeAiOauth"], item["claudeAiOauth"]);
+        assert_eq!(out["trustedDeviceToken"], "kept-too");
+        assert_eq!(out["mcpOAuth"][KEY], item["mcpOAuth"][KEY]);
+        assert!(
+            out["mcpOAuth"].get("plugin:b:b|2").is_some(),
+            "a refresh token alone is kept"
+        );
+        assert!(out["mcpOAuth"].get("plugin:a:a|1").is_none());
+        let registered = json!({"mcpOAuth": {"plugin:c:c|3": {"serverName": "c", "accessToken": "",
+            "clientId": "synthetic-client"}, "plugin:a:a|1": stub()}});
+        let (bytes, dropped) = without_stubs(&serde_json::to_vec(&registered).unwrap()).unwrap();
+        let out: Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(dropped, 1);
+        assert!(
+            out["mcpOAuth"].get("plugin:c:c|3").is_some(),
+            "a client registration is kept"
+        );
+        let only_tokens = json!({"mcpOAuth": {KEY: own(NOW)}});
+        assert!(without_stubs(&serde_json::to_vec(&only_tokens).unwrap()).is_none());
+        assert!(without_stubs(b"not json").is_none());
     }
     fn locked(write: &dyn Fn() -> Result<usize, String>) -> Result<usize, String> {
         write()

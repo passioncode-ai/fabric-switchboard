@@ -1855,6 +1855,15 @@ enum AgentsCommand {
         /// pay-per-token group (where it is needed).
         #[arg(long)]
         model: Option<String>,
+        /// With `--anthropic`: the reasoning level, passed to Hermes as `--reasoning` (none,
+        /// minimal, low, medium, high, xhigh, max, ultra); default: Hermes's own.
+        #[arg(
+            long,
+            visible_alias = "reasoning",
+            requires = "anthropic",
+            value_name = "LEVEL"
+        )]
+        effort: Option<String>,
     },
 }
 #[derive(Subcommand)]
@@ -3878,6 +3887,7 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                 openrouter,
                 anthropic,
                 model,
+                effort,
             } => Operation::LaunchAgent {
                 agent: agent.clone(),
                 pool: pool.clone(),
@@ -3891,6 +3901,7 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                 },
                 model: model.clone(),
                 key: anthropic.clone(),
+                effort: effort.clone(),
             },
         },
         Command::Keys {
@@ -6891,7 +6902,7 @@ mod mcp_parity {
             "agents openrouter model",
             Tool("switchboard_openrouter_model"),
         ),
-        ("agents openrouter remove", Not(PERSON)),
+        ("agents openrouter remove", Tool("switchboard_openrouter_remove")),
         (
             "agents openrouter list",
             Tool("switchboard_openrouter_status"),
@@ -6915,7 +6926,7 @@ mod mcp_parity {
         ("kimi relogin", Tool("switchboard_kimi_login")),
         ("kimi launch", Not(LAUNCH)),
         ("kimi rename", Tool("switchboard_kimi_rename")),
-        ("kimi remove", Not(PERSON)),
+        ("kimi remove", Tool("switchboard_kimi_remove")),
         ("recovery register", Not(HOST)),
         ("recovery claim", Not(HOST)),
         ("recovery hook", Not(HOST)),

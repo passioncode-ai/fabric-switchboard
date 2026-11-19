@@ -11,9 +11,28 @@ Words: the person reads **group** for what tool names and fields call a project,
 group's id is its `pool` (`default` is the default group). **Automatic switching** is what tool
 names and fields call rotation. Say group and automatic switching to the person.
 
-`switchboard mcp --read-only` lists only the 24 tools that read (every tool under
-[Read tools](#read-tools)) and none of the 24 that write. A session Switchboard launches in
-isolated mode gets that set. The server lists 76 tools; each has a section below.
+`switchboard mcp --read-only` lists the 39 tools that only read (every tool under
+[Read tools](#read-tools)) and, since SB-517, the 13 write tools that also have a read form:
+`switchboard_capacity`, `switchboard_own_sign_in`, `switchboard_duty` (a dry run included),
+`switchboard_app` (`updates` and `login_item` without `enabled`), `switchboard_analytics`,
+`switchboard_balance`, `switchboard_feed`, `switchboard_anthropic_keys`,
+`switchboard_codex_route`, `switchboard_project_sources`, `switchboard_machine_set` (`keys`, and
+`adopt` without `apply`), `switchboard_login` (`status`, `pending`) and `switchboard_usage_mode`
+(without `mode`). There they are annotated
+as reads and answer only that form: a call with a field that changes something, or any other
+write tool, is refused with `isError: true` and `structuredContent.error.code` `read_only`, never
+as an unknown tool. A session Switchboard launches in isolated mode gets that set. The server
+lists 96 tools; each has a section below.
+
+Since SB-517 every call is checked against its tool's `inputSchema` before it runs (types,
+`required`, `enum`, `minimum` and `maximum`, `minLength` and `maxLength`, list items and size,
+and no argument the schema does not name). A fault is a result with `isError: true` whose
+`structuredContent.error` is `{code: "invalid_arguments", field, message}`, the field as a path
+(`executors[0].agent`, `decision.by`), and nothing ran. A `decision` takes the operator's words
+as `by`, `instruction`, `at` and `source`, and nothing else. A tool that would answer a refusal as data (`{state: "refused", reason}`,
+as `switchboard dispatch` does on the CLI) answers an agent `isError: true` with
+`structuredContent.error.code` set to its `reason`; no tool answers that shape yet, so this guards
+the dispatch tools to come.
 
 ## Contents
 
@@ -122,7 +141,8 @@ sign-in on that machine, or call the account back with `switchboard_account_reca
 
 The Anthropic API keys agents run on directly (SB-390), each under a name the person chose
 (`team-a`, `personal`): `name`, `saved_at` and default `model`, never a key. With both `name`
-and `model`, changes that key's default model. Saving or removing a key is the person's
+and `model`, changes that key's default model (a write: on a read-only server only the list
+answers). Saving or removing a key is the person's
 (`switchboard agents anthropic set <name> --key-stdin`); a launch picks one with `switchboard
 agents launch hermes --anthropic <name>`. No spending ceiling counts these keys.
 ### `switchboard_launch_keys`: `agent` (string), `folder?` (absolute path)
@@ -135,7 +155,9 @@ the default; an Anthropic Admin key (`sk-ant-admin`) cannot run a model and is r
 Since SB-404 every key carries `metered` (whether a ceiling counts it), and for Claude Code and
 Hermes the pay-per-token group's Claude API keys follow as `kind: group` (`pool`, `group`,
 `account_id`, `selected`): `usable` once the group is on, has a daily ceiling, holds the folder
-and has this key selected, else `why_not` says which.
+and has this key selected, else `why_not` says which. It only reads (SB-517: listed on a
+read-only server too). No MCP tool launches an agent yet: launch from the window or with
+`switchboard agents launch`.
 
 ### `switchboard_observatory_keys`
 
@@ -480,8 +502,9 @@ Agents page, or `switchboard agents enable|disable|default`).
 used_percent, resets_at}]`, asked of Kimi at this call) and `error` when Kimi refused the login,
 did not answer, or the login waits for Kimi to renew it (launching the account once does).
 `current` is the ordinary `kimi` (`~/.kimi-code`) the same way, shown and never switched. No
-token is returned or handed to any agent; signing in, launching and removing accounts are the
-operator's (the app, or `switchboard kimi login|launch|remove`).
+token is returned or handed to any agent; signing in and launching accounts are the operator's
+(the app, or `switchboard kimi login|launch`). Removing one, when the operator asks, is
+`switchboard_kimi_remove`.
 
 ### `switchboard_project_suggestions`: no arguments
 
@@ -963,6 +986,22 @@ and `again` (sign a saved account in again) take `id`.
 
 Only when the operator asks. Renames a saved Kimi Code account.
 
+### `switchboard_kimi_remove`: `id`
+
+Only when the operator asks (SB-517). The window's *Remove* of a Kimi Code account: forgets the
+account and deletes its home here, which cannot be undone (sign it in again to bring it back).
+Refused while a `kimi` session runs in it. Returns `{removed}`, `false` when no such account was
+saved, so a second call removes nothing more. Annotated `destructiveHint` and `idempotentHint`.
+
+### `switchboard_openrouter_remove`: `pool?`, `decision?`
+
+Only when the operator asks (SB-517). The window's *Remove* of the OpenRouter key agents run on,
+or with `pool` that group's own key: the saved key and its vault item are deleted, which cannot be
+undone (save or issue a new key to replace it). A key whose spend a spending ceiling counts is
+removed only with `decision`, the operator's own words; without them the refusal names the
+window. Returns `{removed}`, `false` when no key was saved. Annotated `destructiveHint` and
+`idempotentHint`.
+
 ### `switchboard_handovers_set`: `on`
 
 Only when the operator asks. `true`: hand-overs open in Fabric's console; `false`: straight in
@@ -1007,8 +1046,9 @@ its own key inside Hermes, which this server never sets.
 
 Only when the operator asks. `model` is an OpenRouter id (`vendor/model`, for example
 `moonshotai/kimi-k2` or `anthropic/claude-sonnet-4.5`); agents launched on the operator's key
-start on it; with `pool`, the model of that group's own key. Refuses a malformed id. Saving or removing the key itself is the operator's own
-step (the app, or `switchboard agents openrouter set|remove`), never this server.
+start on it; with `pool`, the model of that group's own key. Refuses a malformed id. Saving the key itself is the operator's own
+step (the app, or `switchboard agents openrouter set`), never this server; removing it, when the
+operator asks, is `switchboard_openrouter_remove`.
 
 ## Refusals
 
@@ -1023,7 +1063,9 @@ Fixed texts the server returns with `isError: true`, the same sentences the wind
 | "This session does not run through Switchboard's proxy…" | `target: "route"` to prepare a group, or `claude_cli` with `global: true` after the operator's OK |
 | "No account with id …" | call `switchboard_accounts` for current ids |
 | "Pass an absolute folder." | pass an absolute `path` |
-| "expires_in_hours must be 1 to 720." | pick an expiry in range |
+| "expires_in_hours is a whole number from 1 to 720." | pick an expiry in range (the schema check, SB-517) |
+| "This server is read-only (switchboard mcp --read-only): …" | the call changes something: use a server started without `--read-only`, or call the tool without the fields that change something |
+| "… is required." / "… is not an argument here…" / "… must be …" / "… is one of: …" | the schema check (`error.code` `invalid_arguments`, `error.field` names the argument): fix that argument and call again |
 | "Choose an existing folder." | the folder is missing or inside Switchboard's data folder |
 | "Name one account_id to refresh." | `refresh` needs one `account_id` |
 | "Group not found." | call `switchboard_projects` for current group ids |

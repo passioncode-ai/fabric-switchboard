@@ -13,6 +13,15 @@
 
 **Exact next task.** Review the SB-518 pull request and merge once its gate reads EXIT 0 on the merged head (renumber DEC-0032 if another pull request took it); after the release, measure an hour of `usage_check` lines on the operator's Mac (expected at most about 120 a provider) and the share of switches before a refusal; then SB-519.
 
+## 2026-11-19: release 0.7.121 and plan section 10 (launch, fleet and lifecycle), waves W10.0 to W10.2 landed
+
+- **Objective.** The operator's order of 2026-11-19: audit attribution, lifecycle and watchers, full access by default, MCP, automatic switching against the provider's load; design the Launch flow (folder, agent, model, billing, key reuse or minting, harness), remote session management and the organization's subscriptions board; build it in waves and release.
+- **Done (merged to main):** [plan section 10](plans/2026-11-17-target-state/10-launch-fleet-lifecycle.md) (#849); SB-505 duty journal (#848); SB-455 login PATH (#838); SB-533 parent route header not inherited (#851); SB-423 recovery filters (#830); SB-515 full access for every agent (#850); SB-542 Keychain item compacted so the ordinary account can be switched (#854); SB-506, SB-509, SB-530 lifecycle (#853). Each passed the full gate on the Mac Studio and two consecutive clean review rounds.
+- **Open PRs:** #852 SB-508 ledger and SB-510 watchdog, #855 SB-517 MCP defects, #856 SB-518 smart usage mode (DEC-0032), #836 SB-450/451/507 boot resume (DEC-0030), #832, #829, #821.
+- **Decisions:** the duty journal pairs an intent with the outcome of the same session, act and process; a too-large Claude Code item drops only MCP entries with no token and no client registration; the watchdog sends no message (only Needs attention and agent-health/1).
+- **Checks run:** `CARGO_BUILD_JOBS=4 ./scripts/check.sh` on the Mac Studio for every merged head; the release's Nightly on the tag.
+- **Exact next task:** land #855, #852, #856, #836 (review rounds, merge, gate on the merged head), release 0.7.122; then W10.4 attribution (SB-511 to SB-514), W10.5 the Launch flow (SB-520 to SB-522, SB-534 to SB-539), W10.6 remote session acts (SB-523, SB-524), W10.7 the subscriptions board (SB-526 to SB-528), W10.8 two MCP doors (SB-478).
+
 ## 2026-11-18: SB-452 a launch keeps its group's route, SB-453 a short rate limit of the key is waited out, on branch `tokens-spend`
 
 - **Asked.** Board thread a9844103 (Fabric Dashboards): a session on the pay-per-token group spent $53.98 by its own estimate while `spent_today_usd` read 0 and the statistics had no row for the key; its nine subagents met `429` and stood still.
