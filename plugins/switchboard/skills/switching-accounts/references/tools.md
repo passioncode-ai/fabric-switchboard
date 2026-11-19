@@ -55,7 +55,7 @@ The server works out which session asks from its own environment, first match wi
 
 ## Read tools
 
-Annotations: `readOnlyHint: true`, except the three tools here that end a process (`switchboard_session_close_copy`, `switchboard_dispatch_stop`, `switchboard_session_end`), which are write tools: their annotations are under [Write tools](#write-tools).
+Annotations: `readOnlyHint: true` for the tools that only read. Some sections here belong to write tools kept beside the reads they act on (for example `switchboard_session_continue`, `switchboard_sessions_restart_apply`, `switchboard_github_clone`, and the three that end a process: `switchboard_session_close_copy`, `switchboard_dispatch_stop`, `switchboard_session_end`), and some to write tools with a read form (`switchboard_app`, `switchboard_analytics`); on the full server they carry the write tools' annotations, under [Write tools](#write-tools).
 
 ### `switchboard_status`: no arguments
 
