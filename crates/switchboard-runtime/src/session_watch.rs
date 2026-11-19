@@ -148,6 +148,12 @@ pub fn findings(
                     "kind": GONE, "launch_id": id, "folder": record["working_directory"],
                     "since": record["last_turn_at"].as_i64().unwrap_or(started),
                     "surface": surface(record), "task": task(record), "dispatch": dispatched,
+                    // SB-509: the session it ran, which `offer_continuations` may offer, and
+                    // when its last turn ended (or it started), which a cut turn wrote after.
+                    "session_id": record["provider_session_id"],
+                    "provider": record["provider"],
+                    "last_turn_at": record["last_turn_at"],
+                    "launched_at": started,
                 }));
             }
             None => {}
@@ -246,6 +252,50 @@ static LAST_READ: std::sync::Mutex<Option<(i64, std::path::PathBuf, Read)>> =
     std::sync::Mutex::new(None);
 const READ_FRESH: i64 = 15;
 
+/// SB-500 (operator 2026-11-18: «дежурный работает неправильно»): per live session process, how many
+/// launches it started itself (`launched_by.caller_launch_id`, else `launched_by.parent`) run now.
+/// Such a launch runs in a session host of its own, never under the session's process, so the
+/// process tree does not show it; the duty officer counts it as the session's work.
+pub fn running_children(scan: &Value, records: &[Value]) -> HashMap<u32, usize> {
+    let rows: Vec<Value> = scan["sessions"].as_array().cloned().unwrap_or_default();
+    let live: HashSet<&str> = rows
+        .iter()
+        .filter_map(|r| r["launch_id"].as_str())
+        .collect();
+    let mut per_launch: HashMap<&str, usize> = HashMap::new();
+    for r in records {
+        let Some(id) = r["launch_id"].as_str() else {
+            continue;
+        };
+        if !live.contains(id) {
+            continue;
+        }
+        let by = &r["launched_by"];
+        if let Some(caller) = by["caller_launch_id"]
+            .as_str()
+            .or_else(|| by["parent"].as_str())
+        {
+            if caller != id {
+                *per_launch.entry(caller).or_default() += 1;
+            }
+        }
+    }
+    rows.iter()
+        .filter_map(|row| {
+            let pid = u32::try_from(row["pid"].as_u64()?).ok()?;
+            let n = *per_launch.get(row["launch_id"].as_str()?)?;
+            Some((pid, n))
+        })
+        .collect()
+}
+
+/// SB-500: `running_children` from the watch's last read (at most `READ_FRESH` seconds old), and
+/// whether that read saw the process table.
+pub(crate) fn children_now(root: &Path, now: i64) -> (HashMap<u32, usize>, bool) {
+    let (scan, records, _) = read_cached(root, now);
+    (running_children(&scan, &records), table_read(&scan))
+}
+
 fn read_cached(root: &Path, now: i64) -> Read {
     if let Ok(last) = LAST_READ.lock() {
         if let Some((at, folder, read)) = last.as_ref() {
@@ -281,6 +331,10 @@ fn read_fresh(root: &Path, now: i64) -> Read {
 /// What the live processes and records read now give.
 fn read(root: &Path, now: i64) -> Read {
     let (scan, pairs) = crate::machine_sessions::scan_and_pairs(root);
+    let pairs: Vec<(String, u32)> = pairs.into_iter().map(|(s, p, _)| (s, p)).collect();
+    // SB-451: a record naming a session its own process does not hold is corrected before the
+    // records are read.
+    reconcile_records(root, &scan, &pairs, now);
     let mut records = crate::launches::recent_records(root, now - WINDOW_SECONDS);
     for record in records.iter_mut().filter(|r| r["dispatch"].is_object()) {
         if let Some(at) = log_written_at(root, record) {
@@ -294,12 +348,51 @@ fn read(root: &Path, now: i64) -> Read {
             record[HOME_RUNNING] = true.into();
         }
     }
-    let pairs = pairs.into_iter().map(|(s, p, _)| (s, p)).collect();
     (scan, records, pairs)
 }
 
+/// SB-451: the launch records corrected from their processes' own session files
+/// (`launches::reconcile`); the session files are read only when a record differs. Nothing is
+/// corrected from a scan that could not read the process table.
+fn reconcile_records(root: &Path, scan: &Value, pairs: &[(String, u32)], now: i64) {
+    if !table_read(scan) {
+        return;
+    }
+    let rows: Vec<Value> = scan["sessions"].as_array().cloned().unwrap_or_default();
+    type Files = HashMap<u32, (std::path::PathBuf, String)>;
+    let files: std::cell::OnceCell<Files> = std::cell::OnceCell::new();
+    let transcript_of = |pid: u32, session: &str| {
+        let files = files.get_or_init(|| {
+            crate::machine_sessions::session_files(root)
+                .into_iter()
+                .filter_map(|(config, f)| {
+                    let pid = u32::try_from(f["pid"].as_u64()?).ok()?;
+                    Some((pid, (config, f["cwd"].as_str()?.to_owned())))
+                })
+                .collect()
+        });
+        let (config, cwd) = files.get(&pid)?;
+        let path = crate::resumable::transcript(config, cwd, session);
+        path.is_file().then_some(path)
+    };
+    crate::launches::reconcile(
+        root,
+        &rows,
+        pairs,
+        transcript_of,
+        crate::boot_resume::boot(),
+        now,
+    );
+}
+
+/// SB-451: before one launch is shown, its record is checked against its process (a read at most
+/// `READ_FRESH` seconds old, the tree's own).
+pub fn refresh(root: &Path, now: i64) {
+    let _ = read_cached(root, now);
+}
+
 /// SB-407: when a dispatched run's log (`launches/logs/<id>.log`) was last written; a stat only.
-fn log_written_at(root: &Path, record: &Value) -> Option<i64> {
+pub(crate) fn log_written_at(root: &Path, record: &Value) -> Option<i64> {
     let id = record["launch_id"].as_str()?;
     if !crate::launches::valid_id(id) {
         return None;
@@ -384,6 +477,7 @@ pub fn last(root: &Path) -> Vec<Value> {
 /// once, so Needs attention does not list it until the next minute's pass.
 pub fn forget(root: &Path, kind: &str, id: &str) {
     invalidate();
+    let _lock = file_lock();
     let Some(mut kept) = std::fs::read(root.join(FILE))
         .ok()
         .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
@@ -400,6 +494,13 @@ pub fn forget(root: &Path, kind: &str, id: &str) {
         let bytes = serde_json::to_vec(&kept).unwrap_or_default();
         let _ = switchboard_core::private_fs::private_write(&root.join(FILE), &bytes);
     }
+}
+
+/// Review round 1 of PR #853: one writer of `session-watch.json` at a time in this process (the
+/// watch, `forget` and `continued` each read it, change it and write it back).
+static FILE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+fn file_lock() -> std::sync::MutexGuard<'static, ()> {
+    FILE_LOCK.lock().unwrap_or_else(|p| p.into_inner())
 }
 
 static LAST_TICK: AtomicI64 = AtomicI64::new(0);
@@ -448,10 +549,23 @@ fn watch(root: &Path, now: i64) {
     let (scan, records, pairs) = read_fresh(root, now);
     // SB-412: room in the pool after a refused dispatch is noted once.
     crate::dispatch_refusals::observe(root, &scan, now);
+    // SB-508: every live Claude Code session is kept for a continuation after a reboot or a
+    // crash; a scan that did not read the process table changes nothing.
+    if table_read(&scan) {
+        crate::live_ledger::observe(root, &claude_pids(&scan), now);
+    }
     let rows: Vec<Value> = scan["sessions"].as_array().cloned().unwrap_or_default();
+    // SB-450: after a restart the sessions it cut are continued once; the live ones are kept for
+    // the next restart.
+    crate::boot_resume::tick(root, &rows, &pairs, table_read(&scan), now);
     let mut found = findings(&rows, &records, &pairs, now, table_read(&scan));
     describe_duplicates(root, &mut found);
-    let before = last_keys(root);
+    // The offers and the kept watch are read and written under one lock (`continued`).
+    let _lock = file_lock();
+    offer_continuations(root, &mut found, &pairs, now);
+    let kept = last(root);
+    stamp_first_seen(&mut found, &kept, now);
+    let before: HashSet<String> = kept.iter().map(key).collect();
     for f in &found {
         if !before.contains(&key(f)) {
             let kind = match f["kind"].as_str() {
@@ -467,8 +581,276 @@ fn watch(root: &Path, now: i64) {
     }
     // SB-389: a duplicate's copies and the offer change while its keys stay, so the whole
     // findings are compared, not their keys.
-    if found != last(root) {
+    if found != kept {
         let bytes = serde_json::to_vec(&json!({"at": now, "findings": found})).unwrap_or_default();
+        let _ = switchboard_core::private_fs::private_write(&root.join(FILE), &bytes);
+    }
+}
+
+/// SB-510: the field each kept finding carries: when the watch first found it (Unix seconds).
+pub const FIRST_SEEN: &str = "first_seen";
+
+/// SB-510: each finding's first sighting, carried from the kept watch (`kept`), else now, so the
+/// watchdog can tell a finding that has stood for a while from a new one.
+pub fn stamp_first_seen(found: &mut [Value], kept: &[Value], now: i64) {
+    for f in found.iter_mut() {
+        let k = key(f);
+        let first = kept
+            .iter()
+            .find(|old| key(old) == k)
+            .and_then(|old| old[FIRST_SEEN].as_i64())
+            .unwrap_or(now);
+        f[FIRST_SEEN] = first.into();
+    }
+}
+
+/// SB-508: the live Claude Code processes a scan read.
+fn claude_pids(scan: &Value) -> HashSet<u32> {
+    scan["sessions"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|r| r["agent"] == "claude-code")
+        .filter_map(|r| r["pid"].as_u64().and_then(|p| u32::try_from(p).ok()))
+        .collect()
+}
+
+/// SB-509: who was offered the continuation of a gone launch's session, `<data>/continue-offers.json`
+/// (0600, session ids, launch ids and times): each session is offered once, and never again once
+/// it was continued (by the person, or by anything that runs it again).
+pub const OFFERS_FILE: &str = "continue-offers.json";
+/// An offer is kept this long after it was made, past the watch's window.
+const OFFERS_KEPT: i64 = 7 * 24 * 3600;
+
+fn offers_read(root: &Path) -> serde_json::Map<String, Value> {
+    switchboard_core::private_fs::read_private(&root.join(OFFERS_FILE), 256 * 1024)
+        .ok()
+        .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
+        .and_then(|v| v.as_object().cloned())
+        .unwrap_or_default()
+}
+
+fn offers_write(root: &Path, offers: &serde_json::Map<String, Value>) {
+    let path = root.join(OFFERS_FILE);
+    if offers.is_empty() {
+        let _ = std::fs::remove_file(path);
+        return;
+    }
+    if let Ok(bytes) = serde_json::to_vec(offers) {
+        let _ = switchboard_core::private_fs::private_write(&path, &bytes);
+    }
+}
+
+/// SB-509 (review round 1 of PR #853): a transcript written this long after the last turn's end
+/// was cut in a turn; Claude Code's own writes at a turn's end land within it.
+pub const CUT_MARGIN_SECONDS: i64 = 30;
+
+/// SB-509: whether the session's last words were the person ending it (`/exit`, `/quit`), read
+/// from the transcript's last lines. Pure.
+pub fn exited(tail: &str) -> bool {
+    tail.lines().rev().take(6).any(|line| {
+        [
+            "<command-name>/exit</command-name>",
+            "<command-name>/quit</command-name>",
+        ]
+        .iter()
+        .any(|c| line.contains(c))
+    })
+}
+
+/// SB-509: a gone session was cut in a turn: its transcript was written more than
+/// `CUT_MARGIN_SECONDS` after its last turn ended (`baseline`: the launch's `last_turn_at`, else
+/// its start), and its last words were not the person's `/exit`. A session the person left between
+/// turns (closing its window, `/exit`) wrote nothing after its last turn. Pure.
+pub fn cut_turn(written: Option<i64>, baseline: i64, tail: &str) -> bool {
+    written.is_some_and(|w| w > baseline + CUT_MARGIN_SECONDS) && !exited(tail)
+}
+
+/// SB-509: the sessions closed on purpose since `since`, each with its latest close: a
+/// `resumable.jsonl` line (the duty officer's or a session host's close, a restart wave's) or a
+/// duty officer's act in `duty.jsonl`. They are offered elsewhere (the Sessions page's
+/// *Continue*) or were meant to end. A close counts against a launch only when it came at or
+/// after that launch began ([`closed_since`]): a session closed and then continued as a new
+/// launch was not closed in that launch (review round 4 of #836). Pure.
+pub fn closed_on_purpose(resumable: &[Value], duty: &[Value], since: i64) -> HashMap<String, i64> {
+    let mut closed: HashMap<String, i64> = HashMap::new();
+    for l in resumable
+        .iter()
+        .chain(duty.iter().filter(|l| l.get("outcome").is_some()))
+    {
+        let (Some(at), Some(session)) = (l["at"].as_i64(), l["session"].as_str()) else {
+            continue;
+        };
+        if at >= since {
+            let latest = closed.entry(session.to_owned()).or_insert(at);
+            *latest = (*latest).max(at);
+        }
+    }
+    closed
+}
+
+/// Whether `session` was closed on purpose at or after `launched_at` (unknown: any close counts).
+pub fn closed_since(
+    closed: &HashMap<String, i64>,
+    session: &str,
+    launched_at: Option<i64>,
+) -> bool {
+    closed
+        .get(session)
+        .is_some_and(|at| launched_at.is_none_or(|l| *at >= l))
+}
+
+/// SB-509: marks gone launches whose Claude Code session can be continued as itself
+/// `continuable`, once per session: its turn was cut (`can_continue` with the time its last turn
+/// ended), nobody closed it on purpose (`closed`), and no process holds it. An offer is recorded
+/// when first made, and a session continued since (live now) is taken and never offered again.
+/// Nothing is continued here: Needs attention offers it to the person. Pure but for its reads, so
+/// `offers` is the state before and after.
+pub fn offer(
+    found: &mut [Value],
+    offers: &mut serde_json::Map<String, Value>,
+    live: &HashSet<&str>,
+    closed: &HashMap<String, i64>,
+    can_continue: impl Fn(&str, i64) -> bool,
+    now: i64,
+) {
+    for f in found
+        .iter_mut()
+        .filter(|f| f["kind"] == GONE && f["dispatch"] != true)
+    {
+        let Some(session) = f["session_id"].as_str().map(str::to_owned) else {
+            continue;
+        };
+        if f["provider"].as_str().is_some_and(|p| p != "claude")
+            || closed_since(closed, &session, f["launched_at"].as_i64())
+        {
+            continue;
+        }
+        let entry = offers.get(&session).cloned();
+        if entry.as_ref().is_some_and(|e| !e["taken_at"].is_null()) {
+            continue;
+        }
+        if live.contains(session.as_str()) {
+            // Continued since, by the person or a host: the offer is over.
+            if let Some(entry) = entry {
+                offers.insert(
+                    session,
+                    json!({"launch_id": entry["launch_id"], "offered_at": entry["offered_at"],
+                        "taken_at": now}),
+                );
+            }
+            continue;
+        }
+        let baseline = f["last_turn_at"]
+            .as_i64()
+            .or_else(|| f["launched_at"].as_i64())
+            .unwrap_or(now);
+        if !can_continue(&session, baseline) {
+            continue;
+        }
+        f["continuable"] = true.into();
+        if entry.is_none() {
+            offers.insert(
+                session,
+                json!({"launch_id": f["launch_id"], "offered_at": now, "taken_at": null}),
+            );
+        }
+    }
+    offers.retain(|_, e| {
+        e["offered_at"]
+            .as_i64()
+            .or_else(|| e["taken_at"].as_i64())
+            .is_some_and(|t| now - t < OFFERS_KEPT)
+    });
+}
+
+/// The last bytes of a transcript, for `exited`.
+pub(crate) fn transcript_tail(path: &Path) -> String {
+    use std::io::{Read, Seek, SeekFrom};
+    let Ok(mut file) = std::fs::File::open(path) else {
+        return String::new();
+    };
+    let len = file.metadata().map(|m| m.len()).unwrap_or(0);
+    let _ = file.seek(SeekFrom::Start(len.saturating_sub(16 * 1024)));
+    let mut bytes = Vec::new();
+    let _ = file.take(16 * 1024).read_to_end(&mut bytes);
+    String::from_utf8_lossy(&bytes).into_owned()
+}
+
+fn offer_continuations(root: &Path, found: &mut [Value], pairs: &[(String, u32)], now: i64) {
+    let gone = found
+        .iter()
+        .any(|f| f["kind"] == GONE && f["dispatch"] != true && f["session_id"].is_string());
+    if !gone && std::fs::symlink_metadata(root.join(OFFERS_FILE)).is_err() {
+        return;
+    }
+    let mut offers = offers_read(root);
+    let before = offers.clone();
+    let live: HashSet<&str> = pairs.iter().map(|(s, _)| s.as_str()).collect();
+    let since = now - WINDOW_SECONDS;
+    let closed = if gone {
+        closed_on_purpose(
+            &crate::resumable::recent(root, since),
+            &crate::duty::journal(root),
+            since,
+        )
+    } else {
+        HashMap::new()
+    };
+    offer(
+        found,
+        &mut offers,
+        &live,
+        &closed,
+        |session, baseline| {
+            crate::launches::valid_id(session)
+                && crate::resumable::locate(root, session, now).is_some_and(|(config, cwd)| {
+                    let path = crate::resumable::transcript(&config, &cwd, session);
+                    let written = std::fs::metadata(&path)
+                        .and_then(|m| m.modified())
+                        .ok()
+                        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                        .map(|d| d.as_secs() as i64);
+                    Path::new(&cwd).is_dir() && cut_turn(written, baseline, &transcript_tail(&path))
+                })
+        },
+        now,
+    );
+    if offers != before {
+        offers_write(root, &offers);
+    }
+}
+
+/// SB-509: a session continued from Needs attention (or `sessions continue`) is taken: it is never
+/// offered again, and leaves the kept watch at once.
+pub fn continued(root: &Path, session: &str, now: i64) {
+    let _lock = file_lock();
+    let mut offers = offers_read(root);
+    if let Some(entry) = offers.get_mut(session) {
+        if entry["taken_at"].is_null() {
+            entry["taken_at"] = now.into();
+            offers_write(root, &offers);
+        }
+    }
+    let Some(mut kept) = std::fs::read(root.join(FILE))
+        .ok()
+        .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
+    else {
+        return;
+    };
+    let Some(list) = kept["findings"].as_array_mut() else {
+        return;
+    };
+    let mut changed = false;
+    for f in list
+        .iter_mut()
+        .filter(|f| f["session_id"] == session && f["continuable"] == true)
+    {
+        f["continuable"] = false.into();
+        changed = true;
+    }
+    if changed {
+        let bytes = serde_json::to_vec(&kept).unwrap_or_default();
         let _ = switchboard_core::private_fs::private_write(&root.join(FILE), &bytes);
     }
 }
@@ -500,12 +882,57 @@ fn key(f: &Value) -> String {
     )
 }
 
-fn last_keys(root: &Path) -> HashSet<String> {
-    last(root).iter().map(key).collect()
-}
-
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_sessions_running_launches_of_its_own_are_counted_for_its_process() {
+        // SB-500: the audit (launch A, process 100) started B and C itself; B runs, C ended; D runs
+        // and continues A's earlier work, which is not a launch A started.
+        let scan = json!({"sessions": [
+            {"pid": 100, "launch_id": "A"}, {"pid": 200, "launch_id": "B"},
+            {"pid": 300, "launch_id": "D"}, {"pid": 400}
+        ]});
+        let records = vec![
+            json!({"launch_id": "A", "launched_by": {}}),
+            json!({"launch_id": "B", "launched_by": {"caller_launch_id": "A"}}),
+            json!({"launch_id": "C", "launched_by": {"caller_launch_id": "A"}, "ended": {"kind": "exited"}}),
+            json!({"launch_id": "D", "launched_by": {}, "continued_from": ["A"]}),
+            json!({"launch_id": "E", "launched_by": {"parent": "D"}}),
+        ];
+        let children = running_children(&scan, &records);
+        assert_eq!(children.get(&100), Some(&1));
+        assert_eq!(children.get(&300), None, "E does not run");
+        assert_eq!(children.get(&400), None);
+        assert_eq!(children.len(), 1);
+    }
+
+    #[test]
+    fn a_finding_keeps_its_first_sighting_and_only_claude_code_pids_are_live_sessions() {
+        // SB-510: the watchdog reads how long a finding has stood.
+        let kept = vec![
+            json!({"kind": DUPLICATE, "session_id": "s-1", FIRST_SEEN: 100}),
+            json!({"kind": GONE, "launch_id": "L-old"}),
+        ];
+        let mut found = vec![
+            json!({"kind": DUPLICATE, "session_id": "s-1"}),
+            json!({"kind": GONE, "launch_id": "L-old"}),
+            json!({"kind": GONE, "launch_id": "L-new"}),
+        ];
+        stamp_first_seen(&mut found, &kept, 500);
+        let firsts: Vec<i64> = found
+            .iter()
+            .map(|f| f[FIRST_SEEN].as_i64().unwrap())
+            .collect();
+        assert_eq!(firsts, [100, 500, 500]);
+        let scan = json!({"sessions": [
+            {"pid": 10, "agent": "claude-code"}, {"pid": 11, "agent": "codex"},
+            {"pid": 12, "agent": "claude-code"}
+        ]});
+        let mut pids: Vec<u32> = claude_pids(&scan).into_iter().collect();
+        pids.sort_unstable();
+        assert_eq!(pids, [10, 12]);
+    }
+
     #[test]
     fn a_kept_read_answers_only_the_same_folder_for_fifteen_seconds() {
         let root = Path::new("/data/a");
@@ -695,5 +1122,173 @@ mod tests {
         assert_eq!(tree["launches"][0]["launch_id"], "L-child");
         assert_eq!(tree["launches"][0]["state"], "running");
         assert_eq!(tree["launches"][1]["state"], "ended");
+    }
+
+    #[test]
+    fn a_gone_session_with_its_history_is_offered_once_and_never_after_it_was_continued() {
+        // SB-509: a gone launch of a Claude Code session whose history is here is offered for
+        // continuation; a board run, another agent, one with no session or no history is not.
+        let gone = |id: &str, session: Option<&str>, provider: &str, dispatch: bool| {
+            json!({"kind": GONE, "launch_id": id, "session_id": session, "provider": provider,
+                "dispatch": dispatch})
+        };
+        let mut found = vec![
+            gone("L-1", Some("s-1"), "claude", false),
+            gone("L-2", Some("s-2"), "claude", true),
+            gone("L-3", Some("s-3"), "codex", false),
+            gone("L-4", None, "claude", false),
+            gone("L-5", Some("s-5"), "claude", false),
+        ];
+        let mut offers = serde_json::Map::new();
+        let none = HashSet::new();
+        let closed = HashMap::new();
+        let history = |s: &str, _: i64| s != "s-5";
+        offer(&mut found, &mut offers, &none, &closed, history, 1000);
+        let offered: Vec<&str> = found
+            .iter()
+            .filter(|f| f["continuable"] == true)
+            .map(|f| f["launch_id"].as_str().unwrap())
+            .collect();
+        assert_eq!(offered, ["L-1"]);
+        assert_eq!(offers["s-1"]["offered_at"], 1000);
+        // The next minute: still offered, with its first time kept.
+        let mut again = vec![gone("L-1", Some("s-1"), "claude", false)];
+        offer(&mut again, &mut offers, &none, &closed, history, 1060);
+        assert_eq!(again[0]["continuable"], true);
+        assert_eq!(offers["s-1"]["offered_at"], 1000);
+        // Continued: it runs, the offer is taken, and a later gone launch of it is not offered.
+        let live: HashSet<&str> = ["s-1"].into();
+        let mut running = vec![gone("L-1", Some("s-1"), "claude", false)];
+        offer(&mut running, &mut offers, &live, &closed, history, 1120);
+        assert!(running[0]["continuable"].is_null());
+        assert_eq!(offers["s-1"]["taken_at"], 1120);
+        let mut later = vec![gone("L-6", Some("s-1"), "claude", false)];
+        offer(&mut later, &mut offers, &none, &closed, history, 1180);
+        assert!(later[0]["continuable"].is_null(), "offered once");
+        // Offers older than a week are forgotten.
+        offer(
+            &mut [],
+            &mut offers,
+            &none,
+            &closed,
+            history,
+            1000 + OFFERS_KEPT,
+        );
+        assert!(offers.is_empty());
+    }
+
+    #[test]
+    fn only_a_turn_cut_by_the_process_ending_is_offered_never_a_session_ended_on_purpose() {
+        // SB-509 (review round 1 of PR #853): a Terminal launch records no end, so a session the
+        // person left (window closed, `/exit`) or the duty officer closed reads as gone too.
+        // Written 2 minutes after its last turn: cut. Within the margin, never written after, or
+        // ended with `/exit`: left on purpose.
+        assert!(cut_turn(Some(1120), 1000, ""));
+        assert!(!cut_turn(Some(1000 + CUT_MARGIN_SECONDS), 1000, ""));
+        assert!(!cut_turn(Some(900), 1000, ""));
+        assert!(!cut_turn(None, 1000, ""));
+        let exit = r#"{"type":"user","message":{"content":"<command-name>/exit</command-name>"}}"#;
+        assert!(!cut_turn(
+            Some(1120),
+            1000,
+            &format!("{{}}\n{exit}\n{{}}\n")
+        ));
+        // The baseline is the launch's last turn, else its start.
+        let gone = |turn: Option<i64>| {
+            json!({"kind": GONE, "launch_id": "L-1", "session_id": "s-1", "provider": "claude",
+                "dispatch": false, "last_turn_at": turn, "launched_at": 500})
+        };
+        let seen_baseline = std::cell::Cell::new(0);
+        let probe = |_: &str, b: i64| {
+            seen_baseline.set(b);
+            false
+        };
+        let (none, closed) = (HashSet::new(), HashMap::new());
+        offer(
+            &mut [gone(Some(900))],
+            &mut serde_json::Map::new(),
+            &none,
+            &closed,
+            probe,
+            2000,
+        );
+        assert_eq!(seen_baseline.get(), 900);
+        offer(
+            &mut [gone(None)],
+            &mut serde_json::Map::new(),
+            &none,
+            &closed,
+            probe,
+            2000,
+        );
+        assert_eq!(seen_baseline.get(), 500);
+    }
+
+    #[test]
+    fn a_session_closed_on_purpose_is_not_offered() {
+        // SB-509: the duty officer's or a host's close (`resumable.jsonl`) and the duty officer's
+        // acts (`duty.jsonl`, outcome lines) since the window opened; an intent alone is no act.
+        let resumable = vec![
+            json!({"session": "s-host", "reason": "host_idle", "at": 900, "by": "host"}),
+            json!({"session": "s-old", "reason": "idle", "at": 10, "by": "duty"}),
+        ];
+        let duty = vec![
+            json!({"at": 950, "action": "close", "reason": "idle", "outcome": "closed", "session": "s-duty"}),
+            json!({"at": 960, "phase": "intent", "action": "close", "session": "s-intent"}),
+        ];
+        let closed = closed_on_purpose(&resumable, &duty, 100);
+        let mut names: Vec<&str> = closed.keys().map(String::as_str).collect();
+        names.sort_unstable();
+        assert_eq!(names, ["s-duty", "s-host"]);
+        // Review round 4 of #836: a close before the launch began (the session closed, then
+        // continued as this launch) is not a close of this launch.
+        assert!(!closed_since(&closed, "s-host", Some(901)));
+        assert!(closed_since(&closed, "s-host", Some(900)));
+        assert!(closed_since(&closed, "s-host", None));
+        let mut continued = vec![
+            json!({"kind": GONE, "launch_id": "L-2", "session_id": "s-host",
+            "provider": "claude", "dispatch": false, "launched_at": 920}),
+        ];
+        offer(
+            &mut continued,
+            &mut serde_json::Map::new(),
+            &HashSet::new(),
+            &closed,
+            |_, _| true,
+            1000,
+        );
+        assert_eq!(continued[0]["continuable"], true);
+        let mut found = vec![
+            json!({"kind": GONE, "launch_id": "L-1", "session_id": "s-duty",
+            "provider": "claude", "dispatch": false, "last_turn_at": 100}),
+        ];
+        let mut offers = serde_json::Map::new();
+        offer(
+            &mut found,
+            &mut offers,
+            &HashSet::new(),
+            &closed,
+            |_, _| true,
+            1000,
+        );
+        assert!(found[0]["continuable"].is_null());
+        assert!(offers.is_empty());
+    }
+
+    #[test]
+    fn continuing_from_needs_attention_takes_the_offer_and_clears_the_kept_finding() {
+        let root = tempfile::tempdir().unwrap();
+        let mut offers = serde_json::Map::new();
+        offers.insert(
+            "s-1".into(),
+            json!({"launch_id": "L-1", "offered_at": 10, "taken_at": null}),
+        );
+        offers_write(root.path(), &offers);
+        let kept = json!({"at": 10, "findings": [
+            {"kind": GONE, "launch_id": "L-1", "session_id": "s-1", "continuable": true}]});
+        std::fs::write(root.path().join(FILE), kept.to_string()).unwrap();
+        continued(root.path(), "s-1", 20);
+        assert_eq!(offers_read(root.path())["s-1"]["taken_at"], 20);
+        assert_eq!(last(root.path())[0]["continuable"], false);
     }
 }

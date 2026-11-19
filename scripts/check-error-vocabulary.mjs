@@ -53,6 +53,12 @@ const EXCLUDED_FILES = {
 // Messages that are error literals in the sources above but can never reach the UI.
 // Every entry names why. Keep this list short: a doubtful message gets a mapping instead.
 const ALLOWLIST = {
+  // SB-518 (DEC-0032): monitor::probe's internal refusal when a provider hold began before its
+  // request; check_as answers it as USAGE_RATE_LIMITED, which src/adapter.ts shows verbatim.
+  "usage request not sent: provider held": 'SB-518: internal to monitor::check_as, mapped to the provider wait before any reply',
+  // SB-550 (review of PR #861): a background read's failure, kept only as the code `refused` in
+  // remote-usage.json (`remote_usage::reason_of`); no renderer request returns it.
+  "The other machine's Switchboard refused the read.": 'SB-550: background read only, kept as a reason code',
   // SB-403 (DEC-0025): answered only to another machine through `switchboard ssh-serve` or to the
   // CLI and MCP (a lease without --delegate); the window never sends these calls.
   "This computer holds no seat with that id that the calling machine delegated.": 'SB-403: ssh-serve only, answered to the delegating machine',
@@ -104,6 +110,8 @@ const ALLOWLIST = {
   'Give a launch id from switchboard sessions --history as the parent.': 'SB-212 launch --parent: CLI only',
   'No launch has that id. List them with switchboard sessions --history.': 'SB-212 sessions show: CLI and MCP only',
   'Only a launch can name who launched it.': 'SB-212 Launched wraps only launches; the window never sends it',
+  'Give from 1 to 64 launch ids.': 'SB-423 sessions --history --launch and MCP launch_ids: CLI and MCP only',
+  'Choose a reasoning level: none, minimal, low, medium, high, xhigh, max or ultra.': 'SB-535 agents launch --anthropic --reasoning: CLI only, the window passes no effort (src-tauri main.rs launch_agent effort: None)',
   // runtime launch.rs (SB-247): a dispatched run is started and stopped only by `switchboard
   // dispatch`, Fabric's command; the window sends neither.
   'The dispatched session did not start: its program could not be run.': 'SB-247 dispatch: CLI only',
@@ -136,6 +144,18 @@ const ALLOWLIST = {
   "Switchboard could not prepare this hand-over's session with permission prompts on. It is still waiting: take it without --ask, or leave it for Terminal.": 'SB-405: handovers run --ask is CLI only',
   // core projects.rs restore_project(): called only by backup::restore, which counts a refusal
   // as a project not put back and never returns the message.
+  // runtime boot_resume.rs (SB-450): reason codes written in `boot-resume.jsonl`; the window
+  // shows its own sentence per outcome (`bootResumeLineText`), never the code.
+  'no_cli': 'SB-450: a journal reason code, shown as its outcome sentence',
+  'no_script': 'SB-450: a journal reason code, shown as its outcome sentence',
+  'unsupported': 'SB-450: a journal reason code, shown as its outcome sentence',
+  'not_ours': 'SB-450: a journal reason code, shown as its outcome sentence',
+  // runtime session_host.rs start_detached (SB-450): `launch --hosted` and `sessions continue
+  // --hosted` print it to their terminal, and the owner's pass after a restart journals it; no
+  // window or MCP request starts a host.
+  'The session host could not start.': 'SB-450: hosted starts print to the CLI or go to the boot-resume journal',
+  'The session host stopped before the session started.': 'SB-450: hosted starts print to the CLI or go to the boot-resume journal',
+  'The session host did not answer within ten seconds.': 'SB-450: hosted starts print to the CLI or go to the boot-resume journal',
   'Project already here.': 'swallowed by backup restore',
   'Organization already here.': 'swallowed by backup restore (SB-109)',
   'Nothing to restore.': 'swallowed by backup restore (SB-109)',
@@ -194,6 +214,7 @@ const ALLOWLIST = {
   // runtime uninstall.rs remove_login_item(): `switchboard uninstall --yes` lists it under
   // `failures` in CLI output; uninstall is never a desktop operation (SB-28).
   'Could not remove the login item.': 'uninstall CLI output only',
+  "Could not remove the watchdog's job.": 'uninstall CLI output only (SB-510)',
   // runtime lib.rs StopSignals (listen/requested): used by `switchboard serve` (CLI output) and
   // by the desktop app's signal task, which ignores an error; never a renderer reply.
   'Shutdown signal unavailable.': 'serve CLI and the desktop signal task only',

@@ -6,7 +6,7 @@ never renumber, never delete. The doc map ([DOCMAP.md](DOCMAP.md)) names this fi
 register. Decisions made before 2026-11-08 live where they were made (plans' `D-<n>`, board rows,
 research notes); the ones still in force that the board cites are seeded below with their source.
 
-**Next free ID:** `DEC-0029` (`DEC-0018` and `DEC-0020`, held for the window and fleet plan's modules, were written on 2026-11-17)
+**Next free ID:** `DEC-0034` (`DEC-0032` is SB-518, smart usage checks; `DEC-0029` is held by an open branch, `DEC-0030` is SB-450, sessions continued after a restart, `DEC-0031` is SB-453, a short rate limit of the pay-per-token key waited out; `DEC-0027` is SB-418, a person's off switch for an account, and `DEC-0028` SB-419, groups fed from the default group; `DEC-0018` and `DEC-0020`, held for the window and fleet plan's modules, were written on 2026-11-17)
 
 ## Format
 
@@ -313,7 +313,8 @@ research notes); the ones still in force that the board cites are seeded below w
 ### DEC-0017: The accounts on other machines are read in the background, and still never routed here
 
 - **Date:** 2026-11-14
-- **Status:** Accepted (built on branch `wf4`: SB-366, WF-4); amends DEC-0013's "on request"
+- **Status:** Accepted (built on branch `wf4`: SB-366, WF-4); amends DEC-0013's "on request";
+  its cadence and what is read amended by DEC-0033 (every minute, with sessions and health)
 - **Context:** an account moved to another machine is turned off here (DEC-0013), so its row read
   "Not checked while disabled", and its copy there was read only when a person asked
   (`machines --live`). The operator asked that the usage of accounts on another device come here
@@ -962,3 +963,216 @@ research notes); the ones still in force that the board cites are seeded below w
   связано … Те, которые выбывают, они уходят в дефолтную папку отстаиваться … аккаунты, которые
   скоро станут активными, наперед мы подготавливаем … У папок типа есть свой приоритет»); design
   target-state `06-default-feed.md`.
+
+### DEC-0030: The sessions a restart of this computer cut are continued once, hosted
+
+- **Date:** 2026-11-18
+- **Status:** Accepted (built on branch `boot-resume`: SB-450)
+- **Context:** after the Mac rebooted nothing continued the sessions (Fabric Dashboards, board
+  request 737b04e6): each session host died with the machine, the duty officer acts only on live
+  processes, and recovery only on sessions stopped on a limit. Fabric Dashboards runs a temporary
+  agent (`ai.passioncode.resume-after-boot`, until 2026-11-25) with the same rule until this ships.
+- **Decision:** the one-minute session watch keeps `boot-live.json` (0600): the boot time and the
+  session and launch ids of every live Claude Code session a Switchboard launch runs, rewritten when
+  they change and every 30 minutes while such sessions run, and stamped with `stopped_at` at the owner's drain. The first watch pass of an
+  owner whose ledger is from an earlier boot (boot time from `kern.boottime` on macOS, `/proc/stat`
+  `btime` on Linux) continues each session of that ledger that:
+  - has a launch record naming that session, with no `continued_as`, provider Claude, launched
+    before the boot, not a dispatched board run (Fabric starts those again), and either no `ended`
+    or an `exited` end with a shutdown signal's code (129, 137, 143) recorded after the ledger's
+    last look and before the boot; with the person's own sign-in off (SB-403 S3), only a record in
+    Switchboard's own home;
+  - was cut in a turn (SB-509's rule: its transcript written more than 30 s after its last turn
+    ended and its last lines not the person's `/exit`), and nothing closed it on purpose (a
+    `resumable.jsonl` line, a duty officer's close, finished or begun); a session idle between
+    turns waited for the person, and a prompt to go on would answer for them (review round 3 of
+    PR #836, 2026-11-19);
+  - was in the ledger at a look no older than 2 hours before the boot, and its owner did not stop
+    looking before the session's last transcript write (120 s of slack);
+  - has its transcript (in any config folder) last written in the 2 hours before the boot, not after;
+  - no live Claude Code process holds, no session host runs, no launch since the boot names, no
+    launch began to continue in the last 2 minutes, and this boot's journal does not name.
+  At most 5 a boot, newest transcript first; each needs the session pool's admission
+  (`capacity.json`, an interactive start), and a refusal ends the pass. A continuation is
+  `resumable::continue_as` hosted (`claude --resume <id>` with `resumable::CONTINUE_PROMPT`, in the
+  session's own config and working folders), recorded as a launch of its own (`launched_by: {surface:
+  recovery, by: boot-resume, parent: <the cut launch>}`) and started with
+  `session_host::start_detached`, the one way every hosted start uses; the cut launch gets `ended:
+  {kind: reboot}` and `continued_as`. `boot-resume.jsonl` (0600, 500 lines) gets an `intent` line
+  before each start and its outcome after (`continued` with `new_launch_id`, `failed`,
+  `at_capacity`, `over_limit`); a later owner settles an intent with no outcome as `continued` when
+  a process or host holds the session, else `interrupted`, and never starts it again. On by default
+  (`boot-resume.json`), off with `switchboard boot-resume off`, MCP `switchboard_boot_resume {on:
+  false}` or Settings → *Sessions after a restart*. macOS and Linux; Windows reads no boot time, so it keeps no ledger and continues nothing.
+  `continue_as` itself refuses a session a host runs or a launch began to continue within 2 minutes
+  and serializes continuations, so the owner's pass, a person's Continue and another agent's
+  `sessions continue` never start one session twice.
+- **Consequences / affects:** the temporary agent in Fabric Dashboards can be removed once a release
+  with this ships: until then the two cannot both start one session, since each checks for a live
+  process (and Switchboard also for a host or a launch since the boot) first; a person's own session
+  started outside Switchboard is never continued (it has no launch record); the first restart after
+  updating continues nothing (no earlier ledger). CLI `boot-resume`; MCP `switchboard_boot_resume`;
+  Settings (SCN-105); [CONTRACTS](CONTRACTS.md#sessions-after-a-restart-sb-450-dec-0030); AGENTS.md
+  Lifecycle (Writes).
+- **Source:** Fabric Dashboards' board request 737b04e6 (thread a9844103), 2026-11-18; the
+  operator's rule that sessions are never lost and never doubled (DEC-0021, SB-396).
+
+### DEC-0031: A short rate limit of the pay-per-token key is waited out inside the proxy
+
+- **Date:** 2026-11-18
+- **Status:** Accepted (built on branch `tokens-spend`: SB-453). The number is the next one free
+  after the decisions on open pull requests (DEC-0027 #821, DEC-0029 #832, DEC-0030 #836); a
+  pull request that lands first with the same number moves this one to the next free.
+- **Context:** the pay-per-token group usually holds one Claude API key, so DEC-0002's move to the
+  group's next account finds none, and a `429` for the key's rate limit reached the session as an
+  error. On 2026-11-18 (board thread a9844103) a session and its nine subagents met `429` within
+  two minutes and stood still until they were closed for inactivity. An API rate limit refills
+  within the minute and the provider says how long to wait (`Retry-After`).
+- **Decision:** a `429` for a Claude API key at home in the pay-per-token group, when no DEC-0002
+  move takes the request, is waited out inside the proxy and the same request sent again on the
+  same key, when the provider asked for at most 30 seconds and did not say `x-should-retry:
+  false`: at most three tries and 60 seconds of waiting per request, the group's switch and
+  ceiling checked again before each try. Nothing reached the session before, so it sees only the
+  final answer. This is a second deliberate replay beside DEC-0002, limited to a request that did
+  no work and charged nothing; no other replay is added.
+- **Consequences / affects:** a waiting request holds one of the proxy's 64 slots; a session that
+  goes away ends its wait. Each refused try counts as `limited` in the statistics and the journal
+  records `rate_limited` once per request. `AGENTS.md` (Local rules),
+  [CONTRACTS](CONTRACTS.md#pay-per-token-group-sb-401-dec-0023).
+- **Source:** board thread a9844103 (Fabric Dashboards, 2026-11-18), relayed by the coordinator
+  of SB-452/SB-453: "the proxy should handle an upstream 429 with retry-after: a bounded wait and
+  retry inside the proxy before any byte reached the client (a request that did no work, like
+  DEC-0002's rule; never retry after bytes were sent)".
+
+### DEC-0032: Response headers count as quota checks, and each provider has a budget
+
+- **Date:** 2026-11-19
+- **Status:** Accepted (built on branch `sb-518-smart-usage`: SB-518). The number is the next one
+  free after DEC-0031; a pull request that lands first with the same number moves this one to the
+  next free.
+- **Context:** measured on 2026-11-19 with 32 enabled sign-ins in 5 groups: one pass every 30 s
+  checks at most 4 accounts, and since SB-310 (DEC-0008) every account of a group with switching
+  on was due every 180 s, about 640 checks an hour wanted against 480 possible, about 8 usage
+  calls a minute from one address. A switch needed a figure under 300 s old, so most switches came
+  after a refusal (25 before the limit against 66 after it on 2026-11-18). Every Claude answer
+  carries the account's five-hour and seven-day utilization in its headers, but they never pushed
+  the next check back, and each changed header was a metadata write with its fsync. A 429 on a
+  usage check held only the account it answered.
+- **Decision:** the `smart` mode, the default:
+  - A response's headers with both the five-hour and the seven-day window count as a check: the
+    next check from the usage endpoint is 180 s after the last such header, but never more than
+    `PASSIVE_CEILING_SECONDS` (30 minutes, before the spread below) after the endpoint's last answer in this process (a
+    header can lag, and it never carries the per-model windows). A partial header postpones
+    nothing; after a start nothing is postponed until the endpoint answered once. A header never
+    makes a per-model window fresher than the endpoint's answer it came with; the account in use
+    may switch on its header figures alone when they reach the threshold, never below it.
+  - An account that carries no traffic (neither a group's routed account nor the ordinary CLI's)
+    is checked on the idle cadence (600 s). Under the budget a pass serves the accounts that carry
+    traffic first, then those brought forward (near the limit, the pool's next account, after a
+    reset, a new sign-in), then the idle ones in turn, so the account in use keeps its 180 s
+    cadence and idle accounts wait longer than 600 s when the budget is short. A switch ranks the
+    candidates on their last known figure, of any age (it only orders: never measured comes last,
+    one last known full is never taken), and takes the one chosen only after one fresh check of
+    it, made before the pass decides (`Store::rotation_candidate_to_confirm`), at most once a
+    minute per provider. The account in use is held to its policy's age but never to less than
+    300 s, the real interval of its checks.
+  - Each provider has a budget: 2 checks a minute, a burst of 4, at most 2 on the network at
+    once; a person's check and a candidate's check may run up to 4 ahead, which the background
+    then waits out. A 429 on any usage check holds the whole provider for
+    `max(Retry-After, 900 s)` (the per-account floor, which `retry-after: 0` made necessary),
+    doubling on each 429 that follows up to an hour, a longer `Retry-After` kept whole; a success
+    ends the doubling. Kept in `usage-provider-holds.json`.
+  - Every schedule of 2 minutes or more falls due spread by ± 15 %, the same way each time for
+    one account and schedule.
+  - The near-limit minute (SB-106) counts from the last header when one came within the minute,
+    and the pool's next account is not pulled in while its own headers are that fresh.
+  - Header observations wait in memory and reach `accounts.json` at most once a minute and at the
+    drain.
+
+  The person may choose `timer` (0.7.121's fixed cadence of checks: every account of a switching
+  group every 180 s, headers postpone nothing, no budget beyond the provider's holds and 2 checks of one provider
+  on the network at once) or `on_demand` (no check
+  on a schedule; a switch's candidate and a person's check still ask). The mode governs the checks only: the account in use's 300 s floor and its switch on header figures hold in every mode. In `on_demand` a managed
+  Claude group's account in use is read from its answers' headers, so it still switches before the
+  limit; a Codex group (Switchboard reads no Codex headers) and native rotation of the ordinary
+  Claude Code have no such source and switch only on a limit. Nothing here touches a
+  session's request: DEC-0002's one move of a refused request and DEC-0031's wait stay as they are.
+- **Consequences / affects:** about 120 checks an hour per provider at most instead of up to 480;
+  while a 429 holds a provider, no candidate is checked, so its groups switch only on a limit or a
+  refusal (DEC-0002) until the hold ends; a new sign-in waits out the provider's hold too (the
+  per-account hold of SB-39 still starts afresh with a new credential); a 429 that comes more than
+  its last hold's length after that hold ended starts again from 900 s;
+  an account with traffic is read from its answers, the endpoint at least every 30 minutes. A
+  switch before the limit no longer waits for a refusal: the candidate is checked fresh within the
+  pass. An account whose per-model window is older than its policy's age reads as not fresh in
+  `switchboard_usage` while headers keep its five-hour and seven-day figures current. A person's
+  checks of one provider run 4 ahead of the bucket (up to 8 at once from a full one), then answer
+  that checks are paced. Moving a sign-in to another machine or calling it back proves it with a person's check:
+  while the provider is held or that check is paced, the proof fails and the move is undone as for
+  any unanswered proof, to be tried again once the hold ends (SB-519 may make it wait instead). Settings: CLI
+  `switchboard usage-mode`, MCP `switchboard_usage_mode`. `AGENTS.md` (Background monitor, Writes,
+  Idle budget), [CONTRACTS](CONTRACTS.md#smart-usage-checks-sb-518-dec-0032).
+- **Source:** plan 10 §H (target state, 2026-11-19 audit); the coordinator of SB-518 (plan review:
+  keep the 900 s floor, leave DEC-0002 untouched, add the person's mode).
+
+### DEC-0033: Each machine is read every minute through its own Switchboard, its sessions and health with its accounts
+
+- **Date:** 2026-11-19
+- **Status:** Accepted (built on branch `sb-550-remote-minute`: SB-550). Amends DEC-0017's cadence
+  (15 minutes, then hourly after three failures) and what is read; DEC-0013's routing rule and
+  DEC-0025's lease cadence stand. The number is the next one free after the decisions on open pull
+  requests (DEC-0027 #821, DEC-0029 #832, DEC-0030 #836, DEC-0032 #856); a pull request that lands
+  first with the same number moves this one to the next free.
+- **Context:** the Accounts row of an account on another machine showed this computer's own old
+  check as its bar and share ("17%, 8d ago") while the line under it gave the background read of
+  its copy there ("Used 0% on the machine, 14 min ago"): two numbers for one account. The window
+  read that file once and did not read it again, so a fresh read could still say "Not read yet",
+  and the line under the bar was drawn over it. The operator asked to tell when something does
+  not work, and to ping the sessions on other machines every minute through Switchboard, never by
+  asking the sessions themselves, on a teammate's Switchboard inside the organization too.
+- **Decision:**
+  - The owner reads each machine group's Switchboard over ssh every minute while it runs, one
+    machine after another on a thread of its own, each call given up at 20 seconds, never two
+    passes at once. Three failures in a row read that machine every five minutes.
+  - One call, `switchboard --json remote-status`, answers that machine's accounts (label,
+    provider, on or off, used share with when its own check observed it, its check's status), its
+    sessions (the Sessions page's rows cut to ids and codes: id, group, why, agent, launch and
+    session ids, since when; never a folder, a label or text a session wrote; the ended rows only
+    counted) and its own `agent-health/1` report. A Switchboard there that does not know the call
+    is read with the older calls in the same read (`accounts list`, then `sessions --rows`; only
+    `accounts list` through an older restricted entry, which refuses the other), and until it is
+    updated it is read at the old cadence, every 15 minutes, and asked the one call again an hour
+    later. The real cost per machine is one ssh call a minute; an older Switchboard costs two calls
+    (one through a restricted entry) every 15 minutes, and a machine that stopped answering one
+    call of at most 20 seconds every five minutes.
+  - A teammate's restricted entry (`ssh-serve`, DEC-0025) answers the same call cut to the seats
+    the calling key delegated and the sessions of the group its key line names, with no health:
+    that computer's other data stays its own.
+  - `remote-usage.json` keeps per machine the accounts' shares, the session rows and counts, the
+    health checks' states and which call answered: ids, codes, counts and times only (0600).
+  - The row of an account on another machine shows its copy there: bar, share and age from the
+    last read; this computer's own older check is shown only while there is no read there, and
+    says so. The window reads the file again each minute while Accounts or Groups is on screen,
+    and when the owner writes it (event `machines-changed`, one `stat` per 15-second look).
+  - Needs attention names a machine that did not answer three reads in a row
+    (`machine_unreachable`), and from a read that worked its failing health checks or its owner
+    not running (`machine_health`) and its sessions that need a person: a second copy or a board
+    run gone quiet (`machine_sessions`; a gone run is history there). The last good items are
+    kept through one or two failed reads, so they do not come and go; `since` is when a read that
+    worked first saw the condition. `agent-health/1` counts them in the check `machines` (area `connection`).
+    Switchboard itself sends no message about them.
+  - The leases of seats delegated to a machine are extended at most every 15 minutes, as before;
+    a failed extension is tried again five minutes later, not at every read.
+- **Consequences / affects:** [CONTRACTS](CONTRACTS.md#background-reads-of-other-machines-sb-366-dec-0017),
+  `AGENTS.md` Lifecycle (the child `ssh` and `remote-usage.json` every minute, the window's
+  `machines-changed`, the idle budget), [CLI.md](CLI.md) (`remote-status`, `ssh-serve`,
+  `attention`, `health`), the MCP descriptions of `switchboard_attention`, `switchboard_health` and
+  `switchboard_machines`, the skill's [tools reference](../plugins/switchboard/skills/switching-accounts/references/tools.md),
+  [ux/scenarios.md](ux/scenarios.md) (SCN-092 step 8), [CHANGELOG](../CHANGELOG.md),
+  [evidence/backlog.md](evidence/backlog.md) (SB-550).
+- **Source:** operator 2026-11-19, a screenshot of Accounts with the machine group of a remote
+  machine and two accounts: «вот такие как мне отслеживать и числа с полоской отличаются и в
+  целом надо понимать если что-то не работает и вести пинг по сессиям которые удаленны раз в
+  минуту через свитчборд а не через запросы напрямую к сессиям и на удаленный свитчборд в рамках
+  организации то же самое».
+

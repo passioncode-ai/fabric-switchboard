@@ -511,9 +511,11 @@ pub(crate) fn status(
                 .map_or((None, None), |(l, t)| (Some(l), t));
             // FD-291 (2026-11-17): a stop whose launch was continued (a hand-over, or a later
             // launch of the session) was taken up elsewhere: it is not ready to continue again.
-            let continued = launch_id
-                .as_deref()
-                .is_some_and(|l| crate::launches::continued_after(root, l, r.stopped_at));
+            // FD-316: and the record's own `continued_as`, from the same read.
+            let (continued, continued_as) = launch_id.as_deref().map_or(
+                (false, serde_json::Value::Null),
+                |l| crate::launches::continuation(root, l, r.stopped_at),
+            );
             let ready = readiness(r, snapshot, limited, capped, sign_in, now);
             // FD-291: when the session's transcript was last written, from its launch's own path
             // or any config folder that may hold it; a stop already settled costs no stat.
@@ -545,7 +547,7 @@ pub(crate) fn status(
             serde_json::json!({"stop": r, "ready": ready.mode.is_some() && !continued,
                 "continued": continued, "mode": ready.mode,
                 "candidates": ready.accounts, "probe_at": ready.probe_at, "reason": ready.reason,
-                "launch_id": launch_id, "transcript": transcript, "transcript_at": transcript_at,
+                "launch_id": launch_id, "continued_as": continued_as, "transcript": transcript, "transcript_at": transcript_at,
                 "live": open.contains(r.session.as_str()).then(|| live.get(&r.session)).flatten()
                     .map(|(pid, status)| serde_json::json!({"pid": pid, "status": status}))})
         })

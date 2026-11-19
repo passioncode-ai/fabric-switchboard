@@ -260,6 +260,70 @@
       "tool": "switchboard_recovery"
     },
     {
+      "answer": "Start the desktop app or 'switchboard serve' before login or launch.",
+      "arguments": {
+        "open": true
+      },
+      "is_error": true,
+      "tool": "switchboard_recovery"
+    },
+    {
+      "answer": {
+        "launches": [
+          {
+            "agent": "claude-code",
+            "context_name": null,
+            "ended": {
+              "at": "<at>",
+              "exit_code": 0,
+              "kind": "exited"
+            },
+            "ended_at": "<ended_at>",
+            "home_dir": null,
+            "home_path": null,
+            "hosted": true,
+            "in_place": true,
+            "label": null,
+            "launch_id": "golden-resume-ended",
+            "launched_at": "<launched_at>",
+            "launched_by": {
+              "surface": "dashboards"
+            },
+            "mode": "resume",
+            "provider": "claude",
+            "provider_session_id": "resumed-session",
+            "started_at": null,
+            "state": "ended",
+            "working_directory": "<scratch>/home/work/app"
+          }
+        ],
+        "missing": [
+          "no-such-launch"
+        ],
+        "next_before": null,
+        "total": 1
+      },
+      "arguments": {
+        "history": true,
+        "launch_ids": [
+          "golden-resume-ended",
+          "no-such-launch"
+        ]
+      },
+      "is_error": false,
+      "tool": "switchboard_sessions"
+    },
+    {
+      "answer": "Give launch_ids with history: true.",
+      "arguments": {
+        "launch_ids": [
+          "golden-resume-ended"
+        ]
+      },
+      "is_error": true,
+      "tool": "switchboard_sessions"
+    },
+    {
       "answer": "Switchboard has no record of that session. Refresh the list, then retry.",
       "arguments": {
         "session_id": "no-such-session"
@@ -315,7 +379,7 @@
         "openWorldHint": false,
         "readOnlyHint": false
       },
-      "description": "The session duty officer: every five minutes it looks at each live interactive Claude Code session on this computer (not Fabric Dashboards' consoles, not claude -p runs) and never ends one before it finished. Finished: idle for idle_minutes (default 60, never under 65 so a session waiting for a wake-up it set itself is kept) with none of its own commands (Bash tool shells, background ones included) still running: closed. Stalled: busy with its status unchanged and its transcript unwritten for stuck_minutes (45), its process tree using no CPU since the previous check, and no command of its own running (or one running three times stuck_minutes without CPU): closed and resumed in a new Terminal window with claude --resume and a prompt to continue. A session waiting for the person's answer is left alone, nothing is restarted for its age, and of two copies of one session only a finished copy is closed. At most three actions a check and three restarts of one session in six hours. Answers settings, due (what a check would do now), recent (its last actions), watched, waiting_for_person and running_commands. on, stuck_minutes, idle_minutes and run (check now) change it (waiting_minutes and max_age_hours are kept for older settings and unused); dry_run lists without acting.",
+      "description": "The session duty officer: every five minutes it looks at each live interactive Claude Code session on this computer (not Fabric Dashboards' consoles, not claude -p runs) and never ends one before it finished. Finished: idle for idle_minutes (default 60, never under 65 so a session waiting for a wake-up it set itself is kept), its transcript and its background agents' transcripts unwritten as long, none of its own commands (Bash tool shells, background ones included) and no session it launched itself still running: closed. A session the person took up again after such a close is never closed as finished again. Stalled: busy with its status unchanged and its transcript unwritten for stuck_minutes (45), its process tree using no CPU since the previous check, and no command of its own running (or one running three times stuck_minutes without CPU): closed and resumed in a new Terminal window with claude --resume and a prompt to continue. A session waiting for the person's answer is left alone, nothing is restarted for its age, and of two copies of one session only a finished copy is closed. At most three actions a check and three restarts of one session in six hours. Answers settings, due (what a check would do now), recent (its last actions), watched, waiting_for_person and running_commands. on, stuck_minutes, idle_minutes and run (check now) change it (waiting_minutes and max_age_hours are kept for older settings and unused); dry_run lists without acting.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -404,7 +468,7 @@
         "openWorldHint": false,
         "readOnlyHint": true
       },
-      "description": "Sessions Switchboard launched: Claude Code, Codex, Kimi Code, Hermes, OpenCode and catalog agents (through an API-key account's proxy or on the OpenRouter key). Each with account_id, label, agent (the catalog id, such as claude-code, codex or goose), provider (the provider the route serves: claude for an agent through the proxy), group id (pool), context (personal or org:<id>) and context_name (the organization's name, or null), mode (managed or isolated), working_directory, in_place, launched_at, started_at, continues (a workflow id or null) and state: starting, running, ended or unknown. A session resumed as itself in a session host (the CLI's sessions continue --in-place --hosted) has no home: it is listed from its launch record with home null, mode resume and no account (account_id, label and pool null). Without all, only starting and running ones. With history, every launch of the last 90 days instead, newest first: one record per launch with launch_id, launched_by (surface: window, cli, mcp, fallback, recovery, dashboards or fabric for a run switchboard dispatch started, whose launched_by.dispatch is {id, request, thread, project, workflow}; caller_launch_id, caller_project, caller_program, by, parent), provider_session_id, transcript (its path), turns, last_turn_at, ended (limit; a dispatched run's {kind: exited, stopped or timed_out, exit_code?, at}) and continued_as (where its work went), and for a dispatched run log (its log file's absolute path), plus total and next_before (pass it as before for the next page; null at the end; limit 1 to 500, default 500). With launch_id, that launch with up (who launched it, to the first) and down (what it launched or what took its work over). Reads only; no credential. With tree, the session tree instead: every live session joined to its launch (surface, parent launch, task: workflow and board request), the launches of the last day with their state (running, ended, gone), counts by group and surface, the session pool, and what the one-minute watch found (duplicate: one session in two processes; stuck: a board run quiet for 30 minutes; gone: a launch whose process ended with no end recorded).",
+      "description": "Sessions Switchboard launched: Claude Code, Codex, Kimi Code, Hermes, OpenCode and catalog agents (through an API-key account's proxy or on the OpenRouter key). Each with account_id, label, agent (the catalog id, such as claude-code, codex or goose), provider (the provider the route serves: claude for an agent through the proxy), group id (pool), context (personal or org:<id>) and context_name (the organization's name, or null), mode (managed or isolated), working_directory, in_place, launched_at, started_at, continues (a workflow id or null) and state: starting, running, ended or unknown. A session resumed as itself in a session host (the CLI's sessions continue --in-place --hosted) has no home: it is listed from its launch record with home null, mode resume and no account (account_id, label and pool null). Without all, only starting and running ones. With history, every launch of the last 90 days instead, newest first: one record per launch with launch_id, launched_by (surface: window, cli, mcp, fallback, recovery, dashboards or fabric for a run switchboard dispatch started, whose launched_by.dispatch is {id, request, thread, project, workflow}; caller_launch_id, caller_project, caller_program, by, parent), provider_session_id, transcript (its path), turns, last_turn_at, ended (limit; a dispatched run's {kind: exited, stopped or timed_out, exit_code?, at}; reboot when a restart cut it and Switchboard continued it after) and continued_as (where its work went), and for a dispatched run log (its log file's absolute path), plus total and next_before (pass it as before for the next page; null at the end; limit 1 to 500, default 500). With launch_id, that launch with up (who launched it, to the first) and down (what it launched or what took its work over). Reads only; no credential. With tree, the session tree instead: every live session joined to its launch (surface, parent launch, task: workflow and board request), the launches of the last day with their state (running, ended, gone), counts by group and surface, the session pool, and what the one-minute watch found (duplicate: one session in two processes; stuck: a board run quiet for 30 minutes; gone: a launch whose process ended with no end recorded).",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -423,6 +487,15 @@
           "launch_id": {
             "description": "One launch and its chain.",
             "type": "string"
+          },
+          "launch_ids": {
+            "description": "With history: only these launches, each read by its id (no chain), with missing naming the ids that have no record.",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 64,
+            "minItems": 1,
+            "type": "array"
           },
           "limit": {
             "description": "With history: at most this many launches (default 500).",
@@ -450,10 +523,15 @@
         "openWorldHint": false,
         "readOnlyHint": true
       },
-      "description": "Sessions that stopped on a limit and the accounts ready for them to continue: each stop's mode and when to try again.",
+      "description": "Sessions that stopped on a limit and the accounts ready for them to continue: each stop's mode and when to try again. Each open stop names its launch_id and, from that launch's record, continued_as (where its work went: {kind: launch, id} or {kind: handover, id, launch_id}; null while nowhere). With open, only the stops still open (state waiting or claimed); the counts stay those of every stop.",
       "inputSchema": {
         "additionalProperties": false,
-        "properties": {},
+        "properties": {
+          "open": {
+            "description": "Only the stops still open: waiting or claimed.",
+            "type": "boolean"
+          }
+        },
         "type": "object"
       },
       "name": "switchboard_recovery",

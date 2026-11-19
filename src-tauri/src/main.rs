@@ -83,6 +83,8 @@ impl Slot {
                     // (never a development build); the runtime checks the data folder too.
                     if std::env::current_exe().is_ok_and(|exe| residency::packaged(&exe)) {
                         owner.runtime.enable_shell_hook();
+                        // SB-510: the watchdog's system job, for the app's own data folder only.
+                        owner.runtime.enable_watchdog();
                     }
                 }
             });
@@ -275,6 +277,15 @@ async fn send_account(
         })
         .await
 }
+/// SB-450: whether the sessions a restart cut are continued; `on` changes it.
+#[tauri::command]
+async fn boot_resume(on: Option<bool>, state: State<'_, Slot>) -> Result<Value, String> {
+    state
+        .runtime()
+        .await?
+        .execute(Operation::BootResume { on })
+        .await
+}
 /// SB-403 S3: whether Switchboard reads or changes the person's own sign-in; `on` changes it.
 #[tauri::command]
 async fn own_sign_in(on: Option<bool>, state: State<'_, Slot>) -> Result<Value, String> {
@@ -445,6 +456,30 @@ async fn recall_account(
             program: None,
             remote_data_dir: None,
             decision: None,
+        })
+        .await
+}
+/// SB-473: every machine this computer knows (moves and runs), as `switchboard targets` lists them,
+/// for the move dialog's machine picker; with `probe`, each asked whether it answers.
+#[tauri::command]
+async fn targets(probe: bool, state: State<'_, Slot>) -> Result<Value, String> {
+    state
+        .runtime()
+        .await?
+        .execute(Operation::Targets { probe })
+        .await
+}
+/// SB-474: another machine's groups, organizations and accounts, read over ssh as `switchboard
+/// remote status` reads them, for the move dialog's group picker.
+#[tauri::command]
+async fn remote_status(target: String, state: State<'_, Slot>) -> Result<Value, String> {
+    state
+        .runtime()
+        .await?
+        .execute(Operation::RemoteStatus {
+            target,
+            program: None,
+            remote_data_dir: None,
         })
         .await
 }
@@ -1703,6 +1738,7 @@ async fn launch_agent(
             via: via.unwrap_or_default(),
             model,
             key,
+            effort: None,
         })
         .await
 }
@@ -1976,8 +2012,28 @@ async fn check_for_updates(app: tauri::AppHandle) -> Result<Value, String> {
     updates::check_now(app).await
 }
 
+/// The stack of every thread the app's async runtime runs on: the size the command line's runtime
+/// threads have had since 0.6.61 (SB-161), because the owner's `execute` runs on these threads
+/// (the window's commands and the control listener's calls) and its futures are large (SB-558).
+const RUNTIME_STACK_BYTES: usize = 16 * 1024 * 1024;
+
 fn main() {
     let Launch { smoke, background } = launch(std::env::args());
+    // Tauri would build its own runtime with the standard 2 MiB threads; this one is set first
+    // and lives until the process ends.
+    let runtime = match tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .thread_stack_size(RUNTIME_STACK_BYTES)
+        .build()
+    {
+        Ok(runtime) => runtime,
+        Err(_) => {
+            eprintln!("Switchboard could not start its runtime.");
+            std::process::exit(1);
+        }
+    };
+    tauri::async_runtime::set(runtime.handle().clone());
+    let _runtime = runtime;
     // The folder picker is called from Rust (`pick_folder`); the window holds no dialog or
     // filesystem permission of its own.
     let mut builder = tauri::Builder::default()
@@ -2174,6 +2230,8 @@ fn main() {
             send_account,
             recall_account,
             machines,
+            targets,
+            remote_status,
             attention,
             given_accounts,
             events,
@@ -2236,6 +2294,7 @@ fn main() {
             feed,
             capacity,
             duty,
+            boot_resume,
             own_sign_in,
             session_tree,
             session_rows,

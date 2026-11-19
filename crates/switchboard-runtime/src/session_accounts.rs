@@ -32,12 +32,18 @@ impl Accounts for Homes<'_> {
     fn launch_markers(&self) -> HashMap<u32, String> {
         let mut found = HashMap::new();
         for home in self.launched_homes() {
-            let Some(pid) = std::fs::read_to_string(home.join(".session-pid"))
+            let marker = home.join(".session-pid");
+            let Some(pid) = std::fs::read_to_string(&marker)
                 .ok()
                 .and_then(|t| t.trim().parse::<u32>().ok())
             else {
                 continue;
             };
+            // SB-450 (review round 3 of #836): a marker from before this boot, or older than the
+            // process now holding its pid, names a launch that process never belonged to.
+            if crate::launch::marker_outlived(&marker, pid) {
+                continue;
+            }
             let launch = std::fs::read(home.join(crate::launch::SESSION_RECORD))
                 .ok()
                 .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
@@ -83,9 +89,32 @@ impl Accounts for Homes<'_> {
     }
 }
 
+/// SB-515: the arguments a resumed Claude Code session takes, as Fabric Sessions asks Switchboard
+/// for them (`Accounts::resume_flags`): the duty officer's restarts, Continue and restart waves
+/// build their scripts from this answer, the one the core reads once they move there.
+pub fn resume_flags(root: &Path) -> Vec<&'static str> {
+    Homes::at(root).resume_flags()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// SB-515: the resume flags Fabric Sessions asks for follow the person's permission choice.
+    #[test]
+    fn resumed_sessions_skip_their_prompts_unless_the_person_chose_ask() {
+        let root = tempfile::tempdir().unwrap();
+        assert_eq!(
+            resume_flags(root.path()),
+            ["--dangerously-skip-permissions"]
+        );
+        assert_eq!(
+            Homes::at(root.path()).resume_flags(),
+            resume_flags(root.path())
+        );
+        crate::agent_settings::set_permissions(root.path(), crate::agent_settings::ASK).unwrap();
+        assert!(resume_flags(root.path()).is_empty());
+    }
 
     #[test]
     fn the_homes_switchboard_launches_in_and_their_markers_are_answered() {

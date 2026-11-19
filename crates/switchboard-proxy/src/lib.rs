@@ -25,6 +25,20 @@ use uuid::Uuid;
 const BODY_LIMIT: usize = 32 * 1024 * 1024;
 /// The header a project folder's Claude Code sends its pool capability in (SB-140).
 pub const CAPABILITY_HEADER: &str = "x-switchboard-capability";
+/// SB-452: the group a session was launched for, which its launch's own settings file sends
+/// (`ANTHROPIC_CUSTOM_HEADERS`). A claim that can only narrow: a request whose route names
+/// another group is counted, and refused when one of the two is the pay-per-token group. Never
+/// relayed upstream (not on `REQUEST_HEADERS`).
+pub const LAUNCH_GROUP_HEADER: &str = "x-switchboard-launch-group";
+/// SB-452: the session's launch named one group and its request came through another's route,
+/// one of the two being the pay-per-token group.
+pub const LAUNCH_GROUP_MISMATCH: &str = "This session was started for one group, but its request came through another group's route, and one of the two is the pay-per-token group. Switchboard refused it so the key serves only its own group. Start the session again with Switchboard.";
+/// SB-453 (DEC-0031): a 429 of the pay-per-token group's key is waited out inside the proxy when
+/// the provider asks for at most this many seconds, before any byte reached the session.
+const TOKENS_RETRY_WAIT: i64 = 30;
+/// SB-453: tries of one request in all, and the longest total wait across them.
+const TOKENS_RETRY_TRIES: u32 = 3;
+const TOKENS_RETRY_BUDGET: i64 = 60;
 /// Client headers relayed upstream. Authentication (`authorization`, `x-api-key`), cookies,
 /// proxy and account-identity headers are never on this list: the proxy injects its own.
 const REQUEST_HEADERS: &[&str] = &[
@@ -105,6 +119,8 @@ struct Gateway {
 pub struct FolderMap {
     folders: Vec<String>,
     by_capability: std::collections::HashMap<String, String>,
+    /// SB-452: each group folder's groups (a repository may be in several).
+    pools: std::collections::HashMap<String, std::collections::BTreeSet<String>>,
 }
 pub type StatFolders = Arc<std::sync::RwLock<FolderMap>>;
 /// SB-133: each pool's folder capabilities (`folder_token`), one per folder that is part of the
@@ -361,6 +377,10 @@ impl ProxyHandle {
                 pool_token_salted(&self.token, &pool, salts.get(&pool).map(String::as_str));
             map.by_capability
                 .insert(folder_token(&capability, &folder), folder.clone());
+            map.pools
+                .entry(folder.clone())
+                .or_default()
+                .insert(pool.clone());
             map.folders.push(folder);
         }
         map.folders.sort();
@@ -547,6 +567,40 @@ impl AuditedStream {
             }
         }
     }
+}
+/// SB-452: one request served by another group than its own, in its tally.
+fn count_mismatch(stats: &stats::Stats, key: &str) {
+    if let Ok(mut all) = stats.lock() {
+        let t = all.entry(key.to_owned()).or_default();
+        t.mismatched = t.mismatched.saturating_add(1);
+    }
+}
+/// SB-453 (DEC-0031): how long to wait before trying a request again on the same key after its
+/// 429: a Claude API key at home in the pay-per-token group, a `Retry-After` of at most
+/// `TOKENS_RETRY_WAIT` seconds that fits the request's budget, fewer than `TOKENS_RETRY_TRIES`
+/// tries so far, and no `x-should-retry: false`. None: the 429 goes to the client as it came.
+fn tokens_wait(
+    g: &Gateway,
+    provider: Provider,
+    account: &switchboard_core::Account,
+    headers: &HeaderMap,
+    tries: u32,
+    waited: i64,
+) -> Option<i64> {
+    if provider != Provider::Claude
+        || account.kind != AuthKind::ApiKey
+        || tries >= TOKENS_RETRY_TRIES
+        || headers.get("x-should-retry").and_then(|v| v.to_str().ok()) == Some("false")
+        || !g
+            .store
+            .pool_flags(&account.pool)
+            .is_ok_and(|(_, tokens)| tokens)
+    {
+        return None;
+    }
+    let wait = retry_after_seconds(headers, now())?.max(1);
+    (wait <= TOKENS_RETRY_WAIT && waited.saturating_add(wait) <= TOKENS_RETRY_BUDGET)
+        .then_some(wait)
 }
 /// SB-145: one request's outcome in the day's tally of its account, pool and client.
 fn count(stats: &stats::Stats, key: &str, status: Option<StatusCode>) {
@@ -865,7 +919,40 @@ async fn relay(
         })
         .unwrap_or_default();
     let tally = |id: &str| stats::key(&stats::day_of(now()), id, &pool, &client, &folder);
+    // SB-452: the folder the request names (its session's working directory) belongs to other
+    // groups only. Claude Code reads a worktree's local settings from its main checkout, so a
+    // session in a worktree of another group than its main checkout's comes through the main
+    // checkout's route: counted, so the statistics show it.
+    let hinted_elsewhere = g.stat_folders.read().ok().is_some_and(|map| {
+        stats::folder_hint(&bytes)
+            .and_then(|hint| stats::deepest(&map.folders, &hint).map(str::to_owned))
+            .and_then(|f| map.pools.get(&f).cloned())
+            .is_some_and(|pools| !pools.contains(&pool))
+    });
+    // SB-452: the group the session was launched for, as its launch's settings file says.
+    let launched_for = parts
+        .headers
+        .get(LAUNCH_GROUP_HEADER)
+        .and_then(|v| v.to_str().ok())
+        .map(str::trim)
+        .filter(|p| !p.is_empty() && *p != pool)
+        .map(str::to_owned);
+    if hinted_elsewhere || launched_for.is_some() {
+        count_mismatch(&g.stats, &tally(&account.id));
+    }
+    if let Some(launched) = launched_for {
+        // Fails closed: a group whose flags cannot be read counts as the pay-per-token group.
+        let tokens = |p: &str| g.store.pool_flags(p).map_or(true, |(_, tokens)| tokens);
+        if tokens(&launched) || tokens(&pool) {
+            count(&g.stats, &tally(&account.id), None);
+            return error(StatusCode::FORBIDDEN, LAUNCH_GROUP_MISMATCH);
+        }
+    }
     let mut moved = false;
+    // SB-453: tries sent, seconds waited, and the account whose limit the journal holds.
+    let mut tries: u32 = 0;
+    let mut waited: i64 = 0;
+    let mut limit_recorded: Option<String> = None;
     let mut account = account;
     let mut credential = credential;
     let (upstream, journaled) = loop {
@@ -950,6 +1037,7 @@ async fn relay(
             };
             outgoing = outgoing.header("chatgpt-account-id", id);
         }
+        tries += 1;
         let upstream = match outgoing.send().await {
             Ok(r) => r,
             Err(_) => {
@@ -967,35 +1055,73 @@ async fn relay(
         // a limit did no work, so it moves — once — to the pool's next usable account, which
         // also serves the requests after it; the agent never sees the pause. Only Claude Code
         // and Codex sessions: an agent's API-key request keeps the provider's answer.
-        if upstream.status() == StatusCode::TOO_MANY_REQUESTS && official && !moved {
-            let _ = g.store.record("request", Some(&account.id), "rate_limited");
-            if provider == Provider::Claude {
-                if let Some(usage) = usage_from_headers(upstream.headers()) {
-                    let _ = g.store.observe_credential(&account.id, &credential, usage);
+        if upstream.status() == StatusCode::TOO_MANY_REQUESTS {
+            if official && !moved {
+                if limit_recorded.as_deref() != Some(account.id.as_str()) {
+                    let _ = g.store.record("request", Some(&account.id), "rate_limited");
+                    limit_recorded = Some(account.id.clone());
+                }
+                if provider == Provider::Claude {
+                    if let Some(usage) = usage_from_headers(upstream.headers()) {
+                        let _ = g.store.observe_credential(&account.id, &credential, usage);
+                    }
+                }
+                let fits = switchboard_core::Fits {
+                    kind: Some(account.kind),
+                    api_key_only,
+                };
+                let next = g
+                    .store
+                    .failover(provider, &pool, &account.id, fits, now())
+                    .ok()
+                    .flatten()
+                    // SB-401: never onto an account whose home group may not serve now.
+                    .filter(|(next, _)| {
+                        next.pool == pool || pool_refusal(&g, &next.pool).is_none()
+                    });
+                if let Some(next) = next {
+                    count(
+                        &g.stats,
+                        &tally(&account.id),
+                        Some(StatusCode::TOO_MANY_REQUESTS),
+                    );
+                    (account, credential) = next;
+                    moved = true;
+                    continue;
                 }
             }
-            let fits = switchboard_core::Fits {
-                kind: Some(account.kind),
-                api_key_only,
-            };
-            let next = g
-                .store
-                .failover(provider, &pool, &account.id, fits, now())
-                .ok()
-                .flatten()
-                // SB-401: never onto an account whose home group may not serve now.
-                .filter(|(next, _)| next.pool == pool || pool_refusal(&g, &next.pool).is_none());
-            if let Some(next) = next {
+            // SB-453 (DEC-0031): the pay-per-token group's key was refused for its rate limit,
+            // which did no work and charged nothing, and no other account takes the request:
+            // when the provider asks for a short wait, the proxy waits it out and sends the same
+            // request again on the same key, before any byte reached the client, its group's
+            // switch and ceiling checked again first.
+            if let Some(wait) =
+                tokens_wait(&g, provider, &account, upstream.headers(), tries, waited)
+            {
+                if limit_recorded.as_deref() != Some(account.id.as_str()) {
+                    let _ = g.store.record("request", Some(&account.id), "rate_limited");
+                    limit_recorded = Some(account.id.clone());
+                }
                 count(
                     &g.stats,
                     &tally(&account.id),
                     Some(StatusCode::TOO_MANY_REQUESTS),
                 );
-                (account, credential) = next;
-                moved = true;
+                drop(upstream);
+                tokio::time::sleep(Duration::from_secs(wait.unsigned_abs())).await;
+                waited = waited.saturating_add(wait);
+                let again = pool_refusal(&g, &pool).or_else(|| {
+                    (account.pool != pool)
+                        .then(|| pool_refusal(&g, &account.pool))
+                        .flatten()
+                });
+                if let Some((status, message)) = again {
+                    return error(status, message);
+                }
                 continue;
             }
-            break (upstream, true);
+            let journaled = limit_recorded.as_deref() == Some(account.id.as_str());
+            break (upstream, journaled);
         }
         break (upstream, false);
     };

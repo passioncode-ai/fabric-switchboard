@@ -58,10 +58,64 @@ pub fn switchable(id: &str) -> bool {
     SWITCHABLE.contains(&id)
 }
 
+/// SB-515: how one agent runs with full access, from its catalog entry's `full_access`: the
+/// arguments and environment that skip its permission prompts, and the arguments that already
+/// name a mode (a caller passing one keeps its own). The one place this is written; every launch
+/// reads it through `launch::full_access`.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct FullAccess {
+    pub args: Vec<String>,
+    pub env: BTreeMap<String, String>,
+    pub named: Vec<String>,
+}
+
+/// SB-515: the agent's full-access arguments and environment, or none when the catalog names
+/// none for it. Read once from the embedded catalog.
+pub fn full_access(id: &str) -> Option<&'static FullAccess> {
+    static ALL: std::sync::OnceLock<BTreeMap<String, FullAccess>> = std::sync::OnceLock::new();
+    ALL.get_or_init(|| {
+        let strings = |v: &Value| -> Vec<String> {
+            v.as_array()
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|x| x.as_str().map(str::to_owned))
+                        .collect()
+                })
+                .unwrap_or_default()
+        };
+        catalog()["agents"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|a| {
+                let access = a.get("full_access")?;
+                Some((
+                    a["id"].as_str()?.to_owned(),
+                    FullAccess {
+                        args: strings(&access["args"]),
+                        env: access["env"]
+                            .as_object()
+                            .map(|m| {
+                                m.iter()
+                                    .filter_map(|(k, v)| {
+                                        v.as_str().map(|v| (k.clone(), v.to_owned()))
+                                    })
+                                    .collect()
+                            })
+                            .unwrap_or_default(),
+                        named: strings(&access["named"]),
+                    },
+                ))
+            })
+            .collect()
+    })
+    .get(id)
+}
+
 /// SB-82 D-6: how an agent Switchboard launches asks before it acts, weakest first. Claude Code
 /// runs under the operator's own settings and Codex under its defaults, both asking for
-/// approval; Kimi Code (`kimi -p`), Hermes and OpenCode, as launched now, ask for none, and so
-/// does any agent this list does not name.
+/// approval; Kimi Code, Hermes and OpenCode ask for none (with the person's `ask`, SB-515, they
+/// run in their own default modes), and so does any agent this list does not name.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Containment {
     None,
@@ -361,6 +415,54 @@ mod tests {
             }
         }
         assert!(ids.contains("hermes") && ids.contains("claude-code") && ids.contains("codex"));
+    }
+
+    /// SB-515: every agent Switchboard hands work to says how it runs with full access, and each
+    /// entry names its own arguments as a mode, so a caller passing them is not given them twice.
+    #[test]
+    fn every_switchable_agent_says_how_it_runs_with_full_access() {
+        for id in SWITCHABLE {
+            let access = full_access(id).unwrap_or_else(|| panic!("{id}: no full_access"));
+            assert!(
+                !access.args.is_empty() || !access.env.is_empty(),
+                "{id}: full_access is empty"
+            );
+        }
+        for a in catalog()["agents"].as_array().unwrap() {
+            let id = a["id"].as_str().unwrap();
+            let Some(access) = full_access(id) else {
+                assert!(a.get("full_access").is_none(), "{id}");
+                continue;
+            };
+            assert!(
+                a["full_access"]["checked"]
+                    .as_str()
+                    .is_some_and(|s| !s.is_empty()),
+                "{id}: say where the flag was checked"
+            );
+            assert!(
+                access.args.is_empty()
+                    || access.args.iter().any(|arg| access
+                        .named
+                        .iter()
+                        .any(|n| arg == n || arg.starts_with(&format!("{n}=")))),
+                "{id}: its own arguments name no mode"
+            );
+            for name in access.env.keys() {
+                assert!(
+                    !name.is_empty()
+                        && name
+                            .bytes()
+                            .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit() || b == b'_'),
+                    "{id}: {name}"
+                );
+            }
+        }
+        assert_eq!(full_access("kimi-code").unwrap().args, ["--auto"]);
+        assert_eq!(full_access("hermes").unwrap().args, ["--yolo"]);
+        assert_eq!(full_access("opencode").unwrap().args, ["--auto"]);
+        assert_eq!(full_access("goose").unwrap().env["GOOSE_MODE"], "auto");
+        assert!(full_access("gemini-cli").is_none());
     }
 
     #[test]

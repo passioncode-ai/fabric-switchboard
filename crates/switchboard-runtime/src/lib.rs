@@ -13,6 +13,7 @@ pub mod attribution;
 pub(crate) mod balancing;
 mod bindings;
 mod blocking;
+pub mod boot_resume;
 pub mod bugs;
 pub mod capacity;
 mod carry;
@@ -45,6 +46,8 @@ pub mod launch;
 pub mod launch_keys;
 pub mod launches;
 mod limits;
+pub mod live_ledger;
+pub mod login_path;
 pub mod machine_proof;
 pub mod machine_sessions;
 pub mod machines;
@@ -83,11 +86,16 @@ mod statistics;
 pub mod stop_spool;
 pub mod suggest;
 pub mod targets;
+pub mod token_rotation;
 pub mod uninstall;
+mod usage_budget;
 mod usage_gate;
+pub mod usage_mode;
 pub mod vault_choice;
 pub mod vesta;
 pub mod walks;
+pub mod watchdog;
+pub mod watchdog_job;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{
@@ -204,6 +212,21 @@ pub enum Operation {
         #[serde(default)]
         on: Option<bool>,
     },
+    /// SB-518 (DEC-0032): how quota figures are kept current (`smart`, `timer`, `on_demand`);
+    /// `mode` absent reads the setting.
+    UsageMode {
+        #[serde(default)]
+        mode: Option<String>,
+    },
+    /// SB-510: the watchdog: `on` sets the switch (and puts in or takes out the system job where
+    /// this owner installed it), `run` runs one check now; neither reads the switch, the job and
+    /// the last report.
+    Watchdog {
+        #[serde(default)]
+        on: Option<bool>,
+        #[serde(default)]
+        run: bool,
+    },
     /// A field left out keeps its saved value. Both present serializes as before, so an owner
     /// of an earlier version still understands the full form.
     Update {
@@ -278,8 +301,9 @@ pub enum Operation {
         #[serde(default)]
         in_place: bool,
         /// SB-440: in place for the hand-over queue (`ContinueToConsole`, the automatic fallback),
-        /// where the script may wait for a console; set only inside the owner, never sent.
-        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        /// where the script may wait for a console; set only inside the owner, never sent nor read
+        /// from the wire (SB-449).
+        #[serde(skip)]
         queued: bool,
     },
     /// SB-247: Fabric's start of the default agent, with no person, on a workflow Fabric opened
@@ -529,6 +553,12 @@ pub enum Operation {
         #[serde(default)]
         dry_run: bool,
     },
+    /// SB-450: continuing the sessions a restart of this computer cut: the switch (`on` changes
+    /// it), this boot, the last look before it and what was continued.
+    BootResume {
+        #[serde(default)]
+        on: Option<bool>,
+    },
     /// SB-388: close the newer of two processes holding one Claude Code session
     /// (`duty::close_copy`); the older keeps working.
     SessionCloseCopy {
@@ -695,6 +725,11 @@ pub enum Operation {
         limit: Option<usize>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         before: Option<i64>,
+        /// SB-423: only these launches (1 to 64), each read by its id (`launches::by_ids`), with
+        /// `missing` naming the ids that have no record. Sent only when asked, so an owner from
+        /// before it reads every other `launches`; the CLI asks such an owner one id at a time.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        launch_ids: Option<Vec<String>>,
     },
     /// Creates (`pool: None`) or updates a project: its name, folders and whole account set.
     SaveProject {
@@ -1160,6 +1195,9 @@ pub enum Operation {
         /// SB-390: with `via: anthropic`, the name of the saved Anthropic key.
         #[serde(default)]
         key: Option<String>,
+        /// SB-535: with `via: anthropic`, the reasoning level Hermes runs at (`--reasoning`).
+        #[serde(default)]
+        effort: Option<String>,
     },
     /// SB-390: the saved Anthropic keys by name, never a value.
     AnthropicKeys,
@@ -1423,6 +1461,9 @@ pub struct Runtime {
     /// SB-183: the person's home for the terminal hook's start files; set only by the installed
     /// app (`enable_shell_hook`), so a test, `serve` or a development build never writes one.
     shell_hook: Mutex<Option<shell::install::Host>>,
+    /// SB-510: where the watchdog's system job lives; set only by the installed app
+    /// (`enable_watchdog`), so a test, `serve` or a development build never installs one.
+    watchdog_job: Mutex<Option<watchdog_job::Host>>,
     /// Whether a group bound to an organization existed at the last look, for the hook's
     /// default (written when the first appears, taken out when the last leaves).
     shell_present: Mutex<Option<bool>>,
@@ -1581,6 +1622,8 @@ impl Runtime {
         let limits = limits::LimitState::kept_in(root.join(limits::EVIDENCE_FILE), monitor::now());
         let statistics = statistics::Statistics::load(&root);
         let own_sign_in_off = own_sign_in::is_off(&root);
+        // SB-518 (DEC-0032): the person's usage mode, read once here and again when changed.
+        store.set_usage_mode(usage_mode::read(&root));
         Ok(Arc::new(Self {
             store,
             proxy,
@@ -1619,6 +1662,7 @@ impl Runtime {
             balancing: Mutex::new(BalanceWatch::default()),
             usage_gate,
             shell_hook: Mutex::new(None),
+            watchdog_job: Mutex::new(None),
             shell_present: Mutex::new(None),
             backup_key: Mutex::new(None),
             backup_folder: Mutex::new(None),
@@ -1705,6 +1749,8 @@ impl Runtime {
                 | Operation::Capacity { .. }
                 // SB-384: the process table and its own two small files.
                 | Operation::Duty { .. }
+                // SB-450: its own small files.
+                | Operation::BootResume { .. }
                 // SB-388: the process table, the session files and one signal.
                 | Operation::SessionCloseCopy { .. }
                 // SB-379: the process table, session files and the day's launch records.
@@ -1726,6 +1772,8 @@ impl Runtime {
                 // W3 part 2: two small files of its own.
                 | Operation::Bugs
                 | Operation::Health
+                // SB-510: its own two small files, the control port and the system job.
+                | Operation::Watchdog { .. }
                 // SB-364: the snapshot and the launch records, each its own small file.
                 | Operation::GivenAccounts
                 // SB-359: Keychain reads of Claude Code's items; the store is only read.
@@ -2510,6 +2558,17 @@ impl Runtime {
         if new.is_empty() {
             return;
         }
+        // SB-452: requests served by another group than their own since the last pass.
+        let mismatched: u64 = new.values().map(|t| t.mismatched).sum();
+        if mismatched > 0 {
+            oplog::event(
+                "proxy_group_mismatch",
+                &[(
+                    "count",
+                    oplog::Field::Number(i64::try_from(mismatched).unwrap_or(i64::MAX)),
+                )],
+            );
+        }
         let Ok(snapshot) = self.store.snapshot() else {
             self.statistics.absorb(new);
             return;
@@ -2940,6 +2999,41 @@ impl Runtime {
             },
             || shell::install::Host::process(shell::install::hook_cli()),
         );
+    }
+    /// SB-510: the installed app's owner of the app's own data folder puts the watchdog's system
+    /// job in place (or takes it out while the person turned the watchdog off). The app calls it
+    /// only from an installed build; `serve`, a development build and a test never do.
+    pub fn enable_watchdog(self: &Arc<Self>) {
+        self.enable_watchdog_when(
+            || {
+                std::env::current_exe()
+                    .and_then(|exe| exe.canonicalize())
+                    .is_ok_and(|exe| {
+                        shell::install::installed_app(&exe, dirs::home_dir().as_deref())
+                    })
+            },
+            || watchdog_job::Host::process(shell::install::hook_cli()),
+        );
+    }
+    /// `enable_watchdog` with the installed check and the job's host given: the data folder is
+    /// checked first, then `installed`, and only then is `host` asked for.
+    pub(crate) fn enable_watchdog_when(
+        &self,
+        installed: impl FnOnce() -> bool,
+        host: impl FnOnce() -> Option<watchdog_job::Host>,
+    ) {
+        if !shell::install::is_default_root(&self.root) || !installed() {
+            return;
+        }
+        let Some(host) = host() else {
+            return;
+        };
+        let on = !watchdog::is_off(&self.root);
+        let outcome = blocking::run(|| watchdog_job::apply(&host, on));
+        oplog::event("watchdog_job", &[("outcome", oplog::Field::Code(outcome))]);
+        if let Ok(mut slot) = self.watchdog_job.lock() {
+            *slot = Some(host);
+        }
     }
     /// `enable_shell_hook` with the installed check and the person's home given: the data
     /// folder is checked first, then `installed`, and only then is `host` asked for.
@@ -3581,6 +3675,8 @@ async fn start_proxy(root: &Path, store: Arc<Store>) -> Result<ProxyHandle, Stri
             "proxy_rotated",
             &[("reason", oplog::Field::Code("port_taken"))],
         );
+        // SB-509: the sessions started before it keep the old token; Needs attention lists them.
+        token_rotation::record(root, monitor::now());
     }
     let salts = read_pool_salts(root);
     proxy.set_pool_salts(salts.clone());
@@ -3767,6 +3863,11 @@ impl Owner {
                 &[("count", oplog::Field::Number(adopted as i64))],
             );
         }
+        // SB-455: the person's login PATH, asked of their login shell once (bounded, off the start
+        // path), so the sessions this owner starts find Homebrew's tools.
+        if native_sources {
+            login_path::warm();
+        }
         // SB-87: sign-in homes an earlier owner forgot; off the start path (it may ask `ps` and
         // Keychain, each bounded), and only the real owner of its data folder does it.
         if native_sources {
@@ -3814,6 +3915,8 @@ impl Owner {
         if native_sources && default_store {
             bugs::begin(&runtime.root, monitor::now());
         }
+        // SB-549: a Keychain refusal an older version recorded may no longer hold.
+        item_size::forget_older(&runtime.root, env!("CARGO_PKG_VERSION"));
         let monitor = monitor::MonitorHandle::start(&runtime, native_sources);
         oplog::event(
             "owner_started",
@@ -3868,6 +3971,8 @@ impl Owner {
         digest::save_open(&runtime.root);
         let _ = runtime.store.flush();
         drop(transaction);
+        // SB-450: the sessions this owner last saw live stay the ones a restart would cut.
+        boot_resume::owner_stopped(&runtime.root, monitor::now());
         // W3 part 2: this run ended through its drain; the next start finds no crash.
         bugs::end(&runtime.root);
         let millis = started.elapsed().as_millis() as u64;
@@ -4885,6 +4990,8 @@ pub async fn execute_offline(root: PathBuf, operation: Operation) -> Result<Valu
         root.clone(),
         switchboard_core::open_vault(&root, false)?,
     )?);
+    // SB-518: a person's check from the offline CLI follows the person's usage mode too.
+    store.set_usage_mode(usage_mode::read(&root));
     execute(store, &root, None, from_outside(operation)).await
 }
 /// How long a command waits for the store when another process holds it (SB-181): an update
@@ -5423,6 +5530,8 @@ fn dispatch_remote(
     let start = remote_dispatch::Start {
         launch_id: &launch_id,
         provider,
+        // SB-515: the run's mode goes with it (before, only the record here kept it).
+        permissions,
         identity: &identity,
         request_body: &body,
         workflow: workflow_id,
@@ -5501,6 +5610,7 @@ fn attention_report(
     root: &Path,
     store: &Store,
     refresh_state: &refresh::RefreshState,
+    owner_running: bool,
 ) -> Result<Value, String> {
     let snapshot = store.snapshot()?;
     let sign_in = refresh_state.sign_in_known(store);
@@ -5525,6 +5635,10 @@ fn attention_report(
         // SB-417: the board starts waiting since the pool last admitted one, with no cutoff.
         refusals: dispatch_refusals::waiting(root).as_ref(),
         too_large: &item_size::read(root),
+        // SB-509: read only while the proxy's token changed and sessions may be left on the old.
+        rotated: token_rotation::sessions(root, &snapshot).as_ref(),
+        // SB-510: the watchdog's current findings; the owner's own codes only offline.
+        watchdog: &watchdog::current(root, now, owner_running).unwrap_or_default(),
         now,
     }))
 }
@@ -5703,20 +5817,35 @@ async fn execute(
             Ok(blocking::run(move || bugs::list(&root, monitor::now())))
         }
         Operation::Health => {
-            let attention = attention_report(root, &store, refresh_state)?;
+            let attention = attention_report(root, &store, refresh_state, runtime.is_some())?;
             let bugs = {
                 let root = root.to_owned();
                 blocking::run(move || bugs::list(&root, monitor::now()))
             };
+            let watchdog = {
+                let host = runtime.and_then(|r| r.watchdog_job.lock().ok().and_then(|h| h.clone()));
+                let root = root.to_owned();
+                let running = runtime.is_some();
+                blocking::run(move || {
+                    let host = host.or_else(|| {
+                        shell::install::is_default_root(&root)
+                            .then(|| watchdog_job::Host::process(None))
+                            .flatten()
+                    });
+                    let installed = host.is_some_and(|h| watchdog_job::state(&h) == "installed");
+                    watchdog::watched(&root, monitor::now(), running, installed)
+                })
+            };
             Ok(health::report(&health::Inputs {
                 attention: &attention,
                 bugs: &bugs,
+                watchdog: &watchdog,
                 owner_running: runtime.is_some(),
                 version: env!("CARGO_PKG_VERSION"),
                 now: monitor::now(),
             }))
         }
-        Operation::Attention => attention_report(root, &store, refresh_state),
+        Operation::Attention => attention_report(root, &store, refresh_state, runtime.is_some()),
         Operation::MonitorStatus => Ok(json!({
             "running": runtime.is_some(), "interval_seconds": monitor::INTERVAL_SECONDS, "idle_interval_seconds": switchboard_core::CHECK_IDLE_SECONDS,
             "decisions": runtime.and_then(|r| r.monitor_decisions.lock().ok().map(|v| v.clone())).unwrap_or_default(),
@@ -6346,6 +6475,7 @@ async fn execute(
             via: AgentVia::Anthropic,
             model,
             key,
+            effort,
             ..
         } => {
             // SB-390: no ceiling counts an Anthropic key (Anthropic offers no read of its spend).
@@ -6357,6 +6487,7 @@ async fn execute(
                     &agent,
                     &key,
                     model.as_deref(),
+                    effort.as_deref(),
                     &working_directory,
                     launch::start_terminal,
                 )
@@ -6756,9 +6887,16 @@ async fn execute(
                     observatory,
                     previous_provider: plan.from_provider.clone(),
                 };
-                let launched =
-                    kimi::launch_continuation(root, &store, &id, &directory, &resumed, start)
-                        .map_err(|e| continuation::launch_failed(&offer, &e))?;
+                // SB-449: in place, the caller (or the hand-over queue) runs Kimi's script too.
+                let handed = if in_place {
+                    launch::Handed::for_continue(queued)
+                } else {
+                    launch::Handed::Terminal
+                };
+                let launched = kimi::launch_continuation(
+                    root, &store, &id, &directory, &resumed, start, handed,
+                )
+                .map_err(|e| continuation::launch_failed(&offer, &e))?;
                 return Ok(json!({
                     "script": if in_place { launched["script"].clone() } else { Value::Null },
                     "message": "Terminal launch requested; the Kimi Code session accepts the handoff itself. Provider response is not yet verified.",
@@ -6806,11 +6944,7 @@ async fn execute(
                     &directory,
                     &resumed,
                     // SB-440: a queued script may wait for a console; the CLI runs its own at once.
-                    if queued {
-                        launch::Handed::Terminal
-                    } else {
-                        launch::Handed::Caller
-                    },
+                    launch::Handed::for_continue(queued),
                 )
                 .map_err(|e| continuation::launch_failed(&offer, &e))?;
                 (tools, Some(script))
@@ -6939,7 +7073,12 @@ async fn execute(
                 }
             }
             let pool = pool.unwrap_or_else(|| "default".into());
-            let program = program.unwrap_or_else(|| account_send::REMOTE_DEFAULT.into());
+            // SB-475: the switchboard the machine is known to run (the newest move or run there),
+            // as every other call to it does; the macOS app's only for a machine never reached. A
+            // Linux machine runs the .deb's `/usr/bin/switchboard`, and the macOS default made
+            // every move there fail as if the machine had not answered.
+            let (program, remote_data_dir) =
+                targets::program_for(root, &to, program, remote_data_dir);
             let remote = account_send::Program {
                 path: &program,
                 data_dir: remote_data_dir.as_deref(),
@@ -7231,9 +7370,28 @@ async fn execute(
                         .into_iter()
                         .map(|(id, _)| id),
                 );
-                let resumable =
-                    resumable::recent(&root, session_watch::now() - resumable::WINDOW_SECONDS);
                 let now = session_watch::now();
+                let mut resumable = resumable::recent(&root, now - resumable::WINDOW_SECONDS);
+                // SB-508: a session the person started that ended outside Switchboard in the
+                // last day, from the ledger; only when the process table was read, so a live
+                // session is never listed as ended (review round 3 of PR #852). One Switchboard
+                // closed on purpose keeps its own line. The newest line of a session wins.
+                if session_watch::table_read(&tree) {
+                    let since = now - session_watch::WINDOW_SECONDS;
+                    let closed =
+                        session_watch::closed_on_purpose(&resumable, &duty::journal(&root), since);
+                    // A session a Switchboard launch or boot resume names has its own line and
+                    // its own continuation (SB-509, SB-450).
+                    let mut launched: HashSet<String> = tree["launches"]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .filter_map(|l| l["session_id"].as_str().map(str::to_owned))
+                        .collect();
+                    launched.extend(boot_resume::named_this_boot(&root));
+                    resumable.extend(live_ledger::ended_rows(&root, now, &closed, &launched));
+                    resumable.sort_by_key(|r| std::cmp::Reverse(r["at"].as_i64().unwrap_or(0)));
+                }
                 let monitors: HashMap<String, Value> = tree["live"]
                     .as_array()
                     .into_iter()
@@ -7324,6 +7482,15 @@ async fn execute(
                     answer["check"] = duty::check(&root, now, !run || dry_run)?;
                 }
                 Ok(answer)
+            })
+        }
+        Operation::BootResume { on } => {
+            let root = root.to_owned();
+            blocking::run(move || {
+                if let Some(on) = on {
+                    boot_resume::save(&root, &boot_resume::Settings { on })?;
+                }
+                boot_resume::status(&root)
             })
         }
         Operation::SessionCloseCopy { session_id, pid } => {
@@ -7545,6 +7712,51 @@ async fn execute(
             launch::clean_account(root, &id)?;
             store.remove_delegated(&id, &sender_key)?;
             Ok(json!({"removed": true}))
+        }
+        Operation::UsageMode { mode } => {
+            let value = match mode {
+                Some(mode) => usage_mode::set(root, &mode)?,
+                None => usage_mode::status(root),
+            };
+            store.set_usage_mode(usage_mode::read(root));
+            Ok(value)
+        }
+        Operation::Watchdog { on, run } => {
+            let host = runtime.and_then(|r| r.watchdog_job.lock().ok().and_then(|h| h.clone()));
+            let mut job = Value::Null;
+            if let Some(on) = on {
+                watchdog::set(root, on)?;
+                let outcome = match &host {
+                    Some(host) => {
+                        let host = host.clone();
+                        blocking::run(move || watchdog_job::apply(&host, on))
+                    }
+                    // No installed owner here: off still takes out the job the app's own data
+                    // folder installed; on leaves it to the app's next start.
+                    None if !on && shell::install::is_default_root(root) => blocking::run(|| {
+                        watchdog_job::Host::process(None)
+                            .map_or("absent", |h| watchdog_job::apply(&h, false))
+                    }),
+                    None => "not_installed_here",
+                };
+                oplog::event("watchdog_job", &[("outcome", oplog::Field::Code(outcome))]);
+                job = json!(outcome);
+            }
+            let mut value = json!({});
+            if run {
+                value["run"] = watchdog::once(root, monitor::now()).await;
+            }
+            let host = host.or_else(|| {
+                shell::install::is_default_root(root)
+                    .then(|| watchdog_job::Host::process(None))
+                    .flatten()
+            });
+            let mut answer = watchdog::status(root, host.as_ref(), monitor::now());
+            answer["job_change"] = job;
+            if run {
+                answer["run"] = value["run"].take();
+            }
+            Ok(answer)
         }
         Operation::OwnSignIn { on } => {
             let value = match on {
@@ -9109,12 +9321,32 @@ async fn execute(
             launch_id,
             limit,
             before,
+            launch_ids,
         } => {
             let snapshot = store.snapshot()?;
             // The states may ask `kill -0`/`ps`: never on an async worker (SB-103).
             match launch_id {
+                // SB-423 (FD-316): the named launches alone, each read by its id.
+                None if launch_ids.is_some() => {
+                    let ids = launches::wanted_ids(&launch_ids.unwrap_or_default())?;
+                    let (found, missing) = crate::blocking::run(|| launches::by_ids(root, &ids));
+                    let found: Vec<Value> = found
+                        .into_iter()
+                        .map(|r| label_session(&snapshot, r))
+                        .collect();
+                    Ok(
+                        json!({"launches": found, "total": found.len(), "next_before": null,
+                        "missing": missing}),
+                    )
+                }
                 Some(id) => {
-                    let mut shown = crate::blocking::run(|| launches::show(root, &id))?;
+                    let mut shown = crate::blocking::run(|| {
+                        // SB-451: the record names its process's own session before it is shown.
+                        if !cfg!(test) {
+                            session_watch::refresh(root, session_watch::now());
+                        }
+                        launches::show(root, &id)
+                    })?;
                     shown["launch"] = label_session(&snapshot, shown["launch"].take());
                     Ok(shown)
                 }
@@ -10421,6 +10653,7 @@ mod owner_tests {
             via: AgentVia::Proxy,
             model: None,
             key: None,
+            effort: None,
         };
         assert_eq!(
             runtime.execute(launch("goose")).await.unwrap_err(),
@@ -11066,6 +11299,74 @@ mod owner_tests {
         assert!(!shell::install::record_path(root.path()).exists());
         assert!(runtime.shell_hook_notice().is_none());
         drop(work);
+    }
+
+    /// SB-510: an owner over a data folder that is not the app's own never installs the
+    /// watchdog's job, whatever counts as installed; the switch and a run go through the
+    /// operation, and a run answers with the report it wrote.
+    #[tokio::test]
+    async fn the_watchdog_job_is_never_installed_from_another_data_folder() {
+        let root = tempfile::tempdir().unwrap();
+        let runtime = fixtures::runtime(root.path(), signed_out, activates).await;
+        let asked = std::sync::atomic::AtomicBool::new(false);
+        runtime.enable_watchdog_when(
+            || true,
+            || {
+                asked.store(true, std::sync::atomic::Ordering::SeqCst);
+                None
+            },
+        );
+        assert!(!asked.load(std::sync::atomic::Ordering::SeqCst));
+        assert!(runtime.watchdog_job.lock().unwrap().is_none());
+        let status = runtime
+            .execute(Operation::Watchdog {
+                on: None,
+                run: false,
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            (status["on"].clone(), status["job"].clone()),
+            (json!(true), json!("unknown"))
+        );
+        let off = runtime
+            .execute(Operation::Watchdog {
+                on: Some(false),
+                run: false,
+            })
+            .await
+            .unwrap();
+        assert_eq!(off["on"], false);
+        assert_eq!(off["job_change"], "not_installed_here");
+        runtime
+            .execute(Operation::Watchdog {
+                on: Some(true),
+                run: false,
+            })
+            .await
+            .unwrap();
+        // A run beside an owner that has just started: no finding about the owner yet.
+        let run = bugs::Run {
+            pid: std::process::id(),
+            started_at: monitor::now(),
+            version: env!("CARGO_PKG_VERSION").into(),
+            clean: false,
+        };
+        std::fs::write(
+            root.path().join(bugs::RUN_FILE),
+            serde_json::to_vec(&run).unwrap(),
+        )
+        .unwrap();
+        let ran = runtime
+            .execute(Operation::Watchdog {
+                on: None,
+                run: true,
+            })
+            .await
+            .unwrap();
+        assert_eq!(ran["run"]["checked"], true);
+        assert!(ran["report"]["checked_at"].is_i64());
+        assert_eq!(ran["current"], true);
     }
 
     /// SB-183 (node A-3): the data-folder guard holds on its own. Even when the app counts as
@@ -14748,6 +15049,14 @@ mod usage_gate_tests {
         while runtime.usage_gate.held(&a.id, monitor::now()) {
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         }
+        // SB-518: the provider stays held for at least 900 s after the 429, whatever the
+        // account's own wait; this test is about the account's, so the provider's is ended here.
+        assert_eq!(
+            usage(&runtime, &a.id).await.unwrap_err(),
+            switchboard_proxy::USAGE_RATE_LIMITED
+        );
+        assert_eq!(up.calls.load(Ordering::SeqCst), 1);
+        runtime.usage_gate.budget.succeeded(Provider::Claude);
         assert_eq!(usage(&runtime, &a.id).await.unwrap()["used_percent"], 42.0);
         assert_eq!(up.calls.load(Ordering::SeqCst), 2);
         assert!(
@@ -14821,6 +15130,13 @@ mod usage_gate_tests {
         let snapshot = runtime.store.snapshot().unwrap();
         assert!(snapshot.accounts[0].usage_health.is_none());
         up.status.store(200, Ordering::SeqCst);
+        // SB-518: the provider's own hold covers every sign-in from this address; once it is
+        // over, the new sign-in is checked though the old token's wait still runs.
+        assert_eq!(
+            usage(&runtime, &a.id).await.unwrap_err(),
+            switchboard_proxy::USAGE_RATE_LIMITED
+        );
+        runtime.usage_gate.budget.succeeded(Provider::Claude);
         assert_eq!(usage(&runtime, &a.id).await.unwrap()["used_percent"], 42.0);
         assert_eq!(up.calls.load(Ordering::SeqCst), 2);
     }
@@ -15298,6 +15614,7 @@ mod launch_record_tests {
                 launch_id: None,
                 limit: None,
                 before: None,
+                launch_ids: None,
             })
             .await
             .unwrap();
@@ -15321,6 +15638,7 @@ mod launch_record_tests {
                 launch_id: Some(id.clone()),
                 limit: None,
                 before: None,
+                launch_ids: None,
             })
             .await
             .unwrap();

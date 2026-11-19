@@ -2,7 +2,7 @@
 // exercise them directly. main.ts owns rendering; these functions own decisions.
 import type { BalanceStatus, FeedEntry, FeedStatus, ShellHookNotice, ShellHookStatus, Onboarding, OnboardStep, ChainExecutor, ChainScope, ChainStepView, Placement } from './types';
 import type { SessionGroup, SessionRow, MachineReadStatus } from './types';
-import type { Machine, MachineCopy, RemoteRead, Attention, AttentionItem, AttentionReason, AttentionWindow, Event, EventsPage, GivenAccount } from './types';
+import type { Machine, MachineCopy, MachineRead, RemoteRead, Target, RemoteStatus, Attention, AttentionItem, AttentionReason, AttentionWindow, WatchdogCode, Event, EventsPage, GivenAccount } from './types';
 import type { Account, AccountLimit, Organization, OrganizationGroupOffer, Project, AgentRow, AgentSetup, OpenrouterCredit, RecommendedModel, SessionInfo, ProjectRule, RotationPolicy, UpdateStatus, UpdateOwner, DebNotice, Usage, UsageWindow } from './types';
 import { t, plural } from './i18n';
 
@@ -435,12 +435,13 @@ export function groupSeatsEndedText(_snapshot: OrgSnapshot, group: { name: strin
  * the session list on Activity (SB-104), the ceilings on Agents and API keys (C-7, local
  * `spend.json`), and the PassionCode.ai status on Organizations (SB-227: a local file read, so a
  * mark a background read made shows without reopening the page). */
-export type BackgroundRead = 'onboarding' | 'sessions' | 'ceilings' | 'passioncode' | 'session_rows';
+export type BackgroundRead = 'onboarding' | 'sessions' | 'ceilings' | 'passioncode' | 'session_rows' | 'machines';
 export function backgroundReads(page: string, tokensGroup = false): BackgroundRead[] {
   // SB-401: Groups reads the ceilings again while the pay-per-token group shows its spending.
-  if (page === 'projects') return tokensGroup ? ['ceilings'] : [];
+  // SB-550: Accounts and Groups read the other machines' last read (a file) every minute.
+  if (page === 'projects') return tokensGroup ? ['ceilings', 'machines'] : ['machines'];
   if (page === 'orgs') return ['onboarding', 'passioncode'];
-  if (page === 'accounts') return ['onboarding'];
+  if (page === 'accounts') return ['onboarding', 'machines'];
   if (page === 'activity') return ['sessions'];
   if (page === 'sessions') return ['session_rows'];
   if (page === 'agents' || page === 'tokens') return ['ceilings'];
@@ -532,8 +533,8 @@ export function accountMatches(account: Pick<Account, 'id' | 'label' | 'external
   return words.every((word) => text.includes(word));
 }
 
-const ATTENTION_REASONS: AttentionReason[] = ['keychain_too_large', 'session_duplicate', 'session_stuck', 'session_gone', 'dispatch_refused', 'sign_in', 'seat_ended', 'renewal_refused', 'usage_failing', 'move_unknown', 'refused_there', 'key_outside_tokens', 'ceiling_question'];
-const ATTENTION_WINDOWS: AttentionWindow[] = ['sign_in', 'answer_ceiling', 'check_usage', 'open_machines', 'open_sessions', 'close_copy', 'dispatch_stop', 'open_capacity', 'move_tokens', 'none'];
+const ATTENTION_REASONS: AttentionReason[] = ['watchdog', 'keychain_too_large', 'token_rotated', 'session_duplicate', 'session_stuck', 'session_gone', 'session_continuable', 'dispatch_refused', 'sign_in', 'seat_ended', 'renewal_refused', 'usage_failing', 'move_unknown', 'refused_there', 'machine_unreachable', 'machine_health', 'machine_sessions', 'key_outside_tokens', 'ceiling_question'];
+const ATTENTION_WINDOWS: AttentionWindow[] = ['sign_in', 'answer_ceiling', 'check_usage', 'open_machines', 'open_sessions', 'close_copy', 'dispatch_stop', 'continue_session', 'restart_wave', 'open_capacity', 'move_tokens', 'none'];
 /**
  * WF-3 (SB-365): the answer of the `attention` command, kept to the fields the window knows. An
  * answer that is not one (an older owner without the command, a malformed item) is an empty list
@@ -548,8 +549,10 @@ export function attentionView(raw: unknown): Attention {
     const e = entry as Record<string, unknown>;
     const action = e.action && typeof e.action === 'object' ? e.action as Record<string, unknown> : null;
     if (!ATTENTION_REASONS.includes(e.reason as AttentionReason) || !action || !ATTENTION_WINDOWS.includes(action.window as AttentionWindow)) continue;
+    // SB-510: a watchdog finding this window does not know is left out, never shown blank.
+    if (e.reason === 'watchdog' && !WATCHDOG_CODES.includes(e.code as WatchdogCode)) continue;
     const provider = e.provider === 'claude' || e.provider === 'codex' ? e.provider : null;
-    items.push({ account_id: text(e.account_id), label: text(e.label), provider, pool: text(e.pool), reason: e.reason as AttentionReason, detail: text(e.detail) ?? '', since: typeof e.since === 'number' ? e.since : null, action: { tool: text(action.tool) ?? '', window: action.window as AttentionWindow, ...(action.if_gone === true ? { if_gone: true } : {}) }, session_id: text(e.session_id), ...(e.launch_id === undefined ? {} : { launch_id: text(e.launch_id) }), ...(typeof e.count === 'number' ? { count: e.count } : {}), ...(typeof e.freed === 'boolean' ? { freed: e.freed } : {}), ...(e.close === undefined ? {} : { close: closeOffer(e.close) }) });
+    items.push({ account_id: text(e.account_id), label: text(e.label), provider, pool: text(e.pool), reason: e.reason as AttentionReason, detail: text(e.detail) ?? '', since: typeof e.since === 'number' ? e.since : null, action: { tool: text(action.tool) ?? '', window: action.window as AttentionWindow, ...(action.if_gone === true ? { if_gone: true } : {}) }, session_id: text(e.session_id), ...(e.launch_id === undefined ? {} : { launch_id: text(e.launch_id) }), ...(typeof e.count === 'number' ? { count: e.count } : {}), ...(typeof e.freed === 'boolean' ? { freed: e.freed } : {}), ...(e.close === undefined ? {} : { close: closeOffer(e.close) }), ...(e.reason === 'watchdog' ? { code: e.code as WatchdogCode } : {}) });
   }
   return { count: items.length, items };
 }
@@ -563,20 +566,24 @@ function closeOffer(raw: unknown): AttentionItem['close'] {
 /**
  * SB-389: what a duplicate's item says and offers. A quiet copy is closed as before; when every
  * copy works, the older one waiting on a command of its own is offered by its pid, and the line
- * says that command ends with it; when every copy is answering nothing is offered.
+ * says that command ends with it. SB-472: when every copy is answering nothing can be closed
+ * without losing work, so the item offers no button (`label` null) and says when it will: a
+ * disabled button the person cannot press is never shown.
  */
-export function duplicateOffer(item: Pick<AttentionItem, 'session_id' | 'close'>): { line: string; label: string; pid: number | null; disabled: boolean } {
+export function duplicateOffer(item: Pick<AttentionItem, 'session_id' | 'close'>): { line: string; label: string | null; pid: number | null } {
   const close = item.close;
+  // Without its session id nothing here can close a copy: the line says what the person can do.
+  if (!item.session_id) return { line: t('Both copies of this session are working. Close one in its own window when it finishes.'), label: null, pid: null };
   if (close?.why === 'older') {
     const line = close.command_age !== null
       ? t('One session runs in two processes, and both are working. The older copy has been in one command for {age}; closing it ends that command.', { age: shortAge(close.command_age) })
       : t('One session runs in two processes, and both are working. Closing the older copy ends what it is doing.');
-    return { line, label: t('Close the older copy'), pid: close.pid, disabled: !item.session_id };
+    return { line, label: t('Close the older copy'), pid: close.pid };
   }
-  if (item.close === null && item.session_id) {
-    return { line: t('One session runs in two processes, and both are answering. Close one in its own window when it finishes.'), label: t('Close the quiet copy'), pid: null, disabled: true };
+  if (close === null) {
+    return { line: t('One session runs in two processes, and both are answering now. When one of them finishes its turn, this item offers to close it.'), label: null, pid: null };
   }
-  return { line: t('One session runs in two processes. Close the quiet copy so they do not work over each other.'), label: t('Close the quiet copy'), pid: null, disabled: !item.session_id };
+  return { line: t('One session runs in two processes. Close the quiet copy so they do not work over each other.'), label: t('Close the quiet copy'), pid: null };
 }
 /** WF-3: the accounts that need a person: those the list names, and those the monitor says must sign in again. */
 export function attentionAccounts(attention: Attention | null, signInRequired: readonly string[] = []): Set<string> {
@@ -614,6 +621,10 @@ export function dispatchStopLineText(line: { reason: string; folder: string | nu
     ? t('Stopped a board run in {folder}: it reached its deadline.', { folder })
     : t('Stopped a board run in {folder} at your request.', { folder });
 }
+/** SB-509: a board run given more time at its deadline because its log still grew. */
+export function dispatchExtendLineText(folder: string): string {
+  return t('Gave a board run in {folder} ten more minutes: it still writes its log.', { folder });
+}
 /** SB-417: the board's share when the person sets none: a quarter of the limit rounded up, never more than the limit (core `capacity::default_board_share`). */
 export function defaultBoardShare(limit: number): number {
   if (!Number.isInteger(limit) || limit < 1) return 1;
@@ -631,12 +642,28 @@ export function dispatchRefusedLine(item: { count?: number; freed?: boolean }): 
 export function dispatchStopNotice(state: string): string {
   return state === 'already_ended' ? t('The board run had already ended. Its end is recorded now.') : t('Stopped the board run.');
 }
+const WATCHDOG_CODES: WatchdogCode[] = ['owner_down', 'owner_not_answering', 'owner_stopped', 'act_unfinished', 'board_run_gone', 'duplicate_session'];
+/** SB-510: what the watchdog found, by its code; the window shows the owner's codes only when it reads them offline. */
+export function watchdogLine(code: WatchdogCode | undefined): string {
+  switch (code) {
+    case 'owner_down': return t('Switchboard stopped without finishing its work and has not started again. Open it.');
+    case 'owner_not_answering': return t('Switchboard is running but did not answer for five seconds. Quit it and open it again.');
+    case 'owner_stopped': return t('Switchboard is not running, so nothing switches accounts or watches sessions. Open it.');
+    case 'act_unfinished': return t("An act of the duty officer or a board run's stop was left half done more than 10 minutes ago.");
+    case 'board_run_gone': return t("A board run's process has been gone for over 30 minutes with no end recorded.");
+    case 'duplicate_session': return t('One session has run in two processes for over 15 minutes.');
+    default: return attentionReasonText('watchdog');
+  }
+}
 export function attentionReasonText(reason: AttentionReason): string {
   switch (reason) {
+    case 'watchdog': return t("Switchboard's watchdog found work left unfinished. Look at Sessions.");
     case 'keychain_too_large': return t("Claude Code's sign-in is too large to write to the Keychain safely, so Switchboard could not update it. Sign out of MCP servers you no longer use in Claude Code.");
     case 'session_duplicate': return t('One session runs in two processes. Close the quiet copy so they do not work over each other.');
     case 'session_stuck': return t('A board run has been quiet for 30 minutes. Look at it, or stop it.');
     case 'session_gone': return t("A board run's process is gone, but its end was not recorded. Stop the run to record it.");
+    case 'session_continuable': return t("A session's process ended without its end being recorded. Its history is here: continue it as the same session.");
+    case 'token_rotated': return t("The proxy's token changed when its port was taken, so sessions started before it are refused. Restart them.");
     case 'dispatch_refused': return t("Board runs are waiting: this computer's session limit refused them, and none has started since.");
     case 'sign_in': return t('Its sign-in ended. Sign in again to use it and see its usage.');
     case 'seat_ended': return t('Its seat in the organization ended. Sign in again if the seat was given back.');
@@ -644,6 +671,9 @@ export function attentionReasonText(reason: AttentionReason): string {
     case 'usage_failing': return t('Its usage check has failed for over an hour.');
     case 'move_unknown': return t('A move to another machine did not report how it ended. Check it under Other machines.');
     case 'refused_there': return t('The provider refused its copy on the other machine: it needs a sign-in there.');
+    case 'machine_unreachable': return t("This machine's Switchboard has not answered three reads in a row. Check that the machine is on and reachable over ssh.");
+    case 'machine_health': return t("This machine's Switchboard reports a failing health check. Open Other machines to see which.");
+    case 'machine_sessions': return t('Sessions on this machine need a look: a second copy, or a board run that has gone quiet.');
     case 'key_outside_tokens': return t('This Claude API key is outside the pay-per-token group, so no daily ceiling holds it. Move it there.');
     case 'ceiling_question': return t('A spending ceiling was reached and waits for your answer.');
   }
@@ -658,6 +688,8 @@ export function attentionActionLabel(window: AttentionWindow): string {
     case 'open_sessions': return t('Open sessions');
     case 'close_copy': return t('Close the quiet copy');
     case 'dispatch_stop': return t('Stop the run');
+    case 'continue_session': return t('Continue');
+    case 'restart_wave': return t('Restart sessions…');
     case 'open_capacity': return t('Open the session limit');
     case 'move_tokens': return t('Move to Pay-per-token keys');
     // SB-420: the fix is in Claude Code; no button.
@@ -2213,6 +2245,47 @@ export const MACHINE_POOL_PREFIX = 'machine_';
 export function machineOf(snapshot: { machines?: Machine[] }, account: Pick<Account, 'pool'>): Machine | undefined {
   return account.pool.startsWith(MACHINE_POOL_PREFIX) ? snapshot.machines?.find((m) => m.pool === account.pool) : undefined;
 }
+/**
+ * SB-473: the machines a move can go to, chosen rather than typed: the machine groups and every
+ * machine `switchboard targets` knows (moves and runs), each once (a name or alias of either),
+ * newest first, without the machine the account is on now. `detail` says how it is known.
+ */
+export function machineChoices(machines: readonly Machine[], targets: readonly Target[], exclude: Machine | null = null): { name: string; detail: string }[] {
+  const names = (m: Machine) => [m.name, ...(m.aliases ?? [])];
+  const skip = new Set(exclude ? names(exclude) : []);
+  const out: { name: string; detail: string; at: number }[] = [];
+  const seen = new Set<string>();
+  const add = (name: string, aliases: readonly string[], detail: string, at: number) => {
+    const all = [name, ...aliases];
+    if (all.some((n) => skip.has(n) || seen.has(n))) return;
+    all.forEach((n) => seen.add(n)); out.push({ name, detail, at });
+  };
+  for (const tgt of targets) {
+    const group = machines.find((m) => names(m).includes(tgt.machine) || (tgt.aliases ?? []).some((a) => names(m).includes(a)));
+    const how = group ? t('accounts live there') : (tgt.known_by ?? []).includes('dispatch') ? t('runs started there') : t('accounts moved there before');
+    add(tgt.machine, [...(tgt.aliases ?? []), ...(group ? names(group) : [])], how, tgt.last_at ?? 0);
+  }
+  for (const m of machines) add(m.name, m.aliases ?? [], t('accounts live there'), m.created_at);
+  return out.sort((a, b) => b.at - a.at || a.name.localeCompare(b.name)).map(({ name, detail }) => ({ name, detail }));
+}
+/**
+ * SB-474: the groups a move can join on the other machine, read from it: the default group first,
+ * then its groups by name (machine groups there left out), each with its organization and account
+ * count. `chosen` is the account's own group id when that machine has it, else the default group.
+ */
+export function remoteGroupChoices(status: RemoteStatus, prefer: string | null): { choices: [string, string][]; chosen: string } {
+  const count = (n: number) => plural(n, { one: '{n} account', other: '{n} accounts' });
+  const groups = status.groups.filter((g) => g.pool !== 'default' && !g.pool.startsWith(MACHINE_POOL_PREFIX))
+    .sort((a, b) => (a.name ?? a.pool).localeCompare(b.name ?? b.pool));
+  const defaults = status.groups.find((g) => g.pool === 'default');
+  const choices: [string, string][] = [['default', defaults ? `${t('Default group')} · ${count(defaults.accounts)}` : t('Default group')]];
+  for (const g of groups) choices.push([g.pool, [g.name ?? g.pool, g.organization, count(g.accounts)].filter(Boolean).join(' · ')]);
+  return { choices, chosen: prefer && choices.some(([pool]) => pool === prefer) ? prefer : 'default' };
+}
+/** SB-476: the accounts a move can take: a subscription sign-in on this computer that is on, or one on another machine; never one already on `to`. */
+export function movableAccounts<A extends Pick<Account, 'id' | 'kind' | 'enabled' | 'pool'>>(snapshot: { accounts: A[]; elsewhere?: Record<string, number>; machines?: Machine[] }, to: Machine | null = null): A[] {
+  return snapshot.accounts.filter((a) => a.kind === 'oauth' && (to ? a.pool !== to.pool : true) && (machineOf(snapshot, a) !== undefined || (a.enabled && snapshot.elsewhere?.[a.id] === undefined)));
+}
 /** Q2 item 6: the groups that hold accounts but have no folders (no group record): no session uses those accounts, so the Groups page names them. */
 export function foldlessGroups<A extends Pick<Account, 'id' | 'pool'>>(snapshot: { accounts: A[]; projects?: { pool: string }[] }): { pool: string; accounts: A[] }[] {
   const known = new Set((snapshot.projects ?? []).map((p) => p.pool));
@@ -2254,6 +2327,53 @@ export function remoteUsageLine(there: RemoteRead | null | undefined, machine: s
     return age < 60 ? t('Used {percent}% on {machine}, just now', { percent: Math.round(there.used_percent), machine }) : t('Used {percent}% on {machine}, {age} ago', { percent: Math.round(there.used_percent), machine, age: shortAge(age) });
   }
   return t('Not read on {machine} yet', { machine });
+}
+/**
+ * SB-550: what the usage cell of an account on another machine shows. Its bar, share and age come
+ * from the last read of its copy there (the age is that machine's own check, else the read); this
+ * computer's own older observation is shown only while there is no read there, and says so. The
+ * line under the bar names the machine and how fresh the read is, or why there is none.
+ */
+export interface RemoteUsageView { percent: number | null; at: number | null; tone: 'available' | 'low' | 'blocked' | 'failed' | 'stale' | 'unknown'; line: string; ownCheck: boolean }
+export function remoteUsageView(there: RemoteRead | null | undefined, own: { used: number | null; observedAt: number } | null, machine: string, nowSeconds: number): RemoteUsageView {
+  // Review of PR #861 (P2-4): once that machine answered a read, the row speaks from it alone,
+  // with or without a figure: this computer's own older check is never its state.
+  if (there && there.as_of !== null) {
+    const percent = typeof there.used_percent === 'number' ? there.used_percent : null;
+    const at = percent !== null ? there.observed_at ?? there.as_of : null;
+    const tone = there.usage_status === 'rejected' ? 'failed' : there.reason ? 'stale' : percent === null ? 'unknown' : percent >= 100 ? 'blocked' : percent >= LOW_AT_PERCENT ? 'low' : 'available';
+    if (there.reason || there.usage_status === 'rejected' || there.enabled === false) return { percent, at, tone, line: remoteUsageLine(there, machine, nowSeconds), ownCheck: false };
+    if (there.listed === false) return { percent: null, at: null, tone: 'unknown', line: t('Not in the account list of {machine} at its last read', { machine }), ownCheck: false };
+    if (percent === null) return { percent: null, at: null, tone: 'unknown', line: t('{machine} has no usage figure for it yet', { machine }), ownCheck: false };
+    const read = nowSeconds - there.as_of;
+    return { percent, at, tone, line: read < 60 ? t('On {machine}, read just now', { machine }) : t('On {machine}, read {age} ago', { machine, age: shortAge(read) }), ownCheck: false };
+  }
+  const line = remoteUsageLine(there, machine, nowSeconds);
+  if (own && own.used !== null) return { percent: own.used, at: own.observedAt, tone: 'stale', line: t("This computer's last check · {line}", { line }), ownCheck: true };
+  return { percent: null, at: null, tone: 'unknown', line, ownCheck: false };
+}
+/** SB-550: a failing health check of another machine, in words; an unknown one by its id. */
+export function healthCheckText(id: string): string {
+  switch (id) {
+    case 'owner': return t('its Switchboard is not running');
+    case 'crashes': return t('it crashed in the last day');
+    default: return id;
+  }
+}
+/** SB-550: what the last read of a machine says of its sessions and its own health, for its card; empty before a read. */
+export function machineReadLine(read: MachineRead | null | undefined, nowSeconds: number): string {
+  if (!read) return '';
+  if (read.failures >= 3) return read.as_of !== null ? t('Not answering: three reads in a row failed. Last answer {age} ago.', { age: shortAge(nowSeconds - read.as_of) }) : t('Not answering: three reads in a row failed.');
+  if (read.as_of === null) return '';
+  const parts: string[] = [];
+  const counts = read.sessions?.counts;
+  if (counts) parts.push(t('Sessions: {running} running, {waiting} waiting, {needs} need you.', { running: counts.running ?? 0, waiting: counts.waiting ?? 0, needs: counts.needs_you ?? 0 }));
+  else if (read.call === 'accounts') parts.push(t('Its Switchboard is older and does not report its sessions. Update it there.'));
+  if (read.health?.failing.length) parts.push(t('Needs a look there: {checks}.', { checks: read.health.failing.map(healthCheckText).join(', ') }));
+  else if (read.health) parts.push(t('No failing health check there.'));
+  const age = nowSeconds - read.as_of;
+  parts.push(age < 60 ? t('Read just now.') : t('Read {age} ago.', { age: shortAge(age) }));
+  return parts.join(' ');
 }
 /** SB-355: what a live read found for one machine; empty before a read. */
 export function machineLiveLine(live: { reachable: boolean } | undefined): string {
@@ -2297,6 +2417,10 @@ export function sessionWhyText(row: Pick<SessionRow, 'why' | 'quiet_minutes' | '
     case 'closed_duplicate': return t('Closed as a second copy');
     case 'closed_stuck': return t('Closed after it stopped making progress');
     case 'closed_restart': return t('Ended by a restart and not back, can continue');
+    // SB-508: a session the person started that ended outside Switchboard, from the ledger.
+    case 'ended_seen': return t('Ended outside Switchboard, can continue');
+    // SB-450: a launch the computer's restart cut, which Switchboard continued after it.
+    case 'reboot': return t('Cut by a computer restart, continued after it');
     // FD-291: a stop the session went past, and one whose history no folder holds any more.
     case 'moved_on': return t('Went on after its limit stop and ended, can continue');
     case 'no_transcript': return t('Stopped on a limit, its history is gone');

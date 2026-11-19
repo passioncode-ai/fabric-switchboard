@@ -1981,8 +1981,20 @@ pub trait LiveItem: Send {
         true
     }
 }
-/// SB-420: what a renewed item may grow by over the one read (its new tokens and expiry).
+/// SB-420: what a renewed item may grow by over the one read (its new tokens and expiry). Only
+/// macOS writes the Keychain; elsewhere only the tests read it.
+#[cfg(any(target_os = "macos", test))]
 pub(crate) const RENEWAL_HEADROOM: usize = 512;
+/// SB-542: whether a renewal's write of `auth` would fit one `security -i` line, as written or
+/// without its token-less MCP entries (`external_keychain::add_compacting` writes it so), asked
+/// before the grant spends the refresh token. Runs nothing.
+#[cfg(any(target_os = "macos", all(test, unix)))]
+pub(crate) fn fits_or_compacted(service: &str, user: &str, auth: &[u8]) -> bool {
+    use switchboard_core::security_cli::fits;
+    fits(service, user, auth, RENEWAL_HEADROOM)
+        || crate::mcp_homes::without_stubs(auth)
+            .is_some_and(|(smaller, _)| fits(service, user, &smaller, RENEWAL_HEADROOM))
+}
 /// SB-420: the Keychain stamp of Claude Code's credential item (created and modified times),
 /// read from its attributes: nothing is decrypted, no lock is taken, no dialog can show. Off
 /// macOS, the file's time and length. None when it cannot be read.
@@ -2017,12 +2029,7 @@ impl LiveItem for LiveLock {
     fn fits(&self, auth: &[u8]) -> bool {
         #[cfg(target_os = "macos")]
         if self.context.mac {
-            return switchboard_core::security_cli::fits(
-                &self.context.service,
-                &self.context.user,
-                auth,
-                RENEWAL_HEADROOM,
-            );
+            return fits_or_compacted(&self.context.service, &self.context.user, auth);
         }
         let _ = auth;
         true
@@ -2680,6 +2687,36 @@ mod tests {
             "Claude activation failed; previous account restored."
         );
         assert_eq!(*f.keys.borrow(), before);
+    }
+    #[cfg(unix)]
+    #[test]
+    fn a_renewal_fits_when_the_item_fits_without_its_token_less_mcp_entries() {
+        let stubs: serde_json::Map<String, serde_json::Value> = (0..60)
+            .map(|i| {
+                (
+                    format!("plugin:p{i}:server-with-a-long-name|0123456789abcdef"),
+                    json!({"serverName": format!("plugin:p{i}:server"), "serverUrl":
+                        "https://mcp.example/v1/mcp", "accessToken": ""}),
+                )
+            })
+            .collect();
+        let item = json!({"claudeAiOauth": {"accessToken": "a", "refreshToken": "r"},
+            "mcpOAuth": stubs});
+        let bytes = serde_json::to_vec(&item).unwrap();
+        let service = "Claude Code-credentials";
+        assert!(!switchboard_core::security_cli::fits(
+            service,
+            "user",
+            &bytes,
+            RENEWAL_HEADROOM
+        ));
+        assert!(fits_or_compacted(service, "user", &bytes));
+        let big = json!({"claudeAiOauth": {"accessToken": "a".repeat(6000)}});
+        assert!(!fits_or_compacted(
+            service,
+            "user",
+            &serde_json::to_vec(&big).unwrap()
+        ));
     }
     /// SB-420: an item too large to write leaves everything as it was and says so: no rollback
     /// write is tried, and the answer is the size, not a rollback that needs attention.

@@ -164,12 +164,34 @@ enum Command {
         command: Option<CapacityCmd>,
     },
     /// The session duty officer: every five minutes it closes and continues a Claude Code session
-    /// that stopped moving, closes one that finished and only holds a terminal, and gives a
-    /// long-lived one a fresh process at the end of a turn. Without a subcommand: its settings,
-    /// its last actions and what a check would do now.
+    /// that stopped moving, and closes one that finished and only holds a terminal (nothing it
+    /// started still runs or writes). Nothing is restarted for its age. Without a subcommand: its
+    /// settings, its last actions and what a check would do now.
     Duty {
         #[command(subcommand)]
         command: Option<DutyCmd>,
+    },
+    /// The watchdog, a system job apart from Switchboard: every five minutes it checks
+    /// that Switchboard answers, that no act of the duty officer was left half done for 10
+    /// minutes, that no board run has been gone for 30 and no session has run in two processes
+    /// for 15. It only reports, in Needs attention and the health report; it never acts. Without
+    /// a subcommand: the switch, its job and the last report.
+    #[command(args_conflicts_with_subcommands = true)]
+    Watchdog {
+        /// Check once now, as the job does: needs no running Switchboard and writes the report.
+        #[arg(long)]
+        once: bool,
+        #[command(subcommand)]
+        command: Option<WatchdogCmd>,
+    },
+    /// Whether Switchboard continues, after this computer restarts, the Claude Code sessions the
+    /// restart cut in the middle of a turn: those it launched that were running and wrote in the
+    /// two hours before the restart, never one closed on purpose or a board run (with your own
+    /// sign-in off, only its own homes), at most five, each in a session host you can attach to.
+    /// Without a subcommand: the setting and what was continued.
+    BootResume {
+        #[command(subcommand)]
+        command: Option<BootResumeCmd>,
     },
     /// Whether Switchboard reads or changes your own Claude Code and Codex sign-in on this
     /// computer. Off on a teammate's computer that only serves seats an organization
@@ -178,6 +200,14 @@ enum Command {
     OwnSignIn {
         #[command(subcommand)]
         command: Option<OwnSignInCmd>,
+    },
+    /// How quota figures are kept current: smart (the default: response headers first, the
+    /// usage endpoint when a figure decides something, two checks a minute per provider), timer
+    /// (a fixed three-minute cadence for every account of a switching group) or on-demand (only
+    /// before a switch and when you ask). Without a subcommand: the setting.
+    UsageMode {
+        #[command(subcommand)]
+        command: Option<UsageModeCmd>,
     },
     /// The restricted entry another machine reaches over ssh: put it in that machine's key line
     /// in ~/.ssh/authorized_keys as `command="'<this program>' ssh-serve --sender-key KEY --pool
@@ -209,6 +239,12 @@ enum Command {
     /// warn, fail or unknown), a count and the tool that fixes it. Counts and kinds only, for a
     /// watcher that turns them into incidents. Reads only.
     Health,
+    /// What another machine reads of this Switchboard every minute over ssh, in one answer: the
+    /// accounts (label, provider, on or off, used share and its check), the sessions as ids and
+    /// codes (never a folder, a label or text a session wrote) and the health report. Through a
+    /// restricted entry (`ssh-serve`), only the delegated seats and that group's sessions, with no
+    /// health. Reads only.
+    RemoteStatus,
     /// Report online/offline mode and the proxy address, without its capability.
     Status,
     /// The other machines this Switchboard knows, from accounts moved there and runs started
@@ -251,6 +287,11 @@ enum Command {
         /// `next_before` of the previous page.
         #[arg(long, requires = "history")]
         before: Option<i64>,
+        /// With --history: only these launches (repeat it, 1 to 64 ids), each read by its id and
+        /// no other record (no chain); an id with no record is named in `missing`.
+        #[arg(long = "launch", value_name = "LAUNCH_ID", requires = "history",
+              conflicts_with_all = ["limit", "before"])]
+        launch: Vec<String>,
         /// Every Claude Code and Codex process running for this user, Switchboard's or not: its
         /// folder, age, the launch it belongs to (or none) and how long its folder's transcripts
         /// have been quiet. Read from the process table here, without the owner.
@@ -546,7 +587,11 @@ enum Command {
         command: KimiCommand,
     },
     /// Stopped sessions and accounts ready to continue their work.
+    #[command(args_conflicts_with_subcommands = true)]
     Recovery {
+        /// Only the stops still open (waiting or claimed); the counts stay those of every stop.
+        #[arg(long)]
+        open: bool,
         #[command(subcommand)]
         command: Option<RecoveryCommand>,
     },
@@ -1112,10 +1157,33 @@ enum CapacityCmd {
 }
 
 #[derive(Subcommand)]
+enum UsageModeCmd {
+    /// Response headers first, the usage endpoint when a figure decides something (the default).
+    Smart,
+    /// Every account of a switching group checked every three minutes, as in 0.7.121.
+    Timer,
+    /// No check on a schedule: only a switch's candidate and a check you ask for.
+    OnDemand,
+}
+#[derive(Subcommand)]
 enum OwnSignInCmd {
     /// Switchboard may read and change your own sign-in (the default).
     On,
     /// Switchboard never reads or changes your own sign-in on this computer.
+    Off,
+}
+#[derive(Subcommand)]
+enum WatchdogCmd {
+    /// Turn the watchdog on (the default); the app puts its job in place.
+    On,
+    /// Turn the watchdog off and take its job out.
+    Off,
+}
+#[derive(Subcommand)]
+enum BootResumeCmd {
+    /// Continue cut sessions after a restart (the default).
+    On,
+    /// Leave sessions a restart cut as they are.
     Off,
 }
 #[derive(Subcommand)]
@@ -1318,7 +1386,8 @@ enum Accounts {
         /// The group it joins there (`default`: the default group).
         #[arg(long)]
         pool: Option<String>,
-        /// The other machine's switchboard, an absolute path; by default the macOS app's.
+        /// The other machine's switchboard, an absolute path; by default the one the newest move or
+        /// run there used (`switchboard targets`), else the macOS app's.
         #[arg(long)]
         remote: Option<String>,
         /// The other machine's data folder, an absolute path, when its Switchboard runs with
@@ -1829,6 +1898,15 @@ enum AgentsCommand {
         /// pay-per-token group (where it is needed).
         #[arg(long)]
         model: Option<String>,
+        /// With `--anthropic`: the reasoning level, passed to Hermes as `--reasoning` (none,
+        /// minimal, low, medium, high, xhigh, max, ultra); default: Hermes's own.
+        #[arg(
+            long,
+            visible_alias = "reasoning",
+            requires = "anthropic",
+            value_name = "LEVEL"
+        )]
+        effort: Option<String>,
     },
 }
 #[derive(Subcommand)]
@@ -2384,6 +2462,24 @@ async fn serve_ssh(
     use ssh_serve::Request;
     match request {
         Request::Prove { nonce } => call(root, Operation::MachineProve { nonce }).await,
+        // SB-550: the one-minute read, scoped to the seats this key delegated and the sessions of
+        // the group its line names; this computer's own health is not shared.
+        Request::RemoteStatus => {
+            use switchboard_runtime::remote_usage;
+            let snapshot = call(root, Operation::Snapshot).await?;
+            let seats = ssh_serve::accounts_view(&snapshot, sender_key, pool);
+            let sessions = call(root, Operation::SessionRows)
+                .await
+                .ok()
+                .map(|rows| remote_usage::sessions_digest(&rows, Some(pool)));
+            Ok(json!({
+                "schema": remote_usage::STATUS_SCHEMA,
+                "version": env!("CARGO_PKG_VERSION"),
+                "accounts": remote_usage::accounts_answer(&seats["accounts"]),
+                "sessions": sessions,
+                "health": null,
+            }))
+        }
         Request::AccountsList => Ok(ssh_serve::accounts_view(
             &call(root, Operation::Snapshot).await?,
             sender_key,
@@ -2496,6 +2592,25 @@ async fn serve_ssh(
         }
     }
 }
+/// SB-550: what another machine reads of this Switchboard every minute (`remote-status`): the
+/// accounts, the sessions as ids and codes (`remote_usage::sessions_digest`) and the health report.
+/// A part that could not be read is null; the accounts are required.
+async fn remote_status(root: &std::path::Path) -> Result<Value, String> {
+    use switchboard_runtime::remote_usage;
+    let snapshot = call(root, Operation::Snapshot).await?;
+    let sessions = call(root, Operation::SessionRows)
+        .await
+        .ok()
+        .map(|rows| remote_usage::sessions_digest(&rows, None));
+    let health = call(root, Operation::Health).await.ok();
+    Ok(json!({
+        "schema": remote_usage::STATUS_SCHEMA,
+        "version": env!("CARGO_PKG_VERSION"),
+        "accounts": remote_usage::accounts_answer(&snapshot["accounts"]),
+        "sessions": sessions,
+        "health": health,
+    }))
+}
 #[cfg(not(unix))]
 async fn serve_ssh(
     _: &std::path::Path,
@@ -2546,6 +2661,11 @@ async fn run(cli: &Cli) -> Result<Value, String> {
     {
         return serve_ssh(&root, sender_key, pool, from.as_deref()).await;
     }
+    // SB-550: another machine's one-minute read, composed of the three answers an older owner
+    // already gives, so a newer command works beside an owner that is not restarted yet.
+    if matches!(cli.command, Command::RemoteStatus) {
+        return remote_status(&root).await;
+    }
     // SB-380: a session read, ended or attached on another machine runs that machine's
     // Switchboard over ssh; nothing is asked of this machine's owner.
     if let Some((target, remote, remote_data_dir, words, tty)) = there(&cli.command) {
@@ -2556,6 +2676,12 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                 .is_some_and(|w| w == "end" || w == "close-copy");
         if names_launch && !words.last().is_some_and(|id| launches::valid_id(id)) {
             return Err(launches::NO_SUCH_LAUNCH.into());
+        }
+        // SB-423: the ids of `sessions --history --launch` too, and their number.
+        if let Command::Sessions { launch, .. } = &cli.command {
+            if !launch.is_empty() {
+                launches_travel(launch)?;
+            }
         }
         let (program, data_dir) =
             switchboard_runtime::targets::program_for(&root, &target, remote, remote_data_dir);
@@ -2574,6 +2700,15 @@ async fn run(cli: &Cli) -> Result<Value, String> {
     if let Command::Mcp { read_only } = cli.command {
         mcp::Server::new(root, read_only).serve().await?;
         return Ok(Value::Null);
+    }
+    // SB-510: the watchdog's own run needs no owner and no store; it only reads, probes and
+    // writes its report, so it works while the owner is down.
+    if let Command::Watchdog { once: true, .. } = cli.command {
+        return Ok(switchboard_runtime::watchdog::once(
+            &root,
+            switchboard_runtime::session_watch::now(),
+        )
+        .await);
     }
     // SB-299: needs no owner and no store.
     if let Command::Link = cli.command {
@@ -2986,11 +3121,30 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                 board_default: false,
             },
         },
+        Command::UsageMode { command } => Operation::UsageMode {
+            mode: command.as_ref().map(|c| {
+                match c {
+                    UsageModeCmd::Smart => "smart",
+                    UsageModeCmd::Timer => "timer",
+                    UsageModeCmd::OnDemand => "on_demand",
+                }
+                .to_owned()
+            }),
+        },
         Command::OwnSignIn { command } => Operation::OwnSignIn {
             on: command.as_ref().map(|c| matches!(c, OwnSignInCmd::On)),
         },
+        Command::Watchdog { command, .. } => Operation::Watchdog {
+            on: command.as_ref().map(|c| matches!(c, WatchdogCmd::On)),
+            run: false,
+        },
         // Answered before the owner is asked (`ssh_serve`); here only to keep this match whole.
         Command::SshServe { .. } => return Err(ssh_serve::NOT_THROUGH_SSH.into()),
+        Command::BootResume { command } => Operation::BootResume {
+            on: command.as_ref().map(|c| matches!(c, BootResumeCmd::On)),
+        },
+        // Answered before the owner is asked (`remote_status`); here only to keep this match whole.
+        Command::RemoteStatus => return remote_status(&root).await,
         Command::Duty { command } => {
             fn duty(
                 on: Option<bool>,
@@ -3345,7 +3499,13 @@ async fn run(cli: &Cli) -> Result<Value, String> {
             launch_id: Some(launch_id.clone()),
             limit: None,
             before: None,
+            launch_ids: None,
         },
+        Command::Sessions {
+            history: true,
+            launch,
+            ..
+        } if !launch.is_empty() => return launches_by_id(&root, launch).await,
         Command::Sessions {
             history: true,
             limit,
@@ -3355,6 +3515,7 @@ async fn run(cli: &Cli) -> Result<Value, String> {
             launch_id: None,
             limit: limit.map(usize::from),
             before: *before,
+            launch_ids: None,
         },
         Command::Sessions { all, .. } => Operation::Sessions { all: *all },
         Command::Provenance {
@@ -3599,7 +3760,8 @@ async fn run(cli: &Cli) -> Result<Value, String> {
             in_place,
             ..
         } => return continue_workflow(&root, workflow_id, account, *mode, dir, *in_place).await,
-        Command::Recovery { command } => match command {
+        Command::Recovery { open, command } => match command {
+            None if *open => return Ok(open_stops(call(&root, Operation::Recovery).await?)),
             None => Operation::Recovery,
             Some(RecoveryCommand::Register {
                 event,
@@ -3839,6 +4001,7 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                 openrouter,
                 anthropic,
                 model,
+                effort,
             } => Operation::LaunchAgent {
                 agent: agent.clone(),
                 pool: pool.clone(),
@@ -3852,6 +4015,7 @@ async fn run(cli: &Cli) -> Result<Value, String> {
                 },
                 model: model.clone(),
                 key: anthropic.clone(),
+                effort: effort.clone(),
             },
         },
         Command::Keys {
@@ -4342,6 +4506,72 @@ fn run_hosted(
 ) -> Result<Value, String> {
     Err("A session host runs on macOS and Linux for now.".into())
 }
+/// FD-316 (fabric-dashboards, 2026-11-17): `recovery --open` and MCP `switchboard_recovery`
+/// with `open`: only the stops still open (waiting or claimed). The answer's counts are left as
+/// the owner gave them, over every stop. Filtered here, after the owner answered, so it works with
+/// an owner of any version (`Operation` refuses fields it does not know).
+pub(crate) fn open_stops(mut status: Value) -> Value {
+    if let Some(rows) = status.get_mut("sessions").and_then(Value::as_array_mut) {
+        rows.retain(|r| matches!(r["stop"]["state"].as_str(), Some("waiting" | "claimed")));
+    }
+    status
+}
+/// SB-423 (FD-316, fabric-dashboards, 2026-11-17): `sessions --history --launch ID...` and MCP
+/// `switchboard_sessions` `{history: true, launch_ids}`: only the named launches, in the order
+/// given (a repeated id once), shaped like a history page (`launches`, `total`, `next_before`
+/// null) plus `missing`, the ids with no record. The owner reads each named record and no other
+/// (`launches::by_ids`). An owner from before `launch_ids` refuses the field
+/// (`CONTROL_OWNER_OLDER`, nothing done); it is then asked one id at a time, as `sessions show`
+/// asks it, which each reads every record for a chain, until it is restarted on this version.
+pub(crate) async fn launches_by_id(
+    root: &std::path::Path,
+    ids: &[String],
+) -> Result<Value, String> {
+    let wanted = switchboard_runtime::launches::wanted_ids(ids)?;
+    match call(
+        root,
+        Operation::Launches {
+            launch_id: None,
+            limit: None,
+            before: None,
+            launch_ids: Some(wanted.clone()),
+        },
+    )
+    .await
+    {
+        Err(e) if e == switchboard_runtime::control::CONTROL_OWNER_OLDER => {}
+        answer => return answer,
+    }
+    let (mut found, mut missing) = (Vec::new(), Vec::new());
+    for id in wanted {
+        match call(
+            root,
+            Operation::Launches {
+                launch_id: Some(id.clone()),
+                limit: None,
+                before: None,
+                launch_ids: None,
+            },
+        )
+        .await
+        {
+            Ok(mut shown) => found.push(shown["launch"].take()),
+            Err(e) if e == switchboard_runtime::launches::LAUNCH_NOT_FOUND => missing.push(id),
+            Err(e) => return Err(e),
+        }
+    }
+    Ok(json!({"launches": found, "total": found.len(), "next_before": null, "missing": missing}))
+}
+/// SB-423: the ids `sessions --history --launch --target` sends over ssh: 1 to 64, each one a
+/// launch id's characters, checked here before they reach the other machine.
+fn launches_travel(ids: &[String]) -> Result<(), String> {
+    launches::wanted_ids(ids)?;
+    if ids.iter().all(|id| launches::valid_id(id)) {
+        Ok(())
+    } else {
+        Err(launches::LAUNCH_NOT_FOUND.into())
+    }
+}
 /// SB-380: the command to run on another machine for `sessions`, `sessions end` and `attach`
 /// given `--target`: the machine, its program and data folder, the words, and whether it needs a
 /// terminal. A launch id is checked here, before it reaches the other machine.
@@ -4356,6 +4586,7 @@ fn there(command: &Command) -> Option<There> {
             history,
             limit,
             before,
+            launch,
             machine,
             tree,
             rows,
@@ -4378,6 +4609,9 @@ fn there(command: &Command) -> Option<There> {
             }
             if let Some(t) = before {
                 words.extend(["--before".to_owned(), t.to_string()]);
+            }
+            for id in launch {
+                words.extend(["--launch".to_owned(), id.clone()]);
             }
             Some((
                 target.clone(),
@@ -5359,11 +5593,21 @@ fn print_result(value: &Value, cli: &Cli) {
         }
         Command::Sessions { history: true, .. } => {
             let launches = value["launches"].as_array().cloned().unwrap_or_default();
-            if launches.is_empty() {
+            // SB-423: with --launch, the ids that have no record.
+            let missing: Vec<&str> = value["missing"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str)
+                .collect();
+            if launches.is_empty() && missing.is_empty() {
                 println!("No launch is recorded yet.");
             }
             for l in &launches {
                 println!("{}", launch_line(l));
+            }
+            if !missing.is_empty() {
+                println!("No launch is recorded with id {}.", missing.join(", "));
             }
             let total = value["total"].as_u64().unwrap_or(0);
             if total as usize > launches.len() {
@@ -6486,6 +6730,16 @@ mod in_place_tests {
 mod help_tests {
     use clap::CommandFactory;
 
+    /// Review round 2 of PR #852: `--once` checks and changes nothing, so a switch beside it is
+    /// refused, never ignored.
+    #[test]
+    fn watchdog_once_refuses_a_switch_beside_it() {
+        use clap::Parser;
+        assert!(super::Cli::try_parse_from(["switchboard", "watchdog", "--once", "off"]).is_err());
+        assert!(super::Cli::try_parse_from(["switchboard", "watchdog", "--once"]).is_ok());
+        assert!(super::Cli::try_parse_from(["switchboard", "watchdog", "off"]).is_ok());
+    }
+
     /// SB-68: every command and every argument says what it is in `--help`.
     #[test]
     fn every_command_and_argument_has_help() {
@@ -6642,8 +6896,13 @@ mod mcp_parity {
             "ssh-serve",
             Not("the forced command of another machine's ssh key; it answers that machine, never an agent here"),
         ),
+        ("usage-mode smart", Tool("switchboard_usage_mode")),
+        ("usage-mode timer", Tool("switchboard_usage_mode")),
+        ("usage-mode on-demand", Tool("switchboard_usage_mode")),
         ("own-sign-in on", Tool("switchboard_own_sign_in")),
         ("own-sign-in off", Tool("switchboard_own_sign_in")),
+        ("watchdog on", Tool("switchboard_watchdog")),
+        ("watchdog off", Tool("switchboard_watchdog")),
         (
             "accounts surrender",
             Not("SB-292: run only by the calling machine's accounts recall over ssh; it prints a sign-in"),
@@ -6703,8 +6962,14 @@ mod mcp_parity {
         ("attention", Tool("switchboard_attention")),
         ("bugs", Tool("switchboard_bugs")),
         ("health", Tool("switchboard_health")),
+        (
+            "remote-status",
+            Not("SB-550: another machine's one-minute read of this Switchboard over ssh; switchboard_machines shows what this computer read of its machines"),
+        ),
         ("capacity set", Tool("switchboard_capacity")),
         ("capacity clear", Tool("switchboard_capacity")),
+        ("boot-resume on", Tool("switchboard_boot_resume")),
+        ("boot-resume off", Tool("switchboard_boot_resume")),
         ("duty on", Tool("switchboard_duty")),
         ("duty off", Tool("switchboard_duty")),
         ("duty set", Tool("switchboard_duty")),
@@ -6791,7 +7056,7 @@ mod mcp_parity {
             "agents openrouter model",
             Tool("switchboard_openrouter_model"),
         ),
-        ("agents openrouter remove", Not(PERSON)),
+        ("agents openrouter remove", Tool("switchboard_openrouter_remove")),
         (
             "agents openrouter list",
             Tool("switchboard_openrouter_status"),
@@ -6817,7 +7082,7 @@ mod mcp_parity {
         ("kimi rename", Tool("switchboard_kimi_rename")),
         ("kimi off", Tool("switchboard_kimi_update")),
         ("kimi on", Tool("switchboard_kimi_update")),
-        ("kimi remove", Not(PERSON)),
+        ("kimi remove", Tool("switchboard_kimi_remove")),
         ("recovery register", Not(HOST)),
         ("recovery claim", Not(HOST)),
         ("recovery hook", Not(HOST)),
@@ -7277,5 +7542,143 @@ mod there_tests {
             .is_err(),
             "--remote needs --target"
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn open_stops_keeps_waiting_and_claimed_and_the_counts() {
+        let status = json!({"waiting_sessions": 1, "ready_sessions": 1, "claimed_sessions": 1,
+        "sessions": [
+            {"stop": {"event": "a", "state": "waiting"}, "continued_as": null},
+            {"stop": {"event": "b", "state": "claimed"}},
+            {"stop": {"event": "c", "state": "resumed"}},
+            {"stop": {"event": "d", "state": "cancelled"}},
+        ]});
+        let open = open_stops(status);
+        let events: Vec<_> = open["sessions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|r| r["stop"]["event"].as_str().unwrap())
+            .collect();
+        assert_eq!(events, ["a", "b"]);
+        assert_eq!(open["waiting_sessions"], 1);
+        assert_eq!(open["claimed_sessions"], 1);
+        // An answer with no list (an error shape) passes through untouched.
+        assert_eq!(open_stops(json!({"x": 1})), json!({"x": 1}));
+    }
+
+    #[test]
+    fn sessions_history_takes_repeated_launch_ids_and_refuses_them_without_history() {
+        let cli = Cli::try_parse_from([
+            "switchboard",
+            "sessions",
+            "--history",
+            "--launch",
+            "l-1",
+            "--launch",
+            "l-2",
+        ])
+        .unwrap();
+        let Command::Sessions {
+            history, launch, ..
+        } = &cli.command
+        else {
+            panic!("not sessions");
+        };
+        assert!(*history);
+        assert_eq!(launch, &["l-1", "l-2"]);
+        assert!(Cli::try_parse_from(["switchboard", "sessions", "--launch", "l-1"]).is_err());
+        assert!(Cli::try_parse_from([
+            "switchboard",
+            "sessions",
+            "--history",
+            "--launch",
+            "l-1",
+            "--limit",
+            "5",
+        ])
+        .is_err());
+    }
+
+    #[tokio::test]
+    async fn launches_by_id_refuses_none_and_too_many() {
+        let root = std::env::temp_dir().join(format!("sb-423-{}", std::process::id()));
+        assert_eq!(
+            launches_by_id(&root, &[]).await.unwrap_err(),
+            launches::LAUNCH_IDS_INVALID
+        );
+        let many: Vec<String> = (0..=launches::MAX_LAUNCH_IDS)
+            .map(|i| format!("l-{i}"))
+            .collect();
+        assert_eq!(
+            launches_by_id(&root, &many).await.unwrap_err(),
+            launches::LAUNCH_IDS_INVALID
+        );
+    }
+
+    #[test]
+    fn launch_ids_are_checked_before_they_travel() {
+        assert!(launches_travel(&["5b7f2c1e-0000-4000-8000-000000000001".into()]).is_ok());
+        assert_eq!(
+            launches_travel(&["l-1".into(), "x;rm -rf ~".into()]).unwrap_err(),
+            launches::LAUNCH_NOT_FOUND
+        );
+        let many: Vec<String> = (0..=launches::MAX_LAUNCH_IDS)
+            .map(|i| format!("l-{i}"))
+            .collect();
+        assert_eq!(
+            launches_travel(&many).unwrap_err(),
+            launches::LAUNCH_IDS_INVALID
+        );
+    }
+
+    #[test]
+    fn recovery_open_is_refused_beside_a_subcommand() {
+        assert!(Cli::try_parse_from([
+            "switchboard",
+            "recovery",
+            "--open",
+            "claim",
+            "e1",
+            "--account",
+            "a"
+        ])
+        .is_err());
+        assert!(Cli::try_parse_from([
+            "switchboard",
+            "recovery",
+            "claim",
+            "e1",
+            "--account",
+            "a",
+            "--open"
+        ])
+        .is_err());
+    }
+
+    #[test]
+    fn recovery_takes_open_and_its_subcommands_still_parse() {
+        let cli = Cli::try_parse_from(["switchboard", "recovery", "--open"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Recovery {
+                open: true,
+                command: None
+            }
+        ));
+        let cli = Cli::try_parse_from(["switchboard", "recovery", "claim", "e1", "--account", "a"])
+            .unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Recovery {
+                open: false,
+                command: Some(RecoveryCommand::Claim { .. })
+            }
+        ));
     }
 }
