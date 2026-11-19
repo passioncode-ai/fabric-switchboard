@@ -108,7 +108,7 @@
 5. **S5, one admission gate**: `capacity` adds host load and free disk to the pool cap and the board
    share; a start above them waits (`at_capacity`, with the reason) for every entry point; the
    studio-agent's `load.json` is read as the host's input (SB-461; the SB-422 cited here before was
-   never filed: that id was renumbered away before PR #826 merged).
+   never filed).
 6. **S6, saved launches** (SB-454, section 07).
 7. **S7, sessions and load feed for Observatory**: Switchboard writes `sessions-feed.json` (0600,
    per session and per host, no text a session wrote) and answers it read-only without the owner
